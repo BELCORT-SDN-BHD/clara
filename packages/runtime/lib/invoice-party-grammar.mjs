@@ -9,7 +9,7 @@
 // about unmeasured thresholds — lives in `invoice-customer-identity.mjs`'s header.
 
 import { asciiTrim, DASH_CHARS } from "./invoice-amount-grammar.mjs";
-import { foldUnicode } from "./invoice-entity-lexicon.mjs";
+import { foldUnicode, hasColon } from "./invoice-entity-lexicon.mjs";
 
 // The REGISTERED-ENTITY LEXICON lives next door — it owns what a Malaysian business is
 // CALLED and the two asymmetric predicates built from that (strict endsWith for party
@@ -283,9 +283,10 @@ export function looksLikePartyName(s) {
   // A COLON ANYWHERE MEANS A CAPTION, not an identity — registered company names do not contain
   // one. This is the ROOT closer for the possessive-caption class: `Customer＇s Ref: ACME SDN BHD`
   // leaves `＇s Ref: ACME SDN BHD` as a remainder whatever apostrophe glyph the OCR produced, and
-  // the embedded suffix then satisfies the entity gate. Enumerating apostrophes chases renderings
-  // forever; refusing a colon closes the class in one rule.
-  if (/[:：]/.test(v)) return false;
+  // the embedded suffix then satisfies the entity gate. The class itself must be COMPLETE or it
+  // reopens one glyph at a time — `Reference﹕`, `∶` and `꞉` each reached customer_name against
+  // an ASCII+fullwidth-only test. `hasColon` normalizes NFKC first, then matches the residue.
+  if (hasColon(v)) return false;
   const folded = foldForMatch(v);
   if (HEADER_WORDS.has(folded)) return false;
   // A PHRASE that mentions a company is not that company. Folded on the UNICODE fold so a

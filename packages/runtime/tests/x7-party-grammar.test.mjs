@@ -41,6 +41,24 @@ test("C3-1: a COLON anywhere means a caption — the root closer for the possess
   assert.equal(looksLikePartyName("BANK OF CHINA (MALAYSIA) BERHAD"), true);
 });
 
+test("S2: the COLON class is complete — NFKC first, then the enumerated residue", () => {
+  // The rule recognized only ASCII + fullwidth, so `Reference﹕` (U+FE55), `∶` (U+2236) and
+  // `꞉` (U+A789) each reached customer_name. A root rule with an incomplete character class is
+  // not a root rule — it reopens one glyph at a time.
+  for (const [name, glyph] of [["U+003A ascii", ":"], ["U+FF1A fullwidth", "："],
+    ["U+FE55 small", "﹕"], ["U+2236 ratio", "∶"], ["U+A789 modifier letter", "꞉"],
+    ["U+05C3 sof pasuq", "׃"], ["U+0589 armenian", "։"]]) {
+    assert.equal(looksLikePartyName(`Reference${glyph} ACME SDN BHD`), false, name);
+  }
+  // NFKC is the ROOT half — it folds the presentation/fullwidth forms with no enumeration at all.
+  assert.equal("﹕".normalize("NFKC"), ":", "U+FE55 folds, so it needs no listing");
+  assert.equal("：".normalize("NFKC"), ":", "U+FF1A folds too");
+  assert.equal("∶".normalize("NFKC"), "∶", "U+2236 does NOT fold — hence the class");
+  assert.equal("꞉".normalize("NFKC"), "꞉", "U+A789 does NOT fold either");
+  // A real name still reads.
+  assert.equal(looksLikePartyName("BANK OF CHINA (MALAYSIA) BERHAD"), true);
+});
+
 test("C3-2: the contact refusal is a CONTAINS test, not the negation of party candidacy", () => {
   // `!hasRegisteredEntitySuffix` is a different proposition from `is a person`: every
   // company-shaped string that failed candidacy for some OTHER reason landed in the contact
@@ -59,18 +77,28 @@ test("C3-2: the contact refusal is a CONTAINS test, not the negation of party ca
   assert.equal(containsEntityToken("ACME SDN BHD (123456-X)"), true, "broad: and not a contact either");
 });
 
-test("C3-3: punctuation in the base folds to a SPACE, never to nothing", () => {
-  // Collapsing it away made `A-B SDN BHD` and `AB SDN BHD` ONE key, so a document naming two
-  // different companies read as `matched` and SUPPRESSED a lawful contest — wrong-silent, which
-  // loses to a safe hold.
+test("C3-3 / S4: punctuation preserves a boundary, and its CLASS is part of the identity", () => {
+  // C3-3: collapsing punctuation away made `A-B SDN BHD` ≡ `AB SDN BHD`, so a document naming two
+  // different companies read as `matched` and SUPPRESSED a lawful contest — wrong-silent.
   assert.notEqual(partyKey("A-B SDN BHD"), partyKey("AB SDN BHD"));
   assert.notEqual(partyKey("A.B. SDN BHD"), partyKey("AB SDN BHD"));
-  assert.equal(partyKey("A-B SDN BHD"), "a b sdnbhd");
-  // …while noise punctuation between whole words stays harmless.
+  // S4: folding hyphen and slash to the SAME boundary left `A/B` ≡ `A-B` — the same suppression
+  // one level down. The classes now sign the key distinctly, so they HOLD instead of merging.
+  assert.notEqual(partyKey("A/B TRADING SDN BHD"), partyKey("A-B TRADING SDN BHD"));
+  assert.notEqual(partyKey("A/B TRADING SDN BHD"), partyKey("AB TRADING SDN BHD"));
+  assert.notEqual(partyKey("A-B TRADING SDN BHD"), partyKey("AB TRADING SDN BHD"));
+  // The same rendering keys the same, whichever class it uses.
+  assert.equal(partyKey("A/B TRADING SDN BHD"), partyKey("a/b trading sdn bhd"));
+  assert.equal(partyKey("A-B TRADING SDN BHD"), partyKey("a-b trading sdn bhd"));
+  // COMMAS AND DOTS STAY HARMLESS — only the two classes that can carry a distinct registered
+  // name are signed. NARROWING RECORDED: `KONG-CHENG` no longer keys as `KONG CHENG`, so two
+  // renderings of one name now HOLD rather than merge. Fail-closed by the S4 ruling.
   assert.equal(partyKey("KONG, CHENG SDN BHD"), partyKey("KONG CHENG SDN BHD"));
-  assert.equal(partyKey("KONG-CHENG SDN BHD"), partyKey("KONG CHENG SDN BHD"));
-  // Suffix-variant canonicalization is untouched by the change.
+  assert.notEqual(partyKey("KONG-CHENG SDN BHD"), partyKey("KONG CHENG SDN BHD"));
+  // Suffix-variant canonicalization is untouched: the S/B suffix's own slash must not sign the
+  // key, or every `S/B` name would stop collapsing with its `SDN BHD` spelling.
   assert.equal(partyKey("KONG CHENG RESTAURANTS S/B"), partyKey("KONG CHENG RESTAURANTS SDN BHD"));
+  assert.equal(partyKey("ACME S/B"), partyKey("ACME SDN BHD"));
 });
 
 test("`M/s` is matched as PUNCTUATION, so a company named `M S ...` keeps its own name", () => {

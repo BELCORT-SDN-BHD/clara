@@ -4,25 +4,22 @@
 // WHY THIS EXISTS, measured on real client books (docs/plan/wave-7a-acceptance-h1.md rows 1 and
 // 12, exhibit E7). ROME SECRETARY issued two invoices to KONG CHENG RESTAURANTS SDN BHD. Both
 // print the company in the bill-to box and a separate `Attn : Lim Xiao Shan` contact line under
-// it. Azure Document Intelligence's typed `CustomerName` came back as **the person** on BOTH —
-// so `invoice.customer_name` read "Lim Xiao Shan", the sales lane could not resolve a
-// counterparty, and both drafts sit held on `counterparty_unresolved` to this day.
+// it. Azure's typed `CustomerName` came back as **the person** on BOTH — so
+// `invoice.customer_name` read "Lim Xiao Shan" and both drafts sit held `counterparty_unresolved`.
 //
 // The defect is not a mis-ranked lexicon: BEFORE this module, Clara had NO deterministic
 // customer-identity reader at all. `invoice.customer_name` was a byte-for-byte pass-through of
-// Azure's typed field (`FIELD_MAP` in invoiceFacts.v1.azure.mjs), so an ML model's pick of which
-// line in the bill-to box is "the customer" went to the books unchallenged. This module supplies
-// the missing second reader: it reads the ADDRESSEE PARTY off the layout, label-anchored and
-// geometry-bound, and reads the `Attn` person separately as `invoice.contact_person` — a contact
-// is not a counterparty, and the two must never be the same field.
+// Azure's typed field, so an ML model's pick of which line in the bill-to box is "the customer"
+// went to the books unchallenged. This module supplies the missing second reader: it reads the
+// ADDRESSEE PARTY off the layout, label-anchored and geometry-bound, and reads the `Attn` person
+// separately as `invoice.contact_person` — a contact is not a counterparty.
 //
 // THE HAZARD THIS MODULE IS SHAPED AROUND is the mirror of X6's: emitting the WRONG PARTY as the
 // customer. On a sales invoice that births a counterparty on real client books (birth happens at
 // human approval — `_resolve_counterparty` proposes, the approver creates), and every subsequent
 // receipt, statement and ageing line inherits the error. A MISSING customer_name merely returns
 // the lane to `customer_name_missing`, where a human already has to look. So every ambiguity
-// resolves to REFUSE, and refusing means Azure's typed value stands exactly as it did before
-// this module existed.
+// resolves to REFUSE, and refusing means Azure's typed value stands exactly as before.
 //
 // ─── THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR ────────────────────────────────
 // (orchestrator ruling on the two-lane review, 2026-08-09.) Two behaviours the original work
@@ -39,73 +36,71 @@
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
 // ─── ROUND-3 DESIGN LAW: POSITIVE EVIDENCE, NOT ENUMERATION ───────────────────────────────────
-// PARTY CANDIDACY REQUIRES A POSITIVE REGISTERED-ENTITY SIGNAL (`hasRegisteredEntitySuffix`, the
-// documented Malaysian suffix family in `invoice-party-grammar.mjs`). No suffix ⇒ no candidacy ⇒
-// no override, no contest, no disagreement-withdraw: the reader abstains and typed stands.
-//
-// WHY, the structural lesson three rounds paid for. The party gate was a BLOCKLIST and both scan
-// paths took the FIRST string it admitted. A blocklist only enumerates the past, so every round
-// found a fresh instance of ONE class — a label whose remainder is furniture (`Customer's Ref:
-// PO-8891`, `Buyer Signature`: fifteen in a single probe) — and every scan widening reopened it
-// (the two-column skip repair let the caption `DELIVERY ADDRESS` win). The override branch is the
-// only branch that can write a WRONG party onto real books, so it demands positive evidence.
-//
-// ONE LEXICON, TWO POLARITIES. The same suffix family that ADMITS a party REFUSES a contact: an
-// entity-suffixed string is never a person. Without that symmetry, `Attention:` → `ACME SDN BHD`
-// emitted the company as BOTH `customer_name` and `contact_person`.
-//
-// A NON-CANDIDATE IS A SKIP, NOT A STOP. The scan walks past anything without the signal, within
-// its existing bounds, so a caption printed ABOVE the party no longer hides it — and no
-// prefer-last heuristic is needed: the first line carrying the signal still wins.
-//
-// A SUFFIX PROVES A NAME IS PRESENT, NOT THAT THE NAME IS THE ADDRESSEE (round 4). Skipping is
-// what made this bite: `Bill To:` / `SIFU LAB` / `c/o AMATERUS GROUP SDN BHD` skipped a REAL
-// unsuffixed buyer and birthed the c/o line. So the base must be a NAME, not a phrase mentioning
-// one — `NON_ADDRESSEE_MARKERS`, enforced in `looksLikePartyName` so BOTH polarities inherit it.
+// PARTY CANDIDACY REQUIRES A POSITIVE REGISTERED-ENTITY SIGNAL — the suffix family and both
+// asymmetric predicates live in `invoice-entity-lexicon.mjs`, which carries the full rationale.
+// No suffix ⇒ no candidacy ⇒ no override, no contest, no disagreement-withdraw: abstain, and
+// Azure's typed value stands. The gate was a BLOCKLIST and both scan paths took the FIRST string
+// it admitted, so every round found a new instance of ONE class and every scan widening reopened
+// it. The override branch is the only branch that can write a WRONG party, so it demands
+// evidence. ONE LEXICON, TWO POLARITIES: the family that ADMITS a party REFUSES a contact.
+// A NON-CANDIDATE IS A SKIP, NOT A STOP, so a caption above the party cannot hide it — no
+// prefer-last heuristic needed. And (round 4) A SUFFIX PROVES A NAME, NOT THE ADDRESSEE: the
+// base must be a name, not a phrase mentioning one (`NON_ADDRESSEE_MARKERS`, enforced in
+// `looksLikePartyName` so BOTH polarities inherit it). Residual (5) below is what remains.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
-// ─── HONESTY NOTE, STATED BECAUSE IT IS A REAL DIFFERENCE FROM X6 ─────────────────────────────
-// X6's thresholds were CALIBRATED against two real Azure captures (a measured 0.015in vendor
-// gap; a letterhead at y≈0.88 of an 11.68in page). THE THRESHOLDS BELOW ARE NOT MEASURED — the
-// KONG CHENG captures are real client documents, they are not in this repo, and no synthetic
-// corpus can stand in for a measurement. They are therefore conservative, every one is an OPT,
-// and the module is built so that a WRONG threshold produces an ABSTAIN (typed passes through,
-// today's behaviour) rather than a wrong party. The live replay of the KONG CHENG pair IS the
-// measurement; its acceptance should re-read these defaults against the real capture rather than
-// assume them.
+// ─── HONESTY NOTE, A REAL DIFFERENCE FROM X6 ──────────────────────────────────────────────────
+// X6's thresholds were CALIBRATED against two real Azure captures. THE THRESHOLDS BELOW ARE NOT
+// MEASURED — the KONG CHENG captures are real client documents, not in this repo, and no
+// synthetic corpus substitutes for a measurement. They are conservative, every one is an OPT, and
+// a WRONG threshold produces an ABSTAIN rather than a wrong party. The live replay IS the
+// measurement; its acceptance should re-read these defaults against the real capture.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
 // FOUR DEFENSES, all required, none silently skipped when its input is unavailable:
 //
-//   (a) UNIQUENESS-OR-NOTHING over the WHOLE document, for the party read and the contact read
-//       independently. Two DISTINCT labelled party blocks ⇒ emit no party. Identical readings
-//       collapse (the two-page invoice that repeats its bill-to box).
+//   (a) UNIQUENESS-OR-NOTHING over the WHOLE document, party read and contact read independently.
+//       Two DISTINCT labelled party blocks ⇒ emit no party; identical readings collapse.
 //   (b) THE LABEL GATE + THE PARTY-NAME GATE — `invoice-party-grammar.mjs`, which owns every
-//       question about spelling. Where X6's top-band defense would sit; there is deliberately
-//       NO band analogue (see THE MISSING BAND below).
+//       question about spelling. Where X6's top-band defense would sit; no band analogue here.
 //   (c) CUSTOMER-BLOCK ATTRIBUTION, the defense that makes an emission EVIDENCED rather than
 //       merely label-shaped. A candidate must sit next to the typed `CustomerName` field's OWN
 //       bounding region and — when a typed `VendorName` region also exists — closer to the
-//       customer's than to the vendor's. THIS IS X6'S INSIGHT RE-APPLIED, and it is exactly why
-//       it works on the F7 defect: on those documents Azure's typed CustomerName picked the
-//       WRONG LINE, but it picked a wrong line INSIDE the bill-to box — its CONTENT is wrong
-//       while its GEOMETRY points straight at the block. Attribution by position, never by text.
+//       customer's than to the vendor's. THIS IS X6'S INSIGHT RE-APPLIED, and why it works on
+//       the F7 defect: Azure's typed CustomerName picked the WRONG LINE, but a wrong line INSIDE
+//       the bill-to box — its CONTENT is wrong while its GEOMETRY points at the block.
 //       FAIL CLOSED: no typed CustomerName region ⇒ no attribution evidence ⇒ no emission.
 //   (d) RECONCILIATION with the typed emission — `mergeCustomerIdentity` below, which decides
-//       who WINS and is therefore the part of this file to read hardest. Its full matrix is
-//       written out there rather than left to be inferred from the branches.
+//       who WINS and is the part of this file to read hardest. Its full matrix is written there.
 //
-// THE MISSING BAND, stated rather than papered over. X6's second defense is "a letterhead sits
-// at the top of its page by convention". No such convention exists for the buyer block, so an
-// unmeasured band would refuse real documents for a reason no one measured — X6's lesson cuts
-// both ways: a wall no measurement supports is a guess wearing a threshold. Attribution (c) does
+// THE MISSING BAND, stated rather than papered over. X6's second defense is "a letterhead sits at
+// the top of its page by convention". No such convention exists for the buyer block, so an
+// unmeasured band would refuse real documents for a reason no one measured. Attribution (c) does
 // the band's work here, against evidence Azure actually produced.
 //
-// A KNOWN LIMIT, recorded now rather than discovered later: because attribution anchors on the
-// typed CustomerName region, this reader can NEVER supply a customer_name where Azure typed none.
-// The FINCARE row (acceptance-h1 row 10, held `customer_name_missing`) is that shape and is NOT
-// fixed by F7. Relaxing the anchor to "far from the vendor" would be absence-as-evidence, which
-// review law 2 forbids. That document needs a different door.
+// ═══ RECORDED RESIDUALS — five, each a DECISION rather than an oversight ═══════════════════════
+//  (1) THE THRESHOLDS ARE UNMEASURED (see the honesty note below). A wrong one abstains.
+//  (2) NO TYPED CustomerName ⇒ NO READ. Attribution anchors on that region, so this reader can
+//      never supply a name where Azure typed none — the FINCARE row (acceptance-h1 row 10) is
+//      that shape and is NOT fixed by F7. Relaxing to "far from the vendor" would be
+//      absence-as-evidence, which review law 2 forbids. That document needs a different door.
+//  (3) TWO GENUINELY DIFFERENT REGISTERED BUYERS on one document withdraw the typed row rather
+//      than picking one (`contested`). Eyes-open: a safe hold, never a guess.
+//  (4) FAIL-CLOSED NARROWINGS: an UNSUFFIXED buyer (an individual, `SIFU LAB`), a dotted `S.B.`,
+//      a same-line `To : X`, and any value carrying a COLON all ABSTAIN. Each leaves Azure's
+//      typed value standing — zero loss against today.
+//  (5) SUFFIXED RELATIONAL PHRASES — THE OPEN ONE, and the only residual that can still write a
+//      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured
+//      forms; reviewers constructed more and 20 passed candidacy, 5 producing a wrong
+//      `customer_name` end-to-end (`A division of AMATERUS GROUP SDN BHD` is the realistic one).
+//      The base is still validated by ABSENCE-of-known-bad. The case-discontinuity proposal was
+//      implemented and MEASURED, then REJECTED: it closed 5/5 end-to-end but lost 4 legitimate
+//      title-case names and closed 0/20 once the phrases are ALL-CAPS, which is how Malaysian
+//      invoices are usually printed. Harm ceiling is a wrong DRAFT — counterparty birth is at
+//      HUMAN APPROVAL and no unattended-post path reaches `customer_name`. The 20 forms and the
+//      5 scenarios are PINNED as cells so this is measured, not remembered. FULL VETO-READY
+//      RECORD, with the measurement table and the four-part reachability precondition:
+//      docs/plan/extraction-slice-contract.md, X7 → "RECORDED RESIDUAL (5)". OWNER-VETOABLE.
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
@@ -154,6 +149,7 @@ const emptyReceipt = () => ({
   contact_emitted: 0,
   typed_collapsed: 0, typed_overridden_attn: 0, typed_disagreement: 0,
   typed_vs_contested: 0, sole_authorship_refused: 0,
+  contact_read_inconclusive: false, attn_inconclusive_hold: 0,
   candidates: [],
 });
 
@@ -248,7 +244,10 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
           // Counted under the head that actually refused it — a receipt that lumps "this is not
           // a name" together with "this is a name but carries no entity signal" cannot tell a
           // reader which wall did the work.
-          if (kind !== "party") receipt.attn_rejected_gate += 1;
+          if (kind !== "party") {
+            receipt.attn_rejected_gate += 1;
+            if (containsEntityToken(raw)) receipt.contact_read_inconclusive = true;
+          }
           else if (!looksLikePartyName(raw)) receipt.rejected_gate += 1;
           else receipt.no_entity_suffix += 1;
           note(kind === "party" && looksLikePartyName(raw) ? "no_entity_signal" : "rejected_gate",
@@ -282,8 +281,11 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
 
       let value = null;
       if (attn.remainder) {
-        // The contact polarity: a person, and NEVER an entity-suffixed string (see scanBelow).
-        if (!looksLikePartyName(attn.remainder) || hasRegisteredEntitySuffix(attn.remainder)) {
+        // THE SAME BROAD PREDICATE AS `scanBelow` — this seam shipped with the STRICT one, so
+        // `Attention: ACME SDN BHD (123456-X)` / `P.L.T.` / bare `SDN BHD` were refused on the
+        // split seam and persisted as people here. A rule at one of two seams is not a rule.
+        if (!looksLikePartyName(attn.remainder) || containsEntityToken(attn.remainder)) {
+          if (containsEntityToken(attn.remainder)) receipt.contact_read_inconclusive = true;
           receipt.attn_rejected_gate += 1;
           note("attn_rejected_gate", attn.label, pageNumber, { kind: "attn" });
           continue;
@@ -424,76 +426,6 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
   return { fields, receipt };
 }
 
-/**
- * Merge the reader's emissions into the mapper's field list, reconciling `invoice.customer_name`
- * against Azure's typed row. Mutates `out` and `identity.receipt`.
- *
- * THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR — the two overrules and the
- * positive-evidence law are recorded in the module header above. THE LAWFUL ACTIONS ARE FOUR:
- *   COLLAPSE   reader AGREES with typed → ONE row survives and it is the TYPED one (it carries
- *              Azure's own region). `typed_collapsed`. Never two rows for one field_path —
- *              `persist_invoice_facts` forfeits the WHOLE extraction on conflicting text
- *              duplicates (0026:810-819), which would destroy the working `invoice.total`
- *              capture along with this one.
- *   OVERRIDE   typed (non-empty) == the reader's OWN Attn person, and a distinct party block
- *              exists → THE F7 DEFECT: the party REPLACES the typed row and the person is
- *              emitted separately as `invoice.contact_person`. `typed_overridden_attn`. The only
- *              branch where one machine reading overrules another of the same field, and the
- *              document itself licenses it — a line labelled `Attn` is not a party under any
- *              reading of the page.
- *   WITHDRAW   unexplained disagreement → EMIT NEITHER (X6's semantics). Two readers, two
- *              different buyers, nothing on the page explaining it. `typed_disagreement`.
- *   WITHDRAW   contested landscape → EMIT NEITHER. `typed_vs_contested`.
- *
- * And its two lawful silences: reader ABSENT/refused → typed stands byte-identically (the reader
- * having nothing to say is not evidence about Azure); reader has a party but typed is
- * empty/absent → nothing emitted, `sole_authorship_refused`.
- *
- * `invoice.contact_person` is unaffected by all of the above: it has no typed counterpart in the
- * Document Intelligence vocabulary and no other producer in the repo, so it is purely additive.
- */
-export function mergeCustomerIdentity(out, identity) {
-  const receipt = identity.receipt;
-  const contact = identity.fields.find((f) => f.field_path === "invoice.contact_person");
-  const party = identity.fields.find((f) => f.field_path === "invoice.customer_name");
-  const typed = out.find((r) => r.field_path === "invoice.customer_name");
-  const typedRaw = String(typed?.value_raw ?? "").trim();
-
-  if (contact && !out.some((r) => r.field_path === "invoice.contact_person")) {
-    out.push(contact);
-    receipt.contact_emitted += 1;
-  }
-
-  // A CONTEST is a positive measurement, so it is handled BEFORE the no-party return — the
-  // reader emits no party precisely because it found two.
-  if (receipt.outcome === "contested") {
-    if (typed && typedRaw) {
-      out.splice(out.indexOf(typed), 1);
-      receipt.typed_vs_contested += 1;
-    }
-    return;
-  }
-  if (!party) return;
-
-  if (!typed || !typedRaw) {
-    // RECONCILIATION-ONLY. There is nothing to reconcile against, and the reader does not get to
-    // author an identity on its own. Recorded rather than silent so the refusal is inspectable
-    // on live without re-running the engine.
-    receipt.sole_authorship_refused += 1;
-    receipt.outcome = "sole_authorship_refused";
-    return;
-  }
-  if (partyKey(typedRaw) === partyKey(party.value_raw)) {
-    receipt.typed_collapsed += 1;
-    return;
-  }
-  if (receipt.attn_key && partyKey(typedRaw) === receipt.attn_key) {
-    Object.assign(typed, party);
-    receipt.typed_overridden_attn += 1;
-    receipt.outcome = "attn_overridden";
-    return;
-  }
-  out.splice(out.indexOf(typed), 1);
-  receipt.typed_disagreement += 1;
-  receipt.outcome = "typed_disagreement";
-}
+// The RECONCILER lives next door — see its header for the seam. Re-exported so the adapter
+// and every test keep importing `mergeCustomerIdentity` from this module.
+export { mergeCustomerIdentity } from "./invoice-customer-reconcile.mjs";

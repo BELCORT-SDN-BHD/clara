@@ -250,6 +250,22 @@ reached the books unchallenged. X7 supplies the missing second reader.
   away made `A-B SDN BHD` ≡ `AB SDN BHD`, so a document naming two different companies read as
   `matched` and **suppressed a lawful contest** — wrong-silent, which loses to a safe hold.
   Noise commas stay harmless (`KONG, CHENG` ≡ `KONG CHENG`); suffix canonicalization is untouched.
+- **Round-5 supplement — four more, each a bug in a previous round's own fix:**
+  - **S1** the C3-2 broad contact predicate landed only in the split-line scan, so the **same-line**
+    `Attention: ACME SDN BHD (123456-X)` seam kept persisting companies as people. A rule at one
+    of two seams is not a rule; both doors now take `containsEntityToken`.
+  - **S2** the colon rule knew ASCII + fullwidth only, so `Reference﹕` (U+FE55), `∶` (U+2236) and
+    `꞉` (U+A789) reached `customer_name`. **NFKC first** (it folds U+FE55/U+FF1A with no
+    enumeration), then a named class for the residue, each codepoint cited in the lexicon.
+  - **S3** a contact-door refusal (`Lim P.L.T.`) left `attn_key` unset, so the F7 **override**
+    shape was scored as an unexplained **disagreement** and *withdrew a correct customer name*.
+    Absence of an explanation the reader could not read is not evidence of a contest, so it now
+    **holds** (`attn_inconclusive_hold`). Invariant, with its own cell: a string refused at the
+    contact door may COLLAPSE with an agreeing typed row but can **never** override or withdraw.
+  - **S4** hyphen and slash folded to the same boundary, so `A/B TRADING SDN BHD` ≡
+    `A-B TRADING SDN BHD` suppressed a lawful contest. The classes now sign the key distinctly.
+    *Narrowing recorded:* `KONG-CHENG` no longer keys as `KONG CHENG` — two renderings of one
+    name now HOLD rather than merge, which is the fail-closed direction.
 - **Suffix-variant canonicalization in `partyKey`.** The module still never STRIPS a suffix
   (`ACME` ≠ `ACME SDN BHD`); equivalent SPELLINGS of the same suffix canonicalize
   (`S/B` ≡ `SDN BHD`, `BHD` ≡ `BERHAD`). Without it `KONG CHENG…SDN BHD` vs `KONG CHENG…S/B` —
@@ -259,6 +275,41 @@ reached the books unchallenged. X7 supplies the missing second reader.
   **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
   the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the
   whole persist. `NORMALIZATION_VERSION` → **v10**.
+### X7 — RECORDED RESIDUAL (5): suffixed relational phrases *(round 5, OWNER-VETOABLE)*
+
+> **The one-paragraph record, for the owner.** X7 reads the buyer's name off the invoice layout
+> and may override Azure's own reading in one narrow case. A line only becomes a candidate if it
+> ends in a registered-business suffix (`SDN BHD`, `BHD`, `PLT`, `LLP`). **Residual: a line that
+> *mentions* a company but is not the addressee — `A division of AMATERUS GROUP SDN BHD`,
+> `t/a …`, `Parent company …` — can still be read as the customer.** Eleven such phrases are
+> explicitly refused; reviewers constructed more and **20 still pass, 5 producing a wrong customer
+> name end-to-end**. It only fires when four things coincide: the real buyer's name carries **no**
+> suffix, the phrase line sits inside the bill-to block, it is geometrically closer to the buyer
+> box than the seller's, **and** Azure independently typed the `Attn` person as the customer. Each
+> of the four is individually necessary — measured by removing one at a time. **The harm ceiling
+> is a wrong DRAFT**: counterparty creation happens at human approval and no unattended-posting
+> path reaches this field — the same maker/checker wall that caught the original KONG CHENG
+> defect. A proposed rule (refuse when a lowercase relational phrase precedes an upper-cased name)
+> was **implemented, measured and rejected**: it closed all 5 end-to-end cases but **lost 4
+> legitimate names** (`Bank of China (Malaysia) Berhad`) and closed **0 of 24** once the phrases
+> are printed ALL-CAPS, which is how Malaysian invoices usually print. **Recommendation: accept
+> the residual and re-measure against the real KONG CHENG capture at the live replay.** All 24
+> forms and the 5 scenarios are pinned as tests (`x7-residual-5.test.mjs`) so the class is
+> measured on every run, not remembered.
+
+**The measurement table (path A, case discontinuity — REJECTED).**
+
+| corpus | result |
+|---|---|
+| the 5 end-to-end leaks | **5/5 closed** ✓ |
+| the 24 relational forms | 20/24 closed |
+| the same 24, **ALL-CAPS** | **0/24 closed** ✗ — the class survives re-casing |
+| legitimate names in the 81-cell battery | 54/57 kept, **3 lost** |
+| of-names, all-caps | 8/8 kept ✓ |
+| of-names / real names, **title-case** | 1/5 kept, **4 lost** ✗ (`Bank of China (Malaysia) Berhad`) |
+| of-names / real names, all-lowercase OCR | 4/4 kept ✓ |
+| **verdict** | **DROP** — decision rule required ≥5 closed with **zero** legitimate loss; 7 lost |
+
 - **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
   **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so
   unlike X6 the defaults are conservative opts and the reader is built to ABSTAIN when one is

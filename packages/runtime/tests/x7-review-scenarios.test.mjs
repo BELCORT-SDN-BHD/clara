@@ -354,6 +354,75 @@ test("C3-3 end-to-end: two companies differing only by punctuation still CONTEST
   assert.equal(same.outcome, "matched");
 });
 
+// ══════════════════════════════════════════════════════════════════════════════════════
+// ROUND 5 — the supplement: both seams, the complete colon class, and the contest invariant
+// ══════════════════════════════════════════════════════════════════════════════════════
+
+const ATTN_LABEL = L("Attention:", box(0.72, 2.25, 1.60, 2.39));
+
+test("S1: a company-shaped contact is refused at BOTH seams, not just the split one", () => {
+  // The round-4 C3-2 fix landed only in `scanBelow`, so the SAME-LINE door kept the strict
+  // predicate and kept persisting companies as people. A rule at one of two seams is not a rule.
+  for (const company of ["SDN BHD", "ACME SDN BHD (123456-X)", "ACME SDN BHD, Kuala Lumpur", "ACME P.L.T."]) {
+    const sameLine = run([VENDOR, BILL_TO, L(`Attention: ${company}`, box(0.72, 2.40, 3.60, 2.54))], "Lim Xiao Shan");
+    assert.equal(sameLine.contact, undefined, `${company} — same-line seam`);
+    const split = run([VENDOR, BILL_TO, ATTN_LABEL, L(company, box(0.72, 2.40, 3.20, 2.54))],
+      "Lim Xiao Shan", box(0.72, 2.40, 3.20, 2.54));
+    assert.equal(split.contact, undefined, `${company} — split seam`);
+  }
+  // A real person still reads on BOTH seams.
+  const p1 = run([VENDOR, BILL_TO, KONG_CHENG, L("Attn : Lim Xiao Shan", ATTN_BOX)], "Lim Xiao Shan");
+  assert.equal(p1.contact, "Lim Xiao Shan");
+  const p2 = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim Xiao Shan", box(0.72, 2.40, 2.20, 2.54)),
+    L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim Xiao Shan", box(0.72, 2.40, 2.20, 2.54));
+  assert.equal(p2.contact, "Lim Xiao Shan");
+});
+
+test("S2 end-to-end: no colon glyph manufactures a party", () => {
+  for (const v of ["Reference﹕ ACME SDN BHD", "Reference∶ ACME SDN BHD",
+    "Reference꞉ ACME SDN BHD", "Reference： ACME SDN BHD",
+    "Customer‘s Ref﹕ ACME SDN BHD"]) {
+    const r = run([VENDOR, L(v, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
+    assert.equal(r.customer, "Lim Xiao Shan", `${JSON.stringify(v)} must not override`);
+    assert.notEqual(r.outcome, "attn_overridden");
+  }
+});
+
+test("S3: a contact-door refusal HOLDS — it may collapse, but never override or withdraw", () => {
+  // THE SIDE-EFFECT CHAIN, traced: the contact gate refuses `Lim P.L.T.` (single-letter-run
+  // joining reads `plt`), so `attn_key` is never set, so the F7 OVERRIDE shape is scored as an
+  // UNEXPLAINED disagreement — and the reconciler WITHDREW a correct `KONG CHENG…SDN BHD`.
+  // Absence of an explanation the reader COULD NOT READ is not evidence of a contest.
+  const withPlt = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54)),
+    L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54));
+  assert.equal(withPlt.customer, "Lim P.L.T.", "typed stands — pre-X7 behaviour, zero loss");
+  assert.equal(withPlt.outcome, "attn_inconclusive_hold");
+  // THE INVARIANT: a string refused at the contact door may still COLLAPSE with an agreeing typed
+  // row, but it can never win AGAINST the typed value it sat beside.
+  const disagree = run([VENDOR, BILL_TO, ATTN_LABEL, L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))],
+    "Lim Xiao Shan", box(0.72, 2.40, 2.60, 2.54));
+  assert.equal(disagree.customer, "Lim Xiao Shan", "it does not override…");
+  assert.equal(disagree.outcome, "attn_inconclusive_hold", "…and it does not withdraw either");
+  const agree = run([VENDOR, BILL_TO, ATTN_LABEL, L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))],
+    "ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
+  assert.equal(agree.customer, "ACME SDN BHD", "…but an agreeing typed row still collapses");
+  assert.equal(agree.outcome, "matched");
+  // The S/B rescue survives: a dotted-initials person is readable, so the override still fires.
+  const sb = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim S.B.", box(0.72, 2.40, 2.60, 2.54)),
+    L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim S.B.", box(0.72, 2.40, 2.60, 2.54));
+  assert.equal(sb.customer, "KONG CHENG RESTAURANTS SDN BHD");
+  assert.equal(sb.outcome, "attn_overridden");
+});
+
+test("S4 end-to-end: slash and hyphen renderings CONTEST rather than merge", () => {
+  const r = run([VENDOR,
+    L("Bill To: A/B TRADING SDN BHD", box(0.72, 2.15, 3.60, 2.29)),
+    L("Customer : A-B TRADING SDN BHD", box(0.72, 2.32, 3.60, 2.46)),
+  ], "A-B TRADING SDN BHD", box(0.72, 2.32, 3.60, 2.46));
+  assert.equal(r.outcome, "contested", "two punctuation classes are two names, so this HOLDS");
+  assert.equal(r.customer, undefined);
+});
+
 test("THE CONTROL: F7's own measured defect still fixes, and the honest narrowing is real", () => {
   // (c) the reason this reader exists — KONG CHENG RESTAURANTS SDN BHD carries the entity signal.
   const fixed = run([VENDOR, BILL_TO, KONG_CHENG, ATTN], "Lim Xiao Shan");

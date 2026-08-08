@@ -34,6 +34,27 @@
  *  that identifies the party. */
 export const foldUnicode = (s) => String(s ?? "").normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
 
+/**
+ * EVERY COLON A DOCUMENT CAN PRINT. A colon means a CAPTION, and a caption is never an identity —
+ * that rule is the root closer for the possessive/caption class, so the character class it
+ * matches has to be complete or the class reopens one glyph at a time.
+ *
+ * ROOT-FIRST, RESIDUE ENUMERATED — the method this reader now uses for every character class.
+ * NFKC folds the presentation and fullwidth forms: U+FE55 SMALL COLON and U+FF1A FULLWIDTH COLON
+ * both normalize to U+003A, so normalizing the value FIRST removes them without enumeration.
+ * What NFKC does NOT fold is enumerated with its codepoint and reason:
+ *   · U+003A COLON                    — ASCII, the base case
+ *   · U+2236 RATIO                    — a distinct math character, no compatibility mapping; OCR
+ *                                       emits it for a colon on some engines
+ *   · U+A789 MODIFIER LETTER COLON    — a letter-class character, so it also survives \p{L} folds
+ *   · U+05C3 HEBREW PUNCTUATION SOF PASUQ, U+0589 ARMENIAN FULL STOP — same shape, no mapping
+ * All three probed glyphs (U+FE55, U+2236, U+A789) reached `customer_name` before this class.
+ */
+export const COLON_CLASS = /[:∶꞉׃։]/u;
+
+/** Does this value carry a colon in ANY of its printed forms? NFKC first, then the residue. */
+export const hasColon = (s) => COLON_CLASS.test(String(s ?? "").normalize("NFKC"));
+
 const ENTITY_SUFFIXES = Object.freeze([
   ["sdnbhd", "sendirian berhad"],
   ["sdnbhd", "sdn berhad"],
@@ -83,18 +104,38 @@ const ENTITY_TOKENS = Object.freeze(new Set([
  */
 export function splitEntitySuffix(raw) {
   const original = String(raw ?? "");
-  // The punctuated S/B is read off the ORIGINAL, before folding destroys the slash.
+  // The punctuated S/B is read off the ORIGINAL, before folding destroys the slash. `baseRaw` is
+  // the ORIGINAL text of the base — the punctuation signature below needs it, and for this path
+  // it must EXCLUDE the suffix, whose own slash would otherwise sign every `S/B` name.
   const sb = SB_PUNCTUATED.exec(original);
-  if (sb) return { base: foldUnicode(original.slice(0, sb.index)), canonical: "sdnbhd" };
+  if (sb) {
+    const baseRaw = original.slice(0, sb.index);
+    return { base: foldUnicode(baseRaw), baseRaw, canonical: "sdnbhd" };
+  }
   const folded = foldUnicode(original);
   for (const [canonical, variant] of ENTITY_SUFFIXES_BY_LENGTH) {
-    if (folded === variant) return { base: "", canonical };
+    if (folded === variant) return { base: "", baseRaw: "", canonical };
     if (folded.endsWith(` ${variant}`)) {
-      return { base: folded.slice(0, folded.length - variant.length - 1).trim(), canonical };
+      // Every non-S/B suffix form is letters and spaces only, so the whole original is a safe
+      // signature source — no slash or hyphen can come from the suffix region.
+      return { base: folded.slice(0, folded.length - variant.length - 1).trim(), baseRaw: original, canonical };
     }
   }
   return null;
 }
+
+/**
+ * PUNCTUATION CLASSES FOLD DISTINCTLY. `A/B TRADING SDN BHD` and `A-B TRADING SDN BHD` are two
+ * different registered names; both folded to `a b`, keyed the same, and the reader reported
+ * `matched` — SUPPRESSING a lawful contest. A silent merge of two identities is strictly worse
+ * than a hold, so the slash class and the hyphen class each leave their own mark on the key.
+ * They still differ from `AB` (no punctuation at all), and ordinary noise punctuation — commas,
+ * dots, brackets — still folds to a boundary and stays harmless.
+ */
+const punctSignature = (s) => {
+  const t = String(s ?? "").normalize("NFKC");
+  return (/[/／]/.test(t) ? "s" : "") + (/[-‐‑‒–—―−]/.test(t) ? "h" : "");
+};
 
 /**
  * PARTY CANDIDACY — STRICT: the string must END in a suffix, with a name in front of it.
@@ -152,5 +193,7 @@ export function containsEntityToken(s) {
  */
 export const partyKey = (s) => {
   const hit = splitEntitySuffix(s);
-  return hit ? `${hit.base} ${hit.canonical}`.trim() : foldUnicode(s);
+  const sig = punctSignature(hit ? hit.baseRaw : s);
+  const body = hit ? `${hit.base} ${hit.canonical}`.trim() : foldUnicode(s);
+  return sig ? `${body}#${sig}` : body;
 };
