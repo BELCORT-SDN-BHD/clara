@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { admissionNeedsStart, admitDocument, resolveDocumentFilings, AUTODRAFT_CONSUMER, AUTODRAFT_EVENT_TYPES } from "../lib/autodraft.mjs";
+import { admissionNeedsStart, admitDocument, resolveDocumentFilings, runCatchupPass, AUTODRAFT_CONSUMER, AUTODRAFT_EVENT_TYPES } from "../lib/autodraft.mjs";
 
 // A scripted mock pg client: open_sweep_run returns a fixed run id; admit_autodraft_task
 // returns the next scripted receipt. Captures the calls so the assertions can inspect args.
@@ -39,9 +39,15 @@ test("consumer name + subscribed event types are the fixed spine identity", () =
   assert.deepEqual([...AUTODRAFT_EVENT_TYPES], ["document.invoice_facts_completed", "document.invoice_facts_failed"]);
 });
 
-test("admissionNeedsStart enqueues on 'admitted' AND 're_admitted' — every no-op/refusal outcome does not", () => {
+test("admissionNeedsStart enqueues on ALL THREE task-minting outcomes — every no-op/refusal outcome does not", () => {
   assert.equal(admissionNeedsStart("admitted"), true);
   assert.equal(admissionNeedsStart("re_admitted"), true, "the 0034 supersede outcome mints a real queued task and must enqueue");
+  assert.equal(
+    admissionNeedsStart("re_admitted_after_withdrawal"), true,
+    "the 0053 / F8 outcome (a COMPLETED task whose entry was withdrawn) rides the SAME mint pipeline and mints a real queued task — leaving it un-enqueued would recreate F8 one layer up: the row exists, nothing ever runs it",
+  );
+  // 'already_done' stays FALSE and that is the whole contrast: 0053 narrowed which completed
+  // attempts re-admit, it did not turn the honest refusal into an enqueue.
   for (const o of [
     "noop_existing",
     "refused_budget",
@@ -50,6 +56,11 @@ test("admissionNeedsStart enqueues on 'admitted' AND 're_admitted' — every no-
     "skipped_lane",
     "already_done",
     "skipped_direction",
+    // Near-misses that must not be admitted by a loose prefix/substring test — spelling is
+    // not identity (CLAUDE.md law 3): only the exact tokens enqueue.
+    "re_admitted_after_withdrawal_x",
+    "readmitted",
+    "RE_ADMITTED",
     undefined,
     "",
   ]) {
@@ -109,6 +120,46 @@ test("admitDocument passes the sweep origin, run id, model, and reserve tokens t
   );
   // admit_autodraft_task(p_filing, p_origin, p_run_id, p_model, p_reserve_tokens)
   assert.deepEqual(client.calls.admits[0], ["fil-1", "sweep", "run-9", "gpt-x", 12345]);
+});
+
+test("runCatchupPass admits with origin 'sweep' — the UNATTENDED pass may never take the one_click door", async () => {
+  // 0053 / §7-A F8: the re-admit-after-withdrawal arm is gated on p_origin='one_click', which
+  // is what makes a human's withdrawal STICKY AGAINST AUTOMATION. That gate is runtime-layer
+  // discipline, NOT a privilege boundary: clara_runtime can call admit_autodraft_task with
+  // 'one_click' directly, and 0053's prestate producer census reads pg_proc, which the runtime
+  // is not in. So the property has to be pinned HERE, on the one production call site that
+  // could reopen it -- this catch-up pass, which runs unattended every few minutes over exactly
+  // the no-live-entry state a withdrawal creates.
+  //
+  // A future "let the retry door work for stragglers too" edit now fails a named test instead
+  // of silently redrafting work a human deliberately rejected (and, where an autopost rule is
+  // live, seeing it re-approved ~100ms later).
+  const calls = { openSweep: [], admits: [], tx: [] };
+  const client = {
+    query: async (sql, params) => {
+      if (/^(begin|commit|rollback)$/i.test(sql.trim())) { calls.tx.push(sql.trim().toLowerCase()); return { rows: [], rowCount: 0 }; }
+      if (/list_autodraft_candidates/.test(sql)) return { rows: [{ firm_id: "F", filing_id: "fil-1" }], rowCount: 1 };
+      if (/open_sweep_run/.test(sql)) { calls.openSweep.push(params); return { rows: [{ run_id: "run-c" }], rowCount: 1 }; }
+      if (/admit_autodraft_task/.test(sql)) {
+        calls.admits.push(params);
+        return { rows: [{ receipt: { outcome: "admitted", task_id: "t1" } }], rowCount: 1 };
+      }
+      if (/reconcile_sweep_runs/.test(sql)) return { rows: [{ r: null }], rowCount: 1 };
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  const enqueued = [];
+  const out = await runCatchupPass(client, { enqueue: async (id) => enqueued.push(id), log: () => {}, model: "gpt-x", reserveTokens: 777 });
+
+  assert.equal(calls.admits.length, 1, "the straggler was put to admission");
+  // Same deep-equal shape as the admitDocument cell above: full positional args, so the origin
+  // cannot drift without this failing.
+  assert.deepEqual(
+    calls.admits[0], ["fil-1", "sweep", "run-c", "gpt-x", 777],
+    "the catch-up pass MUST admit with origin 'sweep' -- 'one_click' would hand the unattended loop the 0053 re-admit door and reopen F8's blocker",
+  );
+  assert.equal(out.admitted, 1);
+  assert.deepEqual(enqueued, ["t1"]);
 });
 
 test("admitDocument resolves the document's filings from the injected resolver (event carries NO client)", async () => {

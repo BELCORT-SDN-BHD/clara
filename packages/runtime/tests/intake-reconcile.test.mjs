@@ -47,6 +47,15 @@ function task(status, extra = {}) {
     firmId: randomUUID(),
     status,
     lane: "structured_parse",
+    // TRANSPORT, which every production ingest task carries: intake.mjs writes storageKey +
+    // sha256 into the sidecar before it enqueues (intake.mjs:366-383). The fixture omitted
+    // them, which modelled a task the product never creates — and 0051 §2 made that shape
+    // load-bearing: the reconciler now refuses to dispatch a transport-less ingest task,
+    // because behavior_v2 would call downloadCanonical with an undefined key and manufacture
+    // a storage_error terminal indistinguishable from a real engine fault. These cells are
+    // about lane DISPATCH, so they get the transport and keep testing their own subject.
+    storageKey: `firms/00000000-0000-4000-8000-0000000000ff/docs/${"a".repeat(64)}.pdf`,
+    sha256: "a".repeat(64),
     createdAt: new Date(Date.now() - 60_000).toISOString(),
     updatedAt: new Date(Date.now() - 60_000).toISOString(),
     ...extra,

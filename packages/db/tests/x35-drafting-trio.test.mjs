@@ -109,10 +109,28 @@ test("x35.a section B: counterparty-landscape-changed refusal carries the new re
   // extra or altered text were prepended/appended around the expected phrase
   // (an O-round Codex finding). The live message carries no DETAIL suffix for
   // this refusal, so the raised message IS the full remedy text.
+  // 0053 / §7-A FINDING F8 rewords this remedy to name the doors that actually exist. The old
+  // text told a human to "withdraw and re-draft" while admission answered already_done forever
+  // for a completed attempt -- a remedy pointing at nothing (8 of 9 real H1 redrafts hit that
+  // wall). errcode is unchanged, asserted above.
+  //
+  // TWO PROPERTIES OF THE WORDING ARE DELIBERATE, and both were review findings:
+  //   * IT PROMISES NOTHING UNCONDITIONAL. The same call can still return refused_attempts,
+  //     lane_changed, skipped_direction or refused_budget, and 0053 additionally gates
+  //     re-admission on a HUMAN origin -- so the message says a bookkeeper "can ask", and
+  //     names the gates, rather than claiming the filing "re-admits".
+  //   * IT PRESUPPOSES NO FILING. This refusal fires for ANY entry carrying a proposed
+  //     counterparty, including chat and adjustment drafts where filing_id IS NULL and a
+  //     phrase like "the withdrawn filing" would name nothing.
+  // Asserted by EXACT equality (not .includes()) for the O-round reason recorded above.
   assert.equal(
     caught.message,
-    "counterparty match landscape changed; withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape",
+    "counterparty match landscape changed; withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, budget or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape",
     `refusal message must be exactly the new remedy text -- got: ${caught.message}`,
+  );
+  assert.ok(
+    !/re-admits through the autodraft door|the withdrawn filing/.test(caught.message),
+    "the remedy must never make an unconditional re-admission promise, and must never presuppose a filing",
   );
 });
 

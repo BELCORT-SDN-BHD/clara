@@ -97,8 +97,8 @@ test("the mapper merges reader emissions and folds the receipt into the envelope
   assert.equal(got["invoice.total_excl_tax"].value_raw, "435,560.40", "the reader supplies what Azure never typed");
   assert.equal(got["invoice.rounding"], undefined, "the rounding sign was never OCR'd — refused, not assumed");
   assert.equal(got["invoice.tax_total"], undefined);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v9");
-  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v9");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v10");
+  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v10");
   assert.equal(out.envelope.totals_reader.emitted, 1);
   assert.equal(out.envelope.totals_reader.sst_rate, 8);
   assert.equal(out.pagesUsed, 1, "pagesUsed still counts pages, not lines");

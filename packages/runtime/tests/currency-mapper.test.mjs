@@ -104,7 +104,7 @@ test("CG3 — an openai-0008-shaped doc: ambiguous page vocabulary -> reader sil
 // ======================================================================================
 
 test("CG6 — NORMALIZATION_VERSION is bumped to v9", () => {
-  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v9");
+  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v10");
 });
 
 test("CG6 — a correctly-typed-MYR document's currency row is BYTE-STABLE under v9 (agreement never rewrites it)", () => {
@@ -156,7 +156,7 @@ test("CG6 — the XML/MyInvois lane's OWN normalization version is untouched by 
   // v9) and `MYINVOIS_NORMALIZATION_VERSION` (untouched, v1) are deliberately DIFFERENT
   // constants in DIFFERENT files — that separation IS the byte-identity guarantee.
   assert.equal(MYINVOIS_NORMALIZATION_VERSION, "clara-myinvois-norm:v1");
-  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v9");
+  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v10");
   assert.notEqual(MYINVOIS_NORMALIZATION_VERSION, NORMALIZATION_VERSION);
 });
 
