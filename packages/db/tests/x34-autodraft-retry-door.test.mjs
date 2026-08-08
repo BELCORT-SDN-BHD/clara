@@ -113,12 +113,18 @@ async function has34() {
   }
 }
 
-async function has53() {
+/** Is the F8 re-admit arm actually INSTALLED? Deliberately NOT a schema_migrations version
+ *  lookup like has31/has34 above: migration numbers are claimed at MERGE time in this repo,
+ *  so a version string is a name that can drift away from the thing it names (CLAUDE.md law
+ *  3 — spelling is not identity). This asks the live catalog whether the branch is in the
+ *  body these cells exercise, which is the fact they actually depend on. */
+async function hasReadmitAfterWithdrawal() {
   try {
     const r = await rootQuery(
-      "select 1 from clara.schema_migrations where version='0053_autodraft_readmit_after_withdrawal'",
+      `select position('re_admitted_after_withdrawal' in
+                pg_get_functiondef('clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure)) > 0 as ok`,
     );
-    return r.rows.length > 0;
+    return r.rows[0]?.ok === true;
   } catch {
     return false;
   }
@@ -135,11 +141,11 @@ async function requireReady() {
       "0034_autodraft_retry_door is not applied -- this battery must fail against the pre-0034 behavior",
     );
   }
-  // 0053 is hard-required for the SAME reason 0034 is: the g/h/i/j cells must FAIL against
-  // the pre-fix behavior rather than skip past it. (0034's own precedent, restated.)
-  if (!await has53()) {
+  // The F8 fix is hard-required for the SAME reason 0034 is: the g/h/i/j cells must FAIL
+  // against the pre-fix behavior rather than skip past it. (0034's own precedent, restated.)
+  if (!await hasReadmitAfterWithdrawal()) {
     throw new Error(
-      "0053_autodraft_readmit_after_withdrawal is not applied -- the F8 cells must fail against the pre-0053 behavior, never skip",
+      "the F8 re-admit-after-withdrawal arm is not installed in clara.admit_autodraft_task -- the F8 cells must fail against the pre-fix behavior, never skip",
     );
   }
 }

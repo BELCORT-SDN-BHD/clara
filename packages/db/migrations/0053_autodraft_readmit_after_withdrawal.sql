@@ -7,10 +7,17 @@
 -- ACCEPTANCE EVIDENCE OF RECORD: docs/plan/wave-7a-acceptance-h1.md:746-759 and its 19-row
 -- approval table at :793-831 -- ROME SECRETARY's real §7-A campaign, 2026-08-07.
 --
--- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md + RENUMBER.md). 0053 is
--- the WORKING number; the frontier probe below pins 0050_egress_release_skip_consent as the
--- applied predecessor. The number also appears inside the two installed comment markers, so
--- a renumber must carry them (RENUMBER.md's own procedure).
+-- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md). 0053 is the WORKING
+-- number; the frontier probe below pins 0050_egress_release_skip_consent as the applied
+-- predecessor.
+-- RENUMBERING THIS FILE IS A GLOBAL '0053' -> '00NN' REPLACE **WITHIN THIS FILE**, PLUS THE
+-- FILENAME, AND NOTHING ELSE. The number appears in the raise/notice texts and, load-
+-- bearingly, in the installed comment marker `[0053 / F8]` that SECTION 3's own placement
+-- check greps for -- so the splice and its proof must be renumbered together or the tail
+-- fails loudly (which is the safe direction). Nothing OUTSIDE this file names the number:
+-- packages/db/tests/x34-autodraft-retry-door.test.mjs gates on the installed CAPABILITY
+-- (does the live body carry the token) rather than on a schema_migrations version string,
+-- precisely so a renumber cannot silently turn its F8 cells into skips.
 --
 -- =====================================================================================
 -- WHAT WENT WRONG, IN ONE PARAGRAPH
