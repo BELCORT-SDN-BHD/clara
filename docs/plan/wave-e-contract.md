@@ -38,7 +38,11 @@ attested human override:
 - **Drawer 1 — ABSOLUTE (no override, nobody):** the serialized close lock (advisory lock
   per client; no writer escapes into the FY mid-close) · continuity math (P&L→retained
   earnings roll; opening(n+1) = closing(n); tie asserted) · the reverse/re-open ordering
-  guard (no reversing FY(n) under a live FY(n+1) close).
+  guard (no reversing FY(n) under a live FY(n+1) close) · **the DB-owned control tie-outs
+  at the close boundary** (AR control = Σ open items · AP control · the FA register tie,
+  including its segment-aware Wave-E rebuild) — these are arithmetic identities the DB
+  owns by construction, so a mismatch is a DEFECT, not a judgement item: no attestation
+  path exists, and an UNKNOWN/ERROR tie state fails closed exactly like a mismatch.
 - **Drawer 2 — DEFAULT-REFUSE, PER-ITEM ATTESTED OVERRIDE** (who/why/when written into the
   close receipt, permanent). All five named checks live here:
   1. depreciation not run through FY end — **this is the WD-R6 answer: the advisory
@@ -49,6 +53,12 @@ attested human override:
   5. uncoded documents.
 - **Drawer 3 — ADVISORY ONLY** (readiness panel, never blocks): soft signals.
 
+*(Tie-out enumeration completed at review round 3; the assignments follow the ruled
+drawer principles — arithmetic-wrong is drawer 1, professional-judgement is drawer 2.
+Drawer 2's "open bank-reconciliation items" means the evidence-dependent states —
+unmatched statement lines, missing statements — never the DB-owned tie identities,
+which live in drawer 1. PRD journey-7's "tie-outs clean" is thereby a gate, not prose.)*
+
 Rationale of record: all-hard ⇒ one stubborn RM50 recon diff makes a client permanently
 unclosable and users route around the system; all-soft ⇒ decoration. The middle drawer is
 audit working-paper practice (exceptions allowed, partner-signed, filed).
@@ -58,8 +68,13 @@ audit working-paper practice (exceptions allowed, partner-signed, filed).
 - **The ANNUAL close is the only true lock**; the three drawers mount on it.
 - **Months never lock.** A month gets a SNAPSHOT: run the readiness checks, mint the
   management-accounts artifact (timestamped, durable, reproducible). Books stay open.
-- **Staleness labels:** any posting into an already-snapshotted month marks that artifact
-  STALE and surfaces it — change is free, silent change is impossible.
+- **Staleness labels:** any audited mutation whose effect intersects an already-
+  snapshotted period — posting, reversal, allocation, correction, closing-stock
+  adjustment, anything that moves a number the snapshot presented — marks the artifact
+  STALE **in the same audited transaction** (Invariant-4 discipline: no asynchronous
+  window in which a stale report reads as current). Artifact bytes stay immutable;
+  staleness is a separate append-only assessment row. Change is free, silent change is
+  impossible.
 - **FY windows are DATE RANGES, not "12 months"** (first FY up to 18 months under CA 2016
   is native; `fy_end_month/day` nullable-default-12/31 handling is part of the build).
 - No month-lock is built and no slot is reserved; a future month lock is a lock on a
@@ -74,13 +89,34 @@ audit working-paper practice (exceptions allowed, partner-signed, filed).
 
 Supersedes the blunter "the agent never computes a figure" phrasing. Ratified on a
 three-lane evidence dossier (Anthropic docs · OpenAI docs + arithmetic benchmarks · a
-Codex gpt-5.6 adversarial debate) — see the research file. Key evidence pins: frontier
-in-context arithmetic has a hard digit-level failure boundary at every scale tested;
-errors are plausible-looking, not near-misses; semantic errors (period/definition/
-population/sign/stock-vs-flow) dominate and correlate; both vendors' own tooling posture
-delegates math to code; CA 2016 s.245 seven-year explainability + MIA due care. The PRD
-§6 and CLAUDE.md texts are amended in the same PR as ADR-065. Narration uses placeholder
-substitution — the model never retypes figures into prose or charts.
+Codex gpt-5.6 adversarial debate) — see the research file. Key evidence pins, stated at
+their own confidence: the cited benchmarks show NONZERO digit-level arithmetic errors at
+every tested scale, with wrong answers that look plausible rather than near-miss (no
+Clara-specific production error rate exists — none was claimed); both vendors provide and
+steer toward code-execution tools for precision-sensitive math (neither states a blanket
+in-context ban; Anthropic's own line is threshold-based); the prediction that SEMANTIC
+errors (period/definition/population/sign/stock-vs-flow) will dominate and correlate is
+the Codex position paper's engineering judgment, ADOPTED as a design premise; CA 2016
+s.245 seven-year explainability + MIA due care. The PRD §6 and CLAUDE.md texts are
+amended in the same PR as ADR-065. Narration uses placeholder substitution — the model
+never retypes figures into prose or charts.
+
+**Binding interpretation (round-3 cross-model review; closes the lawyer holes without
+touching the ratified sentence):**
+- **"Authoritative"** = every product-presented or persisted quantitative or assurance
+  claim. Transient UI is NOT an escape hatch — the retained render boundary (below)
+  already covers everything the product shows.
+- **The ratified sentence is a PERMISSION grant** (proposing and checking are lawful),
+  not a relaxation. The retained, stricter operational law — PRD §4 item 14 ("never
+  model-computed"), PRD §9's exclusion table ("Model-computed numbers in any artifact"),
+  ARCHITECTURE §6's render boundary — **GOVERNS wherever the two could diverge.** The
+  asymmetry is deliberate.
+- **"Reproduces … from DB-owned inputs" means ORIGINATES:** the evaluator computes the
+  value from source facts and approved, versioned constants. A model numeral is never an
+  evaluator input; matching or echoing a model-produced numeral that was previously
+  stored is NOT reproduction.
+- **A model check emits a discrepancy signal only** — never a figure that anything
+  downstream may render.
 
 ## E-R5 — The typed metric algebra ("乐高厨房")
 
@@ -110,6 +146,16 @@ substitution — the model never retypes figures into prose or charts.
 - **Edge policies are defined explicitly, never left to the evaluator's discretion:**
   division-by-zero, negative denominators, missing data, sign normalization, and rounding
   each get a named, versioned policy.
+- **Definition lifecycle (the state matrix, completed at review round 3):**
+  `draft` — executable for preview; may render ONLY into non-statutory management
+  artifacts and ONLY under the mandatory "uncertified" watermark; never statutory →
+  `firm_approved` — human approval bound to the exact content hash/revision; reusable;
+  statutory-eligible alongside `canonical` — · `canonical` (product-curated, MASB/
+  textbook definitions) · `superseded` / `rejected` (immutable history, never deleted).
+  Composing already-approved metrics ad hoc is composition, not a new definition;
+  SAVING a composition mints a new `draft`. Approval/publication ride named audited
+  functions under the standing role floors and PRD §2's segregation model; direct DML
+  stays revoked (invariant 10).
 
 ## E-R6 — The dormant correction guards POWER ON
 
@@ -149,6 +195,14 @@ filename/cover/metadata.
 | Snapshot + staleness witness | **RS** | 19 approved real invoices; snapshot a month, post into it, watch the label |
 | Sole-prop FS format | BEE | convention-labelled, never MPERS-claimed (E-R14) |
 
+**Acceptance discipline (added at review round 3):** this table names the CORPUS, not the
+oracle. Before each acceptance runs, the build mints a falsifiable acceptance matrix —
+ruling → precondition → action → exact DB/artifact assertion (refusal tokens, receipts,
+hashes) → negative case → implementation owner → independent verifier — at the
+`wave-7a-acceptance-h1/h2.md` evidence grade. Coverage must include role/RLS boundaries,
+concurrency, idempotency, the evaluator edge policies, number-injection attempts, reopen
+ordering, guard-activation (E-R6), and byte-reproduction of sealed artifacts.
+
 ## E-R10 — The UX-debt register (recorded here; ALL of it → Wave G)
 
 The owner's restated list (no prior durable record existed): ① no userflow at all — no
@@ -167,10 +221,17 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
   owner/partner level by default.
 - **Key ③ reopen:** owner/partner level; stated reason + named correction target + reopen
   receipt + the ordering guard.
-- **Firm-configurable authorization list** for keys ②③ (grant/revoke to e.g. a senior
-  manager); every grant/revoke is itself an audited act; factory default = owner/partner
-  only. **The agent holds ZERO keys structurally** — the verbs do not exist for the
-  agent's DB role; list membership cannot change that.
+- **Firm-configurable authorization list** for keys ②③ — the two are SEPARATELY
+  grantable capabilities; only the firm owner grants/revokes membership, and every
+  grant/revoke is itself an audited act; factory default = owner/partner only. **The
+  agent holds ZERO keys structurally** — the verbs do not exist for the agent's DB role;
+  list membership cannot change that.
+- **Segregation of duties — PRD §2's existing hard gate governs the close itself:**
+  year-end close is on the high-stakes lane, so where the firm has ≥2 eligible humans
+  the closer must be a DIFFERENT human from the last human editor/preparer; a solo firm
+  records the explicit self-approval attestation (PRD's solo branch). Preparing (key ①),
+  attesting exceptions + closing (key ②), and reopening (key ③) are distinct
+  capabilities in the DB, so the separation is checkable, not prose.
 
 ## E-R12 — The client-facts trio
 
@@ -191,8 +252,16 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
   on same-resolved-counterparty + exact-to-the-sen amount + exactly ONE open candidate.
   Zero tolerance. Corroboration buys THE settled draft's unattended-post eligibility
   only — all nine controls still run; floor economics + the anti-circular law untouched;
-  no new autopost class is created. A late settlement crossing a closed FY hits the
-  period lock → drawer-2 surfacing.
+  no new autopost class is created. A late settlement whose invoice sits in a CLOSED FY
+  is HELD and surfaced on the exception panel; entering the closed year takes the formal
+  reopen path (E-R6 / key ③) — a drawer-2 attestation never posts into a closed year.
+- **Supersession registered NOW, activated only at the F build:** this door, when built,
+  NARROWS 7A-R3's blanket "tax-silent never autoposts" to "never WITHOUT settlement
+  corroboration". The Wave-F build ADR executes that narrowing and must define the
+  alternate corroboration predicate — the bank-external settlement anchor standing in
+  for control 4's document-internal second numeric anchor — plus negative tests for
+  ambiguity and race shapes. Until that ADR lands, 7A-R3 stands whole and no tax-silent
+  document posts unattended.
 - **Agentic layer (attended):** ambiguity (partial payments, combo settlements, multiple
   candidates) routes to an agent-built SUGGESTION card carrying evidence + client-KB
   reasoning; the human's one-click approve IS the human witness; posting walks the normal
@@ -207,13 +276,16 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
 periods beginning before 2027-01-01; MPERS(2025) (issued 2025-10-10, based on IFRS for
 SMEs 3rd ed.) for periods beginning on/after 2027-01-01, with the 2016 text withdrawn at
 that same boundary — live 2025/26 clients stay on MPERS(2016) wording. The wording tables are BORN two-versioned (the tax-table pattern). MASB's own
-illustrative FS (`MPERS_2025_BC_IE.pdf`) is the primary illustrative-source CANDIDATE (standard-setter provenance; existence confirmed by metadata only) — it is an
-image PDF: **a manual pull + HUMAN verification is REQUIRED before any wording enters the
-policy tables** (extraction was refused to every reader; absence-is-not-evidence applies).
+illustrative FS (`MPERS_2025_BC_IE.pdf`) is the primary illustrative-source CANDIDATE (standard-setter provenance; existence confirmed by metadata only) — automated
+extraction failed on it (the encoding is unverified; only the failure was observed):
+**a manual pull + HUMAN verification is REQUIRED before any wording enters the policy
+tables** (absence-is-not-evidence applies).
 KPMG's free illustrative FS is the cross-check; the MIA paid illustrative book is
-deferred-until-needed (ask the owner then). **Sole-prop format has NO authoritative
-source** (verified NOT FOUND) — practitioner convention (P&L + SoFP + capital-account
-movement), honestly labelled convention-based, never MPERS-claimed.
+deferred-until-needed (ask the owner then). **Sole-prop format: no authoritative source
+was FOUND in this search** — treated as UNRESOLVED, not proven-absent; the build's
+golden-source step includes a positive primary check (LHDN / MIA / ROBA materials)
+before the convention label is finalized. Interim: practitioner convention (P&L + SoFP +
+capital-account movement), honestly labelled convention-based, never MPERS-claimed.
 
 **The six-layer template model** (full design: the Codex research file): statutory
 authority profile (curator-only, never firm/LLM-editable) → verified locale packs →

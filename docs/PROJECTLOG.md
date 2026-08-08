@@ -99,8 +99,12 @@ reproducible, and DB-owned.
 **Supersessions.** PRD §6 invariant 1's wording AND ARCHITECTURE §0's headline sentence
 (both amended in this PR — the law has three homes, PRD §6 / ARCHITECTURE §0 / CLAUDE.md,
 and all three now carry the E-R4 wording; this ADR governs on any residual divergence);
-the "E-c may slip" sequencing offer (dead per E-R7); WD-R6's open "advisory vs hard"
-question (answered). The five archives and every prior ADR stand unchanged.
+ARCHITECTURE §0's "visibility-first" line gains its ONE ruled exception (the drawer-2
+close gates, E-R2 — amended in this PR); 7A-R3's blanket tax-silent prohibition carries a
+REGISTERED future narrowing (E-R13) that only the Wave-F settlement-door build ADR may
+activate — until then 7A-R3 stands whole; the "E-c may slip" sequencing offer (dead per
+E-R7); WD-R6's open "advisory vs hard" question (answered). The five archives and every
+prior ADR stand unchanged.
 
 
 ## PART 2 — OPEN ITEMS

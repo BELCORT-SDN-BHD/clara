@@ -7,8 +7,11 @@
 > (direct `codex exec`, read-only). The owner RATIFIED the synthesis as E-R14
 > (`docs/plan/wave-e-contract.md`, ADR-065). This file preserves both lanes as the
 > design-of-record. **Standing caution carried into the build:** every illustrative-FS
-> PDF below resisted text extraction (image-encoded) — a manual pull + HUMAN verification
-> is required before any wording enters the policy tables.
+> PDF below resisted AUTOMATED text extraction (the encodings are unverified — only the
+> failures were observed) — a manual pull + HUMAN verification is required before any
+> wording enters the policy tables. *(Portability note: workstation-absolute repo links
+> in the verbatim Codex section below were rewritten repo-relative; content otherwise
+> verbatim.)*
 
 ---
 
@@ -74,7 +77,7 @@ never cited as MPERS-equivalent.
 
 ## Lane 2 — the Codex gpt-5.6-sol design (verbatim below; ratified as E-R14's architecture)
 
-The architecture should treat a firm’s “golden FS template” as a versioned composition, not a fork of statutory truth: an exact statutory profile + an exact firm house style + constrained preferences. This extends Clara’s existing [reporting-engine boundary](/C:/Users/zhant/Desktop/clara-rebuild/docs/architecture/ARCHITECTURE.md:157), [honest-FS requirement](/C:/Users/zhant/Desktop/clara-rebuild/docs/prd/PRD.md:84), and [Wave E scope](/C:/Users/zhant/Desktop/clara-rebuild/docs/plan/REBUILD-PLAN.md:357).
+The architecture should treat a firm’s “golden FS template” as a versioned composition, not a fork of statutory truth: an exact statutory profile + an exact firm house style + constrained preferences. This extends Clara’s existing [reporting-engine boundary](docs/architecture/ARCHITECTURE.md:157), [honest-FS requirement](docs/prd/PRD.md:84), and [Wave E scope](docs/plan/REBUILD-PLAN.md:357).
 
 ## 1. Layered template model
 

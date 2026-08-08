@@ -8,7 +8,12 @@
 > metric algebra (see `docs/plan/wave-e-contract.md`, ADR-065). This file preserves the
 > three lanes' outputs as evidence of record. Claims below carry their authors' own
 > confidence labels — several vendor-doc quotes are flagged secondary-corroborated rather
-> than first-hand-fetched; treat labels as part of the evidence.
+> than first-hand-fetched; treat labels as part of the evidence. Neither vendor states a
+> blanket in-context arithmetic ban (Anthropic's line is explicitly threshold-based), no
+> Clara-specific production error rate exists, and the "semantic errors will dominate"
+> claim is the Codex paper's engineering judgment — the E-R4 ruling adopts it as a design
+> premise, not a measured fact. *(Portability note: workstation-absolute repo links in
+> the verbatim Codex section were rewritten repo-relative; content otherwise verbatim.)*
 
 ---
 
@@ -48,7 +53,7 @@ Anthropic itself raises a contamination caveat on the 100%). Claude Sonnet 4.5: 
 AIME 2025 without tools vs 100% with Python tools (Sonnet 4.5 System Card, Sep 2025).
 Proves: Anthropic's own evaluation methodology treats raw model computation and
 tool-assisted computation as distinct, separately-reported conditions, with a
-double-digit-point gap on competition math.
+7.23-point (Opus 4.5, MATH) to 13-point (Sonnet 4.5, AIME) gap on competition math.
 
 3. **Hallucination guidance** (docs.claude.com/.../reduce-hallucinations): "For tasks
 involving long documents (>20k tokens), ask Claude to extract word-for-word quotes first
@@ -254,7 +259,7 @@ This matters in Malaysia beyond abstract “AI safety.” The Companies Act 2016
 
 MIA’s professional rules require competence, due care, diligence, and appropriate supervision. They do not prescribe a database architecture, but “the model seemed extremely precise” is not persuasive evidence of due care. [MIA By-Laws](https://mia.org.my/storage/2025/07/By-Laws-updated-Feb-2025-Effective-1-July-2025.pdf)
 
-This is also exactly the boundary the prior Clara build violated: it could launder model-authored figures into branded artifacts and describe SQL literals as database-computed. [Gate‑1 pattern 9](/C:/Users/zhant/Desktop/clara-rebuild/docs/audit/00-GATE-1-README.md:59) The present [PRD law](/C:/Users/zhant/Desktop/clara-rebuild/docs/prd/PRD.md:123) is a rational response to that evidence, not superstition.
+This is also exactly the boundary the prior Clara build violated: it could launder model-authored figures into branded artifacts and describe SQL literals as database-computed. [Gate‑1 pattern 9](docs/audit/00-GATE-1-README.md:59) The present [PRD law](docs/prd/PRD.md:123) is a rational response to that evidence, not superstition.
 
 ## 5. Verdict
 
