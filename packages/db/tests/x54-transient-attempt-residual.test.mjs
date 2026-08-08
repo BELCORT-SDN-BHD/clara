@@ -118,7 +118,8 @@ test("…but the half ruling 2 DOES deliver still holds on the same run: a trans
 test("NOTHING unparks a filing: the set of live writers of autodraft_attempts.state is closed, and every one of them excludes 'parked'", async (t) => {
   if (skipHere(t)) return;
   // Measured against the CATALOG rather than the migration files — the claim in
-  // autoDraft.v7.errors.ts's header is "NONE EXISTS; registered", and this is that claim as
+  // autoDraft.v7.errors.ts's header is "NONE EXISTS; queued for the batch-close register",
+  // and this is that claim as
   // a test. If a future migration adds an unpark verb, this cell fails and the header has to
   // be corrected with it rather than quietly going stale.
   // THE PATTERN MATCHES BOTH WRITE FORMS (native round-3 review). An UPDATE is not the only

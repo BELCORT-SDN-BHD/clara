@@ -240,7 +240,12 @@ export function directionFamilyMismatchRefusal(): RefusalPart {
  *  (packages/db/tests/x54-transient-attempt-residual.test.mjs) rather than trusted here.
  *  No dashboard or human verb touches it either (the dashboard's own "parked" strings are the
  *  bank-reconciliation declaration, a different concept). THERE IS NO UNPARK PATH: NONE
- *  EXISTS — registered for PROJECTLOG PART 2, not silently absorbed here.
+ *  EXISTS — recorded here and QUEUED for the PROJECTLOG PART 2 register at the F6–F9 batch
+ *  close (the close-out PR owns the register entry; PROJECTLOG is decisions-only, so this PR
+ *  carries no change to it). Stated in that tense deliberately: an earlier cut of this
+ *  comment said "registered", present tense, while no such entry existed — absence is not
+ *  evidence, and a comment claiming a record that has not been written is the documentation
+ *  form of exactly that.
  *
  *  WHY THE RESIDUAL IS STILL ACCEPTED, AS A DECISION: (a) with the reducer fix
  *  (autoDraft.v7.prompt.ts) a transient that the model recovers from in-run never settles at
@@ -250,7 +255,8 @@ export function directionFamilyMismatchRefusal(): RefusalPart {
  *  that filing only: the chat and hand doors do not consult this registry, so the document
  *  stays codable by a human (the same route ADR-064 records all nine H1 redrafts taking).
  *  Widening the DB's own attempt accounting to distinguish a system condition from a real
- *  failure is a REGISTERED follow-up, deliberately out of this PR's scope.
+ *  failure is a follow-up QUEUED for the same batch-close register, deliberately out of this
+ *  PR's scope.
  *
  *  THE CODE IS DELIBERATELY NOT A CLR. No DB gate raised this, and reusing a CLR reason token
  *  is precisely the misclassification being fixed. "transient" sits beside the existing

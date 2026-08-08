@@ -101,7 +101,7 @@ test("autoDraft.v7.errors.ts is PURELY ADDITIVE over v6 — new blocks only, and
     },
     // Four sub-spans rather than one, so each new declaration's LENGTH is pinned separately
     // and a body cannot grow inside a neighbour's mask.
-    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 89, trailingBlanks: 1 },
+    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 95, trailingBlanks: 1 },
     { label: "errors/validIdxHint", from: "/** The (idx, field_path) hint appended to an unknown-index refusal. Derived entirely from the", to: "}", lines: 10, trailingBlanks: 1 },
     { label: "errors/evidenceSystemRefusal", from: "export function evidenceSystemRefusal(reason: EvidenceSystemReason, hint?: string): RefusalPart {", to: "}", lines: 5, trailingBlanks: 1 },
     { label: "errors/refusalForEvidenceFailure", from: "/** Map a failed resolution to its refusal. The ONE place the two failure kinds are given", to: "}", lines: 13, trailingBlanks: 1 },
