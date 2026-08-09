@@ -266,7 +266,9 @@ test("R4-1: a `c/o` line never outranks an UNSUFFIXED real buyer", () => {
   assert.notEqual(r.outcome, "attn_overridden");
 });
 
-test("R4-1: all ELEVEN measured non-addressee forms are dead on both seams", () => {
+// Precisely the ELEVEN ROUND-4 RELATIONAL forms. `NON_ADDRESSEE_MARKERS` has since grown to
+// sixteen; PR #220's five SELLER CAPTIONS have their own cell in `x7-pr220-review.test.mjs`.
+test("R4-1: all ELEVEN round-4 relational non-addressee forms are dead on both seams", () => {
   const FORMS = [
     "c/o AMATERUS GROUP SDN BHD", "C/O ACME SDN BHD", "care of ACME SDN BHD",
     "A subsidiary of AMATERUS GROUP SDN BHD", "A member of ACME SDN BHD",

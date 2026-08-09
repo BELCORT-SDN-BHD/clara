@@ -105,7 +105,7 @@
 //      a same-line `To : X`, and any value carrying a COLON all ABSTAIN. Each leaves Azure's
 //      typed value standing — zero loss against today.
 //  (5) SUFFIXED RELATIONAL PHRASES — THE OPEN ONE, and the only residual that can still write a
-//      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured
+//      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates SIXTEEN measured
 //      forms; reviewers constructed 23 distinct more, of which 23 of the 38 pinned entries still
 //      pass candidacy, 5 producing a wrong `customer_name` end-to-end (`A division of AMATERUS
 //      GROUP SDN BHD` is the realistic one). The base is still validated by ABSENCE-of-known-bad
@@ -116,15 +116,14 @@
 //      ALL-CAPS, which is how Malaysian invoices usually print.
 //      REACHABILITY, re-measured after the A1 field test WIDENED it: load-bearing are the
 //      bounded scan window, typed == the reader's own Attn person, and NOW the anchor sweep's
-//      radius — a second way in, on exactly the label-less pages the sweep exists for. The
-//      closer-to-buyer comparison is no longer among them: it is RETIRED. Harm ceiling is
-//      unchanged and is a wrong DRAFT — counterparty birth is at HUMAN APPROVAL and no
-//      unattended-post path reaches `customer_name`. FULL VETO-READY RECORD, with the 38 forms
-//      and 5 scenarios pinned: docs/plan/extraction-slice-contract.md, X7. OWNER-VETOABLE.
+//      radius. The closer-to-buyer comparison is no longer among them: it is RETIRED. Harm
+//      ceiling is unchanged and is a wrong DRAFT — counterparty birth is at HUMAN APPROVAL and
+//      no unattended-post path reaches `customer_name`. FULL VETO-READY RECORD (38 forms, 5
+//      scenarios): docs/plan/extraction-slice-x7-field-record.md. OWNER-VETOABLE.
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
-import { containsEntityToken, hasRegisteredEntitySuffix, looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { containsEntityToken, hasRegisteredEntitySuffix, looksLikePartyName, partyBaseTokens, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { customerAttributionFailure, extentOf, scaleAnchor, xOverlap } from "./invoice-block-geometry.mjs";
 import { sweepAnchorNeighbourhood } from "./invoice-anchor-sweep.mjs";
 
@@ -208,17 +207,17 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       ? {
         vendor: scaleAnchor(anchors?.vendor, frame.scale),
         customer: scaleAnchor(anchors?.customer, frame.scale),
-        // The seller's own name, keyed HERE so `invoice-block-geometry.mjs` keeps owning POSITION
-        // only and never learns how a name is spelled. Refuse-only — see its header.
-        vendorKey: anchors?.vendorName ? partyKey(anchors.vendorName) : null,
+        // The seller's own distinguishing words, tokenized HERE so `invoice-block-geometry.mjs`
+        // keeps owning POSITION only and never learns how a name is spelled. Refuse-only.
+        vendorTokens: anchors?.vendorName ? partyBaseTokens(anchors.vendorName) : null,
       }
       : null;
     /** Line indices claimed by PASS 1 as a contact VALUE — never available to the party read. */
     const reserved = new Set();
 
     /** Attribution (defense c), counted under the right head so the receipt names the refusal. */
-    const attributed = (box, label, kind, key = null) => {
-      const failure = customerAttributionFailure({ ...box, page: pageNumber, key }, scaledAnchors, anchorLimit);
+    const attributed = (box, label, kind, baseTokens = null) => {
+      const failure = customerAttributionFailure({ ...box, page: pageNumber, baseTokens }, scaledAnchors, anchorLimit);
       if (!failure) return true;
       if (kind === "party") receipt[failure] += 1;
       else receipt.attn_unattributed += 1;
@@ -426,7 +425,7 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         }
       }
 
-      if (!attributed(value.box, hit.label, "party", partyKey(value.raw))) continue;
+      if (!attributed(value.box, hit.label, "party", partyBaseTokens(value.raw))) continue;
       const source = lines[value.lineIndex];
       parties.push({
         value_raw: value.raw, key: partyKey(value.raw), page: pageNumber,

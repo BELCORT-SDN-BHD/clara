@@ -257,6 +257,62 @@ const foldKey = (s) => deApostrophe(s)
   .toLowerCase();
 
 /**
+ * THE DISTINGUISHING WORDS OF A NAME — its tokens with the legal-entity suffix removed.
+ *
+ * `KONG CHENG RESTAURANTS SDN BHD` → {kong, cheng, restaurants}. A string with no suffix folds
+ * whole, which is what makes it usable on Azure's typed `VendorName`: the real capture types that
+ * field as the LOGO, `M\nROME\nSECRETARY`, and folding gives {m, rome, secretary}.
+ *
+ * Suffixes are stripped because they carry NO identifying information — every Malaysian company
+ * ends in one, so leaving them in makes any two companies look 40% alike.
+ */
+export function partyBaseTokens(raw) {
+  const hit = splitEntitySuffix(raw);
+  const base = hit ? hit.base : foldUnicode(raw);
+  return new Set(base.split(" ").filter(Boolean));
+}
+
+/**
+ * DOES THIS CANDIDATE SAY ANYTHING THE VENDOR'S OWN NAME DOES NOT? If not, it IS the vendor.
+ *
+ * ─── WHY EXACT EQUALITY WAS NOT ENOUGH (Codex C2 on PR #220, CONFIRMED and reproduced) ────────
+ * The first cut refused a candidate whose `partyKey` EQUALLED the typed VendorName's. Azure does
+ * not cooperate: on the real capture it types VendorName as a LOGO FRAGMENT (`M\nROME\nSECRETARY`)
+ * while the seller's full legal name prints elsewhere as `ROME SECRETARY SDN BHD`. Those two keys
+ * are not equal, so exact matching sees two different companies. Executed on the reviewer's probe:
+ * typed `A\nACME` with a nearby `ACME SDN BHD` emitted THE SELLER as `customer_name`.
+ *
+ * SAY PLAINLY WHY THE REAL FIXTURE WAS SAFE: not because this wall held, but because ROME
+ * SECRETARY's full seller line happens to sit 2.205in from the customer anchor, outside the 1.0in
+ * radius. That is LUCK, not design — the same document with a slightly taller header would have
+ * emitted the seller. This function converts that accident into a rule.
+ *
+ * ─── THE RULE: SUBSET, NO REMAINDER ───────────────────────────────────────────────────────────
+ * REFUSE when every distinguishing token of the candidate already appears in the typed vendor's.
+ * The asymmetry is the whole design, and each direction is fixed by a calibration point:
+ *
+ *   REMAINDER ON THE VENDOR SIDE IS OCR NOISE.  typed {a, acme} vs candidate {acme} → the `a` is
+ *     a logo fragment, not a distinction. Candidate ⊆ vendor ⇒ REFUSE.
+ *   REMAINDER ON THE CANDIDATE SIDE IS A DISTINCTION.  vendor {rome, secretary} vs candidate
+ *     {rome, secretary, penang} — a franchisee or branch is a DIFFERENT legal person that may
+ *     genuinely be the buyer. The token `penang` is what says so ⇒ ADMIT.
+ *
+ * Stated "either direction with no remainder beyond the suffix", the rule COLLAPSES to this one
+ * direction: vendor ⊆ candidate with no remainder means the two sets are equal, which candidate ⊆
+ * vendor already covers. Recorded rather than implemented twice.
+ *
+ * REFUSE-ONLY, like every term it sits with (review law 3: a name is a projection of the thing).
+ * NAMED RESIDUAL, eyes-open: a buyer whose name is a strict subset of the seller's — buyer
+ * `ACME SDN BHD` billed by seller `ACME HOLDINGS SDN BHD` — is refused and the lane HOLDS. That is
+ * an over-refusal, it abstains visibly on `is_vendor_name`, and a hold is the cheap failure.
+ */
+export function candidateIsVendorSubset(candidateTokens, vendorTokens) {
+  if (!candidateTokens || !vendorTokens || vendorTokens.size === 0) return false;
+  for (const t of candidateTokens) if (!vendorTokens.has(t)) return false;
+  return true;
+}
+
+/**
  * PARTY CANDIDACY — STRICT: the string must END in a suffix, with a name in front of it.
  *
  * A bare suffix (`SDN BHD` alone, an OCR fragment) is the ENDING of an identity, not one.

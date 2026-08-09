@@ -34,7 +34,7 @@
 // existed. Uniqueness-or-nothing therefore holds with room to spare rather than by luck.
 
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
-import { hasRegisteredEntitySuffix, looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { hasRegisteredEntitySuffix, looksLikePartyName, partyBaseTokens, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { boxDistance } from "./invoice-block-geometry.mjs";
 
 /**
@@ -85,7 +85,7 @@ export function sweepAnchorNeighbourhood(ctx) {
     if (!hasRegisteredEntitySuffix(raw)) { receipt.anchor_no_entity_suffix += 1; continue; }
     // Attribution still runs, and on this path only the IDENTITY terms can refuse: the radius
     // above already IS the distance gate. The seller's own name is refused here too.
-    if (!attributed(box, null, "party", partyKey(raw))) continue;
+    if (!attributed(box, null, "party", partyBaseTokens(raw))) continue;
 
     const source = lines[j];
     found.push({

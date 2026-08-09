@@ -4,6 +4,8 @@
 // seam: `invoice-party-grammar.mjs` owns SPELLING, this file owns POSITION, and the reader owns
 // which line wins and what happens when two readings disagree.
 //
+import { candidateIsVendorSubset } from "./invoice-entity-lexicon.mjs";
+
 // Every threshold that crosses into this file arrives ALREADY CONVERTED into the page's own
 // frame by the caller (via X2's `pageFrame`), so nothing here knows about inches or pixels —
 // which is exactly why the unit lesson that bit X2 and then X6 cannot bite a third time here.
@@ -63,8 +65,10 @@ export function boxesOverlap(a, b) {
  * SO THE TERM ASKS ABOUT IDENTITY INSTEAD, in the two ways the evidence can actually answer:
  *   `in_vendor_block` — the candidate INTERSECTS the region where Azure found the vendor's name,
  *                       so it IS that text. Positive, geometric, and what the read actually SAW.
- *   `is_vendor_name`  — the candidate's party key EQUALS the typed VendorName's. The seller's own
- *                       name is not the buyer, wherever on the page it is printed.
+ *   `is_vendor_name`  — the candidate says NOTHING the typed VendorName does not already say
+ *                       (`candidateIsVendorSubset`, whose header carries the calibration points).
+ *                       Exact key equality was the first cut and Codex C2 broke it with the
+ *                       partial-logo shape Azure actually produces; the subset rule replaced it.
  * Both only ever REFUSE (review law 3: a name is a projection, so it may not admit anything), so
  * a false match costs an abstain and Azure's typed value stands — never a wrong party.
  *
@@ -73,16 +77,16 @@ export function boxesOverlap(a, b) {
  * 2.949,0.313) sits 2.205in from the customer anchor against a 1.0in gate, and a second registered
  * name reaching the ballot is a CONTEST, which emits nothing. Both measured, not assumed.
  *
- * @param {{page:number,xmin:number,xmax:number,ymin:number,ymax:number,key?:string}} candidate
- *        `key` is the candidate's `partyKey`, supplied by the caller so this file keeps owning
- *        POSITION only and never learns how a name is spelled.
+ * @param {{page:number,xmin:number,xmax:number,ymin:number,ymax:number,baseTokens?:Set<string>}} candidate
+ *        `baseTokens` is the candidate's suffix-stripped token set, supplied by the caller so this
+ *        file keeps owning POSITION only and never learns how a name is spelled.
  */
 export function customerAttributionFailure(candidate, anchors, limit) {
   const customerDistance = boxDistance(candidate, anchors?.customer);
   if (customerDistance === null) return "no_customer_anchor";
   if (customerDistance > limit) return "customer_anchor_far";
   if (boxesOverlap(candidate, anchors?.vendor)) return "in_vendor_block";
-  if (candidate.key && anchors?.vendorKey && candidate.key === anchors.vendorKey) return "is_vendor_name";
+  if (candidateIsVendorSubset(candidate.baseTokens, anchors?.vendorTokens)) return "is_vendor_name";
   return null;
 }
 

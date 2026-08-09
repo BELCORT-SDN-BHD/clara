@@ -1,7 +1,8 @@
 // X7 — RECORDED RESIDUAL (5): SUFFIXED RELATIONAL PHRASES.
 //
 // The ONE residual that can still write a WRONG party rather than abstain, given its own file so
-// it is impossible to miss. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured forms;
+// it is impossible to miss. `NON_ADDRESSEE_MARKERS` enumerates SIXTEEN measured forms (eleven
+// relational from round 4, five seller captions from PR #220's C1);
 // reviewers constructed more and 23 of the 38 pinned forms still pass candidacy, 5 producing a wrong
 // `customer_name` end-to-end. The base is validated by ABSENCE-of-known-bad — the same law that
 // produced rounds 1-3 — and the case-discontinuity proposal was implemented, MEASURED and
@@ -14,7 +15,7 @@
 //
 // These cells DOCUMENT current behaviour rather than assert a fix, so the residual is measured on
 // every run instead of remembered. Full veto-ready record with the measurement table and the
-// four-part reachability precondition: docs/plan/extraction-slice-contract.md, X7.
+// four-part reachability precondition: docs/plan/extraction-slice-x7-field-record.md.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
