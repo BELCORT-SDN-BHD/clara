@@ -186,11 +186,15 @@ test("R6-A end-to-end: a compatibility glyph can no longer corrupt customer_name
   // VERBATIM, so a glyph that merely NFKC-folded into the allowed class survived into the
   // emitted name. Measured: `Bill To:` / `ACME︰SDN BHD` produced
   // `customer_name = "ACME︰SDN BHD"` — a corrupted counterparty, not merely a wrong one.
+  // Ruling 2 (the A1 field test) strengthened the expected result: the glyph string must not be
+  // emitted AND the typed person — which the reader positively read as the `Attn` contact — is
+  // withdrawn rather than passed through. So the assertion is now the ABSENCE of any party row.
   for (const v of ["ACME︰SDN BHD", "︰ ACME SDN BHD", "ACME‥SDN BHD", "ACME﹐SDN BHD", "ACME﹒SDN BHD"]) {
     const out = normalizeAzureInvoice(payloadWith({ CustomerName: typedCustomerName() },
       [BILL_TO_LABEL, line(v, box(0.72, 2.30, 3.60, 2.45)), ATTN_PERSON]));
-    assert.equal(customerOf(out).value_raw, "Lim Xiao Shan", `${JSON.stringify(v)} must not be emitted`);
+    assert.equal(customerOf(out), undefined, `${JSON.stringify(v)} must not be emitted`);
     assert.notEqual(receiptOf(out).outcome, "attn_overridden");
+    assert.equal(out.fields.find((f) => f.field_path === "invoice.contact_person")?.value_raw, "Lim Xiao Shan");
   }
   // The SAME-LINE form is unaffected and still correct — there the glyph is a label separator,
   // consumed by the label cut, and the clean company name is what gets read.
@@ -200,13 +204,14 @@ test("R6-A end-to-end: a compatibility glyph can no longer corrupt customer_name
     "a glyph-separated LABEL still reads, and reads clean");
 });
 
-test("NORMALIZATION_VERSION is bumped to v10 — v9 and v10 fact sets must stay distinguishable", () => {
+test("NORMALIZATION_VERSION is bumped to v11 — the BROKEN v10 fact set must stay distinguishable", () => {
   // The version is hashed with the raw response, so a re-extraction is a genuinely new fact set
-  // rather than a silent supersede. On the F7 shape the SAME document now yields a DIFFERENT
-  // customer_name and one extra fact, which is the strongest possible reason to bump.
-  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v10");
+  // rather than a silent supersede. v10 ALREADY RAN ON LIVE and produced the wrong customer_name
+  // on both real documents; v11 produces a different one from the same bytes. Without the bump
+  // the A-leg replay could not tell the broken fact set from the fixed one.
+  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v11");
   const out = normalizeAzureInvoice(payloadWith({ CustomerName: typedCustomerName() }, KONG_CHENG_BLOCK));
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v10");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v11");
 });
 
 test("a legacy payload with NO pages[].lines[] is a pure widening of v9", () => {

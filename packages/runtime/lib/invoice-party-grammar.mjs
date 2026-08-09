@@ -15,7 +15,7 @@ import { foldUnicode, hasColon, isNameShaped } from "./invoice-entity-lexicon.mj
 // CALLED and the two asymmetric predicates built from that (strict endsWith for party
 // candidacy, broad contains for the contact refusal). Re-exported so every existing importer
 // of this module keeps working and there is still ONE place these rules are defined.
-export { hasRegisteredEntitySuffix, containsEntityToken, partyKey, splitEntitySuffix }
+export { hasRegisteredEntitySuffix, containsEntityToken, partyKey, splitEntitySuffix, identityComparisonTokens, identityComparisonForm }
   from "./invoice-entity-lexicon.mjs";
 
 /**
@@ -230,6 +230,43 @@ const NON_ADDRESSEE_MARKERS = Object.freeze([
   /\bpayable to\b/,      // covers `Cheque payable to …`
   /\bknown as\b/,        // covers `Formerly known as …` / `also known as`
   /^group company\b/,
+
+  // ─── SELLER MARKERS (Codex C1 on PR #220, CONFIRMED and reproduced) ─────────────────────────
+  // A caption naming the SELLER is a phrase ABOUT the seller — never the addressee. It is the
+  // same base-must-be-a-NAME rule the round-4 markers encode, applied to the one relationship
+  // this reader must never confuse: the other side of the invoice.
+  //
+  // WIDER THAN THE FINDING SAID, and worth stating: the review attributed this to the anchor
+  // sweep. Re-measured, `Seller ACME SDN BHD` also overrode through the SAME-LINE and
+  // SPLIT-VALUE label seams — so the gap predates the sweep, which merely opened a third door
+  // onto it. Fixing it HERE closes all three at once, because `looksLikePartyName` is the one
+  // gate both polarities share.
+  //
+  // Each entry, justified:
+  //   `^seller`    — `Seller ACME SDN BHD`, executed and emitted as customer_name.
+  //   `^vendor`    — `Vendor ACME SDN BHD`, likewise. Also the exact word Azure's own typed
+  //                  field uses, so a document echoing the label reads as a party without it.
+  //   `^supplier`  — `Supplier ACME SDN BHD`, likewise. The Malaysian AP form of the same caption.
+  //   `\bsold by\b`   — `Sold By …`, executed. Unanchored like `\bmanaged by\b` beside it: the
+  //                     by-phrase is a relationship wherever it appears, not only when leading.
+  //   `\bissued by\b` — `Issued By …`, executed. Same by-phrase shape.
+  // ANCHORED vs UNANCHORED IS A DECISION: the three noun captions are `^`-anchored so a genuine
+  // trading name that merely CONTAINS one keeps its candidacy; the two by-phrases are not,
+  // because a relationship clause is one wherever it sits.
+  //
+  // `From` IS DELIBERATELY ABSENT FROM THIS LIST, and that is a measurement, not an oversight:
+  // `from` is already a STOPWORD_OPENER below, so `From ACME SDN BHD` refuses one gate earlier.
+  // Executed on the reviewer's own probe set: it was the one form of the six that ALREADY held.
+  // A cell pins the mechanism so a stopword-list edit cannot silently reopen it.
+  //
+  // NEIGHBOURS NOT ADDED, so the boundary is a decision: `supplied by`, `billed by`, `remit to`,
+  // `payee`. Each is arguably the same class; none was executed against this reader, and this
+  // list is the one place in X7 that earns entries by measurement rather than by imagination.
+  /^seller\b/,
+  /^vendor\b/,
+  /^supplier\b/,
+  /\bsold by\b/,
+  /\bissued by\b/,
 ]);
 
 /**

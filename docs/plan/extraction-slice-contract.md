@@ -167,10 +167,17 @@ reached the books unchallenged. X7 supplies the missing second reader.
   The person is emitted as the **new `invoice.contact_person` fact**.
 - **Twins X6's architecture** (`lib/invoice-customer-identity.mjs` + `lib/invoice-party-grammar
   .mjs`): uniqueness-or-nothing · the label + party-name gate · **customer-block attribution**
-  (a candidate must sit next to the typed `CustomerName` region and closer to it than to
-  `VendorName`) · reconciliation against the typed emission. **X6's insight re-applied is what
-  makes it work on the very documents it fixes:** Azure's typed CustomerName picked the wrong
-  LINE but a line *inside* the bill-to box — its content is wrong, its **geometry** is sound.
+  (a candidate must sit within the gate of the typed `CustomerName` region, must not intersect the
+  typed `VendorName` region, and must not BE the typed vendor's name) · reconciliation against the
+  typed emission. **X6's insight re-applied is what makes it work on the very documents it fixes:**
+  Azure's typed CustomerName picked the wrong LINE but a line *inside* the bill-to box — its
+  content is wrong, its **geometry** is sound.
+- **TWO CANDIDATE-GENERATION SURFACES** *(the A1 field test, 2026-08-09 — see the reopening record
+  below).* A **bill-to LABEL** generates candidates; on a page that prints **no such label at all**,
+  the typed `CustomerName` **anchor's neighbourhood** generates them instead
+  (`lib/invoice-anchor-sweep.mjs`), behind the identical wall set. The sweep is gated on the
+  LABEL's absence, not on "no party found", so a candidate the label path REFUSED never gets a
+  second hearing on proximity.
 - **No top-band analogue**, deliberately: a bill-to block has no positional convention
   comparable to a letterhead, and an unmeasured band is a guess wearing a threshold.
 - **THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR** *(orchestrator ruling on the
@@ -178,9 +185,11 @@ reached the books unchallenged. X7 supplies the missing second reader.
   after BOTH review lanes broke them by executing the code).* Its lawful actions are exactly four:
   **collapse** (agrees with typed → one row, the typed one) · **override** (non-empty typed ==
   the reader's own Attn person → the party wins; the F7 branch) · **withdraw** on unexplained
-  disagreement · **withdraw** on a contested landscape. Its two lawful silences: reader
-  absent/refused → typed stands byte-identically; reader has a party but typed is empty/absent →
-  **nothing emitted** (`sole_authorship_refused`).
+  disagreement · **withdraw** on a contested landscape · **withdraw** when typed == the reader's
+  own ACCEPTED Attn person and **no party is reachable** (`typed_withdrawn_attn`, ruling 2 of the
+  A1 field test — a known person may never pass as a confident customer). Its two lawful silences:
+  reader absent/refused → typed stands byte-identically; reader has a party but typed is
+  empty/absent → **nothing emitted** (`sole_authorship_refused`).
   - *Overrule 1 — sole authorship DELETED.* With an empty-but-regioned typed `CustomerName` the
     first cut emitted a line item, a contact person, a caption (`Name:`) and a street address as
     `customer_name` — each a WRONG identity manufactured where pass-through had supplied none.
@@ -343,23 +352,25 @@ reached the books unchallenged. X7 supplies the missing second reader.
 - **DB half is mandatory, not optional:** `invoice.contact_person` joins `persist_invoice_facts`'
   **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
   the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the
-  whole persist. `NORMALIZATION_VERSION` → **v10**.
+  whole persist. `NORMALIZATION_VERSION` → **v10**, then **v11** at the A1 field test below (the
+  v11 half is RUNTIME-ONLY — `0052`'s allowlist splice already covers `invoice.contact_person`).
 ### X7 — RECORDED RESIDUAL (5): suffixed relational phrases *(round 5, OWNER-VETOABLE)*
 
 > **The one-paragraph record, for the owner.** X7 reads the buyer's name off the invoice layout
 > and may override Azure's own reading in one narrow case. A line only becomes a candidate if it
 > ends in a registered-business suffix (`SDN BHD`, `BHD`, `PLT`, `LLP`). **Residual: a line that
 > *mentions* a company but is not the addressee — `A division of AMATERUS GROUP SDN BHD`,
-> `t/a …`, `Parent company …` — can still be read as the customer.** Eleven such phrases are
+> `t/a …`, `Parent company …` — can still be read as the customer.** Sixteen such phrases are
 > explicitly refused; reviewers constructed more and **23 of the 38 pinned forms still pass, 5
 > producing a wrong customer name end-to-end**. It fires when the phrase sits inside the bill-to
 > block **and** Azure independently typed the `Attn` person as the customer **and** no
-> suffix-bearing line appears earlier in that block; when Azure typed a seller name, the phrase
-> must also sit nearer the buyer box than the seller's. *(Corrected round 6: an earlier record
+> suffix-bearing line appears earlier in that block. *(Corrected round 6: an earlier record
 > claimed four coincidences "each individually necessary". Two were disproved — a **suffixed**
 > real buyer printed **after** the phrase still loses, so what matters is scan ORDER not the
-> buyer's suffix; and the seller comparison does not run at all when Azure typed no VendorName.
-> The residual is **wider** than that story.)* **The harm ceiling
+> buyer's suffix; and the seller comparison did not run at all when Azure typed no VendorName.
+> Corrected again after the A1 field test: **the seller-PROXIMITY comparison no longer exists**,
+> so it is not a condition at all, and the anchor sweep adds a **second** way in on label-less
+> pages. The residual is **wider** than either earlier story.)* **The harm ceiling
 > is a wrong DRAFT**: counterparty creation happens at human approval and no unattended-posting
 > path reaches this field — the same maker/checker wall that caught the original KONG CHENG
 > defect. A proposed rule (refuse when a lowercase relational phrase precedes an upper-cased name)
@@ -394,13 +405,23 @@ the constructed set is **23 distinct**, not 24 (`trading as` was contributed by 
 and counted twice); and the legitimate loss is **4**, not 7 — the extra 3 were an artefact of
 scraping test files for the corpus, which swept up leak forms as the batteries grew.*
 
-- **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
-  **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so
-  unlike X6 the defaults are conservative opts and the reader is built to ABSTAIN when one is
-  wrong; the **live replay is the measurement**. (ii) Attribution anchors on the typed
+- **Two honest limits, recorded rather than discovered later.** (i) ~~The thresholds are
+  **UNMEASURED**~~ — **DISCHARGED by the A1 field test.** The live replay happened, it FAILED, and
+  the real page geometry is now in the repo as a fixture (`tests/x7-kongcheng-real.mjs`), so the
+  defaults are measured against the capture: the buyer sits **0.736in** from the typed anchor and
+  the seller's letterhead **2.205in**, against a **1.0in** gate. Every threshold remains an opt and
+  a wrong one still ABSTAINS. (ii) Attribution anchors on the typed
   `CustomerName` region, so X7 can never supply a name where Azure typed none — the **FINCARE**
   row (acceptance-h1 row 10, held `customer_name_missing`) is NOT fixed by F7, and relaxing the
   anchor to "far from the vendor" would be absence-as-evidence, which review law 2 forbids.
+
+### X7 — THE FIELD RECORD (A1 + PR #220) → `docs/plan/extraction-slice-x7-field-record.md`
+
+**F7 shipped once (v10) and FAILED ITS FIELD TEST**, and the review of the repair found two more
+wrong-party paths. Both stories — what was believed vs what the capture measured, the two repairs,
+the seller-caption class, the subset-no-remainder calibration table, and the named residuals — live
+in that record. **Read it before touching the reader:** it is where the measurements are.
+
 
 ## 3. Falsifiable gates
 

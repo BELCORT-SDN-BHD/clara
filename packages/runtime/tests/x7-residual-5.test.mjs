@@ -1,7 +1,8 @@
 // X7 — RECORDED RESIDUAL (5): SUFFIXED RELATIONAL PHRASES.
 //
 // The ONE residual that can still write a WRONG party rather than abstain, given its own file so
-// it is impossible to miss. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured forms;
+// it is impossible to miss. `NON_ADDRESSEE_MARKERS` enumerates SIXTEEN measured forms (eleven
+// relational from round 4, five seller captions from PR #220's C1);
 // reviewers constructed more and 23 of the 38 pinned forms still pass candidacy, 5 producing a wrong
 // `customer_name` end-to-end. The base is validated by ABSENCE-of-known-bad — the same law that
 // produced rounds 1-3 — and the case-discontinuity proposal was implemented, MEASURED and
@@ -14,7 +15,7 @@
 //
 // These cells DOCUMENT current behaviour rather than assert a fix, so the residual is measured on
 // every run instead of remembered. Full veto-ready record with the measurement table and the
-// four-part reachability precondition: docs/plan/extraction-slice-contract.md, X7.
+// four-part reachability precondition: docs/plan/extraction-slice-x7-field-record.md.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
@@ -38,7 +39,13 @@ function run(lines, typed, tbox) {
     pages: [{ pageNumber: 1, unit: "inch", width: 8.2639, height: 11.6806, lines }],
   } });
   const g = (p) => out.fields.find((r) => r.field_path === p)?.value_raw;
-  return { customer: g("invoice.customer_name"), outcome: out.envelope.customer_identity.outcome };
+  return {
+    customer: g("invoice.customer_name"),
+    outcome: out.envelope.customer_identity.outcome,
+    // Exposed so a cell can assert WHICH wall refused, not merely that something did — the
+    // A1 field test found a comment here naming a wall that had never fired.
+    receipt: out.envelope.customer_identity,
+  };
 }
 
 /**
@@ -135,9 +142,21 @@ test("RESIDUAL (5): the TRUE reachability — which parts are load-bearing, and 
   }
   assert.equal(wrong(run([VENDOR, BILL_TO, L("SIFU LAB", box(0.72, 2.30, 1.90, 2.45)),
     L(PHRASE, box(0.72, 2.55, 3.40, 2.70))], "Lim Xiao Shan", ATTN_BOX)), false, "no Attn line at all");
-  // (C) WHEN a typed VendorName anchor EXISTS, the phrase must be closer to the buyer than to it.
-  assert.equal(wrong(run([VENDOR, BILL_TO, L("SIFU LAB", box(0.72, 2.30, 1.90, 2.45)),
-    L(PHRASE, box(0.72, 1.05, 3.40, 1.20)), ATTN_LINE], "Lim Xiao Shan", ATTN_BOX)), false);
+  // (C) The phrase must sit INSIDE the labelled block — i.e. BELOW its `Bill To:` label.
+  //
+  // THIS COMMENT USED TO READ "when a typed VendorName anchor exists, the phrase must be closer to
+  // the buyer than to it". That justification was WRONG WHEN IT WAS WRITTEN, and the A1 field test
+  // exposed it by retiring the seller-proximity term entirely — the cell stayed green, which is
+  // how a false explanation announces itself. Re-measured on this exact page, the receipt says:
+  //     split_line_scanned 1 · no_entity_suffix 1 (SIFU LAB) · split_line_exhausted 1
+  // The phrase is never a candidate at all. The scan steps over `SIFU LAB`, reaches the phrase at
+  // ymin 1.05 — ABOVE the label at ymin 2.10 — and the block-boundary rule ends the scan there.
+  // What is load-bearing is the BLOCK BOUNDARY, and it never involved the seller.
+  const above = run([VENDOR, BILL_TO, L("SIFU LAB", box(0.72, 2.30, 1.90, 2.45)),
+    L(PHRASE, box(0.72, 1.05, 3.40, 1.20)), ATTN_LINE], "Lim Xiao Shan", ATTN_BOX);
+  assert.equal(wrong(above), false);
+  assert.equal(above.receipt.split_line_exhausted, 1, "the block ended above the phrase");
+  assert.equal(above.receipt.is_vendor_name, 0, "and the seller term never fired");
 
   // ── NOT LOAD-BEARING (counterexamples, verbatim) ──────────────────────────────────────────
   // (i) "the real buyer is UNSUFFIXED" is FALSE as stated. A SUFFIXED real buyer printed AFTER

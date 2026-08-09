@@ -256,6 +256,12 @@ const foldKey = (s) => deApostrophe(s)
   .trim()
   .toLowerCase();
 
+// The VENDOR-IDENTITY COMPARISON FOLD lives next door — see its header for the seam (admission
+// NARROWS here; comparison MERGES there). Re-exported so every existing importer keeps working
+// and there is still ONE name for each of these rules.
+export { identityComparisonForm, identityComparisonTokens, candidateIsVendorSubset, candidateIsVendorIdentity }
+  from "./invoice-identity-fold.mjs";
+
 /**
  * PARTY CANDIDACY — STRICT: the string must END in a suffix, with a name in front of it.
  *

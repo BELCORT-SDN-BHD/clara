@@ -44,7 +44,9 @@ test("C6-2 end-to-end: a punctuation-variant contact label claims its line, both
   // contact-labelled string won the override — `customer_name = "Att'n ACME SDN BHD"`.
   for (const lbl of ["Att'n", "Att.n", "Att-n", "Att/n"]) {
     const leak = run([VENDOR, BILL_TO, L(`${lbl} ACME SDN BHD`, box(0.72, 2.30, 3.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(leak.customer, "Lim Xiao Shan", `${lbl} must not write a party`);
+    // Ruling 2: no party is written AND the typed person is withdrawn, not passed through.
+    assert.equal(leak.customer, undefined, `${lbl} must not write a party`);
+    assert.equal(leak.contact, "Lim Xiao Shan", `${lbl} still reads as a contact label`);
     assert.notEqual(leak.outcome, "attn_overridden");
     // …and the same variant on the SAME-LINE seam reads as a genuine contact, F7 intact.
     const ok = run([VENDOR, BILL_TO, KONG_CHENG, L(`${lbl} : Lim Xiao Shan`, ATTN_BOX)], "Lim Xiao Shan");
