@@ -2,10 +2,16 @@
 
 > **STATUS: DESIGN, NOT LAW.** `docs/plan/wave-e-contract.md` (E-R1..E-R14, ADR-065) is the law; on
 > any conflict the contract wins. Rulings are **cited** (`E-R2`), never restated at length.
-> **SIBLINGS (cite by filename, never duplicate):** `wave-e-design-skeleton-part2.md` (**this
-> document's own §2.6–§2.12**) and `wave-e-design-skeleton-part3.md` (**§3–§6**) — one document,
-> three files, continuous numbering · `wave-e-design-reporting.md` (E-b/E-c) ·
-> `wave-e-acceptance-matrix.md` (minted BEFORE build, E-R9).
+>
+> **THE PACKET IS SIX FILES — cite by filename, never duplicate.** This document carries **§0–§2.4**.
+> Its own continuations, one document in three files with continuous numbering:
+> `wave-e-design-skeleton-part2.md` = **§2.5–§2.10** (the closed-period wall + the permit, continuity
+> math, the close receipt family, the reopen path, E-R6 activation, the E-R11 keys) ·
+> `wave-e-design-skeleton-part3.md` = **§2.11–§6** (lane γ's month snapshots, staleness and period
+> registry; the E-R12 trio; lane θ; the E-b/E-c pointers; the open-question ledger). The other three
+> files: `wave-e-design-reporting.md` = **§0–§5** (lane δ) · `wave-e-design-reporting-part2.md` =
+> **§6–§12** (lanes ε/ζ/η) · `wave-e-acceptance-matrix.md` (the falsifiable cells, minted BEFORE
+> build per E-R9).
 >
 > **MARKERS.** *(ruled — E-R#)* = contract law; changing it needs a new ADR. *(builder choice)* = a
 > mechanism this document picks, adjustable without reopening a ruling. *(DECIDED (orchestrator,
@@ -122,9 +128,9 @@ every lane (Law 1: independent review on judgement logic — which is most of E-
 | **α** | E-R12 trio: F-1 verify-first **+ one `apply_open_items` guard** · `entity_type` · the MSIC/facts door | DB + a `get_context_pack` splice | — | §3. Early-ride candidate; **carries a small D1 window** (§1.1). |
 | **β** | Period spine + the close model (gates, receipts, keys, the wall, E-R6 activation) | DB | — | §2. The campaign root. |
 | **γ** | **`clara.reporting_periods` (the period registry)** + month snapshots + staleness | DB | β | §2.11–§2.12. Split from β purely for review size. |
-| **δ** | Metric algebra + catalog + evaluator (`_vN`) | DB | **γ — BUILD dependency:** `period_ids` and `days_in_period` bind to γ's registry (§2.12); acceptance additionally depends on β | sibling doc |
+| **δ** | Metric algebra + catalog + evaluator (`_vN`) · **the freeze family's DB half** (`evaluator_versions`, `verify_evaluator_freeze()`, the `migrate.mjs` hook, the per-migration tails) | DB | **γ — BUILD dependency:** the cell↔period junction and `days_in_period` bind to γ's registry (§2.12); acceptance additionally depends on β | sibling doc, reporting §4.2 |
 | **ε** | FS template layers · wording STRUCTURE · claim assessment · sealed-artifact registry | DB | δ | sibling doc. Wording **seeds** wait on task #43; the structure does not. |
-| **ζ** | Render worker package · freeze-lint extension · DR §10 recipe | runtime + CI + ops | ε, δ | sibling doc |
+| **ζ** | Render worker package · **the freeze family's CI/runtime half** (`check-frozen-evaluators.mjs` + manifest; marking the render modules `@frozen` for the existing lint) · DR §10 recipe | runtime + CI + ops | ε, δ | sibling doc, reporting §4.2 |
 | **η** | E-c ad-hoc authoring lane | runtime + DB | δ, ε | sibling doc |
 | **θ** | Close plan-as-document · readiness panel · `/reports` | dashboard | β, ε/ζ | §4. Plumbing grade only — ALL UX polish is Wave G (E-R10). |
 
@@ -260,50 +266,82 @@ index ix_fy_client_span on (client_id, starts_on, ends_on)   -- the wall's per-w
 E-R2 drawer 1; the shared/exclusive shape is a builder choice, and it is the fix for the MVCC race a
 close-lock-only design leaves open).*
 
-- The four close verbs take `pg_advisory_xact_lock(203005007, hashtext(p_client::text))` — the
-  **EXCLUSIVE** form — as their first act after the op reservation. **Every JE-writing path** takes
-  `pg_advisory_xact_lock_shared(203005007, hashtext(<client>))` as the FIRST statement of the §2.5
-  wall trigger, **before** it reads `fiscal_years`.
+- The four close verbs take `pg_advisory_xact_lock(203005004, hashtext(p_client::text))` — the house
+  **client** rung — and **then** `pg_advisory_xact_lock(203005007, hashtext(p_client::text))`, the
+  **EXCLUSIVE** form, as their first two acts after the op reservation. **Every JE-writing path and
+  every gate-evidence path** takes `pg_advisory_xact_lock_shared(203005007, hashtext(<client>))` as
+  the FIRST statement of its §2.5 wall trigger, **before** anything reads `fiscal_years`.
 - Consequences, each of which is a cell: writers never block each other (shared/shared is compatible);
   a close waits until every in-flight writer commits; and **no writer can evaluate FY status while a
   close holds exclusive** — the trigger blocks on the shared request before reading the predicate, so
   the race a lock-free writer opens (reading `open` from a snapshot older than the uncommitted
   `closing`) cannot occur.
-- **No self-conflict, no per-row blow-up.** A session never conflicts with its own advisory locks, so
-  the close's own closing-entry insert re-acquires the shared form under its exclusive hold without
-  waiting; and advisory xact locks are REENTRANT (live code, `0046:2205-2207`), so a multi-row
-  statement takes ONE lock object, not one per row.
+- **The price, stated rather than discovered.** A transaction that writes a single JE row holds SHARED
+  for its whole life, so `begin_close` waits on the LONGEST-running open writer: close latency becomes
+  a function of the slowest sweep. That is intended — it is what "no writer escapes" costs — and it is
+  why `abandon_close` (§2.2) exists as an ordinary path rather than an incident.
+- **No self-conflict; ONE lock object, but a REAL per-row call.** A session never conflicts with its
+  own advisory locks, so the close's own closing-entry insert re-acquires the shared form under its
+  exclusive hold without waiting; and advisory xact locks are REENTRANT (live code,
+  `0046_wave_7a_sales_lane.sql:2205-2207`), so a multi-row statement holds ONE lock object rather than
+  one per row. *(v2's first cut wrote this as "no per-row blow-up", which over-reads it: `_tf_period_wall`
+  is a ROW trigger, so the lock FUNCTION is still invoked once per row. The honest price is one
+  lock-manager lookup per row plus one held lock per (transaction, client) — cheap, not free, and a
+  reviewer should price it as a per-row call.)*
 - **No precedent for the shared form:** `grep -n "pg_advisory_xact_lock_shared"` over
   `packages/db/migrations/*.sql` returns **zero** hits — named as an absence, not read as permission.
   The pair is new here and gets its own two-session cells.
 
-**Lock order — including the correction this section owes its own v1.** The advisory rung is recorded
-WHOLE at `0037:2530-2532`: `firm (203005002) → client (203005004) → client:counterparty (203005003)`,
-"read as a **PARTIAL order** over who takes what". The same paragraph states the fact v1 had backwards:
-**`reverse_entry` and `approve_wrong_client_correction` take `203005004` AFTER their `journal_entries`
-row locks, "the same relative order `_approve_entry_core` has always used (JE row lock … advisory
-after)"** (`0037:2535-2538`). "Advisory before any JE row lock" was never the house rung for JE
-writers. `203005007` therefore sits at **two** positions, deliberately: **exclusive, before any JE row
-lock** (the four close verbs) and **shared, immediately after the row lock the mutating statement
-itself already took** (the wall trigger — a `before insert or update` ROW trigger structurally cannot
-run earlier). That asymmetry is the **deliberate, documented exception**, and it has exactly one
-reachable cycle:
+**Lock order — ONE documented order, and the two cycles it is measured against.** The advisory rung is
+recorded WHOLE at `0037:2530-2532`: `firm (203005002) → client (203005004) → client:counterparty
+(203005003)`, "read as a **PARTIAL order** over who takes what". The same paragraph records the fact
+v1 had backwards: **`reverse_entry` and `approve_wrong_client_correction` take `203005004` AFTER their
+`journal_entries` row locks, "the same relative order `_approve_entry_core` has always used (JE row
+lock … advisory after)"** (`0037:2535-2538`). *(The correction v1 owes is to its own PLACEMENT claim,
+not to the house order: v1's sentence named the JE-before-advisory order correctly in its closing
+clause and then mis-stated that its placement was compatible with it. The over-claim "'advisory before
+any JE row lock' was never the house rung" is withdrawn as a mis-description of v1.)*
 
-> Session A (a close) holds EXCLUSIVE and then waits for a row lock on a **pre-existing**
-> `journal_entries` row; session B holds that row lock (its `for update` ran before A arrived) and is
-> blocked inside the wall trigger waiting for SHARED. A ↔ B.
+**`203005007` is the BOTTOM rung, on every path.** Close verbs run `004 → 007-exclusive`; JE writers
+and gate-evidence writers run `004 → [006] → 007-shared` (the bank rung `203005006` where a bank
+account is in play). "004 first" on the writer side is measured, not assumed — every gate-evidence
+writer §2.5's trigger family covers takes `203005004` as its first advisory act: `unallocate_group`
+`0037:3166` · `apply_open_items` `0037:3278` · `complete_bank_reconciliation` `0040:1647` ·
+`void_bank_reconciliation` `0040:2085` · `except_bank_line` `0040:3261` ·
+`resolve_bank_line_exception` `0040:3426` · `void_bank_statement` `0038:2241` ·
+`complete_fixed_asset_particulars` `0041:3054` · `revise_fixed_asset_particulars` `0041:3135`; the JE
+writers take it immediately after their row lock (`0037:2535-2538`; the `reverse_entry` splice itself
+at `0037:2180`, post-asserted `0037:2189-2190`). So `007` is requested LAST, always.
 
-Two build obligations close it, both assertable: **(1)** `begin_close`, `finalize_close` and
+> **Cycle 1 — `004 ↔ 007`. DEAD, killed by ORDER.** v2's first cut put the exclusive acquisition
+> *before* the client rung, so a close ran `007-excl → 004` while every writer ran `004 →
+> 007-shared`: writer W holds 004 and waits for shared; close R holds exclusive and waits for 004;
+> `40P01`. Moving `007` to the bottom of the close family's ladder deletes the inversion outright.
+> This is the house remedy applied, not a mitigation: fix a cycle by ORDER or by deleting the key,
+> never by leaving it to the detector (`0046:2209-2210`).
+>
+> **Cycle 2 — `004` ↔ a PRE-EXISTING `journal_entries` row lock. The ONE residual, and it belongs to
+> `reopen_fiscal_year` alone.** The reopen holds 004 and then row-locks a pre-existing entry — it
+> reverses the closing entry through `clara.reverse_entry`, whose `for update` is the lock in
+> question — while a concurrent `reverse_entry` / `approve_wrong_client_correction` on that same
+> entry holds the row and then wants 004 (`0037:2180`). This is the house's PRE-EXISTING asymmetry
+> between the row lock and the client rung; `203005007` neither creates nor widens it.
+
+Two build obligations close cycle 2, both assertable. **(1)** `begin_close`, `finalize_close` and
 `abandon_close` row-lock only rows they inserted in their own transaction — the invariant
-`0037:2543-2548` already states for the composites ("a composite locks only its own freshly-inserted
+`0037:2542-2548` already states for the composites ("a composite locks only its own freshly-inserted
 entry row … ANY FUTURE VERB THAT LOCKS A PRE-EXISTING ENTRY MUST TAKE `journal_entries` BEFORE
-`open_items`"), restated for the close family; three of four verbs cannot enter the cycle at all.
-**(2)** `reopen_fiscal_year` is the ONE close verb that locks a pre-existing entry (it reverses the
-closing entry through `clara.reverse_entry`, whose `for update` is the lock in question), so it takes
-that lock under an in-function **`lock_timeout`** and converts contention into a named, retryable
-`CLR41 close_lock_contended` rather than waiting into a detector abort. *(builder choice; the house
-precedent is to fix a cycle by ORDER or by deleting the key, never by leaving it to the detector —
-`0046:2205-2210`.)*
+`open_items`"), restated for the close family; three of four verbs cannot enter cycle 2 at all.
+**(2)** `reopen_fiscal_year` takes that row lock under an in-function **`lock_timeout`** and converts
+contention into a named, retryable `CLR41 close_lock_contended` rather than waiting into a detector
+abort. *(builder choice, labelled honestly: this is the one place the design accepts a TIMER instead
+of an order — because the two orders meet on a ROW, and `0046:2209-2210` records exactly that case,
+"a row lock cannot be collapsed into an advisory one". The reopen's contention branch is a cell.)*
+
+**The nested take is free, and the reopen cannot deadlock against itself.** Inside the reopen,
+`reverse_entry`'s own `pg_advisory_xact_lock(203005004, hashtext(o.client_id::text))` (`0037:2180`)
+re-acquires a lock the reopen already holds; advisory xact locks are reentrant (`0046:2205-2207`), so
+it bumps a local refcount and never waits.
 
 ### 2.2 The gate catalog and the run/result/attestation trio
 
@@ -405,95 +443,12 @@ SUBTRANSACTION's `xmin` — which is why the permit is a declared `xid8` column 
   (E-R13's own resolution of the same question). Each of the five carries a **negative** cell as well
   as a positive one; `open_bank_recon_items` and `uncoded_documents` had none in matrix v1.
 
-### 2.5 Drawer 3, and the closed-period wall
-
-**Drawer 3** is advisory-only (E-R2): the informational half of `verify_bank_reconciliation`,
-`fa_register_tie`'s non-blocking view, snapshot staleness counts, aging concentration. It renders in
-the readiness panel and never blocks. DIRECTION §3's a11y floor binds the panel: gate status is
-**shape + label, never hue-only, never a raw digit**.
-
-**The closed-period wall — a TRIGGER, not N writer recuts** *(builder choice, the most consequential
-one in this document).* "No writer escapes into the FY mid-close" (E-R2 drawer 1) and E-R13's
-"entering the closed year takes the formal reopen path" both require that approved postings cannot
-land in a `closing`/`closed` FY.
-
-- **Mechanism:** `clara._tf_period_wall`, a `before insert or update` ROW trigger on
-  `clara.journal_entries`, whose statements run in this order: (1) `perform
-  pg_advisory_xact_lock_shared(203005007, hashtext(NEW.client_id::text));` — §2.1's serialization half,
-  unconditional and FIRST, because a conditional acquisition re-opens the race it closes; (2) read the
-  FY containing `NEW.posting_date` (index `ix_fy_client_span`); (3) if that FY is `closing`/`closed`
-  **and** the row would be or stay `status='approved'`, refuse unless the permit below holds —
-  `errcode='CLR19'`, `reason='write_into_closed_period'`. A sibling trigger on `clara.journal_lines`
-  refuses mutation of a line whose parent entry sits in such a FY.
-- **UPDATE scope is deliberate.** No `WHEN` clause and no `UPDATE OF` list: the trigger fires on every
-  touch, so it also refuses the `reversed_by` linkage UPDATE `reverse_entry` performs on an original
-  inside a closed FY — intended, and the reason **§2.8's effect ordering is REQUIRED, not incidental**
-  (status → `reopened` first, reversal second). A column list would be a second enumeration to keep
-  correct.
-- **Why a trigger, not N writer recuts:** a trigger is caller-agnostic and complete by construction.
-  Enumeration is provably error-prone in this repo's own history — 0027's CoR sweep found a **third**
-  `document_filings` writer the ledger had not named (`0027:30-36`), and §7-A's v1 declared a function
-  "never recut" off a truncated grep. Enumeration is a review instrument (§2.11 uses it as exactly
-  that), never a mechanism.
-
-**The permit is a ROW this transaction created — never session state, never a caller argument.**
-
-```
-clara.close_write_permits          -- ungranted, forced RLS, owner policy only, append-only
-  id uuid pk · firm_id · client_id · fiscal_year_id · close_run_id
-  purpose text not null check (purpose in ('close_entry','reopen_reversal'))
-  target_entry_id uuid             -- required when purpose='reopen_reversal'
-  max_entries int not null default 1
-  created_xact xid8 not null default pg_current_xact_id()
-  created_at timestamptz not null default now()
-```
-
-The wall permits a write into a `closing`/`closed` FY **iff** a permit row `P` satisfies all of:
-`P.created_xact = pg_current_xact_id()` · `P.client_id = NEW.client_id` · `P.fiscal_year_id` = the FY
-containing `NEW.posting_date` · for `reopen_reversal`, `P.target_entry_id` names the entry being
-touched (or the mirror minted for it) · on INSERT for `close_entry`, fewer than `P.max_entries` entries
-already carry that `(client, FY, xact)`.
-
-- **Why the permit is LOOKED UP, not passed on `NEW`.** The caller controls every column of `NEW`, so a
-  permit id on the row is a caller-settable fact wearing a column's clothes; and the reopen must UPDATE
-  an entry whose stored close lineage was written by an **earlier** transaction, so a stored id could
-  never carry a this-transaction fact anyway. `journal_entries.close_receipt_id` (§2.6) stays **lineage
-  only** — enumerable, auditable, never consulted for authorization.
-- **Why a declared `xid8` column and not `xmin`.** Both round-1 reviews proposed `receipt.xmin =
-  pg_current_xact_id()`. The FACT is right and is the ruling; the INSTRUMENT would have failed the
-  build: (a) a row inserted inside a PL/pgSQL `begin … exception` block carries the **subtransaction's**
-  xid in `xmin` while `pg_current_xact_id()` returns the **top-level** xid — and §2.3 puts every
-  drawer-1 probe inside exactly such a block, so an `xmin` permit would refuse the close's own write;
-  (b) `xmin` is a 32-bit `xid` and `pg_current_xact_id()` is `xid8`, so the comparison needs a cast
-  whose epoch behaviour must be argued rather than read; (c) a declared column is a fact a reviewer
-  checks in DDL instead of in the catalog. `xmin` survives as a **belt** in the migration tail, never
-  as the guard. *(builder choice INSIDE the ruled mechanism — "a row-level fact only the audited close
-  verbs could have created in this transaction". This is that fact, typed.)*
-- **Forgery, measured rather than assumed.** An authenticated session may call `set_config` and
-  `pg_advisory_xact_lock*` at will: `0004:752-753` revokes EXECUTE only on functions **in schema
-  `clara`**, and nothing revokes `pg_catalog`; a transaction-local GUC also survives into a later
-  SECURITY DEFINER call in the same transaction, because clara bodies pin `search_path` and nothing
-  else. So v1's two conjuncts were both caller-settable. A session **cannot** insert into
-  `close_write_permits`: no grant to any role, forced RLS, `clara_fn_owner using(true)` only. ⇒ **The
-  GUC is DELETED from this design, and `pg_locks` introspection is DELETED with it** (it existed only
-  to read the lock the GUC could not prove).
-- **Write order inside `finalize_close`**, resolving the mutual FK without DEFERRABLE: permit row →
-  closing entry (permitted by lookup) → `close_receipts` row (its `close_entry_id` now resolvable) →
-  UPDATE the entry's `close_receipt_id` (same transaction, still permitted).
-- **Inert on arrival:** with zero `fiscal_years` rows the FY lookup finds nothing and every write
-  proceeds; the residual cost is one reentrant shared advisory acquisition per statement.
-
-**Cells this mechanism owes the matrix:** `CLR19 write_into_closed_period` fires on a plain post into a
-`closed` FY · the **close-vs-post race** in two sessions (B posts while A holds exclusive mid-close: B
-waits, then refuses) · a **forge attempt** (an authenticated session sets any GUC it likes, takes
-`203005007` itself, attempts a write into a `closing` FY → refused) · the close's own closing entry
-SUCCEEDS under its permit · a permit from a PRIOR transaction does NOT permit.
-
 ---
 
-*Part 1 ends at §2.5. **§2.6–§2.12** — continuity math, the close receipt family, the reopen path, the
-E-R6 activation, the E-R11 keys, month snapshots + staleness, the period registry (γ) — continue in
-[`wave-e-design-skeleton-part2.md`](./wave-e-design-skeleton-part2.md); **§3–§6** — the E-R12 trio,
-lane θ, the E-b/E-c pointers and the open-question ledger — in
+*Part 1 ends at §2.4. **§2.5–§2.10** — drawer 3 and the closed-period wall (with the permit), the
+continuity math, the close receipt family, the reopen path, the E-R6 activation and the E-R11 keys —
+continue in [`wave-e-design-skeleton-part2.md`](./wave-e-design-skeleton-part2.md); **§2.11–§6** —
+lane γ's month snapshots, staleness and period registry, the E-R12 trio, lane θ, the E-b/E-c pointers
+and the open-question ledger — in
 [`wave-e-design-skeleton-part3.md`](./wave-e-design-skeleton-part3.md). *Section numbering is
 continuous; the three files are one document.**

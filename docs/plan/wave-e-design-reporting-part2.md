@@ -9,6 +9,12 @@
 > the decision ledger).** Section numbers are continuous across the two files; a citation like
 > "reporting §7" resolves here.
 >
+> **THE PACKET IS SIX FILES.** Besides this one and `wave-e-design-reporting.md` (§0–§5):
+> `wave-e-design-skeleton.md` (**§0–§2.4**) · `wave-e-design-skeleton-part2.md` (**§2.5–§2.10** — the
+> closed-period wall, continuity, close receipts, reopen, E-R6, the E-R11 keys) ·
+> `wave-e-design-skeleton-part3.md` (**§2.11–§2.12** lane γ · **§3** the E-R12 trio · §4–§6) ·
+> `wave-e-acceptance-matrix.md` (the falsifiable cells).
+>
 > All of Part 1's banners, markers and evidence discipline apply unchanged: **the contract
 > (`docs/plan/wave-e-contract.md`) wins**; every EXISTS claim carries a file:line read taken
 > 2026-08-09 in this pass; *(ruled — E-R#)* = contract law, *(builder choice)* = adjustable;
@@ -33,7 +39,7 @@ a SKETCH; adoptions and amendments are named:
 **On "owner/partner"** *(R11)*: E-R11's factory default is written `owner/partner only`
 (`wave-e-contract.md:233`), and "partner" has no structural representation in the live role set. The
 campaign's **PROPOSED** default is owner-only, **pending the owner's one-line confirmation — an
-OWNER-OPEN item**, carried identically in the skeleton's §6.2. This document uses "key ② floor" and
+OWNER-OPEN item**, carried identically in the skeleton's §6 item 2. This document uses "key ② floor" and
 defers to that item rather than asserting either reading.
 
 **Wording tables are BORN two-versioned** *(ruled)*: one act inserts both vintages' row sets — but only
@@ -49,11 +55,31 @@ nothing — it never emits a blank heading that reads as a real one.
 **(b) Wake DRAFT-ONLY writers** — the four named wrappers of §11 → EXECUTE to
 **`clara_wake_interactive` only**, each with a `wake_fn_allowlist` row for the `interactive` kind and
 never `proactive`, the `0004:782-788` shape. They mint drafts and previews; they cannot approve,
-publish, or produce a `pre_sign` artifact. **(c) Reads** → `clara_authenticated`; the model's catalog
-read is an **RLS-scoped table SELECT**, not a function EXECUTE (`0005_event_spine.sql:408` is the
-precedent for a SELECT grant to `clara_agent_ro`).
-**`clara_agent_ro` receives ZERO new EXECUTE grants, and no new grants of any kind land on close- or
-approve-class verbs.**
+publish, or produce a `pre_sign` artifact.
+
+**(c) Reads** → `clara_authenticated` on every read function. **The model's catalog read is an
+RLS-scoped table SELECT, and the grant is NAMED here rather than implied** *(round-2: "the agent gains
+nothing" was true of EXECUTE and read as though it were true of everything, which would leave
+`list_metric_catalog` with no reachable path to its own data)*:
+
+```sql
+grant select on clara.metric_definitions, clara.metric_definition_versions,
+                clara.account_sets, clara.account_set_versions,
+                clara.presentation_maps, clara.presentation_map_versions,
+                clara.metric_constants, clara.edge_policy_sets, clara.metric_edge_policies
+  to clara_authenticated, clara_agent_ro;
+```
+
+The precedent is exact and was re-read this pass: `0005_event_spine.sql:406-407` grants SELECT on four
+REFERENCE tables to `clara_authenticated, clara_agent_ro, clara_runtime`, and `:408` does the same for
+`clara.domain_events`. Every table above carries forced RLS with a firm-scoped policy, so the grant
+widens **reachability, never scope**. **`clara.metric_cells` and every write-side table are NOT in the
+list** — the model reads what a metric IS, never what a client's figures ARE.
+
+**The negative, correctly scoped:** `clara_agent_ro` receives **ZERO new EXECUTE grants**, and no new
+grant of any kind — SELECT included — on any close-, approve- or publish-class object. What it gains
+is exactly the catalog SELECT above, and the matrix asserts that table list **positively**, rather
+than asserting an absence.
 
 ## 7. Lane ε · CLAIM ASSESSMENT, ANTI-SMUGGLING, PROTECTED PLACEHOLDERS
 
@@ -80,21 +106,40 @@ unknown or unreadable (Law 2: "nothing said stripped" is a derived state, not a 
 `failed` run may still render a **watermarked, non-issuable** draft so the preparer can see what
 failed *(builder choice)* — gate 3 keeps the claim phrase out of that artifact.
 
-**Gate 3 — the pre-seal claim scan, scoped to what it can actually read** *(R9 — redesigned; the
-whole-byte-stream claim is WITHDRAWN)*. A raw byte scan of a PDF proves nothing: page text lives in
-FlateDecode-compressed content streams and font subsetting routinely splits a phrase across separate
-`Tj` operators. The honest scan is three positive reads, run after assembly and before sealing:
-(a) **the inputs** — the resolved layout AST, the fully resolved render manifest (every substituted
-string), and the `statutory_wording` / house-style rows the run bound; (b) **a deterministic
-extracted-text layer** the renderer emits in the same deterministic pass as the PDF — a canonical
-text-extract whose sha256 is a REQUIRED manifest key (§9), so the scan reads what the renderer says it
-drew, and the two are bound to each other; (c) **the uncompressed metadata** — the Info dictionary
-(`Title`/`Subject`/`Keywords`/`Author`) and the XMP packet. Matching runs against
-`clara.claim_phrase_lexicon` (versioned EN/MY/ZH policy rows, 0016 idiom) and refuses when a claim
-phrase appears while status ≠ `eligible`. **The limit is written into the function's own comment**, in
-`verify_report_artifact`'s idiom (§9): this scans the declared text layer and the metadata — it is NOT
-a proof about arbitrary bytes inside a compressed stream. The byte-level guarantee is the
-double-render equality drill (§9/§10), not this scan.
+**Gate 3 — the pre-seal claim scan, which OBSERVES THE FINAL PDF** *(R9 redesigned the scan; the
+round-2 fix moved it onto the produced bytes — a sidecar the renderer emits alongside the PDF binds
+the sidecar to the manifest, not the manifest to what the PDF actually says)*. A raw byte scan proves
+nothing on its own: page text lives in FlateDecode-compressed content streams and font subsetting
+routinely splits a phrase across separate `Tj` operators. So the scan does the one thing that closes
+the gap between "what the renderer says it drew" and "what the artifact says": **it extracts text FROM
+the produced PDF and reads that.** Four positive reads, run after assembly and before sealing:
+
+- (a) **the inputs** — the resolved layout AST, the fully resolved render manifest (every substituted
+  string), and the `statutory_wording` / house-style rows the run bound;
+- (b) **a deterministic text extraction over the FINAL PDF BYTES** — decompress the content streams
+  and reassemble the text runs per page, using an extraction tool **pinned in the renderer image**,
+  with the tool's name + exact version a REQUIRED manifest key (§9) beside the extracted-text sha256.
+  Pinning is what makes the extraction reproducible seven years later; an unpinned extractor makes the
+  scan's own result unrepeatable;
+- (c) **cross-check (a) against (b)** — every protected placeholder's resolved value must appear in
+  the extracted text. A phrase that the manifest says was drawn and the extraction cannot find means
+  the two disagree, and disagreement refuses the seal rather than picking a winner;
+- (d) **the uncompressed metadata** — the Info dictionary (`Title`/`Subject`/`Keywords`/`Author`) and
+  the XMP packet.
+
+Matching runs against `clara.claim_phrase_lexicon` (versioned EN/MY/ZH policy rows, 0016 idiom) and
+refuses when a claim phrase appears while status ≠ `eligible`.
+
+**The one residual, with its honest boundary** *(written into the function's own comment, in
+`verify_report_artifact`'s idiom, §9)*: **claim text rendered INSIDE an image** — a logo or a cover
+graphic with words baked into pixels — is not reachable by text extraction, and this design does not
+OCR. The boundary that makes that acceptable is structural rather than hopeful: images enter a render
+only as **content-addressed assets published by the firm owner** through `publish_house_style_version`
+(§6, owner floor), every hash pinned in the manifest (§9). It is a recorded human act by the one role
+that could also just approve a false claim directly — **not a model-reachable channel, and not a
+user-supplied one**. If image OCR is ever wanted it is a lane-ζ addition, not a hole in this gate.
+The byte-level *reproduction* guarantee remains the double-render equality drill (§9/§10); this gate
+is about content, that one is about determinism.
 
 **The filename vector is structurally closed:** the storage key is content-addressed
 (`firms/{uuid}/reports/{sha256}.pdf`) and the download filename is DB-derived from the run row —
@@ -140,9 +185,14 @@ claim-assessment receipts · evaluator function versions + definition hashes · 
 renderer OCI image digest and source commit · Node/OS/architecture/font-engine versions · every
 font/logo/image hash · locale, timezone and deterministic document metadata · canonical
 render-manifest hash · pre-sign PDF hash · signed-original PDF hash and signature evidence. Each is
-a REQUIRED key of the manifest; a missing key is a seal refusal, not a default. **Plus one key this
-design adds:** the §7 gate-3 **text-layer sha256** *(builder choice — the scan is only honest if the
-thing it scanned is itself pinned)*.
+a REQUIRED key of the manifest; a missing key is a seal refusal, not a default. **Plus two keys this
+design adds** *(builder choice — the scan is only honest if what it read, and the instrument that read
+it, are both pinned)*: the §7 gate-3 **extracted-text sha256**, and the **extraction tool's name +
+exact version** as pinned in the renderer image. **Ordering, stated because the two constraints look
+circular otherwise:** the PDF bytes are produced → the pinned extractor reads them → the scan runs
+over that extraction → the extraction's hash and the tool version join the manifest → the manifest is
+sealed. The scan therefore runs strictly BEFORE the seal and its output is an INPUT to the seal; the
+manifest key is never a precondition of the scan.
 
 **The registry.** `clara.report_artifacts(id, report_run_id, kind
 ('draft_watermarked'|'pre_sign'|'signed_original'), storage_key, sha256, byte_size, manifest jsonb,
@@ -193,7 +243,9 @@ render machine when a claimable job exists — **the one place lane ζ touches r
 logic, so it carries a Law-1 independent review.** A coarse scheduled wake is the fallback (Fly's
 granularity is hourly at best and approximate — `packages/backup/fly.toml:40-45`), so a leader outage
 delays renders rather than stranding them. The Fly API token is an environment secret — never argv,
-never code.
+never code. **This surface is celled: `wave-e-acceptance-matrix.md` **A33** asks all three arms —
+dispatch within cadence, leader outage → delayed-not-stranded, and duplicate dispatch → one artifact
+— because a judgement surface the matrix never asks is the ADR-066 lesson repeating.**
 
 **Determinism obligations.** Network disabled during layout/PDF · content-addressed
 fonts/logos/images, no system fonts · one pinned OS/CPU architecture and an exact renderer image
@@ -207,10 +259,14 @@ way** — double-render byte equality in CI, re-render-from-archived-digest equa
 
 **DR.md §10 + Supavisor.** DR.md's last `##` is §9 (`docs/ops/DR.md:349`; the file runs to `:497`);
 §10 lands after it, structured like §5/§5b (described drill at `:152` + exercised evidence at `:203`)
-and joined to **§9's existing cadence, in DR.md's own vocabulary — monthly-light + quarterly STRICT**
-(`:329`, `:344`, `:491`): *monthly-light* = re-render the most recent sealed pre-sign artifact and
-compare sha256; *quarterly STRICT* = re-render one artifact per pinned renderer image digest still
-referenced by a retained artifact, plus a signed-original retrieval + hash check. In DR.md's own idiom:
+and joined to §9's existing cadence **in DR.md's own vocabulary, quoted exactly** — the section header
+is *"Verify cadence (a backup you never restored is not a backup)"* (`:491`) and its two bullets are
+spelled **`Monthly-light`** (`:493-495`) and **`Quarterly-full`** (`:496-497`). *(v2 wrote "quarterly
+STRICT", which is the prose used at `:329`/`:344` about the drill, not the cadence bullet's own label;
+a new section that renames an existing cadence is a second vocabulary.)* So: *Monthly-light* = also
+re-render the most recent sealed pre-sign artifact and compare sha256; *Quarterly-full* = also
+re-render one artifact per pinned renderer image digest still referenced by a retained artifact, plus
+a signed-original retrieval + hash check. In DR.md's own idiom:
 a sealed artifact you have never re-rendered from its pinned dataset + evaluator + renderer digest is
 not proven reproducible. **Supavisor: last measured 35/60** (`docs/plan/wave-e-f6f9-acceptance.md:51`,
 `:196`). The `clara-backup` shape adds **no standing sessions** — a short-lived DSN session per job, no
@@ -233,13 +289,14 @@ already describes for `_*_core` helpers.
 
 | Tool | Wake wrapper (EXECUTE → `clara_wake_interactive` only) | Effect | Guard |
 |---|---|---|---|
-| `list_metric_catalog(client, as_of)` | **none** — RLS-scoped table SELECT (`0005:408` precedent) | read | RLS; no EXECUTE grant is created |
+| `list_metric_catalog(client, as_of)` | **none, and none is needed** — the tool issues an RLS-scoped `SELECT` directly against the catalog tables §6(c) grants, so there is no `clara.list_metric_catalog` function to go looking for (`0005:406-408` precedent) | read | RLS scopes it to the wake's firm; no EXECUTE grant is created and none of the write-side tables is in the grant list |
 | `compose_metric_preview(ast, periods)` | `clara.wake_compose_metric_preview` | validator + evaluator in **preview** mode; cells with `report_run_id is null` | numbers come from the evaluator (E-R4 satisfied); the model narrates by **placeholder substitution only** |
 | `save_metric_definition_draft(ast, …)` | `clara.wake_save_metric_definition_draft` | a `draft` version row | **SAVING a composition mints a draft** *(ruled — E-R5)*; never `firm_approved` |
 | `draft_report_spec(template_version_id, params, overrides)` | `clara.wake_draft_report_spec` | a draft spec | never approves, never issues |
 | `request_report_preview(spec_draft_id)` | `clara.wake_request_report_preview` | a render job of kind `draft_watermarked` | can never produce `pre_sign` (§7 gate 1 is a seal-side refusal, not a caller-side promise) |
 
-**`clara_agent_ro` gains nothing** (`0004:744-799`).
+**`clara_agent_ro` gains no EXECUTE, on anything** (`0004:744-799`) — its only new privilege in all of
+E-b/E-c is §6(c)'s named catalog SELECT.
 
 **Human approval.** `approve_metric_definition(version_id, expected_formula_sha256, reason)` (admin+
 floor *(builder choice — mirrors `role_rank` ≥ 2; E-R11's keys are close-scoped and belong to E-a)*,
@@ -274,9 +331,9 @@ watermarked drafts included.
 
 | Lane | Contents | Size | Build-depends on | Law-1 judgement PR? |
 |---|---|---|---|---|
-| **δ** | AST + validator + primitives · catalog + lifecycle fns · edge-policy + sampling rows · `evaluate_metric_v1` + `metric_cells` · the §4.2 freeze parts · ratio seeds | **XL** | **γ** — `clara.reporting_periods` is δ's `period_ids` FK and `days_in_period`'s only input *(R7; a BUILD dependency, not merely acceptance)* | **Yes** — validator, lifecycle, edge policies, freeze |
+| **δ** | AST + validator + primitives · catalog + lifecycle fns · edge-policy + sampling rows · `evaluate_metric_v1` + `metric_cells` + `metric_cell_periods` · **the freeze family's DB half** (`evaluator_versions`, `verify_evaluator_freeze()`, the `migrate.mjs` hook, the per-migration tails — §4.2) · ratio seeds | **XL** | **γ** — `clara.reporting_periods` is the junction's FK target and `days_in_period`'s only input *(R7; a BUILD dependency, not merely acceptance)* | **Yes** — validator, lifecycle, edge policies, freeze |
 | **ε** | six template layers · wording STRUCTURE (zero MPERS rows) · claim assessment + protected placeholders + phrase lexicon · chart AST tables · `report_artifacts` + `verify_report_artifact` | **L** | δ (cells) | **Yes** — claim assessment, anti-smuggling |
-| **ζ** | `packages/reporting-render` + Fly app · `render_jobs` + leader dispatch · `safeReportKey` + the bucket-prefix step · DR.md §10 | **L** | ε (manifest + seal) | **Yes** — the leader-dispatch touch |
+| **ζ** | `packages/reporting-render` + Fly app · `render_jobs` + leader dispatch · the pinned text extractor (§7 gate 3) · `safeReportKey` + the bucket-prefix step · **the freeze family's CI/runtime half** (`check-frozen-evaluators.mjs` + manifest; marking the render modules `@frozen` — §4.2) · DR.md §10 | **L** | ε (manifest + seal) | **Yes** — the leader-dispatch touch |
 | **η** | `chatTurn_v11` tools · the four wake wrappers + allowlist rows · approval fns · watermark enforcement | **M** | δ, ε | **Yes** — watermark enforcement |
 
 **Acceptance.** The CORPUS is **ruled — E-R9** (`wave-e-contract.md:196-203`): the full synthetic
@@ -304,6 +361,7 @@ contract)*:
 6. **The event trigger — off the critical path, optional, live-probed (§4.2).**
 
 **Still with the OWNER, not decided here:** the E-R11 factory-default reading (owner-only vs
-owner/partner), carried as the same one-line open item in the skeleton's §6.2 and cited at §6 above.
+owner/partner), carried as the same one-line open item in the skeleton's §6 item 2 (in
+`wave-e-design-skeleton-part3.md`) and cited at §6 above.
 
 *End. §§2-11 are proposals at implementable precision; every ruled item is cited, never restated.*

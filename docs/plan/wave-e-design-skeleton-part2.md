@@ -1,15 +1,163 @@
-# WAVE E — DESIGN SKELETON v2 · **PART 2** (§2.6–§2.12)
+# WAVE E — DESIGN SKELETON v2 · **PART 2** (§2.5–§2.10)
 
 > **CONTINUATION of `wave-e-design-skeleton.md` — one document in three files** (the repo's 500-line
 > file discipline; the `wave-d-b-asbuilt.md`/`-part2.md` split precedent). Part 1 carries §0 (the
-> verification ledger + three corrections) · §1 (campaign frame, lanes, ceremony) · §2.1–§2.5 (period
-> spine, gates, drawers 1–3, the closed-period wall). **This file carries §2.6–§2.12 (continuity,
-> receipts, reopen, E-R6 activation, the E-R11 keys, snapshots + staleness, the period registry).**
-> `wave-e-design-skeleton-part3.md` carries §3 (the E-R12 trio) · §4 (lane θ) · §5 (E-b/E-c pointers)
-> · §6 (open questions + decisions). Section numbers are continuous across the three files; a
-> citation like "skeleton §2.9" resolves here. Part 1's status banners, markers and evidence
-> discipline apply unchanged: the contract wins; EXISTS claims carry `file:line` reads taken
-> **2026-08-09 at the v2 fix pass**; migration numbers and `CLRnn` codes claim at MERGE.
+> verification ledger + three corrections) · §1 (campaign frame, lanes, ceremony) · §2.1–§2.4 (the
+> period spine, the gate catalog, drawer 1, drawer 2). **This file carries §2.5–§2.10: drawer 3 and
+> the closed-period wall, the continuity math, the close receipt family, the reopen path, the E-R6
+> activation and the E-R11 keys.** `wave-e-design-skeleton-part3.md` carries §2.11–§2.12 (lane γ —
+> month snapshots, staleness, the period registry) · §3 (the E-R12 trio) · §4 (lane θ) · §5 (E-b/E-c
+> pointers) · §6 (open questions + decisions). Section numbers are continuous across the three files;
+> a citation like "skeleton §2.9" resolves here, "skeleton §2.11" in part 3. **THE PACKET IS SIX
+> FILES**; the other three: `wave-e-design-reporting.md` (§0–§5), `wave-e-design-reporting-part2.md`
+> (§6–§12), `wave-e-acceptance-matrix.md`. Part 1's banners, markers and evidence discipline apply
+> unchanged: the contract wins; EXISTS claims carry `file:line` reads taken **2026-08-09 at the v2
+> fix pass**; migration numbers and `CLRnn` codes claim at MERGE.
+
+### 2.5 Drawer 3, and the closed-period wall
+
+**Drawer 3** is advisory-only (E-R2): the informational half of `verify_bank_reconciliation`,
+`fa_register_tie`'s non-blocking view, snapshot staleness counts, aging concentration. It renders in
+the readiness panel and never blocks. DIRECTION §3's a11y floor binds the panel: gate status is
+**shape + label, never hue-only, never a raw digit**.
+
+**The closed-period wall — a TRIGGER FAMILY, not N writer recuts** *(builder choice, the most
+consequential one in this document).* "No writer escapes into the FY **mid-close**" (E-R2 drawer 1)
+and E-R13's "entering the closed year takes the formal reopen path" require two different things, and
+the family separates them: **serialization** (nothing that feeds a gate may move while a close is
+measuring) and **refusal** (an approved posting may not land in a `closing`/`closed` FY).
+
+**(A) The JE wall — serialize AND refuse.** `clara._tf_period_wall`, a `before insert or update` ROW
+trigger on `clara.journal_entries`, declared **`security definer set search_path = clara, pg_temp`**
+*(stated because it must be: the trigger reads `clara.fiscal_years` and `clara.close_write_permits`,
+both FORCE-RLS with owner-only policies, so an invoker-context trigger would see zero rows and permit
+everything — the same silent fail-open §2.1 names for the definer read)*. Its statements, in order:
+(1) `perform pg_advisory_xact_lock_shared(203005007, hashtext(NEW.client_id::text));` — §2.1's
+serialization half, unconditional and FIRST, because a conditional acquisition re-opens the race it
+closes; (2) read the FY containing `NEW.posting_date` (index `ix_fy_client_span`); (3) if that FY is
+`closing`/`closed` **and** the row would be or stay `status='approved'`, refuse unless the permit
+below holds — `errcode='CLR19'`, `reason='write_into_closed_period'`. A sibling trigger on
+`clara.journal_lines` refuses mutation of a line whose parent entry sits in such an FY.
+
+- **UPDATE scope is deliberate.** No `WHEN` clause and no `UPDATE OF` list: the trigger fires on every
+  touch, so it also refuses the `reversed_by` linkage UPDATE `reverse_entry` performs on an original
+  inside a closed FY — intended, and the reason **§2.8's effect ordering is REQUIRED, not incidental**
+  (status → `reopened` first, reversal second). A column list would be a second enumeration to keep
+  correct.
+
+**(B) The gate-evidence walls — serialize ONLY.** *(DECIDED (orchestrator, 2026-08-09), closing the
+round-2 finding that the JE-only wall let gate INPUTS move under a live close.)* A drawer-1 gate reads
+far more than `journal_entries`: the AR/AP ties read allocation rows, the bank identity reads
+statements, reconciliations and exceptions, the FA tie reads the register. `finalize_close`
+re-evaluates every gate in-transaction (§2.1), so any of those moving between the evaluation and the
+commit would make the receipt describe a state that never existed. Row triggers therefore sit on
+**`clara.open_item_allocations`** (`0037:783`), **`clara.bank_statements`** (`0038:369`),
+**`clara.bank_reconciliations`** (`0040:262`), **`clara.bank_line_exceptions`** (`0040:424`) and
+**`clara.fixed_assets`**, each taking `pg_advisory_xact_lock_shared(203005007, hashtext(<the row's
+client>))` and then proceeding. Caller-agnostic, zero audited-writer recuts.
+
+- **Effect:** while a close holds EXCLUSIVE, no gate-evidence write can land — it waits, exactly as a
+  JE write does. Outside a close window everything proceeds unchanged and marks snapshots stale per
+  §2.11.
+- **These triggers do NOT test FY status, and that is the ruled scope, not an oversight.** A statement
+  void or an allocation carries no `posting_date` to test against an FY, and E-R2's phrase is "no
+  writer escapes into the FY **mid-close**" — a close-window property, which the shared lock delivers
+  whole. **The honest residual:** a gate-evidence write dated into an ALREADY-closed FY is not refused
+  here. It is caught after the fact by `clara.verify_close`'s recompute (§2.7) and by the staleness
+  assessments (§2.11) — never silently, but "caught" is weaker than "refused", and a reviewer should
+  price that gap rather than discover it. Extending refusal needs a per-table act-date rule and is
+  **out of scope for E** *(builder choice; it would be a second enumeration of the kind (C) rejects)*.
+- **The census that keeps the family complete:** §2.11's per-writer disposition table is not prose —
+  it is the **input to a migration-tail assertion**. For every writer it names as a gate-evidence
+  mover, the tail asserts from the live catalog that the table that writer writes carries a wall
+  trigger; a named mover writing an uncovered table RAISEs at apply time. A *checked* enumeration
+  whose failure mode is a failed migration, rather than a silent hole.
+
+**(C) Why triggers and not N writer recuts:** a trigger is caller-agnostic and complete by
+construction. Enumeration is provably error-prone in this repo's own history — 0027's CoR sweep found
+a **third** `document_filings` writer the ledger had not named (`0027:30-36`), and §7-A's v1 declared
+a function "never recut" off a truncated grep. Enumeration is a review instrument (§2.11 uses it as
+exactly that, and (B) makes it an asserted one), never a mechanism.
+
+**The permit is a ROW this transaction created — never session state, never a caller argument.**
+
+```
+clara.close_write_permits     -- ungranted, forced RLS, clara_fn_owner using(true) only
+  id uuid pk · firm_id · client_id · fiscal_year_id · close_run_id
+  purpose text not null check (purpose in ('close_entry','reopen_reversal'))
+  target_entry_id uuid              -- required when purpose='reopen_reversal'
+  entries_expected int not null check (entries_expected >= 1)
+  entries_used     int not null default 0 check (entries_used <= entries_expected)
+  created_xact xid8 not null default pg_current_xact_id()
+  created_at timestamptz not null default now()
+```
+
+The wall permits a write into a `closing`/`closed` FY **iff** a permit row `P` satisfies all of:
+`P.created_xact = pg_current_xact_id()` · `P.client_id = NEW.client_id` · `P.fiscal_year_id` = the FY
+containing `NEW.posting_date` · for `reopen_reversal`, the touched entry is on `P`'s lineage (below) ·
+`P.entries_used < P.entries_expected`. On admitting the write the trigger **increments
+`P.entries_used` in the same transaction**, an ordinary UPDATE, and a further write beyond
+`entries_expected` refuses like any other.
+
+- **The counter IS the consumption identity — no transaction column on `journal_entries` is needed,
+  and none is added.** v2's first cut bounded the permit with `max_entries` and counted "entries
+  already carrying that `(client, FY, xact)`", which is not expressible: `clara.journal_entries` has
+  no transaction column, so the count could only come from `xmin` — the instrument this same section
+  rejects two bullets below. Counting on the permit row removes the question.
+- **Consequence for the table's shape, stated:** `close_write_permits` is **insert-once with exactly
+  ONE mutable column**, not append-only. An update trigger permits `entries_used` to move, upward
+  only (the `0040:351` whole-row-minus-named-columns compare, different named set); every other column
+  and DELETE refuse. The increment cannot contend — the permit row was inserted by **this**
+  transaction, so no other session can see it, let alone lock it.
+- **Retention, stated rather than left unsaid:** ≤2 rows per close or reopen, and closes are annual —
+  the smallest table this campaign creates, growth bounded by `2 × closes × clients`. No pruning in v1
+  (the seven-year posture §2.7 takes); a purge verb, if ever wanted, is a later migration.
+- **Why the permit is LOOKED UP, not passed on `NEW`.** The caller controls every column of `NEW`, so a
+  permit id on the row is a caller-settable fact wearing a column's clothes; and the reopen must UPDATE
+  an entry whose stored close lineage was written by an **earlier** transaction, so a stored id could
+  never carry a this-transaction fact anyway. `journal_entries.close_receipt_id` (§2.6) stays **lineage
+  only** — enumerable, auditable, never consulted for authorization.
+- **The `reopen_reversal` arm: which half is the mechanism and which is the belt.** `P.target_entry_id`
+  names the closing entry. The mirror `reverse_entry` mints has an id generated *after* the permit row
+  exists, so the trigger matches the mirror on **lineage** (`NEW.reversal_of = P.target_entry_id`),
+  never on an id the permit could hold. And §2.8's REQUIRED ordering flips the FY to `reopened`
+  **first**, at which point the wall's step-3 predicate is false and the permit is not consulted at
+  all. **The ORDERING is the mechanism; the permit arm is the BELT** — it exists so that a future
+  implementation which reverses before flipping fails closed rather than silently, and so the two
+  mechanisms are never mistaken for one guarantee.
+- **Why a declared `xid8` column and not `xmin`.** Both round-1 reviews proposed `receipt.xmin =
+  pg_current_xact_id()`. The FACT is right and is the ruling; the INSTRUMENT would have failed the
+  build: (a) a row inserted inside a PL/pgSQL `begin … exception` block carries the **subtransaction's**
+  xid in `xmin` while `pg_current_xact_id()` returns the **top-level** xid — and §2.3 puts every
+  drawer-1 probe inside exactly such a block, so an `xmin` permit would refuse the close's own write;
+  (b) `xmin` is a 32-bit `xid` and `pg_current_xact_id()` is `xid8`, so the comparison needs a cast
+  whose epoch behaviour must be argued rather than read; (c) a declared column is a fact a reviewer
+  checks in DDL instead of in the catalog. `xmin` survives as a **belt** in the migration tail, never
+  as the guard. *(builder choice INSIDE the ruled mechanism — "a row-level fact only the audited close
+  verbs could have created in this transaction". This is that fact, typed.)*
+- **Forgery, measured rather than assumed.** An authenticated session may call `set_config` and
+  `pg_advisory_xact_lock*` at will: `0004:752-753` revokes EXECUTE only on functions **in schema
+  `clara`**, and nothing revokes `pg_catalog`; a transaction-local GUC also survives into a later
+  SECURITY DEFINER call in the same transaction, because clara bodies pin `search_path` and nothing
+  else. So v1's two conjuncts were both caller-settable. A session **cannot** insert into
+  `close_write_permits`: no grant to any role, forced RLS, `clara_fn_owner using(true)` only. ⇒ **The
+  GUC is DELETED from this design, and `pg_locks` introspection is DELETED with it** (it existed only
+  to read the lock the GUC could not prove).
+- **Write order inside `finalize_close`**, resolving the mutual FK without DEFERRABLE: permit row
+  (`entries_expected = 1`) → closing entry as a DRAFT → the approve flip (§2.6) → `close_receipts` row
+  (its `close_entry_id` now resolvable) → UPDATE the entry's `close_receipt_id` (same transaction,
+  still permitted). *(Two touches of the entry, one permit: `entries_expected` counts admitted WRITES,
+  and the value the build ships is asserted against the touches the body actually performs.)*
+- **Inert on arrival:** with zero `fiscal_years` rows the FY lookup finds nothing and every write
+  proceeds; the residual cost is one reentrant shared advisory acquisition per row.
+
+**Cells this mechanism owes the matrix:** `CLR19 write_into_closed_period` fires on a plain post into a
+`closed` FY · the **close-vs-post race** in two sessions (B posts while A holds exclusive mid-close: B
+waits, then refuses) · the **close-vs-gate-evidence race** (an `apply_open_items` or a
+`void_bank_statement` blocks while a close holds exclusive) · a **forge attempt** (an authenticated
+session sets any GUC it likes, takes `203005007` itself, attempts a write into a `closing` FY →
+refused) · the close's own closing entry SUCCEEDS under its permit · a permit from a PRIOR transaction
+does NOT permit · a write beyond `entries_expected` refuses.
 
 ### 2.6 Continuity math *(ruled — E-R2 drawer 1)*
 
@@ -36,39 +184,70 @@ LLM boundary on this path** (E-R4; the operational law at PRD §4 item 14 govern
      **`journal_entries.close_receipt_id`** (nullable FK) — lineage only, never authorization (§2.5) —
      which also makes the receipt's line set enumerable. *(builder choice.)*
 
-   **The approve path — DECIDED (orchestrator, 2026-08-09): authored IN BODY, and the census roster
-   grows to FIVE in the same migration.** *(Routing through `_approve_entry_core` is declined: it puts
-   the close's own E-R11 segregation and maker/checker in one transaction arguing about the same actor,
-   and makes a SECURITY DEFINER close depend on the caller-context branch of a verb designed for a
-   human approving someone else's draft.)* The obligation is discharged **in the migration tail, not in
-   prose**: the repo keeps a whitespace-tolerant census of every body writing `status='approved'` on
-   `journal_entries`, roster pinned verbatim at **`0042:6240`** and carried forward unchanged at
+   **The approve path — DECIDED (orchestrator, 2026-08-09): authored IN BODY as a DRAFT, then flipped
+   by the census-visible UPDATE, and the census roster grows to FIVE in the same migration.** *(Routing
+   through `_approve_entry_core` is declined: it puts the close's own E-R11 segregation and
+   maker/checker in one transaction arguing about the same actor, and makes a SECURITY DEFINER close
+   depend on the caller-context branch of a verb designed for a human approving someone else's draft.)*
+
+   **The SHAPE is load-bearing, not stylistic.** The live census detector is an **UPDATE**-shaped
+   regex (`0045:7831`, applied to the catalog at `0045:7848`, self-tested at `0045:7830-7837`), so
+   **an `insert … status='approved'` is INVISIBLE to it**: a close that inserted the entry
+   already-approved would "pass" the census by not being seen, and a reviewer would read silence as
+   coverage. `finalize_close` therefore inserts the closing entry as `status='draft'` and flips it
+   with a literal `update clara.journal_entries set status='approved' …` in the same transaction,
+   under its own permit (§2.5's write order counts both touches). The build asserts the shape
+   positively — the new body must MATCH the detector's own regex.
+
+   The obligation is then discharged **in the migration tail, not in prose**: the repo keeps that
+   whitespace-tolerant census of every body writing `status='approved'` on `journal_entries`, roster
+   pinned verbatim at **`0042:6240`** and carried forward unchanged at
    **`0043_wave_d_b1_staff_advances.sql:4638`** and **`0045:7816`** — `'_approve_entry_core,
    _approve_opening_entry, approve_wrong_client_correction, reverse_entry'`. **0045 is the LAST
    carrier** (0046..0054 carry no copy — grep). β restates it with `finalize_close` added, re-asserts
-   the count, and carries the per-hook disposition below — the list a fifth approve path owes, and the
-   reason path four needed 0037 §H.3:
+   the count (four → **five**), and carries the per-hook disposition below — the list a fifth approve
+   path owes, and the reason path four needed 0037 §H.3:
 
    | Hook `_approve_entry_core` carries | Disposition for the closing entry |
    |---|---|
    | `clara.is_high_stakes` (`0004_governed_fns.sql:72-79`) | **True by construction** — a closing entry is `is_year_end`, the body's first disjunct. Not bypassed: key ② + §2.10's segregation IS the high-stakes control for this act, and the receipt records `segregation_mode`. |
    | the maker/checker branch (`0004:541-546`, testing `e.last_human_editor`) | **Replaced, not skipped**, by E-R11's close segregation (§2.10) — same column, same solo branch, same attestation shape, evaluated over the FY rather than one entry. Stated so a reviewer sees a substitution, not a hole. |
    | `clara._subledger_on_approve` (spliced into path 4 at `0037_wave_c_a_subledger.sql:2379-2392` precisely because it had been missed) | **Reasoned, not assumed.** A P&L→RE entry touches no receivable/payable control account and so mints no open item — but that is a property of the CHART, not of the code. β therefore **calls the hook** and asserts zero `open_items` rows resulted. A provable no-op costs one call; a wrong argument costs a silently divergent subledger. |
-2. **`opening(n+1) = closing(n)`, asserted against a PINNED opening position — not a first-day
-   balance.** The FY(n) closing position must equal FY(n+1)'s opening position account-by-account for
-   balance-sheet accounts, to the cent; mismatch ⇒ refuse, no override. **The basis is the Wave-B
-   opening seed, not `trial_balance_as_of(fy_next.starts_on)`** — that read includes every ordinary
-   approved posting dated on the first day (`0017:3576-3579`: `status='approved' and posting_date <=
-   p_as_of`), so a correct closing plus one legitimate first-day sale would read as a continuity break.
-   The Wave-B machinery is reused, not rebuilt (`create_opening_seed` `0017:2885` …
-   `approve_opening_correction` `0017:4162`). FY(n+1) carrying an **approved opening seed** ⇒ the tie
-   is asserted against it, drawer 1, absolute. No seed ⇒ the close records the closing position in the
-   receipt and the tie defers to the next close — and that deferral is itself a **drawer-2 gate row**
-   (`continuity_tie_deferred`, default-refuse-attestable), never a silent skip. *(The fix for round
-   1's finding that "record and defer" quietly softens a drawer-1 absolute: the absolute holds wherever
-   a seed exists, and its absence becomes a visible, attested, receipt-recorded decision. builder
-   choice; minting a seed inside `finalize_close` would put a second author on an already-audited
-   one-shot registry.)*
+2. **`opening(n+1) = closing(n)` — PIN AT CLOSE, ASSERT AT THE EARLIEST EVENT THAT CAN EVALUATE IT.
+   Drawer 1, absolute, with no gate in any drawer.** *(DECIDED (orchestrator, 2026-08-09), replacing
+   v2's `continuity_tie_deferred` drawer-2 gate outright — both round-2 reviews adjudicated that gate
+   as a NARROWING of E-R2, and it is deleted rather than re-argued.)*
+
+   The tie is one identity with two operands, and v2's mistake was treating "the second operand does
+   not exist yet" as a state needing an override. It needs a **clock**, not a drawer:
+
+   - **At close(n) — the PIN.** `finalize_close` writes the FY(n) closing position **per balance-sheet
+     account, in cents**, into the receipt (`closing_position` in §2.7's snapshot, digested by
+     `closing_tb_digest`). This is an ordinary product of the close, not a concession: it is what the
+     receipt already had to carry for `verify_close` to recompute anything.
+   - **Close(n)'s OWN drawer-1 continuity obligations** are therefore fully evaluable and fully
+     absolute: the P&L→RE roll (item 1), and the tie of FY(n)'s **opening** side against the PRIOR
+     receipt's pinned closing position. For a client's FIRST FY there is no prior receipt and the
+     opening side is the **Wave-B opening seed** (`create_opening_seed` `0017:2885` …
+     `approve_opening_correction` `0017:4162`) — reused, not rebuilt. Both are drawer 1; neither can
+     ever be unevaluable, so neither needs an attestation path.
+   - **At the earliest successor event — the ASSERTION.** The `opening(n+1) = closing(n)` half fires,
+     **drawer 1 and absolute**, at whichever comes first: FY(n+1)'s **opening-seed approval**, or
+     FY(n+1)'s **close**. It is asserted against the **PINNED** position from close(n)'s receipt,
+     never a re-derivation. Divergence ⇒ refuse, **no attestation path, no override, nobody** — and
+     the refusal is raised by the successor event, which is the act that made the identity evaluable.
+   - **The basis is never `trial_balance_as_of(fy_next.starts_on)`** — that read includes every
+     ordinary approved posting dated on the first day (`0017:3576-3579`), so a correct closing plus
+     one legitimate first-day sale would read as a continuity break.
+
+   **Why this is faithful where the gate was not.** E-R2 rules that an UNKNOWN/ERROR tie state fails
+   closed exactly like a mismatch (`wave-e-contract.md:46-48`), and §2.3 applies that verbatim to the
+   bank identity. A drawer-2 gate over the continuity tie applied the *opposite* reading to the other
+   drawer-1 identity in the same document. Pinning removes the question instead of answering it twice:
+   nothing is ever measured as unknown, because nothing is measured before both operands exist — and
+   no client is blocked from closing its first year, which is what the gate was reaching for.
+   *(Minting a successor seed inside `finalize_close` stays declined: a second author on an
+   already-audited one-shot registry.)*
 3. **The close-time FA continuity roll** (E-R9's BEE row): FY(n) closing NBV per enrolled asset →
    FY(n+1) opening, computed by `fa_control_tie_out`'s segment reads and **persisted into the close
    receipt's snapshot**, so FY(n+1)'s tie has a stored prior position rather than a re-derivation.
@@ -102,18 +281,25 @@ snapshot jsonb not null check (jsonb_typeof(snapshot) = 'object')
   claims the receipt pins them; v1 claimed it with no column to carry it. Empty array is legal for a
   close whose pack has not been rendered — the array records what WAS consumed, never a promise.
 - **`snapshot`** carries the enumerable evidence: every gate result + measured payload, every
-  attestation (who/why/when), the per-account closing TB, the per-asset FA continuity roll, the AR/AP
-  tie terms, and the bank-recon receipt ids consumed. The 0040 posture applies: the DDL demands *some*
-  object payload; **enumeration completeness is the belt's job**, asserted by a trigger, not a CHECK
-  (`0040_wave_c_c_tieout.sql:296-298`).
+  attestation (who/why/when), the per-account closing TB, **`closing_position` — the per-balance-sheet-
+  account closing figure in cents that §2.6 item 2 PINS** (`closing_tb_digest` is its digest), the
+  per-asset FA continuity roll, the AR/AP tie terms, and the bank-recon receipt ids consumed. The 0040
+  posture applies: the DDL demands *some* object payload; **enumeration completeness is the belt's
+  job**, asserted by a trigger, not a CHECK (`0040_wave_c_c_tieout.sql:296-298`). The pin is what
+  FY(n+1)'s seed approval or close asserts against — so a receipt whose `closing_position` is absent or
+  unreadable is not a receipt this design can chain from, and the belt trigger refuses it at write.
 - **Immutability:** two triggers mirroring `_tf_bank_reconciliation_transition` (`0040:351`,
   whole-row-minus-lifecycle-columns compare) and `_tf_bank_reconciliation_no_delete` (`0040:379`). The
   only permitted transition is `active` → `superseded`, and only by `reopen_fiscal_year`.
 - **`clara.verify_close(p_receipt uuid) returns jsonb`** — recomputes every identity **from scratch**
   and diffs recomputed-vs-stored, never re-deriving from the snapshot it is checking
   (`verify_bank_reconciliation`'s discipline, `0040:4537-4644`). Split: a **STRICT half** (the four
-  drawer-1 identities + the RE roll + the opening tie) that fails `verified`, and an **INFORMATIONAL
-  half** (drawer-3 counts, enumeration drift) that is reported and never fails. This is the seven-year
+  drawer-1 identities + the RE roll + the tie of this FY's OPENING side against the prior receipt's
+  pin) that fails `verified`, and an **INFORMATIONAL half** (drawer-3 counts, enumeration drift) that
+  is reported and never fails. **The successor tie is reported, never graded:** where no FY(n+1) seed
+  or close has consumed this receipt's `closing_position` yet, the strict half emits
+  `successor_tie: 'pinned_not_yet_consumed'` — an informational status, never `passed` and never a
+  silent omission (the tie itself is asserted by the successor event, §2.6). This is the seven-year
   answer to "was this year really closed clean".
 
 ### 2.8 The reopen path *(key ③ — ruled, E-R11)*
@@ -254,9 +440,9 @@ could sign when is permanent.
   active grant exists **or** the user's active membership role is `'owner'` (the factory default).
   Key ① (prepare) is the existing `role_rank('bookkeeper')` floor and needs no new object.
 - **Refusal:** `CLR04` + `reason='capability_missing'` + the capability named in `detail`.
-- **The factory default is PROPOSED, not decided — it is an owner question** (§6.2). E-R11's ruled
+- **The factory default is PROPOSED, not decided — it is an owner question** (§6 item 2). E-R11's ruled
   default is "owner/partner only"; `'partner'` has no structural representation in the role model
-  (`0002:215`), so `owner`-only is the closest mechanical reading and is what §6.2 proposes, pending
+  (`0002:215`), so `owner`-only is the closest mechanical reading and is what §6 item 2 proposes, pending
   one line from the owner. Adjustable in one `_has_capability` predicate.
 - **Keys ② and ③ are separately grantable**, which is a ruled property and therefore a cell: grant ②
   alone and prove `reopen_fiscal_year` still refuses `CLR04`.
@@ -304,122 +490,10 @@ asserts this **positively and by privilege, not by grant-statement text** — fo
 the sweep runs under every non-`clara_authenticated` role), because a diff of grant statements reads a
 projection of the privilege state, not the state.
 
-### 2.11 Month snapshots + staleness *(lane γ — ruled, E-R3)*
-
-**Months never lock.** A month gets an artifact; books stay open.
-
-- **`clara.period_snapshots`** — `id · firm_id · client_id · reporting_period_id (FK → §2.12) ·
-  period_start · period_end · kind ('management_accounts') · minted_by · minted_at · books_watermark
-  text not null · dataset_sha256 text not null · payload jsonb not null`. **Bytes immutable**: an
-  update trigger permits no change to `payload`, `dataset_sha256` or the range (the `0040:351` compare
-  shape); no delete.
-- **`clara.snapshot_assessments`** — **append-only**: `id · snapshot_id · assessment
-  ('current','stale') · reason · caused_by_entry_id · caused_by_table text · caused_by_effect_date
-  date · assessed_at · assessed_by`, with `index (snapshot_id, assessed_at desc)`. Current state is the
-  latest row, read through `clara.snapshot_state(p_snapshot)`. **Duplicate `stale` rows are EXPECTED,
-  not a defect:** two concurrent mutations can each read "not yet stale" and both insert. On an
-  append-only table whose reader takes the latest row that is harmless, and saying so here stops a
-  later reviewer "fixing" it with a unique index that would deadlock the writers.
-
-**The mechanism: triggers, in the same transaction, by construction** *(builder choice).* Row triggers
-on `clara.journal_entries`, **`clara.open_item_allocations`**, the FA register rows, and
-`clara.bank_reconciliations` insert a `stale` assessment for every not-yet-stale snapshot of that
-client that the mutation's effect **intersects**. Because the trigger is part of the mutating
-statement there is **no asynchronous window** — Invariant-4 discipline, satisfied structurally.
-
-- **The predicate is INTERSECTS + a watermark, not date containment** *(the v1 narrowing, corrected).*
-  E-R3 rules staleness for "any audited mutation whose effect **intersects** an already-snapshotted
-  period … anything that moves a number the snapshot presented" (`wave-e-contract.md:79-85`). A
-  posting into month M−1 moves month M's opening, YTD and comparative figures without its
-  `posting_date` falling inside M. So the test is: mark stale when the mutation's **effect date ≤
-  `period_end`** and the mutation is **not already inside the snapshot's `books_watermark`**. Effect
-  date = `posting_date` for JE rows, `effective_date` for allocation rows (producer law
-  `0040:864-877`), the register act date for FA rows, the reconciliation's period end for bank rows.
-- **`open_item_allocations` is the table v1 missed, and it is the one that moves aging with no JE at
-  all.** `clara.apply_open_items` (`0037:3225`; live body = 0037 base spliced by 0040 S4.9 and again
-  by 0042 S5.22) inserts **only** into `open_item_allocations` (`0037:3384-3389` → live
-  `0040:6206-6213` → `0042:4896-4903`), and `clara.unallocate_group` (`0037:3141`) inserts only
-  negation rows there (`0037:3190-3197`). Both move every AR/AP aging figure a management pack
-  presents, because `_aging_core` (`0040:3937-3987`) reads allocations through
-  `_subledger_outstanding_asof` (`0040:3203-3208`, `effective_date <= p_as_of`) at `0040:3942`. v1's
-  row 11 pointed those writers at an `open_items` trigger, which could never fire for them:
-  `open_items` is append-only by trigger (`0037:824-825`), so no update/delete reaches it, and the
-  amendments never insert there.
-
-**The writer set — a REVIEW instrument, not the mechanism.** E-R3 names the class; the list below lets
-a reviewer check each named writer's effect path against a trigger. It is deliberately **not** the
-enforcement, because enumeration is exactly what this repo has proven it gets wrong (§2.5).
-
-| # | Writer | Effect path | Covered by |
-|---|---|---|---|
-| 1 | `approve_entry` (`0004:542` CoR chain) | status → approved | JE trigger |
-| 2 | `reverse_entry` | mints the mirror **and** stamps `reversed_by` on the original | JE trigger, both branches |
-| 3 | `allocate_receipt` / `allocate_payment` (`0044_wave_d_b3_af2_composite.sql:1642-1674`) | book entries **and** allocation rows | JE + allocation triggers |
-| 4 | the composite bank paths (cores called at `0044:1927`, `:1946`) | book entries | JE trigger |
-| 5 | recurring-adjustment occurrences + auto-reversals (0045, `auto_reversal_of`) | book entries | JE trigger |
-| 6 | the depreciation belt (0041/0042 authorities) | book entries | JE trigger |
-| 7 | the closing-stock adjustment (WD-R11) | books an entry | JE trigger |
-| 8 | `approve_wrong_client_correction` (live body via `pg_get_functiondef`, §0.3) | reverses and re-books **across two clients** | JE trigger, per row, so both clients' snapshots mark |
-| 9 | the opening machinery (`approve_opening_seed` `0017:3825`, `supersede_opening_item` `0017:4047`) | books opening entries | JE trigger |
-| 10 | `finalize_close` (§2.6) | the closing entry | JE trigger (correctly: a close makes every prior month's pack stale) |
-| 11 | **`apply_open_items` (`0037:3225`) / `unallocate_group` (`0037:3141`)** | `open_item_allocations` rows ONLY — zero GL | **`open_item_allocations` trigger** *(the v1 defect)* |
-| 12 | FA particulars/enrolment (`complete_fixed_asset_particulars` `0041:3035`, `revise_fixed_asset_particulars` `0041:3112`) | register rows | FA trigger |
-| 13 | `void_bank_statement` (`0038:2211`) and the bank receipt lifecycle | `bank_reconciliations` / statement rows | `bank_reconciliations` trigger |
-
-**The honest boundary, stated rather than papered over.** Three classes still mint no staleness row:
-(a) a fact none of these tables owns (a counterparty rename, a chart relabel); (b) the bank
-**exception** doors `except_bank_line` (`0040:3222`) and `resolve_bank_line_exception` (`0040:3372`),
-which move a presented bank position by writing match/exception rows rather than any table above; (c)
-anything a future writer adds. All three are caught only by **`clara.verify_snapshot(p_snapshot)`**,
-which recomputes the dataset and diffs `dataset_sha256` against the stored one. That is a real limit
-and it belongs in the acceptance matrix as a named negative case — `verify_snapshot` gets its own
-cell — not in a footnote.
-
-**Per-writer act-dating disposition (E-R2's "no writer escapes" for the non-JE money movers).** §2.5's
-wall sits on `journal_entries`/`journal_lines`; the table below states, for each money- or
-figure-moving writer that touches neither, what its date anchor is and how it is contained. It is a
-REVIEW instrument plus targeted coverage — not N writer recuts.
-
-| Writer | Date anchor | Proving line | Containment |
-|---|---|---|---|
-| `apply_open_items` | the ACT date, `clara._book_today()` | splice `0042:4896-4903`; producer law `0040:864-877`; header `0040:6148-6160` | not wall-covered (no JE); **staleness via the allocation trigger**; forward-dating bounded by §3.1's new guard |
-| `unallocate_group` | the ACT date (`created_at::date`), with the R9 `greatest()` ordering guard | producer law `0040:864-877`; `0037:3190-3197` | same |
-| `allocate_receipt` / `allocate_payment` | the settlement entry's `posting_date` | comment `0044:1262-1263`; wall `0044:1266-1272` | JE-bearing ⇒ **wall-covered**; the unborn-item wall already refuses backdating |
-| `except_bank_line` · `resolve_bank_line_exception` | **UNREAD — a build obligation, not an assumption** | bodies at `0040:3222` / `0040:3372` | β/γ reads both bodies, records the anchor here, and either extends the wall's sibling set or names them in the honest boundary above (they are named there today) |
-| `void_bank_statement` | **UNREAD — same obligation** | body at `0038:2211` | `bank_reconciliations` trigger covers the receipt side; the statement side is the read owed |
-| FA particulars (`0041:3035`, `:3112`) | register act date | bodies at those lines | FA trigger; a particulars edit moves no GL |
-
-**RS is the witness** (E-R9): snapshot a month, post into it, watch the label. Note for the matrix
-author — E-R9's "19 approved real invoices" is **stale** as of ADR-066; **verify the live count before
-citing it, and cite no number here**.
-
-### 2.12 `clara.reporting_periods` — the period registry *(lane γ; the E-b build dependency)*
-
-E-b binds `metric_cells.period_ids` and `days_in_period` to "the E-a period row". `fiscal_years` is an
-FY, and `period_snapshots` is an artifact; neither is a month/quarter period with an id. γ therefore
-mints the registry, and δ **build-depends** on it (§1's lane table):
-
-```
-clara.reporting_periods
-  id uuid pk · firm_id · client_id
-  grain text not null check (grain in ('month','fiscal_year'))
-  period_start date not null · period_end date not null   -- both ends INCLUSIVE
-  fiscal_year_id uuid references clara.fiscal_years(id)   -- required when grain='fiscal_year'
-  minted_by uuid not null references clara.users(id) · minted_at timestamptz not null default now()
-  unique (client_id, grain, period_start, period_end)
-  check (period_end >= period_start)
-```
-
-- `days_in_period(p_period)` = `period_end - period_start + 1`, read from this row — one definition,
-  one place, no evaluator-local arithmetic.
-- Rows are minted by the same audited door that mints a snapshot (and by `open_fiscal_year` for the
-  `fiscal_year` grain), so a period id always has an author. Immutable after mint; no delete.
-- Reads are granted to `clara_authenticated` and `clara_agent_ro`; no wake or runtime write grant.
-
 ---
 
-*Part 2 ends at §2.12. **§3 onward — the E-R12 trio (lane α), lane θ, the E-b/E-c pointers and the
-open-question ledger — continue in
+*Part 2 ends at §2.10. **§2.11–§2.12** — lane γ's month snapshots, staleness and the
+`clara.reporting_periods` registry — and **§3–§6** — the E-R12 trio (lane α), lane θ, the E-b/E-c
+pointers and the open-question ledger — continue in
 [`wave-e-design-skeleton-part3.md`](./wave-e-design-skeleton-part3.md).* Section numbering is
 continuous; the three files are one document.*
-

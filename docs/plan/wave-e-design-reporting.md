@@ -11,9 +11,14 @@
 > **`wave-e-design-reporting-part2.md` = §6–§12** (lane ε · lane ζ · lane η · the floors, lane map
 > and decision ledger). Section numbering is continuous; "reporting §7" resolves in Part 2.
 >
-> **Siblings — refer, do not duplicate:** `wave-e-design-skeleton.md` (+ `-part2.md`) (campaign frame ·
-> E-a period/close model · the E-R12 trio) · `wave-e-acceptance-matrix.md` (the falsifiable cells —
-> this document names obligations, that one names oracles).
+> **THE PACKET IS SIX FILES.** The other four, refer-do-not-duplicate: `wave-e-design-skeleton.md`
+> (**§0–§2.4** — campaign frame, lanes, ceremony · the period spine · the gate catalog · drawers 1–2)
+> · `wave-e-design-skeleton-part2.md` (**§2.5–§2.10** — the closed-period wall + permit, continuity,
+> close receipts, reopen, E-R6 activation, the E-R11 keys) · `wave-e-design-skeleton-part3.md`
+> (**§2.11–§2.12** lane γ's snapshots/staleness/**the `clara.reporting_periods` registry this document
+> binds to** · **§3** the E-R12 trio · §4 lane θ · §5 E-b/E-c pointers · §6 open questions) ·
+> `wave-e-acceptance-matrix.md` (the falsifiable cells — this document names obligations, that one
+> names oracles).
 >
 > **Scope:** lanes **δ** (metric algebra + catalog + evaluator), **ε** (FS template layers,
 > wording structure, claim assessment, chart AST, sealed-artifact registry), **ζ** (render worker
@@ -40,7 +45,7 @@ absence of a found artifact, never positive evidence that the thing cannot exist
 | Freeze-lint: `packages/` scope, JS/TS only, append-only vs base is the durable half | EXISTS | `scripts/check-frozen-workflows.mjs:107` (`SCAN_PATHSPEC="packages"`), `:108` (`SOURCE_EXT` — no `.sql`), `:102-103` (`BASE_REF` resolution **only**), **append-only enforcement `:424-441`** (`REMOVED-VS-BASE` `:432`, `UNLOCKED-VS-BASE` `:437`, `REHASHED-VS-BASE` `:440`), base-unavailable **fails closed under CI** `:442-455`, `--update` CI-refused `:311`, `--lock-deployed` CI-refused `:338` |
 | `@frozen` selection is independent of the WDK workflow directive | EXISTS | `FROZEN_MARKER` `:82`; `computeFrozenSet` selects by marker + import closure `:276-293`; the directive scan is a separate filter `:300` |
 | Separate-Fly-app batch-worker precedent (no `[http_service]`, build-only+push, commands in ONE place, coarse schedule) | EXISTS | `packages/backup/fly.toml:1-11` (separate app; "the exact commands live in ONE place — DR.md §9 step 6"), `:13-17` (`fly machine run` DISREGARDS fly.toml — its flag set IS the runtime contract), `:27-29` (batch, dead-man's-switch liveness), `:40-45` (Fly schedule granularity is hourly/daily/weekly/monthly, approximate) |
-| DR.md's last `##` is §9; its verify cadence is **monthly-light + quarterly STRICT**; live chat pin is `chatTurn_v10` | EXISTS | `docs/ops/DR.md:349` is the last `##` (the file runs to `:497`); cadence named `:329`, `:344`, header `:491`; §5/§5b are the described-drill + exercised-evidence idiom (`:152`, `:203`); `packages/runtime/workflows/registry.ts:38-47` |
+| DR.md's last `##` is §9; its verify-cadence bullets are spelled **`Monthly-light`** and **`Quarterly-full`**; live chat pin is `chatTurn_v10` | EXISTS | `docs/ops/DR.md:349` is the last `##` (the file runs to `:497`); section header *"Verify cadence (a backup you never restored is not a backup)"* `:491`, **`Monthly-light` `:493-495`**, **`Quarterly-full` `:496-497`** — re-read this round and quoted exactly; the "monthly-light + quarterly STRICT" prose at `:329`/`:344` describes the DRILL, and §10 must not rename the cadence. §5/§5b are the described-drill + exercised-evidence idiom (`:152`, `:203`); `packages/runtime/workflows/registry.ts:38-47` |
 | Any metric-algebra, catalog, FS-template, chart, claim, sealed-artifact or render object | **MISSING** | repo-wide search for `evaluate_fs_pack`, `report_template_versions`, `statutory_profile`, `chart_template`, `report_claim_assessment`, and for a render/PDF module under `packages/runtime/lib/`, hit only the research file |
 | A `.sql`-body freeze instrument · a reports storage prefix · **any event trigger** | **MISSING** | the lint's `SOURCE_EXT` (`:108`) excludes `.sql` and no sibling script exists; `storage.mjs` holds exactly two key families; a search for `create event trigger` / `ddl_command_end` across `packages/db/migrations/` returns **zero** hits (searched, not proven impossible — see §4.2) |
 
@@ -101,9 +106,21 @@ both ASTs version identically)*. Closed JSON schema: **unknown fields rejected**
 
 Periods and entity are **parameters** (`$P0`, `$P-1`, `$CLIENT`) bound at evaluation, so a definition
 is period-agnostic and reusable. **A bound period is a `clara.reporting_periods` row id** *(R7 — lane
-γ owns the registry: `id, firm_id, client_id, period_start, period_end, grain 'month'|'fiscal_year'`,
-minted refs)*; `$P-1` resolves to the prior row of the same grain for the same client. The cell records
-the bound period ids (field 2).
+γ owns the registry; its full DDL, RLS pair and grain-congruence constraints are skeleton §2.12)*. The
+cell records the bound period ids (field 2), through the junction table of §4.3.
+
+**`$P-1` resolves by CALENDAR ARITHMETIC on the grain — never "the prior registry row"** *(the
+round-2 finding, ruled into the design; skeleton §2.12 carries the producer half)*. The prior period
+of a month row is the **calendar-prior month**; of an `fy` row, the FY whose `ends_on` is `starts_on -
+1`. **A missing prior period resolves `absent` per §5.3** — it never falls back to the nearest earlier
+row. **The named hazard, so nobody re-introduces it:** a client whose registry holds January and March
+but not February. Under "prior row", March's `$P-1` silently binds **January**, and a revenue-growth
+or debtor-days cell computes a correct-looking figure against the wrong base — the
+wrong-answer-that-looks-right class the E-R4 amendment was ratified to contain
+(`wave-e-contract.md:105-107`), reached through the very registry R7 added. Under calendar
+arithmetic the same cell reports `absent` with `prior_period_absent`, and the fix ("mint or snapshot
+the missing month") is named. T7's `lag`-before-the-first-period rule is the same rule at the edge;
+this is it in the interior.
 
 ### 2.2 The primitive set
 **Ratified eight** *(E-R5)*: `measure` · `sum` · `average` · `lag` · `subtract` · `divide` ·
@@ -262,25 +279,49 @@ inside a ceremony.
    deployed bool, created_at)`: insert-once, a queryable record of what is frozen and what is live.
    `body_sha256` is computed at apply time from `pg_get_functiondef(oid)` — a **positive read of the
    live catalog**, never an assertion copied from the file.
-2. **Migration-tail positive read (the enforcement that actually catches the realistic threat).**
-   Every migration that creates or replaces a `clara.evaluate_%_v%` body recomputes
-   `sha256(pg_get_functiondef(oid))` for each `deployed` evaluator in its own tail and RAISEs on any
-   difference — the same tail-assertion idiom 0037/0038/0040/0042 use dozens of times. A later
-   migration silently replacing a frozen body dies at apply time, in the transaction that did it.
-3. **Ceremony-time `clara.verify_evaluator_freeze()` returns jsonb** — a positive deploy read joining
-   the standing positive-deploy-read law and `--lock-deployed` (`check-frozen-workflows.mjs:338`
-   refuses that flag under CI; it stays a local ceremony act).
+2. **The RUNNER enforces it, unconditionally — not the migration author** *(the round-2 fix; v2's
+   design asked every migration that "admits it touches an evaluator" to carry a tail read, which is a
+   procedure, and the migration that breaks a freeze is precisely the one that will not admit it).*
+   `packages/db/scripts/migrate.mjs` applies each migration in its own transaction (`:160-164`).
+   **Between the body and the `commit`, and for EVERY migration, the runner runs `select
+   clara.verify_evaluator_freeze()`** and aborts that transaction on any difference. A later migration
+   that recuts `_v1` without minting a new version row therefore fails **the very apply that did it**,
+   with nothing committed. Fail-closed on the function's own absence, per the standing law: the runner
+   reads `to_regprocedure('clara.verify_evaluator_freeze()')` and `to_regclass('clara.evaluator_versions')`
+   — a live `evaluator_versions` table carrying any `deployed` row **without** a live verifier is a
+   REFUSAL, not a skip; before δ ships, neither object exists and the runner proceeds silently.
+   Per-migration tails stay as evidence, but they are no longer the enforcement.
+   **The legitimate `_v2` case, stated so the check is not read as a freeze on progress:**
+   `verify_evaluator_freeze()` compares only rows already flagged `deployed`. A migration shipping
+   `evaluate_metric_v2` inserts an **undeployed** version row, which the check ignores; the row becomes
+   `deployed` at the ceremony, by the same act that locks a workflow.
+3. **Ceremony-time `clara.verify_evaluator_freeze()` returns jsonb** — the same function, called as a
+   positive deploy read, joining the standing positive-deploy-read law and `--lock-deployed`
+   (`check-frozen-workflows.mjs:338` refuses that flag under CI; it stays a local ceremony act).
 4. **CI sibling — `scripts/check-frozen-evaluators.mjs`**, a sibling of `check-frozen-workflows.mjs`
    with a `frozen-evaluators.json` manifest of the same shape. A sibling, not a widening, for a
    measured reason: `SOURCE_EXT` (`:108`) covers only JS/TS, so `.sql` migration bodies are outside
    the existing lint's reach even though `SCAN_PATHSPEC` (`:107`) already includes
    `packages/db/migrations`. It reuses the durable half verbatim — **append-only vs `origin/main`**
    (`:424-441`; a removed entry `:432` or a rehash of a `deployed:true` entry `:440` is a hard
-   reject), including the fail-CLOSED base-unavailable branch under CI (`:442-455`).
+   reject), including the fail-CLOSED base-unavailable branch under CI (`:442-455`). **Plus one scan
+   the workflow lint has no analogue for, and it is mandatory:** every migration file NEW versus the
+   base ref is scanned for `create or replace function clara.evaluate_%`, and each hit is matched
+   against the manifest — **an existing evaluator name without a corresponding new version row is a
+   hard reject in CI**, before the migration ever reaches a database. This is the half that catches
+   the offending migration at review time rather than at apply time.
 
 **Honesty boundary**, in `packages/db/README.md:32-38`'s own idiom: this defends against a later
 migration and against application/agent/definer-bug mutation — **not** against a role that can
 `CREATE OR REPLACE` outside the migration runner.
+
+**LANE OWNERSHIP OF THE FREEZE FAMILY — stated once, here, and repeated nowhere in other words**
+*(the round-2 fix: the skeleton's lane table and this document's §12 disagreed)*: **the DB half is
+δ's** — `clara.evaluator_versions`, `clara.verify_evaluator_freeze()`, the `migrate.mjs` hook and the
+per-migration tails, because they ship with the evaluator they freeze. **The CI/runtime half is
+ζ's** — `scripts/check-frozen-evaluators.mjs` + its manifest, and marking the render worker's
+determinism-critical modules `@frozen` for the EXISTING workflow lint. §12's lane table and the
+skeleton's §1 lane table both say exactly this and add nothing to it.
 
 **OPTIONAL hardening — the event trigger, behind a LIVE PREFLIGHT** *(builder choice; the two round-1
 reviews disagree and BOTH positions are recorded, per R8)*.
@@ -292,12 +333,18 @@ reviews disagree and BOTH positions are recorded, per R8)*.
 - **Position B (Codex):** a current managed Supabase project CAN create event triggers, because
   supautils grants that specifically to the project's `postgres` role; the migration must `RESET ROLE`
   first, since `clara_fn_owner` will not qualify. Vanilla CI is not evidence for the managed path.
-- **Resolution: decide at BUILD time on a live probe** — a preflight that positively reads
-  `current_user` / `is_superuser` and attempts a throwaway event trigger on the hosted project,
-  run **outside and before** any ceremony window. Probe fails → the four-part default stands unchanged
-  and nothing is lost. Probe passes → the trigger is added as belt, and its unlock path is a
-  **migration-minted new version row**, never a caller-settable GUC (E-a's BL-2 lesson: session state
-  is not authorization).
+- **Resolution: decide at BUILD time on a live probe, and the VENUE is part of the design** *(R8;
+  venue named at the round-2 fix)*. The preflight positively reads `current_user` / `is_superuser` and
+  then attempts a throwaway `CREATE EVENT TRIGGER` / `DROP EVENT TRIGGER`. **It runs on a Supabase
+  BRANCH database or a throwaway project — never on the live project, and never inside a ceremony
+  window.** A create-and-drop of a DDL-firing event trigger on shared live state is itself a
+  privileged act on the estate, and the standing boundary is that such acts are asked for, not
+  assumed; a branch answers the only question the probe asks (does *this platform's* `postgres` role
+  hold the privilege) with none of the exposure. If a branch is unavailable, the probe is owner-
+  authorized explicitly or it does not run — and not running it costs nothing, because the default
+  stands. Probe fails → the four-part default stands unchanged. Probe passes → the trigger is added as
+  belt, and its unlock path is a **migration-minted new version row**, never a caller-settable GUC
+  (E-a's permit lesson: session state is not authorization).
 
 The render worker's determinism-critical TS modules (§10) sit under `packages/`, so the EXISTING lint
 covers them once marked `@frozen` — verified this pass: `FROZEN_MARKER` at `:82` and `computeFrozenSet`
@@ -309,7 +356,7 @@ scan (`:300`). *(The draft's hedge is withdrawn; the claim is proven.)*
 | # | Ruled field | Column(s) |
 |---|---|---|
 | 1 | definition version / normalized formula hash | `definition_version_id uuid null`, `formula_sha256 bytea not null`, **`resolved_inputs_sha256 bytea not null`** (§3.1's two hashes) |
-| 2 | periods | `period_ids uuid[] not null` → `clara.reporting_periods` (lane γ) |
+| 2 | periods | **`clara.metric_cell_periods(cell_id, period_id, ordinal)`** — a junction table with real FKs to `metric_cells` and `clara.reporting_periods` (skeleton §2.12), `unique (cell_id, ordinal)`, `on delete restrict`. **Not a `period_ids uuid[]` column** *(R7 / round-2)*: an array cannot carry a foreign key, so an array-typed field would let a cell cite a period id that does not exist — provenance that references nothing is the absence-as-evidence defect wearing a column. `ordinal` preserves the argument order `evaluate_metric_v1` was called with |
 | 3 | account-set + presentation-map versions | `account_set_version_ids uuid[]`, `presentation_map_version_id` |
 | 4 | input values and entry/document references | `inputs jsonb not null`, `entry_ids uuid[]`, `document_ids uuid[]` |
 | 5 | books watermark | `books_watermark` → lane γ's snapshot token |
