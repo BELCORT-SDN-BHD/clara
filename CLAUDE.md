@@ -11,7 +11,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
-| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (ADR-065 = the Wave E contract), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (065 = the Wave E contract · 066 = the F6–F9 first-strike close), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
 | Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
@@ -139,30 +139,36 @@ CLEARED (ADR-060..062: the data doctrine · uniform review intensity · the pre-
 day) · §7-A GRILLED AND CLOSED (ADR-063/064 — the unattended sales drafter, accepted on a
 two-halves acceptance) · WAVE E CONTRACT RATIFIED AND MERGED (ADR-065, PR #214,
 2026-08-08) — the grill is DONE; the LAW WAS AMENDED (E-R4: the DB owns every
-AUTHORITATIVE number — see the cardinal invariants above). NEXT: the WAVE E BUILD,
-opening with the F6–F9 fix batch.** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
+AUTHORITATIVE number — see the cardinal invariants above). **THE WAVE E BUILD IS OPEN and its
+FIRST STRIKE — the F6–F9 fix batch — is CLOSED (ADR-066, 2026-08-09; as-run evidence
+`docs/plan/wave-e-f6f9-acceptance.md`). NEXT: the campaign proper — periods + close · the FS
+pack + reporting engine · the ad-hoc authoring lane.** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
 the extraction slice (ADR-047/048) · the settlement program (ADR-049) · the first production
 autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at
 exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
 adjustments + advances + AF-2 + producer as a four-slice split (0042/0043/0044/0045).
 
-**LIVE POSTURE: 49 migrations (frontier `0050`) · Fly `clara-runtime` **v58** (2026-08-07 night:
-the post-close fix train `0048` F5-cap + `0049` direction-abstains (+ the generic
-`clara.migration_receipts` ceremony channel, receipt id 1) + `0050` F4-egress (DB + runtime
-halves — the release/re-hold storm is dead) deployed in ONE ceremony on positive reads; the
-BEE/RP identifier seed live — 4 ssm rows; ceremony-recipe fact: Supavisor drops PGOPTIONS, an
-armed seed's confirm GUC is SET in-session) ·
+**LIVE POSTURE: 53 migrations (frontier `0054`) · Fly `clara-runtime` **v60** (2026-08-08/09, the
+F6–F9 batch ceremony, ADR-066: `0051` extraction-recovery door + `0052` customer-identity facts +
+`0053` autodraft re-admit-after-withdrawal + `0054` region ordinal applied 23:24Z under D1 quiesce,
+all tails green → **v59** 23:33Z → **v60** 07:53Z carrying the anchor-sweep fix; both deploys on
+positive build-time-vs-merge reads; `--lock-deployed` stamped exactly the 12 `autoDraft.v7.*` /
+`chatTurn.v10.*` entries; Supavisor 35/60, runtime pool 11) ·
 **§7-A CLOSED (ADR-064, 2026-08-07)** — the sandbox posted UNATTENDED (five ocr_sales posts,
 two rule ids; nine-controls battery complete — eight tokens SEEN incl. a wild-caught
 `floor_lost`, four documented NOT-REACHABLE; floor `floor_met` TRUE 6/6/6/85, TB
 33,133,816 = 33,133,816¢) and **ROME SECRETARY's 22 REAL sales invoices** ran draft-only
-(21 drafted unattended, 19 approved: TB 915,000 → **3,056,500/3,056,500¢** to the sen,
-**10 customers born NAME-ONLY — never enrich them with registrations**, PART 2's
-enrichment trap; 2 KONG CHENG rows held on F7, FINCARE held `customer_name_missing`).
-Findings **F6–F9 → tasks #31–34** (PART 2 holds the register). **·
+(21 drafted unattended, 19 approved: TB 915,000 → 3,056,500/3,056,500¢ to the sen).
+**RS now carries 11 customers / 0 registrations — ALL NAME-ONLY, never enrich them with
+registrations** (PART 2's enrichment trap): the 10 born at the §7-A close plus **KONG CHENG
+RESTAURANTS SDN BHD `256d6100`, born 2026-08-09** at the F6–F9 close. **The KONG CHENG pair is
+half resolved (ADR-066): the 2512 leg is APPROVED** (entry `f6da5aff`, TB
+**3,116,500/3,116,500¢**, diff 0) **and the 2506 leg awaits the owner's backfill-window
+decision** (`sales_backlog_held` at the `0046` watermark — correct, pre-existing); FINCARE
+stays held `customer_name_missing`, a human coding decision F7 deliberately does not fix.
+Findings **F6–F9 (tasks #31–34) → CLOSED at ADR-066** (PART 2 holds the register). **·
 THE ADJUSTMENTS BELT IS ARMED AND WITNESSED** (daily sweep; every occurrence DRAFTS,
-attested approves; the producer verb `accept_bank_rule_suggestion` granted authenticated-ONLY) **· Supavisor 32/60
-(runtime pool 11, its post-restart baseline; measured 2026-08-06) · FOUR firms** (BELCORT — real,
+attested approves; the producer verb `accept_bank_rule_suggestion` granted authenticated-ONLY) **· FOUR firms** (BELCORT — real,
 high-stakes RM100,000 ADR-044, **THREE clients: ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE
 SOLUTION** `9e957c0f` — a sole prop onboarded 2026-08-06, the FIRST going-concern real client
 (a sole proprietor is NOT an employee; his account is EQUITY) · ROME PUBLIC ADVISORY `39008536`
@@ -228,12 +234,19 @@ with mandatory per-cell provenance · ONE campaign (owner: 一口气全做) · a
 snapshot witness · sandbox = the full battery incl. the synthetic goods-trader closing
 stock) · the client-facts trio (F-1 guard refuses outright · entity_type context key ·
 MSIC door + backfill RPR 68109 / RS 82110 / BEE 74101) · evidence dossiers
-`docs/plan/research/wave-e/`.
+`docs/plan/research/wave-e/`. **First strike ACCEPTANCE (as-run, evidence grade):**
+`docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) — with X7's field story in
+`docs/plan/extraction-slice-x7-field-record.md`. **The standing lesson it minted: a wall that
+never refused anything is not a wall that held — it is a wall that was never asked.**
 
-**Open build items (PROJECTLOG PART 2 is the live register):** **THE WAVE E BUILD —
-contract ratified (ADR-065, `docs/plan/wave-e-contract.md`, E-R1..E-R14); the grill is
-DONE.** Opens with the **F6–F9 fix batch** (tasks #31–34; F7 unblocks the held KONG CHENG
-pair, F6 merges the ADR-062 extraction-recovery door), then periods + statements
+**Open build items (PROJECTLOG PART 2 is the live register):** **THE WAVE E BUILD is OPEN
+(ADR-065, `docs/plan/wave-e-contract.md`, E-R1..E-R14). Its FIRST STRIKE — the F6–F9 fix batch
+(tasks #31–34) — is CLOSED (ADR-066): `0051`–`0054` + v60 live; F7 unblocked the 2512 KONG CHENG
+leg; F6 discharged the ADR-062 extraction-recovery door. NAMED REMAINDERS, all in PART 2:** C1's
+`failed_retry` witness (a purpose-built sandbox upload) · the 2506 backfill decision (owner) ·
+**Gate P NOT unblocked — SEVEN docs, all `bad_type`/kind-NULL; remedy = owner re-export or the
+Wave-F 401/403 auth split** · FINCARE (human coding decision) · the batch's registered design
+items. **NEXT = the campaign proper:** periods + statements
 (sequential per 7A-R10; owns closing stock per WD-R11 — synthetic-only this wave, the
 segment-aware FA tie, the depreciation close gate, MPERS presentation wording —
 dual-version: 2016 wording for pre-2027 FYs, MPERS(2025) from FY start ≥ 2027-01-01) and
