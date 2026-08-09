@@ -303,16 +303,30 @@ test("attribution FAILS CLOSED — no typed CustomerName region means no evidenc
   assert.equal(otherPage.receipt.no_customer_anchor, 1);
 });
 
-test("a labelled party NEARER THE SELLER is refused — both attribution terms are load-bearing", () => {
-  // The mirror of X6's wrong-party path. Geometry chosen so ONLY the second term can refuse it:
-  // 0.95in from the customer anchor (INSIDE the 1.0in gap, so the gap alone would let it through)
-  // but 0.91in from the vendor's. Nearer the seller means it is the seller's.
+test("a labelled party NEARER THE SELLER is refused — by IDENTITY, not by proximity", () => {
+  // THE CELL THE A1 FIELD TEST REWROTE, and the reason the vendor term is what it is.
+  //
+  // Its geometry was built so ONLY the seller-proximity term could refuse it: 0.95in from the
+  // customer anchor (inside the 1.0in gap) but 0.91in from the vendor's. Then the real capture
+  // landed and THE REAL BUYER SITS IN THE SAME PLACE — 0.736in from its customer anchor, 0.334in
+  // from the vendor's, because Azure typed VendorName onto a top-left LOGO that prints directly
+  // above the bill-to box. The candidate that must be ADMITTED is the MORE vendor-ward of the
+  // two, so proximity cannot separate them in the right direction at any threshold.
+  //
+  // What separates them is what the two candidates ARE: this one is the seller's own name, and
+  // the typed VendorName says so. Refuse-only, so a false match abstains (see the geometry
+  // module's header). The page is otherwise untouched — same boxes, same lines, same intent.
   const nearerSeller = line("Bill To: ROME SECRETARY SDN BHD", box(0.72, 1.72, 3.30, 1.95));
   const { fields, receipt } = read([VENDOR_LETTERHEAD, nearerSeller, KONG_CHENG, ATTN_PERSON]);
   assert.equal(partyOf({ fields }), undefined, "the seller's own name is never the buyer");
-  assert.equal(receipt.closer_to_vendor, 1);
+  assert.equal(receipt.is_vendor_name, 1);
   assert.equal(receipt.customer_anchor_far, 0, "the gap alone would have let this through");
   assert.equal(receipt.outcome, "absent");
+  // AND THE ANCHOR SWEEP DOES NOT RESCUE IT. `KONG_CHENG` is on this page, unlabelled and well
+  // inside the gap, so a sweep gated merely on "no party found" would emit it — giving a
+  // candidate the LABEL path refused a second hearing on proximity. The gate is the LABEL's
+  // absence, and this page has one, so the sweep never runs.
+  assert.equal(receipt.anchor_sweep_ran, 0, "a page that prints a bill-to label is never swept");
 
   // A `To:` line further up, INSIDE the letterhead, is refused one wall earlier — the same
   // ordering X6 records for its own buyer-block cell, and worth pinning so a threshold change
@@ -320,7 +334,7 @@ test("a labelled party NEARER THE SELLER is refused — both attribution terms a
   const inLetterhead = line("Bill To: ROME SECRETARY SDN BHD", box(0.70, 0.85, 3.50, 1.00));
   const higher = read([VENDOR_LETTERHEAD, inLetterhead, ATTN_PERSON]);
   assert.equal(higher.receipt.customer_anchor_far, 1);
-  assert.equal(higher.receipt.closer_to_vendor, 0);
+  assert.equal(higher.receipt.is_vendor_name, 0);
 });
 
 test("a candidate beyond the anchor gap is refused, and the gap is an OPT not a law", () => {

@@ -59,12 +59,11 @@
 // is identical either way; only the receipt differs.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
-// ─── HONESTY NOTE, A REAL DIFFERENCE FROM X6 ──────────────────────────────────────────────────
-// X6's thresholds were CALIBRATED against two real Azure captures. THE THRESHOLDS BELOW ARE NOT
-// MEASURED — the KONG CHENG captures are real client documents, not in this repo, and no
-// synthetic corpus substitutes for a measurement. They are conservative, every one is an OPT, and
-// a WRONG threshold produces an ABSTAIN rather than a wrong party. The live replay IS the
-// measurement; its acceptance should re-read these defaults against the real capture.
+// ─── THE HONESTY NOTE, NOW DISCHARGED ─────────────────────────────────────────────────────────
+// This said the thresholds were UNMEASURED and that the live replay would be the measurement. It
+// was, and it failed: v10 read the person on both documents. The real page geometry now lives in
+// `tests/x7-kongcheng-real.mjs` and the A1 gate asserts against it, so these defaults ARE measured
+// against the capture. What has NOT changed: every threshold is an OPT and a wrong one abstains.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
 // FOUR DEFENSES, all required, none silently skipped when its input is unavailable:
@@ -74,14 +73,20 @@
 //   (b) THE LABEL GATE + THE PARTY-NAME GATE — `invoice-party-grammar.mjs`, which owns every
 //       question about spelling. Where X6's top-band defense would sit; no band analogue here.
 //   (c) CUSTOMER-BLOCK ATTRIBUTION, the defense that makes an emission EVIDENCED rather than
-//       merely label-shaped. A candidate must sit next to the typed `CustomerName` field's OWN
-//       bounding region and — when a typed `VendorName` region also exists — closer to the
-//       customer's than to the vendor's. THIS IS X6'S INSIGHT RE-APPLIED, and why it works on
-//       the F7 defect: Azure's typed CustomerName picked the WRONG LINE, but a wrong line INSIDE
-//       the bill-to box — its CONTENT is wrong while its GEOMETRY points at the block.
+//       merely label-shaped. A candidate must sit within the gate of the typed `CustomerName`
+//       field's OWN bounding region and must not INTERSECT the typed `VendorName` region. THIS IS
+//       X6'S INSIGHT RE-APPLIED, and why it works on the F7 defect: Azure's typed CustomerName
+//       picked the WRONG LINE, but a wrong line INSIDE the bill-to box — its CONTENT is wrong
+//       while its GEOMETRY points at the block. The vendor term was PROXIMITY until the A1 field
+//       test falsified it on the real capture; `invoice-block-geometry.mjs` carries the numbers.
 //       FAIL CLOSED: no typed CustomerName region ⇒ no attribution evidence ⇒ no emission.
 //   (d) RECONCILIATION with the typed emission — `mergeCustomerIdentity` below, which decides
 //       who WINS and is the part of this file to read hardest. Its full matrix is written there.
+//
+// TWO GENERATION SURFACES, ONE WALL SET. Pass 2 generates from a BILL-TO LABEL; on a page that
+// prints NONE, `invoice-anchor-sweep.mjs` generates from the typed CustomerName anchor's
+// neighbourhood instead. Read its header before touching either pass — it holds the field test
+// that forced it, and the difference between a wall that refused and a wall never asked.
 //
 // THE MISSING BAND, stated rather than papered over. X6's second defense is "a letterhead sits at
 // the top of its page by convention". No such convention exists for the buyer block, so an
@@ -89,11 +94,11 @@
 // the band's work here, against evidence Azure actually produced.
 //
 // ═══ RECORDED RESIDUALS — five, each a DECISION rather than an oversight ═══════════════════════
-//  (1) THE THRESHOLDS ARE UNMEASURED (see the honesty note below). A wrong one abstains.
-//  (2) NO TYPED CustomerName ⇒ NO READ. Attribution anchors on that region, so this reader can
-//      never supply a name where Azure typed none — the FINCARE row (acceptance-h1 row 10) is
-//      that shape and is NOT fixed by F7. Relaxing to "far from the vendor" would be
-//      absence-as-evidence, which review law 2 forbids. That document needs a different door.
+//  (1) THE THRESHOLDS ARE OPTS — measured (see the discharged note); a wrong one abstains.
+//  (2) NO TYPED CustomerName ⇒ NO READ, INHERITED BY THE SWEEP (the anchor is what it sweeps
+//      around). No name is ever supplied where Azure typed none; the FINCARE row (acceptance-h1
+//      row 10) is that shape and is NOT fixed by F7. Relaxing to "far from the vendor" would be
+//      absence-as-evidence, which review law 2 forbids.
 //  (3) TWO GENUINELY DIFFERENT REGISTERED BUYERS on one document withdraw the typed row rather
 //      than picking one (`contested`). Eyes-open: a safe hold, never a guess.
 //  (4) FAIL-CLOSED NARROWINGS: an UNSUFFIXED buyer (an individual, `SIFU LAB`), a dotted `S.B.`,
@@ -109,20 +114,19 @@
 //      the rejection is a fact, not a claim: 5/5 end-to-end closed, but 4 of 5 TITLE-CASE names
 //      lost (`Bank of China (Malaysia) Berhad`) and 0 of the constructed forms closed once
 //      ALL-CAPS, which is how Malaysian invoices usually print.
-//      REACHABILITY, re-measured after the round-6 fixes and WIDER than the retired
-//      four-coincidence story: LOAD-BEARING are the bounded scan window, typed == the reader's
-//      own Attn person, and (only when Azure typed a VendorName) the closer-to-buyer comparison.
-//      NOT load-bearing: "the real buyer is unsuffixed" — a SUFFIXED buyer printed AFTER the
-//      phrase still loses, so what matters is scan ORDER; and the seller comparison does not run
-//      at all when no VendorName anchor exists. Harm ceiling is a wrong DRAFT — counterparty
-//      birth is at HUMAN APPROVAL and no unattended-post path reaches `customer_name`. The 38
-//      forms and the 5 scenarios are PINNED so this is measured, not remembered. FULL
-//      VETO-READY RECORD: docs/plan/extraction-slice-contract.md, X7. OWNER-VETOABLE.
+//      REACHABILITY, re-measured after the A1 field test WIDENED it: load-bearing are the
+//      bounded scan window, typed == the reader's own Attn person, and NOW the anchor sweep's
+//      radius — a second way in, on exactly the label-less pages the sweep exists for. The
+//      closer-to-buyer comparison is no longer among them: it is RETIRED. Harm ceiling is
+//      unchanged and is a wrong DRAFT — counterparty birth is at HUMAN APPROVAL and no
+//      unattended-post path reaches `customer_name`. FULL VETO-READY RECORD, with the 38 forms
+//      and 5 scenarios pinned: docs/plan/extraction-slice-contract.md, X7. OWNER-VETOABLE.
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
 import { containsEntityToken, hasRegisteredEntitySuffix, looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { customerAttributionFailure, extentOf, scaleAnchor, xOverlap } from "./invoice-block-geometry.mjs";
+import { sweepAnchorNeighbourhood } from "./invoice-anchor-sweep.mjs";
 
 export { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel, splitLabelled, BILL_TO_LABELS, ATTN_LABELS } from "./invoice-party-grammar.mjs";
 
@@ -132,12 +136,10 @@ export { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel, splitLa
 // THIRD reader to inherit it; the first two each learned it the expensive way.
 
 export const DEFAULT_CUSTOMER_IDENTITY_OPTS = Object.freeze({
-  /** Distance allowed between a candidate line and the typed CustomerName region, in inches.
-   *  UNMEASURED (see the honesty note above). Sized for the F7 shape the acceptance record
-   *  describes — a party line one or two printed rows above an `Attn` line Azure typed over,
-   *  roughly 0.2-0.5in on an A4 bill — plus headroom for a two- or three-line address between
-   *  them. What keeps this generous number safe is the vendor-comparison term below plus the
-   *  label vocabulary: nothing in a supplier's letterhead opens with `Bill To`. */
+  /** Distance allowed between a candidate line and the typed CustomerName region, in inches —
+   *  and the ANCHOR SWEEP'S RADIUS. MEASURED on the real capture: the buyer sits 0.736in from the
+   *  typed anchor, the seller's letterhead 2.205in, so 1.0 admits the one and refuses the other
+   *  with margin both ways. Still an OPT: too small abstains, too large invites a contest. */
   customerAnchorGapIn: 1.0,
   /** How far BELOW a bare label line (`Bill To:` on its own row) the party name may sit, in
    *  inches, for the split-line scan. One or two printed rows on an A4 bill. */
@@ -159,12 +161,14 @@ export const DEFAULT_CUSTOMER_IDENTITY_OPTS = Object.freeze({
 const emptyReceipt = () => ({
   matched: 0, absent: 0, contested: 0,
   rejected_gate: 0, label_continuation: 0, no_geometry: 0, unit_unresolved: 0,
-  no_customer_anchor: 0, customer_anchor_far: 0, closer_to_vendor: 0,
+  no_customer_anchor: 0, customer_anchor_far: 0, in_vendor_block: 0, is_vendor_name: 0,
   split_line_scanned: 0, split_line_exhausted: 0, no_entity_suffix: 0,
+  anchor_sweep_ran: 0, anchor_in_range: 0, anchor_label_skipped: 0,
+  anchor_rejected_gate: 0, anchor_no_entity_suffix: 0,
   attn_skipped: 0, column_skipped: 0, reserved_skipped: 0, label_boundary: 0,
   attn_matched: 0, attn_ambiguous: 0, attn_rejected_gate: 0, attn_no_value: 0, attn_unattributed: 0,
   contact_emitted: 0,
-  typed_collapsed: 0, typed_overridden_attn: 0, typed_disagreement: 0,
+  typed_collapsed: 0, typed_overridden_attn: 0, typed_disagreement: 0, typed_withdrawn_attn: 0,
   typed_vs_contested: 0, sole_authorship_refused: 0,
   contact_read_inconclusive: false, attn_inconclusive_hold: 0,
   candidates: [],
@@ -201,14 +205,20 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
     const blockGap = frame ? frame.inchToFrame(settings.blockGapIn) : null;
     const skewTol = frame ? frame.inchToFrame(settings.skewToleranceIn) : null;
     const scaledAnchors = frame
-      ? { vendor: scaleAnchor(anchors?.vendor, frame.scale), customer: scaleAnchor(anchors?.customer, frame.scale) }
+      ? {
+        vendor: scaleAnchor(anchors?.vendor, frame.scale),
+        customer: scaleAnchor(anchors?.customer, frame.scale),
+        // The seller's own name, keyed HERE so `invoice-block-geometry.mjs` keeps owning POSITION
+        // only and never learns how a name is spelled. Refuse-only — see its header.
+        vendorKey: anchors?.vendorName ? partyKey(anchors.vendorName) : null,
+      }
       : null;
     /** Line indices claimed by PASS 1 as a contact VALUE — never available to the party read. */
     const reserved = new Set();
 
     /** Attribution (defense c), counted under the right head so the receipt names the refusal. */
-    const attributed = (box, label, kind) => {
-      const failure = customerAttributionFailure({ ...box, page: pageNumber }, scaledAnchors, anchorLimit);
+    const attributed = (box, label, kind, key = null) => {
+      const failure = customerAttributionFailure({ ...box, page: pageNumber, key }, scaledAnchors, anchorLimit);
       if (!failure) return true;
       if (kind === "party") receipt[failure] += 1;
       else receipt.attn_unattributed += 1;
@@ -357,7 +367,9 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       note("attn_accepted", attn.label, pageNumber, { kind: "attn", key: partyKey(value.raw) });
     }
 
-    // ══ PASS 2 — THE PARTY READ.
+    // ══ PASS 2 — THE PARTY READ, from a BILL-TO LABEL.
+    const partiesBeforePage = parties.length;
+    let sawBillToLabel = false;
     for (let i = 0; i < lines.length; i++) {
       // A reserved line cannot open a party read either. NOT counted here: `reserved_skipped`
       // means "a candidate VALUE line was stepped over", which is what `scanBelow` records —
@@ -368,6 +380,7 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       if (splitAttnLabel(text)) continue;      // an Attn LABEL line is never a party line
       const hit = splitBillToLabel(text);
       if (!hit) continue;
+      sawBillToLabel = true;
       if (hit.continuation) {
         receipt.label_continuation += 1;
         note("label_continuation", hit.label, pageNumber, { kind: "party" });
@@ -413,7 +426,7 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         }
       }
 
-      if (!attributed(value.box, hit.label, "party")) continue;
+      if (!attributed(value.box, hit.label, "party", partyKey(value.raw))) continue;
       const source = lines[value.lineIndex];
       parties.push({
         value_raw: value.raw, key: partyKey(value.raw), page: pageNumber,
@@ -421,6 +434,18 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         confidence: source?.confidence == null ? null : Number(source.confidence),
       });
       note("accepted", hit.label, pageNumber, { kind: "party", key: partyKey(value.raw) });
+    }
+
+    // ══ PASS 2b — THE ANCHOR SWEEP, only on a page that PRINTS NO BILL-TO LABEL AT ALL.
+    // Not "found no party" — found no LABEL. The distinction is the wall: where a document names
+    // its bill-to box, that naming decides, and a candidate the label path REFUSED must not get a
+    // second hearing on proximity. (The battery's `NEARER THE SELLER` page is exactly that shape.)
+    // A label-less page is the real capture's own condition, so this is the narrowest broadening
+    // that reaches it. `invoice-anchor-sweep.mjs` holds the field test and the fallback argument.
+    if (!sawBillToLabel && parties.length === partiesBeforePage) {
+      parties.push(...sweepAnchorNeighbourhood({
+        lines, boxes, pageNumber, reserved, scaledAnchors, anchorLimit, receipt, note, attributed,
+      }));
     }
   }
 

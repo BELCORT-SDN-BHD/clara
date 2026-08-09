@@ -22,6 +22,9 @@ import { partyKey } from "./invoice-party-grammar.mjs";
  *              it — a line labelled `Attn` is not a party under any reading of the page.
  *   WITHDRAW   unexplained disagreement → EMIT NEITHER (X6's semantics). `typed_disagreement`.
  *   WITHDRAW   contested landscape → EMIT NEITHER. `typed_vs_contested`.
+ *   WITHDRAW   typed == the reader's OWN accepted Attn person and NO party is reachable → EMIT
+ *              ONLY the contact. `typed_withdrawn_attn`. Ruling 2 of the A1 field test; the
+ *              argument is at the branch.
  *
  * And its two lawful silences: reader ABSENT/refused → typed stands byte-identically (the reader
  * having nothing to say is not evidence about Azure); reader has a party but typed is
@@ -51,7 +54,30 @@ export function mergeCustomerIdentity(out, identity) {
     }
     return;
   }
-  if (!party) return;
+  // ── RULING 2 OF THE A1 FIELD TEST: THE TWICE-EMISSION IS A DEFECT. Live v10 emitted the SAME
+  // PERSON twice on both KONG CHENG invoices — honestly as `contact_person`, and again as a
+  // confident `customer_name` — because this branch returned early and let the typed row stand.
+  // That is the F7 defect surviving its own fix, now wearing a corroborating second field.
+  //
+  // THIS IS A MEASUREMENT, NOT AN ABSENCE (review law 2). `attn_key` is set ONLY when a contact
+  // LABEL claimed a line, the value passed the person gate, AND it attributed to the buyer block
+  // — so the equality says something the reader positively SAW: the string Azure called the
+  // customer is the string this document called the contact. A known person may not pass as a
+  // counterparty on the strength of Azure's pick alone.
+  //
+  // WHAT IT COSTS, deliberately: the lane lands on `customer_name_missing` → needs_review, the
+  // FINCARE shape (acceptance-h1 row 10), where a human already has to look. A held draft is the
+  // cheap failure; a counterparty born under a contact's name is the expensive one, and birth is
+  // at approval. Note the ORDER — `contested` is handled above, and the party branches below are
+  // unreachable from here, so this fires only when the sweep AND the label read both found none.
+  if (!party) {
+    if (receipt.attn_key && typed && typedRaw && partyKey(typedRaw) === receipt.attn_key) {
+      out.splice(out.indexOf(typed), 1);
+      receipt.typed_withdrawn_attn += 1;
+      receipt.outcome = "attn_withdrawn";
+    }
+    return;
+  }
 
   if (!typed || !typedRaw) {
     // RECONCILIATION-ONLY. There is nothing to reconcile against, and the reader does not get to

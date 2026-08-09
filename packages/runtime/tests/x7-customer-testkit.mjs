@@ -45,6 +45,10 @@ export const KONG_CHENG_BLOCK = [
 export const ANCHORS = Object.freeze({
   vendor: { page: 1, xmin: 0.70, xmax: 3.50, ymin: 0.65, ymax: 0.81 },
   customer: { page: 1, xmin: 1.10, xmax: 2.20, ymin: 2.90, ymax: 3.04 },
+  // `vendorName` MUST mirror TYPED_VENDOR_NAME.content below — it is what `anchorsFromTypedFields`
+  // builds from that very field, and a unit fixture that omits it would test a reader the adapter
+  // never constructs. Attribution uses it to REFUSE a candidate that is the seller's own name.
+  vendorName: "ROME SECRETARY SDN BHD",
 });
 
 /** The same two regions in Azure's own typed-field shape, for mapper-level payloads. */

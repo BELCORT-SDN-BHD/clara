@@ -19,32 +19,7 @@ process.env.RELAY_TEST_MODE ??= "1";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeAzureInvoice } from "../workflows/invoiceFacts.v1.azure.mjs";
-
-const box = (x1, y1, x2, y2) => [x1, y1, x2, y1, x2, y2, x1, y2];
-const L = (content, polygon) => ({ content, polygon });
-
-const VENDOR = L("ROME SECRETARY SDN BHD", box(0.70, 0.65, 3.50, 0.81));
-const BILL_TO = L("Bill To:", box(0.72, 2.10, 1.45, 2.24));
-const KONG_CHENG = L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.30, 3.30, 2.45));
-const ATTN = L("Attn : Lim Xiao Shan", box(0.72, 2.90, 2.20, 3.04));
-const ATTN_BOX = box(0.72, 2.90, 2.20, 3.04);
-const ITEM = L("To Secretarial fee for the year 2025", box(0.72, 3.80, 4.20, 3.95));
-
-/** Run a page of lines through the REAL normalizer with a typed CustomerName at `tbox`. */
-function run(lines, typed, tbox = ATTN_BOX) {
-  const out = normalizeAzureInvoice({ status: "succeeded", analyzeResult: {
-    documents: [{ fields: {
-      InvoiceTotal: { content: "2,800.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: box(6.5, 8.0, 7.7, 8.15) }], confidence: 0.93 },
-      VendorName: { content: "ROME SECRETARY SDN BHD", boundingRegions: [{ pageNumber: 1, polygon: box(0.70, 0.65, 3.50, 0.81) }], confidence: 0.94 },
-      CustomerName: { content: typed, boundingRegions: [{ pageNumber: 1, polygon: tbox }], confidence: 0.91 },
-    } }],
-    pages: [{ pageNumber: 1, unit: "inch", width: 8.2639, height: 11.6806, lines }],
-  } });
-  const g = (p) => out.fields.find((r) => r.field_path === p)?.value_raw;
-  return { customer: g("invoice.customer_name"), contact: g("invoice.contact_person"),
-    outcome: out.envelope.customer_identity.outcome, rows: out.fields, envelope: out.envelope };
-}
+import { ATTN, ATTN_BOX, BILL_TO, ITEM, KONG_CHENG, L, VENDOR, WITHDRAWN, box, run } from "./x7-scenario-kit.mjs";
 
 // ══════════════════════════════════════════════════════════════════════════════════════
 // ROUND 1 — the native probes that opened the merge-blocker
@@ -55,8 +30,15 @@ test("R1: a Malaysian INFINITIVE line item never becomes the customer (probes 2 
   // the override branch — strictly worse than the held state F7 exists to fix.
   const supply = L("To supply and install air-conditioning system", box(0.72, 3.80, 4.60, 3.95));
   const p2 = run([VENDOR, KONG_CHENG, L("No 12, Jalan Ampang", box(0.72, 2.50, 2.60, 2.64)), ATTN, supply], "Lim Xiao Shan");
-  assert.equal(p2.customer, "Lim Xiao Shan", "typed stands; the line item is not an identity");
-  assert.equal(p2.outcome, "absent");
+  // THIS PAGE IS THE REAL KONG CHENG SHAPE — a buyer printed with NO bill-to label, an address,
+  // an `Attn` line Azure typed over, and a line item. Until the A1 field test it read `absent` and
+  // the person stood, which is what shipped and what failed on live. The anchor sweep reads it now.
+  // The cell's own claim is untouched and is the reason the line item is still on the page: it
+  // sits 0.76in from the anchor, INSIDE the radius, and is refused by the entity-suffix wall.
+  assert.equal(p2.customer, "KONG CHENG RESTAURANTS SDN BHD", "the boxed party, not the line item");
+  assert.equal(p2.contact, "Lim Xiao Shan");
+  assert.equal(p2.outcome, "attn_overridden");
+  assert.equal(p2.envelope.customer_identity.anchor_sweep_ran, 1);
 
   // probe3-A: the F7 vehicle as fixtured — the fix still fires.
   const a = run([VENDOR, BILL_TO, KONG_CHENG, ATTN], "Lim Xiao Shan");
@@ -166,11 +148,11 @@ test("R3-1: FURNITURE remainders never reach customer_name, on either seam", () 
   for (const f of FURNITURE) {
     // (i) the OVERRIDE seam — typed is the Attn person, the only branch that can write a party.
     const sameLine = run([VENDOR, L(f, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(sameLine.customer, "Lim Xiao Shan", `${f} must not override via the same-line seam`);
+    assert.equal(sameLine.customer, WITHDRAWN, `${f} must not override via the same-line seam`);
     assert.notEqual(sameLine.outcome, "attn_overridden");
     // (ii) the SPLIT-VALUE seam — a bare `Bill To:` whose value line is the furniture.
     const splitValue = run([VENDOR, BILL_TO, L(f, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(splitValue.customer, "Lim Xiao Shan", `${f} must not override via the split-value seam`);
+    assert.equal(splitValue.customer, WITHDRAWN, `${f} must not override via the split-value seam`);
     assert.notEqual(splitValue.outcome, "attn_overridden");
   }
 });
@@ -212,7 +194,7 @@ test("R3-Codex R2-A: the split-VALUE path is entity-gated too, not only top-leve
     VENDOR, L("To:", box(0.72, 2.10, 1.10, 2.24)),
     L("To supply and install air-conditioning system", box(0.72, 2.30, 4.60, 2.45)), ATTN,
   ], "Lim Xiao Shan");
-  assert.equal(a1.customer, "Lim Xiao Shan");
+  assert.equal(a1.customer, WITHDRAWN);
   assert.notEqual(a1.outcome, "attn_overridden");
 
   const a2 = run([
@@ -224,7 +206,7 @@ test("R3-Codex R2-A: the split-VALUE path is entity-gated too, not only top-leve
     L("Payment Terms", box(0.72, 2.44, 2.20, 2.58)),
     ATTN,
   ], "Lim Xiao Shan");
-  assert.equal(a2.customer, "Lim Xiao Shan");
+  assert.equal(a2.customer, WITHDRAWN);
   assert.notEqual(a2.outcome, "attn_overridden");
 });
 
@@ -262,7 +244,7 @@ test("R6-1: the invariant is about LINES, not STRINGS — the same name on an UN
   assert.equal(r.contact, "Lim Xiao Shan");
   // …and with line 2 removed, the claimed line alone supplies nothing.
   const claimedOnly = run([VENDOR, BILL_TO, L("Attention: ACME SDN BHD", box(0.72, 2.50, 3.60, 2.64)), ATTN], "Lim Xiao Shan");
-  assert.equal(claimedOnly.customer, "Lim Xiao Shan", "no unclaimed line, so nothing overrides");
+  assert.equal(claimedOnly.customer, WITHDRAWN, "no unclaimed line, so nothing overrides");
   assert.notEqual(claimedOnly.outcome, "attn_overridden");
 });
 
@@ -280,7 +262,7 @@ test("R4-1: a `c/o` line never outranks an UNSUFFIXED real buyer", () => {
     L("c/o AMATERUS GROUP SDN BHD", box(0.72, 2.55, 3.40, 2.70)),
     L("Attn : Lim Xiao Shan", box(0.72, 2.80, 2.20, 2.94)),
   ], "Lim Xiao Shan", box(0.72, 2.80, 2.20, 2.94));
-  assert.equal(r.customer, "Lim Xiao Shan", "typed stands — no party is manufactured from a c/o line");
+  assert.equal(r.customer, WITHDRAWN, "no party is manufactured from a c/o line");
   assert.notEqual(r.outcome, "attn_overridden");
 });
 
@@ -295,11 +277,11 @@ test("R4-1: all ELEVEN measured non-addressee forms are dead on both seams", () 
   for (const f of FORMS) {
     // (i) the OVERRIDE seam — the only branch that can write a party.
     const sameLine = run([VENDOR, L(f, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(sameLine.customer, "Lim Xiao Shan", `${f} must not override`);
+    assert.equal(sameLine.customer, WITHDRAWN, `${f} must not override`);
     assert.notEqual(sameLine.outcome, "attn_overridden");
     // (ii) the SPLIT-VALUE seam beneath a bare `Bill To:`.
     const split = run([VENDOR, BILL_TO, L(f, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(split.customer, "Lim Xiao Shan", `${f} must not override via the split seam`);
+    assert.equal(split.customer, WITHDRAWN, `${f} must not override via the split seam`);
     assert.notEqual(split.outcome, "attn_overridden");
     // (iii) and it must not slip through the CONTACT door either — the polarity inversion means
     // "not an entity" is a POSITIVE contact signal, so a party-only rule would promote it here.
@@ -342,7 +324,7 @@ test("C3-1 end-to-end: no apostrophe glyph manufactures a party through the over
     "Customerʼs Ref: ACME SDN BHD", "Customer′s Ref: ACME SDN BHD",
     "Customer’s Ref: ACME SDN BHD", "Customer's Ref:ACME SDN BHD"]) {
     const r = run([VENDOR, L(v, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(r.customer, "Lim Xiao Shan", `${JSON.stringify(v)} must not override`);
+    assert.equal(r.customer, WITHDRAWN, `${JSON.stringify(v)} must not override`);
     assert.notEqual(r.outcome, "attn_overridden");
   }
 });
@@ -377,116 +359,4 @@ test("C3-3 end-to-end: two companies differing only by punctuation still CONTEST
     L("Customer : KONG CHENG SDN BHD", box(0.72, 2.32, 3.60, 2.46)),
   ], "KONG CHENG SDN BHD", box(0.72, 2.32, 3.60, 2.46));
   assert.equal(same.outcome, "matched");
-});
-
-// ══════════════════════════════════════════════════════════════════════════════════════
-// ROUND 5 — the supplement: both seams, the complete colon class, and the contest invariant
-// ══════════════════════════════════════════════════════════════════════════════════════
-
-const ATTN_LABEL = L("Attention:", box(0.72, 2.25, 1.60, 2.39));
-
-test("S1: a company-shaped contact is refused at BOTH seams, not just the split one", () => {
-  // The round-4 C3-2 fix landed only in `scanBelow`, so the SAME-LINE door kept the strict
-  // predicate and kept persisting companies as people. A rule at one of two seams is not a rule.
-  for (const company of ["SDN BHD", "ACME SDN BHD (123456-X)", "ACME SDN BHD, Kuala Lumpur", "ACME P.L.T."]) {
-    const sameLine = run([VENDOR, BILL_TO, L(`Attention: ${company}`, box(0.72, 2.40, 3.60, 2.54))], "Lim Xiao Shan");
-    assert.equal(sameLine.contact, undefined, `${company} — same-line seam`);
-    const split = run([VENDOR, BILL_TO, ATTN_LABEL, L(company, box(0.72, 2.40, 3.20, 2.54))],
-      "Lim Xiao Shan", box(0.72, 2.40, 3.20, 2.54));
-    assert.equal(split.contact, undefined, `${company} — split seam`);
-  }
-  // A real person still reads on BOTH seams.
-  const p1 = run([VENDOR, BILL_TO, KONG_CHENG, L("Attn : Lim Xiao Shan", ATTN_BOX)], "Lim Xiao Shan");
-  assert.equal(p1.contact, "Lim Xiao Shan");
-  const p2 = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim Xiao Shan", box(0.72, 2.40, 2.20, 2.54)),
-    L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim Xiao Shan", box(0.72, 2.40, 2.20, 2.54));
-  assert.equal(p2.contact, "Lim Xiao Shan");
-});
-
-test("S2 end-to-end: no colon glyph manufactures a party", () => {
-  for (const v of ["Reference﹕ ACME SDN BHD", "Reference∶ ACME SDN BHD",
-    "Reference꞉ ACME SDN BHD", "Reference： ACME SDN BHD",
-    "Customer‘s Ref﹕ ACME SDN BHD"]) {
-    const r = run([VENDOR, L(v, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
-    assert.equal(r.customer, "Lim Xiao Shan", `${JSON.stringify(v)} must not override`);
-    assert.notEqual(r.outcome, "attn_overridden");
-  }
-});
-
-test("S3 / R6-1: a contact-CLAIMED line can never override, withdraw, or collapse", () => {
-  // THE SIDE-EFFECT CHAIN, traced: the contact gate refuses `Lim P.L.T.` (single-letter-run
-  // joining reads `plt`), so `attn_key` is never set, so the F7 OVERRIDE shape is scored as an
-  // UNEXPLAINED disagreement — and the reconciler WITHDREW a correct `KONG CHENG…SDN BHD`.
-  // Absence of an explanation the reader COULD NOT READ is not evidence of a contest.
-  const withPlt = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54)),
-    L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54));
-  assert.equal(withPlt.customer, "Lim P.L.T.", "typed stands — pre-X7 behaviour, zero loss");
-  // `absent` since C6-3 — the party scan stops at the intervening `Attention:` label, so no
-  // party is read and the inconclusive-hold branch is never reached. The OBSERVABLE is
-  // unchanged (typed stands); an earlier wall now does the work. The hold branch is still live
-  // and still pinned — by the disagree/agree pair below, where no label intervenes.
-  assert.equal(withPlt.outcome, "absent");
-  // THE INVARIANT, now TRUE as originally stated because reservation happens on the CLAIM: a
-  // contact-CLAIMED line supplies nothing to the party read — it cannot override, cannot drive a
-  // withdraw, and cannot collapse. Typed simply stands, agreeing or not. (The round-5 wording
-  // had to be narrowed because reservation then happened only on ACCEPTANCE; R6-1 removed the
-  // hole rather than the claim.)
-  const disagree = run([VENDOR, BILL_TO, ATTN_LABEL, L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))],
-    "Lim Xiao Shan", box(0.72, 2.40, 2.60, 2.54));
-  assert.equal(disagree.customer, "Lim Xiao Shan", "it does not override…");
-  assert.notEqual(disagree.outcome, "attn_overridden", "…and it does not withdraw either");
-  assert.equal(disagree.customer !== undefined, true, "the typed row survives");
-  const agree = run([VENDOR, BILL_TO, ATTN_LABEL, L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))],
-    "ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
-  assert.equal(agree.customer, "ACME SDN BHD", "…and an agreeing typed row is left untouched");
-  assert.equal(agree.outcome, "absent", "no party was read from the claimed line at all");
-  // THE ROUND-5 COUNTEREXAMPLE, NOW CLOSED BY R6-1. This layout was the reason the invariant had
-  // to be narrowed at 7bcbd39: `AMATERUS GROUP SDN BHD` was refused as a contact, re-entered as a
-  // party, met a second labelled party, and drove a CONTESTED withdraw of a CORRECT typed name.
-  // With reservation on the CLAIM, the AMATERUS line is out of the party read entirely, only
-  // KONG CHENG remains, and the correct typed name simply survives. The strong wording holds
-  // again — and this is the fail-open-free direction: one fewer withdraw, no new assertion.
-  const wasContest = run([VENDOR, BILL_TO, ATTN_LABEL,
-    L("AMATERUS GROUP SDN BHD", box(0.72, 2.40, 2.90, 2.54)),
-    L("Customer : KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.70, 4.60, 2.84)),
-  ], "KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.70, 3.60, 2.84));
-  assert.equal(wasContest.customer, "KONG CHENG RESTAURANTS SDN BHD", "the correct typed name is no longer withdrawn");
-  assert.equal(wasContest.outcome, "matched", "the claimed line never entered the contest");
-  // A GENUINE two-party contest — both on UNCLAIMED lines — still withdraws (residual 3).
-  const realContest = run([VENDOR,
-    L("Bill To: WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29)),
-    L("Customer : ACTUAL SUBSIDIARY SDN BHD", box(0.72, 2.32, 3.90, 2.46)),
-  ], "WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29));
-  assert.equal(realContest.outcome, "contested");
-  assert.equal(realContest.customer, undefined);
-  // The S/B rescue survives — shown on the ORDINARY ordering (`Bill To:` / party / `Attn :`),
-  // which is what the measured KONG CHENG documents actually print. The previous fixture put the
-  // party AFTER an `Attention:` block, and since C6-3 a label terminates the scan, so that
-  // layout now abstains regardless of the S/B question — it could no longer exercise it.
-  const sb = run([VENDOR, BILL_TO, KONG_CHENG, L("Attn : Lim S.B.", ATTN_BOX)], "Lim S.B.");
-  assert.equal(sb.customer, "KONG CHENG RESTAURANTS SDN BHD");
-  assert.equal(sb.contact, "Lim S.B.");
-  assert.equal(sb.outcome, "attn_overridden");
-});
-
-test("S4 end-to-end: slash and hyphen renderings CONTEST rather than merge", () => {
-  const r = run([VENDOR,
-    L("Bill To: A/B TRADING SDN BHD", box(0.72, 2.15, 3.60, 2.29)),
-    L("Customer : A-B TRADING SDN BHD", box(0.72, 2.32, 3.60, 2.46)),
-  ], "A-B TRADING SDN BHD", box(0.72, 2.32, 3.60, 2.46));
-  assert.equal(r.outcome, "contested", "two punctuation classes are two names, so this HOLDS");
-  assert.equal(r.customer, undefined);
-});
-
-test("THE CONTROL: F7's own measured defect still fixes, and the honest narrowing is real", () => {
-  // (c) the reason this reader exists — KONG CHENG RESTAURANTS SDN BHD carries the entity signal.
-  const fixed = run([VENDOR, BILL_TO, KONG_CHENG, ATTN], "Lim Xiao Shan");
-  assert.equal(fixed.customer, "KONG CHENG RESTAURANTS SDN BHD");
-  assert.equal(fixed.contact, "Lim Xiao Shan");
-  assert.equal(fixed.outcome, "attn_overridden");
-  // (d) the narrowing, pinned so it is a recorded decision: an UNSUFFIXED buyer never overrides.
-  // `SIFU LAB` is a real customer on this client's books (acceptance-h1 row 13).
-  const narrowed = run([VENDOR, L("Bill To: SIFU LAB", box(0.72, 2.30, 2.60, 2.45)), ATTN], "Lim Xiao Shan");
-  assert.equal(narrowed.customer, "Lim Xiao Shan", "abstains — typed stands, exactly today's behaviour");
-  assert.notEqual(narrowed.outcome, "attn_overridden");
 });

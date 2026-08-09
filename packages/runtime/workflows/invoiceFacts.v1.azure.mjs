@@ -91,8 +91,21 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  genuinely new fact set rather than a silent supersede. The reader's counters ride the
  *  envelope under `customer_identity`. THIS ONE DOES CARRY A DB CHANGE — `invoice.contact_person`
  *  joins persist_invoice_facts' CLOSED field_path allowlist in its own migration; without it
- *  every extraction carrying the new fact would raise CLR10 and forfeit outright. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v10";
+ *  every extraction carrying the new fact would raise CLR10 and forfeit outright.
+ *  v11 (the A1 field test — F7 REOPENED): v10 SHIPPED AND DID NOT WORK. Both real KONG CHENG
+ *  documents re-extracted cleanly under v10 and `customer_name` came back BYTE-IDENTICAL to v1,
+ *  still the contact person: X7's only candidate-GENERATION surface was a bill-to LABEL, and
+ *  those invoices print none, so every wall the reviews hardened sat unreached (the live receipts
+ *  read zero in every refusal head). Two repairs ride this bump — geometry-anchored generation on
+ *  label-less pages (lib/invoice-anchor-sweep.mjs), and the vendor attribution term becoming
+ *  IDENTITY rather than PROXIMITY after the capture showed Azure types VendorName onto a top-left
+ *  LOGO sitting nearer the buyer than the buyer's own anchor. Plus ruling 2: a typed value the
+ *  reader positively read AS its own accepted contact is WITHDRAWN when no party is reachable,
+ *  instead of shipping the same human as both `contact_person` and `customer_name`. NO DB CHANGE
+ *  — `0052`'s allowlist splice already covers `invoice.contact_person`, so this half is runtime
+ *  only. Bumped because the SAME document yields a DIFFERENT customer_name than under v10, and
+ *  the A-leg replay must be able to tell a v10 fact set from a v11 one. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v11";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {

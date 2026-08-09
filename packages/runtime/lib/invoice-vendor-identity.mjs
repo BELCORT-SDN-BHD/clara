@@ -263,7 +263,16 @@ export function anchorsFromTypedFields(fields) {
       ymin: Math.min(...ys), ymax: Math.max(...ys),
     };
   };
-  return { vendor: regionOf(fields?.VendorName), customer: regionOf(fields?.CustomerName) };
+  // `vendorName` is the ONE piece of vendor CONTENT that crosses into attribution, and it crosses
+  // in ONE direction only: X7 uses it to REFUSE a buyer candidate that IS the seller's own name.
+  // Review law 3 says a name is a projection of the thing, not the thing — which is exactly why
+  // it may only ever refuse. A false match costs an abstain (Azure's typed value stands); it can
+  // never admit anything. See `customerAttributionFailure` for the measurement that forced it.
+  return {
+    vendor: regionOf(fields?.VendorName),
+    customer: regionOf(fields?.CustomerName),
+    vendorName: String(fields?.VendorName?.content ?? fields?.VendorName?.valueString ?? ""),
+  };
 }
 
 /** Full 2D extent of a flat polygon, scaled into the page's frame, or null when unusable. */

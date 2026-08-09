@@ -167,10 +167,17 @@ reached the books unchallenged. X7 supplies the missing second reader.
   The person is emitted as the **new `invoice.contact_person` fact**.
 - **Twins X6's architecture** (`lib/invoice-customer-identity.mjs` + `lib/invoice-party-grammar
   .mjs`): uniqueness-or-nothing · the label + party-name gate · **customer-block attribution**
-  (a candidate must sit next to the typed `CustomerName` region and closer to it than to
-  `VendorName`) · reconciliation against the typed emission. **X6's insight re-applied is what
-  makes it work on the very documents it fixes:** Azure's typed CustomerName picked the wrong
-  LINE but a line *inside* the bill-to box — its content is wrong, its **geometry** is sound.
+  (a candidate must sit within the gate of the typed `CustomerName` region, must not intersect the
+  typed `VendorName` region, and must not BE the typed vendor's name) · reconciliation against the
+  typed emission. **X6's insight re-applied is what makes it work on the very documents it fixes:**
+  Azure's typed CustomerName picked the wrong LINE but a line *inside* the bill-to box — its
+  content is wrong, its **geometry** is sound.
+- **TWO CANDIDATE-GENERATION SURFACES** *(the A1 field test, 2026-08-09 — see the reopening record
+  below).* A **bill-to LABEL** generates candidates; on a page that prints **no such label at all**,
+  the typed `CustomerName` **anchor's neighbourhood** generates them instead
+  (`lib/invoice-anchor-sweep.mjs`), behind the identical wall set. The sweep is gated on the
+  LABEL's absence, not on "no party found", so a candidate the label path REFUSED never gets a
+  second hearing on proximity.
 - **No top-band analogue**, deliberately: a bill-to block has no positional convention
   comparable to a letterhead, and an unmeasured band is a guess wearing a threshold.
 - **THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR** *(orchestrator ruling on the
@@ -178,9 +185,11 @@ reached the books unchallenged. X7 supplies the missing second reader.
   after BOTH review lanes broke them by executing the code).* Its lawful actions are exactly four:
   **collapse** (agrees with typed → one row, the typed one) · **override** (non-empty typed ==
   the reader's own Attn person → the party wins; the F7 branch) · **withdraw** on unexplained
-  disagreement · **withdraw** on a contested landscape. Its two lawful silences: reader
-  absent/refused → typed stands byte-identically; reader has a party but typed is empty/absent →
-  **nothing emitted** (`sole_authorship_refused`).
+  disagreement · **withdraw** on a contested landscape · **withdraw** when typed == the reader's
+  own ACCEPTED Attn person and **no party is reachable** (`typed_withdrawn_attn`, ruling 2 of the
+  A1 field test — a known person may never pass as a confident customer). Its two lawful silences:
+  reader absent/refused → typed stands byte-identically; reader has a party but typed is
+  empty/absent → **nothing emitted** (`sole_authorship_refused`).
   - *Overrule 1 — sole authorship DELETED.* With an empty-but-regioned typed `CustomerName` the
     first cut emitted a line item, a contact person, a caption (`Name:`) and a street address as
     `customer_name` — each a WRONG identity manufactured where pass-through had supplied none.
@@ -343,7 +352,8 @@ reached the books unchallenged. X7 supplies the missing second reader.
 - **DB half is mandatory, not optional:** `invoice.contact_person` joins `persist_invoice_facts`'
   **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
   the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the
-  whole persist. `NORMALIZATION_VERSION` → **v10**.
+  whole persist. `NORMALIZATION_VERSION` → **v10**, then **v11** at the A1 field test below (the
+  v11 half is RUNTIME-ONLY — `0052`'s allowlist splice already covers `invoice.contact_person`).
 ### X7 — RECORDED RESIDUAL (5): suffixed relational phrases *(round 5, OWNER-VETOABLE)*
 
 > **The one-paragraph record, for the owner.** X7 reads the buyer's name off the invoice layout
@@ -354,12 +364,13 @@ reached the books unchallenged. X7 supplies the missing second reader.
 > explicitly refused; reviewers constructed more and **23 of the 38 pinned forms still pass, 5
 > producing a wrong customer name end-to-end**. It fires when the phrase sits inside the bill-to
 > block **and** Azure independently typed the `Attn` person as the customer **and** no
-> suffix-bearing line appears earlier in that block; when Azure typed a seller name, the phrase
-> must also sit nearer the buyer box than the seller's. *(Corrected round 6: an earlier record
+> suffix-bearing line appears earlier in that block. *(Corrected round 6: an earlier record
 > claimed four coincidences "each individually necessary". Two were disproved — a **suffixed**
 > real buyer printed **after** the phrase still loses, so what matters is scan ORDER not the
-> buyer's suffix; and the seller comparison does not run at all when Azure typed no VendorName.
-> The residual is **wider** than that story.)* **The harm ceiling
+> buyer's suffix; and the seller comparison did not run at all when Azure typed no VendorName.
+> Corrected again after the A1 field test: **the seller-PROXIMITY comparison no longer exists**,
+> so it is not a condition at all, and the anchor sweep adds a **second** way in on label-less
+> pages. The residual is **wider** than either earlier story.)* **The harm ceiling
 > is a wrong DRAFT**: counterparty creation happens at human approval and no unattended-posting
 > path reaches this field — the same maker/checker wall that caught the original KONG CHENG
 > defect. A proposed rule (refuse when a lowercase relational phrase precedes an upper-cased name)
@@ -394,13 +405,57 @@ the constructed set is **23 distinct**, not 24 (`trading as` was contributed by 
 and counted twice); and the legitimate loss is **4**, not 7 — the extra 3 were an artefact of
 scraping test files for the corpus, which swept up leak forms as the batteries grew.*
 
-- **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
-  **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so
-  unlike X6 the defaults are conservative opts and the reader is built to ABSTAIN when one is
-  wrong; the **live replay is the measurement**. (ii) Attribution anchors on the typed
+- **Two honest limits, recorded rather than discovered later.** (i) ~~The thresholds are
+  **UNMEASURED**~~ — **DISCHARGED by the A1 field test.** The live replay happened, it FAILED, and
+  the real page geometry is now in the repo as a fixture (`tests/x7-kongcheng-real.mjs`), so the
+  defaults are measured against the capture: the buyer sits **0.736in** from the typed anchor and
+  the seller's letterhead **2.205in**, against a **1.0in** gate. Every threshold remains an opt and
+  a wrong one still ABSTAINS. (ii) Attribution anchors on the typed
   `CustomerName` region, so X7 can never supply a name where Azure typed none — the **FINCARE**
   row (acceptance-h1 row 10, held `customer_name_missing`) is NOT fixed by F7, and relaxing the
   anchor to "far from the vendor" would be absence-as-evidence, which review law 2 forbids.
+
+### X7 — THE A1 FIELD TEST: F7 REOPENED, AND WHAT IT COST *(2026-08-09)*
+
+**v10 shipped and did not work.** Both KONG CHENG documents re-extracted cleanly (version_n 2,
+supersede + repoint correct) and `invoice.contact_person = "Lim Xiao Shan"` was emitted correctly
+— but `invoice.customer_name` came back **byte-identical to v1**, still the person. The live
+receipts named the mechanism in counters: `split_line_scanned: 0` with **every refusal head at
+zero**. The reader had not refused the company; **it had never generated it as a candidate.**
+
+| what was believed | what the capture measured |
+|---|---|
+| the fix would fire once the walls admitted the buyer | **the buyer was never enumerated** — party generation hung off a bill-to LABEL, and these invoices **print none** |
+| the walls "would admit line 7 instantly" | the `closer_to_vendor` wall **REFUSED it**: Azure typed `VendorName` onto the top-left **LOGO** (`M\nROME\nSECRETARY`), which sits **0.334in** above the buyer while the buyer's own typed anchor is **0.736in** below |
+| proximity could be repaired into a discriminator | **it cannot.** The battery's own wrong-party cell is the SAME SHAPE (0.91 / 0.95) and the candidate that must be ADMITTED is the more vendor-ward of the two — no threshold separates them in the right direction |
+
+**The two repairs.** (1) **Generation** reaches a geometry-anchored population on label-less pages
+(`invoice-anchor-sweep.mjs`), behind the unchanged wall set — measured on the real capture,
+**exactly one** line within the gate clears the entity-suffix wall on each document, so
+uniqueness-or-nothing holds with room. (2) **The vendor term became IDENTITY, not proximity:**
+`in_vendor_block` (the candidate intersects the typed VendorName region) and `is_vendor_name` (its
+party key equals the typed VendorName's). Both **refuse only** — review law 3 says a name is a
+projection, so it may never admit — and a false match costs an abstain.
+
+**Ruling 2 — the twice-emission was itself a defect.** v10 shipped the same human twice: honestly
+as `contact_person`, and again as a confident `customer_name`. When the reader positively read the
+typed value AS its own accepted contact and no party is reachable, the typed row is now
+**withdrawn** (`typed_withdrawn_attn`) and the lane holds on `customer_name_missing` — the FINCARE
+shape, where a human already looks.
+
+**What the corpus paid.** Twelve battery cells changed expectation; **none** was a weakening. Ten
+asserted the person *standing* as `customer_name` — precisely the twice-emission — and now assert
+its withdrawal, a strictly stronger claim. One is the wrong-party cell above, rewritten around
+identity, with a new assertion that the sweep never runs on a labelled page. One now reads the
+real buyer where it used to read the person. **The A1 gate** (`x7-real-capture.test.mjs`) is the
+crown cell and asserts `customer_name = "KONG CHENG RESTAURANTS SDN BHD"` through the full
+`normalizeAzureInvoice` on both real documents.
+
+**The standing lesson, for the batch ADR.** Ninety-six synthetic cells were green while the
+product was broken on the only two documents it existed to fix, because **the corpus was authored
+by the same reasoning that authored the reader** — it could only confirm that reasoning. Six review
+rounds hardened the WALLS; none of them asked whether GENERATION could reach the document. *A wall
+that never refused anything is not a wall that held — it is a wall that was never asked.*
 
 ## 3. Falsifiable gates
 
