@@ -12,13 +12,17 @@ truth (`docs/architecture/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/REBUILD-PLAN.md`.
 >
-> **Migration ledger (as of 2026-08-08).** The repo carries **49 migrations,
-> `0001`–`0050`** (the sequence skips `0032`, which never existed — 49 files, not 50),
-> and **live Supabase is applied through the frontier `0050`**. The most recent arrivals
-> are the §7-A pair `0046`/`0047` (the unattended sales drafter + the F1 settle-guard
-> fix, ADR-063/064) and the post-close fix train `0048` (F5 sweep-cap own-run) ·
-> `0049` (zero-evidence direction abstains; born `clara.migration_receipts`) ·
-> `0050_egress_release_skip_consent.sql` (F4, the release/re-hold storm fix).
+> **Migration ledger (as of 2026-08-09).** The repo carries **53 migrations,
+> `0001`–`0054`** (the sequence skips `0032`, which never existed — 53 files, not 54),
+> and **live Supabase is applied through the frontier `0054`**. The most recent arrivals
+> are the **F6–F9 batch** (ADR-066, applied 2026-08-08 23:24Z in ONE D1-quiesced ceremony):
+> `0051_extraction_recovery_door.sql` (F6 — both failed populations get a lawful retry) ·
+> `0052_customer_identity_facts.sql` (F7 — `invoice.contact_person` joins the CLR10
+> allowlist) · `0053_autodraft_readmit_after_withdrawal.sql` (F8 — the five-conjunct
+> re-admit arm) · `0054_region_ordinal.sql` (F9 — the stable `region_idx`). Before them:
+> the §7-A pair `0046`/`0047` (ADR-063/064) and the post-close fix train `0048` (F5
+> sweep-cap own-run) · `0049` (zero-evidence direction abstains; born
+> `clara.migration_receipts`) · `0050_egress_release_skip_consent.sql` (F4).
 >
 > **This ledger is a snapshot and WILL go stale — verify before relying on it.**
 > The authoritative reads are `select count(*), max(version) from clara.schema_migrations`

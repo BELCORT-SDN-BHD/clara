@@ -98,11 +98,17 @@ Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability; the registry now runs
-`chatTurn_v9` (v1–v8 stay frozen + reachable for parked runs; v7 = Wave B's
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability; **the registry pins
+`chatTurn: chatTurn_v10` and `autoDraft: autoDraft_v7`** (as of the F6–F9 batch, ADR-066;
+live on `clara-runtime` **v60**, with the repo frontier at migration `0054`). v1–v9 stay
+frozen + reachable for parked runs; v7 = Wave B's
 `'wiki_coding'` pack purpose + the txn-local `clara.pack_consumer` GUC + the
 citation-visible wiki framing; v8 = the Wave-C closing batch; v9 = the §7-A
-PR-RUNTIME cut — registry.ts's inline comments carry the per-version details): the model can **draft**
+PR-RUNTIME cut; **v10 = F9's cite-by-index cut** — evidence elements carry
+`region_idx` and the SERVER resolves them to `region_id`, so a model-transcribed UUID can
+no longer exist (`autoDraft_v7` is the same cut on the unattended side; both closures are
+`deployed`-locked in `frozen-workflows.json`). registry.ts's inline comments carry the
+per-version details. The model can **draft**
 ONE journal entry per turn — a supplier bill, a sales invoice / sales credit note, or
 a generic voucher-style `journal_entry` — always for a human to approve; it never
 approves or posts (agent-never-signs, ADR-015). New in v2:

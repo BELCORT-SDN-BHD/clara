@@ -26,12 +26,15 @@
 
 Ordered by dependency + risk; each wave keeps the app runnable.
 
-> **CURRENT (2026-08-08, the Wave-E-contract close) — read this line, not the first dated block below.**
-> **49 migrations (frontier `0050`) · Fly `clara-runtime` v58 · §7-A CLOSED (ADR-063/064) ·
-> WAVE E CONTRACT RATIFIED AND MERGED (ADR-065; `docs/plan/wave-e-contract.md`,
-> E-R1..E-R14; the LAW amended at E-R4).** Waves A / A2 / A2.1 / B / C / D and §7-A are
-> closed; **NEXT = the Wave E BUILD, opening with the F6–F9 fix batch** (tasks #31–34),
-> then the campaign per the contract (ONE campaign, dependency-ordered acceptance).
+> **CURRENT (2026-08-09, the F6–F9 first-strike close) — read this line, not the first dated block below.**
+> **53 migrations (frontier `0054`) · Fly `clara-runtime` v60 · §7-A CLOSED (ADR-063/064) ·
+> WAVE E CONTRACT RATIFIED (ADR-065; `docs/plan/wave-e-contract.md`, E-R1..E-R14; the LAW
+> amended at E-R4) · THE WAVE E BUILD IS OPEN AND ITS FIRST STRIKE — the F6–F9 fix batch
+> (tasks #31–34) — is BUILT, DEPLOYED AND ACCEPTED (ADR-066; as-run evidence
+> `docs/plan/wave-e-f6f9-acceptance.md`; F6 accepted PARTIALLY WITNESSED).** Waves
+> A / A2 / A2.1 / B / C / D and §7-A are closed; **NEXT = the Wave E campaign proper** —
+> periods + close · the FS pack + reporting engine + metric algebra/catalog · the ad-hoc
+> authoring lane · the client-facts trio (ONE campaign, dependency-ordered acceptance).
 > Everything that follows is the CHRONOLOGICAL record, **oldest first** — each
 > `STATUS (date)` block was true on its date and is superseded by the ones below it. The
 > live pin lives in `CLAUDE.md`; the open register is PROJECTLOG PART 2.
