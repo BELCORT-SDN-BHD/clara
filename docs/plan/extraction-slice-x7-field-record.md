@@ -137,3 +137,56 @@ is the divergence itself: proving one half would prove nothing about the law.
 
 **N3** — the sweep header named only `in_vendor_block` as its live refusal; `is_vendor_name` fires
 there too. Corrected.
+
+### X7 — THE OVER-JOIN ROUND *(native spot-check; N1b, plus Codex CX1/CX2)*
+
+**The glyph-run join closed one direction and opened the other.** A letter-spaced wordmark —
+`R O M E  S E C R E T A R Y`, an entirely ordinary way to set a logo — folds to the SINGLE token
+`{romesecretary}`, and the candidate's `{rome, secretary}` is not a subset of one token. Executed
+end-to-end: **the SELLER was emitted as `customer_name` with `is_vendor_name=0`** — the wall never
+even counted. Mid-word splits (`ROME SECRE TARY`) and uneven fragments (`RO ME SECRETARY`) leak
+identically. The live pair stayed green only because its seller line sits at 2.205in: the same luck
+the record already names.
+
+**The lesson, and why the fix is shaped as it is: TOKENISATION ITSELF IS THE UNRELIABLE PART.** OCR
+moves boundaries in *both* directions, so any rule comparing them can be defeated by moving them.
+The second term therefore throws boundaries away entirely — concatenate each side's ordered tokens
+and ask whether the candidate's whole name occurs inside the seller's, in the **same single
+direction** as the subset term.
+
+**The re-derivation, over a 33-row corpus** (`tests/x7-vendor-identity-derivation.mjs` — the
+rejected predicates stay executable in CI, the round-5 precedent):
+
+| rule | leaks | false holds | declared collateral |
+|---|---|---|---|
+| **shipped** (subset OR substring) | **0** | **0** | 9 |
+| subset only | 8 | 0 | 4 |
+| suffix-only containment | 2 | 0 | 5 |
+| reverse direction | 3 | 1 (franchise) | 4 |
+
+**A tighter alternative was derived and killed on measurement.** Suffix-only containment is
+*genuinely more accurate* — 5 collateral holds against 9, because it admits the interior-substring
+companies the shipped rule refuses. **Sum the two failure columns and it looks like the better
+rule, which is exactly why they are never summed.** It is rejected on the leak column alone: with
+noise glued INTO a word rather than split off it (`ROME SECRETARYM`) it admits the seller. A hold
+is recoverable by the human already reading the document; a wrong counterparty is not. The reverse
+direction stays forbidden — `romesecretary` IS inside `romesecretarypenang`, so it refuses a
+legitimate branch buyer while closing none of the leaks.
+
+**CX1 — the declaration must track the FINAL fold.** Each round added a term and widened the merge
+set, so a list written against an earlier fold reads as complete while being stale. The safe-holds
+are now enumerated one per distinction the fold destroys, **three → five**: (a) strict token subset
+· (b) punctuation class · (c) legal suffix · **(d) initials vs concatenation** (`A & C & M & E
+TRADING` ≡ `ACME TRADING` — the join cannot tell an initialism from the word it spells, because on
+the page neither can a reader who sees only fragments) · **(e) whole name inside a longer name**
+(`MASTER`/`MASTERCRAFT`, `CARS`/`CARSTAR`, `SUN`/`SUNWAY`, `WALL`/`GREATWALL`, CJK `旺发`/`鑫旺发展`).
+Every row is pinned, and each is asserted to be a *genuinely distinct* `partyKey` — otherwise it is
+a correct refusal wearing a residual's label.
+
+**CX2** — the fragment cells now assert `is_vendor_name=1` positively and carry the reverse
+spaced-Latin form. A refusal that is not counted cannot be mined on live, so "did not emit" is not
+sufficient evidence that the wall fired.
+
+**One structural note:** the comparison fold moved to `packages/runtime/lib/invoice-identity-fold.mjs`.
+The lexicon serves ADMISSION, where folding **narrows**; this serves REFUSAL, where folding
+**merges**. Two opposite folding disciplines in one file is what made them easy to confuse.

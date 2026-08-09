@@ -165,6 +165,49 @@ function onAllSurfaces(vendorContent, buyerName) {
   };
 }
 
+/** REFUSE also means COUNTED: a wall that refuses silently cannot be mined on live (CX2). */
+function assertRefusedAndCounted(out, why) {
+  assert.equal(customerOf(out), undefined, why);
+  assert.equal(out.envelope.customer_identity.is_vendor_name, 1, `${why} — and the refusal is COUNTED`);
+}
+
+test("N1b: an OVER-JOINED vendor name is refused — the direction the join itself opened", () => {
+  // THE SECOND HALF OF N1, and the reason this file has two fragment cells rather than one.
+  // Round 1 joined single-glyph runs, which closed the UNDER-fragmented seller and OPENED the
+  // over-joined one: a letter-spaced wordmark folds to the SINGLE token {romesecretary}, and the
+  // candidate's {rome, secretary} is not a subset of one token. Executed end-to-end, the SELLER
+  // was emitted as customer_name with is_vendor_name=0 — the wall never even counted.
+  //
+  // The fix throws token boundaries away entirely (concatenated substring), because TOKENISATION
+  // IS THE UNRELIABLE PART: OCR moves boundaries in both directions, so any rule that compares
+  // them can be defeated by moving them.
+  const OVER_JOINED = [
+    ["R O M E  S E C R E T A R Y", "ROME SECRETARY SDN BHD"],  // letter-spaced logo
+    ["ROME SECRETARY", "R O M E  S E C R E T A R Y SDN BHD"],  // …and its REVERSE (CX2)
+    ["ROME SECRE TARY", "ROME SECRETARY SDN BHD"],             // mid-word OCR split
+    ["RO ME SECRETARY", "ROME SECRETARY SDN BHD"],             // uneven fragments
+    ["R\nO\nME SECRETARY", "ROME SECRETARY SDN BHD"],          // mixed
+    ["ROME SECRETARYM", "ROME SECRETARY SDN BHD"],             // noise GLUED into the word
+  ];
+  for (const [vendor, buyer] of OVER_JOINED) {
+    const label = `${JSON.stringify(vendor)} vs ${buyer}`;
+    assertRefusedAndCounted(withVendor(vendor, [buyerLine(buyer), ATTN_LINE]), `${label} — sweep`);
+    assertRefusedAndCounted(withVendor(vendor, [BILL_TO, buyerLine(buyer), ATTN_LINE]), `${label} — split`);
+    assertRefusedAndCounted(
+      withVendor(vendor, [L(`Bill To: ${buyer}`, box(0.72, 2.30, 3.90, 2.45)), ATTN_LINE]), `${label} — same-line`);
+  }
+});
+
+test("N1b: the REVERSE containment direction must never be added", () => {
+  // The one clause that would look symmetric and is forbidden. `romesecretary` IS inside
+  // `romesecretarypenang`, so a reverse term turns the franchise calibration into a refusal —
+  // a legitimate branch buyer lost to a wall built for the seller. Asserted as a live property
+  // rather than a comment, because a future reader WILL notice the asymmetry and try to fix it.
+  const franchise = withVendor("ROME SECRETARY SDN BHD", [buyerLine("ROME SECRETARY (PENANG) SDN BHD"), ATTN_LINE]);
+  assert.equal(customerOf(franchise), "ROME SECRETARY (PENANG) SDN BHD");
+  assert.equal(franchise.envelope.customer_identity.is_vendor_name, 0);
+});
+
 test("N1: a FRAGMENTED vendor name still refuses its own full spelling — all three surfaces", () => {
   // Executed and CONFIRMED: each of these emitted THE SELLER as customer_name with
   // is_vendor_name=0, because the tokens compared were `{a,c,m,e}` against `{acme}`. Both
@@ -225,18 +268,31 @@ test("N2: the comparison fold is DELIBERATELY coarser than the contest key", () 
   }
 });
 
-test("N2: both declared safe-holds HOLD, visibly, on is_vendor_name", () => {
-  // (b) PUNCTUATION CLASS and (c) LEGAL SUFFIX from the residual list. Each is an over-refusal:
-  // the buyer really is a different registered entity from the seller, and the lane holds anyway.
-  // The price of a coarse fold, paid deliberately — the alternative admits `ACME BERHAD` (the
-  // seller in its other lawful form) as the buyer, and a wrong counterparty outranks a hold.
-  const punctuation = withVendor("A-B TRADING SDN BHD", [buyerLine("A/B TRADING SDN BHD"), ATTN_LINE]);
-  assert.equal(customerOf(punctuation), undefined);
-  assert.equal(punctuation.envelope.customer_identity.is_vendor_name, 1, "the hold is COUNTED, not silent");
-
-  const suffix = withVendor("ACME BERHAD", [buyerLine("ACME SDN BHD"), ATTN_LINE]);
-  assert.equal(customerOf(suffix), undefined);
-  assert.equal(suffix.envelope.customer_identity.is_vendor_name, 1, "the hold is COUNTED, not silent");
+test("N2/CX1: ALL FIVE declared safe-holds hold, visibly — enumerated from the FINAL fold", () => {
+  // THE DECLARATION MUST MATCH THE RULE AS IT FINALLY STANDS. Each review round added a term and
+  // therefore widened the merge set, and a list written against an earlier fold is worse than no
+  // list — it reads as complete. So this cell enumerates one row per distinction the fold
+  // destroys, and every row is an over-refusal that HOLDS VISIBLY on `is_vendor_name`.
+  const HOLDS = [
+    ["ACME HOLDINGS SDN BHD", "ACME SDN BHD", "(a) strict token subset"],
+    ["A-B TRADING SDN BHD", "A/B TRADING SDN BHD", "(b) punctuation class"],
+    ["ACME BERHAD", "ACME SDN BHD", "(c) legal suffix"],
+    // (d) is CX1's: the glyph-run join cannot tell an initialism from the word it spells, because
+    // on the page neither can a reader who sees only the fragments. Different `partyKey`s, one
+    // comparison fold — and it arrived with the join, not with the original subset rule.
+    ["ACME TRADING SDN BHD", "A & C & M & E TRADING SDN BHD", "(d) initials vs concatenation"],
+    // (e) is the widest, and it arrived with the substring clause in this same commit. Throwing
+    // token boundaries away is what makes the term survive OCR moving them, and it is also what
+    // lets a short buyer name collide with a longer seller's.
+    ["MASTERCRAFT SDN BHD", "MASTER SDN BHD", "(e) whole name inside a longer name"],
+    ["鑫旺发展 SDN BHD", "旺发 SDN BHD", "(e) …in CJK, where there are no spaces to help"],
+  ];
+  for (const [seller, buyer, label] of HOLDS) {
+    assertRefusedAndCounted(withVendor(seller, [buyerLine(buyer), ATTN_LINE]), `${label}: ${buyer} vs ${seller}`);
+    // …and each pair really IS two different registered names — otherwise it is not a safe-hold,
+    // it is a correct refusal wearing a residual's label.
+    assert.notEqual(partyKey(buyer), partyKey(seller), `${label}: the pair must be genuinely distinct`);
+  }
 });
 
 test("C2: with NO typed VendorName the subset term cannot fire at all", () => {

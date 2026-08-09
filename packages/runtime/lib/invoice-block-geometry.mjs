@@ -4,7 +4,7 @@
 // seam: `invoice-party-grammar.mjs` owns SPELLING, this file owns POSITION, and the reader owns
 // which line wins and what happens when two readings disagree.
 //
-import { candidateIsVendorSubset } from "./invoice-entity-lexicon.mjs";
+import { candidateIsVendorIdentity } from "./invoice-identity-fold.mjs";
 
 // Every threshold that crosses into this file arrives ALREADY CONVERTED into the page's own
 // frame by the caller (via X2's `pageFrame`), so nothing here knows about inches or pixels —
@@ -66,9 +66,11 @@ export function boxesOverlap(a, b) {
  *   `in_vendor_block` — the candidate INTERSECTS the region where Azure found the vendor's name,
  *                       so it IS that text. Positive, geometric, and what the read actually SAW.
  *   `is_vendor_name`  — the candidate says NOTHING the typed VendorName does not already say
- *                       (`candidateIsVendorSubset`, whose header carries the calibration points).
- *                       Exact key equality was the first cut and Codex C2 broke it with the
- *                       partial-logo shape Azure actually produces; the subset rule replaced it.
+ *                       (`candidateIsVendorIdentity` in `invoice-identity-fold.mjs`, whose header
+ *                       carries the calibration points and the five named safe-holds). Exact key
+ *                       equality was the first cut; two review rounds replaced it with a token
+ *                       SUBSET term and then a concatenated-SUBSTRING term, because OCR moves
+ *                       token boundaries in both directions and neither term alone survives that.
  * Both only ever REFUSE (review law 3: a name is a projection, so it may not admit anything), so
  * a false match costs an abstain and Azure's typed value stands — never a wrong party.
  *
@@ -77,16 +79,16 @@ export function boxesOverlap(a, b) {
  * 2.949,0.313) sits 2.205in from the customer anchor against a 1.0in gate, and a second registered
  * name reaching the ballot is a CONTEST, which emits nothing. Both measured, not assumed.
  *
- * @param {{page:number,xmin:number,xmax:number,ymin:number,ymax:number,baseTokens?:Set<string>}} candidate
- *        `baseTokens` is the candidate's suffix-stripped token set, supplied by the caller so this
- *        file keeps owning POSITION only and never learns how a name is spelled.
+ * @param {{page:number,xmin:number,xmax:number,ymin:number,ymax:number,identity?:object}} candidate
+ *        `identity` is the candidate's comparison FORM ({tokens, joined}), supplied by the caller
+ *        so this file keeps owning POSITION only and never learns how a name is spelled.
  */
 export function customerAttributionFailure(candidate, anchors, limit) {
   const customerDistance = boxDistance(candidate, anchors?.customer);
   if (customerDistance === null) return "no_customer_anchor";
   if (customerDistance > limit) return "customer_anchor_far";
   if (boxesOverlap(candidate, anchors?.vendor)) return "in_vendor_block";
-  if (candidateIsVendorSubset(candidate.baseTokens, anchors?.vendorTokens)) return "is_vendor_name";
+  if (candidateIsVendorIdentity(candidate.identity, anchors?.vendorIdentity)) return "is_vendor_name";
   return null;
 }
 
