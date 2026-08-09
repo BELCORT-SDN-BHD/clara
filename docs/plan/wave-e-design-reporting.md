@@ -11,14 +11,14 @@
 > **`wave-e-design-reporting-part2.md` = §6–§12** (lane ε · lane ζ · lane η · the floors, lane map
 > and decision ledger). Section numbering is continuous; "reporting §7" resolves in Part 2.
 >
-> **THE PACKET IS SIX FILES.** The other four, refer-do-not-duplicate: `wave-e-design-skeleton.md`
+> **THE PACKET IS SEVEN FILES.** The other five, refer-do-not-duplicate: `wave-e-design-skeleton.md`
 > (**§0–§2.4** — campaign frame, lanes, ceremony · the period spine · the gate catalog · drawers 1–2)
-> · `wave-e-design-skeleton-part2.md` (**§2.5–§2.10** — the closed-period wall + permit, continuity,
-> close receipts, reopen, E-R6 activation, the E-R11 keys) · `wave-e-design-skeleton-part3.md`
-> (**§2.11–§2.12** lane γ's snapshots/staleness/**the `clara.reporting_periods` registry this document
-> binds to** · **§3** the E-R12 trio · §4 lane θ · §5 E-b/E-c pointers · §6 open questions) ·
-> `wave-e-acceptance-matrix.md` (the falsifiable cells — this document names obligations, that one
-> names oracles).
+> · `wave-e-design-skeleton-part2.md` (**§2.5–§2.8** — the closed-period wall + permit, continuity,
+> close receipts, reopen) · `wave-e-design-skeleton-part3.md` (**§2.9** E-R6 activation · **§2.10**
+> the E-R11 keys · **§2.11–§2.12** lane γ's snapshots/staleness/**the `clara.reporting_periods`
+> registry this document binds to**) · `wave-e-design-skeleton-part4.md` (**§3** the E-R12 trio · §4
+> lane θ · §5 E-b/E-c pointers · §6 open questions) · `wave-e-acceptance-matrix.md` (the falsifiable
+> cells — this document names obligations, that one names oracles).
 >
 > **Scope:** lanes **δ** (metric algebra + catalog + evaluator), **ε** (FS template layers,
 > wording structure, claim assessment, chart AST, sealed-artifact registry), **ζ** (render worker
@@ -106,11 +106,11 @@ both ASTs version identically)*. Closed JSON schema: **unknown fields rejected**
 
 Periods and entity are **parameters** (`$P0`, `$P-1`, `$CLIENT`) bound at evaluation, so a definition
 is period-agnostic and reusable. **A bound period is a `clara.reporting_periods` row id** *(R7 — lane
-γ owns the registry; its full DDL, RLS pair and grain-congruence constraints are skeleton §2.12)*. The
+γ owns the registry; its full DDL, RLS pair and grain-congruence constraints are `wave-e-design-skeleton-part3.md` §2.12)*. The
 cell records the bound period ids (field 2), through the junction table of §4.3.
 
 **`$P-1` resolves by CALENDAR ARITHMETIC on the grain — never "the prior registry row"** *(the
-round-2 finding, ruled into the design; skeleton §2.12 carries the producer half)*. The prior period
+round-2 finding, ruled into the design; `wave-e-design-skeleton-part3.md` §2.12 carries the producer half)*. The prior period
 of a month row is the **calendar-prior month**; of an `fy` row, the FY whose `ends_on` is `starts_on -
 1`. **A missing prior period resolves `absent` per §5.3** — it never falls back to the nearest earlier
 row. **The named hazard, so nobody re-introduces it:** a client whose registry holds January and March
@@ -321,7 +321,7 @@ migration and against application/agent/definer-bug mutation — **not** against
 per-migration tails, because they ship with the evaluator they freeze. **The CI/runtime half is
 ζ's** — `scripts/check-frozen-evaluators.mjs` + its manifest, and marking the render worker's
 determinism-critical modules `@frozen` for the EXISTING workflow lint. §12's lane table and the
-skeleton's §1 lane table both say exactly this and add nothing to it.
+`wave-e-design-skeleton.md` §1 lane table both say exactly this and add nothing to it.
 
 **OPTIONAL hardening — the event trigger, behind a LIVE PREFLIGHT** *(builder choice; the two round-1
 reviews disagree and BOTH positions are recorded, per R8)*.
@@ -356,7 +356,7 @@ scan (`:300`). *(The draft's hedge is withdrawn; the claim is proven.)*
 | # | Ruled field | Column(s) |
 |---|---|---|
 | 1 | definition version / normalized formula hash | `definition_version_id uuid null`, `formula_sha256 bytea not null`, **`resolved_inputs_sha256 bytea not null`** (§3.1's two hashes) |
-| 2 | periods | **`clara.metric_cell_periods(cell_id, period_id, ordinal)`** — a junction table with real FKs to `metric_cells` and `clara.reporting_periods` (skeleton §2.12), `unique (cell_id, ordinal)`, `on delete restrict`. **Not a `period_ids uuid[]` column** *(R7 / round-2)*: an array cannot carry a foreign key, so an array-typed field would let a cell cite a period id that does not exist — provenance that references nothing is the absence-as-evidence defect wearing a column. `ordinal` preserves the argument order `evaluate_metric_v1` was called with |
+| 2 | periods | **`clara.metric_cell_periods(cell_id, period_id, ordinal)`** — a junction table with real FKs to `metric_cells` and `clara.reporting_periods` (`wave-e-design-skeleton-part3.md` §2.12), `unique (cell_id, ordinal)`, `on delete restrict`. **Not a `period_ids uuid[]` column** *(R7 / round-2)*: an array cannot carry a foreign key, so an array-typed field would let a cell cite a period id that does not exist — provenance that references nothing is the absence-as-evidence defect wearing a column. `ordinal` preserves the argument order `evaluate_metric_v1` was called with |
 | 3 | account-set + presentation-map versions | `account_set_version_ids uuid[]`, `presentation_map_version_id` |
 | 4 | input values and entry/document references | `inputs jsonb not null`, `entry_ids uuid[]`, `document_ids uuid[]` |
 | 5 | books watermark | `books_watermark` → lane γ's snapshot token |

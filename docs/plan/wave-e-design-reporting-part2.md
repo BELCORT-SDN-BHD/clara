@@ -9,10 +9,11 @@
 > the decision ledger).** Section numbers are continuous across the two files; a citation like
 > "reporting §7" resolves here.
 >
-> **THE PACKET IS SIX FILES.** Besides this one and `wave-e-design-reporting.md` (§0–§5):
-> `wave-e-design-skeleton.md` (**§0–§2.4**) · `wave-e-design-skeleton-part2.md` (**§2.5–§2.10** — the
-> closed-period wall, continuity, close receipts, reopen, E-R6, the E-R11 keys) ·
-> `wave-e-design-skeleton-part3.md` (**§2.11–§2.12** lane γ · **§3** the E-R12 trio · §4–§6) ·
+> **THE PACKET IS SEVEN FILES.** Besides this one and `wave-e-design-reporting.md` (§0–§5):
+> `wave-e-design-skeleton.md` (**§0–§2.4**) · `wave-e-design-skeleton-part2.md` (**§2.5–§2.8** — the
+> closed-period wall, continuity, close receipts, reopen) · `wave-e-design-skeleton-part3.md`
+> (**§2.9** E-R6 activation · **§2.10** the E-R11 keys · **§2.11–§2.12** lane γ) ·
+> `wave-e-design-skeleton-part4.md` (**§3** the E-R12 trio · §4–§6) ·
 > `wave-e-acceptance-matrix.md` (the falsifiable cells).
 >
 > All of Part 1's banners, markers and evidence discipline apply unchanged: **the contract
@@ -39,7 +40,7 @@ a SKETCH; adoptions and amendments are named:
 **On "owner/partner"** *(R11)*: E-R11's factory default is written `owner/partner only`
 (`wave-e-contract.md:233`), and "partner" has no structural representation in the live role set. The
 campaign's **PROPOSED** default is owner-only, **pending the owner's one-line confirmation — an
-OWNER-OPEN item**, carried identically in the skeleton's §6 item 2. This document uses "key ② floor" and
+OWNER-OPEN item**, carried identically in `wave-e-design-skeleton-part4.md` §6 item 2. This document uses "key ② floor" and
 defers to that item rather than asserting either reading.
 
 **Wording tables are BORN two-versioned** *(ruled)*: one act inserts both vintages' row sets — but only
@@ -361,7 +362,7 @@ contract)*:
 6. **The event trigger — off the critical path, optional, live-probed (§4.2).**
 
 **Still with the OWNER, not decided here:** the E-R11 factory-default reading (owner-only vs
-owner/partner), carried as the same one-line open item in the skeleton's §6 item 2 (in
-`wave-e-design-skeleton-part3.md`) and cited at §6 above.
+owner/partner), carried as the same one-line open item in
+`wave-e-design-skeleton-part4.md` §6 item 2 and cited at §6 above.
 
 *End. §§2-11 are proposals at implementable precision; every ruled item is cited, never restated.*

@@ -3,15 +3,15 @@
 > **STATUS: DESIGN, NOT LAW.** `docs/plan/wave-e-contract.md` (E-R1..E-R14, ADR-065) is the law; on
 > any conflict the contract wins. Rulings are **cited** (`E-R2`), never restated at length.
 >
-> **THE PACKET IS SIX FILES — cite by filename, never duplicate.** This document carries **§0–§2.4**.
-> Its own continuations, one document in three files with continuous numbering:
-> `wave-e-design-skeleton-part2.md` = **§2.5–§2.10** (the closed-period wall + the permit, continuity
-> math, the close receipt family, the reopen path, E-R6 activation, the E-R11 keys) ·
-> `wave-e-design-skeleton-part3.md` = **§2.11–§6** (lane γ's month snapshots, staleness and period
-> registry; the E-R12 trio; lane θ; the E-b/E-c pointers; the open-question ledger). The other three
-> files: `wave-e-design-reporting.md` = **§0–§5** (lane δ) · `wave-e-design-reporting-part2.md` =
-> **§6–§12** (lanes ε/ζ/η) · `wave-e-acceptance-matrix.md` (the falsifiable cells, minted BEFORE
-> build per E-R9).
+> **THE PACKET IS SEVEN FILES — cite by filename, never duplicate.** This document carries
+> **§0–§2.4**. Its own continuations, one document in four files with continuous numbering:
+> `wave-e-design-skeleton-part2.md` = **§2.5–§2.8** (the closed-period wall + the permit, continuity
+> math, the close receipt family, the reopen path) · `wave-e-design-skeleton-part3.md` =
+> **§2.9–§2.12** (E-R6 activation, the E-R11 keys, lane γ's month snapshots, staleness and the period
+> registry) · `wave-e-design-skeleton-part4.md` = **§3–§6** (the E-R12 trio; lane θ; the E-b/E-c
+> pointers; the open-question ledger). The other three files: `wave-e-design-reporting.md` = **§0–§5**
+> (lane δ) · `wave-e-design-reporting-part2.md` = **§6–§12** (lanes ε/ζ/η) ·
+> `wave-e-acceptance-matrix.md` (the falsifiable cells, minted BEFORE build per E-R9).
 >
 > **MARKERS.** *(ruled — E-R#)* = contract law; changing it needs a new ADR. *(builder choice)* = a
 > mechanism this document picks, adjustable without reopening a ruling. *(DECIDED (orchestrator,
@@ -260,7 +260,17 @@ index ix_fy_client_span on (client_id, starts_on, ends_on)   -- the wall's per-w
 | `clara.attest_close_exception(p_close_run, p_check_key, p_reason, p_op_key)` | **key ②** | one drawer-2 item, bound to the exact gate-result row |
 | `clara.finalize_close(p_fy, p_self_attestation, p_op_key)` | **key ②** | `closing` → `closed`; **re-evaluates every gate in-transaction**; mints the close entry + receipt |
 | `clara.abandon_close(p_close_run, p_reason, p_op_key)` | **key ②** | `closing` → `open`; the run is stamped abandoned, never deleted |
-| `clara.reopen_fiscal_year(p_fy, p_reason, p_correction_target, p_op_key)` | **key ③** | §2.8 |
+| `clara.reopen_fiscal_year(p_fy, p_reason, p_correction_target, p_op_key)` | **key ③** | §2.8; acquires `row → 004 → 007-excl` per the lock order below |
+
+**Bodies this campaign PATCHES rather than creates — the D1 surface, named here so no lane discovers
+it late.** A new function is reviewed as new code; an existing audited body that gains a branch is a
+change-of-record with a D1 window and its own PATCHED-NOT-REBUILT discipline (§3.3's law, applied).
+Lane β owns both rows.
+
+| Live body | What β splices in | Why it is a patch, not a rebuild — and the D1/Law-1 posture |
+|---|---|---|
+| `clara._correction_period_state` (`0007_document_pipeline.sql:2420-2424`) | the E-R6 activation (§2.9) | it is a stub with no callers to preserve, so this one IS a `create or replace` — but the guard that reads it is NOT recut, and §2.9's tail proves that with a prestate/tail `md5(prosrc)` pair. **Judgement logic ⇒ Law-1 independent review.** |
+| **`clara.approve_opening_seed`** (`0017_wave_b.sql:3825`) | the drawer-1 `opening(n+1) = closing(n)` assertion against the prior receipt's PIN (§2.6 item 2) | **the live body is NOT the file text.** A repo-wide search for `create or replace function clara.approve_opening_seed` returns **zero** hits, so every change it has ever taken was a splice: 0018 §3b harvests it with `pg_get_functiondef` (`0018_gate_k_domain.sql:282-284`), replaces two counted anchors — the K5 correction-draft guard before `perform clara._assert_opening_tie(p_seed);` (`:290-296`) and the DB-authored `entry_count` (`:304-311`) — and re-installs it with `execute v_cur;` (`0018:314`). β must harvest → count → `replace()` → post-assert in that same idiom, **never retype from `0017`**, or 0018's two guards vanish silently. It is an **audited writer**, so β carries a D1 window for it; the assertion is a refusal branch, so it is **judgement logic ⇒ Law-1 independent review.** |
 
 **Serialization — a SHARED/EXCLUSIVE advisory pair on ONE key** *(the serialized close lock is ruled —
 E-R2 drawer 1; the shared/exclusive shape is a builder choice, and it is the fix for the MVCC race a
@@ -268,9 +278,11 @@ close-lock-only design leaves open).*
 
 - The four close verbs take `pg_advisory_xact_lock(203005004, hashtext(p_client::text))` — the house
   **client** rung — and **then** `pg_advisory_xact_lock(203005007, hashtext(p_client::text))`, the
-  **EXCLUSIVE** form, as their first two acts after the op reservation. **Every JE-writing path and
-  every gate-evidence path** takes `pg_advisory_xact_lock_shared(203005007, hashtext(<client>))` as
-  the FIRST statement of its §2.5 wall trigger, **before** anything reads `fiscal_years`.
+  **EXCLUSIVE** form. For `begin_close`, `finalize_close` and `abandon_close` those are the first two
+  acts after the op reservation. **`reopen_fiscal_year` takes ONE act before them** — the closing
+  entry's ROW LOCK (below) — so that all four walk a prefix of the same order. **Every JE-writing path
+  and every gate-evidence path** takes `pg_advisory_xact_lock_shared(203005007, hashtext(<client>))`
+  as the FIRST statement of its §2.5 wall trigger, **before** anything reads `fiscal_years`.
 - Consequences, each of which is a cell: writers never block each other (shared/shared is compatible);
   a close waits until every in-flight writer commits; and **no writer can evaluate FY status while a
   close holds exclusive** — the trigger blocks on the shared request before reading the predicate, so
@@ -302,8 +314,9 @@ not to the house order: v1's sentence named the JE-before-advisory order correct
 clause and then mis-stated that its placement was compatible with it. The over-claim "'advisory before
 any JE row lock' was never the house rung" is withdrawn as a mis-description of v1.)*
 
-**`203005007` is the BOTTOM rung, on every path.** Close verbs run `004 → 007-exclusive`; JE writers
-and gate-evidence writers run `004 → [006] → 007-shared` (the bank rung `203005006` where a bank
+**`203005007` is the BOTTOM rung, on every path.** Close verbs run `[pre-existing JE row lock →]
+004 → 007-exclusive`; JE writers and gate-evidence writers run `[row lock →] 004 → [006] →
+007-shared` (the bank rung `203005006` where a bank
 account is in play). "004 first" on the writer side is measured, not assumed — every gate-evidence
 writer §2.5's trigger family covers takes `203005004` as its first advisory act: `unallocate_group`
 `0037:3166` · `apply_open_items` `0037:3278` · `complete_bank_reconciliation` `0040:1647` ·
@@ -317,31 +330,46 @@ at `0037:2180`, post-asserted `0037:2189-2190`). So `007` is requested LAST, alw
 > *before* the client rung, so a close ran `007-excl → 004` while every writer ran `004 →
 > 007-shared`: writer W holds 004 and waits for shared; close R holds exclusive and waits for 004;
 > `40P01`. Moving `007` to the bottom of the close family's ladder deletes the inversion outright.
-> This is the house remedy applied, not a mitigation: fix a cycle by ORDER or by deleting the key,
-> never by leaving it to the detector (`0046:2209-2210`).
+> This is the house remedy applied, not a mitigation: fix a cycle by ORDER, or by deleting the key,
+> never by leaving it to the detector (`0046:2199-2210` — the file's two deadlocks and their two
+> remedies).
 >
-> **Cycle 2 — `004` ↔ a PRE-EXISTING `journal_entries` row lock. The ONE residual, and it belongs to
-> `reopen_fiscal_year` alone.** The reopen holds 004 and then row-locks a pre-existing entry — it
+> **Cycle 2 — `004` ↔ a PRE-EXISTING `journal_entries` row lock. ALSO DEAD, and by the same means.**
+> v2's draft had `reopen_fiscal_year` take 004 and only then row-lock a pre-existing entry — it
 > reverses the closing entry through `clara.reverse_entry`, whose `for update` is the lock in
 > question — while a concurrent `reverse_entry` / `approve_wrong_client_correction` on that same
-> entry holds the row and then wants 004 (`0037:2180`). This is the house's PRE-EXISTING asymmetry
-> between the row lock and the client rung; `203005007` neither creates nor widens it.
+> entry holds the row and then wants 004 (`0037:2180`). Opposite orders on one object; `40P01`.
+> **The reopen now takes the ROW LOCK FIRST** (below), which is the order every JE writer already
+> walks, so the two sessions share one order and the cycle cannot form.
 
-Two build obligations close cycle 2, both assertable. **(1)** `begin_close`, `finalize_close` and
-`abandon_close` row-lock only rows they inserted in their own transaction — the invariant
-`0037:2542-2548` already states for the composites ("a composite locks only its own freshly-inserted
-entry row … ANY FUTURE VERB THAT LOCKS A PRE-EXISTING ENTRY MUST TAKE `journal_entries` BEFORE
-`open_items`"), restated for the close family; three of four verbs cannot enter cycle 2 at all.
-**(2)** `reopen_fiscal_year` takes that row lock under an in-function **`lock_timeout`** and converts
-contention into a named, retryable `CLR41 close_lock_contended` rather than waiting into a detector
-abort. *(builder choice, labelled honestly: this is the one place the design accepts a TIMER instead
-of an order — because the two orders meet on a ROW, and `0046:2209-2210` records exactly that case,
-"a row lock cannot be collapsed into an advisory one". The reopen's contention branch is a cell.)*
+Three build obligations hold that order, all assertable.
+**(1)** `begin_close`, `finalize_close` and `abandon_close` row-lock only rows they inserted in their
+own transaction — the invariant `0037:2542-2548` already states for the composites ("a composite
+locks only its own freshly-inserted entry row … ANY FUTURE VERB THAT LOCKS A PRE-EXISTING ENTRY MUST
+TAKE `journal_entries` BEFORE `open_items`"), restated for the close family. Those three take no
+pre-existing row lock at all, so `004 → 007` is simply a prefix of the same order.
+**(2) `reopen_fiscal_year` acquires in `row → 004 → 007-exclusive` order** *(ruled by the house
+partial order, not a builder preference)*: after the op reservation it resolves the FY's `active`
+close receipt and its `close_entry_id`, takes `select … from clara.journal_entries where id = <that
+entry> for update`, and only then the client rung and the exclusive close rung. This is exactly the
+sequence `_approve_entry_core` has used since the 0029/0035 era — "the document filing, then the entry
+row, then the advisory pair" (`0037:2549-2553`) — and the one `reverse_entry` and
+`approve_wrong_client_correction` were aligned to at `0037:2535-2538`. An FY with no closing entry
+(nothing to reverse) locks no row and falls through to `004 → 007`, still a prefix.
+**(3) No timer stands in for the order.** An in-function `lock_timeout` remains ordinary ceremony
+hygiene — the same hygiene §1.1 sets for the trigger DDL — and is **never** the containment for this
+cycle. *(v2 wrote it as the containment and cited `0046:2209-2210` for the proposition that a
+row-vs-advisory cycle must be left to a timer. Re-read whole, that passage records the opposite:
+0046's SECOND deadlock was exactly a row-vs-advisory cycle (`:2199-2205`) and it was fixed **by
+imposing an order** — "hoisting the acquisition to the top of the branch costs the retry path nothing
+and **gives every path one order**" (`:2206-2207`). The clause about a row lock not collapsing into
+an advisory one (`:2209-2210`) explains only why the FIRST deadlock's key-deletion remedy was
+unavailable, not why ordering would be. Cited correctly, 0046 is the precedent FOR obligation (2).)*
 
-**The nested take is free, and the reopen cannot deadlock against itself.** Inside the reopen,
-`reverse_entry`'s own `pg_advisory_xact_lock(203005004, hashtext(o.client_id::text))` (`0037:2180`)
-re-acquires a lock the reopen already holds; advisory xact locks are reentrant (`0046:2205-2207`), so
-it bumps a local refcount and never waits.
+**The nested takes are free, and the reopen cannot deadlock against itself.** Inside the reopen,
+`clara.reverse_entry` re-takes both: the same row's `for update` (a row lock a transaction already
+holds re-acquires trivially) and `pg_advisory_xact_lock(203005004, hashtext(o.client_id::text))`
+(`0037:2180`), which advisory reentrancy (`0046:2206`) turns into a refcount bump. Neither waits.
 
 ### 2.2 The gate catalog and the run/result/attestation trio
 
@@ -445,10 +473,11 @@ SUBTRANSACTION's `xmin` — which is why the permit is a declared `xid8` column 
 
 ---
 
-*Part 1 ends at §2.4. **§2.5–§2.10** — drawer 3 and the closed-period wall (with the permit), the
-continuity math, the close receipt family, the reopen path, the E-R6 activation and the E-R11 keys —
-continue in [`wave-e-design-skeleton-part2.md`](./wave-e-design-skeleton-part2.md); **§2.11–§6** —
-lane γ's month snapshots, staleness and period registry, the E-R12 trio, lane θ, the E-b/E-c pointers
-and the open-question ledger — in
-[`wave-e-design-skeleton-part3.md`](./wave-e-design-skeleton-part3.md). *Section numbering is
-continuous; the three files are one document.**
+*Part 1 ends at §2.4. **§2.5–§2.8** — drawer 3 and the closed-period wall (with the permit), the
+continuity math, the close receipt family and the reopen path — continue in
+[`wave-e-design-skeleton-part2.md`](./wave-e-design-skeleton-part2.md); **§2.9–§2.12** — the E-R6
+activation, the E-R11 keys, and lane γ's month snapshots, staleness and period registry — in
+[`wave-e-design-skeleton-part3.md`](./wave-e-design-skeleton-part3.md); **§3–§6** — the E-R12 trio,
+lane θ, the E-b/E-c pointers and the open-question ledger — in
+[`wave-e-design-skeleton-part4.md`](./wave-e-design-skeleton-part4.md). *Section numbering is
+continuous; the four files are one document.**
