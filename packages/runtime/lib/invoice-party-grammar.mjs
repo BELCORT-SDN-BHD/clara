@@ -15,7 +15,7 @@ import { foldUnicode, hasColon, isNameShaped } from "./invoice-entity-lexicon.mj
 // CALLED and the two asymmetric predicates built from that (strict endsWith for party
 // candidacy, broad contains for the contact refusal). Re-exported so every existing importer
 // of this module keeps working and there is still ONE place these rules are defined.
-export { hasRegisteredEntitySuffix, containsEntityToken, partyKey, splitEntitySuffix, partyBaseTokens }
+export { hasRegisteredEntitySuffix, containsEntityToken, partyKey, splitEntitySuffix, identityComparisonTokens }
   from "./invoice-entity-lexicon.mjs";
 
 /**

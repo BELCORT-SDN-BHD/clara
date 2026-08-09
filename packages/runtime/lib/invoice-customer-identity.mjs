@@ -123,7 +123,7 @@
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
-import { containsEntityToken, hasRegisteredEntitySuffix, looksLikePartyName, partyBaseTokens, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { containsEntityToken, hasRegisteredEntitySuffix, looksLikePartyName, identityComparisonTokens, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { customerAttributionFailure, extentOf, scaleAnchor, xOverlap } from "./invoice-block-geometry.mjs";
 import { sweepAnchorNeighbourhood } from "./invoice-anchor-sweep.mjs";
 
@@ -209,7 +209,7 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         customer: scaleAnchor(anchors?.customer, frame.scale),
         // The seller's own distinguishing words, tokenized HERE so `invoice-block-geometry.mjs`
         // keeps owning POSITION only and never learns how a name is spelled. Refuse-only.
-        vendorTokens: anchors?.vendorName ? partyBaseTokens(anchors.vendorName) : null,
+        vendorTokens: anchors?.vendorName ? identityComparisonTokens(anchors.vendorName) : null,
       }
       : null;
     /** Line indices claimed by PASS 1 as a contact VALUE — never available to the party read. */
@@ -425,7 +425,7 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         }
       }
 
-      if (!attributed(value.box, hit.label, "party", partyBaseTokens(value.raw))) continue;
+      if (!attributed(value.box, hit.label, "party", identityComparisonTokens(value.raw))) continue;
       const source = lines[value.lineIndex];
       parties.push({
         value_raw: value.raw, key: partyKey(value.raw), page: pageNumber,

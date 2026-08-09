@@ -20,6 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { normalizeAzureInvoice } from "../workflows/invoiceFacts.v1.azure.mjs";
+import { identityComparisonTokens, partyKey } from "../lib/invoice-entity-lexicon.mjs";
 import { ATTN, ATTN_BOX, BILL_TO, L, VENDOR, WITHDRAWN, box, run } from "./x7-scenario-kit.mjs";
 
 /** The five executed seller captions. `From` is handled separately — see its own cell. */
@@ -146,6 +147,96 @@ test("C2 calibration 4: the NAMED RESIDUAL — a buyer whose name is a subset of
   const out = withVendor("ACME HOLDINGS SDN BHD", [buyerLine("ACME SDN BHD"), ATTN_LINE]);
   assert.equal(customerOf(out), undefined);
   assert.equal(out.envelope.customer_identity.is_vendor_name, 1);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// N1 — FRAGMENTED VENDOR GLYPHS. The re-verify round's HIGH finding: token segmentation defeated
+// the subset test, so a seller whose typed name arrived split emitted as the customer on every
+// surface. The repair is the comparison fold's own territory — comparison MERGES.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The same buyer line on all three candidate surfaces, against a chosen typed VendorName. */
+function onAllSurfaces(vendorContent, buyerName) {
+  const page = (lines) => withVendor(vendorContent, lines);
+  return {
+    sweep: customerOf(page([buyerLine(buyerName), ATTN_LINE])),
+    split: customerOf(page([BILL_TO, buyerLine(buyerName), ATTN_LINE])),
+    sameLine: customerOf(page([L(`Bill To: ${buyerName}`, box(0.72, 2.30, 3.90, 2.45)), ATTN_LINE])),
+  };
+}
+
+test("N1: a FRAGMENTED vendor name still refuses its own full spelling — all three surfaces", () => {
+  // Executed and CONFIRMED: each of these emitted THE SELLER as customer_name with
+  // is_vendor_name=0, because the tokens compared were `{a,c,m,e}` against `{acme}`. Both
+  // DIRECTIONS are probed — the fragment can arrive on either side, since OCR splits the page
+  // line just as readily as Azure splits the typed field.
+  const FRAGMENTED = [
+    ["A\nC\nM\nE", "ACME SDN BHD"],       // line-split Latin, the reported shape
+    ["A.C.M.E.", "ACME SDN BHD"],         // dotted initials, same tokens by a different route
+    ["ACME", "A.C.M.E. SDN BHD"],         // the REVERSE — fragmentation on the candidate side
+    ["鑫\n旺", "鑫旺 SDN BHD"],              // line-split CJK: the case `\b` could not see
+    ["鑫旺", "鑫 旺 SDN BHD"],              // …and its reverse
+  ];
+  for (const [vendor, buyer] of FRAGMENTED) {
+    const r = onAllSurfaces(vendor, buyer);
+    assert.equal(r.sweep, undefined, `${JSON.stringify(vendor)} vs ${buyer} — swept in as buyer`);
+    assert.equal(r.split, undefined, `${JSON.stringify(vendor)} vs ${buyer} — split seam`);
+    assert.equal(r.sameLine, undefined, `${JSON.stringify(vendor)} vs ${buyer} — same-line seam`);
+  }
+});
+
+test("N1 CONTROL: joining must not manufacture false vendor-refusals of initialed buyers", () => {
+  // The cost side of the same fold. An initialed or punctuated buyer name joins too, so it must
+  // still be ADMITTED when the seller is a different company — otherwise the repair for a
+  // wrong-party path becomes a lost identity on every `D&D`-shaped customer in the book.
+  for (const buyer of ["D&D SDN BHD", "A-B TRADING SDN BHD", "A/B TRADING SDN BHD", "D & D ENTERPRISE SDN BHD"]) {
+    const r = onAllSurfaces("ROME SECRETARY SDN BHD", buyer);
+    assert.equal(r.sweep, buyer, `${buyer} is a real buyer and must be readable`);
+    assert.equal(r.split, buyer);
+    assert.equal(r.sameLine, buyer);
+  }
+});
+
+test("N1: the four calibration points survive the join UNCHANGED", () => {
+  // The run-of-two bound exists for these two rows: join a run of ONE forward and both invert.
+  assert.equal(onAllSurfaces("A\nACME", "ACME SDN BHD").sweep, undefined, "partial logo still refuses");
+  assert.equal(onAllSurfaces("M\nROME\nSECRETARY", "ROME SECRETARY SDN BHD").sweep, undefined, "mirror still refuses");
+  assert.equal(onAllSurfaces("ROME SECRETARY SDN BHD", "ROME SECRETARY (PENANG) SDN BHD").sweep,
+    "ROME SECRETARY (PENANG) SDN BHD", "franchise still admitted");
+  assert.equal(onAllSurfaces("M\nROME\nSECRETARY", "KONG CHENG RESTAURANTS SDN BHD").sweep,
+    "KONG CHENG RESTAURANTS SDN BHD", "the real buyer still admitted");
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// N2 — THE DECLARED SAFE-HOLDS. Two shapes the comparison fold merges and the CONTEST key does
+// not. Pinned here so the divergence is a proven property of the design, not a latent surprise.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+test("N2: the comparison fold is DELIBERATELY coarser than the contest key", () => {
+  // ADMISSION NARROWS, COMPARISON MERGES. `partyKey` decides whether two readings CONTEST, where
+  // a false merge is WRONG-SILENT — so it keeps these pairs apart. `identityComparisonTokens`
+  // decides whether to REFUSE a candidate as the seller, where a false merge is a visible HOLD —
+  // so it merges them. Opposite failure modes, opposite precision. Asserted BOTH ways, because
+  // the claim is the divergence itself: proving only one half would prove nothing about the law.
+  for (const [a, b] of [["A/B TRADING SDN BHD", "A-B TRADING SDN BHD"], ["ACME SDN BHD", "ACME BERHAD"]]) {
+    assert.notEqual(partyKey(a), partyKey(b), `${a} vs ${b}: the CONTEST key must keep them apart`);
+    assert.deepEqual([...identityComparisonTokens(a)].sort(), [...identityComparisonTokens(b)].sort(),
+      `${a} vs ${b}: the COMPARISON fold must merge them`);
+  }
+});
+
+test("N2: both declared safe-holds HOLD, visibly, on is_vendor_name", () => {
+  // (b) PUNCTUATION CLASS and (c) LEGAL SUFFIX from the residual list. Each is an over-refusal:
+  // the buyer really is a different registered entity from the seller, and the lane holds anyway.
+  // The price of a coarse fold, paid deliberately — the alternative admits `ACME BERHAD` (the
+  // seller in its other lawful form) as the buyer, and a wrong counterparty outranks a hold.
+  const punctuation = withVendor("A-B TRADING SDN BHD", [buyerLine("A/B TRADING SDN BHD"), ATTN_LINE]);
+  assert.equal(customerOf(punctuation), undefined);
+  assert.equal(punctuation.envelope.customer_identity.is_vendor_name, 1, "the hold is COUNTED, not silent");
+
+  const suffix = withVendor("ACME BERHAD", [buyerLine("ACME SDN BHD"), ATTN_LINE]);
+  assert.equal(customerOf(suffix), undefined);
+  assert.equal(suffix.envelope.customer_identity.is_vendor_name, 1, "the hold is COUNTED, not silent");
 });
 
 test("C2: with NO typed VendorName the subset term cannot fire at all", () => {

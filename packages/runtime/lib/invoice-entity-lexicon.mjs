@@ -257,19 +257,65 @@ const foldKey = (s) => deApostrophe(s)
   .toLowerCase();
 
 /**
- * THE DISTINGUISHING WORDS OF A NAME — its tokens with the legal-entity suffix removed.
+ * FRAGMENTED GLYPHS REJOIN — a maximal RUN OF TWO OR MORE single-glyph tokens becomes one token.
  *
- * `KONG CHENG RESTAURANTS SDN BHD` → {kong, cheng, restaurants}. A string with no suffix folds
- * whole, which is what makes it usable on Azure's typed `VendorName`: the real capture types that
- * field as the LOGO, `M\nROME\nSECRETARY`, and folding gives {m, rome, secretary}.
+ * `[a, c, m, e]` → `[acme]` · `[鑫, 旺]` → `[鑫旺]` · `[a, b, trading]` → `[ab, trading]`.
  *
- * Suffixes are stripped because they carry NO identifying information — every Malaysian company
- * ends in one, so leaving them in makes any two companies look 40% alike.
+ * THE RUN MUST BE TWO OR MORE, and that bound is load-bearing rather than tidy: a run of ONE must
+ * NOT absorb the multi-glyph token beside it, or the two live calibration points invert. Typed
+ * `A\nACME` folds to `[a, acme]` and typed `M\nROME\nSECRETARY` to `[m, rome, secretary]`; join
+ * either leading fragment forward and `{acme}` / `{rome, secretary}` stop being subsets, which is
+ * exactly the wrong-party admission the subset rule exists to refuse.
+ *
+ * WHY NOT REUSE `containsEntityToken`'s REGEX, which does the same job for `ACME P.L.T.`: it is
+ * built on `\b`, and JavaScript's `\b` is defined by ASCII `\w`. MEASURED — that regex folds
+ * `a c m e` to `acme` correctly and leaves `鑫 旺` UNJOINED, so a line-split Chinese seller name
+ * walked straight through the subset test (Codex N1, all three surfaces). The run-of-tokens form
+ * below is the same idea expressed where Unicode cannot silently opt out; codepoint counting
+ * (`Array.from`) keeps it right for astral glyphs too.
  */
-export function partyBaseTokens(raw) {
+function joinGlyphRuns(tokens) {
+  const out = [];
+  for (let i = 0; i < tokens.length;) {
+    let j = i;
+    while (j < tokens.length && Array.from(tokens[j]).length === 1) j++;
+    if (j - i >= 2) { out.push(tokens.slice(i, j).join("")); i = j; }
+    else { out.push(tokens[i]); i++; }
+  }
+  return out;
+}
+
+/**
+ * THE COMPARISON FOLD — a name reduced to its distinguishing words, for the vendor-identity
+ * REFUSAL and nothing else. `KONG CHENG RESTAURANTS SDN BHD` → {kong, cheng, restaurants}.
+ *
+ * A string with no suffix folds whole, which is what makes it usable on Azure's typed
+ * `VendorName`: the real capture types that field as the LOGO, `M\nROME\nSECRETARY` → {m, rome,
+ * secretary}. Suffixes are stripped because they carry NO identifying information — every
+ * Malaysian company ends in one, so leaving them in makes any two companies look 40% alike.
+ *
+ * ─── WHY JOINING LIVES ON THE COMPARISON SIDE ONLY ────────────────────────────────────────────
+ * The house rule is ADMISSION NARROWS, COMPARISON MERGES, and this function is the comparison
+ * half — so it may merge two spellings that `partyKey` (the ADMISSION/contest key) deliberately
+ * keeps apart. That asymmetry is not sloppiness, it is the two failure modes pointing opposite
+ * ways:
+ *
+ *   `partyKey` decides whether two readings CONTEST. A false merge there is WRONG-SILENT — it
+ *   suppresses a lawful contest and lets one name through unchallenged. So it must be FINE:
+ *   punctuation classes and legal suffixes are preserved (`A/B` ≠ `A-B`, `SDN BHD` ≠ `BERHAD`).
+ *
+ *   This function decides whether to REFUSE a candidate as the seller. It can only ever refuse,
+ *   so a false merge is a visible HOLD on `is_vendor_name`. It must therefore be COARSE: every
+ *   spelling a seller's name might arrive in has to land on the same tokens, because the one
+ *   outcome that cannot be tolerated is admitting the seller as the buyer.
+ *
+ * NEVER USE THIS FUNCTION TO DECIDE THAT TWO PARTIES ARE THE SAME PARTY. It answers only "does
+ * this candidate say anything the vendor's name does not", and only to say no.
+ */
+export function identityComparisonTokens(raw) {
   const hit = splitEntitySuffix(raw);
   const base = hit ? hit.base : foldUnicode(raw);
-  return new Set(base.split(" ").filter(Boolean));
+  return new Set(joinGlyphRuns(base.split(" ").filter(Boolean)));
 }
 
 /**
@@ -302,9 +348,25 @@ export function partyBaseTokens(raw) {
  * vendor already covers. Recorded rather than implemented twice.
  *
  * REFUSE-ONLY, like every term it sits with (review law 3: a name is a projection of the thing).
- * NAMED RESIDUAL, eyes-open: a buyer whose name is a strict subset of the seller's — buyer
- * `ACME SDN BHD` billed by seller `ACME HOLDINGS SDN BHD` — is refused and the lane HOLDS. That is
- * an over-refusal, it abstains visibly on `is_vendor_name`, and a hold is the cheap failure.
+ *
+ * ─── THE THREE NAMED SAFE-HOLDS, all declared rather than discovered ───────────────────────────
+ * Every one is an OVER-refusal: the reader abstains, `is_vendor_name` counts it, and the lane
+ * holds on `customer_name_missing` where a human already looks. They are listed so the coarseness
+ * of `identityComparisonTokens` (see its header — comparison MERGES, deliberately coarser than
+ * the contest key) is a recorded decision and not a surprise on live.
+ *
+ *   (a) STRICT SUBSET. Buyer `ACME SDN BHD` billed by seller `ACME HOLDINGS SDN BHD`. Genuinely
+ *       two legal persons; the buyer carries no token the seller lacks, so it is refused.
+ *   (b) PUNCTUATION CLASS. Buyer `A/B TRADING SDN BHD` vs seller `A-B TRADING SDN BHD`. `partyKey`
+ *       keeps these APART — they really are two registered names, and it must, because merging
+ *       them there would suppress a lawful contest. Here they merge and the buyer is refused.
+ *   (c) LEGAL SUFFIX. Buyer `ACME SDN BHD` vs seller `ACME BERHAD`. A private limited and a public
+ *       limited company are different entities; `partyKey` preserves the distinction for the same
+ *       contest reason. The suffix is stripped here, so they merge and the buyer is refused.
+ *
+ * (b) and (c) are the price of the coarse fold, paid deliberately: the alternative is a fold fine
+ * enough to let `ACME BERHAD` (the seller, printed in its other lawful form) be read as the buyer.
+ * A wrong counterparty on real books outranks a hold, every time.
  */
 export function candidateIsVendorSubset(candidateTokens, vendorTokens) {
   if (!candidateTokens || !vendorTokens || vendorTokens.size === 0) return false;

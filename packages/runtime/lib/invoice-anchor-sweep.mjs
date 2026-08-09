@@ -34,7 +34,7 @@
 // existed. Uniqueness-or-nothing therefore holds with room to spare rather than by luck.
 
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
-import { hasRegisteredEntitySuffix, looksLikePartyName, partyBaseTokens, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { hasRegisteredEntitySuffix, looksLikePartyName, identityComparisonTokens, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { boxDistance } from "./invoice-block-geometry.mjs";
 
 /**
@@ -52,8 +52,10 @@ import { boxDistance } from "./invoice-block-geometry.mjs";
  * none today, which is the real capture's own condition.
  *
  * The radius IS `anchorLimit`, so `customer_anchor_far` is a BOUND here rather than a refusal and
- * never fires; the caller's `attributed()` still runs, and on this path only `in_vendor_block`
- * can refuse. Both are counted by the caller under their own heads.
+ * never fires. The caller's `attributed()` still runs in full, and on this path the two IDENTITY
+ * terms are what can refuse: `in_vendor_block` and `is_vendor_name` (the latter added with the
+ * subset rule — this line named only the first until Codex N3 caught it). Both are counted by the
+ * caller under their own heads.
  *
  * @returns {Array<{value_raw:string,key:string,page:number,polygon:number[],confidence:number|null}>}
  */
@@ -85,7 +87,7 @@ export function sweepAnchorNeighbourhood(ctx) {
     if (!hasRegisteredEntitySuffix(raw)) { receipt.anchor_no_entity_suffix += 1; continue; }
     // Attribution still runs, and on this path only the IDENTITY terms can refuse: the radius
     // above already IS the distance gate. The seller's own name is refused here too.
-    if (!attributed(box, null, "party", partyBaseTokens(raw))) continue;
+    if (!attributed(box, null, "party", identityComparisonTokens(raw))) continue;
 
     const source = lines[j];
     found.push({

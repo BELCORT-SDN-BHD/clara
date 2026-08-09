@@ -94,3 +94,46 @@ over-refusal, pinned as its own cell, visible on `is_vendor_name`.
 franchise all still ADMIT), the walls on known classes, `typed_withdrawn_attn` in both directions,
 and the twelve changed-expectation cells unweakened. The declared residual-5 forms remain **open
 as declared** — the repair closed a class, it did not quietly close the acknowledged one.
+
+### X7 — THE COMPARISON-FOLD ROUND *(Codex re-verify on `2eac8d1`; N1 HIGH, N2, N3)*
+
+The re-verify confirmed both original findings closed — with a **historical replay** that
+independently proved the C1 scope correction: `origin/main` leaked **10** caption/label
+combinations, `HEAD^` leaked **15** across three surfaces, `HEAD` leaked **0/15**. It also
+measured the real seller lines at **2.204937in / 2.204714in** from the customer anchor, confirming
+their prior safety came only from the 1.0in radius.
+
+**N1 (HIGH) — token segmentation defeated subset identity.** Typed `A\nC\nM\nE` or `A.C.M.E.`
+against a candidate `ACME SDN BHD` emitted **the seller** as the customer on all three surfaces
+with `is_vendor_name=0`, as did line-split CJK `鑫\n旺` vs `鑫旺 SDN BHD`. The comparison held
+`{a,c,m,e}` against `{acme}` and saw two companies.
+
+The repair is **fragment joining in the comparison fold** — a maximal run of **two or more**
+single-glyph tokens becomes one token. **The run-of-two bound is load-bearing:** join a run of ONE
+forward and both live calibration points invert (`A\nACME` → `{a,acme}` and `M\nROME\nSECRETARY` →
+`{m,rome,secretary}` are precisely the subsets the rule must keep). Both directions are covered —
+OCR splits a page line as readily as Azure splits the typed field.
+
+**Why the existing P.L.T. run-join regex was not simply reused, measured rather than assumed:** it
+is built on `\b`, and JavaScript's `\b` is defined by ASCII `\w`. It folds `a c m e` → `acme`
+correctly and leaves `鑫 旺` **unjoined** — which is exactly how the CJK seller walked through. The
+replacement counts codepoints over a token run, where Unicode cannot silently opt out.
+
+**N2 — the two undeclared safe-holds, now declared.** Vendor identity refuses `A/B TRADING` vs
+`A-B TRADING`, and `ACME SDN BHD` vs `ACME BERHAD`. That is **coarser than the party-identity
+contract on purpose**, and the reason is that the two folds fail in opposite directions:
+
+| fold | decides | a false MERGE is | so it must be |
+|---|---|---|---|
+| `partyKey` (admission / contest) | do two readings CONTEST? | **wrong-silent** — a lawful contest suppressed | **FINE**: `A/B` ≠ `A-B`, `SDN BHD` ≠ `BERHAD` |
+| `identityComparisonTokens` (refusal) | is this candidate the SELLER? | a **visible HOLD** on `is_vendor_name` | **COARSE**: every spelling of the seller must land together |
+
+*Admission narrows; comparison merges.* The three named safe-holds — **(a)** strict subset
+(`ACME SDN BHD` billed by `ACME HOLDINGS SDN BHD`), **(b)** punctuation class, **(c)** legal suffix
+— are all over-refusals that hold visibly. The alternative to (b) and (c) is a fold fine enough to
+let the seller's other lawful spelling be read as the buyer, and **a wrong counterparty on real
+books outranks a hold, every time.** A cell asserts the divergence **both ways**, because the claim
+is the divergence itself: proving one half would prove nothing about the law.
+
+**N3** — the sweep header named only `in_vendor_block` as its live refusal; `is_vendor_name` fires
+there too. Corrected.
