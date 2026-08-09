@@ -60,7 +60,7 @@ abstains visibly on a counted head instead of manufacturing a party.
 `attn_overridden`. **Wider than the finding stated:** the review attributed it to the anchor
 sweep; re-measured, the same forms leaked through the **same-line and split-value LABEL seams**
 too, so the gap **predates the sweep** — which merely opened a third door onto it. The five
-captions therefore join `NON_ADDRESSEE_MARKERS` (**eleven → sixteen**), the one gate both
+captions therefore join `NON_ADDRESSEE_MARKERS` (**ten → fifteen** shipped entries), the one gate both
 polarities share, closing all three surfaces at once. The three noun captions are `^`-anchored so
 `PREFERRED VENDOR SOLUTIONS SDN BHD` keeps its candidacy; the two by-phrases are not, matching the
 `\bmanaged by\b` entries beside them. **`From …` was ALREADY closed** by `STOPWORD_OPENERS` — the
@@ -175,7 +175,11 @@ legitimate branch buyer while closing none of the leaks.
 
 **CX1 — the declaration must track the FINAL fold.** Each round added a term and widened the merge
 set, so a list written against an earlier fold reads as complete while being stale. The safe-holds
-are now enumerated one per distinction the fold destroys, **three → five**: (a) strict token subset
+are now enumerated one per distinction the fold destroys, **three → five**. *(Two different
+five-item lists live in this record — do not conflate them: these LETTERED **(a)–(e)** are the
+comparison-fold's SAFE-HOLDS; the NUMBERED **(1)–(5)** are the reader's recorded RESIDUALS in
+`packages/runtime/lib/invoice-customer-identity.mjs`, whose #5 — the suffixed relational
+phrases — is the "residual-5" referenced above.)* The safe-holds: (a) strict token subset
 · (b) punctuation class · (c) legal suffix · **(d) initials vs concatenation** (`A & C & M & E
 TRADING` ≡ `ACME TRADING` — the join cannot tell an initialism from the word it spells, because on
 the page neither can a reader who sees only fragments) · **(e) whole name inside a longer name**

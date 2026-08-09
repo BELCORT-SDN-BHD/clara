@@ -1,6 +1,6 @@
 # Clara — Design Direction (Rebuild, adopted)
 
-*The design source of truth for the rebuild, superseding the old `docs/design/` set. Status: Phase-2 adopted direction, for Gate-2 ratification. Date: 2026-07-17.*
+*The design source of truth for the rebuild, superseding the old `docs/design/` set. Status: **RATIFIED** — adopted at Gate 2, which closed 2026-07-17 (the ADR-013 era). Date: 2026-07-17.*
 
 ## 1. The normative document
 
@@ -34,9 +34,11 @@ Precedence on any collision remains **accounting-correctness > backend contracts
 
 ## 4. What Phase 4 builds first (design-critical path)
 
-1. The typed `parts[]` transcript + tool chips + attachment lifecycle chips (the streaming spine).
-2. `je_review` + `clarify` + `doc_review` (side-by-side evidence with region overlays) — the daily loop.
-3. The review queue (List model: sections, fuzzy filter, trust-badge accessories, split-view).
-4. Plan-as-document for close/onboarding.
-5. ⌘K Ask/Do/Go + object ActionPanels; URL-as-truth wiring.
-6. The verification lane + diffs (legs before/after; doc↔entry).
+Status marks read as of the F6–F9 close (2026-08-09): ✅ built · ◐ part-built · – not yet.
+
+1. ✅ The typed `parts[]` transcript + tool chips + attachment lifecycle chips (the streaming spine).
+2. ✅ `je_review` + `clarify` + `doc_review` (side-by-side evidence with region overlays) — the daily loop.
+3. ✅ The review queue (List model: sections, fuzzy filter, trust-badge accessories, split-view).
+4. ◐ Plan-as-document for close/onboarding — the ONBOARDING half is built (`/clients/plan`); the CLOSE half rides Wave E.
+5. – ⌘K Ask/Do/Go + object ActionPanels; URL-as-truth wiring (URL-as-truth is wired page-by-page; the palette is not built).
+6. – The verification lane + diffs (legs before/after; doc↔entry).

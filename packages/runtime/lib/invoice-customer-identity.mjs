@@ -105,7 +105,7 @@
 //      a same-line `To : X`, and any value carrying a COLON all ABSTAIN. Each leaves Azure's
 //      typed value standing — zero loss against today.
 //  (5) SUFFIXED RELATIONAL PHRASES — THE OPEN ONE, and the only residual that can still write a
-//      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates SIXTEEN measured
+//      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates FIFTEEN measured
 //      forms; reviewers constructed 23 distinct more, of which 23 of the 38 pinned entries still
 //      pass candidacy, 5 producing a wrong `customer_name` end-to-end (`A division of AMATERUS
 //      GROUP SDN BHD` is the realistic one). The base is still validated by ABSENCE-of-known-bad

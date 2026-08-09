@@ -12,9 +12,9 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Durable substrate**: the Workflow DevKit Postgres world (`workflow` +
   `@workflow/world-postgres`, `ai@7.0.31`), built by Nitro with the
   `workflow/nitro` compiler module (Appendix A).
-- **The chat loop** (`workflows/chatTurn.v6.ts` + its FROZEN closure
-  `chatTurn.v6.impl.ts` / `chatTurn.v6.prompt.ts`; the v1→v6 history follows
-  Appendix A — v1–v5 stay frozen + reachable for parked runs): a coding-capable
+- **The chat loop** (`workflows/chatTurn.v10.ts` + its FROZEN closure
+  `chatTurn.v10.impl.ts` / `chatTurn.v10.prompt.ts`; the v1→v10 history follows
+  Appendix A — v1–v9 stay frozen + reachable for parked runs): a coding-capable
   advisor with the `draft_journal_entry` write tool that streams the model to
   the run's writable, reads the client context pack with a per-attempt wake
   credential (minted INSIDE the step, never crossing a step boundary), and
