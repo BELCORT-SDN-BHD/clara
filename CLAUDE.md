@@ -134,127 +134,55 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4 — WAVE C CLOSED (ADR-051..054) · WAVE D COMPLETE (ADR-055..059) · POST-WAVE
-CLEARED (ADR-060..062: the data doctrine · uniform review intensity · the pre-E clearing
-day) · §7-A GRILLED AND CLOSED (ADR-063/064 — the unattended sales drafter, accepted on a
-two-halves acceptance) · WAVE E CONTRACT RATIFIED AND MERGED (ADR-065, PR #214,
-2026-08-08) — the grill is DONE; the LAW WAS AMENDED (E-R4: the DB owns every
-AUTHORITATIVE number — see the cardinal invariants above). **THE WAVE E BUILD IS OPEN and its
-FIRST STRIKE — the F6–F9 fix batch — is CLOSED (ADR-066, 2026-08-09; as-run evidence
-`docs/plan/wave-e-f6f9-acceptance.md`). NEXT: the campaign proper — periods + close · the FS
-pack + reporting engine · the ad-hoc authoring lane.** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
-the extraction slice (ADR-047/048) · the settlement program (ADR-049) · the first production
-autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at
-exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
-adjustments + advances + AF-2 + producer as a four-slice split (0042/0043/0044/0045).
+**Phase 4 · WAVE E IS IN BUILD.** Everything before it is CLOSED: **A/A2/A2.1 · B · the
+extraction slice · the settlement program · the first production autopost · C · D**
+(ADR-022..059), the post-wave clearing (ADR-060..062) and **§7-A** (ADR-063/064). The **Wave E
+contract is RATIFIED** (ADR-065 — it AMENDED THE LAW at E-R4; see the cardinal invariants
+above) and its **FIRST STRIKE, the F6–F9 fix batch, is CLOSED** (ADR-066, 2026-08-09: F7
+unblocked the held 2512 KONG CHENG leg, F6 discharged ADR-062's extraction-recovery door).
+**NEXT = the campaign proper:** periods + close · the FS pack + reporting engine + the metric
+algebra/catalog · the ad-hoc authoring lane · the client-facts trio — ONE campaign,
+sequential per 7A-R10.
 
-**LIVE POSTURE: 53 migrations (frontier `0054`) · Fly `clara-runtime` **v60** (2026-08-08/09, the
-F6–F9 batch ceremony, ADR-066: `0051` extraction-recovery door + `0052` customer-identity facts +
-`0053` autodraft re-admit-after-withdrawal + `0054` region ordinal applied 23:24Z under D1 quiesce,
-all tails green → **v59** 23:33Z → **v60** 07:53Z carrying the anchor-sweep fix; both deploys on
-positive build-time-vs-merge reads; `--lock-deployed` stamped exactly the 12 `autoDraft.v7.*` /
-`chatTurn.v10.*` entries; Supavisor 35/60, runtime pool 11) ·
-**§7-A CLOSED (ADR-064, 2026-08-07)** — the sandbox posted UNATTENDED (five ocr_sales posts,
-two rule ids; nine-controls battery complete — eight tokens SEEN incl. a wild-caught
-`floor_lost`, four documented NOT-REACHABLE; floor `floor_met` TRUE 6/6/6/85, TB
-33,133,816 = 33,133,816¢) and **ROME SECRETARY's 22 REAL sales invoices** ran draft-only
-(21 drafted unattended, 19 approved: TB 915,000 → 3,056,500/3,056,500¢ to the sen).
-**RS now carries 11 customers / 0 registrations — ALL NAME-ONLY, never enrich them with
-registrations** (PART 2's enrichment trap): the 10 born at the §7-A close plus **KONG CHENG
-RESTAURANTS SDN BHD `256d6100`, born 2026-08-09** at the F6–F9 close. **The KONG CHENG pair is
-half resolved (ADR-066): the 2512 leg is APPROVED** (entry `f6da5aff`, TB
-**3,116,500/3,116,500¢**, diff 0) **and the 2506 leg awaits the owner's backfill-window
-decision** (`sales_backlog_held` at the `0046` watermark — correct, pre-existing); FINCARE
-stays held `customer_name_missing`, a human coding decision F7 deliberately does not fix.
-Findings **F6–F9 (tasks #31–34) → CLOSED at ADR-066** (PART 2 holds the register). **·
-THE ADJUSTMENTS BELT IS ARMED AND WITNESSED** (daily sweep; every occurrence DRAFTS,
-attested approves; the producer verb `accept_bank_rule_suggestion` granted authenticated-ONLY) **· FOUR firms** (BELCORT — real,
-high-stakes RM100,000 ADR-044, **THREE clients: ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE
-SOLUTION** `9e957c0f` — a sole prop onboarded 2026-08-06, the FIRST going-concern real client
-(a sole proprietor is NOT an employee; his account is EQUITY) · ROME PUBLIC ADVISORY `39008536`
-= the Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test Services";
-do not confuse it with BELCORT's real ROME pair · Alara + Borneo = slice-era RLS fixtures,
-never repurpose) **· dashboard Pages `app.clarabook.com` incl. /assets + /advances + /rules
-adjustments** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **·
-`clara-backup` daily.** The **ROME pair's** FA and staff-advance registers are honestly EMPTY
-(ADR-056/058 — both are in strike-off, so neither could carry a live register); **BEE is the
-going-concern client ADR-058 said those deferrals were waiting for** — it owns tasks #71/#72
-(Gate P on its SST invoices + the first close-time real FA continuity roll, FY2025 closing
-NBV → FY2026 opening, riding the Wave-E first real close; **NOT** WD-R14's *opening*
-carry-down deferral, which still needs a client that owned assets at opening — PROJECTLOG
-PART 2's measured reason stands). The sandbox carries the
-labelled-synthetic corpora — a live depreciation authority, ONE synthetic staff advance (tie 0),
-the D-b2 acceptance register (templates A+B retired with reasons · **B2 LIVE from 2026-07-01** ·
-the May occurrence+mirror pair netting ZERO · one cancelled pair drill), and §7-A's live
-`ocr_sales` rule + earned floor. **Witnesses:** the belt's first autonomous DRAFT `d023b48c`
-(B2's July, v55's boot sweep — **NEVER approve it**) · BEE's first real depreciation draft
-`3c05ab82` (Feb-2025, 10,393¢; the 0041 ramp rule — a first-ever run under an authority always
-drafts, owner approval unlocks the remaining ten catch-up periods) · the first `ocr_sales`
-unattended POSTS (five, sandbox, ADR-064) · the first autonomous adjustments POST (≥2026-10-01)
-stands open.
+**Live posture pin (at the ADR-066 close): 53 migrations, frontier `0054` · Fly
+`clara-runtime` v60 · dashboard Pages `app.clarabook.com` (needs
+`NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) · `clara-backup` daily.**
+Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
 
-**WAVE D records (never re-grill):** `docs/plan/wave-d-contract.md` (WD-R1..R15, ADR-055) ·
-D-a: `wave-d-a-fa-design.md` v2.1 + `-part2.md` (ADR-056) · D-b AS-BUILT:
-`wave-d-b-asbuilt.md` + `-part2.md` (ADR-058; the design docs are DESIGN-time, bannered) ·
-D-b2's hold-ladder record: `~/.clara-tools/d-b-build-backup/recovered/split-build-record.md`
-(ADR-059 — five fix waves W-R13..R15.1, three two-lens rounds ending CLEAN both lenses, the
-owner-ruled NATIVE merge-gate substitute, the ceremony statement-timeout recipe, the
-acceptance receipts). The hold-ladder's SETTLED residuals (probe C/A design residuals · the
-raw-subject sentinel guard · the S5.8-b2 splice anchor · trade (f) — owner-reversible) are
-never re-litigated. Archive branch `build/wave-d-b-0042`: **NEVER MERGE** (evidence only;
-do-not-restore list in asbuilt-part2 §13). The Wave C records: `wave-c-contract.md`
-(WC-R1..R12) · the C-a/C-b/C-c design docs + parts.
+**Records of record — never re-grill these; cite, don't restate:**
 
-**Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
-autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
-OCR-sales envelope is BUILT and now WITNESSED end-to-end (ADR-064): the unattended sales
-drafter ships in `0046`/`0047`, tax-silent sales invoices DRAFT but can never autopost
-(7A-R3), and the floor counts `coding_kind='sales_invoice'` only and **excludes entries a
-rule posted itself** — a rule can never feed its own floor. **Standing
-law: migration numbers are claimed at MERGE time** (RENUMBER.md procedure). **Ceremony law
-(ADR-059): live applies carrying whole-schema lex passes set session-level
-`statement_timeout` inside the migration connection — role/db-level settings are invisible
-through Supavisor's pool.** **Deploy law (2026-08-06, minted by the v54 belt gap): a deploy
-ceremony closes only on a POSITIVE read that the running release carries the intended
-commit — compare the release's build time against the merge it must contain, then read the
-new code's own boot/log line; "the deploy command completed" is a derived state, not
-evidence.** Malaysian tax facts live in effective-dated policy tables, never
-in prose (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
+- **Wave E:** contract `docs/plan/wave-e-contract.md` (E-R1..E-R14, ADR-065) · first-strike
+  acceptance `docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) · the reader's field story
+  `docs/plan/extraction-slice-x7-field-record.md` · dossiers `docs/plan/research/wave-e/`.
+- **§7-A:** `wave-7a-contract.md` (7A-R1..R12, ADR-063) · `wave-7a-design-skeleton.md` v2 ·
+  acceptance `wave-7a-acceptance-h1.md` (RS real) + `-h2.md` (sandbox).
+- **Wave D:** `wave-d-contract.md` (WD-R1..R15) · `wave-d-a-fa-design.md` + `-part2.md` ·
+  AS-BUILT `wave-d-b-asbuilt.md` + `-part2.md` · the D-b2 hold-ladder record
+  (`~/.clara-tools/d-b-build-backup/recovered/split-build-record.md`, ADR-059) and its SETTLED
+  residuals. Archive branch `build/wave-d-b-0042`: **NEVER MERGE** (evidence only).
+- **Wave C:** `wave-c-contract.md` (WC-R1..R12) + the C-a/C-b/C-c design docs.
+- **The standing laws these waves minted** (autopost eligibility · migration numbers claimed at
+  MERGE time · the ceremony `statement_timeout` recipe · the positive-read deploy law ·
+  Malaysian tax facts in effective-dated policy tables) live in `docs/PROJECTLOG.md` +
+  `docs/architecture/ARCHITECTURE.md` — cite them there.
 
-**§7-A records (never re-grill):** contract `docs/plan/wave-7a-contract.md` (7A-R1..R12,
-ADR-063) · skeleton `wave-7a-design-skeleton.md` v2 · ACCEPTANCE (as-run, evidence grade):
-`wave-7a-acceptance-h2.md` (sandbox) + `-h1.md` (RS real).
+**PERMANENT SAFETY PINS — these never expire:**
 
-**WAVE E records (never re-grill):** contract `docs/plan/wave-e-contract.md` (E-R1..E-R14,
-ADR-065) — three-drawer close gates (drawer 1 absolute incl. the DB-owned tie identities ·
-drawer 2 default-refuse + attested per-item override · drawer 3 advisory) · annual-only
-lock + month snapshots with same-transaction staleness · the typed metric algebra/catalog
-with mandatory per-cell provenance · ONE campaign (owner: 一口气全做) · acceptance corpus
-(BEE FY2025 first real close · RPR historical FY = the MPERS pack corpus · RS = the
-snapshot witness · sandbox = the full battery incl. the synthetic goods-trader closing
-stock) · the client-facts trio (F-1 guard refuses outright · entity_type context key ·
-MSIC door + backfill RPR 68109 / RS 82110 / BEE 74101) · evidence dossiers
-`docs/plan/research/wave-e/`. **First strike ACCEPTANCE (as-run, evidence grade):**
-`docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) — with X7's field story in
-`docs/plan/extraction-slice-x7-field-record.md`. **The standing lesson it minted: a wall that
-never refused anything is not a wall that held — it is a wall that was never asked.**
+- **Canary `daba7f2e` — NEVER answer it, even past due** (it was due 2026-08-02).
+- **The belt witness `d023b48c` — NEVER approve it** (the sandbox's first autonomous draft).
+- **THE ENRICHMENT TRAP — ROME SECRETARY's customers are NAME-ONLY; never enrich them with
+  registrations or TINs.** PROJECTLOG PART 2 holds the full statement.
+- **Four firms, and they are NOT interchangeable:** **BELCORT** is the real, high-stakes firm
+  (clients ROME PROPERTIES · ROME SECRETARY · **BEE CREATIVE SOLUTION**, the going-concern one
+  — a sole proprietor is NOT an employee; his account is EQUITY) · **ROME PUBLIC ADVISORY** is
+  the Gate-S synthetic sandbox whose only client is fictional — never confuse it with
+  BELCORT's real ROME pair · **Alara + Borneo** are slice-era RLS fixtures — never repurpose.
+  Ids, balances, registers and witnesses: **memory + PART 2**, not here.
+- **ADR-060's data authority is DATA-scoped and EXPIRES AT BETA** (see Boundaries above).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** **THE WAVE E BUILD is OPEN
-(ADR-065, `docs/plan/wave-e-contract.md`, E-R1..E-R14). Its FIRST STRIKE — the F6–F9 fix batch
-(tasks #31–34) — is CLOSED (ADR-066): `0051`–`0054` + v60 live; F7 unblocked the 2512 KONG CHENG
-leg; F6 discharged the ADR-062 extraction-recovery door. NAMED REMAINDERS, all in PART 2:** C1's
-`failed_retry` witness (a purpose-built sandbox upload) · the 2506 backfill decision (owner) ·
-**Gate P NOT unblocked — SEVEN docs, all `bad_type`/kind-NULL; remedy = owner re-export or the
-Wave-F 401/403 auth split** · FINCARE (human coding decision) · the batch's registered design
-items. **NEXT = the campaign proper:** periods + statements
-(sequential per 7A-R10; owns closing stock per WD-R11 — synthetic-only this wave, the
-segment-aware FA tie, the depreciation close gate, MPERS presentation wording —
-dual-version: 2016 wording for pre-2027 FYs, MPERS(2025) from FY start ≥ 2027-01-01) and
-the client-facts trio. The §7-A carry-ins are DISPOSITIONED, not open-in-E: the
-settlement-corroboration door stays design-only (build = Wave F); the third-reader #25
-and the FX-lite decision move to Wave-F planning; ALL owner UX debt moves to Wave G ·
-Gate P + Gate S both **operating runway** (first native-MYR SST-stated bill / first real
-e-invoice XML) · the `opening_tb.line` producer + K-doc door (Phase 5, review-gated) ·
-the fifth-lex measurement constraint (standing).
-
-**Canary `daba7f2e` was due 2026-08-02 — NEVER answer it, even past due.**
+**Open items — PROJECTLOG PART 2 is the live register; read it, never cache it here.** Two
+stand **with the owner**: the **2506 backfill-window** call (RS's held `RSINV-2506/01` leg) and
+**Gate P's remedy** — an owner re-export, or the Wave-F 401/403 auth-code split; F6 did NOT
+unblock Gate P, whose waiting population measured **seven** documents. The `opening_tb.line`
+producer + the K-doc door are Phase-5 and review-gated — their home is
+**`docs/plan/REBUILD-PLAN.md`**.

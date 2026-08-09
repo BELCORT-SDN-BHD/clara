@@ -266,5 +266,3 @@ mint-time-only reclaim bound, and `internal`'s missing self-service door) · the
 line's missing bundle version · `RENUMBER.md`'s dangling path.
 
 **The decision record is ADR-066.**
-</content>
-</invoke>

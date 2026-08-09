@@ -1,5 +1,13 @@
 # The currency defect — design (DRAFT, 2026-07-28)
 
+> ⚠️ **DESIGN-TIME document.** It cites **`clara-invoice-norm:v9`-era** mechanics (and a
+> then-current `v8`); the **LIVE normalization is `v11`**
+> (`packages/runtime/workflows/invoiceFacts.v1.azure.mjs`). The **AS-BUILT truth lives in
+> [`extraction-slice-contract.md`](./extraction-slice-contract.md) +
+> [`extraction-slice-x7-field-record.md`](./extraction-slice-x7-field-record.md)** — read those
+> for what the reader actually does today. The rulings and the measured defect below stand;
+> the version-numbered mechanics are two cuts behind. Body unchanged on purpose.
+
 **Status: DESIGN ONLY.** No product code, no migration. Ledger task #24. Branch
 `feat/currency-defect-design`. Every number below was measured read-only against live on
 2026-07-28 via `C:\Users\zhant\.clara-tools\live_ro_u.py`; the query for each claim is quoted
