@@ -1672,7 +1672,7 @@ create function clara.attest_close_exception(
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; v_run record; v_chk record; v_result record; v_dedupe jsonb;
-  v_prior uuid; v_new uuid;
+  v_prior uuid; v_new uuid; v_fresh uuid;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if not clara._has_capability(c.firm, c.actor, 'close_and_attest') then
@@ -1709,17 +1709,21 @@ begin
         detail = jsonb_build_object('reason', 'drawer1_identity_failed',
           'check_key', p_check_key, 'drawer', v_chk.drawer)::text;
   end if;
-  -- MEASURE NOW, BIND TO WHAT WAS MEASURED (PRD invariant 8, strongest honest form; the
-  -- A20 recovery fix -- the battery's fifth catch): the attester signs the state as of the
-  -- attest act, freshly evaluated and COMMITTED with this transaction. finalize re-measures
-  -- under its lock; unchanged facts hash identically, moved facts refuse stale again --
-  -- and re-attesting after movement now genuinely recovers, because the fresh row exists.
-  select * into v_result from clara.close_gate_results g
-    where g.id = ((clara._evaluate_one_gate(p_close_run, p_check_key)) ->> 'result_id')::uuid;
   v_dedupe := clara._reserve_op(c.firm, 'attest_close_exception', p_op_key,
     clara._hash(jsonb_build_object('run', p_close_run, 'check', p_check_key,
       'reason', p_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- MEASURE NOW, BIND TO WHAT WAS MEASURED (PRD invariant 8, strongest honest form; the
+  -- A20 recovery fix): the attester signs the state as of the attest act, freshly
+  -- evaluated and COMMITTED with this transaction. finalize re-measures under its lock;
+  -- unchanged facts hash identically, moved facts refuse stale again -- and re-attesting
+  -- after movement genuinely recovers, because the fresh row exists. The assignment form
+  -- is load-bearing (the battery's sixth catch): a volatile self-INSERTing call embedded
+  -- in a WHERE clause over the same table runs once PER SCANNED ROW and its fresh id can
+  -- never equal a pre-existing row's -- evaluate exactly once, then bind by the captured
+  -- id. Measurement sits AFTER the dedupe return so an op_key replay measures nothing.
+  v_fresh := (clara._evaluate_one_gate(p_close_run, p_check_key) ->> 'result_id')::uuid;
+  select * into v_result from clara.close_gate_results g where g.id = v_fresh;
   select a.id into v_prior from clara.close_attestations a
     where a.close_run_id = p_close_run and a.check_key = p_check_key
       and a.superseded_at is null
