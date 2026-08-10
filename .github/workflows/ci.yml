@@ -6,79 +6,118 @@ name: CI
 # DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
 # project. See docs/architecture/ARCHITECTURE.md §9 and the repo README.
 
+# THE CI DIET (2026-08-11, owner-ruled after the quota exhaustion; reviewed on its own PR).
+# Three structural wastes removed, ZERO gate semantics changed when a gate runs:
+#   1. Every branch push used to trigger BOTH a push run and a pull_request run of the whole
+#      matrix (different refs -> concurrency never deduped them): 2x everything. Now: PRs run
+#      on the pull_request event only; push runs only on main (the post-merge confirmation,
+#      and the one context that keeps the FULL-history gitleaks sweep per merge).
+#   2. A docs-only change used to run the full DB matrix (~10 jobs x ~40 min) although it
+#      cannot change any fact a DB job proves. Now: the `changes` job classifies the diff
+#      (FAIL-CLOSED — any uncertainty, any non-docs path, any self-change of this file =>
+#      everything runs) and the heavy jobs skip when their subject cannot have changed.
+#      A SKIP under this rule is a POSITIVE statement, not a hole: the job's entire input
+#      surface is untouched by the diff, and the weekly scheduled full sweep re-proves every
+#      gate regardless (the "forever honest" promise of the frontier legs, kept on a cadence
+#      that does not bill 40 minutes to a typo fix).
+#   3. lint (freeze-lint, leak/secret scans, the wiki gates) is extracted into its own fast
+#      job so EVERY change — docs included — still gets the full secrets + boundary sweep,
+#      with feedback in minutes instead of after the DB matrix.
+# Deliberately NOT taken here (a later, separate decision): baseline-caching the migration
+# chain — it touches what the deploy-onto-existing and drill steps PROVE, so it needs its own
+# review, not a ride-along.
 on:
-  push:
   pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly full sweep (Thu 03:23 MYT): every job runs regardless of the last diff, so the
+    # historical frontier legs and drills stay proven on a cadence even through docs-only weeks.
+    - cron: "23 19 * * 3"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ci:
+  # =========================================================================
+  # THE DIFF CLASSIFIER — plain git, no third-party action, FAIL-CLOSED.
+  # Outputs default to true (run everything) and are narrowed ONLY when the diff is
+  # confidently computed and every changed path is provably outside a job's input surface.
+  # schedule / workflow_dispatch / a zero-SHA push / any git failure => everything runs.
+  #   code=false  ONLY when every changed file is docs-shaped (docs/**, any *.md,
+  #               .claude/** — none of which any CI gate reads).
+  #   db=true     when anything under packages/db/**, this workflow file, or a root
+  #               manifest/lockfile changed — the ENTIRE input surface of the frontier
+  #               legs and the partition gate (they read packages/db only; their runner
+  #               is defined here; installs read the root manifests).
+  # $GITHUB_* values are read as shell env, never spliced via ${{ }} (the house
+  # anti-injection discipline this file already applies elsewhere); EV_BEFORE is a SHA.
+  # =========================================================================
+  changes:
     runs-on: ubuntu-latest
-
-    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
-    # it ends. This is the ONLY database CI touches. It is not the frozen project.
-    # `postgres_b` is a SECOND, INDEPENDENT cluster (different port) used only by the
-    # DR full-profile round-trip so cluster-role recovery is genuinely cross-cluster
-    # (Codex HIGH-5: two databases in ONE cluster share pg_authid, making role parity a
-    # tautology; restoring into a separate cluster exercises real role/membership creation).
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: clara_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      postgres_b:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      # libpq vars — the db scripts read these (no DSN in code/argv).
-      PGHOST: localhost
-      PGPORT: "5432"
-      PGUSER: postgres
-      PGPASSWORD: postgres
-      PGDATABASE: clara_ci
-      NEXT_TELEMETRY_DISABLED: "1"
-      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
-      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
-      # still refuses any non-ephemeral target even with this set.
-      CLARA_ALLOW_DESTRUCTIVE: "1"
-
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      db: ${{ steps.classify.outputs.db }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Full history so the freeze-lint + migration-history checks can compare
-          # against origin/main (append-only-vs-base is the ONLY real protection —
-          # free-tier branch protection is not platform-enforced).
+          fetch-depth: 0
+      - id: classify
+        env:
+          EV_BEFORE: ${{ github.event.before }}
+        run: |
+          CODE=true; DB=true
+          RANGE=""
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"; then
+              BASE="$(git merge-base HEAD "refs/remotes/origin/$GITHUB_BASE_REF" 2>/dev/null || true)"
+              [ -n "$BASE" ] && RANGE="$BASE..HEAD"
+            fi
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            case "$EV_BEFORE" in
+              ""|0000000000000000000000000000000000000000) : ;;  # first/forced push — stay fail-closed
+              *) git cat-file -e "$EV_BEFORE" 2>/dev/null && RANGE="$EV_BEFORE..HEAD" ;;
+            esac
+          fi
+          if [ -n "$RANGE" ]; then
+            if FILES="$(git diff --name-only $RANGE)" && [ -n "$FILES" ]; then
+              CODE=false; DB=false
+              while IFS= read -r f; do
+                case "$f" in
+                  docs/*|*.md|.claude/*) : ;;
+                  *) CODE=true ;;
+                esac
+                case "$f" in
+                  packages/db/*|.github/workflows/ci.yml|pnpm-lock.yaml|package.json|pnpm-workspace.yaml|.npmrc) DB=true ;;
+                esac
+              done <<< "$FILES"
+            fi
+          fi
+          echo "--- event=$GITHUB_EVENT_NAME range=${RANGE:-<none: fail-closed>} => code=$CODE db=$DB ---"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "db=$DB" >> "$GITHUB_OUTPUT"
+
+  # =========================================================================
+  # LINT + SECRETS + BOUNDARY GATES — extracted from the `ci` job (the diet, item 3).
+  # Runs on EVERY event unconditionally, docs-only diffs included: a docs commit can leak a
+  # credential or violate the wiki boundary exactly as code can, and the standing law
+  # ("scan any branch with CI's own pinned gitleaks config") keeps its per-PR teeth here.
+  # Every step below is moved VERBATIM from the `ci` job — same commands, same comments,
+  # same pinned versions; only the job home changed. No DB service: none of these read one.
+  # =========================================================================
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history: the freeze-lint compares against origin/main, and the push-to-main /
+          # scheduled gitleaks context scans full history (same reasons as the ci job's checkout).
           fetch-depth: 0
 
       - name: Fetch base ref (origin/main) for append-only checks
         run: |
-          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
-          # append-only freeze-lint + migration-history gates MUST have it — a
-          # fetch failure can no longer masquerade as success. Only a genuine
-          # first-introduction (origin/main absent) may pass without a base.
           if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
             echo "origin/main exists — fetching it for the append-only base checks"
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
@@ -97,9 +136,6 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
-
-      - name: Typecheck (tsc across TS packages)
-        run: pnpm typecheck
 
       - name: Lint (freeze-lint + leak-scan + eslint code-lint)
         run: pnpm lint
@@ -214,6 +250,94 @@ jobs:
             echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
             /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
           fi
+
+  ci:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+
+    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
+    # it ends. This is the ONLY database CI touches. It is not the frozen project.
+    # `postgres_b` is a SECOND, INDEPENDENT cluster (different port) used only by the
+    # DR full-profile round-trip so cluster-role recovery is genuinely cross-cluster
+    # (Codex HIGH-5: two databases in ONE cluster share pg_authid, making role parity a
+    # tautology; restoring into a separate cluster exercises real role/membership creation).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres_b:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # libpq vars — the db scripts read these (no DSN in code/argv).
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      NEXT_TELEMETRY_DISABLED: "1"
+      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
+      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
+      # still refuses any non-ephemeral target even with this set.
+      CLARA_ALLOW_DESTRUCTIVE: "1"
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history so the freeze-lint + migration-history checks can compare
+          # against origin/main (append-only-vs-base is the ONLY real protection —
+          # free-tier branch protection is not platform-enforced).
+          fetch-depth: 0
+
+      - name: Fetch base ref (origin/main) for append-only checks
+        run: |
+          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
+          # append-only freeze-lint + migration-history gates MUST have it — a
+          # fetch failure can no longer masquerade as success. Only a genuine
+          # first-introduction (origin/main absent) may pass without a base.
+          if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+            echo "origin/main exists — fetching it for the append-only base checks"
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          else
+            echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
+          fi
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc across TS packages)
+        run: pnpm typecheck
 
       - name: Build (nitro runtime + next dashboard)
         run: pnpm build
@@ -625,6 +749,11 @@ jobs:
   #
   # DB NAMES USE `dbtag`, NEVER `slice`: d-b0 is not a legal bare SQL identifier.
   db-slice-frontiers:
+    # The diet: this matrix reads packages/db/** and nothing else (its own gate/list/drill
+    # logic included) — it runs when that surface (or this file, or a root manifest) changed,
+    # and on every scheduled weekly sweep. FAIL-CLOSED via the classifier's defaults.
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -901,6 +1030,10 @@ jobs:
   # x42x files on disk here, and RUN by every frontier leg above. A new contract that joins the
   # corpus and not the roster fails this job by name.
   db-split-partition-total:
+    # Same input surface as the frontier legs (packages/db/tests + split-lists + migrations),
+    # same diet condition, same weekly sweep.
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
