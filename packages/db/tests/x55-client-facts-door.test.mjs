@@ -68,6 +68,15 @@ test("F3a-shape door + replay -- record_client_fact writes who/basis/when, appea
 
   const r1 = await recordClientFact(sub, { client, factKey: "msic", factValue: "68109", basis: basisText, basisKind: "owner_instruction", opKey });
   assert.ok(r1?.fact_id, "the door returns a fact_id");
+  // THE RECEIPT CARRIES THE RULED TRIO ITSELF (matrix F3a's literal text) -- asserted on the
+  // FIRST call's result, not just on the row read back.
+  assert.equal(r1.recorded_by, sub, "the receipt's recorded_by is the calling admin's own actor id");
+  assert.equal(r1.basis, basisText, "the receipt's basis is the exact text passed");
+  assert.equal(r1.basis_kind, "owner_instruction", "the receipt's basis_kind");
+  assert.equal(r1.fact_value, "68109", "the receipt's fact_value");
+  assert.equal(r1.validated_against, "format_only", "the receipt's validated_against (msic's catalog label)");
+  assert.equal(r1.source_document_id, null, "no document basis on this call");
+  assert.ok(!Number.isNaN(Date.parse(r1.recorded_at)), `the receipt's recorded_at parses as a timestamp (got ${r1.recorded_at})`);
 
   const row = (await rootQuery("select * from clara.client_facts where id=$1", [r1.fact_id])).rows[0];
   assert.ok(row, "the fact row exists");
@@ -155,6 +164,12 @@ test("F4 supersession -- a corrected value SUPERSEDES the prior fact; the prior 
 
   const r1 = await recordClientFact(admin, { client, factKey: "entity_type", factValue: "sdn_bhd", basis: "initial owner instruction", basisKind: "owner_instruction" });
   const priorId = r1.fact_id;
+  // Captured BEFORE the supersession -- the "ORIGINAL" the prior row must still carry
+  // afterward, read from the door's OWN receipt (the ruled trio), not re-derived.
+  const priorRecordedBy = r1.recorded_by;
+  const priorRecordedAt = r1.recorded_at;
+  const priorBasis = r1.basis;
+
   const r2 = await recordClientFact(admin, { client, factKey: "entity_type", factValue: "sole_prop", basis: "corrected: it is actually a sole proprietorship", basisKind: "owner_instruction" });
   assert.notEqual(r2.fact_id, priorId, "a NEW row, not an in-place overwrite");
   assert.equal(r2.superseded_id, priorId, "the door names what it superseded");
@@ -164,6 +179,11 @@ test("F4 supersession -- a corrected value SUPERSEDES the prior fact; the prior 
   assert.equal(prior.basis, "initial owner instruction", "and its ORIGINAL basis");
   assert.equal(prior.superseded_by, r2.fact_id, "superseded_by names the successor");
   assert.ok(prior.superseded_at, "superseded_at is stamped");
+  // The prior row's who/basis/when are UNCHANGED by the supersession -- compared against the
+  // values captured from the door's OWN receipt BEFORE r2 ran, not hardcoded literals.
+  assert.equal(prior.recorded_by, priorRecordedBy, "recorded_by is unchanged after supersession");
+  assert.equal(prior.basis, priorBasis, "basis is unchanged after supersession");
+  assert.equal(new Date(prior.recorded_at).getTime(), new Date(priorRecordedAt).getTime(), "recorded_at is unchanged after supersession");
 
   const live = (await rootQuery(
     "select * from clara.client_facts where client_id=$1 and fact_key='entity_type' and superseded_at is null", [client],
@@ -171,6 +191,10 @@ test("F4 supersession -- a corrected value SUPERSEDES the prior fact; the prior 
   assert.equal(live.length, 1, "the live read (superseded_at is null) returns EXACTLY one row");
   assert.equal(live[0].id, r2.fact_id);
   assert.equal(live[0].fact_value, "sole_prop");
+
+  // The READ SURFACE the cell means: get_context_pack, as a human, carries the NEW value.
+  const pack = await wb.packHuman(admin, { client, purpose: "wiki_coding" });
+  assert.equal(pack?.client?.entity_type, "sole_prop", "the pack reflects the superseding (NEW) value");
 
   // (a) a non-owner role UPDATE attempt: clara_authenticated holds SELECT only.
   await assertRaises(PG.insufficientPrivilege, () => humanQuery(

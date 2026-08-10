@@ -35,11 +35,12 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, roleQuery, ROLES, CLR, PG,
+  rootQuery, roleQuery, ROLES, CLR, PG, idOf, upsertAccountClassed,
   endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, reasonOf, opk, assertRaises,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
+import { addBankAccount, enterStatement, settleFromBankLine } from "./x38-match-fixtures.mjs";
 import {
   has0055, setupCoa, AR1, REVN, caught,
   birthCounterparty, approvedGeneric, itemsOf, outstandingOf,
@@ -215,13 +216,20 @@ test("F1c allocate_receipt/allocate_payment REFUSE an allocation dated before th
   assert.equal(String(detP.posting_date), "2020-01-01", "detail.posting_date (payment side)");
   assert.equal(await outstandingOf(bill.item), 25000, "the refused call left the item untouched");
 
-  // The boundary: SAME-day allocation PASSES (the predicate is <, not <=).
+  // The boundary: SAME-day allocation PASSES (the predicate is <, not <=) -- BOTH sides.
   const okR = await allocateReceipt(sub, {
     client, counterparty: cust, postingDate: future, amountCents: 40000,
     allocations: [{ item_id: inv.item, amount_cents: 40000 }],
   });
   assert.ok(okR, "a same-day allocation against the item's own item_date must succeed");
   assert.equal(await outstandingOf(inv.item), 0, "the same-day allocation settled the item");
+
+  const okP = await allocatePayment(sub, {
+    client, counterparty: vend, postingDate: future, amountCents: 25000,
+    allocations: [{ item_id: bill.item, amount_cents: 25000 }],
+  });
+  assert.ok(okP, "a same-day allocation via allocate_payment against the item's own item_date must ALSO succeed (payment-side boundary)");
+  assert.equal(await outstandingOf(bill.item), 0, "the same-day payment settled the item");
 
   // No override argument exists on either function.
   for (const sig of [
@@ -231,6 +239,44 @@ test("F1c allocate_receipt/allocate_payment REFUSE an allocation dated before th
     const args = (await rootQuery("select pg_get_function_identity_arguments($1::regprocedure) as a", [sig])).rows[0].a;
     assert.doesNotMatch(args, /override/i, `${sig} carries no override argument (got: ${args})`);
   }
+});
+
+// ===========================================================================
+// 3b. THE COMPOSITE/PREHELD PATH -- the wall is inherited by the THIRD census
+// member too (F1a's own count: _settle_from_bank_line_core, allocate_payment,
+// allocate_receipt), not just the two public wrappers. settle_from_bank_line
+// calls clara._allocate_receipt_core DIRECTLY (0044:1927), so a bank-line
+// settlement against a not-yet-born item must refuse identically.
+// ===========================================================================
+
+test("Composite path -- settle_from_bank_line REFUSES a not-yet-born item exactly like the public wrappers (the wall's third caller)", async (t) => {
+  if (skip55(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const future = addDaysStr(await bookToday(), 400);
+  const bankCoa = "171-C55";
+  await upsertAccountClassed(sub, { client, code: bankCoa, name: "Bank GL (x55 composite)", type: "asset", opKey: opk("x55-bankgl") });
+  const bankAcct = await addBankAccount(sub, {
+    client, bankCode: "MBB", accountNumber: `1099${randomUUID().slice(0, 10)}`, coaAccountCode: bankCoa,
+  });
+  const bankAccountId = idOf(bankAcct, "bank_account_id", "id");
+  const cust = await birthCounterparty(sub, { client, name: `X55 COMPOSITE ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const inv = await openArItem(sub, { client, cp: cust, cents: 40000, postingDate: future });
+
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: bankAccountId, periodStart: "2026-09-01", periodEnd: "2026-09-30", opening: 0,
+    specs: [{ amountCents: 40000, entryDate: "2026-09-10" }], keepPeriod: true,
+  });
+
+  const err = await caught(() => settleFromBankLine(sub, {
+    client, line: stmt.lines[0].id, counterparty: cust,
+    allocations: [{ item_id: inv.item, amount_cents: 40000 }],
+    postingDate: "2026-09-10", controlAccount: AR1,
+  }));
+  assert.ok(err, "a settlement against a not-yet-born item must be refused through the composite path too");
+  assert.equal(err.code, "CLR10", `expected CLR10 (got ${err.code} -- ${err.message})`);
+  assert.equal(reasonOf(err), "allocation_to_unborn_item");
+  assert.equal(await outstandingOf(inv.item), 40000, "the refused composite call left the item untouched");
 });
 
 // ===========================================================================
@@ -311,12 +357,16 @@ test("F1f RIGHT ANSWER -- same-day AND historical apply_open_items pairs both su
   assert.ok(applySame, "the same-day apply SUCCEEDS");
   const groupSame = groupOf(applySame);
   assert.ok(groupSame, "the receipt names its application_group");
+  // effective_date::text -- reading the bare `date` column lets node-pg parse it into a
+  // LOCAL-midnight JS Date, and comparing that via toISOString() rolls back a UTC calendar
+  // day on any positive-offset host. Casting to text in SQL sidesteps client-side tz entirely.
   const allocRowsSame = (await rootQuery(
-    "select effective_date from clara.open_item_allocations where application_group=$1", [groupSame],
+    "select effective_date::text as effective_date from clara.open_item_allocations where application_group=$1", [groupSame],
   )).rows;
   assert.equal(allocRowsSame.length, 2, "the pair writes exactly two allocation rows");
-  const datesSame = new Set(allocRowsSame.map((r) => new Date(r.effective_date).toISOString().slice(0, 10)));
+  const datesSame = new Set(allocRowsSame.map((r) => r.effective_date));
   assert.equal(datesSame.size, 1, `the pair shares ONE effective_date (got ${[...datesSame]})`);
+  assert.equal([...datesSame][0], today, `the shared effective_date IS the act date (today), not merely a shared one (got ${[...datesSame][0]})`);
 
   // Historical pair, at DIFFERENT item dates.
   const histTarget = addDaysStr(today, -40);
@@ -330,10 +380,11 @@ test("F1f RIGHT ANSWER -- same-day AND historical apply_open_items pairs both su
   assert.ok(applyHist, "the historical apply SUCCEEDS");
   const groupHist = groupOf(applyHist);
   const allocRowsHist = (await rootQuery(
-    "select effective_date from clara.open_item_allocations where application_group=$1", [groupHist],
+    "select effective_date::text as effective_date from clara.open_item_allocations where application_group=$1", [groupHist],
   )).rows;
-  const datesHist = new Set(allocRowsHist.map((r) => new Date(r.effective_date).toISOString().slice(0, 10)));
+  const datesHist = new Set(allocRowsHist.map((r) => r.effective_date));
   assert.equal(datesHist.size, 1, `the historical pair also shares ONE effective_date (got ${[...datesHist]})`);
+  assert.equal([...datesHist][0], today, `the historical pair's effective_date is ALSO the act date (today) -- act-dating, not either ITEM's own date (histTarget=${histTarget}, histSource=${histSource}, got ${[...datesHist][0]})`);
 
   for (const asOf of [today, addDaysStr(today, 5)]) {
     const aging = await arTotalsAt(sub, client, asOf);
