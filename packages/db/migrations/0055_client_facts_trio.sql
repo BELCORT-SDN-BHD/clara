@@ -156,6 +156,16 @@ begin
     raise exception '0055 S0.5: a required helper (_book_today / _human_ctx / _append_event) is missing at its pinned signature'
       using errcode = 'CLR10';
   end if;
+
+  -- (0.6) The event type this file registers must not pre-exist (idempotence probe), and the
+  -- taxonomy machinery it registers against must (the wake-authority invariant's registers).
+  if exists (select 1 from clara.event_types where name = 'client.fact_recorded') then
+    raise exception '0055 S0.6: client.fact_recorded is already registered -- 0055 has already been applied to this database'
+      using errcode = 'CLR10';
+  end if;
+  if to_regclass('clara.trigger_taxonomy') is null or to_regclass('clara.taxonomy_active') is null then
+    raise exception '0055 S0.6: the trigger-taxonomy registers are missing' using errcode = 'CLR10';
+  end if;
 end $s0$;
 
 -- =====================================================================================
@@ -450,6 +460,28 @@ grant select, insert, update on clara.client_facts to clara_fn_owner;
 -- facts: entity_type and msic differ only in their catalog rule; two doors would be two
 -- audit shapes for the same act.
 -- =====================================================================================
+-- S4.0 — EVENT TAXONOMY, one additive pair against the active version (the 0024 §B idiom).
+-- The events spine validates every domain_events.event_type against clara.event_types, so a
+-- door that emits an unregistered type fails on its FIRST successful call — exactly the
+-- defect the x55 battery caught on this file's first cut (9/14 green, five cells blocked by
+-- this one missing row). Registered here, BEFORE the door exists.
+-- 'ignore': a recorded client fact is a HUMAN capture act and its reader (the context pack)
+-- reads lazily at judgement time — nothing downstream is designed to wake on it, and nothing
+-- here manufactures a consumer for it (the document.classify_failed posture, 0024 §B).
+with added(name, client_scoped, description, decision, note) as (values
+  ('client.fact_recorded', true, 'A client fact was recorded through the audited door', 'ignore',
+    'human capture act; the context pack reads facts lazily at judgement time -- no router wake (mirrors 0024 §B''s ignore posture)')
+), inserted_types as (
+  insert into clara.event_types(name, client_scoped, description)
+  select name, client_scoped, description from added
+  returning name
+)
+insert into clara.trigger_taxonomy(version, event_type, decision, note)
+select a.version, x.name, x.decision, x.note
+from added x
+join inserted_types i on i.name = x.name
+cross join clara.taxonomy_active a;
+
 create function clara.record_client_fact(
     p_client uuid, p_fact_key text, p_fact_value jsonb, p_basis text, p_basis_kind text,
     p_source_document_id uuid, p_op_key text) returns jsonb
@@ -768,7 +800,23 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- (7.5) The F-1 posture at close: the guard is live exactly once; the census is unmoved.
+  -- (7.5) The door's event type is registered on BOTH registers (the spine catalog and the
+  -- wake-authority taxonomy) — the x55 battery's finding made structural: an unregistered
+  -- event type turns every successful door call into a CLR10 at the spine.
+  select count(*) into v_n from clara.event_types where name = 'client.fact_recorded';
+  if v_n <> 1 then
+    raise exception '0055 S7.5: client.fact_recorded is not registered in clara.event_types'
+      using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from clara.trigger_taxonomy tt
+    join clara.taxonomy_active a on a.version = tt.version
+   where tt.event_type = 'client.fact_recorded' and tt.decision = 'ignore';
+  if v_n <> 1 then
+    raise exception '0055 S7.5: client.fact_recorded carries no ''ignore'' decision on the ACTIVE taxonomy version'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (7.6) The F-1 posture at close: the guard is live exactly once; the census is unmoved.
   select (length(d) - length(replace(d, 'apply_before_item_date', ''))) / length('apply_before_item_date')
     into v_n
     from pg_get_functiondef('clara.apply_open_items(uuid,jsonb,text,text)'::regprocedure) d;
