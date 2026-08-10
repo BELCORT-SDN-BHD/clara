@@ -958,3 +958,421 @@ begin
     'as_of', v_fy.ends_on, 'accounts', v_accounts);
 end $$;
 revoke all on function clara.bank_recon_close_state(uuid, uuid) from public;
+
+-- =====================================================================================
+-- S6.0 -- EVENT TAXONOMY, six additive pairs (the 0024 §B idiom; the lane-α battery's
+-- first catch made this structural: an unregistered type kills every emitting verb at the
+-- spine). All 'ignore': no consumer is designed in E (surfaces read tables; wake classes
+-- are owner-ruled acts, never ride-alongs).
+-- =====================================================================================
+with added(name, client_scoped, description, decision, note) as (values
+  ('fiscal_year.opened',   true, 'A fiscal year was opened',                    'ignore', 'human period act; no designed consumer in E'),
+  ('close.begun',          true, 'A close run began (gates evaluated)',         'ignore', 'human close act; readiness is read from tables'),
+  ('close.attested',       true, 'A drawer-2 gate exception was attested',      'ignore', 'human attestation; bound to its digest in-table'),
+  ('close.finalized',      true, 'A fiscal year was closed (receipt minted)',   'ignore', 'the receipt row is the record; no router wake'),
+  ('close.abandoned',      true, 'A close run was abandoned (FY back to open)', 'ignore', 'stamped on the run row; no router wake'),
+  ('fiscal_year.reopened', true, 'A closed fiscal year was formally reopened',  'ignore', 'key-3 act; the reopen receipt is the record')
+), inserted_types as (
+  insert into clara.event_types(name, client_scoped, description)
+  select name, client_scoped, description from added
+  returning name
+)
+insert into clara.trigger_taxonomy(version, event_type, decision, note)
+select a.version, x.name, x.decision, x.note
+from added x join inserted_types i on i.name = x.name
+cross join clara.taxonomy_active a;
+
+-- =====================================================================================
+-- S6.1 -- E-R11: THE THREE KEYS AS DB OBJECTS (skeleton §2.10; placed before the verbs
+-- that consult them). Key ① (prepare) is the existing bookkeeper floor and needs no new
+-- object. Factory default: OWNER ONLY -- CONFIRMED by the owner 2026-08-09; a partner who
+-- is not the firm owner joins by explicit audited grant.
+-- =====================================================================================
+create table clara.firm_capability_grants (
+  id         uuid        primary key default gen_random_uuid(),
+  firm_id    uuid        not null references clara.firms(id),
+  user_id    uuid        not null references clara.users(id),
+  capability text        not null check (capability in ('close_and_attest', 'reopen')),
+  granted_by uuid        not null references clara.users(id),
+  granted_at timestamptz not null default now(),
+  reason     text        not null check (btrim(reason) <> ''),
+  revoked_by uuid,
+  revoked_at timestamptz,
+  revoke_reason text,
+  constraint ck_fcg_revoke_paired check ((revoked_by is null) = (revoked_at is null))
+);
+create unique index uq_capability_active on clara.firm_capability_grants
+  (firm_id, user_id, capability) where revoked_at is null;
+
+-- Append-only in spirit: the ONE update is the revoke stamp; history is permanent.
+create function clara._tf_fcg_revoke_only() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  if old.revoked_at is not null then
+    raise exception 'a revoked capability grant is immutable'
+      using errcode = 'CLR10', detail = '{"reason":"capability_grant_immutable"}';
+  end if;
+  if new.revoked_by is null or new.revoked_at is null
+     or new.id         is distinct from old.id
+     or new.firm_id    is distinct from old.firm_id
+     or new.user_id    is distinct from old.user_id
+     or new.capability is distinct from old.capability
+     or new.granted_by is distinct from old.granted_by
+     or new.granted_at is distinct from old.granted_at
+     or new.reason     is distinct from old.reason then
+    raise exception 'a capability grant admits exactly one update: the revoke stamp'
+      using errcode = 'CLR10', detail = '{"reason":"capability_grant_immutable"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_fcg_revoke_only() from public;
+create trigger t_fcg_revoke_only before update on clara.firm_capability_grants
+  for each row execute function clara._tf_fcg_revoke_only();
+create trigger t_fcg_no_delete before delete on clara.firm_capability_grants
+  for each row execute function clara._tf_append_only();
+create trigger t_fcg_no_truncate before truncate on clara.firm_capability_grants
+  for each statement execute function clara._tf_no_truncate();
+alter table clara.firm_capability_grants enable row level security;
+alter table clara.firm_capability_grants force row level security;
+create policy p_fcg_owner on clara.firm_capability_grants
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_fcg_human on clara.firm_capability_grants
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.firm_capability_grants to clara_authenticated;
+
+-- The resolver: an active grant, OR the caller's active membership role is the LITERAL
+-- 'owner' (the factory default -- adjustable in this one predicate).
+create function clara._has_capability(p_firm uuid, p_user uuid, p_capability text)
+  returns boolean
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select exists (
+    select 1 from clara.firm_capability_grants g
+      where g.firm_id = p_firm and g.user_id = p_user
+        and g.capability = p_capability and g.revoked_at is null)
+  or exists (
+    select 1 from clara.firm_memberships m
+      where m.firm_id = p_firm and m.user_id = p_user
+        and m.status = 'active' and m.role = 'owner');
+$$;
+revoke all on function clara._has_capability(uuid, uuid, text) from public;
+
+-- Grant/revoke: the floor is the caller's active membership role being the LITERAL 'owner'
+-- -- never role_rank (E-R11: firm-owner-only grant/revoke; every grant an audited act).
+create function clara.grant_firm_capability(
+    p_user uuid, p_capability text, p_reason text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  c record; v_dedupe jsonb; v_id uuid;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));  -- identity only; the REAL floor is below
+  if not exists (select 1 from clara.firm_memberships m
+                  where m.firm_id = c.firm and m.user_id = c.actor
+                    and m.status = 'active' and m.role = 'owner') then
+    raise exception 'only the firm owner may grant a signing capability'
+      using errcode = 'CLR04', detail = '{"reason":"capability_missing","capability":"owner"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  if p_capability is null or p_capability not in ('close_and_attest', 'reopen') then
+    raise exception 'capability must be close_and_attest or reopen'
+      using errcode = 'CLR10', detail = '{"reason":"fact_key_unknown"}';
+  end if;
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'a capability grant requires its reason'
+      using errcode = 'CLR10', detail = '{"reason":"fact_basis_missing"}';
+  end if;
+  if not exists (select 1 from clara.firm_memberships m
+                  where m.firm_id = c.firm and m.user_id = p_user and m.status = 'active') then
+    raise exception 'the grantee holds no active membership of this firm'
+      using errcode = 'CLR11', detail = '{"reason":"client_not_in_firm"}';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'grant_firm_capability', p_op_key,
+    clara._hash(jsonb_build_object('user', p_user, 'capability', p_capability,
+      'reason', p_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  insert into clara.firm_capability_grants(firm_id, user_id, capability, granted_by, reason)
+    values (c.firm, p_user, p_capability, c.actor, p_reason)
+    returning id into v_id;
+  perform clara._audit(c.firm, c.actor, null, null, 'grant_firm_capability', null,
+    jsonb_build_object('grant_id', v_id, 'user', p_user, 'capability', p_capability,
+      'op_key', p_op_key));
+  return clara._finish_op(c.firm, 'grant_firm_capability', p_op_key,
+    jsonb_build_object('grant_id', v_id, 'user_id', p_user, 'capability', p_capability,
+      'granted_by', c.actor, 'granted_at', now()));
+end $$;
+alter function clara.grant_firm_capability(uuid, text, text, text) owner to clara_fn_owner;
+revoke all on function clara.grant_firm_capability(uuid, text, text, text) from public;
+grant execute on function clara.grant_firm_capability(uuid, text, text, text)
+  to clara_authenticated;
+
+create function clara.revoke_firm_capability(
+    p_user uuid, p_capability text, p_reason text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  c record; v_dedupe jsonb; v_id uuid;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  if not exists (select 1 from clara.firm_memberships m
+                  where m.firm_id = c.firm and m.user_id = c.actor
+                    and m.status = 'active' and m.role = 'owner') then
+    raise exception 'only the firm owner may revoke a signing capability'
+      using errcode = 'CLR04', detail = '{"reason":"capability_missing","capability":"owner"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'a capability revoke requires its reason'
+      using errcode = 'CLR10', detail = '{"reason":"fact_basis_missing"}';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'revoke_firm_capability', p_op_key,
+    clara._hash(jsonb_build_object('user', p_user, 'capability', p_capability,
+      'reason', p_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  update clara.firm_capability_grants g
+     set revoked_by = c.actor, revoked_at = now(), revoke_reason = p_reason
+   where g.firm_id = c.firm and g.user_id = p_user
+     and g.capability = p_capability and g.revoked_at is null
+   returning g.id into v_id;
+  if v_id is null then
+    raise exception 'no active % grant exists for this user', p_capability
+      using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+  end if;
+  perform clara._audit(c.firm, c.actor, null, null, 'revoke_firm_capability', null,
+    jsonb_build_object('grant_id', v_id, 'user', p_user, 'capability', p_capability,
+      'op_key', p_op_key));
+  return clara._finish_op(c.firm, 'revoke_firm_capability', p_op_key,
+    jsonb_build_object('grant_id', v_id, 'user_id', p_user, 'capability', p_capability,
+      'revoked_by', c.actor, 'revoked_at', now()));
+end $$;
+alter function clara.revoke_firm_capability(uuid, text, text, text) owner to clara_fn_owner;
+revoke all on function clara.revoke_firm_capability(uuid, text, text, text) from public;
+grant execute on function clara.revoke_firm_capability(uuid, text, text, text)
+  to clara_authenticated;
+
+-- =====================================================================================
+-- S6.2 -- THE DRAWER-2 GATE EVALUATORS (skeleton §2.4's five named checks) + the trade-
+-- nature fact key their applicability reads. Each returns jsonb {state, measured...};
+-- state ∈ pass|fail|unknown -- and per E-R2, an UNKNOWN drawer-2 state is refuse-
+-- attestable, never "not applicable" (an unknown trade nature is not evidence of a
+-- service business).
+-- =====================================================================================
+
+-- The applicability fact (§2.4: "the applicability test is itself a fact question --
+-- applies_when reads client_facts"). Enters through the SAME audited door 0055 built.
+insert into clara.client_fact_keys (fact_key, validated_against, allowed_values, description) values
+  ('trade_nature', 'enum:TRADE_NATURE_V1',
+   '["goods_trading","services","mixed"]'::jsonb,
+   'Whether the client trades goods (drives the closing-stock close gate, WD-R11/E-R2). '
+   || 'Captured through record_client_fact with who/basis/when like every client fact; '
+   || 'ABSENT means the closing-stock gate reads UNKNOWN and refuses attestably -- an '
+   || 'unknown trade nature is not evidence of a service business (skeleton §2.4).');
+
+create function clara._close_gate_depreciation(p_client uuid, p_fy uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_lagging jsonb;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  -- An enrolled, undisposed asset whose live depreciation has not reached FY end is lagging.
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'asset_id', fa.id, 'description', fa.description,
+           'depreciated_through', l.through, 'fy_ends_on', v_fy.ends_on)
+         order by fa.id), '[]'::jsonb)
+    into v_lagging
+    from clara.fixed_assets fa
+    left join lateral (
+      select max(d.period_end) as through from clara.fa_depreciation d
+        where d.asset_id = fa.id and d.is_live) l on true
+    where fa.client_id = p_client and fa.superseded_at is null and fa.disposed_at is null
+      and fa.depreciation_start_date is not null
+      and fa.depreciation_start_date <= v_fy.ends_on
+      and coalesce(l.through, fa.depreciation_start_date - 1) < v_fy.ends_on;
+  return jsonb_build_object(
+    'state', case when jsonb_array_length(v_lagging) = 0 then 'pass' else 'fail' end,
+    'lagging_assets', v_lagging);
+end $$;
+revoke all on function clara._close_gate_depreciation(uuid, uuid) from public;
+
+create function clara._close_gate_closing_stock(p_client uuid, p_fy uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_nature text; v_present boolean;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  select cf.fact_value #>> '{}' into v_nature from clara.client_facts cf
+    where cf.client_id = p_client and cf.fact_key = 'trade_nature'
+      and cf.superseded_at is null;
+  if v_nature is null then
+    return jsonb_build_object('state', 'unknown', 'reason', 'trade_nature_fact_absent');
+  end if;
+  if v_nature = 'services' then
+    return jsonb_build_object('state', 'pass', 'reason', 'not_goods_trading',
+      'trade_nature', v_nature);
+  end if;
+  -- THE v1 MARKER CONTRACT, stated: the WD-R11 closing-stock entry carries
+  -- flags ? 'closing_stock' (the Section-B fixture and the future closing-stock verb both
+  -- write it). A goods-trader with no such approved entry dated in the FY fails this gate.
+  select exists (select 1 from clara.journal_entries je
+                  where je.client_id = p_client and je.status = 'approved'
+                    and je.posting_date between v_fy.starts_on and v_fy.ends_on
+                    and je.flags ? 'closing_stock') into v_present;
+  return jsonb_build_object(
+    'state', case when v_present then 'pass' else 'fail' end,
+    'trade_nature', v_nature, 'closing_stock_entry_present', v_present,
+    'fy_starts_on', v_fy.starts_on, 'fy_ends_on', v_fy.ends_on);
+end $$;
+revoke all on function clara._close_gate_closing_stock(uuid, uuid) from public;
+
+create function clara._close_gate_drafts(p_client uuid, p_fy uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_drafts jsonb;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  select coalesce(jsonb_agg(jsonb_build_object('entry_id', je.id,
+           'posting_date', je.posting_date, 'memo', left(coalesce(je.memo, ''), 80))
+         order by je.posting_date, je.id), '[]'::jsonb)
+    into v_drafts
+    from clara.journal_entries je
+    where je.client_id = p_client and je.status = 'draft'
+      and je.posting_date between v_fy.starts_on and v_fy.ends_on;
+  return jsonb_build_object(
+    'state', case when jsonb_array_length(v_drafts) = 0 then 'pass' else 'fail' end,
+    'draft_count', jsonb_array_length(v_drafts), 'drafts', v_drafts);
+end $$;
+revoke all on function clara._close_gate_drafts(uuid, uuid) from public;
+
+create function clara._close_gate_bank_items(p_client uuid, p_fy uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_exceptions jsonb; v_gaps jsonb;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  -- OPEN exceptions (the doors: except_bank_line / resolve_bank_line_exception).
+  select coalesce(jsonb_agg(jsonb_build_object('exception_id', e.id,
+           'statement_id', e.statement_id, 'line_id', e.line_id, 'kind', e.kind)
+         order by e.created_at), '[]'::jsonb)
+    into v_exceptions
+    from clara.bank_line_exceptions e
+    where e.client_id = p_client and e.resolved_at is null;
+  -- Statement GAPS: a month inside the FY with no non-void statement covering any part of
+  -- it, for an account that has statements at all.
+  select coalesce(jsonb_agg(jsonb_build_object('bank_account_id', g.bank_account_id,
+           'month', to_char(g.m, 'YYYY-MM')) order by g.bank_account_id, g.m), '[]'::jsonb)
+    into v_gaps
+    from (
+      select a.bank_account_id, m.m
+        from (select distinct s.bank_account_id from clara.bank_statements s
+               where s.client_id = p_client and s.status <> 'void') a
+        cross join (select generate_series(date_trunc('month', v_fy.starts_on),
+                             date_trunc('month', v_fy.ends_on), interval '1 month')::date as m) m
+        where not exists (select 1 from clara.bank_statements s2
+                where s2.client_id = p_client and s2.bank_account_id = a.bank_account_id
+                  and s2.status <> 'void'
+                  and s2.period_start <= (m.m + interval '1 month - 1 day')::date
+                  and s2.period_end >= m.m)) g;
+  -- v1 BOUNDARY, stated: unmatched-but-unexcepted LINES are not enumerated here (the match
+  -- linkage is not line-keyed in the live schema); the exception doors are the lines'
+  -- escalation surface and the covering-reconciliation identity (drawer 1) bounds the
+  -- residual. Recorded for the as-run record, not discovered later.
+  return jsonb_build_object(
+    'state', case when jsonb_array_length(v_exceptions) = 0
+                    and jsonb_array_length(v_gaps) = 0 then 'pass' else 'fail' end,
+    'open_exceptions', v_exceptions, 'statement_gaps', v_gaps,
+    'unmatched_lines_basis', 'exceptions_and_gaps_v1');
+end $$;
+revoke all on function clara._close_gate_bank_items(uuid, uuid) from public;
+
+create function clara._close_gate_uncoded(p_client uuid, p_fy uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_uncoded jsonb;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  -- DATE-SCOPED BY THE BUILD (matrix A27: the live reader list_uncoded_filings has NO date
+  -- predicate, so the gate scopes by the document's financial_date -- a NEXT-FY document
+  -- must never block THIS year's close). The definer body performs its own client filter;
+  -- it inherits nothing from the invoker-posture reader.
+  select coalesce(jsonb_agg(jsonb_build_object('filing_id', f.id, 'document_id', f.document_id,
+           'financial_date', d.financial_date) order by d.financial_date, f.id), '[]'::jsonb)
+    into v_uncoded
+    from clara.document_filings f
+    join clara.documents d on d.id = f.document_id
+    where f.client_id = p_client and f.retired_at is null
+      and d.financial_date between v_fy.starts_on and v_fy.ends_on
+      and not exists (select 1 from clara.journal_entries je
+             where je.document_id = f.document_id and je.client_id = p_client
+               and je.status in ('draft', 'approved'))
+  ;
+  return jsonb_build_object(
+    'state', case when jsonb_array_length(v_uncoded) = 0 then 'pass' else 'fail' end,
+    'uncoded_count', jsonb_array_length(v_uncoded), 'uncoded', v_uncoded);
+end $$;
+revoke all on function clara._close_gate_uncoded(uuid, uuid) from public;
+
+-- =====================================================================================
+-- S6.3 -- THE GATE EVALUATION ENGINE: one pass over the catalog, every probe inside its
+-- own begin…exception block (a raising probe records 'error', never aborts the close --
+-- and error/unknown refuse exactly like fail/mismatch, E-R2). Results are APPEND-ONLY
+-- rows; measured_digest is the attestation's binding target.
+-- =====================================================================================
+create function clara._evaluate_close_gates(p_run uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_run record; v_fy record; chk record; v_measured jsonb; v_state text;
+  v_summary jsonb := '[]'::jsonb; v_nature text;
+begin
+  select * into v_run from clara.close_runs r where r.id = p_run;
+  select * into v_fy from clara.fiscal_years fy where fy.id = v_run.fiscal_year_id;
+  for chk in select * from clara.close_gate_checks order by drawer, check_key loop
+    -- Applicability: 'goods_trading' checks apply unless the trade_nature fact POSITIVELY
+    -- says services -- an ABSENT fact keeps the check applicable (its evaluator then reads
+    -- 'unknown', which refuses attestably; skipping on absence would be absence-as-evidence).
+    if chk.applies_when = 'goods_trading' then
+      select cf.fact_value #>> '{}' into v_nature from clara.client_facts cf
+        where cf.client_id = v_run.client_id and cf.fact_key = 'trade_nature'
+          and cf.superseded_at is null;
+      if v_nature = 'services' then continue; end if;
+    end if;
+    begin
+      v_measured := case chk.check_key
+        when 'ar_control_tie'            then clara.ar_control_tie(v_run.client_id, v_fy.ends_on)
+        when 'ap_control_tie'            then clara.ap_control_tie(v_run.client_id, v_fy.ends_on)
+        when 'fa_control_tie'            then clara.fa_control_tie_out(v_run.client_id, v_fy.id)
+        when 'bank_recon_identity'       then clara.bank_recon_close_state(v_run.client_id, v_fy.id)
+        when 'bank_recon_informational'  then clara.bank_recon_close_state(v_run.client_id, v_fy.id) -> 'accounts' -> 0
+        when 'fa_register_tie_view'      then clara.fa_register_tie(v_run.client_id, v_fy.ends_on)
+        when 'pl_retained_earnings_roll' then jsonb_build_object('state', 'pass', 'note', 'computed in finalize_close under the lock')
+        when 'opening_continuity_tie'    then jsonb_build_object('state', 'pass', 'note', 'asserted in finalize_close against the prior pin')
+        when 'depreciation_through_fy_end' then clara._close_gate_depreciation(v_run.client_id, v_fy.id)
+        when 'closing_stock_present'     then clara._close_gate_closing_stock(v_run.client_id, v_fy.id)
+        when 'unapproved_drafts_in_period' then clara._close_gate_drafts(v_run.client_id, v_fy.id)
+        when 'open_bank_recon_items'     then clara._close_gate_bank_items(v_run.client_id, v_fy.id)
+        when 'uncoded_documents'         then clara._close_gate_uncoded(v_run.client_id, v_fy.id)
+        else jsonb_build_object('state', 'error', 'reason', 'no_evaluator_wired')
+      end;
+      v_state := case
+        when chk.drawer = 3 then 'advisory'
+        when coalesce(v_measured ->> 'state', 'error') in ('tie', 'pass') then 'pass'
+        when coalesce(v_measured ->> 'state', 'error') = 'mismatch' then 'fail'
+        when coalesce(v_measured ->> 'state', 'error') = 'fail' then 'fail'
+        when coalesce(v_measured ->> 'state', 'error') = 'unknown' then 'unknown'
+        else 'error'
+      end;
+    exception when others then
+      v_state := 'error';
+      v_measured := jsonb_build_object('state', 'error', 'sqlstate', sqlstate,
+        'message', sqlerrm);
+    end;
+    insert into clara.close_gate_results(firm_id, close_run_id, check_key, drawer,
+        state, measured, measured_digest)
+      values (v_run.firm_id, p_run, chk.check_key, chk.drawer, v_state,
+        coalesce(v_measured, '{}'::jsonb), md5(coalesce(v_measured, '{}'::jsonb)::text));
+    v_summary := v_summary || jsonb_build_object('check_key', chk.check_key,
+      'drawer', chk.drawer, 'state', v_state);
+  end loop;
+  return v_summary;
+end $$;
+revoke all on function clara._evaluate_close_gates(uuid) from public;
