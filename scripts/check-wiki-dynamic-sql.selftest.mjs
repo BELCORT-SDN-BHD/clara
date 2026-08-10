@@ -242,9 +242,11 @@ testCase("an `execute` inside a comment or a string literal is not dynamic SQL",
 
 testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
   // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. Exactly one
-  // entry stands today — 0055 S2's apply_open_items CoR patch (PR #226, full ADR-061 ladder):
-  // an unprovable-by-design pg_get_functiondef harvest (three live patch generations), why +
-  // full declared target set in wiki-lint-checks.mjs. A SECOND entry must trip this pin and
+  // entry stands today — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226,
+  // full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
+  // pg_get_functiondef re-count outside the census grammar plus 'execute' as a privilege-name
+  // literal and one raise-message word — nothing dynamic constructed or run; why + the full
+  // declared target set live in wiki-lint-checks.mjs. A SECOND entry must trip this pin and
   // earn its own reviewed justification, exactly as the first did.
   const expectedKeys = ["apply_open_items(uuid,jsonb,text,text)"];
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();
