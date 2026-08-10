@@ -1483,8 +1483,16 @@ create policy p_cr_human on clara.close_receipts
 grant select on clara.close_receipts to clara_authenticated;
 
 -- The lineage column on journal_entries (§2.6): LINEAGE ONLY, never authorization (§2.5).
+-- DEFERRABLE, because the mutual FK resolves by BIRTH ORDER, not by a late UPDATE: the
+-- closing entry is INSERTED already carrying its receipt's pre-generated id, and the
+-- receipt row lands later in the same transaction (checked at commit). The x56 battery's
+-- catch made this structural: the PRE-EXISTING _tf_entry_immutable trigger admits only the
+-- reversal-linkage stamp on an approved entry, so the design's original
+-- update-lineage-last order could never complete a real close -- and widening that
+-- trigger's allow-list for a lineage column would open it to every definer body. The
+-- trigger stays at full force; the claim is simply made at birth, where it is true.
 alter table clara.journal_entries add column close_receipt_id uuid
-  references clara.close_receipts(id);
+  references clara.close_receipts(id) deferrable initially deferred;
 
 -- =====================================================================================
 -- S6.4b -- THE VERBS, part 1: propose / open / begin / attest / abandon.
@@ -1974,16 +1982,19 @@ begin
   -- THE CLOSING ENTRY: permit → DRAFT insert → lines → the census-VISIBLE flip. A year
   -- with zero P&L movement mints no entry (an empty entry is not a journal), and the
   -- receipt records that honestly.
+  v_receipt := gen_random_uuid();   -- the receipt's id, pre-generated: the entry is BORN
+                                    -- carrying its lineage (deferred FK; no approved-row
+                                    -- UPDATE ever happens -- the battery's catch)
   if jsonb_array_length(v_pl_rows) > 0 then
     insert into clara.close_write_permits(firm_id, client_id, fiscal_year_id, close_run_id,
         purpose, entries_expected)
-      values (c.firm, v_fy.client_id, v_fy.id, v_run.id, 'close_entry', 3)
+      values (c.firm, v_fy.client_id, v_fy.id, v_run.id, 'close_entry', 2)
       returning id into v_permit;
     insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
-        is_year_end, maker_actor, last_human_editor)
+        is_year_end, maker_actor, last_human_editor, close_receipt_id)
       values (v_fy.client_id, 'draft', v_fy.ends_on,
         'Year-end close ' || v_fy.label || ' — P&L to retained earnings', 'manual',
-        true, c.actor, c.actor)
+        true, c.actor, c.actor, v_receipt)
       returning id into v_entry;
     v_line := 0;
     for r in select * from jsonb_array_elements(v_pl_rows) x(el) loop
@@ -2039,11 +2050,11 @@ begin
     from clara.journal_entries je
     where je.client_id = v_fy.client_id and je.status = 'approved';
 
-  insert into clara.close_receipts(firm_id, client_id, fiscal_year_id, close_run_id,
+  insert into clara.close_receipts(id, firm_id, client_id, fiscal_year_id, close_run_id,
       prior_close_receipt_id, kind, closed_by, segregation_mode, last_preparer_actor,
       self_attestation, pl_net_cents, retained_earnings_account, closing_tb_digest,
       gate_digest, books_watermark, dataset_sha256, close_entry_id, snapshot)
-    values (c.firm, v_fy.client_id, v_fy.id, v_run.id,
+    values (v_receipt, c.firm, v_fy.client_id, v_fy.id, v_run.id,
       v_prior_receipt.id, 'close', c.actor, v_mode, v_preparer,
       nullif(btrim(coalesce(p_self_attestation, '')), ''), v_pl, v_re,
       md5(v_closing_pos::text), md5(v_gate_summary::text), v_watermark,
@@ -2064,12 +2075,10 @@ begin
           else jsonb_build_object('basis', 'wave_b_opening_machinery',
                  'note', 'no prior close receipt; the seed tie was asserted at approval') end,
         'watermark_basis', 'v1_count_maxapproved',
-        'dataset_basis', 'v1_closing_position_digest'))
-    returning id into v_receipt;
+        'dataset_basis', 'v1_closing_position_digest'));
 
-  if v_entry is not null then
-    update clara.journal_entries set close_receipt_id = v_receipt where id = v_entry;
-  end if;
+  -- (No lineage UPDATE: the entry was BORN carrying close_receipt_id -- see the column's
+  -- own comment. An approved entry is never touched outside the reversal-linkage stamp.)
   update clara.close_runs set state = 'finalized', ended_by = c.actor, ended_at = now()
     where id = v_run.id;
   update clara.fiscal_years set status = 'closed' where id = p_fy;
