@@ -170,7 +170,7 @@ begin
   -- its posture; positively probe the anchor this file will count and the two 0018 guards
   -- that a from-file rebuild would delete.
   select coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)) into v_def from pg_proc p
-    where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,text)'::regprocedure;
+    where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
   if v_def is null then
     raise exception '0056 S0.6: clara.approve_opening_seed is GONE' using errcode = 'CLR10';
   end if;
@@ -189,7 +189,7 @@ begin
       using errcode = 'CLR10';
   end if;
   select md5(p.prosrc) into v_t from pg_proc p
-    where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,text)'::regprocedure;
+    where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
   insert into _x56_pre(k, v) values ('aos_md5_pre', v_t);
 
   -- (0.7) The approve-writer census: 0045 is the LAST carrier and the roster must still be
@@ -2362,3 +2362,311 @@ alter function clara.list_fiscal_years(uuid) owner to clara_fn_owner;
 revoke all on function clara.list_fiscal_years(uuid) from public;
 grant execute on function clara.list_fiscal_years(uuid) to clara_authenticated;
 grant execute on function clara.list_fiscal_years(uuid) to clara_agent_ro;
+
+-- =====================================================================================
+-- S7 -- E-R6 ACTIVATION (skeleton §2.9): ONE body rewritten in place -- the stub with no
+-- callers to preserve. 'no_period_model' stays the PERMIT token (frozen by the untouched
+-- guard); 'entry_missing' fails closed; closed-wins ordering; the honest twin serves the
+-- two human-facing readers, repointed by MINIMAL splice in the same transaction.
+-- =====================================================================================
+create or replace function clara._correction_period_state(p_entry uuid) returns text
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  -- The returned string is a PROTOCOL token, not a description. Its spelling is FROZEN by
+  -- the live guard in clara.approve_wrong_client_correction, which refuses on
+  -- <> 'no_period_model'. Honest state for every other consumer:
+  -- clara.correction_period_state(p_entry).
+  select coalesce((
+    select case
+             when fy.id is null                     then 'no_period_model'  -- outside any FY: permit
+             when fy.status in ('open','reopened')  then 'no_period_model'  -- permit
+             else fy.status                                                 -- closing|closed: REFUSE
+           end
+      from clara.journal_entries je
+      left join clara.fiscal_years fy
+        on fy.client_id = je.client_id
+       and je.posting_date between fy.starts_on and fy.ends_on
+     where je.id = p_entry
+     order by (fy.status in ('closing','closed')) desc, fy.starts_on desc
+     limit 1
+  ), 'entry_missing');
+$$;
+
+-- THE HONEST TWIN: real vocabulary for panels and new writers (never the protocol token).
+create function clara.correction_period_state(p_entry uuid) returns text
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select coalesce((
+    select case when fy.id is null then 'none' else fy.status end
+      from clara.journal_entries je
+      left join clara.fiscal_years fy
+        on fy.client_id = je.client_id
+       and je.posting_date between fy.starts_on and fy.ends_on
+     where je.id = p_entry
+     order by (fy.status in ('closing','closed')) desc, fy.starts_on desc
+     limit 1
+  ), 'entry_missing');
+$$;
+revoke all on function clara.correction_period_state(uuid) from public;
+
+-- REPOINT THE TWO READERS (reads, not audited writers -- no D1 exposure): each live body
+-- carries the internal call once; count-guarded splice, never a rebuild.
+do $s7$
+declare
+  v_sig text; v_def text; v_frm text; v_cnt int;
+begin
+  v_frm := 'clara._correction_period_state(';
+  foreach v_sig in array array[
+      'clara.retire_document_filing(uuid,text,uuid,text)',
+      'clara.preview_wrong_client_correction(uuid,uuid,uuid)'] loop
+    select pg_get_functiondef(p.oid) into v_def from pg_proc p
+      where p.oid = v_sig::regprocedure;
+    if v_def is null then
+      raise exception '0056 S7: % is GONE', v_sig using errcode = 'CLR10';
+    end if;
+    v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+    if v_cnt <> 1 then
+      raise exception '0056 S7: % carries the period-state call % time(s), expected exactly 1 -- re-derive the repoint', v_sig, v_cnt
+        using errcode = 'CLR10';
+    end if;
+    v_def := replace(v_def, v_frm, 'clara.correction_period_state(');
+    execute v_def;
+  end loop;
+end $s7$;
+
+-- =====================================================================================
+-- S9 -- THE approve_opening_seed SPLICE (skeleton §2.6 item 2; matrix A19g's seed arm).
+-- The assertion logic lives in a NEW helper so the splice into the LIVE audited body is
+-- ONE LINE -- the smallest possible diff to a body whose file text died at 0018 §3b.
+-- =====================================================================================
+create function clara._assert_seed_matches_prior_pin(p_seed uuid) returns void
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  s record; v_receipt record; v_pin jsonb; v_diffs jsonb;
+begin
+  select * into s from clara.opening_seed_registry where id = p_seed;
+  if not found then return; end if;
+  -- The pin exists only once a close model year has CLOSED for this client; with no
+  -- active close receipt the Wave-B machinery's own tie (targets + OBE-nil) governs alone
+  -- -- the first-FY case, by design, not a hole.
+  select cr.* into v_receipt from clara.close_receipts cr
+    join clara.fiscal_years fy on fy.id = cr.fiscal_year_id
+    where cr.client_id = s.client_id and cr.kind = 'close' and cr.status = 'active'
+    order by fy.ordinal desc limit 1;
+  if v_receipt.id is null then return; end if;
+  v_pin := coalesce(v_receipt.snapshot -> 'closing_position', '{}'::jsonb);
+  -- DRAWER 1, ABSOLUTE: opening(n+1) = closing(n), per account, in cents, against the
+  -- PINNED position -- never a re-derivation (the pin is the stored operand).
+  select coalesce(jsonb_agg(jsonb_build_object('account_code', d.code,
+           'pinned_cents', d.pin, 'seed_cents', d.seed) order by d.code), '[]'::jsonb)
+    into v_diffs
+    from (
+      select coalesce(p.key, t.account_code) as code,
+             coalesce((p.value)::text::bigint, 0) as pin,
+             coalesce(t.net, 0) as seed
+        from jsonb_each(v_pin) p(key, value)
+        full outer join (
+          select tt.account_code, sum(tt.debit_cents - tt.credit_cents) as net
+            from clara.opening_tb_targets tt
+            where tt.seed_id = p_seed
+            group by tt.account_code
+        ) t on t.account_code = p.key
+    ) d
+    where d.pin <> d.seed;
+  if jsonb_array_length(v_diffs) > 0 then
+    raise exception 'the opening seed does not tie to the prior close''s pinned position -- drawer 1, absolute, no override, for anybody'
+      using errcode = 'CLR41',
+        detail = jsonb_build_object('reason', 'drawer1_identity_failed',
+          'check_key', 'opening_continuity_tie', 'prior_receipt_id', v_receipt.id,
+          'diffs', v_diffs)::text;
+  end if;
+end $$;
+revoke all on function clara._assert_seed_matches_prior_pin(uuid) from public;
+
+do $s9$
+declare
+  v_sig text := 'clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)';
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_frm := 'perform clara._assert_opening_tie(p_seed);';
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0056 S9: the opening-tie anchor appears % time(s) (expected exactly once) -- the body drifted since S0.6; re-derive', v_cnt
+      using errcode = 'CLR10';
+  end if;
+  v_to := v_frm || chr(10) ||
+    '  -- 0056 (Wave E lane beta, skeleton 2.6 item 2 / matrix A19g): the seed-approval arm' || chr(10) ||
+    '  -- of opening(n+1) = closing(n), asserted against the PRIOR receipt''s PINNED position.' || chr(10) ||
+    '  perform clara._assert_seed_matches_prior_pin(p_seed);';
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+  -- POSTCHECK: the new call landed once; the anchor and 0018 SS3b's guards all survive.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if (length(v_def) - length(replace(v_def, '_assert_seed_matches_prior_pin', '')))
+       / length('_assert_seed_matches_prior_pin') <> 1 then
+    raise exception '0056 S9 postcheck: the pin assertion did not land exactly once'
+      using errcode = 'CLR10';
+  end if;
+  if position('correction_draft_present' in v_def) = 0
+     or position(v_frm in v_def) = 0 then
+    raise exception '0056 S9 postcheck: a pre-existing guard (0018 SS3b / the opening tie) vanished in the splice'
+      using errcode = 'CLR10';
+  end if;
+end $s9$;
+
+reset role;
+
+-- =====================================================================================
+-- S11 -- TAILS: every structural claim re-measured from the live catalog in this same
+-- transaction.
+-- =====================================================================================
+do $s11$
+declare
+  v_n int; v_t text; r record;
+begin
+  -- (11.1) THE GUARD IS UNTOUCHED: md5 equal to the S0 stash, and the frozen predicate
+  -- still present (a prestate/tail pair measured in-migration -- "we did not edit it"
+  -- proves nothing).
+  select md5(p.prosrc) into v_t from pg_proc p
+    where p.oid = 'clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure;
+  if v_t <> (select v from _x56_pre where k = 'awcc_md5') then
+    raise exception '0056 S11.1: approve_wrong_client_correction MOVED during this migration -- it must not'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.2) THE CALLER SET, AFTER (matrix A6d): the protocol fn's callers are exactly the
+  -- guard; the twin's callers are exactly the two repointed readers.
+  select coalesce(string_agg(p.proname, ',' order by p.proname), '') into v_t
+    from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and p.proname not in ('_correction_period_state')
+      and p.prosrc like '%\_correction\_period\_state(%' escape '\';
+  if v_t <> 'approve_wrong_client_correction' then
+    raise exception '0056 S11.2: after the repoint, _correction_period_state''s callers are {%} -- expected exactly {approve_wrong_client_correction}', v_t
+      using errcode = 'CLR10';
+  end if;
+  select coalesce(string_agg(p.proname, ',' order by p.proname), '') into v_t
+    from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and p.proname not in ('correction_period_state', '_correction_period_state')
+      and p.prosrc like '%clara.correction\_period\_state(%' escape '\';
+  if v_t <> 'preview_wrong_client_correction,retire_document_filing' then
+    raise exception '0056 S11.2: the honest twin''s callers are {%} -- expected exactly {preview_wrong_client_correction, retire_document_filing}', v_t
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.3) THE APPROVE-WRITER CENSUS: four -> FIVE, and the fifth is finalize_close whose
+  -- flip MATCHES the 0045:7831 detector shape (an insert-approved would be invisible to
+  -- it -- matrix A19e).
+  select count(*) into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and lower(regexp_replace(regexp_replace(regexp_replace(
+            coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)),
+            '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+          ~ 'update\s+clara\.journal_entries\s+set\s+status\s*=\s*''approved''';
+  if v_n <> 5 then
+    raise exception '0056 S11.3: the approve-writer census counts % (expected FIVE: the pinned four + finalize_close)', v_n
+      using errcode = 'CLR10';
+  end if;
+  select lower(regexp_replace(regexp_replace(regexp_replace(
+           coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)),
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g')) into v_t
+    from pg_proc p where p.oid = 'clara.finalize_close(uuid,text,text)'::regprocedure;
+  if v_t !~ 'update\s+clara\.journal_entries\s+set\s+status\s*=\s*''approved''' then
+    raise exception '0056 S11.3: finalize_close''s flip does not match the census detector shape'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.4) THE WALL-COVERAGE CENSUS (skeleton §2.11's disposition table, asserted): every
+  -- gate-evidence table carries the serialize trigger; the JE pair carries the wall.
+  for r in select * from (values
+      ('journal_entries',       't_period_wall'),
+      ('journal_lines',         't_period_wall_lines'),
+      ('open_item_allocations', 't_close_serialize'),
+      ('bank_statements',       't_close_serialize'),
+      ('bank_reconciliations',  't_close_serialize'),
+      ('bank_line_exceptions',  't_close_serialize'),
+      ('fixed_assets',          't_close_serialize')) t(tbl, trg) loop
+    select count(*) into v_n from pg_trigger g
+      where g.tgrelid = ('clara.' || r.tbl)::regclass and g.tgname = r.trg
+        and not g.tgisinternal;
+    if v_n <> 1 then
+      raise exception '0056 S11.4: clara.% does not carry trigger % -- the wall family is incomplete', r.tbl, r.trg
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (11.5) THE PRIVILEGE SWEEP, by STATE never by grant text: the agent role can execute
+  -- NO close/approve-class verb; the wake roles and runtime can execute NOTHING new.
+  for r in select * from (values
+      ('clara.open_fiscal_year(uuid,text,date,date,text,text)'),
+      ('clara.begin_close(uuid,text)'),
+      ('clara.attest_close_exception(uuid,text,text,text)'),
+      ('clara.finalize_close(uuid,text,text)'),
+      ('clara.abandon_close(uuid,text,text)'),
+      ('clara.reopen_fiscal_year(uuid,text,jsonb,text)'),
+      ('clara.grant_firm_capability(uuid,text,text,text)'),
+      ('clara.revoke_firm_capability(uuid,text,text,text)')) t(sig) loop
+    if has_function_privilege('clara_agent_ro', r.sig, 'execute')
+       or has_function_privilege('clara_runtime', r.sig, 'execute')
+       or has_function_privilege('clara_wake_interactive', r.sig, 'execute')
+       or has_function_privilege('clara_wake_proactive', r.sig, 'execute') then
+      raise exception '0056 S11.5: a non-human role holds EXECUTE on % -- the write-authorization invariant is breached', r.sig
+        using errcode = 'CLR10';
+    end if;
+    if not has_function_privilege('clara_authenticated', r.sig, 'execute') then
+      raise exception '0056 S11.5: clara_authenticated cannot execute % -- the verb is dark', r.sig
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  -- The permit table stays caller-unreachable (matrix A19c).
+  for v_t in select unnest(array['clara_authenticated','clara_agent_ro','clara_runtime',
+      'clara_wake_interactive','clara_wake_proactive']) loop
+    if has_table_privilege(v_t, 'clara.close_write_permits', 'insert')
+       or has_table_privilege(v_t, 'clara.close_write_permits', 'update')
+       or has_table_privilege(v_t, 'clara.close_write_permits', 'select') then
+      raise exception '0056 S11.5: % can reach close_write_permits -- forged permits become possible', v_t
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (11.6) fa_register_tie is UNTOUCHED (WD-R1: visibility-only stays visibility-only).
+  select md5(p.prosrc) into v_t from pg_proc p
+    where p.oid = 'clara.fa_register_tie(uuid,date)'::regprocedure;
+  if v_t <> (select v from _x56_pre where k = 'fart_md5') then
+    raise exception '0056 S11.6: fa_register_tie MOVED during this migration -- it must not'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.7) approve_opening_seed carries the splice AND its 0018 guards (the md5 MUST have
+  -- moved -- from the S0 stash -- by exactly the spliced content; both anchors positive).
+  select md5(p.prosrc) into v_t from pg_proc p
+    where p.oid = 'clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure;
+  if v_t = (select v from _x56_pre where k = 'aos_md5_pre') then
+    raise exception '0056 S11.7: approve_opening_seed did NOT change -- the S9 splice never landed'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.8) The gate catalog carries its thirteen authored checks; the six event pairs are
+  -- on BOTH registers.
+  select count(*) into v_n from clara.close_gate_checks;
+  if v_n <> 13 then
+    raise exception '0056 S11.8: close_gate_checks carries % row(s), expected 13', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from clara.event_types
+    where name in ('fiscal_year.opened','close.begun','close.attested','close.finalized',
+      'close.abandoned','fiscal_year.reopened');
+  if v_n <> 6 then
+    raise exception '0056 S11.8: % of 6 close event types registered', v_n using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from clara.trigger_taxonomy tt
+    join clara.taxonomy_active a on a.version = tt.version
+    where tt.event_type in ('fiscal_year.opened','close.begun','close.attested',
+      'close.finalized','close.abandoned','fiscal_year.reopened') and tt.decision = 'ignore';
+  if v_n <> 6 then
+    raise exception '0056 S11.8: % of 6 close event types carry taxonomy decisions', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '0056 OK: period spine + gate trio + permit + wall family + drawer-1 probes + six verbs + E-R6 activated (guard untouched, twin repointed) + E-R11 keys + the opening-seed pin splice -- INERT ON ARRIVAL (zero fiscal_years rows; activation is the first human open_fiscal_year).';
+end $s11$;
