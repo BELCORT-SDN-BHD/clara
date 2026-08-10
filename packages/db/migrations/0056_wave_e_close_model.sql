@@ -1778,3 +1778,587 @@ end $$;
 alter function clara.abandon_close(uuid, text, text) owner to clara_fn_owner;
 revoke all on function clara.abandon_close(uuid, text, text) from public;
 grant execute on function clara.abandon_close(uuid, text, text) to clara_authenticated;
+
+-- =====================================================================================
+-- S6.4c -- clara.finalize_close: the heart of the close (skeleton §2.6). Everything under
+-- the EXCLUSIVE lock, every numeral from DB-owned inputs (E-R4), the closing entry
+-- authored IN BODY as a DRAFT and flipped by the census-VISIBLE UPDATE, the
+-- closing_position PINNED into the receipt (matrix A19d/A19e/A19f, A12, A20, A1).
+-- =====================================================================================
+create function clara.finalize_close(p_fy uuid, p_self_attestation text, p_op_key text)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  c record; v_fy record; v_run record; v_dedupe jsonb; g record;
+  v_att record; v_prep record; v_preparer uuid; v_mode text;
+  v_re text; v_re_n int; v_pl bigint; v_line int; v_entry uuid; v_permit uuid;
+  v_pl_rows jsonb; v_open_diffs jsonb; v_prior_receipt record; v_pin jsonb;
+  v_closing_pos jsonb; v_receipt uuid; v_gate_summary jsonb; v_watermark text;
+  v_fa jsonb; v_n int; r record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if not clara._has_capability(c.firm, c.actor, 'close_and_attest') then
+    raise exception 'finalizing a close takes the close_and_attest capability (key 2)'
+      using errcode = 'CLR04',
+        detail = '{"reason":"capability_missing","capability":"close_and_attest"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  if v_fy.id is null or v_fy.firm_id <> c.firm then
+    raise exception 'fiscal year is not in your firm'
+      using errcode = 'CLR11', detail = '{"reason":"fiscal_year_not_in_firm"}';
+  end if;
+  -- The EXPLICIT client-in-firm check (skeleton §2.6: trial_balance_as_of is SECURITY
+  -- INVOKER; called from this definer body it evaluates under the OWNER's policies, so
+  -- nothing is inherited from RLS on this path).
+  perform 1 from clara.clients cl where cl.id = v_fy.client_id and cl.firm_id = c.firm;
+  if not found then
+    raise exception 'client is not in your firm'
+      using errcode = 'CLR11', detail = '{"reason":"client_not_in_firm"}';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'finalize_close', p_op_key,
+    clara._hash(jsonb_build_object('fy', p_fy, 'self_attestation', p_self_attestation)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  perform pg_advisory_xact_lock(203005004, hashtext(v_fy.client_id::text));
+  perform pg_advisory_xact_lock(203005007, hashtext(v_fy.client_id::text));
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  if v_fy.status <> 'closing' then
+    raise exception 'fiscal year % is %; finalize takes a year mid-close', v_fy.label, v_fy.status
+      using errcode = 'CLR41', detail = '{"reason":"close_not_in_progress"}';
+  end if;
+  select * into v_run from clara.close_runs r2
+    where r2.fiscal_year_id = p_fy and r2.state = 'in_progress';
+  if v_run.id is null then
+    raise exception 'no in-progress close run exists for this fiscal year'
+      using errcode = 'CLR41', detail = '{"reason":"close_not_in_progress"}';
+  end if;
+
+  -- RE-EVALUATE EVERY GATE IN-TRANSACTION (the attestation-staleness law measures against
+  -- THESE digests, not the begin-time ones).
+  v_gate_summary := clara._evaluate_close_gates(v_run.id);
+
+  -- THE DRAWER SWEEP over the FRESH results (latest row per check on this run).
+  for g in
+    select distinct on (r2.check_key) r2.*
+      from clara.close_gate_results r2
+      where r2.close_run_id = v_run.id
+      order by r2.check_key, r2.evaluated_at desc, r2.id desc
+  loop
+    if g.drawer = 1 and g.state = 'fail' then
+      raise exception 'drawer-1 identity % FAILED -- no attestation path exists, for anybody', g.check_key
+        using errcode = 'CLR41',
+          detail = jsonb_build_object('reason', 'drawer1_identity_failed',
+            'check_key', g.check_key, 'measured', g.measured)::text;
+    elsif g.drawer = 1 and g.state in ('unknown', 'error') then
+      raise exception 'drawer-1 identity % could not be evaluated (%) -- an unevaluated identity has not passed', g.check_key, g.state
+        using errcode = 'CLR41',
+          detail = jsonb_build_object('reason', 'drawer1_state_unknown',
+            'check_key', g.check_key, 'state', g.state, 'measured', g.measured)::text;
+    elsif g.drawer = 2 and g.state in ('fail', 'unknown', 'error') then
+      select a.*, gr.measured_digest as bound_digest into v_att
+        from clara.close_attestations a
+        join clara.close_gate_results gr on gr.id = a.gate_result_id
+        where a.close_run_id = v_run.id and a.check_key = g.check_key
+          and a.superseded_at is null;
+      if v_att.id is null then
+        raise exception 'drawer-2 gate % is % and carries no attestation', g.check_key, g.state
+          using errcode = 'CLR41',
+            detail = jsonb_build_object('reason', 'drawer2_unattested',
+              'check_key', g.check_key, 'measured', g.measured)::text;
+      end if;
+      if v_att.bound_digest <> g.measured_digest then
+        raise exception 'the attestation on % signed a state that has since MOVED -- re-attest against the fresh measurement', g.check_key
+          using errcode = 'CLR41',
+            detail = jsonb_build_object('reason', 'close_attestation_stale',
+              'check_key', g.check_key, 'attested_digest', v_att.bound_digest,
+              'fresh_digest', g.measured_digest)::text;
+      end if;
+    end if;
+  end loop;
+
+  -- SEGREGATION (E-R11 / §2.10; matrix A12): the FY's last human PREPARER -- measured on
+  -- last_human_editor (the column _approve_entry_core itself tests), any status, close-prep
+  -- edits included; ordering coalesce(approved_at, updated_at) desc.
+  select je.* into v_prep from clara.journal_entries je
+    where je.client_id = v_fy.client_id
+      and je.posting_date between v_fy.starts_on and v_fy.ends_on
+    order by coalesce(je.approved_at, je.updated_at) desc, je.id desc limit 1;
+  v_preparer := coalesce(v_prep.last_human_editor, v_prep.maker_actor);
+  if clara.eligible_checker_count(c.firm) >= 2 then
+    if v_preparer is not null and v_preparer = c.actor then
+      raise exception 'the closer must differ from the year''s last human preparer -- a different eligible human must finalize'
+        using errcode = 'CLR41',
+          detail = jsonb_build_object('reason', 'close_segregation_violation',
+            'last_preparer', v_preparer)::text;
+    end if;
+    v_mode := 'two_person';
+  else
+    if p_self_attestation is null or btrim(p_self_attestation) = '' then
+      raise exception 'a solo firm closes with an explicit self-approval attestation'
+        using errcode = 'CLR41',
+          detail = '{"reason":"close_self_attestation_required"}';
+    end if;
+    v_mode := 'solo_self_attested';
+  end if;
+
+  -- THE P&L → RETAINED-EARNINGS ROLL, from DB-owned inputs only: trial_balance_as_of at
+  -- ends_on minus at starts_on-1, restricted to P&L types by an EXPLICIT coa join (the
+  -- read carries no type). Per-account movement = what the closing entry zeroes.
+  select coalesce(jsonb_agg(jsonb_build_object('account_code', m.account_code,
+           'account_type', m.account_type, 'movement_cents', m.mv)
+         order by m.account_code), '[]'::jsonb),
+         coalesce(sum(case when m.account_type = 'income' then -m.mv else 0 end)
+                - sum(case when m.account_type = 'expense' then m.mv else 0 end), 0)
+    into v_pl_rows, v_pl
+    from (
+      select a.account_code, a.account_type,
+             coalesce(te.debit_cents - te.credit_cents, 0)
+           - coalesce(ts.debit_cents - ts.credit_cents, 0) as mv
+        from clara.coa_accounts a
+        left join clara.trial_balance_as_of(v_fy.client_id, v_fy.ends_on) te
+          on te.account_code = a.account_code
+        left join clara.trial_balance_as_of(v_fy.client_id, v_fy.starts_on - 1) ts
+          on ts.account_code = a.account_code
+        where a.client_id = v_fy.client_id and a.account_type in ('income', 'expense')
+    ) m
+    where m.mv <> 0;
+
+  -- THE RETAINED-EARNINGS RESOLUTION: the chart's own structural marker
+  -- (special_acc_type = 'retained_earnings'), exactly one active -- else the close cannot
+  -- know where the year rolls, and says so.
+  select count(*)::int, min(a.account_code) into v_re_n, v_re
+    from clara.coa_accounts a
+    where a.client_id = v_fy.client_id and a.is_active
+      and a.special_acc_type = 'retained_earnings';
+  if v_re_n <> 1 then
+    raise exception 'the chart carries % active retained-earnings account(s) (special_acc_type=''retained_earnings''); the close needs exactly one', v_re_n
+      using errcode = 'CLR41',
+        detail = jsonb_build_object('reason', 'drawer1_state_unknown',
+          'resolution', 'special_acc_type=retained_earnings', 'count', v_re_n)::text;
+  end if;
+
+  -- THE OPENING-SIDE TIE against the PRIOR receipt's PIN (never a re-derivation where a
+  -- pin exists; matrix A19g's close arm). First FY / pre-model prior: the Wave-B opening
+  -- machinery asserted the seed (recorded in the snapshot, not re-argued).
+  select cr.* into v_prior_receipt from clara.close_receipts cr
+    where cr.fiscal_year_id = v_fy.prior_fy_id and cr.kind = 'close' and cr.status = 'active';
+  if v_prior_receipt.id is not null then
+    v_pin := v_prior_receipt.snapshot -> 'closing_position';
+    select coalesce(jsonb_agg(jsonb_build_object('account_code', d.code,
+             'pinned_cents', d.pin, 'current_cents', d.cur) order by d.code), '[]'::jsonb)
+      into v_open_diffs
+      from (
+        select coalesce(p.key, t.account_code) as code,
+               coalesce((p.value ->> 0)::bigint, (p.value)::text::bigint, 0) as pin,
+               coalesce(t.debit_cents - t.credit_cents, 0) as cur
+          from jsonb_each(coalesce(v_pin, '{}'::jsonb)) p(key, value)
+          full outer join (
+            select tb.account_code, tb.debit_cents, tb.credit_cents
+              from clara.trial_balance_as_of(v_fy.client_id, v_fy.starts_on - 1) tb
+              join clara.coa_accounts a on a.client_id = v_fy.client_id
+               and a.account_code = tb.account_code
+              where a.account_type in ('asset', 'liability', 'equity')
+          ) t on t.account_code = p.key
+      ) d
+      where d.pin <> d.cur;
+    if jsonb_array_length(v_open_diffs) > 0 then
+      raise exception 'this year''s opening no longer ties to the prior close''s pinned position -- the identity is absolute, with no override, for anybody'
+        using errcode = 'CLR41',
+          detail = jsonb_build_object('reason', 'drawer1_identity_failed',
+            'check_key', 'opening_continuity_tie', 'diffs', v_open_diffs)::text;
+    end if;
+  end if;
+
+  -- THE CLOSING ENTRY: permit → DRAFT insert → lines → the census-VISIBLE flip. A year
+  -- with zero P&L movement mints no entry (an empty entry is not a journal), and the
+  -- receipt records that honestly.
+  if jsonb_array_length(v_pl_rows) > 0 then
+    insert into clara.close_write_permits(firm_id, client_id, fiscal_year_id, close_run_id,
+        purpose, entries_expected)
+      values (c.firm, v_fy.client_id, v_fy.id, v_run.id, 'close_entry', 3)
+      returning id into v_permit;
+    insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+        is_year_end, maker_actor, last_human_editor)
+      values (v_fy.client_id, 'draft', v_fy.ends_on,
+        'Year-end close ' || v_fy.label || ' — P&L to retained earnings', 'manual',
+        true, c.actor, c.actor)
+      returning id into v_entry;
+    v_line := 0;
+    for r in select * from jsonb_array_elements(v_pl_rows) x(el) loop
+      v_line := v_line + 1;
+      -- Zero the account: movement>0 is a net debit balance ⇒ CREDIT it away, and mirror.
+      insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
+          credit_cents, description)
+        values (v_entry, v_line, r.el ->> 'account_code',
+          case when (r.el ->> 'movement_cents')::bigint < 0
+               then -(r.el ->> 'movement_cents')::bigint else 0 end,
+          case when (r.el ->> 'movement_cents')::bigint > 0
+               then (r.el ->> 'movement_cents')::bigint else 0 end,
+          'Close ' || (r.el ->> 'account_type'));
+    end loop;
+    v_line := v_line + 1;
+    insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
+        credit_cents, description)
+      values (v_entry, v_line, v_re,
+        case when v_pl < 0 then -v_pl else 0 end,
+        case when v_pl > 0 then v_pl else 0 end,
+        'Net result to retained earnings');
+    perform clara._assert_balanced(v_entry);
+    -- THE CENSUS-VISIBLE FLIP (matrix A19e: this statement must MATCH 0045:7831's
+    -- update-shaped detector; an insert-approved would be invisible to it).
+    update clara.journal_entries set status='approved', approved_at = now(),
+        checker_actor = c.actor
+      where id = v_entry;
+    -- THE PER-HOOK DISPOSITION (§2.6's table): the subledger hook is CALLED, not argued a
+    -- no-op -- and the no-op is then ASSERTED (a P&L→RE entry touches no control account,
+    -- but that is a property of the CHART, so it is proven per close, not assumed).
+    perform clara._subledger_on_approve(v_entry);
+    select count(*) into v_n from clara.open_items oi where oi.entry_id = v_entry;
+    if v_n <> 0 then
+      raise exception 'the closing entry minted % open item(s) -- a P&L→RE close must move no subledger', v_n
+        using errcode = 'CLR41',
+          detail = '{"reason":"drawer1_identity_failed","check_key":"pl_retained_earnings_roll"}';
+    end if;
+  end if;
+
+  -- THE PIN: the per-balance-sheet-account closing position IN CENTS, read AFTER the
+  -- closing entry posted (drawer 1's stored operand for FY(n+1); matrix A19f).
+  select coalesce(jsonb_object_agg(t.account_code, (t.debit_cents - t.credit_cents)), '{}'::jsonb)
+    into v_closing_pos
+    from clara.trial_balance_as_of(v_fy.client_id, v_fy.ends_on) t
+    join clara.coa_accounts a on a.client_id = v_fy.client_id
+     and a.account_code = t.account_code
+    where a.account_type in ('asset', 'liability', 'equity')
+      and (t.debit_cents - t.credit_cents) <> 0;
+
+  v_fa := clara.fa_control_tie_out(v_fy.client_id, v_fy.id);
+  select md5(count(*)::text || coalesce(max(je.approved_at)::text, ''))
+    into v_watermark
+    from clara.journal_entries je
+    where je.client_id = v_fy.client_id and je.status = 'approved';
+
+  insert into clara.close_receipts(firm_id, client_id, fiscal_year_id, close_run_id,
+      prior_close_receipt_id, kind, closed_by, segregation_mode, last_preparer_actor,
+      self_attestation, pl_net_cents, retained_earnings_account, closing_tb_digest,
+      gate_digest, books_watermark, dataset_sha256, close_entry_id, snapshot)
+    values (c.firm, v_fy.client_id, v_fy.id, v_run.id,
+      v_prior_receipt.id, 'close', c.actor, v_mode, v_preparer,
+      nullif(btrim(coalesce(p_self_attestation, '')), ''), v_pl, v_re,
+      md5(v_closing_pos::text), md5(v_gate_summary::text), v_watermark,
+      md5(v_closing_pos::text), v_entry,
+      jsonb_build_object(
+        'closing_position', v_closing_pos,
+        'gates', v_gate_summary,
+        'attestations', coalesce((select jsonb_agg(jsonb_build_object('check_key', a.check_key,
+            'attested_by', a.attested_by, 'reason', a.reason, 'attested_at', a.attested_at,
+            'gate_result_id', a.gate_result_id, 'superseded', a.superseded_at is not null)
+            order by a.attested_at)
+          from clara.close_attestations a where a.close_run_id = v_run.id), '[]'::jsonb),
+        'pl_rows', v_pl_rows,
+        'fa_roll', v_fa,
+        'opening_tie', case when v_prior_receipt.id is not null
+          then jsonb_build_object('basis', 'prior_receipt_pin',
+                 'prior_receipt_id', v_prior_receipt.id, 'diffs', '[]'::jsonb)
+          else jsonb_build_object('basis', 'wave_b_opening_machinery',
+                 'note', 'no prior close receipt; the seed tie was asserted at approval') end,
+        'watermark_basis', 'v1_count_maxapproved',
+        'dataset_basis', 'v1_closing_position_digest'))
+    returning id into v_receipt;
+
+  if v_entry is not null then
+    update clara.journal_entries set close_receipt_id = v_receipt where id = v_entry;
+  end if;
+  update clara.close_runs set state = 'finalized', ended_by = c.actor, ended_at = now()
+    where id = v_run.id;
+  update clara.fiscal_years set status = 'closed' where id = p_fy;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'finalize_close', v_entry,
+    jsonb_build_object('fiscal_year_id', p_fy, 'close_run_id', v_run.id,
+      'receipt_id', v_receipt, 'pl_net_cents', v_pl, 'segregation_mode', v_mode,
+      'op_key', p_op_key));
+  perform clara._append_event(c.firm, 'close.finalized', v_fy.client_id, c.actor,
+    null, null, v_entry, null, null,
+    jsonb_build_object('fiscal_year_id', p_fy, 'receipt_id', v_receipt));
+  return clara._finish_op(c.firm, 'finalize_close', p_op_key,
+    jsonb_build_object('receipt_id', v_receipt, 'fiscal_year_id', p_fy,
+      'close_entry_id', v_entry, 'pl_net_cents', v_pl,
+      'retained_earnings_account', v_re, 'segregation_mode', v_mode));
+end $$;
+alter function clara.finalize_close(uuid, text, text) owner to clara_fn_owner;
+revoke all on function clara.finalize_close(uuid, text, text) from public;
+grant execute on function clara.finalize_close(uuid, text, text) to clara_authenticated;
+
+-- =====================================================================================
+-- S6.4d -- clara.reopen_fiscal_year (key 3; skeleton §2.8). Acquisition row → 004 →
+-- 007-EXCLUSIVE (the one close verb touching a pre-existing entry leads with the row --
+-- cycle 2 dies by ORDER, never a timer). Effects in the REQUIRED order: status first,
+-- receipt chain second, reversal third (under the reopen_reversal permit as BELT).
+-- =====================================================================================
+create function clara.reopen_fiscal_year(
+    p_fy uuid, p_reason text, p_correction_target jsonb, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  c record; v_fy record; v_dedupe jsonb; v_receipt record; v_entry uuid;
+  v_new_receipt uuid; v_target_ok boolean := false; e uuid;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if not clara._has_capability(c.firm, c.actor, 'reopen') then
+    raise exception 'reopening a closed year takes the reopen capability (key 3)'
+      using errcode = 'CLR04', detail = '{"reason":"capability_missing","capability":"reopen"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  if p_reason is null or length(btrim(p_reason)) < 10 then
+    raise exception 'a reopen requires a stated reason (at least 10 characters)'
+      using errcode = 'CLR10', detail = '{"reason":"fact_basis_missing"}';
+  end if;
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  if v_fy.id is null or v_fy.firm_id <> c.firm then
+    raise exception 'fiscal year is not in your firm'
+      using errcode = 'CLR11', detail = '{"reason":"fiscal_year_not_in_firm"}';
+  end if;
+  -- A NAMED correction target resolving to REAL rows of THIS client (prose is not a
+  -- target; matrix A5).
+  if p_correction_target is null or jsonb_typeof(p_correction_target) <> 'object' then
+    raise exception 'a reopen names its correction target (entry_ids / document_id / check_key)'
+      using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+  end if;
+  if p_correction_target ? 'entry_ids' then
+    for e in select (x.v)::uuid from jsonb_array_elements_text(
+        p_correction_target -> 'entry_ids') x(v) loop
+      perform 1 from clara.journal_entries je
+        where je.id = e and je.client_id = v_fy.client_id;
+      if not found then
+        raise exception 'correction target entry % is not in this client', e
+          using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+      end if;
+      v_target_ok := true;
+    end loop;
+  end if;
+  if p_correction_target ? 'document_id' then
+    perform 1 from clara.document_filings f
+      where f.document_id = (p_correction_target ->> 'document_id')::uuid
+        and f.client_id = v_fy.client_id and f.retired_at is null;
+    if not found then
+      raise exception 'correction target document is not filed to this client'
+        using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+    end if;
+    v_target_ok := true;
+  end if;
+  if p_correction_target ? 'check_key' then
+    perform 1 from clara.close_gate_checks k
+      where k.check_key = p_correction_target ->> 'check_key';
+    if not found then
+      raise exception 'correction target gate is unknown'
+        using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+    end if;
+    v_target_ok := true;
+  end if;
+  if not v_target_ok then
+    raise exception 'the correction target resolved to nothing auditable'
+      using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+  end if;
+  -- THE ORDERING GUARD (GAP5-3 as a predicate; matrix A5): no later FY may be mid-close
+  -- or closed.
+  perform 1 from clara.fiscal_years later
+    where later.client_id = v_fy.client_id and later.ordinal > v_fy.ordinal
+      and later.status in ('closing', 'closed');
+  if found then
+    raise exception 'a later fiscal year is closing or closed; reopen years newest-first'
+      using errcode = 'CLR41', detail = '{"reason":"reopen_ordering_violation"}';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'reopen_fiscal_year', p_op_key,
+    clara._hash(jsonb_build_object('fy', p_fy, 'reason', p_reason,
+      'target', p_correction_target)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- ACQUISITION: the closing entry's ROW FIRST, then 004, then 007-EXCLUSIVE (the order
+  -- every JE writer already walks; an FY with no closing entry locks no row and falls
+  -- through to 004 → 007, still a prefix).
+  select cr.* into v_receipt from clara.close_receipts cr
+    where cr.fiscal_year_id = p_fy and cr.kind = 'close' and cr.status = 'active';
+  if v_receipt.id is null then
+    raise exception 'no active close receipt exists for this fiscal year'
+      using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
+  end if;
+  v_entry := v_receipt.close_entry_id;
+  if v_entry is not null then
+    perform 1 from clara.journal_entries je where je.id = v_entry for update;
+  end if;
+  perform pg_advisory_xact_lock(203005004, hashtext(v_fy.client_id::text));
+  perform pg_advisory_xact_lock(203005007, hashtext(v_fy.client_id::text));
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fy;
+  if v_fy.status <> 'closed' then
+    raise exception 'fiscal year % is %; only a closed year reopens', v_fy.label, v_fy.status
+      using errcode = 'CLR41', detail = '{"reason":"close_not_in_progress"}';
+  end if;
+
+  -- EFFECTS, IN THE REQUIRED ORDER (the wall refuses the reversed_by UPDATE on an entry
+  -- inside a closing/closed FY; flipping first is what makes the reversal reachable, and
+  -- the permit is the BELT for any future implementation that reverses first).
+  update clara.fiscal_years set status = 'reopened' where id = p_fy;
+  update clara.close_receipts set status = 'superseded' where id = v_receipt.id;
+  insert into clara.close_receipts(firm_id, client_id, fiscal_year_id, close_run_id,
+      prior_close_receipt_id, kind, closed_by, segregation_mode, last_preparer_actor,
+      self_attestation, pl_net_cents, retained_earnings_account, closing_tb_digest,
+      gate_digest, books_watermark, dataset_sha256, close_entry_id, snapshot)
+    values (c.firm, v_fy.client_id, p_fy, v_receipt.close_run_id, v_receipt.id, 'reopen',
+      c.actor, v_receipt.segregation_mode, v_receipt.last_preparer_actor, null,
+      v_receipt.pl_net_cents, v_receipt.retained_earnings_account,
+      v_receipt.closing_tb_digest, v_receipt.gate_digest, v_receipt.books_watermark,
+      v_receipt.dataset_sha256, v_entry,
+      jsonb_build_object('reason', p_reason, 'correction_target', p_correction_target,
+        'superseded_receipt_id', v_receipt.id, 'reopened_by', c.actor))
+    returning id into v_new_receipt;
+  if v_entry is not null then
+    insert into clara.close_write_permits(firm_id, client_id, fiscal_year_id,
+        close_run_id, purpose, target_entry_id, entries_expected)
+      values (c.firm, v_fy.client_id, p_fy, v_receipt.close_run_id,
+        'reopen_reversal', v_entry, 2);
+    -- The audited verb, never a hand-written unwind (PRD invariant 8). Its own row lock
+    -- and 004 are re-acquisitions this transaction already holds.
+    perform clara.reverse_entry(v_entry, 'Reopen ' || v_fy.label || ': ' || p_reason,
+      p_op_key || ':rev');
+  end if;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'reopen_fiscal_year', v_entry,
+    jsonb_build_object('fiscal_year_id', p_fy, 'reopen_receipt_id', v_new_receipt,
+      'superseded_receipt_id', v_receipt.id, 'op_key', p_op_key));
+  perform clara._append_event(c.firm, 'fiscal_year.reopened', v_fy.client_id, c.actor,
+    null, null, v_entry, null, null,
+    jsonb_build_object('fiscal_year_id', p_fy, 'reopen_receipt_id', v_new_receipt));
+  return clara._finish_op(c.firm, 'reopen_fiscal_year', p_op_key,
+    jsonb_build_object('reopen_receipt_id', v_new_receipt, 'fiscal_year_id', p_fy,
+      'reversed_entry_id', v_entry));
+end $$;
+alter function clara.reopen_fiscal_year(uuid, text, jsonb, text) owner to clara_fn_owner;
+revoke all on function clara.reopen_fiscal_year(uuid, text, jsonb, text) from public;
+grant execute on function clara.reopen_fiscal_year(uuid, text, jsonb, text)
+  to clara_authenticated;
+
+-- =====================================================================================
+-- S6.4e -- THE READS: verify_close (recompute, never trust storage) + get_close_readiness
+-- + list_fiscal_years. Granted to clara_authenticated AND clara_agent_ro (reads are the
+-- agent's whole reach into the close model).
+-- =====================================================================================
+create function clara.verify_close(p_receipt uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  c record; v_r record; v_fy record; v_strict jsonb := '[]'::jsonb;
+  v_pos jsonb; v_diffs jsonb; v_probe jsonb; v_successor text;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  select * into v_r from clara.close_receipts cr where cr.id = p_receipt;
+  if v_r.id is null or v_r.firm_id <> c.firm then
+    raise exception 'close receipt not found in your firm'
+      using errcode = 'CLR11', detail = '{"reason":"fiscal_year_not_in_firm"}';
+  end if;
+  select * into v_fy from clara.fiscal_years fy where fy.id = v_r.fiscal_year_id;
+  -- STRICT: the four drawer-1 identities, RECOMPUTED FROM SCRATCH now.
+  for v_probe in
+    select p2 from unnest(array[
+      clara.ar_control_tie(v_r.client_id, v_fy.ends_on),
+      clara.ap_control_tie(v_r.client_id, v_fy.ends_on),
+      clara.fa_control_tie_out(v_r.client_id, v_fy.id),
+      clara.bank_recon_close_state(v_r.client_id, v_fy.id)]) u(p2)
+  loop
+    v_strict := v_strict || jsonb_build_object('state', v_probe ->> 'state',
+      'probe', v_probe);
+  end loop;
+  -- The stored pin vs a fresh recompute of the SAME instant (drift = a wall bypass or a
+  -- corrupted receipt; the recompute never replaces the pin, it interrogates it).
+  select coalesce(jsonb_object_agg(t.account_code, (t.debit_cents - t.credit_cents)), '{}'::jsonb)
+    into v_pos
+    from clara.trial_balance_as_of(v_r.client_id, v_fy.ends_on) t
+    join clara.coa_accounts a on a.client_id = v_r.client_id
+     and a.account_code = t.account_code
+    where a.account_type in ('asset', 'liability', 'equity')
+      and (t.debit_cents - t.credit_cents) <> 0;
+  select coalesce(jsonb_agg(jsonb_build_object('account_code', d.code,
+           'pinned_cents', d.pin, 'recomputed_cents', d.cur) order by d.code), '[]'::jsonb)
+    into v_diffs
+    from (
+      select coalesce(p.key, q.key) as code,
+             coalesce((p.value)::text::bigint, 0) as pin,
+             coalesce((q.value)::text::bigint, 0) as cur
+        from jsonb_each(coalesce(v_r.snapshot -> 'closing_position', '{}'::jsonb)) p(key, value)
+        full outer join jsonb_each(v_pos) q(key, value) on q.key = p.key
+    ) d
+    where d.pin <> d.cur;
+  -- The successor tie: REPORTED, never graded (§2.7): consumed only when a successor
+  -- close receipt exists; the seed-approval consumption is asserted by that event itself.
+  select case when exists (select 1 from clara.close_receipts nxt
+                 join clara.fiscal_years nfy on nfy.id = nxt.fiscal_year_id
+                 where nfy.prior_fy_id = v_r.fiscal_year_id
+                   and nxt.kind = 'close' and nxt.status = 'active')
+              then 'consumed_by_successor_close' else 'pinned_not_yet_consumed' end
+    into v_successor;
+  return jsonb_build_object(
+    'receipt_id', p_receipt, 'fiscal_year_id', v_r.fiscal_year_id,
+    'verified', (jsonb_array_length(v_diffs) = 0
+      and not exists (select 1 from jsonb_array_elements(v_strict) s(el)
+            where s.el ->> 'state' in ('mismatch', 'unknown', 'error'))),
+    'strict', jsonb_build_object('probes', v_strict, 'closing_position_diffs', v_diffs),
+    'successor_tie', v_successor,
+    'informational', jsonb_build_object(
+      'gate_summary_stored', v_r.snapshot -> 'gates'));
+end $$;
+alter function clara.verify_close(uuid) owner to clara_fn_owner;
+revoke all on function clara.verify_close(uuid) from public;
+grant execute on function clara.verify_close(uuid) to clara_authenticated;
+grant execute on function clara.verify_close(uuid) to clara_agent_ro;
+
+create function clara.get_close_readiness(p_client uuid, p_fy uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  c record; v_run record;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  perform 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm;
+  if not found then
+    raise exception 'client is not in your firm' using errcode = 'CLR11';
+  end if;
+  select * into v_run from clara.close_runs r
+    where r.fiscal_year_id = p_fy and r.client_id = p_client
+    order by r.started_at desc limit 1;
+  return jsonb_build_object(
+    'fiscal_year_id', p_fy, 'close_run_id', v_run.id, 'run_state', v_run.state,
+    'gates', coalesce((
+      select jsonb_agg(jsonb_build_object('check_key', g.check_key, 'drawer', g.drawer,
+          'state', g.state, 'measured', g.measured, 'measured_digest', g.measured_digest,
+          'attested', exists (select 1 from clara.close_attestations a
+              where a.close_run_id = v_run.id and a.check_key = g.check_key
+                and a.superseded_at is null and a.gate_result_id = g.id))
+        order by g.drawer, g.check_key)
+        from (select distinct on (r2.check_key) r2.* from clara.close_gate_results r2
+               where r2.close_run_id = v_run.id
+               order by r2.check_key, r2.evaluated_at desc, r2.id desc) g), '[]'::jsonb));
+end $$;
+alter function clara.get_close_readiness(uuid, uuid) owner to clara_fn_owner;
+revoke all on function clara.get_close_readiness(uuid, uuid) from public;
+grant execute on function clara.get_close_readiness(uuid, uuid) to clara_authenticated;
+grant execute on function clara.get_close_readiness(uuid, uuid) to clara_agent_ro;
+
+create function clara.list_fiscal_years(p_client uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  c record;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  perform 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm;
+  if not found then
+    raise exception 'client is not in your firm' using errcode = 'CLR11';
+  end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('fiscal_year_id', fy.id,
+      'label', fy.label, 'ordinal', fy.ordinal, 'starts_on', fy.starts_on,
+      'ends_on', fy.ends_on, 'status', fy.status, 'fy_end_source', fy.fy_end_source)
+    order by fy.ordinal)
+    from clara.fiscal_years fy where fy.client_id = p_client), '[]'::jsonb);
+end $$;
+alter function clara.list_fiscal_years(uuid) owner to clara_fn_owner;
+revoke all on function clara.list_fiscal_years(uuid) from public;
+grant execute on function clara.list_fiscal_years(uuid) to clara_authenticated;
+grant execute on function clara.list_fiscal_years(uuid) to clara_agent_ro;
