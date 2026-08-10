@@ -95,11 +95,25 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * EMPTY TODAY, and that is a fact about the tree, not an accident: no non-whitelisted clara
- * function or CoR replacement in packages/db/migrations carries a dynamic `EXECUTE`. Adding an
- * entry is a contract-level decision, exactly like widening WIKI_WHITELIST.
+ * ONE ENTRY TODAY (it was empty until 0055). Adding an entry is a contract-level decision,
+ * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
-export const DYNAMIC_SQL_ALLOWLIST = new Map([]);
+export const DYNAMIC_SQL_ALLOWLIST = new Map([
+  ["apply_open_items(uuid,jsonb,text,text)", {
+    why: "0055 S2 (Wave E lane α, E-R12(1) — reviewed on PR #226 under the full ADR-061 "
+      + "ladder): the apply-path date guard is spliced PATCHED-NOT-REBUILT — the body is "
+      + "harvested via pg_get_functiondef because THREE patch generations are live "
+      + "(0037 → 0040 S4.9 → 0042 S5.22; a from-file rebuild would revert them), so the "
+      + "executed statement is unreconstructible from literals BY DESIGN, same as the "
+      + "whitelisted get_context_pack patches. The installed body is the live "
+      + "apply_open_items plus one refusal conjunct; it names no wiki relation and calls "
+      + "no wiki verb — its full target set is declared below and the 0055 S2 postcheck "
+      + "re-counts the body's own markers after the splice.",
+    relations: ["open_items", "journal_entries", "open_item_allocations", "clients", "op_receipts", "audit_log", "domain_events", "firm_event_seq"],
+    calls: ["_human_ctx", "role_rank", "_reserve_op", "_hash", "_canonical_counterparty",
+      "_subledger_outstanding", "_book_today", "_audit", "_append_event", "_finish_op"],
+  }],
+]);
 
 /** Normalise a waiver value to {why, relations:Set, calls:Set}; a legacy string is a bare
  *  attestation with no declared targets. Returns null for a missing waiver. */
