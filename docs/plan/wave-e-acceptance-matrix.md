@@ -446,9 +446,9 @@ CLOSING VERIFICATION — <section> · <UTC timestamp> · <lane> · <model overri
    producer) is not.
 6. **Cell counts are not coverage.** A section with every cell green and no right-answer cell in
    it is not discharged — see the header lesson, which this document exists to obey.
-7. **This matrix does not decide the two owner-open items it depends on.** The E-R11 factory
-   default (owner-only vs owner/partner) is PROPOSED, pending the owner's one-line confirmation —
-   A28 asserts the SEPARATE-grantability ruling, which holds under either default; and the
-   RPR-close reachability question (D2a) is a measurement to be taken, not a conclusion recorded
-   here.
+7. **This matrix does not decide the owner items it depends on.** The E-R11 factory default is
+   **owner-only — CONFIRMED by the owner 2026-08-09** (ruling record:
+   `wave-e-design-skeleton-part4.md` §6 item 2); A28 asserts the SEPARATE-grantability ruling,
+   which held under either default and stands unchanged. The RPR-close reachability question
+   (D2a) remains a measurement to be taken, not a conclusion recorded here.
 

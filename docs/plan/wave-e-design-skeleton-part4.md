@@ -241,14 +241,17 @@ Two items are DECIDED by the orchestrator; one belongs to the OWNER and is state
    `0040:864-877`) but conditional, so the verb gets one small refusal and lane α's size moves from
    "tests only" to "tests + one guard + the door". Both independent round-1 review lanes reached this
    answer separately.
-2. **The E-R11 factory default — PROPOSED (`owner` only), PENDING THE OWNER (one line).** *(Not
-   decided here: E-R11's ruled default is "owner/partner only", and narrowing a ruled default belongs
-   with the owner, not the orchestrator.)* Reasoning of record for the proposal: "partner" has no
-   structural representation in the role model (`viewer|bookkeeper|admin|owner`, `0002:215`), so an
-   explicit audited grant IS the honest mechanism for a partner who is not the firm owner — defaulting
-   the whole `admin` tier in would make the list decorative for the largest senior role, and signing
-   authority should fail closed. **Owner-open item; adjustable in one `_has_capability` predicate.**
-   The reporting doc's "owner/partner" wording cites this same pending item.
+2. **The E-R11 factory default — CONFIRMED (`owner` only). RULED BY THE OWNER 2026-08-09** (the
+   five-question grill at the campaign-design close, session 43d6f6cf; recorded in PROJECTLOG PART 2
+   and the handoff; this truing rides lane α's PR per the ruling). Keys ② and ③ default to the
+   `owner` role alone; partners/admins join by **explicit audited grant** (`grant_firm_capability` —
+   the firm-configurable list ships with lane β; a polished settings UI is Wave G). Reasoning of
+   record, unchanged from the proposal: "partner" has no structural representation in the role model
+   (`viewer|bookkeeper|admin|owner`, `0002:215`), so an explicit audited grant IS the honest
+   mechanism for a partner who is not the firm owner — defaulting the whole `admin` tier in would
+   make the list decorative for the largest senior role, and signing authority should fail closed.
+   **Adjustable in one `_has_capability` predicate.** The reporting doc's "owner/partner" wording
+   resolves to this same ruling.
 3. **Lane α's early ride — DECIDED (orchestrator, 2026-08-09): α rides an early ceremony.** §1.1's
    argument stands (an ADR-062 debt discharged, the three parked codes landed without waiting on the
    campaign), amended by §3.1: α now replaces one audited writer body, so it carries its own small D1

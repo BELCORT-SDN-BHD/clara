@@ -120,10 +120,11 @@ could sign when is permanent.
   active grant exists **or** the user's active membership role is `'owner'` (the factory default).
   Key ① (prepare) is the existing `role_rank('bookkeeper')` floor and needs no new object.
 - **Refusal:** `CLR04` + `reason='capability_missing'` + the capability named in `detail`.
-- **The factory default is PROPOSED, not decided — it is an owner question** (§6 item 2). E-R11's ruled
-  default is "owner/partner only"; `'partner'` has no structural representation in the role model
-  (`0002:215`), so `owner`-only is the closest mechanical reading and is what §6 item 2 proposes, pending
-  one line from the owner. Adjustable in one `_has_capability` predicate.
+- **The factory default is CONFIRMED: `owner` only — ruled by the owner 2026-08-09** (§6 item 2
+  carries the ruling record). E-R11's contract wording is "owner/partner only"; `'partner'` has no
+  structural representation in the role model (`0002:215`), so `owner`-only is the honest mechanical
+  reading — a partner who is not the firm owner joins by explicit audited grant. Adjustable in one
+  `_has_capability` predicate.
 - **Keys ② and ③ are separately grantable**, which is a ruled property and therefore a cell: grant ②
   alone and prove `reopen_fiscal_year` still refuses `CLR04`.
 

@@ -39,9 +39,9 @@ a SKETCH; adoptions and amendments are named:
 
 **On "owner/partner"** *(R11)*: E-R11's factory default is written `owner/partner only`
 (`wave-e-contract.md:233`), and "partner" has no structural representation in the live role set. The
-campaign's **PROPOSED** default is owner-only, **pending the owner's one-line confirmation — an
-OWNER-OPEN item**, carried identically in `wave-e-design-skeleton-part4.md` §6 item 2. This document uses "key ② floor" and
-defers to that item rather than asserting either reading.
+campaign's default is **owner-only — CONFIRMED by the owner 2026-08-09** (the ruling record is
+`wave-e-design-skeleton-part4.md` §6 item 2; a partner who is not the firm owner joins by explicit
+audited grant). This document uses "key ② floor" and resolves to that ruling.
 
 **Wording tables are BORN two-versioned** *(ruled)*: one act inserts both vintages' row sets — but only
 once #43 has verified the text. Lane ε ships the STRUCTURE with zero MPERS rows and a CHECK forbidding
