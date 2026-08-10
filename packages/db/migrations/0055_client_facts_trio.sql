@@ -488,7 +488,7 @@ create function clara.record_client_fact(
   language plpgsql security definer set search_path = clara, pg_temp as $door$
 declare
   c record; v_firm uuid; v_key record; v_dedupe jsonb; v_val text;
-  v_prior uuid; v_new uuid; v_doc_firm uuid;
+  v_prior uuid; v_new uuid; v_doc_firm uuid; v_doc_filed_here boolean := false;
 begin
   -- THE FLOOR: admin+ (skeleton §3.2, builder choice ratified with the packet). A client
   -- fact drives coding and statutory presentation -- above a bookkeeper's day book, below a
@@ -532,11 +532,12 @@ begin
     if v_doc_firm is null or v_doc_firm <> c.firm then
       raise exception 'source document is not in your firm' using errcode = 'CLR11';
     end if;
-    if exists (select 1 from clara.document_filings df
-                where df.document_id = p_source_document_id and df.retired_at is null)
-       and not exists (select 1 from clara.document_filings df
+    v_doc_filed_here := exists (select 1 from clara.document_filings df
                 where df.document_id = p_source_document_id and df.client_id = p_client
-                  and df.retired_at is null) then
+                  and df.retired_at is null);
+    if not v_doc_filed_here
+       and exists (select 1 from clara.document_filings df
+                where df.document_id = p_source_document_id and df.retired_at is null) then
       raise exception 'the source document is filed to a different client; a document-based fact cites a document filed to this client, or an unfiled firm document'
         using errcode = 'CLR10', detail = '{"reason":"fact_source_document_invalid"}';
     end if;
@@ -614,9 +615,20 @@ begin
     jsonb_build_object('client', p_client, 'fact_key', p_fact_key, 'fact_id', v_new,
       'superseded_id', v_prior, 'basis_kind', p_basis_kind,
       'source_document', p_source_document_id, 'op_key', p_op_key));
+  -- THE EVENT'S document_id COLUMN CLAIMS A FILING LINK, AND ONLY A REAL ONE MAY CLAIM IT.
+  -- clara._tf_validate_domain_event (pre-existing, untouched, at full force) requires a
+  -- document_filings row whenever an event carries BOTH client_id and document_id -- and the
+  -- unfiled-firm-document grounding this door deliberately allows can NEVER satisfy that (the
+  -- x55 battery's third catch: the door's first cut passed the column unconditionally and the
+  -- spine rolled the whole act back). The FACT ROW is the record of truth and always pins the
+  -- exact document; the event is a notification, so it carries the reference in its PAYLOAD
+  -- unconditionally and sets the COLUMN only when the active this-client filing exists. The
+  -- invariant is not weakened; the claim is simply not made where it is not true.
   perform clara._append_event(c.firm, 'client.fact_recorded', p_client, c.actor,
-    null, null, null, p_source_document_id, null,
-    jsonb_build_object('fact_key', p_fact_key, 'fact_id', v_new, 'superseded_id', v_prior));
+    null, null, null,
+    case when v_doc_filed_here then p_source_document_id end, null,
+    jsonb_build_object('fact_key', p_fact_key, 'fact_id', v_new, 'superseded_id', v_prior,
+      'source_document_id', p_source_document_id));
   return clara._finish_op(c.firm, 'record_client_fact', p_op_key,
     jsonb_build_object('fact_id', v_new, 'fact_key', p_fact_key,
       'superseded_id', v_prior, 'client_id', p_client));

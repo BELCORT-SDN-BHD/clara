@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, humanQuery, PG,
   endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
-  waveAEnsureReady, firmOf, filedDocument,
+  waveAEnsureReady, firmOf, filedDocument, seedVerifiedDocument,
   reasonOf, opk, assertRaises,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
@@ -223,4 +223,70 @@ test("Door refusal battery -- basis/kind/key/value/document shape and a cross-fi
   const errFirm = await caught(() => recordClientFact(admin, { client: other, factKey: "msic", factValue: "68109", basis: "x", basisKind: "owner_instruction" }));
   assert.ok(errFirm, "a client from another firm must be refused");
   assert.equal(errFirm.code, "CLR11", `expected CLR11 (got ${errFirm.code} -- ${errFirm.message})`);
+});
+
+// ===========================================================================
+// 13. Document-basis battery -- the FIXED contract (the client relation reads
+// from ACTIVE FILINGS, not from the dropped clara.documents.client_id; the
+// x55 battery's prior round caught that column read, 0055's own comment now
+// credits it). Four sub-cases:
+//   (1) absent OR another-firm document -> CLR11 'source document is not in
+//       your firm' (ONE refusal for both -- the 0021 no-existence-oracle rule).
+//   (2) an active filing exists, but NONE to THIS client -> CLR10
+//       fact_source_document_invalid.
+//   (3) actively filed to THIS client -> SUCCEEDS, fact carries
+//       source_document_id.
+//   (4) in the firm with NO active filing at all -> SUCCEEDS (firm-scoped
+//       grounding -- a registry search the firm holds but never filed to any
+//       client's books; the basis TEXT carries that story, the fact row still
+//       pins the exact document).
+// ===========================================================================
+
+test("Document-basis battery -- CLR11 for absent/foreign, CLR10 fact_source_document_invalid for a different-client filing, SUCCESS for a same-client filing AND for an unfiled firm document", async (t) => {
+  if (skip55(t)) return;
+  const admin = world.users.hana;
+  const client = await freshActiveClient(world.users.alice, "docbasis");
+  const firm = await firmOf(client);
+
+  // (1) CLR11: a document belonging to ANOTHER FIRM.
+  const otherFirmDoc = await filedDocument(world.users.dave, { firm: world.firms.B, client: world.clients.B1 });
+  const errFirm = await caught(() => recordClientFact(admin, {
+    client, factKey: "msic", factValue: "74101", basis: "x", basisKind: "document", sourceDocument: otherFirmDoc.documentId,
+  }));
+  assert.ok(errFirm, "a document from another firm must be refused");
+  assert.equal(errFirm.code, "CLR11", `expected CLR11 (got ${errFirm.code} -- ${errFirm.message})`);
+  assert.match(errFirm.message ?? "", /not in your firm/i);
+
+  // (2) CLR10 fact_source_document_invalid: a document ACTIVELY FILED, but to a
+  // DIFFERENT client of the SAME firm (never to `client`).
+  const otherClient = await freshActiveClient(world.users.alice, "docbasis-other");
+  const otherClientDoc = await filedDocument(admin, { firm, client: otherClient });
+  const errClient = await caught(() => recordClientFact(admin, {
+    client, factKey: "msic", factValue: "68109", basis: "x", basisKind: "document", sourceDocument: otherClientDoc.documentId,
+  }));
+  assert.ok(errClient, "a document actively filed to a DIFFERENT client (same firm) must be refused");
+  assert.equal(errClient.code, "CLR10", `expected CLR10 (got ${errClient.code} -- ${errClient.message})`);
+  assert.equal(reasonOf(errClient), "fact_source_document_invalid");
+
+  // (3) SUCCEEDS: a document ACTIVELY FILED to THIS client.
+  const ownDoc = await filedDocument(admin, { firm, client });
+  const r = await recordClientFact(admin, {
+    client, factKey: "msic", factValue: "68109",
+    basis: "SSM business profile print-out, sighted 2026-08-11", basisKind: "document",
+    sourceDocument: ownDoc.documentId,
+  });
+  assert.ok(r?.fact_id, "a document actively filed to THIS client is accepted");
+  const row = (await rootQuery("select source_document_id from clara.client_facts where id=$1", [r.fact_id])).rows[0];
+  assert.equal(row.source_document_id, ownDoc.documentId, "the fact row carries source_document_id");
+
+  // (4) SUCCEEDS: a document IN THE FIRM with NO active filing at all.
+  const unfiledDoc = await seedVerifiedDocument({ firm });
+  const r2 = await recordClientFact(admin, {
+    client, factKey: "entity_type", factValue: "sole_prop",
+    basis: "an unfiled SSM registry search the firm holds on this client, never filed to its books", basisKind: "document",
+    sourceDocument: unfiledDoc.documentId,
+  });
+  assert.ok(r2?.fact_id, "an unfiled firm document grounds the fact on firm scope alone");
+  const row2 = (await rootQuery("select source_document_id from clara.client_facts where id=$1", [r2.fact_id])).rows[0];
+  assert.equal(row2.source_document_id, unfiledDoc.documentId, "the fact row still pins the exact (unfiled) document");
 });
