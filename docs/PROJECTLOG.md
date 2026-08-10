@@ -163,9 +163,15 @@ prior ADR stand unchanged.
   43d6f6cf):** ① E-R11 keys ②③ default **owner-only**, partners by explicit audited grant
   (CONFIRMED — the design's PROPOSED wording FLIPPED with lane α's PR, 2026-08-11) · ② the
   **2506 window OPENS** — **EXECUTED AND CLOSED 2026-08-11** (entry `2d226fe7` owner-approved;
-  the batch register below carries the trail) · ③ **Gate P = owner re-export near-term**
-  (STILL OPEN — the local folder was measured byte-identical 2026-08-11, see the Gate-P bullet;
-  the re-export reminder stands) · ④/⑤ **#43 MASB + #44 sole-prop = agent legwork + owner
+  the batch register below carries the trail) · ③ **Gate P — RE-RULED 2026-08-11 (owner, in-session): STOP CHASING; the reminder is RETIRED.**
+  Every self-serve path was exhausted and measured that day: the local folder is byte-identical
+  to the stuck seven (sha-proven); the PDFs' own embedded Stripe hosted-invoice links are
+  EXPIRED ("This link expired — contact ar@openai.com", read live); the owner states the portal
+  is not accessible to them. The owner-ruled close-out: **at the WAVE G close, factory-reset the
+  product and re-run a FULL E2E rebuild from the raw documents** (an ADR-060-scoped pre-beta
+  act; registered as a Wave-G planning item below). Gate P itself stays what ADR-062 made it —
+  operating runway, closing on the first native-MYR SST-stated supplier bill; the books remain
+  honest via the manual attested lane (0008 booked) · ④/⑤ **#43 MASB + #44 sole-prop = agent legwork + owner
   verify** — **packages LANDED (PR #225: `masb-mpers-sources-43.md`,
   `sole-prop-convention-44.md`) and the owner SIGNED OFF in-session 2026-08-11**: #44's
   candidate verdicts CONFIRMED (MPERS does not bind BEE — incorporation-gated definition +
@@ -173,8 +179,19 @@ prior ADR stand unchanged.
   presentation with the never-MPERS-claimed disclaimer), #43's package + policy items signed
   with the **byte-level MPERS wording verification structurally deferred to lane ε's seeding
   act** (the `statutory_wording` CHECK demands `source_manifest`+`source_sha256`+`verified_by`
-  before any row reads `verified` — D5's wording-content cells stay gated there, and the two
-  LHDN Public Rulings named in #44 §4 remain owner pulls). **NEXT = lane α (the E-R12 trio; the
+  before any row reads `verified` — D5's wording-content cells stay gated there). **THE PRIMARY
+  BYTES ARE NOW IN HAND (pulled 2026-08-11, same session, via the MASB acknowledgment-gate
+  POST + LHDN's current wp-content host — the legacy `phl` host is dead, which is all the
+  "inaccessibility" ever was):** `~/.clara-tools/captures/gov-pulls-2026-08-11/` holds
+  MPERS 2016 (sha `e5114a24…`), MPERS 2025 (`59f8c5fe…`), MPERS 2025 BC+IE (`b547b13d…`,
+  title page confirms it carries the illustrative FS), the 2023 Pillar Two amendment
+  (`501293e5…`), PR 5/2000 original+Revised (`31930482…`/`1a177344…`) and PR 7/2021
+  (`2b0f0ac6…`) — all text-extractable. Settled from those bytes already: **the #43 numbering
+  conflict (MPERS 2016 ¶5.2 IS the single/two-statement rule — KPMG cited correctly; the IFRS
+  module's 5.3/5.4 was its own numbering; ¶3.17/3.18/3.19/5.5/5.11 all confirmed verbatim)**
+  and **#44's 7-year retention (PR 5/2000 Revised: ≥7 years from the end of the year the
+  income relates to, plus the late-filing and under-appeal variants, quoted).** Lane ε seeds
+  against these hashes; no owner pull remains on either dossier. **NEXT = lane α (the E-R12 trio; the
   design's verdict: F-1 is discharged by the live 0044 wall, so α = verification + ONE
   `apply_open_items` date guard + the `client_facts` door + the context-pack splice; early
   ceremony) ∥ the 2506 window ∥ the #43/#44 research lanes — then β..θ, acceptance
@@ -193,6 +210,16 @@ prior ADR stand unchanged.
 - **R2 backup cadence — RULED (WB-R26, ADR-037):** monthly LIGHT human-assisted drill + quarterly STRICT per DR.md. **First monthly sitting still to schedule (owner + agent).** Wiring DONE 2026-07-22 (evidence `docs/ops/DR.md` §9).
 - *(Pruned to ADR-051: the #51/#52/#53 register + the sales mis-route — all landed in 0036.)*
 - *(Pruned 2026-08-08 at the Wave-E-contract close, each to its record: the §7-A closure narrative → ADR-064 + the acceptance docs · the 0048–0050 fix-train landing → PRs #209/#210/#211 + CLAUDE.md's posture/recipe block · the Wave-E-grill bullet → ADR-065 + `wave-e-contract.md` · the #193/#195 landing narrative → git log (the open optimistic-bubble residual stays carried in the interview-v3 bullet below) · the ADR-061 tiering ruling → ADR-061 · the MyInvois-autopost undecided → WC-R12/ADR-051 + ADR-064 · the ROME PUBLIC allocation ruling → ADR-054/WCC-R9 · the C-c-residuals FULLY-PAID note → ADR-056/058/059 · the gitleaks discharge narrative → PR #190, its standing law kept below.)*
+
+- **WAVE-G CLOSE-OUT ITEM — OWNER-RULED 2026-08-11: FACTORY RESET + FULL E2E REBUILD FROM RAW
+  DOCUMENTS.** At the Wave G close (pre-beta, ADR-060 authority still in force), reset the
+  product's DATA and re-run the whole raw-document corpus through the then-current pipeline as
+  the final end-to-end review. This is the definitive discharge for every stuck-bytes class —
+  the Gate-P seven included: the same content re-enters cleanly once the old rows are gone —
+  and the strongest whole-product acceptance available before beta. Scope: DATA only per
+  ADR-060 §2 (mechanisms, secrets and process untouched); the frozen prior build and the
+  spike's parked run stay out of scope (the §1 narrowing above). Plan the ceremony at Wave-G
+  planning; the resumption of "real data untouchable" at beta rides the same gate.
 
 **Open decisions / obligations (owner/legal):**
 - **The onboarding commit-lane shape — RULED (WB-R22, ADR-037):** the audited temp-admin ceremony stands (Gate O closed on it); target = a scoped review-attestation capability (future migration).
