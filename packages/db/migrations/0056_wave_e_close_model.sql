@@ -347,3 +347,265 @@ create policy p_fy_human on clara.fiscal_years
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.fiscal_years to clara_authenticated;
 grant select on clara.fiscal_years to clara_agent_ro;
+
+-- =====================================================================================
+-- S2 -- the gate catalog + the run/result/attestation trio (skeleton §2.2).
+-- =====================================================================================
+
+-- CODE-POPULATED, NOT FIRM-CONFIGURABLE (the wake_fn_allowlist posture): drawer assignment
+-- is RULED (E-R2), and this table is where the ruling becomes data a reviewer can diff.
+create table clara.close_gate_checks (
+  check_key    text primary key check (btrim(check_key) <> ''),
+  drawer       int  not null check (drawer in (1, 2, 3)),
+  title        text not null,
+  evaluator_fn text not null,
+  applies_when text not null default 'always'
+    check (applies_when in ('always', 'goods_trading')),
+  created_at   timestamptz not null default now()
+);
+create trigger t_close_gate_checks_append_only before update or delete on clara.close_gate_checks
+  for each row execute function clara._tf_append_only();
+create trigger t_close_gate_checks_no_truncate before truncate on clara.close_gate_checks
+  for each statement execute function clara._tf_no_truncate();
+alter table clara.close_gate_checks enable row level security;
+alter table clara.close_gate_checks force row level security;
+create policy p_cgc_owner on clara.close_gate_checks
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_cgc_human on clara.close_gate_checks
+  for select to clara_authenticated using (true);   -- a GLOBAL catalog, like client_fact_keys
+grant select on clara.close_gate_checks to clara_authenticated;
+grant select on clara.close_gate_checks to clara_agent_ro;
+
+insert into clara.close_gate_checks (check_key, drawer, title, evaluator_fn, applies_when) values
+  -- DRAWER 1 -- absolute; no attestation path exists for any of these (E-R2).
+  ('ar_control_tie',            1, 'AR control account = Σ open receivable items', 'clara.ar_control_tie',        'always'),
+  ('ap_control_tie',            1, 'AP control account = Σ open payable items',    'clara.ap_control_tie',        'always'),
+  ('fa_control_tie',            1, 'FA register ties to the GL over the close segment', 'clara.fa_control_tie_out', 'always'),
+  ('bank_recon_identity',       1, 'Bank reconciliation identity (strict half)',   'clara.bank_recon_close_state','always'),
+  ('pl_retained_earnings_roll', 1, 'P&L nets to the retained-earnings roll',       'finalize_close (in-body)',    'always'),
+  ('opening_continuity_tie',    1, 'FY opening = prior close''s pinned position',  'finalize_close (in-body)',    'always'),
+  -- DRAWER 2 -- default-refuse, per-item attested override (E-R2's five named checks).
+  ('depreciation_through_fy_end', 2, 'Depreciation authorities have run through FY end', 'clara._close_gate_depreciation', 'always'),
+  ('closing_stock_present',       2, 'A goods-trader has a closing-stock entry in the FY', 'clara._close_gate_closing_stock', 'goods_trading'),
+  ('unapproved_drafts_in_period', 2, 'No unapproved drafts dated inside the FY',   'clara._close_gate_drafts',    'always'),
+  ('open_bank_recon_items',       2, 'No unmatched statement lines / missing statements', 'clara._close_gate_bank_items', 'always'),
+  ('uncoded_documents',           2, 'No FY-dated filings without an entry',       'clara._close_gate_uncoded',   'always'),
+  -- DRAWER 3 -- advisory only; renders, never blocks.
+  ('bank_recon_informational',  3, 'Bank reconciliation informational half',       'clara.bank_recon_close_state','always'),
+  ('fa_register_tie_view',      3, 'FA register visibility tie (WD-R1, non-blocking)', 'clara.fa_register_tie',   'always');
+
+-- The mutable attempt workspace. ONE in_progress run per FY -- the partial unique index IS
+-- matrix A13's structural oracle (read from pg_index, not inferred).
+create table clara.close_runs (
+  id             uuid        primary key default gen_random_uuid(),
+  firm_id        uuid        not null references clara.firms(id),
+  client_id      uuid        not null,
+  fiscal_year_id uuid        not null,
+  state          text        not null default 'in_progress'
+                   check (state in ('in_progress', 'finalized', 'abandoned')),
+  started_by     uuid        not null references clara.users(id),
+  started_at     timestamptz not null default now(),
+  ended_by       uuid,
+  ended_at       timestamptz,
+  end_reason     text,
+  constraint uq_close_runs_id_firm unique (id, firm_id),
+  constraint fk_close_runs_client foreign key (client_id, firm_id)
+    references clara.clients (id, firm_id),
+  constraint fk_close_runs_fy foreign key (fiscal_year_id, firm_id)
+    references clara.fiscal_years (id, firm_id),
+  constraint ck_close_runs_ended check ((state = 'in_progress') = (ended_at is null))
+);
+create unique index uq_close_runs_one_live on clara.close_runs (fiscal_year_id)
+  where state = 'in_progress';
+
+-- Lifecycle: in_progress -> finalized|abandoned, stamped never deleted (matrix A22).
+create function clara._tf_close_runs_lifecycle() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  if old.state <> 'in_progress' then
+    raise exception 'a settled close run is immutable'
+      using errcode = 'CLR10', detail = '{"reason":"close_not_in_progress"}';
+  end if;
+  if new.id                is distinct from old.id
+     or new.firm_id        is distinct from old.firm_id
+     or new.client_id      is distinct from old.client_id
+     or new.fiscal_year_id is distinct from old.fiscal_year_id
+     or new.started_by     is distinct from old.started_by
+     or new.started_at     is distinct from old.started_at
+     or new.state = 'in_progress' then
+    raise exception 'a close run admits exactly one update: its settlement (state + ended_by/at + reason)'
+      using errcode = 'CLR10', detail = '{"reason":"close_not_in_progress"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_close_runs_lifecycle() from public;
+create trigger t_close_runs_lifecycle before update on clara.close_runs
+  for each row execute function clara._tf_close_runs_lifecycle();
+create trigger t_close_runs_no_delete before delete on clara.close_runs
+  for each row execute function clara._tf_append_only();
+create trigger t_close_runs_no_truncate before truncate on clara.close_runs
+  for each statement execute function clara._tf_no_truncate();
+alter table clara.close_runs enable row level security;
+alter table clara.close_runs force row level security;
+create policy p_close_runs_owner on clara.close_runs
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_close_runs_human on clara.close_runs
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.close_runs to clara_authenticated;
+grant select on clara.close_runs to clara_agent_ro;
+
+-- APPEND-ONLY measurement rows. measured_digest is what an attestation BINDS to (PRD
+-- invariant 8 applied to a gate): finalize refuses close_attestation_stale on any drift.
+create table clara.close_gate_results (
+  id              uuid        primary key default gen_random_uuid(),
+  firm_id         uuid        not null,
+  close_run_id    uuid        not null,
+  check_key       text        not null references clara.close_gate_checks(check_key),
+  drawer          int         not null check (drawer in (1, 2, 3)),
+  state           text        not null check (state in ('pass','fail','unknown','error','advisory')),
+  measured        jsonb       not null check (jsonb_typeof(measured) = 'object'),
+  measured_digest text        not null,
+  evaluated_at    timestamptz not null default now(),
+  constraint uq_cgr_id_firm unique (id, firm_id),
+  constraint fk_cgr_run foreign key (close_run_id, firm_id)
+    references clara.close_runs (id, firm_id)
+);
+create index ix_cgr_run_key on clara.close_gate_results (close_run_id, check_key, evaluated_at desc);
+create trigger t_cgr_append_only before update or delete on clara.close_gate_results
+  for each row execute function clara._tf_append_only();
+create trigger t_cgr_no_truncate before truncate on clara.close_gate_results
+  for each statement execute function clara._tf_no_truncate();
+alter table clara.close_gate_results enable row level security;
+alter table clara.close_gate_results force row level security;
+create policy p_cgr_owner on clara.close_gate_results
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_cgr_human on clara.close_gate_results
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.close_gate_results to clara_authenticated;
+grant select on clara.close_gate_results to clara_agent_ro;
+
+-- Attestations: SUPERSESSION, NEVER MUTATION (the client_facts discipline; matrix A20 demands
+-- BOTH the stale and the fresh attestation survive in history). The live attestation for a
+-- (run, check) is the superseded_at IS NULL row; a fresh one stamps its predecessor.
+create table clara.close_attestations (
+  id             uuid        primary key default gen_random_uuid(),
+  firm_id        uuid        not null,
+  close_run_id   uuid        not null,
+  check_key      text        not null references clara.close_gate_checks(check_key),
+  gate_result_id uuid        not null,
+  attested_by    uuid        not null references clara.users(id),
+  reason         text        not null check (btrim(reason) <> ''),
+  attested_at    timestamptz not null default now(),
+  superseded_by  uuid        references clara.close_attestations(id) deferrable initially deferred,
+  superseded_at  timestamptz,
+  constraint ck_ca_supersession_paired check ((superseded_by is null) = (superseded_at is null)),
+  constraint fk_ca_run foreign key (close_run_id, firm_id)
+    references clara.close_runs (id, firm_id),
+  constraint fk_ca_result foreign key (gate_result_id, firm_id)
+    references clara.close_gate_results (id, firm_id)
+);
+create unique index uq_ca_live on clara.close_attestations (close_run_id, check_key)
+  where superseded_at is null;
+create function clara._tf_close_attestations_supersede_only() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  if old.superseded_at is not null or old.superseded_by is not null then
+    raise exception 'a superseded attestation is immutable'
+      using errcode = 'CLR10', detail = '{"reason":"close_attestation_stale"}';
+  end if;
+  if new.superseded_by is null or new.superseded_at is null
+     or new.id             is distinct from old.id
+     or new.firm_id        is distinct from old.firm_id
+     or new.close_run_id   is distinct from old.close_run_id
+     or new.check_key      is distinct from old.check_key
+     or new.gate_result_id is distinct from old.gate_result_id
+     or new.attested_by    is distinct from old.attested_by
+     or new.reason         is distinct from old.reason
+     or new.attested_at    is distinct from old.attested_at then
+    raise exception 'an attestation admits exactly one update: the supersession stamp'
+      using errcode = 'CLR10', detail = '{"reason":"close_attestation_stale"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_close_attestations_supersede_only() from public;
+create trigger t_ca_supersede_only before update on clara.close_attestations
+  for each row execute function clara._tf_close_attestations_supersede_only();
+create trigger t_ca_no_delete before delete on clara.close_attestations
+  for each row execute function clara._tf_append_only();
+create trigger t_ca_no_truncate before truncate on clara.close_attestations
+  for each statement execute function clara._tf_no_truncate();
+alter table clara.close_attestations enable row level security;
+alter table clara.close_attestations force row level security;
+create policy p_ca_owner on clara.close_attestations
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_ca_human on clara.close_attestations
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.close_attestations to clara_authenticated;
+grant select on clara.close_attestations to clara_agent_ro;
+
+-- =====================================================================================
+-- S3 -- clara.close_write_permits: the wall's permit (skeleton §2.5). A ROW this
+-- transaction created -- NEVER session state (the GUC and pg_locks instruments are
+-- deliberately absent: both are caller-settable, measured at design time), NEVER xmin
+-- (the §2.3 subtransaction trap: a row written inside begin…exception carries the
+-- SUBxact's xid while pg_current_xact_id() returns the top-level one).
+-- =====================================================================================
+create table clara.close_write_permits (
+  id               uuid        primary key default gen_random_uuid(),
+  firm_id          uuid        not null,
+  client_id        uuid        not null,
+  fiscal_year_id   uuid        not null,
+  close_run_id     uuid        not null,
+  purpose          text        not null check (purpose in ('close_entry', 'reopen_reversal')),
+  target_entry_id  uuid,
+  entries_expected int         not null check (entries_expected >= 1),
+  entries_used     int         not null default 0
+                     check (entries_used >= 0 and entries_used <= entries_expected),
+  created_xact     xid8        not null default pg_current_xact_id(),
+  created_at       timestamptz not null default now(),
+  constraint ck_cwp_target check ((purpose = 'reopen_reversal') = (target_entry_id is not null)),
+  constraint fk_cwp_client foreign key (client_id, firm_id)
+    references clara.clients (id, firm_id),
+  constraint fk_cwp_fy foreign key (fiscal_year_id, firm_id)
+    references clara.fiscal_years (id, firm_id),
+  constraint fk_cwp_run foreign key (close_run_id, firm_id)
+    references clara.close_runs (id, firm_id)
+);
+create index ix_cwp_xact on clara.close_write_permits (created_xact, client_id);
+
+-- INSERT-ONCE WITH EXACTLY ONE MUTABLE COLUMN: entries_used moves UPWARD only; every other
+-- column and DELETE refuse. The increment cannot contend -- the row is invisible to every
+-- other session until this transaction commits (and by then the permit is spent history).
+create function clara._tf_cwp_consume_only() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  if new.entries_used < old.entries_used
+     or new.id               is distinct from old.id
+     or new.firm_id          is distinct from old.firm_id
+     or new.client_id        is distinct from old.client_id
+     or new.fiscal_year_id   is distinct from old.fiscal_year_id
+     or new.close_run_id     is distinct from old.close_run_id
+     or new.purpose          is distinct from old.purpose
+     or new.target_entry_id  is distinct from old.target_entry_id
+     or new.entries_expected is distinct from old.entries_expected
+     or new.created_xact     is distinct from old.created_xact
+     or new.created_at       is distinct from old.created_at then
+    raise exception 'a close-write permit admits exactly one update: consuming entries_used, upward'
+      using errcode = 'CLR19', detail = '{"reason":"write_into_closed_period"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_cwp_consume_only() from public;
+create trigger t_cwp_consume_only before update on clara.close_write_permits
+  for each row execute function clara._tf_cwp_consume_only();
+create trigger t_cwp_no_delete before delete on clara.close_write_permits
+  for each row execute function clara._tf_append_only();
+create trigger t_cwp_no_truncate before truncate on clara.close_write_permits
+  for each statement execute function clara._tf_no_truncate();
+
+-- UNGRANTED TO EVERY APP ROLE -- forged permits die here (matrix A19c asserts INSERT is
+-- FALSE by has_table_privilege under every role). Owner policy only; forced RLS.
+alter table clara.close_write_permits enable row level security;
+alter table clara.close_write_permits force row level security;
+create policy p_cwp_owner on clara.close_write_permits
+  for all to clara_fn_owner using (true) with check (true);
