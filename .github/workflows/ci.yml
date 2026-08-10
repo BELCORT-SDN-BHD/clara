@@ -37,11 +37,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # A push-to-main run shares the ref with the WEEKLY SWEEP; cancelling the sweep would
-  # silently drop the one compensating control every skip in this file leans on (review R1
-  # MN-2) -- a scheduled run is never cancelled.
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  # THE WEEKLY SWEEP GETS ITS OWN GROUP (review R2 MAJOR): cancel-in-progress is read from
+  # the NEWLY-QUEUED run, so no cancellation policy on the sweep itself can protect it while
+  # it shares a group with push-to-main runs -- a merge landing mid-sweep would cancel the
+  # one compensating control every skip in this file leans on, silently. Group isolation is
+  # the only mechanism that actually delivers "a scheduled run is never cancelled": nothing
+  # shares the sweep's group, so nothing can cancel it.
+  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # =========================================================================
@@ -249,7 +252,10 @@ jobs:
               exit 1
             fi
             if git rev-parse --verify -q origin/main >/dev/null; then
-              if git diff --name-only origin/main...HEAD 2>/dev/null | grep -qxF ".gitleaks.toml"; then
+              # A failed diff falls to the STRONGER arm (review R2 MINOR: absence must never
+              # select the weaker scan -- the round-1 polarity rule, applied to this probe).
+              CHANGED="$(git diff --name-only origin/main...HEAD)" || CHANGED=".gitleaks.toml"
+              if echo "$CHANGED" | grep -qxF ".gitleaks.toml"; then
                 # Review R1 MN-3: a PR that TIGHTENS the ruleset must exercise it against full
                 # history BEFORE merge, or a newly-flagged historical secret surfaces only after.
                 echo "PR context: .gitleaks.toml changed in this PR — running the FULL-history scan pre-merge"
