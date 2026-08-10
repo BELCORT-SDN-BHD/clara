@@ -38,7 +38,10 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A push-to-main run shares the ref with the WEEKLY SWEEP; cancelling the sweep would
+  # silently drop the one compensating control every skip in this file leans on (review R1
+  # MN-2) -- a scheduled run is never cancelled.
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
   # =========================================================================
@@ -104,8 +107,10 @@ jobs:
   # Runs on EVERY event unconditionally, docs-only diffs included: a docs commit can leak a
   # credential or violate the wiki boundary exactly as code can, and the standing law
   # ("scan any branch with CI's own pinned gitleaks config") keeps its per-PR teeth here.
-  # Every step below is moved VERBATIM from the `ci` job — same commands, same comments,
-  # same pinned versions; only the job home changed. No DB service: none of these read one.
+  # Every step below is moved from the `ci` job verbatim in every EXECUTABLE respect — same
+  # commands, same pinned versions, same order (review R1 verified mechanically); the
+  # checkout rationale comment is condensed for this job's context. No DB service: none of
+  # these read one.
   # =========================================================================
   lint:
     runs-on: ubuntu-latest
@@ -118,6 +123,10 @@ jobs:
 
       - name: Fetch base ref (origin/main) for append-only checks
         run: |
+          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
+          # append-only freeze-lint + migration-history gates MUST have it — a
+          # fetch failure can no longer masquerade as success. Only a genuine
+          # first-introduction (origin/main absent) may pass without a base.
           if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
             echo "origin/main exists — fetching it for the append-only base checks"
             git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
@@ -240,8 +249,15 @@ jobs:
               exit 1
             fi
             if git rev-parse --verify -q origin/main >/dev/null; then
-              echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
-              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+              if git diff --name-only origin/main...HEAD 2>/dev/null | grep -qxF ".gitleaks.toml"; then
+                # Review R1 MN-3: a PR that TIGHTENS the ruleset must exercise it against full
+                # history BEFORE merge, or a newly-flagged historical secret surfaces only after.
+                echo "PR context: .gitleaks.toml changed in this PR — running the FULL-history scan pre-merge"
+                /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+              else
+                echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
+                /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+              fi
             else
               echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
               /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
@@ -253,7 +269,9 @@ jobs:
 
   ci:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    # FAIL-CLOSED AT THIS LAYER TOO (review R1 MAJOR): != 'false', never == 'true' --
+    # an absent/garbled output must RUN the job, not skip it green.
+    if: needs.changes.outputs.code != 'false'
     runs-on: ubuntu-latest
 
     # Ephemeral, disposable Postgres 17 — created for this job and discarded when
@@ -753,7 +771,7 @@ jobs:
     # logic included) — it runs when that surface (or this file, or a root manifest) changed,
     # and on every scheduled weekly sweep. FAIL-CLOSED via the classifier's defaults.
     needs: changes
-    if: needs.changes.outputs.db == 'true'
+    if: needs.changes.outputs.db != 'false'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1033,7 +1051,7 @@ jobs:
     # Same input surface as the frontier legs (packages/db/tests + split-lists + migrations),
     # same diet condition, same weekly sweep.
     needs: changes
-    if: needs.changes.outputs.db == 'true'
+    if: needs.changes.outputs.db != 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
