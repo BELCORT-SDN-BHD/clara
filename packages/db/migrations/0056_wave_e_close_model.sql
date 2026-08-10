@@ -1318,14 +1318,67 @@ revoke all on function clara._close_gate_uncoded(uuid, uuid) from public;
 -- and error/unknown refuse exactly like fail/mismatch, E-R2). Results are APPEND-ONLY
 -- rows; measured_digest is the attestation's binding target.
 -- =====================================================================================
-create function clara._evaluate_close_gates(p_run uuid) returns jsonb
+-- ONE gate, evaluated NOW, its result row COMMITTED with the caller's transaction. Shared
+-- by the engine loop and by attest_close_exception -- the latter is the A20 recovery fix
+-- (the battery's fifth catch): an attestation binds a digest the attester MEASURED at
+-- attest time, freshly, in a transaction that commits -- never a stale stored row, and
+-- never a fresh row that rolled back with finalize's own raise.
+create function clara._evaluate_one_gate(p_run uuid, p_check_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  v_run record; v_fy record; chk record; v_measured jsonb; v_state text;
-  v_summary jsonb := '[]'::jsonb; v_nature text;
+  v_run record; v_fy record; chk record; v_measured jsonb; v_state text; v_id uuid;
 begin
   select * into v_run from clara.close_runs r where r.id = p_run;
   select * into v_fy from clara.fiscal_years fy where fy.id = v_run.fiscal_year_id;
+  select * into chk from clara.close_gate_checks k where k.check_key = p_check_key;
+  begin
+    v_measured := case chk.check_key
+      when 'ar_control_tie'            then clara.ar_control_tie(v_run.client_id, v_fy.ends_on)
+      when 'ap_control_tie'            then clara.ap_control_tie(v_run.client_id, v_fy.ends_on)
+      when 'fa_control_tie'            then clara.fa_control_tie_out(v_run.client_id, v_fy.id)
+      when 'bank_recon_identity'       then clara.bank_recon_close_state(v_run.client_id, v_fy.id)
+      when 'bank_recon_informational'  then clara.bank_recon_close_state(v_run.client_id, v_fy.id)
+      when 'fa_register_tie_view'      then clara.fa_register_tie(v_run.client_id, v_fy.ends_on)
+      when 'pl_retained_earnings_roll' then jsonb_build_object('state', 'pass', 'note', 'computed in finalize_close under the lock')
+      when 'opening_continuity_tie'    then jsonb_build_object('state', 'pass', 'note', 'asserted in finalize_close against the prior pin')
+      when 'depreciation_through_fy_end' then clara._close_gate_depreciation(v_run.client_id, v_fy.id)
+      when 'closing_stock_present'     then clara._close_gate_closing_stock(v_run.client_id, v_fy.id)
+      when 'unapproved_drafts_in_period' then clara._close_gate_drafts(v_run.client_id, v_fy.id)
+      when 'open_bank_recon_items'     then clara._close_gate_bank_items(v_run.client_id, v_fy.id)
+      when 'uncoded_documents'         then clara._close_gate_uncoded(v_run.client_id, v_fy.id)
+      else jsonb_build_object('state', 'error', 'reason', 'no_evaluator_wired')
+    end;
+    v_state := case
+      when chk.drawer = 3 then 'advisory'
+      when coalesce(v_measured ->> 'state', 'error') in ('tie', 'pass') then 'pass'
+      when coalesce(v_measured ->> 'state', 'error') = 'mismatch' then 'fail'
+      when coalesce(v_measured ->> 'state', 'error') = 'fail' then 'fail'
+      when coalesce(v_measured ->> 'state', 'error') = 'unknown' then 'unknown'
+      else 'error'
+    end;
+  exception when others then
+    v_state := 'error';
+    v_measured := jsonb_build_object('state', 'error', 'sqlstate', sqlstate,
+      'message', sqlerrm);
+  end;
+  insert into clara.close_gate_results(firm_id, close_run_id, check_key, drawer,
+      state, measured, measured_digest)
+    values (v_run.firm_id, p_run, chk.check_key, chk.drawer, v_state,
+      coalesce(v_measured, '{}'::jsonb), md5(coalesce(v_measured, '{}'::jsonb)::text))
+    returning id into v_id;
+  return jsonb_build_object('result_id', v_id, 'check_key', chk.check_key,
+    'drawer', chk.drawer, 'state', v_state, 'measured', v_measured,
+    'measured_digest', md5(coalesce(v_measured, '{}'::jsonb)::text));
+end $$;
+revoke all on function clara._evaluate_one_gate(uuid, text) from public;
+
+create function clara._evaluate_close_gates(p_run uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_run record; chk record; v_one jsonb;
+  v_summary jsonb := '[]'::jsonb; v_nature text;
+begin
+  select * into v_run from clara.close_runs r where r.id = p_run;
   for chk in select * from clara.close_gate_checks order by drawer, check_key loop
     -- Applicability: 'goods_trading' checks apply unless the trade_nature fact POSITIVELY
     -- says services -- an ABSENT fact keeps the check applicable (its evaluator then reads
@@ -1336,42 +1389,9 @@ begin
           and cf.superseded_at is null;
       if v_nature = 'services' then continue; end if;
     end if;
-    begin
-      v_measured := case chk.check_key
-        when 'ar_control_tie'            then clara.ar_control_tie(v_run.client_id, v_fy.ends_on)
-        when 'ap_control_tie'            then clara.ap_control_tie(v_run.client_id, v_fy.ends_on)
-        when 'fa_control_tie'            then clara.fa_control_tie_out(v_run.client_id, v_fy.id)
-        when 'bank_recon_identity'       then clara.bank_recon_close_state(v_run.client_id, v_fy.id)
-        when 'bank_recon_informational'  then clara.bank_recon_close_state(v_run.client_id, v_fy.id) -> 'accounts' -> 0
-        when 'fa_register_tie_view'      then clara.fa_register_tie(v_run.client_id, v_fy.ends_on)
-        when 'pl_retained_earnings_roll' then jsonb_build_object('state', 'pass', 'note', 'computed in finalize_close under the lock')
-        when 'opening_continuity_tie'    then jsonb_build_object('state', 'pass', 'note', 'asserted in finalize_close against the prior pin')
-        when 'depreciation_through_fy_end' then clara._close_gate_depreciation(v_run.client_id, v_fy.id)
-        when 'closing_stock_present'     then clara._close_gate_closing_stock(v_run.client_id, v_fy.id)
-        when 'unapproved_drafts_in_period' then clara._close_gate_drafts(v_run.client_id, v_fy.id)
-        when 'open_bank_recon_items'     then clara._close_gate_bank_items(v_run.client_id, v_fy.id)
-        when 'uncoded_documents'         then clara._close_gate_uncoded(v_run.client_id, v_fy.id)
-        else jsonb_build_object('state', 'error', 'reason', 'no_evaluator_wired')
-      end;
-      v_state := case
-        when chk.drawer = 3 then 'advisory'
-        when coalesce(v_measured ->> 'state', 'error') in ('tie', 'pass') then 'pass'
-        when coalesce(v_measured ->> 'state', 'error') = 'mismatch' then 'fail'
-        when coalesce(v_measured ->> 'state', 'error') = 'fail' then 'fail'
-        when coalesce(v_measured ->> 'state', 'error') = 'unknown' then 'unknown'
-        else 'error'
-      end;
-    exception when others then
-      v_state := 'error';
-      v_measured := jsonb_build_object('state', 'error', 'sqlstate', sqlstate,
-        'message', sqlerrm);
-    end;
-    insert into clara.close_gate_results(firm_id, close_run_id, check_key, drawer,
-        state, measured, measured_digest)
-      values (v_run.firm_id, p_run, chk.check_key, chk.drawer, v_state,
-        coalesce(v_measured, '{}'::jsonb), md5(coalesce(v_measured, '{}'::jsonb)::text));
+    v_one := clara._evaluate_one_gate(p_run, chk.check_key);
     v_summary := v_summary || jsonb_build_object('check_key', chk.check_key,
-      'drawer', chk.drawer, 'state', v_state);
+      'drawer', chk.drawer, 'state', v_one ->> 'state');
   end loop;
   return v_summary;
 end $$;
@@ -1689,15 +1709,13 @@ begin
         detail = jsonb_build_object('reason', 'drawer1_identity_failed',
           'check_key', p_check_key, 'drawer', v_chk.drawer)::text;
   end if;
-  -- Bind to the LATEST measured state of this gate on this run (PRD invariant 8: the
-  -- signature binds the exact revision signed).
+  -- MEASURE NOW, BIND TO WHAT WAS MEASURED (PRD invariant 8, strongest honest form; the
+  -- A20 recovery fix -- the battery's fifth catch): the attester signs the state as of the
+  -- attest act, freshly evaluated and COMMITTED with this transaction. finalize re-measures
+  -- under its lock; unchanged facts hash identically, moved facts refuse stale again --
+  -- and re-attesting after movement now genuinely recovers, because the fresh row exists.
   select * into v_result from clara.close_gate_results g
-    where g.close_run_id = p_close_run and g.check_key = p_check_key
-    order by g.evaluated_at desc, g.id desc limit 1;
-  if v_result.id is null then
-    raise exception 'gate % has no measured result on this run yet', p_check_key
-      using errcode = 'CLR10', detail = '{"reason":"reopen_target_missing"}';
-  end if;
+    where g.id = ((clara._evaluate_one_gate(p_close_run, p_check_key)) ->> 'result_id')::uuid;
   v_dedupe := clara._reserve_op(c.firm, 'attest_close_exception', p_op_key,
     clara._hash(jsonb_build_object('run', p_close_run, 'check', p_check_key,
       'reason', p_reason)));
