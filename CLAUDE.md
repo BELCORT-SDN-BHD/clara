@@ -140,9 +140,11 @@ extraction slice · the settlement program · the first production autopost · C
 contract is RATIFIED** (ADR-065 — it AMENDED THE LAW at E-R4; see the cardinal invariants
 above) and its **FIRST STRIKE, the F6–F9 fix batch, is CLOSED** (ADR-066, 2026-08-09: F7
 unblocked the held 2512 KONG CHENG leg, F6 discharged ADR-062's extraction-recovery door).
-**NEXT = the campaign proper:** periods + close · the FS pack + reporting engine + the metric
-algebra/catalog · the ad-hoc authoring lane · the client-facts trio — ONE campaign,
-sequential per 7A-R10.
+The **CAMPAIGN DESIGN PACKET IS LANDED** (PR #223, 2026-08-09: seven design files + the
+108-cell acceptance matrix minted BEFORE build, four-round dual-lane ladder CLEAN) and the
+**five standing owner questions are RULED** (same day — PART 2 records them). **NEXT = the
+LANE α build** (the E-R12 trio) ∥ the 2506 backfill window ∥ the #43/#44 research lanes,
+then lanes β..θ — ONE campaign per E-R7, acceptance F→A→B→C→D→E per the matrix.
 
 **Live posture pin (at the ADR-066 close): 53 migrations, frontier `0054` · Fly
 `clara-runtime` v60 · dashboard Pages `app.clarabook.com` (needs
@@ -152,7 +154,10 @@ Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
 **Records of record — never re-grill these; cite, don't restate:**
 
 - **Wave E:** contract `docs/plan/wave-e-contract.md` (E-R1..E-R14, ADR-065) · first-strike
-  acceptance `docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) · the reader's field story
+  acceptance `docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) · **the campaign design packet
+  (PR #223): `wave-e-design-skeleton.md` (+3 part files) · `wave-e-design-reporting.md`
+  (+part2) · `wave-e-acceptance-matrix.md`** — its four-round review records live in PR #223's
+  body + `~/.clara-tools/wave-e-design-review-records/` · the reader's field story
   `docs/plan/extraction-slice-x7-field-record.md` · dossiers `docs/plan/research/wave-e/`.
 - **§7-A:** `wave-7a-contract.md` (7A-R1..R12, ADR-063) · `wave-7a-design-skeleton.md` v2 ·
   acceptance `wave-7a-acceptance-h1.md` (RS real) + `-h2.md` (sandbox).
@@ -180,9 +185,9 @@ Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
   Ids, balances, registers and witnesses: **memory + PART 2**, not here.
 - **ADR-060's data authority is DATA-scoped and EXPIRES AT BETA** (see Boundaries above).
 
-**Open items — PROJECTLOG PART 2 is the live register; read it, never cache it here.** Two
-stand **with the owner**: the **2506 backfill-window** call (RS's held `RSINV-2506/01` leg) and
-**Gate P's remedy** — an owner re-export, or the Wave-F 401/403 auth-code split; F6 did NOT
-unblock Gate P, whose waiting population measured **seven** documents. The `opening_tb.line`
-producer + the K-doc door are Phase-5 and review-gated — their home is
-**`docs/plan/REBUILD-PLAN.md`**.
+**Open items — PROJECTLOG PART 2 is the live register; read it, never cache it here.** The
+five owner questions standing at the ADR-066 close were **ALL RULED 2026-08-09** (E-R11
+owner-only keys · the 2506 window OPENS · Gate P = owner re-export, remind until done ·
+#43/#44 = agent legwork + owner verify) — PART 2 + the handoff record them; **one owner ACTION
+is outstanding: the Gate-P seven re-export.** The `opening_tb.line` producer + the K-doc door
+are Phase-5 and review-gated — their home is **`docs/plan/REBUILD-PLAN.md`**.
