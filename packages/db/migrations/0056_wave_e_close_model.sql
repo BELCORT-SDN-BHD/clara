@@ -609,3 +609,158 @@ alter table clara.close_write_permits enable row level security;
 alter table clara.close_write_permits force row level security;
 create policy p_cwp_owner on clara.close_write_permits
   for all to clara_fn_owner using (true) with check (true);
+
+-- =====================================================================================
+-- S4 -- THE CLOSED-PERIOD WALL: a TRIGGER FAMILY, not N writer recuts (skeleton §2.5;
+-- the most consequential builder choice in the design). Two jobs, separated:
+-- SERIALIZATION (nothing that feeds a gate moves while a close measures) and REFUSAL
+-- (no approved posting lands in a closing/closed FY). Every trigger's FIRST act is the
+-- SHARED form of the close rung -- 007 is the BOTTOM of every path's lock order.
+-- =====================================================================================
+
+-- (A) THE JE WALL -- serialize AND refuse. SECURITY DEFINER because it must be: it reads
+-- fiscal_years and close_write_permits, both FORCE-RLS with owner-only policies -- an
+-- invoker-context trigger would see zero rows and PERMIT EVERYTHING (the same silent
+-- fail-open A6e guards against on the definer-read side).
+create function clara._tf_period_wall() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_permit record; v_approved_touch boolean;
+begin
+  -- (1) SERIALIZE, unconditionally and FIRST: a conditional acquisition re-opens the race
+  -- it exists to close. Advisory xact locks are REENTRANT, so a multi-row statement holds
+  -- ONE lock object per (transaction, client) -- the cost is one lock-manager lookup per
+  -- row, priced in the design.
+  perform pg_advisory_xact_lock_shared(203005007, hashtext(new.client_id::text));
+
+  -- (2) The FY containing this row's posting_date (ix_fy_client_span). Zero rows at deploy
+  -- ⇒ inert on arrival; the closed state wins if contiguity ever admitted two matches
+  -- (a derived state a guard never rests on -- the §2.9 ordering, applied here too).
+  select * into v_fy from clara.fiscal_years fy
+    where fy.client_id = new.client_id
+      and new.posting_date between fy.starts_on and fy.ends_on
+    order by (fy.status in ('closing','closed')) desc, fy.starts_on desc
+    limit 1;
+  if v_fy.id is null or v_fy.status in ('open', 'reopened') then
+    return new;
+  end if;
+
+  -- (3) REFUSE only the approved-class touch: an INSERT arriving approved, an UPDATE that
+  -- approves, or ANY touch of an already-approved row (deliberately no WHEN clause and no
+  -- UPDATE OF list -- this is what refuses reverse_entry's reversed_by stamp on an original
+  -- inside a closed FY, which is why §2.8's reopen ordering is REQUIRED, not incidental).
+  v_approved_touch := (tg_op = 'INSERT' and new.status = 'approved')
+                   or (tg_op = 'UPDATE' and (new.status = 'approved' or old.status = 'approved'));
+  if not v_approved_touch then
+    return new;
+  end if;
+
+  -- (4) THE PERMIT: a row THIS transaction created (created_xact = pg_current_xact_id() --
+  -- a declared xid8, never xmin, never a GUC, never pg_locks; all three rejected with
+  -- measurements in the design). The reopen_reversal arm matches on LINEAGE (the mirror's
+  -- reversal_of, or the original's own id), never on an id the caller could plant on NEW:
+  -- the permit row is unreachable to callers (no grant, forced RLS), so the fact is
+  -- unforgeable.
+  select * into v_permit from clara.close_write_permits p
+    where p.created_xact = pg_current_xact_id()
+      and p.client_id = new.client_id
+      and p.fiscal_year_id = v_fy.id
+      and p.entries_used < p.entries_expected
+      and (p.purpose = 'close_entry'
+           or (p.purpose = 'reopen_reversal'
+               and (new.reversal_of = p.target_entry_id or new.id = p.target_entry_id)))
+    order by p.created_at
+    limit 1
+    for update;
+  if v_permit.id is null then
+    raise exception 'fiscal year % (% to %) is %; an approved posting dated % may not enter it -- the formal reopen path (reopen_fiscal_year, key 3) is the one way back in', v_fy.label, v_fy.starts_on, v_fy.ends_on, v_fy.status, new.posting_date
+      using errcode = 'CLR19',
+        detail = jsonb_build_object('reason', 'write_into_closed_period',
+          'fiscal_year_id', v_fy.id, 'fy_status', v_fy.status,
+          'posting_date', new.posting_date, 'entry_id', new.id)::text;
+  end if;
+
+  -- (5) CONSUME in the same transaction -- the counter IS the consumption identity. A write
+  -- beyond entries_expected refuses above like any other; a rolled-back subtransaction
+  -- rolls its increment back with the write it admitted (fail-closed, no orphaned
+  -- consumption -- the §2.3 interaction, stated in the design).
+  update clara.close_write_permits set entries_used = entries_used + 1
+    where id = v_permit.id;
+  return new;
+end $$;
+revoke all on function clara._tf_period_wall() from public;
+
+create trigger t_period_wall before insert or update on clara.journal_entries
+  for each row execute function clara._tf_period_wall();
+
+-- (A2) THE LINES SIBLING: a line whose PARENT entry sits in a closing/closed FY refuses
+-- mutation -- unless the parent's admission stands in this same transaction. The permit is
+-- CONSULTED, never consumed here: entries_expected counts ENTRY touches, and a line rides
+-- its entry's admission (the existence test on created_xact is the same unforgeable fact).
+create function clara._tf_period_wall_lines() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_row record; v_entry record; v_fy record; v_n int;
+begin
+  v_row := coalesce(new, old);
+  select je.id, je.client_id, je.posting_date, je.status, je.reversal_of into v_entry
+    from clara.journal_entries je where je.id = v_row.entry_id;
+  if v_entry.id is null then
+    return coalesce(new, old);   -- the FK owns absent-parent refusal; nothing to wall
+  end if;
+  perform pg_advisory_xact_lock_shared(203005007, hashtext(v_entry.client_id::text));
+  select * into v_fy from clara.fiscal_years fy
+    where fy.client_id = v_entry.client_id
+      and v_entry.posting_date between fy.starts_on and fy.ends_on
+    order by (fy.status in ('closing','closed')) desc, fy.starts_on desc
+    limit 1;
+  if v_fy.id is null or v_fy.status in ('open', 'reopened') then
+    return coalesce(new, old);
+  end if;
+  select count(*) into v_n from clara.close_write_permits p
+    where p.created_xact = pg_current_xact_id()
+      and p.client_id = v_entry.client_id
+      and p.fiscal_year_id = v_fy.id
+      and (p.purpose = 'close_entry'
+           or (p.purpose = 'reopen_reversal'
+               and (v_entry.reversal_of = p.target_entry_id or v_entry.id = p.target_entry_id)));
+  if v_n = 0 then
+    raise exception 'entry % sits in % fiscal year %; its lines may not change -- the formal reopen path is the one way back in', v_entry.id, v_fy.status, v_fy.label
+      using errcode = 'CLR19',
+        detail = jsonb_build_object('reason', 'write_into_closed_period',
+          'fiscal_year_id', v_fy.id, 'fy_status', v_fy.status, 'entry_id', v_entry.id)::text;
+  end if;
+  return coalesce(new, old);
+end $$;
+revoke all on function clara._tf_period_wall_lines() from public;
+
+create trigger t_period_wall_lines before insert or update or delete on clara.journal_lines
+  for each row execute function clara._tf_period_wall_lines();
+
+-- (B) THE GATE-EVIDENCE WALLS -- serialize ONLY, on the FIVE tables a drawer-1 gate reads
+-- (the same list §2.11's staleness triggers cover -- one list, two duties; a table on one
+-- list and not the other is the shape of both defects). These do NOT test FY status: E-R2's
+-- phrase is a close-WINDOW property ("no writer escapes into the FY MID-CLOSE"), which the
+-- shared lock delivers whole. The honest residual the design prices: a gate-evidence write
+-- dated into an ALREADY-closed FY is caught by verify_close's recompute and by staleness,
+-- never refused here -- extending refusal needs a per-table act-date rule, out of scope
+-- for E.
+create function clara._tf_close_serialize() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  perform pg_advisory_xact_lock_shared(203005007,
+    hashtext(coalesce(new.client_id, old.client_id)::text));
+  return coalesce(new, old);
+end $$;
+revoke all on function clara._tf_close_serialize() from public;
+
+create trigger t_close_serialize before insert or update or delete on clara.open_item_allocations
+  for each row execute function clara._tf_close_serialize();
+create trigger t_close_serialize before insert or update or delete on clara.bank_statements
+  for each row execute function clara._tf_close_serialize();
+create trigger t_close_serialize before insert or update or delete on clara.bank_reconciliations
+  for each row execute function clara._tf_close_serialize();
+create trigger t_close_serialize before insert or update or delete on clara.bank_line_exceptions
+  for each row execute function clara._tf_close_serialize();
+create trigger t_close_serialize before insert or update or delete on clara.fixed_assets
+  for each row execute function clara._tf_close_serialize();
