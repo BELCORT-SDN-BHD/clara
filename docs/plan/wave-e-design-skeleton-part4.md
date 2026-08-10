@@ -234,7 +234,10 @@ scope folds a draft tax computation in by another name.
 
 ## 6. Open questions
 
-Two items are DECIDED by the orchestrator; one belongs to the OWNER and is stated as pending.
+All three items are now DECIDED — items 1 and 3 by the orchestrator at design time; item 2 by
+the OWNER (2026-08-09; the item carries the ruling record). *(This preamble originally read
+"one belongs to the OWNER and is stated as pending" — trued with the lane α PR, the same act
+that flips item 2's wording.)*
 
 1. **`clara.apply_open_items` — verified or guarded? CLOSED (2026-08-09): GUARDED.** §3.1 carries the
    read and the verdict — act-dating is mechanized (`0040:6148-6216`, `0042:4896-4903`, producer law

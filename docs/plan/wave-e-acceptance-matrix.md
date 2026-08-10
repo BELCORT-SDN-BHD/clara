@@ -352,8 +352,12 @@ so no future session re-builds the wall:
   2026-08-01) are stored data predating the wall (`0041`), not a live gap — the wall operates
   at call time and never retro-touches rows. Section D's D2a precondition still measures them
   at run time before any RPR close.
-- **As-run quotes** (the F1a–F1f battery outputs and the field read) belong to the lane α
-  as-run acceptance record, not this matrix; F1d and F3e close there, V-OWNER.
+- **As-run quotes** belong to the lane α as-run acceptance record, not this matrix: the
+  F1a–F1f battery outputs and the field read, AND the live-corpus halves the rig cannot
+  discharge — F2a on the REAL BEE/RPR packs, F3a–F3c's three parked codes entered on the REAL
+  RPR/RS/BEE through the door, and F4's supersession read on whichever real fact first needs
+  correcting. The rig proves shape on synthetic clients; the named clients close at the
+  ceremony. F1d and F3e close there too, V-OWNER.
 
 ---
 

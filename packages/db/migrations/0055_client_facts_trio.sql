@@ -105,13 +105,17 @@ begin
     raise exception '0055 S0.3: apply_open_items is missing 0037''s lineage/teeming-and-lading walls -- not the body this migration accounts for'
       using errcode = 'CLR10';
   end if;
+  -- THE ALREADY-APPLIED PROBE RUNS FIRST (review R1 MJ-3): 0055's own guard raises the
+  -- _book_today() count from 4 to 8, so a count-first ordering would misdiagnose a correctly
+  -- applied database as "body drifted" -- during the D1 window, exactly when a wrong
+  -- diagnosis costs. Token first, count second.
+  if position('apply_before_item_date' in v_def) <> 0 then
+    raise exception '0055 S0.3: apply_open_items already carries the apply_before_item_date guard -- 0055 has already been applied to this database'
+      using errcode = 'CLR10';
+  end if;
   v_cnt := (length(v_def) - length(replace(v_def, 'clara._book_today()', ''))) / length('clara._book_today()');
   if v_cnt <> 4 then
     raise exception '0055 S0.3: apply_open_items carries clara._book_today() % time(s), expected 4 (the 0042 S5.22 splice) -- the body drifted; re-derive this section against the live catalog', v_cnt
-      using errcode = 'CLR10';
-  end if;
-  if position('apply_before_item_date' in v_def) <> 0 then
-    raise exception '0055 S0.3: apply_open_items already carries the apply_before_item_date guard -- 0055 has already been applied to this database'
       using errcode = 'CLR10';
   end if;
 
@@ -332,6 +336,12 @@ reset role;
 -- plus its own door. The catalog keeps the door generic; clara.clients stays a registry.
 -- =====================================================================================
 
+-- S3/S4 RUN AS clara_fn_owner (review R1 MJ-1: the 0043:315-664 idiom — the house's tables,
+-- trigger functions and doors are OWNED by clara_fn_owner; forced RLS binds the OWNER, so
+-- ownership is part of the RLS story, not cosmetics). Measured before this wrap: fn_owner
+-- inserts into event_types/trigger_taxonomy under their forced RLS cleanly.
+set role clara_fn_owner;
+
 -- The key catalog. CODE-POPULATED (no runtime writer exists or is granted): a fact key is
 -- product vocabulary, and vocabulary changes ride migrations with review, never live edits.
 create table clara.client_fact_keys (
@@ -356,7 +366,6 @@ create policy p_client_fact_keys_owner on clara.client_fact_keys
 create policy p_client_fact_keys_human on clara.client_fact_keys
   for select to clara_authenticated using (true);
 grant select on clara.client_fact_keys to clara_authenticated;
-grant select on clara.client_fact_keys to clara_fn_owner;
 
 insert into clara.client_fact_keys (fact_key, validated_against, allowed_values, description) values
   ('entity_type', 'enum:ENTITY_TYPES_V2',
@@ -377,7 +386,7 @@ insert into clara.client_fact_keys (fact_key, validated_against, allowed_values,
 create table clara.client_facts (
   id                 uuid        primary key default gen_random_uuid(),
   firm_id            uuid        not null references clara.firms(id),
-  client_id          uuid        not null references clara.clients(id),
+  client_id          uuid        not null,
   fact_key           text        not null references clara.client_fact_keys(fact_key),
   fact_value         jsonb       not null,
   -- WHO/BASIS/WHEN, verbatim from ADR-062 via E-R12(3): the free-text justification is NOT
@@ -401,7 +410,13 @@ create table clara.client_facts (
   -- states the forward direction, the reverse is the same fail-closed reading: a stray
   -- document id on an owner_instruction fact would be provenance theatre).
   constraint ck_client_facts_document_basis check (
-    (basis_kind = 'document') = (source_document_id is not null))
+    (basis_kind = 'document') = (source_document_id is not null)),
+  -- TENANT CONGRUENCE IS STRUCTURAL (review R1, Codex MJ-3; the 0043 fk_staff_advances_client
+  -- idiom): the (client, firm) pair is one fact, enforced by the composite FK onto
+  -- uq_clients_id_firm -- RLS trusts firm_id while the pack reads by client_id, and this
+  -- constraint is what makes those two views of the row provably the same tenant.
+  constraint fk_client_facts_client foreign key (client_id, firm_id)
+    references clara.clients (id, firm_id)
 );
 
 create unique index uq_client_fact_live on clara.client_facts (client_id, fact_key)
@@ -450,7 +465,6 @@ create policy p_client_facts_owner on clara.client_facts
 create policy p_client_facts_human on clara.client_facts
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.client_facts to clara_authenticated;
-grant select, insert, update on clara.client_facts to clara_fn_owner;
 
 -- =====================================================================================
 -- S4 -- clara.record_client_fact -- THE ONE AUDITED DOOR (matrix F3a-F3f; skeleton §3.2).
@@ -501,6 +515,18 @@ begin
   if v_firm is null or v_firm <> c.firm then
     raise exception 'client is not in your firm' using errcode = 'CLR11';
   end if;
+  -- RESERVE-BEFORE-MUTABLE-VALIDATION (review R1, Codex MJ-2; the 0017:2773 placement): the
+  -- replay short-circuit sits here, after identity/authz and the immutable-shape check but
+  -- BEFORE any validation that reads MUTABLE world state (the key catalog, the document's
+  -- filing landscape). A retry of a SUCCEEDED call must return its stored receipt even when
+  -- the world moved since -- re-judging a moved world would refuse the caller its own
+  -- receipt. A FIRST call that fails a later validation raises, and the raise rolls the
+  -- whole transaction back, reservation included -- nothing is burned.
+  v_dedupe := clara._reserve_op(c.firm, 'record_client_fact', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'fact_key', p_fact_key,
+      'fact_value', p_fact_value, 'basis', p_basis, 'basis_kind', p_basis_kind,
+      'source_document', p_source_document_id)));
+  if v_dedupe is not null then return v_dedupe; end if;
   -- WHO/BASIS/WHEN is the ruled trio (ADR-062 / E-R12(3)): a fact without its basis is
   -- refused, never defaulted.
   if p_basis is null or btrim(p_basis) = '' then
@@ -581,15 +607,6 @@ begin
         'fact_key', p_fact_key)::text;
   end if;
 
-  -- Reserve-before-effect (0002 §F/F11): a replay under the same op_key returns the STORED
-  -- receipt and writes nothing (F3a's three-count assertion); the same key with DIFFERENT
-  -- args is refused by _reserve_op's request_hash (F3f).
-  v_dedupe := clara._reserve_op(c.firm, 'record_client_fact', p_op_key,
-    clara._hash(jsonb_build_object('client', p_client, 'fact_key', p_fact_key,
-      'fact_value', p_fact_value, 'basis', p_basis, 'basis_kind', p_basis_kind,
-      'source_document', p_source_document_id)));
-  if v_dedupe is not null then return v_dedupe; end if;
-
   -- SUPERSESSION, NEVER UPDATE (matrix F4). Lock the live predecessor, stamp it with the
   -- successor's id (the FK is deferred to commit), then insert the successor. Two admins
   -- racing on the SAME fact serialize on the row lock; the second re-reads a superseded row,
@@ -629,13 +646,19 @@ begin
     case when v_doc_filed_here then p_source_document_id end, null,
     jsonb_build_object('fact_key', p_fact_key, 'fact_id', v_new, 'superseded_id', v_prior,
       'source_document_id', p_source_document_id));
+  -- THE RECEIPT CARRIES THE RULED TRIO ITSELF (review R1, Codex MJ-1; matrix F3a's literal
+  -- text): who (recorded_by), basis (verbatim, with its kind), when (recorded_at -- now() is
+  -- transaction-stable, so this is byte-equal to the row's own default). A replay hands the
+  -- caller this same stored object, trio included.
   return clara._finish_op(c.firm, 'record_client_fact', p_op_key,
-    jsonb_build_object('fact_id', v_new, 'fact_key', p_fact_key,
-      'superseded_id', v_prior, 'client_id', p_client));
+    jsonb_build_object('fact_id', v_new, 'fact_key', p_fact_key, 'fact_value', p_fact_value,
+      'superseded_id', v_prior, 'client_id', p_client,
+      'recorded_by', c.actor, 'recorded_at', now(),
+      'basis', p_basis, 'basis_kind', p_basis_kind,
+      'validated_against', v_key.validated_against,
+      'source_document_id', p_source_document_id));
 end $door$;
 
-alter function clara.record_client_fact(uuid, text, jsonb, text, text, uuid, text)
-  owner to clara_fn_owner;
 revoke all on function clara.record_client_fact(uuid, text, jsonb, text, text, uuid, text)
   from public;
 -- HUMANS ONLY. No wake role, no clara_runtime, no clara_agent_ro: which fact a client's
@@ -644,6 +667,8 @@ revoke all on function clara.record_client_fact(uuid, text, jsonb, text, text, u
 -- definer read; it never writes one.
 grant execute on function clara.record_client_fact(uuid, text, jsonb, text, text, uuid, text)
   to clara_authenticated;
+
+reset role;
 
 -- =====================================================================================
 -- S5 -- THE BACKFILL (skeleton §3.2). entity_type is requiredForCommit on the client
@@ -657,7 +682,7 @@ grant execute on function clara.record_client_fact(uuid, text, jsonb, text, text
 -- =====================================================================================
 do $s5$
 declare
-  r record; v_n int := 0;
+  r record; v_n int := 0; v_skipped int;
 begin
   for r in
     select p.id as plan_id, p.firm_id, p.client_id,
@@ -694,6 +719,18 @@ begin
     v_n := v_n + 1;
   end loop;
   raise notice '0055 S5 backfill: % entity_type fact(s) carried over from committed plans', v_n;
+  -- ABSENCE IS REPORTED, NOT SILENT (review R1: Codex MJ-4 / native MN-3): a client whose
+  -- latest committed plan carries no answered/resolved entity_type is legitimately served by
+  -- the DOOR, not by this carryover -- but the operator must SEE the population, not infer
+  -- it. Not a raise: refusing the migration for a client the design's own remedy covers
+  -- would turn a known disposition into an outage.
+  select count(distinct p2.client_id) into v_skipped
+    from clara.onboarding_plans p2
+   where p2.scope_kind = 'client' and p2.state = 'committed'
+     and not exists (select 1 from clara.client_facts cf
+                      where cf.client_id = p2.client_id and cf.fact_key = 'entity_type'
+                        and cf.superseded_at is null);
+  raise notice '0055 S5 backfill: % committed client(s) left WITHOUT an entity_type carryover (no answered/resolved item on the latest committed plan) -- each takes the door (record_client_fact), the design''s own remedy', v_skipped;
 end $s5$;
 
 -- =====================================================================================
@@ -849,7 +886,15 @@ begin
     into v_n
     from pg_get_functiondef('clara.apply_open_items(uuid,jsonb,text,text)'::regprocedure) d;
   if v_n <> 1 then
-    raise exception '0055 S7.5: apply_before_item_date count is % at the tail, expected 1', v_n
+    raise exception '0055 S7.6: apply_before_item_date count is % at the tail, expected 1', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- (7.7) The door stays OFF the wake register (the 0024:656-658 precedent, belt): no wake
+  -- kind may ever reach a client-fact write.
+  select count(*) into v_n from clara.wake_fn_allowlist where function_name = 'record_client_fact';
+  if v_n <> 0 then
+    raise exception '0055 S7.7: record_client_fact appears in wake_fn_allowlist -- a wake lane must never write a client fact'
       using errcode = 'CLR10';
   end if;
 

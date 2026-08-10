@@ -177,7 +177,9 @@ test("F1c allocate_receipt/allocate_payment REFUSE an allocation dated before th
   if (skip55(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
-  const future = "2028-06-01";
+  // Derived from the guard's own clock, never hard-coded (review R1 MN-5: a fixed
+  // "2028-06-01" would silently invert the cell the day the calendar catches up).
+  const future = addDaysStr(await bookToday(), 400);
   const cust = await birthCounterparty(sub, { client, name: `X55 F1C CUST ${randomUUID().slice(0, 6)}`, kind: "customer" });
   const vend = await birthCounterparty(sub, { client, name: `X55 F1C VEND ${randomUUID().slice(0, 6)}`, kind: "vendor" });
   const inv = await openArItem(sub, { client, cp: cust, cents: 40000, postingDate: future });
@@ -191,6 +193,13 @@ test("F1c allocate_receipt/allocate_payment REFUSE an allocation dated before th
   assert.equal(errR.code, "CLR10", `expected CLR10 (got ${errR.code} -- ${errR.message})`);
   assert.equal(reasonOf(errR), "allocation_to_unborn_item");
   assert.match(errR.message ?? "", new RegExp(inv.item), "the raise names the item_id");
+  // The matrix cell's EXACT assertion (F1c): the detail carries item_id, item_date AND
+  // posting_date -- a reason token alone is a weaker paraphrase (review R1 MJ-2). A refusal
+  // surface renders from this payload; each field is asserted, not assumed.
+  const detR = JSON.parse(errR.detail ?? "{}");
+  assert.equal(detR.item_id, inv.item, "detail.item_id names the unborn item");
+  assert.equal(String(detR.item_date), future, "detail.item_date is the item's own date");
+  assert.equal(String(detR.posting_date), "2020-01-01", "detail.posting_date is the refused settlement date");
   assert.equal(await outstandingOf(inv.item), 40000, "the refused call left the item untouched");
 
   const errP = await caught(() => allocatePayment(sub, {
@@ -200,6 +209,10 @@ test("F1c allocate_receipt/allocate_payment REFUSE an allocation dated before th
   assert.ok(errP, "allocate_payment against a not-yet-born item must be refused");
   assert.equal(errP.code, "CLR10", `expected CLR10 (got ${errP.code} -- ${errP.message})`);
   assert.equal(reasonOf(errP), "allocation_to_unborn_item");
+  const detP = JSON.parse(errP.detail ?? "{}");
+  assert.equal(detP.item_id, bill.item, "detail.item_id names the unborn item (payment side)");
+  assert.equal(String(detP.item_date), future, "detail.item_date (payment side)");
+  assert.equal(String(detP.posting_date), "2020-01-01", "detail.posting_date (payment side)");
   assert.equal(await outstandingOf(bill.item), 25000, "the refused call left the item untouched");
 
   // The boundary: SAME-day allocation PASSES (the predicate is <, not <=).
@@ -248,8 +261,31 @@ test("F1e apply_open_items REFUSES pairing a future-dated source item against a 
   assert.ok(err, "applying a future-dated source item must be refused");
   assert.equal(err.code, "CLR10", `expected CLR10 (got ${err.code} -- ${err.message})`);
   assert.equal(reasonOf(err), "apply_before_item_date");
+  // The guard's full detail shape (review R1 MJ-2): both items, both dates, and the clock
+  // the refusal was measured against.
+  const det = JSON.parse(err.detail ?? "{}");
+  assert.equal(det.source_item_id, cred.id, "detail.source_item_id");
+  assert.equal(String(det.source_item_date), future, "detail.source_item_date");
+  assert.equal(det.target_item_id, inv.item, "detail.target_item_id");
+  assert.equal(String(det.target_item_date), past, "detail.target_item_date");
+  assert.equal(String(det.book_today), today, "detail.book_today is the guard's own clock");
   assert.equal(await outstandingOf(inv.item), 80000, "the refused apply left the historical target untouched");
   assert.equal(await outstandingOf(cred.id), -30000, "and the future-dated source untouched");
+
+  // The guard is greatest(si, ti): a future-dated TARGET refuses identically (review R1
+  // MN-4) -- a historical credit against an invoice that does not yet exist is the same
+  // aging break reached from the other side.
+  const invFut = await openArItem(sub, { client, cp, cents: 50000, postingDate: future });
+  const credPastEntry = await approvedGeneric(sub, { client, cp, cpKind: "customer", debit: REVN, credit: AR1, cents: 20000, postingDate: past, memo: "x55 historical credit vs future target" });
+  const credPast = (await itemsOf(credPastEntry))[0];
+  const errT = await caught(() => applyOpenItems(sub, {
+    client, applications: [{ source_item_id: credPast.id, target_item_id: invFut.item, amount_cents: 20000 }],
+  }));
+  assert.ok(errT, "applying against a future-dated TARGET must be refused");
+  assert.equal(errT.code, "CLR10");
+  assert.equal(reasonOf(errT), "apply_before_item_date");
+  assert.equal(await outstandingOf(invFut.item), 50000, "the future target untouched");
+  assert.equal(await outstandingOf(credPast.id), -20000, "the historical source untouched");
 });
 
 // ===========================================================================
