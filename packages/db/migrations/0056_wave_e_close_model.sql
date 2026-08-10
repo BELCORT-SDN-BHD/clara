@@ -1988,7 +1988,11 @@ begin
   if jsonb_array_length(v_pl_rows) > 0 then
     insert into clara.close_write_permits(firm_id, client_id, fiscal_year_id, close_run_id,
         purpose, entries_expected)
-      values (c.firm, v_fy.client_id, v_fy.id, v_run.id, 'close_entry', 2)
+      -- entries_expected = 1: the TRUE consumption is the census-visible flip alone (the
+      -- draft INSERT is not an approved-class touch and the lines wall consults without
+      -- consuming) -- the design's own rule: assert the shipped value against the touches
+      -- the body actually performs. The battery's range observation trued this from 2.
+      values (c.firm, v_fy.client_id, v_fy.id, v_run.id, 'close_entry', 1)
       returning id into v_permit;
     insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
         is_year_end, maker_actor, last_human_editor, close_receipt_id)
