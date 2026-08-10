@@ -764,3 +764,197 @@ create trigger t_close_serialize before insert or update or delete on clara.bank
   for each row execute function clara._tf_close_serialize();
 create trigger t_close_serialize before insert or update or delete on clara.fixed_assets
   for each row execute function clara._tf_close_serialize();
+
+-- =====================================================================================
+-- S5 -- THE DRAWER-1 PROBES (skeleton §2.3). Every probe: measure with the instrument
+-- production uses, resolve through the resolver the writers use, and fail CLOSED on
+-- unknown/error -- a probe that could not be evaluated has not passed (E-R2).
+-- =====================================================================================
+
+-- clara._control_tie_core -- the shared AR/AP tie. The SUBLEDGER side calls _aging_core
+-- (0040's instrument -- the one production aging reads; re-summing open_items by hand is how
+-- two "correct" numbers disagree). The GL side resolves the control account with the SAME
+-- semantics as _allocate_*_core's resolver (0044:1169-1188: account_class match + is_active;
+-- exactly ONE or the resolution is not a resolution): zero or plural class accounts ⇒ state
+-- 'unknown', never 'tie' -- the composite refuses to PICK for the same reason this probe
+-- refuses to GUESS. GL balance = Σ(debit−credit) over approved entries dated <= as_of on the
+-- resolved account (fa_register_tie's own predicate shape).
+create function clara._control_tie_core(p_client uuid, p_domain text, p_as_of date)
+  returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_firm uuid; v_class text; v_n int; v_ctrl text;
+  v_gl bigint; v_sub bigint;
+begin
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null then
+    return jsonb_build_object('state', 'unknown', 'reason', 'client_unknown',
+      'domain', p_domain, 'as_of', p_as_of);
+  end if;
+  v_class := case p_domain when 'ar' then 'receivable' when 'ap' then 'payable' end;
+  select count(*)::int, min(a.account_code) into v_n, v_ctrl
+    from clara.coa_accounts a
+    where a.client_id = p_client and a.account_class = v_class and a.is_active;
+  if v_n <> 1 then
+    return jsonb_build_object('state', 'unknown', 'reason', 'control_not_resolvable',
+      'domain', p_domain, 'as_of', p_as_of, 'control_account_count', v_n,
+      'control_accounts', coalesce((select jsonb_agg(a.account_code order by a.account_code)
+         from clara.coa_accounts a
+         where a.client_id = p_client and a.account_class = v_class and a.is_active), '[]'::jsonb));
+  end if;
+  select coalesce(sum(jl.debit_cents - jl.credit_cents), 0) into v_gl
+    from clara.journal_lines jl
+    join clara.journal_entries je on je.id = jl.entry_id
+    where je.client_id = p_client and je.status = 'approved'
+      and je.posting_date <= p_as_of and jl.account_code = v_ctrl;
+  v_sub := coalesce(((clara._aging_core(v_firm, p_client, p_domain, p_as_of)
+             -> 'totals') ->> 'total_cents')::bigint, 0);
+  -- AP sign convention: the aging totals are OUTSTANDING (positive = owed), while the GL
+  -- payable control carries a CREDIT balance (negative under debit−credit). Compare like
+  -- with like by negating the GL side for 'ap'.
+  if p_domain = 'ap' then v_gl := -v_gl; end if;
+  return jsonb_build_object(
+    'state', case when v_gl = v_sub then 'tie' else 'mismatch' end,
+    'domain', p_domain, 'as_of', p_as_of,
+    'control_accounts', jsonb_build_array(v_ctrl),
+    'gl_cents', v_gl, 'subledger_cents', v_sub, 'diff_cents', v_gl - v_sub);
+end $$;
+revoke all on function clara._control_tie_core(uuid, text, date) from public;
+
+create function clara.ar_control_tie(p_client uuid, p_as_of date) returns jsonb
+  language sql stable security definer set search_path = clara, pg_temp as
+  $$ select clara._control_tie_core(p_client, 'ar', p_as_of) $$;
+revoke all on function clara.ar_control_tie(uuid, date) from public;
+
+create function clara.ap_control_tie(p_client uuid, p_as_of date) returns jsonb
+  language sql stable security definer set search_path = clara, pg_temp as
+  $$ select clara._control_tie_core(p_client, 'ap', p_as_of) $$;
+revoke all on function clara.ap_control_tie(uuid, date) from public;
+
+-- clara.fa_control_tie_out -- the SEGMENT-AWARE FA tie 0041:4250-4256 deferred by name to
+-- this campaign. The close segment is (fy.starts_on, fy.ends_on] and the identity is the
+-- SEGMENT MOVEMENT measured on both sides: the register's movement (live depreciation rows
+-- effective in the segment + acquisitions dated in it) against the GL's movement on exactly
+-- the account codes the register itself names. The OPENING side is reported with its source
+-- -- the PRIOR receipt's pinned fa roll where one exists, else the register baseline --
+-- never re-derived when a pin exists (ARCHITECTURE §3.6 F12-1: an opening restatement
+-- counted in FY(n) must not double-count in FY(n+1)). fa_register_tie is NOT touched: it
+-- stays visibility-only per WD-R1 (its prosrc is tail-asserted unchanged), and its
+-- non-blocking view feeds drawer 3.
+create function clara.fa_control_tie_out(p_client uuid, p_fiscal_year_id uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_codes text[]; v_reg_move bigint; v_gl_move bigint;
+  v_opening jsonb; v_opening_src text;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fiscal_year_id;
+  if v_fy.id is null or v_fy.client_id <> p_client then
+    return jsonb_build_object('state', 'unknown', 'reason', 'fiscal_year_unknown');
+  end if;
+  -- The account universe is the REGISTER's own: every asset/accum code a non-superseded
+  -- asset of this client names. No assets ⇒ the identity is vacuously a tie at zero, and
+  -- says so rather than being silently green.
+  select coalesce(array_agg(distinct c), '{}') into v_codes from (
+    select fa.asset_account_code as c from clara.fixed_assets fa
+      where fa.client_id = p_client and fa.superseded_at is null
+    union
+    select fa.accum_depr_account_code from clara.fixed_assets fa
+      where fa.client_id = p_client and fa.superseded_at is null) u;
+  if array_length(v_codes, 1) is null then
+    return jsonb_build_object('state', 'tie', 'vacuous', true, 'reason', 'no_enrolled_assets',
+      'fiscal_year_id', p_fiscal_year_id, 'register_movement_cents', 0, 'gl_movement_cents', 0,
+      'diff_cents', 0);
+  end if;
+  -- Register movement inside the segment: live depreciation effective in it (sign: accum
+  -- credit reduces NBV) net of acquisitions dated in it (cost enters NBV).
+  select coalesce((select sum(fa.cost_cents) from clara.fixed_assets fa
+            where fa.client_id = p_client and fa.superseded_at is null
+              and fa.acquired_date > v_fy.starts_on - 1 and fa.acquired_date <= v_fy.ends_on), 0)
+       - coalesce((select sum(d.amount_cents) from clara.fa_depreciation d
+            where d.client_id = p_client and d.is_live
+              and d.effective_date > v_fy.starts_on - 1 and d.effective_date <= v_fy.ends_on), 0)
+    into v_reg_move;
+  select coalesce(sum(jl.debit_cents - jl.credit_cents), 0) into v_gl_move
+    from clara.journal_lines jl
+    join clara.journal_entries je on je.id = jl.entry_id
+    where je.client_id = p_client and je.status = 'approved'
+      and je.posting_date > v_fy.starts_on - 1 and je.posting_date <= v_fy.ends_on
+      and jl.account_code = any (v_codes);
+  -- The opening side, with its SOURCE named: the prior receipt's pin when one exists.
+  select cr.snapshot -> 'fa_roll' into v_opening
+    from clara.close_receipts cr
+    where cr.fiscal_year_id = v_fy.prior_fy_id and cr.status = 'active' and cr.kind = 'close'
+    limit 1;
+  v_opening_src := case when v_opening is not null then 'prior_receipt_pin'
+                        else 'register_baseline' end;
+  return jsonb_build_object(
+    'state', case when v_reg_move = v_gl_move then 'tie' else 'mismatch' end,
+    'fiscal_year_id', p_fiscal_year_id,
+    'segment_start', v_fy.starts_on, 'segment_end', v_fy.ends_on,
+    'account_codes', to_jsonb(v_codes),
+    'register_movement_cents', v_reg_move, 'gl_movement_cents', v_gl_move,
+    'diff_cents', v_reg_move - v_gl_move,
+    'opening_source', v_opening_src, 'opening', coalesce(v_opening, 'null'::jsonb));
+end $$;
+revoke all on function clara.fa_control_tie_out(uuid, uuid) from public;
+
+-- clara.bank_recon_close_state -- per BANK ACCOUNT: the latest COMPLETED reconciliation
+-- whose period_end covers fy.ends_on, judged by verify_bank_reconciliation's STRICT half
+-- ONLY ('verified' + 'diffs' -- recompute, never the stored row); the informational half
+-- routes to drawer 3 untouched. A bank account with statements but NO covering completed
+-- reconciliation is the UNKNOWN state -- drawer 1, fail-closed, no attestation path
+-- (E-R2 `wave-e-contract.md:46-48`; the drawer-2 carve-out is unmatched LINES and a missing
+-- STATEMENT, never a missing reconciliation).
+create function clara.bank_recon_close_state(p_client uuid, p_fiscal_year_id uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_fy record; v_accounts jsonb := '[]'::jsonb; v_state text := 'tie';
+  r record; v_verify jsonb; v_acct_state text;
+begin
+  select * into v_fy from clara.fiscal_years fy where fy.id = p_fiscal_year_id;
+  if v_fy.id is null or v_fy.client_id <> p_client then
+    return jsonb_build_object('state', 'unknown', 'reason', 'fiscal_year_unknown');
+  end if;
+  for r in
+    select s.bank_account_id,
+           (select br.id from clara.bank_reconciliations br
+             join clara.bank_statements st on st.id = br.statement_id
+            where br.client_id = p_client and st.bank_account_id = s.bank_account_id
+              and br.status = 'complete' and br.period_end >= v_fy.ends_on
+            order by br.period_end asc, br.completed_at desc limit 1) as covering_recon
+      from clara.bank_statements s
+      where s.client_id = p_client and s.status <> 'void'
+      group by s.bank_account_id
+  loop
+    if r.covering_recon is null then
+      v_acct_state := 'unknown';
+      v_verify := jsonb_build_object('reason', 'no_completed_reconciliation_covering_fy_end');
+    else
+      begin
+        v_verify := clara.verify_bank_reconciliation(r.covering_recon);
+        v_acct_state := case when (v_verify ->> 'verified')::boolean then 'tie'
+                             else 'mismatch' end;
+      exception when others then
+        v_acct_state := 'error';
+        v_verify := jsonb_build_object('reason', 'verify_raised', 'sqlstate', sqlstate,
+          'message', sqlerrm);
+      end;
+    end if;
+    v_accounts := v_accounts || jsonb_build_object(
+      'bank_account_id', r.bank_account_id, 'reconciliation_id', r.covering_recon,
+      'state', v_acct_state,
+      'strict', case when v_verify ? 'verified'
+                     then jsonb_build_object('verified', v_verify -> 'verified',
+                                             'diffs', v_verify -> 'diffs')
+                     else v_verify end,
+      'informational', coalesce(v_verify -> 'informational', 'null'::jsonb));
+    -- The FY-level state is the WORST account state: error/unknown dominate mismatch,
+    -- mismatch dominates tie (fail-closed aggregation).
+    if v_acct_state in ('unknown', 'error') then v_state := 'unknown';
+    elsif v_acct_state = 'mismatch' and v_state <> 'unknown' then v_state := 'mismatch';
+    end if;
+  end loop;
+  return jsonb_build_object('state', v_state, 'fiscal_year_id', p_fiscal_year_id,
+    'as_of', v_fy.ends_on, 'accounts', v_accounts);
+end $$;
+revoke all on function clara.bank_recon_close_state(uuid, uuid) from public;
