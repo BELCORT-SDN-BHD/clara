@@ -488,7 +488,7 @@ create function clara.record_client_fact(
   language plpgsql security definer set search_path = clara, pg_temp as $door$
 declare
   c record; v_firm uuid; v_key record; v_dedupe jsonb; v_val text;
-  v_prior uuid; v_new uuid; v_doc record;
+  v_prior uuid; v_new uuid; v_doc_firm uuid;
 begin
   -- THE FLOOR: admin+ (skeleton §3.2, builder choice ratified with the packet). A client
   -- fact drives coding and statutory presentation -- above a bookkeeper's day book, below a
@@ -517,11 +517,27 @@ begin
       raise exception 'a document-based fact must name its source document'
         using errcode = 'CLR10', detail = '{"reason":"fact_source_document_missing"}';
     end if;
-    select d.firm_id, d.client_id into v_doc
+    -- THE 0021 RULE (the 0022:203-206 / 0025:321-324 door idiom): absent and foreign answer
+    -- with ONE refusal -- no existence oracle. And the CLIENT relation is read from FILINGS,
+    -- not from documents: 0007:1105 DROPPED documents.client_id (this door's first cut read
+    -- the dropped column from 0003's file text -- the x55 battery caught it; file text is not
+    -- the live schema, the same law the body splices obey). A document may carry several
+    -- ACTIVE filings across clients (uq_document_filing_active is per (document, client)), so
+    -- the honest check is MEMBERSHIP: a document that is actively filed at all must be filed
+    -- to THIS client; a document with no active filing grounds a fact on firm scope alone
+    -- (e.g. a registry search held by the firm and never filed to any client's books) -- the
+    -- basis text carries that story, and the fact row still pins the exact document.
+    select d.firm_id into v_doc_firm
       from clara.documents d where d.id = p_source_document_id;
-    if v_doc.firm_id is null or v_doc.firm_id <> c.firm
-       or (v_doc.client_id is not null and v_doc.client_id <> p_client) then
-      raise exception 'the source document does not belong to this firm and client'
+    if v_doc_firm is null or v_doc_firm <> c.firm then
+      raise exception 'source document is not in your firm' using errcode = 'CLR11';
+    end if;
+    if exists (select 1 from clara.document_filings df
+                where df.document_id = p_source_document_id and df.retired_at is null)
+       and not exists (select 1 from clara.document_filings df
+                where df.document_id = p_source_document_id and df.client_id = p_client
+                  and df.retired_at is null) then
+      raise exception 'the source document is filed to a different client; a document-based fact cites a document filed to this client, or an unfiled firm document'
         using errcode = 'CLR10', detail = '{"reason":"fact_source_document_invalid"}';
     end if;
   elsif p_source_document_id is not null then
