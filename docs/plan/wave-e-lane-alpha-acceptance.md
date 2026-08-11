@@ -93,13 +93,15 @@ Final `client_facts` census: **7 rows** (3 carryover + 3 msic + 1 doored entity_
   NOT NULL held) and spliced `apply_before_item_date` (strict boundary) into
   `apply_open_items`. **No duplicate wall was written anywhere.** The 0055 tail's
   "F-1 verified" line printed at the live apply.
-  — OWNER SIGN-OFF: ________ (date ________)
+  — OWNER SIGN-OFF: **Tao (BELCORT) — SIGNED 2026-08-11**, in-session structured ruling
+  (recorded at ADR-068).
 - **F3e — the MSIC honesty record.** The door does **NOT** validate against an official
   MSIC registry — no `clara.msic_codes` table exists anywhere in 0001–0056 — codes are
   **format-checked only** (`^[0-9]{5}$`), the catalog label says so
   (`validated_against='format_only'`), and the compensating control is **basis capture**
   (§2's verbatim strings). Nothing here claims the codes were registry-validated.
-  — OWNER SIGN-OFF: ________ (date ________)
+  — OWNER SIGN-OFF: **Tao (BELCORT) — SIGNED 2026-08-11**, in-session structured ruling
+  (recorded at ADR-068).
 
 ## §6 The two carried notes (from PR #226)
 
