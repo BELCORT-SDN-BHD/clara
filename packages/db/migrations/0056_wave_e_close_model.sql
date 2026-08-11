@@ -324,6 +324,18 @@ begin
     raise exception 'a fiscal year admits exactly one update: its lifecycle status'
       using errcode = 'CLR10', detail = '{"reason":"fy_immutable"}';
   end if;
+  -- THE TRANSITION GRAPH, ENFORCED (R1.5 MINOR — the comment above claimed it, the code
+  -- now has it). The five edges are exactly the four verbs' writes, measured:
+  -- begin_close open|reopened->closing · abandon_close closing->open (normalizes, even
+  -- from a reopened year's abandoned close) · finalize_close closing->closed ·
+  -- reopen_fiscal_year closed->reopened. A same-status touch is a no-op, admitted.
+  if new.status is distinct from old.status
+     and not ( (old.status in ('open', 'reopened') and new.status = 'closing')
+            or (old.status = 'closing' and new.status in ('open', 'closed'))
+            or (old.status = 'closed' and new.status = 'reopened') ) then
+    raise exception 'fiscal year status % -> % is not a lifecycle edge; the audited verbs walk open|reopened->closing->closed->reopened only', old.status, new.status
+      using errcode = 'CLR10', detail = '{"reason":"fy_lifecycle_edge_invalid"}';
+  end if;
   return new;
 end $$;
 revoke all on function clara._tf_fiscal_years_lifecycle() from public;
@@ -1451,6 +1463,11 @@ create table clara.close_receipts (
     references clara.close_runs (id, firm_id)
 );
 create index ix_cr_fy on clara.close_receipts (fiscal_year_id, status, closed_at desc);
+-- "At most one ACTIVE close receipt per FY" is STRUCTURE, not verb discipline (R1.5
+-- MINOR): three readers consume it as unique (reopen's unordered select, the FA prior-pin
+-- read, the seed pin-tie) -- the same partial-unique idiom as uq_close_runs_one_live.
+create unique index uq_cr_one_active_close on clara.close_receipts (fiscal_year_id)
+  where kind = 'close' and status = 'active';
 
 -- The belt: a chainable receipt CARRIES ITS PIN -- refuse at write, not at the successor.
 create function clara._tf_close_receipts_belt() returns trigger
@@ -2247,6 +2264,18 @@ begin
     raise exception 'fiscal year % is %; only a closed year reopens', v_fy.label, v_fy.status
       using errcode = 'CLR41', detail = '{"reason":"close_not_in_progress"}';
   end if;
+  -- THE ORDERING GUARD, RE-RUN UNDER THE LOCK (R1.5 MAJOR): the pre-lock check above is
+  -- the fast, friendly refusal; THIS one is authoritative. Between the early check and
+  -- the 007 acquisition a concurrent finalize_close(FY n+1) can commit -- all four close
+  -- verbs serialize on the same per-client pair, so only a re-check held UNDER that pair
+  -- closes the window. Same discipline as the v_fy re-read directly above.
+  perform 1 from clara.fiscal_years later
+    where later.client_id = v_fy.client_id and later.ordinal > v_fy.ordinal
+      and later.status in ('closing', 'closed');
+  if found then
+    raise exception 'a later fiscal year is closing or closed; reopen years newest-first'
+      using errcode = 'CLR41', detail = '{"reason":"reopen_ordering_violation"}';
+  end if;
 
   -- EFFECTS, IN THE REQUIRED ORDER (the wall refuses the reversed_by UPDATE on an entry
   -- inside a closing/closed FY; flipping first is what makes the reversal reachable, and
@@ -2350,6 +2379,10 @@ begin
     into v_successor;
   return jsonb_build_object(
     'receipt_id', p_receipt, 'fiscal_year_id', v_r.fiscal_year_id,
+    -- status + kind ride the answer (R1.5 MINOR): the recompute-now semantics verify ANY
+    -- receipt by design, but a caller must be able to tell an active close's "verified"
+    -- from a SUPERSEDED one's -- a reopened year's old receipt can still happen to tie.
+    'receipt_status', v_r.status, 'receipt_kind', v_r.kind,
     'verified', (jsonb_array_length(v_diffs) = 0
       and not exists (select 1 from jsonb_array_elements(v_strict) s(el)
             where s.el ->> 'state' in ('mismatch', 'unknown', 'error'))),
@@ -2706,7 +2739,8 @@ begin
     from pg_proc p
     where p.pronamespace = 'clara'::regnamespace
       and p.proname not in ('_correction_period_state')
-      and regexp_replace(regexp_replace(coalesce(nullif(p.prosrc, ''), ''),
+      and regexp_replace(regexp_replace(
+            coalesce(nullif(p.prosrc, ''), pg_get_functiondef(p.oid)),
             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')
           like '%\_correction\_period\_state(%' escape '\';
   if v_t <> 'approve_wrong_client_correction' then
@@ -2717,7 +2751,8 @@ begin
     from pg_proc p
     where p.pronamespace = 'clara'::regnamespace
       and p.proname not in ('correction_period_state', '_correction_period_state')
-      and regexp_replace(regexp_replace(coalesce(nullif(p.prosrc, ''), ''),
+      and regexp_replace(regexp_replace(
+            coalesce(nullif(p.prosrc, ''), pg_get_functiondef(p.oid)),
             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')
           like '%clara.correction\_period\_state(%' escape '\';
   if v_t <> 'preview_wrong_client_correction,retire_document_filing' then
