@@ -2989,11 +2989,13 @@ begin
       using errcode = 'CLR10';
   end if;
   if position(v_frm in v_def) = 0
+     or position('acquisition_line_id' in v_def) = 0
      or position('fa_disposal' in v_def) = 0
      or position('depreciation_charges' in v_def) = 0
+     or position('item_kind = ''fixed_asset''' in v_def) = 0
      or position('fa_k_gl_balance_on_enrolled' in v_def) = 0
      or position('fa_cost_adjustment_deferred' in v_def) = 0 then
-    raise exception '0056 S9c postcheck: a pre-existing exemption or refusal vanished in the splice'
+    raise exception '0056 S9c postcheck: a pre-existing exemption or refusal vanished in the splice (all FIVE exemptions named: acquisition-line, disposal, depreciation-run, reversal(anchor), opening-items)'
       using errcode = 'CLR10';
   end if;
 end $s9c$;
