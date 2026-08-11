@@ -62,7 +62,11 @@ jobs:
   # anti-injection discipline this file already applies elsewhere); EV_BEFORE is a SHA.
   # =========================================================================
   changes:
-    runs-on: ubuntu-latest
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
     outputs:
       code: ${{ steps.classify.outputs.code }}
       db: ${{ steps.classify.outputs.db }}
@@ -116,7 +120,11 @@ jobs:
   # these read one.
   # =========================================================================
   lint:
-    runs-on: ubuntu-latest
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -278,7 +286,11 @@ jobs:
     # FAIL-CLOSED AT THIS LAYER TOO (review R1 MAJOR): != 'false', never == 'true' --
     # an absent/garbled output must RUN the job, not skip it green.
     if: needs.changes.outputs.code != 'false'
-    runs-on: ubuntu-latest
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
 
     # Ephemeral, disposable Postgres 17 — created for this job and discarded when
     # it ends. This is the ONLY database CI touches. It is not the frozen project.
@@ -778,7 +790,11 @@ jobs:
     # and on every scheduled weekly sweep. FAIL-CLOSED via the classifier's defaults.
     needs: changes
     if: needs.changes.outputs.db != 'false'
-    runs-on: ubuntu-latest
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
     strategy:
       fail-fast: false
       matrix:
@@ -1058,7 +1074,11 @@ jobs:
     # same diet condition, same weekly sweep.
     needs: changes
     if: needs.changes.outputs.db != 'false'
-    runs-on: ubuntu-latest
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
