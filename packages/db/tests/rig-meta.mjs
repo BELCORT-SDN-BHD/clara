@@ -85,6 +85,25 @@ const CLOSE_MODEL_0056_HUMAN_FNS = [
   "verify_close", "get_close_readiness", "list_fiscal_years",
   "grant_firm_capability", "revoke_firm_capability",
 ];
+// 0057 [Wave E lane gamma]: the period registry + month snapshots. ONE write door
+// (mint_month_snapshot, bookkeeper floor body-enforced) and THREE reads. The agent, both
+// wake roles and clara_runtime gain ZERO — 0057's S11.5 sweep asserts it in-migration, and
+// this roster is the second, independent instrument that says so.
+//
+// THE AGENT ROW IS EMPTY DELIBERATELY. Skeleton §2.10's grant table names snapshot_state for
+// clara_agent_ro; 0057 follows lane beta's B6 ruling instead, which revoked the agent grants
+// on the close reads because a _human_ctx-gated read granted to a role that carries no JWT
+// is a DARK grant — it reads as access and refuses at runtime with CLR04. Measured on the
+// rig: verify_close, get_close_readiness and list_fiscal_years are all agent_ro=false.
+// If the owner rules the other way, the fix is additive (one grant, or the dual-lane
+// wake-secret idiom get_context_pack uses) and this list is where it lands.
+const REGISTRY_0057_HUMAN_FNS = [
+  "mint_month_snapshot", "snapshot_state", "verify_snapshot", "days_in_period",
+];
+// A COHORT, for the same reason 0020's block states: this matrix is a CLOSED SET whose
+// default is "no role may execute anything unlisted", so cohortFailures() catches a name
+// that silently VANISHES from the catalog while its exemption lives on here.
+const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -663,6 +682,8 @@ export const ALLOWED = {
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
+    ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
+    // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -830,6 +851,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0041 wave D-a fixed-asset register", FA_0041_COHORT, liveNames));
   failures.push(...cohortFailures("0045 wave D-b recurring adjustments", ADJUSTMENTS_0045_COHORT, liveNames));
   failures.push(...cohortFailures("0046 §7-A unattended sales lane", SALES_LANE_0046_COHORT, liveNames));
+  failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   return failures;
 }
 

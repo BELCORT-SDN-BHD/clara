@@ -218,6 +218,47 @@ close measures it", and a table on one list but not the other is the shape of bo
   `open_items` is append-only by trigger (`0037:824-825`), so no update/delete reaches it, and the
   amendments never insert there.
 
+  > **QUALIFICATION (lane γ R2 confirming round, 2026-08-11) — "move every AR/AP aging figure" is
+  > true of the MECHANISM, not unconditionally true of every CALL.** Read plainly, the sentence above
+  > promises that any `apply_open_items`/`unallocate_group` act moves a presented figure; the E7/E8
+  > adjudication (this section's own row-11 writer-table entry, and the matrix's E7/E8 cells) never
+  > reached back to correct THIS passage even though it corrects the consequence. Both verbs stamp
+  > `effective_date = clara._book_today()` — the ACT date, never a caller-supplied one — so against an
+  > ALREADY-COMPLETED month (the only kind `mint_month_snapshot` will snapshot), `_subledger_
+  > outstanding_asof`'s own `effective_date <= p_as_of` filter excludes a today-dated allocation from
+  > that month's `as_of = period_end` recompute: the figure a management pack PRESENTS for that month
+  > does not move. That is the accounting-correct outcome, not a gap.
+  >
+  > **Four precisions, each read from the live bodies at the R2.5 pass:**
+  >
+  > 1. **`unallocate_group`'s stamp is not the bare act date.** It writes
+  >    `greatest(clara._book_today(), oa.effective_date)` — the later of today and the allocation row
+  >    it negates. The per-writer table's row for it (below, "the ACT date (`created_at::date`), with
+  >    the R9 `greatest()` ordering guard") names the guard without quoting it; the expression above is
+  >    what the body actually stamps. The consequence for this qualification is unchanged — the value
+  >    is never EARLIER than today, so it still cannot reach a completed month — but the reason is the
+  >    `greatest()`, not a bare `_book_today()`.
+  > 2. **THE BOUNDARY-DAY CARVE-OUT, which both siblings carry.** "Does not move the presented figure"
+  >    holds for every completed month *except the exact calendar last day of the period*. The
+  >    completeness guard refuses a month whose `period_end > clara._book_today()` but ALLOWS
+  >    `period_end = _book_today()`, so on that one day a same-day allocation satisfies
+  >    `effective_date <= as_of` and does reach the recompute. The staleness predicate agrees on that
+  >    day (`period_end >= effect_date` is true when both are today), so the artifact marks stale and
+  >    a recompute reports real drift — the two halves stay consistent at the boundary rather than
+  >    diverging there.
+  > 3. **The row-11 citation.** The adjudication that corrects the consequence lives in the per-writer
+  >    act-dating table below, rows `apply_open_items` and `unallocate_group`
+  >    (`wave-e-design-skeleton-part3.md:300-301`), not in §2.11's writer table row 11.
+  > 4. **The backdatable reach, stated precisely.** For these two verbs it is unreachable (neither
+  >    takes a date argument). For the posting-dated pair (row 3, `allocate_receipt` /
+  >    `allocate_payment`) the reach is REAL but BOUNDED, and the per-writer table's "the unborn-item
+  >    wall already refuses backdating" overstates it: the live wall is
+  >    `if i.item_date is not null and p_posting_date < i.item_date then raise ... CLR10
+  >    allocation_to_unborn_item`, which refuses only dates EARLIER than the item's own date. Backdating
+  >    to any date `>= item_date` is lawful, so a settlement posted into a snapshotted month does move
+  >    that month's presented aging — and is marked stale by the JE trigger, since those verbs are
+  >    JE-bearing.
+
 **The writer set — a REVIEW instrument, and (per §2.5(B)) an ASSERTED one.** E-R3 names the class; the
 list below lets a reviewer check each named writer's effect path against a trigger, and the migration
 tail asserts from the live catalog that every table named in the "Covered by" column actually carries
@@ -233,7 +274,7 @@ it gets wrong (§2.5(C)) — but an unchecked enumeration is worse than a checke
 | 5 | recurring-adjustment occurrences + auto-reversals (0045, `auto_reversal_of`) | book entries | JE trigger |
 | 6 | the depreciation belt (0041/0042 authorities) | book entries | JE trigger |
 | 7 | the closing-stock adjustment (WD-R11) | books an entry | JE trigger |
-| 8 | `approve_wrong_client_correction` (live body via `pg_get_functiondef`, §0.3) | reverses and re-books **across two clients** | JE trigger, per row, so both clients' snapshots mark |
+| 8 | `approve_wrong_client_correction` (live body via `pg_get_functiondef`, §0.3) | reverses at the FROM client; **does NOT re-book at TO** (see the amendment below) | JE trigger, FROM client only, at the correction's own approve |
 | 9 | the opening machinery (`approve_opening_seed` `0017:3825`, `supersede_opening_item` `0017:4047`) | books opening entries | JE trigger |
 | 10 | `finalize_close` (§2.6) | the closing entry | JE trigger (correctly: a close makes every prior month's pack stale) |
 | 11 | **`apply_open_items` (`0037:3225`) / `unallocate_group` (`0037:3141`)** | `open_item_allocations` rows ONLY — zero GL | **`open_item_allocations` trigger** *(the v1 defect)* |
@@ -241,6 +282,18 @@ it gets wrong (§2.5(C)) — but an unchecked enumeration is worse than a checke
 | 13 | **`void_bank_statement` (`0038:2211`)** | **`clara.bank_statements`** — `update … set status='void'` at **`0038:2270-2272`**; the statement's LINES are row-locked (`0038:2254-2255`) but not written | **`bank_statements` trigger** *(the v1 defect: row 13 named the `bank_reconciliations` trigger, which this verb never touches)* |
 | 14 | `complete_bank_reconciliation` (`0040:1587`, insert `0040:1963`) / `void_bank_reconciliation` (`0040:2057`, update `0040:2119`) | `bank_reconciliations` rows | `bank_reconciliations` trigger |
 | 15 | **`except_bank_line` (`0040:3222`) / `resolve_bank_line_exception` (`0040:3372`)** | **`clara.bank_line_exceptions`** — INSERT at `0040:3320-3325`, UPDATEs at `0040:3550-3555` and `:3558-3563` | **`bank_line_exceptions` trigger** *(newly covered — see the boundary note)* |
+
+> **ROW 8 AMENDMENT (lane γ Codex round adjudication, 2026-08-11) — "BOTH CLIENTS MARK" WAS WRONG,
+> READ FROM THE LIVE BODY.** `approve_wrong_client_correction` reverses the misfiled entry at the
+> FROM client (the mirror lands in `journal_entries`, marking FROM's snapshots via the row-1 JE
+> arm, in the correction's own transaction) — but it does **not** insert or approve any entry at the
+> TO client. Its live body retires the document's filing and opens a coding task at TO; the TO
+> client's books move only LATER, when that task is recoded into a draft and a human approves it —
+> an ordinary row-1 JE-arm marking, at its own later transaction, not part of the correction's act.
+> "Fires per row, so both clients' snapshots mark" conflated "the correction touches two clients'
+> attribution" with "the correction books at two clients" — it books at one. A cell built on the old
+> claim (asserting TO marks stale INSIDE the correction's own transaction) would assert a positive
+> that the live body does not perform.
 
 **The class the census will find COVERED, recorded so it is not rediscovered as a hole.** The FA
 depreciation tables — `clara.fa_depreciation` (`0041:519`), `clara.fa_depreciation_authorities`
