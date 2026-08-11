@@ -52,8 +52,11 @@ jobs:
   # Outputs default to true (run everything) and are narrowed ONLY when the diff is
   # confidently computed and every changed path is provably outside a job's input surface.
   # schedule / workflow_dispatch / a zero-SHA push / any git failure => everything runs.
-  #   code=false  ONLY when every changed file is docs-shaped (docs/**, any *.md,
-  #               .claude/** — none of which any CI gate reads).
+  #   code=false  ONLY when every changed file is docs-shaped (docs/** or any *.md) —
+  #               the literal set ADR-0069 ruling 2 names. `.claude/**` is DELIBERATELY
+  #               NOT in it: settings.json carries the pinned-ids hook registration and
+  #               rules/ carries path-scoped authoring law, so a change there is a change
+  #               to an enforcement mechanism and classifies as CODE -> the full ladder.
   #   db=true     when anything under packages/db/**, this workflow file, or a root
   #               manifest/lockfile changed — the ENTIRE input surface of the frontier
   #               legs and the partition gate (they read packages/db only; their runner
@@ -96,7 +99,7 @@ jobs:
               CODE=false; DB=false
               while IFS= read -r f; do
                 case "$f" in
-                  docs/*|*.md|.claude/*) : ;;
+                  docs/*|*.md) : ;;
                   *) CODE=true ;;
                 esac
                 case "$f" in

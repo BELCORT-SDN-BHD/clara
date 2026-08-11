@@ -3,7 +3,7 @@
 //
 //   node scripts/hooks/pinned-ids-guard.selftest.mjs   # exit 0 green, 1 red
 //
-// Two layers, same split as check-wiki-dynamic-sql.selftest.mjs:
+// Three layers; the first two follow check-wiki-dynamic-sql.selftest.mjs's split:
 //   (1) IN-PROCESS — imports evaluateToolCall() from the pure module directly and drives it
 //       through the decision matrix (both ids x both directions x the precision edge cases).
 //       Fast, and this is where the bulk of the coverage lives.
@@ -11,11 +11,21 @@
 //       and asserts on the real exit code, so the stdin/JSON/exit-code WIRING is proven too, not
 //       just the pure logic. Covers exactly the three shapes the dispatch brief named (blocked
 //       write-shape, allowed read-shape, clean command) plus the malformed-stdin fallback.
+//   (3) REGISTRATION — parses the tracked .claude/settings.json and proves a PreToolUse command
+//       resolves to THIS file on disk. Layers 1-2 prove the guard decides correctly; a guard
+//       nothing invokes still decides correctly and protects nothing. Verified to fail on both
+//       a renamed target and a missing PreToolUse block before being accepted.
+//
+// This runs in `pnpm lint` and in ci.yml. CI cannot exercise a PreToolUse hook IN SITU — only a
+// real Claude Code session can — so layer 3 is the closest automated proof available that the
+// registration is live, and the in-situ confirmation is one deliberately-blocked probe on the
+// owner's machine.
 //
 // No dependencies — Node built-ins only.
 
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateToolCall, findPinnedId, isWriteShaped, blockMessage } from "./pinned-ids-guard-checks.mjs";
 
@@ -226,6 +236,38 @@ testCase("e2e: malformed (non-JSON) stdin, but carries id+keyword -> exit 2 (fal
 testCase("e2e: empty stdin -> exit 0", () => {
   const { code } = runCli("");
   if (code !== 0) throw new Error(`expected exit 0 on empty stdin, got ${code}`);
+});
+
+// ---------------------------------------------------------------------------
+// (3) REGISTRATION — a guard nothing invokes is not a guard. The layers above prove the
+// script decides correctly; this proves the tracked project settings actually POINT at it.
+// Resolving the command's path to a real file on disk is the part that rots silently: a
+// rename or a move leaves the JSON syntactically perfect and the hook dead.
+// ---------------------------------------------------------------------------
+console.log("\nregistration — .claude/settings.json:");
+
+testCase("tracked settings.json registers a PreToolUse command resolving to this guard", () => {
+  const settingsPath = join(HERE, "..", "..", ".claude", "settings.json");
+  if (!existsSync(settingsPath)) throw new Error(`no ${settingsPath} — the registration must ship tracked`);
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  const entries = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(entries) || entries.length === 0) throw new Error("hooks.PreToolUse is missing or empty");
+
+  const commands = entries.flatMap((e) => (e.hooks ?? []).map((h) => h.command ?? ""));
+  // The command is a shell string: `node "$CLAUDE_PROJECT_DIR"/scripts/hooks/pinned-ids-guard.mjs`.
+  // Strip the project-dir variable in either shell or Windows spelling, plus quotes, then resolve
+  // the remaining repo-relative path against the actual repo root.
+  const repoRoot = resolve(HERE, "..", "..");
+  const resolved = commands.map((c) => {
+    const m = c.match(/(?:\$CLAUDE_PROJECT_DIR|%CLAUDE_PROJECT_DIR%|\$\{CLAUDE_PROJECT_DIR\})["']?[/\\]?([^\s"']+)/);
+    return m ? resolve(repoRoot, m[1]) : null;
+  });
+  if (!resolved.some((p) => p && existsSync(p) && resolve(p) === resolve(CLI))) {
+    throw new Error(
+      `no PreToolUse command resolves to ${CLI}. Commands found: ${JSON.stringify(commands)}; `
+      + `resolved to: ${JSON.stringify(resolved)}`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # REBUILD-PLAN — historical record (archived at the harness refactor)
 
-> **Archived 2026-08-12** when `docs/plan/REBUILD-PLAN.md` was retired as part of the harness
+> **Archived 2026-08-12** when docs/plan/REBUILD-PLAN.md was retired as part of the harness
 > docs-tree migration. This file reproduces **verbatim** the plan's Phase 3 section (Slices
 > 0–6, all CLOSED) and the full chronological Phase-4 record — every dated `STATUS (…)` block
 > from 2026-07-23 through the 2026-08-11 α+β landing, plus the per-wave summary paragraphs
@@ -8,15 +8,21 @@
 > **This is a historical record, not a live document: nothing below is updated going forward.**
 >
 > Where the rest of REBUILD-PLAN.md's content went: the CURRENT-as-of-archival posture, the
-> Wave F / Wave G forward paragraphs, the Risks table, and the Phase-5 verification plan moved
-> to `docs/plan/_progress-extraction.md` (a temporary handoff for the orchestrator composing the
-> harness's `PROGRESS.md`); the `coding_kind` roadmap table moved verbatim into a new
+> Wave F / Wave G forward paragraphs, the Risks table, and the Phase-5 verification plan are
+> now in `PROGRESS.md` — the state authority — and `docs/plan/active/roadmap.md`; the
+> `coding_kind` roadmap table moved verbatim into a new
 > "Roadmaps" section at the end of `docs/ARCHITECTURE.md`. **Git has the full history of the
 > original file** if line-level provenance is ever needed — this archive is for readability,
 > not the sole copy.
 >
-> Live posture and the open register live in memory (`project-clara-rebuild-state`) and
-> `docs/PROJECTLOG.md` PART 2 — this file is cite-only, never re-grill.
+> Live posture and the open register live in `PROGRESS.md`, the state authority (ADR-0069
+> ruling 1; memory is a preferences-and-lessons cache, not a second copy of state) — this
+> file is cite-only, never re-grill.
+
+<!-- harness-links: verbatim-below — everything past this line is the source document
+     reproduced as it read at archival. Its paths name the pre-refactor tree ON PURPOSE and
+     are NOT rewritten; rewriting them would falsify the verbatim claim above. The live
+     claims in this file are the archival header, and they ARE scanned. -->
 
 ---
 
@@ -50,7 +56,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 
 
 > *[The CURRENT summary block that stood here in the source — the as-of-2026-08-11 posture
-> pin — moved to `docs/plan/_progress-extraction.md` at archival. What follows is the unbroken
+> pin — moved to `PROGRESS.md` at archival. What follows is the unbroken
 > chronological record, oldest first, exactly as the source file's own convention describes it:
 > each `STATUS (date)` block was true on its date and is superseded by the ones below it.]*
 
@@ -417,4 +423,5 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 
 *End of the archived REBUILD-PLAN.md chronology. The source document's other closing sections —
 Risks (top 8), Phase 5 (Verification plan), and the Wave F / Wave G forward paragraphs — are not
-historical and moved to `docs/plan/_progress-extraction.md` instead of being archived here.*
+historical and live on in `PROGRESS.md` and `docs/plan/active/roadmap.md` instead of being
+archived here.*

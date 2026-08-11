@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   checkHarnessLinks, extractPathReferences, resolveReference, looksLikePath, NON_PATH_ALLOWLIST,
+  findUnterminatedFence, isHopContentExempt,
 } from "./check-harness-links.mjs";
 
 let failures = 0;
@@ -255,6 +256,65 @@ testCase("resolveReference() strips a trailing anchor before resolving (docs/tar
   const r = resolveReference(root, root, "docs/target.md#a-section");
   rm(root);
   if (r.skip || !r.resolved) throw new Error(`expected the anchor to be stripped and the file to resolve, got: ${JSON.stringify(r)}`);
+});
+
+// ---------------------------------------------------------------------------
+// The two mechanisms added at the review fix batch. Each is asserted in BOTH directions —
+// a guard that cannot fail proves nothing about the case it exists for.
+// ---------------------------------------------------------------------------
+console.log("\nfail-closed on an unterminated fence:");
+
+testCase("an UNCLOSED fence is reported, and the swallowed remainder is not silently passed", () => {
+  const root = freshFixture();
+  write(root, "AGENTS.md", ["# entry", "```", "the fence below is never closed", "`docs/swallowed.md`"].join("\n"));
+  const result = checkHarnessLinks({ repoRoot: root, entryList: ["AGENTS.md"], strict: true });
+  rm(root);
+  if (result.ok) throw new Error("an unclosed fence must FAIL the file — a swallowed remainder is a silent pass");
+  if (!result.findings.some((f) => f.includes("UNTERMINATED-FENCE"))) {
+    throw new Error(`expected an UNTERMINATED-FENCE finding, got:\n${result.findings.join("\n")}`);
+  }
+});
+
+testCase("a properly CLOSED fence is not reported (the check does not fire on normal docs)", () => {
+  if (findUnterminatedFence("# t\n```\ncode\n```\ntail\n") !== null) {
+    throw new Error("a balanced fence must not be reported");
+  }
+});
+
+testCase("findUnterminatedFence() reports the opening line number", () => {
+  const at = findUnterminatedFence("# t\nprose\n```\nunclosed\n");
+  if (at !== 3) throw new Error(`expected the fence's own line 3, got ${at}`);
+});
+
+console.log("\nthe verbatim-below marker:");
+
+testCase("references BELOW the marker are not scanned; references ABOVE it still are", () => {
+  const text = [
+    "# archive",
+    "live claim: `docs/live-target.md`",
+    "<!-- harness-links: verbatim-below -->",
+    "reproduced: `docs/historical-target.md`",
+  ].join("\n");
+  const raws = extractPathReferences(text).map((r) => r.raw);
+  if (!raws.includes("docs/live-target.md")) throw new Error("a reference ABOVE the marker must still be scanned");
+  if (raws.includes("docs/historical-target.md")) throw new Error("a reference BELOW the marker must not be scanned");
+});
+
+testCase("an unterminated fence BELOW the marker is not reported (the marker bounds both checks)", () => {
+  if (findUnterminatedFence("# t\n<!-- harness-links: verbatim-below -->\n```\nreproduced, unclosed\n") !== null) {
+    throw new Error("the fence check must stop at the marker, like the reference scan does");
+  }
+});
+
+console.log("\nhop-content exemption overrides:");
+
+testCase("rebuild-plan-history.md is NOT content-exempt despite living under docs/plan/completed/", () => {
+  if (isHopContentExempt("docs/plan/completed/rebuild-plan-history.md")) {
+    throw new Error("the override must win over the completed/ prefix — this file was authored at the refactor");
+  }
+  if (!isHopContentExempt("docs/plan/completed/wave-c-contract.md")) {
+    throw new Error("a genuine archived record must still be content-exempt");
+  }
 });
 
 // ---------------------------------------------------------------------------

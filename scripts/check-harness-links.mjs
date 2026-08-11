@@ -200,6 +200,10 @@ export const HOP_CONTENT_EXEMPT = new Set([
   "docs/audit/02-salvage-manifest.md",
 ]);
 
+// An in-document boundary marker: a file declaring that everything below it is a verbatim
+// reproduction, not a live claim. See extractPathReferences().
+const VERBATIM_BELOW_RE = /harness-links:\s*verbatim-below/;
+
 const PATH_EXT_RE = /\.(md|mjs|sql|ts|json)$/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i; // http://, https://, ftp://, ...
 
@@ -213,8 +217,21 @@ export function looksLikePath(content) {
   return content.includes("/") || PATH_EXT_RE.test(content);
 }
 
+/**
+ * Files that sit UNDER an exempt prefix but are NOT exempt — the prefix rule protects records
+ * written before this tree existed, and these were written AS PART of the move, so their
+ * references describe the tree they were born into and must resolve. Overrides the prefixes.
+ */
+export const HOP_CONTENT_EXEMPT_OVERRIDES = new Set([
+  // Minted at the 2026-08-12 harness refactor to hold the retired plan's chronology. Its
+  // ARCHIVED BODY is history, but its header and closing note describe where the plan's live
+  // content went TODAY — a claim about the present tree, so it gets scanned like any live doc.
+  "docs/plan/completed/rebuild-plan-history.md",
+]);
+
 /** True if this file's CONTENT is exempt from the one-hop scan (see HOP_CONTENT_EXEMPT*). */
 export function isHopContentExempt(relFile) {
+  if (HOP_CONTENT_EXEMPT_OVERRIDES.has(relFile)) return false;
   return HOP_CONTENT_EXEMPT.has(relFile) || HOP_CONTENT_EXEMPT_PREFIXES.some((p) => relFile.startsWith(p));
 }
 
@@ -260,6 +277,12 @@ export function extractPathReferences(text) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    // An archive file may reproduce a source document VERBATIM below its own live header. The
+    // reproduced part's paths describe the tree as it was, and rewriting them would falsify the
+    // verbatim claim — the same reasoning that keeps docs/adr/0* and docs/plan/completed/ bodies
+    // exempt. A file declares that boundary itself, in its own text, and everything the marker
+    // covers is history; everything ABOVE it is a live claim and stays checked.
+    if (VERBATIM_BELOW_RE.test(line)) break;
     if (/^\s*(```|~~~)/.test(line)) {
       inFence = !inFence;
       continue; // the fence delimiter line itself is never scanned
@@ -283,6 +306,26 @@ export function extractPathReferences(text) {
     }
   }
   return refs;
+}
+
+/**
+ * The line number (1-based) of a fence that is opened and never closed, or null.
+ *
+ * extractPathReferences() skips everything inside a fenced block. An UNCLOSED fence therefore
+ * swallows the entire rest of the file — every reference below it goes unchecked and the file
+ * still reports clean. That is a fail-OPEN: the one direction a gate must never fail. A stray
+ * ``` in a doc is a typo, not a licence to stop checking, so the scan reports it as a finding.
+ *
+ * Counts only up to the verbatim marker, matching where extractPathReferences() stops.
+ */
+export function findUnterminatedFence(text) {
+  const lines = text.split(/\r?\n/);
+  let openedAt = null;
+  for (let i = 0; i < lines.length; i++) {
+    if (VERBATIM_BELOW_RE.test(lines[i])) break;
+    if (/^\s*(```|~~~)/.test(lines[i])) openedAt = openedAt === null ? i + 1 : null;
+  }
+  return openedAt;
 }
 
 function toRel(repoRoot, abs) {
@@ -363,6 +406,16 @@ function trackedFilesByBasename(repoRoot) {
   return index;
 }
 
+function reportUnterminatedFence(findings, relFile, text) {
+  const line = findUnterminatedFence(text);
+  if (line === null) return;
+  findings.push(
+    `${relFile}:${line}  UNTERMINATED-FENCE  a code fence opens here and is never closed, so every `
+    + `reference below it was skipped unchecked. Close the fence (or remove the stray one) — a `
+    + `swallowed remainder is a silent pass, which is the one way this gate must not fail.`,
+  );
+}
+
 function formatBrokenRef(relFile, ref, candidates, repoRoot) {
   const kindLabel = ref.kind === "md-link" ? "BROKEN-MD-LINK" : "BROKEN-BACKTICK-PATH";
   const tried = candidates.map((c) => toRel(repoRoot, c)).join(" or ");
@@ -426,6 +479,7 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
     const abs = join(repoRoot, relFile);
     entriesChecked++;
     const text = readFileSync(abs, "utf8");
+    reportUnterminatedFence(findings, relFile, text);
     for (const ref of extractPathReferences(text)) {
       refsChecked++;
       const { skip, resolved, candidates } = resolveReference(repoRoot, dirname(abs), ref.raw);
@@ -469,6 +523,7 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
     const abs = join(repoRoot, relFile);
     entriesChecked++;
     const text = readFileSync(abs, "utf8");
+    reportUnterminatedFence(findings, relFile, text);
     for (const ref of extractPathReferences(text)) {
       refsChecked++;
       const { skip, resolved, candidates } = resolveReference(repoRoot, dirname(abs), ref.raw);

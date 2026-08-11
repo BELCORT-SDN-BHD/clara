@@ -77,11 +77,14 @@ Registered but not scheduled. Sources of record in brackets.
 reclaim bound · the 401/403 auth-code split (Wave F) · F8 single-use door + two 0034-inherited
 items + the sweep-side landscape-refresh autonomy class (owner-ruled, future) · F9 no-unpark
 path + parked-residual acceptance · X7's five residuals (residual 5 owner-accepted;
-`in_vendor_block`/`is_vendor_name` unproven live).
+`in_vendor_block`/`is_vendor_name` unproven live). *Parked, unchanged: the sandbox floor sits
+at its exact 6/6/6/85 minimum with zero headroom; `SYNTHETIC-TEST-MY-INV-0023.pdf` is
+pre-generated and untouched if headroom is ever wanted.*
 
 **Gates on the operating runway:** Gate P (first native-MYR SST-stated supplier bill, or the
 Wave-G reset; reminders RETIRED per ADR-0068; the capitalised/mixed-purchase tax-allocation
-question rides it) · Gate S real-XML leg (first genuine e-invoice) · FINCARE RSINV-2510/02
+question rides it, and the Gate D residuals ride along) · Gate S real-XML leg (first genuine
+e-invoice) · FINCARE RSINV-2510/02
 needs a human coding decision.
 
 **Wave-F planning inputs:** FX-lite (BNM rate tables, DB-computed) · the LLM third reader
@@ -98,6 +101,24 @@ opening) · one real reducing-balance asset · first live real recurring templat
 declined) · C-c F-3 documented-as-is. **C-c F-1 is CLOSED** — the allocation-date guard was
 built in `0055` and verified at the live apply (ADR-0067); the two RPR historical scars remain
 documented history.
+
+**Slice-era standing residuals** (carried from the retired PART 2 register; none has a PR):
+- **0017's kind-blind supersede** — readers were fixed kind-honestly, but the authoritative-extraction trigger's own kind-scoped supersede is an OPEN ADJUDICATION; needs an `authoritative_extraction_id` consumer census before any migration candidate. *(C-b acceptance-night item 1)*
+- **Always-run role/membership reconciliation** — deferred: poisoning needs SUPERUSER, outside the threat model. *(Slice-2 HIGH 6/7)*
+- **Supabase non-superuser deploy-role CI** — CI applies migrations as superuser; the follow-up is a job running the full set under a Supabase-shaped non-superuser role. *(Slice-2 HIGH 8/9)*
+- **Opaque/HMAC pack tokens** — declined; a stronger structural binding stays optional. *(Slice-3 C12)*
+- **`activate_taxonomy_version(v)` operator fn + the predicate-dimension taxonomy schema** — ship when a second taxonomy version, or a workflow-period-materiality routing state, first exists. *(Slice-3 C8/C16)*
+- **Slice-4 residuals** — per-part-type field schemas → the fail-closed card catalog · audited owner compliance export + a visibility-aware trace-debug surface · per-firm chat-visibility toggle + un-share · S4-V2 engine-hook-lifetime ≥14d (the canary watch) · job-level engine liveness · firm-local-time budgets · billing-grade metering. *(ADR-017)*
+- **Slice-6 / Wave-A residuals** — task-per-ingest coding · a dedicated proactive notification-inbox surface (the one-queue is the interim) · agent-visible attribution candidates. *(ADR-019/023)*
+
+**Interview v3 residuals** (no PR owns these):
+- ⚠️ **Verify first, then carry or close:** ADR-062 (6) records PR #199 landing "bubble rollback incl. deliverValue, guard file-wide announces + closed-set call-argument reachability, structural fetch bounds in runtimeFetch" — that reads as discharging the next three bullets, but the register was never updated. **Confirm against `main` before carrying them.**
+- **The optimistic-bubble rollback** — a thrown submit leaves the optimistic answer bubble in the thread, and a retyped DIFFERENT answer at the same park never renders (the bubble id keys on park+phase).
+- **Guard follow-ups** (convergent: native review + Codex round 7; neither gating) — announces are counted only inside `ask` while arms are counted file-wide, and `ask` is not proven reachable from the registered export. Close by counting ANNOUNCE file-wide.
+- **The 409 recovery's ≤4 sequential fetches carry no AbortSignal/timeout** while `busy` disables the input. Cosmetic under normal conditions.
+- **`readClearsError` never checks runId** — unreachable while `refresh` passes its own run's state; one line if ever wanted.
+- **UNOWNED — the concurrent-submitter receipt gap** (a RUNTIME CONTRACT change, not a dashboard fix): *"a higher park index ⇒ my answer landed"* is an inference, not a receipt — any bookkeeper+ of the firm can win a CLIENT-scope hook (the route gates on role + plan binding only, whereas the FIRM branch binds ONE principal). The real fix is a server-authored per-(run, park, submission) receipt.
+- **UNOWNED — the interview e2e de-pin** — `interview-e2e.mjs` names `interview.v2.core.ts` inside a clause that says no version is named there. True today, stale at the next core bump: a dated tripwire.
 
 **Owner/legal:** the C6 checklist (DPA · disclosure text · PDPA basis) before any vendor trace
 export · the first monthly LIGHT DR sitting (to schedule) · PITR (deferred, owner-tracked) ·
