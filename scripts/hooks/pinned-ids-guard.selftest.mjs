@@ -77,7 +77,7 @@ testCase("Bash + canary via psql SELECT -> PASSES (read-shaped)", () => {
 });
 
 testCase("Bash + grep for the id -> PASSES (read-shaped)", () => {
-  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `grep -rn "${CANARY}" docs/PROJECTLOG.md` } });
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `grep -rn "${CANARY}" docs/adr/` } });
   assertPassed(r, "grep read");
 });
 
@@ -153,7 +153,7 @@ testCase("case-insensitive id match (uppercase in a curl payload) -> BLOCKED", (
 testCase("blockMessage() names the pin, the rule, and the provenance", () => {
   const pin = findPinnedId(CANARY);
   const msg = blockMessage({ pin, shape: "bash-write-shaped", tool_name: "Bash" });
-  for (const must of [CANARY, "NEVER answer", "ADR-065", "PERMANENT SAFETY PINS"]) {
+  for (const must of [CANARY, "NEVER answer", "ADR-065", "AGENTS.md hard constraint 11"]) {
     if (!msg.includes(must)) throw new Error(`blockMessage() is missing "${must}":\n${msg}`);
   }
 });
@@ -162,7 +162,7 @@ testCase("isWriteShaped() / findPinnedId() are independently sane (unit-level)",
   if (!isWriteShaped("APPROVE this")) throw new Error("expected 'APPROVE' to match case-insensitively");
   if (isWriteShaped("posting_date")) throw new Error("'posting_date' must not match 'post' (natural-language inflection)");
   if (isWriteShaped("NEVER approved")) throw new Error("'approved' must not match 'approve' (natural-language inflection)");
-  if (!isWriteShaped("approve_entry(")) throw new Error("'approve_entry(' MUST match — this is CLAUDE.md's own cited write call");
+  if (!isWriteShaped("approve_entry(")) throw new Error("'approve_entry(' MUST match — this is AGENTS.md's own cited write call");
   if (isWriteShaped("0019_insert_wiki_seed.sql")) throw new Error("'insert' glued by a LEADING underscore must not match (a filename fragment, not a verb)");
   if (findPinnedId(`prefix-${WITNESS}-suffix`)?.id !== WITNESS) throw new Error("id must match as a substring anywhere");
   if (findPinnedId("no ids here") !== null) throw new Error("expected no match");

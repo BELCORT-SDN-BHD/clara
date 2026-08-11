@@ -1,6 +1,6 @@
 // Slice-4 rig — DURABLE RUNTIME part 1: LIFECYCLE ALLOWLISTS (§6 item 1 of the
 // work order; contract §3.1–§3.5). Contract-blind: derived from
-// docs/plan/slice4-durable-runtime-contract.md v2.1, never from reading 0006.
+// docs/plan/completed/slice4-durable-runtime-contract.md v2.1, never from reading 0006.
 //
 // Covers: wake_intents consumption lifecycle (forge-proof INSERT, the single
 // pending→consumed update, DELETE/TRUNCATE blocks, the column-scoped runtime

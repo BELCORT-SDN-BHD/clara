@@ -1,7 +1,7 @@
 // Wave-B battery — migration 0019 RATCHET R1 HARDENING. FAILS (never skips) below 0019.
 //
 // PROVENANCE — READ THIS BEFORE TREATING IT LIKE ITS SIBLINGS. Every other wb-0019-*
-// lane is CONTRACT-BLIND: written from docs/plan/wave-b-migration-0019-design.md v1.0
+// lane is CONTRACT-BLIND: written from docs/plan/completed/wave-b-migration-0019-design.md v1.0
 // with the SQL unread (ADR-029 discipline), so a divergence there is a finding about the
 // build. This file is the OPPOSITE and deliberately so — it was written AFTER a
 // cross-model adversarial review of the as-built 0019 returned NOT-MERGEABLE, from the

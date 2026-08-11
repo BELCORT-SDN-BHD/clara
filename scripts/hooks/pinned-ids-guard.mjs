@@ -9,21 +9,14 @@
 // block path prints a message to stderr and exits 2; otherwise exits 0. No dependencies —
 // Node built-ins only.
 //
-// REGISTRATION. `.claude/settings.json` is gitignored in this repo (.gitignore: `.claude/*`
-// with only `!.claude/skills/` and, as of this branch, `!.claude/hooks/` excepted — settings.json
-// stays deliberately LOCAL/per-checkout, same as CLAUDE.md's own framing: skills are the tracked,
-// shared toolchain; settings/permissions are not). None of the places a prior registration could
-// live (this worktree, the main checkout's .claude/settings.local.json, the user-level
-// ~/.claude/settings.json, every sibling refactor worktree) had one at the time this was written
-// — so this ships as the FIRST registration of this hook, and it lives under scripts/hooks/ (an
-// explicitly sanctioned home per the dispatch brief), which is tracked regardless of the
-// .claude/hooks/ gitignore state either way. (.claude/hooks/ is now ALSO trackable on this
-// branch — L3 found the same `.claude/*` trap and this branch adds `!.claude/hooks/` alongside
-// `!.claude/skills/` — but the settings.json REGISTRATION step below is still necessarily local:
-// merging a hooks.PreToolUse entry into settings.json is a per-checkout act, not something a
-// git commit alone can deliver, since settings.json itself stays untracked by design.) To wire
-// this hook into a project or global settings.json, merge (never overwrite) this into
-// hooks.PreToolUse:
+// REGISTRATION. The guard is registered repo-wide in TRACKED `.claude/settings.json` — the
+// assembly pass added `!.claude/settings.json` to the `.claude/*` ignore block alongside
+// `!.claude/skills/`, `!.claude/rules/` and `!.claude/hooks/`, so every checkout inherits the
+// registration from git rather than each one having to wire it by hand. The script itself lives
+// under scripts/hooks/ (an explicitly sanctioned home per the dispatch brief), which is tracked
+// regardless of the `.claude/hooks/` ignore state. Per-checkout overrides still belong in the
+// untracked `.claude/settings.local.json`. The tracked registration is exactly this — merge
+// (never overwrite) if you are reconstructing it into some other settings file:
 //
 //   {
 //     "hooks": {

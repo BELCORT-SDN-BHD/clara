@@ -1,5 +1,5 @@
 // Migration-0018 blind battery — §1 SUBJECT-BOUND KEYED RESOLUTIONS. Written from
-// docs/plan/wave-b-migration-0018-design.md ALONE (the 0018 SQL is NEVER read —
+// docs/plan/completed/wave-b-migration-0018-design.md ALONE (the 0018 SQL is NEVER read —
 // a sibling lane writes it concurrently; these cells encode the CONTRACT, not the
 // SQL). A divergence at reconcile is a FINDING for orchestrator adjudication, never
 // a silent edit. FAILS RED below 0018 (fail0018 — the pins are not built yet).

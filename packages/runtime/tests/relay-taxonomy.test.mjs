@@ -1,7 +1,7 @@
 // Slice-3 relay — taxonomy-facing behaviour: (c) zero active pointer HALT, the
 // (X5) redrive edge cases, and (f) redrive-after-coverage + the (D4) taxonomy
 // flip. These mutate GLOBAL state (the singleton pointer) and each RESTORES it in
-// a finally. Contract: docs/plan/slice3-event-spine-contract.md §2.9 / D3 / D4.
+// a finally. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9 / D3 / D4.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

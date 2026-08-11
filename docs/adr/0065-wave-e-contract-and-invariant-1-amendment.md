@@ -3,7 +3,7 @@
 **Decision.** Wave E (periods + statements + the reporting engine) is contracted on
 fourteen rulings, grilled with the owner in Chinese (recommendations attached to every
 question, each ruling explicitly confirmed) and ratified 2026-08-08. **The contract of
-record is `docs/plan/wave-e-contract.md` — cite it, don't restate it.** Headlines:
+record is `docs/plan/active/wave-e-contract.md` — cite it, don't restate it.** Headlines:
 
 1. **Boundary (E-R1):** core + five named debts in contract; the F6–F9 batch (tasks
    #31–34) is the first strike; the settlement-corroboration door is DESIGN-ONLY (build =

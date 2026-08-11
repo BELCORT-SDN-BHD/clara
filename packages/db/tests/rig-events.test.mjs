@@ -1,6 +1,6 @@
 // Slice-3 rig — the EVENT SPINE, part 1: EMISSION + ABORT PURITY (contract §4.1/§4.2).
 // Adversarial, contract-driven suite for migration 0005, written straight from
-// docs/plan/slice3-event-spine-contract.md v2.2 — a SECOND implementation of the contract that
+// docs/plan/completed/slice3-event-spine-contract.md v2.2 — a SECOND implementation of the contract that
 // cross-checks lane-migration's schema. Where the schema diverges, the assertion
 // stays as the contract states (a suspected defect), never weakened.
 //

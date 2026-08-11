@@ -2,7 +2,7 @@
 
 Authored at the 2026-08-12 harness docs-tree refactor, when this directory split into
 `active/` (the wave currently in build) and `completed/` (every closed wave and slice, plus the
-former `REBUILD-PLAN.md`'s archived chronology). `research/` is untouched by this refactor and
+former REBUILD-PLAN.md's archived chronology). `research/` is untouched by this refactor and
 keeps its own tree of per-wave cross-model research dossiers.
 
 **Wave contracts of CLOSED waves are historical records of record: never re-grill them, cite
@@ -134,12 +134,11 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 
 | File | Status | Hook |
 |---|---|---|
-| `rebuild-plan-history.md` | historical | The former `REBUILD-PLAN.md`'s verbatim Phase-3 + Phase-4 dated STATUS chronology, archived at this refactor. |
+| `rebuild-plan-history.md` | historical | The former REBUILD-PLAN.md's verbatim Phase-3 + Phase-4 dated STATUS chronology, archived at this refactor. |
 
 ## `docs/plan/` root
 
 | File | Status | Hook |
 |---|---|---|
-| `_progress-extraction.md` | live (temporary) | Handoff material — CURRENT posture, Next, Backlog (Wave F/G, Risks, Phase 5), Named build debts — for the orchestrator composing `PROGRESS.md`. Delete once folded in. |
 | `research/` | reference | Supporting cross-model research dossiers, organized per wave/slice. Not restructured in this pass — cite the specific dossier inside it, not this line. |
-| `REBUILD-PLAN.md` | **superseded (deleted)** | Retired at this refactor. Its dated chronology → `completed/rebuild-plan-history.md`; its `coding_kind` roadmap table → `../ARCHITECTURE.md` ("Roadmaps" section); its CURRENT posture + Wave F/G + Risks + Phase 5 → `_progress-extraction.md`. |
+| REBUILD-PLAN.md | **superseded (deleted)** | Retired at this refactor. Its dated chronology → `completed/rebuild-plan-history.md`; its `coding_kind` roadmap table → `../ARCHITECTURE.md` ("Roadmaps" section); its CURRENT posture + Wave F/G + Risks + Phase 5 → `PROGRESS.md`. |

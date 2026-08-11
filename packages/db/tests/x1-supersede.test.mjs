@@ -1,6 +1,6 @@
 // Extraction slice X1 (migration 0022) — what happens when a re-extraction SETTLES.
 //
-// The contract (docs/plan/extraction-slice-contract.md §2, X1) claims settlement needs
+// The contract (docs/plan/completed/extraction-slice-contract.md §2, X1) claims settlement needs
 // nothing new: `persist_invoice_facts` already inserts the extraction, 0017's
 // `t_document_extractions_authority_0017` trigger already supersedes the prior row and
 // repoints `documents.authoritative_extraction_id`, and 0016's facts_rotated block already

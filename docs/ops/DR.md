@@ -5,7 +5,7 @@ GAP1-7 (liveness-only, no readiness). Status: Slice-1 ops floor, 2026-07-17.*
 
 The shared Supabase Postgres is Clara's **single source of truth** and a
 **7-year statutory record** (ITA s.82/82A, CA2016 s.245 — retention anchors at
-period-end + filing date, `docs/architecture/ARCHITECTURE.md` §7a). Losing it is
+period-end + filing date, `docs/ARCHITECTURE.md` §7a). Losing it is
 unrecoverable in a way losing the runtime or dashboard is not. This document is
 the binding DR contract.
 
@@ -97,8 +97,8 @@ implemented directly so it runs anywhere with a Postgres client):
 - `packages/db/scripts/restore.mjs` — `psql` apply of a dump into a target.
 - `packages/db/scripts/dr-selftest.mjs` — a full **dump → drop → restore →
   verify** round-trip in a throwaway `dr_selftest` schema.
-- `packages/db/deploy/roles-bootstrap.sql` · `scripts/restore-full.mjs` ·
-  `scripts/dr-verify.mjs` — the **full-profile** DR path (recreate roles → ordered
+- `packages/db/deploy/roles-bootstrap.sql` · `packages/db/scripts/restore-full.mjs` ·
+  `packages/db/scripts/dr-verify.mjs` — the **full-profile** DR path (recreate roles → ordered
   restore → verification battery). See **`docs/ops/DR-full-drill.md`**.
 
 ### Two backup profiles (be honest about what each protects)
@@ -117,7 +117,7 @@ implemented directly so it runs anywhere with a Postgres client):
   The two-lane security model *is* the GRANT/REVOKE matrix + `clara_fn_owner` object
   ownership — a `SECURITY DEFINER` writer runs as its owner, so a `--no-owner` restore
   is a **privilege-escalation**, not a cosmetic gap. Roles are cluster-level (not in a
-  `pg_dump`) and recreated by `deploy/roles-bootstrap.sql`; the globals dump beside the
+  `pg_dump`) and recreated by `packages/db/deploy/roles-bootstrap.sql`; the globals dump beside the
   backup is an **evidence/diff** artifact only. Scheduled DR **must** use the full
   profile. Full runbook + tooling + off-site scheduling design: `docs/ops/DR-full-drill.md`.
 
@@ -188,7 +188,7 @@ you have never restored is not a backup.
 > the `pg_dump`/`psql` tooling round-trips, not that a real recovery is complete.
 > The **full-profile tooling is now built and rehearsed** (hardening interlude):
 > `db:backup:full` (owners + privileges + the four authoritative schemas incl.
-> `workflow_drizzle`), `deploy/roles-bootstrap.sql`, `db:restore:full`, and the
+> `workflow_drizzle`), `packages/db/deploy/roles-bootstrap.sql`, `db:restore:full`, and the
 > `db:dr:verify` battery — see **`docs/ops/DR-full-drill.md`**. It was rehearsed
 > end-to-end on a local `postgres` throwaway, CI runs the whole
 > backup→restore→verify chain on an ephemeral pair (the "DR full-profile round-trip" CI step), and the
@@ -254,7 +254,7 @@ runbook by hand). The post-restore ceremonies
 (`roles-bootstrap` → full restore → `storage-provision` + bucket + bytes →
 `write-login-ceremony` → **`acl-baseline` re-apply** → engine-sanity → `dr-verify`)
 are the runbook in `docs/ops/DR-full-drill.md` §3. Note the **ACL baseline is not
-carried by any dump** — re-applying `deploy/acl-baseline.sql` is a mandatory
+carried by any dump** — re-applying `packages/db/deploy/acl-baseline.sql` is a mandatory
 post-restore step (a restore recreates `public` with its default PUBLIC USAGE, which
 would re-open the confined agent/wake lanes' reach).
 
@@ -336,7 +336,7 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
 4. **Wire the alerting** in §7 — the dead-man's-switch backup-freshness alarm is
    **live** (2026-07-22, §9); the external `/ready` uptime checks remain open.
 5. **Full-profile DR — DONE.** `db:backup:full` (owners+privileges, four schemas),
-   `deploy/roles-bootstrap.sql`, `db:restore:full`, and the `db:dr:verify` battery
+   `packages/db/deploy/roles-bootstrap.sql`, `db:restore:full`, and the `db:dr:verify` battery
    are built, rehearsed, and CI-guarded (the "DR full-profile round-trip" CI step);
    the **fresh-Supabase-project drill EXECUTED AND PASSED 2026-07-20** (**177/0
    STRICT**, ADR-020 — §5b; real `auth`/`storage` recovery included). The R2
@@ -365,7 +365,7 @@ ping (`/fail` on error).
 |---|---|---|
 | Session-pooler DSN (**port 5432**) | reads all schemas + ownership/ACLs + `auth` PII ≈ project admin | `fly secrets` (`DATABASE_URL`) |
 | Supabase `service_role` key | account-wide Storage bypass (firm-docs LIST/READ) | `fly secrets` **`CLARA_BACKUP_STORAGE_SERVICE_KEY_B64`** (base64-encoded — Fly file-secrets require it); materialized at `/run/secrets/clara_storage_service_key` by machine-run `--file-secret`; the image bakes `CLARA_BACKUP_STORAGE_KEY_FILE` to that path. Neither is ever logged; note the machine ALSO receives every app secret as env, so the base64 form rides in process env — the code reads only the file |
-| R2 API token | write to the DR bucket | `fly secrets` **`RCLONE_CONFIG_R2_ACCESS_KEY_ID` / `RCLONE_CONFIG_R2_SECRET_ACCESS_KEY` / `RCLONE_CONFIG_R2_ENDPOINT`** (rclone env-remote config — never argv; `deploy/rclone.conf.example` remains the LOCAL-rehearsal form) |
+| R2 API token | write to the DR bucket | `fly secrets` **`RCLONE_CONFIG_R2_ACCESS_KEY_ID` / `RCLONE_CONFIG_R2_SECRET_ACCESS_KEY` / `RCLONE_CONFIG_R2_ENDPOINT`** (rclone env-remote config — never argv; `packages/backup/deploy/rclone.conf.example` remains the LOCAL-rehearsal form) |
 | age **recipient (public)** key | none (encrypt-only) | committed: `packages/backup/deploy/age-recipient.txt` |
 | age **identity (private)** key | decrypts the whole bundle (books + `auth` PII) | **owner custody, off-repo AND off-R2** — laptop `~/.clara-age-identity.*` + an offline backup; NEVER in the bucket |
 | healthchecks.io ping URL | low (UUID) | `fly secrets` (`CLARA_BACKUP_PING_URL`) |
@@ -388,8 +388,8 @@ ping (`/fail` on error).
 
 1. Create the **R2 bucket** + a **scoped R2 API token** (Object Read&Write on the ONE DR
    bucket). Its access-key pair + account endpoint become the `RCLONE_CONFIG_R2_*` Fly
-   secrets in step 4 (for a LOCAL rehearsal use `deploy/rclone.conf.example` instead).
-2. `age-keygen` → paste the `age1…` **recipient** into `deploy/age-recipient.txt` (replaces
+   secrets in step 4 (for a LOCAL rehearsal use `packages/backup/deploy/rclone.conf.example` instead).
+2. `age-keygen` → paste the `age1…` **recipient** into `packages/backup/deploy/age-recipient.txt` (replaces
    the placeholder — the job **refuses to run** until it is real); custody the **identity**
    key off-repo/off-R2 (+ offline backup).
 3. A **healthchecks.io** check (period 1 day, **26h grace**) → `tools@belcort.com`; its
@@ -452,7 +452,7 @@ ping (`/fail` on error).
    checksum-verified current upstream rclone release binary (1.74.4 at pin time;
    bump = the two ARG lines). Re-verify with a supervised run at the next image
    rebuild + deploy.
-7. *(Optional corroboration)* deploy the freshness Worker (`deploy/cf-worker/`).
+7. *(Optional corroboration)* deploy the freshness Worker (`packages/backup/deploy/cf-worker/`).
 
 ### Steps the classifier FORCES owner-run (the agent may only scaffold/dry-run)
 
@@ -483,7 +483,7 @@ balanced both sides · migration ledger checksum-exact (44 files, frontier 0045)
 `approve_entry` correctly 42501s under `clara_agent_ro` on the restored copy.** All 109 raw
 STRICT fails root-caused to artifacts, none a restore defect — 101 were session-timezone
 hashing (PROVEN by re-hashing all 101 tables under `set timezone='UTC'`: 101/101 exact).
-Tooling follow-ups registered in PROJECTLOG PART 2: dr-verify should set `timezone='UTC'`
+Tooling follow-ups registered in `PROGRESS.md`: dr-verify should set `timezone='UTC'`
 both sides before content-md5 · the STRICT canary probe hardcodes "pending" (the canary is
 now EXPIRED on both sides — observed read-only, never answered) · §3's worked-example
 `CLARA_DR_AP_CLIENT_NAME_ILIKE='RPR%'` predates the current client roster.

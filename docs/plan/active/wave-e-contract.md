@@ -31,7 +31,7 @@ Five candidate classes were put to the owner; ruled:
 
 ## E-R2 — Close gates: the three-drawer model
 
-Reconciles PRD journey-7's "pre-close gates" (rated "structural" by REBUILD-PLAN's Wave-E
+Reconciles PRD journey-7's "pre-close gates" (rated "structural" by the rebuild plan's Wave-E
 line) with ARCHITECTURE §0 "close-readiness is visibility-first" via fail-closed +
 attested human override:
 
@@ -197,7 +197,7 @@ filename/cover/metadata.
 |---|---|---|
 | Full synthetic battery | Sandbox (RPA) | close → reopen → guard activation → abuse drills |
 | Closing stock (WD-R11) | **Sandbox synthetic goods-trader fixture ONLY** | no real goods-trading client exists; **NAMED DEBT:** the first real goods-trading client's onboarding carries the real acceptance |
-| First REAL close | **BEE FY2025** | the drawer-2 depreciation gate's first real firing pulls the 11-period catch-up approval through (draft `3c05ab82`); **the close-time FA continuity roll** (FY2025 closing NBV → FY2026 opening; the rolling posture's task #72) fires for real in the same act — this does **NOT** discharge WD-R14's *opening* carry-down deferral, which still needs a client that owned assets at opening (PROJECTLOG PART 2's measured reason) |
+| First REAL close | **BEE FY2025** | the drawer-2 depreciation gate's first real firing pulls the 11-period catch-up approval through (draft `3c05ab82`); **the close-time FA continuity roll** (FY2025 closing NBV → FY2026 opening; the rolling posture's task #72) fires for real in the same act — this does **NOT** discharge WD-R14's *opening* carry-down deferral, which still needs a client that owned assets at opening (the backlog's measured reason, `PROGRESS.md`) |
 | MPERS company-format FS, real corpus | **RPR historical FY** | Sdn Bhd, 9 real months to the sen; strike-off companies legitimately prepare historical accounts |
 | Snapshot + staleness witness | **RS** | 19 approved real invoices; snapshot a month, post into it, watch the label |
 | Sole-prop FS format | BEE | convention-labelled, never MPERS-claimed (E-R14) |

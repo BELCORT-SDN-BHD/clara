@@ -4,7 +4,7 @@ packages:
   - apps/*
 # NOTE: spike/ is intentionally NOT a workspace member. It is the frozen
 # Slice-0 runtime spike (its own lockfile + node_modules) and must not be
-# pulled into the monorepo install graph. See docs/architecture/ARCHITECTURE.md
+# pulled into the monorepo install graph. See docs/ARCHITECTURE.md
 # Appendix A and spike/README.md.
 #
 # NOTE: packages/backup (the clara-backup off-site DR app, Wave A2 §8 / WA2-R6)

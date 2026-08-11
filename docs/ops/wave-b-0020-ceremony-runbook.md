@@ -4,7 +4,7 @@
 confirms in-session. Every precondition and probe is listed so that confirmation is
 informed.
 
-> **Authority:** `docs/plan/wave-b-migration-0020-design.md` v1.6 §10.3 (amendments A1–A8,
+> **Authority:** `docs/plan/completed/wave-b-migration-0020-design.md` v1.6 §10.3 (amendments A1–A8,
 > ratchet R1–R5) · **Artifacts:** `packages/db/deploy/wave-b-0020-a7-probe.sql` (read-only),
 > `packages/db/deploy/wave-b-0020-a7-preflight.sql` (audited correction) ·
 > **Precedent:** `docs/ops/wave-b-0019-ceremony-runbook.md` (ADR-039), the WB-R18 ceremony.

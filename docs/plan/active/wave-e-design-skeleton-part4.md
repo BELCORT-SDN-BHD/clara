@@ -225,7 +225,7 @@ touches it only through E-R4's law, absolute on both sides: a model may propose 
 numeral enters a durable report unless a versioned deterministic evaluator **originates** it from
 DB-owned inputs.
 
-**Tax computation is NOT in Wave E.** PRD §8's exclusion is `docs/prd/PRD.md:183` — *"Model-computed
+**Tax computation is NOT in Wave E.** PRD §8's exclusion is `docs/product/PRD.md` §8, the model-computed row — *"Model-computed
 numbers in any artifact | Every figure from DB functions (invariant 1)"* — which is the row the E-R4
 argument actually rests on; `:184` is the separate tax-gating row. Nothing in the FS-pack or reporting
 scope folds a draft tax computation in by another name.
@@ -245,7 +245,7 @@ that flips item 2's wording.)*
    "tests only" to "tests + one guard + the door". Both independent round-1 review lanes reached this
    answer separately.
 2. **The E-R11 factory default — CONFIRMED (`owner` only). RULED BY THE OWNER 2026-08-09** (the
-   five-question grill at the campaign-design close, session 43d6f6cf; recorded in PROJECTLOG PART 2
+   five-question grill at the campaign-design close, session 43d6f6cf; recorded in the `PROGRESS.md` backlog
    and the handoff; this truing rides lane α's PR per the ruling). Keys ② and ③ default to the
    `owner` role alone; partners/admins join by **explicit audited grant** (`grant_firm_capability` —
    the firm-configurable list ships with lane β; a polished settings UI is Wave G). Reasoning of

@@ -1,6 +1,6 @@
 // Slice-3 relay — draining behaviour: (e) bootstrap, (d) NOTIFY hygiene, and the
 // (X1) fairness/anti-starvation guarantee. Contract:
-// docs/plan/slice3-event-spine-contract.md §2.9.
+// docs/plan/completed/slice3-event-spine-contract.md §2.9.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

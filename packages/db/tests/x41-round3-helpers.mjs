@@ -7,7 +7,7 @@
 // imports this file.
 //
 // CONTRACT-BLIND, same discipline as the rest of the battery (see the
-// x41-fa-fixtures.mjs header): authored from docs/plan/wave-d-a-fa-design.md v2.1
+// x41-fa-fixtures.mjs header): authored from docs/plan/completed/wave-d-a-fa-design.md v2.1
 // + the round-3 adjudicated fix ledger (F1..F10 + smalls) ONLY. This lane never
 // reads 0041's SQL, the fix diffs, or the harvested live bodies.
 //

@@ -1,6 +1,6 @@
 # Clara — Target Architecture (Rebuild v1)
 
-*How the PRD becomes real. This is the technical source of truth for the greenfield build. It fixes the eleven verified failure patterns (`docs/audit/00-GATE-1-README.md`) and realises the Gate-1 rulings (`docs/audit/04-gate1-decisions.md`). The Phase-2 research it draws on is in `docs/phase2-research/`. Status: Gate-2 ratified 2026-07-17 (see `docs/PROJECTLOG.md`).*
+*How the PRD becomes real. This is the technical source of truth for the greenfield build. It fixes the eleven verified failure patterns (`docs/audit/00-GATE-1-README.md`) and realises the Gate-1 rulings (`docs/audit/04-gate1-decisions.md`). The Phase-2 research it draws on is in `docs/phase2-research/`. Status: Gate-2 ratified 2026-07-17 (see `docs/adr/`).*
 
 ---
 
@@ -33,9 +33,9 @@ Postgres (fresh Supabase project)  ── THE SINGLE SOURCE OF TRUTH
 Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks/checkpoints; the ONLY holder of service credentials
 ```
 
-- **Fresh Supabase project** + the **`packages/db` migration rig** for day-to-day dev — migrations are validated on a throwaway Postgres (CI's `postgres:17` service, or a scratch schema), never hand-applied to a live project. *(A local Supabase CLI stack was the original intent; it needs Docker, which is unavailable here, so the rig is the as-built target — see PROJECTLOG PART 2.)* Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
-- Isolation is **RLS on `firm_id`**, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's PROJECTLOG), which is PORT. What changes is everything *above* the isolation boundary.
-- **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; the dashboard is on **Cloudflare Pages** at `app.clarabook.com` (Vercel dropped, ADR-024); the DB is **Supabase**. The runtime host is ratified in PROJECTLOG ADR-014 (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
+- **Fresh Supabase project** + the **`packages/db` migration rig** for day-to-day dev — migrations are validated on a throwaway Postgres (CI's `postgres:17` service, or a scratch schema), never hand-applied to a live project. *(A local Supabase CLI stack was the original intent; it needs Docker, which is unavailable here, so the rig is the as-built target — see `PROGRESS.md`.)* Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
+- Isolation is **RLS on `firm_id`**, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's decision log), which is PORT. What changes is everything *above* the isolation boundary.
+- **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; the dashboard is on **Cloudflare Pages** at `app.clarabook.com` (Vercel dropped, ADR-024); the DB is **Supabase**. The runtime host is ratified in `docs/adr/` (ADR-014) (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
 
 ---
 
@@ -133,7 +133,7 @@ Integration shape (detail in the research file §6): engine schemas (`workflow_*
 2. **Resumable HITL** — clarification and approval interruptions are durable, first-class objects correlated to a `clarify_id` and bound to the asking user (fixes GAP4-3); a run pauses at zero compute and resumes on the answer, days later, without double-posting.
 3. **Typed tools + structured outputs + per-tool guardrails**, parallel tool calls.
 4. **Durable-workflow checkpointing + idempotency + error recovery/retry** — completed steps do not re-run on replay; re-drive treats an already-approved entry as success (fixes the bulk-approve miscount).
-5. **Tracing (Gate-1 C6, governed by PROJECTLOG ADR-011)** — the runtime writes full-content traces to **Clara-controlled Postgres storage**; the OTel path *can* export full-content to a DPA-covered vendor from the same code, but that export ships **OFF** and is enabled later only **minimized-first** and only after the DPA + **MIA client authorization** + PDPA-cross-border gate (ADR-011). The DB-backed run history is the durable audit record regardless.
+5. **Tracing (Gate-1 C6, governed by `docs/adr/` ADR-011)** — the runtime writes full-content traces to **Clara-controlled Postgres storage**; the OTel path *can* export full-content to a DPA-covered vendor from the same code, but that export ships **OFF** and is enabled later only **minimized-first** and only after the DPA + **MIA client authorization** + PDPA-cross-border gate (ADR-011). The DB-backed run history is the durable audit record regardless.
 6. **Structural post-workflow sync** — derived outcomes (notifications, KB/wiki updates, recon hints, export receipts) are written by the outbox/projection layer or asserted at run settle, **not** left to the model remembering (fixes Grt-13).
 7. **SSE streaming** driven independently of whether a client is attached — a run started by any surface (chat rail, documents tab) **executes** (fixes D-1/E-1: never toast success on a fire-and-forget POST).
 8. **MCP consumption, skills/progressive-disclosure, multi-agent/background jobs** (bulk approve, reconciliation sweeps) as durable jobs.
@@ -242,7 +242,7 @@ Remaining before final Slice-0 sign-off: the 48-hour park check-in (armed 2026-0
 
 ## Roadmaps (carried from REBUILD-PLAN at the 2026-08-12 harness refactor)
 
-*The section below is reproduced verbatim from the former `docs/plan/REBUILD-PLAN.md` (deleted
+*The section below is reproduced verbatim from the former docs/plan/REBUILD-PLAN.md (deleted
 at the harness docs-tree refactor; its dated STATUS chronology is now the historical record at
 `docs/plan/completed/rebuild-plan-history.md`). It moved here, rather than into that historical
 archive, because it is a live routing table — new `document_kind`/`coding_kind` work still reads
@@ -259,7 +259,7 @@ it as the authority for where an unbuilt kind's destination is decided.*
 > absence is what produced the receipt-routing seam: ADR-ruled receipt auto-routing (0025) sends
 > every receipt into the paid OCR lane, and those receipts are now read and then strand, because a
 > counter purchase has no payable credit and so cannot be a `supplier_bill`. **This table closes
-> that gap.** Rulings marked **[R]** are ratified in `docs/plan/wave-c-contract.md`; **[P]** are
+> that gap.** Rulings marked **[R]** are ratified in `docs/plan/completed/wave-c-contract.md`; **[P]** are
 > proposed and await the owner.
 
 **The law this table encodes:** `coding_kind` means *"which control account this entry touches, and

@@ -20,7 +20,7 @@
 // ceiling; `node --test tests/` discovers this file automatically.
 //
 // CONTRACT-BLIND (see the x42-adj-core.mjs header): authored from
-// docs/plan/wave-d-b-design.md §2.1/§2.3/§2.6 + -abi.md §A/§C/§F ONLY.
+// docs/plan/completed/wave-d-b-design.md §2.1/§2.3/§2.6 + -abi.md §A/§C/§F ONLY.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

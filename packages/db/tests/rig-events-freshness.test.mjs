@@ -1,5 +1,5 @@
 // Slice-3 rig — the EVENT SPINE, part 2: IDEMPOTENT REPLAY + the FRESHNESS GATE
-// (§4.3/§4.4 of docs/plan/slice3-event-spine-contract.md v2.2; suite map in rig-events.test.mjs).
+// (§4.3/§4.4 of docs/plan/completed/slice3-event-spine-contract.md v2.2; suite map in rig-events.test.mjs).
 // Every negative asserts an EXACT SQLSTATE; a divergence from the contract stays as
 // the contract states.
 

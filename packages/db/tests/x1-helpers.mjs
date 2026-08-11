@@ -3,7 +3,7 @@
 // core so an X1 test file imports ONE leaf, and adds the 0022 verb wrappers plus the two
 // fact-shape fixtures the tie cells need.
 //
-// Authority: docs/plan/extraction-slice-contract.md (v1.0, ADR-047). Kept OUT of
+// Authority: docs/plan/completed/extraction-slice-contract.md (v1.0, ADR-047). Kept OUT of
 // a21-helpers.mjs deliberately — that module is the contract-blind 0016 lane's core and
 // carries a header saying so, and it is already at the repo's 500-line cap.
 //
@@ -210,7 +210,7 @@ export async function requireRecoveryDoor() {
  *  TERMINALLY FAILED — the F6 / LUMINOUS shape, reproduced through the REAL writers
  *  (enqueue -> claim -> fail_invoice_facts), never by hand-writing a task row.
  *
- *  The live exhibit this mirrors, quoted: docs/plan/wave-7a-acceptance-h1.md:542-545 —
+ *  The live exhibit this mirrors, quoted: docs/plan/completed/wave-7a-acceptance-h1.md:542-545 —
  *  "invoice_facts FAILED on its only-ever attempt: `document_processing_tasks`
  *  status='failed', error_code='internal', attempt_count=1 (OCR on the SAME document
  *  completed fine)". `seedCitedDocument` supplies that same completed-OCR half (it seeds a

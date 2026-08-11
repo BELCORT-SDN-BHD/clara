@@ -1,6 +1,6 @@
 // Wave-A2 rig — the LANE-keyed egress gate + the lane↔engine DB CHECK (contract
 // §3.4 + probes P1/P9). CONTRACT-BLIND: written straight from
-// docs/plan/wave-a2-ar-myinvois-contract.md v1.0 §3.4 + migrations 0007/0009 (the
+// docs/plan/completed/wave-a2-ar-myinvois-contract.md v1.0 §3.4 + migrations 0007/0009 (the
 // as-built task DDL) — NEVER from 0015_ar_myinvois_rules.sql or its companion. The
 // battery encodes the SPEC; a divergence between an expectation here and observed
 // 0015 behavior is a FINDING for adjudication, never a silent test edit.

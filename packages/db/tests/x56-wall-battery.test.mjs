@@ -1,6 +1,6 @@
 // 0056 (Wave E lane beta, the close model) rig -- PART 1: the WALL BATTERY (matrix
 // A19a/A19b/A19d) and E-R6 activation (A6a-A6e). Priority order per the work order:
-// wall battery first, E-R6 second. Section A of docs/plan/wave-e-acceptance-matrix.md.
+// wall battery first, E-R6 second. Section A of docs/plan/active/wave-e-acceptance-matrix.md.
 //
 // CONTRACT-BLIND on 0056 itself: every structural claim is probed off the LIVE
 // CATALOG (pg_trigger / pg_proc.prosrc / pg_get_functiondef), never by reading

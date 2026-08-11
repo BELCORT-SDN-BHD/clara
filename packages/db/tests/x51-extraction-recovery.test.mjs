@@ -2,7 +2,7 @@
 // the ADR-062 registration, ONE item per wave-e-contract E-R1).
 //
 // THE GAP THESE CELLS CLOSE, in the shape it was actually measured. A first invoice_facts
-// attempt that dies terminally had NO recovery path: docs/plan/wave-7a-acceptance-h1.md:
+// attempt that dies terminally had NO recovery path: docs/plan/completed/wave-7a-acceptance-h1.md:
 // 540-564 records all four doors closed on one real document (LUMINOUS, c597a24b) —
 // request_reextraction refused `CLR16 no completed extraction to re-extract`, a
 // content-addressed re-ingest of identical bytes ADOPTED the same document_id and spawned no

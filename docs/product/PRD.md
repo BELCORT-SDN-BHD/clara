@@ -125,9 +125,9 @@ Naming is scoping, not build: each row is re-openable at its wave's grilling.
 
 ### 5a. The OS surface (the agentic super-UI contract)
 
-§0 promises a **stateful conversational super-UI over the entire product**, not accounting software with a chat panel bolted on. This section states what that obliges the surface to deliver, written as promises to the accountant who uses it. The design realisation — layout, motion, tokens, the card catalog, and the build-time gates that enforce them — is `docs/design/` (`DIRECTION.md` today; the full set populates at Wave G, which owns closing this surface).
+§0 promises a **stateful conversational super-UI over the entire product**, not accounting software with a chat panel bolted on. This section states what that obliges the surface to deliver, written as promises to the accountant who uses it. The design realisation — layout, motion, tokens, the card catalog, and the build-time gates that enforce them — is `docs/design/` (`PRODUCT_DESIGN.md` today; the full set populates at Wave G, which owns closing this surface).
 
-**The acceptance test that governs every surface** (adopted, `docs/design/DIRECTION.md` §1): *remove the chat rail — the workbench must still show what Clara did, why, with what evidence, and offer every Clara action as an object-level verb.* A surface that only works when you talk to it has failed.
+**The acceptance test that governs every surface** (adopted, `docs/design/PRODUCT_DESIGN.md` §1): *remove the chat rail — the workbench must still show what Clara did, why, with what evidence, and offer every Clara action as an object-level verb.* A surface that only works when you talk to it has failed.
 
 - **One workspace, two panes.** The accountant works in a client workspace — journals, documents, subledgers, registers, knowledge — with Clara docked alongside as a rail, never a modal. The rail is where she speaks; the workbench is where the work lives. Neither is a view of the other.
 - **Clara answers in objects, not walls of text.** Every reply is a typed card — clarify, plan, choice, analysis, document, tool result, approval — that is inspectable, actionable, and re-derives its authoritative status whenever it is re-opened, so a card read tomorrow tells the truth as of tomorrow rather than as of when it was written.

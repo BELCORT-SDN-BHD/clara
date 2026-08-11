@@ -1,4 +1,4 @@
-// Bank-statement GRAMMAR (Wave C-b — `docs/plan/wave-c-b-bank-design.md` §3, §4.2, §4.3).
+// Bank-statement GRAMMAR (Wave C-b — `docs/plan/completed/wave-c-b-bank-design.md` §3, §4.2, §4.3).
 //
 // WHY A GRAMMAR MODULE. Three independent producers have to agree on what a printed
 // Malaysian bank statement MEANS before any of them may claim corroboration: reader-1

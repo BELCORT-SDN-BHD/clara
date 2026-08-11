@@ -1,6 +1,6 @@
 // Wave-A rig — daily-loop shared helper CORE (NOT a test file: the name does not
 // end in `.test.mjs`, so `node --test` ignores it). Written by the CONTRACT-BLIND
-// test lane (Lane B) straight from `docs/plan/wave-a-daily-loop-contract.md` v1.1 +
+// test lane (Lane B) straight from `docs/plan/completed/wave-a-daily-loop-contract.md` v1.1 +
 // `wave-a-migration-0011-design.md` v1.1 (companion) + `.tmp/wave-a-build/
 // INTERFACE-PINS.md` v1 + migrations 0001–0010 + the existing rig harness. It NEVER
 // reads `0011_daily_loop.sql` (or any Lane A/C/D/E source). The battery encodes the

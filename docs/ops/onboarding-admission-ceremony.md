@@ -59,7 +59,7 @@ governed RPCs (PostgREST authenticated lane), exactly as the DB battery probes t
 ## References
 
 - Ruling record: `docs/plan/research/wave-b/ruling-batch-adr-037.md` (WB-R22).
-- Contract annotation: `docs/plan/wave-b-contract.md` §6.
+- Contract annotation: `docs/plan/completed/wave-b-contract.md` §6.
 - The probed lawful flow: `packages/db/tests/wave-b/wb-r2.test.mjs` ([R2-F4]).
 - Governed verbs: `clara.add_member` / `clara.remove_member`
   (`packages/db/migrations/0004_governed_fns.sql:400,457`, patched 0005).

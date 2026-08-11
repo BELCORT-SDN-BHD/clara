@@ -9,7 +9,7 @@ sign/retire **+ the adjustment-template panel**). Wave C added `/bank`
 (statement ingest, matching, reconciliation), `/aging` and `/opening`; Wave D added
 `/assets` (the FA register) and `/advances` (the staff-advance register). Also live:
 `/accounts`, `/clients`, `/onboarding`, `/seeding`.
-*(Route list verified against `apps/dashboard/app/` on 2026-08-06.)* Design law: `docs/design/DIRECTION.md`. Governance reads/writes go
+*(Route list verified against `apps/dashboard/app/` on 2026-08-06.)* Design law: `docs/design/PRODUCT_DESIGN.md`. Governance reads/writes go
 **browser → PostgREST** on the session JWT (typed CLR refusals render verbatim);
 only the runtime `/api/*` transits the same-origin Pages Function proxy.
 

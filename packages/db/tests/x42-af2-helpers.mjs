@@ -6,9 +6,9 @@
 // because the repo's 500-line-per-file gate is enforced).
 //
 // CONTRACT-BLIND, the x37/x38/x40/x41 discipline. Written straight from
-// `docs/plan/wave-d-b-design.md` §4/§5/§7 + `docs/plan/wave-d-b-design-abi.md`
+// `docs/plan/completed/wave-d-b-design.md` §4/§5/§7 + `docs/plan/completed/wave-d-b-design-abi.md`
 // (§A signatures, §B flags keys, §E op keys, §F refusal tokens, §G event
-// payloads) + `docs/plan/wave-d-contract.md` §4 — plus the LIVE 0037/0038/0040
+// payloads) + `docs/plan/completed/wave-d-contract.md` §4 — plus the LIVE 0037/0038/0040
 // bank world this lane builds its fixtures through. It NEVER reads a 0042
 // migration file or any build-0042 section file. Every verb is called by its
 // PINNED name with NAMED args; every refusal is asserted by its pinned DETAIL

@@ -1,5 +1,5 @@
 // The currency defect fix — the READER side. Pure unit tests, no DB.
-// (currency-defect design part 1 §3/§8; ADR pending — see docs/plan/currency-defect-design.md
+// (currency-defect design part 1 §3/§8; ADR pending — see docs/plan/completed/currency-defect-design.md
 // and -part2.md, ratified 2026-07-28.)
 //
 // Every pinned line below is COPIED VERBATIM from a real Azure prebuilt-invoice OCR capture,

@@ -1,6 +1,6 @@
 // §7-A rig — the CONTRACT-BLIND battery for migration 0046 (the unattended sales
-// drafter). Written straight from `docs/plan/wave-7a-contract.md` (7A-R1..R12) +
-// `docs/plan/wave-7a-design-skeleton.md` §2b/§2c/§2d/§4.1 + `packages/db/README.md`
+// drafter). Written straight from `docs/plan/completed/wave-7a-contract.md` (7A-R1..R12) +
+// `docs/plan/completed/wave-7a-design-skeleton.md` §2b/§2c/§2d/§4.1 + `packages/db/README.md`
 // + the existing rig idioms (a21-helpers.mjs and its chain). It NEVER reads
 // `0046_wave_7a_sales_lane.sql`, `x46-wave-7a-sales-lane.test.mjs`, or any review
 // report. Every function name, signature, and behavior asserted below was learned

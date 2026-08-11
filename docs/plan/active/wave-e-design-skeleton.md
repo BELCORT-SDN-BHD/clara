@@ -1,6 +1,6 @@
 # WAVE E — CAMPAIGN FRAME · THE E-a CLOSE MODEL · THE E-R12 TRIO · **DESIGN SKELETON v2**
 
-> **STATUS: DESIGN, NOT LAW.** `docs/plan/wave-e-contract.md` (E-R1..E-R14, ADR-065) is the law; on
+> **STATUS: DESIGN, NOT LAW.** `docs/plan/active/wave-e-contract.md` (E-R1..E-R14, ADR-065) is the law; on
 > any conflict the contract wins. Rulings are **cited** (`E-R2`), never restated at length.
 >
 > **THE PACKET IS SEVEN FILES — cite by filename, never duplicate.** This document carries

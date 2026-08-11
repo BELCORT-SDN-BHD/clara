@@ -1,7 +1,7 @@
 # WAVE E · E-b + E-c DESIGN — THE REPORTING ENGINE, THE FS PACK, AND THE AUTHORING LANE
 
 > **STATUS: design draft, ROUND-1 REVIEW APPLIED (2026-08-09).** The ratified law is
-> `docs/plan/wave-e-contract.md` (E-R1..E-R14). **On any conflict the contract wins**; nothing here
+> `docs/plan/active/wave-e-contract.md` (E-R1..E-R14). **On any conflict the contract wins**; nothing here
 > re-opens a ruling. Rulings are CITED (`E-R5`), never restated at length. Round-1 fixes carry the
 > orchestrator ruling id they discharge *(R7..R15, R18)*.
 >
@@ -60,8 +60,8 @@ lane γ's shape.
 PERMISSION grant, not a relaxation; "reproduces" means **ORIGINATES** (a model numeral is never an
 evaluator input, and echoing a stored model numeral is not reproduction); a model check emits a
 **discrepancy signal only**. The retained stricter operational law governs where the two could
-diverge — `docs/prd/PRD.md:183`, "Model-computed numbers in any artifact | Every figure from DB
-functions". One structural rule follows *(R15 — SCOPED)*:
+diverge — `docs/product/PRD.md` §8, the model-computed row: "Model-computed numbers in any
+artifact | Every figure from DB functions". One structural rule follows *(R15 — SCOPED)*:
 
 > **No numeral in a REPORT or RENDERED quantitative claim enters a persisted or presented object
 > except through a cell row minted by a versioned evaluator.** Prose and charts take figures by
@@ -241,7 +241,7 @@ transitions ride named audited fns (`propose_metric_definition` → `draft`;
 granted writer at all** — canonical rows arrive by migration only (0016 idiom, `0016:234-236`), so
 neither a human nor a model can mint one. **Approval carries PRD §2's segregation, not just a role
 floor** *(R18; E-R5 `wave-e-contract.md:163-165`)*: the approver must be a different human from the
-proposer (`proposed_by`), the hard-gate shape PRD names at `docs/prd/PRD.md:50`; a solo firm records
+proposer (`proposed_by`), the hard-gate shape PRD names at `docs/product/PRD.md:50`; a solo firm records
 the explicit self-approval attestation on the same branch PRD uses. The model can never be approver
 (it holds no such verb). **Statutory eligibility is a mechanical predicate** evaluated at seal time:
 `definition_version_id is not null AND state in ('canonical','firm_approved') AND effective for the

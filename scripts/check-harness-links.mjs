@@ -20,13 +20,11 @@
 // justified entry — never by loosening the heuristic itself (same shape as
 // DYNAMIC_SQL_ALLOWLIST in wiki-lint-checks.mjs).
 //
-// STRICT=false TODAY (owner-ruled, dispatch brief for this lane). Three of the four entries
-// (PROGRESS.md, docs/adr/README.md, docs/plan/index.md) are being authored by OTHER lanes of
-// this same harness refactor in parallel and do not exist on disk yet in this branch — an
-// absent entry file WARNS, it does not fail, so this branch stands on its own green. This does
-// NOT soften anything else: a broken reference INSIDE a file that does exist (AGENTS.md, today)
-// is always a hard failure regardless of STRICT. Flip STRICT to true at harness-refactor
-// ASSEMBLY, once every entry above is actually on disk (comment stays as the marker to find).
+// STRICT=true SINCE ASSEMBLY (2026-08-12). It was false on the authoring lane because three of
+// the four entries (PROGRESS.md, docs/adr/README.md, docs/plan/index.md) were being written by
+// sibling lanes in parallel and were not yet on disk; all four exist now, so a missing entry is
+// a hard failure. It never softened anything else: a broken reference INSIDE a file that exists
+// was always a hard failure regardless of STRICT.
 //
 // No dependencies — Node built-ins only.
 
@@ -35,7 +33,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-export const STRICT = false; // <-- FLIP TO true AT ASSEMBLY (see header) once all 4 entries exist.
+export const STRICT = true;
 
 export const ENTRY_LIST = Object.freeze([
   "AGENTS.md",
@@ -48,11 +46,121 @@ export const ENTRY_LIST = Object.freeze([
 // something other than a repo file. Every entry needs a one-line reason — this list is a named
 // exception, never a loosened rule.
 export const NON_PATH_ALLOWLIST = new Set([
-  "origin/main", // a git ref (CLAUDE.md, ci.yml, and Wave docs all say "never push origin/main" etc.), not a file
-  "@workflow/world-postgres", // an npm package specifier (the WDK Postgres backend), not a file
+  "origin/main", // a git ref (AGENTS.md, ci.yml, and Wave docs all say "never push origin/main" etc.), not a file
   "firms/{firm_id}/…", // an API route TEMPLATE (ARCHITECTURE.md), placeholder segment + ellipsis
   "…/vision-alignment-audit-2026-07-27.md", // an elided path in prose (leading "…" = "somewhere under"), not literal
-  "clara-rebuild/", // REBUILD-PLAN.md's own genesis note ("fresh repo, seeded from `clara-rebuild/`") — names this repo's own root by folder name, not a subpath of it
+  "clara-rebuild/", // the rebuild plan's own genesis note ("fresh repo, seeded from `clara-rebuild/`") — names this repo's own root by folder name, not a subpath of it
+
+  // --- Documents that were authored OUTSIDE this repo and never committed to it. Each names a
+  // real artifact of a real ladder; the standing law each one minted is recorded in the harness
+  // (AGENTS.md / docs/adr/), which is where a reader should be sent. Kept as named exceptions
+  // rather than rewritten, because the ADR bodies that cite them are append-only.
+  "RENUMBER.md", // the merge-time renumber procedure minted by ADR-058, authored in the Wave D-b build tree; the law it encodes is AGENTS.md hard constraint 10
+  "algebra.md", // the metric-algebra research dossier behind wave-e-design-reporting.md's lane-δ section; a cross-model research output, never committed
+  "INTERFACE-PINS.md", // the Wave-A/Slice-6 interface-pin sheet, authored under a .tmp build dir; its amendments are docs/plan/completed/wave-a-as-built-amendments.md
+
+  // --- Named things that carry a "/" or a path-like extension but are not repo files.
+  "build/wave-d-b-0042", // a git BRANCH (the Wave D-b evidence archive, "NEVER MERGE"), not a directory
+  "build/wave-a-daily-loop", // a git branch (the Wave-A build lane), not a directory
+  "actions/checkout@v4", // a GitHub Actions ref in a CI excerpt, not a file
+  "github.com/mosaladtaooo/clara", // ADR-001's original repo URL written without a scheme (the repo has since moved to the org, ADR-021)
+  "openai/gpt-5-mini", // a model identifier (the extraction lane's OCR model), not a file
+  "BELCORT-SDN-BHD/clara", // a GitHub owner/repo slug, not a path in this tree
+  "manifest.json", // a file INSIDE a produced backup bundle (DR.md §9), not a file in this repo
+  "backups/", // the produced backup output dir — gitignored by design ("dumps may hold data")
+  "db-snapshots/", // a remote (rclone) destination prefix in the DR plan, not a repo directory
+  "firm-docs-mirror/", // likewise a remote destination prefix, not a repo directory
+  "clara.chart/v1", // a typed artifact media-type identifier in the reporting design, not a path
+  "clara.metric/v1", // likewise
+  "/clients/plan", // a dashboard ROUTE with two segments (looksLikeRoute only clears single-segment routes)
+  "/etc/sudoers.d/runner", // an absolute path on the CI RUNNER host, not in this repo
+  "/run/secrets/clara_storage_service_key", // a container secret mount path, not in this repo
+
+  // --- Instruments and packages the ACTIVE design docs specify but that are not built yet. They
+  // are named in future tense in docs/plan/active/; they become real paths when their lane lands,
+  // and the entry then comes back out of this list.
+  "scripts/check-frozen-evaluators.mjs", // wave-e-design-reporting.md §: the evaluator freeze instrument (lane δ, unbuilt)
+  "check-frozen-evaluators.mjs", // the same instrument named by basename
+  "frozen-evaluators.json", // its manifest (unbuilt)
+  "packages/reporting-render", // the render package the reporting design specifies (unbuilt)
+  "packages/reporting-render/", // the same, written as a directory
+
+  // --- Produced or remote directories, and working dirs, that are gitignored by design.
+  "packages/db/backups/", // where a dump lands; gitignored ("dumps may hold data" — DR.md)
+  "reports/", // the produced-report storage prefix the reporting design writes under, not a repo dir
+  ".tmp/h2/", // a Codex-lane sandbox working dir (the §7-A h2 evidence run); .tmp/ is gitignored
+  "//run", // DR.md's own illustration of a DOUBLED-slash mount path, quoted to show the bug shape
+  "mint_session_jwt.mjs", // an owner-side ceremony helper kept outside the repo (it handles a live secret)
+  "wave-7a-acceptance-h1/h2.md", // the "-h1/-h2" pair shorthand: two files named once (completed/wave-7a-acceptance-h1.md and -h2.md)
+]);
+
+/**
+ * Content that carries a "/" or a path-like extension but CANNOT be a single repo path, by its
+ * own shape. This narrows the BACKTICK heuristic only — an explicit markdown link is never
+ * excluded here, so a real `[text](path)` reference still always has to resolve.
+ *
+ * Every clause below describes a construct this repo's prose uses constantly inside backticks:
+ *   - whitespace: a shell command (`pnpm --filter @clara/db test`), an HTTP verb + route
+ *     (`GET /ready`), an SQL clause (`ALTER ROLE … NOBYPASSRLS`), a column list. A path in this
+ *     tree never contains a space.
+ *   - {} <> * |: a brace expansion (`deploy/{roles-bootstrap,acl-baseline}.sql`), a glob
+ *     (`docs/plan/research/slice6/asbuilt-*`), a placeholder segment (`firms/{uuid}/docs/…`).
+ *     These name a SET or a TEMPLATE, never one file.
+ *   - ( ) ' " = , ; : and the typographic marks … ≡ → ·: an expression, a quoted literal, an
+ *     assignment, an elision, or a prose comparison — none of which is a filename.
+ * A construct that is genuinely one path never needs any of these characters, so nothing this
+ * clears could have been a broken reference worth reporting.
+ */
+const STRUCTURALLY_NOT_A_PATH_RE = /[\s{}<>*|()'"=,;:…≡→·%]/;
+
+// A bare extension used as prose shorthand — "the `.sql` bodies", "`.impl.ts` holds the logic".
+// SUFFIX_SHORTHAND_RE above covers the dashed form (`-part2.md`); this covers the undashed one.
+const BARE_EXT_RE = /^\.(?:md|mjs|sql|ts|json)$|^\.[a-z0-9]+\.(?:md|mjs|sql|ts|json)$/i;
+
+// An npm package specifier — `@clara/db`, `@clara/runtime`, `@workflow/world-postgres`. The "/"
+// is the scope separator, not a directory separator; the workspace package it names lives at a
+// path this repo spells differently (packages/db, packages/runtime).
+const NPM_SPECIFIER_RE = /^@[a-z0-9][\w.-]*\/[\w.-]+$/i;
+
+/**
+ * This repo's shorthand for a SET of SQL/JS identifiers written slash-joined — `fy_end_month/day`
+ * (two columns), `superseded_by/superseded_at`, `propose_/approve_/reject_/supersede_metric_definition`
+ * (four function names sharing a suffix), `grant/revoke_client_egress`.
+ *
+ * The discriminator is snake_case, and it is a real property of this tree, not a guess: every
+ * tracked path here is kebab-case or numeric — ZERO tracked paths have an underscore in any
+ * directory segment, and no extensionless tracked file has one either (verified at assembly with
+ * `git ls-files`). Underscores are how this codebase spells SQL and JS identifiers, and nothing
+ * else. So: no recognised path extension anywhere, at least one snake_case segment, and every
+ * segment a bare identifier => a set of identifiers, never a file. `docs/adr` and `packages/db`
+ * carry no underscore and stay fully checked.
+ */
+function looksLikeIdentifierShorthand(content) {
+  if (PATH_EXT_RE.test(content) || !content.includes("/")) return false;
+  const segments = content.split("/");
+  if (!segments.some((s) => s.includes("_"))) return false;
+  return segments.every((s) => /^[A-Za-z0-9_.]*$/.test(s));
+}
+
+/**
+ * Prefixes whose files are APPEND-ONLY or FROZEN by standing law, so a stale reference inside one
+ * cannot be repaired without rewriting a historical record. Their own existence as a reference
+ * TARGET is still validated (an index row pointing at a missing archive file still fails, and
+ * docs/adr/ keeps its bidirectional index check) — this exempts only their CONTENT from the
+ * one-hop scan. Same discipline as HOP_CONTENT_EXEMPT: a one-line reason per entry.
+ */
+export const HOP_CONTENT_EXEMPT_PREFIXES = Object.freeze([
+  // Closed waves and slices. Owner-ruled untouchable at the 2026-08-12 harness refactor: "they
+  // may cite the old world as history — leave them; only their INDEX rows describe present
+  // reality". Their sibling cross-references were written against the pre-refactor docs/plan/ flat
+  // tree and are history, not instructions.
+  "docs/plan/completed/",
+  // Frozen per-wave research dossiers — cross-model evidence, cited as-of their authoring date.
+  "docs/plan/research/",
+  // The ADR bodies. Append-only by the log's own first law ("supersede with a NEW entry; never
+  // rewrite or prune an old one" — docs/adr/README.md), so their prose is a permanent minute of
+  // what was true at ratification. docs/adr/README.md itself is an ENTRY and stays fully checked.
+  "docs/adr/0",
 ]);
 
 // First path segments that mean "this is the FROZEN prior repo, not this tree" — CLAUDE.md's own
@@ -99,8 +207,15 @@ const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i; // http://, https://, ftp://, ...
 export function looksLikePath(content) {
   if (NON_PATH_ALLOWLIST.has(content)) return false;
   if (SCHEME_RE.test(content) || /^mailto:/i.test(content)) return false;
-  if (SUFFIX_SHORTHAND_RE.test(content)) return false;
+  if (SUFFIX_SHORTHAND_RE.test(content) || BARE_EXT_RE.test(content)) return false;
+  if (STRUCTURALLY_NOT_A_PATH_RE.test(content)) return false;
+  if (NPM_SPECIFIER_RE.test(content) || looksLikeIdentifierShorthand(content)) return false;
   return content.includes("/") || PATH_EXT_RE.test(content);
+}
+
+/** True if this file's CONTENT is exempt from the one-hop scan (see HOP_CONTENT_EXEMPT*). */
+export function isHopContentExempt(relFile) {
+  return HOP_CONTENT_EXEMPT.has(relFile) || HOP_CONTENT_EXEMPT_PREFIXES.some((p) => relFile.startsWith(p));
 }
 
 /** Strip a markdown link's optional trailing `"Title"` and surrounding whitespace. */
@@ -181,7 +296,7 @@ function isUnderDocs(rel) {
 /**
  * Resolve a raw reference against the referencing file's own directory FIRST (the convention
  * real Wave docs use — e.g. `[x](./wave-e-design-skeleton-part2.md)`), then against the repo
- * root (the convention AGENTS.md uses — e.g. `` `docs/prd/PRD.md` `` — and what a leading "/"
+ * root (the convention AGENTS.md uses — e.g. `` `docs/product/PRD.md` `` — and what a leading "/"
  * always means). Both conventions are live in this repo today, so both are tried.
  * @returns {{skip: true} | {skip: false, resolved: string|null, candidates: string[]}}
  */
@@ -345,9 +460,10 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
   // ONE hop, never further: every hop candidate got here only via a successfully-RESOLVED
   // reference from an entry file, so it is guaranteed to exist — its own references are
   // validated, but files IT references are not added back into hopCandidates.
+  let hopExempt = 0;
   for (const relFile of hopCandidates) {
-    if (HOP_CONTENT_EXEMPT.has(relFile)) {
-      warnings.push(`${relFile}: one-hop content validation skipped — HOP_CONTENT_EXEMPT (see scripts/check-harness-links.mjs)`);
+    if (isHopContentExempt(relFile)) {
+      hopExempt++;
       continue;
     }
     const abs = join(repoRoot, relFile);
@@ -359,6 +475,14 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
       if (skip) continue;
       if (!resolved) findings.push(formatBrokenRef(relFile, ref, candidates, repoRoot));
     }
+  }
+
+  if (hopExempt > 0) {
+    warnings.push(
+      `${hopExempt} reached file(s) skipped for CONTENT — append-only or frozen by standing law `
+      + `(HOP_CONTENT_EXEMPT / _PREFIXES in scripts/check-harness-links.mjs). Their existence as a `
+      + `reference target was still validated.`,
+    );
   }
 
   // docs/adr/ bidirectional check — only meaningful once its README index exists.
@@ -391,7 +515,7 @@ export function main({ repoRoot } = {}) {
   }
   console.log(
     `check-harness-links: OK — ${entriesChecked} file(s) scanned, ${refsChecked} reference(s) validated, 0 broken`
-    + (warnings.length > 0 ? `, ${warnings.length} warning(s) above (STRICT=false).` : "."),
+    + (warnings.length > 0 ? `, ${warnings.length} warning(s) above.` : "."),
   );
   return 0;
 }

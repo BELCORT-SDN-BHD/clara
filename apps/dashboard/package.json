@@ -2,7 +2,7 @@
   "name": "@clara/dashboard",
   "version": "0.0.0",
   "private": true,
-  "description": "Clara dashboard (Next.js 15). Slice-1 skeleton: boots + placeholder page + reads NEXT_PUBLIC config. No real UI yet (see docs/design/DIRECTION.md).",
+  "description": "Clara dashboard (Next.js 15). Slice-1 skeleton: boots + placeholder page + reads NEXT_PUBLIC config. No real UI yet (see docs/design/PRODUCT_DESIGN.md).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

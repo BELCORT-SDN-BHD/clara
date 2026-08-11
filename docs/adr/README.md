@@ -1,7 +1,7 @@
 # Decision record — ADR index + the standing laws
 
 This directory is Clara's decision log, one file per decision. It replaces
-`docs/PROJECTLOG.md` and its five archive files, which were split here entry-by-entry
+the former docs/PROJECTLOG.md and its five archive files, which were split here entry-by-entry
 with **every entry's bytes preserved verbatim** — no reflow, no frontmatter, no edits.
 Cite decisions by number exactly as before (`ADR-014`); the numbering is global and
 unchanged.
@@ -15,9 +15,9 @@ These conventions governed the append-only log and still govern this directory:
   instance) are left intact deliberately.
 - **Decisions only.** Build narrative, commit hashes and status do NOT belong in a
   decision record — those live in git, the plan, and `PROGRESS.md`.
-- **Cite, don't duplicate.** The artifacts of record are `docs/prd/PRD.md`,
-  `docs/architecture/ARCHITECTURE.md` (+ Appendix A), `docs/design/DIRECTION.md`,
-  `docs/plan/REBUILD-PLAN.md`, `docs/audit/`, `docs/00-GATE-2-README.md`,
+- **Cite, don't duplicate.** The artifacts of record are `docs/product/PRD.md`,
+  `docs/ARCHITECTURE.md` (+ Appendix A), `docs/design/PRODUCT_DESIGN.md`,
+  `docs/plan/index.md`, `docs/audit/`, `docs/00-GATE-2-README.md`,
   `docs/phase2-research/`. A wave's contract/acceptance doc is the mechanism of record;
   the ADR minutes the ruling and points at it.
 - **The fix for a log that outgrows a read is a split, never a rewrite or a prune.**

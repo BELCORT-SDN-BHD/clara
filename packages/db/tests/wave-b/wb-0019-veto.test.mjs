@@ -1,6 +1,6 @@
 // Wave-B battery — migration 0019 §1/§8/§9/§10: THE VETO IS GONE, THE
 // SERIALIZER SURVIVES. Written by the CONTRACT-BLIND test lane straight from
-// `docs/plan/wave-b-migration-0019-design.md` v1.0 (RATIFIED) — the 0019 SQL and
+// `docs/plan/completed/wave-b-migration-0019-design.md` v1.0 (RATIFIED) — the 0019 SQL and
 // the 0019 consumer-lib diff are NEVER read (ADR-029 discipline). A divergence
 // between an expectation here and observed 0019 behavior is a FINDING for
 // orchestrator adjudication, never a silent test edit.

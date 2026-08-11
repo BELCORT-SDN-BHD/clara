@@ -1,8 +1,8 @@
 // 0041 Wave D-a — the FA REGISTER battery, part 1: SCHEMA MARKERS · ACQUISITION
 // FROM CODING (WD-R1) · THE BELT (design §2.4).
 //
-// CONTRACT-BLIND: authored from docs/plan/wave-d-a-fa-design.md v2.1 (+ -part2.md),
-// docs/plan/wave-d-contract.md (WD-R1..R15) and the orchestrator's pinned 0041
+// CONTRACT-BLIND: authored from docs/plan/completed/wave-d-a-fa-design.md v2.1 (+ -part2.md),
+// docs/plan/completed/wave-d-contract.md (WD-R1..R15) and the orchestrator's pinned 0041
 // interface ONLY — this lane NEVER reads 0041's SQL. Every verb is called by its
 // PINNED name with NAMED args; every new refusal is asserted by its pinned REASON
 // TOKEN (contract §4), never by a bare new SQLSTATE (the CLR block is claimed by the

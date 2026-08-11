@@ -17,7 +17,7 @@
 > `wave-e-acceptance-matrix.md` (the falsifiable cells).
 >
 > All of Part 1's banners, markers and evidence discipline apply unchanged: **the contract
-> (`docs/plan/wave-e-contract.md`) wins**; every EXISTS claim carries a file:line read taken
+> (`docs/plan/active/wave-e-contract.md`) wins**; every EXISTS claim carries a file:line read taken
 > 2026-08-09 in this pass; *(ruled — E-R#)* = contract law, *(builder choice)* = adjustable;
 > migration numbers and CLR codes are proposals claimed at MERGE. Round-1 fixes carry the
 > orchestrator ruling id they discharge *(R7..R15, R18)*.
@@ -179,7 +179,8 @@ forbidden; charts are deterministic vector geometry.
 
 ## 9. Lane ε/ζ · SEALED ARTIFACTS
 
-**The pin list, carried verbatim (14 lines, `fs-template.md` (e)):** report spec/version and
+**The pin list, carried verbatim (14 lines, the FS-template dossier (e) —
+`docs/plan/research/wave-e/fs-template-design-codex-2026-08-08.md`):** report spec/version and
 parameters · statutory profile, wording, house-style and chart version IDs + hashes · books
 snapshot/event sequence · typed metric/fact dataset + dataset hash · all applicability and
 claim-assessment receipts · evaluator function versions + definition hashes · assembler version ·
@@ -239,7 +240,7 @@ to Postgres and object storage only, which is what "offline at render time" requ
 at-least-once is safe — the idempotency key is `(run_id, manifest_sha256)` and the output key is
 content-addressed, so a duplicate render is a no-op write under `x-upsert:false`; (d) no new
 authenticated HTTP surface. **Dispatch:** the runtime leader already holds a session and already
-runs periodic sweeps (`lib/reconciler.mjs`'s five daily sweeps are the precedent), so it starts a
+runs periodic sweeps (`packages/runtime/lib/reconciler.mjs`'s five daily sweeps are the precedent), so it starts a
 render machine when a claimable job exists — **the one place lane ζ touches runtime judgement
 logic, so it carries a Law-1 independent review.** A coarse scheduled wake is the fallback (Fly's
 granularity is hourly at best and approximate — `packages/backup/fly.toml:40-45`), so a leader outage
@@ -269,7 +270,7 @@ re-render the most recent sealed pre-sign artifact and compare sha256; *Quarterl
 re-render one artifact per pinned renderer image digest still referenced by a retained artifact, plus
 a signed-original retrieval + hash check. In DR.md's own idiom:
 a sealed artifact you have never re-rendered from its pinned dataset + evaluator + renderer digest is
-not proven reproducible. **Supavisor: last measured 35/60** (`docs/plan/wave-e-f6f9-acceptance.md:51`,
+not proven reproducible. **Supavisor: last measured 35/60** (`docs/plan/completed/wave-e-f6f9-acceptance.md:51`,
 `:196`). The `clara-backup` shape adds **no standing sessions** — a short-lived DSN session per job, no
 pool, no LISTEN client; worker concurrency capped at 1 in v1, so peak adds 1. **Re-verify headroom
 before deploy** (the standing law every consumer-adding wave has followed).

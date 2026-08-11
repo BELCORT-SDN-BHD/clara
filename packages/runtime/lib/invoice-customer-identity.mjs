@@ -1,7 +1,7 @@
 // X7 — the deterministic CUSTOMER-identity reader (the F6–F9 fix batch, finding F7 / task #32;
-// added to the extraction slice's X-taxonomy by that batch — docs/plan/extraction-slice-contract.md).
+// added to the extraction slice's X-taxonomy by that batch — docs/plan/completed/extraction-slice-contract.md).
 //
-// WHY THIS EXISTS, measured on real client books (docs/plan/wave-7a-acceptance-h1.md rows 1 and
+// WHY THIS EXISTS, measured on real client books (docs/plan/completed/wave-7a-acceptance-h1.md rows 1 and
 // 12, exhibit E7). ROME SECRETARY issued two invoices to KONG CHENG RESTAURANTS SDN BHD. Both
 // print the company in the bill-to box and a separate `Attn : Lim Xiao Shan` contact line under
 // it. Azure's typed `CustomerName` came back as **the person** on BOTH — so
@@ -119,7 +119,7 @@
 //      radius. The closer-to-buyer comparison is no longer among them: it is RETIRED. Harm
 //      ceiling is unchanged and is a wrong DRAFT — counterparty birth is at HUMAN APPROVAL and
 //      no unattended-post path reaches `customer_name`. FULL VETO-READY RECORD (38 forms, 5
-//      scenarios): docs/plan/extraction-slice-x7-field-record.md. OWNER-VETOABLE.
+//      scenarios): docs/plan/completed/extraction-slice-x7-field-record.md. OWNER-VETOABLE.
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";

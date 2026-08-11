@@ -5,7 +5,7 @@
 > build mints a falsifiable acceptance matrix … at the `wave-7a-acceptance-h1/h2.md` evidence
 > grade."* This is that mint. It states what each acceptance run must be ASKED and what a pass
 > must LOOK like, in advance, so that the run cannot grade itself after the fact.
-> **Where this document and `docs/plan/wave-e-contract.md` disagree, the contract wins.**
+> **Where this document and `docs/plan/active/wave-e-contract.md` disagree, the contract wins.**
 >
 > **THE PACKET IS SEVEN FILES, and this is the seventh. Where a cell needs the design home of the
 > mechanism it grades:** `wave-e-design-skeleton.md` = **§0–§2.4** (campaign frame, lanes, ceremony ·
@@ -396,7 +396,7 @@ absence — the same discipline §0.2 applies to evidence.
 
 | ruling | disposition | where it is discharged |
 |---|---|---|
-| **E-R1 first strike** (`wave-e-contract.md:21-24`) | **EXTERNALLY DISCHARGED — no cell in this matrix.** The F6–F9 fix batch closed at ADR-066 with its own as-run record; re-asserting it here would inherit a discharge instead of measuring one | `docs/plan/wave-e-f6f9-acceptance.md` (and the ADR). Note the record's own boundary: it does **not** state that F6 unblocked Gate P |
+| **E-R1 first strike** (`wave-e-contract.md:21-24`) | **EXTERNALLY DISCHARGED — no cell in this matrix.** The F6–F9 fix batch closed at ADR-066 with its own as-run record; re-asserting it here would inherit a discharge instead of measuring one | `docs/plan/completed/wave-e-f6f9-acceptance.md` (and the ADR). Note the record's own boundary: it does **not** state that F6 unblocked Gate P |
 | **E-R10 UX debt** (`wave-e-contract.md:213-222`) | **NON-BUILD RULING — no execution cell.** All of it ships in Wave G; lane θ builds plumbing-grade surfaces only, and this matrix asserts no UX behaviour. A cell here would grade something Wave E is ruled not to build | Wave G's own acceptance. The lane-θ surfaces are covered only where a cell needs them as a READ (A4's readiness read) |
 | **E-R13 settlement-corroboration door** (`wave-e-contract.md:256-285`) | **DESIGN-ONLY IN E — no execution cell, and none may be added.** The build rides Wave F, and until that ADR lands 7A-R3 stands whole: no tax-silent document posts unattended | Wave F's build ADR + acceptance. If any Wave-E lane finds itself needing a corroboration cell, that is scope leak — stop and escalate |
 

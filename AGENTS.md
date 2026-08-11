@@ -11,8 +11,8 @@ lifecycle (onboarding → ongoing close → tax → reporting) under professiona
 an RLS-isolated Postgres. **The DB owns every authoritative number; the agent orchestrates.**
 The dashboard is not a form UI — it is the agent's body language.
 
-**Read the fifteen hard constraints below before your first write.** Nothing else in this
-repo outranks them.
+**The fifteen hard constraints come before the menu — read them before your first write.**
+Nothing else in this repo outranks them.
 
 ## Run / verify
 
@@ -27,26 +27,6 @@ pnpm test        # per-package tests
 The data plane runs its own pipeline against a **throwaway** Postgres — `pnpm db:migrate`,
 `pnpm db:seed`, then `pnpm --filter @clara/db test`. The rig, the DR tooling and the reset
 scoping are in `packages/db/README.md`.
-
-## The menu — what you need, where the truth lives
-
-| When you need | Read |
-|---|---|
-| Product law: what/why/scope, and the invariants that bind every feature | `docs/product/PRD.md` (**§6 is LAW**) |
-| The bar the work is judged against, before you call something done | `docs/product/EVALUATION_RUBRIC.md` |
-| Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
-| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` — **read the digest first**; drill to the ADR only if the digest is thin |
-| Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
-| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` |
-| Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
-| Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
-| Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
-| The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
-| Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
-| The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |
-| What the prior build got wrong (11 failure patterns) and what was salvaged from it | `docs/audit/` |
-| The ratified stack and the blueprint packet behind it | `docs/00-GATE-2-README.md` |
-| Prior research: Malaysian tax/standards dossiers, evidence packages | `docs/phase2-research/` · `docs/plan/research/` |
 
 ## Hard constraints
 
@@ -79,7 +59,8 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 10. **DB changes are rig-validated on a throwaway, never hand-applied to a live project.**
     Migration numbers are claimed at MERGE time, not at authoring.
 11. **The pinned ids are hard-blocked by a PreToolUse hook** — canary `daba7f2e` is NEVER
-    answered (even past due), witness `d023b48c` is NEVER approved. See `.claude/hooks/`.
+    answered (even past due), witness `d023b48c` is NEVER approved. The guard is
+    `scripts/hooks/pinned-ids-guard.mjs`, registered in `.claude/settings.json`.
 12. **ROME SECRETARY's customers are NAME-ONLY — never enrich them** with a registration
     number or a TIN. (A DB-side guard is a registered candidate; until it lands, this one
     rests on you.)
@@ -92,6 +73,26 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
     under test and are never weakened or bypassed for testing convenience.
 15. **Never disturb the frozen prior build or the Slice-0 spike's parked run** (the
     `workflow` / `graphile_worker` / `spike` schemas).
+
+## The menu — what you need, where the truth lives
+
+| When you need | Read |
+|---|---|
+| Product law: what/why/scope, and the invariants that bind every feature | `docs/product/PRD.md` (**§6 is LAW**) |
+| The bar the work is judged against, before you call something done | `docs/product/EVALUATION_RUBRIC.md` |
+| Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
+| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` — **read the digest first**; drill to the ADR only if the digest is thin |
+| Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
+| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` |
+| Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
+| Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
+| Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
+| The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
+| Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
+| The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |
+| What the prior build got wrong (11 failure patterns) and what was salvaged from it | `docs/audit/` |
+| The ratified stack and the blueprint packet behind it | `docs/00-GATE-2-README.md` |
+| Prior research: Malaysian tax/standards dossiers, evidence packages | `docs/phase2-research/` · `docs/plan/research/` |
 
 ## Working protocol
 

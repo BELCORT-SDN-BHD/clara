@@ -3,7 +3,7 @@
 > **Skeleton + pointer, per the owner's Q7-B ruling (harness refactor, 2026-08-12): real content
 > lands at Wave G** ("the OS surface" — proactive inbox, ⌘K Ask/Do/Go + ActionPanels,
 > plan-as-document, exports UI, generative-UI completion, the design floors — see
-> `docs/ARCHITECTURE.md`'s "Roadmaps" section and `docs/plan/_progress-extraction.md` /
+> `docs/ARCHITECTURE.md`'s "Roadmaps" section and
 > `PROGRESS.md` for the live Wave-G scope). Phase 4 (Waves A–F) builds the product's accounting
 > engine under the seed direction below; this file is where the **product design** — the
 > object model surfaced to a user (Clients, Documents, Entries, Periods, Reports as first-class
@@ -22,8 +22,8 @@
   built.
 - The proactive inbox + cross-scope needs-you surface (allowlisted wakes) and how they compose
   with the object model above.
-- Cross-references into `docs/DESIGN_SYSTEM.md` (the visual/component vocabulary that
-  implements this) and `docs/FRONTEND.md` (the stable UI contracts + verification approach).
+- Cross-references into `docs/design/DESIGN_SYSTEM.md` (the visual/component vocabulary that
+  implements this) and `docs/design/FRONTEND.md` (the stable UI contracts + verification approach).
 
 ## Primary sources for the Wave-G write-up
 
@@ -42,11 +42,11 @@ The four primary-source research lanes behind the seed direction, kept as refere
 
 ## Current direction (seed)
 
-> Carried in verbatim from the former `docs/design/DIRECTION.md` (retired at the 2026-08-12
+> Carried in verbatim from the former `docs/design/PRODUCT_DESIGN.md` (retired at the 2026-08-12
 > harness docs-tree refactor — this file supersedes it as the home for product design). Ratified
 > at Gate 2 (2026-07-17) and still the live seed direction for Phase 4 build; its own "what Phase
 > 4 builds first" status table (§4) reads as of the F6–F9 close (2026-08-09) and will go stale as
-> later waves land — cross-check against `docs/plan/_progress-extraction.md` / `PROGRESS.md` for
+> later waves land — cross-check against `PROGRESS.md` for
 > current build status. Nothing in this reproduced section has been edited.
 
 # Clara — Design Direction (Rebuild, adopted)

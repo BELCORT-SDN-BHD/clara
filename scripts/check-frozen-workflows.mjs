@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Workflow freeze-lint — enforces the BINDING versioning policy from
-// docs/architecture/ARCHITECTURE.md Appendix A (Slice-0 spike finding T6):
+// docs/ARCHITECTURE.md Appendix A (Slice-0 spike finding T6):
 //
 //   (a) a deployed workflow body is immutable once any run can be in flight;
 //       every behavioural change ships as a NEW exported workflow (_v2, _v3…);

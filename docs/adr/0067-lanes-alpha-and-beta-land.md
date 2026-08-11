@@ -17,8 +17,8 @@ the strongest evidence yet for ADR-061's uniform ladder). The queue drained in o
 dropped 0055 from its tree — the queue order existed for exactly this**; violated once,
 lesson recorded. **One D1 quiesce window then applied 0055+0056 live** (first attempt, zero
 rollbacks; the statement_timeout recipe honored IN-FILE). As-run records of record —
-**`docs/plan/wave-e-lane-alpha-acceptance.md`** (ceremony narrative + Section-F closes) and
-**`docs/plan/wave-e-lane-beta-acceptance.md`** (0056 post-checks + named observations) —
+**`docs/plan/completed/wave-e-lane-alpha-acceptance.md`** (ceremony narrative + Section-F closes) and
+**`docs/plan/completed/wave-e-lane-beta-acceptance.md`** (0056 post-checks + named observations) —
 cite them, don't restate them.
 
 **Decision 3 — the ADR-062 sanctioned-lane MSIC debt is DISCHARGED.** The three parked codes
@@ -36,7 +36,7 @@ close model INERT ON ARRIVAL** (zero `fiscal_years` rows; activation = the first
 
 **Open from this close (PART 2):** the **B3 reopen-mirror owner ruling** (two lane positions,
 PR #228 residual 3) · two **V-OWNER sign-offs** on the α record (F1d, F3e) · the
-`closing_stock` producer verb before any real goods-trader close (REBUILD-PLAN) · one dead
+`closing_stock` producer verb before any real goods-trader close (`PROGRESS.md`) · one dead
 re-apply tell in 0056 S0.6, recorded in the β record §3 (fails closed regardless; cosmetic).
 
 **Why:** the ceremony ran EARLY (the α design's ruling) so the door and the wall harden on

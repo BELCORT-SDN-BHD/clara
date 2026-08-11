@@ -2,7 +2,7 @@
 // battery (F1a/F1b/F1c/F1e/F1f), the role battery, and F2a (the context-pack
 // splice). packages/db/migrations/0055_client_facts_trio.sql. Matrix: docs/plan/
 // wave-e-acceptance-matrix.md §6 Section F (cells F1a-F4). Design home:
-// docs/plan/wave-e-design-skeleton-part4.md §3. Fixture helpers live in the
+// docs/plan/active/wave-e-design-skeleton-part4.md §3. Fixture helpers live in the
 // sibling x55-fixtures.mjs; PART 2 (F3a-shape/F3d/F3f/F4/door refusals) lives
 // in x55-client-facts-door.test.mjs (the repo's 500-line gate split, x38/x40
 // precedent).

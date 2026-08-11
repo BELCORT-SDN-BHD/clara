@@ -15,7 +15,7 @@
 //
 // These cells DOCUMENT current behaviour rather than assert a fix, so the residual is measured on
 // every run instead of remembered. Full veto-ready record with the measurement table and the
-// four-part reachability precondition: docs/plan/extraction-slice-x7-field-record.md.
+// four-part reachability precondition: docs/plan/completed/extraction-slice-x7-field-record.md.
 
 process.env.RELAY_TEST_MODE ??= "1";
 

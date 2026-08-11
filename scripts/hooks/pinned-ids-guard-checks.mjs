@@ -1,14 +1,14 @@
 // Pinned-ids guard — pure decision logic (owner-ruled Q4-A).
 //
-// TWO hard-blocked ids stand under CLAUDE.md's "PERMANENT SAFETY PINS" (never expire):
+// TWO hard-blocked ids stand under AGENTS.md hard constraint 11, the pinned ids (never expire):
 //   - the canary `daba7f2e`     — NEVER answer it (first raised as an ADR-017 S4-V2 residual,
 //     due 2026-08-02; carried as a standing constraint through every wave since — e.g.
-//     docs/plan/wave-b-contract.md, docs/plan/wave-a-daily-loop-contract.md — and reaffirmed
-//     in the ratified Wave E contract, docs/plan/wave-e-contract.md, ADR-065).
+//     docs/plan/completed/wave-b-contract.md, docs/plan/completed/wave-a-daily-loop-contract.md — and reaffirmed
+//     in the ratified Wave E contract, docs/plan/active/wave-e-contract.md, ADR-065).
 //   - the B2 witness `d023b48c` (full: d023b48c-94fa-43a5-a544-cc4fe3b1163d) — NEVER approve it
 //     (the sandbox's first autonomous draft; fixed at Wave 7A / task #29 — see
-//     docs/plan/wave-7a-acceptance-h1.md / -h2.md — and reaffirmed the same way in
-//     docs/plan/wave-e-contract.md, ADR-065).
+//     docs/plan/completed/wave-7a-acceptance-h1.md / -h2.md — and reaffirmed the same way in
+//     docs/plan/active/wave-e-contract.md, ADR-065).
 //
 // THE RULE THIS FILE ENFORCES (owner-ruled Q4-A): block a tool call that is WRITE-SHAPED and
 // references either id; PASS a call that is READ-shaped. Both ids are read constantly in
@@ -33,7 +33,7 @@
 // audited write call. A bare substring match on "post" would block every read that prints
 // `posting_date` (the B2 witness's own acceptance evidence quotes it constantly: "status
 // 'draft', posting_date 2026-07-31"). But a PLAIN \b (boundary required on both sides) has the
-// opposite failure: CLAUDE.md's own cardinal-invariants example of the write this guard exists
+// opposite failure: AGENTS.md's own hard-constraints example of the write this guard exists
 // to catch is literally `select approve_entry(...)` — and \b does not match "approve" inside
 // "approve_entry" either, because underscore is a \w character, so "approve_entry" reads as one
 // glued token exactly like "0019_insert_wiki_seed.sql" does. Those two glued-by-underscore shapes
@@ -58,16 +58,16 @@ export const PINNED_IDS = Object.freeze([
     label: "the canary",
     rule: "NEVER answer it",
     provenance:
-      "CLAUDE.md PERMANENT SAFETY PINS; first raised as an ADR-017 S4-V2 residual (due 2026-08-02); "
-      + "reaffirmed as a standing constraint in the ratified Wave E contract (docs/plan/wave-e-contract.md, ADR-065)",
+      "AGENTS.md hard constraint 11 (the pinned ids); first raised as an ADR-017 S4-V2 residual (due 2026-08-02); "
+      + "reaffirmed as a standing constraint in the ratified Wave E contract (docs/plan/active/wave-e-contract.md, ADR-065)",
   }),
   Object.freeze({
     id: "d023b48c",
     label: "the B2 witness (the sandbox's first autonomous draft)",
     rule: "NEVER approve it",
     provenance:
-      "CLAUDE.md PERMANENT SAFETY PINS; fixed at Wave 7A / task #29 (docs/plan/wave-7a-acceptance-h1.md, -h2.md); "
-      + "reaffirmed as a standing constraint in the ratified Wave E contract (docs/plan/wave-e-contract.md, ADR-065)",
+      "AGENTS.md hard constraint 11 (the pinned ids); fixed at Wave 7A / task #29 (docs/plan/completed/wave-7a-acceptance-h1.md, -h2.md); "
+      + "reaffirmed as a standing constraint in the ratified Wave E contract (docs/plan/active/wave-e-contract.md, ADR-065)",
   }),
 ]);
 

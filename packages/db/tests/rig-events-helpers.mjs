@@ -1,6 +1,6 @@
 // Slice-3 rig — event-spine shared helpers (NOT a test file: the name does not end
 // in `.test.mjs`). Written INDEPENDENTLY from the migration lane, straight from the
-// Slice-3 event-spine contract (docs/plan/slice3-event-spine-contract.md v2.2). Adversarial
+// Slice-3 event-spine contract (docs/plan/completed/slice3-event-spine-contract.md v2.2). Adversarial
 // implementation of the contract that cross-checks lane-migration's 0005 schema.
 //
 // Beyond the Slice-2 harness this holds: the event catalog + client-scoped map + v1

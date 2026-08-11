@@ -195,7 +195,7 @@ const VENDOR_BINDING_0028_HUMAN_FNS = [
 ];
 export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_HUMAN_FNS];
 
-// 0037 — the Wave C-a subledger (design: docs/plan/wave-c-a-subledger-design.md §4.9).
+// 0037 — the Wave C-a subledger (design: docs/plan/completed/wave-c-a-subledger-design.md §4.9).
 // Four human composites, clara_authenticated ONLY (bookkeeper floor in-body): which
 // obligation a payment discharges is a judgement, and the agent never makes one — no
 // wake role, no runtime, no agent_ro. Its own cohort per the "wholly present or wholly

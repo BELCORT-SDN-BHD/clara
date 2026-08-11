@@ -1,6 +1,6 @@
 // Wave B — migration 0019 §4: the `document.filing_retired` → stale CONSUMER
 // LANE, unit half (no DB). Written by the CONTRACT-BLIND test lane straight from
-// `docs/plan/wave-b-migration-0019-design.md` v1.0 §4/§5/§10 — the 0019 consumer
+// `docs/plan/completed/wave-b-migration-0019-design.md` v1.0 §4/§5/§10 — the 0019 consumer
 // diff is NEVER read. A divergence between an expectation here and observed
 // behaviour is a FINDING for orchestrator adjudication, never a silent edit.
 //

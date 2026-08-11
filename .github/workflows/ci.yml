@@ -4,7 +4,7 @@ name: CI
 # schema (defect GAP1-5) — a green check that proved nothing. This pipeline
 # applies the REAL migrations, builds the REAL packages, and runs the smoke +
 # DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
-# project. See docs/architecture/ARCHITECTURE.md §9 and the repo README.
+# project. See docs/ARCHITECTURE.md §9 and the repo README.
 
 # THE CI DIET (2026-08-11, owner-ruled after the quota exhaustion; reviewed on its own PR).
 # Three structural wastes removed, ZERO gate semantics changed when a gate runs:

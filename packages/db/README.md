@@ -2,7 +2,7 @@
 
 Versioned migrations, seeds (synthetic only), the ephemeral test rig, and the
 DR backup/restore tooling. The shared Postgres is Clara's single source of
-truth (`docs/architecture/ARCHITECTURE.md` §3).
+truth (`docs/ARCHITECTURE.md` §3).
 
 > **Scope.** Slice 1 landed the *pipeline* (migration `0001_smoke.sql` — a
 > placeholder that only proves the runner works end-to-end). **Slice 2** (`0002`–
@@ -118,7 +118,7 @@ This was **materially zero-risk pre-Slice-4** — no runtime deployed, and
 CI / throwaway targets have no concurrent writers — so `0005` needed no special
 handling. The runtime is live since Slice 4: the rule binds every live deploy that
 ships a writer-body change.
-(Design authority: `docs/plan/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
+(Design authority: `docs/plan/completed/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
 behaviour is a PostgreSQL property, not a Clara mechanism.)
 
 ## CI

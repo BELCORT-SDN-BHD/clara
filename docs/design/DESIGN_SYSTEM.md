@@ -11,12 +11,12 @@
 
 ## Why this is empty on purpose
 
-`docs/design/PRODUCT_DESIGN.md` (formerly `docs/design/DIRECTION.md`) is a *direction*
+`docs/design/PRODUCT_DESIGN.md` (formerly `docs/design/PRODUCT_DESIGN.md`) is a *direction*
 document — principles, precedence rules, what to build first — not a component/token
 specification. Nothing has yet extracted the shipped surfaces' actual tokens (color, spacing,
 type scale), component variants, or interaction patterns into a reusable system. That
 extraction is real design-system work, scoped to Wave G ("the design floors" — see
-`docs/ARCHITECTURE.md`'s "Roadmaps" section and `docs/plan/_progress-extraction.md` /
+`docs/ARCHITECTURE.md`'s "Roadmaps" section and
 `PROGRESS.md` for the live Wave-G scope) once enough of the product surface exists to
 generalize from, rather than being guessed ahead of the surfaces that will use it.
 
@@ -29,7 +29,7 @@ generalize from, rather than being guessed ahead of the surfaces that will use i
   the Clara-specific compositions (trust-badge accessories, confidence bands, evidence-region
   overlays, tool chips, the card catalog).
 - The card-catalog protocol's visual contract (fail-closed rendering, hydrate-vs-live parity —
-  the mechanism is `docs/PROJECTLOG.md`/`docs/ARCHITECTURE.md`; this file would own its visual
+  the mechanism is `docs/adr/`/`docs/ARCHITECTURE.md`; this file would own its visual
   half).
 - Motion and state conventions (honest-state lints: no success toast without a confirmed
   outcome, terminal cards render inert — currently enforced ad hoc per surface, not documented
