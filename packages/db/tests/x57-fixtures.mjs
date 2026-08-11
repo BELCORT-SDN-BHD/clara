@@ -16,6 +16,7 @@
 // statement/void verbs, x42-af2-helpers.mjs (0040/0042) for the exception doors.
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   rootQuery, humanQuery, withActor, ROLES, opk, namedCall, idOf, firmOf,
   draftEntryV3, approveEntry, reverseEntry, freshResolution, counterpartyRows,
@@ -230,4 +231,58 @@ export async function creditNote57(sub, { client, cp, cents, memo = "x57 credit 
   const items = await openItemsOf(entry);
   assert.equal(items.length, 1, `a credit-note entry mints exactly ONE item (got ${items.length})`);
   return { entry, item: items[0].id };
+}
+
+// ---------------------------------------------------------------------------
+// R1 fix-batch additions (E7'/E8' arms B) -- 0037/0044 writers, already shipped.
+// ---------------------------------------------------------------------------
+
+/** allocate_receipt(p_client, p_counterparty, p_posting_date, p_memo,
+ *  p_bank_account, p_amount_cents, p_allocations, p_op_key, p_discount_cents,
+ *  p_discount_account, p_attestation, p_control_account) -- pinned off the LIVE
+ *  pg_get_function_arguments read. JE-bearing: books the settlement entry AND
+ *  the allocation row in the SAME call, unlike apply_open_items. The date
+ *  anchor is `p_posting_date` (the design's own writer-table row 3: "the
+ *  settlement entry's posting_date"), NOT `_book_today()` -- this is the arm
+ *  that proves the trigger reaches a REAL date-bearing allocation writer. */
+export async function allocateReceipt57(sub, {
+  client, counterparty, postingDate, memo = "x57 receipt", bankAccount, amountCents, allocations, opKey = null,
+}) {
+  const r = await humanQuery(
+    sub,
+    `select clara.allocate_receipt(p_client => $1, p_counterparty => $2, p_posting_date => $3::date,
+       p_memo => $4, p_bank_account => $5, p_amount_cents => $6::bigint, p_allocations => $7::jsonb,
+       p_op_key => $8) as r`,
+    [client, counterparty, postingDate, memo, bankAccount, amountCents, JSON.stringify(allocations), opKey ?? opk("x57-receipt")],
+  );
+  return r.rows[0].r;
+}
+
+/** A DIRECT, backdated, balanced netting pair inserted straight into
+ *  clara.open_item_allocations (root -- RLS bypass; only clara_fn_owner/root
+ *  may write this table at all) -- proving the open_item_allocations arm of
+ *  t_snapshot_staleness fires on its own, independent of any audited writer's
+ *  act-dating choice. NOT a fixture shortcut that silences triggers (contrast
+ *  forceControlMismatch/forgeClosedPeriodMovement, x56-fixtures.mjs): every
+ *  trigger on the table, including the deferred subledger belt
+ *  (_tf_subledger_alloc_belt) and t_snapshot_staleness itself, stays LIVE --
+ *  the row is constructed to be a genuinely LAWFUL pair (nets to zero per
+ *  (client,domain), one canonical counterparty, each item's two-sided bound
+ *  respected) so the belt passes it on its own merits, the same shape
+ *  apply_open_items itself would have written, just with a caller-chosen
+ *  effective_date instead of _book_today(). */
+export async function directBackdatedAllocationPair(client, {
+  invoiceItem, invoiceCents, creditItem, effectiveDate, actorUserId, reason = "x57 direct backdated apply",
+}) {
+  const firm = await firmOf(client);
+  const group = randomUUID();
+  await rootQuery(
+    `insert into clara.open_item_allocations
+       (firm_id, client_id, domain, item_id, application_group, operation_kind, amount_cents, reason, created_by, effective_date)
+     values
+       ($1, $2, 'ar', $3, $4, 'apply', $5::bigint, $6, $7, $8::date),
+       ($1, $2, 'ar', $9, $4, 'apply', $10::bigint, $6, $7, $8::date)`,
+    [firm, client, invoiceItem, group, -invoiceCents, reason, actorUserId, effectiveDate, creditItem, invoiceCents],
+  );
+  return group;
 }

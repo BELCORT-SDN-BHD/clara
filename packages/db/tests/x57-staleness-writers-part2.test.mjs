@@ -1,0 +1,264 @@
+// 0057 (Wave E lane gamma, the period registry + month snapshots) rig -- PART 3
+// (split from x57-staleness-writers.test.mjs purely to stay under the repo's
+// 500-line-per-file gate -- the wave-a-helpers/wave-a-fixtures split
+// precedent): E9 (reversal + wrong-client correction) and E11 (the bank
+// writers). Matrix: docs/plan/wave-e-acceptance-matrix.md Section E. Design
+// contract: docs/plan/wave-e-design-skeleton-part3.md SS2.11.
+//
+// R1 FIX BATCH (2026-08-11), finding 10: E9(b) now uses the SAME
+// transactional-identity instrument as its siblings (was a post-commit read)
+// and covers BOTH clients -- SS2.11 row 8 says the correction's inline
+// mirror-approve marks "both clients' snapshots"; the TO-client half is
+// measured and reported, not assumed.
+//
+// CONTRACT-BLIND on 0057 itself; `0057_wave_e_registry_snapshots.sql` is never
+// opened. The transactional-identity instrument (inHumanTxn/txnSnapshotState,
+// x57-fixtures.mjs) runs the mutating call and the snapshot_state read inside
+// ONE open transaction, so an asynchronous staleness mechanism could not pass.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import {
+  rootQuery, opk, namedCall, idOf, firmOf, buildWorld, printLaneNotes, printSkipCount,
+  noteLane, markSkip, endPool, freshResolution, seedCitedDocument,
+  proposeCorrection, FIELD, draftEntryV3, approveEntry, ev,
+  has0056, has0057, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty, bookToday,
+  AR1, REVN, BANK1,
+  mintMonthSnapshot, snapshotState, assessmentRows,
+  inHumanTxn, txnSnapshotState,
+  addBankAccount, enterStatement, exceptLine,
+} from "./x57-fixtures.mjs";
+
+let ready = false;
+let world = null;
+
+before(async () => {
+  ready = (await has0056()) && (await has0057());
+  if (!ready) { noteLane("0056 or 0057 not applied -- x57 staleness-writers-part2 suite skipped"); return; }
+  world = await buildWorld();
+});
+after(async () => { printLaneNotes("x57-staleness-writers-part2"); printSkipCount("x57-staleness-writers-part2"); await endPool(); });
+
+function skip57(t) {
+  if (!ready) { markSkip(); t.skip("0056/0057 surface absent"); return true; }
+  return false;
+}
+
+async function pastMonthStart(n) {
+  const today = await bookToday();
+  const [y, m] = today.split("-").map(Number);
+  const total = y * 12 + (m - 1) - n;
+  const yy = Math.floor(total / 12);
+  const mm = (total % 12) + 1;
+  return `${yy}-${String(mm).padStart(2, "0")}-01`;
+}
+
+function monthBounds(monthStart) {
+  const [y, m] = monthStart.split("-").map(Number);
+  const nextTotal = y * 12 + (m - 1) + 1;
+  const ny = Math.floor(nextTotal / 12);
+  const nm = (nextTotal % 12) + 1;
+  const nextFirst = new Date(Date.UTC(ny, nm - 1, 1));
+  const lastDay = new Date(nextFirst.getTime() - 86_400_000);
+  return { periodStart: monthStart, periodEnd: lastDay.toISOString().slice(0, 10) };
+}
+
+/** A raw named-arg call issued on the caller's OWN pooled client (mid-transaction). */
+async function callInTxn(txc, fnName, specs, vals) {
+  const r = await txc.query(namedCall(fnName, specs), vals);
+  return r.rows[0].result;
+}
+
+// ===========================================================================
+// E9 -- reversal AND wrong-client correction each mark STALE in their OWN
+// audited transaction.
+// ===========================================================================
+test("E9(a): reverse_entry marks the artifact STALE inside the SAME uncommitted transaction as the reversal", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const client = await freshActiveClient(owner, "e9a");
+  await setupCloseCoa(owner, client);
+  const monthStart = await pastMonthStart(6);
+  const entry = await plainEntry(owner, { client, debit: BANK1, credit: REVN, cents: 60_000, postingDate: `${monthStart.slice(0, 8)}05` });
+  const receipt = await mintMonthSnapshot(owner, { client, monthStart });
+  assert.equal(await snapshotState(owner, { snapshot: receipt.snapshot_id }), "current");
+
+  let stateInsideTxn = null;
+  await inHumanTxn(owner, async (txc) => {
+    await callInTxn(txc, "reverse_entry", [
+      { name: "p_entry" }, { name: "p_reason" }, { name: "p_op_key" },
+    ], [entry, "x57 E9a reverse", opk("x57-e9a-reverse")]);
+    stateInsideTxn = await txnSnapshotState(txc, receipt.snapshot_id);
+  });
+  assert.equal(stateInsideTxn, "stale", `E9(a): STALE inside the SAME transaction as reverse_entry (got ${stateInsideTxn})`);
+  const rows = await assessmentRows(receipt.snapshot_id);
+  assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries");
+});
+
+test("E9(b): a wrong-client correction marks BOTH clients' artifacts inside the SAME uncommitted transaction as the approve (the correction's inline mirror-approve is a fourth JE-approve path)", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const checker = world.users.bob;
+  const clientFrom = await freshActiveClient(owner, "e9bfrom");
+  const clientTo = await freshActiveClient(owner, "e9bto");
+  await setupCloseCoa(owner, clientFrom);
+  await setupCloseCoa(owner, clientTo);
+  const cp = await birthCounterparty(owner, { client: clientFrom, name: `X57 E9BCO ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const firm = await firmOf(clientFrom);
+  const monthStart = await pastMonthStart(6);
+  const postingDate = `${monthStart.slice(0, 8)}09`;
+
+  const cited = await seedCitedDocument(owner, { firm, client: clientFrom, quote: "RM 900.00", fieldPath: FIELD.total, kind: "invoice" });
+  const resolution = await freshResolution(owner, clientFrom, { subjectKind: "document", subjectId: cited.documentId });
+  const d = await draftEntryV3(owner, {
+    client: clientFrom, resolution, postingDate, memo: "x57 E9b misfiled invoice",
+    lines: [
+      { account_code: AR1, debit_cents: 90_000, credit_cents: 0, description: "dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 90_000, description: "cr" },
+    ],
+    document: cited.documentId, sha256: cited.sha256,
+    evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+    vendor: { existing_id: cp, kind: "customer" },
+    opKey: opk("x57-e9b-draft"),
+  });
+  await approveEntry(owner, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x57-e9b-approve") });
+
+  const receiptFrom = await mintMonthSnapshot(owner, { client: clientFrom, monthStart });
+  assert.equal(await snapshotState(owner, { snapshot: receiptFrom.snapshot_id }), "current", "mandatory setup: FROM current before the correction");
+  // The TO client gets its OWN snapshot for the SAME month, so this cell can
+  // READ (not assume) whether the correction's re-booking half marks it too.
+  const receiptTo = await mintMonthSnapshot(owner, { client: clientTo, monthStart });
+  assert.equal(await snapshotState(owner, { snapshot: receiptTo.snapshot_id }), "current", "mandatory setup: TO current before the correction");
+
+  await freshResolution(owner, clientTo, { subjectKind: "document", subjectId: cited.documentId });
+  const proposal = await proposeCorrection(owner, { document: cited.documentId, fromClient: clientFrom, toClient: clientTo, reason: "x57 E9b filed to the wrong client" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  assert.ok(correctionId, `propose_wrong_client_correction returns a correction id (got ${JSON.stringify(proposal)})`);
+  const planHash = proposal.plan_hash
+    ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+
+  let stateFromInsideTxn = null;
+  let stateToInsideTxn = null;
+  await inHumanTxn(checker, async (txc) => {
+    await callInTxn(txc, "approve_wrong_client_correction", [
+      { name: "p_correction" }, { name: "p_plan_hash" }, { name: "p_attestation" }, { name: "p_op_key" },
+    ], [correctionId, planHash, null, opk("x57-e9b-approvecorr")]);
+    stateFromInsideTxn = await txnSnapshotState(txc, receiptFrom.snapshot_id);
+    stateToInsideTxn = await txnSnapshotState(txc, receiptTo.snapshot_id);
+  });
+  assert.equal(stateFromInsideTxn, "stale", `E9(b): the FROM-client's snapshot went STALE inside the SAME transaction as the correction's approve (got ${stateFromInsideTxn})`);
+  const fromRows = await assessmentRows(receiptFrom.snapshot_id);
+  assert.equal(fromRows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries", "the correction's mirror is a journal_entries row -- the FOURTH approve path E-R3's writer table names");
+
+  // TO-CLIENT: measured and reported, never assumed. SS2.11 row 8 asserts the
+  // correction marks "both clients' snapshots" -- this cell reports what the
+  // approve ACTUALLY did, inside the SAME transaction, rather than restating
+  // the design's promise.
+  noteLane(`E9(b) TO-CLIENT MEASURED: snapshot_state(receiptTo) inside the SAME transaction as approve_wrong_client_correction = '${stateToInsideTxn}' (SS2.11 row 8 asserts both clients mark; this is the measured result).`);
+  if (stateToInsideTxn === "stale") {
+    const toRows = await assessmentRows(receiptTo.snapshot_id);
+    assert.equal(toRows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries");
+  }
+});
+
+// ===========================================================================
+// E11 -- the BANK writers, at their TRUE effect tables.
+// ===========================================================================
+test("E11(i): void_bank_statement marks the covering month's artifact STALE inside its own transaction (effect table: bank_statements)", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const client = await freshActiveClient(owner, "e11void");
+  await setupCloseCoa(owner, client);
+  const monthStart = await pastMonthStart(6);
+  const { periodStart, periodEnd } = monthBounds(monthStart);
+  const acct = await addBankAccount(owner, { client, bankCode: "MBB", accountNumber: "9057000001", coaAccountCode: BANK1, opKey: opk("x57-e11v-acct") });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  const stmt = await enterStatement(owner, {
+    client, bankAccount: bankAccountId, periodStart, periodEnd, opening: 0,
+    specs: [{ amountCents: 50_000, entryDate: `${periodStart.slice(0, 8)}10`, description: "x57 e11 void deposit" }],
+    keepPeriod: true,
+  });
+  const receipt = await mintMonthSnapshot(owner, { client, monthStart });
+  assert.equal(await snapshotState(owner, { snapshot: receipt.snapshot_id }), "current");
+
+  let stateInsideTxn = null;
+  await inHumanTxn(owner, async (txc) => {
+    await callInTxn(txc, "void_bank_statement", [
+      { name: "p_client" }, { name: "p_statement" }, { name: "p_reason" }, { name: "p_op_key" },
+    ], [client, stmt.statementId, "x57 e11 void", opk("x57-e11-void")]);
+    stateInsideTxn = await txnSnapshotState(txc, receipt.snapshot_id);
+  });
+  assert.equal(stateInsideTxn, "stale", `E11(i): STALE inside the SAME transaction as void_bank_statement (got ${stateInsideTxn})`);
+  const rows = await assessmentRows(receipt.snapshot_id);
+  assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "bank_statements", "effect table is bank_statements, NOT bank_reconciliations (the round-2 correction)");
+});
+
+test("E11(ii): except_bank_line marks the covering month's artifact STALE inside its own transaction (effect table: bank_line_exceptions)", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const client = await freshActiveClient(owner, "e11except");
+  await setupCloseCoa(owner, client);
+  const monthStart = await pastMonthStart(6);
+  const { periodStart, periodEnd } = monthBounds(monthStart);
+  const acct = await addBankAccount(owner, { client, bankCode: "MBB", accountNumber: "9057000002", coaAccountCode: BANK1, opKey: opk("x57-e11e-acct") });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  const stmt = await enterStatement(owner, {
+    client, bankAccount: bankAccountId, periodStart, periodEnd, opening: 0,
+    specs: [
+      { amountCents: -40_000, entryDate: `${periodStart.slice(0, 8)}11`, description: "x57 e11 erroneous charge" },
+      { amountCents: 40_000, entryDate: `${periodStart.slice(0, 8)}12`, description: "x57 e11 bank reversal" },
+    ],
+    keepPeriod: true,
+  });
+  const receipt = await mintMonthSnapshot(owner, { client, monthStart });
+  assert.equal(await snapshotState(owner, { snapshot: receipt.snapshot_id }), "current");
+
+  let stateInsideTxn = null;
+  await inHumanTxn(owner, async (txc) => {
+    await callInTxn(txc, "except_bank_line", [
+      { name: "p_line" }, { name: "p_kind" }, { name: "p_reason" }, { name: "p_op_key" },
+    ], [stmt.lines[0].id, "bank_error", "x57 e11 except", opk("x57-e11-except")]);
+    stateInsideTxn = await txnSnapshotState(txc, receipt.snapshot_id);
+  });
+  assert.equal(stateInsideTxn, "stale", `E11(ii): STALE inside the SAME transaction as except_bank_line (got ${stateInsideTxn})`);
+  const rows = await assessmentRows(receipt.snapshot_id);
+  assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "bank_line_exceptions");
+});
+
+test("E11(iii): resolve_bank_line_exception marks a (freshly re-minted) artifact STALE inside its own transaction (effect table: bank_line_exceptions)", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const client = await freshActiveClient(owner, "e11resolve");
+  await setupCloseCoa(owner, client);
+  const monthStart = await pastMonthStart(6);
+  const { periodStart, periodEnd } = monthBounds(monthStart);
+  const acct = await addBankAccount(owner, { client, bankCode: "MBB", accountNumber: "9057000003", coaAccountCode: BANK1, opKey: opk("x57-e11r-acct") });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  const stmt = await enterStatement(owner, {
+    client, bankAccount: bankAccountId, periodStart, periodEnd, opening: 0,
+    specs: [
+      { amountCents: -60_000, entryDate: `${periodStart.slice(0, 8)}11`, description: "x57 e11r erroneous charge" },
+      { amountCents: 60_000, entryDate: `${periodStart.slice(0, 8)}12`, description: "x57 e11r bank reversal" },
+    ],
+    keepPeriod: true,
+  });
+  const ex0 = idOf(await exceptLine(owner, { client, line: stmt.lines[0].id, kind: "bank_error", reason: "x57 e11r leg 1" }), "exception_id", "id");
+  await exceptLine(owner, { client, line: stmt.lines[1].id, kind: "bank_error", reason: "x57 e11r leg 2" });
+  assert.ok(ex0, "mandatory setup: the first exception minted");
+
+  const receipt = await mintMonthSnapshot(owner, { client, monthStart, opKey: opk("x57-e11r-mint2") });
+  assert.equal(await snapshotState(owner, { snapshot: receipt.snapshot_id }), "current");
+
+  let stateInsideTxn = null;
+  await inHumanTxn(owner, async (txc) => {
+    await callInTxn(txc, "resolve_bank_line_exception", [
+      { name: "p_exception" }, { name: "p_disposition" }, { name: "p_note" },
+      { name: "p_counterpart_line" }, { name: "p_op_key" },
+    ], [ex0, "bank_corrective_line", "x57 e11r the offsetting reversal names its pair", stmt.lines[1].id, opk("x57-e11-resolve")]);
+    stateInsideTxn = await txnSnapshotState(txc, receipt.snapshot_id);
+  });
+  assert.equal(stateInsideTxn, "stale", `E11(iii): STALE inside the SAME transaction as resolve_bank_line_exception (got ${stateInsideTxn})`);
+  const rows = await assessmentRows(receipt.snapshot_id);
+  assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "bank_line_exceptions");
+});
