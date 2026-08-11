@@ -2548,6 +2548,107 @@ begin
   end if;
 end $s9$;
 
+-- =====================================================================================
+-- S9b -- THE REACHABLE RESTATEMENT DOOR (the battery's seventh catch). S9's assertion
+-- inside approve_opening_seed protects the transition path (an operating client's
+-- FIRST seed recorded after a close has already pinned -- reachable via the
+-- bootstrap-plan route); but for an ALREADY-SEEDED client the reachable post-close
+-- restatement verb is approve_opening_correction (reopen_opening_seed -> supersession
+-- drafts -> here), and it carried NO continuity guard -- while opening entries
+-- pre-date the fiscal spine, so the period wall never sees them either. The exact
+-- invariant: entries balance, so a correction batch whose per-account net is ZERO on
+-- every balance-sheet account leaves every subsequent closing untouched (P&L
+-- recompositions aggregate to zero and the RE roll is unchanged) -- pure below-
+-- account-level recomposition (a counterparty re-attribution, a same-total FA
+-- re-registration) stays legal without ceremony. Any NONZERO balance-sheet delta
+-- moves every subsequent year's closing, breaks the standing pin, and would surface
+-- only at the NEXT finalize_close, months later, as a trap -- so THAT is refused at
+-- the door: reopen the closed years first (key 3 -- reopen supersedes the receipt,
+-- S6.4d; the escape hatch is real and capability-gated), correct, then re-close.
+-- =====================================================================================
+create function clara._assert_correction_pin_neutral(p_seed uuid) returns void
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  s record; v_receipt record; v_diffs jsonb;
+begin
+  select * into s from clara.opening_seed_registry where id = p_seed;
+  if not found then return; end if;
+  select cr.id, fy.label into v_receipt
+    from clara.close_receipts cr
+    join clara.fiscal_years fy on fy.id = cr.fiscal_year_id
+    where cr.client_id = s.client_id and cr.kind = 'close' and cr.status = 'active'
+    order by fy.ordinal desc limit 1;
+  -- No pinned close standing: Wave-B's own ties govern alone, by design.
+  if v_receipt.id is null then return; end if;
+  -- The batch population is the verb's own: pending supersession drafts + the
+  -- reversal mirrors of the entries they replace.
+  select coalesce(jsonb_agg(jsonb_build_object('account_code', d.account_code,
+           'net_delta_cents', d.net) order by d.account_code), '[]'::jsonb)
+    into v_diffs
+    from (
+      select jl.account_code, sum(jl.debit_cents - jl.credit_cents)::bigint as net
+        from clara.journal_entries je
+        join clara.journal_lines jl on jl.entry_id = je.id
+        join clara.coa_accounts ca on ca.client_id = s.client_id
+             and ca.account_code = jl.account_code
+        where je.status = 'draft' and je.is_opening_balance
+          and (exists (select 1 from clara.opening_items x where x.seed_id = p_seed
+                 and x.entry_id = je.id and x.supersedes_item_id is not null)
+            or exists (select 1 from clara.opening_items x where x.seed_id = p_seed
+                 and x.entry_id = je.reversal_of))
+          and ca.account_type in ('asset', 'liability', 'equity')
+        group by jl.account_code
+        having sum(jl.debit_cents - jl.credit_cents) <> 0
+    ) d;
+  if jsonb_array_length(v_diffs) > 0 then
+    raise exception 'fiscal year % is closed and its position is pinned; this correction moves balance-sheet openings, which moves every subsequent closing -- reopen the closed years first (key 3), correct, then re-close', v_receipt.label
+      using errcode = 'CLR41',
+        detail = jsonb_build_object('reason', 'drawer1_identity_failed',
+          'check_key', 'opening_continuity_tie',
+          'refusal', 'close_pinned_reopen_first',
+          'pinned_receipt_id', v_receipt.id, 'fiscal_year', v_receipt.label,
+          'bs_deltas', v_diffs)::text;
+  end if;
+end $$;
+revoke all on function clara._assert_correction_pin_neutral(uuid) from public;
+
+do $s9b$
+declare
+  v_sig text := 'clara.approve_opening_correction(uuid,jsonb,text,text)';
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_frm := 'perform clara._assert_opening_tie(p_seed);';
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0056 S9b: the opening-tie anchor appears % time(s) in approve_opening_correction (expected exactly once) -- the body drifted; re-derive', v_cnt
+      using errcode = 'CLR10';
+  end if;
+  -- The doctrine guard goes BEFORE the tie arithmetic: a pin-breaking batch is refused
+  -- before any tie computation dignifies it.
+  v_to := '-- 0056 S9b (Wave E lane beta; the battery''s seventh catch): while a pinned' || chr(10) ||
+    '  -- close stands, a correction batch must be balance-sheet-neutral per account --' || chr(10) ||
+    '  -- anything else moves every subsequent closing; reopen first (key 3).' || chr(10) ||
+    '  perform clara._assert_correction_pin_neutral(p_seed);' || chr(10) ||
+    '  ' || v_frm;
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+  -- POSTCHECK: the guard landed exactly once; the anchor, the fa baseline, and the K6
+  -- checker-separation guard all survive.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if (length(v_def) - length(replace(v_def, '_assert_correction_pin_neutral', '')))
+       / length('_assert_correction_pin_neutral') <> 1 then
+    raise exception '0056 S9b postcheck: the pin-neutrality guard did not land exactly once'
+      using errcode = 'CLR10';
+  end if;
+  if position(v_frm in v_def) = 0
+     or position('_assert_fa_baseline' in v_def) = 0
+     or position('distinct_checker' in v_def) = 0 then
+    raise exception '0056 S9b postcheck: a pre-existing guard (the opening tie / fa baseline / K6 checker separation) vanished in the splice'
+      using errcode = 'CLR10';
+  end if;
+end $s9b$;
+
 reset role;
 
 -- =====================================================================================
