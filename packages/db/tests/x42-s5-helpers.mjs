@@ -218,6 +218,15 @@ const SALES_LANE_0046_CLOCK_NAMES = [
 // from the session clock (its one date read is clara._book_today()'s authority).
 const CLIENT_FACTS_0055_CLOCK_NAMES = ["record_client_fact"];
 
+// 0056 [Wave E lane β]: five lawful bare-clock readers — timestamptz audit stamps
+// (attest/abandon/finalize receipts + the capability grant/revoke stamps); every DATE
+// these verbs write flows through the authorities (_book_today / the FY row's own
+// bounds), never the session clock. Measured on the 0056 rig.
+const CLOSE_MODEL_0056_CLOCK_NAMES = [
+  "abandon_close", "attest_close_exception", "finalize_close",
+  "grant_firm_capability", "revoke_firm_capability",
+];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -226,6 +235,7 @@ export async function s5BareTokenRoster(query) {
   const names = [...S5_25_BARE_TOKEN_ROSTER];
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
   if (await applied("0055_%")) names.push(...CLIENT_FACTS_0055_CLOCK_NAMES);
+  if (await applied("0056_%")) names.push(...CLOSE_MODEL_0056_CLOCK_NAMES);
   return names.sort();
 }
 

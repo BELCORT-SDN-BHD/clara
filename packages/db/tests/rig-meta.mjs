@@ -73,6 +73,18 @@ const WAVE_A2_RUNTIME_FNS = ["reconcile_autopost_rules"];
 // 0055 [Wave E lane α]: the ONE human door of the client-facts trio (admin floor,
 // body-enforced). Absent on pre-0055 frontiers — existence is the gate.
 const CLIENT_FACTS_0055_HUMAN_FNS = ["record_client_fact"];
+// 0056 [Wave E lane β]: the close model's twelve human doors — the two period verbs
+// (key ①, admin floor), the four close verbs + reopen (keys ②③, capability-gated
+// in-body), the three reads (B6 revoked the agent grants: JWT context is not wake
+// context), and the two E-R11 capability verbs (owner-LITERAL floor in-body).
+// Agent + wake + runtime gain ZERO — 0056's S11.5 sweep asserts it in-migration.
+const CLOSE_MODEL_0056_HUMAN_FNS = [
+  "propose_fiscal_year", "open_fiscal_year",
+  "begin_close", "attest_close_exception", "finalize_close", "abandon_close",
+  "reopen_fiscal_year",
+  "verify_close", "get_close_readiness", "list_fiscal_years",
+  "grant_firm_capability", "revoke_firm_capability",
+];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -650,6 +662,7 @@ export const ALLOWED = {
     ...SALES_LANE_0046_READ_FNS, // 0046 [§7-A] the signing-time evidence preview + batch read
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
+    ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

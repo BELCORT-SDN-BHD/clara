@@ -191,7 +191,10 @@ test("x41.a3 splice census: _fa_on_approve lives INSIDE the shared _subledger_on
       where n.nspname='clara' and p.prosrc like '%_subledger_on_approve%' and p.proname <> '_subledger_on_approve'
       order by 1`,
   )).rows.map((x) => x.proname);
-  assert.equal(callers.length, 4, `the four-caller census holds post-splice (got ${callers.length}: ${callers.join(", ")})`);
+  // [0056 β] finalize_close = the FIFTH caller (its census-visible flip calls the shared
+  // hook; the x56 battery proves it zero-op on the closing entry). Frontier-gated.
+  const n56 = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0056_%'")).rows[0].n;
+  assert.equal(callers.length, n56 === 1 ? 5 : 4, `the caller census holds post-splice (got ${callers.length}: ${callers.join(", ")})`);
 
   const shared = await fnSource("_subledger_on_approve");
   assert.ok(shared.includes("_fa_on_approve"), "the FA hook is spliced into the SHARED _subledger_on_approve (ONE CoR splice, design §2.1)");
