@@ -365,14 +365,15 @@ Run against synthetic / labelled-synthetic data — local/dev, **or the live san
 
 ## Part C — the assembly lane's record
 
-Branch `refactor/harness-v2`, based on `origin/main` @ `099a5bf`. PR #231's γ commit had **not**
-merged when the worktree was cut, so no matrix-path reconciliation was needed — the acceptance
-matrix existed only at its old path and L2's rename moved it cleanly to `docs/plan/active/`. If γ
-lands before this branch does, that file is the one to re-check.
+Branch `refactor/harness-v2`, cut from `origin/main` @ `099a5bf`. **PR #231 (Wave E lane γ) merged
+mid-assembly**, moving `origin/main` to `9a0ba9b`; it is merged in here as the sixth merge, and the
+matrix reconciliation the brief anticipated was needed after all — see C.1.
 
 ### C.1 Merge conflicts
 
-Five `--no-ff` merges in the ordered sequence. **One conflict, in `.gitignore`.**
+Six `--no-ff` merges. **Two conflicts.**
+
+**(1) `.gitignore`, merging L4 over L3.**
 
 - `refactor/agents-entry` added `!.claude/rules/`; `refactor/hooks-lint` added `!.claude/hooks/`
   at the same position in the `.claude/*` negation block.
@@ -380,7 +381,22 @@ Five `--no-ff` merges in the ordered sequence. **One conflict, in `.gitignore`.*
   (a). `.claude/hooks/` does not exist on disk (L4 put the guard under `scripts/hooks/`); the
   negation is kept anyway as the conservative resolution and as the home a future hook would use.
 
-The other four merges were clean. Ownership really was disjoint.
+**(2) `docs/plan/active/wave-e-acceptance-matrix.md`, merging the γ `origin/main`.** γ amended the
+matrix (241 lines) at the old flat path while L2 had moved it to `active/`; git followed the rename
+and conflicted on content. Resolved to **γ's side**, then re-swept for paths, per the brief's rule
+(apply the move to the newest content). Verified: the file is byte-identical to
+`origin/main:docs/plan/wave-e-acceptance-matrix.md` except for one rewritten cite.
+
+γ also **minted a new file**, `wave-e-acceptance-matrix-part2.md`, at the old flat path. With no
+counterpart on this branch there was nothing for git to rename, so it landed at `docs/plan/` and was
+moved to `active/` by hand — likewise byte-identical to γ apart from two rewritten cites. Its row is
+added to `docs/plan/index.md`, and the matrix's own row now describes the split.
+
+γ's `docs/plan/active/wave-e-design-skeleton-part3.md` amendment auto-merged through the rename and
+needed no path fixes. Its migration (`0057`) and the eight x57 test files came in clean; the test
+headers got the path sweep, the migration did not (byte-stable by law).
+
+The other four lane merges were clean. Ownership really was disjoint.
 
 ### C.2 Tracking proof (`git ls-files`)
 
@@ -400,7 +416,9 @@ All eight tracked; `git check-ignore -v .claude/settings.json` returns nothing.
 ### C.3 Reference sweep
 
 - **Mechanical pass:** 184 references rewritten across 136 files, from a rename map built out of
-  L2's own `git diff -M` output (so the map cannot drift from what actually moved).
+  L2's own `git diff -M` output (so the map cannot drift from what actually moved). The γ merge
+  added 10 more across 6 files (the amended matrix, the new part2, and the x57 test headers),
+  which were authored against the pre-refactor tree.
 - **Reverted out of that pass, deliberately:** the 130 files in `frozen-workflows.json` and
   `packages/db/deploy/*.sql`. The first sweep hit frozen workflow bodies and produced 15
   freeze-lint violations — comment-only, but a frozen body is byte-stable or it is not frozen.
