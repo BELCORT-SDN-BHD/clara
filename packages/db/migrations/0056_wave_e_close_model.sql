@@ -1360,7 +1360,13 @@ begin
       and d.financial_date between v_fy.starts_on and v_fy.ends_on
       and not exists (select 1 from clara.journal_entries je
              where je.document_id = f.document_id and je.client_id = p_client
-               and je.status in ('draft', 'approved'))
+               and je.status in ('draft', 'approved')
+               -- LIVE coding only (R2.5 MAJOR -- M3's predicate, carried to the sibling
+               -- it was always meant for): a reversed original keeps status='approved'
+               -- and its mirror is approved too; neither is standing coding. Without
+               -- this the gate false-PASSES -- and the date scope makes the miss
+               -- permanent, no later close ever asks about this document again.
+               and je.reversed_by is null and je.reversal_of is null)
   ;
   return jsonb_build_object(
     'state', case when jsonb_array_length(v_uncoded) = 0 then 'pass' else 'fail' end,
