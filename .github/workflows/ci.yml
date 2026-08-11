@@ -180,6 +180,19 @@ jobs:
       - name: Vendor-binding post-control gate (0029 Slot C)
         run: node scripts/check-binding-post-control.mjs
 
+      # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
+      # (AGENTS.md, PROGRESS.md, docs/adr/README.md, docs/plan/index.md) has its markdown
+      # links + backtick paths validated against disk, one hop into referenced docs/*.md
+      # files, plus docs/adr/'s own bidirectional index check. STRICT=false today (three of
+      # the four entries are mid-authorship on other harness-refactor lanes) — an absent
+      # entry file WARNS, not fails; a broken reference inside a file that DOES exist is
+      # always a hard failure. Flip STRICT=true in scripts/check-harness-links.mjs once the
+      # tree is assembled.
+      - name: Harness-links gate + self-test (Q9-A entry-list integrity)
+        run: |
+          node scripts/check-harness-links.mjs
+          node scripts/check-harness-links.selftest.mjs
+
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
       # gitleaks binary (not a mutable action tag); config + allowlist in
