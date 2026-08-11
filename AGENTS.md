@@ -111,6 +111,11 @@ output, or a native subagent.
 architecture question or changing code: query the graph for structure, then read the one menu
 row that covers the question. A few targeted queries beat a fan-out.
 
+**Ask the owner first** before deleting or overwriting a file you did not create, and before
+any genuinely destructive or irreversible operation — a DROP on shared state, a project
+teardown. ADR-060's data authority is the one standing exception, and it is DATA-scoped
+(constraint 14): resetting test books is yours; the mechanisms under test are not.
+
 **The three review and evidence laws** (minted 2026-08-06; each cost real money to learn):
 
 1. **A PR that changes judgement logic gets an independent review pass before merge** — the
@@ -122,7 +127,8 @@ row that covers the question. A few targeted queries beat a fan-out.
 3. **Spelling is not identity.** A guard that reads a NAME reads a projection of the thing,
    not the thing — prove an identifier IS its import before trusting it.
 
-Review intensity is **uniform** (ADR-061): the full ladder for every substantive change.
+Review intensity is **uniform** (ADR-061): the full ladder for every substantive change
+touching code — see hard constraint 3 for the one narrow, mechanically-fenced exception.
 Law 1 is the floor, not the ceiling.
 
 ## Clock in, clock out

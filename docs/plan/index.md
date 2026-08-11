@@ -26,6 +26,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-design-reporting-part2.md` | live | Reporting design continued. |
 | `wave-e-acceptance-matrix.md` | live | The acceptance matrix, minted before build: how to read a cell, then Sections A–E (part 1 of 2). |
 | `wave-e-acceptance-matrix-part2.md` | live | Matrix continued: Section F (the E-R12 client-facts trio) and the cross-section sweeps, run order and closing-verification template. |
+| `roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
 
 ## `completed/` — closed waves and slices
 
@@ -130,6 +131,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-f6f9-acceptance.md` | historical | The F6–F9 fix-batch acceptance record (ADR-066). |
 | `wave-e-lane-alpha-acceptance.md` | historical | Lane α as-run acceptance record (`0055`, PR #226). |
 | `wave-e-lane-beta-acceptance.md` | historical | Lane β as-run acceptance record (`0056`, PR #228). |
+| `wave-e-lane-gamma-acceptance.md` | historical | Lane γ as-run ceremony record: `0057` applied quiesce-free, E5 taken live, the trap re-proven (PR #231). |
 
 ### The former REBUILD-PLAN.md
 
@@ -142,6 +144,4 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | File | Status | Hook |
 |---|---|---|
 | `research/` | reference | Supporting cross-model research dossiers, organized per wave/slice. Not restructured in this pass — cite the specific dossier inside it, not this line. |
-| `active/roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
-| `completed/wave-e-lane-gamma-acceptance.md` | historical (record of record) | Lane γ's as-run ceremony record: 0057 applied quiesce-free, E5 taken live, the trap re-proven. Ladder record = PR #231's body. |
 | REBUILD-PLAN.md | **superseded (deleted)** | Retired at this refactor. Its dated chronology → `completed/rebuild-plan-history.md`; its `coding_kind` roadmap table → `../ARCHITECTURE.md` ("Roadmaps" section); its CURRENT posture → `PROGRESS.md`; Wave F/G + Risks + Phase 5 → `active/roadmap.md`. |

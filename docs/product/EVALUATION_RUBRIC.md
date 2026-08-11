@@ -8,8 +8,8 @@ new: each line restates a standing law with its source.*
 **For verifier agents:** every criterion is addressable by ID (`DF-n`, `EV-n`, `IN-n`, `VD-n`, `IT-n`,
 `SG-n`) and is written to be evaluated on its own. Cite the ID when you apply it.
 
-**The three laws minted 2026-08-06** — recorded in `CLAUDE.md`'s working protocol and the `docs/adr/`
-open register — are the spine of §1–§3: (1) a judgement-logic change gets an independent review pass
+**The three laws minted 2026-08-06** — recorded in `AGENTS.md`'s working protocol and the `docs/adr/`
+digest — are the spine of §1–§3: (1) a judgement-logic change gets an independent review pass
 before merge, ratified as the standing floor by **ADR-061**; (2) **absence is not evidence, and a
 derived state is not evidence**; (3) **spelling is not identity**.
 

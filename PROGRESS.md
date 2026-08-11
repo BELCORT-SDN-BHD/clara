@@ -134,8 +134,8 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 ## Known issues
 
 - **Three genuinely dangling doc paths** — `RENUMBER.md`, `algebra.md`, `INTERFACE-PINS.md`:
-  authored in build worktrees, never committed; content survives in ADR-058's body + AGENTS
-  constraint 10 (renumber law). Recorded at the harness-v2 assembly; re-author only if a real
+  authored in build worktrees, never committed; the renumber procedure's content survives as
+  the digest's law 41 (`docs/adr/README.md` §4 · Engineering and CI law) and ADR-058's body. Recorded at the harness-v2 assembly; re-author only if a real
   need appears.
 - **Two γ post-CLEAN NITs** (PR #231 body, residuals 4–5): a +25-line self-citation drift in
   the third skeleton amendment · S11.4c's absent-function branch tests `''` where a no-row

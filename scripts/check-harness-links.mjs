@@ -114,7 +114,8 @@ export const NON_PATH_ALLOWLIST = new Set([
 const STRUCTURALLY_NOT_A_PATH_RE = /[\s{}<>*|()'"=,;:…≡→·%]/;
 
 // A bare extension used as prose shorthand — "the `.sql` bodies", "`.impl.ts` holds the logic".
-// SUFFIX_SHORTHAND_RE above covers the dashed form (`-part2.md`); this covers the undashed one.
+// SUFFIX_SHORTHAND_RE (defined below) covers the dashed form (`-part2.md`); this covers the
+// undashed one.
 const BARE_EXT_RE = /^\.(?:md|mjs|sql|ts|json)$|^\.[a-z0-9]+\.(?:md|mjs|sql|ts|json)$/i;
 
 // An npm package specifier — `@clara/db`, `@clara/runtime`, `@workflow/world-postgres`. The "/"

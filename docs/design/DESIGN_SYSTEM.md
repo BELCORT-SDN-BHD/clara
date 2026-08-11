@@ -11,7 +11,7 @@
 
 ## Why this is empty on purpose
 
-`docs/design/PRODUCT_DESIGN.md` (formerly `docs/design/PRODUCT_DESIGN.md`) is a *direction*
+`docs/design/PRODUCT_DESIGN.md` (formerly DIRECTION.md) is a *direction*
 document — principles, precedence rules, what to build first — not a component/token
 specification. Nothing has yet extracted the shipped surfaces' actual tokens (color, spacing,
 type scale), component variants, or interaction patterns into a reusable system. That
