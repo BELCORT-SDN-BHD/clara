@@ -37,11 +37,11 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, opk, namedCall, buildWorld, printLaneNotes, printSkipCount,
   noteLane, markSkip, endPool, freshResolution,
-  has0056, has0057, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty, bookToday,
+  has0056, has0057, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty, bookToday, addDaysStr,
   REVN, BANK1,
   mintMonthSnapshot, snapshotState, verifySnapshot, assessmentRows, periodSnapshotRow,
   inHumanTxn, txnSnapshotState, openArItem57, creditNote57, caught,
-  applyOpenItems57, unallocateGroup, allocateReceipt57, directBackdatedAllocationPair,
+  applyOpenItems57, unallocateGroup, allocateReceipt57, directBackdatedAllocationPairInTxn,
 } from "./x57-fixtures.mjs";
 
 let ready = false;
@@ -72,6 +72,16 @@ function addMonths(monthStart, n) {
   const [y, m] = monthStart.split("-").map(Number);
   const total = y * 12 + (m - 1) + n;
   return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}-01`;
+}
+
+function monthBounds(monthStart) {
+  const [y, m] = monthStart.split("-").map(Number);
+  const nextTotal = y * 12 + (m - 1) + 1;
+  const ny = Math.floor(nextTotal / 12);
+  const nm = (nextTotal % 12) + 1;
+  const nextFirst = new Date(Date.UTC(ny, nm - 1, 1));
+  const lastDay = new Date(nextFirst.getTime() - 86_400_000);
+  return { periodStart: monthStart, periodEnd: lastDay.toISOString().slice(0, 10) };
 }
 
 /** A raw named-arg call issued on the caller's OWN pooled client (mid-transaction). */
@@ -264,32 +274,53 @@ test("E7'(B-i): allocate_receipt backdated INTO the snapshotted period marks the
   assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries", "the JE trigger wins the race here (allocate_receipt books a settlement entry in the SAME call) -- this is the expected, honest value, not open_item_allocations");
 });
 
-test("E7'(B-ii): a DIRECT, lawful, backdated open_item_allocations pair marks the artifact STALE -- the allocation ARM of t_snapshot_staleness fires on its own", async (t) => {
+// FIX (Codex round finding 5, 2026-08-11): the old B-ii arm allocated between
+// two items sharing the SAME item_date, so both landed in the SAME aging
+// bucket and the pair's net-zero amounts left every STORED aging total
+// unchanged -- it proved the trigger fires on unmoved bytes, not that the
+// mechanism protects a moved FIGURE. It also read state via a separate
+// autocommit rootQuery rather than the same-transaction instrument. Rebuilt:
+// the two items now sit in DIFFERENT clara._aging_core buckets (current vs
+// d61_90, by item_date distance from period_end), so the allocation moves
+// BOTH bucket totals while the raw pair still nets to zero (satisfying the
+// belt's own group-law); the insert and the in-txn read share one pooled
+// client (directBackdatedAllocationPairInTxn); and a POST-COMMIT
+// verify_snapshot call proves real drift with the aging key named.
+test("E7'(B-ii): a DIRECT, lawful, backdated open_item_allocations pair -- items in DIFFERENT aging buckets -- marks the artifact STALE inside the SAME transaction, and verify_snapshot AFTER commit reports drift=true on the aging key", async (t) => {
   if (skip57(t)) return;
   const owner = world.users.alice;
   const client = await freshActiveClient(owner, "e7bii");
   await setupCloseCoa(owner, client);
   const cp = await birthCounterparty(owner, { client, name: `X57 E7BIICO ${randomUUID().slice(0, 6)}`, kind: "customer" });
   const monthStart = await pastMonthStart(6);
-  const postingDate = `${monthStart.slice(0, 8)}05`;
-  const inPeriodEffectiveDate = `${monthStart.slice(0, 8)}18`;
-  const { item: invItem } = await openArItem57(owner, { client, cp, cents: 90_000, postingDate });
-  const { item: creditItem } = await creditNote57(owner, { client, cp, cents: 25_000, postingDate });
+  const { periodEnd } = monthBounds(monthStart);
+  const invoiceDate = addDaysStr(periodEnd, -10); // clara._aging_core: days<=30 -> 'current' bucket
+  const creditDate = addDaysStr(periodEnd, -75); // 61<=days<=90 -> 'd61_90' bucket
+  const inPeriodEffectiveDate = addDaysStr(periodEnd, -5);
+  const { item: invItem } = await openArItem57(owner, { client, cp, cents: 90_000, postingDate: invoiceDate });
+  const { item: creditItem } = await creditNote57(owner, { client, cp, cents: 30_000, postingDate: creditDate });
   const receipt = await mintMonthSnapshot(owner, { client, monthStart });
   assert.equal(await snapshotState(owner, { snapshot: receipt.snapshot_id }), "current");
+  const before = await verifySnapshot(owner, { snapshot: receipt.snapshot_id });
+  assert.equal(before.drift, false, "mandatory setup: no drift before the direct pair");
 
-  const group = await directBackdatedAllocationPair(client, {
-    invoiceItem: invItem, invoiceCents: 25_000, creditItem, effectiveDate: inPeriodEffectiveDate, actorUserId: owner,
+  const { group, stateInsideTxn } = await directBackdatedAllocationPairInTxn(owner, client, {
+    invoiceItem: invItem, appliedCents: 30_000, creditItem, effectiveDate: inPeriodEffectiveDate,
+    actorUserId: owner, snapshot: receipt.snapshot_id,
   });
   assert.ok(group, "mandatory setup: the direct pair inserted lawfully (survived the FKs + the deferred subledger belt)");
+  assert.equal(stateInsideTxn, "stale", `E7'(B-ii): STALE inside the SAME transaction as the direct backdated insert -- proves the allocation arm of t_snapshot_staleness fires on its own (got ${stateInsideTxn})`);
 
-  assert.equal(
-    await snapshotState(owner, { snapshot: receipt.snapshot_id }), "stale",
-    "E7'(B-ii): STALE after a genuinely backdated (in-period) open_item_allocations pair -- proves the allocation arm of t_snapshot_staleness fires on its own",
-  );
   const rows = await assessmentRows(receipt.snapshot_id);
   const staleRow = rows.find((r) => r.assessment === "stale" && r.caused_by_table === "open_item_allocations");
-  assert.ok(staleRow, `E7'(B-ii): at least one assessment row carries caused_by_table='open_item_allocations' (got ${JSON.stringify(rows.map((r) => r.caused_by_table))}) -- this is the suite-wide proof R1 found zero of`);
+  assert.ok(staleRow, `E7'(B-ii): at least one assessment row carries caused_by_table='open_item_allocations' (got ${JSON.stringify(rows.map((r) => r.caused_by_table))}) -- this is the suite-wide proof both R1 and the Codex round found zero of`);
+
+  // AFTER commit: a lawful backdated allocation that genuinely MOVES a
+  // presented figure (current_cents -30,000; d61_90_cents +30,000; total_cents
+  // unchanged) marks real, recomputed drift -- the full ratified protection.
+  const after = await verifySnapshot(owner, { snapshot: receipt.snapshot_id });
+  assert.equal(after.drift, true, `E7'(B-ii): verify_snapshot reports REAL drift after a bucket-moving allocation (got ${JSON.stringify(after)})`);
+  assert.ok(after.drifted_keys.includes("ar_aging"), `the drifted key is ar_aging (got ${JSON.stringify(after.drifted_keys)})`);
 });
 
 // ===========================================================================

@@ -233,7 +233,7 @@ it gets wrong (§2.5(C)) — but an unchecked enumeration is worse than a checke
 | 5 | recurring-adjustment occurrences + auto-reversals (0045, `auto_reversal_of`) | book entries | JE trigger |
 | 6 | the depreciation belt (0041/0042 authorities) | book entries | JE trigger |
 | 7 | the closing-stock adjustment (WD-R11) | books an entry | JE trigger |
-| 8 | `approve_wrong_client_correction` (live body via `pg_get_functiondef`, §0.3) | reverses and re-books **across two clients** | JE trigger, per row, so both clients' snapshots mark |
+| 8 | `approve_wrong_client_correction` (live body via `pg_get_functiondef`, §0.3) | reverses at the FROM client; **does NOT re-book at TO** (see the amendment below) | JE trigger, FROM client only, at the correction's own approve |
 | 9 | the opening machinery (`approve_opening_seed` `0017:3825`, `supersede_opening_item` `0017:4047`) | books opening entries | JE trigger |
 | 10 | `finalize_close` (§2.6) | the closing entry | JE trigger (correctly: a close makes every prior month's pack stale) |
 | 11 | **`apply_open_items` (`0037:3225`) / `unallocate_group` (`0037:3141`)** | `open_item_allocations` rows ONLY — zero GL | **`open_item_allocations` trigger** *(the v1 defect)* |
@@ -241,6 +241,18 @@ it gets wrong (§2.5(C)) — but an unchecked enumeration is worse than a checke
 | 13 | **`void_bank_statement` (`0038:2211`)** | **`clara.bank_statements`** — `update … set status='void'` at **`0038:2270-2272`**; the statement's LINES are row-locked (`0038:2254-2255`) but not written | **`bank_statements` trigger** *(the v1 defect: row 13 named the `bank_reconciliations` trigger, which this verb never touches)* |
 | 14 | `complete_bank_reconciliation` (`0040:1587`, insert `0040:1963`) / `void_bank_reconciliation` (`0040:2057`, update `0040:2119`) | `bank_reconciliations` rows | `bank_reconciliations` trigger |
 | 15 | **`except_bank_line` (`0040:3222`) / `resolve_bank_line_exception` (`0040:3372`)** | **`clara.bank_line_exceptions`** — INSERT at `0040:3320-3325`, UPDATEs at `0040:3550-3555` and `:3558-3563` | **`bank_line_exceptions` trigger** *(newly covered — see the boundary note)* |
+
+> **ROW 8 AMENDMENT (lane γ Codex round adjudication, 2026-08-11) — "BOTH CLIENTS MARK" WAS WRONG,
+> READ FROM THE LIVE BODY.** `approve_wrong_client_correction` reverses the misfiled entry at the
+> FROM client (the mirror lands in `journal_entries`, marking FROM's snapshots via the row-1 JE
+> arm, in the correction's own transaction) — but it does **not** insert or approve any entry at the
+> TO client. Its live body retires the document's filing and opens a coding task at TO; the TO
+> client's books move only LATER, when that task is recoded into a draft and a human approves it —
+> an ordinary row-1 JE-arm marking, at its own later transaction, not part of the correction's act.
+> "Fires per row, so both clients' snapshots mark" conflated "the correction touches two clients'
+> attribution" with "the correction books at two clients" — it books at one. A cell built on the old
+> claim (asserting TO marks stale INSIDE the correction's own transaction) would assert a positive
+> that the live body does not perform.
 
 **The class the census will find COVERED, recorded so it is not rediscovered as a hole.** The FA
 depreciation tables — `clara.fa_depreciation` (`0041:519`), `clara.fa_depreciation_authorities`

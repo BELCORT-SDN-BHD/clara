@@ -96,7 +96,16 @@ test("E9(a): reverse_entry marks the artifact STALE inside the SAME uncommitted 
   assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries");
 });
 
-test("E9(b): a wrong-client correction marks BOTH clients' artifacts inside the SAME uncommitted transaction as the approve (the correction's inline mirror-approve is a fourth JE-approve path)", async (t) => {
+// FIX (Codex round adjudication, 2026-08-11): the TRUE contract, asserted
+// POSITIVELY, not logged as an observation. approve_wrong_client_correction
+// reverses at FROM only -- it retires the filing and opens a TO coding task,
+// it never books at TO. Design row 8's "both clients' snapshots mark" was
+// wrong for a normal correction (amended: wave-e-design-skeleton-part3.md
+// SS2.11 row 8), and this cell now asserts what the live body actually does:
+// FROM marks stale inside the correction's own transaction; TO stays CURRENT
+// through the correction; TO marks later, at its own ordinary row-1 JE-arm
+// event, when the recoded entry is drafted and approved there.
+test("E9(b): a wrong-client correction marks FROM (in-txn) and leaves TO CURRENT through the correction; TO marks later, at its own recoding approve", async (t) => {
   if (skip57(t)) return;
   const owner = world.users.alice;
   const checker = world.users.bob;
@@ -105,6 +114,7 @@ test("E9(b): a wrong-client correction marks BOTH clients' artifacts inside the 
   await setupCloseCoa(owner, clientFrom);
   await setupCloseCoa(owner, clientTo);
   const cp = await birthCounterparty(owner, { client: clientFrom, name: `X57 E9BCO ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const cpTo = await birthCounterparty(owner, { client: clientTo, name: `X57 E9BCOTO ${randomUUID().slice(0, 6)}`, kind: "customer" });
   const firm = await firmOf(clientFrom);
   const monthStart = await pastMonthStart(6);
   const postingDate = `${monthStart.slice(0, 8)}09`;
@@ -126,8 +136,8 @@ test("E9(b): a wrong-client correction marks BOTH clients' artifacts inside the 
 
   const receiptFrom = await mintMonthSnapshot(owner, { client: clientFrom, monthStart });
   assert.equal(await snapshotState(owner, { snapshot: receiptFrom.snapshot_id }), "current", "mandatory setup: FROM current before the correction");
-  // The TO client gets its OWN snapshot for the SAME month, so this cell can
-  // READ (not assume) whether the correction's re-booking half marks it too.
+  // The TO client gets its OWN snapshot for the SAME month, so this cell
+  // asserts (not merely observes) the correction's non-effect there.
   const receiptTo = await mintMonthSnapshot(owner, { client: clientTo, monthStart });
   assert.equal(await snapshotState(owner, { snapshot: receiptTo.snapshot_id }), "current", "mandatory setup: TO current before the correction");
 
@@ -151,15 +161,30 @@ test("E9(b): a wrong-client correction marks BOTH clients' artifacts inside the 
   const fromRows = await assessmentRows(receiptFrom.snapshot_id);
   assert.equal(fromRows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries", "the correction's mirror is a journal_entries row -- the FOURTH approve path E-R3's writer table names");
 
-  // TO-CLIENT: measured and reported, never assumed. SS2.11 row 8 asserts the
-  // correction marks "both clients' snapshots" -- this cell reports what the
-  // approve ACTUALLY did, inside the SAME transaction, rather than restating
-  // the design's promise.
-  noteLane(`E9(b) TO-CLIENT MEASURED: snapshot_state(receiptTo) inside the SAME transaction as approve_wrong_client_correction = '${stateToInsideTxn}' (SS2.11 row 8 asserts both clients mark; this is the measured result).`);
-  if (stateToInsideTxn === "stale") {
-    const toRows = await assessmentRows(receiptTo.snapshot_id);
-    assert.equal(toRows.find((r) => r.assessment === "stale").caused_by_table, "journal_entries");
-  }
+  // POSITIVE ASSERTION: the correction's OWN transaction books nothing at TO,
+  // so TO's artifact stays current THROUGH it -- not an absence, a measured
+  // fact taken inside the same transaction that just marked FROM stale.
+  assert.equal(stateToInsideTxn, "current", `E9(b): TO's snapshot stays CURRENT through the correction's own transaction (got ${stateToInsideTxn}) -- the live body reverses at FROM only and re-books at TO LATER, via that client's own recoding`);
+  const toRowsDuring = await assessmentRows(receiptTo.snapshot_id);
+  assert.equal(toRowsDuring.filter((r) => r.assessment === "stale").length, 0, "TO carries ZERO stale assessment rows from the correction itself");
+
+  // THE RECODING HALF: an ordinary draft+approve at TO (standing in for the
+  // human recoding the task the correction opened) marks TO stale later, at
+  // its OWN row-1 JE-arm event -- a separate transaction, not the correction's.
+  const recodeDate = `${monthStart.slice(0, 8)}11`;
+  const recode = await draftEntryV3(owner, {
+    client: clientTo, resolution: await freshResolution(owner, clientTo, { subjectKind: "manual", subjectId: null }),
+    postingDate: recodeDate, memo: "x57 E9b TO recoding",
+    lines: [
+      { account_code: AR1, debit_cents: 90_000, credit_cents: 0, description: "dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 90_000, description: "cr" },
+    ],
+    vendor: { existing_id: cpTo, kind: "customer" }, opKey: opk("x57-e9b-recode-draft"),
+  });
+  await approveEntry(owner, { entry: recode.entry_id, expectedRevision: recode.revision_token, opKey: opk("x57-e9b-recode-approve") });
+  assert.equal(await snapshotState(owner, { snapshot: receiptTo.snapshot_id }), "stale", "E9(b) recoding half: TO's snapshot marks stale at its OWN recoding approve -- a separate, later, ordinary row-1 JE-arm event");
+  const toRowsAfter = await assessmentRows(receiptTo.snapshot_id);
+  assert.equal(toRowsAfter.find((r) => r.assessment === "stale").caused_by_table, "journal_entries");
 });
 
 // ===========================================================================

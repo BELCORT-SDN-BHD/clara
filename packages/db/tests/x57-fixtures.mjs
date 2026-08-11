@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, humanQuery, withActor, ROLES, opk, namedCall, idOf, firmOf,
+  rootQuery, humanQuery, withActor, ROLES, opk, namedCall, idOf, firmOf, getPool,
   draftEntryV3, approveEntry, reverseEntry, freshResolution, counterpartyRows,
   buildWorld, printLaneNotes, noteLane, printSkipCount, markSkip, endPool,
   seedCitedDocument, proposeCorrection, approveCorrection, renameCounterparty,
@@ -26,21 +26,23 @@ import {
 } from "./a21-helpers.mjs";
 import {
   has0056, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty,
-  bookToday, AR1, REVN, EXPN, BANK1,
+  bookToday, addDaysStr, AR1, REVN, EXPN, BANK1,
 } from "./x56-fixtures.mjs";
 import { addBankAccount, enterStatement, voidBankStatement } from "./x38-match-fixtures.mjs";
 import { exceptLine, resolveException } from "./x42-af2-helpers.mjs";
+import { holdThenContend, waitBlockedBy } from "./rig-docs-race.mjs";
 
 export {
-  rootQuery, humanQuery, withActor, ROLES, opk, namedCall, idOf, firmOf,
+  rootQuery, humanQuery, withActor, ROLES, opk, namedCall, idOf, firmOf, getPool,
   draftEntryV3, approveEntry, reverseEntry, freshResolution, counterpartyRows,
   buildWorld, printLaneNotes, noteLane, printSkipCount, markSkip, endPool,
   seedCitedDocument, proposeCorrection, approveCorrection, renameCounterparty,
   FIELD, ev,
   has0056, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty,
-  bookToday, AR1, REVN, EXPN, BANK1,
+  bookToday, addDaysStr, AR1, REVN, EXPN, BANK1,
   addBankAccount, enterStatement, voidBankStatement,
   exceptLine, resolveException,
+  holdThenContend, waitBlockedBy,
 };
 
 /** Run fn and return the raised error (or null) -- the x37/x38/x56 idiom. */
@@ -259,8 +261,7 @@ export async function allocateReceipt57(sub, {
 }
 
 /** A DIRECT, backdated, balanced netting pair inserted straight into
- *  clara.open_item_allocations (root -- RLS bypass; only clara_fn_owner/root
- *  may write this table at all) -- proving the open_item_allocations arm of
+ *  clara.open_item_allocations -- proving the open_item_allocations arm of
  *  t_snapshot_staleness fires on its own, independent of any audited writer's
  *  act-dating choice. NOT a fixture shortcut that silences triggers (contrast
  *  forceControlMismatch/forgeClosedPeriodMovement, x56-fixtures.mjs): every
@@ -270,19 +271,48 @@ export async function allocateReceipt57(sub, {
  *  (client,domain), one canonical counterparty, each item's two-sided bound
  *  respected) so the belt passes it on its own merits, the same shape
  *  apply_open_items itself would have written, just with a caller-chosen
- *  effective_date instead of _book_today(). */
-export async function directBackdatedAllocationPair(client, {
-  invoiceItem, invoiceCents, creditItem, effectiveDate, actorUserId, reason = "x57 direct backdated apply",
+ *  effective_date instead of _book_today().
+ *
+ *  FIX (Codex round finding 5, 2026-08-11): the insert and the snapshot_state
+ *  read now run in the SAME transaction, on the SAME pooled client -- the
+ *  same transactional-identity instrument as every other writer cell in this
+ *  suite (inHumanTxn/txnSnapshotState), not a separate autocommit rootQuery
+ *  insert followed by a later, separately-committed read. open_item_
+ *  allocations grants INSERT to NO app role (forced RLS, clara_fn_owner
+ *  using(true) only), so the insert runs as the pool's default (superuser)
+ *  role; the read then switches, WITHIN THE SAME OPEN TRANSACTION, to
+ *  clara_authenticated with the human's jwt claims set txn-local -- exactly
+ *  the role clara.snapshot_state()'s SECURITY DEFINER body expects, and the
+ *  same lane every sibling in-txn read uses. */
+export async function directBackdatedAllocationPairInTxn(sub, client, {
+  invoiceItem, appliedCents, creditItem, effectiveDate, actorUserId, snapshot, reason = "x57 direct backdated apply",
 }) {
   const firm = await firmOf(client);
   const group = randomUUID();
-  await rootQuery(
-    `insert into clara.open_item_allocations
-       (firm_id, client_id, domain, item_id, application_group, operation_kind, amount_cents, reason, created_by, effective_date)
-     values
-       ($1, $2, 'ar', $3, $4, 'apply', $5::bigint, $6, $7, $8::date),
-       ($1, $2, 'ar', $9, $4, 'apply', $10::bigint, $6, $7, $8::date)`,
-    [firm, client, invoiceItem, group, -invoiceCents, reason, actorUserId, effectiveDate, creditItem, invoiceCents],
-  );
-  return group;
+  const c = await getPool().connect();
+  let stateInsideTxn = null;
+  try {
+    await c.query("begin");
+    await c.query(
+      `insert into clara.open_item_allocations
+         (firm_id, client_id, domain, item_id, application_group, operation_kind, amount_cents, reason, created_by, effective_date)
+       values
+         ($1, $2, 'ar', $3, $4, 'apply', $5::bigint, $6, $7, $8::date),
+         ($1, $2, 'ar', $9, $4, 'apply', $10::bigint, $6, $7, $8::date)`,
+      [firm, client, invoiceItem, group, -appliedCents, reason, actorUserId, effectiveDate, creditItem, appliedCents],
+    );
+    await c.query(`set role ${ROLES.authenticated}`);
+    await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub, role: "authenticated" })]);
+    const r = await c.query("select clara.snapshot_state(p_snapshot => $1) as r", [snapshot]);
+    stateInsideTxn = r.rows[0].r;
+    await c.query("commit");
+  } catch (e) {
+    await c.query("rollback").catch(() => {});
+    throw e;
+  } finally {
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+  return { group, stateInsideTxn };
 }
