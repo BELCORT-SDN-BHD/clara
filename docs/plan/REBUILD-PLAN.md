@@ -26,15 +26,16 @@
 
 Ordered by dependency + risk; each wave keeps the app runnable.
 
-> **CURRENT (2026-08-09, the F6–F9 first-strike close) — read this line, not the first dated block below.**
-> **53 migrations (frontier `0054`) · Fly `clara-runtime` v60 · §7-A CLOSED (ADR-063/064) ·
-> WAVE E CONTRACT RATIFIED (ADR-065; `docs/plan/wave-e-contract.md`, E-R1..E-R14; the LAW
-> amended at E-R4) · THE WAVE E BUILD IS OPEN AND ITS FIRST STRIKE — the F6–F9 fix batch
-> (tasks #31–34) — is BUILT, DEPLOYED AND ACCEPTED (ADR-066; as-run evidence
-> `docs/plan/wave-e-f6f9-acceptance.md`; F6 accepted PARTIALLY WITNESSED).** Waves
-> A / A2 / A2.1 / B / C / D and §7-A are closed; **NEXT = the Wave E campaign proper** —
-> periods + close · the FS pack + reporting engine + metric algebra/catalog · the ad-hoc
-> authoring lane · the client-facts trio (ONE campaign, dependency-ordered acceptance).
+> **CURRENT (2026-08-11, the α+β landing — ADR-067) — read this line, not the first dated block below.**
+> **55 migrations (frontier `0056`) · Fly `clara-runtime` v60 · CI on the SELF-HOSTED runner
+> (PR #227; gate unchanged) · WAVE E LANES α AND β BUILT, MERGED AND CEREMONIED** (α = PR
+> #226/`0055`, the E-R12 trio; β = PR #228/`0056`, the close model — INERT until the first
+> human `open_fiscal_year`; as-run records `wave-e-lane-alpha-acceptance.md` +
+> `wave-e-lane-beta-acceptance.md`; the ADR-062 MSIC debt discharged through the door).
+> Waves A / A2 / A2.1 / B / C / D and §7-A are closed; the first strike (F6–F9) closed at
+> ADR-066. **NEXT = lane γ (registry + snapshots, skeleton §2.11–§2.12), then δ..θ** —
+> ONE campaign per E-R7, acceptance F→A→B→C→D→E per the matrix. **Named build debt:** the
+> `closing_stock` producer verb ships before any real goods-trader close (PR #228 residual 5).
 > Everything that follows is the CHRONOLOGICAL record, **oldest first** — each
 > `STATUS (date)` block was true on its date and is superseded by the ones below it. The
 > live pin lives in `CLAUDE.md`; the open register is PROJECTLOG PART 2.
@@ -368,6 +369,17 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > live 0044 wall, so α = verification + ONE `apply_open_items` date guard + the `client_facts`
 > door + the context-pack splice; early ceremony) ∥ the 2506 backfill window ∥ the #43/#44
 > research lanes.
+
+> **STATUS (2026-08-11 — lanes α AND β LANDED AND CEREMONIED, ADR-067): α = PR #226 (`0055`,
+> triple-CLEAN, 16/16 battery) · β = PR #228 (`0056`, the 8-round/35-defect ladder + the
+> 69-cell battery) · CI moved to the SELF-HOSTED `clara-wsl` runner mid-queue (PR #227 — the
+> quota outage; gate unchanged, private-repo-only law in `docs/ops/ci-runner.md`).** One D1
+> window applied 0055+0056 live (first attempt); the three MSIC codes entered through the
+> door (ADR-062 debt discharged); the close model is LIVE-INERT (zero `fiscal_years` rows —
+> activation is the first human `open_fiscal_year`). As-run records:
+> `wave-e-lane-alpha-acceptance.md` (+ two V-OWNER sign-offs pending) ·
+> `wave-e-lane-beta-acceptance.md`. **Owner rulings standing: B3 (the reopen mirror, two lane
+> positions, PR #228 residual 3) · the Gate-P seven re-export.** **NEXT = lane γ.**
 
 **Wave A — the daily loop** *(**CLOSED**, ADR-022..030 — incl. A2 / A2.1)*. Coding with **intrinsic side-effects** (composed inside `approve_entry` / `_subledger_on_approve` as built; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding** *(**CLOSED on intent**, ADR-044..046)*. The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
