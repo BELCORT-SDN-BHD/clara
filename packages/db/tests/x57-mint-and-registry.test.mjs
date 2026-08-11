@@ -27,7 +27,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, opk, buildWorld, printLaneNotes, printSkipCount, noteLane, markSkip, endPool,
   has0056, has0057, hasDeltaEvaluator, freshActiveClient, setupCloseCoa, bookToday,
-  AR1, REVN, birthCounterparty, renameCounterparty,
+  AR1, birthCounterparty, renameCounterparty,
   mintMonthSnapshot, verifySnapshot, snapshotState, reportingPeriodRows, periodSnapshotRow,
   openArItem57, caught,
 } from "./x57-fixtures.mjs";

@@ -41,7 +41,7 @@ import {
   REVN, BANK1,
   mintMonthSnapshot, snapshotState, verifySnapshot, assessmentRows, periodSnapshotRow,
   inHumanTxn, txnSnapshotState, openArItem57, creditNote57, caught,
-  applyOpenItems57, unallocateGroup, allocateReceipt57, directBackdatedAllocationPairInTxn,
+  applyOpenItems57, unallocateGroup, directBackdatedAllocationPairInTxn,
 } from "./x57-fixtures.mjs";
 
 let ready = false;
