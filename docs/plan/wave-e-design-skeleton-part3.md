@@ -227,12 +227,37 @@ close measures it", and a table on one list but not the other is the shape of bo
   > ALREADY-COMPLETED month (the only kind `mint_month_snapshot` will snapshot), `_subledger_
   > outstanding_asof`'s own `effective_date <= p_as_of` filter excludes a today-dated allocation from
   > that month's `as_of = period_end` recompute: the figure a management pack PRESENTS for that month
-  > does not move. That is the accounting-correct outcome, not a gap. The mechanism DOES reach a
-  > presented figure when the allocation is genuinely backdated into the snapshotted period — which,
-  > for these two verbs, is unreachable (no date argument exists on either); the backdatable reach into
-  > a real, date-bearing allocation is via the **posting-dated `approve_*` paths** (row 3,
-  > `allocate_receipt`/`allocate_payment`, whose date anchor is the settlement entry's own
-  > `posting_date`).
+  > does not move. That is the accounting-correct outcome, not a gap.
+  >
+  > **Four precisions, each read from the live bodies at the R2.5 pass:**
+  >
+  > 1. **`unallocate_group`'s stamp is not the bare act date.** It writes
+  >    `greatest(clara._book_today(), oa.effective_date)` — the later of today and the allocation row
+  >    it negates. The per-writer table's row for it (below, "the ACT date (`created_at::date`), with
+  >    the R9 `greatest()` ordering guard") names the guard without quoting it; the expression above is
+  >    what the body actually stamps. The consequence for this qualification is unchanged — the value
+  >    is never EARLIER than today, so it still cannot reach a completed month — but the reason is the
+  >    `greatest()`, not a bare `_book_today()`.
+  > 2. **THE BOUNDARY-DAY CARVE-OUT, which both siblings carry.** "Does not move the presented figure"
+  >    holds for every completed month *except the exact calendar last day of the period*. The
+  >    completeness guard refuses a month whose `period_end > clara._book_today()` but ALLOWS
+  >    `period_end = _book_today()`, so on that one day a same-day allocation satisfies
+  >    `effective_date <= as_of` and does reach the recompute. The staleness predicate agrees on that
+  >    day (`period_end >= effect_date` is true when both are today), so the artifact marks stale and
+  >    a recompute reports real drift — the two halves stay consistent at the boundary rather than
+  >    diverging there.
+  > 3. **The row-11 citation.** The adjudication that corrects the consequence lives in the per-writer
+  >    act-dating table below, rows `apply_open_items` and `unallocate_group`
+  >    (`wave-e-design-skeleton-part3.md:300-301`), not in §2.11's writer table row 11.
+  > 4. **The backdatable reach, stated precisely.** For these two verbs it is unreachable (neither
+  >    takes a date argument). For the posting-dated pair (row 3, `allocate_receipt` /
+  >    `allocate_payment`) the reach is REAL but BOUNDED, and the per-writer table's "the unborn-item
+  >    wall already refuses backdating" overstates it: the live wall is
+  >    `if i.item_date is not null and p_posting_date < i.item_date then raise ... CLR10
+  >    allocation_to_unborn_item`, which refuses only dates EARLIER than the item's own date. Backdating
+  >    to any date `>= item_date` is lawful, so a settlement posted into a snapshotted month does move
+  >    that month's presented aging — and is marked stale by the JE trigger, since those verbs are
+  >    JE-bearing.
 
 **The writer set — a REVIEW instrument, and (per §2.5(B)) an ASSERTED one.** E-R3 names the class; the
 list below lets a reviewer check each named writer's effect path against a trigger, and the migration

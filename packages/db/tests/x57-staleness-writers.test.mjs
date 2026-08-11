@@ -229,7 +229,12 @@ test("E7'(A): apply_open_items TODAY, against a past-period invoice+credit-note,
   // prove the apply actually WROTE anything -- a silent no-op apply would
   // return SOME object and pass an assert.ok. Positively ground the
   // stimulus: read the allocation rows the apply's own group produced.
-  const group = applyReceipt?.group_id ?? applyReceipt?.application_group ?? applyReceipt?.group ?? null;
+  // FIX (R2.5 NIT, accepted 2026-08-12): read the EXACT catalog key, never a fallback
+  // chain. clara.apply_open_items returns jsonb_build_object('group_id', ...) and nothing
+  // else; a ?? chain over three spellings papers over the day that key is renamed, turning
+  // a real contract change into a green test. The fixtures' own law: a key divergence is a
+  // FINDING, so let it surface as the failed assert on the next line.
+  const group = applyReceipt?.group_id ?? null;
   assert.ok(group, `mandatory setup: the apply's receipt names its application_group (got ${JSON.stringify(applyReceipt)})`);
   const allocRows = (await rootQuery(
     "select item_id, amount_cents from clara.open_item_allocations where application_group=$1 order by amount_cents",
@@ -373,7 +378,12 @@ test("E8'(A): unallocate_group TODAY, undoing a past-period application, leaves 
   const applyReceipt = await applyOpenItems57(owner, {
     client, applications: [{ source_item_id: creditItem, target_item_id: invItem, amount_cents: 25_000 }],
   });
-  const group = applyReceipt?.group_id ?? applyReceipt?.application_group ?? applyReceipt?.group ?? null;
+  // FIX (R2.5 NIT, accepted 2026-08-12): read the EXACT catalog key, never a fallback
+  // chain. clara.apply_open_items returns jsonb_build_object('group_id', ...) and nothing
+  // else; a ?? chain over three spellings papers over the day that key is renamed, turning
+  // a real contract change into a green test. The fixtures' own law: a key divergence is a
+  // FINDING, so let it surface as the failed assert on the next line.
+  const group = applyReceipt?.group_id ?? null;
   assert.ok(group, "mandatory setup: the apply named its group");
 
   // A FRESH snapshot, minted AFTER the apply settled -- 'current' -- so this

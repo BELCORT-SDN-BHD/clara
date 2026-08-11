@@ -661,7 +661,13 @@ begin
       fiscal_year_id, minted_by)
     values (new.firm_id, new.client_id, 'fiscal_year', new.starts_on, new.ends_on,
       new.id, new.opened_by)
-    on conflict do nothing;
+    -- The arbiter is NAMED here for the same reason S5's backfill and _ensure_month_period
+    -- name theirs -- and it matters MOST here, because this is the PRIMARY forward path:
+    -- every fiscal year opened from now on arrives through this trigger. A bare
+    -- `on conflict do nothing` swallows a violation of ANY unique constraint on the table,
+    -- including ones added later for entirely different reasons, so a future constraint
+    -- could silently absorb a collision this trigger should have raised on.
+    on conflict (client_id, grain, period_start) do nothing;
   return new;
 end $$;
 revoke all on function clara._tf_fiscal_years_mint_period() from public;
@@ -1510,13 +1516,25 @@ begin
   -- covered table without this guard can be emptied with no assessment written and every
   -- artifact still reading `current`. Asserted across all six (tgtype bit 32 = TRUNCATE) so
   -- the set cannot drift back open the way fixed_assets had.
+  -- Pinned by IDENTITY, not by shape (the 0043 precedent). tgtype alone says only "some
+  -- statement-level truncate trigger exists" -- it would be satisfied by a trigger bound to
+  -- a function that logs and returns, or one left DISABLED, and either reads as protection
+  -- while providing none. So all four properties are asserted together: the bound function
+  -- IS clara._tf_no_truncate, it fires on TRUNCATE (bit 32), it fires BEFORE (bit 2 SET --
+  -- measured on this catalog: the live no-truncate triggers carry tgtype=34 = 32|2, and an
+  -- AFTER row trigger reads 0 on that bit; the bit is set for BEFORE, not for AFTER), and
+  -- it is ENABLED ('O' = origin, the normal enabled state).
   for r in select * from (values
       ('journal_entries'), ('open_item_allocations'), ('fixed_assets'),
       ('bank_statements'), ('bank_reconciliations'), ('bank_line_exceptions')) t(tbl) loop
     if not exists (select 1 from pg_trigger g
                     where g.tgrelid = ('clara.' || r.tbl)::regclass
-                      and not g.tgisinternal and (g.tgtype & 32) <> 0) then
-      raise exception '0057 S11.1: clara.% carries NO before-truncate guard -- TRUNCATE fires no row triggers, so it would empty a covered table leaving every snapshot reading current', r.tbl
+                      and not g.tgisinternal
+                      and g.tgfoid = 'clara._tf_no_truncate()'::regprocedure
+                      and (g.tgtype & 32) <> 0          -- TRUNCATE
+                      and (g.tgtype & 2)  <> 0          -- BEFORE (bit set = BEFORE)
+                      and g.tgenabled = 'O') then       -- enabled, origin
+      raise exception '0057 S11.1: clara.% carries no ENABLED before-truncate trigger bound to clara._tf_no_truncate -- TRUNCATE fires no row triggers, so it would empty a covered table leaving every snapshot reading current', r.tbl
         using errcode = 'CLR10';
     end if;
   end loop;
@@ -1707,6 +1725,13 @@ begin
   -- conjunct is dropped: ZERO clara non-trigger functions may contain a bare EXECUTE token
   -- at all. Measured 0 today, so the stricter form costs nothing now and is load-bearing
   -- the moment anyone adds dynamic SQL to this schema.
+  --
+  -- ITS KNOWN LIMITATION, NAMED RATHER THAN DISCOVERED LATER: the probe matches the bare
+  -- word, so a body containing the STRING `grant execute on function ...` -- a plausible
+  -- thing for a future migration helper to build -- trips it too, and the message would
+  -- then misdiagnose a privilege statement as dynamic DML. That is the fail-CLOSED
+  -- direction (a false stop, never a false pass) and the fix when it happens is to read the
+  -- named body and narrow the pattern, not to weaken the sentinel.
   select coalesce(string_agg(p.oid::regprocedure::text, ', ' order by p.oid::regprocedure::text), '')
     into v_t
     from pg_proc p
@@ -1893,10 +1918,22 @@ begin
   -- The re-derive path, stated so a future author is not left guessing: if this fires, read
   -- the body's allow-sets again and re-derive the INSERT/UPDATE/DELETE predicate in the
   -- clara.journal_entries arm of clara._tf_snapshot_staleness -- do not simply widen it.
-  select coalesce(p.prosrc, '') into v_def from pg_proc p
+  -- COMMENT-STRIPPED BEFORE EVERY PROBE BELOW, and both polarities need it:
+  --   * the five arm probes are POSITIVE (the literal must be PRESENT), so a raw read lets
+  --     an arm that was DELETED but left behind as a comment keep passing -- prose standing
+  --     in for a live refusal, which is the same defect this file corrected in 11.2b and
+  --     again in 11.2d's edges. The refusal literals themselves live inside `raise
+  --     exception` STRINGS, not comments, so stripping cannot erase a real one.
+  --   * the posting_date and FA-column probes are NEGATIVE (the token must be ABSENT), so a
+  --     raw read FALSE-RAISES the day someone writes the column name in a comment --
+  --     a migration refusing to apply because of a sentence.
+  -- One strip fixes both, which is the tell that they were always one defect.
+  select regexp_replace(regexp_replace(coalesce(p.prosrc, ''),
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g') into v_def
+    from pg_proc p
    where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_entry_immutable';
-  if v_def = '' then
-    raise exception '0057 S11.4c: clara._tf_entry_immutable is absent -- the JE staleness predicate was derived from its allow-set'
+  if btrim(v_def) = '' then
+    raise exception '0057 S11.4c: clara._tf_entry_immutable is absent (or is comment-only) -- the JE staleness predicate was derived from its allow-set'
       using errcode = 'CLR10';
   end if;
   if position('posting_date' in v_def) <> 0 then
@@ -1920,10 +1957,15 @@ begin
   -- and its post-approval mutable set is {status, disposed_at, disposal_entry_id,
   -- superseded_by_asset_id, superseded_at, updated_at} plus the particulars columns while
   -- particulars are incomplete. Measured: NEITHER column appears anywhere in that body.
-  select coalesce(p.prosrc, '') into v_def from pg_proc p
+  -- Comment-stripped for the reason stated at (ii): this probe is NEGATIVE, and the 0017
+  -- belt carries a long prose transition table above its allow-sets. A raw read would make
+  -- the first future comment that so much as NAMES acquired_date abort the migration.
+  select regexp_replace(regexp_replace(coalesce(p.prosrc, ''),
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g') into v_def
+    from pg_proc p
    where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_fixed_assets_immutable_0017';
-  if v_def = '' then
-    raise exception '0057 S11.4c: clara._tf_fixed_assets_immutable_0017 is absent -- the FA effect-date skip rests on its transition table'
+  if btrim(v_def) = '' then
+    raise exception '0057 S11.4c: clara._tf_fixed_assets_immutable_0017 is absent (or is comment-only) -- the FA effect-date skip rests on its transition table'
       using errcode = 'CLR10';
   end if;
   if position('acquired_date' in v_def) <> 0 or position('effective_from' in v_def) <> 0 then
@@ -2061,12 +2103,25 @@ begin
   end if;
   -- THE DOUBLE-MINT ARM IS DELIBERATELY NOT WRITTEN, and this comment is why. The obvious
   -- companion assertion -- "no FY carries more than one fy-grain period row" -- is
-  -- STRUCTURALLY UNREACHABLE: uq_rp_client_grain_start would already have raised 23505 at
-  -- INSERT time, inside the trigger or the backfill, long before this tail could observe a
-  -- duplicate. An assertion that cannot fail is not evidence; it is decoration that reads
-  -- like evidence, which is the specific failure this file has now corrected twice. The
-  -- constraint IS the guarantee here, and 11.6 already asserts the constraint's table is
-  -- under forced RLS with its owner policy. Nothing further to check.
+  -- STRUCTURALLY UNREACHABLE, and it takes THREE mechanisms in combination to make it so.
+  -- Citing only the first would be its own species of the defect this file keeps fixing: a
+  -- stated proof narrower than the thing it claims to prove.
+  --   1. uq_rp_client_grain_start (client_id, grain, period_start) -- a second fy-grain row
+  --      for the same client and start raises 23505 at INSERT time, inside the trigger or
+  --      the backfill, long before this tail could observe it.
+  --   2. clara._tf_reporting_periods_fy_congruence -- an fy-grain row's period_start must
+  --      EQUAL its fiscal year's starts_on. Without this, (1) would not bind: two rows for
+  --      the same FY could carry different starts, collide on nothing, and both persist.
+  --   3. clara._tf_fiscal_years_lifecycle -- a fiscal year "admits exactly one update: its
+  --      lifecycle status" (its own refusal text, CLR-raised with reason fy_immutable), so
+  --      starts_on cannot move under an existing period row and re-open the gap (2) closes.
+  --      Verified BEHAVIOURALLY, not by reading the body for the column name: the token
+  --      `starts_on` DOES appear in that trigger, so an absence probe would have concluded
+  --      the opposite of the truth. An UPDATE of starts_on is refused outright.
+  -- Together they make "one fy-grain row per fiscal year" true by construction. An
+  -- assertion here could not fail, and an assertion that cannot fail is not evidence -- it
+  -- is decoration that reads like evidence. 11.6 already asserts this table's forced RLS
+  -- and owner policy; the three mechanisms above are the rest of the guarantee.
 
   -- (11.10) THE STATED OUT-OF-SCOPE DECISION. The honest-boundary convention requires
   -- saying what was left out and why, not silence -- an omission nobody wrote down is

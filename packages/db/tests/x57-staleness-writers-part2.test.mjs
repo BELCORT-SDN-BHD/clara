@@ -34,8 +34,11 @@ import {
 // scratch. A SEPARATE, already-proven firm/client graph (wb.buildWaveBWorld,
 // cached per process); x57's own generic wrappers (mint/snapshot/verify) work
 // identically against it since they key only on the calling human's JWT firm.
-import { faWorld, freshFaClient, buyAsset, completeSL } from "./x41-fa-world.mjs";
-import { reviseParticulars } from "./x41-fa-fixtures.mjs";
+// SINGLE DOOR (R2.5 NIT, accepted 2026-08-12): x41-fa-world.mjs re-exports the fixtures
+// wholesale (`export * from "./x41-fa-fixtures.mjs"`), so importing from both it and the
+// fixtures directly gives one module two entry points here -- and the second one bypasses
+// whatever the world sets up around them. Everything comes through the world.
+import { faWorld, freshFaClient, buyAsset, completeSL, reviseParticulars } from "./x41-fa-world.mjs";
 
 let ready = false;
 let world = null;
