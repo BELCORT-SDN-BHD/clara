@@ -915,18 +915,32 @@ begin
   if v_fy.id is null or v_fy.client_id <> p_client then
     return jsonb_build_object('state', 'unknown', 'reason', 'fiscal_year_unknown');
   end if;
+  -- Enumerate from the ACCOUNT REGISTRY, never from statements (round-1 ladder finding):
+  -- an active account with NO statements loaded is a question this gate must ASK -- from
+  -- statements alone it is never enumerated and the gate answers 'tie' without ever being
+  -- asked (the ADR-066 lesson). Inactive accounts with non-void statement history stay in
+  -- the census: deactivation mid-year does not excuse reconciliation.
   for r in
-    select s.bank_account_id,
+    select ba.id as bank_account_id,
+           exists (select 1 from clara.bank_statements s
+              where s.client_id = p_client and s.bank_account_id = ba.id
+                and s.status <> 'void') as has_statements,
            (select br.id from clara.bank_reconciliations br
              join clara.bank_statements st on st.id = br.statement_id
-            where br.client_id = p_client and st.bank_account_id = s.bank_account_id
+            where br.client_id = p_client and st.bank_account_id = ba.id
+              and st.status <> 'void'
               and br.status = 'complete' and br.period_end >= v_fy.ends_on
             order by br.period_end asc, br.completed_at desc limit 1) as covering_recon
-      from clara.bank_statements s
-      where s.client_id = p_client and s.status <> 'void'
-      group by s.bank_account_id
+      from clara.bank_accounts ba
+      where ba.client_id = p_client
+        and (ba.active or exists (select 1 from clara.bank_statements s2
+               where s2.client_id = p_client and s2.bank_account_id = ba.id
+                 and s2.status <> 'void'))
   loop
-    if r.covering_recon is null then
+    if not r.has_statements then
+      v_acct_state := 'unknown';
+      v_verify := jsonb_build_object('reason', 'no_statements_loaded');
+    elsif r.covering_recon is null then
       v_acct_state := 'unknown';
       v_verify := jsonb_build_object('reason', 'no_completed_reconciliation_covering_fy_end');
     else
@@ -2084,7 +2098,10 @@ begin
       v_prior_receipt.id, 'close', c.actor, v_mode, v_preparer,
       nullif(btrim(coalesce(p_self_attestation, '')), ''), v_pl, v_re,
       md5(v_closing_pos::text), md5(v_gate_summary::text), v_watermark,
-      md5(v_closing_pos::text), v_entry,
+      -- dataset_sha256 IS a sha256 (round-1 ladder MAJOR): the column's name asserts the
+      -- algorithm, and the E-b sealed-artifact pin (skeleton part2 5) will lean on its
+      -- collision resistance -- an md5 alias of closing_tb_digest satisfied neither.
+      encode(sha256(convert_to(v_closing_pos::text, 'UTF8')), 'hex'), v_entry,
       jsonb_build_object(
         'closing_position', v_closing_pos,
         'gates', v_gate_summary,
@@ -2101,7 +2118,7 @@ begin
           else jsonb_build_object('basis', 'wave_b_opening_machinery',
                  'note', 'no prior close receipt; the seed tie was asserted at approval') end,
         'watermark_basis', 'v1_count_maxapproved',
-        'dataset_basis', 'v1_closing_position_digest'));
+        'dataset_basis', 'v1_closing_position_sha256'));
 
   -- (No lineage UPDATE: the entry was BORN carrying close_receipt_id -- see the column's
   -- own comment. An approved entry is never touched outside the reversal-linkage stamp.)
@@ -2464,6 +2481,17 @@ begin
     end if;
     v_def := replace(v_def, v_frm, 'clara.correction_period_state(');
     execute v_def;
+    -- POSTCHECK (round-1 ladder uniformity with S9/S9b): re-harvest -- the honest twin
+    -- landed exactly once and the protocol spelling is GONE from this reader. S11.2's
+    -- caller censuses re-assert the same from the tail; this closes the loop in-line.
+    select pg_get_functiondef(p.oid) into v_def from pg_proc p
+      where p.oid = v_sig::regprocedure;
+    if (length(v_def) - length(replace(v_def, 'clara.correction_period_state(', '')))
+         / length('clara.correction_period_state(') <> 1
+       or position('_correction_period_state(' in v_def) > 0 then
+      raise exception '0056 S7 postcheck: %''s repoint did not land cleanly', v_sig
+        using errcode = 'CLR10';
+    end if;
   end loop;
 end $s7$;
 
@@ -2671,11 +2699,16 @@ begin
 
   -- (11.2) THE CALLER SET, AFTER (matrix A6d): the protocol fn's callers are exactly the
   -- guard; the twin's callers are exactly the two repointed readers.
+  -- Both censuses comment-strip before matching (round-1 ladder uniformity with 11.3):
+  -- a comment mention would only ever add a spurious caller (false RED, fail-closed),
+  -- but the stripped form is the one worth copying.
   select coalesce(string_agg(p.proname, ',' order by p.proname), '') into v_t
     from pg_proc p
     where p.pronamespace = 'clara'::regnamespace
       and p.proname not in ('_correction_period_state')
-      and p.prosrc like '%\_correction\_period\_state(%' escape '\';
+      and regexp_replace(regexp_replace(coalesce(nullif(p.prosrc, ''), ''),
+            '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')
+          like '%\_correction\_period\_state(%' escape '\';
   if v_t <> 'approve_wrong_client_correction' then
     raise exception '0056 S11.2: after the repoint, _correction_period_state''s callers are {%} -- expected exactly {approve_wrong_client_correction}', v_t
       using errcode = 'CLR10';
@@ -2684,7 +2717,9 @@ begin
     from pg_proc p
     where p.pronamespace = 'clara'::regnamespace
       and p.proname not in ('correction_period_state', '_correction_period_state')
-      and p.prosrc like '%clara.correction\_period\_state(%' escape '\';
+      and regexp_replace(regexp_replace(coalesce(nullif(p.prosrc, ''), ''),
+            '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')
+          like '%clara.correction\_period\_state(%' escape '\';
   if v_t <> 'preview_wrong_client_correction,retire_document_filing' then
     raise exception '0056 S11.2: the honest twin''s callers are {%} -- expected exactly {preview_wrong_client_correction, retire_document_filing}', v_t
       using errcode = 'CLR10';
