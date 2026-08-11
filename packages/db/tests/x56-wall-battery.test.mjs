@@ -83,7 +83,8 @@ test("A19a the wall refuses approve_entry AND reverse_entry inside a CLOSED FY (
   const begun = await beginClose(owner, { fy: fx.fy });
   const draftsGate = (begun.gates ?? []).find((g) => g.check_key === "unapproved_drafts_in_period");
   assert.equal(draftsGate?.state, "fail", "mandatory setup: the pre-existing draft trips the drawer-2 gate");
-  await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: "x56 a19a: attested past the deliberately left draft" });
+  // unapproved_drafts_in_period is ITEMIZED (Codex R1 MAJOR 1) -- name the one draft's entry_id.
+  await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: "x56 a19a: attested past the deliberately left draft", itemKey: draft.entry_id });
   const closed = await finalizeClose(owner, { fy: fx.fy });
   assert.ok(closed?.receipt_id, "mandatory setup: the FY closed");
 
@@ -192,7 +193,10 @@ test("A19d RIGHT ANSWER -- the closing entry posts under its own permit (read: p
   const draftA = await draftOnly(preparer, { client: fx.client, postingDate: addDaysStr(fx.startsOn, 31) });
   const draftB = await draftOnly(preparer, { client: fx.client, postingDate: addDaysStr(fx.startsOn, 32) });
   const begun = await beginClose(owner, { fy: fx.fy });
-  await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: "x56 a19d: attested past draftA/draftB, left unapproved on purpose" });
+  // unapproved_drafts_in_period is ITEMIZED (Codex R1 MAJOR 1) -- TWO outstanding drafts
+  // (draftA, draftB) each take their OWN attestation call, named by entry_id.
+  await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: "x56 a19d: attested past draftA, left unapproved on purpose", itemKey: draftA.entry_id });
+  await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: "x56 a19d: attested past draftB, left unapproved on purpose", itemKey: draftB.entry_id });
   const closed = await finalizeClose(owner, { fy: fx.fy });
   assert.ok(closed?.close_entry_id, "the close minted a real closing entry (non-zero P&L)");
 
@@ -208,6 +212,10 @@ test("A19d RIGHT ANSWER -- the closing entry posts under its own permit (read: p
   // consumes exactly 1, not a defensive range.
   assert.equal(permit.entries_expected, 1, "entries_expected is trued to the actual single consuming touch");
   assert.equal(permit.entries_used, 1, "entries_used matches exactly -- no under- or over-consumption");
+  // target_entry_id (Codex R1 MAJOR 2): the permit BINDS to the entry it was minted for --
+  // ck_cwp_target requires it non-null for every purpose, and both walls match new.id/
+  // v_entry.id against it, not just client+fy+purpose.
+  assert.equal(permit.target_entry_id, closed.close_entry_id, "the permit's target_entry_id is the pre-generated closing entry id -- nothing else can ride it in-transaction");
   const entryRow = (await rootQuery("select close_receipt_id from clara.journal_entries where id=$1", [closed.close_entry_id])).rows[0];
   assert.equal(entryRow.close_receipt_id, closed.receipt_id, "the closing entry carries its receipt id AS LINEAGE (born with it, never a later UPDATE)");
 
@@ -219,39 +227,74 @@ test("A19d RIGHT ANSWER -- the closing entry posts under its own permit (read: p
   assert.equal(errPrior.code, "CLR19");
   assert.equal(JSON.parse(errPrior.detail ?? "{}").reason, "write_into_closed_period");
 
-  // (ii) a write BEYOND entries_expected refuses. The close's own permit is spent and
-  // gone (its transaction long committed); to force the ceiling itself, a same-shaped
-  // permit (entries_expected=1) is minted by the table OWNER (close_write_permits grants
-  // NO role any privilege -- table-owner DML is the only lawful direct-insert lane) inside
-  // ONE raw transaction that also performs two approved-class touches under it, approving
-  // the two PRE-EXISTING drafts (draftA/draftB, minted before the close): the FIRST
-  // consumes the sole expected unit, the SECOND must refuse -- the wall's own bound.
+  // (ii) target_entry_id (Codex R1 MAJOR 2) now BINDS a forged permit to exactly one
+  // entry -- "a write beyond entries_expected refuses" and "a write to a DIFFERENT entry
+  // refuses" are now two DISTINCT guards in the same WHERE clause (id=target AND
+  // entries_used<expected), not one. Attack both, separately, and assert what each
+  // actually measures rather than assuming the old single-cause story still holds.
+  // ALL of this must run in ONE transaction (created_xact = pg_current_xact_id() binds a
+  // permit to the transaction that minted it, proven in the A19d dig -- a permit committed
+  // in one transaction can never be consumed by a later one). A Postgres transaction that
+  // takes an error is ABORTED for every statement after, including COMMIT (which silently
+  // performs an implicit ROLLBACK) -- SAVEPOINT/ROLLBACK TO around each expected-failure
+  // statement is the only way to keep the permit (and the transaction) alive afterward.
   const { getPool } = await import("./wave-a-fixtures.mjs");
+  const firmId = (await rootQuery("select firm_id from clara.clients where id=$1", [fx.client])).rows[0].firm_id;
   const c = await getPool().connect();
+  let mismatchErr = null;
   let capacityErr = null;
+  let permitAUsedAfterMismatch = null;
+  let usedAfterFirst = null;
   try {
     await c.query("set role clara_fn_owner");
     await c.query("begin");
     const permitRow = await c.query(
       `insert into clara.close_write_permits(firm_id, client_id, fiscal_year_id, close_run_id,
-         purpose, entries_expected)
-       select $1, $2, $3, cr.id, 'close_entry', 1
+         purpose, target_entry_id, entries_expected)
+       select $1, $2, $3, cr.id, 'close_entry', $4, 1
          from clara.close_runs cr where cr.fiscal_year_id = $3 order by cr.started_at desc limit 1
        returning id`,
-      [await (await rootQuery("select firm_id from clara.clients where id=$1", [fx.client])).rows[0].firm_id, fx.client, fx.fy],
+      [firmId, fx.client, fx.fy, draftA.entry_id],
     );
-    assert.equal(permitRow.rows.length, 1, "mandatory setup: the manual permit row inserted (table-owner DML)");
-    await c.query(
-      "update clara.journal_entries set status='approved', approved_at=now(), checker_actor=$2 where id=$1",
-      [draftA.entry_id, owner],
-    );
+    assert.equal(permitRow.rows.length, 1, "mandatory setup: the manual permit row inserted, bound to draftA (table-owner DML)");
+    const permitA = permitRow.rows[0].id;
+
+    // (ii-a) TARGET MISMATCH: draftB's id never equals the permit's target -- the permit
+    // is never even reached (v_permit.id stays null on the id=target predicate alone).
+    await c.query("savepoint sp_mismatch");
     try {
       await c.query(
         "update clara.journal_entries set status='approved', approved_at=now(), checker_actor=$2 where id=$1",
         [draftB.entry_id, owner],
       );
     } catch (e) {
+      mismatchErr = e;
+      await c.query("rollback to savepoint sp_mismatch");
+    }
+    permitAUsedAfterMismatch = (await c.query("select entries_used from clara.close_write_permits where id=$1", [permitA])).rows[0].entries_used;
+
+    // (ii-b) BUDGET EXHAUSTION under a MATCHING target: draftA's own approve legitimately
+    // consumes the permit's one expected unit; a SECOND touch on the SAME (now-approved)
+    // draftA matches the target but finds no capacity left. _tf_entry_immutable (CLR08)
+    // fires BEFORE the period wall in trigger name order and permits exactly ONE shape of
+    // touch on an already-approved row: the complete reversed_by/reversal_reason linkage
+    // pair (the reverse_entry stamp) -- any other column touch is refused CLR08 first,
+    // never reaching the period wall at all. Use that shape so the SECOND touch actually
+    // exercises the budget guard, not the immutability guard.
+    await c.query(
+      "update clara.journal_entries set status='approved', approved_at=now(), checker_actor=$2 where id=$1",
+      [draftA.entry_id, owner],
+    );
+    usedAfterFirst = (await c.query("select entries_used from clara.close_write_permits where id=$1", [permitA])).rows[0].entries_used;
+    await c.query("savepoint sp_capacity");
+    try {
+      await c.query(
+        "update clara.journal_entries set reversed_by=$2, reversal_reason=$3 where id=$1",
+        [draftA.entry_id, fx.revenueEntry, "a19d ii-b second touch, beyond budget"],
+      );
+    } catch (e) {
       capacityErr = e;
+      await c.query("rollback to savepoint sp_capacity");
     }
     await c.query("commit");
   } finally {
@@ -260,7 +303,12 @@ test("A19d RIGHT ANSWER -- the closing entry posts under its own permit (read: p
     await c.query("reset all").catch(() => {});
     c.release();
   }
-  assert.ok(capacityErr, "a SECOND approved-class touch beyond entries_expected=1 must refuse");
+  assert.ok(mismatchErr, "approving draftB under a permit bound to draftA's id must refuse -- the target never matches");
+  assert.equal(mismatchErr.code, "CLR19", `expected CLR19 (got ${mismatchErr.code} -- ${mismatchErr.message})`);
+  assert.equal(JSON.parse(mismatchErr.detail ?? "{}").reason, "write_into_closed_period");
+  assert.equal(permitAUsedAfterMismatch, 0, "the target-mismatched attempt never touched the permit's own counter -- budget is untouched, this was never a capacity question");
+  assert.equal(usedAfterFirst, 1, "draftA's own approve (matching target) consumed the permit's sole unit");
+  assert.ok(capacityErr, "a SECOND touch on the SAME target, beyond entries_expected=1, must refuse");
   assert.equal(capacityErr.code, "CLR19", `expected CLR19 (got ${capacityErr.code} -- ${capacityErr.message})`);
   assert.equal(JSON.parse(capacityErr.detail ?? "{}").reason, "write_into_closed_period");
 });

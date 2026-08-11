@@ -131,21 +131,28 @@ test("A23 fy_end_source is honest: a client with NO fy_end set reads 'default_12
 // A9 -- the agent-role privilege sweep over the close/approve-class verb set:
 // (i) a live call under clara_agent_ro raises 42501 before any body runs;
 // (ii) a has_function_privilege sweep returns FALSE for agent_ro AND both
-// wake roles, over every close/approve-class verb.
+// wake roles, over every close/approve-class verb PLUS (Codex R1 BLOCKER 6,
+// folded in here per the work order) the three close READERS -- verify_close,
+// get_close_readiness, list_fiscal_years -- which a caller could otherwise
+// forge a JWT context for; agent reads to this surface ride the gamma/delta
+// wake-pack, never a direct grant.
 // ===========================================================================
 
 const CLOSE_VERBS = [
   "clara.begin_close(uuid,text)",
   "clara.finalize_close(uuid,text,text)",
-  "clara.attest_close_exception(uuid,text,text,text)",
+  "clara.attest_close_exception(uuid,text,text,text,text)",
   "clara.abandon_close(uuid,text,text)",
   "clara.reopen_fiscal_year(uuid,text,jsonb,text)",
   "clara.open_fiscal_year(uuid,text,date,date,text,text)",
   "clara.grant_firm_capability(uuid,text,text,text)",
   "clara.revoke_firm_capability(uuid,text,text,text)",
+  "clara.verify_close(uuid)",
+  "clara.get_close_readiness(uuid,uuid)",
+  "clara.list_fiscal_years(uuid)",
 ];
 
-test("A9 the close/approve-class verb set: 42501 under clara_agent_ro before any body runs; a has_function_privilege sweep returns FALSE for agent_ro and BOTH wake roles over every verb", async (t) => {
+test("A9 the close/approve-class verb set (verbs + the three close readers, Codex R1 BLOCKER 6): 42501 under clara_agent_ro before any body runs; a has_function_privilege sweep returns FALSE for agent_ro and BOTH wake roles over every one of them", async (t) => {
   if (skip56(t)) return;
   await assertRaises(PG.insufficientPrivilege, () => roleQuery(
     ROLES.agentRo, "select clara.begin_close(p_fy => $1, p_op_key => $2) as r",

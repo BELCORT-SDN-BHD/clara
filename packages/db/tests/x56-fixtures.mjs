@@ -120,11 +120,15 @@ export async function beginClose(sub, { fy, opKey = null }) {
   return r.rows[0].r;
 }
 
-export async function attestClose(sub, { closeRun, checkKey, reason, opKey = null }) {
+// itemKey: required on an ITEMIZED gate (unapproved_drafts_in_period -> entry_id,
+// uncoded_documents -> filing_id, depreciation_through_fy_end -> asset_id,
+// open_bank_recon_items -> exception_id or bank_account_id||':'||month), null for a
+// scalar gate (Codex R1 MAJOR 1 -- attest_close_exception's own item domain).
+export async function attestClose(sub, { closeRun, checkKey, reason, itemKey = null, opKey = null }) {
   const r = await humanQuery(
     sub,
-    "select clara.attest_close_exception(p_close_run => $1, p_check_key => $2, p_reason => $3, p_op_key => $4) as r",
-    [closeRun, checkKey, reason, opKey ?? opk("x56-attest")],
+    "select clara.attest_close_exception(p_close_run => $1, p_check_key => $2, p_reason => $3, p_op_key => $4, p_item_key => $5) as r",
+    [closeRun, checkKey, reason, opKey ?? opk("x56-attest"), itemKey],
   );
   return r.rows[0].r;
 }

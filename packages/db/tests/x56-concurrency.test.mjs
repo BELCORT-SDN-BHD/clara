@@ -229,7 +229,7 @@ test("A13c reopen_fiscal_year's acquisition order is row -> 004 -> 007 (structur
 // Structural: the shared-lock trigger's table census.
 // ===========================================================================
 
-test("A13d the gate-evidence tables carry the shared-lock trigger (structural census, 5 tables); a live writer (apply_open_items) BLOCKS while S1 holds begin_close, then completes normally", async (t) => {
+test("A13d the gate-evidence tables carry the shared-lock trigger (structural census, 6 tables); a live writer (apply_open_items) BLOCKS while S1 holds begin_close, then completes normally", async (t) => {
   if (skip56(t)) return;
   const owner = world.users.alice;
   const preparer = world.users.bob;
@@ -241,7 +241,11 @@ test("A13d the gate-evidence tables carry the shared-lock trigger (structural ce
        from pg_trigger tg join pg_class c on c.oid=tg.tgrelid join pg_proc p on p.oid=tg.tgfoid
       where p.proname='_tf_close_serialize' and not tg.tgisinternal`,
   )).rows[0].t;
-  assert.deepEqual(census, ["bank_line_exceptions", "bank_reconciliations", "bank_statements", "fixed_assets", "open_item_allocations"],
+  // bank_accounts joined the roster (Codex R1 BLOCKER 2): the census moved to registry
+  // enumeration in the R1 bank-census fix, but the serialize trigger was never swept to
+  // match -- a concurrent add_bank_account could otherwise slip an unreconcilable account
+  // past a mid-flight finalize.
+  assert.deepEqual(census, ["bank_accounts", "bank_line_exceptions", "bank_reconciliations", "bank_statements", "fixed_assets", "open_item_allocations"],
     `the shared-lock trigger's live table census (got ${JSON.stringify(census)})`);
 
   // BEHAVIOURAL (one demonstrative writer, apply_open_items -- open_item_allocations):

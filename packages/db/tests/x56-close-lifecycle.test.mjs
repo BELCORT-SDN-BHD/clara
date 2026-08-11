@@ -173,9 +173,19 @@ test("A3 drawer-2 unapproved draft: refuses without attestation; attested, the c
   assert.equal(errNoAttest.code, "CLR41", `expected CLR41 (got ${errNoAttest.code} -- ${errNoAttest.message})`);
   assert.equal(JSON.parse(errNoAttest.detail ?? "{}").reason, "drawer2_unattested");
 
+  // unapproved_drafts_in_period is ITEMIZED (Codex R1 MAJOR 1): a blanket call refuses
+  // CLR10/attest_item_required -- name the stray draft's own entry_id.
+  const errBlanket = await caught(() => attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: "x56 a3: blanket attempt, deliberately no item_key" }));
+  assert.ok(errBlanket, "a blanket attestation on the now-itemized gate is refused");
+  assert.equal(errBlanket.code, "CLR10", `expected CLR10 (got ${errBlanket.code} -- ${errBlanket.message})`);
+  const detBlanket = JSON.parse(errBlanket.detail ?? "{}");
+  assert.equal(detBlanket.reason, "attest_item_required");
+  assert.deepEqual(detBlanket.outstanding_items, [stray.entry_id], "the blanket refusal names the one outstanding item by its entry_id");
+
   const reasonText = "x56 a3: the stray draft is a known year-end timing item, accepted";
-  const att = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: reasonText });
+  const att = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "unapproved_drafts_in_period", reason: reasonText, itemKey: stray.entry_id });
   assert.ok(att?.attestation_id, "the attestation is recorded");
+  assert.equal(att.item_key, stray.entry_id, "the recorded attestation carries the item_key");
 
   const closed = await finalizeClose(owner, { fy: fx.fy });
   assert.ok(closed?.receipt_id, "the attested close SUCCEEDS");
@@ -187,7 +197,6 @@ test("A3 drawer-2 unapproved draft: refuses without attestation; attested, the c
   assert.equal(mine.attested_by, owner, "WHO");
   assert.equal(mine.reason, reasonText, "WHY");
   assert.ok(mine.attested_at, "WHEN");
-  void stray;
 });
 
 // ===========================================================================
@@ -208,18 +217,19 @@ test("A20 attestation staleness -- a moved fact makes the prior attestation STAL
   // the wall does not cover. document_filings is exactly that.
   const { filedDocument } = await import("./wave-a-fixtures.mjs");
   const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [fx.client])).rows[0].firm_id;
-  await filedDocument(preparer, { firm, client: fx.client, financialDate: addDaysStr(fx.startsOn, 12) });
+  const doc1 = await filedDocument(preparer, { firm, client: fx.client, financialDate: addDaysStr(fx.startsOn, 12) });
 
   const begun = await beginClose(owner, { fy: fx.fy });
   const gate = (begun.gates ?? []).find((g) => g.check_key === "uncoded_documents");
   assert.equal(gate?.state, "fail", "mandatory setup: the one uncoded document trips the gate");
-  const att1 = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "uncoded_documents", reason: "x56 a20: attesting the ONE known uncoded document" });
+  // uncoded_documents is ITEMIZED (Codex R1 MAJOR 1) -- name doc1's own filing_id.
+  const att1 = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "uncoded_documents", reason: "x56 a20: attesting the ONE known uncoded document", itemKey: doc1.filingId });
   const digest1 = att1.measured_digest;
   assert.ok(digest1, "mandatory setup: the first attestation binds a real digest");
 
   // Move the underlying fact: a SECOND uncoded document appears, DURING the close window
   // (FY status is 'closing' here) -- document_filings is not wall-covered, so this succeeds.
-  await filedDocument(preparer, { firm, client: fx.client, financialDate: addDaysStr(fx.startsOn, 13) });
+  const doc2 = await filedDocument(preparer, { firm, client: fx.client, financialDate: addDaysStr(fx.startsOn, 13) });
 
   const errStale = await caught(() => finalizeClose(owner, { fy: fx.fy }));
   assert.ok(errStale, "the close must refuse -- the attestation signed a state that has since moved");
@@ -228,23 +238,31 @@ test("A20 attestation staleness -- a moved fact makes the prior attestation STAL
   assert.equal(det.reason, "close_attestation_stale");
   assert.equal(det.attested_digest, digest1, "detail names the ATTESTED (old) digest");
   assert.notEqual(det.fresh_digest, digest1, "detail names the FRESH (new, different) digest");
+  assert.deepEqual([...det.missing_or_stale_items].sort(), [doc1.filingId, doc2.filingId].sort(),
+    "the stale detail names BOTH items outstanding under the fresh (2-document) digest -- doc1's attestation no longer covers the whole-gate digest it was bound to, doc2 was never attested at all");
 
-  // attest_close_exception now self-measures: it calls clara._evaluate_one_gate
-  // (a single-gate evaluator that commits its own fresh result as PART OF the
-  // attest transaction, never relying on a prior begin_close/finalize_close
-  // evaluation), so the SECOND attestation binds the FRESH digest, not the stale one.
-  const att2 = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "uncoded_documents", reason: "x56 a20: re-attesting over BOTH uncoded documents now" });
-  assert.notEqual(att2.measured_digest, digest1, "the fresh attestation binds the NEW digest");
+  // attest_close_exception now self-measures: it calls clara._evaluate_one_gate (a
+  // single-gate evaluator that commits its own fresh result as PART OF the attest
+  // transaction). PER-ITEM (Codex R1 MAJOR 1): clearing the gate now takes ONE fresh
+  // attestation PER outstanding item -- re-attest doc1, then attest doc2 (newly outstanding).
+  const att2a = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "uncoded_documents", reason: "x56 a20: re-attesting item 1 fresh (its old digest no longer covers doc2)", itemKey: doc1.filingId });
+  const att2b = await attestClose(owner, { closeRun: begun.close_run_id, checkKey: "uncoded_documents", reason: "x56 a20: attesting item 2 (the newly-appeared document)", itemKey: doc2.filingId });
+  assert.notEqual(att2a.measured_digest, digest1, "the fresh attestation on item 1 binds the NEW (2-document) digest");
+  assert.equal(att2b.measured_digest, att2a.measured_digest, "both fresh attestations bind the SAME fresh digest -- one in-transaction measurement basis per attest call, and neither call moved the underlying facts");
   const closed = await finalizeClose(owner, { fy: fx.fy });
-  assert.ok(closed?.receipt_id, "the close now succeeds under the fresh attestation");
+  assert.ok(closed?.receipt_id, "the close now succeeds once BOTH outstanding items carry live attestations bound to the fresh digest");
 
   const allAttestations = (await rootQuery(
-    "select id, superseded_at from clara.close_attestations where close_run_id=$1 and check_key='uncoded_documents' order by attested_at",
+    "select id, item_key, superseded_at from clara.close_attestations where close_run_id=$1 and check_key='uncoded_documents' order by attested_at",
     [begun.close_run_id],
   )).rows;
-  assert.equal(allAttestations.length, 2, "BOTH attestations survive in history -- the stale one superseded, never deleted");
-  assert.ok(allAttestations[0].superseded_at, "the first (stale) attestation is marked superseded");
-  assert.equal(allAttestations[1].superseded_at, null, "the second (fresh) attestation is live");
+  assert.equal(allAttestations.length, 3, "ALL THREE attestations survive in history -- the stale one superseded, never deleted; two live, one per item");
+  assert.equal(allAttestations[0].item_key, doc1.filingId);
+  assert.ok(allAttestations[0].superseded_at, "the first (stale) attestation on item 1 is marked superseded");
+  assert.equal(allAttestations[1].item_key, doc1.filingId);
+  assert.equal(allAttestations[1].superseded_at, null, "the second attestation on item 1 (fresh) is live");
+  assert.equal(allAttestations[2].item_key, doc2.filingId);
+  assert.equal(allAttestations[2].superseded_at, null, "the item-2 attestation is live and was never superseded (nothing preceded it)");
 });
 
 // ===========================================================================
