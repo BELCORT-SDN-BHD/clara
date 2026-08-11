@@ -1,0 +1,3 @@
+### ADR-004 — KB = two-layer Karpathy wiki that informs but never decides (Gate-1 B)
+**Decision:** Replace the prior write-only memory-note layer with a per-client Clara-maintained markdown **wiki** (ingest/query/lint, provenance-cited, injected into every context pack) over a thin **typed authority** layer (user-gated coa-mapping rules, the ≥0.95 gate, first-class open-question objects). The wiki informs every decision but never selects an account or lowers a gate; wiki content is inert data on read. Per the Karpathy LLM-wiki pattern. Supersedes the stale prior KB design notes.
+**Why:** A compounding client-knowledge layer without an LLM-written file gating money. Ref: ARCHITECTURE §5, PRD §6a.

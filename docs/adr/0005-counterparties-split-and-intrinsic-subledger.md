@@ -1,0 +1,3 @@
+### ADR-005 — Counterparties split + INTRINSIC same-transaction subledger (Gate-1 C2)
+**Decision:** Port the proven alias/normalise + recon-hint machinery; build a first-class id-keyed counterparty entity; counterparty narrative lives in the wiki. Subledger maintenance is intrinsic to the coding/receipt execution — the audited write composes the GL leg + the AR/AP open item in ONE transaction. No path posts the GL leg without the open item.
+**Why:** Structurally kills the F3 "dead subledger chain" (the audit's #1 theme — the prior build's subledger writers had zero callers). Ref: ARCHITECTURE §3.5.

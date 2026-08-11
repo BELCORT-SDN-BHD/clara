@@ -1,0 +1,3 @@
+### ADR-001 — Greenfield rebuild on a fresh repo + fresh Supabase project
+**Decision:** Rebuild Clara in a new repo (`clara-rebuild` → `github.com/mosaladtaooo/clara`) and a new Supabase project (`clara-rebuild` = `bzecqklouchkmdmdxlln`, ap-southeast-1, PG17). The prior build (`initial acc software skillmd` + `belcort-shared`) stays frozen read-only as the audit's evidence until Phase-5 sign-off.
+**Why:** The Phase-1 audit found the prior build's "go-live-ready" claim structurally false (235 verified findings, 11 failure patterns) — the fix is a re-architecture of the orchestration/state/governance/UX layers on a mostly-salvageable DB layer, not a patch. Evidence: `docs/audit/`.

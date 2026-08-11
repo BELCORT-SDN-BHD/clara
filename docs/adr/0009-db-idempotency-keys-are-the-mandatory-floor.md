@@ -1,0 +1,3 @@
+### ADR-009 — Durable-engine step memoization is NOT exactly-once; DB idempotency keys are the mandatory floor
+**Decision:** Every mutation carries a stable idempotency key (unique; returns the original receipt on duplicate). The workflow engine reduces re-execution but cannot guarantee exactly-once — a step's DB txn can commit and the worker die before the engine records completion, so replay may re-invoke it.
+**Why:** Empirically proven by the Slice-0 spike's kill-after-commit test (T4): the engine re-invoked a committed step; only `ON CONFLICT (op_key)` kept the books at one posting. Codex flagged this as the strongest counter-argument and it was confirmed. Ref: ARCHITECTURE Appendix A, `spike/RESULTS.md` T4.
