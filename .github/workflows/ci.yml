@@ -52,15 +52,18 @@ jobs:
   # Outputs default to true (run everything) and are narrowed ONLY when the diff is
   # confidently computed and every changed path is provably outside a job's input surface.
   # schedule / workflow_dispatch / a zero-SHA push / any git failure => everything runs.
-  #   code=false  ONLY when every changed file is docs-shaped: docs/** or any *.md.
-  #               `.claude/**` is matched FIRST and forced to CODE, so it can never reach
-  #               the *.md arm — a rules file or a skill is markdown, and without that
-  #               first arm `.claude/rules/db-migrations.md` would classify docs-only.
-  #               ADR-0069 ruling 2's docs-only set is ENUMERATED — AGENTS.md, CLAUDE.md,
-  #               PROGRESS.md, docs/** — and `.claude/**` is not in it. A rules or skills
-  #               change alters how agents behave on CODE work, which is exactly the class
-  #               that takes the full ladder. Arm order is load-bearing: shell `case` takes
-  #               the FIRST match, and `*` matches `/`, so `.claude/*` covers the subtree.
+  #   code=false  ONLY when every changed file is in ADR-0069 ruling 2's ENUMERATED
+  #               docs-only set, matched LITERALLY: docs/**, AGENTS.md, CLAUDE.md,
+  #               PROGRESS.md. Nothing else. Ruling 2 is a narrow carve-out FROM the
+  #               uniform ladder, so the default for anything unlisted is the full
+  #               ladder — and markdown outside the set is not automatically low-risk
+  #               (a package README can document a deploy or security step). Better an
+  #               occasional README-only PR takes the full ladder than a code-adjacent
+  #               doc slips through single-lane. `.claude/**` is matched FIRST and forced
+  #               to CODE: a rules file or a skill is markdown, and it changes how agents
+  #               behave on CODE work. Arm order is load-bearing — shell `case` takes the
+  #               FIRST match, and `*` matches `/`, so `.claude/*` covers the subtree.
+  #               (Owner call, 2026-08-12; recorded on ADR-0069 ruling 2.)
   #   db=true     when anything under packages/db/**, this workflow file, or a root
   #               manifest/lockfile changed — the ENTIRE input surface of the frontier
   #               legs and the partition gate (they read packages/db only; their runner
@@ -104,7 +107,7 @@ jobs:
               while IFS= read -r f; do
                 case "$f" in
                   .claude/*) CODE=true ;;
-                  docs/*|*.md) : ;;
+                  docs/*|AGENTS.md|CLAUDE.md|PROGRESS.md) : ;;
                   *) CODE=true ;;
                 esac
                 case "$f" in

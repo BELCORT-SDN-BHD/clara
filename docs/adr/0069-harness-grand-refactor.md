@@ -20,7 +20,9 @@ article — each read verbatim and diffed against this repo before any ruling.
    path classifier, never the author's claim. ADR-061's judgement-logic law and the
    uniform-ladder posture for code are untouched. *(The assembly's conflict audit initially
    REVERTED this line because no decision record existed for it — the append-only culture
-   correctly refusing an unrecorded amendment. This entry is that record.)*
+   correctly refusing an unrecorded amendment. This entry is that record.)* **The classifier
+   matches the enumerated set literally; markdown outside it takes the full ladder —
+   2026-08-12.**
 3. **ADR conversion (Q3).** All 68 ADRs converted to per-decision files
    (`docs/adr/0001..0068-*.md`), each entry byte-preserved (mechanically verified: the six
    source files reconstruct byte-for-byte, twice, including from `origin/main`);
