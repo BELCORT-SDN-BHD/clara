@@ -13,13 +13,13 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
+  rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, opk,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, freshActiveClient, proposeFY, openFY, addDaysStr,
-  beginClose, attestClose, finalizeClose, setupCloseCoa, cleanCloseableFY,
+  has0056, caught, proposeFY, openFY, addDaysStr,
+  beginClose, attestClose, finalizeClose, cleanCloseableFY,
 } from "./x56-fixtures.mjs";
 import { addBankAccount, enterStatement } from "./x38-match-fixtures.mjs";
 import { completeRecon } from "./x42-af2-helpers.mjs";

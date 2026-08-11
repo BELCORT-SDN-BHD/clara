@@ -12,8 +12,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
-  waveAEnsureReady, opk, getPool,
+  rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
+  waveAEnsureReady, getPool,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {

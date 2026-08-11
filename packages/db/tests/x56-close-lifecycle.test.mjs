@@ -9,7 +9,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, humanQuery,
+  rootQuery, 
   endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, opk,
 } from "./wave-a-fixtures.mjs";

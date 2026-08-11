@@ -11,7 +11,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, humanQuery, ROLES,
+  rootQuery, ROLES,
   endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, opk, draftEntryV3, approveEntry, freshResolution,
 } from "./wave-a-fixtures.mjs";
@@ -19,7 +19,7 @@ import * as wb from "./wave-b/wb-fixtures.mjs";
 import { holdThenContend } from "./rig-docs-race.mjs";
 import {
   has0056, caught, cleanCloseableFY, birthCounterparty,
-  beginClose, finalizeClose, reopenFY,
+  beginClose, finalizeClose,
   AR1, REVN, addDaysStr,
 } from "./x56-fixtures.mjs";
 

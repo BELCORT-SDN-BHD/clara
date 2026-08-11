@@ -18,7 +18,7 @@ import {
   filedDocument, previewCorrection, proposeCorrection, approveCorrection, idOf,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
-import { holdThenContend, waitBlockedBy } from "./rig-docs-race.mjs";
+import { holdThenContend } from "./rig-docs-race.mjs";
 import {
   has0056, caught, cleanCloseableFY, freshActiveClient, beginClose, attestClose, finalizeClose,
   BANK1, REVN, addDaysStr,
@@ -407,7 +407,7 @@ test("A6d E-R6 Law 3 -- the LIVE reader census for _correction_period_state is e
       where p.pronamespace='clara'::regnamespace
         and p.proname <> '_correction_period_state' and p.proname <> 'correction_period_state'
         and coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid))
-              like '%correction\_period\_state(%' escape '\'`,
+              like '%correction\\_period\\_state(%' escape '\\'`,
   )).rows[0].c;
   assert.deepEqual(census, ["approve_wrong_client_correction", "preview_wrong_client_correction", "retire_document_filing"],
     `the live reader census (got ${JSON.stringify(census)}) -- exactly the three readers, one still on the protocol token, two repointed to the honest twin`);

@@ -19,7 +19,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, cleanCloseableFY, recordClientFact, forgeClosedPeriodMovement,
+  has0056, cleanCloseableFY, recordClientFact, forgeClosedPeriodMovement,
   beginClose, attestClose, finalizeClose, abandonClose, reopenFY, verifyClose,
   getCloseReadiness, plainEntry, REVN, EXPN, BANK1, addDaysStr,
 } from "./x56-fixtures.mjs";
