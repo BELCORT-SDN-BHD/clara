@@ -251,9 +251,9 @@ jobs:
         env:
           GITLEAKS_VERSION: "8.18.4"
         run: |
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
-          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
-          /tmp/gitleaks version
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o $RUNNER_TEMP/gitleaks.tgz
+          tar -xzf $RUNNER_TEMP/gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
+          $RUNNER_TEMP/gitleaks version
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             if [ "$GITHUB_BASE_REF" != "main" ]; then
               echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (CLAUDE.md); refusing to guess a scan scope." >&2
@@ -267,18 +267,18 @@ jobs:
                 # Review R1 MN-3: a PR that TIGHTENS the ruleset must exercise it against full
                 # history BEFORE merge, or a newly-flagged historical secret surfaces only after.
                 echo "PR context: .gitleaks.toml changed in this PR — running the FULL-history scan pre-merge"
-                /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+                $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
               else
                 echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
-                /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+                $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
               fi
             else
               echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
-              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+              $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
             fi
           else
             echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
-            /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+            $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
           fi
 
   ci:
@@ -742,11 +742,11 @@ jobs:
           PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
           WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
             pnpm --filter @clara/runtime exec bootstrap
-          PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out /tmp/drci-full.sql
+          PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out $RUNNER_TEMP/drci-full.sql
           # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid
           PGPORT=$PGB_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
           PGPORT=$PGB_PORT PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          PGPORT=$PGB_PORT PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file /tmp/drci-full.sql
+          PGPORT=$PGB_PORT PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file $RUNNER_TEMP/drci-full.sql
           CLARA_DR_SOURCE_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
           CLARA_DR_TARGET_URL="postgres://postgres@localhost:$PGB_PORT/drci_target" \
             node packages/db/scripts/dr-verify.mjs
@@ -1003,15 +1003,15 @@ jobs:
           # CLARA_RIG_ALLOW_RESET is deliberately NOT set here: the reset-gated drill must SKIP in
           # this sweep and run ALONE in (4). CLARA_ALLOW_DESTRUCTIVE *is* set, at job level, because
           # the rig battery needs it — every reset gate keys on CLARA_RIG_ALLOW_RESET, never on it.
-          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee /tmp/list-run.txt
+          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/list-run.txt
           # (3b) THE CELL FLOOR. The totality gate below is FILE-granular: a DELETED cell inside a
           # still-listed file passes it. Each list therefore declares its own measured floor and the
           # run must meet it. Raise the floor in the list when you add cells; never lower it to go
           # green.
           FLOOR="$(grep -E '^#!cells-floor:' "$LIST" | head -1 | awk '{print $2}')"
           test -n "$FLOOR" || { echo "$LIST declares no '#!cells-floor:' — every list must"; exit 1; }
-          PASS="$(grep -E '^# pass ' /tmp/list-run.txt | tail -1 | awk '{print $3}')"
-          FAIL="$(grep -E '^# fail ' /tmp/list-run.txt | tail -1 | awk '{print $3}')"
+          PASS="$(grep -E '^# pass ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
+          FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
           echo "--- ${{ matrix.slice }}: $PASS pass / $FAIL fail · declared floor $FLOOR ---"
           test "$FAIL" = "0" || { echo "the ${{ matrix.slice }} list is not green"; exit 1; }
           test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
@@ -1047,9 +1047,9 @@ jobs:
           done < "$ROSTER"
           test -n "$FILES" || { echo "$ROSTER lists no contracts"; exit 1; }
           echo "--- ${{ matrix.slice }} frontier: $(echo $FILES | wc -w) cross-slice contract(s) ---"
-          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee /tmp/contracts-run.txt
-          FAIL="$(grep -E '^# fail ' /tmp/contracts-run.txt | tail -1 | awk '{print $3}')"
-          PASS="$(grep -E '^# pass ' /tmp/contracts-run.txt | tail -1 | awk '{print $3}')"
+          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/contracts-run.txt
+          FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
+          PASS="$(grep -E '^# pass ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
           echo "--- contracts at the ${{ matrix.slice }} frontier: $PASS pass / $FAIL fail ---"
           test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ matrix.slice }} frontier"; exit 1; }
 
@@ -1142,16 +1142,16 @@ jobs:
           # of anything, it is the set of files that run EVERYWHERE.
           ROSTER="tests/split-lists/test-list-contracts.txt"
           test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional once the split has landed"; exit 1; }
-          ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > /tmp/contracts-disk.txt
-          grep -v '^#' "$ROSTER" | grep -v '^$' | sort > /tmp/contracts-roster.txt
-          if ! diff -u /tmp/contracts-disk.txt /tmp/contracts-roster.txt; then
+          ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > $RUNNER_TEMP/contracts-disk.txt
+          grep -v '^#' "$ROSTER" | grep -v '^$' | sort > $RUNNER_TEMP/contracts-roster.txt
+          if ! diff -u $RUNNER_TEMP/contracts-disk.txt $RUNNER_TEMP/contracts-roster.txt; then
             echo "the cross-slice contract roster ($ROSTER) is not the set of x42x-*.test.mjs on disk."
             echo "  a '-' line is a contract on disk that NO frontier leg runs — add it to the roster;"
             echo "  a '+' line is a roster entry with no file — every frontier leg would fail on it."
             exit 1
           fi
-          test "$(sort /tmp/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
-          echo "contract roster OK: $(wc -l < /tmp/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
+          test "$(sort $RUNNER_TEMP/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
+          echo "contract roster OK: $(wc -l < $RUNNER_TEMP/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
           # EXCLUDED from the partition below, both by design: x42x-* are the cross-slice contracts
           # (covered by the roster above — they run at every frontier, so they partition nothing),
           # and x42-<NNNN>-bN-upgrade are the four reset-gated deploy drills (each runs ALONE in the
@@ -1160,29 +1160,29 @@ jobs:
           # landing as 0050 must not rejoin the corpus.
           ls tests/x41-*.test.mjs tests/x42-*.test.mjs tests/x41b*.test.mjs tests/x42b*.test.mjs 2>/dev/null \
             | xargs -n1 basename | grep -v '^x42x-' \
-            | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > /tmp/corpus.txt
+            | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > $RUNNER_TEMP/corpus.txt
           # THE SLICE LISTS ARE test-list-d-bN.txt, NEVER test-list-*.txt: the contract roster
           # lives in the same directory and is not a slice list — it declares no cell floor and
           # partitions nothing.
-          cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > /tmp/listed.txt
+          cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > $RUNNER_TEMP/listed.txt
           # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
           for L in tests/split-lists/test-list-d-b*.txt; do
             grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
           done
           # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
           # the strict checks, which still fail on any undeclared duplicate.
-          cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > /tmp/floorruns.txt
+          cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > $RUNNER_TEMP/floorruns.txt
           while read -r fr || [ -n "$fr" ]; do
             [ -n "$fr" ] || continue
-            grep -qxF "$fr" /tmp/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
-            awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' /tmp/listed.txt > /tmp/listed.tmp
-            mv /tmp/listed.tmp /tmp/listed.txt
-            grep -qxF "$fr" /tmp/listed.txt || {
+            grep -qxF "$fr" $RUNNER_TEMP/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
+            awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' $RUNNER_TEMP/listed.txt > $RUNNER_TEMP/listed.tmp
+            mv $RUNNER_TEMP/listed.tmp $RUNNER_TEMP/listed.txt
+            grep -qxF "$fr" $RUNNER_TEMP/listed.txt || {
               echo "stale allowance: $fr is declared a floor re-run but is listed only once"; exit 1; }
             echo "floor re-run allowed: $fr (one extra listing)"
-          done < /tmp/floorruns.txt
-          if ! diff -u /tmp/corpus.txt /tmp/listed.txt; then
+          done < $RUNNER_TEMP/floorruns.txt
+          if ! diff -u $RUNNER_TEMP/corpus.txt $RUNNER_TEMP/listed.txt; then
             echo "the slice lists do not partition the x41/x42 corpus exactly once"; exit 1
           fi
-          test "$(sort /tmp/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
-          echo "partition OK: $(wc -l < /tmp/corpus.txt) files, each in exactly one list"
+          test "$(sort $RUNNER_TEMP/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
+          echo "partition OK: $(wc -l < $RUNNER_TEMP/corpus.txt) files, each in exactly one list"
