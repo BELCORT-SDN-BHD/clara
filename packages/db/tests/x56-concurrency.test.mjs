@@ -229,7 +229,7 @@ test("A13c reopen_fiscal_year's acquisition order is row -> 004 -> 007 (structur
 // Structural: the shared-lock trigger's table census.
 // ===========================================================================
 
-test("A13d the gate-evidence tables carry the shared-lock trigger (structural census, 6 tables); a live writer (apply_open_items) BLOCKS while S1 holds begin_close, then completes normally", async (t) => {
+test("A13d the gate-evidence tables carry the shared-lock trigger (structural census, 8 tables); a live writer (apply_open_items) BLOCKS while S1 holds begin_close, then completes normally; record_client_fact (a Codex R2 census addition) blocks the SAME way", async (t) => {
   if (skip56(t)) return;
   const owner = world.users.alice;
   const preparer = world.users.bob;
@@ -244,8 +244,10 @@ test("A13d the gate-evidence tables carry the shared-lock trigger (structural ce
   // bank_accounts joined the roster (Codex R1 BLOCKER 2): the census moved to registry
   // enumeration in the R1 bank-census fix, but the serialize trigger was never swept to
   // match -- a concurrent add_bank_account could otherwise slip an unreconcilable account
-  // past a mid-flight finalize.
-  assert.deepEqual(census, ["bank_accounts", "bank_line_exceptions", "bank_reconciliations", "bank_statements", "fixed_assets", "open_item_allocations"],
+  // past a mid-flight finalize. client_facts + document_filings join it too (Codex R2 fix,
+  // priced residual named in the migration's own comment: documents itself has no
+  // client_id, so it structurally cannot ride this trigger).
+  assert.deepEqual(census, ["bank_accounts", "bank_line_exceptions", "bank_reconciliations", "bank_statements", "client_facts", "document_filings", "fixed_assets", "open_item_allocations"],
     `the shared-lock trigger's live table census (got ${JSON.stringify(census)})`);
 
   // BEHAVIOURAL (one demonstrative writer, apply_open_items -- open_item_allocations):
@@ -275,4 +277,29 @@ test("A13d the gate-evidence tables carry the shared-lock trigger (structural ce
   assert.ok(out.provedBlocked, "apply_open_items BLOCKED while S1 held begin_close's exclusive form");
   assert.equal(out.a.ok, true);
   assert.equal(out.b.ok, true, `apply_open_items SERIALIZES and completes normally once S1 commits -- it does NOT refuse (got ${JSON.stringify(out.b)})`);
+
+  // A SECOND writer, on client_facts specifically (the Codex R2 census addition): a
+  // fresh client/FY, since the first arm already left fx.fy 'closing'. Same shape,
+  // same law -- serializes, never refuses.
+  const fx2 = await cleanCloseableFY(owner, { tag: "a13d-facts", prepSub: preparer, startsOn: "2025-01-01" });
+  const out2 = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: owner, run: async (c) => {
+      const r = await c.query("select clara.begin_close(p_fy => $1, p_op_key => $2) as r", [fx2.fy, opk("x56-a13d-facts-begin")]);
+      return r.rows[0].r;
+    } },
+    b: { role: ROLES.authenticated, jwtSub: world.users.hana, run: async (c) => {
+      // record_client_fact takes role_rank('admin') -- preparer (bookkeeper) does not
+      // qualify and would refuse CLR04 immediately, never reaching the trigger at all
+      // (measured: that shape never blocks, it just fails fast). hana is this world's
+      // admin.
+      const r = await c.query(
+        "select clara.record_client_fact(p_client => $1, p_fact_key => $2, p_fact_value => $3::jsonb, p_basis => $4, p_basis_kind => $5, p_source_document_id => $6, p_op_key => $7) as r",
+        [fx2.client, "trade_nature", JSON.stringify("services"), "x56 a13d-facts: a live writer during a held close", "owner_instruction", null, opk("x56-a13d-facts-record")],
+      );
+      return r.rows[0].r;
+    } },
+  });
+  assert.ok(out2.provedBlocked, "record_client_fact BLOCKED while S1 held begin_close's exclusive form -- the SAME shape as apply_open_items");
+  assert.equal(out2.a.ok, true);
+  assert.equal(out2.b.ok, true, `record_client_fact SERIALIZES and completes normally once S1 commits -- it does NOT refuse (got ${JSON.stringify(out2.b)})`);
 });

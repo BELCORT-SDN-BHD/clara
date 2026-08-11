@@ -146,8 +146,15 @@ test("per-item attest E2E: two outstanding items, blanket refuses naming both, p
     assert.ok(r.reason?.length > 0, "WHY, per item");
     assert.ok(r.attested_at, "WHEN, per item");
   }
+  // (Codex R2 MINOR: item_key now rides the PERMANENT snapshot record, not just the
+  // live close_attestations table -- assert the SNAPSHOT's own item_keys directly,
+  // never just its row COUNT (a count alone false-greens if item_key were silently
+  // dropped or wrong; the snapshot is what a reader sees years after the live table
+  // could theoretically be pruned).
   const snapAttestations = (row.snapshot.attestations ?? []).filter((a) => a.check_key === "uncoded_documents");
   assert.equal(snapAttestations.length, 2, "the receipt's own snapshot ALSO carries both attestation records");
+  assert.deepEqual([...snapAttestations.map((a) => a.item_key)].sort(), [doc1.filingId, doc2.filingId].sort(),
+    "the snapshot's OWN attestation records name BOTH item_keys correctly, read from the permanent record itself, not inferred from the live table");
   void t2;
 });
 
