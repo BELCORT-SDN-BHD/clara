@@ -2945,6 +2945,59 @@ begin
   end if;
 end $s9b$;
 
+-- =====================================================================================
+-- S9c -- THE FA BELT MEETS THE CLOSING ENTRY (the battery's integration catch): 0041's
+-- _tf_fa_movement_belt refuses any entry moving an FA-enrolled account without a
+-- register act, and finalize_close's P&L roll legitimately ZEROES an enrolled
+-- depreciation-EXPENSE account (origin='manual', no flags) -- so ANY client with
+-- depreciation expense activity could not close a fiscal year at all. The register acts
+-- for those movements were the depreciation RUNS themselves; the roll is an aggregate
+-- transfer, not an FA movement. Exemption (f) is STRUCTURAL: only finalize_close births
+-- an entry carrying close_receipt_id (no verb parameter admits the column; the permit
+-- binds the pre-generated id), so a hand journal cannot ride it. Spliced into the LIVE
+-- body (patched across 0041..0045 -- harvest, never retype).
+-- =====================================================================================
+do $s9c$
+declare
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_fa_movement_belt';
+  if v_def is null then
+    raise exception '0056 S9c: _tf_fa_movement_belt is GONE' using errcode = 'CLR10';
+  end if;
+  v_frm := 'if new.reversal_of is not null then continue; end if;';
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0056 S9c: the reversal-exemption anchor appears % time(s) (expected exactly once) -- the belt body drifted; re-derive', v_cnt
+      using errcode = 'CLR10';
+  end if;
+  v_to := v_frm || chr(10) ||
+    '    -- (f) 0056 S9c: the closing entry -- finalize''s P&L roll zeroes enrolled' || chr(10) ||
+    '    -- depreciation-expense accounts; its register acts were the runs themselves.' || chr(10) ||
+    '    -- Structural key: only finalize_close births close_receipt_id.' || chr(10) ||
+    '    if new.close_receipt_id is not null then continue; end if;';
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+  -- POSTCHECK: (f) landed exactly once; the surviving exemptions and both named
+  -- refusal reasons are intact.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_fa_movement_belt';
+  if (length(v_def) - length(replace(v_def, 'new.close_receipt_id is not null', '')))
+       / length('new.close_receipt_id is not null') <> 1 then
+    raise exception '0056 S9c postcheck: exemption (f) did not land exactly once'
+      using errcode = 'CLR10';
+  end if;
+  if position(v_frm in v_def) = 0
+     or position('fa_disposal' in v_def) = 0
+     or position('depreciation_charges' in v_def) = 0
+     or position('fa_k_gl_balance_on_enrolled' in v_def) = 0
+     or position('fa_cost_adjustment_deferred' in v_def) = 0 then
+    raise exception '0056 S9c postcheck: a pre-existing exemption or refusal vanished in the splice'
+      using errcode = 'CLR10';
+  end if;
+end $s9c$;
+
 reset role;
 
 -- =====================================================================================
