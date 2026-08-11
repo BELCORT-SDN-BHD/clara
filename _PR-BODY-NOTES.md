@@ -102,6 +102,77 @@ nowhere:
 exercise a PreToolUse hook — only a real Claude Code session can. The post-merge step is one
 deliberately-blocked probe on the owner's machine.
 
+## The Codex adversarial round — adjudication and outcome
+
+Codex ran an adversarial pass over both instruments and returned 14 findings (3 BLOCKER, 9 MAJOR,
+2 MINOR) plus a survived-attacks list. **The three BLOCKERs are technically true and aimed at the
+wrong threat model**, and that adjudication is the substance of this round.
+
+### The ruling: the guard is a mistake-net, not containment
+
+The pinned-ids hook exists to catch the realistic failure — an agent or a human, moving fast,
+reaching for one of these two ids in a write-shaped call without noticing which id it is. Against
+that, a lexical check is the right instrument. It was never adversarial containment, and it is now
+stated as such in three places: the guard header, ADR-0069 ruling 4, and AGENTS constraint 11.
+
+An agent that deliberately obfuscates its own safety ids — assembling the id from fragments,
+reading it from a file, computing it at runtime — defeats any lexical hook, and no amount of
+pattern-hardening changes that. The ids' primary protection is, and always was, the process law
+and the DB walls: maker/checker, audited-function-only writes, the structural read-only agent role.
+
+Three structural facts set the ceiling, all confirmed against the official hooks reference rather
+than assumed:
+
+- **A PreToolUse hook that fails to LAUNCH fails OPEN.** Only exit 2 blocks; a bad path exits ~127
+  and the tool call proceeds. The guard's own wiring is therefore part of its correctness — which
+  is why the registration moved to exec form and why the self-test asserts it resolves on disk.
+- **`disableAllHooks: true` in an untracked `settings.local.json` blanks every non-managed hook.**
+  Unpreventable from inside the repo: the owner's local settings are the owner's, and a
+  Write-block on that file would be circular. A **named residual**, not a defect to fix.
+- **Hook entries merge across settings levels**, so a personal file cannot selectively remove this
+  hook — only the blunt switch above reaches it.
+
+### What was closed anyway (the cheap true gaps)
+
+| # | Finding | Outcome |
+|---|---|---|
+| 4 | `DELETE/MERGE/UPSERT/EXECUTE/PUT/PATCH` passed as read-shaped | verb set widened; the asymmetric boundary is unchanged, so inflections still pass |
+| 5 | shell-form `$CLAUDE_PROJECT_DIR` fails to expand under PowerShell → hook fails open | registration moved to **exec form** (`command` + `args`), removing the shell entirely |
+| 7 | `git grep "approve.*<id>"` was blocked — a real audit workflow | read-tool allowlist, evaluated **per pipeline segment** so a read cannot prefix a smuggled write |
+| 8 | `README.md/nope.md` and `README.md.backup` resolved green as `README.md` | citation stripping now accepts only an empty remainder or a real citation opener; verified old-vs-new on those exact inputs |
+| 9 | `../../../<sibling>/AGENTS.md` resolved outside the repo | containment via realpath |
+| 10 | unique basename treated as identity | fallback kept, every rebind announced (grouped into one warning) |
+| 13 | reference-style links extracted as zero references | `[ref]: path` definitions extracted and validated |
+| 3 | the hook can be disabled via `settings.local.json` | **named residual**, no code change — see above |
+| 11, 12 | prefix exemptions and the narrow backtick heuristic | **ruled trade-offs**, documented in a new KNOWN LIMITATIONS block, with finding 12's evasion list recorded verbatim as known-unvalidated shapes |
+| 6 | CI never exercised the registered hook | already closed earlier in this batch (the registration self-test layer) |
+
+17 new self-test cells landed with the fixes (44 pinned-ids, 39 harness-links). Two **older** cells
+turned out to pass for the wrong reason once the read allowlist existed — the glued-underscore
+boundary cell was short-circuiting on the allowlist and would have stayed green if the boundary
+regressed. It now uses a non-allowlisted command and pins its resolution shape.
+
+### Attacks the scripts SURVIVED (Codex's own list — half the value of the round)
+
+**Pinned-ids guard:** literal ids with `rpc`/`approve`/`answer`/`update`/`insert`/`curl`/`post`
+blocked case-insensitively · full literal UUID prefixes blocked · uppercase ids blocked ·
+`approve_entry` blocked despite the trailing underscore · same-call `ID=d023b48c; curl …$ID`
+blocked · literal-id heredocs blocked · literal bare and deeply-nested MCP ids blocked ·
+malformed stdin carrying id + keyword blocked · plain SELECT/grep/read-only-script shapes passed ·
+`posting_date`, `approved`, `answering`, `updated` and `0019_insert_wiki_seed.sql` all avoided the
+intended substring false positives.
+
+**Harness lint:** literal broken backtick paths and ordinary `[x](path)` links detected · matched
+triple-backtick and tilde fences suppressed contents and resumed after · ambiguous bare basenames
+with multiple matches stayed unresolved · external URLs and pure anchors skipped · `STRICT=true`
+caught a missing entry · an entry that is a directory throws rather than passing, so that failure
+stays closed.
+
+**Wiring/CI:** `.claude/settings.json` is valid JSON on the documented PreToolUse schema · matcher
+`"*"` matches all tool events · exit 2 is the correct denial signal · all relevant files tracked
+with LF endings · Linux CI installs Node 20.19.5 and invokes exact-case paths, with no separator,
+shebang, executable-bit or Node-invocation failure found.
+
 ## Deliberately not done
 
 `docs/plan/completed/` and `docs/plan/research/` bodies · ADR prose · migration and
