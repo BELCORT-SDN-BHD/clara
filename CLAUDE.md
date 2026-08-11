@@ -11,7 +11,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
-| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (065 = the Wave E contract · 066 = the F6–F9 first-strike close · 067 = the α+β landing + ceremony close), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (065 = the Wave E contract · 066 = the F6–F9 first-strike close · 067 = the α+β landing + ceremony close · 068 = the evening sitting: B3 ruled, sign-offs, Gate-P defers), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
 | Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
@@ -194,8 +194,9 @@ Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
 **Open items — PROJECTLOG PART 2 is the live register; read it, never cache it here.** The
 five owner questions standing at the ADR-066 close were **ALL RULED 2026-08-09** (E-R11
 owner-only keys · the 2506 window OPENS · Gate P = owner re-export, remind until done ·
-#43/#44 = agent legwork + owner verify) — PART 2 + the handoff record them. **Owner items
-standing at the ADR-067 close: the Gate-P seven re-export (remind every session open) · the
-B3 reopen-mirror RULING (two lane positions, PR #228 residual 3) · two V-OWNER sign-offs on
-the α record (F1d + F3e).** The `opening_tb.line` producer + the K-doc door
+#43/#44 = agent legwork + owner verify) — PART 2 + the handoff record them. **The ADR-068
+evening sitting (2026-08-11) cleared the owner queue: B3 RULED (the ends_on-dated reopen
+reversal — its IMPLEMENTATION is a named build item, D1-class, before the close model
+activates on real books) · the two α V-OWNER sign-offs RECORDED · Gate-P defers to the
+Wave-G reset (reminders STOP).** The `opening_tb.line` producer + the K-doc door
 are Phase-5 and review-gated — their home is **`docs/plan/REBUILD-PLAN.md`**.

@@ -35,7 +35,9 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > Waves A / A2 / A2.1 / B / C / D and §7-A are closed; the first strike (F6–F9) closed at
 > ADR-066. **NEXT = lane γ (registry + snapshots, skeleton §2.11–§2.12), then δ..θ** —
 > ONE campaign per E-R7, acceptance F→A→B→C→D→E per the matrix. **Named build debt:** the
-> `closing_stock` producer verb ships before any real goods-trader close (PR #228 residual 5).
+> `closing_stock` producer verb ships before any real goods-trader close (PR #228 residual 5) ·
+> **the B3 ends_on-reopen implementation (ADR-068)** — a D1-class migration on
+> `reopen_fiscal_year`, before the close model activates on real books.
 > Everything that follows is the CHRONOLOGICAL record, **oldest first** — each
 > `STATUS (date)` block was true on its date and is superseded by the ones below it. The
 > live pin lives in `CLAUDE.md`; the open register is PROJECTLOG PART 2.
@@ -380,6 +382,8 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `wave-e-lane-alpha-acceptance.md` (+ two V-OWNER sign-offs pending) ·
 > `wave-e-lane-beta-acceptance.md`. **Owner rulings standing: B3 (the reopen mirror, two lane
 > positions, PR #228 residual 3) · the Gate-P seven re-export.** **NEXT = lane γ.**
+> *(Same evening, ADR-068: B3 RULED — ends_on variant, implementation = the named build debt
+> above; the two sign-offs RECORDED; Gate-P defers to the Wave-G reset, reminders stop.)*
 
 **Wave A — the daily loop** *(**CLOSED**, ADR-022..030 — incl. A2 / A2.1)*. Coding with **intrinsic side-effects** (composed inside `approve_entry` / `_subledger_on_approve` as built; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding** *(**CLOSED on intent**, ADR-044..046)*. The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
