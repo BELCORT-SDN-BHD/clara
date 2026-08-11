@@ -11,7 +11,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
-| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (065 = the Wave E contract · 066 = the F6–F9 first-strike close), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (065 = the Wave E contract · 066 = the F6–F9 first-strike close · 067 = the α+β landing + ceremony close), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
 | Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
@@ -142,12 +142,15 @@ contract is RATIFIED** (ADR-065 — it AMENDED THE LAW at E-R4; see the cardinal
 above) and its **FIRST STRIKE, the F6–F9 fix batch, is CLOSED** (ADR-066, 2026-08-09: F7
 unblocked the held 2512 KONG CHENG leg, F6 discharged ADR-062's extraction-recovery door).
 The **CAMPAIGN DESIGN PACKET IS LANDED** (PR #223, 2026-08-09: seven design files + the
-108-cell acceptance matrix minted BEFORE build, four-round dual-lane ladder CLEAN) and the
-**five standing owner questions are RULED** (same day — PART 2 records them). **NEXT = the
-LANE α build** (the E-R12 trio) ∥ the 2506 backfill window ∥ the #43/#44 research lanes,
-then lanes β..θ — ONE campaign per E-R7, acceptance F→A→B→C→D→E per the matrix.
+108-cell acceptance matrix minted BEFORE build, four-round dual-lane ladder CLEAN), the
+**five standing owner questions are RULED** (same day — PART 2 records them), and **LANES
+α AND β ARE BUILT, MERGED AND CEREMONIED** (ADR-067, 2026-08-11: PR #226/0055 + PR #228/0056
+live in one D1 window; the ADR-062 MSIC debt discharged through the door; the close model
+INERT until the first human `open_fiscal_year`; CI now rides the SELF-HOSTED runner, PR #227).
+**NEXT = the LANE γ build** (registry + snapshots, skeleton §2.11–§2.12), then δ..θ — ONE
+campaign per E-R7, acceptance F→A→B→C→D→E per the matrix.
 
-**Live posture pin (at the ADR-066 close): 53 migrations, frontier `0054` · Fly
+**Live posture pin (at the ADR-067 close): 55 migrations, frontier `0056` · Fly
 `clara-runtime` v60 · dashboard Pages `app.clarabook.com` (needs
 `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) · `clara-backup` daily.**
 Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
@@ -155,7 +158,9 @@ Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
 **Records of record — never re-grill these; cite, don't restate:**
 
 - **Wave E:** contract `docs/plan/wave-e-contract.md` (E-R1..E-R14, ADR-065) · first-strike
-  acceptance `docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) · **the campaign design packet
+  acceptance `docs/plan/wave-e-f6f9-acceptance.md` (ADR-066) · **the α+β as-run records
+  `wave-e-lane-alpha-acceptance.md` + `wave-e-lane-beta-acceptance.md` (ADR-067)** · the
+  lane ladder records = PR #226/#228 bodies · **the campaign design packet
   (PR #223): `wave-e-design-skeleton.md` (+3 part files) · `wave-e-design-reporting.md`
   (+part2) · `wave-e-acceptance-matrix.md`** — its four-round review records live in PR #223's
   body + `~/.clara-tools/wave-e-design-review-records/` · the reader's field story
@@ -189,6 +194,8 @@ Refreshed each ceremony in **memory**; on disagreement, **memory wins**.
 **Open items — PROJECTLOG PART 2 is the live register; read it, never cache it here.** The
 five owner questions standing at the ADR-066 close were **ALL RULED 2026-08-09** (E-R11
 owner-only keys · the 2506 window OPENS · Gate P = owner re-export, remind until done ·
-#43/#44 = agent legwork + owner verify) — PART 2 + the handoff record them; **one owner ACTION
-is outstanding: the Gate-P seven re-export.** The `opening_tb.line` producer + the K-doc door
+#43/#44 = agent legwork + owner verify) — PART 2 + the handoff record them. **Owner items
+standing at the ADR-067 close: the Gate-P seven re-export (remind every session open) · the
+B3 reopen-mirror RULING (two lane positions, PR #228 residual 3) · two V-OWNER sign-offs on
+the α record (F1d + F3e).** The `opening_tb.line` producer + the K-doc door
 are Phase-5 and review-gated — their home is **`docs/plan/REBUILD-PLAN.md`**.
