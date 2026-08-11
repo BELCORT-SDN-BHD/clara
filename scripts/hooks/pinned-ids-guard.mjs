@@ -14,9 +14,9 @@
 // convention — settings.json is project-shared and checked in, settings.local.json is personal
 // and ignored — and this repo's blanket `.claude/*` ignore simply predates having any shared
 // setting worth committing. The assembly pass added `!.claude/settings.json` beside
-// `!.claude/skills/`, `!.claude/rules/` and `!.claude/hooks/`, so every checkout now inherits the
-// registration from git. The script itself lives under scripts/hooks/ (an explicitly sanctioned
-// home per the dispatch brief), tracked regardless of the `.claude/hooks/` ignore state.
+// `!.claude/skills/` and `!.claude/rules/`, so every checkout now inherits the registration from
+// git. The script itself lives under scripts/hooks/, which is tracked normally — there is no
+// `.claude/hooks/` directory in this repo.
 //
 // This REVERSES this lane's own earlier recommendation, deliberately and on the record: the
 // header used to argue the registration "stays necessarily local", because merging a
@@ -26,7 +26,14 @@
 // ruling exists to forbid. Keep this file MINIMAL: the hooks block only, nothing else migrates in.
 //
 // The tracked registration is exactly this — merge (never overwrite) if you are reconstructing it
-// into some other settings file:
+// into some other settings file. It is the EXEC form (`command` = the executable, `args` = the
+// argv) and that is load-bearing, not style: with `args` present the entry is spawned directly
+// with NO shell, so the project-dir placeholder is substituted by Claude Code itself. The earlier
+// shell form — `node "$CLAUDE_PROJECT_DIR"/scripts/hooks/pinned-ids-guard.mjs` — expands only
+// under a POSIX shell; on a Windows box without Git Bash the hook runs under PowerShell, where
+// bare `$CLAUDE_PROJECT_DIR` is not an environment reference, the path resolves to garbage, and
+// the launch FAILS OPEN (only exit 2 blocks — see the threat model in the checks module). Do not
+// "simplify" this back to a single command string.
 //
 //   {
 //     "hooks": {
@@ -34,7 +41,11 @@
 //         {
 //           "matcher": "*",
 //           "hooks": [
-//             { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/pinned-ids-guard.mjs" }
+//             {
+//               "type": "command",
+//               "command": "node",
+//               "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/pinned-ids-guard.mjs"]
+//             }
 //           ]
 //         }
 //       ]
