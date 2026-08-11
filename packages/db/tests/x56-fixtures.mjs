@@ -229,17 +229,38 @@ export async function birthCounterparty(sub, { client, name, kind = "customer" }
  *  (_tf_subledger_item_belt) requires the item's amount to match what
  *  _subledger_classify_entry derives from the ENTRY'S OWN lines -- exactly the
  *  congruence that makes a real mismatch nearly impossible to produce lawfully, which
- *  is the whole point of the drawer-1 identity. The belt is disabled for the ONE
- *  INSERT that seeds the phantom row (never for anything finalize_close itself does),
- *  inside one transaction, then immediately re-enabled -- the x40/FA-anchor forging
- *  precedent, applied here. This is a FIXTURE SHORTCUT to reach a prestate, not a
- *  claim about how the mismatch would arise in production. */
+ *  is the whole point of the drawer-1 identity. The belt is silenced (SET LOCAL
+ *  session_replication_role='replica', session-scoped, never ALTER TABLE DISABLE
+ *  TRIGGER -- see the function body's own comment for the mechanism and why) for the
+ *  ONE INSERT that seeds the phantom row (never for anything finalize_close itself
+ *  does), inside one transaction. This is a FIXTURE SHORTCUT to reach a prestate, not
+ *  a claim about how the mismatch would arise in production. */
 export async function forceControlMismatch(sub, { client, domain, groundEntry, counterparty, cents }) {
   const c = await getPool().connect();
   try {
-    await c.query("set role clara_fn_owner");
     await c.query("begin");
-    await c.query("alter table clara.open_items disable trigger t_open_items_belt");
+    // SET LOCAL, never ALTER TABLE ... DISABLE TRIGGER (the A19d dig, 2026-08-11): a
+    // DISABLE/ENABLE TRIGGER pair is catalog DDL -- database-GLOBAL between its own
+    // disable-commit and re-enable-commit (an AccessExclusive lock, visible to every
+    // session, not just this one) -- and under concurrent multi-file test runs that
+    // window let an INNOCENT BYSTANDER write that should have refused silently
+    // succeed instead (proven: trigger-body instrumentation showed zero log rows on
+    // a write that unambiguously happened, root-caused via a 1/80 repro on a harness
+    // with no connection to the test that first surfaced it). SET LOCAL
+    // session_replication_role is transaction-scoped AND session-local: no catalog
+    // change, no lock, no cross-session window, and it sidesteps the 55006 pending-
+    // trigger-events restriction entirely (nothing to re-enable, so no straddling
+    // transaction is needed either). CAVEAT, measured not assumed: replica mode
+    // disables EVERY user trigger and FK check for this session's writes, not just
+    // t_open_items_belt -- t_open_items_validate (counterparty-kind-vs-domain) also
+    // goes quiet here, but every existing caller already passes a correctly-kinded
+    // counterparty, so it would have passed anyway; re-check this if a future caller
+    // deliberately wants THAT validation to still fire. SECOND caveat, also measured:
+    // setting this GUC takes superuser -- it must run BEFORE `set role clara_fn_owner`
+    // (which is not superuser), or Postgres refuses 42501 "permission denied to set
+    // parameter" (measured directly, not assumed from the docs).
+    await c.query("set local session_replication_role = 'replica'");
+    await c.query("set role clara_fn_owner");
     const firm = (await c.query("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
     await c.query(
       `insert into clara.open_items(firm_id, client_id, domain, counterparty_id, entry_id,
@@ -248,7 +269,6 @@ export async function forceControlMismatch(sub, { client, domain, groundEntry, c
          from clara.journal_entries je where je.id = $6`,
       [firm, client, domain, counterparty, cents, groundEntry],
     );
-    await c.query("alter table clara.open_items enable trigger t_open_items_belt");
     await c.query("commit");
   } finally {
     await c.query("rollback").catch(() => {});
@@ -265,51 +285,58 @@ export async function forceControlMismatch(sub, { client, domain, groundEntry, c
  *  reachable through any audited verb -- t_period_wall (journal_entries) and
  *  t_period_wall_lines (journal_lines) both refuse this write from every real
  *  writer, which is the whole point of the identity the pin protects. Both
- *  triggers are disabled for the ONE insert sequence, then immediately re-enabled
- *  -- the x40/forceControlMismatch forging precedent, applied to a different
- *  trigger pair. A FIXTURE SHORTCUT to reach a prestate, not a claim about how
+ *  triggers are silenced (SET LOCAL session_replication_role='replica',
+ *  session-scoped, never ALTER TABLE DISABLE TRIGGER -- see the function body's own
+ *  comment for the mechanism and why) for the ONE insert sequence, inside one
+ *  transaction. A FIXTURE SHORTCUT to reach a prestate, not a claim about how
  *  this would arise in production. */
 export async function forgeClosedPeriodMovement(sub, { client, postingDate, debit, credit, cents, memo = "x56 forged closed-period movement" }) {
   const c = await getPool().connect();
   let entryId = null;
   try {
-    await c.query("set role clara_fn_owner");
     await c.query("begin");
-    await c.query("alter table clara.journal_entries disable trigger t_period_wall");
-    await c.query("alter table clara.journal_lines disable trigger t_period_wall_lines");
+    // SET LOCAL, never ALTER TABLE ... DISABLE TRIGGER -- see forceControlMismatch's
+    // own comment (this file) for the mechanism and the A19d dig's finding: a
+    // DISABLE/ENABLE pair is database-global catalog DDL between its two commits, a
+    // real cross-session guard-off window under concurrent runs; SET LOCAL
+    // session_replication_role is transaction-scoped and session-local, no window,
+    // no straddling second transaction, no 55006. CAVEAT, measured not assumed:
+    // replica mode disables every user trigger on journal_entries/journal_lines for
+    // this session, not just the two period-wall ones -- in particular
+    // _tf_stamp_from_client and _tf_stamp_line_from_entry (which normally fill
+    // firm_id from client_id, and client_id+firm_id from the parent entry) go quiet
+    // too, so this forge now supplies firm_id/client_id explicitly, matching exactly
+    // what those triggers would have stamped. Every OTHER disabled trigger (balance,
+    // provenance, the shape/belt checks) would have passed this specific write
+    // unchanged even when active -- it is balanced, manual-origin, and touches no
+    // adv/fa/bank/subledger domain -- so silencing them changes nothing observable.
+    // SECOND caveat, also measured: setting this GUC takes superuser -- it must run
+    // BEFORE `set role clara_fn_owner` (not superuser), or Postgres refuses 42501
+    // "permission denied to set parameter" (measured directly, not assumed).
+    await c.query("set local session_replication_role = 'replica'");
+    await c.query("set role clara_fn_owner");
+    const firm = (await c.query("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
     // Born DRAFT with its lines (a fresh line insert on a draft entry is ordinary and
     // does not trip the SEPARATE "lines of an approved entry are immutable" guard),
     // THEN flipped to approved by its own UPDATE -- the same two-step shape every real
     // writer uses, matching what t_period_wall itself is disabled to admit.
     const entryRow = await c.query(
-      `insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+      `insert into clara.journal_entries(firm_id, client_id, status, posting_date, memo, origin,
            maker_actor, last_human_editor)
-         values ($1, 'draft', $2, $3, 'manual', $4, $4)
+         values ($1, $2, 'draft', $3, $4, 'manual', $5, $5)
          returning id`,
-      [client, postingDate, memo, sub],
+      [firm, client, postingDate, memo, sub],
     );
     entryId = entryRow.rows[0].id;
     await c.query(
-      `insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
-         values ($1, 1, $2, $3, 0, 'forged dr'), ($1, 2, $4, 0, $3, 'forged cr')`,
-      [entryId, debit, cents, credit],
+      `insert into clara.journal_lines(entry_id, line_no, client_id, firm_id, account_code, debit_cents, credit_cents, description)
+         values ($1, 1, $5, $6, $2, $3, 0, 'forged dr'), ($1, 2, $5, $6, $4, 0, $3, 'forged cr')`,
+      [entryId, debit, cents, credit, client, firm],
     );
     await c.query(
       `update clara.journal_entries set status='approved', approved_at=now(), checker_actor=$2 where id=$1`,
       [entryId, sub],
     );
-    await c.query("commit");
-  } finally {
-    await c.query("rollback").catch(() => {});
-  }
-  // The re-enable must straddle the commit, in its OWN transaction: Postgres refuses
-  // ALTER TABLE ... ENABLE/DISABLE TRIGGER while the table has PENDING trigger events
-  // queued in the current transaction (55006) -- the forge's own insert/update queue
-  // some, so re-enabling inside the same transaction that wrote them is refused.
-  try {
-    await c.query("begin");
-    await c.query("alter table clara.journal_entries enable trigger t_period_wall");
-    await c.query("alter table clara.journal_lines enable trigger t_period_wall_lines");
     await c.query("commit");
   } finally {
     await c.query("rollback").catch(() => {});
