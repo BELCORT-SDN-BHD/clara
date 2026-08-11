@@ -173,6 +173,40 @@ stays closed.
 with LF endings · Linux CI installs Node 20.19.5 and invokes exact-case paths, with no separator,
 shebang, executable-bit or Node-invocation failure found.
 
+## A process lesson from this batch: `cmd || echo "(none)"` manufactures the absence trap
+
+Worth carrying beyond this PR, because it is a mechanised version of a law this repo already
+holds — *absence is not evidence, and a derived state is not evidence.*
+
+Before deleting `_ASSEMBLY-HANDOFF.md` the assembly lane checked for referrers with:
+
+```sh
+git grep -n "_ASSEMBLY-HANDOFF" -- . ':!_ASSEMBLY-HANDOFF.md' || echo "(none)"
+```
+
+That pathspec is invalid — a leading `_` reads as pathspec magic — so git exited non-zero with
+`fatal: Unimplemented pathspec magic '_'`, the `||` branch fired, and the output read
+**`(none)`**. A tool ERROR was rendered as a clean negative result. The check was re-run
+correctly and there genuinely were no referrers, so nothing was lost — but the instrument had
+already reported success without having looked.
+
+The general shape: **`cmd || echo "<reassuring text>"` cannot distinguish "ran and found
+nothing" from "did not run".** grep-family tools exit 1 for *no matches* and ≥2 for *failure*,
+and the `||` collapses both into the same branch. Every "I verified there were no X" built this
+way is an unproven claim wearing a receipt.
+
+What to do instead, in rough order of cost:
+
+- Drop the `||` and read the real output — an empty result is already visible as empty.
+- If a friendly message is wanted, branch on the exit code explicitly: `0` = found, `1` = none,
+  anything else = the check FAILED and must not be reported as absence.
+- For a load-bearing check, assert on the positive side instead — count what you *did* see.
+
+This is the same failure the repo's ops lessons already record three times over (*measure with
+the instrument production uses*; *read the caller before declaring a consumer orphaned*), and
+the same class as the two safety instruments this PR found enforced nowhere. The pattern is
+worth a standing note precisely because it is so cheap to type.
+
 ## Deliberately not done
 
 `docs/plan/completed/` and `docs/plan/research/` bodies · ADR prose · migration and
