@@ -1,0 +1,337 @@
+# Decision record — ADR index + the standing laws
+
+This directory is Clara's decision log, one file per decision. It replaces
+`docs/PROJECTLOG.md` and its five archive files, which were split here entry-by-entry
+with **every entry's bytes preserved verbatim** — no reflow, no frontmatter, no edits.
+Cite decisions by number exactly as before (`ADR-014`); the numbering is global and
+unchanged.
+
+## The log's own law (carried forward from the deleted files' headers)
+
+These conventions governed the append-only log and still govern this directory:
+
+- **Append-only.** Supersede a decision with a NEW entry; never rewrite or prune an old
+  one. Historical entries that name a since-changed fact (ADR-001's repo slug, for
+  instance) are left intact deliberately.
+- **Decisions only.** Build narrative, commit hashes and status do NOT belong in a
+  decision record — those live in git, the plan, and `PROGRESS.md`.
+- **Cite, don't duplicate.** The artifacts of record are `docs/prd/PRD.md`,
+  `docs/architecture/ARCHITECTURE.md` (+ Appendix A), `docs/design/DIRECTION.md`,
+  `docs/plan/REBUILD-PLAN.md`, `docs/audit/`, `docs/00-GATE-2-README.md`,
+  `docs/phase2-research/`. A wave's contract/acceptance doc is the mechanism of record;
+  the ADR minutes the ruling and points at it.
+- **The fix for a log that outgrows a read is a split, never a rewrite or a prune.**
+  This directory is that principle taken to its conclusion.
+
+## How to read the status column
+
+| Status | Meaning |
+|---|---|
+| **standing** | The entry's decision still binds specs, architecture or process today. |
+| **discharged** | Executed and complete; no ongoing instruction. Any law it minted is lifted into the digest below and cited there. |
+| **superseded** | Replaced by a later entry. *No ADR is wholly superseded* — every supersession in this log is clause-level, and is named in the hook. |
+| *narrative* | Flag, not a status: the entry mixes its decision with build/status narrative. The decision stands; the state parts are superseded by `PROGRESS.md` and the live posture pins. |
+
+## Index
+
+| # | Title | Date | Status | Hook |
+|---|---|---|---|---|
+| [0001](0001-greenfield-rebuild-on-fresh-repo-and-project.md) | Greenfield rebuild on a fresh repo + fresh Supabase project | — | standing | The prior build stays frozen read-only audit evidence until Phase-5. Repo location superseded by 0021 (slug left intact by design). |
+| [0002](0002-four-invariants-are-structural-db-guarantees.md) | The four firm-killing invariants are STRUCTURAL DB guarantees | — | standing | Cardinal. Everything judgement-flavored stays visibility-first (one exception since: 0065/E-R2). |
+| [0003](0003-maker-checker-hard-gate-high-stakes-only.md) | Maker/checker: modelled always, hard-gate high-stakes only | — | standing | The agent can never satisfy a human sign-off. |
+| [0004](0004-kb-is-a-wiki-that-informs-never-decides.md) | KB = two-layer wiki that informs but never decides | — | standing | Made structural by WB-R6 (0032); the veto defect closed by 0039. |
+| [0005](0005-counterparties-split-and-intrinsic-subledger.md) | Counterparties split + INTRINSIC same-transaction subledger | — | standing | The F3 law. Debt paid at 0052; the law binds. |
+| [0006](0006-v1-scope-is-the-compliance-correct-core.md) | v1 scope = the compliance-correct core | — | standing | Incl. the MPERS cash-flow statement. Scope home is PRD §9 now. |
+| [0007](0007-event-spine-context-packs-and-freshness.md) | Event-driven state layer + context packs + freshness | — | standing | The North-Star spine; realized by 0016/0017/0018. |
+| [0008](0008-runtime-is-ai-sdk-plus-workflow-devkit.md) | Runtime = AI SDK 7 + Workflow DevKit, self-hosted | — | standing | Named fallback LangGraph JS + PostgresSaver; the provider seam stays. |
+| [0009](0009-db-idempotency-keys-are-the-mandatory-floor.md) | Step memoization is NOT exactly-once; idempotency keys are the floor | — | standing | Proven by the Slice-0 spike's kill-after-commit test. |
+| [0010](0010-binding-workflow-versioning-policy.md) | BINDING workflow-versioning policy (no run pinning) | — | standing | Every behavioural change is a new `_vN`; the freeze-lint enforces. |
+| [0011](0011-tracing-stays-in-clara-controlled-storage.md) | Tracing: Clara-controlled storage; vendor export gated | — | standing | The C6 checklist (DPA · disclosure · PDPA) is still open owner/legal work. |
+| [0012](0012-anti-misleading-green-ci.md) | Anti-"misleading-green" CI (test the REAL artifact) | — | standing | Real migrations on a throwaway `postgres:17`; deploy-onto-existing check. |
+| [0013](0013-workspace-harness-relocated-to-rebuild-repo.md) | Workspace/harness relocated; prior parent doctrine deleted | 2026-07-17 | discharged | One-time cleanup, executed. |
+| [0014](0014-runtime-host-is-fly.md) | Runtime host = Fly (a long-lived Node process) | 2026-07-17 | standing | Region `sin`, co-located with the Supabase project. |
+| [0015](0015-write-authorization-is-lane-split-by-grant.md) | Write-authorization is lane-split by GRANT, not detected at runtime | — | standing | Agent-never-signs is the ABSENCE of an entry point. |
+| [0016](0016-event-spine-ratified-semantics.md) | The event spine's ratified semantics (Slice 3) | 2026-07-18 | standing | Clause (3)'s universal quantifier narrowed by 0017(10); its freshness asymmetry narrowed by 0018(11). |
+| [0017](0017-durable-runtime-skeleton-ratified-semantics.md) | The durable runtime skeleton's ratified semantics (Slice 4) | 2026-07-18 | standing | Its "chat may never write books" ruling amended by 0018(3). Carries the canary watch. |
+| [0018](0018-document-pipeline-ratified-semantics.md) | The document pipeline's ratified semantics (Slice 5) | 2026-07-18 | standing | Its managed-scanner FATAL law superseded by 0019(10). |
+| [0019](0019-coding-floor-ratified-semantics.md) | The coding floor's ratified semantics (Slice 6) | 2026-07-19 | standing | Its S6-R1 RPR-only egress constraint superseded by WA-R2 (0022). |
+| [0020](0020-dr-full-fidelity-profile-and-acl-baseline.md) | DR full-fidelity profile + the deployment ACL baseline | 2026-07-20 | standing | Production recovery is full-profile only; drill re-runs quarterly. |
+| [0021](0021-repository-moves-to-the-company-org.md) | The repository moves to BELCORT-SDN-BHD | 2026-07-20 | discharged | Transfer executed. Standing residuals (PR-only gate, org-policy constraints) → digest. |
+| [0022](0022-wave-a-daily-loop-design-contract.md) | The Wave-A daily-loop design contract | ~2026-07-20 | discharged · *narrative* | WA-R2 supersedes 0019's S6-R1; WA-R7 reopens the batch-approve deferral. |
+| [0023](0023-wave-a-daily-loop-build-as-built.md) | The Wave-A daily-loop BUILD (as-built) | ~2026-07-21 | discharged · *narrative* | Its four open owner decisions were all resolved at 0024. |
+| [0024](0024-wave-a-live-and-consent-evidence-provenance.md) | Wave A ships live; consent evidence goes full-provenance | 2026-07-21 | discharged · *narrative* | Migration 0014 supersedes 0012's owner-declaration weakening for evidence-backed consents. |
+| [0025](0025-wave-a2-inserted-and-auto-post-law-scoped.md) | Wave A2 inserted; the auto-post law scoped; consent scoped to cross-border | 2026-07-21 | standing · *narrative* | "No auto-approve ever" → "no UNBOUNDED/agent-initiated auto-approve". WA2-R14 scopes the WA-D1 consent gate. |
+| [0026](0026-wave-a2-built-with-cross-model-hardening.md) | Wave A2 BUILT + MERGED; six-round cross-model hardening | 2026-07-22 | discharged · *narrative* | Minted the cross-model-review-before-money-merge law → digest. |
+| [0027](0027-wave-a2-deployed-and-the-live-eval-ratified.md) | Wave A2 DEPLOYED + the §9 eval CLOSED | 2026-07-22 | standing · *narrative* | Ratifies the live eval as the standing acceptance gate for every wave. |
+| [0028](0028-wave-a2-1-design-ratified-sst-watch.md) | Wave A2.1 design RATIFIED; purchase "input tax" corrected | 2026-07-22 | standing · *narrative* | SST has no input-tax credit; cross-model design debate becomes design-phase practice. |
+| [0029](0029-migration-0016-built-and-merged.md) | Migration 0016 BUILT + MERGED; execution-truth ratified | 2026-07-23 | discharged · *narrative* | "Evidence, not authority" → digest. |
+| [0030](0030-wave-a2-1-closed-on-gates-w-c-d.md) | Wave A2.1 CLOSED on Gates W/C/D; the 0016 ceremony executed | 2026-07-23 | discharged · *narrative* | Gates S/P split to a follow-on eval; both later re-scoped at 0062. |
+| [0031](0031-queue-section-order-needs-you-first.md) | Queue section order: needs_you renders FIRST | 2026-07-23 | discharged | The rank-2 wrinkle it queued for 0017 has since landed. |
+| [0032](0032-wave-b-design-ratified.md) | Wave B design RATIFIED (WB-R1..R18) | 2026-07-23 | discharged · *narrative* | WB-R6 (the wiki authority boundary) is lifted to the digest; the wave closed at 0046. |
+| [0033](0033-migration-0017-built-merged-undeployed.md) | Migration 0017 (the Wave B DB heart) BUILT | 2026-07-23 | discharged · *narrative* | Minted the blind-lanes-need-filesystem-isolation law → digest. |
+| [0034](0034-the-v25-runtime-lanes-built.md) | The v25 runtime lanes BUILT | 2026-07-23 | discharged · *narrative* | Merged undeployed behind the WB-R18 ceremony. |
+| [0035](0035-wave-b-dashboard-surfaces-and-deploy-lock.md) | Wave-B dashboard surfaces; the freeze-lint gains the deploy-lock | 2026-07-24 | discharged · *narrative* | The freeze-lint's deploy-boundary refinement is standing → digest. |
+| [0036](0036-the-wb-r18-ceremony-executed.md) | The WB-R18 ceremony EXECUTED: live 16→17, runtime v24→v25 | 2026-07-24 | discharged · *narrative* | `fly deploy` must run from the repo root → digest. |
+| [0037](0037-ruling-batch-wb-r19-r27.md) | The nine open rulings adjudicated as batch WB-R19..R27 | 2026-07-24 | standing | WB-R22 (commit lane target), WB-R23 (typed consent), WB-R26 (drill cadence) and WB-R27 (`__Host-` + BFF before multi-user) all still bind. |
+| [0038](0038-migration-0018-gate-k-domain-live.md) | Migration 0018 BUILT, RATIFIED, DEPLOYED same-day | 2026-07-24 | discharged · *narrative* | A PostgREST rpc probe must send `Content-Profile: clara`. |
+| [0039](0039-migration-0019-wiki-authority-boundary.md) | Migration 0019 (the wiki authority boundary) DEPLOYED | 2026-07-25 | discharged · *narrative* | The runtime-image-first cutover law → digest. Closes WB-R21's boundary defect. |
+| [0040](0040-migration-0020-typed-egress-consent-built.md) | Migration 0020 (typed egress consent) BUILT; Gate W2 closed | 2026-07-25 | discharged · *narrative* | Minted the load-bearing-verbs + fail-on-the-OLD-artifact review laws → digest. |
+| [0041](0041-migration-0020-deployed-live-and-dark.md) | Migration 0020 DEPLOYED; typed egress consent live and DARK | 2026-07-25 | discharged · *narrative* | WB-R23 closed in production. |
+| [0042](0042-migration-0021-the-human-counterparty-lane.md) | Migration 0021: the human counterparty lane | 2026-07-26 | discharged · *narrative* | `_resolve_counterparty` keeps its monopoly on identity resolution. |
+| [0042a](0042a-ruling-batch-wb-r28-r30.md) | Ruling batch WB-R28..R30 *(not an ADR — see the note below)* | 2026-07-26 | discharged | WB-R28 superseded by 0062's Gate-P re-scope · WB-R29's date half by 0046 · WB-R30 discharged at 0045. WB-R29's "no delete verb exists" fact → digest. |
+| [0043](0043-migration-0021-deployed-gate-k-closed.md) | Migration 0021 DEPLOYED; GATE K CLOSED on Bee Creative | 2026-07-26 | discharged · *narrative* | Names the open gap: the `opening_tb.line` producer still does not exist. |
+| [0044](0044-belcort-high-stakes-threshold-rm100k.md) | BELCORT's high-stakes threshold raised to RM100,000 | 2026-07-27 | standing | Per-firm; the slice-era fixtures keep the RM10,000 default. |
+| [0045](0045-gate-f-closed-rome-public-advisory-born.md) | GATE F CLOSED: Rome Public Advisory born through the durable 11-Q | 2026-07-27 | discharged | Firm `39008536` — the Gate-S synthetic sandbox. |
+| [0046](0046-wave-b-closed-on-intent.md) | WAVE B CLOSED ON INTENT; the deferral register | 2026-07-27 | discharged · *narrative* | WB-R2's "no autopost rules from seeding, ever" → digest. Supersedes WB-R29's date half. |
+| [0047](0047-extraction-slice-contract-ratified.md) | The extraction-slice contract RATIFIED v1.0 | 2026-07-27 | standing | Corroboration = two independent readers, not a model score; `request_reextraction` is human-invoked-only. |
+| [0048](0048-extraction-slice-closed-and-settlement-program.md) | The extraction slice CLOSED + the pre-Wave-C settlement program | 2026-07-28 | standing · *narrative* | The labelled-synthetic sanction (cited product-wide as "the ADR-048 sanction"). |
+| [0049](0049-settlement-program-executed-gates-l-and-s.md) | THE SETTLEMENT PROGRAM EXECUTED: Gates L+S closed (synthetic) | 2026-07-28 | discharged · *narrative* | The vendor-binding design ratified; F3 ruled corroboration-not-option-B. |
+| [0050](0050-the-first-production-autopost.md) | THE FIRST PRODUCTION AUTOPOST: RM350 posted unattended | 2026-07-29 | discharged · *narrative* | Minted: migration numbers claim at MERGE time; F2 is a consistency gate, never a selection key. |
+| [0051](0051-wave-c-opened-and-c0-live.md) | WAVE C OPENED (WC-R1..R12); C0 built; migration 0036 live | 2026-07-30 | standing · *narrative* | WC-R5 (no multi-currency), WC-R7 (the chain is the second reader), WC-R10 (no employee counterparty) and the effective-dated-policy-table law all bind. |
+| [0052](0052-wave-c-a-live-the-f3-debt-paid.md) | WAVE C-a LIVE: the AR/AP subledger + allocation; the F3 debt PAID | 2026-07-30 | discharged · *narrative* | WCA-R7 (high-stakes settlements park for a distinct checker) rides in the mechanism. |
+| [0053](0053-wave-c-b-closed-and-accepted.md) | WAVE C-b CLOSED AND ACCEPTED: bank identity + ingest + matching | 2026-07-31 | discharged · *narrative* | Minted: unsigned single-column amounts are refused; `enter_bank_statement` binds a FILED document only. |
+| [0054](0054-wave-c-closed.md) | WAVE C CLOSED: thirteen receipts at exact zero, the learn loop live | 2026-08-01 | discharged · *narrative* | Its F-1 finding was ruled at E-R12 (0065) and built in lane α; F-2 closed by 0058; F-3 documented. |
+| [0055](0055-wave-d-opened.md) | WAVE D OPENED (WD-R1..R15); staff advances ruled B-lite | 2026-08-01 | standing · *narrative* | WD-R10 (no employee counterparty, the B-lite register), WD-R5/R8 (the authority doctrine) and WD-R11 (closing stock → Wave E) still bind. |
+| [0056](0056-wave-d-a-closed.md) | WAVE D-a CLOSED: 0041 live; both real registers hold ZERO fixed assets | 2026-08-02 | discharged · *narrative* | The honest-empty precedent. Its real-half deferrals are partly discharged at 0062; the rest are open. |
+| [0057](0057-wave-d-b-design-closed-at-v8.md) | WAVE D-b DESIGN CLOSED at v8 (WDB-G1..G16) | 2026-08-02 | discharged · *narrative* | G14's split-month law → digest. The design doc is design-time-only per 0058. |
+| [0058](0058-wave-d-b-closed-as-a-four-slice-split.md) | WAVE D-b CLOSED as a FOUR-SLICE SPLIT | 2026-08-05 | discharged · *narrative* | Minted eight standing engineering laws → digest. `build/wave-d-b-0042`: NEVER MERGE. |
+| [0059](0059-d-b2-closed-0045-live.md) | D-b2 CLOSED: 0045 LIVE; WAVE D-b COMPLETE | 2026-08-06 | discharged · *narrative* | The ceremony `statement_timeout` recipe + fail-closed-on-unknown armour law → digest. |
+| [0060](0060-the-pre-beta-data-doctrine.md) | THE PRE-BETA DATA DOCTRINE | 2026-08-06 | standing | DATA-scoped only; mechanisms/process/secrets NOT relaxed; **expires at beta**. Narrowed by the §1 narrowing (see digest). |
+| [0061](0061-review-intensity-stays-uniform.md) | REVIEW INTENSITY STAYS UNIFORM; risk-tiering DECLINED | 2026-08-06 | standing | The full ladder for every substantive change; Law 1 is the floor, not the ceiling. |
+| [0062](0062-the-pre-e-clearing-day.md) | THE PRE-E CLEARING DAY: three structural gaps registered | 2026-08-06 | standing · *narrative* | Re-scopes Gate P **and** Gate S to operating runway; the ceremony now ends with `--lock-deployed`. Two of its three gaps are since discharged (0066, 0067). |
+| [0063](0063-wave-7a-grilled-and-ratified.md) | §7-A GRILLED AND RATIFIED (7A-R1..R12) | 2026-08-06 | standing | Never re-grill. Registers the settlement-corroboration door; re-confirms three standing autopost refusals. |
+| [0064](0064-wave-7a-closed-two-halves-acceptance.md) | §7-A CLOSED: the two-halves acceptance; four findings minted | 2026-08-07 | discharged · *narrative* | The four findings became F6–F9 and closed at 0066. The anti-circular floor exclusion → digest. |
+| [0065](0065-wave-e-contract-and-invariant-1-amendment.md) | The Wave E contract (E-R1..E-R14) + **the invariant-1 law amendment** | 2026-08-08 | standing | E-R4 amends the cardinal invariant in all three of its homes. The contract is the mechanism of record. |
+| [0066](0066-the-f6-f9-fix-batch-closed.md) | The F6–F9 fix batch BUILT, DEPLOYED and ACCEPTED | 2026-08-09 | discharged · *narrative* | Corrects E-R1's Gate-P expectation by measurement (seven documents, not four). "A wall that never refused anything…" → digest. |
+| [0067](0067-lanes-alpha-and-beta-land.md) | Lanes α+β land; the CI gate survives on zero minutes | 2026-08-11 | discharged · *narrative* | The self-hosted runner is **private-repo only** → digest. Discharges the 0062 MSIC debt. |
+| [0068](0068-the-evening-sitting-b3-ruled.md) | The evening sitting: B3 ruled; Gate-P defers to the Wave-G reset | 2026-08-11 | standing | The `ends_on` reopen variant + its named build trigger; supersedes 0066/PART-2's Gate-P reminder clause. |
+
+**Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
+ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
+owner rulings, so it is preserved as a file rather than dropped; the `a` suffix keeps it
+in source order without claiming an ADR number it never had. **The owner may wish to give
+it a number** (it would be the only renumbering in this conversion) — flagged, not decided.
+
+---
+
+# THE STANDING LAWS DIGEST
+
+Every law still binding TODAY, deduplicated, with its source. **This digest goes to the
+owner for sign-off** — it is a reading of all 68 entries, not a mechanical extraction.
+On any divergence, the cited ADR governs.
+
+## 1 · Product law (the cardinal invariants)
+
+1. **The DB owns every AUTHORITATIVE number.** The LLM may propose or independently check
+   a calculation, but no model-generated numeral enters a durable report unless a
+   versioned deterministic evaluator reproduces it from DB-owned inputs. *(0065/E-R4 —
+   amended wording; homes: PRD §6, ARCHITECTURE §0, CLAUDE.md. The pre-amendment
+   clarification survives in substance: an agent-proposed draft becomes authoritative
+   only after exact-revision human approval.)*
+2. **Four structural invariants, enforced in the DB, not by model discipline:** client
+   attribution (≥0.95), provenance binding (`source_doc_sha256` + `document_id` validated
+   in-txn), wake authority (per-wake allowlist), write authorization (structural
+   read-only agent role). *(0002; realized 0015)*
+3. **Write authorization is lane-split by GRANT, never detected at runtime.**
+   Agent-never-signs is the ABSENCE of an entry point, not a runtime check. *(0015)*
+4. **Maker/checker is modelled always**, hard distinct-approver gate on the high-stakes
+   lane, solo firms record an attestation, and the agent can never satisfy a human
+   sign-off. *(0003; BELCORT's threshold is RM100,000 per 0044)*
+5. **Auto-approve is scoped, not forbidden:** no *unbounded or agent-initiated*
+   auto-approve. A human-signed rule IS the posting authority. *(0025)*
+6. **Reverse-not-delete is structural** — there is no delete verb anywhere in the schema.
+   *(0005, 0042a/WB-R29)*
+7. **Visibility-first for everything judgement-flavored**, with exactly ONE ruled
+   exception: the drawer-2 close gates. *(0002 + 0065/E-R2)*
+8. **The wiki informs, never decides** — no gate/bound/floor/autopost function may read
+   wiki; authority paths must be bit-identical with and without it. *(0004, 0032/WB-R6,
+   0039)*
+9. **The subledger is intrinsic:** the audited write composes the GL leg and the open item
+   in ONE transaction. *(0005; the debt paid at 0052)*
+10. **Idempotency keys are the mandatory floor** — durable-engine step memoization is not
+    exactly-once. *(0009)*
+11. **Precedence on collision:** accounting-correctness > backend contracts > design
+    look/motion. *(house law; applied as the grounds of the B3 ruling, 0068)*
+
+## 2 · Accounting and domain law
+
+12. **Autopost eligibility.** Posting authority derives from verified in-system approvals
+    only: no autopost rules from seeding, ever *(0046/WB-R2)*; hand-drafts are never
+    autopost fuel and hand-created rules past the floor are refused *(0063)*; and an entry
+    a rule posted itself can never count as evidence for its own authority — the
+    anti-circular floor exclusion *(0064)*.
+13. **Corroboration is agreement, not confidence.** Two independent readers agreeing to
+    the sen ∧ the document's own arithmetic identity ∧ the polygon wall ∧ MYR. Vendor
+    self-reported confidence is gone; reader disagreement is a refusal, never a tie to
+    adjudicate; `request_reextraction` is human-invoked-only, no machine caller ever.
+    *(0047)*
+14. **For bank statements the running-balance CHAIN is the second reader** (structured);
+    OCR needs two readers AND the chain. *(0051/WC-R7 — a deliberate strengthening of
+    0047)*
+15. **Unsigned single-column amounts are REFUSED by design**, and `enter_bank_statement`
+    binds to a FILED document only. *(0053)*
+16. **Malaysian tax facts live in effective-dated policy tables, never in product-law
+    prose** — rates, thresholds, phase dates. *(0051)*
+17. **SST has no input-tax credit**; the purchase side is a *visibility* split. *(0028)*
+18. **Multi-currency is ruled OUT**; non-MYR fails closed until its own post-G wave.
+    *(0051/WC-R5, superseding WA2-R1's charter)*
+19. **No employee counterparty kind, ever.** Staff advances ride the B-lite register; a
+    sole proprietor is NOT an employee — his account is EQUITY. *(0051/WC-R10,
+    0055/WD-R10)*
+20. **The split-month law:** a day-1 revision gives the month to the successor; day-2+
+    leaves it with the PREDECESSOR. No month is ever split; no day-level pro-rating.
+    *(0057/G14)*
+21. **The time-triggered authority doctrine:** sign once at admin+, the first firing
+    DRAFTS (the ramp), receipt everything, high-stakes always to a distinct checker.
+    *(0055/WD-R5, WD-R8)*
+22. **Never fabricate.** A gate whose evidence class does not exist in the world cannot be
+    closed honestly, only deferred with its cause written down *(0046)*; synthetic
+    evidence is sanctioned pre-go-live but is LABELLED synthetic and never claimed as real
+    *(0048 — "the ADR-048 sanction")*.
+23. **The never-backdate law stands for transaction reversals.** A year-end close pair is
+    period machinery, not a business transaction: `reopen_fiscal_year` mints a dedicated
+    reversal DATED the reopened year's `ends_on` under the target-bound close-write permit
+    (M2), with the act's real timestamp/actor/receipt retained. *(0068)*
+24. **MASB dual-version golden wording** — MPERS 2016 → MPERS 2025 for FYs beginning
+    ≥ 2027-01-01; live 2025/26 clients stay on MPERS(2016). The tax-table pattern.
+    *(0065/E-R14)*
+25. **The close model's governance:** three-drawer gates; three keys with a
+    firm-configurable authorization list (default owner-only, partners by explicit audited
+    grant); the agent structurally key-less and grant-less. *(0065/E-R2, E-R11)*
+
+## 3 · Review and evidence law
+
+26. **Review intensity stays UNIFORM** — the full ladder for every substantive change.
+    Risk-tiering was proposed and DECLINED. *(0061)*
+27. **The three laws minted 2026-08-06.** (1) A judgement-logic PR gets an independent
+    review pass before merge — the floor, not the ceiling. (2) **Absence is not evidence,
+    and a derived state is not evidence** — only what a read actually SAW counts; every
+    absence and every derivation falls to the fail-closed branch. (3) **Spelling is not
+    identity** — a guard that reads a NAME reads a projection; prove an identifier IS its
+    import. *(minted in the open register; live exhibits at 0064/F1 and 0066)*
+28. **Cross-model adversarial review before merging money-touching code** *(0026)*, and
+    for the DESIGN of anything touching the approval path *(0028)*.
+29. **The live eval is the standing acceptance gate for every wave.** A wave is not done
+    at merged-and-reviewed; it is done when its gates close on live books. *(0027;
+    re-earned at 0053, 0064)*
+30. **Execution truth outranks read-only review claims** — evidence, not authority, in
+    both directions. *(0029)*
+31. **A wall that never refused anything is not a wall that held — it is a wall that was
+    never asked.** A review round must ask what the code has never been ASKED; a
+    zero-count refusal head is a question to open, never a wall to bank. *(0066)*
+32. **Read a document's load-bearing verbs** (*enforced · closed · only · reports*) and
+    find the line that makes each true; **write the test against the artifact, then run it
+    against the OLD artifact and require it to FAIL.** *(0040)*
+33. **Blind lanes need FILESYSTEM isolation, not instructions.** *(0033)*
+34. **The binding-gate exemption allowlist is EXACTLY ONE**, printed as an audit line; any
+    addition is a review event. *(0058)*
+35. **A probe that can error under `|| true` reports blank as success** — force the
+    locale, never trust the ambient. *(0058)*
+36. **Fail-closed-on-unknown:** deploy instruments name their verified grammar subset and
+    refuse loudly outside it, with a diagnosis. Do not "fix" a red by loosening the guard.
+    *(0059; the interview AST guard's named cost is the standing exhibit)*
+
+## 4 · Engineering and CI law
+
+37. **`main` is PR-only with green CI.** Server-side branch protection is unavailable on
+    the plan tier, so the git-base freeze-lint + CI ARE the gate. Two org policies must
+    stay compatible or CI breaks silently: no allowed-actions allowlist (it would reject
+    `actions/checkout@v4`) and no enforced SHA-pinning (it would reject `@v4`). *(0021)*
+38. **The self-hosted CI runner (`clara-wsl`) is PRIVATE-REPO ONLY — decommission it
+    BEFORE any repository visibility change.** The gate itself is unchanged. *(0067;
+    runbook `docs/ops/ci-runner.md`)*
+39. **Anti-misleading-green CI:** real migrations onto a throwaway `postgres:17`, a
+    deploy-onto-existing check so an edited historical migration fails, freeze-lint,
+    leak-scan, and a real DR round-trip. Destructive DB scripts refuse without a
+    disposable-target sentinel. *(0012)*
+40. **Workflow bodies are immutable once deployed** — ship a behavioural change as a new
+    `_vN` export and repoint the registry; never rename/delete an export with in-flight
+    runs. The freeze-lint's boundary is the DEPLOY boundary, with a monotonic lock.
+    *(0010 + 0035)*
+41. **Migration numbers (and CLR codes) are claimed at MERGE time**, with the `RENUMBER.md`
+    procedure: templates, an exhaustive stable-name inventory (never prefix-only), the
+    version as a shared assembler input, and a mandatory dry run. *(0050, 0058)*
+42. **A test for a granted verb belongs no later than the grant slice**; a fork's shipping
+    set is the transitive closure of its prologue; the dashboard splits with the DB.
+    *(0058)*
+43. **A slice never rewrites a prior slice's installed comment**, and an optional
+    cross-section patch is a PROPOSAL, not a patch. *(0058)*
+44. **Scan any branch with CI's own pinned gitleaks config BEFORE pushing it**, and never
+    commit a credential — connections come from the environment, never a DSN in code or
+    argv. *(standing law from the #190 discharge; the leak-scan gate enforces)*
+45. **DB changes are rig-validated on a throwaway**, never hand-applied to a live project
+    blindly. *(0012 + house)*
+
+## 5 · Ceremony and deploy law
+
+46. **The positive-read deploy law: a ceremony closes only on a POSITIVE read that the
+    running release carries the intended commit** — release build-time versus the merge it
+    must contain, plus the new code's own boot line. *(minted by the v54 belt-gap incident,
+    2026-08-06; a Law-2 violation at the deploy layer)*
+47. **The `statement_timeout` recipe:** a ceremony-local **session-level**
+    `set statement_timeout` inside the migration connection (port 5432, session mode),
+    reverted after. Role- and database-level settings are invisible through the pooler.
+    *(0059)*
+48. **Ceremonies run a MAIN-PINNED migrate runner, never the wave checkout.** *(0058)*
+49. **`NOTIFY pgrst, 'reload schema'` after any ceremony that adds RPCs**, and a PostgREST
+    rpc probe must send `Content-Profile: clara`. *(0058, 0038)*
+50. **Every ceremony ends with freeze `--lock-deployed` + commit.** *(0062)*
+51. **`fly deploy` must run from the repo root.** *(0036)*
+52. **Runtime-image-first has a failure boundary DB-first does not** — and the cutover
+    point is *exclusive new-binary lock acquisition*, never "the image is up". *(0039)*
+53. **Production recovery is FULL-PROFILE only.** The default backup profile is a
+    diagnostic books snapshot that must NEVER be started as an application database; roles
+    restore via a reviewed ceremony, not globals; the ACL baseline is a mandatory
+    post-restore re-application. *(0020)*
+54. **Backup drills:** monthly LIGHT human-assisted + quarterly STRICT; the full-profile
+    fresh-project DR drill re-runs quarterly. *(0037/WB-R26, 0020)*
+
+## 6 · Data, security and confidentiality posture
+
+55. **The pre-beta data doctrine (0060) IS IN FORCE.** Every firm/client row in the live
+    Clara project is partner-authorized test state; the agent may delete, reverse, reseed
+    and re-run it in service of wave validation, recording each reset. The authority is
+    **DATA-scoped only** — the product's security MECHANISMS, the engineering gates and
+    secrets discipline are never relaxed. **It expires at beta**, and the resumption is
+    itself a named gate item.
+56. **The 0060 §1 narrowing (operative).** The doctrine reaches **client and accounting
+    data in the live Clara project ONLY**. It does NOT reach the frozen prior build
+    (`initial acc software skillmd` + the `belcort-shared` Supabase, read-only audit
+    evidence until Phase-5) or the Slice-0 spike's `workflow` / `graphile_worker` /
+    `spike` schemas and its live parked run. *(recorded in the open register; 0001 is the
+    frozen build's source)*
+57. **Tracing stays in Clara-controlled storage.** Vendor trace export ships OFF and is
+    enabled only after an executed DPA, firm-facing client authorization (MIA By-Laws
+    require *specific* authority), a documented PDPA cross-border basis, short retention,
+    tested deletion and field-level minimization. *(0011 — the C6 checklist is still open)*
+58. **OCR egress is a two-tier gate**, and consent is **typed and purpose-scoped**,
+    re-checked at the dispatch boundary — a grant alone does not authorize. A
+    locally-parsed document skips the cross-border hold (no egress occurs). *(0018,
+    0025/WA2-R14, 0037/WB-R23, 0040)*
+59. **THE ENRICHMENT TRAP.** ROME SECRETARY's customers are NAME-ONLY (11 customers / 0
+    registrations) because no RS invoice prints a buyer registration. **Never enrich them
+    with registration numbers or TINs** — it would strand every subsequent invoice at
+    `customer_ambiguous`, unattended and silently. *(standing OPS note; the F3 mechanism)*
+60. **`__Host-` cookie + same-origin BFF is REQUIRED before staff/multi-user routine
+    production.** *(0037/WB-R27)*
+61. **The onboarding commit lane** stays the audited temp-admin ceremony; the target is a
+    scoped review-attestation capability (reviewer ≠ activator, zero standing privilege).
+    *(0037/WB-R22)*
+62. **The wake-secret txn-local property is a RUNTIME POOL contract**, not DB-enforceable —
+    the DB trusts the `clara.wake_secret` GUC within a request. *(Slice-4 clarification)*
+
+## 7 · Permanent pins (never expire)
+
+63. **Canary `daba7f2e` — NEVER answer it**, even past due (it was due 2026-08-02).
+    *(0017/S4-V2)*
+64. **The belt witness `d023b48c` — NEVER approve it** (the sandbox's first autonomous
+    adjustment draft). *(0059 and the v54 incident record)*
+65. **Archive branch `build/wave-d-b-0042` must NEVER be merged** — evidence only, with a
+    named do-not-restore list. *(0058)*
+66. **Four firms, not interchangeable.** BELCORT is the real firm (ROME PROPERTIES · ROME
+    SECRETARY · BEE CREATIVE SOLUTION); ROME PUBLIC ADVISORY is the Gate-S synthetic
+    sandbox *(0045)*; Alara Advisory and Borneo Books are slice-era RLS fixtures *(0044)* —
+    never repurpose them.
+67. **Never re-grill a ratified contract.** Wave E (0065/E-R1..E-R14) · §7-A
+    (0063/7A-R1..R12) · Wave D and D-b (0055/WD-R1..R15, 0057/WDB-G1..G16) and any
+    ladder's adjudications or settled residuals. Cite them; do not re-open them.

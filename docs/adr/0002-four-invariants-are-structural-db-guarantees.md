@@ -1,0 +1,3 @@
+### ADR-002 — The four firm-killing invariants are STRUCTURAL DB guarantees (Gate-1 C3)
+**Decision:** Client attribution (≥0.95, DB-gated), provenance binding (`source_doc_sha256`+`document_id` validated in-txn), wake authority (allowlist per wake kind), and write authorization (structural read-only agent role — no EXECUTE on writers + `default_transaction_read_only`) are enforced in the DB, not by model/prompt discipline. Everything judgement-flavored (coding, materiality, close-readiness) stays visibility-first.
+**Why:** The audit proved the prior build's prose-only gates leaked (the read tool could write — SDT-001; provenance unvalidated — GAP0-1). Draw the hard-constraint boundary exactly where the prose demonstrably leaked. Ref: ARCHITECTURE §0/§3.
