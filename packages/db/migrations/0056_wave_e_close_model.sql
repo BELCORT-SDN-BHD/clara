@@ -785,8 +785,19 @@ create trigger t_close_serialize before insert or update or delete on clara.fixe
 -- bank_accounts joined the roster when the bank census moved to REGISTRY enumeration
 -- (Codex R1 BLOCKER 2): the registry now DEFINES the drawer-1 bank population, so a
 -- concurrent add_bank_account must not slip an unreconcilable account past a mid-flight
--- finalize's measurement. Six tables, and A13d's census counts SIX.
+-- finalize's measurement.
 create trigger t_close_serialize before insert or update or delete on clara.bank_accounts
+  for each row execute function clara._tf_close_serialize();
+-- client_facts + document_filings joined next (Codex R2 BLOCKER 1): trade_nature decides
+-- closing-stock APPLICABILITY and filings define the uncoded POPULATION -- both
+-- ordinary-writable mid-close without these. EIGHT tables; A13d's census counts EIGHT.
+-- Priced residual, stated: clara.documents carries NO client_id (dropped at 0007), so it
+-- cannot ride this trigger -- the one unserialized gate-input path is 0038's
+-- financial_date correction on an already-filed document; verify_close's recompute and
+-- digest staleness are its net, the same net the already-closed-FY residual above uses.
+create trigger t_close_serialize before insert or update or delete on clara.client_facts
+  for each row execute function clara._tf_close_serialize();
+create trigger t_close_serialize before insert or update or delete on clara.document_filings
   for each row execute function clara._tf_close_serialize();
 
 -- =====================================================================================
@@ -889,14 +900,26 @@ begin
       'fiscal_year_id', p_fiscal_year_id, 'register_movement_cents', 0, 'gl_movement_cents', 0,
       'diff_cents', 0);
   end if;
-  -- Register movement inside the segment: live depreciation effective in it (sign: accum
-  -- credit reduces NBV) net of acquisitions dated in it (cost enters NBV).
+  -- Register movement inside the segment: acquisitions dated in it (cost enters NBV),
+  -- net of live depreciation effective in it (accum credit reduces NBV), net of
+  -- DISPOSALS dated in it (Codex R2 BLOCKER 2): a disposal removes the asset's REMAINING
+  -- NBV -- cost less its baseline accumulated less every live depreciation row (the rows
+  -- stop at disposal, so nothing double-counts against the depreciation term; an asset
+  -- acquired AND disposed in one window nets to its baseline on both sides).
   select coalesce((select sum(fa.cost_cents) from clara.fixed_assets fa
             where fa.client_id = p_client and fa.superseded_at is null
               and fa.acquired_date > v_fy.starts_on - 1 and fa.acquired_date <= v_fy.ends_on), 0)
        - coalesce((select sum(d.amount_cents) from clara.fa_depreciation d
             where d.client_id = p_client and d.is_live
               and d.effective_date > v_fy.starts_on - 1 and d.effective_date <= v_fy.ends_on), 0)
+       - coalesce((select sum(fa.cost_cents
+                     - coalesce(fa.accumulated_depreciation_cents, 0)
+                     - coalesce((select sum(d3.amount_cents) from clara.fa_depreciation d3
+                          where d3.asset_id = fa.id and d3.is_live), 0))
+            from clara.fixed_assets fa
+            where fa.client_id = p_client and fa.superseded_at is null
+              and fa.disposed_at is not null
+              and fa.disposed_at > v_fy.starts_on - 1 and fa.disposed_at <= v_fy.ends_on), 0)
     into v_reg_move;
   select coalesce(sum(jl.debit_cents - jl.credit_cents), 0) into v_gl_move
     from clara.journal_lines jl
@@ -1230,6 +1253,15 @@ begin
     where fa.client_id = p_client and fa.superseded_at is null and fa.disposed_at is null
       and fa.depreciation_start_date is not null
       and fa.depreciation_start_date <= v_fy.ends_on
+      -- Assets that can NEVER produce another depreciation row are not lagging (Codex R2
+      -- MAJOR 1): method 'none'/null has no cadence, and a FULLY-DEPRECIATED asset's
+      -- money clock (baseline + live rows >= cost - residual) is exhausted by design --
+      -- neither may demand a false per-asset exception every year for the rest of time.
+      and coalesce(fa.depreciation_method, 'none') <> 'none'
+      and (coalesce(fa.accumulated_depreciation_cents, 0)
+           + coalesce((select sum(d2.amount_cents) from clara.fa_depreciation d2
+                where d2.asset_id = fa.id and d2.is_live), 0))
+          < (fa.cost_cents - coalesce(fa.residual_cents, 0))
       and coalesce(l.through, fa.depreciation_start_date - 1) < v_fy.ends_on;
   return jsonb_build_object(
     'state', case when jsonb_array_length(v_lagging) = 0 then 'pass' else 'fail' end,
@@ -1438,19 +1470,17 @@ create function clara._evaluate_close_gates(p_run uuid) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   v_run record; chk record; v_one jsonb;
-  v_summary jsonb := '[]'::jsonb; v_nature text;
+  v_summary jsonb := '[]'::jsonb;
 begin
   select * into v_run from clara.close_runs r where r.id = p_run;
   for chk in select * from clara.close_gate_checks order by drawer, check_key loop
     -- Applicability: 'goods_trading' checks apply unless the trade_nature fact POSITIVELY
     -- says services -- an ABSENT fact keeps the check applicable (its evaluator then reads
     -- 'unknown', which refuses attestably; skipping on absence would be absence-as-evidence).
-    if chk.applies_when = 'goods_trading' then
-      select cf.fact_value #>> '{}' into v_nature from clara.client_facts cf
-        where cf.client_id = v_run.client_id and cf.fact_key = 'trade_nature'
-          and cf.superseded_at is null;
-      if v_nature = 'services' then continue; end if;
-    end if;
+    -- NO applies_when skip (Codex R2 MAJOR 2): the evaluator itself answers 'pass /
+    -- not_goods_trading' for a service business, and SKIPPING left finalize's
+    -- latest-result sweep free to find a STALE goods-failure row from before the fact
+    -- was corrected -- always evaluating writes the fresh positive evidence instead.
     v_one := clara._evaluate_one_gate(p_run, chk.check_key);
     -- The summary seals the EVIDENCE IDENTITY, not just the verdicts (Codex R1 MAJOR 5):
     -- result_id + measured_digest ride into the receipt's gate_digest, so two closes
@@ -1836,6 +1866,15 @@ begin
   -- id. Measurement sits AFTER the dedupe return so an op_key replay measures nothing.
   v_fresh := (clara._evaluate_one_gate(p_close_run, p_check_key) ->> 'result_id')::uuid;
   select * into v_result from clara.close_gate_results g where g.id = v_fresh;
+  -- A PASSING gate takes no exception (Codex R2 MINOR 1): an attestation is an acceptance
+  -- of a FAILING/UNKNOWN/ERROR state -- recording one against a gate that just measured
+  -- pass would seed the permanent receipt with an exception that never existed.
+  if v_result.state not in ('fail', 'unknown', 'error') then
+    raise exception 'gate % just measured %; there is no exception to attest', p_check_key, v_result.state
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'attest_gate_not_failing',
+          'check_key', p_check_key, 'state', v_result.state)::text;
+  end if;
   -- PER-ITEM (Codex R1 MAJOR 1; E-R2's ruled shape, matrix A26/B2): an itemized gate's
   -- attestation NAMES the item it accepts, validated against the set just measured; a
   -- blanket call on an itemized gate refuses. Scalar gates attest under '__gate__'.
@@ -2272,6 +2311,10 @@ begin
         'superseded_reopen_receipt_ids', v_reopen_settled,
         'gates', v_gate_summary,
         'attestations', coalesce((select jsonb_agg(jsonb_build_object('check_key', a.check_key,
+            -- item_key rides the PERMANENT record (Codex R2 MAJOR 4): two per-item
+            -- attestations must stay bindable to their items from the receipt alone,
+            -- years later -- E-R2's own recoverability bar.
+            'item_key', a.item_key,
             'attested_by', a.attested_by, 'reason', a.reason, 'attested_at', a.attested_at,
             'gate_result_id', a.gate_result_id, 'superseded', a.superseded_at is not null)
             order by a.attested_at)
@@ -2582,13 +2625,29 @@ begin
     order by r.started_at desc limit 1;
   return jsonb_build_object(
     'fiscal_year_id', p_fy, 'close_run_id', v_run.id, 'run_state', v_run.state,
-    'fy_end_source', (select fy.fy_end_source from clara.fiscal_years fy where fy.id = p_fy),
+    -- Tenant-BOUND (Codex R2 MAJOR 6 -- the fixer's own leak): the definer-context read
+    -- binds p_fy to the ALREADY-VALIDATED client, or a foreign uuid becomes an
+    -- existence-plus-fy_end_source oracle across firms.
+    'fy_end_source', (select fy.fy_end_source from clara.fiscal_years fy
+       where fy.id = p_fy and fy.client_id = p_client),
     'gates', coalesce((
       select jsonb_agg(jsonb_build_object('check_key', g.check_key, 'drawer', g.drawer,
           'state', g.state, 'measured', g.measured, 'measured_digest', g.measured_digest,
-          'attested', exists (select 1 from clara.close_attestations a
-              where a.close_run_id = v_run.id and a.check_key = g.check_key
-                and a.superseded_at is null and a.gate_result_id = g.id))
+          -- 'attested' MEANS what finalize will accept (Codex R2 MAJOR 5): every
+          -- outstanding item covered by a live attestation at the CURRENT digest --
+          -- never "some attestation names this exact row" (one item of two read
+          -- attested=true; a fresh same-digest row read false).
+          'attested', not exists (
+              select 1 from unnest(
+                case when coalesce(array_length(
+                       clara._gate_outstanding_items(g.check_key, g.measured), 1), 0) = 0
+                     then array['__gate__']
+                     else clara._gate_outstanding_items(g.check_key, g.measured) end) x(k)
+              where not exists (select 1 from clara.close_attestations a
+                      join clara.close_gate_results gr on gr.id = a.gate_result_id
+                      where a.close_run_id = v_run.id and a.check_key = g.check_key
+                        and a.item_key = x.k and a.superseded_at is null
+                        and gr.measured_digest = g.measured_digest)))
         order by g.drawer, g.check_key)
         from (select distinct on (r2.check_key) r2.* from clara.close_gate_results r2
                where r2.close_run_id = v_run.id
@@ -2968,7 +3027,9 @@ begin
       ('bank_reconciliations',  't_close_serialize'),
       ('bank_line_exceptions',  't_close_serialize'),
       ('fixed_assets',          't_close_serialize'),
-      ('bank_accounts',         't_close_serialize')) t(tbl, trg) loop
+      ('bank_accounts',         't_close_serialize'),
+      ('client_facts',          't_close_serialize'),
+      ('document_filings',      't_close_serialize')) t(tbl, trg) loop
     select count(*) into v_n from pg_trigger g
       where g.tgrelid = ('clara.' || r.tbl)::regclass and g.tgname = r.trg
         and not g.tgisinternal;
