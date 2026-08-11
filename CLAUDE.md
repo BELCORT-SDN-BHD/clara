@@ -21,6 +21,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 | Gate-2 blueprint packet (ratified stack) | `docs/00-GATE-2-README.md` |
 | Runtime spike results + BINDING workflow-versioning policy | `docs/architecture/ARCHITECTURE.md` Appendix A · `spike/RESULTS.md` |
 | DR / backup / readiness / SLO | `docs/ops/DR.md` |
+| CI runner (self-hosted WSL2; the SAME binding green-check gate, our hardware) | `docs/ops/ci-runner.md` — **private-repo only; decommission BEFORE any visibility change** |
 | Data plane (migrations, seeds, DR, rig) | `packages/db/README.md` |
 | Runtime skeleton (durable substrate, health/ready) | `packages/runtime/README.md` |
 
