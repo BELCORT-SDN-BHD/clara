@@ -3,7 +3,7 @@
 // jwt_firm()); the one mutation is the governed writer clara.upsert_account (0009/0017 —
 // p_client, p_code, p_name, p_type, p_special_acc_type, p_op_key, p_account_class),
 // granted to clara_authenticated at bookkeeper+. Never a hand-written accounts row — the
-// DB owns every account (CLAUDE.md law); this module only calls the named function.
+// DB owns every account (AGENTS.md law); this module only calls the named function.
 
 import { pgrestSelect, rpc } from "../shared/wire";
 import type { AccountRow } from "./accountsModel";

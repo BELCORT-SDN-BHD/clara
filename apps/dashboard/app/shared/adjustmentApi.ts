@@ -1,7 +1,7 @@
 // Wave D-b — S1 wire client for recurring/reversing adjustment templates
 // (design `wave-d-b-design.md` §2, rulings WDB-G1..G4/G13/G14; the builder ABI
 // `wave-d-b-design-abi.md` §A/§B/§C/§D.1-3/§F). HUMAN lane only (PostgREST as
-// clara_authenticated) — governance never transits the runtime (CLAUDE.md); no
+// clara_authenticated) — governance never transits the runtime (AGENTS.md); no
 // figure is computed here, the DB owns every cents value. Every writer carries
 // a FRESH op_key per call (the /assets `opKey()` idiom — the DB is idempotent
 // on firm,fn,op_key; never reuse one across retries or mint one at module load).

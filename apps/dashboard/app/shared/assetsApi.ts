@@ -1,6 +1,6 @@
 // Wave D-a wire client for /assets (design v2.1 §6; 0041-interface-contract.md
 // §2/§3). HUMAN lane only (PostgREST as clara_authenticated) — no figure is
-// computed here, the DB owns every cents value (CLAUDE.md law); this module
+// computed here, the DB owns every cents value (AGENTS.md law); this module
 // calls the named RPCs and maps their rows defensively via assetsModel.ts's
 // mappers (the agingApi.ts split precedent).
 //

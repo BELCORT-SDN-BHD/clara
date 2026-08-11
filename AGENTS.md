@@ -19,7 +19,7 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint · leak-scan · wiki gates · binding post-control · harness-links · eslint
+pnpm lint        # freeze-lint · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · eslint
 pnpm build       # nitro runtime + next dashboard
 pnpm test        # per-package tests
 ```
@@ -40,8 +40,9 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
    propose or independently check a figure, but no model-generated numeral enters a durable
    artifact unless a versioned deterministic evaluator reproduces it from DB-owned inputs.
    Law: `docs/product/PRD.md` §6; the enforcement is structural, not prompt-level.
-3. **`main` is PR-only.** A docs-only PR (zero code paths touched) takes the single-lane
-   review; everything else takes the full ADR-061 ladder.
+3. **`main` is PR-only, and every substantive change takes the full ADR-061 ladder** —
+   uniformly, docs included. Tiering review by blast radius was proposed and DECLINED
+   (ADR-061); what a docs-only diff shrinks is the CI *job set*, never the review.
 4. **Never commit a credential.** DSNs come from the environment only — never code, never
    argv. The leak-scan and gitleaks gates enforce it.
 5. **Every dispatch pins an explicit `model`.** Omission silently inherits Fable, which is

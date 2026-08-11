@@ -360,3 +360,150 @@ Run against synthetic / labelled-synthetic data — local/dev, **or the live san
   real client (both real seeds are `keyed`). Phase-5, review-gated — carried in `CLAUDE.md`'s
   open-items register; the original finding is preserved in
   `docs/plan/completed/rebuild-plan-history.md` (the Wave-B remainder block).
+
+---
+
+## Part C — the assembly lane's record
+
+Branch `refactor/harness-v2`, based on `origin/main` @ `099a5bf`. PR #231's γ commit had **not**
+merged when the worktree was cut, so no matrix-path reconciliation was needed — the acceptance
+matrix existed only at its old path and L2's rename moved it cleanly to `docs/plan/active/`. If γ
+lands before this branch does, that file is the one to re-check.
+
+### C.1 Merge conflicts
+
+Five `--no-ff` merges in the ordered sequence. **One conflict, in `.gitignore`.**
+
+- `refactor/agents-entry` added `!.claude/rules/`; `refactor/hooks-lint` added `!.claude/hooks/`
+  at the same position in the `.claude/*` negation block.
+- Resolved as the union — both negations kept — plus `!.claude/settings.json` for assembly item
+  (a). `.claude/hooks/` does not exist on disk (L4 put the guard under `scripts/hooks/`); the
+  negation is kept anyway as the conservative resolution and as the home a future hook would use.
+
+The other four merges were clean. Ownership really was disjoint.
+
+### C.2 Tracking proof (`git ls-files`)
+
+```
+.claude/rules/db-migrations.md
+.claude/rules/runtime-workflows.md
+.claude/settings.json
+scripts/check-harness-links.mjs
+scripts/check-harness-links.selftest.mjs
+scripts/hooks/pinned-ids-guard-checks.mjs
+scripts/hooks/pinned-ids-guard.mjs
+scripts/hooks/pinned-ids-guard.selftest.mjs
+```
+
+All eight tracked; `git check-ignore -v .claude/settings.json` returns nothing.
+
+### C.3 Reference sweep
+
+- **Mechanical pass:** 184 references rewritten across 136 files, from a rename map built out of
+  L2's own `git diff -M` output (so the map cannot drift from what actually moved).
+- **Reverted out of that pass, deliberately:** the 130 files in `frozen-workflows.json` and
+  `packages/db/deploy/*.sql`. The first sweep hit frozen workflow bodies and produced 15
+  freeze-lint violations — comment-only, but a frozen body is byte-stable or it is not frozen.
+  Deploy SQL is already-executed ceremony material, same class as the migrations.
+- **Contextual pass by hand** (~40 sites): PROJECTLOG → `docs/adr/` (or `PROGRESS.md` where the
+  cite was to PART 2, the open register), REBUILD-PLAN → `PROGRESS.md` / `docs/plan/index.md` /
+  `docs/plan/completed/rebuild-plan-history.md` by context, and mentions of the now-deleted files
+  de-backticked so they read as history rather than as a live path.
+- **Real broken paths found and fixed** (pre-existing, not caused by this refactor):
+  `docs/design/PRODUCT_DESIGN.md` pointed at `docs/DESIGN_SYSTEM.md` / `docs/FRONTEND.md`, which
+  live under `docs/design/`; `docs/ops/DR.md` named nine files package-relative
+  (`deploy/roles-bootstrap.sql`, `scripts/dr-verify.mjs`, …) that resolve only from
+  `packages/db/` or `packages/backup/`; the reporting design named `lib/reconciler.mjs` for
+  `packages/runtime/lib/reconciler.mjs`.
+
+### C.4 `check-harness-links` — 458 → 0
+
+STRICT is now `true`. The finding count fell in three stages, and the shape of what was left
+matters more than the number:
+
+| stage | findings | what moved |
+|---|---|---|
+| STRICT flip, pre-sweep | 458 | baseline |
+| after the mechanical + contextual sweep | 402 (135 outside the archive trees) | stale paths gone |
+| after the lint work below | 0 | |
+
+**Only about 15% of the baseline was stale cross-references.** The rest was the backtick
+heuristic firing on prose. Two changes, both inside the lint's own sanctioned mechanisms:
+
+1. **Four structural rules narrowing the BACKTICK heuristic only** — explicit markdown links are
+   untouched and must still resolve. A span is not a path candidate if it contains whitespace (a
+   shell command, `GET /ready`, an SQL clause), or template/glob/expression metacharacters, or is
+   an npm specifier (`@clara/db`), or is a slash-joined set of snake_case identifiers
+   (`fy_end_month/day`).
+   The last one rests on a property verified empirically at assembly, not assumed: **zero tracked
+   paths in this repo have an underscore in any directory segment, and no extensionless tracked
+   file has one either** — paths here are kebab-case, underscores are SQL/JS identifiers. So the
+   rule cannot mask a real path, and `docs/adr` / `packages/db` stay fully checked.
+2. **`HOP_CONTENT_EXEMPT_PREFIXES`** for `docs/plan/completed/`, `docs/plan/research/` and
+   `docs/adr/0*` — 122 reached files. These are append-only or owner-ruled frozen, so a stale
+   cite inside one cannot be repaired without rewriting a historical record; failing CI on them
+   is a gate that can never legitimately go green. Their existence as reference *targets* is
+   still validated, and `docs/adr/README.md` (an entry) stays fully checked, including its
+   bidirectional index check.
+
+Plus about 20 named `NON_PATH_ALLOWLIST` entries, each with a one-line reason.
+
+**Genuinely dangling, recorded not fixed:** `RENUMBER.md` (the merge-time renumber procedure
+minted by ADR-058), `algebra.md` (the metric-algebra research dossier behind lane δ) and
+`INTERFACE-PINS.md` (the Wave-A pin sheet) were authored in build worktrees and never committed.
+Nothing in the repo holds their content. The *laws* they encode do survive — RENUMBER's is
+AGENTS.md hard constraint 10 plus ADR-058's own body. They are allowlisted with that provenance
+rather than pointed anywhere false. `ci.yml` still cites RENUMBER §2(4) in six comments; left
+alone, since the § clause has no home to point at either.
+
+### C.5 Conflict audit
+
+One contradiction, one gap, both fixed; the rest of the family was consistent.
+
+- **CONTRADICTION (fixed).** `AGENTS.md:43` asserted *"A docs-only PR (zero code paths touched)
+  takes the single-lane review; everything else takes the full ADR-061 ladder"* — while
+  `AGENTS.md:123` said *"Review intensity is uniform (ADR-061): the full ladder for every
+  substantive change"*, and ADR-061 itself records that tiering *"on instrument/UI/doc"* was
+  proposed and **declined**. The phrase "single-lane review" appears nowhere else in the repo and
+  no later ADR reinstates tiering, so this was introduced at L3, not inherited. It weakened a
+  ruled safety posture, so it is rewritten to state the uniform ladder and to name what a
+  docs-only diff actually shrinks: the CI job set, never the review.
+- **GAP (fixed).** `scripts/hooks/pinned-ids-guard.selftest.mjs` ran in **no** gate — not in
+  `pnpm lint`, not in `ci.yml`. The guard is judgement logic protecting two never-expiring safety
+  pins, and CI cannot exercise a PreToolUse hook in situ, so the self-test was the only available
+  protection and it was unwired. Added to `pnpm lint` and to the ci.yml harness-links step.
+- **Stale assertions corrected:** the hook's own header claimed `.claude/settings.json` is
+  gitignored and registration must be per-checkout (it is tracked now); its block-message
+  provenance cited "CLAUDE.md PERMANENT SAFETY PINS" (CLAUDE.md is a one-line `@AGENTS.md` import
+  now — retargeted to AGENTS.md hard constraint 11, and the self-test assertion with it);
+  `ci.yml` still said STRICT=false and "flip it at assembly"; `README.md` called `CLAUDE.md` the
+  full agent guide and described `pnpm lint` as "freeze-lint + leak-scan" (seven gates now);
+  eight `apps/dashboard` modules cited "CLAUDE.md law" for the DB-owns-numbers invariant.
+- **Checked, consistent, no finding:** reset scoping (`.claude/rules/db-migrations.md`,
+  `packages/db/AGENTS.md`, `packages/db/README.md` all say `clara` schema only, never
+  `workflow`/`graphile_worker`/`spike`) · state authority (AGENTS.md constraint 8, PROGRESS.md's
+  header, and the ADR digest all name `PROGRESS.md`) · migration numbering and immutability ·
+  workflow versioning · ceremony rules (main-pinned, D1 quiesce) · the model/dispatch law.
+
+### C.6 Deliberately not done
+
+- **The `docs/plan/completed/` and `docs/plan/research/` bodies were not edited** (owner-ruled
+  exempt). Their internal sibling cites still name the pre-refactor flat `docs/plan/` tree and are
+  now dangling *as history*. Only their index rows in `docs/plan/index.md` describe present
+  reality. About 267 of the original lint findings lived here.
+- **ADR bodies got the mechanical path sweep but no prose rewriting.** They are append-only.
+- **`docs/audit/` untouched.** Its `docs/PROJECTLOG.md:90`-style cites are evidence about the
+  **frozen prior repo**, not this one — ADR-033 there is a different decision than ADR-033 here.
+  Rewriting them would have falsified audit evidence.
+- **Migration `.sql` comments and `packages/db/deploy/*.sql` untouched** (byte-stable / executed).
+- **The autopost-vendor-binding completed record** — L5 routed a `:129` → "§6 invariant 3" fix
+  there, and flagged a pre-existing **§6a mis-cite** on the same line. Not touched: the file is a
+  completed record. Both remain open for the owner if they want the record amended.
+- **`README.md`'s inline status snapshot was replaced by a pointer to `PROGRESS.md`**, not
+  updated. It claimed "2026-08-06 · 44 migrations (frontier 0045)", which is stale, and
+  AGENTS.md constraint 8 makes `PROGRESS.md` the one home. Flagging rather than fixing the number,
+  since the orchestrator owns the real posture.
+- **`packages/db/README.md` and `packages/runtime/README.md` carry point-in-time
+  migration-frontier and runtime-version pins** that will read stale against whatever posture goes
+  into PROGRESS.md. The db README self-labels its ledger as a snapshot with the authoritative
+  query beside it. Worth a look when the posture block is written.

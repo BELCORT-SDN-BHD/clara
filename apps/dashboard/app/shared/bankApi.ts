@@ -1,10 +1,10 @@
 // The /bank workbench wire client (Wave C-b, design §4.1-§4.9 + part2 §4.7). HUMAN
 // lane only (PostgREST as clara_authenticated) — governance never transits the
-// runtime (CLAUDE.md); statement-PDF preview reuses the EXISTING agent-lane
+// runtime (AGENTS.md); statement-PDF preview reuses the EXISTING agent-lane
 // document-bytes stream via shared/reviewApi.ts's fetchDocumentBytes (design part2
 // §4.7 — nothing new is added here for it). Every writer carries a FRESH op_key
 // (the DB is idempotent on firm,fn,op_key); no figure is computed here — the DB
-// owns every cents value (CLAUDE.md law).
+// owns every cents value (AGENTS.md law).
 //
 // READ SURFACE — HONESTY NOTE. The five write verbs this file calls
 // (enter_bank_statement, match_bank_line, unmatch_bank_match, settle_from_bank_line,

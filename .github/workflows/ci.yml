@@ -183,15 +183,18 @@ jobs:
       # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
       # (AGENTS.md, PROGRESS.md, docs/adr/README.md, docs/plan/index.md) has its markdown
       # links + backtick paths validated against disk, one hop into referenced docs/*.md
-      # files, plus docs/adr/'s own bidirectional index check. STRICT=false today (three of
-      # the four entries are mid-authorship on other harness-refactor lanes) — an absent
-      # entry file WARNS, not fails; a broken reference inside a file that DOES exist is
-      # always a hard failure. Flip STRICT=true in scripts/check-harness-links.mjs once the
-      # tree is assembled.
-      - name: Harness-links gate + self-test (Q9-A entry-list integrity)
+      # files, plus docs/adr/'s own bidirectional index check. STRICT=true since assembly:
+      # all four entries exist, so a missing one is a hard failure, as is any broken
+      # reference inside a file that exists.
+      #
+      # The pinned-ids self-test rides here too. The guard itself is a PreToolUse hook, not
+      # a CI step — CI can never exercise it in situ — so this run is the only thing standing
+      # between a refactor and a silently dead safety pin (AGENTS.md hard constraint 11).
+      - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids guard)
         run: |
           node scripts/check-harness-links.mjs
           node scripts/check-harness-links.selftest.mjs
+          node scripts/hooks/pinned-ids-guard.selftest.mjs
 
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
@@ -222,7 +225,7 @@ jobs:
       # conclusion holds regardless, for the reachability reason above, not because
       # of an ancestry guarantee that doesn't actually hold.) `origin/main` is
       # already fetched above for the append-only checks; "main is PR-only"
-      # (CLAUDE.md) makes it the only legal PR base — asserted below rather than
+      # (AGENTS.md) makes it the only legal PR base — asserted below rather than
       # assumed, so a stacked-PR base fails closed instead of silently scoping
       # against the wrong branch.
       #
@@ -269,7 +272,7 @@ jobs:
           $RUNNER_TEMP/gitleaks version
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             if [ "$GITHUB_BASE_REF" != "main" ]; then
-              echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (CLAUDE.md); refusing to guess a scan scope." >&2
+              echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (AGENTS.md); refusing to guess a scan scope." >&2
               exit 1
             fi
             if git rev-parse --verify -q origin/main >/dev/null; then

@@ -1,6 +1,6 @@
 // Wave C-c wire client for /aging (design v2.1 §6). HUMAN lane only
 // (PostgREST as clara_authenticated). No figure is computed here — the DB
-// owns every cents value (CLAUDE.md law); this module only calls the four
+// owns every cents value (AGENTS.md law); this module only calls the four
 // named read RPCs and maps their rows defensively.
 //
 // [D1/M2+A1 fix] `ar_aging`/`ap_aging`/`customer_statement`/`supplier_

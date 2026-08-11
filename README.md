@@ -35,7 +35,7 @@ blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
 packages/db/          versioned SQL migrations + seeds + DR tooling + test rig
 packages/runtime/     Clara agent-runtime skeleton (WDK durable substrate, /health, /ready)
 apps/dashboard/       Next.js 15 dashboard skeleton
-scripts/              repo governance: freeze-lint + leak-scan
+scripts/              repo governance gates (freeze-lint, leak-scan, harness-links, …) + hooks/
 docs/                 PRD, architecture, plan, design, audit (source of truth)
 spike/                the frozen Slice-0 runtime spike (NOT a workspace member)
 .github/workflows/    CI
@@ -62,7 +62,7 @@ pnpm install
 export PGHOST=... PGPORT=5432 PGUSER=... PGPASSWORD=... PGDATABASE=postgres
 
 pnpm typecheck                       # tsc across TS packages
-pnpm lint                            # freeze-lint + leak-scan
+pnpm lint                            # freeze-lint · leak-scan · wiki · binding · harness-links · pinned-ids · eslint
 pnpm build                           # nitro (runtime) + next (dashboard)
 
 pnpm db:migrate && pnpm db:seed      # apply migrations + synthetic seed
@@ -104,4 +104,4 @@ CI.
   (placeholders) is tracked. The leak-scan gate enforces it.
 - **`main` is PR-only** — land via PR with green CI.
 - **The DB owns every number; the agent only orchestrates** (`docs/product/PRD.md`).
-- Full agent working guide: `CLAUDE.md`.
+- Full agent working guide: `AGENTS.md`.

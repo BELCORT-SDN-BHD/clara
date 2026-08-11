@@ -142,7 +142,7 @@ test("an absent compliance block degrades to a safe empty summary (never throws)
 // --- cents safety (WA hard gate) ----------------------------------------------
 
 test("fmtCents renders the AP-gate figure and guards unsafe/absent values", () => {
-  assert.equal(fmtCents(135093821), "RM 1,350,938.21"); // AP gate exact (CLAUDE.md)
+  assert.equal(fmtCents(135093821), "RM 1,350,938.21"); // AP gate exact (AGENTS.md)
   assert.equal(fmtCents(-340), "-RM 3.40");
   assert.equal(fmtCents(null), CENTS_UNAVAILABLE);
   assert.equal(fmtCents(undefined), CENTS_UNAVAILABLE);

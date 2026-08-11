@@ -125,7 +125,7 @@ On any divergence, the cited ADR governs.
 1. **The DB owns every AUTHORITATIVE number.** The LLM may propose or independently check
    a calculation, but no model-generated numeral enters a durable report unless a
    versioned deterministic evaluator reproduces it from DB-owned inputs. *(0065/E-R4 —
-   amended wording; homes: PRD §6, ARCHITECTURE §0, CLAUDE.md. The pre-amendment
+   amended wording; homes: PRD §6, ARCHITECTURE §0, AGENTS.md hard constraint 2. The pre-amendment
    clarification survives in substance: an agent-proposed draft becomes authoritative
    only after exact-revision human approval.)*
 2. **Four structural invariants, enforced in the DB, not by model discipline:** client
