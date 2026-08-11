@@ -26,18 +26,24 @@ merge queue froze. Runner minutes on self-hosted are free and unlimited for priv
 
 ## Operate
 
+The runner is a **systemd service** (`actions.runner.BELCORT-SDN-BHD-clara.clara-wsl`),
+installed via `svc.sh` — it starts whenever the distro boots.
+
 ```powershell
-# Start (after reboot — WSL does not autostart):
-wsl -d Ubuntu -u runner -- bash -lc 'cd ~/actions-runner && nohup ./run.sh > runner.log 2>&1 &'
-# Status: repo → Settings → Actions → Runners (Idle = healthy), or:
-wsl -d Ubuntu -u runner -- bash -lc 'cd ~/actions-runner && tail -5 runner.log'
-# Stop:
-wsl -d Ubuntu -u runner -- bash -lc 'pkill -f Runner.Listener'
+# Start after a reboot = just boot the distro (systemd brings docker + runner up):
+wsl -d Ubuntu -- true
+# Status:
+wsl -d Ubuntu -u root -- systemctl status 'actions.runner.*' --no-pager
+# Stop / restart:
+wsl -d Ubuntu -u root -- bash -c "cd /home/runner/actions-runner && ./svc.sh stop"
+wsl -d Ubuntu -u root -- bash -c "cd /home/runner/actions-runner && ./svc.sh start"
 ```
 
-A Windows Scheduled Task **"clara-ci-runner"** (logon trigger) runs the start command so
-the runner survives reboots; if jobs sit queued, check the task ran and Docker is up
-(`wsl -d Ubuntu -- docker info`).
+Autostart: a silent VBS in the user's **Startup folder**
+(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\clara-ci-runner.vbs`) boots
+the distro at logon (an elevated Scheduled Task was refused without admin — the Startup
+folder needs none). If jobs sit queued after a reboot: log in once, or run the
+one-liner above; check Docker with `wsl -d Ubuntu -- docker info`.
 
 ## Re-register / decommission
 
