@@ -403,8 +403,15 @@ create index ix_ps_period on clara.period_snapshots (reporting_period_id);
 create function clara._tf_period_snapshots_immutable() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 begin
-  if new.payload         is distinct from old.payload
-     or new.dataset_sha256      is distinct from old.dataset_sha256
+  -- id LEADS THE COMPARE SET. Without it this belt let an `update ... set id = <other>`
+  -- through, and the only thing that would have refused is the neighbouring FK from
+  -- snapshot_assessments -- i.e. a snapshot with no assessments yet, or one whose ledger
+  -- moved with it, could be re-identified silently. Leaning on a neighbour's constraint to
+  -- enforce THIS table's immutability is exactly the derived-state reasoning the standing
+  -- law rejects: the belt must refuse on its own evidence, with its own CLR08.
+  if new.id            is distinct from old.id
+     or new.payload            is distinct from old.payload
+     or new.dataset_sha256     is distinct from old.dataset_sha256
      or new.books_watermark     is distinct from old.books_watermark
      or new.period_start        is distinct from old.period_start
      or new.period_end          is distinct from old.period_end
@@ -586,6 +593,19 @@ begin
   end if;
   v_start := date_trunc('month', p_month_start)::date;
   v_end   := (date_trunc('month', p_month_start) + interval '1 month - 1 day')::date;
+  -- COMPLETENESS, ENFORCED BY THE PRODUCER ITSELF. SS2.12 permits an on-demand mint only
+  -- where the period is "derivable and COMPLETE"; date_trunc already makes it whole rather
+  -- than straddling, and this makes it PAST. Without it the header's claim -- one producer,
+  -- so the two cannot disagree -- was false: the door refused an unfinished month while the
+  -- primitive behind it would happily mint one, so delta's evaluator route could create a
+  -- period the human door would never have created, and a $P-1 comparative could then bind
+  -- a month that has not happened. The guard belongs HERE, on the shared producer; the
+  -- door keeps its own (it refuses before reserving an op, which is the better error).
+  if v_end > clara._book_today() then
+    raise exception 'the month % .. % has not finished (books today is %) -- a period row is minted only once its month is complete',
+      v_start, v_end, clara._book_today()
+      using errcode = 'CLR10', detail = '{"reason":"period_not_complete"}';
+  end if;
   -- Idempotent under concurrency: the arbiter is uq_rp_client_grain_start, the same
   -- constraint that makes a client's month rows a partition of the calendar.
   insert into clara.reporting_periods (firm_id, client_id, grain, period_start, period_end,
@@ -914,55 +934,91 @@ declare
   v_entry  uuid;
   v_actor  uuid;
 begin
-  case tg_table_name
+  -- DISPATCH BY IDENTITY, NEVER BY SPELLING. Every arm below compares tg_relid -- the
+  -- table's OID -- against a schema-qualified regclass literal. tg_table_name is only the
+  -- UNQUALIFIED name, so a same-named table in another schema would dispatch down an arm
+  -- authored for a different table and read an effect date out of a column that means
+  -- something else entirely. The standing law is that a guard reading a NAME reads a
+  -- projection of the thing; this reads the thing.
+  --
+  -- (And regclass::TEXT would not have fixed it either: this body pins search_path to
+  -- clara, so 'clara.journal_entries'::regclass::text renders UNQUALIFIED as
+  -- 'journal_entries' -- a text CASE would have been the same projection in a better
+  -- disguise. Comparing OIDs has no rendering step to be fooled by.)
+  --
+  -- tg_table_name survives ONLY as the stored provenance LABEL below, where it is
+  -- cosmetic: it names the row's table for a human reading the ledger and decides nothing.
+  if tg_relid = 'clara.journal_entries'::regclass then
     -- Rows 1,2,3,4,5,6,7,8,9,10 of SS2.11's writer table all land here: every JE-bearing
     -- mover -- approve, reverse, the settlement composites, the composite bank paths,
     -- recurring adjustments and their auto-reversals, the depreciation belt, the closing
     -- stock adjustment, the wrong-client correction (per row, so BOTH clients mark), the
     -- opening machinery, and finalize_close's closing entry.
-    when 'journal_entries' then
-      v_effect := nullif(v_row ->> 'posting_date', '')::date;
-      v_entry  := nullif(v_row ->> 'id', '')::uuid;
+    v_effect := nullif(v_row ->> 'posting_date', '')::date;
+    v_entry  := nullif(v_row ->> 'id', '')::uuid;
 
+  elsif tg_relid = 'clara.open_item_allocations'::regclass then
     -- Row 11, THE v1 DEFECT. apply_open_items and unallocate_group insert ONLY here -- no
     -- journal entry and no open_items row at all -- and they move every AR/AP aging figure
     -- a management pack presents, because _subledger_outstanding_asof sums allocation rows
     -- with effective_date <= as_of. A trigger on open_items could never fire for them.
-    when 'open_item_allocations' then
-      v_effect := nullif(v_row ->> 'effective_date', '')::date;
+    --
+    -- HONEST BOUNDARY, MEASURED THIS ROUND -- THIS ARM RARELY FIRES, AND THAT IS CORRECT.
+    -- SS2.11 pins the allocation effect date to effective_date, and the producer law stamps
+    -- it with the ACT date (clara._book_today(), 0040:864-877) -- never the date of the
+    -- items being applied. So an allocation made today against a February invoice carries
+    -- effective_date = today, and the INTERSECTS test (effect <= period_end) is FALSE for
+    -- every already-closed month. Combined with the door's completeness guard, which
+    -- refuses to snapshot a month that has not finished, the practical consequence is that
+    -- an allocation marks a month snapshot only in the narrow case where the act date falls
+    -- on or before a snapshotted period_end.
+    --
+    -- THAT IS THE ACCOUNTING-CORRECT OUTCOME, not a gap, and it was verified rather than
+    -- argued: after applying a credit note to a February invoice, the February artifact
+    -- reads `current` AND clara.verify_snapshot recomputes the SAME dataset_sha256
+    -- (drift=false). The pack presents AR aging AS OF 28 Feb; _subledger_outstanding_asof
+    -- excludes an allocation dated after that; so no figure the pack presented moved, and
+    -- marking it stale would be a FALSE staleness signal about a still-correct artifact.
+    -- Dating the effect from the ITEM instead would manufacture exactly that false signal
+    -- and would contradict SS2.11's stated rule -- so the rule stands, and the limit is
+    -- written down here instead of being rediscovered as a defect.
+    v_effect := nullif(v_row ->> 'effective_date', '')::date;
 
+  elsif tg_relid = 'clara.fixed_assets'::regclass then
     -- Row 12. The register act date: the EARLIEST date from which this asset appears in the
     -- register, since a particulars edit moves the register (and future depreciation) from
     -- that date forward. least() ignores NULLs and yields NULL only when all three are
     -- NULL, which falls to the mark-everything branch in _mark_snapshots_stale.
-    when 'fixed_assets' then
-      v_effect := least(nullif(v_row ->> 'acquired_date', '')::date,
-                        nullif(v_row ->> 'depreciation_start_date', '')::date,
-                        nullif(v_row ->> 'baseline_as_of', '')::date);
+    v_effect := least(nullif(v_row ->> 'acquired_date', '')::date,
+                      nullif(v_row ->> 'depreciation_start_date', '')::date,
+                      nullif(v_row ->> 'baseline_as_of', '')::date);
 
+  elsif tg_relid = 'clara.bank_statements'::regclass then
     -- Row 13, THE v2 DEFECT. void_bank_statement's effect is `update clara.bank_statements
     -- set status='void'` -- it never touches bank_reconciliations, which the round-1 design
     -- credited. The effect date is the statement's OWN period_end: the period whose
     -- presented bank position the void moves.
-    when 'bank_statements' then
-      v_effect := nullif(v_row ->> 'period_end', '')::date;
+    v_effect := nullif(v_row ->> 'period_end', '')::date;
 
+  elsif tg_relid in ('clara.bank_reconciliations'::regclass,
+                     'clara.bank_line_exceptions'::regclass) then
     -- Rows 14 and 15. Neither the reconciliation verbs nor the exception doors take a date
     -- argument; their act clocks are now(). The EFFECT date is the governing statement's
     -- period_end, reached through the row's statement_id. A statement that cannot be read
     -- leaves v_effect NULL, which marks everything -- the fail-safe direction.
-    when 'bank_reconciliations', 'bank_line_exceptions' then
-      select bs.period_end into v_effect
-        from clara.bank_statements bs
-       where bs.id = nullif(v_row ->> 'statement_id', '')::uuid;
+    select bs.period_end into v_effect
+      from clara.bank_statements bs
+     where bs.id = nullif(v_row ->> 'statement_id', '')::uuid;
 
-    else
-      -- A seventh table would arrive here silently. Refusing is the fail-closed reading:
-      -- an unrecognised table means the effect date is undefined, and an undefined effect
-      -- date on a mover we did not design for is a finding, not a default.
-      raise exception 'clara._tf_snapshot_staleness fired on an unregistered table (%)', tg_table_name
-        using errcode = 'CLR10', detail = '{"reason":"staleness_table_unregistered"}';
-  end case;
+  else
+    -- A seventh table would arrive here silently. Refusing is the fail-closed reading:
+    -- an unrecognised table means the effect date is undefined, and an undefined effect
+    -- date on a mover we did not design for is a finding, not a default. Reported by
+    -- IDENTITY (the qualified regclass), so the message names which table actually fired.
+    raise exception 'clara._tf_snapshot_staleness fired on an unregistered table (%)',
+      tg_relid::regclass::text
+      using errcode = 'CLR10', detail = '{"reason":"staleness_table_unregistered"}';
+  end if;
 
   -- The acting human, when there is one. Resolved THROUGH clara.users so a machine lane
   -- (no JWT) or a claim naming an unknown subject stores NULL rather than breaking the FK
@@ -1021,18 +1077,38 @@ cross join clara.taxonomy_active a;
 --                       for its actual use (SS2.10's own words).
 -- everyone else       : nothing -- the standing schema-scoped revoke-from-public posture.
 --
--- THE AGENT ROW, AND WHY IT IS EMPTY DESPITE SS2.10's SENTENCE. SS2.10's grant table names
--- snapshot_state for clara_agent_ro. The AS-BUILT precedent runs the other way and it is
--- the more recent, reviewed decision: lane beta's B6 ruling REVOKED the agent grants on all
--- three close reads, and the live catalog agrees -- verify_close, get_close_readiness and
--- list_fiscal_years each read has_function_privilege('clara_agent_ro', ..) = false, and each
--- calls clara._human_ctx. That is the reasoning: a _human_ctx-gated read granted to a role
--- that carries no JWT is a DARK grant -- it looks like access and refuses at runtime with
--- CLR04. Granting it here would widen the privilege surface by exactly nothing usable.
--- The reversible half is stated so the owner can rule cheaply: if an agent read is wanted,
--- it is either one `grant execute` (dark, matching SS2.10's letter) or the dual-lane
--- wake-secret idiom clara.get_context_pack already uses (live, and the honest build). Both
--- are additive; neither is blocked by anything in this file.
+-- =====================================================================================
+-- RECORDED DEVIATION FROM RATIFIED DESIGN -- THE AGENT ROW IS EMPTY, ON BOTH ITS HALVES.
+-- This is a DESIGN DEPARTURE from two ratified sentences, not an oversight, and it rides
+-- the PR body as well as this comment. Ruled by the orchestrator at the round-1 review.
+--
+-- (i) THE FUNCTION HALF -- SS2.10's grant table names snapshot_state for clara_agent_ro.
+-- The AS-BUILT precedent runs the other way and it is the more recent, reviewed decision:
+-- lane beta's B6 ruling REVOKED the agent grants on all three close reads, and the live
+-- catalog agrees -- verify_close, get_close_readiness and list_fiscal_years each read
+-- has_function_privilege('clara_agent_ro', ..) = false, and each calls clara._human_ctx.
+-- That is the reasoning: a _human_ctx-gated read granted to a role that carries no JWT is a
+-- DARK grant -- it looks like access and refuses at runtime with CLR04. Granting it here
+-- would widen the privilege surface by exactly nothing usable.
+--
+-- (ii) THE TABLE half -- SS2.12's closing clause reads "reads are granted to
+-- clara_authenticated and clara_agent_ro" for clara.reporting_periods. There is no
+-- p_rp_agent policy and no agent SELECT grant here either, for the same posture reason
+-- rather than a second independent one: the campaign's as-built agent-read surface is
+-- FUNCTION-MEDIATED end to end. Beta's B6 revoked the close-read grants, and beta's R2 ACL
+-- sweep revoked five surviving agent table SELECTs wave-wide; 0037 states the same posture
+-- in its own words ("there is deliberately NO clara_agent_ro policy") for the subledger.
+-- A lone agent table SELECT on the period registry would cut directly against that, and it
+-- would buy nothing today: the agent's period reads arrive with delta's wake-pack surface,
+-- which is a function, so the grant would be dead weight that a reviewer must re-justify at
+-- every later sweep.
+--
+-- BOTH HALVES ARE CHEAPLY REVERSIBLE, AND THE OPTIONS ARE NAMED SO THE OWNER CAN RULE
+-- WITHOUT RE-DERIVING THEM: for the function half, either one `grant execute` (dark,
+-- matching SS2.10's letter) or the dual-lane wake-secret idiom clara.get_context_pack
+-- already uses (live, and the honest build); for the table half, a p_rp_agent policy plus a
+-- SELECT grant. All are additive; none is blocked by anything in this file.
+-- =====================================================================================
 -- =====================================================================================
 grant execute on function clara.mint_month_snapshot(uuid, date, text) to clara_authenticated;
 grant execute on function clara.snapshot_state(uuid)   to clara_authenticated;
@@ -1045,6 +1121,62 @@ reset role;
 -- S11 -- TAIL. Everything this file claims, measured from the LIVE CATALOG in the same
 -- transaction that made it true.
 -- =====================================================================================
+
+-- SS2.11's WRITER ROSTER, AS DATA AND IN ONE PLACE. It lands in a temp table rather than
+-- inline in the DO block because TWO tail arms consume it -- 11.2 (existence + trigger
+-- coverage) and 11.2b (the effect-table reachability proof) -- and a roster written twice
+-- is two rosters that can disagree, which is the defect class this whole census exists to
+-- catch. Every entry is a REGPROCEDURE IDENTITY, never a bare name: settle_from_bank_line
+-- and match_bank_line are each OVERLOADED in the live catalog, and a name-LIKE roster would
+-- conflate two functions with different argument lists and different bodies.
+create temp table _x57_roster(sig text primary key, tbl text not null, row_ref text not null)
+  on commit drop;
+insert into _x57_roster(sig, tbl, row_ref) values
+  -- rows 1,2 -- the JE lifecycle
+  ('clara.approve_entry(uuid,uuid,text,text)',                   'journal_entries', 'r1'),
+  ('clara.reverse_entry(uuid,text,text)',                        'journal_entries', 'r2'),
+  -- row 3 -- the settlement composites (they write BOTH; the allocation half is below)
+  ('clara.allocate_receipt(uuid,uuid,date,text,text,bigint,jsonb,text,bigint,text,text,text)', 'journal_entries', 'r3'),
+  ('clara.allocate_payment(uuid,uuid,date,text,text,bigint,jsonb,text,bigint,text,text,text)', 'journal_entries', 'r3'),
+  -- row 4 -- THE COMPOSITE BANK PATHS. Named by SS2.11 as "the cores called at 0044:1927,
+  -- :1946" and therefore missing from the round-1 census, which enumerated only the doors it
+  -- had signatures for. These are the public doors above those cores; both overloads of each
+  -- overloaded name are listed, because an overload is a different function.
+  ('clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)',                          'journal_entries', 'r4'),
+  ('clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,uuid)',                     'journal_entries', 'r4'),
+  ('clara.resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)', 'journal_entries', 'r4'),
+  ('clara.settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,text)',      'journal_entries', 'r4'),
+  ('clara.settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,text,uuid)', 'journal_entries', 'r4'),
+  -- row 5 -- recurring adjustments + auto-reversals
+  ('clara.run_adjustment_occurrence(uuid,uuid,date,date,text)',   'journal_entries', 'r5'),
+  ('clara.run_adjustment_manual(uuid,uuid,date,date,text)',       'journal_entries', 'r5'),
+  ('clara.reverse_adjustment_pair(uuid,uuid,text,text)',          'journal_entries', 'r5'),
+  -- row 6 -- the depreciation belt
+  ('clara.run_depreciation_period(uuid,date,date,text)',          'journal_entries', 'r6'),
+  ('clara.run_depreciation_manual(uuid,date,date,text)',          'journal_entries', 'r6'),
+  -- row 7 -- THE CLOSING-STOCK ADJUSTMENT IS DELIBERATELY ABSENT; 11.2c measures the absence.
+  -- row 8 -- the wrong-client correction (fires per row, so BOTH clients mark)
+  ('clara.approve_wrong_client_correction(uuid,text,text,text)',  'journal_entries', 'r8'),
+  -- row 9 -- the opening machinery
+  ('clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',  'journal_entries', 'r9'),
+  ('clara.supersede_opening_item(uuid,jsonb,text)',               'journal_entries', 'r9'),
+  -- row 10 -- the close's own closing entry
+  ('clara.finalize_close(uuid,text,text)',                        'journal_entries', 'r10'),
+  -- row 11 -- the allocation movers (zero GL)
+  ('clara.apply_open_items(uuid,jsonb,text,text)',                'open_item_allocations', 'r11'),
+  ('clara.unallocate_group(uuid,uuid,text,text)',                 'open_item_allocations', 'r11'),
+  -- row 12 -- FA particulars / enrolment
+  ('clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)','fixed_assets', 'r12'),
+  ('clara.revise_fixed_asset_particulars(uuid,uuid,jsonb,date,text)', 'fixed_assets', 'r12'),
+  -- row 13 -- the statement void
+  ('clara.void_bank_statement(uuid,uuid,text,text)',              'bank_statements', 'r13'),
+  -- row 14 -- the reconciliation pair
+  ('clara.complete_bank_reconciliation(uuid,uuid[],text)',        'bank_reconciliations', 'r14'),
+  ('clara.void_bank_reconciliation(uuid,text,text)',              'bank_reconciliations', 'r14'),
+  -- row 15 -- the exception doors
+  ('clara.except_bank_line(uuid,text,text,uuid,text)',            'bank_line_exceptions', 'r15'),
+  ('clara.resolve_bank_line_exception(uuid,text,text,uuid,text)', 'bank_line_exceptions', 'r15');
+
 do $s11$
 declare
   r record; v_n int; v_t text; v_def text;
@@ -1084,42 +1216,7 @@ begin
   -- the staleness trigger. An enumeration is not the enforcement -- the trigger is -- but an
   -- UNCHECKED enumeration is worse than a checked one (SS2.11's own words), and a signature
   -- that moved is a real finding rather than a surprise to discover in the field.
-  for r in select * from (values
-      -- rows 1,2 -- the JE lifecycle
-      ('clara.approve_entry(uuid,uuid,text,text)',                   'journal_entries'),
-      ('clara.reverse_entry(uuid,text,text)',                        'journal_entries'),
-      -- row 3 -- the settlement composites (they write BOTH; the allocation half is below)
-      ('clara.allocate_receipt(uuid,uuid,date,text,text,bigint,jsonb,text,bigint,text,text,text)', 'journal_entries'),
-      ('clara.allocate_payment(uuid,uuid,date,text,text,bigint,jsonb,text,bigint,text,text,text)', 'journal_entries'),
-      -- row 5 -- recurring adjustments + auto-reversals
-      ('clara.run_adjustment_occurrence(uuid,uuid,date,date,text)',   'journal_entries'),
-      ('clara.run_adjustment_manual(uuid,uuid,date,date,text)',       'journal_entries'),
-      ('clara.reverse_adjustment_pair(uuid,uuid,text,text)',          'journal_entries'),
-      -- row 6 -- the depreciation belt
-      ('clara.run_depreciation_period(uuid,date,date,text)',          'journal_entries'),
-      ('clara.run_depreciation_manual(uuid,date,date,text)',          'journal_entries'),
-      -- row 8 -- the wrong-client correction (fires per row, so BOTH clients mark)
-      ('clara.approve_wrong_client_correction(uuid,text,text,text)',  'journal_entries'),
-      -- row 9 -- the opening machinery
-      ('clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',  'journal_entries'),
-      ('clara.supersede_opening_item(uuid,jsonb,text)',               'journal_entries'),
-      -- row 10 -- the close's own closing entry
-      ('clara.finalize_close(uuid,text,text)',                        'journal_entries'),
-      -- row 11 -- the allocation movers (zero GL)
-      ('clara.apply_open_items(uuid,jsonb,text,text)',                'open_item_allocations'),
-      ('clara.unallocate_group(uuid,uuid,text,text)',                 'open_item_allocations'),
-      -- row 12 -- FA particulars / enrolment
-      ('clara.complete_fixed_asset_particulars(uuid,uuid,jsonb,text)','fixed_assets'),
-      ('clara.revise_fixed_asset_particulars(uuid,uuid,jsonb,date,text)', 'fixed_assets'),
-      -- row 13 -- the statement void
-      ('clara.void_bank_statement(uuid,uuid,text,text)',              'bank_statements'),
-      -- row 14 -- the reconciliation pair
-      ('clara.complete_bank_reconciliation(uuid,uuid[],text)',        'bank_reconciliations'),
-      ('clara.void_bank_reconciliation(uuid,text,text)',              'bank_reconciliations'),
-      -- row 15 -- the exception doors
-      ('clara.except_bank_line(uuid,text,text,uuid,text)',            'bank_line_exceptions'),
-      ('clara.resolve_bank_line_exception(uuid,text,text,uuid,text)', 'bank_line_exceptions')
-    ) t(sig, tbl) loop
+  for r in select * from _x57_roster order by sig loop
     if to_regprocedure(r.sig) is null then
       raise exception '0057 S11.2: the SS2.11 mover % is absent at that signature -- the census was authored against it', r.sig
         using errcode = 'CLR10';
@@ -1132,6 +1229,85 @@ begin
         using errcode = 'CLR10';
     end if;
   end loop;
+
+  -- (11.2b) THE EFFECT-TABLE PROOF -- the half that makes 11.2 more than a tautology.
+  -- 11.2 alone proves a function EXISTS and that some table carries a trigger; it never
+  -- proves the mover reaches the table the roster CLAIMS for it. A roster row could name
+  -- the wrong effect table -- which is precisely how SS2.11's rows 11 and 13 were wrong
+  -- twice -- and 11.2 would still pass.
+  --
+  -- So: for every roster row, walk the clara call graph from the mover and require that
+  -- SOME body reachable within three hops performs a WRITE STATEMENT against the claimed
+  -- table -- `insert into|update|delete from clara.<table>`, over the 0056-normalised body
+  -- (comments stripped, whitespace collapsed). Most non-JE movers prove at depth 0 (their
+  -- own body writes the table). Most JE movers prove at depth 1 (approve_entry ->
+  -- _approve_entry_core, run_depreciation_* -> _fa_run_period_core, allocate_* ->
+  -- _allocate_*_core, the adjustment verbs -> their run/reverse cores), and
+  -- settle_from_bank_line proves at depth 2 (-> _settle_from_bank_line_core -> the allocate
+  -- cores / _bank_match_adjustment_entry). Measured on the 0057 rig: all 27 rows resolve at
+  -- depth <= 2, so a cap of 3 has real slack without turning the walk loose.
+  --
+  -- THE WRITE SHAPE IS LOAD-BEARING, AND THE WEAKER VERSION OF THIS CHECK WAS VACUOUS.
+  -- The first cut of this arm asked only whether a reachable body MENTIONED the table.
+  -- Measured against deliberately FALSE claims, it passed all of them: within three hops
+  -- nearly every clara verb reaches some body that mentions clara.journal_entries (a shared
+  -- helper, an audit path, a read), so "apply_open_items writes journal_entries" -- the
+  -- exact v1 defect -- came back PROVEN. A check that cannot fail proves nothing and is
+  -- worse than none, because it looks like evidence. The write-shaped predicate was
+  -- re-measured against the same false claims and correctly refuses both of them
+  -- (apply_open_items -> journal_entries, and void_bank_statement -> bank_reconciliations,
+  -- the v2 defect restaged), while still proving all 27 true rows.
+  --
+  -- The edge relation is still "callee's qualified name appears in caller's body", a TEXT
+  -- relation that over-approximates REACHABILITY (a name inside a literal counts). That
+  -- direction is safe: it can only make a true path easier to find, never manufacture a
+  -- failure. The tightening is on what counts as ARRIVING -- a write, not a mention.
+  -- UNION (not UNION ALL) dedupes, which is also what keeps a cyclic call graph
+  -- terminating.
+  for r in
+    with recursive reach(sig, oid, depth) as (
+      select ro.sig, ro.sig::regprocedure::oid, 0 from _x57_roster ro
+      union
+      select h.sig, c.oid, h.depth + 1
+        from reach h
+        join pg_proc p on p.oid = h.oid
+        join pg_proc c on c.pronamespace = 'clara'::regnamespace
+         and position('clara.' || c.proname || '(' in coalesce(p.prosrc, '')) > 0
+       where h.depth < 3)
+    select ro.sig, ro.tbl, ro.row_ref
+      from _x57_roster ro
+     where not exists (
+       select 1 from reach h join pg_proc x on x.oid = h.oid
+        where h.sig = ro.sig
+          and lower(regexp_replace(regexp_replace(regexp_replace(
+                coalesce(x.prosrc, ''),
+                '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+              ~ ('(insert into|update|delete from) clara\.' || ro.tbl || '\M'))
+     order by ro.sig
+  loop
+    raise exception '0057 S11.2b: SS2.11 % claims clara.% as %''s effect table, but no body within 3 call hops of it WRITES that table -- the coverage claim is prose, not a path', r.row_ref, r.tbl, r.sig
+      using errcode = 'CLR10';
+  end loop;
+
+  -- (11.2c) ROW 7 IS ABSENT, AND THE ABSENCE IS MEASURED RATHER THAN ASSUMED. SS2.11's row
+  -- 7 is "the closing-stock adjustment (WD-R11)", and it is the one roster row with no
+  -- entry above, because NO closing-stock PRODUCER exists in the catalog yet: the only
+  -- function carrying the name is clara._close_gate_closing_stock, which is 0056's drawer-2
+  -- GATE evaluator -- it decides whether a goods-trader may close, and books nothing.
+  -- The debt is already recorded (docs/plan/REBUILD-PLAN.md: "the closing_stock producer
+  -- verb ships before any real goods-trader close", PR #228 residual 5); the trigger route
+  -- needs no change when it lands, because it will book a journal entry like every other
+  -- WD-R11 adjustment and the JE trigger already covers that. What this assertion buys is
+  -- the NOTICE: the day a second closing-stock function appears, this raises and tells its
+  -- author to enroll it in the roster rather than leaving row 7 silently unrepresented.
+  select coalesce(string_agg(p.oid::regprocedure::text, ', ' order by p.proname), '')
+    into v_t
+    from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace and p.proname like '%closing_stock%';
+  if v_t <> 'clara._close_gate_closing_stock(uuid,uuid)' then
+    raise exception '0057 S11.2c: the closing-stock surface is now {%} -- SS2.11 row 7 has a producer (or lost its gate). Enroll the producer in the S11 roster and re-derive row 7''s disposition; it is the ONE named mover this census deliberately carries no entry for.', v_t
+      using errcode = 'CLR10';
+  end if;
 
   -- (11.3) THE THREE ROWS THE DESIGN GOT WRONG BEFORE, PROVEN FROM LIVE BODIES rather than
   -- credited from prose. v1 pointed the allocation movers at an open_items trigger that
@@ -1196,6 +1372,40 @@ begin
       and not g.tgisinternal;
   if v_n <> 1 then
     raise exception '0057 S11.4: the FA-depreciation class is credited to the JE trigger, which is not present'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.4b) THE journal_lines DISPOSITION, ASSERTED RATHER THAN NARRATED. S11.10 states
+  -- that journal_lines needs no staleness trigger, and that claim rests on TWO live
+  -- mechanisms rather than on judgement. Both are measured here, because a disposition
+  -- whose justification is only prose becomes a stale excuse the moment either moves --
+  -- and the failure would be silent: line writes would start moving presented figures with
+  -- nothing marking the artifact.
+  --   (i) clara._tf_lines_immutable still guards journal_lines and still refuses writes
+  --       against an approved/withdrawn entry, so a line can only move while its entry is
+  --       a draft; and
+  --  (ii) clara.trial_balance_as_of still filters to approved entries, so a draft is on no
+  --       presented figure in the first place.
+  -- Together: no line write can move a presented number without a journal_entries write,
+  -- which the JE trigger marks.
+  select count(*) into v_n from pg_trigger g
+    join pg_proc p on p.oid = g.tgfoid
+   where g.tgrelid = 'clara.journal_lines'::regclass and not g.tgisinternal
+     and p.proname = '_tf_lines_immutable';
+  if v_n <> 1 then
+    raise exception '0057 S11.4b: clara.journal_lines no longer carries the _tf_lines_immutable belt -- S11.10''s journal_lines disposition rested on it; re-derive whether that table now needs a staleness trigger'
+      using errcode = 'CLR10';
+  end if;
+  select coalesce(p.prosrc, '') into v_def from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_lines_immutable';
+  if v_def !~ 'approved' or v_def !~ 'withdrawn' then
+    raise exception '0057 S11.4b: _tf_lines_immutable no longer refuses on approved/withdrawn -- a line write can now move an approved entry, so journal_lines needs its own staleness trigger'
+      using errcode = 'CLR10';
+  end if;
+  select coalesce(p.prosrc, '') into v_def from pg_proc p
+   where p.oid = 'clara.trial_balance_as_of(uuid,date)'::regprocedure;
+  if v_def !~ 'status\s*=\s*''approved''' then
+    raise exception '0057 S11.4b: trial_balance_as_of no longer filters to approved entries -- drafts would reach a presented figure, and the journal_lines disposition no longer holds'
       using errcode = 'CLR10';
   end if;
 
@@ -1325,7 +1535,7 @@ begin
   -- (11.10) THE STATED OUT-OF-SCOPE DECISION. The honest-boundary convention requires
   -- saying what was left out and why, not silence -- an omission nobody wrote down is
   -- rediscovered later as a hole.
-  raise notice '0057 S11.10 OUT OF SCOPE, STATED: (a) clara.client_facts, clara.document_filings and clara.bank_accounts carry 0056''s close-serialize trigger but deliberately carry NO staleness trigger -- they feed close GATES (is a close permitted?), not the presented P&L or balance-sheet figures a management pack shows, so a mutation there does not move a number the snapshot presented. If a later pack ever PRESENTS a fact from one of them, that table joins the six and this decision is the thing to revisit. (b) The delta junction clara.metric_cell_periods is delta''s to build; (c) clara.get_close_plan is theta''s. Neither is missing here -- both are out of this lane.';
+  raise notice '0057 S11.10 OUT OF SCOPE, STATED -- the SIX staleness tables vs 0056''s TEN wall tables, every difference accounted for: (a) clara.client_facts, clara.document_filings and clara.bank_accounts carry 0056''s close-serialize trigger but deliberately carry NO staleness trigger -- they feed close GATES (is a close permitted?), not the presented P&L or balance-sheet figures a management pack shows, so a mutation there does not move a number the snapshot presented. If a later pack ever PRESENTS a fact from one of them, that table joins the six and this decision is the thing to revisit. (b) clara.journal_lines is the fourth wall table with no staleness trigger, and it is SAFE for a structural reason rather than a judgement: clara._tf_lines_immutable refuses every line write against an entry that is approved or withdrawn, so a line can only move while its entry is a DRAFT -- and a draft is on no trial balance (clara.trial_balance_as_of filters status=''approved''). A line write therefore cannot move a presented figure without an accompanying clara.journal_entries write, which the JE trigger already marks. Putting a second trigger on the hottest child table to re-mark what its parent already marked would double the write cost of every posting and change no outcome. (c) The delta junction clara.metric_cell_periods is delta''s to build; (d) clara.get_close_plan is theta''s. Neither is missing here -- both are out of this lane.';
 
   raise notice '0057 OK: reporting_periods (month|fy, both ends inclusive, two uniques, fy-congruence trigger) + period_snapshots (bytes immutable, real sha256, structural range congruence) + snapshot_assessments (append-only, no unique index BY DESIGN) + mint_month_snapshot (bookkeeper floor, 007-EXCLUSIVE, books stay OPEN) + snapshot_state/verify_snapshot/days_in_period + the SIX-table staleness set (INTERSECTS + watermark, same transaction) + the fy-grain mint trigger (no D1 exposure) -- INERT ON ARRIVAL.';
 end $s11$;

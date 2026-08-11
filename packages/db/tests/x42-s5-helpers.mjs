@@ -227,6 +227,26 @@ const CLOSE_MODEL_0056_CLOCK_NAMES = [
   "grant_firm_capability", "revoke_firm_capability",
 ];
 
+// 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps
+// `'verified_at', now()` on the jsonb payload it RETURNS — a display timestamptz that says
+// when the recomputation ran, and it lands in no column and in no date-typed accounting
+// decision. Every DATE 0057 touches comes from an authority instead: the door's
+// completeness guard reads clara._book_today(), and the period bounds come from the
+// reporting_periods row.
+//
+// AND WHY THE ROSTER IS THE FIX RATHER THAN A REWRITE. Rewriting the body to
+// clara._book_today() would be a category error — _book_today returns a DATE, and this is a
+// timestamp of a read that happened. Arm (D) exists to make every bare-clock reader a
+// DECLARED one with a stated reason, not to drive the count to zero; a declared reader is
+// the outcome it wants. Measured on the 0057 rig with arm (D)'s own detector expression
+// (comments stripped), which flags verify_snapshot and nothing else in the 0057 surface —
+// _tf_snapshot_staleness mentions now() only inside a comment and correctly does not flag.
+//
+// Frontier-gated for the reason the 0046/0055/0056 blocks state: `db-slice-frontiers` runs
+// this battery against databases pinned earlier, where this function does not exist, and an
+// unconditional entry would turn those legs red while saying nothing about clock discipline.
+const REGISTRY_0057_CLOCK_NAMES = ["verify_snapshot"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -236,6 +256,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
   if (await applied("0055_%")) names.push(...CLIENT_FACTS_0055_CLOCK_NAMES);
   if (await applied("0056_%")) names.push(...CLOSE_MODEL_0056_CLOCK_NAMES);
+  if (await applied("0057_%")) names.push(...REGISTRY_0057_CLOCK_NAMES);
   return names.sort();
 }
 
