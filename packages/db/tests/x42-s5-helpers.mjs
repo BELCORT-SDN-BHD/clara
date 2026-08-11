@@ -213,14 +213,19 @@ const SALES_LANE_0046_CLOCK_NAMES = [
   "preview_ocr_sales_evidence", "set_sales_backfill_state", "set_sales_lane_activation",
 ];
 
+// 0055 [Wave E lane α]: record_client_fact stamps recorded_at/superseded_at with bare
+// now() — timestamptz audit stamps, the lawful class; the door never derives a DATE
+// from the session clock (its one date read is clara._book_today()'s authority).
+const CLIENT_FACTS_0055_CLOCK_NAMES = ["record_client_fact"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
-  const applied = (await query(
-    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  const applied = async (pat) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version like '${pat}'`
   )).rows[0].n === 1;
-  const names = applied
-    ? [...S5_25_BARE_TOKEN_ROSTER, ...SALES_LANE_0046_CLOCK_NAMES]
-    : [...S5_25_BARE_TOKEN_ROSTER];
+  const names = [...S5_25_BARE_TOKEN_ROSTER];
+  if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
+  if (await applied("0055_%")) names.push(...CLIENT_FACTS_0055_CLOCK_NAMES);
   return names.sort();
 }
 
