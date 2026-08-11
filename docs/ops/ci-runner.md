@@ -9,9 +9,14 @@ merge queue froze. Runner minutes on self-hosted are free and unlimited for priv
 
 - **Host:** the owner's Windows 11 machine → **WSL2 Ubuntu** distro (`Ubuntu`).
 - **Inside WSL:** Docker Engine (docker-ce; systemd-managed) — required for the
-  `postgres:17` service containers CI declares — plus the GitHub Actions runner under
-  `~/actions-runner`, registered at REPO level to `BELCORT-SDN-BHD/clara` with labels
-  **`self-hosted, linux, clara`**.
+  `postgres:17` service containers CI declares — plus **TWO** GitHub Actions runner
+  instances (`~/actions-runner` → `clara-wsl`, `~/actions-runner-2` → `clara-wsl-2`),
+  both registered at REPO level to `BELCORT-SDN-BHD/clara` with labels
+  **`self-hosted, linux, clara`** — two instances let the db-slice matrix run 2-wide.
+- The `runner` user holds **passwordless sudo** (`/etc/sudoers.d/runner`) — hosted-runner
+  parity: workflows written for GitHub images assume it (the DR pg_dump step's
+  `sudo apt-get` was the first casualty without it). Acceptable ONLY because the repo is
+  private and every workflow change passes our own PR gate.
 - **ci.yml** pins every job `runs-on: [self-hosted, linux, clara]`. An OFFLINE runner
   makes jobs QUEUE visibly (never silently pass); bring the runner back and they resume.
 
