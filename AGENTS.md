@@ -40,9 +40,10 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
    propose or independently check a figure, but no model-generated numeral enters a durable
    artifact unless a versioned deterministic evaluator reproduces it from DB-owned inputs.
    Law: `docs/product/PRD.md` §6; the enforcement is structural, not prompt-level.
-3. **`main` is PR-only, and every substantive change takes the full ADR-061 ladder** —
-   uniformly, docs included. Tiering review by blast radius was proposed and DECLINED
-   (ADR-061); what a docs-only diff shrinks is the CI *job set*, never the review.
+3. **`main` is PR-only.** Every change touching code takes the full ADR-061 ladder —
+   uniformly; blast-radius tiering was proposed and DECLINED (ADR-061). **A zero-code
+   docs-only PR takes the single-lane review** — the one narrow, owner-ruled amendment
+   (ADR-0069), fenced mechanically by the CI path classifier, never by the author's say-so.
 4. **Never commit a credential.** DSNs come from the environment only — never code, never
    argv. The leak-scan and gitleaks gates enforce it.
 5. **Every dispatch pins an explicit `model`.** Omission silently inherits Fable, which is

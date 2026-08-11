@@ -105,6 +105,7 @@ These conventions governed the append-only log and still govern this directory:
 | [0066](0066-the-f6-f9-fix-batch-closed.md) | The F6–F9 fix batch BUILT, DEPLOYED and ACCEPTED | 2026-08-09 | discharged · *narrative* | Corrects E-R1's Gate-P expectation by measurement (seven documents, not four). "A wall that never refused anything…" → digest. |
 | [0067](0067-lanes-alpha-and-beta-land.md) | Lanes α+β land; the CI gate survives on zero minutes | 2026-08-11 | discharged · *narrative* | The self-hosted runner is **private-repo only** → digest. Discharges the 0062 MSIC debt. |
 | [0068](0068-the-evening-sitting-b3-ruled.md) | The evening sitting: B3 ruled; Gate-P defers to the Wave-G reset | 2026-08-11 | standing | The `ends_on` reopen variant + its named build trigger; supersedes 0066/PART-2's Gate-P reminder clause. |
+| [0069](0069-harness-grand-refactor.md) | The harness grand refactor: the repo becomes the system of record | 2026-08-12 | standing | Repo-wins state authority; the docs-only review lane (the one ADR-061 amendment); ADRs per-file + this digest; pins hook-enforced; PROJECTLOG/REBUILD-PLAN dissolved. |
 
 **Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
@@ -231,6 +232,11 @@ On any divergence, the cited ADR governs.
     refuse loudly outside it, with a diagnosis. Do not "fix" a red by loosening the guard.
     *(0059; the interview AST guard's named cost is the standing exhibit)*
 
+- **The docs-only review lane** — a PR touching ZERO code paths (`AGENTS.md` / `CLAUDE.md`
+  / `PROGRESS.md` / `docs/**` only) takes a single-lane review; the fence is the CI path
+  classifier, never the author's claim. The ONE narrow amendment to the uniform ladder;
+  everything touching code keeps the full ladder. *(0069)*
+
 ## 4 · Engineering and CI law
 
 37. **`main` is PR-only with green CI.** Server-side branch protection is unavailable on
@@ -261,6 +267,12 @@ On any divergence, the cited ADR governs.
     argv. *(standing law from the #190 discharge; the leak-scan gate enforces)*
 45. **DB changes are rig-validated on a throwaway**, never hand-applied to a live project
     blindly. *(0012 + house)*
+
+- **The repo is the system of record; `PROGRESS.md` is the state authority.** Memory is a
+  preferences-and-lessons cache; "memory wins" is abolished. *(0069)*
+- **Named/built-in Workflow invocations are dispatches** — every dispatch pins an explicit
+  `model`; omission inherits the main model, which is forbidden. *(owner directive, recorded
+  at 0069)*
 
 ## 5 · Ceremony and deploy law
 

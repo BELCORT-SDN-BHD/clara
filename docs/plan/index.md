@@ -142,4 +142,6 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | File | Status | Hook |
 |---|---|---|
 | `research/` | reference | Supporting cross-model research dossiers, organized per wave/slice. Not restructured in this pass — cite the specific dossier inside it, not this line. |
-| REBUILD-PLAN.md | **superseded (deleted)** | Retired at this refactor. Its dated chronology → `completed/rebuild-plan-history.md`; its `coding_kind` roadmap table → `../ARCHITECTURE.md` ("Roadmaps" section); its CURRENT posture + Wave F/G + Risks + Phase 5 → `PROGRESS.md`. |
+| `active/roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
+| `completed/wave-e-lane-gamma-acceptance.md` | historical (record of record) | Lane γ's as-run ceremony record: 0057 applied quiesce-free, E5 taken live, the trap re-proven. Ladder record = PR #231's body. |
+| REBUILD-PLAN.md | **superseded (deleted)** | Retired at this refactor. Its dated chronology → `completed/rebuild-plan-history.md`; its `coding_kind` roadmap table → `../ARCHITECTURE.md` ("Roadmaps" section); its CURRENT posture → `PROGRESS.md`; Wave F/G + Risks + Phase 5 → `active/roadmap.md`. |
