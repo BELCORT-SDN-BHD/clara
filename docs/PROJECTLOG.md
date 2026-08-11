@@ -158,8 +158,10 @@ entered through the audited door on the owner's session (RPR 68109 · RS 82110 �
 replay-proof counts in the α record §2). RPR's `entity_type` took the same door (the one
 carryover gap — RPR predates the interview). No hand-written row anywhere.
 
-**Live at the close: 55 migrations (frontier `0056`) · runtime v60 (no runtime code shipped
-in the span — positively read) · RS TB 3,396,500 = 3,396,500 (pre- AND post-migrate) · the
+**Live at the close: 55 migrations (frontier `0056`) · runtime v60 — no deployable runtime
+change in the span (the one runtime-lib diff is a single comment word, extracted and read;
+v60 stays the intended release, positively read at `fly status`) · RS TB 3,396,500 =
+3,396,500 (pre- AND post-migrate) · the
 close model INERT ON ARRIVAL** (zero `fiscal_years` rows; activation = the first human
 `open_fiscal_year`; the agent structurally key-less and grant-less — E-R11).
 
@@ -190,9 +192,11 @@ superseded by this close's line above, in the ordinary way of posture pins.
   year-end close pair from interim P&L") · **Codex** = a dedicated `ends_on`-dated reversal
   inside `reopen_fiscal_year` under the target-bound permit (act date retained on
   `created_at`/actor/receipt — a formal prior-period adjustment; the reviewer notes the M2
-  permit binding makes this variant PROVABLE). Owner framing on record: *"a reopened year's
-  P&L reappears in this year's interim figures until this year closes; the final figures and
-  the pins are exact."* The ruling lands as its own ADR entry when made.
+  permit binding makes this variant PROVABLE). Owner framing, **as recorded at the β-ladder
+  close in the session handoff + memory pin (2026-08-11, session 7f055dbc — not yet ruled,
+  and no in-repo ruling artifact exists)**: *"a reopened year's P&L reappears in this year's
+  interim figures until this year closes; the final figures and the pins are exact."* The
+  ruling lands as its own ADR entry when made.
 - **Two V-OWNER sign-offs outstanding on the α record** — F1d (the F-1 wall-scope record)
   and F3e (the MSIC format-only honesty record), `wave-e-lane-alpha-acceptance.md` §5.
 - **§7-A CLOSED (ADR-064, 2026-08-07)** — contract `wave-7a-contract.md` (7A-R1..R12, never re-grill); as-run acceptance `wave-7a-acceptance-h1/-h2.md`. Its four findings were taken as the F6–F9 batch and **CLOSED at ADR-066** (2026-08-09); what survives lives below (the batch register · the 2506/FINCARE holds · the enrichment trap).

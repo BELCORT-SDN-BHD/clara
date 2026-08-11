@@ -30,7 +30,7 @@ First attempt, zero rollbacks; the in-file `set local statement_timeout='5min'`
 | S9 — the seed door's pin splice | token count in the LIVE `approve_opening_seed(uuid,uuid,text,jsonb,text,text)` body | `_assert_seed_matches_prior_pin` appears **exactly 1×**; the helper's own body carries the `closing_position` pin logic |
 | S9b — the restatement door | `approve_opening_correction` prosrc | carries BOTH `_assert_opening_tie` and `_assert_correction_pin_neutral` |
 | E-R6 — guard untouched, twin repointed | exact token counts (substring-safe: `_correction_period_state` counted separately from the bare twin name) | `approve_wrong_client_correction`: guard **1×** · `preview_wrong_client_correction`: guard **0**, twin **1×** · `retire_document_filing`: guard **0**, twin **1×** |
-| CVB unchanged | `trial_balance_as_of` (RS) | 3,396,500 = 3,396,500, diff 0 post-apply |
+| CVB unchanged (the ceremony verification balance — see the α record §1) | `trial_balance_as_of` (RS) | 3,396,500 = 3,396,500, diff 0 post-apply |
 | runtime resumed | `fly status` + `/ready` + heartbeats | v60 · 2/2 checks · `/ready` 200 · beats 0–3s; Supavisor 38 total, runtime pool 11 |
 
 A method note the record keeps on purpose: the first S9/E-R6 probes were

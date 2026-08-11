@@ -18,10 +18,10 @@
 | pre-flight: no deploy | the merged span's ONLY runtime-lib change is one comment word (`SIXTEEN`→`FIFTEEN` in `invoice-customer-identity.mjs`, extracted from the span diff); **v60 stays the intended release** — `fly status` read back v60, 2/2 checks, before and after |
 | quiesce (D1) | `fly machine stop 48ee715b763048` 11:52Z; drain watched at 15s cadence to **heartbeats 99s stale · 0 non-idle runtime sessions · 0 advisory locks** (the 9 pre-stop advisory locks all released on stop) |
 | apply | `live_migrate_main.py` → `applied 0055_client_facts_trio` then `applied 0056_wave_e_close_model`, **first attempt, zero rollbacks**; `migrate: 2 new migration(s) applied · 55 total`. The statement_timeout law is honored IN-FILE (`0055:54` `set local statement_timeout='2min'`; `0056:82` `'5min'`) — no runner patch needed |
-| in-txn censuses | both migrations' own tails printed OK through the notice listener; 0055's S5 notice (verbatim): **"3 entity_type fact(s) carried over from committed plans"** · **"0 committed client(s) left WITHOUT an entity_type carryover"** |
+| in-txn censuses | both migrations' own tails printed OK through the notice listener; 0055's S5 notices (verbatim): **"0055 S5 backfill: 3 entity_type fact(s) carried over from committed plans"** · **"0055 S5 backfill: 0 committed client(s) left WITHOUT an entity_type carryover (no answered/resolved item on the latest committed plan) -- each takes the door (record_client_fact), the design's own remedy"** |
 | reload + resume | `notify pgrst, 'reload schema'` (NOTIFY read back); `fly machine start` 11:53:55Z → `/ready` 200 → heartbeats control/reconciler/world at 0–3s |
 | post-apply frontier | `max(version)` = `0056_wave_e_close_model` |
-| CVB | RS trial balance via the product's own instrument (`trial_balance_as_of('e054b797…', current_date)`): **3,396,500 = 3,396,500, difference 0 — read PRE-migrate and again POST-migrate**, both equal to the 2506-close pin |
+| CVB (the ceremony verification balance — the RS trial-balance identity used as the cross-migrate invariant) | RS trial balance via the product's own instrument (`trial_balance_as_of('e054b797…', current_date)`): **3,396,500 = 3,396,500, difference 0 — read PRE-migrate and again POST-migrate**, both equal to the 2506-close pin |
 
 ## §2 The three MSIC codes through the door (F3a–F3c)
 
@@ -101,9 +101,10 @@ Final `client_facts` census: **7 rows** (3 carryover + 3 msic + 1 doored entity_
   (§2's verbatim strings). Nothing here claims the codes were registry-validated.
   — OWNER SIGN-OFF: ________ (date ________)
 
-## §6 The two carried notes (from PR #226, verbatim)
+## §6 The two carried notes (from PR #226)
 
 1. The apply guard's **unwind-narrowing consequence**: a future-dated original's
    sanctioned unwind waits for its date — E-R12(1) refuse-outright, by design.
-2. The composite cell's **fixed 2026-09 statement period** — revisit at lane β's wall
-   (the wall is now LIVE and inert; the revisit stands for when closes activate).
+2. The composite cell's **fixed 2026-09 statement period** — revisit at lane β's wall.
+   *(This record's own note, not PR #226's: the wall is now LIVE and inert; the revisit
+   stands for when closes activate.)*
