@@ -9,14 +9,24 @@
 // block path prints a message to stderr and exits 2; otherwise exits 0. No dependencies —
 // Node built-ins only.
 //
-// REGISTRATION. The guard is registered repo-wide in TRACKED `.claude/settings.json` — the
-// assembly pass added `!.claude/settings.json` to the `.claude/*` ignore block alongside
-// `!.claude/skills/`, `!.claude/rules/` and `!.claude/hooks/`, so every checkout inherits the
-// registration from git rather than each one having to wire it by hand. The script itself lives
-// under scripts/hooks/ (an explicitly sanctioned home per the dispatch brief), which is tracked
-// regardless of the `.claude/hooks/` ignore state. Per-checkout overrides still belong in the
-// untracked `.claude/settings.local.json`. The tracked registration is exactly this — merge
-// (never overwrite) if you are reconstructing it into some other settings file:
+// REGISTRATION. The TRACKED project `.claude/settings.json` carries the registration; personal
+// overrides live in the untracked `.claude/settings.local.json`. That split IS the official
+// convention — settings.json is project-shared and checked in, settings.local.json is personal
+// and ignored — and this repo's blanket `.claude/*` ignore simply predates having any shared
+// setting worth committing. The assembly pass added `!.claude/settings.json` beside
+// `!.claude/skills/`, `!.claude/rules/` and `!.claude/hooks/`, so every checkout now inherits the
+// registration from git. The script itself lives under scripts/hooks/ (an explicitly sanctioned
+// home per the dispatch brief), tracked regardless of the `.claude/hooks/` ignore state.
+//
+// This REVERSES this lane's own earlier recommendation, deliberately and on the record: the
+// header used to argue the registration "stays necessarily local", because merging a
+// hooks.PreToolUse entry is a per-checkout act that a git commit cannot perform. The orchestrator
+// overruled it. The owner's Q4 ruling requires the pins MECHANICALLY enforced on every checkout,
+// and a manual per-checkout wiring step is captured-once-enforced-maybe — the one shape the
+// ruling exists to forbid. Keep this file MINIMAL: the hooks block only, nothing else migrates in.
+//
+// The tracked registration is exactly this — merge (never overwrite) if you are reconstructing it
+// into some other settings file:
 //
 //   {
 //     "hooks": {

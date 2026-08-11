@@ -525,3 +525,43 @@ One contradiction, one gap, both fixed; the rest of the family was consistent.
   migration-frontier and runtime-version pins** that will read stale against whatever posture goes
   into PROGRESS.md. The db README self-labels its ledger as a snapshot with the authoritative
   query beside it. Worth a look when the posture block is written.
+
+### C.7 Recorded dissent — tracking `.claude/settings.json`
+
+The orchestrator ruled that `.claude/settings.json` ships **tracked**, carrying only the
+PreToolUse registration for `scripts/hooks/pinned-ids-guard.mjs`. That ruling **overrides the
+L4 lane's own recommendation**, which is recorded here so the PR carries the alternative rather
+than burying it.
+
+**L4's position (from its `pinned-ids-guard.mjs` header at `7a81bea`, in substance):** the
+registration *"is still necessarily local: merging a hooks.PreToolUse entry into settings.json is
+a per-checkout act, not something a git commit alone can deliver, since settings.json itself
+stays untracked by design."* L4 read the repo's `.claude/*` ignore block — which excepted only
+`!.claude/skills/`, plus `!.claude/hooks/` as of its own branch — as a deliberate line rather
+than an accident, framing it the way the harness framed itself: *skills are the tracked, shared
+toolchain; settings and permissions are not.* On that reading L4 shipped the hook under
+`scripts/hooks/` (tracked either way), documented the snippet in the header, and left the wiring
+to each checkout. It also recorded, as measured fact, that no prior registration existed anywhere
+it could have — not this worktree, not the main checkout's `settings.local.json`, not the
+user-level `~/.claude/settings.json`, not any sibling refactor worktree — so its hook shipped as
+the first registration of the guard.
+
+**The ruling's grounds, which prevail:**
+
+1. **The official convention is the opposite split.** `settings.json` is project-shared and
+   checked in; `settings.local.json` is personal and gitignored. The blanket `.claude/*` ignore
+   in this repo predates there being any shared setting worth committing — it is not a considered
+   decision that shared settings should not exist.
+2. **The owner's Q4 ruling requires the pins enforced MECHANICALLY on every checkout.** A manual
+   per-checkout wiring step is captured-once-enforced-maybe, which is the exact failure shape the
+   pins exist to prevent. L4's own measurement is the argument against its own conclusion: the
+   guard had been authored and documented, and *no checkout anywhere had it registered.*
+
+**What shipped:** `!.claude/settings.json` in the ignore block; a tracked `.claude/settings.json`
+holding the hooks block and nothing else; and the header comment trued from "necessarily local"
+to the convention, with the reversal stated on the record so it is not silently re-litigated.
+
+Two things worth noting for the PR reader. L4's factual claim was correct at the time it was
+written and is not overturned — only its conclusion is. And the assembly pass separately found
+that the guard's self-test ran in **no gate at all** (C.5), which is the same failure class from
+the other direction: an instrument that exists, is documented, and is enforced nowhere.
