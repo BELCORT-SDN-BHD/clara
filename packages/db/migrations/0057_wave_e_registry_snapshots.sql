@@ -214,6 +214,28 @@ begin
     where p.oid = 'clara.apply_open_items(uuid,jsonb,text,text)'::regprocedure;
   insert into _x57_pre(k, v) values ('aoi_md5', v_t);
 
+  -- (0.10) THE BEGIN ATOMIC BIRTH SENTINEL -- the blind spot that would make S11.2d's
+  -- census silently vacuous rather than merely narrow. A function written with a
+  -- SQL-standard `BEGIN ATOMIC ... END` body stores its text in pg_proc.prosqlbody as a
+  -- PARSED NODE TREE and leaves prosrc EMPTY. Every instrument in this file's tail reads
+  -- prosrc, so such a function is invisible to ALL of them: it could insert into
+  -- clara.journal_entries on every call and the inverse census would report a clean sweep.
+  -- That is worse than a known gap, because the census would still be claiming completeness.
+  --
+  -- Measured 0 in clara today (the whole schema is plpgsql and quoted-body SQL). The
+  -- sentinel is at BIRTH rather than in the tail because it is a property of the SCHEMA,
+  -- not of this migration's work, and because failing here names the cause before any of
+  -- 0057's own objects exist to confuse the diagnosis. When a future migration ships the
+  -- first BEGIN ATOMIC body, this raises and that migration owes the tail a prosqlbody-aware
+  -- detector -- the class fails CLOSED.
+  select count(*) into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and coalesce(p.prosrc, '') = '' and p.prosqlbody is not null;
+  if v_n <> 0 then
+    raise exception '0057 S0.10: % clara function(s) carry a BEGIN ATOMIC (prosqlbody) body -- prosrc is empty for those, so every prosrc-based census in this file''s tail is BLIND to them. Teach the detectors pg_get_function_sqlbody() before this file may pass.', v_n
+      using errcode = 'CLR10';
+  end if;
+
   -- (0.9) The watermark INSTRUMENT, proven by behaviour before anything depends on it.
   -- The staleness predicate's whole "already inside the snapshot" half is
   -- pg_visible_in_snapshot(pg_current_xact_id(), <stored pg_snapshot>). Two properties are
@@ -674,7 +696,11 @@ begin
       from clara.fiscal_years fy
      where not exists (select 1 from clara.reporting_periods rp
                         where rp.fiscal_year_id = fy.id)
-    on conflict do nothing
+    -- The arbiter is NAMED, not left to "any unique constraint": (client_id, grain,
+    -- period_start) is the one that makes a client's periods of a grain unique by start,
+    -- and naming it means a future constraint cannot silently become the thing that
+    -- swallows a conflict this backfill should have raised on.
+    on conflict (client_id, grain, period_start) do nothing
     returning 1)
   select count(*)::int into v_n from minted;
   raise notice '0057 S5 backfill: % pre-existing fiscal year(s) received their fy-grain reporting_periods row. (0 on a database whose fiscal_years is still empty -- the live estate today; non-zero on any database that opened a year against 0056 before 0057 landed. S11.9 asserts zero orphans remain either way.)', v_n;
@@ -870,9 +896,24 @@ revoke all on function clara.mint_month_snapshot(uuid, date, text) from public;
 -- mint used and diffs the digest, naming which parts moved. It refuses nothing and changes
 -- nothing.
 --
--- THE HONEST BOUNDARY, STATED HERE AND NOT ONLY IN THE DESIGN DOC (matrix E10 requires the
--- list to live in the function's OWN comment). Two classes of change mint NO staleness
--- assessment, because no trigger on the six covered tables can see them:
+-- THE HONEST BOUNDARY RUNS IN BOTH DIRECTIONS, AND BOTH ARE STATED. The first direction is
+-- UNDER-coverage (below): changes that mint no assessment at all. The second is
+-- OVER-coverage, and it is just as much a reader's trap: FOUR of the six covered tables --
+-- fixed_assets, bank_statements, bank_reconciliations, bank_line_exceptions -- own nothing
+-- that appears in a `management_accounts` dataset (which is a trial balance plus AR/AP aging
+-- totals). A mutation there marks the artifact stale honestly, and a recompute then reports
+-- drift=FALSE, every time. That pairing is not a defect and not a contradiction: the
+-- staleness set is deliberately held EQUAL to the close wall's set (skeleton SS2.11 -- "a
+-- table on one list but not the other is the shape of both defects"), which prices in the
+-- snapshot kinds that will read those four -- an FA register pack, a bank-position pack --
+-- rather than re-opening the trigger family when they arrive. Only journal_entries and
+-- open_item_allocations can move THIS payload kind's dataset_sha256. verify_snapshot
+-- returns the same split in its covered_tables field so a caller need not know this comment
+-- exists.
+--
+-- THE UNDER-COVERAGE DIRECTION (matrix E10 requires this list to live in the function's OWN
+-- comment). Two classes of change mint NO staleness assessment, because no trigger on the
+-- six covered tables can see them:
 --   (a) a fact none of those tables owns -- a counterparty rename, a chart-of-accounts
 --       relabel, a client fact edited through 0055's door. The FIGURES may be unmoved and
 --       the LABELS moved, or a reclassification may move both.
@@ -923,8 +964,28 @@ begin
     'cannot_detect_by_trigger', jsonb_build_array(
       'a fact none of the six covered tables owns (counterparty rename, chart relabel, client fact edit)',
       'any writer added after migration 0057, whose effect table carries no staleness trigger'),
-    'covered_tables', jsonb_build_array('journal_entries','open_item_allocations',
-      'fixed_assets','bank_statements','bank_reconciliations','bank_line_exceptions'));
+    -- THE COVERED SET, LABELLED IN BOTH DIRECTIONS. Only two of the six can move THIS
+    -- payload kind: journal_entries (the trial balance) and open_item_allocations (the AR/AP
+    -- aging). A mark from the other four is real -- their table did move -- but for a
+    -- management_accounts snapshot it will always come with drift=false on recompute,
+    -- because nothing they own appears in this dataset. Saying so here stops a reader
+    -- treating "stale but drift=false" as a contradiction or a bug; it is the designed
+    -- outcome of holding the staleness set equal to the close wall's set ahead of the
+    -- snapshot kinds (FA register, bank position) that WILL read those four.
+    --
+    -- THE SPLIT IS ADDITIVE, and covered_tables KEEPS ITS ARRAY SHAPE ON PURPOSE. Turning
+    -- it into an object would have said the same thing while breaking every consumer that
+    -- iterates it -- this function's return payload is a read surface, delta and zeta will
+    -- consume it, and a field changing TYPE is the kind of break that is cheap to avoid and
+    -- expensive to discover. The complete list stays where callers already look; the two
+    -- explicitly-named siblings carry the direction.
+    'covered_tables', jsonb_build_array('journal_entries', 'open_item_allocations',
+      'fixed_assets', 'bank_statements', 'bank_reconciliations', 'bank_line_exceptions'),
+    'covered_tables_moving_this_payload',
+      jsonb_build_array('journal_entries', 'open_item_allocations'),
+    'covered_tables_inert_for_this_payload',
+      jsonb_build_array('fixed_assets', 'bank_statements', 'bank_reconciliations',
+                        'bank_line_exceptions'));
 end $$;
 alter function clara.verify_snapshot(uuid) owner to clara_fn_owner;
 revoke all on function clara.verify_snapshot(uuid) from public;
@@ -1035,8 +1096,11 @@ begin
     -- Rows 1,2,3,4,5,6,7,8,9,10 of SS2.11's writer table all land here: every JE-bearing
     -- mover -- approve, reverse, the settlement composites, the composite bank paths,
     -- recurring adjustments and their auto-reversals, the depreciation belt, the closing
-    -- stock adjustment, the wrong-client correction (per row, so BOTH clients mark), the
-    -- opening machinery, and finalize_close's closing entry.
+    -- stock adjustment, the wrong-client correction, the opening machinery, and
+    -- finalize_close's closing entry. (The correction marks the FROM client only -- the
+    -- adjudicated contract. An earlier draft of this comment claimed "both clients mark";
+    -- that was ruled wrong and is corrected here rather than left to mislead the next
+    -- reader into expecting a TO-client assessment that never arrives.)
     --
     -- MARK IFF THE MUTATION CAN CHANGE WHAT AN APPROVED-FILTERED AS-OF READ RETURNS.
     -- Without this predicate a DRAFT insert or a draft revision marked every covering
@@ -1242,6 +1306,18 @@ create trigger t_snapshot_staleness after insert or update or delete on clara.ba
 create trigger t_snapshot_staleness after insert or update or delete on clara.bank_line_exceptions
   for each row execute function clara._tf_snapshot_staleness();
 
+-- THE TRUNCATE HOLE ON clara.fixed_assets, CLOSED. TRUNCATE fires NO row triggers, so it
+-- empties a table without a single staleness assessment being written -- every snapshot of
+-- every client keeps reading `current` while the register behind it is gone. Five of the six
+-- covered tables already carry a BEFORE TRUNCATE guard from their own migrations
+-- (journal_entries, open_item_allocations, bank_statements, bank_reconciliations,
+-- bank_line_exceptions); fixed_assets was measured this round as the ONE that does not, so
+-- it gets the house guard here. This is not a staleness trigger -- there is no useful
+-- effect date for "all rows" -- it is the refusal that makes the hole unreachable, which is
+-- the same trade every other covered table already made.
+create trigger t_fixed_assets_no_truncate before truncate on clara.fixed_assets
+  for each statement execute function clara._tf_no_truncate();
+
 -- =====================================================================================
 -- S9 -- THE EVENT TYPE, ON BOTH REGISTERS. The 0055 S7.5 lesson, made structural: an
 -- unregistered event type turns every successful door call into a CLR10 at the spine.
@@ -1353,7 +1429,7 @@ insert into _x57_roster(sig, tbl, row_ref) values
   ('clara.run_depreciation_period(uuid,date,date,text)',          'journal_entries', 'r6'),
   ('clara.run_depreciation_manual(uuid,date,date,text)',          'journal_entries', 'r6'),
   -- row 7 -- THE CLOSING-STOCK ADJUSTMENT IS DELIBERATELY ABSENT; 11.2c measures the absence.
-  -- row 8 -- the wrong-client correction (fires per row, so BOTH clients mark)
+  -- row 8 -- the wrong-client correction (marks the FROM client; see the arm's own comment)
   ('clara.approve_wrong_client_correction(uuid,text,text,text)',  'journal_entries', 'r8'),
   -- row 9 -- the opening machinery
   ('clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)',  'journal_entries', 'r9'),
@@ -1430,6 +1506,20 @@ begin
     raise exception '0057 S11.1: the six t_snapshot_staleness triggers bind % distinct functions', v_n
       using errcode = 'CLR10';
   end if;
+  -- ...and every covered table refuses TRUNCATE. Row triggers do not fire on TRUNCATE, so a
+  -- covered table without this guard can be emptied with no assessment written and every
+  -- artifact still reading `current`. Asserted across all six (tgtype bit 32 = TRUNCATE) so
+  -- the set cannot drift back open the way fixed_assets had.
+  for r in select * from (values
+      ('journal_entries'), ('open_item_allocations'), ('fixed_assets'),
+      ('bank_statements'), ('bank_reconciliations'), ('bank_line_exceptions')) t(tbl) loop
+    if not exists (select 1 from pg_trigger g
+                    where g.tgrelid = ('clara.' || r.tbl)::regclass
+                      and not g.tgisinternal and (g.tgtype & 32) <> 0) then
+      raise exception '0057 S11.1: clara.% carries NO before-truncate guard -- TRUNCATE fires no row triggers, so it would empty a covered table leaving every snapshot reading current', r.tbl
+        using errcode = 'CLR10';
+    end if;
+  end loop;
 
   -- (11.2) THE SS2.11 WRITER CENSUS. For every named mover: the function still EXISTS at
   -- the signature this file was authored against, and the table its effect lands on carries
@@ -1478,12 +1568,18 @@ begin
   -- (apply_open_items -> journal_entries, and void_bank_statement -> bank_reconciliations,
   -- the v2 defect restaged), while still proving all 27 true rows.
   --
-  -- The edge relation is still "callee's qualified name appears in caller's body", a TEXT
-  -- relation that over-approximates REACHABILITY (a name inside a literal counts). That
-  -- direction is safe: it can only make a true path easier to find, never manufacture a
-  -- failure. The tightening is on what counts as ARRIVING -- a write, not a mention.
-  -- UNION (not UNION ALL) dedupes, which is also what keeps a cyclic call graph
-  -- terminating.
+  -- THE EDGE RELATION IS COMMENT-STRIPPED, AND THE POLARITY IS WHY. An edge is "the
+  -- callee's qualified name appears in the caller's body", which is a TEXT relation. In
+  -- THIS arm a spurious edge makes a claim EASIER to prove, so an un-stripped body would
+  -- let a mere COMMENT mentioning a core stand in for actually calling it -- prose proving
+  -- a code path, which is the precise thing this arm exists to stop doing. Stripping
+  -- comments first (the house `/*...*/` + `--` idiom this file already uses for its write
+  -- detector) removes that. What remains -- a name inside a STRING LITERAL -- still
+  -- over-approximates, and that residual is stated rather than chased: it can only make a
+  -- true path easier to find, never manufacture a failure, and 11.2d's opposite polarity
+  -- is where over-approximation would actually hurt.
+  -- The tightening on ARRIVING is unchanged: a write, not a mention. UNION (not UNION ALL)
+  -- dedupes, which is also what keeps a cyclic call graph terminating.
   for r in
     with recursive reach(sig, oid, depth) as (
       select ro.sig, ro.sig::regprocedure::oid, 0 from _x57_roster ro
@@ -1492,7 +1588,9 @@ begin
         from reach h
         join pg_proc p on p.oid = h.oid
         join pg_proc c on c.pronamespace = 'clara'::regnamespace
-         and position('clara.' || c.proname || '(' in coalesce(p.prosrc, '')) > 0
+         and position('clara.' || c.proname || '(' in
+               regexp_replace(regexp_replace(coalesce(p.prosrc, ''),
+                 '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')) > 0
        where h.depth < 3)
     select ro.sig, ro.tbl, ro.row_ref
       from _x57_roster ro
@@ -1519,18 +1617,58 @@ begin
   -- obligation from the catalog is what makes the next omission a failed migration instead
   -- of a reviewer's lucky catch.
   --
-  -- THE RULE: every clara function that WRITES one of the six covered tables must be, or be
-  -- REACHABLE FROM, at least one roster entry. Reachability (not roster membership) is the
-  -- right test because the doors are what SS2.11 enumerates while the writes usually happen
-  -- one or two layers down in a _core -- persist_statement_facts is the door,
-  -- _persist_statement_core does the insert, and requiring the roster to list cores would
-  -- make it a second copy of the call graph.
+  -- THE RULE, STATED AS WHAT THE INSTRUMENT ACTUALLY SEES: every clara function whose body
+  -- contains a SCHEMA-QUALIFIED STATIC DML STATEMENT (`insert into|update|delete from
+  -- clara.<table>`, over the comment-stripped, whitespace-collapsed body) against one of the
+  -- six covered tables must be, or be REACHABLE FROM, at least one roster entry.
+  -- Reachability (not roster membership) is the right test because the doors are what
+  -- SS2.11 enumerates while the writes usually happen one or two layers down in a _core --
+  -- persist_statement_facts is the door, _persist_statement_core does the insert, and
+  -- requiring the roster to list cores would make it a second copy of the call graph.
+  --
+  -- THE CLAIM IS DELIBERATELY NARROWER THAN "EVERY WRITER", because the detector is a
+  -- SCANNER, not a parser. The confirming round enumerated NINE write shapes it cannot see:
+  -- a bare unqualified table name (search_path resolves it), `clara . tbl` with whitespace
+  -- around the dot, quoted identifiers ("clara"."journal_entries"), UPDATE/DELETE ONLY,
+  -- MERGE, COPY ... FROM, a write through an updatable VIEW, dynamic DML built with
+  -- format() and run by EXECUTE, and a SQL-standard BEGIN ATOMIC body (whose text lives in
+  -- prosqlbody, not prosrc, so prosrc is empty and every regex over it matches nothing).
+  -- Claiming completeness over all writers while measuring only one shape would be the
+  -- census telling a bigger story than its instrument supports -- the same defect as the
+  -- vacuous first cut of 11.2b, in the opposite direction.
+  --
+  -- SO THE UNSEEN SHAPES GET FAIL-CLOSED SENTINELS INSTEAD OF A REGEX ARMS RACE (below,
+  -- and in S0.10 for the birth-time ones). Each sentinel asserts the shape does not exist
+  -- in clara today; the day a migration introduces one, the sentinel RAISES and that
+  -- migration owes this detector an extension. The class fails closed rather than silently
+  -- narrowing, which is the only honest outcome available without writing a SQL parser.
   --
   -- TRIGGER FUNCTIONS ARE EXCLUDED BY IDENTITY (prorettype = trigger), not by name -- a
   -- `_tf_%` name filter would be spelling again. The exclusion is principled: a trigger
   -- function is not a door anyone calls, it fires inside another writer's statement, and
   -- its own write to a covered table re-enters this very staleness trigger. The live
   -- example is clara._tf_rotate_token, which updates journal_entries.
+  --
+  -- THIS ARM HAS TEETH, AND THE PROOF WAS HAND-RUN -- it is NOT a standing guard, so it is
+  -- recorded here rather than implied. Run against this catalog with the roster EMPTIED
+  -- entirely, the same query reports 41 (function, table) pairs across 39 distinct
+  -- functions -- i.e. the full population of statically-detectable writers of the six
+  -- covered tables, every one of which the live roster must therefore account for. (Gutted
+  -- to a SINGLE seed entry instead of none, it reports 37 across 35; the count is an
+  -- artifact of how far the roster is cut, which is why the setup is stated alongside the
+  -- number rather than the number alone.) The check that matters is that BOTH figures are
+  -- non-zero: an arm that reports nothing when its roster is destroyed is proving nothing,
+  -- which is how the first cut of 11.2b passed while being vacuous.
+  -- THE EDGES ARE COMMENT-STRIPPED HERE FOR THE OPPOSITE REASON, AND IT MATTERS MORE.
+  -- In 11.2b a spurious edge makes a claim easier to prove; HERE a spurious edge makes a
+  -- writer look COVERED and drops it off the escapee list. Measured by the confirming
+  -- round: a single comment line naming a writer was enough to exempt it. That is the
+  -- polarity inversion -- an un-stripped edge relation turns a comment into an exemption
+  -- from the very census that exists to find un-enumerated writers, so a future author
+  -- could silence this arm by writing prose. Stripping first closes it.
+  -- The residual (a name inside a STRING LITERAL) is stated and NOT chased: it is the one
+  -- remaining way to look reachable without being called, it exists nowhere in the tree
+  -- today, and resolving it properly means parsing SQL rather than scanning it.
   for r in
     with recursive reach(oid, depth) as (
       select ro.sig::regprocedure::oid, 0 from _x57_roster ro
@@ -1539,7 +1677,9 @@ begin
         from reach h
         join pg_proc p on p.oid = h.oid
         join pg_proc c on c.pronamespace = 'clara'::regnamespace
-         and position('clara.' || c.proname || '(' in coalesce(p.prosrc, '')) > 0
+         and position('clara.' || c.proname || '(' in
+               regexp_replace(regexp_replace(coalesce(p.prosrc, ''),
+                 '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')) > 0
        where h.depth < 3)
     select p.oid::regprocedure::text as sig, t.tbl
       from pg_proc p
@@ -1559,28 +1699,41 @@ begin
       using errcode = 'CLR10';
   end loop;
 
-  -- ...and the residual the instrument CANNOT see, stated and then measured to be empty.
-  -- The write detector reads STATIC statement text, so a body that builds its DML as a
-  -- string and runs it through EXECUTE is invisible to it -- the same blind spot the
-  -- repo's wiki-dynamic-sql gate exists for. Today no body that writes a covered table
-  -- contains EXECUTE at all, which is asserted rather than assumed; the day one does, this
-  -- raises and the author owes the census a manual entry.
+  -- SENTINEL 1 -- DYNAMIC DML, ANYWHERE IN clara. NOT "writes a covered table AND contains
+  -- EXECUTE": that conjunction DEFEATED ITSELF, and the confirming round caught it. A body
+  -- whose write is ONLY dynamic fails the static write-detector, so the first conjunct is
+  -- false, so the guard never reaches it -- the guard could only ever fire on a function
+  -- that ALSO wrote statically, which is exactly the case that needs no guard. The
+  -- conjunct is dropped: ZERO clara non-trigger functions may contain a bare EXECUTE token
+  -- at all. Measured 0 today, so the stricter form costs nothing now and is load-bearing
+  -- the moment anyone adds dynamic SQL to this schema.
+  select coalesce(string_agg(p.oid::regprocedure::text, ', ' order by p.oid::regprocedure::text), '')
+    into v_t
+    from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace
+     and p.prorettype <> 'trigger'::regtype
+     and lower(regexp_replace(regexp_replace(
+           coalesce(p.prosrc, ''),
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')) ~ '\mexecute\M';
+  if v_t <> '' then
+    raise exception '0057 S11.2d: {%} contain a bare EXECUTE token -- the inverse census reads STATIC statement text and cannot see dynamic DML, so it can no longer prove completeness over the six covered tables. Extend the detector (or enumerate the dynamic writes by hand) before this file may pass.', v_t
+      using errcode = 'CLR10';
+  end if;
+
+  -- SENTINEL 2 -- MERGE and COPY targeting a covered table. Both write rows and neither
+  -- matches the `insert into|update|delete from` detector. Measured absent today.
   select coalesce(string_agg(distinct p.oid::regprocedure::text, ', '), '') into v_t
     from pg_proc p
     cross join (values ('journal_entries'), ('open_item_allocations'), ('fixed_assets'),
                        ('bank_statements'), ('bank_reconciliations'),
                        ('bank_line_exceptions')) t(tbl)
    where p.pronamespace = 'clara'::regnamespace
-     and p.prorettype <> 'trigger'::regtype
-     and lower(regexp_replace(regexp_replace(regexp_replace(
-           coalesce(p.prosrc, ''),
-           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
-         ~ ('(insert into|update|delete from) clara\.' || t.tbl || '\M')
      and lower(regexp_replace(regexp_replace(
            coalesce(p.prosrc, ''),
-           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')) ~ '\mexecute\M';
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'))
+         ~ ('\m(merge|copy)\M[^;]{0,200}clara\.' || t.tbl || '\M');
   if v_t <> '' then
-    raise exception '0057 S11.2d: {%} write a covered table AND contain EXECUTE -- the static write-detector cannot see dynamic DML, so the inverse census can no longer prove completeness. Enumerate the dynamic writes by hand before this file may pass.', v_t
+    raise exception '0057 S11.2d: {%} reach a covered table through MERGE or COPY, which the insert/update/delete detector cannot see -- extend it before this file may pass', v_t
       using errcode = 'CLR10';
   end if;
 
@@ -1701,6 +1854,80 @@ begin
    where p.oid = 'clara.trial_balance_as_of(uuid,date)'::regprocedure;
   if v_def !~ 'status\s*=\s*''approved''' then
     raise exception '0057 S11.4b: trial_balance_as_of no longer filters to approved entries -- drafts would reach a presented figure, and the journal_lines disposition no longer holds'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (11.4c) THE JE STATUS PREDICATE'S DEPENDENCIES, ASSERTED RATHER THAN NARRATED -- the
+  -- same standard 11.4b applies to the journal_lines disposition, now applied to the
+  -- staleness arm that decides whether a JE mutation marks at all. That predicate rests on
+  -- two live facts, and if either moves the arm starts MISSING presented movements silently.
+  --
+  -- (i) 'approved' IS THE SOLE PRESENTED STATUS -- by EXACT TOKEN EQUALITY over every status
+  -- literal trial_balance_as_of compares, not by "the body mentions approved". A presence
+  -- regex would still pass if someone widened the filter to
+  -- `status='approved' or status='posted'`, and the staleness arm would then ignore every
+  -- 'posted' entry while the trial balance presented it. So the DISTINCT SET of literals is
+  -- compared to exactly {approved}.
+  select coalesce(string_agg(distinct m[1], ',' order by m[1]), '(none)') into v_t
+    from pg_proc p,
+         lateral regexp_matches(
+           lower(regexp_replace(regexp_replace(regexp_replace(coalesce(p.prosrc, ''),
+             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g')),
+           'status\s*=\s*''([a-z_]+)''', 'g') m
+   where p.oid = 'clara.trial_balance_as_of(uuid,date)'::regprocedure;
+  if v_t <> 'approved' then
+    raise exception '0057 S11.4c: trial_balance_as_of compares status literal(s) {%}, not exactly {approved} -- the JE staleness arm marks only on approved, so any other presented status would move a figure with nothing marking it', v_t
+      using errcode = 'CLR10';
+  end if;
+
+  -- (ii) THE TRANSITION ALLOW-SET IS THE ONE THIS ARM WAS DERIVED AGAINST. Pinned two ways,
+  -- because each alone is weak: an md5 alone says "something moved" without saying whether
+  -- it mattered, and a token probe alone cannot notice a re-ordering that changes meaning.
+  --   * STRUCTURAL: 'posting_date' must appear NOWHERE in clara._tf_entry_immutable. That is
+  --     what makes "an approved entry's effect date cannot move under us" true -- if the
+  --     column is absent from the body entirely, it is in no allow-set, so no transition
+  --     can carry it. (Measured: absent.)
+  --   * MATERIAL: the four transition arms this file enumerated must still be the ones the
+  --     body implements -- probed by their own refusal literals rather than by md5, so a
+  --     comment edit does not cry wolf while a REMOVED arm does raise.
+  -- The re-derive path, stated so a future author is not left guessing: if this fires, read
+  -- the body's allow-sets again and re-derive the INSERT/UPDATE/DELETE predicate in the
+  -- clara.journal_entries arm of clara._tf_snapshot_staleness -- do not simply widen it.
+  select coalesce(p.prosrc, '') into v_def from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_entry_immutable';
+  if v_def = '' then
+    raise exception '0057 S11.4c: clara._tf_entry_immutable is absent -- the JE staleness predicate was derived from its allow-set'
+      using errcode = 'CLR10';
+  end if;
+  if position('posting_date' in v_def) <> 0 then
+    raise exception '0057 S11.4c: _tf_entry_immutable now references posting_date -- an approved entry''s effect date may have become mutable, which the staleness arm assumes it is not; re-derive the predicate'
+      using errcode = 'CLR10';
+  end if;
+  if position('journal entries are never deleted' in v_def) = 0
+     or position('illegal approval transition' in v_def) = 0
+     or position('withdrawal requires actor, time, and reason' in v_def) = 0
+     or position('approved entries permit only a complete reversal-linkage pair' in v_def) = 0
+     or position('illegal status transition' in v_def) = 0 then
+    raise exception '0057 S11.4c: _tf_entry_immutable no longer carries all five transition arms this file derived its JE predicate from -- re-read the allow-sets and re-derive'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (iii) THE FA SKIP'S DEPENDENCY. The fixed_assets arm dates inclusion from
+  -- coalesce(effective_from, acquired_date) and lets an UPDATE that moved nothing
+  -- read-relevant skip. That is only sound while neither column is post-approval mutable --
+  -- otherwise a silent edit to either could move an asset's inclusion start with no
+  -- candidate detecting it. clara._tf_fixed_assets_immutable_0017 is the belt that decides,
+  -- and its post-approval mutable set is {status, disposed_at, disposal_entry_id,
+  -- superseded_by_asset_id, superseded_at, updated_at} plus the particulars columns while
+  -- particulars are incomplete. Measured: NEITHER column appears anywhere in that body.
+  select coalesce(p.prosrc, '') into v_def from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_fixed_assets_immutable_0017';
+  if v_def = '' then
+    raise exception '0057 S11.4c: clara._tf_fixed_assets_immutable_0017 is absent -- the FA effect-date skip rests on its transition table'
+      using errcode = 'CLR10';
+  end if;
+  if position('acquired_date' in v_def) <> 0 or position('effective_from' in v_def) <> 0 then
+    raise exception '0057 S11.4c: the 0017 FA belt now names acquired_date or effective_from -- an asset''s inclusion START may have become mutable, and the fixed_assets staleness arm''s skip is no longer sound; re-derive it'
       using errcode = 'CLR10';
   end if;
 
@@ -1832,16 +2059,14 @@ begin
     raise exception '0057 S11.9: % fiscal year(s) carry NO fiscal_year-grain period row after the S5 backfill -- every FY must have one or its metrics resolve absent', v_n
       using errcode = 'CLR10';
   end if;
-  -- ...and the converse: no fy-grain period may cite an FY that does not exist, and each FY
-  -- has exactly ONE (the backfill and the trigger must not both have fired for a row).
-  select count(*) into v_n from (
-    select rp.fiscal_year_id from clara.reporting_periods rp
-     where rp.grain = 'fiscal_year'
-     group by rp.fiscal_year_id having count(*) <> 1) d;
-  if v_n <> 0 then
-    raise exception '0057 S11.9: % fiscal year(s) carry MORE THAN ONE fy-grain period row -- the trigger and the backfill double-minted', v_n
-      using errcode = 'CLR10';
-  end if;
+  -- THE DOUBLE-MINT ARM IS DELIBERATELY NOT WRITTEN, and this comment is why. The obvious
+  -- companion assertion -- "no FY carries more than one fy-grain period row" -- is
+  -- STRUCTURALLY UNREACHABLE: uq_rp_client_grain_start would already have raised 23505 at
+  -- INSERT time, inside the trigger or the backfill, long before this tail could observe a
+  -- duplicate. An assertion that cannot fail is not evidence; it is decoration that reads
+  -- like evidence, which is the specific failure this file has now corrected twice. The
+  -- constraint IS the guarantee here, and 11.6 already asserts the constraint's table is
+  -- under forced RLS with its owner policy. Nothing further to check.
 
   -- (11.10) THE STATED OUT-OF-SCOPE DECISION. The honest-boundary convention requires
   -- saying what was left out and why, not silence -- an omission nobody wrote down is
