@@ -21,7 +21,7 @@ today-dated mirror — the ends_on variant lands as its own migration (D1-class:
 writer's body changes) **BEFORE THE FIRST REAL CLOSE FINALIZES** (the E-acceptance's BEE
 FY2025 close), and in any case before any real reopen. (Precisely: the D1 deadline is the
 first real close, since only a finalized close mints anything to reopen; ADR-067's "activation
-= the first human `open_fiscal_year`" describes the machinery arming, a distinct, earlier event.) Registered in the `PROGRESS.md` backlog.
+= the first human `open_fiscal_year`" describes the machinery arming, a distinct, earlier event.) Registered in PART 2 + REBUILD-PLAN.
 
 **(2) The two V-OWNER record cells are SIGNED** — F1d (the F-1 wall-scope record:
 verify-plus-one-guard, no duplicate wall) and F3e (MSIC codes are format-checked only, never
