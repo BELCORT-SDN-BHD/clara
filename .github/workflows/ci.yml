@@ -306,7 +306,10 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: clara_ci
         ports:
-          - 5432:5432
+          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides the
+          # moment two jobs share one Docker host — hosted runners never see this, one
+          # VM per job. Steps read the mapped port via the wire-ports step below.
+          - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -319,7 +322,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: postgres
         ports:
-          - 5433:5432
+          - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -327,9 +330,9 @@ jobs:
           --health-retries 10
 
     env:
-      # libpq vars — the db scripts read these (no DSN in code/argv).
+      # libpq vars — the db scripts read these (no DSN in code/argv). PGPORT is wired
+      # per-run by the wire-ports step (job.services is not a job-env context).
       PGHOST: localhost
-      PGPORT: "5432"
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: clara_ci
@@ -340,6 +343,10 @@ jobs:
       CLARA_ALLOW_DESTRUCTIVE: "1"
 
     steps:
+      - name: Wire service ports (ephemeral host ports -> env)
+        run: |
+          echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "PGB_PORT=${{ job.services.postgres_b.ports['5432'] }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Full history so the freeze-lint + migration-history checks can compare
@@ -391,10 +398,15 @@ jobs:
       # v17 server.
       - name: Install PostgreSQL 17 client (for DR pg_dump)
         run: |
-          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
+          # IDEMPOTENT + HOST-LOCKED (self-hosted hardening): parallel jobs on one host
+          # raced the keyring/sources writes and the dpkg lock; flock serializes the
+          # install and the version guard makes every later run a no-op.
+          sudo flock /var/lock/clara-pgdg.lock bash -ec '
+            if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
+            echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
+            apt-get update -o DPkg::Lock::Timeout=180
+            apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
           pg_dump --version
 
       # DEPLOY-ONTO-EXISTING (finding F4 / finding 3): a real deploy applies HEAD's
@@ -663,11 +675,11 @@ jobs:
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_intake_ci'
           PGDATABASE=clara_intake_ci pnpm db:migrate
           PGDATABASE=clara_intake_ci pnpm db:seed
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
             pnpm --filter @clara/runtime exec bootstrap
           cd packages/runtime
           PGDATABASE=clara_intake_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
             node tests/intake-e2e.mjs
 
       # Wave-B rig-confined fault gates (§4 of the contract): the three STANDALONE runtime e2es
@@ -684,17 +696,17 @@ jobs:
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
           PGDATABASE=clara_wave_b_ci pnpm db:migrate
           PGDATABASE=clara_wave_b_ci pnpm db:seed
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             pnpm --filter @clara/runtime exec bootstrap
           cd packages/runtime
           PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             node tests/interview-e2e.mjs
           PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             node tests/interview-kill-resume-e2e.mjs
           PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             node tests/version-cutover-e2e.mjs
 
       - name: DR backup/restore self-test (ephemeral postgres:17)
@@ -728,15 +740,15 @@ jobs:
           # (Codex re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
           # fresh-target-only preflight cannot abort here.
           PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/drci_source" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
             pnpm --filter @clara/runtime exec bootstrap
           PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out /tmp/drci-full.sql
           # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid
-          PGPORT=5433 PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
-          PGPORT=5433 PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          PGPORT=5433 PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file /tmp/drci-full.sql
-          CLARA_DR_SOURCE_URL="postgres://postgres@localhost:5432/drci_source" \
-          CLARA_DR_TARGET_URL="postgres://postgres@localhost:5433/drci_target" \
+          PGPORT=$PGB_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
+          PGPORT=$PGB_PORT PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
+          PGPORT=$PGB_PORT PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file /tmp/drci-full.sql
+          CLARA_DR_SOURCE_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
+          CLARA_DR_TARGET_URL="postgres://postgres@localhost:$PGB_PORT/drci_target" \
             node packages/db/scripts/dr-verify.mjs
 
   # ===========================================================================
@@ -822,7 +834,10 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: clara_ci
         ports:
-          - 5432:5432
+          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides the
+          # moment two jobs share one Docker host — hosted runners never see this, one
+          # VM per job. Steps read the mapped port via the wire-ports step below.
+          - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -831,13 +846,15 @@ jobs:
 
     env:
       PGHOST: localhost
-      PGPORT: "5432"
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: clara_ci
       CLARA_ALLOW_DESTRUCTIVE: "1"
 
     steps:
+      - name: Wire service ports (ephemeral host ports -> env)
+        run: |
+          echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # (0) THE PRESENCE GATE — NONE-OR-ALL. The four slices land days apart; this job is fully
@@ -923,10 +940,13 @@ jobs:
       - name: Install PostgreSQL 17 client
         if: steps.gate.outputs.ready == 'true'
         run: |
-          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
+          # IDEMPOTENT + HOST-LOCKED (self-hosted hardening) — same recipe as the ci job.
+          sudo flock /var/lock/clara-pgdg.lock bash -ec '
+            if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
+            echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
+            apt-get update -o DPkg::Lock::Timeout=180
+            apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
           psql --version
 
       # (1) the slice-shaped migrations copy: every migration numbered at or below THIS SLICE'S
