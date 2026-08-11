@@ -27,7 +27,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { evaluateToolCall, findPinnedId, isWriteShaped, blockMessage } from "./pinned-ids-guard-checks.mjs";
+import { evaluateToolCall, findPinnedId, isWriteShaped, blockMessage, isReadOnlyCommand } from "./pinned-ids-guard-checks.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, "pinned-ids-guard.mjs");
@@ -89,6 +89,7 @@ testCase("Bash + canary via psql SELECT -> PASSES (read-shaped)", () => {
 testCase("Bash + grep for the id -> PASSES (read-shaped)", () => {
   const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `grep -rn "${CANARY}" docs/adr/` } });
   assertPassed(r, "grep read");
+  if (r.shape !== "bash-read-only-command") throw new Error(`expected the read-only-command shape, got ${r.shape}`);
 });
 
 testCase("Bash + witness, command mentions posting_date -> PASSES (the false-positive this guard must avoid)", () => {
@@ -103,8 +104,19 @@ testCase("Bash + witness, command mentions posting_date -> PASSES (the false-pos
 });
 
 testCase("Bash + canary, filename glued by underscores ('insert') -> PASSES (glued token, not a whole word)", () => {
-  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `git log -p -- migrations/0019_insert_wiki_seed.sql | grep ${CANARY}` } });
+  // Deliberately NOT a read-only-allowlisted command: `python` is not on the allowlist, so this
+  // falls through to the keyword check and the ASYMMETRIC BOUNDARY is what decides. (The original
+  // `git log … | grep` spelling now short-circuits on the read allowlist, which would leave this
+  // cell green even if the boundary regressed — a test passing for the wrong reason.)
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `python apply.py migrations/0019_insert_wiki_seed.sql --id ${CANARY}` } });
   assertPassed(r, "insert glued into a filename is not the whole word 'insert'");
+  if (r.shape !== "bash-read-shaped") throw new Error(`must pass via the BOUNDARY, not the read allowlist; got ${r.shape}`);
+});
+
+testCase("a read-only pipeline carrying the glued filename passes via the ALLOWLIST (both paths exist)", () => {
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `git log -p -- migrations/0019_insert_wiki_seed.sql | grep ${CANARY}` } });
+  assertPassed(r, "git log | grep is a pure read pipeline");
+  if (r.shape !== "bash-read-only-command") throw new Error(`expected the allowlist path, got ${r.shape}`);
 });
 
 testCase("Bash + witness, real INSERT INTO as its own words -> BLOCKED (genuine write keyword)", () => {
@@ -158,6 +170,67 @@ testCase("Grep tool carrying the id -> PASSES (out of scope entirely)", () => {
 testCase("case-insensitive id match (uppercase in a curl payload) -> BLOCKED", () => {
   const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `curl -X POST .../rpc/answer?id=${CANARY.toUpperCase()}` } });
   assertBlocked(r, "uppercase id still matches");
+});
+
+// --- The Codex round: the widened verb set (finding 4) and the read-tool allowlist (finding 7).
+
+for (const verb of ["delete", "merge", "upsert", "execute", "put", "patch"]) {
+  testCase(`Bash + witness + ${verb} -> BLOCKED (the widened write-verb set)`, () => {
+    const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `psql -c "${verb} from clara.x where id='${WITNESS}'"` } });
+    assertBlocked(r, `${verb} is a mutation verb`);
+  });
+}
+
+testCase("the widened verbs keep the asymmetric boundary (inflections still pass)", () => {
+  // "deleted"/"merged"/"executed" are how the evidence NARRATES history; they must not block.
+  for (const inflected of ["deleted", "merged", "executed", "patched", "putting"]) {
+    if (isWriteShaped(inflected)) throw new Error(`"${inflected}" must not match — trailing letters are excluded`);
+  }
+  // ...while the glued-underscore RPC spellings must.
+  for (const glued of ["delete_entry(", "merge_rows_", "rpc/patch"]) {
+    if (!isWriteShaped(glued)) throw new Error(`"${glued}" MUST match — a trailing underscore/slash is admitted`);
+  }
+});
+
+testCase("git grep for the id WITH a write verb in the pattern -> PASSES (the audits' real workflow)", () => {
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `git grep -n "approve.*${WITNESS}"` } });
+  assertPassed(r, "a read-only command outranks a keyword inside its search pattern");
+  if (r.shape !== "bash-read-only-command") throw new Error(`expected the read-only shape, got ${r.shape}`);
+});
+
+testCase("a read PIPELINE with a write verb in the pattern -> PASSES", () => {
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `git log -p | grep -i "approve ${CANARY}" | head -20` } });
+  assertPassed(r, "every segment is read-only");
+});
+
+testCase("a read used as a PREFIX to smuggle a write -> STILL BLOCKED (per-segment, not first-token)", () => {
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `grep -rn x docs/ && curl -X POST .../rpc/approve?id=${WITNESS}` } });
+  assertBlocked(r, "the curl segment is not read-only, so the allowlist must not apply");
+});
+
+testCase("a read piped into a writer -> STILL BLOCKED", () => {
+  const r = evaluateToolCall({ tool_name: "Bash", tool_input: { command: `cat ids.txt | xargs -I{} curl -X POST .../approve?id=${CANARY}` } });
+  assertBlocked(r, "xargs is not on the read allowlist");
+});
+
+testCase("a command substitution defeats the read allowlist (fail-closed on what we cannot see)", () => {
+  if (isReadOnlyCommand('grep "$(curl -X POST .../approve)" file')) {
+    throw new Error("a $( ) payload is unreadable to the segment split — must not be treated as read-only");
+  }
+});
+
+testCase("git WRITE subcommands are not on the allowlist", () => {
+  for (const sub of ["push", "commit", "reset", "clean"]) {
+    if (isReadOnlyCommand(`git ${sub} -f`)) throw new Error(`git ${sub} must not count as read-only`);
+  }
+  for (const sub of ["grep", "log", "show", "diff"]) {
+    if (!isReadOnlyCommand(`git ${sub} x`)) throw new Error(`git ${sub} must count as read-only`);
+  }
+});
+
+testCase("a leading env assignment does not hide the real command", () => {
+  if (isReadOnlyCommand(`PGPASSWORD=x psql -c "select 1"`)) throw new Error("psql is not a read-only COMMAND (its SQL decides)");
+  if (!isReadOnlyCommand("LC_ALL=C grep -rn x .")) throw new Error("an env prefix before grep must still read as read-only");
 });
 
 testCase("blockMessage() names the pin, the rule, and the provenance", () => {
@@ -253,20 +326,46 @@ testCase("tracked settings.json registers a PreToolUse command resolving to this
   const entries = settings?.hooks?.PreToolUse;
   if (!Array.isArray(entries) || entries.length === 0) throw new Error("hooks.PreToolUse is missing or empty");
 
-  const commands = entries.flatMap((e) => (e.hooks ?? []).map((h) => h.command ?? ""));
-  // The command is a shell string: `node "$CLAUDE_PROJECT_DIR"/scripts/hooks/pinned-ids-guard.mjs`.
-  // Strip the project-dir variable in either shell or Windows spelling, plus quotes, then resolve
-  // the remaining repo-relative path against the actual repo root.
+  // Two documented shapes: EXEC form (`command` is the executable, `args` is the argv — no shell
+  // involved) and SHELL form (one string). This repo ships exec form deliberately: a shell-form
+  // `$CLAUDE_PROJECT_DIR` does not expand under PowerShell, and a hook that fails to launch fails
+  // OPEN. Both are accepted here so the assertion tests the registration, not the style.
   const repoRoot = resolve(HERE, "..", "..");
-  const resolved = commands.map((c) => {
-    const m = c.match(/(?:\$CLAUDE_PROJECT_DIR|%CLAUDE_PROJECT_DIR%|\$\{CLAUDE_PROJECT_DIR\})["']?[/\\]?([^\s"']+)/);
-    return m ? resolve(repoRoot, m[1]) : null;
-  });
-  if (!resolved.some((p) => p && existsSync(p) && resolve(p) === resolve(CLI))) {
+  const PROJECT_DIR_RE = /(?:\$\{CLAUDE_PROJECT_DIR\}|\$CLAUDE_PROJECT_DIR|%CLAUDE_PROJECT_DIR%|\$env:CLAUDE_PROJECT_DIR)["']?[/\\]?/;
+  const candidates = [];
+  for (const entry of entries) {
+    for (const h of entry.hooks ?? []) {
+      const parts = Array.isArray(h.args) ? h.args : String(h.command ?? "").split(/\s+/);
+      for (const part of parts) {
+        const raw = String(part).replace(/^["']|["']$/g, "");
+        if (!PROJECT_DIR_RE.test(raw)) continue;
+        candidates.push({ raw, abs: resolve(repoRoot, raw.replace(PROJECT_DIR_RE, "")) });
+      }
+    }
+  }
+  const hit = candidates.find((c) => existsSync(c.abs) && resolve(c.abs) === resolve(CLI));
+  if (!hit) {
     throw new Error(
-      `no PreToolUse command resolves to ${CLI}. Commands found: ${JSON.stringify(commands)}; `
-      + `resolved to: ${JSON.stringify(resolved)}`,
+      `no PreToolUse hook resolves to ${CLI}. Candidates: ${JSON.stringify(candidates)}. `
+      + `A hook whose command cannot launch fails OPEN — the tool call proceeds — so a stale `
+      + `registration here means the guard is silently absent.`,
     );
+  }
+});
+
+testCase("the registration avoids a shell-form project-dir reference (PowerShell fails open)", () => {
+  const settings = JSON.parse(readFileSync(join(HERE, "..", "..", ".claude", "settings.json"), "utf8"));
+  for (const entry of settings.hooks.PreToolUse) {
+    for (const h of entry.hooks ?? []) {
+      if (Array.isArray(h.args)) continue; // exec form — no shell, nothing to expand
+      if (/CLAUDE_PROJECT_DIR/.test(String(h.command ?? ""))) {
+        throw new Error(
+          "shell-form command references CLAUDE_PROJECT_DIR: bare `$CLAUDE_PROJECT_DIR` is not a "
+          + "PowerShell env reference, so on a Windows box without Git Bash the launch fails — and a "
+          + "hook that fails to launch fails OPEN. Use exec form (command + args).",
+        );
+      }
+    }
   }
 });
 

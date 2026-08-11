@@ -29,12 +29,22 @@ article — each read verbatim and diffed against this repo before any ruling.
    LAWS DIGEST** (67 laws, owner-signed — see below). One interstitial non-ADR ruling batch
    (WB-R28..R30) preserved as `0042a-*` without claiming a number.
 4. **Pins become mechanisms (Q4).** The canary (`daba7f2e`) and witness (`d023b48c`) ids are
-   hard-blocked by a PreToolUse hook (`scripts/hooks/pinned-ids-guard.mjs`, 27-case selftest,
+   hard-blocked by a PreToolUse hook (`scripts/hooks/pinned-ids-guard.mjs`, 44-case selftest,
    wired into lint + CI), registered in a **tracked** `.claude/settings.json` (the official
    project-settings convention; personal settings stay in `settings.local.json`). The hooks
    lane's recorded dissent — keep registration per-checkout — was overruled on the owner's Q4
    grounds: a manual step is captured-once-enforced-maybe. The enrichment trap stays prose
    AND is registered as a Wave-F/G DB-guard candidate; the four-firms knowledge stays prose.
+   **Scope, ruled at the Codex adversarial round:** the hook is a **mistake-net for verbatim-id
+   write shapes**, not adversarial containment. The ids' primary protection remains the process
+   law and the DB walls (maker/checker, audited-function-only writes, the read-only agent role);
+   deliberate obfuscation — the id built from fragments, read from a file, computed at runtime —
+   is **out of scope by design**, because no lexical hook can reach it. Two structural residuals
+   are NAMED rather than closed: a PreToolUse hook that fails to LAUNCH fails **open** (only
+   exit 2 blocks), which is why the registration is exec-form and the self-test asserts it
+   resolves on disk; and `disableAllHooks: true` in an untracked `.claude/settings.local.json`
+   blanks every non-managed hook, which cannot be prevented from inside the repo — the owner's
+   local settings are the owner's, and a Write-block on that file would be circular.
 5. **REBUILD-PLAN dissolved (Q5).** State → `PROGRESS.md`; forward roadmap/risks/Phase-5 plan
    → `docs/plan/active/roadmap.md`; the dated STATUS chronology →
    `docs/plan/completed/rebuild-plan-history.md` (verbatim); the `coding_kind` table →

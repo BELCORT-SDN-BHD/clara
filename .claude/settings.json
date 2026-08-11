@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/pinned-ids-guard.mjs"
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/pinned-ids-guard.mjs"]
           }
         ]
       }

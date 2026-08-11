@@ -26,10 +26,36 @@
 // a hard failure. It never softened anything else: a broken reference INSIDE a file that exists
 // was always a hard failure regardless of STRICT.
 //
+// ===========================================================================================
+// KNOWN LIMITATIONS — stated plainly, because a gate whose ceiling is undocumented gets trusted
+// past it. This is a ROT DETECTOR for honest documents: it catches the reference that broke when
+// a file moved. It is not adversarial, and a document author who wants to hide a broken link can.
+//
+//   1. TWO EXEMPTIONS ARE DELIBERATE, AND BROAD. Content inside docs/plan/completed/,
+//      docs/plan/research/ and docs/adr/0* is not scanned — those trees are append-only or
+//      owner-ruled frozen, so a stale cite inside one cannot be repaired without rewriting a
+//      historical record, and a gate that can never legitimately go green teaches people to
+//      ignore it. The current run reports ~123 such files. Their existence as reference TARGETS
+//      is still validated, and an archive file authored AFTER the freeze can be pulled back into
+//      scanning via HOP_CONTENT_EXEMPT_OVERRIDES.
+//   2. THE BACKTICK HEURISTIC TRADES FALSE NEGATIVES FOR SILENCE. Narrowing it (whitespace,
+//      template metacharacters, npm specifiers, snake_case identifier sets) is what keeps the
+//      gate's failures meaningful — but every rule is a shape a broken path can hide in. These
+//      spellings are KNOWN-UNVALIDATED and pass untouched even when the file does not exist:
+//        `docs/missing-{draft}.md` · `docs/missing_file` · `Missing.tsx` · `-missing.md`
+//        `docs/missing%20file.md` · `docs/missing.md (see appendix)`
+//      An explicit markdown link is never excluded by any of it, so the fix for anything
+//      load-bearing is to write it as a link, not a backtick span.
+//   3. ONE HOP, NEVER FURTHER — a reference two documents deep is not checked.
+//   4. SCOPE IS THE FOUR ENTRY FILES plus what they reach. A doc nothing points at is unscanned.
+//
+// Findings 11 and 12 of the Codex adversarial round named (1) and (2). Both are ruled trade-offs,
+// recorded here rather than closed.
+//
 // No dependencies — Node built-ins only.
 
-import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { readFileSync, existsSync, statSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
@@ -259,7 +285,15 @@ function stripAnchor(target) {
  */
 function stripTrailingCitation(target) {
   const m = target.match(/^(.*?\.(?:md|mjs|sql|ts|json))\b/i);
-  return m ? m[1] : target;
+  if (!m) return target;
+  const remainder = target.slice(m[1].length);
+  // Codex finding 8: truncating at the FIRST recognised extension made "README.md/nope.md" and
+  // "README.md.backup" both resolve green as the existing README.md — a broken descendant
+  // silently accepted as its ancestor. A citation is prose that FOLLOWS a path, and this repo
+  // opens one with " (" or " §". Anything else after the extension is PART OF THE PATH, so the
+  // whole string is returned and left to fail honestly if it does not exist.
+  if (remainder === "" || /^\s*\(/.test(remainder) || /^\s+§/.test(remainder)) return m[1];
+  return target;
 }
 
 /**
@@ -275,6 +309,11 @@ export function extractPathReferences(text) {
 
   const MD_LINK_RE = /\[([^\]]*)\]\(([^)]+)\)/g;
   const BACKTICK_RE = /`([^`]+)`/g;
+  // Codex finding 13: reference-style links were extracted as ZERO references. `[text][ref]`
+  // carries no path at the use site — the path lives in a `[ref]: path` definition line — so
+  // the inline-link regex never saw it and the target went unchecked. Definitions are what
+  // resolve, so those are what this collects.
+  const MD_REF_DEF_RE = /^\s{0,3}\[([^\]]+)\]:\s*(\S+)/;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -297,6 +336,13 @@ export function extractPathReferences(text) {
       refs.push({ line: i + 1, raw: normalizeTarget(m[2]), kind: "md-link" });
       const [start, end] = [m.index, m.index + m[0].length];
       masked = masked.slice(0, start) + " ".repeat(end - start) + masked.slice(end);
+    }
+
+    const refDef = line.match(MD_REF_DEF_RE);
+    if (refDef) {
+      // `[label]: <path>` — angle brackets are legal around the destination.
+      refs.push({ line: i + 1, raw: normalizeTarget(refDef[2].replace(/^<|>$/g, "")), kind: "md-ref-def" });
+      continue;
     }
 
     BACKTICK_RE.lastIndex = 0;
@@ -327,6 +373,19 @@ export function findUnterminatedFence(text) {
     if (/^\s*(```|~~~)/.test(lines[i])) openedAt = openedAt === null ? i + 1 : null;
   }
   return openedAt;
+}
+
+/**
+ * True if `abs` really sits inside `repoRoot`. Both sides go through realpath first, so a
+ * symlink pointing out of the tree is caught too — a string prefix alone would not see it.
+ */
+function isInsideRepo(repoRoot, abs) {
+  let root = repoRoot;
+  let target = abs;
+  try { root = realpathSync(repoRoot); } catch { /* fall back to the literal */ }
+  try { target = realpathSync(abs); } catch { /* fall back to the literal */ }
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function toRel(repoRoot, abs) {
@@ -360,7 +419,13 @@ export function resolveReference(repoRoot, fromDirAbs, rawTarget) {
       // A file OR a directory: prose constantly points at a directory with a trailing slash
       // ("the technical realisation is `docs/architecture/`") — that is a real, resolvable
       // reference, just not a FILE one.
-      if (st.isFile() || st.isDirectory()) return { skip: false, resolved: c, candidates };
+      if (!st.isFile() && !st.isDirectory()) continue;
+      // Codex finding 9: `../../../clara-refactor-asm/AGENTS.md` resolved happily OUTSIDE the
+      // repo. A reference that escapes the tree binds to whatever sibling checkout happens to
+      // sit beside it — green locally, broken or bound to something else on CI. Containment
+      // goes through realpath so a symlink cannot walk out either.
+      if (!isInsideRepo(repoRoot, c)) continue;
+      return { skip: false, resolved: c, candidates };
     } catch {
       /* not this candidate */
     }
@@ -375,7 +440,13 @@ export function resolveReference(repoRoot, fromDirAbs, rawTarget) {
     const matches = trackedFilesByBasename(repoRoot).get(target) || [];
     if (matches.length === 1) {
       const resolved = join(repoRoot, matches[0]);
-      return { skip: false, resolved, candidates: [...candidates, resolved] };
+      // Codex finding 10: a UNIQUE spelling is not proof of IDENTITY. Bare `DR.md` binds to
+      // docs/ops/DR.md whatever the author meant, and a future file with the same basename
+      // silently re-points every such reference. The fallback stays (this repo's prose really
+      // does name well-known files by basename alone) but it no longer resolves SILENTLY —
+      // the caller surfaces the binding so a wrong one is visible in the output rather than
+      // hiding behind a green run.
+      return { skip: false, resolved, candidates: [...candidates, resolved], rebound: matches[0] };
     }
   }
 
@@ -407,6 +478,10 @@ function trackedFilesByBasename(repoRoot) {
   return index;
 }
 
+function formatRebind(relFile, ref, rebound) {
+  return `${relFile}:${ref.line}  "${ref.raw}"  ->  ${rebound}`;
+}
+
 function reportUnterminatedFence(findings, relFile, text) {
   const line = findUnterminatedFence(text);
   if (line === null) return;
@@ -418,7 +493,9 @@ function reportUnterminatedFence(findings, relFile, text) {
 }
 
 function formatBrokenRef(relFile, ref, candidates, repoRoot) {
-  const kindLabel = ref.kind === "md-link" ? "BROKEN-MD-LINK" : "BROKEN-BACKTICK-PATH";
+  const kindLabel = ref.kind === "md-link" ? "BROKEN-MD-LINK"
+    : ref.kind === "md-ref-def" ? "BROKEN-MD-REF-DEFINITION"
+    : "BROKEN-BACKTICK-PATH";
   const tried = candidates.map((c) => toRel(repoRoot, c)).join(" or ");
   return (
     `${relFile}:${ref.line}  ${kindLabel}  "${ref.raw}" does not resolve (tried: ${tried}). `
@@ -472,6 +549,7 @@ function checkAdrBidirectional(repoRoot, adrReadmeAbs, adrDirAbs) {
 export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = STRICT } = {}) {
   const findings = [];
   const warnings = [];
+  const rebinds = [];
   let entriesChecked = 0;
   let refsChecked = 0;
   const hopCandidates = new Set();
@@ -483,12 +561,13 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
     reportUnterminatedFence(findings, relFile, text);
     for (const ref of extractPathReferences(text)) {
       refsChecked++;
-      const { skip, resolved, candidates } = resolveReference(repoRoot, dirname(abs), ref.raw);
+      const { skip, resolved, candidates, rebound } = resolveReference(repoRoot, dirname(abs), ref.raw);
       if (skip) continue;
       if (!resolved) {
         findings.push(formatBrokenRef(relFile, ref, candidates, repoRoot));
         continue;
       }
+      if (rebound) rebinds.push(formatRebind(relFile, ref, rebound));
       const relResolved = toRel(repoRoot, resolved);
       if (relResolved.toLowerCase().endsWith(".md") && isUnderDocs(relResolved) && !entryList.includes(relResolved)) {
         hopCandidates.add(relResolved);
@@ -527,10 +606,21 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
     reportUnterminatedFence(findings, relFile, text);
     for (const ref of extractPathReferences(text)) {
       refsChecked++;
-      const { skip, resolved, candidates } = resolveReference(repoRoot, dirname(abs), ref.raw);
+      const { skip, resolved, candidates, rebound } = resolveReference(repoRoot, dirname(abs), ref.raw);
       if (skip) continue;
       if (!resolved) findings.push(formatBrokenRef(relFile, ref, candidates, repoRoot));
+      else if (rebound) rebinds.push(formatRebind(relFile, ref, rebound));
     }
+  }
+
+  // One grouped warning, not 97 separate ones: the point is that a wrong binding be VISIBLE,
+  // and a wall of individually-prefixed WARN lines is how a reader learns to skip the output.
+  if (rebinds.length > 0) {
+    warnings.push(
+      `${rebinds.length} reference(s) resolved by UNIQUE BASENAME rather than by a written path. `
+      + `Unique spelling is not proof of identity (Codex finding 10) — scan for a wrong binding:\n`
+      + rebinds.map((r) => `      ${r}`).join("\n"),
+    );
   }
 
   if (hopExempt > 0) {

@@ -318,5 +318,94 @@ testCase("rebuild-plan-history.md is NOT content-exempt despite living under doc
 });
 
 // ---------------------------------------------------------------------------
+// The Codex adversarial round. Each cell reproduces the exact bypass Codex demonstrated, so a
+// regression re-opens a known hole rather than merely failing an abstract assertion.
+// ---------------------------------------------------------------------------
+console.log("\ncitation stripping (finding 8) — a broken DESCENDANT must not inherit its ancestor:");
+
+testCase("'README.md/nope.md' does NOT resolve as README.md", () => {
+  const root = freshFixture();
+  write(root, "README.md", "# r\n");
+  const r = resolveReference(root, root, "README.md/nope.md");
+  rm(root);
+  if (r.resolved) throw new Error("a path CONTINUING past the extension must not truncate to the ancestor");
+});
+
+testCase("'README.md.backup' does NOT resolve as README.md", () => {
+  const root = freshFixture();
+  write(root, "README.md", "# r\n");
+  const r = resolveReference(root, root, "README.md.backup");
+  rm(root);
+  if (r.resolved) throw new Error("a different file with a longer extension must not truncate to README.md");
+});
+
+testCase("a genuine ' (citation)' suffix still strips", () => {
+  const root = freshFixture();
+  write(root, "docs/target.md", "# t\n");
+  const r = resolveReference(root, root, "docs/target.md (ch.03)");
+  rm(root);
+  if (!r.resolved) throw new Error("the real citation convention must keep working");
+});
+
+console.log("\nrepo containment (finding 9):");
+
+testCase("a reference escaping repoRoot is BROKEN, not resolved", () => {
+  const root = freshFixture();
+  write(root, "inner/AGENTS.md", "# a\n");
+  write(root, "docs/plan/x.md", "# x\n");
+  // ../../inner/AGENTS.md from docs/plan resolves INSIDE — that must still work...
+  const inside = resolveReference(root, join(root, "docs/plan"), "../../inner/AGENTS.md");
+  // ...but climbing above the root must not bind to whatever sits beside the checkout.
+  const outside = resolveReference(root, join(root, "docs/plan"), "../../../../../../Windows/System32");
+  rm(root);
+  if (!inside.resolved) throw new Error("an in-tree relative climb must still resolve");
+  if (outside.resolved) throw new Error("a reference resolving OUTSIDE repoRoot must be reported broken");
+});
+
+console.log("\nreference-style links (finding 13):");
+
+testCase("a [ref]: definition is extracted and validated", () => {
+  const refs = extractPathReferences("see [the plan][p]\n\n[p]: docs/plan/index.md\n");
+  const kinds = refs.map((r) => `${r.kind}:${r.raw}`);
+  if (!kinds.includes("md-ref-def:docs/plan/index.md")) {
+    throw new Error(`the reference DEFINITION must be extracted, got ${JSON.stringify(kinds)}`);
+  }
+});
+
+testCase("a BROKEN [ref]: definition fails the file", () => {
+  const root = freshFixture();
+  write(root, "AGENTS.md", "# entry\nsee [x][a]\n\n[a]: docs/does-not-exist.md\n");
+  const result = checkHarnessLinks({ repoRoot: root, entryList: ["AGENTS.md"], strict: true });
+  rm(root);
+  if (result.ok) throw new Error("a reference-style link to a missing file must be a finding");
+  if (!result.findings.some((f) => f.includes("BROKEN-MD-REF-DEFINITION"))) {
+    throw new Error(`expected BROKEN-MD-REF-DEFINITION, got:\n${result.findings.join("\n")}`);
+  }
+});
+
+testCase("an angle-bracket destination in a [ref]: definition is unwrapped", () => {
+  const refs = extractPathReferences("[a]: <docs/plan/index.md>\n");
+  if (!refs.some((r) => r.raw === "docs/plan/index.md")) {
+    throw new Error(`angle brackets must be stripped, got ${JSON.stringify(refs.map((r) => r.raw))}`);
+  }
+});
+
+console.log("\nbasename rebind is announced (finding 10):");
+
+testCase("a bare-basename resolution reports HOW it bound", () => {
+  const root = freshFixture();
+  write(root, "docs/ops/DR.md", "# dr\n");
+  write(root, "AGENTS.md", "# entry\nsee `DR.md` for the drill.\n");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "-A"], { cwd: root });
+  const result = checkHarnessLinks({ repoRoot: root, entryList: ["AGENTS.md"], strict: true });
+  rm(root);
+  if (!result.ok) throw new Error(`the fallback must still RESOLVE, got: ${result.findings.join("\n")}`);
+  if (!result.warnings.some((w) => w.includes("UNIQUE BASENAME") && w.includes("docs/ops/DR.md"))) {
+    throw new Error(`the rebind must be visible in warnings, got: ${JSON.stringify(result.warnings)}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
 console.log(`\n${failures === 0 ? "ALL GREEN" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

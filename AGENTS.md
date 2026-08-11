@@ -62,7 +62,9 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
     Migration numbers are claimed at MERGE time, not at authoring.
 11. **The pinned ids are hard-blocked by a PreToolUse hook** — canary `daba7f2e` is NEVER
     answered (even past due), witness `d023b48c` is NEVER approved. The guard is
-    `scripts/hooks/pinned-ids-guard.mjs`, registered in `.claude/settings.json`.
+    `scripts/hooks/pinned-ids-guard.mjs`, registered in `.claude/settings.json`. It is a
+    **mistake-net for verbatim-id write shapes**, not containment: the ids' primary protection
+    is this constraint plus the DB walls, and deliberate obfuscation is out of scope by design.
 12. **ROME SECRETARY's customers are NAME-ONLY — never enrich them** with a registration
     number or a TIN. (A DB-side guard is a registered candidate; until it lands, this one
     rests on you.)
