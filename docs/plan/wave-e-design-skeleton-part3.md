@@ -218,6 +218,22 @@ close measures it", and a table on one list but not the other is the shape of bo
   `open_items` is append-only by trigger (`0037:824-825`), so no update/delete reaches it, and the
   amendments never insert there.
 
+  > **QUALIFICATION (lane γ R2 confirming round, 2026-08-11) — "move every AR/AP aging figure" is
+  > true of the MECHANISM, not unconditionally true of every CALL.** Read plainly, the sentence above
+  > promises that any `apply_open_items`/`unallocate_group` act moves a presented figure; the E7/E8
+  > adjudication (this section's own row-11 writer-table entry, and the matrix's E7/E8 cells) never
+  > reached back to correct THIS passage even though it corrects the consequence. Both verbs stamp
+  > `effective_date = clara._book_today()` — the ACT date, never a caller-supplied one — so against an
+  > ALREADY-COMPLETED month (the only kind `mint_month_snapshot` will snapshot), `_subledger_
+  > outstanding_asof`'s own `effective_date <= p_as_of` filter excludes a today-dated allocation from
+  > that month's `as_of = period_end` recompute: the figure a management pack PRESENTS for that month
+  > does not move. That is the accounting-correct outcome, not a gap. The mechanism DOES reach a
+  > presented figure when the allocation is genuinely backdated into the snapshotted period — which,
+  > for these two verbs, is unreachable (no date argument exists on either); the backdatable reach into
+  > a real, date-bearing allocation is via the **posting-dated `approve_*` paths** (row 3,
+  > `allocate_receipt`/`allocate_payment`, whose date anchor is the settlement entry's own
+  > `posting_date`).
+
 **The writer set — a REVIEW instrument, and (per §2.5(B)) an ASSERTED one.** E-R3 names the class; the
 list below lets a reviewer check each named writer's effect path against a trigger, and the migration
 tail asserts from the live catalog that every table named in the "Covered by" column actually carries

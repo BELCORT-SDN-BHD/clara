@@ -242,13 +242,33 @@ test("E10: verify_snapshot is a real callable backstop, self-documents its hones
   assert.deepEqual(after.drifted_keys, ["trial_balance"], "the drifted key is named exactly");
   assert.equal(after.state, "current", "the STORED state stays 'current' (no trigger fired) even while the RECOMPUTE reports drift -- that gap is exactly what the backstop exists to close");
 
-  assert.ok(Array.isArray(after.cannot_detect_by_trigger) && after.cannot_detect_by_trigger.length > 0,
-    `verify_snapshot's own payload names its honest-boundary classes (got ${JSON.stringify(after.cannot_detect_by_trigger)})`);
+  // FIX (R2 MINOR 2, accepted 2026-08-11): re-add the CONTENT assertion the
+  // af478e5 rewrite dropped in favour of Array.isArray+length>0 -- a check
+  // any two strings would satisfy. This names the counterparty-rename class
+  // VERBATIM, since that is the exact boundary this cell's own null
+  // observation (below) exercises.
+  assert.ok(Array.isArray(after.cannot_detect_by_trigger) && after.cannot_detect_by_trigger.length === 2,
+    `verify_snapshot's own payload names its honest-boundary classes, exactly two (got ${JSON.stringify(after.cannot_detect_by_trigger)})`);
+  assert.ok(after.cannot_detect_by_trigger.some((s) => /counterparty rename/.test(s)),
+    `the counterparty-rename class is named IN THE FUNCTION'S OWN RETURNED PAYLOAD, not only in the design doc (got ${JSON.stringify(after.cannot_detect_by_trigger)})`);
   assert.deepEqual(
     [...after.covered_tables].sort(),
     ["bank_line_exceptions", "bank_reconciliations", "bank_statements", "fixed_assets", "journal_entries", "open_item_allocations"],
     "verify_snapshot's own payload names exactly the six covered tables the design contract states",
   );
+
+  // NEW (R2 MINOR 2): the two additive sibling fields (batch 5) PARTITION
+  // covered_tables -- moving = the two tables this management_accounts
+  // payload can actually read a figure from; inert = the other four.
+  assert.deepEqual([...after.covered_tables_moving_this_payload].sort(), ["journal_entries", "open_item_allocations"],
+    `covered_tables_moving_this_payload names exactly the JE/allocation-reachable pair (got ${JSON.stringify(after.covered_tables_moving_this_payload)})`);
+  assert.deepEqual([...after.covered_tables_inert_for_this_payload].sort(),
+    ["bank_line_exceptions", "bank_reconciliations", "bank_statements", "fixed_assets"],
+    `covered_tables_inert_for_this_payload names exactly the other four (got ${JSON.stringify(after.covered_tables_inert_for_this_payload)})`);
+  const moving = new Set(after.covered_tables_moving_this_payload);
+  const inert = new Set(after.covered_tables_inert_for_this_payload);
+  assert.equal([...moving].filter((t) => inert.has(t)).length, 0, "moving and inert are DISJOINT");
+  assert.deepEqual([...moving, ...inert].sort(), [...after.covered_tables].sort(), "moving UNION inert equals the full covered_tables set -- a real partition, not two overlapping subsets");
 
   // The null-observation kept as a recorded note, not an assertion -- a
   // counterparty rename does NOT ride inside the management-accounts payload

@@ -23,12 +23,19 @@ import {
   rootQuery, opk, namedCall, idOf, firmOf, buildWorld, printLaneNotes, printSkipCount,
   noteLane, markSkip, endPool, freshResolution, seedCitedDocument,
   proposeCorrection, FIELD, draftEntryV3, approveEntry, ev,
-  has0056, has0057, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty, bookToday,
+  has0056, has0057, freshActiveClient, setupCloseCoa, plainEntry, birthCounterparty, bookToday, addDaysStr,
   AR1, REVN, BANK1,
-  mintMonthSnapshot, snapshotState, assessmentRows,
+  mintMonthSnapshot, snapshotState, verifySnapshot, assessmentRows,
   inHumanTxn, txnSnapshotState,
   addBankAccount, enterStatement, exceptLine,
 } from "./x57-fixtures.mjs";
+// The FA register world (0041, already shipped) -- reused rather than
+// re-deriving "soft-birth" (an approved-entry-triggered belt insert) from
+// scratch. A SEPARATE, already-proven firm/client graph (wb.buildWaveBWorld,
+// cached per process); x57's own generic wrappers (mint/snapshot/verify) work
+// identically against it since they key only on the calling human's JWT firm.
+import { faWorld, freshFaClient, buyAsset, completeSL } from "./x41-fa-world.mjs";
+import { reviseParticulars } from "./x41-fa-fixtures.mjs";
 
 let ready = false;
 let world = null;
@@ -286,4 +293,46 @@ test("E11(iii): resolve_bank_line_exception marks a (freshly re-minted) artifact
   assert.equal(stateInsideTxn, "stale", `E11(iii): STALE inside the SAME transaction as resolve_bank_line_exception (got ${stateInsideTxn})`);
   const rows = await assessmentRows(receipt.snapshot_id);
   assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "bank_line_exceptions");
+});
+
+// ===========================================================================
+// THE FA ARM, FIRED HONESTLY (R2 residual, accepted 2026-08-11). A revision
+// with an IN-PERIOD effective boundary marks the artifact STALE
+// (caused_by_table='fixed_assets') AND verify_snapshot reports drift=FALSE --
+// a positive read pinning the documented truth that fixed_assets is one of
+// the FOUR tables inert for a management_accounts payload (it owns no
+// trial_balance/aging figure), yet still marks as the fail-safe direction so
+// a FUTURE payload kind (an FA register pack) is covered from day one. This
+// is fixed_assets' first FIRING cell in this battery; bank_reconciliations
+// stays a named residual (no cell drives it here).
+// ===========================================================================
+test("the FA arm: revise_fixed_asset_particulars with an in-period effective_from marks the artifact STALE (fixed_assets), and verify_snapshot reports drift=FALSE -- fixed_assets is INERT for this payload kind", async (t) => {
+  if (skip57(t)) return;
+  const fa = await faWorld();
+  const faSub = fa.users.alice;
+  const client = await freshFaClient("x57fa1");
+  const monthStart = await pastMonthStart(6);
+  const acquireDate = addDaysStr(monthStart, -180); // well before the snapshotted month
+  const { asset } = await buyAsset({ client, cents: 200_000, postingDate: acquireDate });
+  await completeSL(client, asset.id, { life: 36, start: acquireDate, description: "x57 FA arm asset" });
+
+  const receipt = await mintMonthSnapshot(faSub, { client, monthStart });
+  assert.equal(await snapshotState(faSub, { snapshot: receipt.snapshot_id }), "current");
+  const before = await verifySnapshot(faSub, { snapshot: receipt.snapshot_id });
+  assert.equal(before.drift, false, "mandatory setup: no drift before the revision");
+
+  const inPeriodEffectiveFrom = `${monthStart.slice(0, 8)}12`;
+  await reviseParticulars(faSub, {
+    client, asset: asset.id,
+    particulars: { method: "straight_line", useful_life_months: 24, residual_cents: 0, start_date: acquireDate },
+    effectiveFrom: inPeriodEffectiveFrom,
+  });
+
+  assert.equal(await snapshotState(faSub, { snapshot: receipt.snapshot_id }), "stale", "the FA arm marks stale on an in-period revision");
+  const rows = await assessmentRows(receipt.snapshot_id);
+  assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "fixed_assets");
+
+  const after = await verifySnapshot(faSub, { snapshot: receipt.snapshot_id });
+  assert.equal(after.drift, false, `fixed_assets is INERT for a management_accounts payload -- the recompute confirms zero drift even though the trigger correctly (fail-safe) marked stale (got ${JSON.stringify(after)})`);
+  assert.ok(after.covered_tables_inert_for_this_payload.includes("fixed_assets"), "verify_snapshot's own payload names fixed_assets as inert for THIS payload kind");
 });

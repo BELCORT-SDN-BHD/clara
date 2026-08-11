@@ -225,7 +225,21 @@ test("E7'(A): apply_open_items TODAY, against a past-period invoice+credit-note,
   const applyReceipt = await applyOpenItems57(owner, {
     client, applications: [{ source_item_id: creditItem, target_item_id: invItem, amount_cents: 30_000 }],
   });
-  assert.ok(applyReceipt, "mandatory setup: the apply succeeded");
+  // FIX (R2 MINOR 3, accepted 2026-08-11): a truthy receipt alone does not
+  // prove the apply actually WROTE anything -- a silent no-op apply would
+  // return SOME object and pass an assert.ok. Positively ground the
+  // stimulus: read the allocation rows the apply's own group produced.
+  const group = applyReceipt?.group_id ?? applyReceipt?.application_group ?? applyReceipt?.group ?? null;
+  assert.ok(group, `mandatory setup: the apply's receipt names its application_group (got ${JSON.stringify(applyReceipt)})`);
+  const allocRows = (await rootQuery(
+    "select item_id, amount_cents from clara.open_item_allocations where application_group=$1 order by amount_cents",
+    [group],
+  )).rows;
+  assert.equal(allocRows.length, 2, `the apply GENUINELY wrote a two-row pair (got ${JSON.stringify(allocRows)})`);
+  assert.deepEqual(allocRows.map((r) => Number(r.amount_cents)).sort((a, b) => a - b), [-30_000, 30_000],
+    "the pair's amounts are the exact applied cents, net zero");
+  assert.ok(allocRows.some((r) => r.item_id === invItem) && allocRows.some((r) => r.item_id === creditItem),
+    "the pair touches BOTH named items, not some other stray rows");
 
   assert.equal(
     await snapshotState(owner, { snapshot: receipt.snapshot_id }), "current",
@@ -308,7 +322,22 @@ test("E7'(B-ii): a DIRECT, lawful, backdated open_item_allocations pair -- items
     invoiceItem: invItem, appliedCents: 30_000, creditItem, effectiveDate: inPeriodEffectiveDate,
     actorUserId: owner, snapshot: receipt.snapshot_id,
   });
-  assert.ok(group, "mandatory setup: the direct pair inserted lawfully (survived the FKs + the deferred subledger belt)");
+  // FIX (R2 MINOR 4, accepted 2026-08-11): `group` is a client-side
+  // randomUUID -- always truthy regardless of whether the insert actually
+  // persisted. Ground it in the DATABASE state instead: the two rows exist,
+  // POST-COMMIT, having survived the deferred subledger belt (which fires
+  // AT commit, not at the insert statement).
+  const persisted = (await rootQuery(
+    // to_jsonb, not a bare column list -- a raw `date` column comes back as a
+    // driver-parsed JS Date (timezone-shiftable); to_jsonb serializes it as
+    // the clean 'YYYY-MM-DD' string every other reader in this file compares
+    // against (the same pitfall E2b/E9's caused_by_effect_date reads avoid).
+    "select to_jsonb(o) as row from clara.open_item_allocations o where o.application_group=$1 order by o.amount_cents",
+    [group],
+  )).rows.map((x) => x.row);
+  assert.equal(persisted.length, 2, `the direct pair PERSISTED -- two rows, surviving the deferred belt at commit (got ${JSON.stringify(persisted)})`);
+  assert.deepEqual(persisted.map((r) => Number(r.amount_cents)).sort((a, b) => a - b), [-30_000, 30_000], "the persisted pair's amounts are the exact applied cents");
+  assert.ok(persisted.every((r) => r.effective_date === inPeriodEffectiveDate), `every persisted row carries the backdated effective_date ${inPeriodEffectiveDate} (got ${JSON.stringify(persisted.map((r) => r.effective_date))})`);
   assert.equal(stateInsideTxn, "stale", `E7'(B-ii): STALE inside the SAME transaction as the direct backdated insert -- proves the allocation arm of t_snapshot_staleness fires on its own (got ${stateInsideTxn})`);
 
   const rows = await assessmentRows(receipt.snapshot_id);

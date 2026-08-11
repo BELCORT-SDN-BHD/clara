@@ -166,3 +166,25 @@ test("mint_month_snapshot refuses CLR10 mint_lock_upgrade_refused when the SAME 
   assert.equal(err.code, "CLR10", `expected CLR10 (got ${err.code} / ${err.message})`);
   assert.ok(err.detail && err.detail.includes("mint_lock_upgrade_refused"), `the refusal detail names the token verbatim (got ${err.detail})`);
 });
+
+// CONTROL ARM (R2 MINOR 1, accepted 2026-08-11): the guard refuses the
+// COMPOSITION (this transaction already holding the SHARE lock), not
+// minting-inside-a-transaction generally. A transaction that mints with NO
+// prior books write for this client must succeed -- proving the refusal
+// above is specific, not a blanket ban this cell could have mistaken it for.
+test("CONTROL: mint_month_snapshot inside a transaction with NO prior books write for this client SUCCEEDS -- the guard refuses the lock upgrade specifically, not minting-in-a-transaction generally", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const client = await freshActiveClient(owner, "conc2ctrl");
+  await setupCloseCoa(owner, client);
+  const monthStart = await pastMonthStart(6);
+
+  let receipt = null;
+  await inHumanTxn(owner, async (txc) => {
+    receipt = await callInTxn(txc, "mint_month_snapshot", [
+      { name: "p_client" }, { name: "p_month_start", cast: "date" }, { name: "p_op_key" },
+    ], [client, monthStart, opk("x57-conc2ctrl-mint")]);
+  });
+  assert.ok(receipt?.snapshot_id, `the control mint SUCCEEDED inside its own transaction with no prior write (got ${JSON.stringify(receipt)})`);
+  assert.equal(receipt.state, "current");
+});
