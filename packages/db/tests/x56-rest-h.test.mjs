@@ -244,3 +244,121 @@ test("fy_end_source is present on both the close receipt snapshot and get_close_
   const readinessPost = await getCloseReadiness(owner, { client: fx.client, fy: fx.fy });
   assert.equal(readinessPost.fy_end_source, "default_1231", "readiness reports the SAME value post-close too");
 });
+
+// ===========================================================================
+// (R2.5 MAJOR) THE UNCODED-DOCUMENTS FALSE-PASS: _close_gate_uncoded's live-
+// entries predicate is M3's OWN closing_stock_present fix, carried to the
+// sibling gate it was always meant for (5c835b3). A document coded by a
+// journal_entries row, then REVERSED with nothing replacing it, is uncoded
+// again in substance -- pre-fix, the gate still saw the reversed original
+// (status stays 'approved') as standing coding: a silent false PASS, and
+// because this gate is date-scoped (matrix A27, no later close ever re-asks
+// about it) the miss was PERMANENT, not a retry-away flake.
+//
+// RED-PROOF: this cell's core assertion (gate2.state === 'fail' after the
+// reversal, below) is the ONE assertion here that a checkout of any commit
+// from 619fc4c through 1ee1a7b (before 5c835b3) would FALSE-PASS on -- those
+// commits count the coded-but-reversed row as live evidence, so the gate
+// reads 'pass' there instead of 'fail'. Genuinely red before the fix landed.
+// ===========================================================================
+
+test("uncoded-documents false-pass: a coded document REVERSED with nothing replacing it reads uncoded again -- the gate must fail naming it, not silently pass; per-item attest or re-coding both clear it legitimately", async (t) => {
+  if (skip56(t)) return;
+  const owner = world.users.alice;
+  const preparer = world.users.bob;
+  const { filedDocument } = await import("./wave-a-fixtures.mjs");
+  const fx = await cleanCloseableFY(owner, { tag: "uncodedrev", prepSub: preparer, startsOn: "2027-01-01" });
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [fx.client])).rows[0].firm_id;
+  const doc = await filedDocument(preparer, { firm, client: fx.client, financialDate: addDaysStr(fx.startsOn, 10) });
+
+  // CODE it: a document-cited, approved entry -- the A6a idiom (freshResolution
+  // over the document, draftEntryV3's document+sha256 pair, then approve).
+  const docRes = freshResolution(preparer, fx.client, { subjectKind: "document", subjectId: doc.documentId });
+  const coding = await draftEntryV3(preparer, {
+    client: fx.client, resolution: docRes, document: doc.documentId, sha256: doc.sha256,
+    postingDate: addDaysStr(fx.startsOn, 10), memo: "x56 uncoded-rev: the coding entry",
+    lines: [
+      { account_code: BANK1, debit_cents: 3300, credit_cents: 0, description: "dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 3300, description: "cr" },
+    ],
+    opKey: opk("x56-uncodedrev-code"),
+  });
+  await approveEntry(preparer, { entry: coding.entry_id, expectedRevision: coding.revision_token, opKey: opk("x56-uncodedrev-code-approve") });
+
+  // MANDATORY SETUP: with the coding entry live, the gate passes (proves the
+  // fixture reaches the 'coded' state honestly before the reversal removes it).
+  const begunCoded = await beginClose(owner, { fy: fx.fy });
+  const gateCoded = (begunCoded.gates ?? []).find((g) => g.check_key === "uncoded_documents");
+  assert.equal(gateCoded?.state, "pass", "mandatory setup: the live coding entry makes the gate pass BEFORE any reversal");
+  await humanQuery(owner, "select clara.abandon_close(p_close_run => $1, p_reason => $2, p_op_key => $3) as r",
+    [begunCoded.close_run_id, "x56 uncoded-rev: abandoning to reverse the coding entry before the real close attempt", opk("x56-uncodedrev-abandon")]);
+
+  // REVERSE it -- nothing replaces it. The coding entry is ordinary (no is_year_end),
+  // so reverse_entry takes its direct branch: the original stays approved with
+  // reversed_by set, and its mirror posts already-approved too.
+  await humanQuery(owner, "select clara.reverse_entry(p_entry => $1, p_reason => $2, p_op_key => $3) as r",
+    [coding.entry_id, "x56 uncoded-rev: reversing the coding entry, nothing recodes it", opk("x56-uncodedrev-reverse")]);
+  const codingRow = (await rootQuery("select reversed_by from clara.journal_entries where id=$1", [coding.entry_id])).rows[0];
+  assert.ok(codingRow.reversed_by, "mandatory setup: the coding entry is now reversed (reversed_by set)");
+
+  // THE FALSE-PASS PROOF: the gate must now read FAIL, naming this filing_id.
+  const begun2 = await beginClose(owner, { fy: fx.fy });
+  const gate2 = (begun2.gates ?? []).find((g) => g.check_key === "uncoded_documents");
+  assert.equal(gate2?.state, "fail", "the gate returns to FAIL once its one coding entry is reversed with nothing replacing it -- a reversed original is not standing coding");
+  const measured2 = (await rootQuery("select measured from clara.close_gate_results where id=$1", [gate2.result_id])).rows[0].measured;
+  assert.equal(measured2.uncoded_count, 1);
+  assert.equal(measured2.uncoded[0]?.filing_id, doc.filingId, "the measured uncoded array names EXACTLY this filing_id");
+
+  // Structural confirmation, read from the live body: the same live-entries
+  // predicate M3 carries on closing_stock_present.
+  const body = (await rootQuery(
+    "select pg_get_functiondef('clara._close_gate_uncoded(uuid,uuid)'::regprocedure) as def",
+  )).rows[0].def;
+  assert.match(body, /je\.reversed_by\s+is\s+null/);
+  assert.match(body, /je\.reversal_of\s+is\s+null/);
+
+  // RIGHT ANSWER, arm 1: per-item attest THIS filing_id -> the close proceeds.
+  await attestClose(owner, { closeRun: begun2.close_run_id, checkKey: "uncoded_documents", reason: "x56 uncoded-rev: attesting the reversed-and-not-recoded document, accepted as-is", itemKey: doc.filingId });
+  const closed = await finalizeClose(owner, { fy: fx.fy });
+  assert.ok(closed.receipt_id, "the close succeeds once the reversed-coding gap is attested by its own filing_id");
+
+  // RIGHT ANSWER, arm 2 (a fresh client): re-coding the SAME document clears the
+  // gate with NO attestation needed -- the false-pass fix does not turn this into
+  // a permanent block, it just stops a stale reversed entry from counting.
+  const fx2 = await cleanCloseableFY(owner, { tag: "uncodedrev-recode", prepSub: preparer, startsOn: "2027-01-01" });
+  const firm2 = (await rootQuery("select firm_id from clara.clients where id=$1", [fx2.client])).rows[0].firm_id;
+  const doc2 = await filedDocument(preparer, { firm: firm2, client: fx2.client, financialDate: addDaysStr(fx2.startsOn, 10) });
+  const docRes2 = freshResolution(preparer, fx2.client, { subjectKind: "document", subjectId: doc2.documentId });
+  const coding2a = await draftEntryV3(preparer, {
+    client: fx2.client, resolution: docRes2, document: doc2.documentId, sha256: doc2.sha256,
+    postingDate: addDaysStr(fx2.startsOn, 10), memo: "x56 uncoded-rev recode: the FIRST coding entry",
+    lines: [
+      { account_code: BANK1, debit_cents: 700, credit_cents: 0, description: "dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 700, description: "cr" },
+    ],
+    opKey: opk("x56-uncodedrev-recode-code1"),
+  });
+  await approveEntry(preparer, { entry: coding2a.entry_id, expectedRevision: coding2a.revision_token, opKey: opk("x56-uncodedrev-recode-code1-approve") });
+  await humanQuery(owner, "select clara.reverse_entry(p_entry => $1, p_reason => $2, p_op_key => $3) as r",
+    [coding2a.entry_id, "x56 uncoded-rev recode: reversing the first coding entry", opk("x56-uncodedrev-recode-reverse")]);
+  // RE-CODE: a fresh entry citing the SAME document, drafted and approved by a
+  // maker/checker pair distinct from each other (ordinary self-approval is fine
+  // here, matching plainEntry's own established shape elsewhere in this suite).
+  const docRes2b = freshResolution(preparer, fx2.client, { subjectKind: "document", subjectId: doc2.documentId });
+  const coding2b = await draftEntryV3(preparer, {
+    client: fx2.client, resolution: docRes2b, document: doc2.documentId, sha256: doc2.sha256,
+    postingDate: addDaysStr(fx2.startsOn, 11), memo: "x56 uncoded-rev recode: the SECOND (real) coding entry",
+    lines: [
+      { account_code: BANK1, debit_cents: 900, credit_cents: 0, description: "dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 900, description: "cr" },
+    ],
+    opKey: opk("x56-uncodedrev-recode-code2"),
+  });
+  await approveEntry(preparer, { entry: coding2b.entry_id, expectedRevision: coding2b.revision_token, opKey: opk("x56-uncodedrev-recode-code2-approve") });
+
+  const begun3 = await beginClose(owner, { fy: fx2.fy });
+  const gate3 = (begun3.gates ?? []).find((g) => g.check_key === "uncoded_documents");
+  assert.equal(gate3?.state, "pass", "re-coding the document with a FRESH live entry clears the gate -- no attestation needed, the stale reversed entry is simply not evidence anymore");
+  const closed2 = await finalizeClose(owner, { fy: fx2.fy });
+  assert.ok(closed2.receipt_id, "the close proceeds cleanly once the document is genuinely re-coded");
+});
