@@ -912,15 +912,19 @@ begin
        - coalesce((select sum(d.amount_cents) from clara.fa_depreciation d
             where d.client_id = p_client and d.is_live
               and d.effective_date > v_fy.starts_on - 1 and d.effective_date <= v_fy.ends_on), 0)
-       - coalesce((select sum(fa.cost_cents
-                     - coalesce(fa.accumulated_depreciation_cents, 0)
-                     - coalesce((select sum(d3.amount_cents) from clara.fa_depreciation d3
-                          where d3.asset_id = fa.id and d3.is_live), 0))
+       - coalesce((select sum(fa.cost_cents - clara._fa_accumulated_at(fa.id, fa.disposed_at))
             from clara.fixed_assets fa
             where fa.client_id = p_client and fa.superseded_at is null
               and fa.disposed_at is not null
               and fa.disposed_at > v_fy.starts_on - 1 and fa.disposed_at <= v_fy.ends_on), 0)
     into v_reg_move;
+  -- The disposal NBV reads the register's OWN instrument, _fa_accumulated_at (the
+  -- battery's partial-disposal catch): a SPLIT successor carries only its baseline
+  -- SHARE by design -- the parent's ledger content is pro-rated at READ time by the
+  -- lineage walk, never baked. The hand formula (baseline + own rows) was exact for
+  -- full disposals and silently dropped the pro-rated parent share for partial ones.
+  -- For a non-split asset the two are identical, so the proven full-disposal algebra
+  -- is unchanged.
   select coalesce(sum(jl.debit_cents - jl.credit_cents), 0) into v_gl_move
     from clara.journal_lines jl
     join clara.journal_entries je on je.id = jl.entry_id
@@ -1258,9 +1262,10 @@ begin
       -- money clock (baseline + live rows >= cost - residual) is exhausted by design --
       -- neither may demand a false per-asset exception every year for the rest of time.
       and coalesce(fa.depreciation_method, 'none') <> 'none'
-      and (coalesce(fa.accumulated_depreciation_cents, 0)
-           + coalesce((select sum(d2.amount_cents) from clara.fa_depreciation d2
-                where d2.asset_id = fa.id and d2.is_live), 0))
+      -- The money clock reads _fa_accumulated_at too (the same partial-disposal catch):
+      -- a split successor's true accumulated includes the parent ledger's pro-rated
+      -- share, which baseline+own-rows misses.
+      and clara._fa_accumulated_at(fa.id, v_fy.ends_on)
           < (fa.cost_cents - coalesce(fa.residual_cents, 0))
       and coalesce(l.through, fa.depreciation_start_date - 1) < v_fy.ends_on;
   return jsonb_build_object(
