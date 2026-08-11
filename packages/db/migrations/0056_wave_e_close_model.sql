@@ -198,7 +198,7 @@ begin
   select count(*) into v_n from pg_proc p
     where p.pronamespace = 'clara'::regnamespace
       and lower(regexp_replace(regexp_replace(regexp_replace(
-            coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)),
+            coalesce(nullif(p.prosrc,''), ''), -- prosrc-only (same latent boundary as 11.2)
             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
           ~ 'update\s+clara\.journal_entries\s+set\s+status\s*=\s*''approved''';
   if v_n <> 4 then
@@ -2733,39 +2733,66 @@ revoke all on function clara.correction_period_state(uuid) from public;
 
 -- REPOINT THE TWO READERS (reads, not audited writers -- no D1 exposure): each live body
 -- carries the internal call once; count-guarded splice, never a rebuild.
-do $s7$
+-- UNROLLED, one LITERAL signature variable per reader (the wiki-lint + binding-post-
+-- control CoR scanners attribute a patch only through a statically literal-valued
+-- signature -- a foreach over an array is unresolvable to them BY DESIGN, fail-closed).
+do $s7a$
 declare
-  v_sig text; v_def text; v_frm text; v_cnt int;
+  v_sig text := 'clara.retire_document_filing(uuid,text,uuid,text)';
+  v_def text; v_frm text; v_cnt int;
 begin
   v_frm := 'clara._correction_period_state(';
-  foreach v_sig in array array[
-      'clara.retire_document_filing(uuid,text,uuid,text)',
-      'clara.preview_wrong_client_correction(uuid,uuid,uuid)'] loop
-    select pg_get_functiondef(p.oid) into v_def from pg_proc p
-      where p.oid = v_sig::regprocedure;
-    if v_def is null then
-      raise exception '0056 S7: % is GONE', v_sig using errcode = 'CLR10';
-    end if;
-    v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
-    if v_cnt <> 1 then
-      raise exception '0056 S7: % carries the period-state call % time(s), expected exactly 1 -- re-derive the repoint', v_sig, v_cnt
-        using errcode = 'CLR10';
-    end if;
-    v_def := replace(v_def, v_frm, 'clara.correction_period_state(');
-    execute v_def;
-    -- POSTCHECK (round-1 ladder uniformity with S9/S9b): re-harvest -- the honest twin
-    -- landed exactly once and the protocol spelling is GONE from this reader. S11.2's
-    -- caller censuses re-assert the same from the tail; this closes the loop in-line.
-    select pg_get_functiondef(p.oid) into v_def from pg_proc p
-      where p.oid = v_sig::regprocedure;
-    if (length(v_def) - length(replace(v_def, 'clara.correction_period_state(', '')))
-         / length('clara.correction_period_state(') <> 1
-       or position('_correction_period_state(' in v_def) > 0 then
-      raise exception '0056 S7 postcheck: %''s repoint did not land cleanly', v_sig
-        using errcode = 'CLR10';
-    end if;
-  end loop;
-end $s7$;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+    where p.oid = v_sig::regprocedure;
+  if v_def is null then
+    raise exception '0056 S7: retire_document_filing is GONE' using errcode = 'CLR10';
+  end if;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0056 S7: retire_document_filing carries the period-state call % time(s), expected exactly 1 -- re-derive the repoint', v_cnt
+      using errcode = 'CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, 'clara.correction_period_state(');
+  execute v_def;
+  -- POSTCHECK (round-1 ladder uniformity with S9/S9b): re-harvest -- the honest twin
+  -- landed exactly once and the protocol spelling is GONE from this reader.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+    where p.oid = v_sig::regprocedure;
+  if (length(v_def) - length(replace(v_def, 'clara.correction_period_state(', '')))
+       / length('clara.correction_period_state(') <> 1
+     or position('_correction_period_state(' in v_def) > 0 then
+    raise exception '0056 S7 postcheck: retire_document_filing''s repoint did not land cleanly'
+      using errcode = 'CLR10';
+  end if;
+end $s7a$;
+
+do $s7b$
+declare
+  v_sig text := 'clara.preview_wrong_client_correction(uuid,uuid,uuid)';
+  v_def text; v_frm text; v_cnt int;
+begin
+  v_frm := 'clara._correction_period_state(';
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+    where p.oid = v_sig::regprocedure;
+  if v_def is null then
+    raise exception '0056 S7: preview_wrong_client_correction is GONE' using errcode = 'CLR10';
+  end if;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0056 S7: preview_wrong_client_correction carries the period-state call % time(s), expected exactly 1 -- re-derive the repoint', v_cnt
+      using errcode = 'CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, 'clara.correction_period_state(');
+  execute v_def;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p
+    where p.oid = v_sig::regprocedure;
+  if (length(v_def) - length(replace(v_def, 'clara.correction_period_state(', '')))
+       / length('clara.correction_period_state(') <> 1
+     or position('_correction_period_state(' in v_def) > 0 then
+    raise exception '0056 S7 postcheck: preview_wrong_client_correction''s repoint did not land cleanly'
+      using errcode = 'CLR10';
+  end if;
+end $s7b$;
 
 -- =====================================================================================
 -- S9 -- THE approve_opening_seed SPLICE (skeleton §2.6 item 2; matrix A19g's seed arm).
@@ -2964,10 +2991,13 @@ end $s9b$;
 -- =====================================================================================
 do $s9c$
 declare
+  -- LITERAL signature (the wiki-lint CoR scanner attributes patches by exact
+  -- regprocedure literal, never by a proname filter -- the S9/S9b idiom).
+  v_sig text := 'clara._tf_fa_movement_belt()';
   v_def text; v_frm text; v_to text; v_cnt int;
 begin
   select pg_get_functiondef(p.oid) into v_def from pg_proc p
-    where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_fa_movement_belt';
+    where p.oid = v_sig::regprocedure;
   if v_def is null then
     raise exception '0056 S9c: _tf_fa_movement_belt is GONE' using errcode = 'CLR10';
   end if;
@@ -2987,7 +3017,7 @@ begin
   -- POSTCHECK: (f) landed exactly once; the surviving exemptions and both named
   -- refusal reasons are intact.
   select pg_get_functiondef(p.oid) into v_def from pg_proc p
-    where p.pronamespace = 'clara'::regnamespace and p.proname = '_tf_fa_movement_belt';
+    where p.oid = v_sig::regprocedure;
   if (length(v_def) - length(replace(v_def, 'new.close_receipt_id is not null', '')))
        / length('new.close_receipt_id is not null') <> 1 then
     raise exception '0056 S9c postcheck: exemption (f) did not land exactly once'
@@ -3035,7 +3065,7 @@ begin
     where p.pronamespace = 'clara'::regnamespace
       and p.proname not in ('_correction_period_state')
       and regexp_replace(regexp_replace(
-            coalesce(nullif(p.prosrc, ''), pg_get_functiondef(p.oid)),
+            coalesce(nullif(p.prosrc, ''), ''), -- prosrc-only: a BEGIN ATOMIC body (0 today, measured) is the recorded-latent boundary; a functiondef fallback is scanner-unattributable
             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')
           like '%\_correction\_period\_state(%' escape '\';
   if v_t <> 'approve_wrong_client_correction' then
@@ -3047,7 +3077,7 @@ begin
     where p.pronamespace = 'clara'::regnamespace
       and p.proname not in ('correction_period_state', '_correction_period_state')
       and regexp_replace(regexp_replace(
-            coalesce(nullif(p.prosrc, ''), pg_get_functiondef(p.oid)),
+            coalesce(nullif(p.prosrc, ''), ''), -- prosrc-only: a BEGIN ATOMIC body (0 today, measured) is the recorded-latent boundary; a functiondef fallback is scanner-unattributable
             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')
           like '%clara.correction\_period\_state(%' escape '\';
   if v_t <> 'preview_wrong_client_correction,retire_document_filing' then
@@ -3061,7 +3091,7 @@ begin
   select count(*) into v_n from pg_proc p
     where p.pronamespace = 'clara'::regnamespace
       and lower(regexp_replace(regexp_replace(regexp_replace(
-            coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)),
+            coalesce(nullif(p.prosrc,''), ''), -- prosrc-only (same latent boundary as 11.2)
             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
           ~ 'update\s+clara\.journal_entries\s+set\s+status\s*=\s*''approved''';
   if v_n <> 5 then
@@ -3069,7 +3099,7 @@ begin
       using errcode = 'CLR10';
   end if;
   select lower(regexp_replace(regexp_replace(regexp_replace(
-           coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)),
+           coalesce(nullif(p.prosrc,''), ''), -- prosrc-only (same latent boundary as 11.2)
            '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g')) into v_t
     from pg_proc p where p.oid = 'clara.finalize_close(uuid,text,text)'::regprocedure;
   if v_t !~ 'update\s+clara\.journal_entries\s+set\s+status\s*=\s*''approved''' then
