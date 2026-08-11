@@ -173,6 +173,11 @@ test("catch-7 RIGHT ANSWER: a NEUTRAL correction (net zero per account) is ADMIT
   const verified = await verifyClose(owner, { receipt: closed.receipt_id });
   assert.equal(verified.verified, true, "the standing close receipt still verifies after the neutral correction -- nothing pinned moved");
   assert.deepEqual(verified.strict.closing_position_diffs, [], "zero closing-position diffs on the fresh recompute");
+  // R1.5 addition (d366870): verify_close now also reports the receipt's own
+  // stored status/kind directly (additive keys) -- still 'active'/'close', the
+  // neutral correction never superseded or reopened anything.
+  assert.equal(verified.receipt_status, "active", "the receipt itself stays active -- a neutral correction supersedes nothing");
+  assert.equal(verified.receipt_kind, "close", "still the original close receipt, not a reopen");
 });
 
 // A genuinely non-neutral, single-supersession correction that ALSO keeps
