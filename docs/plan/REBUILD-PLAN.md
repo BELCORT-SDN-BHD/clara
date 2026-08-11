@@ -37,7 +37,8 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > ONE campaign per E-R7, acceptance F→A→B→C→D→E per the matrix. **Named build debt:** the
 > `closing_stock` producer verb ships before any real goods-trader close (PR #228 residual 5) ·
 > **the B3 ends_on-reopen implementation (ADR-068)** — a D1-class migration on
-> `reopen_fiscal_year`, before the close model activates on real books.
+> `reopen_fiscal_year`, before the FIRST REAL CLOSE finalizes (BEE FY2025) and in any case
+> before any real reopen.
 > Everything that follows is the CHRONOLOGICAL record, **oldest first** — each
 > `STATUS (date)` block was true on its date and is superseded by the ones below it. The
 > live pin lives in `CLAUDE.md`; the open register is PROJECTLOG PART 2.

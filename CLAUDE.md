@@ -196,7 +196,7 @@ five owner questions standing at the ADR-066 close were **ALL RULED 2026-08-09**
 owner-only keys · the 2506 window OPENS · Gate P = owner re-export, remind until done ·
 #43/#44 = agent legwork + owner verify) — PART 2 + the handoff record them. **The ADR-068
 evening sitting (2026-08-11) cleared the owner queue: B3 RULED (the ends_on-dated reopen
-reversal — its IMPLEMENTATION is a named build item, D1-class, before the close model
-activates on real books) · the two α V-OWNER sign-offs RECORDED · Gate-P defers to the
+reversal — its IMPLEMENTATION is a named build item, D1-class, before the first real
+close finalizes) · the two α V-OWNER sign-offs RECORDED · Gate-P defers to the
 Wave-G reset (reminders STOP).** The `opening_tb.line` producer + the K-doc door
 are Phase-5 and review-gated — their home is **`docs/plan/REBUILD-PLAN.md`**.
