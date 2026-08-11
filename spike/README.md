@@ -4,7 +4,7 @@ Minimal, deterministic TypeScript harness proving the **Workflow DevKit
 durable engine** (`workflow` + `@workflow/world-postgres`) against **Supabase
 Postgres**. **No model/LLM calls anywhere** - this tests the ENGINE
 (durability / HITL / idempotency), per `docs/phase2-research/runtime-recommendation.md`
-§6/§8 and `docs/plan/REBUILD-PLAN.md` Slice 0.
+§6/§8 and `docs/plan/completed/rebuild-plan-history.md` Slice 0.
 
 ## Architecture (what actually runs)
 

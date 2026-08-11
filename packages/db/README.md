@@ -10,7 +10,7 @@ truth (`docs/ARCHITECTURE.md` §3).
 > `clara_*` roles, identity/RBAC, forced RLS with role-pinned read policies, the
 > two-lane audited writers (human vs. wake — the agent can never sign), the four
 > structural invariants, the balance/immutability/append-only triggers, and
-> money-as-cents. See `docs/plan/REBUILD-PLAN.md`.
+> money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
 > **Migration ledger (as of 2026-08-09).** The repo carries **53 migrations,
 > `0001`–`0054`** (the sequence skips `0032`, which never existed — 53 files, not 54),

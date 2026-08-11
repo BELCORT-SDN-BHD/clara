@@ -8,7 +8,7 @@ The real **cross-firm isolation suite** (RLS + FORCE on every base table, the
 SELECT-wrapped-writer negative path, provenance-mismatch RAISE, wake allowlists,
 role floors) is **Slice 2** — PORT'd from the frozen build's `90-isolation-tests.sql`
 and extended per the salvage manifest's hardening notes, and green before any
-books table carries data (`docs/plan/REBUILD-PLAN.md` Slice 2;
+books table carries data (`docs/plan/completed/rebuild-plan-history.md` Slice 2;
 `docs/audit/02-salvage-manifest.md`).
 
 ## Running
