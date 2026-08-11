@@ -237,3 +237,64 @@ The Slice-0 spike ran against the fresh hosted Supabase project (`spike/RESULTS.
 5. Operational notes: the runtime reads `WORKFLOW_POSTGRES_URL` (not `DATABASE_URL` — mapped in the worker entry); engine timestamps are tz-naive (display only); Supavisor session-mode LISTEN/NOTIFY verified at 32ms with sub-second job pickup.
 
 Remaining before final Slice-0 sign-off: the 48-hour park check-in (armed 2026-07-17 15:15 +08, resume due ≥2026-07-19 15:15 +08). **RESOLVED** — the park check-in closed with Slice 4 (ADR-017); nothing remains open in this appendix.
+
+---
+
+## Roadmaps (carried from REBUILD-PLAN at the 2026-08-12 harness refactor)
+
+*The section below is reproduced verbatim from the former `docs/plan/REBUILD-PLAN.md` (deleted
+at the harness docs-tree refactor; its dated STATUS chronology is now the historical record at
+`docs/plan/completed/rebuild-plan-history.md`). It moved here, rather than into that historical
+archive, because it is a live routing table — new `document_kind`/`coding_kind` work still reads
+it as the authority for where an unbuilt kind's destination is decided.*
+
+### The `coding_kind` roadmap — where each classified document lands
+
+> **Added 2026-07-29** (Wave-C grilling). The classifier recognises **17 `document_kind` values**
+> (`0007_document_pipeline.sql:33-37`) while the books can code **5 `coding_kind` values**
+> (`0037_wave_c_a_subledger.sql:500-503` — widened from 0015's three by WC-R9:
+> `supplier_bill,sales_invoice,sales_credit_note,customer_receipt,supplier_payment`).
+> Until now **no artifact stated where the other 12 land** —
+> a search of PRD, this plan, ARCHITECTURE and all three project logs returned zero hits. That
+> absence is what produced the receipt-routing seam: ADR-ruled receipt auto-routing (0025) sends
+> every receipt into the paid OCR lane, and those receipts are now read and then strand, because a
+> counter purchase has no payable credit and so cannot be a `supplier_bill`. **This table closes
+> that gap.** Rulings marked **[R]** are ratified in `docs/plan/wave-c-contract.md`; **[P]** are
+> proposed and await the owner.
+
+**The law this table encodes:** `coding_kind` means *"which control account this entry touches, and
+in which direction"* — **not** "what kind of document this is". A document kind earns a typed coding
+lane **only** when a wrong posting would silently corrupt a subledger. Everything else rides the
+generic lane (`coding_kind` NULL), which carries every LAW invariant — client attribution,
+provenance binding, balance, maker/checker, reverse-not-delete — but breeds no rule sightings and
+is permanently ineligible for autopost. **A new `coding_kind` is always a migration, never an agent
+decision.**
+
+| `document_kind` | Destination | Wave |
+|---|---|---|
+| `invoice` | `supplier_bill` · `sales_invoice` | **LIVE** |
+| `e_invoice_xml` | `sales_invoice` via the structured (XML-only) lane | **LIVE** |
+| `credit_note` | `sales_credit_note` LIVE; purchase side → `supplier_credit_note`, added additively **[P]** | LIVE / purchase side **UNBUILT** (not in the five-value set) |
+| `debit_note` | rides `sales_invoice` deliberately — identical subledger effect **[R]** | **LIVE** |
+| `payment_voucher` | `supplier_payment` (settlement kind) **[R]** | **LIVE** (ADR-052 / `0037`) |
+| `bank_statement` | **Not a coding kind.** Becomes statement lines that MATCH entries; settlement is carried by `customer_receipt`/`supplier_payment` **[R]** | **LIVE** (ADR-053 / `0038`) |
+| `receipt` | `cash_purchase` — zero control legs, creates no AP. **Blocked**: "paid at the counter?" is not extractable today (no payment-method field; `invoice.amount_due` is a consistency test). Interim: generic lane **[R]** | **UNBUILT** — still the generic lane |
+| `claim_form` | **Generic lane, permanently** — a non-`payable`-class "due to employee/director" liability by account convention (WC-R10). The real want is tier-2 rule breeding, not a typed kind **[P]** | — |
+| `payroll_summary` | **Generic lane, permanently** for the journal; the statutory deadline calendar is Wave F (PRD §4.16 — no payroll engine) **[P]** | F (calendar only) |
+| `handwritten_note` · `other` | Generic lane **[P]** | — |
+| `management_account` | **Never a coding kind** — carry-down + TB tie-out input | B |
+| `opening_balance_doc` | **Never a coding kind** — carry-forward | B |
+| `ssm_company_doc` | **Never a coding kind** — onboarding/identity | B |
+| `agreement_contract` · `knowledge_artifact` | **Never a coding kind** — client wiki | B |
+| `tax_correspondence` | **Never a coding kind** — wiki + tax lane | B / F |
+
+**The honest gap this table exposes is not tier 3, it is tier 2.** The agent may already (1)
+transcribe any document into the generic lane interactively, and (2) propose a rule after ≥3
+human-approved sightings for a human to sign — but **(2) exists only for supplier bills and sales
+invoices**, because sightings breed only on control-account entries. Generic-lane entries breed
+nothing, so the long tail gets no compounding autonomy. **Extending sighting breeding to
+generic-lane shapes is the highest-value autonomy work STILL UNBUILT after Waves C and D**
+(the timing anchor "after Wave C" has passed; the mechanism claim above was re-verified
+2026-08-06 against `0037` — settlements still never breed, and the coding-rule sighting pool
+is still bills + invoices only; `0040`'s `_bank_rule_sightings` is a separate pool over
+statement lines, so it does not discharge this) — not widening this table.
