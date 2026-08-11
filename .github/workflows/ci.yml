@@ -6,71 +6,130 @@ name: CI
 # DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
 # project. See docs/architecture/ARCHITECTURE.md §9 and the repo README.
 
+# THE CI DIET (2026-08-11, owner-ruled after the quota exhaustion; reviewed on its own PR).
+# Three structural wastes removed, ZERO gate semantics changed when a gate runs:
+#   1. Every branch push used to trigger BOTH a push run and a pull_request run of the whole
+#      matrix (different refs -> concurrency never deduped them): 2x everything. Now: PRs run
+#      on the pull_request event only; push runs only on main (the post-merge confirmation,
+#      and the one context that keeps the FULL-history gitleaks sweep per merge).
+#   2. A docs-only change used to run the full DB matrix (~10 jobs x ~40 min) although it
+#      cannot change any fact a DB job proves. Now: the `changes` job classifies the diff
+#      (FAIL-CLOSED — any uncertainty, any non-docs path, any self-change of this file =>
+#      everything runs) and the heavy jobs skip when their subject cannot have changed.
+#      A SKIP under this rule is a POSITIVE statement, not a hole: the job's entire input
+#      surface is untouched by the diff, and the weekly scheduled full sweep re-proves every
+#      gate regardless (the "forever honest" promise of the frontier legs, kept on a cadence
+#      that does not bill 40 minutes to a typo fix).
+#   3. lint (freeze-lint, leak/secret scans, the wiki gates) is extracted into its own fast
+#      job so EVERY change — docs included — still gets the full secrets + boundary sweep,
+#      with feedback in minutes instead of after the DB matrix.
+# Deliberately NOT taken here (a later, separate decision): baseline-caching the migration
+# chain — it touches what the deploy-onto-existing and drill steps PROVE, so it needs its own
+# review, not a ride-along.
 on:
-  push:
   pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly full sweep (Thu 03:23 MYT): every job runs regardless of the last diff, so the
+    # historical frontier legs and drills stay proven on a cadence even through docs-only weeks.
+    - cron: "23 19 * * 3"
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # THE WEEKLY SWEEP GETS ITS OWN GROUP (review R2 MAJOR): cancel-in-progress is read from
+  # the NEWLY-QUEUED run, so no cancellation policy on the sweep itself can protect it while
+  # it shares a group with push-to-main runs -- a merge landing mid-sweep would cancel the
+  # one compensating control every skip in this file leans on, silently. Group isolation is
+  # the only mechanism that actually delivers "a scheduled run is never cancelled": nothing
+  # shares the sweep's group, so nothing can cancel it.
+  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ci:
-    runs-on: ubuntu-latest
-
-    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
-    # it ends. This is the ONLY database CI touches. It is not the frozen project.
-    # `postgres_b` is a SECOND, INDEPENDENT cluster (different port) used only by the
-    # DR full-profile round-trip so cluster-role recovery is genuinely cross-cluster
-    # (Codex HIGH-5: two databases in ONE cluster share pg_authid, making role parity a
-    # tautology; restoring into a separate cluster exercises real role/membership creation).
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: clara_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      postgres_b:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      # libpq vars — the db scripts read these (no DSN in code/argv).
-      PGHOST: localhost
-      PGPORT: "5432"
-      PGUSER: postgres
-      PGPASSWORD: postgres
-      PGDATABASE: clara_ci
-      NEXT_TELEMETRY_DISABLED: "1"
-      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
-      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
-      # still refuses any non-ephemeral target even with this set.
-      CLARA_ALLOW_DESTRUCTIVE: "1"
-
+  # =========================================================================
+  # THE DIFF CLASSIFIER — plain git, no third-party action, FAIL-CLOSED.
+  # Outputs default to true (run everything) and are narrowed ONLY when the diff is
+  # confidently computed and every changed path is provably outside a job's input surface.
+  # schedule / workflow_dispatch / a zero-SHA push / any git failure => everything runs.
+  #   code=false  ONLY when every changed file is docs-shaped (docs/**, any *.md,
+  #               .claude/** — none of which any CI gate reads).
+  #   db=true     when anything under packages/db/**, this workflow file, or a root
+  #               manifest/lockfile changed — the ENTIRE input surface of the frontier
+  #               legs and the partition gate (they read packages/db only; their runner
+  #               is defined here; installs read the root manifests).
+  # $GITHUB_* values are read as shell env, never spliced via ${{ }} (the house
+  # anti-injection discipline this file already applies elsewhere); EV_BEFORE is a SHA.
+  # =========================================================================
+  changes:
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      db: ${{ steps.classify.outputs.db }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Full history so the freeze-lint + migration-history checks can compare
-          # against origin/main (append-only-vs-base is the ONLY real protection —
-          # free-tier branch protection is not platform-enforced).
+          fetch-depth: 0
+      - id: classify
+        env:
+          EV_BEFORE: ${{ github.event.before }}
+        run: |
+          CODE=true; DB=true
+          RANGE=""
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"; then
+              BASE="$(git merge-base HEAD "refs/remotes/origin/$GITHUB_BASE_REF" 2>/dev/null || true)"
+              [ -n "$BASE" ] && RANGE="$BASE..HEAD"
+            fi
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            case "$EV_BEFORE" in
+              ""|0000000000000000000000000000000000000000) : ;;  # first/forced push — stay fail-closed
+              *) git cat-file -e "$EV_BEFORE" 2>/dev/null && RANGE="$EV_BEFORE..HEAD" ;;
+            esac
+          fi
+          if [ -n "$RANGE" ]; then
+            if FILES="$(git diff --name-only $RANGE)" && [ -n "$FILES" ]; then
+              CODE=false; DB=false
+              while IFS= read -r f; do
+                case "$f" in
+                  docs/*|*.md|.claude/*) : ;;
+                  *) CODE=true ;;
+                esac
+                case "$f" in
+                  packages/db/*|.github/workflows/ci.yml|pnpm-lock.yaml|package.json|pnpm-workspace.yaml|.npmrc) DB=true ;;
+                esac
+              done <<< "$FILES"
+            fi
+          fi
+          echo "--- event=$GITHUB_EVENT_NAME range=${RANGE:-<none: fail-closed>} => code=$CODE db=$DB ---"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "db=$DB" >> "$GITHUB_OUTPUT"
+
+  # =========================================================================
+  # LINT + SECRETS + BOUNDARY GATES — extracted from the `ci` job (the diet, item 3).
+  # Runs on EVERY event unconditionally, docs-only diffs included: a docs commit can leak a
+  # credential or violate the wiki boundary exactly as code can, and the standing law
+  # ("scan any branch with CI's own pinned gitleaks config") keeps its per-PR teeth here.
+  # Every step below is moved from the `ci` job verbatim in every EXECUTABLE respect — same
+  # commands, same pinned versions, same order (review R1 verified mechanically); the
+  # checkout rationale comment is condensed for this job's context. No DB service: none of
+  # these read one.
+  # =========================================================================
+  lint:
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history: the freeze-lint compares against origin/main, and the push-to-main /
+          # scheduled gitleaks context scans full history (same reasons as the ci job's checkout).
           fetch-depth: 0
 
       - name: Fetch base ref (origin/main) for append-only checks
@@ -97,9 +156,6 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
-
-      - name: Typecheck (tsc across TS packages)
-        run: pnpm typecheck
 
       - name: Lint (freeze-lint + leak-scan + eslint code-lint)
         run: pnpm lint
@@ -195,25 +251,136 @@ jobs:
         env:
           GITLEAKS_VERSION: "8.18.4"
         run: |
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
-          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
-          /tmp/gitleaks version
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o $RUNNER_TEMP/gitleaks.tgz
+          tar -xzf $RUNNER_TEMP/gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
+          $RUNNER_TEMP/gitleaks version
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             if [ "$GITHUB_BASE_REF" != "main" ]; then
               echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (CLAUDE.md); refusing to guess a scan scope." >&2
               exit 1
             fi
             if git rev-parse --verify -q origin/main >/dev/null; then
-              echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
-              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+              # A failed diff falls to the STRONGER arm (review R2 MINOR: absence must never
+              # select the weaker scan -- the round-1 polarity rule, applied to this probe).
+              CHANGED="$(git diff --name-only origin/main...HEAD)" || CHANGED=".gitleaks.toml"
+              if echo "$CHANGED" | grep -qxF ".gitleaks.toml"; then
+                # Review R1 MN-3: a PR that TIGHTENS the ruleset must exercise it against full
+                # history BEFORE merge, or a newly-flagged historical secret surfaces only after.
+                echo "PR context: .gitleaks.toml changed in this PR — running the FULL-history scan pre-merge"
+                $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+              else
+                echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
+                $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+              fi
             else
               echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
-              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+              $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
             fi
           else
             echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
-            /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+            $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
           fi
+
+  ci:
+    needs: changes
+    # FAIL-CLOSED AT THIS LAYER TOO (review R1 MAJOR): != 'false', never == 'true' --
+    # an absent/garbled output must RUN the job, not skip it green.
+    if: needs.changes.outputs.code != 'false'
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
+
+    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
+    # it ends. This is the ONLY database CI touches. It is not the frozen project.
+    # `postgres_b` is a SECOND, INDEPENDENT cluster (different port) used only by the
+    # DR full-profile round-trip so cluster-role recovery is genuinely cross-cluster
+    # (Codex HIGH-5: two databases in ONE cluster share pg_authid, making role parity a
+    # tautology; restoring into a separate cluster exercises real role/membership creation).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
+          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides the
+          # moment two jobs share one Docker host — hosted runners never see this, one
+          # VM per job. Steps read the mapped port via the wire-ports step below.
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres_b:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # libpq vars — the db scripts read these (no DSN in code/argv). PGPORT is wired
+      # per-run by the wire-ports step (job.services is not a job-env context).
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      NEXT_TELEMETRY_DISABLED: "1"
+      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
+      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
+      # still refuses any non-ephemeral target even with this set.
+      CLARA_ALLOW_DESTRUCTIVE: "1"
+
+    steps:
+      - name: Wire service ports (ephemeral host ports -> env)
+        run: |
+          echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "PGB_PORT=${{ job.services.postgres_b.ports['5432'] }}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history so the freeze-lint + migration-history checks can compare
+          # against origin/main (append-only-vs-base is the ONLY real protection —
+          # free-tier branch protection is not platform-enforced).
+          fetch-depth: 0
+
+      - name: Fetch base ref (origin/main) for append-only checks
+        run: |
+          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
+          # append-only freeze-lint + migration-history gates MUST have it — a
+          # fetch failure can no longer masquerade as success. Only a genuine
+          # first-introduction (origin/main absent) may pass without a base.
+          if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+            echo "origin/main exists — fetching it for the append-only base checks"
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          else
+            echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
+          fi
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc across TS packages)
+        run: pnpm typecheck
 
       - name: Build (nitro runtime + next dashboard)
         run: pnpm build
@@ -231,10 +398,15 @@ jobs:
       # v17 server.
       - name: Install PostgreSQL 17 client (for DR pg_dump)
         run: |
-          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
+          # IDEMPOTENT + HOST-LOCKED (self-hosted hardening): parallel jobs on one host
+          # raced the keyring/sources writes and the dpkg lock; flock serializes the
+          # install and the version guard makes every later run a no-op.
+          sudo flock /var/lock/clara-pgdg.lock bash -ec '
+            if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
+            echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
+            apt-get update -o DPkg::Lock::Timeout=180
+            apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
           pg_dump --version
 
       # DEPLOY-ONTO-EXISTING (finding F4 / finding 3): a real deploy applies HEAD's
@@ -503,11 +675,11 @@ jobs:
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_intake_ci'
           PGDATABASE=clara_intake_ci pnpm db:migrate
           PGDATABASE=clara_intake_ci pnpm db:seed
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
             pnpm --filter @clara/runtime exec bootstrap
           cd packages/runtime
           PGDATABASE=clara_intake_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
             node tests/intake-e2e.mjs
 
       # Wave-B rig-confined fault gates (§4 of the contract): the three STANDALONE runtime e2es
@@ -524,17 +696,17 @@ jobs:
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
           PGDATABASE=clara_wave_b_ci pnpm db:migrate
           PGDATABASE=clara_wave_b_ci pnpm db:seed
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             pnpm --filter @clara/runtime exec bootstrap
           cd packages/runtime
           PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             node tests/interview-e2e.mjs
           PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             node tests/interview-kill-resume-e2e.mjs
           PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
             node tests/version-cutover-e2e.mjs
 
       - name: DR backup/restore self-test (ephemeral postgres:17)
@@ -568,15 +740,15 @@ jobs:
           # (Codex re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
           # fresh-target-only preflight cannot abort here.
           PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/drci_source" \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
             pnpm --filter @clara/runtime exec bootstrap
-          PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out /tmp/drci-full.sql
+          PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out $RUNNER_TEMP/drci-full.sql
           # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid
-          PGPORT=5433 PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
-          PGPORT=5433 PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          PGPORT=5433 PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file /tmp/drci-full.sql
-          CLARA_DR_SOURCE_URL="postgres://postgres@localhost:5432/drci_source" \
-          CLARA_DR_TARGET_URL="postgres://postgres@localhost:5433/drci_target" \
+          PGPORT=$PGB_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
+          PGPORT=$PGB_PORT PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
+          PGPORT=$PGB_PORT PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file $RUNNER_TEMP/drci-full.sql
+          CLARA_DR_SOURCE_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
+          CLARA_DR_TARGET_URL="postgres://postgres@localhost:$PGB_PORT/drci_target" \
             node packages/db/scripts/dr-verify.mjs
 
   # ===========================================================================
@@ -625,7 +797,16 @@ jobs:
   #
   # DB NAMES USE `dbtag`, NEVER `slice`: d-b0 is not a legal bare SQL identifier.
   db-slice-frontiers:
-    runs-on: ubuntu-latest
+    # The diet: this matrix reads packages/db/** and nothing else (its own gate/list/drill
+    # logic included) — it runs when that surface (or this file, or a root manifest) changed,
+    # and on every scheduled weekly sweep. FAIL-CLOSED via the classifier's defaults.
+    needs: changes
+    if: needs.changes.outputs.db != 'false'
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
     strategy:
       fail-fast: false
       matrix:
@@ -653,7 +834,10 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: clara_ci
         ports:
-          - 5432:5432
+          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides the
+          # moment two jobs share one Docker host — hosted runners never see this, one
+          # VM per job. Steps read the mapped port via the wire-ports step below.
+          - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -662,13 +846,15 @@ jobs:
 
     env:
       PGHOST: localhost
-      PGPORT: "5432"
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: clara_ci
       CLARA_ALLOW_DESTRUCTIVE: "1"
 
     steps:
+      - name: Wire service ports (ephemeral host ports -> env)
+        run: |
+          echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # (0) THE PRESENCE GATE — NONE-OR-ALL. The four slices land days apart; this job is fully
@@ -754,10 +940,13 @@ jobs:
       - name: Install PostgreSQL 17 client
         if: steps.gate.outputs.ready == 'true'
         run: |
-          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
+          # IDEMPOTENT + HOST-LOCKED (self-hosted hardening) — same recipe as the ci job.
+          sudo flock /var/lock/clara-pgdg.lock bash -ec '
+            if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
+            echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
+            apt-get update -o DPkg::Lock::Timeout=180
+            apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
           psql --version
 
       # (1) the slice-shaped migrations copy: every migration numbered at or below THIS SLICE'S
@@ -814,15 +1003,15 @@ jobs:
           # CLARA_RIG_ALLOW_RESET is deliberately NOT set here: the reset-gated drill must SKIP in
           # this sweep and run ALONE in (4). CLARA_ALLOW_DESTRUCTIVE *is* set, at job level, because
           # the rig battery needs it — every reset gate keys on CLARA_RIG_ALLOW_RESET, never on it.
-          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee /tmp/list-run.txt
+          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/list-run.txt
           # (3b) THE CELL FLOOR. The totality gate below is FILE-granular: a DELETED cell inside a
           # still-listed file passes it. Each list therefore declares its own measured floor and the
           # run must meet it. Raise the floor in the list when you add cells; never lower it to go
           # green.
           FLOOR="$(grep -E '^#!cells-floor:' "$LIST" | head -1 | awk '{print $2}')"
           test -n "$FLOOR" || { echo "$LIST declares no '#!cells-floor:' — every list must"; exit 1; }
-          PASS="$(grep -E '^# pass ' /tmp/list-run.txt | tail -1 | awk '{print $3}')"
-          FAIL="$(grep -E '^# fail ' /tmp/list-run.txt | tail -1 | awk '{print $3}')"
+          PASS="$(grep -E '^# pass ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
+          FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
           echo "--- ${{ matrix.slice }}: $PASS pass / $FAIL fail · declared floor $FLOOR ---"
           test "$FAIL" = "0" || { echo "the ${{ matrix.slice }} list is not green"; exit 1; }
           test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
@@ -858,9 +1047,9 @@ jobs:
           done < "$ROSTER"
           test -n "$FILES" || { echo "$ROSTER lists no contracts"; exit 1; }
           echo "--- ${{ matrix.slice }} frontier: $(echo $FILES | wc -w) cross-slice contract(s) ---"
-          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee /tmp/contracts-run.txt
-          FAIL="$(grep -E '^# fail ' /tmp/contracts-run.txt | tail -1 | awk '{print $3}')"
-          PASS="$(grep -E '^# pass ' /tmp/contracts-run.txt | tail -1 | awk '{print $3}')"
+          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/contracts-run.txt
+          FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
+          PASS="$(grep -E '^# pass ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
           echo "--- contracts at the ${{ matrix.slice }} frontier: $PASS pass / $FAIL fail ---"
           test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ matrix.slice }} frontier"; exit 1; }
 
@@ -901,7 +1090,15 @@ jobs:
   # x42x files on disk here, and RUN by every frontier leg above. A new contract that joins the
   # corpus and not the roster fails this job by name.
   db-split-partition-total:
-    runs-on: ubuntu-latest
+    # Same input surface as the frontier legs (packages/db/tests + split-lists + migrations),
+    # same diet condition, same weekly sweep.
+    needs: changes
+    if: needs.changes.outputs.db != 'false'
+    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
+    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
+    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
+    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    runs-on: [self-hosted, linux, clara]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -945,16 +1142,16 @@ jobs:
           # of anything, it is the set of files that run EVERYWHERE.
           ROSTER="tests/split-lists/test-list-contracts.txt"
           test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional once the split has landed"; exit 1; }
-          ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > /tmp/contracts-disk.txt
-          grep -v '^#' "$ROSTER" | grep -v '^$' | sort > /tmp/contracts-roster.txt
-          if ! diff -u /tmp/contracts-disk.txt /tmp/contracts-roster.txt; then
+          ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > $RUNNER_TEMP/contracts-disk.txt
+          grep -v '^#' "$ROSTER" | grep -v '^$' | sort > $RUNNER_TEMP/contracts-roster.txt
+          if ! diff -u $RUNNER_TEMP/contracts-disk.txt $RUNNER_TEMP/contracts-roster.txt; then
             echo "the cross-slice contract roster ($ROSTER) is not the set of x42x-*.test.mjs on disk."
             echo "  a '-' line is a contract on disk that NO frontier leg runs — add it to the roster;"
             echo "  a '+' line is a roster entry with no file — every frontier leg would fail on it."
             exit 1
           fi
-          test "$(sort /tmp/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
-          echo "contract roster OK: $(wc -l < /tmp/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
+          test "$(sort $RUNNER_TEMP/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
+          echo "contract roster OK: $(wc -l < $RUNNER_TEMP/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
           # EXCLUDED from the partition below, both by design: x42x-* are the cross-slice contracts
           # (covered by the roster above — they run at every frontier, so they partition nothing),
           # and x42-<NNNN>-bN-upgrade are the four reset-gated deploy drills (each runs ALONE in the
@@ -963,29 +1160,29 @@ jobs:
           # landing as 0050 must not rejoin the corpus.
           ls tests/x41-*.test.mjs tests/x42-*.test.mjs tests/x41b*.test.mjs tests/x42b*.test.mjs 2>/dev/null \
             | xargs -n1 basename | grep -v '^x42x-' \
-            | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > /tmp/corpus.txt
+            | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > $RUNNER_TEMP/corpus.txt
           # THE SLICE LISTS ARE test-list-d-bN.txt, NEVER test-list-*.txt: the contract roster
           # lives in the same directory and is not a slice list — it declares no cell floor and
           # partitions nothing.
-          cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > /tmp/listed.txt
+          cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > $RUNNER_TEMP/listed.txt
           # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
           for L in tests/split-lists/test-list-d-b*.txt; do
             grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
           done
           # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
           # the strict checks, which still fail on any undeclared duplicate.
-          cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > /tmp/floorruns.txt
+          cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > $RUNNER_TEMP/floorruns.txt
           while read -r fr || [ -n "$fr" ]; do
             [ -n "$fr" ] || continue
-            grep -qxF "$fr" /tmp/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
-            awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' /tmp/listed.txt > /tmp/listed.tmp
-            mv /tmp/listed.tmp /tmp/listed.txt
-            grep -qxF "$fr" /tmp/listed.txt || {
+            grep -qxF "$fr" $RUNNER_TEMP/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
+            awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' $RUNNER_TEMP/listed.txt > $RUNNER_TEMP/listed.tmp
+            mv $RUNNER_TEMP/listed.tmp $RUNNER_TEMP/listed.txt
+            grep -qxF "$fr" $RUNNER_TEMP/listed.txt || {
               echo "stale allowance: $fr is declared a floor re-run but is listed only once"; exit 1; }
             echo "floor re-run allowed: $fr (one extra listing)"
-          done < /tmp/floorruns.txt
-          if ! diff -u /tmp/corpus.txt /tmp/listed.txt; then
+          done < $RUNNER_TEMP/floorruns.txt
+          if ! diff -u $RUNNER_TEMP/corpus.txt $RUNNER_TEMP/listed.txt; then
             echo "the slice lists do not partition the x41/x42 corpus exactly once"; exit 1
           fi
-          test "$(sort /tmp/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
-          echo "partition OK: $(wc -l < /tmp/corpus.txt) files, each in exactly one list"
+          test "$(sort $RUNNER_TEMP/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
+          echo "partition OK: $(wc -l < $RUNNER_TEMP/corpus.txt) files, each in exactly one list"
