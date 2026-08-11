@@ -1,8 +1,8 @@
 # Clara — Product Requirements (Rebuild PRD v1)
 
-*Supersedes the frozen `initial acc software skillmd/PRD.md` in full. This is the product law for the greenfield rebuild. It keeps the North Star, sharpens scope to professional Malaysian accounting practice, and binds the Gate-1 owner decisions (`docs/audit/04-gate1-decisions.md`). The invariants in §6 are LAW — they bind every feature, agent skill, and UI decision. The technical realisation is `docs/architecture/`; the design realisation is `docs/design/`; the build sequence is `docs/plan/`.*
+*Supersedes the frozen `initial acc software skillmd/PRD.md` in full. This is the product law for the greenfield rebuild. It keeps the North Star, sharpens scope to professional Malaysian accounting practice, and binds the Gate-1 owner decisions (`docs/audit/04-gate1-decisions.md`). The invariants in §6 are LAW — they bind every feature, agent skill, and UI decision. The technical realisation is `docs/ARCHITECTURE.md`; the design realisation is `docs/design/`; the plan index is `docs/plan/index.md`, with each wave's contracts and design docs under `docs/plan/active/` while it builds and `docs/plan/completed/` once it closes; live state and the build queue are `PROGRESS.md`. Acceptance standards for all of it are `docs/product/EVALUATION_RUBRIC.md`.*
 
-**Status:** Gate-2 ratified 2026-07-17 (see `docs/PROJECTLOG.md`). **Date:** 2026-07-17.
+**Status:** Gate-2 ratified 2026-07-17 (the decision record is `docs/adr/`). **Date:** 2026-07-17.
 
 ---
 
@@ -78,7 +78,7 @@ One-firm-per-user; the last active owner cannot be removed.
 8. **Bank reconciliation** — statement-line ingest + matching with **structural match-parity checks** (right account/period/amount, entry exclusivity — fixes GAP1-1/1-2) + tie-out that gates year-end close; a human-taught self-reconcile learning loop (advisory).
 9. **Fixed-asset register** — acquisition (created from coding), depreciation (DB-computed, DB-posted, actually run and gated), disposal (register + accum-dep + gain/loss), capital-allowance metadata.
 10. **Adjustments** — recurring/reversing journals (auto-reverse accruals, amortise prepayments).
-11. **Tax — SST done right** — registration/taxable-period model (incl. DG variations), service-tax **payment basis** on real AR anchors + s.11(2) 12-month rule, sales-tax accrual basis, dual-registrant separation that **survives export**, output-only (no input credit), maintained rate/sector schedule, SST-02 return, bad-debt relief; the **structural SST registration compliance watch** — non-blocking, per-service-group, DB-computed on the statutory month-end rolling test with earliest-crossing detection, surfaced through the review queue + context pack, that **never blocks a workflow or posts a figure** (Wave A2.1, ADR-028/029/030); the **purchase-side SST visibility split** — a tied `sst_purchase_cost` expense leg for stated input SST, never a recoverable input-tax asset (Malaysian SST has no input credit, WA21-R1).
+11. **Tax — SST done right** — registration/taxable-period model (incl. DG variations), service-tax **payment basis** on real AR anchors + s.11(2) 12-month rule, sales-tax accrual basis, dual-registrant separation that **survives export**, output-only (no input credit), maintained rate/sector schedule, SST-02 return, bad-debt relief. Two amendments ride with it (Wave A2.1, ADR-028/029/030). The **structural SST registration compliance watch** warns the firm before a client crosses the registration threshold: DB-computed per service group on the statutory month-end rolling test, with earliest-crossing detection, surfaced through the review queue and the context pack — and **advisory by construction, it never blocks a workflow and never posts a figure**. The **purchase-side SST visibility split** records stated input SST as a tied `sst_purchase_cost` expense leg, never a recoverable input-tax asset (Malaysian SST has no input credit, WA21-R1).
 12. **Tax — draft computation** (last v1 slice; may slip to v1.1) — add-back engine, capital-allowance schedule, chargeable income, Form C/P/B + CP204 estimate. Clara prepares; the human reviews and e-files. **Clara never submits to LHDN.**
 13. **Year-end close + carry-forward** — P&L→retained-earnings, opening-balance carry-forward, subledger/FA continuity, **segmentation-correct continuity reads** (fixes F12-1), serialized close (fixes GAP2-1), ordered reverse/re-open guards (fixes GAP5-3).
 14. **Financial statements — honest** — SoFP + SoCI **+ SOCE + cash-flow + basic notes**, or the pack does not claim MPERS compliance (fixes GAP2-5). Every figure from DB read functions/snapshots — never model-computed.
@@ -90,20 +90,25 @@ One-firm-per-user; the last active owner cannot be removed.
 20. **The per-client knowledge wiki** (§6a) — Clara's compounding client memory, informing every decision.
 21. Members/RBAC, ⌘K command palette, settings, export/job-lane/session overlays.
 
-**MyInvois:** Track B (hybrid SST output-tax posting) is in-scope; Track C (inbound UBL-XML parse) is BUILT + LIVE as a local no-egress structured engine (Wave A2, ADR-025/026/027); **API pull + outbound issuance remain future scope**.
+### §4.94 — MyInvois scope
 
-**Human-signed bounded auto-posting — direction (Wave A2.1, ADR-028/029/030):** the standing-rule auto-post lane (§2 — always under a signing admin's authority, never agent-approved) was purchase-only in Wave A2 and **lifts to the sales direction**: structured (MyInvois) sales under the existing bounds, and OCR-sourced sales only inside a **nine-control compensating-control envelope** (distinct evidence class, positive polarity evidence independent of the caller's coding kind, hard direction evidence, full multi-anchor corroboration, tighter proof). A **purchase leg carrying stated SST stays human-lane only** — never auto-posted (WA21-R1/R2).
+Track B (hybrid SST output-tax posting) is in-scope; Track C (inbound UBL-XML parse) is BUILT + LIVE as a local no-egress structured engine (Wave A2, ADR-025/026/027); **API pull + outbound issuance remain future scope**.
 
-**Named future behaviours with their waves (the Wave-C-close §7-B amendment, ADR-054):** five real
-behaviours previously had no home in any artifact; each is now named with the wave that owns it —
-**staff advances → Wave D** (a non-`payable`-class advance/repayment mechanic on the WC-R10
-convention, the shape the C-c ROME PUBLIC advance already exercises) · **staff allowances → Wave F**
-(payroll-calendar adjacent; coded, never computed) · **self-billed e-Invoice obligation detection →
-Wave F** (the verified primary-source trigger rules wait in
-`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md` §1.6) · **withholding tax as a mechanic →
-Wave F** (the COA template's `430-WHT` payable is the prepared landing) · **foreign currency → its
-own wave after G** (WC-R5's fail-closed re-deferral stands until then). Naming is scoping, not
-build: each row is re-openable at its wave's grilling.
+### §4.95 — Human-signed bounded auto-posting (direction; Wave A2.1, ADR-028/029/030)
+
+The standing-rule auto-post lane always executes under a signing admin's authority and is never agent-approved (§2). It was purchase-only in Wave A2 and **lifts to the sales direction**: structured (MyInvois) sales post under the existing bounds; OCR-sourced sales post only inside a **nine-control compensating-control envelope** (distinct evidence class, positive polarity evidence independent of the caller's coding kind, hard direction evidence, full multi-anchor corroboration, tighter proof). A **purchase leg carrying stated SST stays human-lane only** and is never auto-posted (WA21-R1/R2).
+
+### §4.96 — Named future behaviours, each with its wave (the Wave-C-close §7-B amendment, ADR-054)
+
+Five real behaviours previously had no home in any artifact. Each is now named with the wave that owns it:
+
+- **Staff advances → Wave D** — a non-`payable`-class advance/repayment mechanic on the WC-R10 convention, the shape the C-c ROME PUBLIC advance already exercises.
+- **Staff allowances → Wave F** — payroll-calendar adjacent; coded, never computed.
+- **Self-billed e-Invoice obligation detection → Wave F** — the verified primary-source trigger rules wait in `docs/plan/research/wave-c/my-tax-verified-2026-07-29.md` §1.6.
+- **Withholding tax as a mechanic → Wave F** — the COA template's `430-WHT` payable is the prepared landing.
+- **Foreign currency → its own wave after G** — WC-R5's fail-closed re-deferral stands until then.
+
+Naming is scoping, not build: each row is re-openable at its wave's grilling.
 
 ---
 
@@ -117,6 +122,25 @@ build: each row is re-openable at its wave's grilling.
 6. **Proactive → exception inbox** — an event fires a wake → Clara assesses → records exactly one notice → the firm-altitude inbox bridges into the exact client row. Never acts.
 7. **Close & continuity** — pre-close gates (no uncoded docs / no open recon / tie-outs clean) → serialized close → carry-forward → next period opens; every continuity read stays segmentation-correct.
 8. **Report/export** — NL request → structured report spec → DB read functions produce numbers → renderers (CSV/PDF/XLSX/UI artifact) → durable auditable artifact → signed-URL card.
+
+### 5a. The OS surface (the agentic super-UI contract)
+
+§0 promises a **stateful conversational super-UI over the entire product**, not accounting software with a chat panel bolted on. This section states what that obliges the surface to deliver, written as promises to the accountant who uses it. The design realisation — layout, motion, tokens, the card catalog, and the build-time gates that enforce them — is `docs/design/` (`DIRECTION.md` today; the full set populates at Wave G, which owns closing this surface).
+
+**The acceptance test that governs every surface** (adopted, `docs/design/DIRECTION.md` §1): *remove the chat rail — the workbench must still show what Clara did, why, with what evidence, and offer every Clara action as an object-level verb.* A surface that only works when you talk to it has failed.
+
+- **One workspace, two panes.** The accountant works in a client workspace — journals, documents, subledgers, registers, knowledge — with Clara docked alongside as a rail, never a modal. The rail is where she speaks; the workbench is where the work lives. Neither is a view of the other.
+- **Clara answers in objects, not walls of text.** Every reply is a typed card — clarify, plan, choice, analysis, document, tool result, approval — that is inspectable, actionable, and re-derives its authoritative status whenever it is re-opened, so a card read tomorrow tells the truth as of tomorrow rather than as of when it was written.
+- **Every card is honest about state.** Nothing renders as done before its outcome is confirmed, a terminal card is inert, and a card whose action has since been reversed says so.
+- **One proactive inbox across every client.** Exceptions surface in a firm-altitude "Needs you" list spanning the whole book of clients, and each entry bridges into the exact client row that needs the decision. Clara never acts from it (§6.11).
+- **Plans are documents, not chat scrollback.** A close or an onboarding is a plan the accountant can read end to end, watch progress against, and compare intended-vs-actual afterwards.
+- **Every object offers its verbs.** Anything Clara can do to a thing, the accountant can do to that thing directly from it — no hunting for the phrasing that triggers the right skill.
+- **One way in, from anywhere.** A single command surface (⌘K) covers Ask, Do and Go; dispatching work from it hands off to the workbench's own approve gate instead of starting a conversation.
+- **The URL is the truth.** What is on screen is addressable, shareable and restorable; the accountant never loses their place to a refresh.
+- **Density without illegibility.** The surface is built for a professional working at speed all day — and compact mode still meets the accessibility floor, with confidence always shown as shape and label, never hue alone or a bare number.
+- **Recovery is a surface, not an apology.** Interruption, failure and resumption are first-class states with a way forward, because §6.13 makes every mutation durable and resumable.
+
+**Completeness is the gate, not the intention.** The card vocabulary must be *complete* — every card the product can emit has exactly one authoritative emit path, and renders identically live and re-hydrated — and that completeness is proven at build time, not by review. The promises above are what "Wave G closed" has to mean.
 
 ---
 
@@ -139,7 +163,7 @@ These bind every feature and every agent skill. Violating one is a defect regard
 13. **Every mutation is durable and resumable** (Gate-1, Grt-* fix): run/task/checkpoint/interruption/tool-call state is DB-backed and survives restart/redeploy; no workflow double-posts on re-drive (idempotency keys on insert-style writes — fixes GAP4-1); a killed run can be cancelled server-side (fixes GAP4-4).
 14. **The knowledge wiki informs but never decides** — wiki content never selects an account or lowers a gate; it is inert data on read (§6a).
 15. **Precedence on collision: accounting-correctness > backend contracts > design-SoT look/motion.** Non-accounting look-vs-contract collisions go to the owner — never a unilateral call.
-16. **Client data egress is governed** (Gate-1 C6, as ratified by **PROJECTLOG ADR-011** which governs on any conflict) — run traces are written to **Clara-controlled storage** (our own Postgres); **cloud-vendor trace export ships OFF** and may be enabled later only **minimized-first** and only after an executed **DPA + firm-facing MIA client authorization** (a DPA regulates the processor but does not by itself confer the authority to disclose client information outside the firm) + a documented PDPA cross-border basis + short retention + tested deletion; no vendor training on firm data.
+16. **Client data egress is governed** (Gate-1 C6, as ratified by **ADR-011** (`docs/adr/`) which governs on any conflict) — run traces are written to **Clara-controlled storage** (our own Postgres); **cloud-vendor trace export ships OFF** and may be enabled later only **minimized-first** and only after an executed **DPA + firm-facing MIA client authorization** (a DPA regulates the processor but does not by itself confer the authority to disclose client information outside the firm) + a documented PDPA cross-border basis + short retention + tested deletion; no vendor training on firm data.
 
 **Split-trust corollary:** the browser holds only its session JWT; forced RLS + EXECUTE-only grants are the isolation boundary. Reads go via RLS-scoped selects/read fns; writes go only via audited SECURITY-DEFINER functions; service credentials live only in the agent service.
 
@@ -156,12 +180,12 @@ The prior build's memory-note layer was write-only dead weight (C-1). The rebuil
 
 ## 7. The event-driven accounting state layer (the North-Star spine)
 
-The prior build had no event layer, no context pack, and no stale-context detection (A-1..A-7). The rebuild's spine:
+The prior build had no event layer, no context pack, and no stale-context detection (A-1..A-7). The rebuild's spine makes four promises; **`docs/ARCHITECTURE.md` owns how each is realised** — the event catalog, the durable log and its outbox, the context-pack contract, the version token, and the trigger taxonomy all live there, not here.
 
-- **Domain events.** Every accounting action (document upload, OCR, coding edit, approval, rejection, reversal, auto-post, mid-year upload, tax update, COA change, period action, reconciliation, disposal) publishes an **auditable domain event** to a **durable event log with an outbox** (no fire-and-forget loss — fixes A-2). Events update the source-of-truth records, the client wiki, the document/OCR index, retrieval signals, reconciliation status, and Clara's agent-visible context — **transactionally**, not model-mediated (fixes A-3).
-- **Context packs.** Before any accounting decision, Clara retrieves a **fresh context pack**: client profile, FY/period, MSIC/business description, SST/tax status, COA policy, documents, journal history, approval/reversal history, reconciliation exceptions, open questions, wiki pages, and the **current books version token**.
-- **Freshness governance.** A books/KB version token detects stale context; Clara never acts on stale data (fixes A-7). Every recommendation, trigger, sync, approval, reversal, and posting is traceable through the audit spine and versioned state.
-- **Trigger taxonomy** (A-2). Which events proactively trigger Clara (internal task / notification / background review / context update) and which must not — keyed on accounting risk, materiality, workflow state, period status, context freshness, and whether the action affects records/tax/reconciliation/reporting/audit/close-readiness. Detailed in `docs/architecture/`.
+- **Nothing that happens is lost.** Every accounting action publishes an auditable domain event, and everything that must move with it — records, the client wiki, the document/OCR index, retrieval signals, reconciliation status, Clara's visible context — moves in the same transaction rather than by model mediation (fixes A-2/A-3).
+- **Clara never decides uninformed.** Before any accounting decision she retrieves a fresh context pack: who the client is, where they sit in their financial year, their tax and COA position, and what has already happened to their books.
+- **Clara never acts on stale data** (fixes A-7). Context is version-stamped, and every recommendation, trigger, sync, approval, reversal and posting stays traceable through the audit spine.
+- **What may wake her is governed, not ad hoc** (A-2). Which events may proactively trigger Clara — and which must never — is a defined taxonomy keyed on accounting risk, materiality, workflow state, period status and context freshness, not a per-feature judgement call.
 
 ---
 
@@ -189,8 +213,10 @@ The prior build had no event layer, no context pack, and no stale-context detect
 
 ## 9. Open product questions (for later gates)
 
-1. **Runtime choice — RESOLVED (PROJECTLOG ADR-008).** The AI SDK 7 model layer + Workflow DevKit durable substrate (`@workflow/world-postgres`), self-hosted on our own Postgres, behind a swap-seam (named fallback: LangGraph JS + PostgresSaver). See `docs/architecture/ARCHITECTURE.md` §4.0 + `docs/phase2-research/runtime-recommendation.md`. Kept here for provenance; no longer open.
-2. **C6 compliance execution** — the DPA, firm-facing disclosure, and PDPA cross-border transfer check are Gate-2 checklist items that must be satisfied before any firm data flows to a vendor trace platform.
-3. **Billing model + scale guardrails** — the pre-public-launch gate; per-firm token/usage cap design.
-4. **Tax-computation v1 vs v1.1** — the draft computation is the last slice; the slip decision is data-driven during Phase 4.
-5. **MyInvois depth** — Track B built; Track C inbound UBL parse LIVE as a local no-egress engine (Wave A2, ADR-025/026/027); API pull + outbound issuance deferred.
+*Resolved questions are annotated in place and kept for provenance — this list is never pruned.*
+
+1. **Runtime choice — RESOLVED (ADR-008).** The AI SDK 7 model layer + Workflow DevKit durable substrate (`@workflow/world-postgres`), self-hosted on our own Postgres, behind a swap-seam (named fallback: LangGraph JS + PostgresSaver). See `docs/ARCHITECTURE.md` §4.0 + `docs/phase2-research/runtime-recommendation.md`. Kept here for provenance; no longer open.
+2. **C6 compliance execution** — the DPA, firm-facing disclosure, and PDPA cross-border transfer check are Gate-2 checklist items that must be satisfied before any firm data flows to a vendor trace platform. **STATUS: OPEN, and structurally held shut** — cloud-vendor trace export still ships OFF under §6.16, so no firm data has reached a vendor trace platform; the checklist must be satisfied before that can change.
+3. **Billing model + scale guardrails** — the pre-public-launch gate; per-firm token/usage cap design. **STATUS: OPEN** — §8's interim guardrail (email-verify + fail-closed admission + per-firm metering/budgets/concurrency) is what stands until it is answered.
+4. **Tax-computation v1 vs v1.1** — the draft computation is the last slice; the slip decision is data-driven during Phase 4. **STATUS: OPEN** — the decision now belongs to Wave F planning, which owns tax.
+5. **MyInvois depth** — Track B built; Track C inbound UBL parse LIVE as a local no-egress engine (Wave A2, ADR-025/026/027); API pull + outbound issuance deferred. **STATUS: PART-RESOLVED** — the inbound half is settled and live (§4.94); only API pull + outbound issuance stay open, and §8 holds outbound issuance as a non-goal meanwhile.
