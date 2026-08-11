@@ -647,6 +647,39 @@ revoke all on function clara._tf_fiscal_years_mint_period() from public;
 create trigger t_fy_mint_reporting_period after insert on clara.fiscal_years
   for each row execute function clara._tf_fiscal_years_mint_period();
 
+-- THE PRE-0057 FY BACKFILL. The trigger above fires on INSERT, so it is retroactive to
+-- NOTHING: any fiscal year opened BEFORE this migration would carry no fy-grain period row,
+-- forever, and there is no audited door that mints one (the door mints MONTHS). Such an FY
+-- would silently resolve `absent` for every fy-grain metric bound to it -- the wrong-looking
+-- answer arriving quietly, which is the class E-R4 exists to contain.
+--
+-- On the live estate this backfills ZERO rows today, because clara.fiscal_years is empty at
+-- deploy (0056 shipped INERT ON ARRIVAL and no human has opened a year yet). It is written
+-- anyway, because "zero rows today" is a property of this week, not of the migration: the
+-- deploy-onto-existing class is real for every rig, every restored DR target, every scratch
+-- database that opened a year against 0056 before 0057 landed. A backfill that costs nothing
+-- when there is nothing to fix is the cheapest way to close a class permanently.
+--
+-- minted_by is the FY's own opener, exactly as the trigger does -- the period's author is
+-- the human who opened the year, never a synthetic actor. Idempotent by the same conflict
+-- arbiter, so a re-run (or a row the trigger already made in this same transaction) is a
+-- no-op rather than a duplicate.
+do $backfill$
+declare v_n int;
+begin
+  with minted as (
+    insert into clara.reporting_periods (firm_id, client_id, grain, period_start, period_end,
+        fiscal_year_id, minted_by)
+    select fy.firm_id, fy.client_id, 'fiscal_year', fy.starts_on, fy.ends_on, fy.id, fy.opened_by
+      from clara.fiscal_years fy
+     where not exists (select 1 from clara.reporting_periods rp
+                        where rp.fiscal_year_id = fy.id)
+    on conflict do nothing
+    returning 1)
+  select count(*)::int into v_n from minted;
+  raise notice '0057 S5 backfill: % pre-existing fiscal year(s) received their fy-grain reporting_periods row. (0 on a database whose fiscal_years is still empty -- the live estate today; non-zero on any database that opened a year against 0056 before 0057 landed. S11.9 asserts zero orphans remain either way.)', v_n;
+end $backfill$;
+
 -- =====================================================================================
 -- S6 -- THE DATASET RECIPE + THE HUMAN DOOR (skeleton SS2.11; matrix E1/E4/E6).
 -- =====================================================================================
@@ -746,6 +779,38 @@ begin
   v_dedupe := clara._reserve_op(c.firm, 'mint_month_snapshot', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'month_start', v_start)));
   if v_dedupe is not null then return v_dedupe; end if;
+
+  -- THE LOCK-UPGRADE DEADLOCK, REFUSED BEFORE IT CAN FORM. Every covered writer's trigger
+  -- takes 203005007 SHARED for its client and holds it to commit (0056 S4). If this
+  -- transaction has ALREADY written that client's books, it is holding that shared lock --
+  -- and the EXCLUSIVE request below is a LOCK UPGRADE. Two such transactions upgrading the
+  -- same key deadlock each other: each waits for the other's share to drop, and neither can
+  -- drop it before commit. Postgres would break the tie by killing one at random with a
+  -- deadlock error, mid-ceremony, with no explanation a human could act on.
+  --
+  -- So the composition is refused here, positively and by reading THIS BACKEND'S OWN held
+  -- locks -- not by hoping callers behave. The probe is the pg_locks row the lock actually
+  -- produces (measured: locktype='advisory', classid=the namespace, objid=the hashed client
+  -- as oid, objsubid=2 for a two-key lock, mode='ShareLock'), scoped to pg_backend_pid() so
+  -- another session's legitimate concurrent write is never mistaken for our own.
+  --
+  -- UNREACHABLE TODAY, AND KEPT ANYWAY. PostgREST gives each RPC its own transaction, so no
+  -- live caller can currently write books and mint in one transaction. This guard exists for
+  -- the future in-DB caller -- a composite verb, a delta evaluator, a backfill script -- that
+  -- would otherwise discover the class as an intermittent production deadlock rather than as
+  -- a clear refusal naming the fix.
+  if exists (
+    select 1 from pg_locks l
+     where l.locktype = 'advisory'
+       and l.pid      = pg_backend_pid()
+       and l.classid  = 203005007
+       and l.objid    = hashtext(p_client::text)::oid
+       and l.objsubid = 2
+       and l.mode     = 'ShareLock'
+       and l.granted) then
+    raise exception 'mint must run in its own transaction -- a books write in this transaction already holds the client wall (203005007 shared), and minting would upgrade that lock'
+      using errcode = 'CLR10', detail = '{"reason":"mint_lock_upgrade_refused"}';
+  end if;
 
   -- THE ONLY LOCK, AND WHY. 203005007 is 0056's close-serialize namespace and the BOTTOM
   -- rung on every path; this verb takes it and nothing else, so it cannot form a cycle.
@@ -928,12 +993,30 @@ revoke all on function clara._mark_snapshots_stale(uuid, date, text, uuid, uuid,
 create function clara._tf_snapshot_staleness() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  v_row    jsonb := to_jsonb(coalesce(new, old));
-  v_client uuid  := nullif(v_row ->> 'client_id', '')::uuid;
+  -- OLD and NEW as jsonb, each assigned only where the trigger op actually provides it
+  -- (referencing NEW in a DELETE, or OLD in an INSERT, is an error in plpgsql). Several
+  -- arms below must compare the two images, not just read one of them.
+  v_new    jsonb;
+  v_old    jsonb;
+  v_row    jsonb;
+  v_client uuid;
   v_effect date;
   v_entry  uuid;
   v_actor  uuid;
+  v_skip   boolean := false;   -- set by an arm that proves this mutation moves no read
+  v_s_old  date;               -- FA: the OLD image's inclusion start
+  v_s_new  date;               -- FA: the NEW image's inclusion start
+  -- FA: the columns whose own boundaries are handled by their own candidates below, plus
+  -- the pure bookkeeping stamp. Everything NOT listed here is a measurement or identity
+  -- column whose change bites from the row's inclusion START.
+  v_fa_bounds constant text[] :=
+    array['effective_from','acquired_date','disposed_at','superseded_at','updated_at'];
 begin
+  if tg_op <> 'DELETE' then v_new := to_jsonb(new); end if;
+  if tg_op <> 'INSERT' then v_old := to_jsonb(old); end if;
+  v_row    := coalesce(v_new, v_old);
+  v_client := nullif(v_row ->> 'client_id', '')::uuid;
+
   -- DISPATCH BY IDENTITY, NEVER BY SPELLING. Every arm below compares tg_relid -- the
   -- table's OID -- against a schema-qualified regclass literal. tg_table_name is only the
   -- UNQUALIFIED name, so a same-named table in another schema would dispatch down an arm
@@ -954,6 +1037,53 @@ begin
     -- recurring adjustments and their auto-reversals, the depreciation belt, the closing
     -- stock adjustment, the wrong-client correction (per row, so BOTH clients mark), the
     -- opening machinery, and finalize_close's closing entry.
+    --
+    -- MARK IFF THE MUTATION CAN CHANGE WHAT AN APPROVED-FILTERED AS-OF READ RETURNS.
+    -- Without this predicate a DRAFT insert or a draft revision marked every covering
+    -- artifact stale, which is a FALSE SIGNAL: clara.trial_balance_as_of sums lines
+    -- `filter (where je.status='approved')`, so a draft is on no presented figure and its
+    -- birth moves nothing. A staleness model that cries on drafts trains its reader to
+    -- ignore it.
+    --
+    -- DERIVED FROM THE LIVE STATUS MACHINE, not assumed. The domain is
+    -- {draft, approved, withdrawn} (the journal_entries status CHECK), and
+    -- clara._tf_entry_immutable is the only gate on transitions. Read this pass, its
+    -- allow-set is:
+    --   * DELETE                -- refused outright ("reverse, not delete"), so the DELETE
+    --                              arm below is UNREACHABLE for this table today; it is
+    --                              written anyway, fail-safe, so that a future relaxation
+    --                              of that belt cannot silently escape.
+    --   * draft   -> draft      -- metadata only (revision_token, updated_at,
+    --                              proposed_counterparty, match_fingerprint,
+    --                              last_human_editor, flags, closing_transfer, coding_kind,
+    --                              vendor_binding_id). posting_date is in NO allow-set, so
+    --                              a date can never move under an existing entry.
+    --   * draft   -> approved   -- THE FLIP. This is where an entry becomes presented, and
+    --                              it is the arm finalize_close's born-draft closing entry
+    --                              travels: it is inserted as a draft (no mark, correctly)
+    --                              and marks here, at the census-visible flip.
+    --   * draft   -> withdrawn  -- a draft leaves without ever having been presented.
+    --   * approved-> approved   -- the reversal-linkage stamp ONLY (reversed_by,
+    --                              reversal_reason, updated_at).
+    --   * anything else         -- refused.
+    -- So: INSERT marks iff it is born approved (several machine paths do insert approved
+    -- directly); UPDATE marks iff EITHER image is approved; DELETE marks iff the old image
+    -- was approved.
+    --
+    -- THE approved->approved ARM IS DELIBERATELY CONSERVATIVE. A reversal-linkage stamp
+    -- provably moves no trial-balance figure today -- the mirror entry is a separate row
+    -- that marks on its own approval. It is kept inside the mark set because the fail-safe
+    -- direction for staleness is to mark, and because a later widening of that allow-set
+    -- would otherwise escape unnoticed. Over-marking a reversed entry is cheap; missing one
+    -- is a wrong pack.
+    if tg_op = 'INSERT' then
+      v_skip := coalesce(v_new ->> 'status', '') <> 'approved';
+    elsif tg_op = 'UPDATE' then
+      v_skip := coalesce(v_old ->> 'status', '') <> 'approved'
+            and coalesce(v_new ->> 'status', '') <> 'approved';
+    else
+      v_skip := coalesce(v_old ->> 'status', '') <> 'approved';
+    end if;
     v_effect := nullif(v_row ->> 'posting_date', '')::date;
     v_entry  := nullif(v_row ->> 'id', '')::uuid;
 
@@ -985,13 +1115,68 @@ begin
     v_effect := nullif(v_row ->> 'effective_date', '')::date;
 
   elsif tg_relid = 'clara.fixed_assets'::regclass then
-    -- Row 12. The register act date: the EARLIEST date from which this asset appears in the
-    -- register, since a particulars edit moves the register (and future depreciation) from
-    -- that date forward. least() ignores NULLs and yields NULL only when all three are
-    -- NULL, which falls to the mark-everything branch in _mark_snapshots_stale.
-    v_effect := least(nullif(v_row ->> 'acquired_date', '')::date,
-                      nullif(v_row ->> 'depreciation_start_date', '')::date,
-                      nullif(v_row ->> 'baseline_as_of', '')::date);
+    -- Row 12. THE EFFECT DATE IS THE EARLIEST AS-OF AT WHICH THIS MUTATION CHANGES AN FA
+    -- READ -- derived from clara._fa_included_at, which IS the register's own inclusion
+    -- predicate (read this pass):
+    --     coalesce(effective_from, acquired_date) <= as_of
+    --     and (disposed_at   is null or disposed_at   > as_of)
+    --     and (superseded_at is null or superseded_at > as_of)
+    --     and (status <> 'unwound' or <the unwind reversal's posting_date> > as_of)
+    -- so a row is visible from its START = coalesce(effective_from, acquired_date) until
+    -- whichever boundary stamp closes it.
+    --
+    -- THE DEFECT THIS REPLACES: dating from least(acquired_date, depreciation_start_date,
+    -- baseline_as_of) ignored effective_from and the boundary stamps entirely, so
+    -- revise_fixed_asset_particulars -- which mints a SUCCESSOR effective (say) 1 June and
+    -- stamps superseded_at on its predecessor -- staled every artifact back to ACQUISITION,
+    -- years of packs that the prospective revision does not touch. Retroactive over-marking
+    -- is not a safe default; it is the same false signal as the draft one, wearing a
+    -- fail-safe costume.
+    --
+    -- INSERT / DELETE: the row's own START. For a revision successor that IS its
+    -- effective_from, which is exactly the "prospective" answer.
+    -- UPDATE: the earliest of the candidates that actually MOVED --
+    --   * a boundary stamp (disposed_at / superseded_at) taking least(old,new), because the
+    --     change bites from the earlier of the two images;
+    --   * the START itself, if it moved;
+    --   * any OTHER read-relevant column (cost, life, rate, method, accounts, status, the
+    --     lineage links, depreciation_start_date, baseline_as_of, ...), which changes the
+    --     measured amount from the row's START forward. That set is computed as "everything
+    --     except the boundary columns and updated_at" via a jsonb difference rather than a
+    --     hand-listed column roster -- a hand-listed one rots the first time 0041's
+    --     successor adds a column, and rots SILENTLY.
+    -- An UPDATE that moved nothing read-relevant (an updated_at touch alone) marks nothing.
+    v_s_old := coalesce(nullif(v_old ->> 'effective_from', '')::date,
+                        nullif(v_old ->> 'acquired_date',  '')::date);
+    v_s_new := coalesce(nullif(v_new ->> 'effective_from', '')::date,
+                        nullif(v_new ->> 'acquired_date',  '')::date);
+    if tg_op = 'INSERT' then
+      v_effect := v_s_new;
+    elsif tg_op = 'DELETE' then
+      v_effect := v_s_old;
+    else
+      v_effect := least(
+        case when (v_new - v_fa_bounds) is distinct from (v_old - v_fa_bounds)
+             then least(v_s_old, v_s_new) end,
+        case when v_s_old is distinct from v_s_new
+             then least(v_s_old, v_s_new) end,
+        case when (v_old ->> 'disposed_at') is distinct from (v_new ->> 'disposed_at')
+             then least(nullif(v_old ->> 'disposed_at', '')::date,
+                        nullif(v_new ->> 'disposed_at', '')::date) end,
+        case when (v_old ->> 'superseded_at') is distinct from (v_new ->> 'superseded_at')
+             then least(nullif(v_old ->> 'superseded_at', '')::date,
+                        nullif(v_new ->> 'superseded_at', '')::date) end);
+      -- Nothing read-relevant moved at all ⇒ nothing to mark. Note this is NOT the same as
+      -- "v_effect is null": a boundary that moved to/from NULL is a real change whose
+      -- candidate can still be NULL, and that case must fall through to the fail-safe
+      -- mark-everything branch rather than be skipped.
+      if (v_new - v_fa_bounds) is not distinct from (v_old - v_fa_bounds)
+         and v_s_old is not distinct from v_s_new
+         and (v_old ->> 'disposed_at')   is not distinct from (v_new ->> 'disposed_at')
+         and (v_old ->> 'superseded_at') is not distinct from (v_new ->> 'superseded_at') then
+        v_skip := true;
+      end if;
+    end if;
 
   elsif tg_relid = 'clara.bank_statements'::regclass then
     -- Row 13, THE v2 DEFECT. void_bank_statement's effect is `update clara.bank_statements
@@ -1018,6 +1203,14 @@ begin
     raise exception 'clara._tf_snapshot_staleness fired on an unregistered table (%)',
       tg_relid::regclass::text
       using errcode = 'CLR10', detail = '{"reason":"staleness_table_unregistered"}';
+  end if;
+
+  -- AN ARM PROVED THIS MUTATION MOVES NO READ. Marking anyway would be a false signal, and
+  -- a staleness label nobody can trust is worth less than none. The skip is only ever set
+  -- by an arm that DERIVED it from the reading function's own predicate -- never as a
+  -- default, and never on an unrecognised shape (that path raises above).
+  if v_skip then
+    return coalesce(new, old);
   end if;
 
   -- The acting human, when there is one. Resolved THROUGH clara.users so a machine lane
@@ -1129,8 +1322,13 @@ reset role;
 -- catch. Every entry is a REGPROCEDURE IDENTITY, never a bare name: settle_from_bank_line
 -- and match_bank_line are each OVERLOADED in the live catalog, and a name-LIKE roster would
 -- conflate two functions with different argument lists and different bodies.
-create temp table _x57_roster(sig text primary key, tbl text not null, row_ref text not null)
-  on commit drop;
+-- The key is (sig, tbl), NOT sig alone: one door can legitimately write MORE THAN ONE of
+-- the six covered tables, and each such claim is its own row that 11.2b must prove
+-- separately. clara.unmatch_bank_match is the live example -- it writes both
+-- bank_line_exceptions and journal_entries -- and a sig-only key silently made the roster
+-- unable to express that.
+create temp table _x57_roster(sig text not null, tbl text not null, row_ref text not null,
+  primary key (sig, tbl)) on commit drop;
 insert into _x57_roster(sig, tbl, row_ref) values
   -- rows 1,2 -- the JE lifecycle
   ('clara.approve_entry(uuid,uuid,text,text)',                   'journal_entries', 'r1'),
@@ -1175,7 +1373,29 @@ insert into _x57_roster(sig, tbl, row_ref) values
   ('clara.void_bank_reconciliation(uuid,text,text)',              'bank_reconciliations', 'r14'),
   -- row 15 -- the exception doors
   ('clara.except_bank_line(uuid,text,text,uuid,text)',            'bank_line_exceptions', 'r15'),
-  ('clara.resolve_bank_line_exception(uuid,text,text,uuid,text)', 'bank_line_exceptions', 'r15');
+  ('clara.resolve_bank_line_exception(uuid,text,text,uuid,text)', 'bank_line_exceptions', 'r15'),
+  -- ---------------------------------------------------------------------------------
+  -- FOUND BY THE INVERSE CENSUS (11.2d), NOT BY SS2.11. Every row below writes one of the
+  -- six covered tables and appears in NO row of the design's writer table -- the design
+  -- enumerated the movers its authors had in mind, which is exactly the failure mode
+  -- enumeration has in this repo. They were all already COVERED (the trigger sits on the
+  -- table, not on the caller); what was missing was the claim, and therefore the check.
+  -- The census below now derives this set from the catalog, so the next omission fails the
+  -- migration instead of waiting for a reviewer to notice it.
+  ('clara.accept_bank_rule_suggestion(uuid,uuid,uuid,text)',                        'journal_entries',      'inv'),
+  ('clara.approve_opening_correction(uuid,jsonb,text,text)',                        'fixed_assets',         'inv'),
+  ('clara.book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)','journal_entries',     'inv'),
+  ('clara.cancel_pair_reversal(uuid,uuid,text,text)',                               'journal_entries',      'inv'),
+  ('clara.complete_pending_match(uuid,uuid,text)',                                  'bank_line_exceptions', 'inv'),
+  ('clara.dispose_fixed_asset(uuid,uuid,date,bigint,text,text,text,text,text,bigint)','journal_entries',    'inv'),
+  ('clara.persist_invoice_facts(uuid,jsonb,text,text,integer,jsonb)',               'journal_entries',      'inv'),
+  -- the statement-facts door reaches clara.bank_statements through _persist_statement_core
+  ('clara.persist_statement_facts(uuid,jsonb)',                                     'bank_statements',      'inv'),
+  ('clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text,jsonb,jsonb)',              'journal_entries',      'inv'),
+  -- unmatch_bank_match writes BOTH, so it earns two rows: one claim per effect table
+  ('clara.unmatch_bank_match(uuid,uuid,text,text)',                                 'bank_line_exceptions', 'inv'),
+  ('clara.unmatch_bank_match(uuid,uuid,text,text)',                                 'journal_entries',      'inv'),
+  ('clara.withdraw_draft(uuid,text,uuid,text)',                                     'journal_entries',      'inv');
 
 do $s11$
 declare
@@ -1288,6 +1508,81 @@ begin
     raise exception '0057 S11.2b: SS2.11 % claims clara.% as %''s effect table, but no body within 3 call hops of it WRITES that table -- the coverage claim is prose, not a path', r.row_ref, r.tbl, r.sig
       using errcode = 'CLR10';
   end loop;
+
+  -- (11.2d) THE INVERSE CENSUS -- the arm that kills UNDER-CLAIMING as a CLASS.
+  -- 11.2 and 11.2b both start from the ROSTER and check it forward, so neither can ever see
+  -- a mover the roster never named. That is not hypothetical: this arm found ELEVEN writers
+  -- of the six covered tables that SS2.11's table does not mention at all -- among them
+  -- complete_pending_match and unmatch_bank_match (bank_line_exceptions) and
+  -- _persist_statement_core (bank_statements). Adding those three by hand would have been
+  -- whack-a-mole against an enumeration that was already proven incomplete; deriving the
+  -- obligation from the catalog is what makes the next omission a failed migration instead
+  -- of a reviewer's lucky catch.
+  --
+  -- THE RULE: every clara function that WRITES one of the six covered tables must be, or be
+  -- REACHABLE FROM, at least one roster entry. Reachability (not roster membership) is the
+  -- right test because the doors are what SS2.11 enumerates while the writes usually happen
+  -- one or two layers down in a _core -- persist_statement_facts is the door,
+  -- _persist_statement_core does the insert, and requiring the roster to list cores would
+  -- make it a second copy of the call graph.
+  --
+  -- TRIGGER FUNCTIONS ARE EXCLUDED BY IDENTITY (prorettype = trigger), not by name -- a
+  -- `_tf_%` name filter would be spelling again. The exclusion is principled: a trigger
+  -- function is not a door anyone calls, it fires inside another writer's statement, and
+  -- its own write to a covered table re-enters this very staleness trigger. The live
+  -- example is clara._tf_rotate_token, which updates journal_entries.
+  for r in
+    with recursive reach(oid, depth) as (
+      select ro.sig::regprocedure::oid, 0 from _x57_roster ro
+      union
+      select c.oid, h.depth + 1
+        from reach h
+        join pg_proc p on p.oid = h.oid
+        join pg_proc c on c.pronamespace = 'clara'::regnamespace
+         and position('clara.' || c.proname || '(' in coalesce(p.prosrc, '')) > 0
+       where h.depth < 3)
+    select p.oid::regprocedure::text as sig, t.tbl
+      from pg_proc p
+      cross join (values ('journal_entries'), ('open_item_allocations'), ('fixed_assets'),
+                         ('bank_statements'), ('bank_reconciliations'),
+                         ('bank_line_exceptions')) t(tbl)
+     where p.pronamespace = 'clara'::regnamespace
+       and p.prorettype <> 'trigger'::regtype
+       and lower(regexp_replace(regexp_replace(regexp_replace(
+             coalesce(p.prosrc, ''),
+             '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+           ~ ('(insert into|update|delete from) clara\.' || t.tbl || '\M')
+       and not exists (select 1 from reach h where h.oid = p.oid)
+     order by 1, 2
+  loop
+    raise exception '0057 S11.2d: clara function % WRITES clara.% but is reachable from no roster entry -- a mover the census cannot see. Add its public door to the S11 roster (or, if it is genuinely unreachable from any door, say why here).', r.sig, r.tbl
+      using errcode = 'CLR10';
+  end loop;
+
+  -- ...and the residual the instrument CANNOT see, stated and then measured to be empty.
+  -- The write detector reads STATIC statement text, so a body that builds its DML as a
+  -- string and runs it through EXECUTE is invisible to it -- the same blind spot the
+  -- repo's wiki-dynamic-sql gate exists for. Today no body that writes a covered table
+  -- contains EXECUTE at all, which is asserted rather than assumed; the day one does, this
+  -- raises and the author owes the census a manual entry.
+  select coalesce(string_agg(distinct p.oid::regprocedure::text, ', '), '') into v_t
+    from pg_proc p
+    cross join (values ('journal_entries'), ('open_item_allocations'), ('fixed_assets'),
+                       ('bank_statements'), ('bank_reconciliations'),
+                       ('bank_line_exceptions')) t(tbl)
+   where p.pronamespace = 'clara'::regnamespace
+     and p.prorettype <> 'trigger'::regtype
+     and lower(regexp_replace(regexp_replace(regexp_replace(
+           coalesce(p.prosrc, ''),
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+         ~ ('(insert into|update|delete from) clara\.' || t.tbl || '\M')
+     and lower(regexp_replace(regexp_replace(
+           coalesce(p.prosrc, ''),
+           '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g')) ~ '\mexecute\M';
+  if v_t <> '' then
+    raise exception '0057 S11.2d: {%} write a covered table AND contain EXECUTE -- the static write-detector cannot see dynamic DML, so the inverse census can no longer prove completeness. Enumerate the dynamic writes by hand before this file may pass.', v_t
+      using errcode = 'CLR10';
+  end if;
 
   -- (11.2c) ROW 7 IS ABSENT, AND THE ABSENCE IS MEASURED RATHER THAN ASSUMED. SS2.11's row
   -- 7 is "the closing-stock adjustment (WD-R11)", and it is the one roster row with no
@@ -1521,15 +1816,31 @@ begin
     raise exception '0057 S11.9: the artifact tables are not empty at birth (% row(s))', v_n
       using errcode = 'CLR10';
   end if;
-  -- The fy-grain mint trigger is retroactive to NOTHING: it fires on INSERT only, so any FY
-  -- opened before this migration has no period row. Measured and REPORTED, not assumed --
-  -- if a live deploy ever lands with FYs already open, this notice is the backfill's
-  -- work order.
+  -- ZERO FY ORPHANS AT CLOSE -- an ASSERTION now, not a notice. The mint trigger fires on
+  -- INSERT only, so it is retroactive to nothing; S5's backfill is what covers the fiscal
+  -- years that already existed when this migration arrived. Between the two, EVERY fiscal
+  -- year must carry its fy-grain period row by the end of this transaction, on a fresh
+  -- database and on a deploy-onto-existing alike. An orphan here would resolve `absent` for
+  -- every fy-grain metric bound to it -- silently -- so it is a refusal, not a warning.
+  -- (The earlier version of this arm merely NOTICED the orphans it found, which is the
+  -- shape of a problem being reported to nobody: migrations are applied by a runner whose
+  -- notices scroll past.)
   select count(*) into v_n from clara.fiscal_years fy
     where not exists (select 1 from clara.reporting_periods rp
                        where rp.fiscal_year_id = fy.id);
-  if v_n > 0 then
-    raise notice '0057 S11.9: % pre-existing fiscal year(s) carry NO fiscal_year-grain period row -- the mint trigger fires on INSERT only. Mint them explicitly before any fy-grain metric binds, or they resolve ''absent''.', v_n;
+  if v_n <> 0 then
+    raise exception '0057 S11.9: % fiscal year(s) carry NO fiscal_year-grain period row after the S5 backfill -- every FY must have one or its metrics resolve absent', v_n
+      using errcode = 'CLR10';
+  end if;
+  -- ...and the converse: no fy-grain period may cite an FY that does not exist, and each FY
+  -- has exactly ONE (the backfill and the trigger must not both have fired for a row).
+  select count(*) into v_n from (
+    select rp.fiscal_year_id from clara.reporting_periods rp
+     where rp.grain = 'fiscal_year'
+     group by rp.fiscal_year_id having count(*) <> 1) d;
+  if v_n <> 0 then
+    raise exception '0057 S11.9: % fiscal year(s) carry MORE THAN ONE fy-grain period row -- the trigger and the backfill double-minted', v_n
+      using errcode = 'CLR10';
   end if;
 
   -- (11.10) THE STATED OUT-OF-SCOPE DECISION. The honest-boundary convention requires
