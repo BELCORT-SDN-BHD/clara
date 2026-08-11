@@ -34,6 +34,7 @@ blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
 ```
 packages/db/          versioned SQL migrations + seeds + DR tooling + test rig
 packages/runtime/     Clara agent-runtime skeleton (WDK durable substrate, /health, /ready)
+packages/backup/      the clara-backup Fly service (daily DR bundle to R2; docs/ops/DR.md)
 apps/dashboard/       Next.js 15 dashboard skeleton
 scripts/              repo governance gates (freeze-lint, leak-scan, harness-links, …) + hooks/
 docs/                 PRD, architecture, plan, design, audit (source of truth)
