@@ -359,7 +359,6 @@ create policy p_fy_owner on clara.fiscal_years
 create policy p_fy_human on clara.fiscal_years
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.fiscal_years to clara_authenticated;
-grant select on clara.fiscal_years to clara_agent_ro;
 
 -- =====================================================================================
 -- S2 -- the gate catalog + the run/result/attestation trio (skeleton §2.2).
@@ -387,7 +386,6 @@ create policy p_cgc_owner on clara.close_gate_checks
 create policy p_cgc_human on clara.close_gate_checks
   for select to clara_authenticated using (true);   -- a GLOBAL catalog, like client_fact_keys
 grant select on clara.close_gate_checks to clara_authenticated;
-grant select on clara.close_gate_checks to clara_agent_ro;
 
 insert into clara.close_gate_checks (check_key, drawer, title, evaluator_fn, applies_when) values
   -- DRAWER 1 -- absolute; no attestation path exists for any of these (E-R2).
@@ -465,7 +463,6 @@ create policy p_close_runs_owner on clara.close_runs
 create policy p_close_runs_human on clara.close_runs
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.close_runs to clara_authenticated;
-grant select on clara.close_runs to clara_agent_ro;
 
 -- APPEND-ONLY measurement rows. measured_digest is what an attestation BINDS to (PRD
 -- invariant 8 applied to a gate): finalize refuses close_attestation_stale on any drift.
@@ -499,7 +496,6 @@ create policy p_cgr_owner on clara.close_gate_results
 create policy p_cgr_human on clara.close_gate_results
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.close_gate_results to clara_authenticated;
-grant select on clara.close_gate_results to clara_agent_ro;
 
 -- Attestations: SUPERSESSION, NEVER MUTATION (the client_facts discipline; matrix A20 demands
 -- BOTH the stale and the fresh attestation survive in history). The live attestation for a
@@ -562,7 +558,6 @@ create policy p_ca_owner on clara.close_attestations
 create policy p_ca_human on clara.close_attestations
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.close_attestations to clara_authenticated;
-grant select on clara.close_attestations to clara_agent_ro;
 
 -- =====================================================================================
 -- S3 -- clara.close_write_permits: the wall's permit (skeleton §2.5). A ROW this
@@ -1272,6 +1267,11 @@ begin
   return jsonb_build_object(
     'state', case when v_present then 'pass' else 'fail' end,
     'trade_nature', v_nature, 'closing_stock_entry_present', v_present,
+    -- THE INSTRUMENT GAP, NAMED (R2 Q2 amendment): no audited verb writes
+    -- flags?'closing_stock' yet, so an attestation against this gate is an interim
+    -- acceptance of a MISSING INSTRUMENT, not a judgement about stock -- the receipt
+    -- must record which act was signed. Drop this key when the producer verb ships.
+    'no_producer_verb', true,
     'fy_starts_on', v_fy.starts_on, 'fy_ends_on', v_fy.ends_on);
 end $$;
 revoke all on function clara._close_gate_closing_stock(uuid, uuid) from public;
@@ -2604,7 +2604,12 @@ begin
   end if;
   return coalesce((select jsonb_agg(jsonb_build_object('fiscal_year_id', fy.id,
       'label', fy.label, 'ordinal', fy.ordinal, 'starts_on', fy.starts_on,
-      'ends_on', fy.ends_on, 'status', fy.status, 'fy_end_source', fy.fy_end_source)
+      'ends_on', fy.ends_on, 'status', fy.status, 'fy_end_source', fy.fy_end_source,
+      -- R2 Q3: abandon_close flattens reopened->open by design (no mechanism keys on the
+      -- distinction; provenance lives in the receipt chain) -- this key is the honest
+      -- human-facing tell that a year read as 'open' was once closed and reopened.
+      'has_active_reopen_receipt', exists (select 1 from clara.close_receipts cr
+        where cr.fiscal_year_id = fy.id and cr.kind = 'reopen' and cr.status = 'active'))
     order by fy.ordinal)
     from clara.fiscal_years fy where fy.client_id = p_client), '[]'::jsonb);
 end $$;
