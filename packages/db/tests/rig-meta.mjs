@@ -70,6 +70,9 @@ const WAVE_A2_HUMAN_FNS = [
 // LOGIN-DIRECT to clara_runtime_login, like record_rule_resolution, so it is deliberately
 // NOT in any of the five matrix roles).
 const WAVE_A2_RUNTIME_FNS = ["reconcile_autopost_rules"];
+// 0055 [Wave E lane α]: the ONE human door of the client-facts trio (admin floor,
+// body-enforced). Absent on pre-0055 frontiers — existence is the gate.
+const CLIENT_FACTS_0055_HUMAN_FNS = ["record_client_fact"];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -645,6 +648,8 @@ export const ALLOWED = {
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe — the one name BOTH lanes hold
     ...SALES_LANE_0046_HUMAN_FNS, // 0046 [§7-A] the recorded sales backfill door (admin floor)
     ...SALES_LANE_0046_READ_FNS, // 0046 [§7-A] the signing-time evidence preview + batch read
+    ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
+    // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

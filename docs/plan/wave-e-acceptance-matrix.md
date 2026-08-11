@@ -323,6 +323,42 @@ refuses would prove nothing new.
 | **F3f** | Appendix A finding 1 (the arg-tuple half of idempotency) | F3a SEEN | replay the door with the **same `op_key` and DIFFERENT arguments** | the call is **REFUSED** (a `CLR10`-class refusal), not silently answered from the stored receipt — asserted as BEHAVIOUR. The intent is documented at `0002:292-294` (*"request_hash pins the arg tuple so op_key reuse with DIFFERENT args is rejected (CLR10) rather than silently returning a stale receipt"*), and this cell proves the mechanism rather than quoting the comment | returning the stored result for a different arg tuple would let one op_key launder a second, unrelated fact into the book — a FAIL; and a comment standing in for the proof is a FAIL of method | α | V-CI |
 | **F4** | E-R12 item 3 + E-R3 immutability discipline (supersession, never mutation) | a client fact already entered through the door (e.g. RPR's `68109`) | enter a CORRECTED value through the same audited door | the new fact SUPERSEDES the old: the prior row remains readable with its original who/basis/when, the new row carries its own trio plus an explicit supersession link, and the read surface returns the CURRENT fact exactly once (no duplicate, no silent overwrite). Asserted by reading both rows and the reader's single answer | an in-place UPDATE of a client fact destroys the basis the ruling exists to capture — a FAIL; a reader that returns both the superseded and the current fact as equals is a FAIL of the surface | α | V-DB |
 
+### 6.1 F-1 RATIFICATION RECORD (skeleton §3.1's required record — written at the lane α build, 2026-08-11)
+
+**E-R12 item 1 was discharged by VERIFICATION PLUS ONE GUARD, not by a rebuild.** The record,
+so no future session re-builds the wall:
+
+- **The wall exists and is the live mechanism.** The unborn-item predicate lives in
+  `clara._allocate_receipt_core` / `clara._allocate_payment_core`, byte-identical
+  (`0044_wave_d_b3_af2_composite.sql:1266-1272` / `:1557-1563`); the public wrappers are thin
+  delegators (`0044:1642-1657` / `:1659-1674`) and do not re-spell it. **No second wall was
+  written on the allocate path — deliberately**: the wall is inherited by every caller through
+  the cores, and a duplicate spelling is exactly the F1d FAIL this record exists to prevent.
+- **The caller census was measured from the live catalog** (pg_proc.prosrc, 2026-08-11, rig at
+  frontier 0054): exactly **{`_settle_from_bank_line_core`, `allocate_payment`,
+  `allocate_receipt`}**. The lane α migration pins this set and `open_items.item_date NOT NULL`
+  (`0037:738`) as EXECUTABLE build-time assertions (its S1), so every fresh apply — including
+  CI's — re-proves the wall's identity, the wrappers' thinness, the census, and the column
+  floor from then on. A fourth caller or a relaxed column is a loud migration failure, not a
+  silent opening.
+- **The ONE genuinely open hole was the apply path, and it is now guarded** (its S2): the live
+  `apply_open_items` is act-dated (`0040` S4.9 → `0042` S5.22; producer law `0040:864-877`) but
+  no conjunct enforced act-date ≥ both items' `item_date`. The guard refuses
+  `clara._book_today() < greatest(si.item_date, ti.item_date)` with `CLR10` /
+  `'apply_before_item_date'`, strict boundary (same-day passes, F1f). It is NOT the R9
+  `greatest()` guard — R9's hazard is a negation row sorting before the allocation it negates
+  (`0040:6162-6169`); this one is an item not yet born at the act date.
+- **RPR's two documented scars** (as-of 2025-08-31 / 2025-09-30, self-healing at as-of ≥
+  2026-08-01) are stored data predating the wall (`0041`), not a live gap — the wall operates
+  at call time and never retro-touches rows. Section D's D2a precondition still measures them
+  at run time before any RPR close.
+- **As-run quotes** belong to the lane α as-run acceptance record, not this matrix: the
+  F1a–F1f battery outputs and the field read, AND the live-corpus halves the rig cannot
+  discharge — F2a on the REAL BEE/RPR packs, F3a–F3c's three parked codes entered on the REAL
+  RPR/RS/BEE through the door, and F4's supersession read on whichever real fact first needs
+  correcting. The rig proves shape on synthetic clients; the named clients close at the
+  ceremony. F1d and F3e close there too, V-OWNER.
+
 ---
 
 ## 7. Coverage sweeps
@@ -446,9 +482,9 @@ CLOSING VERIFICATION — <section> · <UTC timestamp> · <lane> · <model overri
    producer) is not.
 6. **Cell counts are not coverage.** A section with every cell green and no right-answer cell in
    it is not discharged — see the header lesson, which this document exists to obey.
-7. **This matrix does not decide the two owner-open items it depends on.** The E-R11 factory
-   default (owner-only vs owner/partner) is PROPOSED, pending the owner's one-line confirmation —
-   A28 asserts the SEPARATE-grantability ruling, which holds under either default; and the
-   RPR-close reachability question (D2a) is a measurement to be taken, not a conclusion recorded
-   here.
+7. **This matrix does not decide the owner items it depends on.** The E-R11 factory default is
+   **owner-only — CONFIRMED by the owner 2026-08-09** (ruling record:
+   `wave-e-design-skeleton-part4.md` §6 item 2); A28 asserts the SEPARATE-grantability ruling,
+   which held under either default and stands unchanged. The RPR-close reachability question
+   (D2a) remains a measurement to be taken, not a conclusion recorded here.
 

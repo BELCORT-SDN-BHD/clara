@@ -95,11 +95,33 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * EMPTY TODAY, and that is a fact about the tree, not an accident: no non-whitelisted clara
- * function or CoR replacement in packages/db/migrations carries a dynamic `EXECUTE`. Adding an
- * entry is a contract-level decision, exactly like widening WIKI_WHITELIST.
+ * ONE ENTRY TODAY (it was empty until 0055). Adding an entry is a contract-level decision,
+ * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
-export const DYNAMIC_SQL_ALLOWLIST = new Map([]);
+export const DYNAMIC_SQL_ALLOWLIST = new Map([
+  ["apply_open_items(uuid,jsonb,text,text)", {
+    why: "0055 S7 — the TAIL ASSERTION block (PR #226, full ADR-061 ladder; the round-3 "
+      + "scoped review corrected this entry's first cut, which mis-attributed the finding "
+      + "to the S2 splice). What the gate actually flags: S7 re-reads pg_get_functiondef "
+      + "on apply_open_items to re-count the spliced guard's marker as a LENGTH DIFFERENCE "
+      + "(not count(*)), which sits outside the census grammar, and the block carries the "
+      + "token 'execute' only as (a) the privilege-name literal handed to "
+      + "has_function_privilege in the S7.2 write-authorization check, three times, and "
+      + "(b) the English word inside one raise message. NOTHING DYNAMIC IS CONSTRUCTED OR "
+      + "RUN BY S7 — it is a verification tail, not a patch. The S2 and S6 splices produce "
+      + "NO findings: a CoR block's own 'execute v_def' is migration-time machinery (this "
+      + "file's doctrine above), and their installed fragments carry no execute token. The "
+      + "declared set below is the installed apply_open_items body's FULL clara.* token "
+      + "set — including three names that appear ONLY in the 0042 S5.22 explanatory "
+      + "comment (_fa_today, staff_advance_summary, staff_advance_statement) and the "
+      + "self-name, declared so a future finding-kind reclassification cannot red CI on "
+      + "prose; none is a wiki token.",
+    relations: ["open_items", "journal_entries", "open_item_allocations", "clients", "op_receipts", "audit_log", "domain_events", "firm_event_seq"],
+    calls: ["_human_ctx", "role_rank", "_reserve_op", "_hash", "_canonical_counterparty",
+      "_subledger_outstanding", "_book_today", "_audit", "_append_event", "_finish_op",
+      "_fa_today", "staff_advance_summary", "staff_advance_statement", "apply_open_items"],
+  }],
+]);
 
 /** Normalise a waiver value to {why, relations:Set, calls:Set}; a legacy string is a bare
  *  attestation with no declared targets. Returns null for a missing waiver. */

@@ -345,7 +345,16 @@ test("x42.s5c.5 no clara object derives a date from the session clock, and the d
   // comment-stripped, so a splice comment that merely NAMES it cannot satisfy this.
   // Plain `strip` (prosrc only) — an occurrence COUNT, not an existence check; see the note
   // above (A) for why this one must NOT use the widened source.
-  for (const [fn, want] of [["approve_wrong_client_correction", 1], ["apply_open_items", 2], ["unallocate_group", 1]]) {
+  // [0055, Wave E lane α] the S2 apply guard (apply_before_item_date) is spliced into
+  // apply_open_items and reads the house legal date at TWO more code sites (the guard
+  // comparison + its refusal detail) — 2 pre-0055, 4 at 0055+. Frontier-aware for the
+  // same reason the arm-D roster is: db-slice-frontiers runs this file at 0042-0045.
+  const alphaApplied = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version like '0055_%'"
+  )).rows[0].n === 1;
+  for (const [fn, want] of [["approve_wrong_client_correction", 1],
+                            ["apply_open_items", alphaApplied ? 4 : 2],
+                            ["unallocate_group", 1]]) {
     const n = (await rootQuery(
       `select (length(${strip}) - length(replace(${strip}, 'clara._book_today()', '')))
               / length('clara._book_today()') as n
