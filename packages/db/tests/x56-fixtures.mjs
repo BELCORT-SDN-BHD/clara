@@ -1,0 +1,328 @@
+// 0056 (Wave E lane beta, the close model) rig -- fixture helpers (NOT a test file:
+// the name does not end in `.test.mjs`, so `node --test` ignores it). Reuses the x55/
+// wb-fixtures idioms (world-building, JWT contexts, role helpers) per the work order.
+// Contract-blind: every claim in the test files is proved against the LIVE CATALOG,
+// never this file's understanding of 0056_wave_e_close_model.sql.
+
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import {
+  rootQuery, humanQuery, getPool, opk,
+  createClient, upsertAccountClassed, draftEntryV3, approveEntry, freshResolution, counterpartyRows,
+} from "./wave-a-fixtures.mjs";
+
+// ---------------------------------------------------------------------------
+// Readiness -- LIVE CATALOG only, never the migration file.
+// ---------------------------------------------------------------------------
+
+export async function has0056() {
+  const t = await rootQuery(
+    "select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' and c.relname='fiscal_years'",
+  );
+  if (t.rows.length === 0) return false;
+  const g = await rootQuery(
+    "select 1 from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname='finalize_close'",
+  );
+  return g.rows.length > 0;
+}
+
+export async function caught(fn) {
+  try { await fn(); return null; } catch (e) { return e; }
+}
+
+// ---------------------------------------------------------------------------
+// Suite-scoped COA ("-C56").
+// ---------------------------------------------------------------------------
+
+export const AR1 = "374-C56"; // receivable control
+export const AP1 = "474-C56"; // payable control
+export const RE1 = "390-C56"; // retained earnings (special_acc_type)
+export const REVN = "684-C56"; // revenue (income)
+export const EXPN = "574-C56"; // expense
+export const BANK1 = "170-C56"; // plain asset (no account_class) -- P&L legs route through
+                                 // THIS, never AR1/AP1, so the control accounts stay at their
+                                 // untouched GL=0 / subledger=0 tie without needing a
+                                 // counterparty-bound item to keep them there.
+
+/** A close-capable client: AR/AP controls (needed so the drawer-1 AR/AP ties resolve
+ *  to exactly one account instead of 'unknown'), one retained-earnings marker, a
+ *  revenue/expense pair, and a plain bank leg. trade_nature is recorded 'services' so
+ *  the goods-trading gate (closing_stock_present) reads PASS, not UNKNOWN -- 0056's own
+ *  engine only skips that check when the fact says exactly 'services' (S6.3), so a bare
+ *  client without it would sit UNKNOWN and refuse close. */
+export async function setupCloseCoa(sub, client) {
+  await upsertAccountClassed(sub, { client, code: AR1, name: "Trade Debtors (x56)", type: "asset", accountClass: "receivable", opKey: opk("x56-ar") });
+  await upsertAccountClassed(sub, { client, code: AP1, name: "Trade Creditors (x56)", type: "liability", accountClass: "payable", opKey: opk("x56-ap") });
+  await upsertAccountClassed(sub, { client, code: RE1, name: "Retained Earnings (x56)", type: "equity", special: "retained_earnings", opKey: opk("x56-re") });
+  await upsertAccountClassed(sub, { client, code: REVN, name: "Revenue (x56)", type: "income", opKey: opk("x56-rev") });
+  await upsertAccountClassed(sub, { client, code: EXPN, name: "Expense (x56)", type: "expense", opKey: opk("x56-exp") });
+  await upsertAccountClassed(sub, { client, code: BANK1, name: "Bank (x56)", type: "asset", opKey: opk("x56-bank") });
+  await recordClientFact(sub, { client, factKey: "trade_nature", factValue: "services", basis: "x56 rig: a service business by fixture design", basisKind: "owner_instruction" });
+}
+
+export async function recordClientFact(sub, { client, factKey, factValue, basis, basisKind, sourceDocument = null, opKey = null }) {
+  const r = await humanQuery(
+    sub,
+    `select clara.record_client_fact(p_client => $1, p_fact_key => $2, p_fact_value => $3::jsonb,
+       p_basis => $4, p_basis_kind => $5, p_source_document_id => $6, p_op_key => $7) as r`,
+    [client, factKey, JSON.stringify(factValue), basis, basisKind, sourceDocument, opKey ?? opk("x56-fact")],
+  );
+  return r.rows[0].r;
+}
+
+export async function freshActiveClient(sub, tag) {
+  return createClient(sub, { name: `x56_${tag}_${randomUUID().slice(0, 8)}`, opKey: opk(`x56-cli-${tag}`) });
+}
+
+const manualRes = (sub, client) => freshResolution(sub, client, { subjectKind: "manual", subjectId: null });
+
+/** A balanced, approved entry (Dr debit/Cr credit) at postingDate -- the plainest
+ *  building block for P&L movement, AR/AP breaks, and drafts-in-period fixtures. */
+export async function plainEntry(sub, { client, debit, credit, cents, postingDate, memo = "x56 entry" }) {
+  const d = await draftEntryV3(sub, {
+    client, resolution: manualRes(sub, client), memo, postingDate,
+    lines: [
+      { account_code: debit, debit_cents: cents, credit_cents: 0, description: "dr" },
+      { account_code: credit, debit_cents: 0, credit_cents: cents, description: "cr" },
+    ],
+    opKey: opk("x56-entry"),
+  });
+  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x56-entrya") });
+  return d.entry_id;
+}
+
+// ---------------------------------------------------------------------------
+// Close-verb wrappers.
+// ---------------------------------------------------------------------------
+
+export async function proposeFY(sub, { client, startsOn }) {
+  const r = await humanQuery(sub, "select clara.propose_fiscal_year(p_client => $1, p_starts_on => $2::date) as r", [client, startsOn]);
+  return r.rows[0].r;
+}
+
+export async function openFY(sub, { client, label, startsOn, endsOn, lengthReason = null, opKey = null }) {
+  const r = await humanQuery(
+    sub,
+    "select clara.open_fiscal_year(p_client => $1, p_label => $2, p_starts_on => $3::date, p_ends_on => $4::date, p_length_reason => $5, p_op_key => $6) as r",
+    [client, label, startsOn, endsOn, lengthReason, opKey ?? opk("x56-openfy")],
+  );
+  return r.rows[0].r;
+}
+
+/** open_fiscal_year at the client's default (12/31) cadence, one full calendar year. */
+export async function openDefaultFY(sub, { client, startsOn, tag = "FY" }) {
+  const proposal = await proposeFY(sub, { client, startsOn });
+  return openFY(sub, { client, label: `${tag} ${startsOn}`, startsOn, endsOn: proposal.ends_on });
+}
+
+export async function beginClose(sub, { fy, opKey = null }) {
+  const r = await humanQuery(sub, "select clara.begin_close(p_fy => $1, p_op_key => $2) as r", [fy, opKey ?? opk("x56-begin")]);
+  return r.rows[0].r;
+}
+
+export async function attestClose(sub, { closeRun, checkKey, reason, opKey = null }) {
+  const r = await humanQuery(
+    sub,
+    "select clara.attest_close_exception(p_close_run => $1, p_check_key => $2, p_reason => $3, p_op_key => $4) as r",
+    [closeRun, checkKey, reason, opKey ?? opk("x56-attest")],
+  );
+  return r.rows[0].r;
+}
+
+export async function finalizeClose(sub, { fy, selfAttestation = null, opKey = null }) {
+  const r = await humanQuery(sub, "select clara.finalize_close(p_fy => $1, p_self_attestation => $2, p_op_key => $3) as r", [fy, selfAttestation, opKey ?? opk("x56-finalize")]);
+  return r.rows[0].r;
+}
+
+export async function abandonClose(sub, { closeRun, reason, opKey = null }) {
+  const r = await humanQuery(sub, "select clara.abandon_close(p_close_run => $1, p_reason => $2, p_op_key => $3) as r", [closeRun, reason, opKey ?? opk("x56-abandon")]);
+  return r.rows[0].r;
+}
+
+export async function reopenFY(sub, { fy, reason, correctionTarget, opKey = null }) {
+  const r = await humanQuery(
+    sub,
+    "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4) as r",
+    [fy, reason, JSON.stringify(correctionTarget), opKey ?? opk("x56-reopen")],
+  );
+  return r.rows[0].r;
+}
+
+export async function verifyClose(sub, { receipt }) {
+  const r = await humanQuery(sub, "select clara.verify_close(p_receipt => $1) as r", [receipt]);
+  return r.rows[0].r;
+}
+
+export async function getCloseReadiness(sub, { client, fy }) {
+  const r = await humanQuery(sub, "select clara.get_close_readiness(p_client => $1, p_fy => $2) as r", [client, fy]);
+  return r.rows[0].r;
+}
+
+export async function listFiscalYears(sub, { client }) {
+  const r = await humanQuery(sub, "select clara.list_fiscal_years(p_client => $1) as r", [client]);
+  return r.rows[0].r;
+}
+
+export async function grantCapability(sub, { user, capability, reason, opKey = null }) {
+  const r = await humanQuery(sub, "select clara.grant_firm_capability(p_user => $1, p_capability => $2, p_reason => $3, p_op_key => $4) as r", [user, capability, reason, opKey ?? opk("x56-grant")]);
+  return r.rows[0].r;
+}
+
+export async function revokeCapability(sub, { user, capability, reason, opKey = null }) {
+  const r = await humanQuery(sub, "select clara.revoke_firm_capability(p_user => $1, p_capability => $2, p_reason => $3, p_op_key => $4) as r", [user, capability, reason, opKey ?? opk("x56-revoke")]);
+  return r.rows[0].r;
+}
+
+/** A "clean, closeable" FY: a client with a resolvable AR + AP control (both tie at
+ *  zero -- no AR/AP activity), 'services' trade_nature, and one small approved P&L
+ *  movement inside the FY (so finalize_close mints a real closing entry, not the
+ *  empty-year no-entry path). No bank accounts, no fixed assets -- both drawer-1/2/3
+ *  bank and FA gates read vacuously TRUE with none enrolled (measured against the live
+ *  bodies, not assumed). Returns { client, fy, revenueEntry, expenseEntry }. */
+/** setupSub (admin+) opens the client/FY; prepSub (defaults to setupSub, but a caller
+ *  closing with a DIFFERENT actor should pass a bookkeeper here) posts the P&L entries
+ *  -- so finalize_close's segregation check (closer != last preparer, matrix A12) is
+ *  satisfiable by closing with an actor distinct from prepSub. */
+export async function cleanCloseableFY(setupSub, { tag, prepSub = setupSub, startsOn = "2027-01-01", revCents = 500000, expCents = 200000 } = {}) {
+  const client = await freshActiveClient(setupSub, tag);
+  await setupCloseCoa(setupSub, client);
+  const proposal = await proposeFY(setupSub, { client, startsOn });
+  const opened = await openFY(setupSub, { client, label: `${tag} FY1`, startsOn, endsOn: proposal.ends_on });
+  const midYear = addDaysStr(startsOn, 90);
+  // Both legs route through BANK1, never AR1/AP1: the control accounts stay UNTOUCHED
+  // (GL movement 0), which ties trivially against an empty subledger (0) -- no
+  // counterparty binding, no open item, no risk of the subledger belt minting one.
+  const revenueEntry = revCents > 0 ? await plainEntry(prepSub, { client, debit: BANK1, credit: REVN, cents: revCents, postingDate: midYear, memo: "x56 revenue" }) : null;
+  const expenseEntry = expCents > 0 ? await plainEntry(prepSub, { client, debit: EXPN, credit: BANK1, cents: expCents, postingDate: midYear, memo: "x56 expense" }) : null;
+  return { client, fy: opened.fiscal_year_id, startsOn, endsOn: proposal.ends_on, revenueEntry, expenseEntry };
+}
+
+/** Birth a counterparty via draft+approve of a tiny non-control entry (the x37/x55
+ *  idiom: counterparties are born at APPROVE). */
+export async function birthCounterparty(sub, { client, name, kind = "customer" }) {
+  const proposal = { new: { name } };
+  if (kind === "customer") proposal.kind = "customer";
+  const d = await draftEntryV3(sub, {
+    client, resolution: manualRes(sub, client), memo: `x56 birth ${name}`,
+    lines: [
+      { account_code: EXPN, debit_cents: 100, credit_cents: 0, description: "birth-dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 100, description: "birth-cr" },
+    ],
+    vendor: proposal, opKey: opk("x56-birth"),
+  });
+  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x56-birtha") });
+  const want = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const cp = (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === want);
+  assert.ok(cp?.id, `the ${kind} counterparty ${name} was born (mandatory setup)`);
+  return cp.id;
+}
+
+/** FORCES a drawer-1 control-tie MISMATCH for A2/A24: an open_items row for `domain`
+ *  naming a REAL counterparty, but pointing at an entry (`groundEntry`) that never
+ *  touched the control account at all -- so the subledger side (aging) carries
+ *  `cents` while the GL side stays at whatever it already was (0, in the clean
+ *  fixture). NOT reachable through any audited verb: the subledger belt trigger
+ *  (_tf_subledger_item_belt) requires the item's amount to match what
+ *  _subledger_classify_entry derives from the ENTRY'S OWN lines -- exactly the
+ *  congruence that makes a real mismatch nearly impossible to produce lawfully, which
+ *  is the whole point of the drawer-1 identity. The belt is disabled for the ONE
+ *  INSERT that seeds the phantom row (never for anything finalize_close itself does),
+ *  inside one transaction, then immediately re-enabled -- the x40/FA-anchor forging
+ *  precedent, applied here. This is a FIXTURE SHORTCUT to reach a prestate, not a
+ *  claim about how the mismatch would arise in production. */
+export async function forceControlMismatch(sub, { client, domain, groundEntry, counterparty, cents }) {
+  const c = await getPool().connect();
+  try {
+    await c.query("set role clara_fn_owner");
+    await c.query("begin");
+    await c.query("alter table clara.open_items disable trigger t_open_items_belt");
+    const firm = (await c.query("select firm_id from clara.clients where id=$1", [client])).rows[0].firm_id;
+    await c.query(
+      `insert into clara.open_items(firm_id, client_id, domain, counterparty_id, entry_id,
+         item_kind, item_date, amount_cents, created_by)
+       select $1, $2, $3, $4, je.id, 'adjustment', je.posting_date, $5, je.maker_actor
+         from clara.journal_entries je where je.id = $6`,
+      [firm, client, domain, counterparty, cents, groundEntry],
+    );
+    await c.query("alter table clara.open_items enable trigger t_open_items_belt");
+    await c.query("commit");
+  } finally {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+}
+
+/** FORGES a genuine divergence between FY(n)'s pinned closing_position and a later
+ *  recompute, for A19g's divergence-refusal arm: a balanced, already-approved entry
+ *  is inserted directly (root, role clara_fn_owner) dated INSIDE an ALREADY-CLOSED
+ *  FY, moving a balance-sheet account by `cents` AFTER the pin was taken. NOT
+ *  reachable through any audited verb -- t_period_wall (journal_entries) and
+ *  t_period_wall_lines (journal_lines) both refuse this write from every real
+ *  writer, which is the whole point of the identity the pin protects. Both
+ *  triggers are disabled for the ONE insert sequence, then immediately re-enabled
+ *  -- the x40/forceControlMismatch forging precedent, applied to a different
+ *  trigger pair. A FIXTURE SHORTCUT to reach a prestate, not a claim about how
+ *  this would arise in production. */
+export async function forgeClosedPeriodMovement(sub, { client, postingDate, debit, credit, cents, memo = "x56 forged closed-period movement" }) {
+  const c = await getPool().connect();
+  let entryId = null;
+  try {
+    await c.query("set role clara_fn_owner");
+    await c.query("begin");
+    await c.query("alter table clara.journal_entries disable trigger t_period_wall");
+    await c.query("alter table clara.journal_lines disable trigger t_period_wall_lines");
+    // Born DRAFT with its lines (a fresh line insert on a draft entry is ordinary and
+    // does not trip the SEPARATE "lines of an approved entry are immutable" guard),
+    // THEN flipped to approved by its own UPDATE -- the same two-step shape every real
+    // writer uses, matching what t_period_wall itself is disabled to admit.
+    const entryRow = await c.query(
+      `insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+           maker_actor, last_human_editor)
+         values ($1, 'draft', $2, $3, 'manual', $4, $4)
+         returning id`,
+      [client, postingDate, memo, sub],
+    );
+    entryId = entryRow.rows[0].id;
+    await c.query(
+      `insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
+         values ($1, 1, $2, $3, 0, 'forged dr'), ($1, 2, $4, 0, $3, 'forged cr')`,
+      [entryId, debit, cents, credit],
+    );
+    await c.query(
+      `update clara.journal_entries set status='approved', approved_at=now(), checker_actor=$2 where id=$1`,
+      [entryId, sub],
+    );
+    await c.query("commit");
+  } finally {
+    await c.query("rollback").catch(() => {});
+  }
+  // The re-enable must straddle the commit, in its OWN transaction: Postgres refuses
+  // ALTER TABLE ... ENABLE/DISABLE TRIGGER while the table has PENDING trigger events
+  // queued in the current transaction (55006) -- the forge's own insert/update queue
+  // some, so re-enabling inside the same transaction that wrote them is refused.
+  try {
+    await c.query("begin");
+    await c.query("alter table clara.journal_entries enable trigger t_period_wall");
+    await c.query("alter table clara.journal_lines enable trigger t_period_wall_lines");
+    await c.query("commit");
+  } finally {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+  return entryId;
+}
+
+export function addDaysStr(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function bookToday() {
+  const r = await rootQuery("select clara._book_today()::text as d");
+  return r.rows[0].d;
+}
