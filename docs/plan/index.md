@@ -24,7 +24,8 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-design-skeleton-part4.md` | live | Skeleton conclusion. |
 | `wave-e-design-reporting.md` | live | The FS/reporting-engine design half (part 1 of 2). |
 | `wave-e-design-reporting-part2.md` | live | Reporting design continued. |
-| `wave-e-acceptance-matrix.md` | live | The 108-cell acceptance matrix (Sections F→A→B→C→D→E), minted before build. |
+| `wave-e-acceptance-matrix.md` | live | The acceptance matrix, minted before build: how to read a cell, then Sections A–E (part 1 of 2). |
+| `wave-e-acceptance-matrix-part2.md` | live | Matrix continued: Section F (the E-R12 client-facts trio) and the cross-section sweeps, run order and closing-verification template. |
 
 ## `completed/` — closed waves and slices
 
