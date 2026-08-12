@@ -2,8 +2,8 @@
 // (split from x57-staleness-writers.test.mjs purely to stay under the repo's
 // 500-line-per-file gate -- the wave-a-helpers/wave-a-fixtures split
 // precedent): E9 (reversal + wrong-client correction) and E11 (the bank
-// writers). Matrix: docs/plan/wave-e-acceptance-matrix.md Section E. Design
-// contract: docs/plan/wave-e-design-skeleton-part3.md SS2.11.
+// writers). Matrix: docs/plan/active/wave-e-acceptance-matrix.md Section E. Design
+// contract: docs/plan/active/wave-e-design-skeleton-part3.md SS2.11.
 //
 // R1 FIX BATCH (2026-08-11), finding 10: E9(b) now uses the SAME
 // transactional-identity instrument as its siblings (was a post-commit read)

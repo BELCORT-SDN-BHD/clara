@@ -3,8 +3,8 @@
 // x57-staleness-writers-part2.test.mjs -- split purely to stay under the
 // repo's 500-line-per-file gate, the wave-a-helpers/wave-a-fixtures
 // precedent): E2, E2b, E3, E7', E8'. Matrix:
-// docs/plan/wave-e-acceptance-matrix.md Section E. Design contract:
-// docs/plan/wave-e-design-skeleton-part3.md SS2.11 (the trigger set + the
+// docs/plan/active/wave-e-acceptance-matrix.md Section E. Design contract:
+// docs/plan/active/wave-e-design-skeleton-part3.md SS2.11 (the trigger set + the
 // INTERSECTS+watermark predicate + the writer table).
 //
 // R1 FIX BATCH (2026-08-11): E7/E8 were re-specified after the R1 adjudication

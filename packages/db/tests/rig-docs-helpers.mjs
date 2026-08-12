@@ -1,7 +1,7 @@
 // Slice-5 rig — document-pipeline shared helper CORE (NOT a test file: the name
 // does not end in `.test.mjs`, so `node --test` ignores it). Written by the
-// CONTRACT-BLIND test lane straight from docs/plan/slice5-document-pipeline-contract.md
-// (v1.2) + docs/plan/slice5-migration-0007-design.md (§3.x) + migrations
+// CONTRACT-BLIND test lane straight from docs/plan/completed/slice5-document-pipeline-contract.md
+// (v1.2) + docs/plan/completed/slice5-migration-0007-design.md (§3.x) + migrations
 // 0001–0006 + the existing rig harness — NEVER from reading 0007. The point is
 // mutual blindness: these tests encode the CONTRACT; a divergence from the built
 // migration is the lane's product (signal), not a bug in the tests.

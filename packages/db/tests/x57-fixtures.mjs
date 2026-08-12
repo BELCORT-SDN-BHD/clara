@@ -1,8 +1,8 @@
 // 0057 (Wave E lane gamma, the period registry + month snapshots) rig -- fixture
 // helpers (NOT a test file: the name does not end in `.test.mjs`, so `node --test`
 // ignores it). CONTRACT-BLIND: every claim in the test files this powers is proved
-// against the LIVE CATALOG -- `docs/plan/wave-e-acceptance-matrix.md` Section E +
-// `docs/plan/wave-e-design-skeleton-part3.md` SS2.11-2.12 state what must be true;
+// against the LIVE CATALOG -- `docs/plan/active/wave-e-acceptance-matrix.md` Section E +
+// `docs/plan/active/wave-e-design-skeleton-part3.md` SS2.11-2.12 state what must be true;
 // this file discovers HOW to call it by reading pg_proc / pg_get_function_arguments
 // / pg_get_functiondef against a live rig, never by reading
 // `0057_wave_e_registry_snapshots.sql`, which this file (and every test file that

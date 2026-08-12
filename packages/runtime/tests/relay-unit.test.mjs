@@ -1,6 +1,6 @@
 // Slice-3 relay — pure + small DB-backed units: routing decision map, the X4
 // canonical-target split guard, monotonic checkpoint, dead-letter upsert.
-// Contract: docs/plan/slice3-event-spine-contract.md §2.9.
+// Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

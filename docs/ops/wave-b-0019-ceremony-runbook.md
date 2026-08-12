@@ -5,7 +5,7 @@ confirms in-session. Every precondition and probe is listed so that confirmation
 informed.
 
 **This ceremony is RUNTIME-IMAGE-FIRST — the first two-sided one.** That ordering is not a
-preference; it is ratified in `docs/plan/wave-b-migration-0019-design.md` §11 (binding
+preference; it is ratified in `docs/plan/completed/wave-b-migration-0019-design.md` §11 (binding
 amendment 2, after the cross-model debate rejected DB-first). Read §11 before running this.
 
 > **Authority:** contract §11 · **Merged build:** PR #83, `main` at `f6aa5f9` ·
@@ -160,7 +160,7 @@ Returns `{examined, marked, noop, skipped, run_key}`.
 
 ## 9. Aftermath
 
-- [ ] Append the ceremony ADR to `docs/PROJECTLOG.md` with the as-run evidence.
+- [ ] Add the ceremony ADR under `docs/adr/` with the as-run evidence.
 - [ ] Refresh memory `project-clara-rebuild-state` (live posture: migrations + image tag).
 - [ ] **Gate W2 is now unblocked** — 0019 removes the two known `[R2-F2]` deviations, so the
       live authority-boundary dependency audit can run.

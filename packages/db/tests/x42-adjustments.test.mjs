@@ -7,7 +7,7 @@
 // the repo's 500-line file ceiling — `node --test tests/` discovers all five.
 //
 // CONTRACT-BLIND (see the x42-adj-core.mjs header): authored from
-// docs/plan/wave-d-b-design.md + -abi.md + wave-d-contract.md §4 ONLY, never from
+// docs/plan/completed/wave-d-b-design.md + -abi.md + wave-d-contract.md §4 ONLY, never from
 // 0042's SQL. Refusals are asserted by their pinned ERRCODE + detail.reason (ABI §F).
 //
 // Every date descends from the DB's own Asia/Kuala_Lumpur anchor: mon(-1) is the

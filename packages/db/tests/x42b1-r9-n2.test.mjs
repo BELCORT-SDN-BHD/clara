@@ -62,7 +62,7 @@
 //   left for the owner at round 10, reported not attempted here).
 //
 // CONTRACT-BLIND POSTURE: this file asserts from the round-9 ladder record's OWN measured
-// findings and fix directions (docs/plan/wave-d-b-design.md's WDB-R1..R4 + the recovered
+// findings and fix directions (docs/plan/completed/wave-d-b-design.md's WDB-R1..R4 + the recovered
 // ladder-r9-record.md), never from re-reading the fix's own SQL after the fact — every assert
 // below is what the FINDING says must now be true, not a description of what the code happens
 // to do.

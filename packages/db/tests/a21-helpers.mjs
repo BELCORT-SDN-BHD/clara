@@ -1,7 +1,7 @@
 // Wave-A2.1 rig — migration-0016 shared helper CORE (NOT a test file: the name
 // does not end in `.test.mjs`, so `node --test` ignores it). Written by the
-// CONTRACT-BLIND test lane straight from `docs/plan/wave-a2.1-migration-0016-design.md`
-// (the pin doc) + `docs/plan/wave-a2.1-contract.md` §2/§3/§9 + migrations 0001–0015
+// CONTRACT-BLIND test lane straight from `docs/plan/completed/wave-a2.1-migration-0016-design.md`
+// (the pin doc) + `docs/plan/completed/wave-a2.1-contract.md` §2/§3/§9 + migrations 0001–0015
 // + the existing rig harness. It NEVER reads 0016 SQL (which does not exist in this
 // lane's tree). The battery encodes the SPEC; a divergence between an expectation
 // here and observed 0016 behavior is a FINDING for orchestrator adjudication,

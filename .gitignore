@@ -34,9 +34,13 @@ Thumbs.db
 # spike (frozen; keeps its own env)
 spike/.env
 
-# Local Claude Code state — track the full skills toolchain; keep everything else local.
+# Local Claude Code state — track the shared harness (skills, path-scoped rules, the hook
+# registration); keep session-local state (settings.local.json, caches, transcripts) out.
+# Hook SCRIPTS live in scripts/hooks/, which is tracked normally — there is no .claude/hooks/.
 .claude/*
 !.claude/skills/
+!.claude/rules/
+!.claude/settings.json
 
 # Codex-lane sandbox work dirs (reports + verification mirrors) — never committed
 .tmp/

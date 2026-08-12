@@ -5,15 +5,13 @@
 Clara runs the accounting lifecycle (onboarding → ongoing close → tax → reporting)
 under professional human control, with a shared RLS-isolated Postgres as the
 single source of truth. This repo is the rebuild from the Gate-1 audit + Gate-2
-blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
-`docs/architecture/ARCHITECTURE.md`. Plan → `docs/plan/REBUILD-PLAN.md`.**
+blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
+`docs/ARCHITECTURE.md`. Plans → `docs/plan/index.md`.**
 
-> **Status → `CLAUDE.md`'s "Where we are" + `docs/PROJECTLOG.md` PART 2 (the open
-> register)** — one home each, so the copies can't drift. In one line (2026-08-06):
-> Phase 4 is live product — Waves A/A2/A2.1, B, C and **D are closed**, running on
-> **44 migrations (frontier `0045`)** with the runtime on Fly and the dashboard on
-> Cloudflare Pages. Wave E (periods + statements) is next. Plan →
-> `docs/plan/REBUILD-PLAN.md`.
+> **Status → `PROGRESS.md`** (posture, live lanes, backlog) — the single state
+> authority, so no copy of it can drift. Decisions and the laws they minted →
+> `docs/adr/` (read `docs/adr/README.md`'s digest first). Agents start at
+> `AGENTS.md`.
 
 ## The stack (ratified at Gate 2)
 
@@ -24,8 +22,8 @@ blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
   `@workflow/world-postgres`) on a long-lived **Fly** process (region `sin`,
   Supabase-adjacent), with all durable state in our own Postgres so every step is
   checkpointed; LangGraph JS is the named fallback behind a seam. Proven in the
-  Slice-0 spike (`spike/`, `docs/architecture/ARCHITECTURE.md` Appendix A). The
-  host is ratified in PROJECTLOG ADR-014. `packages/runtime` is the Slice-1
+  Slice-0 spike (`spike/`, `docs/ARCHITECTURE.md` Appendix A). The
+  host is ratified in `docs/adr/` (ADR-014). `packages/runtime` is the Slice-1
   skeleton (durable substrate + health/ready).
 - **Dashboard** — **Next.js 15** on **Cloudflare Pages** (`app.clarabook.com`;
   Vercel dropped, ADR-024), dashboard-direct on the Supabase session JWT
@@ -36,8 +34,9 @@ blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
 ```
 packages/db/          versioned SQL migrations + seeds + DR tooling + test rig
 packages/runtime/     Clara agent-runtime skeleton (WDK durable substrate, /health, /ready)
+packages/backup/      the clara-backup Fly service (daily DR bundle to R2; docs/ops/DR.md)
 apps/dashboard/       Next.js 15 dashboard skeleton
-scripts/              repo governance: freeze-lint + leak-scan
+scripts/              repo governance gates (freeze-lint, leak-scan, harness-links, …) + hooks/
 docs/                 PRD, architecture, plan, design, audit (source of truth)
 spike/                the frozen Slice-0 runtime spike (NOT a workspace member)
 .github/workflows/    CI
@@ -64,7 +63,7 @@ pnpm install
 export PGHOST=... PGPORT=5432 PGUSER=... PGPASSWORD=... PGDATABASE=postgres
 
 pnpm typecheck                       # tsc across TS packages
-pnpm lint                            # freeze-lint + leak-scan
+pnpm lint                            # freeze-lint · leak-scan · wiki · binding · harness-links · pinned-ids · eslint
 pnpm build                           # nitro (runtime) + next (dashboard)
 
 pnpm db:migrate && pnpm db:seed      # apply migrations + synthetic seed
@@ -105,5 +104,5 @@ CI.
 - **Never commit a credential.** `.env` is gitignored; only `.env.example`
   (placeholders) is tracked. The leak-scan gate enforces it.
 - **`main` is PR-only** — land via PR with green CI.
-- **The DB owns every number; the agent only orchestrates** (`docs/prd/PRD.md`).
-- Full agent working guide: `CLAUDE.md`.
+- **The DB owns every number; the agent only orchestrates** (`docs/product/PRD.md`).
+- Full agent working guide: `AGENTS.md`.

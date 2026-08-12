@@ -1,6 +1,6 @@
 // The /bank matching workspace — pure model, split out of model.ts (repo file-size
 // discipline). PURE: zero network, zero React. Continues model.ts's numbering — the
-// design citations below are the SAME design (docs/plan/wave-c-b-bank-design.md +
+// design citations below are the SAME design (docs/plan/completed/wave-c-b-bank-design.md +
 // -part2.md); every function here is a CLIENT-SIDE PREVIEW of an identity the DB
 // enforces under lock at write time (part1 §3/§4.5/§4.6) — never the authority.
 

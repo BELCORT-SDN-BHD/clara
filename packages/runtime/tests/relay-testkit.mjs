@@ -4,7 +4,7 @@
 // required because several cases mutate GLOBAL state (the singleton taxonomy
 // pointer) or hold the shared `router` advisory lock via a spawned runner, and
 // must never overlap. Every relay here is FIRM-SCOPED so it only drains its own
-// fresh fixture firm. Contract: docs/plan/slice3-event-spine-contract.md §2.9.
+// fresh fixture firm. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9.
 
 import { after } from "node:test";
 import assert from "node:assert/strict";

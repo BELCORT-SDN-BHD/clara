@@ -106,7 +106,7 @@ Six probes, read-only, raising on the first failure. Green means:
 
 ## 4. Aftermath
 
-- [ ] Append the ADR to `docs/PROJECTLOG.md` with the applied timestamp and the 6/6 receipt.
+- [ ] Add the ADR under `docs/adr/` with the applied timestamp and the 6/6 receipt.
 - [ ] Update the LIVE POSTURE line in `CLAUDE.md` and the memory state file: **21 migrations**.
 - [ ] `clara-runtime` stays at **v27** — no redeploy, and none is needed.
 - [ ] Re-pin any open gate journey to **21 migrations · v27** (WB-R24).

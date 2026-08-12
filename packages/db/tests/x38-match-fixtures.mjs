@@ -7,8 +7,8 @@
 //
 // CONTRACT-BLIND, same discipline as the test file that imports this: every
 // verb is called by its PINNED name with NAMED args, straight from
-// docs/plan/wave-c-b-bank-design.md (S4.1, S4.2, S4.3, S4.5, S4.6) +
-// docs/plan/wave-c-b-bank-design-part2.md. A 42883 / param-name / reason-token
+// docs/plan/completed/wave-c-b-bank-design.md (S4.1, S4.2, S4.3, S4.5, S4.6) +
+// docs/plan/completed/wave-c-b-bank-design-part2.md. A 42883 / param-name / reason-token
 // divergence at integration is a FINDING for orchestrator adjudication, never
 // a silent test edit. See the test file's header for the full list of names
 // ASSUMED rather than pinned by the design text (add_bank_account's arg list,

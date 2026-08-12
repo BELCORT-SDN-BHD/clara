@@ -1,6 +1,6 @@
 // Slice-3 rig — the EVENT SPINE, part 3: ISOLATION + MATRIX, APPEND-ONLY, CATALOG/
 // VALIDATION, CONTEXT PACK, DEADLOCKS, STAMPING, ALLOCATOR (§4.5–§4.10 + P6 of
-// docs/plan/slice3-event-spine-contract.md v2.2; suite map in rig-events.test.mjs). Every negative asserts
+// docs/plan/completed/slice3-event-spine-contract.md v2.2; suite map in rig-events.test.mjs). Every negative asserts
 // an EXACT SQLSTATE; a divergence stays as the contract states.
 
 import { test, before, after } from "node:test";

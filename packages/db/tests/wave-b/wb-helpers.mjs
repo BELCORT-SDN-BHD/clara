@@ -1,6 +1,6 @@
 // Wave-B rig — migration-0017 shared helper CORE (NOT a test file). Written by
 // the CONTRACT-BLIND test lane straight from the three-part pin set
-// `docs/plan/wave-b-migration-0017-design.md` (+ -part2/-part3) — the 0017 SQL
+// `docs/plan/completed/wave-b-migration-0017-design.md` (+ -part2/-part3) — the 0017 SQL
 // is NEVER read (ADR-029 discipline). A divergence between an expectation here
 // and observed 0017 behavior is a FINDING for orchestrator adjudication, never
 // a silent test edit. Module layout (repo 500-line lint): wb-helpers (constants

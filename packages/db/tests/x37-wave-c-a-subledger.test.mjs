@@ -1,6 +1,6 @@
 // 0037 Wave C-a -- the AR/AP open-item subledger + allocation battery.
 //
-// CONTRACT-BLIND: written from docs/plan/wave-c-a-subledger-design.md (v2, the
+// CONTRACT-BLIND: written from docs/plan/completed/wave-c-a-subledger-design.md (v2, the
 // review-hardened spec) + the orchestrator's pinned interface ONLY -- this lane
 // never reads 0037's SQL. Every verb is called by its PINNED name with NAMED
 // args; a 42883 / param-name / reason-token divergence at integration is a

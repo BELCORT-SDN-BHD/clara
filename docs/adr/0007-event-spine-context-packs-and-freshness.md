@@ -1,0 +1,3 @@
+### ADR-007 — Event-driven state layer + context packs + freshness (the North-Star spine)
+**Decision:** Every audited write appends a domain event + a transactional outbox row; a relay drives projections + wakes (at-least-once + idempotent consumers). Before any accounting decision Clara retrieves a fresh context pack carrying a books-version token; a stale token forces re-fetch. A declarative, versioned trigger taxonomy routes each event type.
+**Why:** The prior build had no event layer, no context pack, no freshness (audit A-1..A-7) — stale figures replayed as authoritative. Ref: ARCHITECTURE §2, PRD §7.

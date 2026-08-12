@@ -8,7 +8,7 @@
 // ceiling. Everything here is ADDITIVE — no existing helper is changed.
 //
 // CONTRACT-BLIND, same discipline as the rest of the battery: authored from
-// docs/plan/wave-d-a-fa-design.md v2.1 and the adjudicated round-4 fold ONLY.
+// docs/plan/completed/wave-d-a-fa-design.md v2.1 and the adjudicated round-4 fold ONLY.
 // This lane never reads 0041's SQL, the fix diffs, or the harvested live bodies.
 //
 // THE ARITHMETIC IS ASSERTED AGNOSTICALLY. Which lineage row owns a calendar month

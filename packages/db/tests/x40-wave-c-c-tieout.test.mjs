@@ -2,7 +2,7 @@
 // AGING (as-of, due-date), and LEARN-LOOP (bank rules) battery.
 //
 // CONTRACT-BLIND, the x37/x38 discipline: written straight from
-// docs/plan/wave-c-c-tieout-design.md (v2.1) + wave-c-c-tieout-design-part2.md
+// docs/plan/completed/wave-c-c-tieout-design.md (v2.1) + wave-c-c-tieout-design-part2.md
 // (the ladder record -- 40 finding rows, all ACCEPTED) + wave-c-contract.md
 // (WC-R1..R12) + the LIVE 0037/0038/0039 idioms this design explicitly reuses
 // (congruence FKs, belts, tail asserts, grant/revoke blocks, the advisory-lock

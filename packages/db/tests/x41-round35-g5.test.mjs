@@ -27,7 +27,7 @@
 // switched off.
 //
 // CONTRACT-BLIND (see x41-fa-fixtures.mjs / x41-round3-helpers.mjs headers): authored from
-// docs/plan/wave-d-a-fa-design.md v2.1 §2.3/§2.4/§4.3 + the adjudicated round-3.5 fix ledger
+// docs/plan/completed/wave-d-a-fa-design.md v2.1 §2.3/§2.4/§4.3 + the adjudicated round-3.5 fix ledger
 // (G5) ONLY. This lane never reads 0041's SQL, the fix diffs, or the harvested live bodies.
 
 import { test, before, after } from "node:test";

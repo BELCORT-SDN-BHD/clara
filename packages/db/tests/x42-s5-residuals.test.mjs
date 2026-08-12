@@ -18,8 +18,8 @@
 //             split's continuing successor carry none. No arithmetic change — proven by
 //             running the period.
 //
-// CONTRACT-BLIND: authored from docs/plan/wave-d-b-design.md §6 + -abi.md §D/§E/§F +
-// docs/plan/wave-d-contract.md §4 ONLY — never 0042's SQL. The 0041 LIVE surface
+// CONTRACT-BLIND: authored from docs/plan/completed/wave-d-b-design.md §6 + -abi.md §D/§E/§F +
+// docs/plan/completed/wave-d-contract.md §4 ONLY — never 0042's SQL. The 0041 LIVE surface
 // (0041_wave_d_a_fa_register.sql + x41-fa-fixtures.mjs) is fair precedent — it is what
 // G10/G11/G12/G14 recut, additively. Every refusal is asserted by its PINNED reason token
 // (ABI §F) and, where stated (G10's CLR39 vs 0041's pre-existing CLR37 on the SAME token;

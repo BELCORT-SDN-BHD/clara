@@ -21,7 +21,7 @@
 // because one defect gets one token whichever door refuses it.
 //
 // CONTRACT-BLIND. Verb names, argument names, envelopes and tokens come from
-// `docs/plan/wave-d-b-design.md` §3/§7 + `-abi.md` §A/§F only.
+// `docs/plan/completed/wave-d-b-design.md` §3/§7 + `-abi.md` §A/§F only.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

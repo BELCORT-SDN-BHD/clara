@@ -1,6 +1,6 @@
 // Slice-4 rig — durable-runtime shared helper CORE (NOT a test file: the name
 // does not end in `.test.mjs`). Written by the CONTRACT-BLIND test lane straight
-// from docs/plan/slice4-durable-runtime-contract.md v2.1 (§0, §3, §6) +
+// from docs/plan/completed/slice4-durable-runtime-contract.md v2.1 (§0, §3, §6) +
 // migrations 0002–0005 + the existing rig harness — NEVER from reading 0006. The
 // point is mutual blindness: these tests encode the CONTRACT; a divergence from
 // the built migration is the lane's product (signal), not a bug in the tests.

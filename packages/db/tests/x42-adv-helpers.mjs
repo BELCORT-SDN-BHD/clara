@@ -4,8 +4,8 @@
 // everything here so a test file imports ONE module (the x41-fa-fixtures /
 // x41-fa-world split, forced by the repo's 500-line file ceiling).
 //
-// CONTRACT-BLIND. Authored from `docs/plan/wave-d-b-design.md` §3 + §7 and
-// `docs/plan/wave-d-b-design-abi.md` (§A signatures/envelopes, §B flags keys,
+// CONTRACT-BLIND. Authored from `docs/plan/completed/wave-d-b-design.md` §3 + §7 and
+// `docs/plan/completed/wave-d-b-design-abi.md` (§A signatures/envelopes, §B flags keys,
 // §D DDL, §F the refusal-token table) ONLY — this lane NEVER reads migration 0042,
 // the 0042 section drafts, or the harvested live bodies. Every verb is called by its
 // PINNED name with NAMED args; every refusal §F names is asserted by its errcode AND

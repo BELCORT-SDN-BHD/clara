@@ -2,7 +2,7 @@
 // file-size discipline, the matchModel.ts precedent). HUMAN lane only
 // (PostgREST as clara_authenticated); every writer carries a FRESH op_key
 // (the DB is idempotent on firm,fn,op_key). No figure is computed here — the
-// DB owns every cents value (CLAUDE.md law).
+// DB owns every cents value (AGENTS.md law).
 //
 // READ/WRITE SHAPE HONESTY NOTE (mirrors bankApi.ts's own header). Migration
 // 0040 is still-to-merge as this file is written. The verb table (design §5)

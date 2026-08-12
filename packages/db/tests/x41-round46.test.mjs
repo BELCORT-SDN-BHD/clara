@@ -37,7 +37,7 @@
 // window, and the months both readings must charge really charged.
 //
 // CONTRACT-BLIND (see x41-fa-fixtures.mjs / x41-round3-helpers.mjs headers): authored
-// from docs/plan/wave-d-a-fa-design.md v2.1, the adjudicated round-4.6 folds and the
+// from docs/plan/completed/wave-d-a-fa-design.md v2.1, the adjudicated round-4.6 folds and the
 // battery's own conventions. This lane never reads 0041's SQL, its diffs, the fix-lane
 // output, or the harvested live bodies.
 

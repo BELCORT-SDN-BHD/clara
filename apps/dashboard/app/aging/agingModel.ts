@@ -3,7 +3,7 @@
 // DB-owned value from ar_aging/ap_aging/customer_statement/supplier_statement
 // — this module groups, labels, and derives ONE display-only date marker
 // (`isOverdueMarker`, a plain string comparison, never a money figure). It
-// NEVER sums a bucket or a running balance: CLAUDE.md's "the DB owns every
+// NEVER sums a bucket or a running balance: AGENTS.md's "the DB owns every
 // number" law means a client-side grand-total row is out of scope for this
 // lane even though it would look harmless — if one is wanted, the DB must
 // return it (it does, as `totals` — see AgingTotals below).

@@ -1,7 +1,7 @@
 // Wave-B rig — migration-0020 (typed egress consent + dispatch authorization)
 // shared helper CORE (NOT a test file: the name does not end in `.test.mjs`, so
 // `node --test` ignores it). Written by the CONTRACT-BLIND test lane straight
-// from `docs/plan/wave-b-migration-0020-design.md` v1.0 (RATIFIED) — the 0020 SQL
+// from `docs/plan/completed/wave-b-migration-0020-design.md` v1.0 (RATIFIED) — the 0020 SQL
 // and its runtime rewire are NEVER read (ADR-029/ADR-037 discipline). A divergence
 // between an expectation here and observed 0020 behaviour is a FINDING for
 // orchestrator adjudication, never a silent test edit.

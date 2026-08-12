@@ -98,7 +98,7 @@ dormant — the surface + seed now both exist); `/ready` green.
   workflow entry becomes immutable forever (the monotonic deploy-lock). The window
   between the deploy and this merge is the one interval where a live v25 body is
   not yet hash-locked; keep it minutes, not days.
-- Update memory + CLAUDE.md Where-we-are (live = 17 migrations, v25) + PROJECTLOG ADR.
+- Update `PROGRESS.md` (live = 17 migrations, v25) + add the ceremony ADR under `docs/adr/`.
 - The live gates O/K/W2/L/R2/F then run on REAL documents (WB-R16 vehicles: the real
   second client full-journey; RPR's management accounts → bootstrap_client_plan → the
   B-12 lane). Gate K rides document-primary if R2's parse lane shipped feasible, else

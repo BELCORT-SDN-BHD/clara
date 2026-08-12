@@ -7,10 +7,10 @@
 // WHY A SPLIT: the repo enforces a 500-line file ceiling (the x41-fa-fixtures /
 // x41-fa-world precedent). Nothing here depends on the sibling.
 //
-// CONTRACT-BLIND. Every line was written from `docs/plan/wave-d-b-design.md`
-// (WDB-G1..G16, §1–§9), `docs/plan/wave-d-b-design-abi.md` (§A signatures, §B flags,
+// CONTRACT-BLIND. Every line was written from `docs/plan/completed/wave-d-b-design.md`
+// (WDB-G1..G16, §1–§9), `docs/plan/completed/wave-d-b-design-abi.md` (§A signatures, §B flags,
 // §C lines/memo/period/index law, §D DDL, §E op-key matrix, §F refusal tokens, §G
-// event payloads) and `docs/plan/wave-d-contract.md` §4 ONLY. This lane NEVER reads
+// event payloads) and `docs/plan/completed/wave-d-contract.md` §4 ONLY. This lane NEVER reads
 // 0042's SQL. Every verb is called by its PINNED name with NAMED args; every refusal
 // is asserted by its pinned ERRCODE + `detail.reason` TOKEN (ABI §F is LAW). A 42883 /
 // param-name / token divergence at integration is a FINDING for orchestrator

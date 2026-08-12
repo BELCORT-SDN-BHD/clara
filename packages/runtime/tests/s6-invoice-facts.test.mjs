@@ -252,7 +252,7 @@ test("v10 (X7/F7): the typed CustomerName pass-through above is OVERRIDDEN when 
   // deterministic reader to challenge it maps VERBATIM. This adjacent cell pins what changed —
   // when the layout states a boxed party AND names the typed value as the `Attn` contact, the
   // party wins and the person becomes `invoice.contact_person`. That is the F7 defect, measured
-  // on both real KONG CHENG invoices (docs/plan/wave-7a-acceptance-h1.md rows 1 and 12, E7).
+  // on both real KONG CHENG invoices (docs/plan/completed/wave-7a-acceptance-h1.md rows 1 and 12, E7).
   // The full matrix lives in x7-customer-mapper.test.mjs; this is the end-to-end sighting.
   const poly = (xmin, ymin, xmax, ymax) => [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax];
   const out = azure.normalizeAzureInvoice({

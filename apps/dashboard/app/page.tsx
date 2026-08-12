@@ -1,5 +1,5 @@
 // Slice-1 placeholder. The real two-pane Agentic Accounting OS UI comes later
-// (docs/design/DIRECTION.md). This only proves the app boots and reads config.
+// (docs/design/PRODUCT_DESIGN.md). This only proves the app boots and reads config.
 const env = process.env.NEXT_PUBLIC_CLARA_ENV ?? "development";
 
 export default function Home() {

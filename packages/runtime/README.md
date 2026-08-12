@@ -3,8 +3,8 @@
 The long-lived Node service that hosts Clara. **Slice 4 lands the durable chat
 runtime** on top of the Slice-0 substrate: the read-only chat advisor
 (`chatTurn_v1`), leased clarify, the outbox drain, the settle-reconciler, and a
-crash-only supervisor. Authority: `docs/plan/slice4-durable-runtime-contract.md`
-v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
+crash-only supervisor. Authority: `docs/plan/completed/slice4-durable-runtime-contract.md`
+v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 `packages/db/migrations/0006_runtime_core.sql`.
 
 ## What is wired now

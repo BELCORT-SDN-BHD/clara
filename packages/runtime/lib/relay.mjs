@@ -1,5 +1,5 @@
 // The outbox relay — pure, injectable logic (Slice 3, ARCHITECTURE §2 / ADR-016;
-// contract docs/plan/slice3-event-spine-contract.md v2.2 §2.8–2.9). This module NEVER opens
+// contract docs/plan/completed/slice3-event-spine-contract.md v2.2 §2.8–2.9). This module NEVER opens
 // its own work connection for the routing functions: every routing function
 // (loadActiveTaxonomy / discoverWork / routeBatchForFirm / redrive / runRelayCycle)
 // takes an ALREADY-CONNECTED pg client that the caller has put into the

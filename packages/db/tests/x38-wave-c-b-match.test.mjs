@@ -1,7 +1,7 @@
 // 0038 Wave C-b -- the bank MATCHING + SETTLE-FROM-LINE + TENANCY/ACL battery.
 //
-// CONTRACT-BLIND: written from docs/plan/wave-c-b-bank-design.md (v2, S1-S4.6)
-// + docs/plan/wave-c-b-bank-design-part2.md (v2, S4.7-S7) -- the review-hardened
+// CONTRACT-BLIND: written from docs/plan/completed/wave-c-b-bank-design.md (v2, S1-S4.6)
+// + docs/plan/completed/wave-c-b-bank-design-part2.md (v2, S4.7-S7) -- the review-hardened
 // spec -- + the pinned governing law (wave-c-contract.md WC-R1..R12,
 // wave-c-a-subledger-design.md WCA-R1..R9) + the LIVE 0037 idioms this design
 // explicitly reuses. This lane never reads 0038's SQL. Every verb is called by

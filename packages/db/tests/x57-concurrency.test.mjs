@@ -1,7 +1,7 @@
 // 0057 (Wave E lane gamma, the period registry + month snapshots) rig -- THE
 // CONCURRENCY FAMILY (Codex round finding 4, 2026-08-11: the battery had no
-// real two-session cell). Matrix: docs/plan/wave-e-acceptance-matrix.md
-// Section E. Design contract: docs/plan/wave-e-design-skeleton-part3.md
+// real two-session cell). Matrix: docs/plan/active/wave-e-acceptance-matrix.md
+// Section E. Design contract: docs/plan/active/wave-e-design-skeleton-part3.md
 // SS2.11 ("THE ONLY LOCK, AND WHY" -- mint_month_snapshot takes 203005007
 // EXCLUSIVE; every covered writer's trigger takes it SHARED first).
 //

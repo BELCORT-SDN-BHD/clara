@@ -2,9 +2,9 @@
 // both lanes) + the typed CONSENT extension (`statement_extraction`).
 //
 // CONTRACT-BLIND, exactly the x37 discipline: written from
-// docs/plan/wave-c-b-bank-design.md + wave-c-b-bank-design-part2.md (v2,
-// review-hardened) + docs/plan/wave-c-contract.md (WC-R1..R12) +
-// docs/plan/wave-c-a-subledger-design.md (WCA-R1..R9) + the LIVE 0037 idiom
+// docs/plan/completed/wave-c-b-bank-design.md + wave-c-b-bank-design-part2.md (v2,
+// review-hardened) + docs/plan/completed/wave-c-contract.md (WC-R1..R12) +
+// docs/plan/completed/wave-c-a-subledger-design.md (WCA-R1..R9) + the LIVE 0037 idiom
 // (congruence FKs, belts, tail asserts, grant/revoke blocks, the advisory-lock
 // family, event registration) -- this lane never reads 0038's SQL. Every verb is
 // called by its PINNED name with NAMED args; a 42883 / param-name / reason-token

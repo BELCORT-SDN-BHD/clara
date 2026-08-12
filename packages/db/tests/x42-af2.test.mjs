@@ -11,7 +11,7 @@
 //     ordinary-group unconditional refusals.
 //
 // CONTRACT-BLIND, the x37/x38/x40/x41 discipline: authored from
-// docs/plan/wave-d-b-design.md §4 + §7 and docs/plan/wave-d-b-design-abi.md
+// docs/plan/completed/wave-d-b-design.md §4 + §7 and docs/plan/completed/wave-d-b-design-abi.md
 // (§A/§B/§D/§E/§F/§G) ONLY. This lane never reads a 0042 migration file or any
 // build-0042 section file — it encodes the DESIGN's promises. Every refusal is
 // asserted by its ABI §F DETAIL reason token, which the design calls LAW. A

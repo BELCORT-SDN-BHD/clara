@@ -1,6 +1,6 @@
 // §7-A THE UNATTENDED SALES DRAFTER — CONTRACT-BLIND unit tests (PR #203 test lane,
-// test-7a-rt-blind). Written FROM docs/plan/wave-7a-contract.md (7A-R2, 7A-R7) and
-// docs/plan/wave-7a-design-skeleton.md §2a, WITHOUT reading autoDraft.v6.impl.ts's
+// test-7a-rt-blind). Written FROM docs/plan/completed/wave-7a-contract.md (7A-R2, 7A-R7) and
+// docs/plan/completed/wave-7a-design-skeleton.md §2a, WITHOUT reading autoDraft.v6.impl.ts's
 // step bodies or any review report — the lane's own blindness rule. Drives ONLY the
 // EXPORTED schema (autoDraft.v6.prompt.ts) and kind-derivation function
 // (autoDraft.v6.tools.ts) surfaces. No DB, no network, no live model call.

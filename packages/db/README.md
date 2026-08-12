@@ -2,7 +2,7 @@
 
 Versioned migrations, seeds (synthetic only), the ephemeral test rig, and the
 DR backup/restore tooling. The shared Postgres is Clara's single source of
-truth (`docs/architecture/ARCHITECTURE.md` §3).
+truth (`docs/ARCHITECTURE.md` §3).
 
 > **Scope.** Slice 1 landed the *pipeline* (migration `0001_smoke.sql` — a
 > placeholder that only proves the runner works end-to-end). **Slice 2** (`0002`–
@@ -10,7 +10,7 @@ truth (`docs/architecture/ARCHITECTURE.md` §3).
 > `clara_*` roles, identity/RBAC, forced RLS with role-pinned read policies, the
 > two-lane audited writers (human vs. wake — the agent can never sign), the four
 > structural invariants, the balance/immutability/append-only triggers, and
-> money-as-cents. See `docs/plan/REBUILD-PLAN.md`.
+> money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
 > **Migration ledger (as of 2026-08-09).** The repo carries **53 migrations,
 > `0001`–`0054`** (the sequence skips `0032`, which never existed — 53 files, not 54),
@@ -118,7 +118,7 @@ This was **materially zero-risk pre-Slice-4** — no runtime deployed, and
 CI / throwaway targets have no concurrent writers — so `0005` needed no special
 handling. The runtime is live since Slice 4: the rule binds every live deploy that
 ships a writer-body change.
-(Design authority: `docs/plan/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
+(Design authority: `docs/plan/completed/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
 behaviour is a PostgreSQL property, not a Clara mechanism.)
 
 ## CI

@@ -22,8 +22,8 @@
 // 0042 Wave D-b — the STAFF-ADVANCE battery, part 1: ENROLMENT (design §3.1) ·
 // THE REGISTER + SOFT-BIRTH + THE PARTICULARS CHASE (design §3.2/§3.3) · THE QUEUE.
 //
-// CONTRACT-BLIND: authored from `docs/plan/wave-d-b-design.md` §3 + §7 and
-// `docs/plan/wave-d-b-design-abi.md` ONLY — this lane NEVER reads 0042's SQL or the
+// CONTRACT-BLIND: authored from `docs/plan/completed/wave-d-b-design.md` §3 + §7 and
+// `docs/plan/completed/wave-d-b-design-abi.md` ONLY — this lane NEVER reads 0042's SQL or the
 // 0042 section drafts. Every verb is called by its PINNED name with NAMED args;
 // every refusal ABI §F names is asserted by its errcode AND its DETAIL reason token,
 // verbatim. A divergence at integration is a FINDING for orchestrator adjudication,

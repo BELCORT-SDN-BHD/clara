@@ -1,8 +1,8 @@
 // 0057 (Wave E lane gamma, the period registry + month snapshots) rig -- PART 1:
 // minting, the period registry's calendar semantics (E1b), the two RECORD cells
 // (E4/E5), and the reproducibility + honest-boundary right-answer cells (E6/E10).
-// Matrix: docs/plan/wave-e-acceptance-matrix.md Section E (E1, E1b, E4, E5, E6,
-// E10). Design contract: docs/plan/wave-e-design-skeleton-part3.md SS2.11-2.12.
+// Matrix: docs/plan/active/wave-e-acceptance-matrix.md Section E (E1, E1b, E4, E5, E6,
+// E10). Design contract: docs/plan/active/wave-e-design-skeleton-part3.md SS2.11-2.12.
 //
 // R1 FIX BATCH (2026-08-11): finding 3 -- E10 now asserts a POSITIVE
 // drift=true on a mover that genuinely rides inside the payload

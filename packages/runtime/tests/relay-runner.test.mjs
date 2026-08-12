@@ -1,7 +1,7 @@
 // Slice-3 relay — the spawned runner: (X2) reconnect + non-zero HALT exit, (a)
 // kill-mid-stream [gate], (b) split-brain. These hold the shared `router`
 // advisory lock and/or mutate the global pointer, so the whole suite runs with
-// --test-concurrency=1. Contract: docs/plan/slice3-event-spine-contract.md §2.9.
+// --test-concurrency=1. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

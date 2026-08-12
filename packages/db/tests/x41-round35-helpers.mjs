@@ -7,7 +7,7 @@
 // ceiling. Everything here is ADDITIVE — no existing helper is changed.
 //
 // CONTRACT-BLIND, same discipline as the rest of the battery: authored from
-// docs/plan/wave-d-a-fa-design.md v2.1 + the adjudicated round-3.5 fix ledger
+// docs/plan/completed/wave-d-a-fa-design.md v2.1 + the adjudicated round-3.5 fix ledger
 // (G1..G8) ONLY. This lane never reads 0041's SQL, the fix diffs, or the
 // harvested live bodies — it reads the CATALOG at run time, which is what
 // production itself is made of.
