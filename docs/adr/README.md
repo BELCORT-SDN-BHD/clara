@@ -117,9 +117,12 @@ it a number** (it would be the only renumbering in this conversion) — flagged,
 
 # THE STANDING LAWS DIGEST
 
-Every law still binding TODAY, deduplicated, with its source. **This digest goes to the
-owner for sign-off** — it is a reading of all 68 entries, not a mechanical extraction.
-On any divergence, the cited ADR governs.
+Every law still binding TODAY, deduplicated, with its source. It is a reading of all 68
+entries, not a mechanical extraction. On any divergence, the cited ADR governs.
+
+> **SIGNED OFF — Tao (BELCORT), 2026-08-12.** The 67 laws below are ratified as the
+> current standing set at the ADR-0069 harness refactor. Additions or supersessions land
+> as new ADR entries; this digest is re-trued whenever one does.
 
 ## 1 · Product law (the cardinal invariants)
 

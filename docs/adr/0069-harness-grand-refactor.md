@@ -28,8 +28,9 @@ article — each read verbatim and diffed against this repo before any ruling.
    source files reconstruct byte-for-byte, twice, including from `origin/main`);
    `PROJECTLOG.md` + the five archive volumes deleted. `docs/adr/README.md` carries the
    status index (standing / superseded-by / discharged / narrative-note) and **THE STANDING
-   LAWS DIGEST** (67 laws, owner-signed — see below). One interstitial non-ADR ruling batch
-   (WB-R28..R30) preserved as `0042a-*` without claiming a number.
+   LAWS DIGEST** (67 laws, **owner-signed 2026-08-12** — Tao ratified the set at this
+   refactor). One interstitial non-ADR ruling batch (WB-R28..R30) preserved as `0042a-*`
+   without claiming a number.
 4. **Pins become mechanisms (Q4).** The canary (`daba7f2e`) and witness (`d023b48c`) ids are
    hard-blocked by a PreToolUse hook (`scripts/hooks/pinned-ids-guard.mjs`, 44-case selftest,
    wired into lint + CI), registered in a **tracked** `.claude/settings.json` (the official
