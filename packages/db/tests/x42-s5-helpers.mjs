@@ -247,6 +247,28 @@ const CLOSE_MODEL_0056_CLOCK_NAMES = [
 // unconditional entry would turn those legs red while saying nothing about clock discipline.
 const REGISTRY_0057_CLOCK_NAMES = ["verify_snapshot"];
 
+// 0059 [Wave E lane δ]: ONE lawful bare-clock reader, and it is the 0057 shape again.
+// clara.approve_metric_definition stamps `approved_at = statement_timestamp()` on the version row
+// it approves — a timestamptz recording WHEN a human approved, which lands in no date-typed
+// accounting decision and drives no calculation.
+//
+// WHY THE TOKEN CANNOT BE clara._book_today() HERE, stated because "use the authority" is the
+// reflex this roster otherwise enforces: _book_today returns a DATE, and this column is the instant
+// an approval occurred, not a business day. Rewriting it would be the same category error 0057's
+// block names for verified_at. Every DATE δ decides comes from an authority or a parameter instead
+// — applies_from/applies_to are the caller's, the edge-policy and averaging windows are catalog
+// rows, the account-set effective windows are stored, and the period-effective N/A reason
+// resolution anchors on the reporting period's own period_start, never on a clock.
+//
+// MEASURED, not inferred: arm (D)'s own detector over the 0058-0061 surface flags this name and no
+// other. 0059's second statement_timestamp() site sits inside the `do $canonical$` seed block,
+// which is not a pg_proc row and correctly does not flag; the A30b receipt writer carries no clock
+// token at all (its receipts are timestamped by the table's own default).
+//
+// Frontier-gated for the reason the 0046/0055/0056/0057 blocks state: db-slice-frontiers runs this
+// battery against databases pinned earlier, where this function does not exist.
+const METRICS_0059_CLOCK_NAMES = ["approve_metric_definition"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -257,6 +279,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0055_%")) names.push(...CLIENT_FACTS_0055_CLOCK_NAMES);
   if (await applied("0056_%")) names.push(...CLOSE_MODEL_0056_CLOCK_NAMES);
   if (await applied("0057_%")) names.push(...REGISTRY_0057_CLOCK_NAMES);
+  if (await applied("0059_%")) names.push(...METRICS_0059_CLOCK_NAMES);
   return names.sort();
 }
 

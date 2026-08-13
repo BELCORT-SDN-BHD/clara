@@ -165,7 +165,7 @@ test("O8 row 9: get_context_pack is the deliberate EXCEPTION — an onboarding c
   fail0017(live);
   const pack = await packHuman(w.users.alice, { client: onb.client, purpose: "chat" });
   assert.ok(pack, "pack returned for the onboarding client (interview + dry-run need it)");
-  assert.equal(pack.pack_schema_version, 4, "and it is the v4 pack");
+  assert.equal(pack.pack_schema_version, 5, "and it is the current pack (v5 — Wave E delta's period/snapshot registry block)");
 });
 
 test("O8 rows 10/11: filing + resolution WIDEN to onboarding (positive) and refuse archived (negative)", async () => {

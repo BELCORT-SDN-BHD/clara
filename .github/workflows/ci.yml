@@ -201,11 +201,13 @@ jobs:
       # The pinned-ids self-test rides here too. The guard itself is a PreToolUse hook, not
       # a CI step — CI can never exercise it in situ — so this run is the only thing standing
       # between a refactor and a silently dead safety pin (AGENTS.md hard constraint 11).
-      - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids guard)
+      - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids + dispatch-model guards)
         run: |
           node scripts/check-harness-links.mjs
           node scripts/check-harness-links.selftest.mjs
           node scripts/hooks/pinned-ids-guard.selftest.mjs
+          # Same deal for the dispatch-model guard (AGENTS.md hard constraint 5).
+          node scripts/hooks/dispatch-model-guard.selftest.mjs
 
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
@@ -688,6 +690,33 @@ jobs:
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
           PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"
+
+      # Wave-E δ contract drill (the same anti-misleading-green wiring as the drills above,
+      # for a NEW hazard shape the review named: the package sweep preloads the wave gate
+      # (--import tests/delta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_DELTA
+      # for every file in the sweep — so if a numbering/merge accident ever left the δ migrations
+      # off the chain, the ENTIRE δ battery would skip loudly-but-green in the only leg that runs
+      # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain, then
+      # the ordered δ contract run FOCUSED with the variable explicitly UNSET — on a pre-δ chain
+      # it FAILS by design (the gate's stated focused-run polarity), and post-δ it must be green
+      # with ZERO skips. The δ contract is a ONE-WAY ceremony (it deploys the evaluator closures
+      # and asserts a pristine metric_cells), which is the other reason it gets its own database:
+      # the sweep's run consumes the shared clara_ci copy, and a consumed database is not valid
+      # evidence for this contract. Guarded by presence so pre-merge branches without δ stay
+      # green: the step no-ops until a numbered wave_e_delta_metrics migration is on disk.
+      - name: Wave-E δ contract drill (isolated DB, focused, allow-missing UNSET)
+        working-directory: packages/db
+        run: |
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_delta_metrics.sql 2>/dev/null | head -1)"
+          if [ -z "$m" ]; then
+            echo "no numbered wave_e_delta_metrics migration on disk — the δ contract has nothing to drill yet"; exit 0
+          fi
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
+          PGDATABASE=clara_delta_contract_ci pnpm migrate
+          PGDATABASE=clara_delta_contract_ci pnpm seed
+          unset CLARA_ALLOW_MISSING_WAVE_E_DELTA
+          PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
+            node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
 
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR

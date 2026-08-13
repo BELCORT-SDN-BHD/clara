@@ -119,11 +119,11 @@ export function childEnvForExternalTools() {
   return env;
 }
 
-/** @returns {pg.ClientConfig} */
-export function connConfig() {
+/** @param {pg.ClientConfig} [overrides] @returns {pg.ClientConfig} */
+export function connConfig(overrides = {}) {
   const url = urlVar();
   // When a DSN is provided we use it; otherwise node-postgres reads PG* vars.
-  return url ? { connectionString: url } : {};
+  return url ? { connectionString: url, ...overrides } : { ...overrides };
 }
 
 /** @param {pg.PoolConfig} [overrides] */
@@ -131,8 +131,9 @@ export function makePool(overrides = {}) {
   return new pg.Pool({ ...connConfig(), max: 5, ...overrides });
 }
 
-export function makeClient() {
-  return new pg.Client(connConfig());
+/** @param {pg.ClientConfig} [overrides] */
+export function makeClient(overrides = {}) {
+  return new pg.Client(connConfig(overrides));
 }
 
 /** Human-readable target (host:port/db) with NO password, for logs. */

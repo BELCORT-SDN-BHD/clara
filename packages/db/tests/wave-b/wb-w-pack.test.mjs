@@ -44,7 +44,7 @@ after(async () => { printLaneNotes("wb-w-pack"); await endPool(); });
 test("W6: pack_schema_version 3→4; every carried v3 key present; the wiki block ABSENT for a v6 caller", async () => {
   fail0017(live);
   const pack = await packHuman(w.users.alice, { client: w.clients.A1, purpose: "chat" });
-  assert.equal(pack.pack_schema_version, 4, "pack_schema_version = 4");
+  assert.equal(pack.pack_schema_version, 5, "pack_schema_version = 5 (W6 took it 3->4; Wave E delta's period/snapshot block took it 4->5)");
   for (const k of PACK_V3_KEYS) assert.ok(k in pack, `carried v3 key '${k}' present`);
   assert.ok(!("wiki" in pack), "additive-but-dark: 'chat' never renders the wiki block");
   const overloads = await rootQuery(
@@ -193,7 +193,10 @@ test("[0019 §7]: the pack's wiki block adds stale_at/stale_reason BY NAME and h
     assert.equal(p.content, before1.wiki.pages.find((x) => x.slug === p.slug).content,
       `page '${p.slug}' CONTENT is byte-identical — content_bytes derives from wv.content alone, so new citation fields cannot shift the byte cap`);
   }
-  assert.equal(after1.pack_schema_version, 4, "the pack schema version did NOT move (0019 is additive)");
+  // "0019 did not move it", not "it is 4": compared in this test's own scope so a later additive
+  // migration (delta's v5 period/snapshot block) changes the frontier without falsifying this claim.
+  assert.equal(after1.pack_schema_version, before1.pack_schema_version,
+    "the pack schema version did NOT move across the 0019 read (0019 is additive)");
   assert.equal(after1.wiki.permitted_use, "inform_never_decide", "the framing is unchanged");
 });
 

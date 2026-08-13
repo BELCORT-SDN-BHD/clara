@@ -180,7 +180,7 @@ test("§2.3 context pack v3: pack_schema_version=3 + the sst_registration_watch 
   const pack = await contextPack(users.alice, client, "a21 read-surface probe");
   assert.ok(pack, "the pack hydrates");
   // W6 pins the 3-to-4 bump while preserving every v3 key.
-  assert.equal(Number(pack.pack_schema_version), 4, `the Wave-B pack schema version is 4 (got ${pack.pack_schema_version})`);
+  assert.equal(Number(pack.pack_schema_version), 5, `the current pack schema version is 5 — Wave E delta's period/snapshot registry block (got ${pack.pack_schema_version})`);
   // INTEGRATION (CLASS T, adjudicated): the block is an ARRAY — one element per
   // OPEN (client, service_group) watch episode. Ratified over the object reading.
   const arr = pack.sst_registration_watch;

@@ -39,6 +39,7 @@
 // also binds tests).
 
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 import { connConfig, assertNoTargetSplit } from "./relay.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
@@ -227,6 +228,57 @@ async function checkout(pool, setup, fn) {
  */
 export function withRuntime(fn) {
   return checkout(getRuntimePool(), setupSql("clara_runtime", false), fn);
+}
+
+/**
+ * Run one deterministic metric-evaluation batch inside an authorized caller-owned
+ * transaction supplied by lane eta. Delta owns the timeout discipline; eta owns
+ * the authenticated-human or wake-wrapper identity boundary. An already-stricter
+ * timeout is preserved; zero (unlimited) and looser limits become 15 seconds.
+ *
+ * EXPLICIT TRANSACTION, PROVEN — not assumed. The cap is applied with
+ * set_config(..., is_local => true), i.e. SET LOCAL, which reverts at the end of the
+ * ENCLOSING transaction. In autocommit each statement is its own transaction, so the
+ * cap would revert the instant it was set and every subsequent query would run
+ * uncapped — a silent, total failure of the discipline this helper exists to enforce.
+ * A docstring saying "call me in a transaction" cannot detect that, so this reads it
+ * off the server: a nonce is written to a txn-local GUC and read back in a SEPARATE
+ * round trip. Surviving that round trip is positive evidence of an open transaction;
+ * an empty or missing read is the fail-closed branch and refuses before fn runs.
+ *
+ * RESTORATION is the same mechanism, and follows from the same proof. With an
+ * explicit transaction established, SET LOCAL's revert at COMMIT/ROLLBACK IS the
+ * restoration, performed by the transaction owner (eta) at the boundary eta already
+ * controls — the probe GUC included. An explicit try/finally restore was considered
+ * and rejected: it would have to run its own query on the way out, which fails with
+ * 25P02 whenever fn left the transaction aborted, and a cleanup that throws over a
+ * live error is exactly the masking this codebase refuses elsewhere.
+ * @template T
+ * @param {pg.PoolClient} c an already-authorized transaction client
+ * @param {(c: pg.PoolClient) => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withMetricEvaluationBatch(c, fn) {
+  const nonce = randomUUID();
+  await c.query("select set_config('clara.metric_batch_probe', $1, true)", [nonce]);
+  const probe = await c.query("select current_setting('clara.metric_batch_probe', true) as probe");
+  if (probe.rows[0]?.probe !== nonce) {
+    throw Object.assign(
+      new Error(
+        "withMetricEvaluationBatch requires an explicit transaction: a txn-local probe did not survive " +
+          "its own round trip, so the caller is in autocommit and the statement_timeout cap would revert " +
+          "before the batch ran. Open a transaction (eta owns the authorized one) and call again.",
+      ),
+      { code: "CLARA_METRIC_BATCH_NO_TRANSACTION" },
+    );
+  }
+  const timeoutResult = await c.query(
+    "select (extract(epoch from current_setting('statement_timeout')::interval) * 1000)::bigint as current_timeout_ms",
+  );
+  const currentTimeoutMs = Number(timeoutResult.rows[0]?.current_timeout_ms);
+  const batchTimeoutMs = currentTimeoutMs === 0 ? 15000 : Math.min(currentTimeoutMs, 15000);
+  await c.query("select set_config('statement_timeout', $1, true)", [`${batchTimeoutMs}ms`]);
+  return fn(c);
 }
 
 /**

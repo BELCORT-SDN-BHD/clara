@@ -170,8 +170,34 @@ test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, 
   // DESIGN (the client-pinned reads project them); coding_tasks/coding_attempts/
   // processing_call_reservations stay zero-access to agent_ro and are still asserted below.
   const s6AgentReads = new Set(["counterparties", "entry_evidence"]);
+  // [Wave E lane δ, design part2 §6(c)] the NINE catalog tables 0059 grants clara_agent_ro a
+  // firm-scoped SELECT on, so the agent can read WHICH metrics and account sets exist when it
+  // narrates. Sanctioned, and deliberately narrow: it is the catalog only — every table carrying a
+  // computed FIGURE or its provenance (metric_cells, the cell junctions, the evaluation contexts,
+  // the input snapshots and their four fact families, the evaluator registry, the assessments, the
+  // A30b attempt receipts) stays zero-access and is still asserted by the loop below. 0060's own
+  // security tail counts this set at exactly nine and revokes agent SELECT from every other δ
+  // table, so a tenth appearing here would be caught in-migration as well as by this cell.
+  const deltaAgentCatalogReads = new Set([
+    "metric_definitions", "metric_definition_versions", "account_sets", "account_set_versions",
+    "presentation_maps", "presentation_map_versions", "metric_constants", "edge_policy_sets",
+    "metric_edge_policies",
+  ]);
+  // EVERY EXCEPTION IS POSITIVELY VERIFIED, because a skip-list cannot fail by growing. Measured
+  // while adding the δ nine: appending an UNSANCTIONED table to this set (metric_cells) left the
+  // suite green, since an excepted table is simply not asserted — so the list was a place where a
+  // real grant could be waved through silently, which is the whole failure mode these cells exist
+  // to prevent. Each name below must therefore actually BE granted; an entry that is stale, or one
+  // added to quiet a failure rather than to record a sanctioned grant, now fails here by name.
+  for (const tbl of deltaAgentCatalogReads) {
+    assert.equal(
+      (await rootQuery("select has_table_privilege($1,$2,'SELECT') ok", [ROLES.agentRo, `clara.${tbl}`])).rows[0].ok,
+      true,
+      `clara.${tbl} is listed as a sanctioned agent-catalog read but carries no agent SELECT grant — remove the exception or restore the grant`,
+    );
+  }
   for (const tbl of tables) {
-    if (slice5AgentReads.has(tbl) || s6AgentReads.has(tbl)) continue;
+    if (slice5AgentReads.has(tbl) || s6AgentReads.has(tbl) || deltaAgentCatalogReads.has(tbl)) continue;
     await assertRaises(
       PG.insufficientPrivilege,
       () => roleQuery(ROLES.agentRo, `select count(*) from clara.${tbl}`),

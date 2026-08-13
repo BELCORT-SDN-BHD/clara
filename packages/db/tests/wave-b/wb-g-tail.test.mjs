@@ -119,7 +119,10 @@ test("G5(a): the constraint swaps re-verified live (clients/open_questions/coa/d
 test("G5(b): prosrc asserts — pack v4 keys carried + wiki LAST, queue CoR keys, guard flip, firm wrap, prior_gl", async () => {
   fail0017(live);
   const pack = await fnSource("get_context_pack");
-  assert.ok(pack.includes("'pack_schema_version',4"), "pack_schema_version 4 literal");
+  // The live body's version literal is the CURRENT one, not 0017's: Wave E delta's residual surgery
+  // rewrote 4 -> 5 when it spliced the period/snapshot registry block in. The 0017 shape this cell
+  // is really about is carried by the purpose, wiki-block and ordering assertions below.
+  assert.ok(pack.includes("'pack_schema_version',5"), "pack_schema_version 5 literal (delta's v5 splice)");
   assert.ok(pack.includes(WB_V7_PURPOSE), `[AMB-1] the v7 purpose literal ('${WB_V7_PURPOSE}') in prosrc`);
   assert.ok(pack.includes("'wiki'"), "the wiki block key");
   assert.ok(pack.includes("sst_registration_watch"), "v3 key CARRIED: sst_registration_watch");
