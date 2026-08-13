@@ -83,9 +83,11 @@ and was not run or bypassed.
   or modify the file merely to match the old snapshot.
 - The untracked δ migrations/tests and runner tests are candidate active build work, not disposable
   scratch and not completion evidence.
-- Do not delete or overwrite `.tmp-delta-pg-local/`, `.tmp-delta-final-review-stage-111380/`,
-  `.tmp-delta-migrations-1786607068/`, `.tmp-e6-*`, `err.txt`, or the delta gate/fixture scripts
-  without proving ownership/disposability or receiving exact authorization.
+- Do not delete or overwrite the local untracked scratch state — the .tmp-delta-pg-local,
+  .tmp-delta-final-review-stage-111380 and .tmp-delta-migrations-1786607068 directories, the
+  .tmp-e6-* files, err.txt — or the delta gate/fixture scripts, without proving
+  ownership/disposability or receiving exact authorization. (Plain-text mentions by design:
+  these are session-local worktree artifacts that exist on no checkout but that one.)
 - `PROGRESS.md` was trued at clock-out and is the authoritative state pointer.
 
 ## Active task chain
