@@ -712,8 +712,8 @@ jobs:
             echo "no numbered wave_e_delta_metrics migration on disk — the δ contract has nothing to drill yet"; exit 0
           fi
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
-          PGDATABASE=clara_delta_contract_ci pnpm db:migrate
-          PGDATABASE=clara_delta_contract_ci pnpm db:seed
+          PGDATABASE=clara_delta_contract_ci pnpm migrate
+          PGDATABASE=clara_delta_contract_ci pnpm seed
           unset CLARA_ALLOW_MISSING_WAVE_E_DELTA
           PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
             node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
