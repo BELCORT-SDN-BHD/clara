@@ -26,4 +26,13 @@ paths = [
 ]
 regexes = [
   '''world:world@localhost''',      # WDK dev-default fixed string (also exempt in check-leaks.mjs)
+  # ROME SECRETARY's client UUID, pinned by 0062_rs_name_only_guard.sql's arming
+  # statement (provenance in that file's header). A tenant identifier, NOT a
+  # credential — the same class as the RPR uuid path exemption above, but anchored
+  # to the exact captured value because it lives in a migration, not an archived
+  # doc. (Allowlist regexes match the CAPTURED SECRET, not the line.)
+  '''^e054b797-2641-413c-809f-f27603bbe9c7$''',
+  # A delta acceptance-battery account-set KEY (a per-test grouping label, not a
+  # credential); "bound512" + "eval" trips generic-api-key on entropy alone.
+  '''^bound512_eval$''',
 ]
