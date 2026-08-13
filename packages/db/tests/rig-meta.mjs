@@ -104,6 +104,39 @@ const REGISTRY_0057_HUMAN_FNS = [
 // default is "no role may execute anything unlisted", so cohortFailures() catches a name
 // that silently VANISHES from the catalog while its exemption lives on here.
 const REGISTRY_0057_COHORT = [...REGISTRY_0057_HUMAN_FNS];
+// 0058-0061 [Wave E lane delta]: the metric algebra + evaluator. ELEVEN names on
+// clara_authenticated and NOTHING anywhere else — the agent, both wake roles, clara_runtime and
+// both non-inheriting login shells gain ZERO EXECUTE across all four files, which delta's own
+// security tail asserts in-migration (its v_entrypoints loop refuses if any of them holds EXECUTE)
+// and which this roster is the second, independent instrument for.
+//
+// WHAT EACH GROUP IS, because "eleven granted verbs" is not self-explaining: four are the metric
+// definition LIFECYCLE (propose is a draft; approve carries the admin floor AND PRD §2's
+// approver-≠-proposer segregation; reject and supersede are owner-floored) — every floor is
+// body-enforced, so the grant is a door, never the authority. create_account_set_v1 and
+// mint_metric_input_snapshot_v1 mint the two frozen inputs an evaluation reads. evaluate_metric_v1
+// and evaluate_fs_pack_v1 are the evaluator itself; assess_metric_cell_independent_v1 is the
+// INDEPENDENT re-check (E6), a separate frozen closure that reads only immutable facts.
+// verify_evaluator_freeze is a VERIFIER, not a writer — it is granted because a human needs to be
+// able to ask whether the deployed closure still matches its registration, and it writes nothing.
+// record_metric_evaluation_attempt_v1 is the A30b receipt writer: a cap or timeout boundary that
+// precludes a truthful cell records an immutable attempt receipt instead of a fabricated number.
+//
+// THE AGENT AND WAKE ROWS ARE EMPTY BY RULING, not by omission. The owner's delta-v1 wake-identity
+// ruling keeps evaluation authenticated-human-only; lane eta's wake wrappers reach these bodies as
+// internal ungranted calls under clara_fn_owner and never by a grant of their own.
+const METRICS_0058_HUMAN_FNS = [
+  "create_account_set_v1", "mint_metric_input_snapshot_v1",
+  "propose_metric_definition", "approve_metric_definition",
+  "reject_metric_definition", "supersede_metric_definition",
+  "evaluate_metric_v1", "evaluate_fs_pack_v1",
+  "assess_metric_cell_independent_v1", "record_metric_evaluation_attempt_v1",
+  "verify_evaluator_freeze",
+];
+// A COHORT for the same closed-set reason as 0057's: these eleven ship together across 0059/0060
+// and must live or die together, so a name that silently vanishes while its exemption survives
+// here is a finding rather than a quiet pass.
+const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -684,6 +717,10 @@ export const ALLOWED = {
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
     // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
+    ...METRICS_0058_HUMAN_FNS, // 0058-0061 [Wave E lane δ] the metric algebra + evaluator: four
+    // lifecycle verbs, the two frozen-input minters, the evaluator pair, the independent E6
+    // re-check, the A30b attempt-receipt writer and the freeze verifier — clara_authenticated
+    // ONLY, every floor body-enforced; agent/wake/runtime gain ZERO (see the block above)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -852,6 +889,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0045 wave D-b recurring adjustments", ADJUSTMENTS_0045_COHORT, liveNames));
   failures.push(...cohortFailures("0046 §7-A unattended sales lane", SALES_LANE_0046_COHORT, liveNames));
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
+  failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   return failures;
 }
 
