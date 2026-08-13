@@ -188,7 +188,11 @@ test("[0019 §7/D19-17]: the pack MARKS and changes NOTHING ELSE — same pages,
   // The pack's framing is untouched.
   assert.equal(after1.wiki.basis, "clara_maintained_advisory_notes", "framing basis unchanged");
   assert.equal(after1.wiki.permitted_use, "inform_never_decide", "permitted_use unchanged");
-  assert.equal(after1.pack_schema_version, 4, "the pack schema version did NOT move (0019 is additive)");
+  // The claim is "0019 did not move it", not "it is 4" — so compare the before and after packs in
+  // this test's own scope. A later additive migration (delta's v5 period/snapshot block) then
+  // changes the frontier without falsifying anything 0019 is responsible for.
+  assert.equal(after1.pack_schema_version, before1.pack_schema_version,
+    "the pack schema version did NOT move across the mark (0019 is additive)");
 });
 
 test("[0019 §7/D19-17]: for an UNMARKED client the budgeted window still matches the INDEPENDENT JS replication exactly", async () => {

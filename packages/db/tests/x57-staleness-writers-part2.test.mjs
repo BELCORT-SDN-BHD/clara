@@ -298,6 +298,64 @@ test("E11(iii): resolve_bank_line_exception marks a (freshly re-minted) artifact
   assert.equal(rows.find((r) => r.assessment === "stale").caused_by_table, "bank_line_exceptions");
 });
 
+test("E11(iv/v): complete INSERT and void UPDATE each mark a fresh artifact STALE inside their own transaction (bank_reconciliations), while management_accounts bytes do not drift", async (t) => {
+  if (skip57(t)) return;
+  const owner = world.users.alice;
+  const client = await freshActiveClient(owner, "e11recon");
+  await setupCloseCoa(owner, client);
+  const monthStart = await pastMonthStart(6);
+  const { periodStart, periodEnd } = monthBounds(monthStart);
+  const acct = await addBankAccount(owner, {
+    client, bankCode: "MBB", accountNumber: "9057000004", coaAccountCode: BANK1,
+    opKey: opk("x57-e11recon-acct"),
+  });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  const stmt = await enterStatement(owner, {
+    client, bankAccount: bankAccountId, periodStart, periodEnd, opening: 0,
+    specs: [], keepPeriod: true,
+  });
+
+  const beforeComplete = await mintMonthSnapshot(owner, {
+    client, monthStart, opKey: opk("x57-e11recon-mint-insert"),
+  });
+  assert.equal(await snapshotState(owner, { snapshot: beforeComplete.snapshot_id }), "current");
+
+  let completeReceipt = null;
+  let stateInsideComplete = null;
+  await inHumanTxn(owner, async (txc) => {
+    completeReceipt = await callInTxn(txc, "complete_bank_reconciliation", [
+      { name: "p_statement" }, { name: "p_ack_outstanding", cast: "uuid[]" }, { name: "p_op_key" },
+    ], [stmt.statementId, [], opk("x57-e11recon-complete")]);
+    stateInsideComplete = await txnSnapshotState(txc, beforeComplete.snapshot_id);
+  });
+  assert.equal(stateInsideComplete, "stale", `E11(iv): STALE inside the SAME transaction as complete_bank_reconciliation's INSERT (got ${stateInsideComplete})`);
+  const completeRows = await assessmentRows(beforeComplete.snapshot_id);
+  assert.equal(completeRows.find((r) => r.assessment === "stale").caused_by_table, "bank_reconciliations");
+  const afterComplete = await verifySnapshot(owner, { snapshot: beforeComplete.snapshot_id });
+  assert.equal(afterComplete.drift, false, `bank_reconciliations deliberately overcovers management_accounts -- INSERT marks stale while deterministic recomputation reports no dataset drift (got ${JSON.stringify(afterComplete)})`);
+  assert.ok(afterComplete.covered_tables_inert_for_this_payload.includes("bank_reconciliations"), "verify_snapshot names bank_reconciliations as inert for THIS payload kind");
+
+  const beforeVoid = await mintMonthSnapshot(owner, {
+    client, monthStart, opKey: opk("x57-e11recon-mint-update"),
+  });
+  assert.equal(await snapshotState(owner, { snapshot: beforeVoid.snapshot_id }), "current");
+  const recon = idOf(completeReceipt, "reconciliation_id", "recon_id", "id");
+  assert.ok(recon, `completion returned a reconciliation id (got ${JSON.stringify(completeReceipt)})`);
+
+  let stateInsideVoid = null;
+  await inHumanTxn(owner, async (txc) => {
+    await callInTxn(txc, "void_bank_reconciliation", [
+      { name: "p_recon" }, { name: "p_reason" }, { name: "p_op_key" },
+    ], [recon, "x57 E11 reconciliation void", opk("x57-e11recon-void")]);
+    stateInsideVoid = await txnSnapshotState(txc, beforeVoid.snapshot_id);
+  });
+  assert.equal(stateInsideVoid, "stale", `E11(v): STALE inside the SAME transaction as void_bank_reconciliation's UPDATE (got ${stateInsideVoid})`);
+  const voidRows = await assessmentRows(beforeVoid.snapshot_id);
+  assert.equal(voidRows.find((r) => r.assessment === "stale").caused_by_table, "bank_reconciliations");
+  const afterVoid = await verifySnapshot(owner, { snapshot: beforeVoid.snapshot_id });
+  assert.equal(afterVoid.drift, false, `bank_reconciliations deliberately overcovers management_accounts -- UPDATE marks stale while deterministic recomputation reports no dataset drift (got ${JSON.stringify(afterVoid)})`);
+});
+
 // ===========================================================================
 // THE FA ARM, FIRED HONESTLY (R2 residual, accepted 2026-08-11). A revision
 // with an IN-PERIOD effective boundary marks the artifact STALE
@@ -305,9 +363,7 @@ test("E11(iii): resolve_bank_line_exception marks a (freshly re-minted) artifact
 // a positive read pinning the documented truth that fixed_assets is one of
 // the FOUR tables inert for a management_accounts payload (it owns no
 // trial_balance/aging figure), yet still marks as the fail-safe direction so
-// a FUTURE payload kind (an FA register pack) is covered from day one. This
-// is fixed_assets' first FIRING cell in this battery; bank_reconciliations
-// stays a named residual (no cell drives it here).
+// a FUTURE payload kind (an FA register pack) is covered from day one.
 // ===========================================================================
 test("the FA arm: revise_fixed_asset_particulars with an in-period effective_from marks the artifact STALE (fixed_assets), and verify_snapshot reports drift=FALSE -- fixed_assets is INERT for this payload kind", async (t) => {
   if (skip57(t)) return;
