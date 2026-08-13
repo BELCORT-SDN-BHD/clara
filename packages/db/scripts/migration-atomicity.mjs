@@ -52,6 +52,27 @@ const VERSION_GATED_SETTINGS = Object.freeze({
   transaction_timeout: TRANSACTION_TIMEOUT_MIN_SERVER_VERSION_NUM,
 });
 
+// Baseline settings PostgreSQL restricts to superusers. MEASURED, not assumed: on 17.10
+// `select name, context from pg_catalog.pg_settings where name = any(<baseline>)` reports
+// context 'user' for 18 of the 19 baseline parameters and 'superuser' for this one — the
+// check is kept honest by the pg_settings sweep cell in migrate-session-reset.test.mjs, so
+// a future baseline addition with a restricted context reds rather than silently joining.
+//
+// It matters because a MANAGED cluster's owner login is not a superuser (Supabase's
+// `postgres` is not), and the SET is denied with 42501. The first live ceremony aborted
+// there. The pin's protective intent survives without the SET: what the runner must never
+// do is RUN under a non-origin replication role, and that it can still verify by reading.
+const SUPERUSER_ONLY_SETTINGS = new Set(["session_replication_role"]);
+
+// Per client, the superuser-only settings whose SET this login has already been denied.
+// Load-bearing, not an optimisation: measured on 17.10, a 42501 inside an OPEN TRANSACTION
+// aborts it (25P02, "commands ignored until end of transaction block"). The post-body
+// re-apply runs inside the runner's transaction, so it must never ATTEMPT a set it already
+// knows will be refused. The first attempt is always safe because it happens in
+// pinMigrationSession, which opens with DISCARD ALL — a statement PostgreSQL refuses to
+// run inside a transaction block at all, so that call site is structurally autocommit.
+const PRIVILEGED_SET_DENIED = new WeakMap();
+
 // One numeric server version per client, read from the server and never inferred.
 const SERVER_VERSION_NUM = new WeakMap();
 
@@ -123,19 +144,57 @@ function assertBaseline(state, expectedTimeout) {
   }
 }
 
-async function applyMigrationSessionBaseline(client, beforeStatement = async () => {}, expectedTimeout = MIGRATION_SESSION_BASELINE.statement_timeout) {
-  const serverVersionNum = await migrationServerVersionNum(client, beforeStatement);
-  for (const [name, value] of Object.entries(MIGRATION_SESSION_BASELINE)) {
-    if (!baselineAppliesTo(name, serverVersionNum)) continue;
-    await beforeStatement();
-    await client.query(
-      "select pg_catalog.set_config($1::pg_catalog.text,$2::pg_catalog.text,false)",
-      [name, value],
+/**
+ * The fail-closed half of a guarded pin: the SET was refused, so READ the parameter and
+ * refuse the run unless the session is ALREADY at the value the pin exists to guarantee.
+ * Reading needs no privilege (measured), so this branch works on a managed cluster.
+ */
+async function verifyUnsettableBaseline(client, name, expected, beforeStatement) {
+  await beforeStatement();
+  const observed = (
+    await client.query("select pg_catalog.current_setting($1::pg_catalog.text) as value", [name])
+  ).rows[0]?.value;
+  if (observed !== expected) {
+    throw new Error(
+      `migration runner cannot set ${name} (PostgreSQL restricts it to superusers and this login is not one) and the session reports ${JSON.stringify(observed)} rather than ${JSON.stringify(expected)} — refusing to migrate under a setting it can neither control nor trust`,
     );
   }
+}
+
+async function applyMigrationSessionBaseline(client, beforeStatement = async () => {}, expectedTimeout = MIGRATION_SESSION_BASELINE.statement_timeout) {
+  const serverVersionNum = await migrationServerVersionNum(client, beforeStatement);
+  const verifiedNotSet = [];
+  for (const [name, value] of Object.entries(MIGRATION_SESSION_BASELINE)) {
+    if (!baselineAppliesTo(name, serverVersionNum)) continue;
+    const privileged = SUPERUSER_ONLY_SETTINGS.has(name);
+    if (privileged && PRIVILEGED_SET_DENIED.get(client)?.has(name)) {
+      // Already denied on this connection — never re-attempt, see PRIVILEGED_SET_DENIED.
+      await verifyUnsettableBaseline(client, name, value, beforeStatement);
+      verifiedNotSet.push(name);
+      continue;
+    }
+    await beforeStatement();
+    try {
+      await client.query(
+        "select pg_catalog.set_config($1::pg_catalog.text,$2::pg_catalog.text,false)",
+        [name, value],
+      );
+    } catch (error) {
+      // Narrow on BOTH the parameter and the SQLSTATE: any other failure, and any other
+      // parameter, is a genuine fault and still refuses.
+      if (!privileged || error?.code !== "42501") throw error;
+      const denied = PRIVILEGED_SET_DENIED.get(client) ?? new Set();
+      denied.add(name);
+      PRIVILEGED_SET_DENIED.set(client, denied);
+      await verifyUnsettableBaseline(client, name, value, beforeStatement);
+      verifiedNotSet.push(name);
+    }
+  }
   const state = await readSessionState(client, beforeStatement);
+  // Belt and braces: the state read re-reads every baseline parameter, so a verified-not-set
+  // one is compared here too, by value, exactly like every parameter the runner did set.
   assertBaseline(state, expectedTimeout);
-  return state;
+  return { ...state, verifiedNotSet };
 }
 
 export async function pinMigrationSession(client) {
@@ -265,6 +324,18 @@ export async function executeMigrationBody(client, sql, timeout) {
          OPERATOR(pg_catalog.>=) 170000 then
         perform pg_catalog.set_config('transaction_timeout'::pg_catalog.text,'0'::pg_catalog.text,false);
       end if;
+      -- session_replication_role is SUPERUSER-only, and RESET ALL has just handed it back
+      -- to the database default. Restoring it closes the same window, but the SET must be
+      -- guarded: on a managed cluster the owner login is not a superuser and this raises
+      -- 42501. Denied is acceptable ONLY while the session is already origin — which is
+      -- the property the pin exists to guarantee, and which reading proves unprivileged.
+      begin
+        perform pg_catalog.set_config('session_replication_role'::pg_catalog.text,'origin'::pg_catalog.text,false);
+      exception when insufficient_privilege then
+        if pg_catalog.current_setting('session_replication_role'::pg_catalog.text) OPERATOR(pg_catalog.<>) 'origin' then
+          raise exception 'migration runner cannot restore session_replication_role and the session is not origin';
+        end if;
+      end;
       perform pg_catalog.set_config('DateStyle'::pg_catalog.text,'ISO, YMD'::pg_catalog.text,false);
       perform pg_catalog.set_config('TimeZone'::pg_catalog.text,'UTC'::pg_catalog.text,false);
       perform pg_catalog.set_config('bytea_output'::pg_catalog.text,'hex'::pg_catalog.text,false);

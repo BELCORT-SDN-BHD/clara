@@ -296,7 +296,13 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
     locked = true;
     await controlClient.connect();
     clientConnected = true;
-    await pinMigrationSession(controlClient);
+    const pinned = await pinMigrationSession(controlClient);
+    // A pin the login could not ISSUE is reported, never silently skipped: on a managed
+    // cluster the superuser-only parameters are verified already-correct instead of set,
+    // and an operator reading the ceremony log must be able to see which.
+    if (pinned.verifiedNotSet.length) {
+      log(`  note: ${pinned.verifiedNotSet.join(", ")} could not be SET by this login (superuser-only) — verified already at the required value instead`);
+    }
     // Cached by the pin above — no extra round trip. Say so out loud when the server
     // predates the GUC, so a reader never has to infer the pin's absence from silence.
     const serverVersionNum = await migrationServerVersionNum(controlClient);

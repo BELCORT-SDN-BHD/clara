@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
 import { migrate } from "../scripts/migrate.mjs";
+import { MIGRATION_SESSION_BASELINE, TRANSACTION_TIMEOUT_MIN_SERVER_VERSION_NUM } from "../scripts/migration-atomicity.mjs";
 import { connectionConfig, disposableDatabaseName, withDatabaseEnv } from "./migrate-harness.mjs";
 
 const DBNAME = disposableDatabaseName("clara_migrate_session");
@@ -65,6 +66,26 @@ test("migration session GUCs cannot weaken a later migration", async () => {
   assert.deepEqual((await db.query("select marker from clara.guc_poison_committed")).rows, [{ marker: "0001 ran" }]);
   assert.equal((await db.query("select to_regclass('clara.guc_later_semantics_started') is null absent")).rows[0].absent, true);
   assert.equal((await db.query("select to_regprocedure('clara.invalid_under_clean_baseline()') is null absent")).rows[0].absent, true);
+});
+
+test("session_replication_role is the only superuser-restricted baseline parameter", async () => {
+  // THE NAMED CHECK behind SUPERUSER_ONLY_SETTINGS. Every other baseline parameter is
+  // claimed to be USERSET; this asks pg_settings rather than trusting the claim, and it
+  // keeps the claim honest — a future baseline addition with a restricted context reds
+  // here instead of silently joining and aborting the next managed-cluster ceremony.
+  const serverVersionNum = Number((await db.query("show server_version_num")).rows[0].server_version_num);
+  const names = Object.keys(MIGRATION_SESSION_BASELINE)
+    .filter((name) => name !== "transaction_timeout" || serverVersionNum >= TRANSACTION_TIMEOUT_MIN_SERVER_VERSION_NUM);
+  const rows = (await db.query(
+    "select name, context from pg_catalog.pg_settings where name = any($1::text[]) order by name", [names])).rows;
+
+  assert.deepEqual(rows.map((row) => row.name).sort(), [...names].sort(),
+    "every baseline parameter must exist on this server — a missing one would be pinned blind");
+  assert.deepEqual(
+    rows.filter((row) => row.context !== "user").map((row) => `${row.name}=${row.context}`),
+    ["session_replication_role=superuser"],
+    "exactly one baseline parameter may need the guarded pin; a new one must be added to SUPERUSER_ONLY_SETTINGS",
+  );
 });
 
 test("a migration that touches check_function_bodies is refused outright", async () => {
