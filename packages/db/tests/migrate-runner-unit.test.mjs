@@ -172,6 +172,83 @@ test("transaction_timeout is pinned off on PostgreSQL 17 and skipped below it", 
     Object.keys(MIGRATION_SESSION_BASELINE).length - 1);
 });
 
+/**
+ * A managed-cluster login: every baseline SET works EXCEPT the superuser-only one, which
+ * is denied with 42501 exactly as a non-superuser owner is denied on Supabase.
+ */
+function managedLoginClient({ observedRole = "origin", denyCode = "42501", denyName = "session_replication_role" } = {}) {
+  const state = { ...MIGRATION_SESSION_BASELINE, session_replication_role: observedRole };
+  const attempts = [];
+  const client = {
+    attempts,
+    async query(sql, parameters = []) {
+      if (sql === SERVER_VERSION_SQL) return { rows: [{ server_version_num: PG17 }] };
+      if (sql === "discard all") return { rows: [] };
+      if (sql.includes("pg_current_xact_id")) {
+        return { rows: [{ xid: "1", session_user: "managed", current_user: "managed" }] };
+      }
+      if (sql.includes("current_setting(s.name)")) {
+        return { rows: parameters[0].map((name) => ({ name, value: state[name] })) };
+      }
+      if (sql.includes("current_setting($1")) return { rows: [{ value: state[parameters[0]] }] };
+      if (sql.includes("set_config($1")) {
+        attempts.push(parameters[0]);
+        if (parameters[0] === denyName) {
+          throw Object.assign(new Error(`permission denied to set parameter "${parameters[0]}"`), { code: denyCode });
+        }
+        state[parameters[0]] = parameters[1];
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+  return client;
+}
+
+test("a superuser-only pin that is denied is VERIFIED instead, and reported", async () => {
+  // The live-ceremony shape: Supabase's owner login is not a superuser, so the SET of
+  // session_replication_role is refused. The pin's intent — never RUN under a non-origin
+  // replication role — survives by reading, which needs no privilege.
+  const client = managedLoginClient({ observedRole: "origin" });
+  const state = await pinMigrationSession(client);
+  assert.deepEqual(state.verifiedNotSet, ["session_replication_role"]);
+  assert.equal(state.settings.session_replication_role, "origin");
+});
+
+test("a denied superuser-only pin REFUSES when the session is not already correct", async () => {
+  const client = managedLoginClient({ observedRole: "replica" });
+  await assert.rejects(
+    () => pinMigrationSession(client),
+    /cannot set session_replication_role .* reports "replica" rather than "origin" — refusing to migrate/u,
+  );
+});
+
+test("a denied superuser-only pin is never re-attempted on the same connection", async () => {
+  // Load-bearing, not an optimisation: measured on 17.10 a 42501 inside an OPEN
+  // TRANSACTION aborts it (25P02), and the post-body re-apply runs inside the runner's
+  // transaction. Re-attempting there would destroy the migration it was protecting.
+  const client = managedLoginClient({ observedRole: "origin" });
+  await pinMigrationSession(client);
+  const afterFirst = client.attempts.filter((name) => name === "session_replication_role").length;
+  await pinMigrationSession(client);
+  const afterSecond = client.attempts.filter((name) => name === "session_replication_role").length;
+  assert.equal(afterFirst, 1, "the first pin attempts it once");
+  assert.equal(afterSecond, 1, "and the second pin does not attempt it at all");
+});
+
+test("the guarded pin is narrow: another parameter, or another SQLSTATE, still refuses", async () => {
+  await assert.rejects(
+    () => pinMigrationSession(managedLoginClient({ denyName: "lock_timeout" })),
+    /permission denied to set parameter "lock_timeout"/u,
+    "a USERSET parameter being denied is a genuine fault, not a managed-cluster shape",
+  );
+  await assert.rejects(
+    () => pinMigrationSession(managedLoginClient({ denyCode: "53300" })),
+    /permission denied to set parameter "session_replication_role"/u,
+    "only 42501 takes the verify path",
+  );
+});
+
 test("an unreadable server version fails closed rather than assuming an old server", async () => {
   await assert.rejects(
     () => migrationServerVersionNum({ async query() { return { rows: [{}] }; } }),
