@@ -511,13 +511,20 @@ begin
     select v_ds, c.firm, r.client_id, (row_number() over (order by q.series_key, q.id))::int - 1,
       q.series_key, q.definition_version_id, q.id, q.cell_status,
       case when q.cell_status = 'ok' then q.displayed_text end,
+      -- na_label is delta's OWN display token for the reason a cell has no value, carried
+      -- verbatim. Without it a non-ok point reaches the renderer with a status and nothing to
+      -- print: value_text is null by construction for every cell that is not `ok`, so "absent"
+      -- would render as blank space where an explanation belongs. It is null for an ok cell,
+      -- which is the positive statement that this cell has a value rather than a reason.
       jsonb_build_object('unit_key', q.unit_key, 'displayed_scale', q.displayed_scale,
         'exact_numerator', q.exact_numerator, 'exact_denominator', q.exact_denominator,
-        'books_watermark', q.books_watermark)
-    from (select mc.*, coalesce(md.definition_key, 'adhoc:' || encode(mc.formula_sha256, 'hex')) as series_key
+        'na_label', q.na_label, 'books_watermark', q.books_watermark)
+    from (select mc.*, coalesce(md.definition_key, 'adhoc:' || encode(mc.formula_sha256, 'hex')) as series_key,
+                 nr.display_token as na_label
             from clara.metric_cells mc
             left join clara.metric_definition_versions mdv on mdv.id = mc.definition_version_id
             left join clara.metric_definitions md on md.id = mdv.definition_id
+            left join clara.metric_na_reason_versions nr on nr.id = mc.na_reason_version_id
            where mc.client_id = r.client_id and mc.run_id = r.id) q;
   select count(*)::int into v_n from clara.report_dataset_points where dataset_id = v_ds;
   update clara.report_datasets
@@ -548,11 +555,12 @@ begin
         case when mc.cell_status = 'ok' then mc.displayed_text end,
         jsonb_build_object('unit_key', mc.unit_key, 'displayed_scale', mc.displayed_scale,
           'exact_numerator', mc.exact_numerator, 'exact_denominator', mc.exact_denominator,
-          'axis_policy', cv.axis_policy)
+          'na_label', nr.display_token, 'axis_policy', cv.axis_policy)
       from (select x->>'series_key' as series_key, (x->>'definition_version_id')::uuid as dvid
               from jsonb_array_elements(cv.chart_spec_ast->'series') x) s
       join clara.metric_cells mc on mc.client_id = r.client_id and mc.run_id = r.id
-        and mc.definition_version_id = s.dvid;
+        and mc.definition_version_id = s.dvid
+      left join clara.metric_na_reason_versions nr on nr.id = mc.na_reason_version_id;
     -- A POSITIVE READ of what actually landed: a series with zero points is a chart the run
     -- cannot plot, and an empty series is not a chart with a gap -- it is a missing evaluation.
     select coalesce(array_agg(s.series_key order by s.series_key), '{}') into v_starved

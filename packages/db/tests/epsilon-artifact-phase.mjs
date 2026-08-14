@@ -7,10 +7,10 @@
 
 import {
   assert, randomUUID, rootQuery, humanQuery, withActor, ROLES, opk,
-  caught, reasonOf, errorDetail, sealArtifact, approveIssue, verifyArtifact,
-  buildManifest, sha64,
+  caught, reasonOf, errorDetail, assertRefusal, sealArtifact, approveIssue, verifyArtifact,
+  buildManifest, sha64, MPERS_SECTIONS,
 } from "./epsilon-fixtures.mjs";
-import { buildEpsilonWorld, artifactRows } from "./epsilon-world.mjs";
+import { buildEpsilonWorld, artifactRows, profileVersion } from "./epsilon-world.mjs";
 
 async function withTriggersOff(table, fn) {
   await rootQuery(`alter table clara.${table} disable trigger user`);
@@ -318,6 +318,71 @@ export async function registerArtifactPhase(t, world) {
     const after = Number((await rootQuery(
       "select count(*)::int n from clara.audit_log where fn='verify_report_artifact'")).rows[0].n);
     assert.equal(after - before, 3, "three verifications, three rows -- none of them silent");
+  });
+
+  await t.test("a JSON null on the two statutory-profile keys is licensed by CLASS, not tolerated", async () => {
+    // The collision worth naming: ck_rtv_statutory_profile FORCES statutory_profile_version_id
+    // null for a management template, and V5 rules a JSON null a positive statement of "none" --
+    // so a blanket non-null rule on those keys would make every management pack unsealable,
+    // including the watermarked-draft preview path, which is management-class by construction.
+    //
+    // Both rules hold at once because the CHECK is a BICONDITIONAL: class and profile-presence
+    // are the same fact, so re-deriving the pin from the template answers the class question by
+    // reading the data. These three cells are that claim, measured.
+    const profileKeys = ["statutory_profile_version_id", "statutory_profile_sha256"];
+    const biconditional = (await rootQuery(
+      `select count(*)::int n from clara.report_template_versions
+        where (report_class='statutory') <> (statutory_profile_version_id is not null)`)).rows[0].n;
+    assert.equal(biconditional, 0,
+      "every template version on this database agrees class with profile-presence, so the licence is structural");
+
+    // (1) A MANAGEMENT pack whose profile keys are null SEALS. This is the cell that would have
+    // gone red on a blanket non-null rule, and with it every draft preview in the product.
+    const mgmt = await buildEpsilonWorld(world, { tag: "null-licence-mgmt", reportClass: "management" });
+    const mgmtPins = (await rootQuery("select clara._report_render_pins_v1($1) p", [mgmt.runId])).rows[0].p;
+    for (const key of profileKeys) {
+      assert.equal(mgmtPins[key], null, `the DB itself says a management pack has no ${key}`);
+    }
+    const mgmtSha = sha64(`null-licence-mgmt-${mgmt.runId}`);
+    const sealed = await sealArtifact(owner, { runId: mgmt.runId, kind: "draft_watermarked", sha256: mgmtSha,
+      manifest: await buildManifest({ runId: mgmt.runId, kind: "draft_watermarked", sha256: mgmtSha }) });
+    assert.ok(sealed.report_artifact_id, "a management pack seals with both profile keys null");
+    const sealedManifest = (await rootQuery("select manifest m from clara.report_artifacts where id=$1",
+      [sealed.report_artifact_id])).rows[0].m;
+    for (const key of profileKeys) {
+      assert.ok(key in sealedManifest, `${key} is PRESENT -- the key is required whatever the class`);
+      assert.equal(sealedManifest[key], null, `and null, which is what "this pack has no profile" looks like`);
+    }
+
+    // (2) A STATUTORY pack with those keys nulled REFUSES. The class is what licensed the none,
+    // and this pack does not have it.
+    const mpers = await profileVersion("mpers_company", 1);
+    const stat = await buildEpsilonWorld(world, { tag: "null-licence-stat", reportClass: "statutory",
+      profileVersionId: mpers, sections: MPERS_SECTIONS });
+    const statPins = (await rootQuery("select clara._report_render_pins_v1($1) p", [stat.runId])).rows[0].p;
+    for (const key of profileKeys) {
+      assert.notEqual(statPins[key], null, `the DB says a statutory pack HAS a ${key}`);
+    }
+    const statSha = sha64(`null-licence-stat-${stat.runId}`);
+    const nulled = await caught(async () => sealArtifact(owner, { runId: stat.runId, kind: "draft_watermarked",
+      sha256: statSha,
+      manifest: await buildManifest({ runId: stat.runId, kind: "draft_watermarked", sha256: statSha,
+        overrides: { statutory_profile_version_id: null, statutory_profile_sha256: null } }) }));
+    const detail = assertRefusal(nulled, "CLR42", "manifest_binding_mismatch", "a statutory pack claiming no profile");
+    assert.deepEqual([...detail.keys].sort(), [...profileKeys].sort(),
+      "and the refusal names both keys, so the render side is told exactly what to carry");
+
+    // (3) The mirror: a MANAGEMENT pack whose manifest claims a profile. Refused for the same
+    // reason and by the same read -- the DB says null and the manifest says otherwise.
+    const claimed = await caught(async () => sealArtifact(owner, { runId: mgmt.runId, kind: "draft_watermarked",
+      sha256: sha64(`null-licence-claim-${mgmt.runId}`),
+      manifest: await buildManifest({ runId: mgmt.runId, kind: "draft_watermarked",
+        sha256: sha64(`null-licence-claim-${mgmt.runId}`),
+        overrides: { statutory_profile_version_id: mpers } }) }));
+    assertRefusal(claimed, "CLR42", "manifest_binding_mismatch", "a management pack claiming a profile");
+    // And the template that would make such a pack lawful cannot be published at all -- the
+    // biconditional is enforced statically, so this is a wall in front of a wall.
+    assert.equal(biconditional, 0);
   });
 
   await t.test("issue is a key-2 act, binds the EXACT hash, and the approver is not the preparer", async () => {

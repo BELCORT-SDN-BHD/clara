@@ -603,6 +603,23 @@ revoke all on function clara._report_manifest_required_keys(text) from public;
 -- nullability: statutory_profile_sha256 is null for a management pack because the DB says the
 -- pack has no profile, not because a null was tolerated here.
 --
+-- HOW THE TWO RULES COMPOSE, because they answer different questions and a reader will ask.
+-- PRESENCE OF THE KEY IS ALWAYS REQUIRED -- that check runs first, for every key of every kind,
+-- and no class licenses its absence. What a class licenses is the VALUE null, and only on the
+-- two statutory-profile keys (statutory_profile_version_id, statutory_profile_sha256). That
+-- licence is not written here as a conditional rule, because it does not have to be: file 1's
+-- ck_rtv_statutory_profile is a BICONDITIONAL --
+--   (report_class = 'statutory') = (statutory_profile_version_id is not null)
+-- -- so the template's class and the presence of a profile are the SAME FACT, and re-deriving the
+-- pin from the template answers the class question by reading the data rather than by asking it.
+-- A management pack therefore seals with both keys null (the DB says null); a statutory pack with
+-- them null refuses (the DB says a uuid and a hash); and a management pack claiming a profile
+-- refuses for the mirror reason. All three land on manifest_binding_mismatch rather than
+-- manifest_evidence_invalid, because the fault is a value that disagrees with the DB, not a shape
+-- -- which is also why a class-conditional null rule HERE would be the weaker wall: it would
+-- admit any well-formed uuid on a statutory pack, including a real profile version belonging to
+-- some other template.
+--
 -- HONEST LIMIT, and the same one verify_report_artifact states: a well-shaped attestation is not
 -- a true one. That a digest is 64 hex characters says nothing about whether those bytes ever
 -- rendered. Lane zeta's gate-3 extraction and its double-render drill are where these become

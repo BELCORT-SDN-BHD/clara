@@ -298,6 +298,51 @@ export async function registerChartPhase(t, world) {
       "the refused attempts left the dataset reconstructing exactly as sealed");
   });
 
+  await t.test("a cell with NO value carries delta's own reason label to the renderer", async () => {
+    // value_text is null by construction for every cell that is not `ok`, so without a label a
+    // non-ok point reaches the render lane with a status and nothing to print -- and "absent"
+    // renders as blank space exactly where an explanation belongs. The label is delta's
+    // display_token carried verbatim; nothing here composes a string.
+    const admin = await ensureEpsilonAdmin(world);
+    const w = await buildEpsilonWorld(world, { tag: "na-label", reportClass: "management", seal: false });
+    // The exact shape delta's own algebra phase proves produces an `absent` cell: a governed
+    // account set with no facts in the period.
+    const absent = await proposeMetricDefinition(admin, {
+      client: w.client, key: `absent_${randomUUID().slice(0, 8)}`, unit: "money",
+      ast: metricAst({ root: measure({ set: "empty_absent" }), unit: "money" }),
+    });
+    await approveMetricDefinition(owner, absent);
+    await evaluateMetricHuman(owner, { client: w.client, definitionVersion: absent,
+      periodIds: [w.period.id], snapshotId: w.snapshotId, runId: w.runId });
+    await sealDataset(owner, { runId: w.runId });
+
+    const points = (await rootQuery(
+      `select p.point_status, p.value_text, p.dimensions from clara.report_dataset_points p
+         join clara.report_datasets d on d.id = p.dataset_id
+        where d.report_run_id=$1 and d.chart_spec_version_id is null order by p.ordinal`,
+      [w.runId])).rows;
+    const na = points.filter((p) => p.point_status !== "ok");
+    const ok = points.filter((p) => p.point_status === "ok");
+    assert.ok(na.length >= 1, `the run evaluated a cell with no value: ${JSON.stringify(points.map((p) => p.point_status))}`);
+    assert.ok(ok.length >= 1, "and one with a value, so the two cases are distinguishable here");
+    for (const p of na) {
+      assert.equal(p.value_text, null, "a non-ok point carries no value, which is why it needs a label");
+      assert.ok(typeof p.dimensions.na_label === "string" && p.dimensions.na_label.length > 0,
+        `a non-ok point carries its reason label: ${JSON.stringify(p.dimensions)}`);
+    }
+    for (const p of ok) {
+      assert.equal(p.dimensions.na_label, null,
+        "an ok point's label is null -- the positive statement that it has a value, not a reason");
+    }
+    // The label is DELTA's, not one this lane wrote: it must equal the reason version's own token.
+    const truth = (await rootQuery(
+      `select distinct nr.display_token t from clara.metric_cells mc
+         join clara.metric_na_reason_versions nr on nr.id = mc.na_reason_version_id
+        where mc.run_id=$1`, [w.runId])).rows.map((r) => r.t);
+    assert.deepEqual([...new Set(na.map((p) => p.dimensions.na_label))].sort(), truth.sort(),
+      "carried verbatim from clara.metric_na_reason_versions -- this lane composes no wording");
+  });
+
   await t.test("a chart's thresholds are RESOLVED at seal and frozen with the dataset", async () => {
     // The spec names a threshold by constant key. WHICH version of that constant applied, and
     // WHAT its value was, are facts about the period being reported -- and if the renderer had to
