@@ -94,15 +94,18 @@ begin
       detail = '{"reason":"zeta_seal_core_reads_claims","fix":"the core takes p_firm/p_actor as parameters -- a machine lane has no claims to read"}';
   end if;
 
-  -- The human verb's grantee set, captured BEFORE, so the tail can prove this file did not widen
-  -- epsilon's human verb by so much as a role.
-  select coalesce(string_agg(rr.rolname, ',' order by rr.rolname), '(none)') into v_tok
-    from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
-    join pg_roles rr on rr.oid = acl.grantee
-   where p.oid = 'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure
-     and acl.privilege_type = 'EXECUTE';
-  insert into _zeta_seam_pre values ('seal_grantees', v_tok);
 end $pre$;
+
+-- The human verb's grantee set, captured BEFORE this file creates anything, so the tail can prove
+-- it did not widen epsilon's human verb by so much as a role. It sits outside the block above for
+-- the reason file 3's tail states: to the wiki dynamic-SQL gate, an 'EXECUTE' literal in a block
+-- that also reads a function body is not distinguishable from an injected statement.
+insert into _zeta_seam_pre
+select 'seal_grantees', coalesce(string_agg(rr.rolname, ',' order by rr.rolname), '(none)')
+  from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
+  join pg_roles rr on rr.oid = acl.grantee
+ where p.oid = 'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure
+   and acl.privilege_type = 'EXECUTE';
 
 set role clara_fn_owner;
 
@@ -259,20 +262,24 @@ reset role;
 
 grant execute on function clara.complete_render_job(uuid, text, text, bigint, jsonb) to clara_runtime;
 
-do $tail$
-declare
-  v_leak int; v_acl_now text; v_acl_before text; v_n int;
+-- (1) THE GATE STAYED WHERE EPSILON PUT IT. The prestate proved the split before this file created
+-- anything; this re-reads it AFTER, because the only thing standing between those two reads is
+-- zeta's own DDL, and a census that only measures the state it inherited is not a census of what
+-- this file did. It is its own block for the reason the capture above states.
+do $bodies$
 begin
-  -- (1) THE GATE STAYED WHERE EPSILON PUT IT. The prestate proved the split before this file
-  -- created anything; this re-reads it AFTER, because the only thing standing between those two
-  -- reads is zeta's own DDL, and a census that only measures the state it inherited is not a
-  -- census of what this file did.
   if position('clara._human_ctx' in pg_get_functiondef(
        'clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure)) <> 0
      or position('claim_assessment_absent' in pg_get_functiondef(
        'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure)) <> 0 then
     raise exception 'zeta file 4 tail: the seal split moved while this file applied' using errcode = 'CLR10';
   end if;
+end $bodies$;
+
+do $tail$
+declare
+  v_leak int; v_acl_now text; v_acl_before text; v_n int;
+begin
   -- (2) The human verb's grantees are EXACTLY what they were before this file ran. Zeta creates
   -- one machine verb and must not widen epsilon's human one by so much as a role.
   select coalesce(string_agg(rr.rolname, ',' order by rr.rolname), '(none)') into v_acl_now

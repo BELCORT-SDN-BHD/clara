@@ -425,21 +425,21 @@ grant execute on function
 -- nothing, so granting it widens reachability and never scope (RLS still scopes the artifact).
 grant execute on function clara.replay_render_inputs(uuid) to clara_authenticated;
 
-do $tail$
+-- THE CENSUS RUNS IN TWO BLOCKS ON PURPOSE. The wiki dynamic-SQL gate (0019 §9) reads a `do` block
+-- that calls pg_get_functiondef as a change-of-record patch site and treats every literal in it as
+-- text the block installs, so an ACL census's 'EXECUTE' literal beside a live-body read is not
+-- statically distinguishable from an injected statement. Neither block runs dynamic SQL at all.
+do $grants$
 declare
-  -- render_job_payload IS ON THIS ROSTER NOW, AND ITS ABSENCE WAS A REAL DEFECT. The verb was
-  -- created and revoked from public but never GRANTED to clara_runtime, and the census only
-  -- proved that the roster it was given was correct — so a verb missing from the roster was
-  -- invisible to it. The worker calls render_job_payload on every job, so the first real render
-  -- would have died on "permission denied for function render_job_payload"; the rig battery never
-  -- caught it because the battery reads the queue directly and never exercises the worker's own
-  -- read path. Found while wiring codex B5's replay door. The lesson is the census's, not the
-  -- grant's: a roster that lists what to check cannot report what nobody listed.
+  -- render_job_payload IS ON THIS ROSTER NOW, AND ITS ABSENCE WAS A REAL DEFECT: created, revoked
+  -- from public, never GRANTED -- so the first real render would have died on "permission denied",
+  -- and the battery missed it by reading the queue directly instead of walking the worker's own
+  -- read path. The lesson is the census's: a roster of what to check cannot report what is absent.
   v_runtime text[] := array['claim_render_job', 'render_job_payload', 'enqueue_missing_render_jobs',
     'fail_render_job', 'render_dispatch_begin', 'render_dispatch_record'];
-  v_granted text[]; v_leak int; v_skip int; v_replay int;
+  v_granted text[]; v_leak int; v_replay int;
 begin
-  -- (1) The five runtime verbs are granted to clara_runtime -- the set, read from live ACLs.
+  -- (1) The six runtime verbs are granted to clara_runtime -- the set, read from live ACLs.
   select coalesce(array_agg(distinct p.proname order by p.proname), '{}') into v_granted
     from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
     join pg_roles rr on rr.oid = acl.grantee
@@ -449,12 +449,10 @@ begin
     raise exception 'zeta claim tail: clara_runtime EXECUTE set is %, expected %',
       v_granted, v_runtime using errcode = 'CLR10';
   end if;
-  -- (2) And to NOBODY else — EXCLUDING, not enumerating (codex M5). This census used to name the
-  -- seven roles it knew about, which meant any role NOT on that list could hold EXECUTE on the
-  -- claim, failure or dispatch verbs and the tail would still pass: clara_storage_docs today, an
-  -- inherited or future role tomorrow. An allow-list of two (the owner, which is ownership rather
-  -- than a grant, and clara_runtime, which is the point) refuses everything else by construction.
-  -- 0074 and 0076 were corrected to this shape by the rig leg; this one was missed.
+  -- (2) And to NOBODY else -- EXCLUDING, not enumerating (codex M5). This census used to name the
+  -- seven roles it knew about, so any role NOT on that list could hold EXECUTE on a render verb and
+  -- the tail would still pass: clara_storage_docs today, an inherited role tomorrow. An allow-list
+  -- of two -- the owner, whose entry is ownership not a grant, and clara_runtime -- refuses the rest.
   select count(*) into v_leak from pg_proc p
     cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
@@ -464,25 +462,8 @@ begin
     raise exception 'zeta claim tail: % EXECUTE grant(s) on a render verb to a role that must not hold one',
       v_leak using errcode = 'CLR10';
   end if;
-  -- (3) The claim really is a skip-locked claim -- asked of the LIVE function body, not asserted
-  -- from the file. A claim that silently lost `skip locked` would serialise every worker behind
-  -- one row lock and A33 arm (i) would still pass, because one job would still be claimed once.
-  select count(*) into v_skip from pg_proc
-   where oid = 'clara.claim_render_job(text,interval)'::regprocedure
-     and pg_get_functiondef(oid) ilike '%for update skip locked%';
-  if v_skip <> 1 then
-    raise exception 'zeta claim tail: claim_render_job no longer claims with FOR UPDATE SKIP LOCKED'
-      using errcode = 'CLR10';
-  end if;
-  select count(*) into v_skip from pg_proc
-   where oid = 'clara.render_dispatch_begin(interval,int)'::regprocedure
-     and pg_get_functiondef(oid) ilike '%skip locked%';
-  if v_skip <> 1 then
-    raise exception 'zeta claim tail: render_dispatch_begin no longer skips locked rows'
-      using errcode = 'CLR10';
-  end if;
-  -- (4) THE REPLAY DOOR is a HUMAN read and reaches no machine lane. It exists (the DR drill is
-  -- unperformable without it), it is granted to clara_authenticated, and to no runtime/wake/agent
+  -- (3) THE REPLAY DOOR is a HUMAN read and reaches no machine lane. It exists (the DR drill is
+  -- unperformable without it), it is granted to clara_authenticated and to no runtime/wake/agent
   -- role -- an operator's recovery instrument must not become a second path the worker can walk.
   select count(*) into v_replay from pg_proc p
     cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
@@ -493,8 +474,26 @@ begin
     raise exception 'zeta claim tail: the replay door is absent or reachable by % non-human role(s)',
       v_replay using errcode = 'CLR10';
   end if;
+  raise notice 'zeta claim grants OK: the six runtime verbs (claim, payload, fail, dispatch begin+record, enqueue fallback) are granted to clara_runtime and to NO other role -- asserted by EXCLUDING the owner and clara_runtime rather than by naming the roles I happened to think of, so a future or inherited role cannot hold EXECUTE unnoticed. The replay door exists and is reachable by humans only.';
+end $grants$;
+
+do $tail$
+declare v_skip int;
+begin
+  -- THE CLAIM REALLY IS A SKIP-LOCKED CLAIM, and the sweep really skips locked rows -- asked of the
+  -- LIVE bodies, not asserted from the file. A claim that silently lost `skip locked` would serialise
+  -- every worker behind one row lock and A33 arm (i) would still pass: one job is still claimed once.
+  select count(*) into v_skip from pg_proc
+   where (oid = 'clara.claim_render_job(text,interval)'::regprocedure
+          and pg_get_functiondef(oid) ilike '%for update skip locked%')
+      or (oid = 'clara.render_dispatch_begin(interval,int)'::regprocedure
+          and pg_get_functiondef(oid) ilike '%skip locked%');
+  if v_skip <> 2 then
+    raise exception 'zeta claim tail: only % of the 2 live bodies still skip locked rows', v_skip
+      using errcode = 'CLR10';
+  end if;
   if current_user <> (select v from _zeta_claim_pre where k = 'deploy_principal') then
     raise exception 'zeta claim tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'zeta claim OK: six runtime verbs (claim, payload, fail, dispatch begin+record, enqueue fallback), clara_runtime their ONLY grantee -- asserted by EXCLUDING owner+runtime rather than by naming the roles I happened to think of, so a future or inherited role cannot hold EXECUTE unnoticed. The replay door exists and is human-only. The claim refuses a job at its attempt cap and the sweep reaps exhausted ones as `failed`, so a crash-only job cannot start paid machines forever. The claim takes the oldest claimable-or-expired job FOR UPDATE SKIP LOCKED -- verified against the live function body, not asserted -- and records the observed wait on the JOB row. Dispatch stamps its attempt BEFORE the start call so a failing dispatch backs off on its cooldown instead of storming; the outcome is recorded per job, so "could not start the renderer" is a readable fact rather than a silence.';
+  raise notice 'zeta claim OK: the claim refuses a job at its attempt cap and the sweep reaps exhausted ones as `failed`, so a crash-only job cannot start paid machines forever. The claim takes the oldest claimable-or-expired job FOR UPDATE SKIP LOCKED and the dispatch sweep skips locked rows -- BOTH read from the live function bodies rather than asserted from this file -- and the claim records the observed wait on the JOB row. Dispatch stamps its attempt BEFORE the start call so a failing dispatch backs off on its cooldown instead of storming; the outcome is recorded per job, so "could not start the renderer" is a readable fact rather than a silence.';
 end $tail$;
