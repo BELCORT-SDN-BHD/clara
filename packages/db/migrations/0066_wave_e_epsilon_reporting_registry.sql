@@ -196,6 +196,17 @@ create table clara.report_datasets (
   evaluator_version_id  uuid not null references clara.evaluator_versions(id),
   dataset_sha256        bytea not null check (octet_length(dataset_sha256) = 32),
   point_count           int  not null check (point_count >= 0),
+  -- THE RESOLVED THRESHOLDS, persisted WITH the dataset rather than left for the renderer to
+  -- re-resolve. A chart spec names a threshold by constant key or definition version; which
+  -- VERSION of that constant applied, and what its value was, is a fact about the run's period
+  -- that the seal resolves once and freezes. Without this the renderer would either omit the
+  -- threshold or resolve it again later -- and "later" is a different answer the moment a new
+  -- constant version lands, which breaks dataset-before-render and seven-year reproducibility.
+  -- The numerals here are COPIED from clara.metric_constants rows inside the sealing
+  -- transaction; nothing computes them, and the dataset digest covers them (see
+  -- _report_dataset_payload_v1), so the reconstruct trigger refuses any later edit.
+  resolved_thresholds   jsonb not null default '[]'::jsonb
+    check (jsonb_typeof(resolved_thresholds) = 'array'),
   -- The sealing transaction's id (the delta account-set-members idiom). The header must exist
   -- before its points can reference it, so the digest is stamped a statement later -- but never
   -- a TRANSACTION later. Outside that window the row is frozen.

@@ -133,15 +133,26 @@ revoke all on function clara.approve_report_for_issue(uuid, text, text, text, te
 -- render lane's drill (design SS10; DR.md's Monthly-light and Quarterly-full cadences). Any
 -- other split would let a green DB check imply a byte claim nobody made.
 -- =====================================================================================
+-- NOT `stable`: this verb WRITES, because a verification that leaves no trace is not evidence
+-- that anyone verified. Who asked, when, about which artifact, and what the answer was, are the
+-- facts a later reader needs -- most of all when the answer was "corrupt". The absence case is
+-- audited too: an attempt against an artifact this firm cannot see is exactly the read worth
+-- having a record of, and auditing it leaks nothing (the receipt is null either way, so the
+-- caller still learns nothing about another firm's rows).
 create function clara.verify_report_artifact(p_artifact uuid) returns jsonb
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+  language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; art record; r record; ds record; a record;
   v_diffs jsonb := '[]'::jsonb; v_hash bytea; v_n int; v_manifest_hash text; v_claim jsonb;
+  v_pins jsonb; v_key text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   select * into art from clara.report_artifacts where id = p_artifact and firm_id = c.firm;
-  if not found then return null; end if;
+  if not found then
+    perform clara._audit(c.firm, c.actor, null, null, 'verify_report_artifact', null,
+      jsonb_build_object('artifact_id', p_artifact, 'outcome', 'not_found_in_firm'));
+    return null;
+  end if;
   select * into r from clara.report_runs where id = art.report_run_id;
   select * into ds from clara.report_datasets where report_run_id = r.id and chart_spec_version_id is null;
   select * into a from clara.report_claim_assessments where id = art.claim_assessment_id;
@@ -197,7 +208,21 @@ begin
       'stored', art.storage_key, 'recomputed',
       'firms/' || art.firm_id::text || '/reports/' || art.sha256 || '.' || art.key_extension);
   end if;
+  -- THE DB-DERIVED PINS, RE-DERIVED AGAIN HERE. The seal refuses a fabricated profile or style
+  -- hash going in; this is what stops one that somehow got in from reading green forever after.
+  -- Same derivation, same source facts -- one definition of what the manifest was supposed to say.
+  v_pins := clara._report_render_pins_v1(art.report_run_id);
+  for v_key in select k from jsonb_object_keys(v_pins) k order by k loop
+    if (art.manifest -> v_key) is distinct from (v_pins -> v_key) then
+      v_diffs := v_diffs || jsonb_build_object('term', 'manifest.' || v_key,
+        'stored', art.manifest -> v_key, 'recomputed', v_pins -> v_key);
+    end if;
+  end loop;
 
+  perform clara._audit(c.firm, c.actor, null, null, 'verify_report_artifact', null,
+    jsonb_build_object('artifact_id', art.id, 'report_run_id', art.report_run_id, 'kind', art.kind,
+      'verified', jsonb_array_length(v_diffs) = 0, 'diff_count', jsonb_array_length(v_diffs),
+      'diff_terms', (select coalesce(jsonb_agg(d->'term'), '[]'::jsonb) from jsonb_array_elements(v_diffs) d)));
   return jsonb_build_object(
     'artifact_id', art.id, 'report_run_id', art.report_run_id, 'kind', art.kind,
     'verified', jsonb_array_length(v_diffs) = 0, 'diffs', v_diffs,

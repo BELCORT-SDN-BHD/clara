@@ -49,9 +49,118 @@ create function clara._report_dataset_payload_v1(p_dataset uuid) returns jsonb
         'cell_id', cell_id, 'point_status', point_status, 'value_cents', value_cents,
         'value_numeric', value_numeric, 'value_date', value_date, 'value_text', value_text,
         'dimensions', dimensions) order by ordinal)
-      from clara.report_dataset_points where dataset_id = p_dataset), '[]'::jsonb))
+      from clara.report_dataset_points where dataset_id = p_dataset), '[]'::jsonb),
+    -- The resolved thresholds are INSIDE the digest, so freezing the points but leaving the
+    -- thresholds editable is not a state this dataset can reach.
+    'resolved_thresholds', (select resolved_thresholds from clara.report_datasets where id = p_dataset))
 $$;
 revoke all on function clara._report_dataset_payload_v1(uuid) from public;
+
+-- =====================================================================================
+-- THE POINT-PROVENANCE WALL. `cell_id` alone binds a point to a cell of the right firm and
+-- client -- it does NOT bind the cell to this dataset's run, snapshot, evaluator or declared
+-- definition. Everything the sealing body selects satisfies those by construction, but "the
+-- current body selects correctly" is a claim about a body, not a property of the table: a later
+-- body, or any internal writer reaching the table under clara_fn_owner, could seal a
+-- reconstructible digest over false provenance. This trigger re-derives the four bindings from
+-- the cell itself and refuses the row, so the invariant belongs to the TABLE.
+--
+-- A composite FK would be the stronger form, but the columns it would need are not unique on
+-- delta's metric_cells and adding an index to a delta-owned table from this lane is not this
+-- lane's to do -- so the ruled alternative (trigger re-derivation) is what ships.
+-- =====================================================================================
+create function clara._tf_report_dataset_point_provenance() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare d record; mc record; v_snapshot uuid; v_axis text := null; v_cell text; v_dataset text;
+begin
+  select report_run_id, books_snapshot_id, evaluator_version_id into d
+    from clara.report_datasets where id = new.dataset_id;
+  if not found then
+    raise exception 'a dataset point names no dataset' using errcode = 'CLR10',
+      detail = '{"reason":"dataset_point_provenance_mismatch","axis":"dataset","fix":"insert the dataset header first"}';
+  end if;
+  select run_id, evaluator_version_id, definition_version_id, evaluation_context_id into mc
+    from clara.metric_cells where id = new.cell_id;
+  if not found then
+    raise exception 'a dataset point names no cell' using errcode = 'CLR10',
+      detail = '{"reason":"dataset_point_provenance_mismatch","axis":"cell","fix":"point at an evaluated cell"}';
+  end if;
+  select snapshot_id into v_snapshot from clara.metric_evaluation_contexts where id = mc.evaluation_context_id;
+  if mc.run_id is distinct from d.report_run_id then
+    v_axis := 'run_id'; v_cell := mc.run_id::text; v_dataset := d.report_run_id::text;
+  elsif v_snapshot is distinct from d.books_snapshot_id then
+    v_axis := 'books_snapshot_id'; v_cell := v_snapshot::text; v_dataset := d.books_snapshot_id::text;
+  elsif mc.evaluator_version_id is distinct from d.evaluator_version_id then
+    v_axis := 'evaluator_version_id'; v_cell := mc.evaluator_version_id::text; v_dataset := d.evaluator_version_id::text;
+  elsif mc.definition_version_id is distinct from new.metric_version_id then
+    v_axis := 'metric_version_id'; v_cell := mc.definition_version_id::text; v_dataset := new.metric_version_id::text;
+  end if;
+  if v_axis is not null then
+    raise exception 'a dataset point''s cell does not belong to this dataset (%)', v_axis using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'dataset_point_provenance_mismatch', 'axis', v_axis,
+        'cell_value', v_cell, 'dataset_value', v_dataset, 'cell_id', new.cell_id,
+        'fix', 'a dataset carries only cells of its own run, snapshot, evaluator version and declared definition')::text;
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_report_dataset_point_provenance() from public;
+create trigger t_report_dataset_point_provenance before insert on clara.report_dataset_points
+  for each row execute function clara._tf_report_dataset_point_provenance();
+
+-- =====================================================================================
+-- B5 -- RESOLVE A CHART'S THRESHOLDS ONCE, AT SEAL, AS OF THE RUN'S PERIOD END. The spec names a
+-- threshold by constant key or by definition version; WHICH version of that constant applied and
+-- WHAT its value was are facts about the period being reported, resolved here and frozen into the
+-- dataset digest. p_as_of is the run's period end -- an accounting fact -- never the session
+-- clock (the x42 forbidden-clock family).
+--
+-- No invented precedence: if more than one visible version of a constant is effective on that
+-- date, this REFUSES as ambiguous rather than picking one. A silent winner is a number nobody
+-- chose.
+-- =====================================================================================
+create function clara._resolve_chart_thresholds_v1(p_firm uuid, p_spec jsonb, p_as_of date) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare x jsonb; v_out jsonb := '[]'::jsonb; k record; mv record; v_n int;
+begin
+  for x in select value from jsonb_array_elements(coalesce(p_spec->'thresholds', '[]'::jsonb)) loop
+    if x->>'source' = 'metric_constant' then
+      select count(*) into v_n from clara.metric_constants
+       where constant_key = x->>'constant_key' and (firm_id is null or firm_id = p_firm)
+         and effective_from <= p_as_of and (effective_to is null or effective_to >= p_as_of);
+      if v_n <> 1 then
+        raise exception 'chart threshold constant % resolves to % effective version(s) at %',
+          x->>'constant_key', v_n, p_as_of using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'threshold_constant_unresolvable',
+            'constant_key', x->>'constant_key', 'as_of', p_as_of, 'effective_versions', v_n,
+            'fix', 'a threshold constant must have exactly one version effective on the run''s period end')::text;
+      end if;
+      select * into k from clara.metric_constants
+       where constant_key = x->>'constant_key' and (firm_id is null or firm_id = p_firm)
+         and effective_from <= p_as_of and (effective_to is null or effective_to >= p_as_of);
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'threshold_key', x->>'threshold_key', 'source', 'metric_constant',
+        'constant_key', k.constant_key, 'constant_id', k.id, 'constant_version', k.version,
+        'numerator', k.numerator, 'denominator', k.denominator,
+        'currency_power', k.currency_power, 'days_power', k.days_power, 'count_power', k.count_power,
+        'effective_from', k.effective_from, 'effective_to', k.effective_to, 'as_of', p_as_of));
+    else
+      select mdv.id, mdv.formula_sha256, mdv.unit_key, mdv.state, mdv.applies_from, mdv.applies_to
+        into mv from clara.metric_definition_versions mdv
+       where mdv.id = (x->>'definition_version_id')::uuid;
+      if not found then
+        raise exception 'chart threshold definition version is absent' using errcode = 'CLR11',
+          detail = '{"reason":"threshold_version_unresolvable","fix":"reference a definition version this firm can see"}';
+      end if;
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'threshold_key', x->>'threshold_key', 'source', 'metric_version',
+        'definition_version_id', mv.id, 'formula_sha256', encode(mv.formula_sha256, 'hex'),
+        'unit_key', mv.unit_key, 'state', mv.state,
+        'applies_from', mv.applies_from, 'applies_to', mv.applies_to, 'as_of', p_as_of));
+    end if;
+  end loop;
+  return v_out;
+end $$;
+revoke all on function clara._resolve_chart_thresholds_v1(uuid, jsonb, date) from public;
 
 create function clara.verify_report_dataset(p_dataset uuid) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
@@ -428,8 +537,10 @@ begin
     perform clara._validate_chart_spec_semantics_v1(c.firm, cv.chart_spec_ast);
     v_ds := gen_random_uuid();
     insert into clara.report_datasets(id, firm_id, client_id, report_run_id, chart_spec_version_id,
-        books_snapshot_id, evaluator_version_id, dataset_sha256, point_count, sealed_by)
-      values (v_ds, c.firm, r.client_id, r.id, cv.id, r.books_snapshot_id, v_eval, zero, 0, c.actor);
+        books_snapshot_id, evaluator_version_id, dataset_sha256, point_count, sealed_by,
+        resolved_thresholds)
+      values (v_ds, c.firm, r.client_id, r.id, cv.id, r.books_snapshot_id, v_eval, zero, 0, c.actor,
+        clara._resolve_chart_thresholds_v1(c.firm, cv.chart_spec_ast, r.period_end));
     insert into clara.report_dataset_points(dataset_id, firm_id, client_id, ordinal, series_key,
         metric_version_id, cell_id, point_status, value_text, dimensions)
       select v_ds, c.firm, r.client_id, (row_number() over (order by s.series_key, mc.id))::int - 1,
@@ -492,13 +603,23 @@ declare v_fns int; v_wrong int; v_triggers int; v_granted text;
 begin
   select count(*) into v_fns from pg_proc p where p.pronamespace = 'clara'::regnamespace
    and p.proname = any (array['_report_dataset_payload_v1', 'verify_report_dataset',
-     '_tf_report_dataset_reconstruct', 'open_report_run', 'assess_report_claim', 'seal_report_dataset']);
-  if v_fns <> 6 then
-    raise exception 'epsilon seal tail: % of 6 functions exist', v_fns using errcode = 'CLR10';
+     '_tf_report_dataset_reconstruct', '_tf_report_dataset_point_provenance',
+     '_resolve_chart_thresholds_v1', 'open_report_run', 'assess_report_claim', 'seal_report_dataset']);
+  if v_fns <> 8 then
+    raise exception 'epsilon seal tail: % of 8 functions exist', v_fns using errcode = 'CLR10';
+  end if;
+  -- The provenance wall is a TRIGGER, so its existence is asserted where it lives, and ENABLED
+  -- is asserted too: a disabled trigger is a catalog row that enforces nothing.
+  select count(*) into v_triggers from pg_trigger
+   where tgfoid = 'clara._tf_report_dataset_point_provenance()'::regprocedure and not tgisinternal
+     and tgenabled = 'O';
+  if v_triggers <> 1 then
+    raise exception 'epsilon seal tail: % enabled point-provenance trigger(s), expected 1', v_triggers
+      using errcode = 'CLR10';
   end if;
   select count(*) into v_triggers from pg_trigger
    where tgfoid = 'clara._tf_report_dataset_reconstruct()'::regprocedure and not tgisinternal
-     and tgdeferrable;
+     and tgdeferrable and tgenabled = 'O';
   if v_triggers <> 2 then
     raise exception 'epsilon seal tail: % deferrable reconstruct trigger(s), expected 2', v_triggers
       using errcode = 'CLR10';
@@ -515,7 +636,8 @@ begin
     from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) a join pg_roles r on r.oid = a.grantee
    where p.pronamespace = 'clara'::regnamespace and a.privilege_type = 'EXECUTE'
      and p.proname = any (array['open_report_run', 'assess_report_claim', 'seal_report_dataset',
-       '_report_dataset_payload_v1', 'verify_report_dataset', '_tf_report_dataset_reconstruct'])
+       '_report_dataset_payload_v1', 'verify_report_dataset', '_tf_report_dataset_reconstruct',
+       '_tf_report_dataset_point_provenance', '_resolve_chart_thresholds_v1'])
      and r.rolname like 'clara\_%' and r.rolname <> 'clara_fn_owner';
   if v_granted <> 'clara_authenticated' then
     raise exception 'epsilon seal tail: grantees are [%], expected exactly clara_authenticated', v_granted

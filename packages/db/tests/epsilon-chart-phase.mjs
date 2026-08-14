@@ -274,11 +274,15 @@ export async function registerChartPhase(t, world) {
 
   await t.test("a point appended after the seal cannot commit, and a sealed dataset is frozen", async () => {
     const [fs] = await datasetRows(base.runId);
+    // The appended row is deliberately PROVENANCE-LEGAL -- same cell, same declared definition,
+    // only a different series key -- so the wall under test here is the DIGEST wall and nothing
+    // else. (The provenance wall gets its own arm below; a test that could be satisfied by either
+    // proves neither.)
     const appended = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
       db.query(
         `insert into clara.report_dataset_points(dataset_id,firm_id,client_id,ordinal,series_key,
-           cell_id,point_status,dimensions)
-         select $1,firm_id,client_id,9999,'forged',cell_id,'absent','{}'::jsonb
+           metric_version_id,cell_id,point_status,dimensions)
+         select $1,firm_id,client_id,9999,'forged',metric_version_id,cell_id,'absent','{}'::jsonb
            from clara.report_dataset_points where dataset_id=$1 limit 1`, [fs.id])));
     assert.equal(reasonOf(appended), "dataset_reconstruction_mismatch",
       `the header no longer reconstructs from its points: ${appended?.message}`);
@@ -292,6 +296,44 @@ export async function registerChartPhase(t, world) {
     }
     assert.equal((await rootQuery("select clara.verify_report_dataset($1) r", [fs.id])).rows[0].r.ok, true,
       "the refused attempts left the dataset reconstructing exactly as sealed");
+  });
+
+  await t.test("a dataset point's cell must belong to the dataset's own run, snapshot and definition", async () => {
+    // The FK binds firm and client. It does NOT bind the cell's run, snapshot, evaluator version
+    // or declared definition -- so an internal writer under clara_fn_owner could seal a
+    // perfectly reconstructible digest over a cell from somewhere else. The trigger is what makes
+    // the binding a property of the TABLE rather than of whichever body happens to be writing.
+    const [fs] = await datasetRows(base.runId);
+    // A cell of a DIFFERENT run, in the same firm and client, so the FK is satisfied and only
+    // provenance can refuse it.
+    const foreignRun = await buildEpsilonWorld(world, { tag: "provenance", reportClass: "management", seal: true });
+    const foreignCell = (await rootQuery(
+      "select id, definition_version_id from clara.metric_cells where run_id=$1 limit 1",
+      [foreignRun.runId])).rows[0];
+    assert.ok(foreignCell, "the second run evaluated a cell of its own");
+    const error = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query(
+        `insert into clara.report_dataset_points(dataset_id,firm_id,client_id,ordinal,series_key,
+           metric_version_id,cell_id,point_status,dimensions)
+         select $1,firm_id,client_id,8888,'foreign',$3,$2,'absent','{}'::jsonb
+           from clara.report_datasets where id=$1`, [fs.id, foreignCell.id, foreignCell.definition_version_id])));
+    assert.equal(error?.code, "CLR10", error?.message);
+    assert.equal(reasonOf(error), "dataset_point_provenance_mismatch", error?.message);
+    assert.equal(errorDetail(error).axis, "run_id",
+      "the refusal names WHICH binding disagreed, so a writer is told what to fix");
+    // And a declared definition that is not the cell's own is refused on its own axis -- the
+    // point where a chart could silently label one series with another's formula.
+    const wrongDefinition = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query(
+        `insert into clara.report_dataset_points(dataset_id,firm_id,client_id,ordinal,series_key,
+           metric_version_id,cell_id,point_status,dimensions)
+         select $1,firm_id,client_id,8887,'mislabelled',null,cell_id,'absent','{}'::jsonb
+           from clara.report_dataset_points where dataset_id=$1 and metric_version_id is not null limit 1`,
+        [fs.id])));
+    assert.equal(reasonOf(wrongDefinition), "dataset_point_provenance_mismatch", wrongDefinition?.message);
+    assert.equal(errorDetail(wrongDefinition).axis, "metric_version_id", wrongDefinition?.message);
+    assert.equal((await rootQuery("select clara.verify_report_dataset($1) r", [fs.id])).rows[0].r.ok, true,
+      "the refused attempts left the sealed dataset reconstructing exactly as it was");
   });
 
   await t.test("a run seals its dataset exactly once", async () => {

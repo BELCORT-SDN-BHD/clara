@@ -590,23 +590,129 @@ begin
 end $$;
 revoke all on function clara._report_manifest_required_keys(text) from public;
 
+-- =====================================================================================
+-- V6/V7 -- THE KEY SHAPES. Presence proves the render side CONSIDERED a key; it proves nothing
+-- about what it wrote there. `extracted_text_sha256: null` is a manifest that looked at gate-3
+-- extraction and recorded nothing, and a null that seals is evidence of nothing at all (review
+-- law 2: absence is not evidence). So every required key also carries a SHAPE, and the roster is
+-- CLOSED IN BOTH DIRECTIONS: a required key with no registered shape RAISES, which is what stops
+-- the two lists drifting apart the next time a key is added.
+--
+-- `db_derived` is not a weaker shape -- it is a stronger one asserted elsewhere. Those keys are
+-- compared value-for-value against the DB at seal (file 7), which also settles their
+-- nullability: statutory_profile_sha256 is null for a management pack because the DB says the
+-- pack has no profile, not because a null was tolerated here.
+--
+-- HONEST LIMIT, and the same one verify_report_artifact states: a well-shaped attestation is not
+-- a true one. That a digest is 64 hex characters says nothing about whether those bytes ever
+-- rendered. Lane zeta's gate-3 extraction and its double-render drill are where these become
+-- facts; this wall only refuses the manifest that never tried.
+-- =====================================================================================
+create function clara._report_manifest_key_shape(p_key text) returns text
+  language sql immutable as $$
+  select case p_key
+    when 'report_spec_version_id' then 'db_derived'
+    when 'statutory_profile_version_id' then 'db_derived'
+    when 'statutory_profile_sha256' then 'db_derived'
+    when 'statutory_wording_sha256' then 'db_derived'
+    when 'house_style_version_id' then 'db_derived'
+    when 'house_style_sha256' then 'db_derived'
+    when 'chart_spec_version_ids' then 'db_derived'
+    when 'chart_spec_sha256' then 'db_derived'
+    when 'books_snapshot_id' then 'db_derived'
+    when 'dataset_id' then 'db_derived'
+    when 'dataset_sha256' then 'db_derived'
+    when 'report_parameters' then 'object'
+    when 'applicability_receipts' then 'object'
+    when 'claim_assessment' then 'object'
+    -- A LIST, not a map: the evaluator versions a run ran under, and a run that ran under none
+    -- rendered nothing. The dataset seal proves there is exactly one; an empty array here would
+    -- contradict a fact the DB already holds.
+    when 'evaluator_versions' then 'list'
+    when 'definition_hashes' then 'object'
+    when 'asset_hashes' then 'object'
+    when 'document_metadata' then 'object'
+    when 'signature_evidence' then 'evidence_object'
+    when 'books_event_sequence' then 'text'
+    when 'assembler_version' then 'text'
+    when 'renderer_source_commit' then 'text'
+    when 'node_version' then 'text'
+    when 'os_version' then 'text'
+    when 'architecture' then 'text'
+    when 'font_engine_version' then 'text'
+    when 'locale' then 'text'
+    when 'timezone' then 'text'
+    when 'extraction_tool' then 'text'
+    when 'renderer_image_digest' then 'image_digest'
+    when 'render_manifest_sha256' then 'sha256_hex'
+    when 'extracted_text_sha256' then 'sha256_hex'
+    when 'pre_sign_pdf_sha256' then 'sha256_hex'
+    when 'signed_original_pdf_sha256' then 'sha256_hex'
+    when 'uncertified' then 'boolean'
+    else null end
+$$;
+revoke all on function clara._report_manifest_key_shape(text) from public;
+
+create function clara._validate_report_manifest_shapes_v1(p_manifest jsonb, p_kind text) returns int
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare k text; s text; v jsonb; t text; n int := 0; bad boolean;
+begin
+  foreach k in array clara._report_manifest_required_keys(p_kind) loop
+    s := clara._report_manifest_key_shape(k);
+    if s is null then
+      raise exception 'manifest key % has no registered shape', k using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'manifest_shape_unregistered', 'key', k,
+          'fix', 'register a shape for every required manifest key -- the two rosters move together')::text;
+    end if;
+    n := n + 1;
+    if s = 'db_derived' then continue; end if;
+    v := p_manifest -> k;
+    t := jsonb_typeof(v);
+    if v is null or t = 'null' then
+      raise exception 'the render manifest records no evidence at %', k using errcode = 'CLR42',
+        detail = jsonb_build_object('reason', 'manifest_evidence_invalid', 'key', k,
+          'expected', s, 'got', 'null',
+          'fix', 'a null is evidence of nothing -- the render side attests this key or the seal refuses')::text;
+    end if;
+    bad := case s
+      when 'sha256_hex'     then t <> 'string' or (v#>>'{}') !~ '^[0-9a-f]{64}$'
+      when 'image_digest'   then t <> 'string' or (v#>>'{}') !~ '^(sha256:)?[0-9a-f]{64}$'
+      when 'text'           then t <> 'string' or btrim(v#>>'{}') = ''
+      when 'object'         then t <> 'object'
+      when 'list'           then t <> 'array' or jsonb_array_length(v) = 0
+      when 'evidence_object' then t <> 'object' or v = '{}'::jsonb
+      when 'boolean'        then t <> 'boolean'
+      else true end;
+    if bad then
+      raise exception 'the render manifest''s % is not a %', k, s using errcode = 'CLR42',
+        detail = jsonb_build_object('reason', 'manifest_evidence_invalid', 'key', k,
+          'expected', s, 'got', coalesce(t, 'null'),
+          'fix', 'attest this key in its registered shape')::text;
+    end if;
+  end loop;
+  return n;
+end $$;
+revoke all on function clara._validate_report_manifest_shapes_v1(jsonb, text) from public;
+
 reset role;
 
 do $tail$
-declare v_fns int; v_grants int; v_base int; v_pre int; v_signed int;
+declare v_fns int; v_grants int; v_base int; v_pre int; v_signed int; v_unshaped int;
 begin
   select count(*) into v_fns from pg_proc p where p.pronamespace = 'clara'::regnamespace
    and p.proname = any (array['_layout_structural_int_fields', '_validate_layout_ast_v1',
-     '_validate_chart_spec_ast_v1', '_validate_chart_spec_semantics_v1', '_report_manifest_required_keys']);
-  if v_fns <> 5 then
-    raise exception 'epsilon validators tail: % of 5 validators exist', v_fns using errcode = 'CLR10';
+     '_validate_chart_spec_ast_v1', '_validate_chart_spec_semantics_v1', '_report_manifest_required_keys',
+     '_report_manifest_key_shape', '_validate_report_manifest_shapes_v1']);
+  if v_fns <> 7 then
+    raise exception 'epsilon validators tail: % of 7 validators exist', v_fns using errcode = 'CLR10';
   end if;
   -- INTERNAL means internal: no app role holds EXECUTE on any of them.
   select count(*) into v_grants from pg_proc p
     cross join lateral aclexplode(coalesce(p.proacl, '{}')) a join pg_roles r on r.oid = a.grantee
    where p.pronamespace = 'clara'::regnamespace and a.privilege_type = 'EXECUTE'
      and p.proname = any (array['_layout_structural_int_fields', '_validate_layout_ast_v1',
-       '_validate_chart_spec_ast_v1', '_validate_chart_spec_semantics_v1', '_report_manifest_required_keys'])
+       '_validate_chart_spec_ast_v1', '_validate_chart_spec_semantics_v1', '_report_manifest_required_keys',
+       '_report_manifest_key_shape', '_validate_report_manifest_shapes_v1'])
      and r.rolname like 'clara\_%' and r.rolname <> 'clara_fn_owner';
   if v_grants <> 0 then
     raise exception 'epsilon validators tail: % app-role EXECUTE grant(s) on an internal validator', v_grants
@@ -620,9 +726,21 @@ begin
     raise exception 'epsilon validators tail: manifest key counts %/%/% -- expected 32/33/35',
       v_base, v_pre, v_signed using errcode = 'CLR10';
   end if;
+  -- THE TWO ROSTERS ARE PROVEN TO MOVE TOGETHER, here, at deploy: every required key of every
+  -- kind resolves to a registered shape. Without this a key added to one list and forgotten in
+  -- the other would only surface as a seal refusal in front of a preparer.
+  select count(*) into v_unshaped from (
+    select k from unnest(clara._report_manifest_required_keys('draft_watermarked')) k
+    union select k from unnest(clara._report_manifest_required_keys('pre_sign')) k
+    union select k from unnest(clara._report_manifest_required_keys('signed_original')) k) q
+   where clara._report_manifest_key_shape(q.k) is null;
+  if v_unshaped <> 0 then
+    raise exception 'epsilon validators tail: % required manifest key(s) carry no registered shape', v_unshaped
+      using errcode = 'CLR10';
+  end if;
   if current_user <> (select v from _epsilon_validator_pre where k = 'deploy_principal') then
     raise exception 'epsilon validators tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'epsilon validators OK: layout AST refuses every non-structural JSON number (allow-list of 8 structural fields), every protected placeholder bound to a supplied literal, and -- UNCONDITIONALLY, at the one display-text leaf the grammar has -- typed registration identifiers, legal-entity suffixes and any claim-lexicon phrase (both scopes) plus typed currency amounts (scope spec); an unregistered scope refuses outright. Chart AST refuses inline values/SQL/JS/formulas, ad-hoc axis bounds and literal thresholds over the WHOLE tree, admits only the four named axis policies and requires the same-source data table; stage 2 additionally holds one axis to one unit dimension, one temporality and one shared effective window, and holds every threshold to the axis dimension. The manifest key list is % keys for a draft, % for pre_sign, % for a signed original, and an unknown kind raises rather than returning an empty requirement. All 5 validators ungranted to every app role.',
+  raise notice 'epsilon validators OK: layout AST refuses every non-structural JSON number (allow-list of 8 structural fields), every protected placeholder bound to a supplied literal, and -- UNCONDITIONALLY, at the one display-text leaf the grammar has -- typed registration identifiers, legal-entity suffixes and any claim-lexicon phrase (both scopes) plus typed currency amounts (scope spec); an unregistered scope refuses outright. Chart AST refuses inline values/SQL/JS/formulas, ad-hoc axis bounds and literal thresholds over the WHOLE tree, admits only the four named axis policies and requires the same-source data table; stage 2 additionally holds one axis to one unit dimension, one temporality and one shared effective window, and holds every threshold to the axis dimension. The manifest key list is % keys for a draft, % for pre_sign, % for a signed original, and an unknown kind raises rather than returning an empty requirement -- and every one of those keys resolves to a registered SHAPE, so a null attestation refuses the seal instead of sealing over evidence of nothing. All 7 validators ungranted to every app role.',
     v_base, v_pre, v_signed;
 end $tail$;

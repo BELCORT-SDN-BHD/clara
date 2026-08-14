@@ -41,6 +41,73 @@ end $pre$;
 set role clara_fn_owner;
 
 -- =====================================================================================
+-- A0 -- THE DB-DERIVED HALF OF A RENDER MANIFEST. Everything here is a fact the DB already
+-- owns; the render side may CARRY these values but may not AUTHOR them, and the seal compares
+-- key for key. Without this a manifest could name a real profile version and a fabricated hash
+-- for it, then verify green forever after -- the manifest's self-hash covers the fabrication
+-- just as faithfully as it covers the truth.
+--
+-- One derivation, used by the gate. Where a value is legitimately absent it is JSON null here
+-- too, so nullability is settled by the DB rather than by tolerance: a management pack's
+-- statutory_profile_sha256 is null because the pack HAS no profile.
+--
+-- The wording digest is over the rows APPLICABLE TO THE RUN'S PERIOD AND LOCALE, ordered. With
+-- owner task #43 outstanding that aggregate is empty, and the digest of the empty aggregate is a
+-- real, reproducible value -- it changes the day verified wording lands, which is exactly what a
+-- provenance hash is for. Windows are read against the run's period start, never a session
+-- clock (the x42 forbidden-clock family).
+-- =====================================================================================
+create function clara._report_render_pins_v1(p_report_run_id uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare r record; sv record; tv record; ds record; v_charts jsonb; v_chart_sha text;
+begin
+  select * into r from clara.report_runs where id = p_report_run_id;
+  if not found then
+    raise exception 'report run not found' using errcode = 'CLR11', detail = '{"reason":"report_run_not_in_firm"}';
+  end if;
+  select * into sv from clara.report_spec_versions where id = r.report_spec_version_id;
+  select * into tv from clara.report_template_versions where id = sv.report_template_version_id;
+  select * into ds from clara.report_datasets
+   where report_run_id = r.id and chart_spec_version_id is null;
+  select coalesce(jsonb_agg(to_jsonb(q.chart_spec_version_id::text) order by q.chart_spec_version_id::text), '[]'::jsonb)
+    into v_charts
+    from (select distinct chart_spec_version_id from clara.report_datasets
+           where report_run_id = r.id and chart_spec_version_id is not null) q;
+  -- A digest over the bound chart specs' OWN content hashes, in a fixed order. Null when the run
+  -- binds no chart: an empty digest and "no charts" are different statements.
+  select case when count(*) = 0 then null
+              else encode(clara._hash(jsonb_agg(encode(cv.content_sha256, 'hex') order by cv.id::text)), 'hex') end
+    into v_chart_sha
+    from clara.chart_template_versions cv
+   where cv.id in (select distinct chart_spec_version_id from clara.report_datasets
+                    where report_run_id = r.id and chart_spec_version_id is not null);
+  return jsonb_build_object(
+    'report_spec_version_id', r.report_spec_version_id::text,
+    'books_snapshot_id', r.books_snapshot_id::text,
+    'dataset_id', ds.id::text,
+    'dataset_sha256', encode(ds.dataset_sha256, 'hex'),
+    'statutory_profile_version_id', tv.statutory_profile_version_id::text,
+    'statutory_profile_sha256', (select encode(pv.content_sha256, 'hex')
+                                   from clara.statutory_profile_versions pv
+                                  where pv.id = tv.statutory_profile_version_id),
+    'statutory_wording_sha256', case when tv.statutory_profile_version_id is null then null else (
+      select encode(clara._hash(coalesce(jsonb_agg(jsonb_build_array(w.wording_key, w.locale,
+               w.applies_to_periods_beginning_from::text, w.source_sha256, w.verification_state)
+               order by w.wording_key, w.locale, w.applies_to_periods_beginning_from), '[]'::jsonb)), 'hex')
+        from clara.statutory_wording w
+        join clara.statutory_profile_versions pv on pv.profile_key = w.profile_key
+       where pv.id = tv.statutory_profile_version_id and w.locale = sv.locale
+         and w.applies_to_periods_beginning_from <= r.period_start
+         and (w.applies_to_periods_beginning_to is null or w.applies_to_periods_beginning_to >= r.period_start)) end,
+    'house_style_version_id', tv.house_style_version_id::text,
+    'house_style_sha256', (select encode(hv.content_sha256, 'hex') from clara.house_style_versions hv
+                            where hv.id = tv.house_style_version_id),
+    'chart_spec_version_ids', v_charts,
+    'chart_spec_sha256', v_chart_sha);
+end $$;
+revoke all on function clara._report_render_pins_v1(uuid) from public;
+
+-- =====================================================================================
 -- A1 -- SEAL AN ARTIFACT. Every render mints one (E-R8 floor 2: there is no preview-only,
 -- not-persisted path, watermarked drafts included).
 -- =====================================================================================
@@ -60,7 +127,7 @@ declare
   r record; a record; ds record; presign record; latest record;
   prior jsonb; v_missing text[]; v_id uuid; v_removed boolean; v_key text;
   v_manifest_hash text; v_claim jsonb; v_expected_presign text;
-  v_draft_now int; v_nonstat_now int;
+  v_draft_now int; v_nonstat_now int; v_pins jsonb; v_wrong text[];
 begin
   select * into r from clara.report_runs where id = p_report_run_id and firm_id = p_firm;
   if not found then
@@ -169,6 +236,23 @@ begin
         detail = jsonb_build_object('reason', 'manifest_key_missing', 'missing_keys', v_missing,
           'kind', p_kind, 'fix', 'pin every required key; seven-year reproducibility is the whole point')::text;
   end if;
+  -- EVIDENCE, NOT MERELY PRESENCE. Presence says the render side considered the key; the shape
+  -- roster says it actually attested something. A null seals nothing.
+  perform clara._validate_report_manifest_shapes_v1(p_manifest, p_kind);
+  -- AND THE DB-OWNED HALF IS RE-DERIVED, never trusted. A manifest may name a real profile
+  -- version beside a fabricated hash for it; the manifest's own self-hash would cover the
+  -- fabrication exactly as faithfully as the truth, and verify would stay green for seven years.
+  v_pins := clara._report_render_pins_v1(r.id);
+  select coalesce(array_agg(k order by k), '{}') into v_wrong
+    from jsonb_object_keys(v_pins) k
+   where (p_manifest -> k) is distinct from (v_pins -> k);
+  if coalesce(array_length(v_wrong, 1), 0) > 0 then
+    raise exception 'the manifest disagrees with the DB about % pinned input(s)', array_length(v_wrong, 1)
+      using errcode = 'CLR42',
+        detail = jsonb_build_object('reason', 'manifest_binding_mismatch', 'keys', v_wrong,
+          'db_values', v_pins, 'fix', 'carry the DB''s own pinned values verbatim -- these are not the render side''s to author')::text;
+  end if;
+
   -- SELF-BINDING. Each of these is a place where the manifest could disagree with the DB, and
   -- disagreement refuses the seal rather than picking a winner.
   v_manifest_hash := encode(clara._hash(p_manifest - 'render_manifest_sha256'), 'hex');
@@ -182,16 +266,14 @@ begin
         'db_claim_removed', v_removed, 'db_uncertified', a.uncertified,
         'fix', 'carry the assessment id, status, claim_removed and uncertified verbatim')::text;
   end if;
-  if coalesce(p_manifest->>'dataset_id', '') <> ds.id::text
-     or coalesce(p_manifest->>'dataset_sha256', '') <> encode(ds.dataset_sha256, 'hex')
-     or coalesce(p_manifest->>'books_snapshot_id', '') <> r.books_snapshot_id::text
-     or coalesce(p_manifest->>'report_spec_version_id', '') <> r.report_spec_version_id::text
-     or coalesce(p_manifest->>'render_manifest_sha256', '') <> v_manifest_hash then
+  -- The dataset, snapshot and spec-version pins are settled by the re-derivation above; what is
+  -- left here is the manifest's claim ABOUT ITSELF, which no other check can make for it.
+  if coalesce(p_manifest->>'render_manifest_sha256', '') <> v_manifest_hash then
     raise exception 'the manifest does not bind this run''s own pinned inputs' using errcode = 'CLR42',
       detail = jsonb_build_object('reason', 'manifest_binding_mismatch', 'dataset_id', ds.id,
         'dataset_sha256', encode(ds.dataset_sha256, 'hex'), 'books_snapshot_id', r.books_snapshot_id,
         'render_manifest_sha256', v_manifest_hash,
-        'fix', 'pin the run''s own dataset, snapshot and spec version, and hash the manifest without its own hash key')::text;
+        'fix', 'hash the manifest without its own hash key and carry that value in render_manifest_sha256')::text;
   end if;
   -- The pre-sign hash a manifest must carry: for a pre_sign artifact it is these very bytes; for
   -- a signed original it is the run's already-sealed pre_sign artifact's hash. Resolved into a
@@ -305,7 +387,7 @@ reset role;
 -- gates to keep in step, which is how one of them silently stops matching the other. The core's
 -- grant posture is re-read in the sibling file's final census, once all ten verbs exist.
 do $tail$
-declare v_wrapper_tokens int; v_core_tokens int; v_core_grants int;
+declare v_wrapper_tokens int; v_core_tokens int; v_core_grants int; v_pin_grants int;
 begin
   select count(*) into v_wrapper_tokens from pg_proc p
    where p.oid = 'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure
@@ -323,8 +405,19 @@ begin
     raise exception 'epsilon seal tail: split is wrong -- wrapper tokens %, core token set %, core app-role grants %',
       v_wrapper_tokens, v_core_tokens, v_core_grants using errcode = 'CLR10';
   end if;
+  -- The pin derivation exists and reaches no app role: it is the seal's own instrument, not a
+  -- door. (verify_report_artifact, which also calls it, is the granted door and carries its own
+  -- role floor.)
+  select count(*) into v_pin_grants from pg_proc p
+    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
+   where p.proname = '_report_render_pins_v1' and acl.privilege_type = 'EXECUTE'
+     and rr.rolname like 'clara\_%' and rr.rolname <> 'clara_fn_owner';
+  if to_regprocedure('clara._report_render_pins_v1(uuid)') is null or v_pin_grants <> 0 then
+    raise exception 'epsilon seal tail: the pin derivation is absent or granted (% app-role grant(s))', v_pin_grants
+      using errcode = 'CLR10';
+  end if;
   if current_user <> (select v from _epsilon_artifact_pre where k = 'deploy_principal') then
     raise exception 'epsilon seal tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'epsilon seal OK: gate 1 lives ENTIRELY in clara._seal_report_artifact_core (all five refusal tokens present), which is granted to NO app role and reachable only as an internal clara_fn_owner call -- the shape zeta''s render worker needs to pass the gate under clara_runtime with no JWT. The human wrapper carries ZERO gate tokens, so there is exactly one copy of the gate.';
+  raise notice 'epsilon seal OK: gate 1 lives ENTIRELY in clara._seal_report_artifact_core (all five refusal tokens present), which is granted to NO app role and reachable only as an internal clara_fn_owner call -- the shape zeta''s render worker needs to pass the gate under clara_runtime with no JWT. The human wrapper carries ZERO gate tokens, so there is exactly one copy of the gate. The manifest is proven three ways: every required key present, every key attested in its registered shape (a null refuses), and every DB-owned pin re-derived from source facts rather than trusted.';
 end $tail$;

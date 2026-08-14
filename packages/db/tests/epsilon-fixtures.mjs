@@ -231,20 +231,16 @@ export async function buildManifest({ runId, kind, sha256, presignSha256 = null,
        from clara.report_runs r join clara.report_spec_versions s on s.id=r.report_spec_version_id
       where r.id=$1`, [runId])).rows[0];
   assert.ok(run, `run ${runId} exists`);
+  // The DB-owned half is READ, never invented: profile / wording / style / chart-spec hashes,
+  // the version ids they belong to, and the dataset and snapshot pins. The seal re-derives the
+  // same values and refuses any disagreement, so a fixture that made them up would be testing
+  // the refusal rather than the happy path. This is also the shape lane zeta wants: ask the DB
+  // what to pin, then attest only what the render side actually knows.
+  const pins = (await rootQuery("select clara._report_render_pins_v1($1) p", [runId])).rows[0].p;
   const base = {
-    report_spec_version_id: run.report_spec_version_id,
+    ...pins,
     report_parameters: { currency: "MYR" },
-    statutory_profile_version_id: null,
-    statutory_profile_sha256: sha64("profile"),
-    statutory_wording_sha256: sha64("wording"),
-    house_style_version_id: null,
-    house_style_sha256: sha64("style"),
-    chart_spec_version_ids: [],
-    chart_spec_sha256: sha64("chart"),
-    books_snapshot_id: run.books_snapshot_id,
     books_event_sequence: "1:1:",
-    dataset_id: run.dataset_id,
-    dataset_sha256: run.dataset_sha256,
     applicability_receipts: { checked: true },
     claim_assessment: { id: run.claim_id, status: run.claim_status,
       claim_removed: run.claim_status === "stripped" },
