@@ -1,8 +1,8 @@
--- UNNUMBERED_wave_e_eta_wake_wrappers_part2.sql -- Wave E lane eta (E-c), the GRANTED half.
--- Number is claimed at merge, immediately after part 1's.
+-- 0078_wave_e_eta_wake_wrappers_part2.sql -- Wave E lane eta (E-c), the GRANTED half.
+-- Number claimed at merge, immediately after part 1's.
 --
 -- ORDERING OBLIGATION, BINDING AND MECHANICAL. This file applies ONLY after
--- UNNUMBERED_wave_e_eta_wake_wrappers.sql, which creates the three ungranted cores every wrapper
+-- 0077_wave_e_eta_wake_wrappers.sql, which creates the three ungranted cores every wrapper
 -- below delegates to. The prestate probes all three by exact regprocedure form and REFUSES rather
 -- than proceeding on a wrong premise, so a wrong merge order fails loudly at apply instead of
 -- silently shipping wrappers that call nothing.
@@ -45,7 +45,7 @@ begin
     'clara._eta_request_report_preview_core(uuid,uuid,uuid,text,uuid,text)'
   ] loop
     if to_regprocedure(n) is null then
-      raise exception 'eta part2 prestate: part 1 core absent: % -- apply UNNUMBERED_wave_e_eta_wake_wrappers.sql first', n using errcode = 'CLR10';
+      raise exception 'eta part2 prestate: part 1 core absent: % -- apply 0077_wave_e_eta_wake_wrappers.sql first', n using errcode = 'CLR10';
     end if;
   end loop;
   -- The epsilon core this file's report-spec wrapper delegates to, and the wake plumbing.

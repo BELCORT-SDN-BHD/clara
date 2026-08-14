@@ -1,9 +1,9 @@
--- UNNUMBERED_wave_e_eta_wake_wrappers.sql -- Wave E lane eta (E-c), the ad-hoc authoring lane.
--- PART 1 of 2: the UNGRANTED MACHINERY. Number is claimed at merge. Applies after the delta and
+-- 0077_wave_e_eta_wake_wrappers.sql -- Wave E lane eta (E-c), the ad-hoc authoring lane.
+-- PART 1 of 2: the UNGRANTED MACHINERY. Number claimed at merge. Applies after the delta and
 -- epsilon files. Add-only: no delta or epsilon object is recut, dropped or re-granted here.
 --
 -- ORDERING OBLIGATION, BINDING AND MECHANICAL, STATED IN BOTH HEADERS. This file creates the three
--- ungranted cores and grants NOTHING; UNNUMBERED_wave_e_eta_wake_wrappers_part2.sql adds the
+-- ungranted cores and grants NOTHING; 0078_wave_e_eta_wake_wrappers_part2.sql adds the
 -- wrappers, the EXECUTE grants, the allowlist rows and the census that proves them, and its prestate
 -- probes all three cores by exact regprocedure form so a wrong merge order fails loudly at apply.
 -- The seam is deliberately between the machinery and the GRANTED SURFACE, not between objects and
@@ -407,5 +407,5 @@ begin
   if (select count(*) from clara.metric_cells where inputs ->> 'schema' = 'clara.metric-composition-inputs/v1') <> 0 then
     raise exception 'eta tail: the migration seeded a composition cell, expected 0' using errcode = 'CLR10';
   end if;
-  raise notice 'eta part1 OK: 3 ungranted cores, definer + pinned search_path, reachable by NO application role incl. both non-inheriting login shells and not by PUBLIC; nothing granted and no allowlist row written by this half; delta definition-writer census unmoved at %; zero cells seeded. UNNUMBERED_wave_e_eta_wake_wrappers_part2.sql adds the granted surface and MUST follow.', v_writers;
+  raise notice 'eta part1 OK: 3 ungranted cores, definer + pinned search_path, reachable by NO application role incl. both non-inheriting login shells and not by PUBLIC; nothing granted and no allowlist row written by this half; delta definition-writer census unmoved at %; zero cells seeded. 0078_wave_e_eta_wake_wrappers_part2.sql adds the granted surface and MUST follow.', v_writers;
 end $tail$;

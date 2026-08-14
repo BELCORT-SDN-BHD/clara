@@ -13,8 +13,10 @@
 // wrapper is EXECUTE-granted to clara_wake_interactive alone and carries an interactive-only
 // clara.wake_fn_allowlist row; the evaluator, the catalog writers and epsilon's report verbs stay
 // ungranted to every wake role and are reached only inside those wrappers, under clara_fn_owner.
-// The migration UNNUMBERED_wave_e_eta_wake_wrappers.sql proves all of that in its own tail, and
-// tests/eta-*.mjs re-proves it against a live catalog. A tool here cannot widen it.
+// The eta wake-wrappers migration pair proves all of that in its own tail, and tests/eta-*.mjs
+// re-proves it against a live catalog. A tool here cannot widen it. (The migration is named by
+// ROLE, not by filename: this file is frozen and becomes immutable at deploy, so a filename
+// baked in here could not be corrected the next time migration numbers move.)
 
 import { tool } from "ai";
 import { z } from "zod";

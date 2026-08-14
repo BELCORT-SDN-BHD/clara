@@ -255,8 +255,8 @@ export const workflows = {
 // set coding intent. Each WRITING tool reaches the database through exactly one clara.wake_*
 // wrapper granted EXECUTE to clara_wake_interactive alone, with an interactive-only
 // clara.wake_fn_allowlist row; the evaluator, the catalog writers and epsilon's report verbs stay
-// ungranted to every wake role (migration UNNUMBERED_wave_e_eta_wake_wrappers.sql proves the
-// posture in its own tail). list_metric_catalog needs no wrapper and gets none — it is an
+// ungranted to every wake role (the eta wake-wrappers migration pair proves the posture in its
+// own tail). list_metric_catalog needs no wrapper and gets none — it is an
 // RLS-scoped SELECT. Nothing in this lane can approve, issue or sign: saving a composition mints a
 // DRAFT definition version (ruled — E-R5), and the render request is pinned to a watermarked draft
 // kind. THE DEPLOY ORDER IS BINDING: the eta migration must be applied BEFORE this image goes
