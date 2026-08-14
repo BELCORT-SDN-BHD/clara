@@ -357,11 +357,16 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
         // both the version-wrapped error and the bounded end() in the finally.
         await client.connect();
         connected = true;
-        await pinMigrationSession(client);
+        const pinnedForMigration = await pinMigrationSession(client);
         backendPid = await readBackendPid(client);
+        // OBSERVABILITY, not a verdict. A repeat used to REFUSE, on the assumption that a
+        // fresh client connection implies a fresh server backend — true on a direct
+        // connection, false by design through a session pooler, which legitimately recycles
+        // backends across client connections. That assumption refused a live migration.
+        // What the runner actually needs is proven by the session-pin nonce below.
         const priorVersion = backendPids.get(backendPid);
         if (priorVersion !== undefined) {
-          throw new Error(`migration ${version} landed on server backend pid ${backendPid}, the backend ${priorVersion} already ran on (pid ${backendPid}) — every pending migration must get its own fresh connection, so a reused backend is refused`);
+          log(`  note: backend pid ${backendPid} also served ${priorVersion} — expected through a session pooler, which recycles server backends; the session-pin nonce is what proves this session was freshly pinned`);
         }
         backendPids.set(backendPid, version);
         await client.query("begin");
@@ -374,7 +379,7 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
         const ledgerBefore = await readLedgerIdentity(client, preRearm);
         const receiptsBefore = await readLedgerReceipts(client, preRearm);
         await armMigrationTimeout(client, null);
-        const { xid: transactionXid, rearm } = await executeMigrationBody(client, sql, bodyTimeout); await rearm();
+        const { xid: transactionXid, rearm } = await executeMigrationBody(client, sql, bodyTimeout, pinnedForMigration.nonce); await rearm();
         const receipt = (
           await client.query(
             `insert into clara.schema_migrations(version,checksum) values($1,$2)
