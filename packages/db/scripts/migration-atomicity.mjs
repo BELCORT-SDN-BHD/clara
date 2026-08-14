@@ -3,6 +3,29 @@
 // server-side SECURITY INVOKER wrapper below is the authoritative wall — it is what
 // catches anything a body constructs dynamically, which the text scan cannot see.
 
+import { randomUUID } from "node:crypto";
+
+// The session-pin NONCE: the runner's honest answer to "is this body about to run on a
+// session that was freshly pinned FOR IT?".
+//
+// It replaces a pid-distinctness test that was FALSE BY DESIGN through a connection
+// pooler. "A fresh client connection gets a fresh server backend" holds on a direct
+// connection and nowhere else — Supavisor in SESSION mode legitimately hands a brand-new
+// client an already-used backend, which is exactly what refused a live migration. CI
+// connects straight to a container, so CI could never ask the question.
+//
+// The nonce is true in both worlds because it measures the thing that actually protects
+// the run: DISCARD ALL plus the baseline, applied for THIS migration. A recycled backend
+// that was freshly pinned passes, because being freshly pinned is the protection. A
+// session that skipped the pin, carries a previous migration's pin, or silently changed
+// underneath the client all fail.
+//
+// It is also the detector for a pooling mode this runner cannot survive: under
+// TRANSACTION pooling a session GUC does not outlive its statement, so the read-back
+// fails immediately and loudly. That matters because the advisory lock (F10) and the
+// pg_temp execution wrapper are both session-scoped too — they would fail SILENTLY.
+export const MIGRATION_SESSION_NONCE_GUC = "clara.migration_session_nonce";
+
 // Re-exported so the runner and its tests keep one import site for the file-level
 // refusals; the split is about file size, not about a new public surface.
 export {
@@ -113,7 +136,8 @@ async function readSessionState(client, beforeStatement = async () => {}) {
   const identity = (
     await client.query(`select pg_catalog.pg_current_xact_id()::pg_catalog.text as xid,
       session_user::pg_catalog.text as session_user,
-      current_user::pg_catalog.text as current_user`)
+      current_user::pg_catalog.text as current_user,
+      pg_catalog.current_setting('${MIGRATION_SESSION_NONCE_GUC}'::pg_catalog.text,true) as session_nonce`)
   ).rows[0];
   const names = Object.keys(MIGRATION_SESSION_BASELINE).filter((name) => baselineAppliesTo(name, serverVersionNum));
   await beforeStatement();
@@ -202,7 +226,36 @@ export async function pinMigrationSession(client) {
   // migration can create. The lock lives on a dedicated client, so it is not
   // released here. Reapply only the runner's deliberate non-default baseline.
   await client.query("discard all");
-  return applyMigrationSessionBaseline(client);
+  const state = await applyMigrationSessionBaseline(client);
+  // The nonce is stamped LAST, so possessing it means the whole pin ran: DISCARD ALL
+  // wiped the session, the full baseline was applied, and only then was this session
+  // marked as belonging to the migration about to run. A half-finished pin cannot
+  // produce it. DISCARD ALL above also clears any previous nonce, so a stale one can
+  // never be mistaken for a fresh one.
+  const nonce = randomUUID();
+  await client.query(
+    "select pg_catalog.set_config($1::pg_catalog.text,$2::pg_catalog.text,false)",
+    [MIGRATION_SESSION_NONCE_GUC, nonce],
+  );
+  return { ...state, nonce };
+}
+
+/**
+ * Refuse to execute a body unless the session still carries the nonce stamped when it
+ * was pinned FOR THIS migration. Fail-closed on a missing expectation: no nonce means
+ * the runner never pinned this session, which is not a reason to proceed.
+ */
+export function assertMigrationSessionNonce(observed, expected) {
+  if (typeof expected !== "string" || expected === "") {
+    throw new Error(
+      "migration runner holds no session-pin nonce for this migration — the session was never pinned for it, and a body must never run on a session the runner cannot vouch for",
+    );
+  }
+  if (observed !== expected) {
+    throw new Error(
+      `migration session-pin nonce mismatch: the session reports ${JSON.stringify(observed)}, not the nonce this migration was pinned with — the body would run on a session that is not the one freshly pinned for it (a lost pin, a swapped session, or transaction-mode pooling, under which session state does not outlive a statement). Refusing.`,
+    );
+  }
 }
 
 async function readWrapperIdentity(client, oid, beforeStatement = async () => {}) {
@@ -269,9 +322,13 @@ export async function runRollbackOnlyProbe(client, probe, beforeStatement = asyn
   return result;
 }
 
-export async function executeMigrationBody(client, sql, timeout) {
+export async function executeMigrationBody(client, sql, timeout, expectedNonce) {
   const before = await readSessionState(client);
   assertBaseline(before);
+  // Read SERVER-SIDE in the same statement as the session identity — no extra round
+  // trip — and checked here rather than at the call site so no caller can execute a
+  // body without it.
+  assertMigrationSessionNonce(before.session_nonce, expectedNonce);
   await client.query(`create function pg_temp.__clara_execute_migration(
       p_sql pg_catalog.text,p_expected_xid pg_catalog.xid8)
     returns pg_catalog.xid8 language plpgsql security invoker as

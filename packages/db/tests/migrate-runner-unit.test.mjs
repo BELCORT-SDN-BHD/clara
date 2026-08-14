@@ -13,13 +13,14 @@ import {
   TRANSACTION_TIMEOUT_MIN_SERVER_VERSION_NUM,
 } from "../scripts/migration-atomicity.mjs";
 
-// Matched EXACTLY, never as a substring: the server-side wrapper body also mentions
-// server_version_num (its own version guard), and a loose match would swallow the
-// CREATE FUNCTION and quietly stop testing the thing under test.
+// Matched EXACTLY, never as a substring: the wrapper body also mentions
+// server_version_num, and a loose match would swallow the CREATE FUNCTION.
 const SERVER_VERSION_SQL =
   "select pg_catalog.current_setting('server_version_num'::pg_catalog.text) as server_version_num";
 const PG17 = "170000";
 const PG16 = "160004";
+// Stands in for the nonce pinMigrationSession stamps; mocks echo it back as session state.
+const PIN_NONCE = "11111111-2222-3333-4444-555555555555";
 
 test("migration NOTICE listener forwards the exact log line", () => {
   const listeners = new Map();
@@ -168,7 +169,10 @@ test("transaction_timeout is pinned off on PostgreSQL 17 and skipped below it", 
     "an older server must never be asked to read a parameter it does not have",
   );
   // Every setting that DOES exist on 16 is still pinned.
-  assert.equal(legacy.filter(({ sql }) => sql.includes("set_config($1")).length,
+  // Counted by NAME, not by statement shape: the session-pin nonce is set the same way
+  // and is not a baseline parameter.
+  assert.equal(legacy.filter(({ sql, parameters }) =>
+    sql.includes("set_config($1") && parameters[0] in MIGRATION_SESSION_BASELINE).length,
     Object.keys(MIGRATION_SESSION_BASELINE).length - 1);
 });
 
@@ -269,7 +273,7 @@ test("post-body reset and timeout rearm restore client_min_messages deterministi
         return { rows: [] };
       }
       if (sql.includes("pg_current_xact_id")) {
-        return { rows: [{ xid: "7", session_user: "runner", current_user: "runner" }] };
+        return { rows: [{ xid: "7", session_user: "runner", current_user: "runner", session_nonce: PIN_NONCE }] };
       }
       if (sql.includes("current_setting(s.name)")) {
         return { rows: parameters[0].map((name) => ({ name, value: state[name] })) };
@@ -295,7 +299,7 @@ test("post-body reset and timeout rearm restore client_min_messages deterministi
     },
   };
   state.client_min_messages = "notice";
-  const { rearm } = await executeMigrationBody(client, "set client_min_messages=warning", "2s");
+  const { rearm } = await executeMigrationBody(client, "set client_min_messages=warning", "2s", PIN_NONCE);
   assert.equal(wrapperCreated, true);
   assert.equal(state.client_min_messages, "notice");
   assert.equal(state.statement_timeout, "2s");
@@ -318,7 +322,7 @@ test("the server-side wrapper re-pins transaction_timeout under a version guard"
         return { rows: [] };
       }
       if (sql.includes("pg_current_xact_id")) {
-        return { rows: [{ xid: "3", session_user: "runner", current_user: "runner" }] };
+        return { rows: [{ xid: "3", session_user: "runner", current_user: "runner", session_nonce: PIN_NONCE }] };
       }
       if (sql.includes("current_setting(s.name)")) {
         return { rows: parameters[0].map((name) => ({ name, value: state[name] })) };
@@ -332,7 +336,7 @@ test("the server-side wrapper re-pins transaction_timeout under a version guard"
       return { rows: [] };
     },
   };
-  await executeMigrationBody(client, "select 1", null);
+  await executeMigrationBody(client, "select 1", null, PIN_NONCE);
 
   const resetIndex = wrapperBody.indexOf("reset all;");
   const guardIndex = wrapperBody.indexOf("current_setting('server_version_num'::pg_catalog.text)::pg_catalog.int4");
@@ -353,7 +357,7 @@ function timeoutClient({ armedAnswer, observed }) {
       if (sql === SERVER_VERSION_SQL) return { rows: [{ server_version_num: PG17 }] };
       if (sql.includes("create function pg_temp.__clara_execute_migration")) return { rows: [] };
       if (sql.includes("pg_current_xact_id")) {
-        return { rows: [{ xid: "5", session_user: "runner", current_user: "runner" }] };
+        return { rows: [{ xid: "5", session_user: "runner", current_user: "runner", session_nonce: PIN_NONCE }] };
       }
       if (sql.includes("set_config('statement_timeout'")) {
         state.statement_timeout = observed;      // what the server will REPORT
@@ -372,16 +376,68 @@ function timeoutClient({ armedAnswer, observed }) {
   };
 }
 
+test("the session-pin nonce is stamped last, after DISCARD ALL and the whole baseline", async () => {
+  // Stamped LAST on purpose: holding it means the entire pin ran. A half-finished pin
+  // cannot produce one.
+  const calls = [];
+  const client = baselineClient({ calls });
+  const { nonce } = await pinMigrationSession(client);
+  assert.match(nonce, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
+  const order = calls.map(({ sql, parameters }) =>
+    sql === "discard all" ? "discard" : parameters[0] === "clara.migration_session_nonce" ? "nonce" : null).filter(Boolean);
+  assert.deepEqual(order, ["discard", "nonce"]);
+  const nonceIndex = calls.findIndex(({ parameters }) => parameters[0] === "clara.migration_session_nonce");
+  const lastBaseline = calls.map(({ parameters }) => parameters[0])
+    .lastIndexOf("lock_timeout");
+  assert.ok(nonceIndex > lastBaseline, "the nonce follows every baseline parameter");
+
+  // Two pins on the same client produce DIFFERENT nonces — otherwise a stale session
+  // could impersonate a freshly pinned one.
+  const second = await pinMigrationSession(client);
+  assert.notEqual(second.nonce, nonce);
+});
+
+test("a body refuses to run on a session whose nonce does not match, or has none", async () => {
+  const nonceClient = (sessionNonce) => ({
+    async query(sql, parameters = []) {
+      if (sql === SERVER_VERSION_SQL) return { rows: [{ server_version_num: PG17 }] };
+      if (sql.includes("pg_current_xact_id")) {
+        return { rows: [{ xid: "2", session_user: "r", current_user: "r", session_nonce: sessionNonce }] };
+      }
+      if (sql.includes("current_setting(s.name)")) {
+        return { rows: parameters[0].map((name) => ({ name, value: MIGRATION_SESSION_BASELINE[name] })) };
+      }
+      if (sql.includes("set_config('statement_timeout'")) return { rows: [{ applied: parameters[0] }] };
+      return { rows: [] };
+    },
+  });
+
+  await assert.rejects(
+    () => executeMigrationBody(nonceClient("a-different-nonce"), "select 1", null, "the-expected-nonce"),
+    /session-pin nonce mismatch: the session reports "a-different-nonce"/u,
+  );
+  // A session that was never pinned carries no nonce at all.
+  await assert.rejects(
+    () => executeMigrationBody(nonceClient(null), "select 1", null, "the-expected-nonce"),
+    /session-pin nonce mismatch: the session reports null/u,
+  );
+  // And a runner holding no expectation must not proceed either — absence is not evidence.
+  await assert.rejects(
+    () => executeMigrationBody(nonceClient("whatever"), "select 1", null, undefined),
+    /holds no session-pin nonce for this migration/u,
+  );
+});
+
 test("a non-canonical timeout spelling is compared as the server displays it", async () => {
   // The file says '1200s'; PostgreSQL answers and reports '20min'. Comparing the raw
   // literal aborted AFTER the body had run, on a spelling PG itself accepts.
-  await executeMigrationBody(timeoutClient({ armedAnswer: "20min", observed: "20min" }), "select 1", "1200s");
+  await executeMigrationBody(timeoutClient({ armedAnswer: "20min", observed: "20min" }), "select 1", "1200s", PIN_NONCE);
 });
 
 test("a genuinely different timeout still fails the baseline assertion", async () => {
   // Same path, one value changed: the normalization must not have become "accept anything".
   await assert.rejects(
-    () => executeMigrationBody(timeoutClient({ armedAnswer: "20min", observed: "5min" }), "select 1", "1200s"),
+    () => executeMigrationBody(timeoutClient({ armedAnswer: "20min", observed: "5min" }), "select 1", "1200s", PIN_NONCE),
     /baseline mismatch for statement_timeout: expected 20min, saw 5min/,
   );
 });
