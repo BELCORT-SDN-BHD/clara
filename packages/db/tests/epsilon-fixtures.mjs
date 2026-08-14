@@ -47,7 +47,7 @@ export const EPSILON_ENTRYPOINTS = Object.freeze([
   ["publish_chart_template_version", "clara.publish_chart_template_version(text,text,jsonb,date,text)"],
   ["draft_report_spec", "clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)"],
   ["open_report_run", "clara.open_report_run(uuid,uuid,uuid,uuid,text)"],
-  ["assess_report_claim", "clara.assess_report_claim(uuid)"],
+  ["assess_report_claim", "clara.assess_report_claim(uuid,text)"],
   ["seal_report_dataset", "clara.seal_report_dataset(uuid,uuid[],text)"],
   ["seal_report_artifact", "clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)"],
   ["approve_report_for_issue", "clara.approve_report_for_issue(uuid,text,text,text,text)"],
@@ -190,8 +190,9 @@ export const sealDataset = (sub, { runId, charts = [], opKey = null }) =>
     ["p_op_key", opKey ?? opk("eps-dataset")],
   ], { p_chart_template_version_ids: "uuid[]" });
 
-export const assessClaim = (sub, runId) =>
-  call(sub, "assess_report_claim", [["p_report_run_id", runId]]);
+export const assessClaim = (sub, runId, opKey = null) =>
+  call(sub, "assess_report_claim", [["p_report_run_id", runId],
+    ["p_op_key", opKey ?? opk("eps-assess")]]);
 
 export const sealArtifact = (sub, { runId, kind, sha256, byteSize = 4096, manifest,
   keyExtension = "pdf", prior = null, opKey = null }) =>

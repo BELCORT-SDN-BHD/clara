@@ -277,8 +277,22 @@ create table clara.report_artifacts (
   unique (id, report_run_id),
   unique (id, firm_id, client_id),
   constraint ck_ra_content_addressed check (
-    storage_key = 'firms/' || firm_id::text || '/reports/' || sha256 || '.' || key_extension)
+    storage_key = 'firms/' || firm_id::text || '/reports/' || sha256 || '.' || key_extension),
+  -- KIND AND EXTENSION ARE NOT INDEPENDENT. An issuable artifact is a PDF: without this, a
+  -- kind='pre_sign', key_extension='json' row is admissible, and approve_report_for_issue would
+  -- happily bind an attestation to JSON bytes while every downstream reader calls them the
+  -- pre-sign PDF. Only a watermarked draft may legitimately be a json side-artifact.
+  constraint ck_ra_kind_extension check (
+    (kind in ('pre_sign', 'signed_original') and key_extension = 'pdf')
+    or kind = 'draft_watermarked')
 );
+-- B7's STRUCTURAL half. The advisory lock in the seal serialises the read; this makes a fork
+-- IMPOSSIBLE rather than merely refused -- two artifacts of one run may never share a predecessor,
+-- so even a future writer that forgets the lock cannot commit a branched chain. Partial, because
+-- the null predecessor is the first-artifact exemption and the one-per-run uniqueness of THAT is
+-- carried by the chain rule in the seal.
+create unique index uq_report_artifacts_linear_chain on clara.report_artifacts
+  (report_run_id, prior_artifact_id) where prior_artifact_id is not null;
 -- At most one pre_sign and one signed_original per run; drafts are unbounded (E-R8 floor 2).
 create unique index uq_report_artifacts_one_pre_sign on clara.report_artifacts (report_run_id)
   where kind = 'pre_sign';

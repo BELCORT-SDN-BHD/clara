@@ -60,6 +60,7 @@ declare
   r record; a record; ds record; presign record; latest record;
   prior jsonb; v_missing text[]; v_id uuid; v_removed boolean; v_key text;
   v_manifest_hash text; v_claim jsonb; v_expected_presign text;
+  v_draft_now int; v_nonstat_now int;
 begin
   select * into r from clara.report_runs where id = p_report_run_id and firm_id = p_firm;
   if not found then
@@ -107,6 +108,30 @@ begin
         detail = jsonb_build_object('reason', 'claim_status_unreadable', 'status', a.status,
           'fix', 'extend the seal gate deliberately when a new claim state is ruled')::text;
   end if;
+  -- GATE 1, ARM 2b: THE ASSESSMENT MUST STILL BE TRUE, not merely present. The stored row is the
+  -- recorded instrument, but currency is proven HERE, at the enforcement point, because the
+  -- population it describes can move after it was written: a definition superseded through delta's
+  -- audited verb between assess and seal leaves a row saying uncertified=false about cells that
+  -- are no longer canonical. Re-derive and refuse on drift rather than inherit a stale verdict.
+  select count(*) filter (where mdv.state = 'draft')::int,
+         count(*) filter (where mc.definition_version_id is null
+                             or mdv.state not in ('canonical', 'firm_approved'))::int
+    into v_draft_now, v_nonstat_now
+    from clara.metric_cells mc
+    left join clara.metric_definition_versions mdv on mdv.id = mc.definition_version_id
+   where mc.client_id = r.client_id and mc.run_id = r.id;
+  if (v_nonstat_now > 0) is distinct from a.uncertified
+     or v_nonstat_now is distinct from coalesce((a.check_receipt->>'non_statutory_cells')::int, -1)
+     or v_draft_now is distinct from coalesce((a.check_receipt->>'draft_definition_cells')::int, -1) then
+    raise exception 'the claim assessment no longer describes this run''s cells' using errcode = 'CLR42',
+      detail = jsonb_build_object('reason', 'assessment_stale', 'report_run_id', r.id,
+        'assessed_uncertified', a.uncertified,
+        'assessed_non_statutory_cells', a.check_receipt->'non_statutory_cells',
+        'assessed_draft_definition_cells', a.check_receipt->'draft_definition_cells',
+        'current_non_statutory_cells', v_nonstat_now, 'current_draft_definition_cells', v_draft_now,
+        'fix', 're-assess this run: a contributing definition changed state after it was assessed')::text;
+  end if;
+
   -- GATE 1, ARM 3: AN UNAPPROVED FORMULA NEVER BECOMES STATUTORY, structurally -- not as a label
   -- the renderer might drop. `uncertified` covers the whole not-canonical/firm_approved
   -- population, so this arm catches BOTH a draft definition and an ad-hoc composition (a cell
@@ -192,6 +217,22 @@ begin
       detail = '{"reason":"manifest_binding_mismatch","fix":"bind the exact signed-original PDF hash"}';
   end if;
 
+  -- B8: RESERVE BEFORE ANY STATE THE SUCCESS PATH MOVES. A failed call rolls back its own
+  -- reservation, so this costs nothing on failure; it is the success-then-lost-response retry that
+  -- would otherwise refuse with artifact_chain_break instead of replaying its receipt.
+  prior := clara._reserve_op(p_firm, 'seal_report_artifact', p_op_key,
+    clara._hash(jsonb_build_object('run', r.id, 'kind', p_kind, 'sha256', p_sha256,
+      'bytes', p_byte_size, 'extension', p_key_extension, 'prior', p_prior_artifact_id,
+      'manifest', p_manifest)));
+  if prior is not null then return prior; end if;
+
+  -- B7: SERIALIZE THE CHAIN. Two concurrent seals with different op keys would otherwise read the
+  -- same predecessor and both insert, forking an append-only chain permanently. The advisory lock
+  -- is per RUN and transaction-scoped, so the second waits rather than racing. The partial unique
+  -- index on (report_run_id, prior_artifact_id) is the structural half: even a future writer that
+  -- forgets this lock cannot commit a fork.
+  perform pg_advisory_xact_lock(hashtextextended('clara.report_artifacts:' || r.id::text, 0));
+
   -- THE CHAIN. The first artifact of a run claims the no-predecessor exemption exactly once;
   -- every later one points at the run's most recent artifact. A signed original must chain to
   -- THIS run's pre-sign, because a signature over bytes nobody sealed is not evidence.
@@ -213,12 +254,16 @@ begin
       raise exception 'a signed original requires this run''s sealed pre-sign artifact' using errcode = 'CLR42',
         detail = '{"reason":"artifact_chain_break","fix":"seal the pre-sign artifact before retaining its signed original"}';
     end if;
+    -- M10: and its predecessor must BE that pre-sign. 'Some pre-sign exists' would admit
+    -- pre_sign -> later draft -> signed_original chained to the draft, i.e. a signature whose
+    -- immediate provenance is a watermarked draft rather than the bytes it attests.
+    if p_prior_artifact_id is distinct from presign.id then
+      raise exception 'a signed original chains to the pre-sign it signs' using errcode = 'CLR42',
+        detail = jsonb_build_object('reason', 'artifact_chain_break', 'expected_prior', presign.id,
+          'supplied_prior', p_prior_artifact_id,
+          'fix', 'chain the signed original directly to this run''s pre-sign artifact')::text;
+    end if;
   end if;
-
-  prior := clara._reserve_op(p_firm, 'seal_report_artifact', p_op_key,
-    clara._hash(jsonb_build_object('run', r.id, 'kind', p_kind, 'sha256', p_sha256,
-      'bytes', p_byte_size, 'manifest', p_manifest)));
-  if prior is not null then return prior; end if;
 
   -- CONTENT-ADDRESSED, DB-DERIVED. Not a parameter: no user- or model-supplied filename exists
   -- anywhere in this path, and the table's own CHECK re-proves the derivation.

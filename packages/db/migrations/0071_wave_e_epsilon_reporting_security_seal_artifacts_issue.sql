@@ -61,13 +61,22 @@ begin
     raise exception 'issuing financial statements is a key-2 capability' using errcode = 'CLR04',
       detail = '{"reason":"capability_required","capability":"close_and_attest","fix":"the firm owner grants key 2 as an audited act"}';
   end if;
-  if r.state <> 'dataset_sealed' then
-    raise exception 'this run is not in a state that can be issued' using errcode = 'CLR10',
-      detail = jsonb_build_object('reason', 'report_run_state_illegal', 'state', r.state)::text;
-  end if;
   if nullif(btrim(coalesce(p_reason, '')), '') is null then
     raise exception 'issue requires a stated reason' using errcode = 'CLR10',
       detail = '{"reason":"issue_reason_required"}';
+  end if;
+  -- B8: RESERVE BEFORE THE STATE CHECK. A successful issue moves the run to 'issued'; a same-key
+  -- retry after a lost response must replay its receipt, not refuse with report_run_state_illegal.
+  -- M13: the hash covers the self-attestation too -- a solo approval that changed only its
+  -- attestation text is a DIFFERENT act and must refuse rather than alias onto the first.
+  prior := clara._reserve_op(c.firm, 'approve_report_for_issue', p_op_key,
+    clara._hash(jsonb_build_object('run', r.id, 'sha256', p_expected_artifact_sha256,
+      'reason', p_reason, 'self_attestation', p_self_attestation)));
+  if prior is not null then return prior; end if;
+
+  if r.state <> 'dataset_sealed' then
+    raise exception 'this run is not in a state that can be issued' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'report_run_state_illegal', 'state', r.state)::text;
   end if;
   select * into art from clara.report_artifacts where report_run_id = r.id and kind = 'pre_sign';
   if not found then
@@ -97,10 +106,6 @@ begin
     end if;
     v_mode := 'solo_self_attested';
   end if;
-
-  prior := clara._reserve_op(c.firm, 'approve_report_for_issue', p_op_key,
-    clara._hash(jsonb_build_object('run', r.id, 'sha256', p_expected_artifact_sha256, 'reason', p_reason)));
-  if prior is not null then return prior; end if;
 
   update clara.report_runs
      set state = 'issued', issued_by = c.actor, issued_at = now(), issue_reason = p_reason,

@@ -164,7 +164,7 @@ begin
   end if;
 
   prior := clara._reserve_op(c.firm, 'publish_report_template_version', p_op_key,
-    clara._hash(jsonb_build_object('key', p_template_key, 'class', p_report_class, 'cap', p_claim_capability,
+    clara._hash(jsonb_build_object('key', p_template_key, 'title', p_title, 'class', p_report_class, 'cap', p_claim_capability,
       'profile', p_statutory_profile_version_id, 'style', p_house_style_version_id,
       'layout', p_layout_ast, 'from', p_effective_from)));
   if prior is not null then return prior; end if;
@@ -220,7 +220,7 @@ begin
   end if;
   v_shape := clara._validate_chart_spec_semantics_v1(c.firm, p_chart_spec_ast);
   prior := clara._reserve_op(c.firm, 'publish_chart_template_version', p_op_key,
-    clara._hash(jsonb_build_object('key', p_chart_key, 'spec', p_chart_spec_ast, 'from', p_effective_from)));
+    clara._hash(jsonb_build_object('key', p_chart_key, 'title', p_title, 'spec', p_chart_spec_ast, 'from', p_effective_from)));
   if prior is not null then return prior; end if;
 
   select id into v_chart from clara.chart_templates where firm_id = c.firm and chart_key = p_chart_key for update;
@@ -293,7 +293,7 @@ begin
   v_shape := clara._validate_layout_ast_v1(p_layout_ast);
 
   prior := clara._reserve_op(p_firm, 'draft_report_spec', p_op_key,
-    clara._hash(jsonb_build_object('client', p_client, 'key', p_spec_key,
+    clara._hash(jsonb_build_object('client', p_client, 'key', p_spec_key, 'title', p_title,
       'template', p_report_template_version_id, 'locale', p_locale, 'parameters', p_parameters,
       'overrides', p_overrides, 'layout', p_layout_ast, 'from', p_effective_from)));
   if prior is not null then return prior; end if;

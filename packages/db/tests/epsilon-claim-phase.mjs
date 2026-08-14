@@ -196,10 +196,23 @@ export async function registerClaimPhase(t, world) {
       db.query("update clara.report_claim_assessments set uncertified=true where report_run_id=$1", [w.runId])));
     assert.equal(blocked?.code, "CLR08",
       "the assessment is append-only through every product path -- the flag cannot be flipped by a caller");
+
+    // The prestate must be CONSISTENT, not merely flagged: the seal now re-derives the population
+    // at the enforcement point, so a receipt edited alone is caught as `assessment_stale` (proven
+    // in its own cell below). So move the cells too -- point the run's cell at a real DRAFT
+    // definition version -- and the receipt then describes reality.
+    const draftVersion = await proposeMetricDefinition(await ensureEpsilonAdmin(world), {
+      client: w.client, key: w.definitionKey, unit: "money",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money" }),
+    });   // deliberately NOT approved: it stays `draft`
+    await withTriggersOff("metric_cells", () => rootQuery(
+      "update clara.metric_cells set definition_version_id=$2 where client_id=$3 and run_id=$1",
+      [w.runId, draftVersion, w.client]));
     await withTriggersOff("report_claim_assessments", () => rootQuery(
       `update clara.report_claim_assessments
           set uncertified = true,
-              check_receipt = jsonb_set(check_receipt, '{draft_definition_cells}', '1'::jsonb)
+              check_receipt = jsonb_set(jsonb_set(check_receipt,
+                '{draft_definition_cells}', '1'::jsonb), '{non_statutory_cells}', '1'::jsonb)
         where report_run_id = $1`, [w.runId]));
 
     const sha = sha64(`uncertified-${w.runId}`);
@@ -217,6 +230,66 @@ export async function registerClaimPhase(t, world) {
     assert.equal((await rootQuery("select uncertified from clara.report_artifacts where id=$1",
       [draft.report_artifact_id])).rows[0].uncertified, true,
       "the flag is on the artifact ROW, so a renderer that loses the manifest still cannot lose it");
+  });
+
+  await t.test("a NULL-definition composition cell sets uncertified and refuses a pre_sign", async () => {
+    // M19: the composition population (definition_version_id IS NULL) is the OTHER half of the
+    // hole lane η traced, and it was previously unasserted -- a regression that cleared
+    // `uncertified` for compositions only would have shipped green behind the superseded cell.
+    // Unreachable through delta's evaluator until η's preview lane exists, so the cells and the
+    // receipt are moved together, consistently, with the append-only wall lifted.
+    const rig = world.epsilonRig;
+    const w = await buildEpsilonWorld(world, { tag: "claim-composition", reportClass: "statutory",
+      profileVersionId: rig.profileVersionId, sections: MPERS_SECTIONS });
+    await withTriggersOff("metric_cells", () => rootQuery(
+      "update clara.metric_cells set definition_version_id=null where client_id=$2 and run_id=$1",
+      [w.runId, w.client]));
+    await withTriggersOff("report_claim_assessments", () => rootQuery(
+      `update clara.report_claim_assessments
+          set uncertified = true,
+              check_receipt = jsonb_set(jsonb_set(check_receipt,
+                '{draft_definition_cells}', '0'::jsonb), '{non_statutory_cells}', '1'::jsonb)
+        where report_run_id = $1`, [w.runId]));
+
+    const sha = sha64(`composition-${w.runId}`);
+    const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
+      sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
+    assert.equal(refused?.code, "CLR42", `SQLSTATE and token asserted together: ${refused?.message}`);
+    assert.equal(reasonOf(refused), "nonstat_definition_in_dataset",
+      "a cell with NO definition at all is an unapproved formula, and the token names it honestly");
+    assert.match(errorDetail(refused).fix ?? "", /save the composition/,
+      "and the remedy is the approval lane, which is the only issuance path");
+  });
+
+  await t.test("a claim assessment that no longer describes its cells REFUSES the seal", async () => {
+    // B1: the stale-replay hole. Assess while every cell is canonical, THEN supersede through
+    // delta's audited verb, then seal -- the stored row still says uncertified=false. The seal
+    // re-derives at the enforcement point rather than inheriting the verdict, so the drift is
+    // caught instead of minting a pre_sign over noncanonical data. Fully reachable: no lifted
+    // walls, every step an audited verb.
+    const rig = world.epsilonRig;
+    const w = await buildEpsilonWorld(world, { tag: "claim-stale", reportClass: "statutory",
+      profileVersionId: rig.profileVersionId, sections: MPERS_SECTIONS });
+    const row = await assessmentRow(w.runId);
+    assert.equal(row.uncertified, false, "assessed while the definition was still firm_approved");
+
+    const successor = await proposeMetricDefinition(await ensureEpsilonAdmin(world), {
+      client: w.client, key: w.definitionKey, unit: "money",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money" }),
+    });
+    await approveMetricDefinition(owner, successor);
+    await supersedeMetricDefinition(owner, { predecessor: w.definitionVersionId, successor });
+
+    const sha = sha64(`stale-${w.runId}`);
+    const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
+      sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
+    assert.equal(refused?.code, "CLR42", refused?.message);
+    assert.equal(reasonOf(refused), "assessment_stale",
+      `a verdict is only worth what it still describes: ${refused?.message}`);
+    assert.equal(Number(errorDetail(refused).current_non_statutory_cells), 1);
+    assert.equal(Number(errorDetail(refused).assessed_non_statutory_cells), 0,
+      "the refusal shows BOTH sides, so the reader can see what moved");
+    assert.match(errorDetail(refused).fix ?? "", /re-assess/);
   });
 
   await t.test("delta's own lifecycle bars a draft definition from the public evaluator", async () => {

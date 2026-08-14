@@ -29,7 +29,7 @@ begin
   if to_regprocedure('clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)') is null then
     raise exception 'epsilon seal requires clara.draft_report_spec (file 5 not applied)' using errcode = 'CLR10';
   end if;
-  if to_regprocedure('clara.assess_report_claim(uuid)') is not null then
+  if to_regprocedure('clara.assess_report_claim(uuid,text)') is not null then
     raise exception 'epsilon seal partial birth: clara.assess_report_claim already exists' using errcode = 'CLR10';
   end if;
 end $pre$;
@@ -167,26 +167,29 @@ revoke all on function clara.open_report_run(uuid, uuid, uuid, uuid, text) from 
 -- renderer turns it into a watermark. Letting a cell-definition problem drive `stripped` was a
 -- hole, because stripped SEALS.
 -- =====================================================================================
-create function clara.assess_report_claim(p_report_run_id uuid) returns jsonb
+create function clara.assess_report_claim(p_report_run_id uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  c record; r record; sv record; tv record; existing record;
+  c record; r record; sv record; tv record; existing record; prior jsonb;
   v_cells int; v_draft int; v_nonstat int; v_eval uuid; v_evals int;
   v_missing text[]; v_unverified text[]; v_status text; v_reasons text[] := '{}';
   v_policy uuid; v_id uuid; v_uncertified boolean;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  -- The run lookup precedes the reservation deliberately: its refusal is STABLE across retries
+  -- (a run either is or is not in your firm), so it can never turn a replayable success into a
+  -- refusal. Everything below this line CAN move, which is why the reservation comes first.
   select * into r from clara.report_runs where id = p_report_run_id and firm_id = c.firm;
   if not found then
     raise exception 'report run not found' using errcode = 'CLR11', detail = '{"reason":"report_run_not_in_firm"}';
   end if;
-  -- ONE IMMUTABLE ROW PER RUN: a second call READS, it never writes a second verdict.
-  select * into existing from clara.report_claim_assessments where report_run_id = r.id;
-  if found then
-    return jsonb_build_object('claim_assessment_id', existing.id, 'status', existing.status,
-      'uncertified', existing.uncertified, 'reason_codes', existing.reason_codes,
-      'check_receipt', existing.check_receipt, 'replayed', true);
+  if nullif(btrim(coalesce(p_op_key, '')), '') is null then
+    raise exception 'assess_report_claim requires an op key' using errcode = 'CLR10',
+      detail = '{"reason":"op_key_required","fix":"supply an idempotency key; this verb writes"}';
   end if;
+  prior := clara._reserve_op(c.firm, 'assess_report_claim', p_op_key,
+    clara._hash(jsonb_build_object('run', r.id)));
+  if prior is not null then return prior; end if;
 
   select * into sv from clara.report_spec_versions where id = r.report_spec_version_id;
   select * into tv from clara.report_template_versions where id = sv.report_template_version_id;
@@ -284,16 +287,37 @@ begin
         'report_class', tv.report_class, 'claim_capability', tv.claim_capability,
         'locale', sv.locale, 'period_start', r.period_start),
       v_policy, v_eval, c.actor)
+    -- ONE IMMUTABLE ROW PER RUN, made idempotent rather than racy: two callers that both saw no
+    -- row would previously both insert, and the loser surfaced a raw 23505. The conflict target
+    -- is the run's own unique index, so the loser falls through to the read below.
+    on conflict (report_run_id) do nothing
     returning id into v_id;
+  if v_id is null then
+    select * into existing from clara.report_claim_assessments where report_run_id = r.id;
+    if not found then
+      -- The conflicting row belongs to a transaction this snapshot cannot see. Neither inserting
+      -- nor reading is possible, and inventing a verdict is the one thing that must not happen --
+      -- so exit as a serialization failure and let the caller retry (delta's F3 shape).
+      raise exception 'claim assessment raced an invisible concurrent writer'
+        using errcode = '40001',
+          detail = jsonb_build_object('reason', 'claim_assessment_race', 'report_run_id', r.id,
+            'fix', 'retry the assessment; a concurrent transaction is minting the same row')::text;
+    end if;
+    return clara._finish_op(c.firm, 'assess_report_claim', p_op_key,
+      jsonb_build_object('claim_assessment_id', existing.id, 'status', existing.status,
+        'uncertified', existing.uncertified, 'reason_codes', existing.reason_codes,
+        'check_receipt', existing.check_receipt, 'replayed', true));
+  end if;
   perform clara._audit(c.firm, c.actor, null, null, 'assess_report_claim', null,
     jsonb_build_object('report_run_id', r.id, 'claim_assessment_id', v_id, 'status', v_status,
       'uncertified', v_uncertified));
-  return jsonb_build_object('claim_assessment_id', v_id, 'status', v_status,
-    'uncertified', v_uncertified, 'reason_codes', to_jsonb(v_reasons),
-    'label', (select status_labels->>v_status from clara.claim_policy_versions where id = v_policy),
-    'replayed', false);
+  return clara._finish_op(c.firm, 'assess_report_claim', p_op_key,
+    jsonb_build_object('claim_assessment_id', v_id, 'status', v_status,
+      'uncertified', v_uncertified, 'reason_codes', to_jsonb(v_reasons),
+      'label', (select status_labels->>v_status from clara.claim_policy_versions where id = v_policy),
+      'replayed', false));
 end $$;
-revoke all on function clara.assess_report_claim(uuid) from public;
+revoke all on function clara.assess_report_claim(uuid, text) from public;
 
 -- =====================================================================================
 -- S4 -- SEAL THE DATASET. Stage 3 (the evaluator ran against the PINNED snapshot -- verified
@@ -318,6 +342,16 @@ begin
   if not found then
     raise exception 'report run not found' using errcode = 'CLR11', detail = '{"reason":"report_run_not_in_firm"}';
   end if;
+  -- RESERVE BEFORE THE STATE CHECK. A failed call rolls back its own reservation, so putting the
+  -- reservation first costs nothing on the failure path. It is the SUCCESS-then-lost-response path
+  -- that matters: the run is now 'dataset_sealed', and a same-key retry that reached the state
+  -- check first would refuse with report_run_state_illegal instead of replaying its receipt --
+  -- turning a completed act into an apparent failure the caller would be right to retry forever.
+  prior := clara._reserve_op(c.firm, 'seal_report_dataset', p_op_key,
+    clara._hash(jsonb_build_object('run', r.id,
+      'charts', coalesce(p_chart_template_version_ids, '{}'::uuid[]))));
+  if prior is not null then return prior; end if;
+
   if r.state <> 'drafting' then
     raise exception 'this run''s dataset is already sealed' using errcode = 'CLR10',
       detail = jsonb_build_object('reason', 'report_run_state_illegal', 'state', r.state,
@@ -353,11 +387,6 @@ begin
       detail = jsonb_build_object('reason', 'evaluator_version_ambiguous', 'evaluator_versions', coalesce(v_evals, 0),
         'fix', 'evaluate a run under exactly one evaluator version')::text;
   end if;
-
-  prior := clara._reserve_op(c.firm, 'seal_report_dataset', p_op_key,
-    clara._hash(jsonb_build_object('run', r.id,
-      'charts', coalesce(p_chart_template_version_ids, '{}'::uuid[]))));
-  if prior is not null then return prior; end if;
 
   set constraints clara.t_report_dataset_reconstruct, clara.t_report_dataset_point_reconstruct deferred;
 
@@ -434,7 +463,7 @@ begin
 
   -- SS7's enforcement point: the assessment is written in the SAME transaction that seals the
   -- dataset, and before anything could enqueue a render.
-  v_assessment := clara.assess_report_claim(r.id);
+  v_assessment := clara.assess_report_claim(r.id, p_op_key || ':assess');
   update clara.report_runs set state = 'dataset_sealed' where id = r.id;
   set constraints clara.t_report_dataset_reconstruct, clara.t_report_dataset_point_reconstruct immediate;
   -- Redundant with the trigger that just fired, and deliberately so: the receipt below claims
@@ -454,7 +483,7 @@ reset role;
 
 grant execute on function
   clara.open_report_run(uuid, uuid, uuid, uuid, text),
-  clara.assess_report_claim(uuid),
+  clara.assess_report_claim(uuid,text),
   clara.seal_report_dataset(uuid, uuid[], text)
   to clara_authenticated;
 
