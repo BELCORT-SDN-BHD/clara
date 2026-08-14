@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { ROLES, buildWorld, endPool, rootQuery, withActor } from "./epsilon-fixtures.mjs";
+import { buildWorld, endPool, roleQuery, rootQuery, withActor } from "./epsilon-fixtures.mjs";
 import { artifactRows, buildEpsilonWorld } from "./epsilon-world.mjs";
 
 const ZETA_RELATIONS = Object.freeze(["render_jobs"]);
@@ -69,10 +69,15 @@ async function skipUnlessZeta(t) {
   return true;
 }
 
+// ROLE-SCOPED, THROUGH THE HOUSE PRIMITIVE. An earlier draft prefixed `set local role …; ` onto
+// the SQL string, which Postgres refuses outright with 42601 ("cannot insert multiple commands
+// into a prepared statement") the moment a parameterised query carries two statements — and which
+// would ALSO have silently split a begin/commit pair across two pooled connections. roleQuery does
+// the SET ROLE on the same client as the statement, which is the thing that has to be true.
 /** Run one statement as clara_fn_owner — the only principal the internal enqueue admits. */
-const asOwner = (sql, params = []) => rootQuery(`set local role clara_fn_owner; ${sql}`, params);
+const asOwner = (sql, params = []) => roleQuery("clara_fn_owner", sql, params);
 /** Run one statement as the runtime group — the worker's and the leader's own lane. */
-const asRuntime = (sql, params = []) => rootQuery(`set local role clara_runtime; ${sql}`, params);
+const asRuntime = (sql, params = []) => roleQuery("clara_runtime", sql, params);
 
 // ONE world per FILE (the epsilon-contract.test.mjs shape), memoised, with one epsilon sub-world
 // per case so the cases stay isolated from each other's rows without paying for a second pool.
@@ -99,6 +104,23 @@ async function sealedRun(tag) {
   const world = await sharedWorld();
   const eps = await buildEpsilonWorld(world, { tag: `zeta-${tag}`, seal: true });
   return { world, eps };
+}
+
+/**
+ * Park every claimable job under a long lease so a queue-sensitive case starts from a KNOWN-EMPTY
+ * queue. The rig leg found the battery lying to itself: one world serves the file, every case
+ * enqueues, and claim_render_job hands out the OLDEST job — so "the second claimant got nothing"
+ * and "the wake got MY job" were asserted against earlier cases' rows. The queue was right; the
+ * assertions were about the wrong rows. Parking, not failing: fail_render_job returns a job below
+ * its cap to `claimable`, so draining by failing would loop forever; a live lease is invisible to
+ * both the claim and the dispatch due-read.
+ */
+async function parkQueue() {
+  for (let i = 0; i < 500; i++) {
+    const j = (await asRuntime("select clara.claim_render_job('battery-park', interval '6 hours') j")).rows[0].j;
+    if (!j) return i;
+  }
+  throw new Error("parkQueue did not converge — the queue is refilling itself, which is its own finding");
 }
 
 after(async () => { await endPool(); });
@@ -155,19 +177,26 @@ test("zeta: the enqueue is idempotent on (run, request manifest) and builds its 
 test("zeta A33 arm (i): two concurrent claims, ONE winner — read at the claim, not inferred", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("claim");
+  await parkQueue();   // isolate: exactly one claimable job must exist for this case to mean anything
   await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
 
-  // Two SEPARATE sessions racing the same claim. The second must come back NULL because the row
-  // is locked and skipped — this is the `for update skip locked` semantics read directly, which
-  // is what A33 asks for: not "only one artifact appeared later".
-  const a = await rootQuery("begin; set local role clara_runtime; select clara.claim_render_job('worker-a') j");
-  try {
-    const b = (await asRuntime("select clara.claim_render_job('worker-b') j")).rows[0].j;
-    assert.equal(b, null, "a job already claimed in another transaction must be skipped, not blocked on");
-  } finally {
-    await rootQuery("commit");
-  }
-  assert.ok(a.rows[0].j, "the first claimant gets the job");
+  // Two SEPARATE sessions racing the same claim. The first HOLDS ITS TRANSACTION OPEN while the
+  // second tries — that is the only arrangement in which `skip locked` can be observed at all, and
+  // it requires one held connection rather than two pooled round trips (an earlier draft issued
+  // `begin` and `commit` as separate pool calls, which could land on different clients and would
+  // have proven nothing). The second claim must come back NULL because the row is locked and
+  // SKIPPED — read directly, which is what A33 asks for, rather than inferred from an artifact
+  // appearing later.
+  let firstClaim = null;
+  let secondClaim = "unset";
+  await withActor({ role: "clara_runtime", transaction: true }, async (db) => {
+    firstClaim = (await db.query("select clara.claim_render_job('worker-a') j")).rows[0].j;
+    // Still inside the open transaction: a different pooled client, deliberately.
+    secondClaim = (await asRuntime("select clara.claim_render_job('worker-b') j")).rows[0].j;
+  });
+  assert.ok(firstClaim, "the first claimant gets the job");
+  assert.equal(secondClaim, null,
+    "a job already claimed in another transaction must be SKIPPED, not blocked on and not handed out twice");
 
   const state = (await rootQuery(
     "select state, claimed_by, attempts, claim_delay_ms from clara.render_jobs where report_run_id = $1",
@@ -181,6 +210,7 @@ test("zeta A33 arm (i): two concurrent claims, ONE winner — read at the claim,
 test("zeta A33 arm (ii): with no leader the job stays CLAIMABLE — delayed, never stranded", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("outage");
+  await parkQueue();   // isolate: "the wake picked up MY job" is only meaningful on an empty queue
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
 
   // No dispatch is ever run: this is the leader outage. The job must remain claimable, and the
@@ -208,6 +238,7 @@ test("zeta A33 arm (ii): with no leader the job stays CLAIMABLE — delayed, nev
 test("zeta: dispatch stamps its attempt BEFORE the start call, and records the outcome", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("dispatch");
+  await parkQueue();   // isolate: `due == 1` is an assertion about THIS job, not about the backlog
   await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
 
   const due = (await asRuntime("select clara.render_dispatch_begin(interval '10 minutes', 5) r")).rows[0].r;
@@ -259,12 +290,12 @@ test("zeta: the pinned request is immutable and a terminal job never reopens", a
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
 
   await assert.rejects(
-    rootQuery("set local role clara_fn_owner; update clara.render_jobs set kind = 'draft_watermarked' where id = $1",
+    asOwner("update clara.render_jobs set kind = 'draft_watermarked' where id = $1",
       [job.render_job_id]),
     (e) => e.code === "CLR08" && /render_job_request_immutable/.test(e.detail ?? ""),
   );
   await assert.rejects(
-    rootQuery("set local role clara_fn_owner; delete from clara.render_jobs where id = $1", [job.render_job_id]),
+    asOwner("delete from clara.render_jobs where id = $1", [job.render_job_id]),
     (e) => e.code === "CLR08" && /render_job_never_deleted/.test(e.detail ?? ""),
   );
 });
@@ -282,12 +313,17 @@ test("zeta: the queue is unreachable except through its verbs", async (t) => {
   assert.equal(rls.r, true);
   assert.equal(rls.f, true, "forced RLS, the house rule — a table without it is a cross-tenant leak waiting for its first bug");
 
-  // The human read is firm-scoped; a second firm's session sees nothing.
-  const { world, eps } = await sealedRun("rls");
-  await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
-  const foreign = await withActor(world.users.bob ?? world.users.alice, ROLES.authenticated,
-    (q) => q("select count(*)::int n from clara.render_jobs"));
-  assert.ok(Number(foreign.rows[0].n) >= 0, `the firm-scoped read returned ${foreign.rows[0].n} rows`);
+  // THE HUMAN READ IS FIRM-SCOPED — asserted STRUCTURALLY, and labelled as such. This battery
+  // creates jobs for ONE firm, so a cross-firm read would return zero rows whether or not the
+  // policy scoped anything: it could not distinguish a working wall from an empty table, which is
+  // the absence-as-evidence shape. Reading the qualifier proves the wall exists; proving it
+  // EXCLUDES another firm's rows needs a two-firm fixture, which is ε's grants phase.
+  const qual = (await rootQuery(
+    `select pg_get_expr(polqual, polrelid) q from pg_policy
+      where polrelid = 'clara.render_jobs'::regclass and polname = 'p_renderjobs_human'`)).rows[0].q;
+  assert.match(qual, /jwt_firm\(\)/,
+    `the human policy must scope by firm; its qualifier is: ${qual}`);
+  assert.match(qual, /firm_id/);
 });
 
 test("zeta: a completion that edits a pin, or omits the job's request hash, REFUSES", async (t) => {
@@ -345,20 +381,29 @@ test("zeta: the seal gate MOVED into the core — it did not multiply", async (t
   assert.ok(!core.includes("_human_ctx"), "the core takes its identity as parameters, never from session claims");
 
   // And the human verb's reach did not widen.
+  // THE OWNER IS NOT A GRANTEE — the same aclexplode subtlety the rig caught in ζ's own migration
+  // census an hour earlier, and it bit twice because it is genuinely easy to miss: proacl for a
+  // clara_fn_owner-owned function ALWAYS carries clara_fn_owner's implicit entry, so an unfiltered
+  // string_agg reads "clara_authenticated,clara_fn_owner" and a test asserting sole grantship fails
+  // on a correct database. Excluding the owner is what makes this an assertion about GRANTS.
   const grantees = (await rootQuery(
     `select coalesce(string_agg(r.rolname, ',' order by r.rolname), '(none)') g
        from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) a
        join pg_roles r on r.oid = a.grantee
       where p.oid = 'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure
-        and a.privilege_type = 'EXECUTE'`)).rows[0].g;
+        and a.privilege_type = 'EXECUTE' and r.rolname <> 'clara_fn_owner'`)).rows[0].g;
   assert.equal(grantees, "clara_authenticated");
 });
 
 test("zeta A33 arm (iii): a second completion of the same bytes yields ONE artifact", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("dup");
+  await parkQueue();   // isolate, or the claim below hands back an EARLIER case's job
   await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
   const job = (await asRuntime("select clara.claim_render_job('worker-dup') j")).rows[0].j;
+  // Bind the claim to THIS run explicitly. Without this the case silently completed some other
+  // run's job and then counted artifacts on a run that never had one — a green-looking zero.
+  assert.equal(job.report_run_id, eps.runId, "the claim must return the job this case enqueued");
 
   // The completion path needs a manifest that satisfies epsilon's required-key list; the request
   // half is carried verbatim and the environment/output half is synthesised here. This is the one
@@ -375,7 +420,11 @@ test("zeta A33 arm (iii): a second completion of the same bytes yields ONE artif
     font_engine_version: "typst 0.0.0-test",
     document_metadata: { title: "battery", creation_date_utc: "2025-12-31T00:00:00Z" },
     extracted_text_sha256: "e".repeat(64),
-    extraction_tool: { name: "pdftotext (poppler-utils)", version: "0.0.0-test" },
+    // TEXT, not an object — epsilon's registered shape for this key. The rig caught this fixture
+    // still carrying the pre-ruling object form, refused by _validate_report_manifest_shapes_v1
+    // with "the render manifest's extraction_tool is not a text". The worker was already fixed;
+    // the fixture had not been, which is precisely the drift a rig leg exists to expose.
+    extraction_tool: "pdftotext (poppler-utils) 0.0.0-test",
     pre_sign_pdf_sha256: sha,
   };
   const first = (await asRuntime("select clara.complete_render_job($1, 'worker-dup', $2, 4096, $3::jsonb) r",
@@ -398,23 +447,39 @@ test("zeta A33 arm (iii): a second completion of the same bytes yields ONE artif
   assert.notEqual(arts[0].sealed_by, run.requested_by,
     "sealing as the requester would misattribute the act AND silently disqualify them as approver");
 
-  // The second dispatch: a NEW job for the same run cannot exist (the idempotency key), so the
-  // duplicate arrives as a re-claim after a lease expiry — the real at-least-once shape.
-  await rootQuery("update clara.render_jobs set state = 'running', claimed_by = 'worker-dup2', claimed_at = now(), lease_expires_at = now() + interval '5 minutes', finished_at = null, artifact_id = null where id = $1",
-    [job.render_job_id]);
+  // HOW A SECOND COMPLETION CAN LAWFULLY ARISE — and how it CANNOT. The rig killed the obvious
+  // construction: an earlier draft reopened the finished job by hand and ζ's own lifecycle trigger
+  // refused it (CLR08, "a terminal render job does not reopen"). That refusal is the finding —
+  // once a job is `done` it can never be re-claimed, so retrying the SAME job is structurally
+  // impossible. The duplicate that CAN happen is a second JOB for the same run (a lawful
+  // re-enqueue after an input changed, minting a different request hash); both seal into one run
+  // and collide on the one-pre_sign-per-run index, which is the path the unique_violation arm was
+  // written for. Constructed with INSERTs — the wall is on UPDATE/DELETE.
+  const reEnqueue = async (tag) => (await asOwner(
+    `insert into clara.render_jobs(firm_id, client_id, report_run_id, kind, request_manifest,
+       manifest_sha256, requested_by)
+     select firm_id, client_id, report_run_id, kind, request_manifest, $2, requested_by
+       from clara.render_jobs where id = $1 returning id`,
+    [job.render_job_id, tag.repeat(64)])).rows[0].id;
+
+  const secondJobId = await reEnqueue("1");
+  const claimed2 = (await asRuntime("select clara.claim_render_job('worker-dup2') j")).rows[0].j;
+  assert.equal(claimed2.render_job_id, secondJobId, "the re-enqueued job is the next claimable one");
   const second = (await asRuntime("select clara.complete_render_job($1, 'worker-dup2', $2, 4096, $3::jsonb) r",
-    [job.render_job_id, sha, JSON.stringify(manifest)])).rows[0].r;
-  assert.equal(second.idempotent_reuse, true, "the identical bytes reconcile to the SAME artifact");
+    [secondJobId, sha, JSON.stringify({ ...manifest, render_request_sha256: "1".repeat(64) })])).rows[0].r;
+  assert.equal(second.idempotent_reuse, true, "identical bytes reconcile to the SAME artifact");
   assert.equal(second.report_artifact_id, first.report_artifact_id);
   assert.equal((await artifactRows(eps.runId)).length, 1, "still ONE artifact and one stored object");
 
-  // DIFFERENT bytes are a determinism failure and must NOT pass quietly.
-  await rootQuery("update clara.render_jobs set state = 'running', claimed_by = 'worker-dup3', claimed_at = now(), lease_expires_at = now() + interval '5 minutes', finished_at = null, artifact_id = null where id = $1",
-    [job.render_job_id]);
+  // DIFFERENT bytes for the same run are a determinism failure and must NOT pass quietly.
+  const thirdJobId = await reEnqueue("2");
+  const claimed3 = (await asRuntime("select clara.claim_render_job('worker-dup3') j")).rows[0].j;
+  assert.equal(claimed3.render_job_id, thirdJobId);
   const other = "9".repeat(64);
   await assert.rejects(
     asRuntime("select clara.complete_render_job($1, 'worker-dup3', $2, 4096, $3::jsonb)",
-      [job.render_job_id, other, JSON.stringify({ ...manifest, pre_sign_pdf_sha256: other })]),
+      [thirdJobId, other, JSON.stringify({ ...manifest, render_request_sha256: "2".repeat(64),
+        pre_sign_pdf_sha256: other })]),
     (e) => e.code === "CLR43" && /render_output_conflict/.test(e.detail ?? ""),
     "two different documents for one run is a determinism failure, never a quiet overwrite",
   );

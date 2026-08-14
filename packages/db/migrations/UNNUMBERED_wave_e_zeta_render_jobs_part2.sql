@@ -351,7 +351,14 @@ begin
   select count(*) into v_leak from pg_proc p
     cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
-     and p.proname = 'enqueue_missing_render_jobs' and rr.rolname <> 'clara_runtime';
+     -- THE OWNER IS NOT A GRANTEE. aclexplode expands proacl, which for a function created by
+     -- clara_fn_owner ALWAYS carries the owner's own implicit entry (clara_fn_owner=X/clara_fn_owner)
+     -- alongside anything granted. Testing `<> 'clara_runtime'` alone therefore counts OWNERSHIP as
+     -- a stray grant and the census fails on a correct database -- which is exactly what the rig
+     -- leg caught here, at apply, with the migration rolled back. Exclude the owner explicitly; the
+     -- sibling checks above do the same thing with their `<> 'clara_fn_owner'` clause.
+     and p.proname = 'enqueue_missing_render_jobs'
+     and rr.rolname not in ('clara_runtime', 'clara_fn_owner');
   if v_leak <> 0 then
     raise exception 'zeta pin tail: enqueue_missing_render_jobs granted to % non-runtime role(s)',
       v_leak using errcode = 'CLR10';

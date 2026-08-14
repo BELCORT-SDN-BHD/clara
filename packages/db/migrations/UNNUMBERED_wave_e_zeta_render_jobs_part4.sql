@@ -298,7 +298,11 @@ begin
   select count(*) into v_leak from pg_proc p
     cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
-     and p.proname = 'complete_render_job' and rr.rolname <> 'clara_runtime';
+     -- The owner is excluded for the same reason file 2's census states at length: aclexplode
+     -- always yields clara_fn_owner's own implicit entry for a function it owns, so testing
+     -- `<> 'clara_runtime'` alone counts ownership as a stray grant.
+     and p.proname = 'complete_render_job'
+     and rr.rolname not in ('clara_runtime', 'clara_fn_owner');
   if v_leak <> 0 then
     raise exception 'zeta file 4 tail: complete_render_job granted to % non-runtime role(s)', v_leak
       using errcode = 'CLR10';
