@@ -149,6 +149,12 @@ begin
       where snapshot_id = s.id and period_id = any(p_period_ids)) then
     raise exception 'metric preview snapshot/context binding incomplete' using errcode = 'CLR11';
   end if;
+  -- The ROOT period anchors every period-effective resolution below, the same anchor delta's
+  -- evaluator and its wall both use. Resolved HERE, before anything is reserved or written, so a
+  -- policy-effectivity refusal costs no durable state.
+  root_period := p_period_ids[1];
+  select period_start into strict root_start from clara.metric_input_snapshot_periods
+   where snapshot_id = s.id and period_id = root_period;
   -- Delta's validator is the ONE authority on the AST contract; eta never re-implements it.
   perform clara.validate_metric_ast_v1(p_ast);
   select id into ev from clara.evaluator_versions
@@ -167,6 +173,34 @@ begin
   if edge_id is null or avg_id is null then
     raise exception 'metric preview policy binding is absent' using errcode = 'CLR11',
       detail = '{"reason":"scope_mismatch","class":"composition_policies"}';
+  end if;
+  -- POLICY EFFECTIVITY, ENFORCED BY REFUSAL RATHER THAN BY RE-SELECTION -- and the distinction is
+  -- load-bearing, not stylistic. The two SELECTs above are byte-for-byte the rule
+  -- clara._tf_metric_cell_integrity's definitionless branch uses (highest version, firm override
+  -- first, NO effective-window filter), and that wall re-derives resolved_inputs_sha256 from the
+  -- ids ITS rule picks and refuses 'composition resolved inputs hash does not reconstruct' on any
+  -- disagreement. So a core that filtered by window here would select a different id than the wall
+  -- on exactly the estates where the rules diverge, and EVERY preview there would fail CLR11 --
+  -- measured on a stage: with two eps_v1 versions the two rules return different ids, the deployed
+  -- wall carries no window filter, and the hash is sensitive to the id.
+  --
+  -- What this lane CAN do, and does, is refuse to mint a preview whose policies are not effective
+  -- for the root period. The number is never silently computed under a policy version that does not
+  -- govern the period being presented; the disagreement is surfaced instead of absorbed. Closing it
+  -- by SELECTION is delta's to do, in the wall and the writer together, under a D1 window.
+  if not exists(select 1 from clara.edge_policy_sets e where e.id = edge_id
+      and e.effective_from <= root_start and (e.effective_to is null or e.effective_to >= root_start)) then
+    raise exception 'the bound edge policy is not effective for the preview root period'
+      using errcode = 'CLR10', detail = jsonb_build_object('reason', 'scope_mismatch',
+        'class', 'edge_policy_effectivity', 'root_period_start', root_start,
+        'fix', 'register an edge-policy version whose effective window covers the root reporting period, or preview a period the current version governs')::text;
+  end if;
+  if not exists(select 1 from clara.averaging_policy_versions a where a.id = avg_id
+      and a.effective_from <= root_start and (a.effective_to is null or a.effective_to >= root_start)) then
+    raise exception 'the bound averaging policy is not effective for the preview root period'
+      using errcode = 'CLR10', detail = jsonb_build_object('reason', 'scope_mismatch',
+        'class', 'averaging_policy_effectivity', 'root_period_start', root_start,
+        'fix', 'register an implemented averaging-policy version whose effective window covers the root reporting period')::text;
   end if;
   norm := (p_ast - 'root') || jsonb_build_object('root', clara._normalize_metric_node_v1(p_ast -> 'root'));
   -- The composition object is the cell's formula identity. Its shape is delta's, read from
@@ -189,9 +223,6 @@ begin
     select ctx.id, s.id, p_firm, p_client, p.period_id, p.period_start, p.period_end, u.ord - 1
       from unnest(p_period_ids) with ordinality u(pid, ord)
       join clara.metric_input_snapshot_periods p on p.snapshot_id = s.id and p.period_id = u.pid;
-  root_period := p_period_ids[1];
-  select period_start into strict root_start from clara.metric_input_snapshot_periods
-   where snapshot_id = s.id and period_id = root_period;
   v := clara._metric_eval_node_v1(p_client, s.id, ctx.id, root_period, norm -> 'root', false, avg_key, null);
   scale := (p_ast ->> 'result_scale')::smallint;
   if v.status <> 'ok' then
@@ -271,6 +302,7 @@ create function clara._eta_save_metric_definition_draft_core(
     p_applies_from date, p_applies_to date, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $core$
 declare d uuid; v uuid; e uuid; av uuid; h bytea; norm jsonb; rev int; unit_key text; validated jsonb; z jsonb;
+  policy_count int; avg_count int;
 begin
   perform 1 from clara.clients where id = p_client and firm_id = p_firm;
   if not found then raise exception 'client not found in your firm' using errcode = 'CLR11'; end if;
@@ -282,15 +314,25 @@ begin
     raise exception 'stored metric declarations do not match AST declarations' using errcode = 'CLR10',
       detail = '{"reason":"declaration_mismatch","fix":"make unit, temporality and result_scale match the validated AST"}';
   end if;
-  select min(id::text)::uuid into e from clara.edge_policy_sets
+  -- EXACT-COUNT BINDING, delta's arm mirrored term for term (clara.propose_metric_definition,
+  -- 0059). A draft saved here becomes a definition version a human later approves, and
+  -- clara.approve_metric_definition re-checks the bound policy identity against the SAME window
+  -- rule -- so a draft that bound an arbitrary one of several co-effective versions would either
+  -- be refused at approval or approved carrying a policy nobody chose. Overlapping versions are an
+  -- ambiguity the registrar must resolve, never something this lane picks its way through: count
+  -- them and refuse unless exactly one governs the whole applies_from..applies_to window.
+  select min(id::text)::uuid, count(*) into e, policy_count from clara.edge_policy_sets
    where policy_set_key = p_ast ->> 'edge_policy_set' and firm_id is null and effective_from <= p_applies_from
      and ((p_applies_to is null and effective_to is null) or (p_applies_to is not null and (effective_to is null or effective_to >= p_applies_to)));
-  select min(id::text)::uuid into av from clara.averaging_policy_versions
+  select min(id::text)::uuid, count(*) into av, avg_count from clara.averaging_policy_versions
    where policy_key = 'avg_month_end_v1' and firm_id is null and implemented and effective_from <= p_applies_from
      and ((p_applies_to is null and effective_to is null) or (p_applies_to is not null and (effective_to is null or effective_to >= p_applies_to)));
-  if e is null or av is null then
-    raise exception 'metric policy binding is absent or ambiguous for the draft' using errcode = 'CLR10',
-      detail = '{"reason":"scope_mismatch","fix":"use registered edge and averaging policy versions whose windows cover applies_from through applies_to"}';
+  if policy_count <> 1 then
+    raise exception 'metric edge policy binding is absent or ambiguous' using errcode = 'CLR10',
+      detail = '{"reason":"scope_mismatch","fix":"use exactly one registered edge-policy version whose effective window covers applies_from through applies_to"}';
+  elsif avg_count <> 1 then
+    raise exception 'metric averaging policy binding is absent or ambiguous' using errcode = 'CLR10',
+      detail = '{"reason":"scope_mismatch","fix":"use exactly one implemented avg_month_end_v1 version whose effective window covers applies_from through applies_to"}';
   end if;
   norm := (p_ast - 'root') || jsonb_build_object('root', clara._normalize_metric_node_v1(p_ast -> 'root'));
   h := clara._hash(jsonb_build_object('normalized_ast', norm, 'unit', unit_key, 'temporality', p_temporality,

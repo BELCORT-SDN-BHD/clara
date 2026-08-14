@@ -101,6 +101,7 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_compose_metric_preview');
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then raise exception 'a wake metric preview needs its idempotency key' using errcode = 'CLR10', detail = '{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}'; end if;
   return clara._eta_compose_metric_preview_core(w.firm_id, clara.agent_user_id(), w.on_behalf_of,
     w.wake_kind, p_client, p_ast, p_period_ids, p_snapshot_id, p_op_key);
 end $$;
@@ -114,6 +115,7 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_save_metric_definition_draft');
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then raise exception 'a wake metric-definition draft needs its idempotency key' using errcode = 'CLR10', detail = '{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}'; end if;
   return clara._eta_save_metric_definition_draft_core(w.firm_id, clara.agent_user_id(), w.on_behalf_of,
     w.wake_kind, p_client, p_key, p_title, p_unit, p_temporality, p_result_scale, p_ast,
     p_allow_negative, p_applies_from, p_applies_to, p_op_key);
@@ -164,6 +166,10 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_request_report_preview');
+  -- Refused here even though the core currently refuses every call anyway: when the OBO evaluator
+  -- core lands and this stops being a structural refusal, the key becomes load-bearing, and a
+  -- wrapper that had quietly accepted blanks would start minting a render per replayed step.
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then raise exception 'a wake report preview needs its idempotency key' using errcode = 'CLR10', detail = '{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}'; end if;
   return clara._eta_request_report_preview_core(w.firm_id, clara.agent_user_id(), w.on_behalf_of,
     w.wake_kind, p_spec_draft_id, p_op_key);
 end $$;
@@ -190,7 +196,7 @@ insert into clara.wake_fn_allowlist(wake_kind, function_name) values
 on conflict do nothing;
 
 do $tail$
-declare v_role text; n int; v_writers int; v_sig text;
+declare v_role text; n int; v_writers int; v_sig text; v_grantees text[];
   v_wrappers text[] := array[
     'clara.wake_compose_metric_preview(uuid,jsonb,uuid[],uuid,text)',
     'clara.wake_save_metric_definition_draft(uuid,text,text,text,text,smallint,jsonb,boolean,date,date,text)',
@@ -214,15 +220,27 @@ begin
     if not has_function_privilege('clara_wake_interactive', v_sig, 'execute') then
       raise exception 'eta part2 tail: clara_wake_interactive lacks EXECUTE on %', v_sig using errcode = 'CLR10';
     end if;
+    -- THE EXACT GRANTEE SURFACE, enumerated rather than sampled. A hand-list of role names can only
+    -- refuse the roles it happens to name: a role invented after this file was written, or one an
+    -- unrelated migration grants later, passes a sample and fails this. aclexplode reads what the
+    -- catalog ACTUALLY holds, so the assertion is the whole surface -- PUBLIC (grantee 0) included,
+    -- which is why the separate PUBLIC probe this replaces is no longer needed.
+    select coalesce(array_agg(g order by g), '{}') into v_grantees from (
+      select distinct case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as g
+        from pg_proc f cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
+       where f.oid = v_sig::regprocedure and a.privilege_type = 'EXECUTE' and a.grantee <> f.proowner) q;
+    if v_grantees is distinct from array['clara_wake_interactive'] then
+      raise exception 'eta part2 tail: % EXECUTE grantees are %, expected exactly {clara_wake_interactive}',
+        v_sig, v_grantees using errcode = 'CLR10';
+    end if;
+    -- The named-role belt stays as well, because the two instruments answer different questions:
+    -- aclexplode reads DIRECT grants, has_function_privilege resolves the EFFECTIVE privilege
+    -- through role membership. A role that inherits the grant holds it without appearing above.
     foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_runtime','clara_runtime_login','clara_wake_proactive','clara_agent_read_login','clara_wake_write_login'] loop
       if to_regrole(v_role) is not null and has_function_privilege(v_role, v_sig, 'execute') then
         raise exception 'eta part2 tail: % executes %', v_role, v_sig using errcode = 'CLR10';
       end if;
     end loop;
-    if exists(select 1 from pg_proc f cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
-        where f.oid = v_sig::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
-      raise exception 'eta part2 tail: PUBLIC executes %', v_sig using errcode = 'CLR10';
-    end if;
   end loop;
   -- Every core, part 1's included: still reachable by NO application role after this file's grants.
   foreach v_sig in array v_cores loop

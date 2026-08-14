@@ -34,7 +34,18 @@ import { buildToolsV10 } from "./chatTurn.v10.tools.js";
  *  able to read the named reason and the fix the database supplied and act on them. */
 export type AuthoringResult =
   | { ok: true; result: unknown }
-  | { ok: false; code: string; reason: string | null; fix: string | null; message: string };
+  | {
+      ok: false;
+      code: string;
+      reason: string | null;
+      fix: string | null;
+      message: string;
+      /** Every OTHER key the database put in its detail payload, passed through verbatim. Deliberately
+       *  an open map rather than a named list: the refusals carry class, constraint, limit,
+       *  requested_kind, blocked_on, root_period_start and why depending on which branch fired, and a
+       *  hand-list here would silently drop each new one the way it dropped the first four. */
+      details: Record<string, unknown>;
+    };
 
 type DbError = { code?: string; message?: string; detail?: string };
 
@@ -61,7 +72,13 @@ export function authoringRefusal(err: DbError): AuthoringResult {
     code === "CLR03"
       ? "That authoring action is not permitted in this session."
       : String(err?.message ?? "That authoring action could not be completed.");
-  return { ok: false, code, reason, fix, message };
+  // Everything else the database said, kept. The refusals this lane produces are DESIGNED to be
+  // acted on — the deferred render preview names the three verbs it is blocked on and the kind it
+  // would have requested; a policy-effectivity refusal names the root period start; an invalid
+  // request names the offending class. Dropping those left the model holding a sentence where the
+  // database had handed it a diagnosis.
+  const { reason: _reason, fix: _fix, ...details } = detail;
+  return { ok: false, code, reason, fix, message, details };
 }
 
 async function authoring(fn: () => Promise<unknown>): Promise<AuthoringResult> {

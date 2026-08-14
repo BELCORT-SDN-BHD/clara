@@ -31,6 +31,8 @@
 import {
   assert, randomUUID, rootQuery, withActor, ROLES, opk, firmIdOf,
   measure, metricAst, caught, errorDetail,
+  freshActiveClient, setupCloseCoa, createStandardSets, plainEntry, mintMonthSnapshot,
+  reportingPeriodRows, mintMetricInput, pastMonthStart, BANK1, REVN,
 } from "./epsilon-fixtures.mjs";
 import { publishHouseStyle, publishTemplate, layoutAst } from "./epsilon-fixtures.mjs";
 import { mintWake } from "./rig-fixtures.mjs";
@@ -55,6 +57,20 @@ const SAVE_DRAFT_SQL = `select clara.wake_save_metric_definition_draft($1::uuid,
   $4::text, $5::text, $6::smallint, $7::jsonb, $8::boolean, $9::date, $10::date, $11::text) as r`;
 
 const PREVIEW_SQL = "select clara.wake_request_report_preview($1::uuid, $2::text) as r";
+
+const COMPOSE_SQL = `select clara.wake_compose_metric_preview($1::uuid, $2::jsonb, $3::uuid[],
+  $4::uuid, $5::text) as r`;
+
+/** Delta's evaluator versions are BORN undeployed and a ONE-WAY ceremony flips them; the composition
+ *  preview cannot evaluate without it. Performed here only if it has not been, so this battery runs
+ *  on its own pristine database as well as after delta's — epsilon-contract.test.mjs's idiom. */
+async function ensureEvaluatorDeployed() {
+  const pending = (await rootQuery(
+    "select count(*)::int n from clara.evaluator_versions where not deployed")).rows[0].n;
+  if (pending === 0) return;
+  await withActor({ transaction: true }, (db) =>
+    db.query("update clara.evaluator_versions set deployed=true where not deployed"));
+}
 
 // Fixed literals, never a derived date. This lane's doctrine is that an effective date is an
 // accounting fact the caller states; a test that computed one from the clock would model the very
@@ -228,10 +244,92 @@ export async function registerBehaviourPhase(t, world) {
         JSON.stringify(metricAst({ root: measure({ set: "revenue" }), unit: "money" })),
         false, APPLIES_FROM, null, opk("eta-nocred"),
       ]],
+      ["wake_compose_metric_preview", COMPOSE_SQL, [
+        client, JSON.stringify(metricAst({ root: measure({ set: "revenue" }), unit: "money" })),
+        [randomUUID()], randomUUID(), opk("eta-nocred"),
+      ]],
     ]) {
       const refusal = await caught(() =>
         withActor({ role: ROLES.wakeInteractive, transaction: true }, (c) => c.query(sql, args)));
       assert.equal(refusal?.code, "CLR03", `${label} refuses without a credential (${refusal?.code})`);
     }
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // COMPOSE. Its own fixture, because a preview EVALUATES: it needs books, a month period, a pinned
+  // input snapshot, published account sets and the deployed evaluator. The cells above deliberately
+  // avoid all of that; compose cannot.
+  // ---------------------------------------------------------------------------------------------
+  await ensureEvaluatorDeployed();
+  const cClient = await freshActiveClient(owner, `eta-c-${randomUUID().slice(0, 6)}`);
+  await setupCloseCoa(owner, cClient);
+  await createStandardSets(owner, cClient);
+  const monthStart = await pastMonthStart(3);
+  await plainEntry(owner, {
+    client: cClient, debit: BANK1, credit: REVN, cents: 100_000,
+    postingDate: `${monthStart.slice(0, 8)}10`, memo: `eta compose ${randomUUID().slice(0, 8)}`,
+  });
+  const gamma = await mintMonthSnapshot(owner, { client: cClient, monthStart, opKey: opk("eta-month") });
+  const cPeriod = (await reportingPeriodRows(cClient, "month")).find((r) => r.id === gamma.reporting_period_id);
+  assert.ok(cPeriod, "the minted month resolves to a live reporting-period row");
+  const { snapshotId } = await mintMetricInput(owner, { client: cClient, periodIds: [cPeriod.id] });
+  const cAst = metricAst({ root: measure({ set: "revenue" }), unit: "money" });
+
+  // CELL 8 — compose end to end. This is the transposition measurement for compose's OWN
+  // (p_firm, p_actor) pair, which every cell above leaves untested: the two are adjacent uuids, so
+  // swapping them type-checks and passes the catalog half exactly as it does for draft_report_spec.
+  // The cell row carries no actor column, so the binding is read off the AUDIT row the core wrote.
+  await t.test("wake_compose_metric_preview mints a definitionless cell and binds identity", async () => {
+    const receipt = await asWake(cred.secret, COMPOSE_SQL,
+      [cClient, JSON.stringify(cAst), [cPeriod.id], snapshotId, `eta-compose-${randomUUID()}`]);
+    assert.ok(receipt?.cell_id, `the wrapper returned a cell (${JSON.stringify(receipt)})`);
+    assert.equal(receipt.preview, true, "the receipt says preview");
+    assert.equal(receipt.definition_version_id, null, "a preview carries no definition version");
+    assert.equal(receipt.statutory_eligible, false, "and is barred from a statutory pack");
+
+    const row = (await rootQuery(
+      `select firm_id, client_id, definition_version_id, displayed_text, cell_status,
+              inputs->>'schema' as schema from clara.metric_cells where id=$1`, [receipt.cell_id],
+    )).rows[0];
+    assert.ok(row, "the metric cell persisted");
+    assert.equal(row.firm_id, firm, "the cell is bound to the credential's firm");
+    assert.equal(row.client_id, cClient, "and to the requested client");
+    assert.equal(row.definition_version_id, null, "the ROW is definitionless, not just the receipt");
+    assert.equal(row.schema, "clara.metric-composition-inputs/v1", "it is a composition cell");
+    // The DB computed the figure and the wall re-derived it; the model quotes displayed_text and
+    // never does arithmetic (PRD §6). We assert it EXISTS and matches the receipt — never its value.
+    assert.equal(row.displayed_text, receipt.displayed_text, "the receipt quotes the row's own figure");
+    if (row.cell_status === "ok") {
+      assert.ok(typeof row.displayed_text === "string" && row.displayed_text.length > 0,
+        "an ok cell carries the database's own displayed text");
+    }
+
+    const audit = (await rootQuery(
+      `select actor, on_behalf_of, via_wake_kind from clara.audit_log
+        where fn='wake_compose_metric_preview' and firm_id=$1 order by at desc limit 1`, [firm],
+    )).rows[0];
+    assert.ok(audit, "the preview wrote an audit row");
+    assert.equal(audit.actor, AGENT_USER_ID, "the audit actor is the AGENT, not the firm id");
+    assert.equal(audit.on_behalf_of, obo, "the audit records the human the wake acted for");
+    assert.equal(audit.via_wake_kind, "interactive", "and the lane it came through");
+  });
+
+  // CELL 9 — compose's blank op key. Every writing wrapper refuses one; before this, only
+  // draft_report_spec did, and compose passed blanks straight into _reserve_op.
+  await t.test("wake_compose_metric_preview refuses a blank op key", async () => {
+    const blank = await caught(() => asWake(cred.secret, COMPOSE_SQL,
+      [cClient, JSON.stringify(cAst), [cPeriod.id], snapshotId, "  "]));
+    assert.equal(blank?.code, "CLR10", `blank op key refused (${blank?.code} ${blank?.message})`);
+    assert.equal(errorDetail(blank).class, "op_key", "the refusal names op_key as the offending class");
+  });
+
+  // CELL 10 — the same blank-key floor on the save wrapper, for the same reason.
+  await t.test("wake_save_metric_definition_draft refuses a blank op key", async () => {
+    const blank = await caught(() => asWake(cred.secret, SAVE_DRAFT_SQL, [
+      client, `eta_blank_${randomUUID().slice(0, 8)}`, "blank key", cAst.unit, cAst.temporality,
+      cAst.result_scale, JSON.stringify(cAst), false, APPLIES_FROM, null, "",
+    ]));
+    assert.equal(blank?.code, "CLR10", `blank op key refused (${blank?.code} ${blank?.message})`);
+    assert.equal(errorDetail(blank).class, "op_key", "the refusal names op_key as the offending class");
   });
 }
