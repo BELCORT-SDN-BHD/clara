@@ -269,6 +269,26 @@ const REGISTRY_0057_CLOCK_NAMES = ["verify_snapshot"];
 // battery against databases pinned earlier, where this function does not exist.
 const METRICS_0059_CLOCK_NAMES = ["approve_metric_definition"];
 
+// 0072 [Wave E lane ε]: ONE lawful bare-clock reader, and it is the 0057/0059 shape a third time.
+// clara.approve_report_for_issue stamps `issued_at = now()` on the run it issues — the instant a
+// human approved a set of financial statements for issue. It lands in no date-typed accounting
+// decision and drives no calculation.
+//
+// WHY NOT clara._book_today(), stated because "use the authority" is the reflex this roster
+// otherwise enforces: _book_today returns a DATE, and this column is an instant, not a business
+// day. Every DATE lane ε decides comes from a parameter or a stored row instead — all four
+// publishing verbs take an explicit p_effective_from (the x42 finding that closed on the first CI
+// round), the statutory profile windows are catalog rows, the wording windows are read against the
+// RUN's period_start, and a chart's thresholds resolve as of the run's period_end.
+//
+// MEASURED, not inferred: arm (D)'s own detector over the 0065-0072 surface flags this name and no
+// other. The rest of the lane's timestamps are column DEFAULTS, which live in the table definition
+// rather than in a pg_proc body and correctly do not flag.
+//
+// Frontier-gated for the reason the 0046/0055/0056/0057/0059 blocks state: db-slice-frontiers runs
+// this battery against databases pinned earlier, where this function does not exist.
+const REPORTING_0072_CLOCK_NAMES = ["approve_report_for_issue"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -280,6 +300,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0056_%")) names.push(...CLOSE_MODEL_0056_CLOCK_NAMES);
   if (await applied("0057_%")) names.push(...REGISTRY_0057_CLOCK_NAMES);
   if (await applied("0059_%")) names.push(...METRICS_0059_CLOCK_NAMES);
+  if (await applied("0072_%")) names.push(...REPORTING_0072_CLOCK_NAMES);
   return names.sort();
 }
 

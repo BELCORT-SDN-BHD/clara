@@ -25,32 +25,117 @@ export async function registerArtifactPhase(t, world) {
   const draftSha = sha64(`art-draft-${w.runId}`);
   const presignSha = sha64(`art-presign-${w.runId}`);
 
-  await t.test("a missing manifest key is a REFUSAL that names it -- never a default", async () => {
-    const classes = [
-      ["the dataset pin", "dataset_sha256"],
-      ["the books watermark", "books_event_sequence"],
-      ["the renderer image digest", "renderer_image_digest"],
-      ["the font engine version", "font_engine_version"],
-      ["every font/logo/image hash", "asset_hashes"],
-      ["the canonical manifest hash", "render_manifest_sha256"],
-      ["the gate-3 extracted-text hash", "extracted_text_sha256"],
-      ["the pinned extraction tool", "extraction_tool"],
-      ["the claim-assessment receipt", "claim_assessment"],
-      ["the uncertified flag", "uncertified"],
-    ];
-    for (const [label, key] of classes) {
+  await t.test("EVERY required manifest key is refused when missing -- the matrix is the DB's own list", async () => {
+    // Driven off clara._report_manifest_required_keys rather than a hand-picked sample: a
+    // sample proves the ten keys somebody thought of, and the twenty-two it omitted are exactly
+    // where a silently-dropped requirement would live. Reading the list here also means a key
+    // added later is covered the day it is added, without anyone remembering to extend a test.
+    const required = (await rootQuery(
+      "select clara._report_manifest_required_keys($1) k", ["draft_watermarked"])).rows[0].k;
+    assert.equal(required.length, 32, "the draft key list is the 32 the design pinned");
+    for (const key of required) {
       const error = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "draft_watermarked",
         sha256: draftSha,
         manifest: await buildManifest({ runId: w.runId, kind: "draft_watermarked", sha256: draftSha, omit: [key] }) }));
-      assert.equal(reasonOf(error), "manifest_key_missing", `${label}: ${error?.message}`);
-      assert.deepEqual(errorDetail(error).missing_keys, [key], label);
+      assert.equal(error?.code, "CLR42", `omitting ${key}: ${error?.code} ${error?.message}`);
+      assert.equal(reasonOf(error), "manifest_key_missing", `omitting ${key}: ${error?.message}`);
+      assert.deepEqual(errorDetail(error).missing_keys, [key], `omitting ${key} names ${key}`);
     }
-    // The pre-sign hash is required for a pre_sign and NOT for a draft: the key list is
-    // kind-dependent, which is the only reason a draft can seal at all.
-    const presignMissing = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
-      sha256: presignSha,
-      manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: presignSha, omit: ["pre_sign_pdf_sha256"] }) }));
-    assert.deepEqual(errorDetail(presignMissing).missing_keys, ["pre_sign_pdf_sha256"]);
+    // The kind-dependent keys, each on its own kind. A draft can seal at all only because the
+    // list is kind-dependent, so this is where that branching earns its keep.
+    for (const [kind, sha, extraKeys] of [
+      ["pre_sign", presignSha, ["pre_sign_pdf_sha256"]],
+      ["signed_original", sha64(`art-signed-${w.runId}`),
+        ["pre_sign_pdf_sha256", "signed_original_pdf_sha256", "signature_evidence"]],
+    ]) {
+      const kindKeys = (await rootQuery("select clara._report_manifest_required_keys($1) k", [kind])).rows[0].k;
+      assert.deepEqual(kindKeys.filter((k) => !required.includes(k)).sort(), [...extraKeys].sort(),
+        `${kind} adds exactly its own evidence keys`);
+      for (const key of extraKeys) {
+        const error = await caught(async () => sealArtifact(owner, { runId: w.runId, kind,
+          sha256: sha,
+          manifest: await buildManifest({ runId: w.runId, kind, sha256: sha, presignSha256: presignSha, omit: [key] }) }));
+        assert.equal(error?.code, "CLR42", `${kind} omitting ${key}: ${error?.message}`);
+        assert.deepEqual(errorDetail(error).missing_keys, [key], `${kind} omitting ${key}`);
+      }
+    }
+    assert.equal((await artifactRows(w.runId)).length, 0, "not one refused attempt left a row behind");
+  });
+
+  await t.test("a NULL at a required manifest key is refused -- presence is not evidence", async () => {
+    // The other half of the same wall, and the one a presence check cannot see: a manifest that
+    // carries `extracted_text_sha256: null` HAS the key and considered the question, then
+    // recorded nothing. Sealing over that is sealing over evidence of nothing.
+    const shaped = (await rootQuery(
+      `select k, clara._report_manifest_key_shape(k) shape
+         from unnest(clara._report_manifest_required_keys('draft_watermarked')) k
+        where clara._report_manifest_key_shape(k) <> 'db_derived' order by k`)).rows;
+    assert.ok(shaped.length >= 20,
+      `the render side attests ${shaped.length} keys in its own right, and every one is shape-enforced`);
+    for (const { k, shape } of shaped) {
+      const error = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "draft_watermarked",
+        sha256: draftSha,
+        manifest: await buildManifest({ runId: w.runId, kind: "draft_watermarked", sha256: draftSha,
+          overrides: { [k]: null } }) }));
+      assert.equal(error?.code, "CLR42", `null at ${k}: ${error?.code} ${error?.message}`);
+      assert.equal(reasonOf(error), "manifest_evidence_invalid", `null at ${k}: ${error?.message}`);
+      assert.equal(errorDetail(error).key, k, `the refusal names ${k}`);
+      assert.equal(errorDetail(error).expected, shape, `the refusal names the expected shape of ${k}`);
+    }
+    // And the wrong SHAPE at the right key, one per shape family -- a null is not the only way
+    // to attest nothing.
+    for (const [label, key, value] of [
+      ["a truncated digest", "extracted_text_sha256", "abc123"],
+      ["an uppercase digest", "render_manifest_sha256", sha64("x").toUpperCase()],
+      ["a blank version pin", "node_version", "   "],
+      ["a stringified map", "asset_hashes", "logo=abc"],
+      ["an empty evaluator list", "evaluator_versions", []],
+      ["a stringified flag", "uncertified", "false"],
+      ["a bare digest where an image reference belongs", "renderer_image_digest", "not-a-digest"],
+    ]) {
+      const error = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "draft_watermarked",
+        sha256: draftSha,
+        manifest: await buildManifest({ runId: w.runId, kind: "draft_watermarked", sha256: draftSha,
+          overrides: { [key]: value } }) }));
+      assert.equal(reasonOf(error), "manifest_evidence_invalid", `${label}: ${error?.message}`);
+      assert.equal(errorDetail(error).key, key, label);
+    }
+    // signature_evidence is the one key whose whole purpose is to be evidence, so an EMPTY
+    // object is refused where an empty map elsewhere would be lawful.
+    const signedSha = sha64(`art-empty-evidence-${w.runId}`);
+    const empty = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "signed_original",
+      sha256: signedSha,
+      manifest: await buildManifest({ runId: w.runId, kind: "signed_original", sha256: signedSha,
+        presignSha256: presignSha, overrides: { signature_evidence: {} } }) }));
+    assert.equal(reasonOf(empty), "manifest_evidence_invalid", empty?.message);
+    assert.equal(errorDetail(empty).key, "signature_evidence", empty?.message);
+    assert.equal((await artifactRows(w.runId)).length, 0, "not one refused attempt left a row behind");
+  });
+
+  await t.test("the DB-owned pins are RE-DERIVED at seal, not carried on trust", async () => {
+    // Presence and shape both pass here; what fails is the value. A manifest may name a real
+    // profile version beside a fabricated hash for it, and its own self-hash would cover the
+    // fabrication exactly as faithfully as the truth.
+    const pins = (await rootQuery("select clara._report_render_pins_v1($1) p", [w.runId])).rows[0].p;
+    const derived = Object.keys(pins);
+    assert.ok(derived.includes("statutory_profile_sha256") && derived.includes("house_style_sha256")
+      && derived.includes("chart_spec_sha256") && derived.includes("statutory_wording_sha256"),
+      "the four hashes codex named as fabricable are among the re-derived");
+    for (const key of derived) {
+      // A value of the right shape and the wrong content, per key.
+      const forged = key.endsWith("_sha256") ? sha64(`forged-${key}`)
+        : key === "chart_spec_version_ids" ? [randomUUID()]
+        : randomUUID();
+      if (pins[key] === forged) continue;
+      const error = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "draft_watermarked",
+        sha256: draftSha,
+        manifest: await buildManifest({ runId: w.runId, kind: "draft_watermarked", sha256: draftSha,
+          overrides: { [key]: forged } }) }));
+      assert.equal(error?.code, "CLR42", `forging ${key}: ${error?.code} ${error?.message}`);
+      assert.equal(reasonOf(error), "manifest_binding_mismatch", `forging ${key}: ${error?.message}`);
+      assert.ok((errorDetail(error).keys ?? []).includes(key),
+        `the refusal names ${key} among the disagreeing pins`);
+    }
     assert.equal((await artifactRows(w.runId)).length, 0, "not one refused attempt left a row behind");
   });
 
@@ -185,6 +270,56 @@ export async function registerArtifactPhase(t, world) {
     assert.equal((await verifyArtifact(owner, presignId)).verified, true, "restored");
   });
 
+  await t.test("every verification leaves an audit row -- including the one that found corruption", async () => {
+    // A verification that leaves no trace is not evidence that anyone verified. Who asked, about
+    // what, and what the answer was, are the facts a later reader needs -- most of all when the
+    // answer was "corrupt".
+    const { presignId, runId } = world.epsilonArtifact;
+    const before = Number((await rootQuery(
+      "select count(*)::int n from clara.audit_log where fn='verify_report_artifact'")).rows[0].n);
+    await verifyArtifact(owner, presignId);
+    const pass = (await rootQuery(
+      `select actor, args from clara.audit_log where fn='verify_report_artifact'
+        order by id desc limit 1`)).rows[0];
+    assert.equal(pass.actor, owner, "the audit row names WHO asked");
+    assert.equal(pass.args.artifact_id, presignId);
+    assert.equal(pass.args.report_run_id, runId);
+    assert.equal(pass.args.verified, true, "and what the answer was");
+    assert.equal(pass.args.diff_count, 0);
+
+    // The corrupt answer is audited with the same fidelity, naming the terms that disagreed.
+    const trueHash = (await rootQuery(
+      "select encode(dataset_sha256,'hex') h from clara.report_datasets where report_run_id=$1 and chart_spec_version_id is null",
+      [runId])).rows[0].h;
+    const setDatasetHash = (value) => withTriggersOff("report_artifacts", () => rootQuery(
+      "update clara.report_artifacts set manifest=jsonb_set(manifest,'{dataset_sha256}',to_jsonb($2::text)) where id=$1",
+      [presignId, value]));
+    await setDatasetHash(sha64("audit-corrupt"));
+    try {
+      await verifyArtifact(owner, presignId);
+      const fail = (await rootQuery(
+        `select args from clara.audit_log where fn='verify_report_artifact'
+          order by id desc limit 1`)).rows[0].args;
+      assert.equal(fail.verified, false, "a detected corruption is recorded as one");
+      assert.ok(fail.diff_count > 0);
+      assert.ok(fail.diff_terms.includes("manifest.dataset_sha256"),
+        `the row names which terms disagreed: ${JSON.stringify(fail.diff_terms)}`);
+    } finally {
+      await setDatasetHash(trueHash);
+    }
+
+    // And an artifact this firm cannot see: the receipt is null either way, so auditing the
+    // attempt leaks nothing and records a read worth having a record of.
+    assert.equal(await verifyArtifact(owner, randomUUID()), null);
+    const missing = (await rootQuery(
+      `select args from clara.audit_log where fn='verify_report_artifact' order by id desc limit 1`)).rows[0].args;
+    assert.equal(missing.outcome, "not_found_in_firm");
+
+    const after = Number((await rootQuery(
+      "select count(*)::int n from clara.audit_log where fn='verify_report_artifact'")).rows[0].n);
+    assert.equal(after - before, 3, "three verifications, three rows -- none of them silent");
+  });
+
   await t.test("issue is a key-2 act, binds the EXACT hash, and the approver is not the preparer", async () => {
     const { runId, presignSha, presignId } = world.epsilonArtifact;
     const bob = world.users.bob;
@@ -224,6 +359,34 @@ export async function registerArtifactPhase(t, world) {
 
     const again = await caught(() => approveIssue(bob, { runId, expectedSha256: presignSha }));
     assert.equal(reasonOf(again), "report_run_state_illegal", "a run is issued once");
+  });
+
+  await t.test("the BYTE SEALER is a preparer too, even when someone else opened the run", async () => {
+    // The cell above uses one human as both requested_by and sealed_by, so deleting the
+    // `sealed_by` half of the segregation test would leave it green -- and a person who produced
+    // the bytes could then approve another preparer's run. This cell separates the two
+    // identities: alice opens the run, BOB seals the pre-sign, and bob (who holds key 2 from the
+    // cell above) must still be refused.
+    const bob = world.users.bob;
+    const solo = await buildEpsilonWorld(world, { tag: "sealer-checker", reportClass: "management" });
+    const sha = sha64(`sealer-presign-${solo.runId}`);
+    const sealed = await sealArtifact(bob, { runId: solo.runId, kind: "pre_sign", sha256: sha,
+      manifest: await buildManifest({ runId: solo.runId, kind: "pre_sign", sha256: sha }) });
+    const row = (await rootQuery(
+      `select r.requested_by, a.sealed_by from clara.report_artifacts a
+         join clara.report_runs r on r.id = a.report_run_id where a.id = $1`,
+      [sealed.report_artifact_id])).rows[0];
+    assert.notEqual(row.sealed_by, row.requested_by,
+      "the two preparer identities are genuinely different in this cell -- otherwise it proves nothing");
+    assert.equal(row.sealed_by, bob, "bob produced the bytes");
+
+    const error = await caught(() => approveIssue(bob, { runId: solo.runId, expectedSha256: sha }));
+    assert.equal(error?.code, "CLR05", error?.message);
+    assert.equal(reasonOf(error), "report_issue_segregation_violation", error?.message);
+    assert.equal(errorDetail(error).sealed_by, bob,
+      "and the refusal names the SEALER as the disqualifying identity, not the opener");
+    assert.equal((await rootQuery("select state from clara.report_runs where id=$1", [solo.runId])).rows[0].state,
+      "dataset_sealed", "the refused approval moved nothing");
   });
 
   await t.test("a run's identity is immutable and its state never moves backwards", async () => {

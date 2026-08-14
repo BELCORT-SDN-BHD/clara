@@ -298,6 +298,46 @@ export async function registerChartPhase(t, world) {
       "the refused attempts left the dataset reconstructing exactly as sealed");
   });
 
+  await t.test("a chart's thresholds are RESOLVED at seal and frozen with the dataset", async () => {
+    // The spec names a threshold by constant key. WHICH version of that constant applied, and
+    // WHAT its value was, are facts about the period being reported -- and if the renderer had to
+    // resolve them later, "later" would be a different answer the moment a new constant version
+    // lands. So the seal resolves once and the digest covers it.
+    const chartDataset = (await rootQuery(
+      `select id, resolved_thresholds, chart_spec_version_id from clara.report_datasets
+        where report_run_id=$1 and chart_spec_version_id is not null`, [base.runId])).rows[0];
+    assert.ok(chartDataset, "the run sealed a chart dataset");
+    const spec = (await rootQuery("select chart_spec_ast s from clara.chart_template_versions where id=$1",
+      [chartDataset.chart_spec_version_id])).rows[0].s;
+    assert.equal(chartDataset.resolved_thresholds.length, spec.thresholds.length,
+      "every threshold the spec names is resolved -- none silently dropped");
+    const zero = chartDataset.resolved_thresholds.find((r) => r.constant_key === "zero");
+    assert.ok(zero, `the zero baseline resolved: ${JSON.stringify(chartDataset.resolved_thresholds)}`);
+    const truth = (await rootQuery(
+      "select id, version, numerator, denominator, currency_power from clara.metric_constants where constant_key='zero'")).rows[0];
+    assert.equal(zero.constant_id, truth.id, "the resolved row names the exact constant ROW, not just its key");
+    assert.equal(zero.constant_version, truth.version, "and its exact version");
+    assert.equal(Number(zero.numerator), Number(truth.numerator));
+    assert.equal(Number(zero.denominator), Number(truth.denominator));
+    assert.equal(Number(zero.currency_power), Number(truth.currency_power),
+      "with the dimension carried, so nothing downstream has to guess what scale the line is on");
+    const runPeriod = (await rootQuery("select period_end::text e from clara.report_runs where id=$1",
+      [base.runId])).rows[0].e;
+    assert.equal(zero.as_of, runPeriod,
+      "resolved as of the run's PERIOD END -- an accounting fact, never the session clock");
+    // The FS dataset binds no chart, so it carries no thresholds: an empty array and "no charts"
+    // must not be the same statement made two different ways.
+    const [fsDataset] = await datasetRows(base.runId);
+    assert.deepEqual(fsDataset.resolved_thresholds, [],
+      "the FS dataset resolves nothing, because it plots nothing");
+    // And they are frozen: the digest covers them, so a post-seal edit cannot commit.
+    const edited = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query("update clara.report_datasets set resolved_thresholds='[]'::jsonb where id=$1",
+        [chartDataset.id])));
+    assert.equal(edited?.code, "CLR08",
+      `a sealed dataset's resolved thresholds are immutable: ${edited?.message}`);
+  });
+
   await t.test("a dataset point's cell must belong to the dataset's own run, snapshot and definition", async () => {
     // The FK binds firm and client. It does NOT bind the cell's run, snapshot, evaluator version
     // or declared definition -- so an internal writer under clara_fn_owner could seal a

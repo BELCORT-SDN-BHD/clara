@@ -7,8 +7,8 @@
 // structure, not as a label.
 
 import {
-  assert, rootQuery, withActor, ROLES, caught, reasonOf, errorDetail,
-  sealArtifact, sealDataset, assessClaim, buildManifest, sha64, MPERS_SECTIONS,
+  assert, rootQuery, withActor, ROLES, caught, errorDetail, assertRefusal,
+  sealArtifact, sealDataset, assessClaim, approveIssue, buildManifest, sha64, MPERS_SECTIONS,
   proposeMetricDefinition, approveMetricDefinition, supersedeMetricDefinition,
   measure, metricAst,
 } from "./epsilon-fixtures.mjs";
@@ -62,7 +62,7 @@ export async function registerClaimPhase(t, world) {
     const sha = sha64(`failed-${w.runId}`);
     const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
       sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
-    assert.equal(reasonOf(refused), "claim_assessment_failed", refused?.message);
+    assertRefusal(refused, "CLR42", "claim_assessment_failed");
     assert.deepEqual(errorDetail(refused).reason_codes, ["required_wording_unverified"]);
 
     // A failed run may still render a WATERMARKED, non-issuable draft so the preparer can see
@@ -163,8 +163,7 @@ export async function registerClaimPhase(t, world) {
     const sha = sha64(`superseded-${w.runId}`);
     const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
       sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
-    assert.equal(reasonOf(refused), "nonstat_definition_in_dataset",
-      `an eligible-but-uncertified pack must NOT reach pre_sign: ${refused?.message}`);
+    assertRefusal(refused, "CLR42", "nonstat_definition_in_dataset");
     assert.match(errorDetail(refused).fix ?? "", /approve it, re-evaluate/,
       "the remedy names the approval lane, which is the only issuance path");
 
@@ -218,8 +217,7 @@ export async function registerClaimPhase(t, world) {
     const sha = sha64(`uncertified-${w.runId}`);
     const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
       sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
-    assert.equal(reasonOf(refused), "draft_definition_in_dataset",
-      `"draft never statutory" is structural, not a label: ${refused?.message}`);
+    assertRefusal(refused, "CLR42", "draft_definition_in_dataset");
 
     // The watermarked draft DOES seal, and carries the flag the renderer stamps every page from.
     const draftSha = sha64(`uncertified-wm-${w.runId}`);
@@ -255,8 +253,7 @@ export async function registerClaimPhase(t, world) {
     const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
       sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
     assert.equal(refused?.code, "CLR42", `SQLSTATE and token asserted together: ${refused?.message}`);
-    assert.equal(reasonOf(refused), "nonstat_definition_in_dataset",
-      "a cell with NO definition at all is an unapproved formula, and the token names it honestly");
+    assertRefusal(refused, "CLR42", "nonstat_definition_in_dataset");
     assert.match(errorDetail(refused).fix ?? "", /save the composition/,
       "and the remedy is the approval lane, which is the only issuance path");
   });
@@ -284,8 +281,7 @@ export async function registerClaimPhase(t, world) {
     const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
       sha256: sha, manifest: await buildManifest({ runId: w.runId, kind: "pre_sign", sha256: sha }) }));
     assert.equal(refused?.code, "CLR42", refused?.message);
-    assert.equal(reasonOf(refused), "assessment_stale",
-      `a verdict is only worth what it still describes: ${refused?.message}`);
+    assertRefusal(refused, "CLR42", "assessment_stale");
     assert.equal(Number(errorDetail(refused).current_non_statutory_cells), 1);
     assert.equal(Number(errorDetail(refused).assessed_non_statutory_cells), 0,
       "the refusal shows BOTH sides, so the reader can see what moved");
@@ -322,8 +318,7 @@ export async function registerClaimPhase(t, world) {
       const sha = sha64(`absent-${kind}-${w.runId}`);
       const error = await caught(() => sealArtifact(owner, { runId: w.runId, kind, sha256: sha,
         manifest: { report_spec_version_id: w.spec.report_spec_version_id } }));
-      assert.equal(reasonOf(error), "claim_assessment_absent",
-        `${kind}: a missing assessment refuses, it does not default: ${error?.message}`);
+      assertRefusal(error, "CLR42", "claim_assessment_absent");
     }
   });
 
@@ -334,8 +329,7 @@ export async function registerClaimPhase(t, world) {
     const sha = sha64(`unsealed-${w.runId}`);
     const error = await caught(() => sealArtifact(owner, { runId: w.runId, kind: "draft_watermarked",
       sha256: sha, manifest: { any: "thing" } }));
-    assert.equal(reasonOf(error), "dataset_not_sealed",
-      "E-R14's persist-before-render is structural: nothing renders from an unsealed dataset");
+    assertRefusal(error, "CLR42", "dataset_not_sealed");
   });
 
   await t.test("assess_report_claim writes ONE row per run and replays on a second call", async () => {
@@ -347,13 +341,90 @@ export async function registerClaimPhase(t, world) {
       "select count(*)::int n from clara.report_claim_assessments where report_run_id=$1", [w.runId])).rows[0].n), 1);
   });
 
-  await t.test("a locale with no effective claim policy REFUSES rather than borrowing another's label", async () => {
-    const w = await buildEpsilonWorld(world, { tag: "claim-locale", reportClass: "management",
-      locale: "ms", seal: false });
-    const error = await caught(() => assessClaim(owner, w.runId));
-    assert.equal(reasonOf(error), "claim_policy_absent",
-      "fail-closed: the product does not invent Malay claim wording nobody verified");
-    assert.equal(errorDetail(error).locale, "ms");
-    assert.match(errorDetail(error).fix ?? "", /claim-policy row for this locale/);
+  await t.test("EVERY locale with no effective claim policy REFUSES rather than borrowing another's label", async () => {
+    // Both fail-closed locales, not one: ms and zh are separate rows the owner has yet to supply,
+    // and a fallback added for either would be a compliance claim in a language nobody verified.
+    for (const locale of ["ms", "zh"]) {
+      const w = await buildEpsilonWorld(world, { tag: `claim-locale-${locale}`, reportClass: "management",
+        locale, seal: false });
+      const error = await caught(() => assessClaim(owner, w.runId));
+      const detail = assertRefusal(error, "CLR10", "claim_policy_absent", locale);
+      assert.equal(detail.locale, locale, `the refusal names ${locale}, not whichever locale it fell back to`);
+      assert.match(detail.fix ?? "", /claim-policy row for this locale/);
+    }
+    // And en, the one locale that IS supplied, assesses -- otherwise the two refusals above would
+    // be consistent with a claim policy that never resolves for anybody.
+    const en = await buildEpsilonWorld(world, { tag: "claim-locale-en", reportClass: "management",
+      locale: "en", seal: false });
+    assert.equal((await assessClaim(owner, en.runId)).status, "not_applicable",
+      "en resolves its policy row, so the ms/zh refusals are about those locales");
+
+    // THE LEXICON POPULATIONS, asserted exactly. Lane zeta's gate-3 scan must treat a locale whose
+    // lexicon has no effective row as a REFUSAL; what ms and zh actually carry today is the
+    // standard's own name token and nothing else, and that is an owner item of the #43 family --
+    // recorded here so an invented Malay or Chinese compliance phrase shows up as a test failure
+    // rather than as a shipped guess.
+    const lexicon = (await rootQuery(
+      `select locale, count(*)::int n, coalesce(string_agg(distinct phrase_key, ',' order by phrase_key), '') keys
+         from clara.claim_phrase_lexicon group by locale order by locale`)).rows;
+    assert.deepEqual(lexicon, [
+      { locale: "en", n: 4, keys: "compliance_sentence,standard_full_name,standard_name_token,true_and_fair" },
+      { locale: "ms", n: 1, keys: "standard_name_token" },
+      { locale: "zh", n: 1, keys: "standard_name_token" },
+    ], "en is populated; ms and zh carry the name token ONLY, pending owner verification");
+  });
+
+  await t.test("the fail-closed branches nothing else reaches are proven to refuse", async () => {
+    // EV-8 for the three arms no happy path can walk into. Each is set up inside a transaction
+    // that always rolls back, with the walls that make the state unreachable lifted for the
+    // duration -- so the branch is exercised without the database ever holding the state.
+    const w = await buildEpsilonWorld(world, { tag: "failclosed", reportClass: "management" });
+    const sha = sha64(`failclosed-${w.runId}`);
+    const manifest = await buildManifest({ runId: w.runId, kind: "draft_watermarked", sha256: sha });
+
+    // (a) A claim status this gate has never been taught to read. Unreachable today because the
+    // CHECK admits only the four ruled states -- which is exactly why the ELSE branch would
+    // otherwise never be measured, and would rot the day a fifth state is ruled.
+    const unreadable = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, async (db) => {
+      await db.query("alter table clara.report_claim_assessments disable trigger user");
+      await db.query(`alter table clara.report_claim_assessments
+                        drop constraint report_claim_assessments_status_check`);
+      await db.query("update clara.report_claim_assessments set status='quantum' where report_run_id=$1",
+        [w.runId]);
+      return db.query(
+        `select clara._seal_report_artifact_core($1,$2,$3,'draft_watermarked','pdf',$4,4096,$5::jsonb,null,$6)`,
+        [world.firms.A, owner, w.runId, sha, JSON.stringify(manifest), `failclosed-${sha.slice(0, 8)}`]);
+    }));
+    assertRefusal(unreadable, "CLR42", "claim_status_unreadable", "an unruled claim status");
+    assert.equal(errorDetail(unreadable).status, "quantum",
+      "the refusal names the status it could not read, so the next ruling knows where to land");
+    assert.equal((await assessmentRow(w.runId)).status, "not_applicable",
+      "and the rolled-back transaction left the real assessment untouched");
+
+    // (b) A run whose state SAYS sealed while its dataset row is gone. A derived state is not
+    // evidence (review law 2): the gate reads the dataset row itself.
+    const stranded = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, async (db) => {
+      await db.query("alter table clara.report_dataset_points disable trigger user");
+      await db.query("alter table clara.report_datasets disable trigger user");
+      await db.query(`delete from clara.report_dataset_points where dataset_id in
+                        (select id from clara.report_datasets where report_run_id=$1)`, [w.runId]);
+      await db.query("delete from clara.report_datasets where report_run_id=$1", [w.runId]);
+      return db.query(
+        `select clara._seal_report_artifact_core($1,$2,$3,'draft_watermarked','pdf',$4,4096,$5::jsonb,null,$6)`,
+        [world.firms.A, owner, w.runId, sha, JSON.stringify(manifest), `stranded-${sha.slice(0, 8)}`]);
+    }));
+    assertRefusal(stranded, "CLR42", "dataset_not_sealed", "a run that says sealed with no dataset");
+    assert.equal((await rootQuery(
+      "select count(*)::int n from clara.report_datasets where report_run_id=$1", [w.runId])).rows[0].n, 1,
+      "and the rolled-back transaction left the real dataset in place");
+
+    // (c) Approval before any pre-sign exists. Reachable through the granted door, so it is
+    // driven through it. The approver is the firm OWNER, who holds key 2 without a grant, so the
+    // capability floor and the state check both pass and the MISSING ARTIFACT is what refuses --
+    // the segregation wall sits further down the body and never gets a say here.
+    const early = await caught(() => approveIssue(owner, { runId: w.runId, expectedSha256: sha }));
+    assertRefusal(early, "CLR42", "pre_sign_artifact_absent", "approval before any pre-sign");
+    assert.equal((await rootQuery("select state from clara.report_runs where id=$1", [w.runId])).rows[0].state,
+      "dataset_sealed", "the refused approval moved nothing");
   });
 }

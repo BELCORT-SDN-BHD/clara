@@ -5,7 +5,7 @@
 // how the opposite failure hides (matrix A34's whole point).
 
 import {
-  assert, randomUUID, rootQuery, roleQuery, withActor, ROLES, PG, caught,
+  assert, randomUUID, rootQuery, roleQuery, withActor, ROLES, PG, caught, reasonOf, opk,
   freshActiveClient, setupCloseCoa,
   publishHouseStyle, publishTemplate, layoutAst,
   EPSILON_RELATIONS, EPSILON_ENTRYPOINTS,
@@ -40,19 +40,25 @@ export async function registerGrantsPhase(t, world) {
                        and p.polroles=array['clara_fn_owner'::regrole]::oid[]) as owner_policy,
               exists(select 1 from pg_policy p where p.polrelid=c.oid
                        and p.polroles=array['clara_authenticated'::regrole]::oid[]) as human_policy,
+              -- tgenabled='O' is load-bearing, not decoration: a DISABLED trigger is a catalog
+              -- row that enforces nothing, and counting catalog rows would call it hardened.
               exists(select 1 from pg_trigger t where t.tgrelid=c.oid and not t.tgisinternal
-                       and t.tgname like '%\\_no\\_truncate') as no_truncate,
+                       and t.tgenabled='O' and t.tgname like '%\\_no\\_truncate') as no_truncate,
               exists(select 1 from pg_trigger t where t.tgrelid=c.oid and not t.tgisinternal
+                       and t.tgenabled='O'
                        and (t.tgname like '%\\_append\\_only' or t.tgname like '%\\_publication\\_freeze'
-                            or t.tgname like '%\\_lifecycle')) as immutable
+                            or t.tgname like '%\\_lifecycle')) as immutable,
+              (select count(*)::int from pg_trigger t where t.tgrelid=c.oid and not t.tgisinternal
+                and t.tgenabled<>'O') as disabled_triggers
          from pg_class c join pg_namespace s on s.oid=c.relnamespace
         where s.nspname='clara' and c.relkind='r' and c.relname=any($1) order by c.relname`,
       [EPSILON_RELATIONS])).rows;
     assert.equal(rows.length, EPSILON_RELATIONS.length, "every epsilon relation is present");
     for (const row of rows) {
       assert.deepEqual(
-        [row.forced, row.owner_policy, row.human_policy, row.no_truncate, row.immutable],
-        [true, true, true, true, true], `clara.${row.relname} is fully hardened`);
+        [row.forced, row.owner_policy, row.human_policy, row.no_truncate, row.immutable,
+          row.disabled_triggers],
+        [true, true, true, true, true, 0], `clara.${row.relname} is fully hardened`);
     }
     const writeGrants = (await rootQuery(
       `select table_name, grantee, privilege_type from information_schema.table_privileges
@@ -86,9 +92,17 @@ export async function registerGrantsPhase(t, world) {
         db.query(`select count(*)::int n from clara.${relation} where firm_id=$1`, [world.firms.A]));
       assert.equal(seen.rows[0].n, 0,
         `firm B reads zero of firm A's clara.${relation} rows`);
+      // The positive half, per table, measured against the truth. `n >= 0` was the shape this
+      // used to have, and a deny-all human policy on all thirteen tables would have satisfied it
+      // -- the isolation would have read perfect while the product was unusable. Comparing the
+      // human's count to root's count for the same firm is the assertion that can actually fail.
       const own = await withActor({ role: ROLES.authenticated, jwtSub: owner }, (db) =>
         db.query(`select count(*)::int n from clara.${relation} where firm_id=$1`, [world.firms.A]));
-      assert.ok(own.rows[0].n >= 0);
+      const truth = (await rootQuery(
+        `select count(*)::int n from clara.${relation} where firm_id=$1`, [world.firms.A])).rows[0].n;
+      assert.ok(truth > 0, `firm A actually holds clara.${relation} rows, so the comparison means something`);
+      assert.equal(own.rows[0].n, truth,
+        `firm A's own human sees every one of its clara.${relation} rows`);
     }
     // The 13 tables above are every epsilon table that CARRIES a firm. The remaining 8 are the
     // product-curated ones whose firm_id is CHECK-constrained to null; they are global by
@@ -266,17 +280,72 @@ export async function registerGrantsPhase(t, world) {
       rootQuery(`select prosrc from pg_proc
         where oid='clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)'::regprocedure`),
     ]);
+    // The SPLIT is a structural claim about which body holds what, so it is read from the bodies.
     for (const check of ["client_not_in_firm", "report_template_version_not_in_firm",
       "_validate_layout_ast_v1", "_reserve_op"]) {
-      assert.ok(core.rows[0].prosrc.includes(check), `the core still performs ${check}`);
       assert.ok(!wrapper.rows[0].prosrc.includes(check),
         `the wrapper does NOT re-perform ${check} -- one drafting rule, not two`);
     }
     assert.ok(wrapper.rows[0].prosrc.includes("_human_ctx"), "the wrapper is the human door");
     assert.ok(!core.rows[0].prosrc.includes("_human_ctx"),
       "the core never touches a JWT -- that is what makes the wake lane able to call it");
-    assert.ok(core.rows[0].prosrc.includes("p_obo") && core.rows[0].prosrc.includes("p_wake_kind"),
-      "and the audit row carries the CALLER's lane, so a wake draft is distinguishable from a human one");
+
+    // But whether the core still ENFORCES those four is a claim about behaviour, and a body can
+    // keep every one of those tokens in a comment or in dead code. So each is driven through the
+    // core itself, JWT-less, exactly as lane eta's wake channel will reach it.
+    const base = await buildEpsilonWorld(world, { tag: "core-behaviour", reportClass: "management", seal: false });
+    const foreignClient = await freshActiveClient(dave, `eps-core-foreign-${randomUUID().slice(0, 6)}`);
+    const callCore = (args) => rootQuery(
+      `select clara._draft_report_spec_core($1,$2,null,null,$3,$4,$5,$6,'en','{}'::jsonb,'{}'::jsonb,
+                                            $7::jsonb,'2026-01-01',$8) r`,
+      [owner, world.firms.A, args.client ?? base.client, args.specKey ?? `core-${randomUUID().slice(0, 6)}`,
+        "Core behaviour", args.templateVersionId ?? base.template.report_template_version_id,
+        JSON.stringify(args.layout ?? base.layout), args.opKey ?? opk("eps-core")]);
+
+    const crossFirm = await caught(() => callCore({ client: foreignClient }));
+    assert.equal(crossFirm?.code, "CLR11", `client binding: ${crossFirm?.message}`);
+    assert.equal(reasonOf(crossFirm), "client_not_in_firm",
+      "the core binds the client to the firm it was HANDED, not to a JWT it never reads");
+
+    const foreignTemplate = await caught(() => callCore({ templateVersionId: randomUUID() }));
+    assert.equal(foreignTemplate?.code, "CLR11", `template lookup: ${foreignTemplate?.message}`);
+    assert.equal(reasonOf(foreignTemplate), "report_template_version_not_in_firm",
+      "the core looks the template version up rather than trusting the id it was given");
+
+    const smuggled = await caught(() => callCore({
+      layout: { ast: "clara.layout/v1", sections: [{ section_key: "summary", blocks: [
+        { node: "text", value: 125_000 }] }] } }));
+    assert.equal(smuggled?.code, "CLR10", `layout validation: ${smuggled?.message}`);
+    assert.equal(reasonOf(smuggled), "numeric_literal_forbidden",
+      "the core actually RUNS the layout validator -- the wake lane gets the same E-R8 floor");
+
+    // Reservation, proven the only way it can be: the same key twice replays instead of drafting
+    // twice, and the same key with different arguments refuses.
+    const opKey = opk("eps-core-replay");
+    const specKey = `core-replay-${randomUUID().slice(0, 6)}`;
+    const first = (await callCore({ opKey, specKey })).rows[0].r;
+    assert.ok(first.report_spec_version_id, "the first call drafts");
+    const replay = (await callCore({ opKey, specKey })).rows[0].r;
+    assert.equal(replay.report_spec_version_id, first.report_spec_version_id,
+      "the same op key replays its receipt rather than minting a second version");
+    const reused = await caught(() => callCore({ opKey, specKey: `different-${randomUUID().slice(0, 6)}` }));
+    assert.equal(reused?.code, "CLR10", reused?.message);
+    assert.match(reused?.message ?? "", /op_key reused with different args/,
+      "and the same key with different arguments refuses rather than aliasing");
+    assert.equal((await rootQuery(
+      "select count(*)::int n from clara.report_spec_versions where report_spec_id=$1",
+      [first.report_spec_id])).rows[0].n, 1,
+      "one reservation, one version -- the replay drafted nothing");
+
+    // The audit row is read from the LOG, not from the body that writes it, and the wake columns
+    // are null here because this call came through the human-shaped path -- which is what makes a
+    // wake draft distinguishable from a human one at all.
+    const audited = (await rootQuery(
+      `select count(*)::int n, bool_and(on_behalf_of is null and via_wake_kind is null) human_lane
+         from clara.audit_log where fn='draft_report_spec' and args->>'version_id'=$1`,
+      [first.report_spec_version_id])).rows[0];
+    assert.equal(audited.n, 1, "the core audits its own act exactly once");
+    assert.equal(audited.human_lane, true, "and records the lane it was called through");
   });
 
   await t.test("the exact public signatures are the ones the design named", async () => {

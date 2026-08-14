@@ -98,6 +98,20 @@ export async function call(sub, fn, args, casts = {}) {
   return r.rows[0].r;
 }
 
+// A REFUSAL IS A PAIR, and both halves are load-bearing. The SQLSTATE is what the estate routes
+// on -- a CLR10 where CLR42 was ruled reaches a different branch in every consumer -- and the
+// reason token is what a caller reads to know what to fix. Asserting one and using the other only
+// as a failure message lets the unasserted half ship wrong, green. Returns the detail object so a
+// caller can go on to assert the payload.
+export function assertRefusal(error, code, reason, label = "") {
+  const where = label ? `${label}: ` : "";
+  assert.ok(error, `${where}the call refused rather than succeeding`);
+  assert.equal(error.code, code, `${where}SQLSTATE -- ${error?.message}`);
+  assert.equal(reasonOf(error), reason, `${where}reason token -- ${error?.message}`);
+  assert.ok((error.message ?? "").trim().length > 0, `${where}the refusal carries a message a human can read`);
+  return errorDetail(error);
+}
+
 export const sha64 = (seed) =>
   [...`${seed}`].reduce((h, ch) => (h * 33 + ch.charCodeAt(0)) >>> 0, 5381)
     .toString(16).padStart(8, "0").repeat(8).slice(0, 64);
@@ -257,7 +271,6 @@ export async function buildManifest({ runId, kind, sha256, presignSha256 = null,
     extracted_text_sha256: sha64("text"),
     extraction_tool: "pdftotext@24.02.0",
     uncertified: run.uncertified,
-    ...overrides,
   };
   if (kind === "pre_sign" || kind === "signed_original") {
     base.pre_sign_pdf_sha256 = presignSha256 ?? sha256;
@@ -266,9 +279,20 @@ export async function buildManifest({ runId, kind, sha256, presignSha256 = null,
     base.signed_original_pdf_sha256 = sha256;
     base.signature_evidence = { signer: "owner", method: "wet-ink-scan" };
   }
+  // Overrides LAST, so a caller can reshape a kind-specific key too. Spreading them earlier
+  // meant the signed-original block silently overwrote any override of its own three keys --
+  // and a test whose input is quietly repaired proves whatever the repair proves.
+  Object.assign(base, overrides);
   for (const key of omit) delete base[key];
   if (omit.includes("render_manifest_sha256")) return base;
+  // Hash the manifest WITHOUT its own hash key, exactly as the seal does. Deleting it here is
+  // what lets a caller override that key deliberately (to null, or to a tampered value) and
+  // still have every other key hash correctly -- otherwise the self-hash arm would be the only
+  // thing such a manifest could ever fail on.
+  const explicit = Object.prototype.hasOwnProperty.call(overrides, "render_manifest_sha256");
+  const payload = { ...base };
+  delete payload.render_manifest_sha256;
   const digest = (await rootQuery("select encode(clara._hash($1::jsonb),'hex') h",
-    [JSON.stringify(base)])).rows[0].h;
-  return { ...base, render_manifest_sha256: digest };
+    [JSON.stringify(payload)])).rows[0].h;
+  return { ...base, render_manifest_sha256: explicit ? overrides.render_manifest_sha256 : digest };
 }
