@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "evaluators": {
+    "clara.evaluate_fs_pack_v1": {
+      "sha256": "69086e62a2c9f52989f9bedb821343dca26e4dcf74cb242f05dc56ef30b8308b",
+      "migration": "packages/db/migrations/UNNUMBERED_wave_e_delta_metrics_behavior.sql",
+      "note": "Wave E lane delta, the FS pack driver. UNDEPLOYED at authoring: its clara.evaluator_versions row is minted with deployed=false and the deploy ceremony flips it (design 4.2 point 2, the legitimate _v2 case). Do not set deployed:true here by hand -- --lock-deployed is the ceremony act that earns it."
+    },
+    "clara.evaluate_metric_v1": {
+      "sha256": "2de7665d627875c1e575970b32363b57f4ef376f99c0525aade798f54ce1f2d2",
+      "migration": "packages/db/migrations/UNNUMBERED_wave_e_delta_metrics_behavior.sql",
+      "note": "Wave E lane delta, the typed metric evaluator. UNDEPLOYED at authoring -- see the fs_pack note. The DB half (clara.verify_evaluator_freeze, run by migrate.mjs between every migration body and its commit) compares only rows already flagged deployed, so an undeployed row is correctly invisible to it until the ceremony."
+    },
+    "clara.evaluate_sst_watch": {
+      "sha256": "57e644849be142435c0331a953aaa98cfa7282d0dfdbb6fc818382cd0b80440c",
+      "migration": "packages/db/migrations/0016_a21_compliance_watch.sql",
+      "deployed": true,
+      "note": "Wave A2.1 SST compliance-watch evaluator. LIVE on the project (0016 is applied), so its body is immutable vs origin/main forever. It predates clara.evaluator_versions and has no registry row; the DB-side verifier therefore says nothing about it and THIS manifest is its only freeze. That asymmetry is recorded rather than papered over: adding a retrospective registry row would be a claim about a deploy nobody made."
+    },
+    "clara.evaluate_sst_watches_all": {
+      "sha256": "2aead0a6e62e9cfbfcbb50e173d61721356be0da602db0cc40f83372e743f569",
+      "migration": "packages/db/migrations/0016_a21_compliance_watch.sql",
+      "deployed": true,
+      "note": "The all-clients driver beside evaluate_sst_watch; same LIVE status and the same recorded asymmetry."
+    }
+  }
+}

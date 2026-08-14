@@ -490,8 +490,18 @@ now EXPIRED on both sides — observed read-only, never answered) · §3's worke
 
 ### Verify cadence (a backup you never restored is not a backup)
 
-- **Monthly-light:** decrypt the latest bundle + restore the DB dumps into a **local
-  throwaway PG17** (scratchpad pg17 bins, port 55432) + a subset of `dr-verify` (schema
-  presence + the manifest floor + the AP gate).
-- **Quarterly-full:** the STRICT fresh-project drill (§5b / `DR-full-drill.md` §3) against a
-  bundle decrypted from R2 — canary + AP gate (`135093821` cents) REQUIRED.
+- **Monthly-light:** decrypt the latest bundle + restore the DB dumps into a **local throwaway
+  PG17** (scratchpad pg17 bins, port 55432) + a subset of `dr-verify` (schema presence + the
+  manifest floor + the AP gate) + **§10: re-render the most recent sealed `pre_sign` artifact and
+  compare sha256**.
+- **Quarterly-full:** the STRICT fresh-project drill (§5b / `DR-full-drill.md` §3) against a bundle
+  decrypted from R2 — canary + AP gate (`135093821` cents) REQUIRED + **§10: re-render one artifact
+  per pinned renderer image digest still referenced by a retained artifact, plus a signed-original
+  retrieval + hash check**.
+
+## 10. Sealed-report reproducibility (Wave E lane ζ)
+
+**A sealed artifact you have never re-rendered from its pinned dataset + evaluator + renderer digest
+is not proven reproducible.** The drill, the deploy commands of record, and the two ceremony steps
+that are NOT inherited (the storage role's `reports/` prefix; the Supavisor headroom re-read) live
+in **`docs/ops/DR-render.md`** — the `DR-full-drill.md` split precedent.

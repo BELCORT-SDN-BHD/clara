@@ -1,0 +1,46 @@
+# fly.toml — clara-render (Wave E lane ζ; design wave-e-design-reporting-part2.md §10).
+#
+# A SEPARATE Fly app from clara-runtime. That separation is not tidiness: clara-runtime is
+# explicitly NON-HA (a single-leader advisory lock), and a font-loading, memory-spiky renderer
+# sharing its machine would put the durable engine at risk of the renderer's worst minute.
+# This file drives the IMAGE BUILD ONLY.
+#
+# DO NOT run a plain `fly deploy`: with no services it still creates AND STARTS a machine (plus a
+# stopped standby) — i.e. it would fire a live render run on every deploy. Build-only + push (from
+# the REPO ROOT, --dockerfile explicit), then create the machine from the pushed image with
+# `fly machine run`. The exact commands live in ONE place — docs/ops/DR.md §10 — deliberately not
+# restated here (a stale copy of a deploy command in this file is how live-run accidents happen).
+#
+# `fly machine run` DISREGARDS fly.toml configuration (env/files/vm — it reads only the app name),
+# so there is NO [env] section here: image-intrinsic env lives in the Dockerfile, run-specific env
+# and the secrets ride as `-e` / `fly secrets` at machine-create time. That flag set IS the
+# runtime contract.
+app = "clara-render"
+
+# Singapore — same city as the Supabase project (ap-southeast-1). The worker opens a short-lived
+# session per job through the pooler, so latency is paid once per job rather than amortised over a
+# pool; being in-region is what keeps that cheap.
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# NO [http_service] and NO [[services]]: this is a BATCH job, not a server. It has no port, serves
+# no traffic, and accepts NO INBOUND CONNECTION AT ALL — which is exactly what "offline at render
+# time" requires (§10). It boots, drains the queue, and exits. Liveness is a dead-man's switch,
+# not an HTTP check.
+
+# Sizing intent (informational — the machine is created by `fly machine run`, which ignores this
+# section too; pass --vm-size shared-cpu-1x --vm-memory 1024). The job is CPU-bound in bursts
+# (typesetting + PDF assembly) and holds one PDF plus its extracted text in memory; worker
+# concurrency is capped at 1 in v1, so one machine is one render at a time.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+# SCHEDULING: set at machine-create time (Fly has no fly.toml `schedule` key), and it is the
+# FALLBACK path, not the primary one. The primary trigger is the runtime leader's dispatch sweep
+# (packages/runtime/lib/reconciler-render.mjs), which starts a machine when a claimable job
+# exists. Fly's own schedule granularity is coarse and approximate (hourly at best), which is
+# precisely why it is the fallback: a leader outage then DELAYS a render rather than stranding it
+# (acceptance cell A33, arm ii). Exit 0 → stopped until the next cycle.

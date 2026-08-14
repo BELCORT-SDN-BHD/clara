@@ -22,6 +22,12 @@ import {
 import { makeRuntimeClient } from "./pools.mjs";
 import { drainCycle } from "./drain.mjs";
 import { runReconcilerSweep } from "./reconciler.mjs";
+// Wave E lane ζ. Wired HERE rather than inside runReconcilerSweep for the repo's own module-size
+// budget — reconciler.mjs already stands 26 lines over the 500-line file discipline, which is the
+// same pressure that split reconciler-sst / -lint / -fa / -adjustments out of it. The two render
+// belts run on different cadences anyway (dispatch every fast cycle, enqueue daily), and this is
+// where every other cadence decision is already made.
+import { reconcileRenderDispatch, reconcileRenderEnqueue } from "./reconciler-render.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
@@ -58,6 +64,13 @@ const FA_RECONCILE_MS = Number.isFinite(FA_RECONCILE_MS_ENV) && FA_RECONCILE_MS_
 // decide whether there is anything to do.
 const ADJ_RECONCILE_MS_ENV = Number(process.env.CLARA_ADJ_RECONCILE_MS);
 const ADJ_RECONCILE_MS = Number.isFinite(ADJ_RECONCILE_MS_ENV) && ADJ_RECONCILE_MS_ENV > 0 ? ADJ_RECONCILE_MS_ENV : 24 * 3600000;
+// Finite-guarded like every cadence above — a NaN here would make the due-check permanently false
+// and silently DISABLE the Wave E lane-ζ render-enqueue fallback, which is the belt that keeps a
+// sealed run from sitting without a render job if lane ε's seal has not yet been repointed to
+// clara.enqueue_render_job. Gates the DAILY cadence only; reconciler-render.mjs feature-detects
+// the migration itself.
+const RENDER_ENQUEUE_MS_ENV = Number(process.env.CLARA_RENDER_ENQUEUE_MS);
+const RENDER_ENQUEUE_MS = Number.isFinite(RENDER_ENQUEUE_MS_ENV) && RENDER_ENQUEUE_MS_ENV > 0 ? RENDER_ENQUEUE_MS_ENV : 24 * 3600000;
 
 /** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which
@@ -103,6 +116,21 @@ export function adjustmentRunDue(lastRunMs, nowMs, intervalMs = ADJ_RECONCILE_MS
   return nowMs - lastRunMs >= intervalMs;
 }
 
+/** True iff the daily render-ENQUEUE fallback is due (pure — the same since-last-run guard as its
+ *  five siblings; lastRunMs=0 runs it on the first cycle after boot, which is safe because
+ *  reconciler-render.mjs feature-detects the ζ migration itself and clara.enqueue_missing_render_jobs
+ *  is idempotent — a run whose job already exists conflicts on the idempotency key and no-ops).
+ *  Wave E lane ζ, design part2 §10. Gates CADENCE only, never the migration's presence.
+ *
+ *  NB: the render DISPATCH half is NOT on this daily cadence and deliberately so — it runs every
+ *  fast cycle, because dispatch latency IS the feature (A33 arm (i) asks for a machine started
+ *  "within the leader's stated cadence"). It cannot storm: clara.render_dispatch_begin stamps an
+ *  attempt and applies its own cooldown in the database, so the Fly API is touched at most once
+ *  per cooldown per job however often this loop spins. */
+export function renderEnqueueDue(lastRunMs, nowMs, intervalMs = RENDER_ENQUEUE_MS) {
+  return nowMs - lastRunMs >= intervalMs;
+}
+
 /**
  * Start the leader loop. Returns { stop, done }. `onHalt` (default process.exit(2))
  * fires on a taxonomy HALT. Deps: { enqueueChatTurn, getRun, log }.
@@ -126,6 +154,7 @@ export function startLeaderLoop(deps) {
     let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
     let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0045 itself, so a pre-0045 boot is a cheap no-op)
+    let lastRenderEnqueueRun = 0; // 0 ⇒ first cycle after boot runs the ζ render-enqueue fallback (reconciler-render.mjs feature-detects the ζ migration itself, so a pre-ζ boot is a cheap no-op)
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;
@@ -164,6 +193,22 @@ export function startLeaderLoop(deps) {
             if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
             if (faDue && swept.faOk) lastFaRun = Date.now(); // a failed FA sweep retries next cycle
             if (adjDue && swept.adjOk) lastAdjRun = Date.now(); // a failed adjustment sweep retries next cycle
+            // Wave E lane ζ. Both belts isolate their own errors and return flags rather than
+            // throwing, so neither can abort this cycle the way the section-I zombie did — but
+            // they are ALSO wrapped, because "a sweeper that cannot fail" is a claim, and the
+            // reconciler's own history is a list of times that claim was wrong.
+            try {
+              // Dispatch runs EVERY cycle (latency is the feature); its own DB-side cooldown, not
+              // this loop, bounds how often the Fly API is touched. Its result gates no cadence,
+              // so it is not carried — the belt logs its own outcome and records it on the rows.
+              await reconcileRenderDispatch(client, { log });
+              if (renderEnqueueDue(lastRenderEnqueueRun, Date.now())) {
+                const enqueued = await reconcileRenderEnqueue(client, { log });
+                if (enqueued.renderEnqueueOk) lastRenderEnqueueRun = Date.now(); // a failed belt retries next cycle
+              }
+            } catch (err) {
+              log(`[reconcile] render belt error: ${err?.message ?? err}`); // transient — retry next cycle
+            }
             // NB: the 'world' heartbeat is NOT written here (S4-AB7b / ND5) — relay
             // leadership must not gate /ready. The engine heartbeat is a dedicated
             // task in the supervisor; the leader only beats 'reconciler' (via the sweep).

@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - "!packages/backup"
+  - "!packages/reporting-render"
   - apps/*
 # NOTE: spike/ is intentionally NOT a workspace member. It is the frozen
 # Slice-0 runtime spike (its own lockfile + node_modules) and must not be
@@ -15,3 +16,13 @@ packages:
 # regenerating pnpm-lock.yaml: a new workspace importer with no lockfile entry
 # would otherwise fail the frozen install. Its own deps are installed INSIDE its
 # Docker image from packages/backup/package.json. Mirrors the spike rationale.
+#
+# NOTE: packages/reporting-render (the clara-render deterministic report worker,
+# Wave E lane ζ / design part2 §10) is EXCLUDED for exactly the same two reasons,
+# and the second one is load-bearing rather than tidy: adding a workspace importer
+# with no pnpm-lock.yaml entry fails `pnpm install --frozen-lockfile`, which is
+# every CI job's first step. It is a separately-imaged batch app deployed as its
+# own Fly app, never installed into @clara/runtime, and its deps are installed
+# INSIDE its Docker image from packages/reporting-render/package.json. Its own
+# lint and unit battery are run by CI as explicit steps (`.github/workflows/ci.yml`),
+# not through `pnpm -r`, precisely because `-r` cannot see a non-member.

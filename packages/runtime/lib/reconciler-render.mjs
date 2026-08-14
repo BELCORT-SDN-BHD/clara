@@ -1,0 +1,223 @@
+// The RENDER DISPATCH sweep (Wave E lane ζ; design part2 §10). Split out of reconciler.mjs like
+// reconciler-sst / reconciler-lint / reconciler-fa (module-size budget), and wired into
+// runReconcilerSweep behind the leader's flags.
+//
+// ===========================================================================================
+// THIS IS THE ONE PLACE LANE ζ TOUCHES RUNTIME JUDGEMENT LOGIC, AND IT CARRIES A LAW-1
+// INDEPENDENT REVIEW (design §10, §12's lane table, acceptance cell A33).
+// ===========================================================================================
+//
+// WHAT IT DECIDES, AND WHAT IT DELIBERATELY DOES NOT. It decides ONE thing: whether to start a
+// render machine right now. It does not decide what to render, whether a render is allowed,
+// which job is next, or whether a produced document may be sealed — those are DB decisions
+// (clara.render_dispatch_begin picks the due jobs; the worker's own gates and epsilon's seal gate
+// decide the rest). The dispatch is a doorbell, not a door.
+//
+// DUE ARITHMETIC IS DB-OWNED (the reconciler-fa.mjs law, verbatim). The leader asks
+// clara.render_dispatch_begin and is TOLD which jobs are due; it never re-derives due-ness from
+// timestamps client-side. The stamp happens inside that call, BEFORE the Fly API is touched, so a
+// persistently failing dispatch backs off on the cooldown instead of storming every ~2s cycle.
+//
+// THE THREE ARMS OF A33, AND WHERE EACH IS ANSWERED.
+//   (i)   dispatch within cadence      -> here, plus clara.render_dispatch_begin's cooldown.
+//   (ii)  leader outage -> DELAYED, never STRANDED. Nothing in this module can lose a job: the
+//         queue row stays `claimable` whatever happens here, the Fly SCHEDULED machine wakes on
+//         its own coarse cadence and claims it, and the wait the job actually suffered is
+//         recorded on the row by clara.claim_render_job. A leader that never runs costs latency.
+//   (iii) duplicate dispatch -> ONE artifact. Not this module's doing and deliberately so: two
+//         machines racing both call clara.claim_render_job, which hands the job to exactly one
+//         (for update skip locked); even if both somehow rendered, the storage key is the content
+//         address, the PUT is x-upsert:false, and clara.complete_render_job reconciles by
+//         READING the sealed artifact's hash. Dispatch is allowed to be sloppy because nothing
+//         downstream trusts it to be careful.
+//
+// FEATURE-DETECT PER CYCLE, EXACT SIGNATURE (the reconciler-fa.mjs / wiki-projection R5 idiom).
+// The runtime image ships before the ζ migration, so the belt boots dormant and lights on the
+// very next cycle after the migration applies, with no restart. to_regprocedure is a plain
+// catalog read, so the guard never fails for a privilege reason.
+//
+// SECRETS COME FROM THE ENVIRONMENT, NEVER ARGV AND NEVER CODE. The Fly API token is read from
+// process.env at call time and is never logged, never interpolated into a message, and never
+// passed on a command line.
+
+const DISPATCH_COOLDOWN = process.env.CLARA_RENDER_DISPATCH_COOLDOWN || "10 minutes";
+const DISPATCH_MAX = Number(process.env.CLARA_RENDER_DISPATCH_MAX || 5);
+const FLY_API = process.env.CLARA_RENDER_FLY_API || "https://api.machines.dev/v1";
+const FLY_TIMEOUT_MS = Number(process.env.CLARA_RENDER_FLY_TIMEOUT_MS || 15000);
+
+/** True iff BOTH dispatch verbs exist with their exact signatures. */
+async function hasDispatchSurface(client) {
+  const r = await client.query(
+    `select to_regprocedure('clara.render_dispatch_begin(interval,int)') is not null
+        and to_regprocedure('clara.render_dispatch_record(uuid[],boolean,jsonb)') is not null as surface`,
+  );
+  return r.rows[0]?.surface === true;
+}
+
+/**
+ * The dispatch configuration, read POSITIVELY. Returns null when the deploy has not been wired,
+ * which is a LOUD no-op rather than a failed dispatch: an unwired leader must not burn a cooldown
+ * per cycle stamping attempts it was never able to make. The Fly scheduled machine still picks
+ * the work up on its own cadence, so unwired means slower, never stranded.
+ */
+export function readDispatchConfig(env = process.env) {
+  const token = env.CLARA_RENDER_FLY_API_TOKEN;
+  const app = env.CLARA_RENDER_FLY_APP;
+  const machineId = env.CLARA_RENDER_FLY_MACHINE_ID || null;
+  const image = env.CLARA_RENDER_IMAGE_REF || null;
+  const region = env.CLARA_RENDER_FLY_REGION || "sin";
+  const missing = [];
+  if (!token) missing.push("CLARA_RENDER_FLY_API_TOKEN");
+  if (!app) missing.push("CLARA_RENDER_FLY_APP");
+  // One of the two start modes must be configured: start a pre-created machine, or create one
+  // from a PINNED image reference. Neither present is unwired.
+  if (!machineId && !image) missing.push("CLARA_RENDER_FLY_MACHINE_ID or CLARA_RENDER_IMAGE_REF");
+  if (missing.length > 0) return { configured: false, missing };
+  return { configured: true, token, app, machineId, image, region };
+}
+
+/**
+ * Start a render machine. Two modes, both idempotent-ish in the direction that matters: starting
+ * an already-running machine, or creating a second one, costs money and time but can never
+ * produce a second artifact (see arm (iii) above).
+ */
+async function startRenderMachine(cfg, log) {
+  const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
+  const signal = AbortSignal.timeout(FLY_TIMEOUT_MS);
+  if (cfg.machineId) {
+    const res = await fetch(`${FLY_API}/apps/${encodeURIComponent(cfg.app)}/machines/${encodeURIComponent(cfg.machineId)}/start`,
+      { method: "POST", headers, signal });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      // The BODY is carried, not just the status (the storage.mjs lesson): a 4xx from Fly can be
+      // "already started", "not found" or "payment required", and those need different humans.
+      throw new Error(`fly machine start failed (${res.status}) ${body.slice(0, 200)}`);
+    }
+    log(`[reconcile] render dispatch started machine ${cfg.machineId}`);
+    return { mode: "start", machine_id: cfg.machineId };
+  }
+  const res = await fetch(`${FLY_API}/apps/${encodeURIComponent(cfg.app)}/machines`, {
+    method: "POST",
+    headers,
+    signal,
+    body: JSON.stringify({
+      region: cfg.region,
+      config: {
+        image: cfg.image,
+        auto_destroy: true,
+        restart: { policy: "no" },
+        guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`fly machine create failed (${res.status}) ${body.slice(0, 200)}`);
+  }
+  const created = await res.json().catch(() => ({}));
+  log(`[reconcile] render dispatch created machine ${created?.id ?? "(id absent)"}`);
+  return { mode: "create", machine_id: created?.id ?? null };
+}
+
+/**
+ * One dispatch pass.
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ */
+export async function reconcileRenderDispatch(client, opts = {}) {
+  const log = opts.log ?? (() => {});
+  const start = opts.startRenderMachine ?? startRenderMachine; // injectable for the unit battery
+  const env = opts.env ?? process.env;
+
+  // The feature-detect is ISOLATED like everything else in this belt. A catalog read failing is
+  // a connection problem, not a dormant surface, and the two must not report the same thing: a
+  // thrown probe used to propagate out of here into the leader's cycle, which is the shape of the
+  // section-I zombie reconciler.mjs documents at length.
+  let surface;
+  try {
+    surface = await hasDispatchSurface(client);
+  } catch (err) {
+    log(`[reconcile] render dispatch surface probe error: ${err?.message ?? err}`);
+    return { renderOk: false, renderDue: 0, renderDispatched: 0 };
+  }
+  if (!surface) {
+    return { renderOk: true, renderDue: 0, renderDispatched: 0, renderDormant: true };
+  }
+
+  const cfg = readDispatchConfig(env);
+  if (!cfg.configured) {
+    // LOUD, EVERY CYCLE, DELIBERATELY. The leader does not log its sweep result, so a
+    // de-duplicated line would turn a permanently unwired dispatch into silence after its first
+    // occurrence — the same argument reconciler.mjs makes for its cancel-edge logging. Nothing is
+    // stamped and nothing is lost; the scheduled machine remains the fallback.
+    log(`[reconcile] render dispatch UNWIRED — missing ${cfg.missing.join(", ")}; renders fall back to the scheduled wake (delayed, not stranded)`);
+    return { renderOk: false, renderDue: 0, renderDispatched: 0, renderUnconfigured: true };
+  }
+
+  let due;
+  try {
+    due = (await client.query("select clara.render_dispatch_begin($1::interval, $2::int) as r",
+      [DISPATCH_COOLDOWN, DISPATCH_MAX])).rows[0]?.r ?? {};
+  } catch (err) {
+    log(`[reconcile] render dispatch due-read error: ${err?.message ?? err}`);
+    return { renderOk: false, renderDue: 0, renderDispatched: 0 };
+  }
+
+  const jobIds = Array.isArray(due?.job_ids) ? due.job_ids : [];
+  if (jobIds.length === 0) {
+    return { renderOk: true, renderDue: 0, renderDispatched: 0 };
+  }
+  // The observed wait is reported on every dispatch, not only on a slow one: A33 arm (ii) asks
+  // for the delay to be recorded, and a number you only print when it looks bad is a number
+  // nobody has a baseline for.
+  log(`[reconcile] render dispatch due=${jobIds.length} oldest_wait_seconds=${due?.oldest_wait_seconds ?? "?"}`);
+
+  let outcome;
+  try {
+    const started = await start(cfg, log);
+    outcome = { ok: true, detail: started };
+  } catch (err) {
+    // The failure is RECORDED on the rows, not merely logged: "no render appeared" and "we could
+    // not start the renderer" are different facts and the second is the actionable one.
+    outcome = { ok: false, detail: { error: String(err?.message ?? err) } };
+    log(`[reconcile] render dispatch start failed: ${outcome.detail.error}`);
+  }
+  try {
+    await client.query("select clara.render_dispatch_record($1::uuid[], $2::boolean, $3::jsonb) as r",
+      [jobIds, outcome.ok, JSON.stringify(outcome.detail)]);
+  } catch (err) {
+    log(`[reconcile] render dispatch receipt error: ${err?.message ?? err}`);
+  }
+  return {
+    renderOk: outcome.ok,
+    renderDue: jobIds.length,
+    renderDispatched: outcome.ok ? jobIds.length : 0,
+    renderOldestWaitSeconds: Number(due?.oldest_wait_seconds ?? 0),
+  };
+}
+
+/**
+ * The daily belt half: enqueue a render for any sealed run that has neither an artifact nor a
+ * job. This is the fallback for lane ε's seal not yet carrying its one-line enqueue — a missing
+ * call DELAYS a render rather than losing it. Feature-detected on its own signature, same idiom.
+ */
+export async function reconcileRenderEnqueue(client, opts = {}) {
+  const log = opts.log ?? (() => {});
+  const limit = Number(opts.limit ?? process.env.CLARA_RENDER_ENQUEUE_LIMIT ?? 25);
+  const has = await client.query(
+    "select to_regprocedure('clara.enqueue_missing_render_jobs(int)') is not null as surface");
+  if (has.rows[0]?.surface !== true) return { renderEnqueueOk: true, renderEnqueued: 0, renderEnqueueDormant: true };
+  try {
+    const r = (await client.query("select clara.enqueue_missing_render_jobs($1::int) as r", [limit])).rows[0]?.r ?? {};
+    const failed = Number(r?.failed ?? 0);
+    if (failed > 0) {
+      // Named, not counted-and-forgotten: the DB returns the per-run errors and they are the
+      // only thing that says WHICH run cannot be enqueued.
+      log(`[reconcile] render enqueue: ${failed} run(s) failed — ${JSON.stringify(r?.errors ?? [])}`);
+    }
+    log(`[reconcile] render enqueue examined=${r?.examined ?? 0} enqueued=${r?.enqueued ?? 0} failed=${failed}`);
+    return { renderEnqueueOk: true, renderEnqueued: Number(r?.enqueued ?? 0), renderEnqueueFailed: failed };
+  } catch (err) {
+    log(`[reconcile] render enqueue error: ${err?.message ?? err}`);
+    return { renderEnqueueOk: false, renderEnqueued: 0 };
+  }
+}
