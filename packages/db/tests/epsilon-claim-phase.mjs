@@ -500,6 +500,52 @@ export async function registerClaimPhase(t, world) {
       `an evaluation joining a run mid-seal must WAIT: ${addBlocked?.code} ${addBlocked?.message}`);
   });
 
+  await t.test("both epsilon writers hold the EVALUATOR'S key, proven by identity and by exclusion", async () => {
+    // "Reproduced verbatim" is a claim about SPELLING, and spelling is not identity (review law
+    // 3). Two locks that merely look alike exclude nothing, and the failure is silent: everything
+    // passes, forever, while the window stays open. So the key is proven twice over, and neither
+    // proof reads the migration text.
+    //
+    // The dataset seal needs this even more than the artifact seal, because it is the writer that
+    // FREEZES the population into a digest -- and it is the one arm the previous round left
+    // untested, which is exactly the shape a volunteered fix tends to have.
+    const w = await buildEpsilonWorld(world, { tag: "lock-identity", reportClass: "management", seal: false });
+    const expected = (await rootQuery(
+      "select hashtextextended($1::uuid::text || ':' || $2::uuid::text, 0) k",
+      [world.firms.A, w.runId])).rows[0].k;
+
+    // (1) IDENTITY, read from pg_locks rather than from either body: with the dataset seal's
+    // transaction open, the advisory lock the backend actually HOLDS must be the key delta's
+    // evaluator computes. A 64-bit advisory key is split across classid/objid.
+    let held; let evalBlocked;
+    const done = await caught(() => withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true },
+      async (a) => {
+        await a.query("select clara.seal_report_dataset($1::uuid, null, $2)",
+          [w.runId, `lock-identity-${w.runId.slice(0, 8)}`]);
+        held = (await a.query(
+          `select count(*)::int n from pg_locks
+            where locktype='advisory' and pid=pg_backend_pid()
+              and ((classid::bigint << 32) | objid::bigint) = $1::bigint`, [expected])).rows[0].n;
+        // (2) EXCLUSION, the instrument that cannot be fooled by arithmetic: an evaluation into
+        // this run must WAIT. If the keys differed this would sail straight through.
+        evalBlocked = await caught(() => withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true },
+          async (b) => {
+            await b.query("set local lock_timeout='700ms'");
+            return b.query("select clara.evaluate_metric_v1($1::uuid,$2::uuid,$3::uuid[],$4::uuid,$5::uuid)",
+              [w.client, w.definitionVersionId, [w.period.id], w.snapshotId, w.runId]);
+          }));
+        throw new Error("rollback the dataset seal");
+      }));
+    assert.match(done?.message ?? "", /rollback the dataset seal/);
+    assert.equal(held, 1,
+      "seal_report_dataset holds the evaluator's OWN key -- not a key of epsilon's that resembles it");
+    assert.equal(evalBlocked?.code, "55P03",
+      `and an evaluation into the same run waits on it: ${evalBlocked?.code} ${evalBlocked?.message}`);
+    assert.equal((await rootQuery(
+      "select state from clara.report_runs where id=$1", [w.runId])).rows[0].state, "drafting",
+      "the rolled-back seal left the run where it was");
+  });
+
   await t.test("the fail-closed branches nothing else reaches are proven to refuse", async () => {
     // EV-8 for the three arms no happy path can walk into. Each is set up inside a transaction
     // that always rolls back, with the walls that make the state unreachable lifted for the
