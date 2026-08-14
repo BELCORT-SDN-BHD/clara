@@ -1,0 +1,35 @@
+/* /reports -- sealed-artifact links + the snapshot list (Wave E lane theta),
+   a sibling of /rules and /close: plumbing-grade, no design system, no
+   animation. Shape + label on every state badge, never hue-only. */
+
+.page { font-family: system-ui, sans-serif; max-width: 1080px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; color: #1a1a1a; }
+.header { margin-bottom: 0.75rem; }
+.title { font-size: 1.25rem; margin: 0 0 0.5rem; }
+.tokenBar { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+.tokenBar .input { flex: 1; }
+.muted { color: #6b6b6b; font-size: 0.8rem; margin: 0.15rem 0; }
+.banner { background: #fbe9e7; border: 1px solid #e5b5ad; color: #7a2418; padding: 0.45rem 0.65rem; border-radius: 4px; font-size: 0.85rem; margin: 0.5rem 0; }
+.notice { background: #eef2fd; border: 1px solid #c2cdec; color: #2f4487; padding: 0.45rem 0.65rem; border-radius: 4px; font-size: 0.85rem; margin: 0.5rem 0; }
+
+.input { font: inherit; font-size: 0.85rem; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+.toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0 0.6rem; }
+.buttonSecondary { font: inherit; padding: 0.3rem 0.7rem; border: 1px solid #b9c2da; background: #eef2fd; color: #2f4487; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+.buttonSecondary:disabled { opacity: 0.5; cursor: default; }
+
+.section { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid #eee; }
+.sectionTitle { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: #6b6b6b; margin: 0.4rem 0 0.4rem; }
+
+.rowList { display: flex; flex-direction: column; gap: 0.4rem; }
+.row { border: 1px solid #b9c2da; background: #fbfcff; border-radius: 6px; padding: 0.5rem 0.7rem; font-size: 0.85rem; }
+.rowHead { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+.rowTitle { font-weight: 700; }
+.idChip { border: 1px solid #cdd5e8; background: #eef2fb; border-radius: 999px; padding: 0.05rem 0.5rem; font-size: 0.72rem; color: #2f4487; }
+.mono { font-family: ui-monospace, monospace; font-size: 0.74rem; color: #4d4d4d; word-break: break-all; }
+.rowMeta { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; }
+
+.band { display: inline-flex; align-items: center; gap: 0.28rem; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 3px; padding: 0.1rem 0.45rem; border: 1px solid transparent; }
+.bandCurrent { color: #1f5c33; background: #e2f4e8; border-color: #b7dcc4; }
+.bandStale { color: #6b4400; background: #f7eccf; border-color: #e2cf9a; }
+.bandUnknown { color: #555; background: #eee; border-color: #ccc; }
+.bandFlag { color: #7a2418; background: #fbe2dd; border-color: #e8b3a8; }
+.glyph { font-weight: 700; }
