@@ -17,6 +17,7 @@ import { chatTurn_v7 } from "./chatTurn.v7.js";
 import { chatTurn_v8 } from "./chatTurn.v8.js";
 import { chatTurn_v9 } from "./chatTurn.v9.js";
 import { chatTurn_v10 } from "./chatTurn.v10.js";
+import { chatTurn_v11 } from "./chatTurn.v11.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -37,7 +38,7 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v10,
+  chatTurn: chatTurn_v11,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   statementFacts: statementFacts_v1,
@@ -244,6 +245,24 @@ export const workflows = {
 // and hand doors do not consult that registry, so a parked filing stays codable by a human.
 //
 // The v6/v9 bodies stay frozen, built and EXPORTED so no parked run is stranded (policy (c)).
+//
+// WAVE E LANE eta (E-c, THE AD-HOC AUTHORING LANE; design part2 section 11) repointed chatTurn
+// v10->v11. v11 is ADDITIVE: five authoring tools (list_metric_catalog, compose_metric_preview,
+// save_metric_definition_draft, draft_report_spec, request_report_preview) and one appended prompt
+// paragraph. The coding lane is untouched — the draft tool, the evidence-index snapshot binding,
+// the clarify park ordering and the C-19 terminal invariant are v10's bodies, reached by IMPORT
+// rather than by copy, so they cannot drift; the authoring tools neither stop the model loop nor
+// set coding intent. Each WRITING tool reaches the database through exactly one clara.wake_*
+// wrapper granted EXECUTE to clara_wake_interactive alone, with an interactive-only
+// clara.wake_fn_allowlist row; the evaluator, the catalog writers and epsilon's report verbs stay
+// ungranted to every wake role (migration UNNUMBERED_wave_e_eta_wake_wrappers.sql proves the
+// posture in its own tail). list_metric_catalog needs no wrapper and gets none — it is an
+// RLS-scoped SELECT. Nothing in this lane can approve, issue or sign: saving a composition mints a
+// DRAFT definition version (ruled — E-R5), and the render request is pinned to a watermarked draft
+// kind. THE DEPLOY ORDER IS BINDING: the eta migration must be applied BEFORE this image goes
+// live, or every authoring tool refuses on a missing wrapper (fail-closed, but a full stop on
+// authoring). The v10 body stays frozen, built and EXPORTED so no parked run is stranded (policy
+// (c)) — chatTurn parks are the human-answer kind, so a live run on v10 is the expected case.
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
@@ -257,6 +276,7 @@ export { chatTurn_v6 };
 export { chatTurn_v7 };
 export { chatTurn_v8 };
 export { chatTurn_v9 };
+export { chatTurn_v10 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
