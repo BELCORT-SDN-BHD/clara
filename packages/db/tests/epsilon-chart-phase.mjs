@@ -1,0 +1,429 @@
+// Wave E lane EPSILON -- phase 3: the chart AST and the four-stage pipeline. NOT a test file.
+//
+// Proves stage 1 (closed schema: no inline values/SQL/JS/formulas, named axis policies only, no
+// ad-hoc bounds, no literal thresholds, no numeric literal anywhere), stage 2 (every series and
+// threshold resolves inside the caller's firm), stage 3 (the evaluator ran against the run's
+// PINNED snapshot) and stage 4 (the typed dataset is persisted, and stays reconstructible).
+
+import {
+  assert, randomUUID, rootQuery, withActor, ROLES, caught, reasonOf, errorDetail,
+  freshActiveClient, setupCloseCoa, createStandardSets, proposeMetricDefinition,
+  approveMetricDefinition, measure, metricAst, mintMetricInput, evaluateMetricHuman,
+  publishChart, chartSpec, sealDataset, openRun, draftSpec,
+} from "./epsilon-fixtures.mjs";
+import { buildEpsilonWorld, datasetRows, ensureEpsilonAdmin } from "./epsilon-world.mjs";
+
+async function foreignDefinitionVersion(world) {
+  const dave = world.users.dave;
+  const client = await freshActiveClient(dave, `eps-foreign-${randomUUID().slice(0, 6)}`);
+  await setupCloseCoa(dave, client);
+  await createStandardSets(dave, client);
+  const version = await proposeMetricDefinition(dave, {
+    client, key: `foreign_revenue_${randomUUID().slice(0, 8)}`, unit: "money",
+    ast: metricAst({ root: measure({ set: "revenue" }), unit: "money" }),
+  });
+  await approveMetricDefinition(dave, version);
+  return version;
+}
+
+export async function registerChartPhase(t, world) {
+  const owner = world.users.alice;
+  const base = await buildEpsilonWorld(world, { tag: "chart-base", reportClass: "management", seal: false });
+
+  await t.test("stage 1 REFUSES every inline-value, ad-hoc-bound and literal-threshold shape", async () => {
+    const good = chartSpec({ definitionVersionId: base.definitionVersionId });
+    const cases = [
+      ["an inline data array", { ...good, series: [{ series_key: "r", definition_version_id: base.definitionVersionId }], data: [1, 2, 3] }, "inline_value_forbidden"],
+      ["an inline values array", { ...good, values: ["x"] }, "inline_value_forbidden"],
+      ["a SQL escape hatch", { ...good, sql: "select 1" }, "inline_value_forbidden"],
+      ["a JS escape hatch", { ...good, js: "() => 1" }, "inline_value_forbidden"],
+      ["a user formula", { ...good, formula: "a/b" }, "inline_value_forbidden"],
+      ["an ad-hoc axis minimum", { ...good, min: 0 }, "axis_bound_adhoc_forbidden"],
+      // Nested, to prove the scan reaches past the top level rather than only guarding it.
+      ["an ad-hoc axis maximum nested in a series", { ...good,
+        series: [{ series_key: "r", definition_version_id: base.definitionVersionId, axis_max: 9 }] }, "axis_bound_adhoc_forbidden"],
+      ["a figure typed at an allowed nested key", { ...good,
+        series: [{ series_key: "r", definition_version_id: 5 }] }, "numeric_literal_forbidden"],
+      ["a literal threshold value", { ...good,
+        thresholds: [{ threshold_key: "target", source: "metric_constant", value: 100 }] }, "threshold_literal_forbidden"],
+      ["a threshold naming no DB source", { ...good,
+        thresholds: [{ threshold_key: "target", source: "metric_constant" }] }, "threshold_literal_forbidden"],
+      ["a threshold naming two DB sources", { ...good,
+        thresholds: [{ threshold_key: "t", source: "metric_constant", constant_key: "zero",
+          definition_version_id: base.definitionVersionId }] }, "threshold_literal_forbidden"],
+      ["an unnamed axis policy", { ...good, axis_policy: "auto" }, "axis_policy_unknown"],
+      ["a suppressed data table", { ...good, data_table: false }, "data_table_required"],
+      ["an unknown top-level field", { ...good, palette: "blue" }, "unknown_field"],
+      ["an empty series list", { ...good, series: [] }, "unknown_field"],
+      ["a duplicated series key", { ...good, series: [
+        { series_key: "r", definition_version_id: base.definitionVersionId },
+        { series_key: "r", definition_version_id: base.definitionVersionId }] }, "series_duplicated"],
+    ];
+    for (const [label, spec, reason] of cases) {
+      const error = await caught(() => publishChart(owner, {
+        chartKey: `bad-${randomUUID().slice(0, 6)}`, spec }));
+      assert.equal(reasonOf(error), reason, `${label}: got ${error?.code} ${error?.message}`);
+    }
+  });
+
+  await t.test("all four NAMED axis policies are admitted, and each is recorded on the version row", async () => {
+    for (const policy of ["include_zero", "data_extent", "symmetric", "disclosed_manual"]) {
+      const published = await publishChart(owner, {
+        chartKey: `axis-${policy}-${randomUUID().slice(0, 6)}`,
+        spec: chartSpec({ definitionVersionId: base.definitionVersionId, axisPolicy: policy }),
+      });
+      assert.equal(published.axis_policy, policy);
+      assert.equal((await rootQuery("select axis_policy from clara.chart_template_versions where id=$1",
+        [published.chart_template_version_id])).rows[0].axis_policy, policy,
+        "the stored column is read OUT OF the validated AST, so the two cannot disagree");
+    }
+  });
+
+  await t.test("stage 2 refuses a foreign firm's metric version and an unknown constant", async () => {
+    const foreign = await foreignDefinitionVersion(world);
+    const crossFirm = await caught(() => publishChart(owner, {
+      chartKey: `cross-${randomUUID().slice(0, 6)}`,
+      spec: chartSpec({ definitionVersionId: foreign }),
+    }));
+    assert.equal(crossFirm?.code, "CLR11", crossFirm?.message);
+    assert.equal(reasonOf(crossFirm), "metric_version_not_in_firm",
+      "no existence oracle: a foreign version reads as not-found-in-your-firm");
+
+    const badConstant = await caught(() => publishChart(owner, {
+      chartKey: `const-${randomUUID().slice(0, 6)}`,
+      spec: chartSpec({ definitionVersionId: base.definitionVersionId,
+        thresholds: [{ threshold_key: "t", source: "metric_constant", constant_key: `nope_${randomUUID().slice(0, 6)}` }] }),
+    }));
+    assert.equal(reasonOf(badConstant), "metric_constant_not_in_firm");
+
+    // A product-curated constant IS reachable -- the refusal above is about scope, not about
+    // thresholds being impossible.
+    const ok = await publishChart(owner, {
+      chartKey: `threshold-${randomUUID().slice(0, 6)}`,
+      spec: chartSpec({ definitionVersionId: base.definitionVersionId,
+        thresholds: [{ threshold_key: "target", source: "metric_constant", constant_key: "zero" }] }),
+    });
+    world.epsilonChart = ok.chart_template_version_id;
+  });
+
+  await t.test("stage 2 holds ONE axis to one dimension, one temporality and one shared window", async () => {
+    // Visibility and state say each series MAY be plotted. They say nothing about whether
+    // plotting them TOGETHER tells the truth -- so every series below is this firm's, approved
+    // and individually lawful, and only COMPATIBILITY can refuse the chart.
+    const admin = await ensureEpsilonAdmin(world);
+    const approved = async (spec) => {
+      const version = await proposeMetricDefinition(admin, { client: base.client, ...spec });
+      await approveMetricDefinition(owner, version);
+      return version;
+    };
+    const money = base.definitionVersionId;                       // money · flow · 2020-01-01..
+    const ratio = await approved({
+      key: `ratio_${randomUUID().slice(0, 8)}`, unit: "ratio",
+      ast: metricAst({ root: { node: "percent_change", current: measure({ set: "revenue" }),
+        prior: { node: "lag", periods: 1, of: measure({ set: "revenue" }) } }, unit: "ratio" }),
+    });
+    const balance = await approved({
+      key: `balance_${randomUUID().slice(0, 8)}`, unit: "money", temporality: "point_in_time",
+      resultScale: 0,
+      ast: metricAst({ root: measure({ set: "bank", aspect: "closing_balance" }), unit: "money",
+        temporality: "point_in_time", resultScale: 0 }),
+    });
+    const retired = await approved({
+      key: `retired_${randomUUID().slice(0, 8)}`, unit: "money", resultScale: 2,
+      appliesFrom: "2020-01-01", appliesTo: "2021-12-31",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money", resultScale: 2 }),
+    });
+    const later = await approved({
+      key: `later_${randomUUID().slice(0, 8)}`, unit: "money", resultScale: 2,
+      appliesFrom: "2023-01-01",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money", resultScale: 2 }),
+    });
+    const twoSeries = (a, b) => ({ extra: { series: [
+      { series_key: "a", definition_version_id: a }, { series_key: "b", definition_version_id: b }] } });
+
+    for (const [label, spec, reason] of [
+      ["money against a ratio on one axis",
+        chartSpec({ definitionVersionId: money, ...twoSeries(money, ratio) }), "series_unit_incompatible"],
+      ["a period flow against a period-end balance",
+        chartSpec({ definitionVersionId: money, ...twoSeries(money, balance) }), "series_temporality_incompatible"],
+      ["two series whose effective windows never overlap",
+        chartSpec({ definitionVersionId: retired, ...twoSeries(retired, later) }), "series_effective_windows_disjoint"],
+      ["a ratio threshold drawn on a money axis",
+        chartSpec({ definitionVersionId: money,
+          thresholds: [{ threshold_key: "t", source: "metric_version", definition_version_id: ratio }] }),
+        "threshold_unit_incompatible"],
+      ["a non-zero dimensionless constant drawn on a money axis",
+        chartSpec({ definitionVersionId: money,
+          thresholds: [{ threshold_key: "t", source: "metric_constant", constant_key: "half" }] }),
+        "threshold_unit_incompatible"],
+    ]) {
+      const error = await caught(() => publishChart(owner, {
+        chartKey: `incompat-${randomUUID().slice(0, 6)}`, spec }));
+      assert.equal(error?.code, "CLR10", `${label}: ${error?.code} ${error?.message}`);
+      assert.equal(reasonOf(error), reason, `${label}: ${error?.message}`);
+    }
+
+    // THE COMPATIBLE CHART STILL PUBLISHES. A compatibility rule that refused every multi-series
+    // chart would pass the matrix above and make charts useless -- so two money/flow series with
+    // overlapping windows, and a ZERO baseline (the one dimensionally neutral value), are proven
+    // to seal rather than merely assumed to.
+    const second = await approved({
+      key: `second_money_${randomUUID().slice(0, 8)}`, unit: "money", resultScale: 2,
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money", resultScale: 2 }),
+    });
+    const compatible = await publishChart(owner, {
+      chartKey: `compatible-${randomUUID().slice(0, 6)}`,
+      spec: chartSpec({ definitionVersionId: money, ...twoSeries(money, second),
+        thresholds: [{ threshold_key: "zero", source: "metric_constant", constant_key: "zero" }] }),
+    });
+    assert.ok(compatible.chart_template_version_id,
+      "two money flows sharing a window, with a zero baseline, publish");
+  });
+
+  await t.test("stage 3: a cell evaluated against ANOTHER snapshot cannot be sealed into the run", async () => {
+    // Two snapshots over the same period. The run pins the SECOND; the evaluation runs against
+    // the FIRST. Nothing in the delta tables forbids that -- the epsilon seal is what catches it.
+    const second = await mintMetricInput(owner, { client: base.client, periodIds: [base.period.id] });
+    const spec = await draftSpec(owner, {
+      client: base.client, specKey: `unpinned-${randomUUID().slice(0, 6)}`,
+      templateVersionId: base.template.report_template_version_id, layout: base.layout,
+    });
+    const run = await openRun(owner, {
+      client: base.client, specVersionId: spec.report_spec_version_id,
+      snapshotId: second.snapshotId, periodId: base.period.id,
+    });
+    await evaluateMetricHuman(owner, {
+      client: base.client, definitionVersion: base.definitionVersionId, periodIds: [base.period.id],
+      snapshotId: base.snapshotId, runId: run.report_run_id,
+    });
+    const error = await caught(() => sealDataset(owner, { runId: run.report_run_id }));
+    assert.equal(reasonOf(error), "snapshot_not_pinned", error?.message);
+    assert.equal(Number(errorDetail(error).unpinned_cells), 1, "the refusal counts what it measured");
+    assert.equal(errorDetail(error).books_snapshot_id, second.snapshotId);
+    assert.equal((await datasetRows(run.report_run_id)).length, 0,
+      "the refused seal left no half-built dataset behind");
+  });
+
+  await t.test("stage 3: a run with no evaluated cells seals nothing", async () => {
+    const spec = await draftSpec(owner, {
+      client: base.client, specKey: `nocells-${randomUUID().slice(0, 6)}`,
+      templateVersionId: base.template.report_template_version_id, layout: base.layout,
+    });
+    const run = await openRun(owner, {
+      client: base.client, specVersionId: spec.report_spec_version_id,
+      snapshotId: base.snapshotId, periodId: base.period.id,
+    });
+    const error = await caught(() => sealDataset(owner, { runId: run.report_run_id }));
+    assert.equal(reasonOf(error), "run_has_no_cells", error?.message);
+    assert.equal(errorDetail(error).report_run_id, run.report_run_id,
+      "the refusal names the run, so the remedy is actionable without a second query");
+  });
+
+  await t.test("a chart series with no evaluated cell in the run is named and refused", async () => {
+    // Proposed by the admin, approved by the owner: firm A has two eligible humans, so delta's
+    // maker/checker rule requires them to differ.
+    const other = await proposeMetricDefinition(await ensureEpsilonAdmin(world), {
+      client: base.client, key: `unplotted_${randomUUID().slice(0, 8)}`, unit: "money",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money" }),
+    });
+    await approveMetricDefinition(owner, other);
+    const chart = await publishChart(owner, {
+      chartKey: `starved-${randomUUID().slice(0, 6)}`,
+      spec: chartSpec({ definitionVersionId: other, seriesKey: "expense" }),
+    });
+    const error = await caught(() => sealDataset(owner, {
+      runId: base.runId, charts: [chart.chart_template_version_id] }));
+    assert.equal(reasonOf(error), "chart_series_has_no_cell", error?.message);
+    assert.deepEqual(errorDetail(error).series_keys, ["expense"]);
+  });
+
+  await t.test("stage 4: the typed dataset persists, joins to its cells BY ID, and stays reconstructible", async () => {
+    const sealed = await sealDataset(owner, { runId: base.runId, charts: [world.epsilonChart] });
+    const datasets = await datasetRows(base.runId);
+    assert.equal(datasets.length, 2, "one FS dataset plus one per bound chart");
+    const [fs, chart] = datasets;
+    assert.equal(fs.chart_spec_version_id, null);
+    assert.equal(chart.chart_spec_version_id, world.epsilonChart);
+    assert.equal(fs.books_snapshot_id, base.snapshotId,
+      "the composite FK makes the dataset's snapshot its run's pinned snapshot, structurally");
+
+    const points = (await rootQuery(
+      "select p.*, c.run_id from clara.report_dataset_points p join clara.metric_cells c on c.id=p.cell_id where p.dataset_id=any($1) order by p.dataset_id, p.ordinal",
+      [[fs.id, chart.id]])).rows;
+    assert.ok(points.length >= 2);
+    assert.ok(points.every((p) => p.run_id === base.runId), "every point joins to a cell OF THIS RUN");
+    const fsCells = new Set(points.filter((p) => p.dataset_id === fs.id).map((p) => p.cell_id));
+    const chartCells = points.filter((p) => p.dataset_id === chart.id).map((p) => p.cell_id);
+    assert.ok(chartCells.length >= 1);
+    assert.ok(chartCells.every((id) => fsCells.has(id)),
+      "the chart plots the SAME persisted cells the FS dataset carries -- same-source by CELL ID, "
+      + "not by two derivations that happen to agree today (matrix A32b)");
+    const ok = points.filter((p) => p.point_status === "ok");
+    assert.ok(ok.length >= 1);
+    assert.ok(ok.every((p) => p.value_text !== null && p.value_cents === null),
+      "the v1 producer carries the evaluator's OWN displayed text; it re-derives no figure");
+    assert.ok(ok.every((p) => p.dimensions.exact_numerator !== undefined
+      && p.dimensions.exact_denominator !== undefined),
+      "the cell's exact rational travels verbatim, so nothing downstream has to round again");
+
+    const verified = (await rootQuery("select clara.verify_report_dataset($1) r", [fs.id])).rows[0].r;
+    assert.equal(verified.ok, true);
+    assert.equal(verified.point_count, Number(fs.point_count));
+    assert.equal(sealed.fs_dataset_id, fs.id);
+  });
+
+  await t.test("a point appended after the seal cannot commit, and a sealed dataset is frozen", async () => {
+    const [fs] = await datasetRows(base.runId);
+    // The appended row is deliberately PROVENANCE-LEGAL -- same cell, same declared definition,
+    // only a different series key -- so the wall under test here is the DIGEST wall and nothing
+    // else. (The provenance wall gets its own arm below; a test that could be satisfied by either
+    // proves neither.)
+    const appended = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query(
+        `insert into clara.report_dataset_points(dataset_id,firm_id,client_id,ordinal,series_key,
+           metric_version_id,cell_id,point_status,dimensions)
+         select $1,firm_id,client_id,9999,'forged',metric_version_id,cell_id,'absent','{}'::jsonb
+           from clara.report_dataset_points where dataset_id=$1 limit 1`, [fs.id])));
+    assert.equal(reasonOf(appended), "dataset_reconstruction_mismatch",
+      `the header no longer reconstructs from its points: ${appended?.message}`);
+    for (const [sql, label] of [
+      ["update clara.report_datasets set point_count=point_count+1 where id=$1", "restamp a sealed digest"],
+      ["delete from clara.report_datasets where id=$1", "delete a sealed dataset"],
+    ]) {
+      const error = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true },
+        (db) => db.query(sql, [fs.id])));
+      assert.equal(error?.code, "CLR08", `${label}: ${error?.message}`);
+    }
+    assert.equal((await rootQuery("select clara.verify_report_dataset($1) r", [fs.id])).rows[0].r.ok, true,
+      "the refused attempts left the dataset reconstructing exactly as sealed");
+  });
+
+  await t.test("a cell with NO value carries delta's own reason label to the renderer", async () => {
+    // value_text is null by construction for every cell that is not `ok`, so without a label a
+    // non-ok point reaches the render lane with a status and nothing to print -- and "absent"
+    // renders as blank space exactly where an explanation belongs. The label is delta's
+    // display_token carried verbatim; nothing here composes a string.
+    const admin = await ensureEpsilonAdmin(world);
+    const w = await buildEpsilonWorld(world, { tag: "na-label", reportClass: "management", seal: false });
+    // The exact shape delta's own algebra phase proves produces an `absent` cell: a governed
+    // account set with no facts in the period.
+    const absent = await proposeMetricDefinition(admin, {
+      client: w.client, key: `absent_${randomUUID().slice(0, 8)}`, unit: "money",
+      ast: metricAst({ root: measure({ set: "empty_absent" }), unit: "money" }),
+    });
+    await approveMetricDefinition(owner, absent);
+    await evaluateMetricHuman(owner, { client: w.client, definitionVersion: absent,
+      periodIds: [w.period.id], snapshotId: w.snapshotId, runId: w.runId });
+    await sealDataset(owner, { runId: w.runId });
+
+    const points = (await rootQuery(
+      `select p.point_status, p.value_text, p.dimensions from clara.report_dataset_points p
+         join clara.report_datasets d on d.id = p.dataset_id
+        where d.report_run_id=$1 and d.chart_spec_version_id is null order by p.ordinal`,
+      [w.runId])).rows;
+    const na = points.filter((p) => p.point_status !== "ok");
+    const ok = points.filter((p) => p.point_status === "ok");
+    assert.ok(na.length >= 1, `the run evaluated a cell with no value: ${JSON.stringify(points.map((p) => p.point_status))}`);
+    assert.ok(ok.length >= 1, "and one with a value, so the two cases are distinguishable here");
+    for (const p of na) {
+      assert.equal(p.value_text, null, "a non-ok point carries no value, which is why it needs a label");
+      assert.ok(typeof p.dimensions.na_label === "string" && p.dimensions.na_label.length > 0,
+        `a non-ok point carries its reason label: ${JSON.stringify(p.dimensions)}`);
+    }
+    for (const p of ok) {
+      assert.equal(p.dimensions.na_label, null,
+        "an ok point's label is null -- the positive statement that it has a value, not a reason");
+    }
+    // The label is DELTA's, not one this lane wrote: it must equal the reason version's own token.
+    const truth = (await rootQuery(
+      `select distinct nr.display_token t from clara.metric_cells mc
+         join clara.metric_na_reason_versions nr on nr.id = mc.na_reason_version_id
+        where mc.run_id=$1`, [w.runId])).rows.map((r) => r.t);
+    assert.deepEqual([...new Set(na.map((p) => p.dimensions.na_label))].sort(), truth.sort(),
+      "carried verbatim from clara.metric_na_reason_versions -- this lane composes no wording");
+  });
+
+  await t.test("a chart's thresholds are RESOLVED at seal and frozen with the dataset", async () => {
+    // The spec names a threshold by constant key. WHICH version of that constant applied, and
+    // WHAT its value was, are facts about the period being reported -- and if the renderer had to
+    // resolve them later, "later" would be a different answer the moment a new constant version
+    // lands. So the seal resolves once and the digest covers it.
+    const chartDataset = (await rootQuery(
+      `select id, resolved_thresholds, chart_spec_version_id from clara.report_datasets
+        where report_run_id=$1 and chart_spec_version_id is not null`, [base.runId])).rows[0];
+    assert.ok(chartDataset, "the run sealed a chart dataset");
+    const spec = (await rootQuery("select chart_spec_ast s from clara.chart_template_versions where id=$1",
+      [chartDataset.chart_spec_version_id])).rows[0].s;
+    assert.equal(chartDataset.resolved_thresholds.length, spec.thresholds.length,
+      "every threshold the spec names is resolved -- none silently dropped");
+    const zero = chartDataset.resolved_thresholds.find((r) => r.constant_key === "zero");
+    assert.ok(zero, `the zero baseline resolved: ${JSON.stringify(chartDataset.resolved_thresholds)}`);
+    const truth = (await rootQuery(
+      "select id, version, numerator, denominator, currency_power from clara.metric_constants where constant_key='zero'")).rows[0];
+    assert.equal(zero.constant_id, truth.id, "the resolved row names the exact constant ROW, not just its key");
+    assert.equal(zero.constant_version, truth.version, "and its exact version");
+    assert.equal(Number(zero.numerator), Number(truth.numerator));
+    assert.equal(Number(zero.denominator), Number(truth.denominator));
+    assert.equal(Number(zero.currency_power), Number(truth.currency_power),
+      "with the dimension carried, so nothing downstream has to guess what scale the line is on");
+    const runPeriod = (await rootQuery("select period_end::text e from clara.report_runs where id=$1",
+      [base.runId])).rows[0].e;
+    assert.equal(zero.as_of, runPeriod,
+      "resolved as of the run's PERIOD END -- an accounting fact, never the session clock");
+    // The FS dataset binds no chart, so it carries no thresholds: an empty array and "no charts"
+    // must not be the same statement made two different ways.
+    const [fsDataset] = await datasetRows(base.runId);
+    assert.deepEqual(fsDataset.resolved_thresholds, [],
+      "the FS dataset resolves nothing, because it plots nothing");
+    // And they are frozen: the digest covers them, so a post-seal edit cannot commit.
+    const edited = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query("update clara.report_datasets set resolved_thresholds='[]'::jsonb where id=$1",
+        [chartDataset.id])));
+    assert.equal(edited?.code, "CLR08",
+      `a sealed dataset's resolved thresholds are immutable: ${edited?.message}`);
+  });
+
+  await t.test("a dataset point's cell must belong to the dataset's own run, snapshot and definition", async () => {
+    // The FK binds firm and client. It does NOT bind the cell's run, snapshot, evaluator version
+    // or declared definition -- so an internal writer under clara_fn_owner could seal a
+    // perfectly reconstructible digest over a cell from somewhere else. The trigger is what makes
+    // the binding a property of the TABLE rather than of whichever body happens to be writing.
+    const [fs] = await datasetRows(base.runId);
+    // A cell of a DIFFERENT run, in the same firm and client, so the FK is satisfied and only
+    // provenance can refuse it.
+    const foreignRun = await buildEpsilonWorld(world, { tag: "provenance", reportClass: "management", seal: true });
+    const foreignCell = (await rootQuery(
+      "select id, definition_version_id from clara.metric_cells where run_id=$1 limit 1",
+      [foreignRun.runId])).rows[0];
+    assert.ok(foreignCell, "the second run evaluated a cell of its own");
+    const error = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query(
+        `insert into clara.report_dataset_points(dataset_id,firm_id,client_id,ordinal,series_key,
+           metric_version_id,cell_id,point_status,dimensions)
+         select $1,firm_id,client_id,8888,'foreign',$3,$2,'absent','{}'::jsonb
+           from clara.report_datasets where id=$1`, [fs.id, foreignCell.id, foreignCell.definition_version_id])));
+    assert.equal(error?.code, "CLR10", error?.message);
+    assert.equal(reasonOf(error), "dataset_point_provenance_mismatch", error?.message);
+    assert.equal(errorDetail(error).axis, "run_id",
+      "the refusal names WHICH binding disagreed, so a writer is told what to fix");
+    // And a declared definition that is not the cell's own is refused on its own axis -- the
+    // point where a chart could silently label one series with another's formula.
+    const wrongDefinition = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, (db) =>
+      db.query(
+        `insert into clara.report_dataset_points(dataset_id,firm_id,client_id,ordinal,series_key,
+           metric_version_id,cell_id,point_status,dimensions)
+         select $1,firm_id,client_id,8887,'mislabelled',null,cell_id,'absent','{}'::jsonb
+           from clara.report_dataset_points where dataset_id=$1 and metric_version_id is not null limit 1`,
+        [fs.id])));
+    assert.equal(reasonOf(wrongDefinition), "dataset_point_provenance_mismatch", wrongDefinition?.message);
+    assert.equal(errorDetail(wrongDefinition).axis, "metric_version_id", wrongDefinition?.message);
+    assert.equal((await rootQuery("select clara.verify_report_dataset($1) r", [fs.id])).rows[0].r.ok, true,
+      "the refused attempts left the sealed dataset reconstructing exactly as it was");
+  });
+
+  await t.test("a run seals its dataset exactly once", async () => {
+    const error = await caught(() => sealDataset(owner, { runId: base.runId }));
+    assert.equal(reasonOf(error), "report_run_state_illegal", error?.message);
+    assert.equal(errorDetail(error).state, "dataset_sealed");
+  });
+}

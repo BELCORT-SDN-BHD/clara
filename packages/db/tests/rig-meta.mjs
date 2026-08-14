@@ -155,6 +155,16 @@ const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
 // statement in the migration plus a one-line addition here naming that
 // consumer -- no resolver rewrite needed either side of that boundary.
 const CLOSE_PLAN_0064_HUMAN_FNS = ["get_close_plan"];
+// 0065-0072 [Wave E lane ε] the FS reporting layer's ten audited doors. Same closed-set reason as
+// 0057's and 0058's: they ship together across four of the eight files and must live or die
+// together, so a name that vanishes while its exemption survives here is a finding, not a pass.
+const REPORTING_0065_HUMAN_FNS = [
+  "publish_house_style_version", "publish_report_template_version",
+  "publish_chart_template_version", "draft_report_spec",
+  "open_report_run", "assess_report_claim", "seal_report_dataset",
+  "seal_report_artifact", "approve_report_for_issue", "verify_report_artifact",
+];
+const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -742,6 +752,13 @@ export const ALLOWED = {
     ...CLOSE_PLAN_0064_HUMAN_FNS, // 0064 [Wave E lane θ] the close-plan-as-document read —
     // clara_authenticated ONLY (the /close consumer); agent row empty by T17's ruling,
     // not by omission — see the block above
+    ...REPORTING_0065_HUMAN_FNS, // 0065-0072 [Wave E lane ε] the FS reporting layer: four
+    // publishing verbs, the run/claim/dataset trio, the artifact seal, the key-2 issue approval
+    // and the artifact verifier — clara_authenticated ONLY, every floor body-enforced. The two
+    // INTERNAL cores (_seal_report_artifact_core, _draft_report_spec_core) and the five closed
+    // validators are deliberately ABSENT from this roster: they are granted to nobody, so the
+    // sweep's expected=false is the assertion that ζ's and η's JWT-less callers reach them only
+    // as clara_fn_owner internals (see the block above)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -911,6 +928,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0046 §7-A unattended sales lane", SALES_LANE_0046_COHORT, liveNames));
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
+  failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
   return failures;
 }
 

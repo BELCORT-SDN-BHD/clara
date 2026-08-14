@@ -766,6 +766,45 @@ jobs:
           PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
             node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
 
+      # Wave-E ε contract drill — the δ drill's shape, for the same hazard on the reporting lane.
+      # The package sweep preloads tests/epsilon-preintegration-gate.mjs, which sets
+      # CLARA_ALLOW_MISSING_WAVE_E_EPSILON for every file in the sweep; so if a numbering or merge
+      # accident ever left the ε migrations off the chain, the ENTIRE ε battery would skip
+      # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
+      # database, the full on-disk chain, then the ε contract FOCUSED with the variable explicitly
+      # UNSET — on a pre-ε chain that FAILS by design (the gate's stated focused-run polarity),
+      # and post-ε it must be green with ZERO skips.
+      #
+      # It gets its OWN database for a reason of its own: the ε battery seals artifacts and issues
+      # a run, and an issued run is one-way. The sweep's copy has already been through that, and a
+      # consumed database is not valid evidence for a contract about sealing.
+      #
+      # ABSENCE FAILS. The first cut of this step exited 0 when the migration was missing, copying
+      # δ's pre-merge courtesy — which put a skip-green branch inside the very step whose reason to
+      # exist is that a skip-green branch elsewhere hides a missing lane. Once ε is on main the
+      # migrations are never legitimately absent, so absence means a numbering or merge accident:
+      # exactly the accident this drill is the last line of defence against. It fails loudly.
+      #
+      # Guarded on the LAST file of the set, not the first: a partial merge that dropped the
+      # security half would satisfy a first-file guard and then drill a chain that cannot enforce
+      # anything.
+      - name: Wave-E ε contract drill (isolated DB, focused, allow-missing UNSET)
+        working-directory: packages/db
+        run: |
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql 2>/dev/null | head -1)"
+          if [ -z "$m" ]; then
+            echo "::error::no numbered wave_e_epsilon_reporting_security_seal_artifacts_issue migration on disk."
+            echo "The ε lane is merged, so its migrations cannot be legitimately absent — this is a"
+            echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
+            exit 1
+          fi
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
+          PGDATABASE=clara_epsilon_contract_ci pnpm migrate
+          PGDATABASE=clara_epsilon_contract_ci pnpm seed
+          unset CLARA_ALLOW_MISSING_WAVE_E_EPSILON
+          PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
+            node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
