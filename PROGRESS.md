@@ -144,7 +144,11 @@ documented history.
 **Slice-era standing residuals** (carried from the retired PART 2 register; none has a PR):
 - **0017's kind-blind supersede** — readers were fixed kind-honestly, but the authoritative-extraction trigger's own kind-scoped supersede is an OPEN ADJUDICATION; needs an `authoritative_extraction_id` consumer census before any migration candidate. *(C-b acceptance-night item 1)*
 - **Always-run role/membership reconciliation** — deferred: poisoning needs SUPERUSER, outside the threat model. *(Slice-2 HIGH 6/7)*
-- **Supabase non-superuser deploy-role CI** — CI applies migrations as superuser; the follow-up is a job running the full set under a Supabase-shaped non-superuser role. *(Slice-2 HIGH 8/9)*
+- **Supabase non-superuser deploy-role CI** — CI applies migrations as superuser; PARTIALLY
+  discharged 2026-08-14 by PR #234's non-superuser owner-login rehearsal (a real `migrate()`
+  end-to-end as a Supabase-shaped login) plus two live ceremonies exercising the guarded
+  SUSET branch against the managed cluster. REMAINING: the standing CI job running the full
+  chain under that role on every PR. *(Slice-2 HIGH 8/9)*
 - **Opaque/HMAC pack tokens** — declined; a stronger structural binding stays optional. *(Slice-3 C12)*
 - **`activate_taxonomy_version(v)` operator fn + the predicate-dimension taxonomy schema** — ship when a second taxonomy version, or a workflow-period-materiality routing state, first exists. *(Slice-3 C8/C16)*
 - **Slice-4 residuals** — per-part-type field schemas → the fail-closed card catalog · audited owner compliance export + a visibility-aware trace-debug surface · per-firm chat-visibility toggle + un-share · S4-V2 engine-hook-lifetime ≥14d (the canary watch) · job-level engine liveness · firm-local-time budgets · billing-grade metering. *(ADR-017)*
