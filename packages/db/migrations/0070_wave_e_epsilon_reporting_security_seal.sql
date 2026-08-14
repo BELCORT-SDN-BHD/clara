@@ -1,7 +1,7 @@
--- 0069_wave_e_epsilon_reporting_security_seal.sql -- Wave E lane epsilon, file 6 of 7.
+-- 0070_wave_e_epsilon_reporting_security_seal.sql -- Wave E lane epsilon, file 6 of 8.
 --
--- Applies after 0068_wave_e_epsilon_reporting_security.sql and before
--- 0070_wave_e_epsilon_reporting_security_seal_artifacts.sql. Number claims at MERGE; the
+-- Applies after 0069_wave_e_epsilon_reporting_security.sql and before
+-- 0071_wave_e_epsilon_reporting_security_seal_artifacts.sql. Number claims at MERGE; the
 -- timeout is PRECAUTIONARY.
 --
 -- THE RUN, THE CLAIM ASSESSMENT AND THE DATASET SEAL (SS7 + SS8 stages 3-4):

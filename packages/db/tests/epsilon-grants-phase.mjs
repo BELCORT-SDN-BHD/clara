@@ -193,7 +193,7 @@ export async function registerGrantsPhase(t, world) {
         [true, false, false, false, false, false],
         `clara.${name} is callable by clara_authenticated and by nobody else`);
     }
-    for (const internal of ["clara._validate_layout_ast_v1(jsonb)", "clara._validate_chart_spec_ast_v1(jsonb)",
+    for (const internal of ["clara._validate_layout_ast_v1(jsonb,text)", "clara._validate_chart_spec_ast_v1(jsonb)",
       "clara._validate_chart_spec_semantics_v1(uuid,jsonb)", "clara._report_manifest_required_keys(text)",
       "clara._report_dataset_payload_v1(uuid)", "clara.verify_report_dataset(uuid)",
       "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)",

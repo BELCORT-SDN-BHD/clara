@@ -1,7 +1,7 @@
--- 0068_wave_e_epsilon_reporting_security.sql -- Wave E lane epsilon, file 5 of 7.
+-- 0069_wave_e_epsilon_reporting_security.sql -- Wave E lane epsilon, file 5 of 8.
 --
--- Applies after 0067_wave_e_epsilon_reporting_schema_validators.sql and before
--- 0069_wave_e_epsilon_reporting_security_seal.sql. Number claims at MERGE; the timeout
+-- Applies after 0068_wave_e_epsilon_reporting_schema_validators.sql and before
+-- 0070_wave_e_epsilon_reporting_security_seal.sql. Number claims at MERGE; the timeout
 -- is PRECAUTIONARY.
 --
 -- THE PUBLISHING VERBS -- layers 3, 4/6 and 5, plus the chart registry:
@@ -27,7 +27,7 @@ insert into _epsilon_security_pre values ('deploy_principal', session_user);
 do $pre$
 declare n text;
 begin
-  foreach n in array array['clara._validate_layout_ast_v1(jsonb)',
+  foreach n in array array['clara._validate_layout_ast_v1(jsonb,text)',
     'clara._validate_chart_spec_semantics_v1(uuid,jsonb)'] loop
     if to_regprocedure(n) is null then
       raise exception 'epsilon security requires % (file 4 not applied)', n using errcode = 'CLR10';
@@ -150,7 +150,10 @@ begin
       detail = '{"reason":"management_template_binds_profile","fix":"omit the statutory profile version"}';
   end if;
 
-  v_shape := clara._validate_layout_ast_v1(p_layout_ast);
+  -- Scope 'template': the publish-gated layer. The protected-identity half of the author-text
+  -- wall still bites here -- a hard-coded entity name in a template is reused across every client
+  -- bound to it -- while the draft-time currency wall is the spec layer's (ruled).
+  v_shape := clara._validate_layout_ast_v1(p_layout_ast, 'template');
   if p_report_class = 'statutory' then
     select coalesce(array_agg(s.section_key order by s.ordinal), '{}') into v_missing
       from clara.statutory_sections s
@@ -290,7 +293,9 @@ begin
     raise exception 'report template version is not a published version of this firm' using errcode = 'CLR11',
       detail = '{"reason":"report_template_version_not_in_firm","fix":"draft against a template version this firm has published"}';
   end if;
-  v_shape := clara._validate_layout_ast_v1(p_layout_ast);
+  -- Scope 'spec': the DRAFT layer, where the currency-shape half of the author-text wall applies
+  -- as well. This is the layer a model or a hurried user types into.
+  v_shape := clara._validate_layout_ast_v1(p_layout_ast, 'spec');
 
   prior := clara._reserve_op(p_firm, 'draft_report_spec', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'key', p_spec_key, 'title', p_title,

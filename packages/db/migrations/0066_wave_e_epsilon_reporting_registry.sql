@@ -1,5 +1,5 @@
--- 0065_wave_e_epsilon_reporting_registry.sql -- Wave E lane epsilon, file 2 of 7.
--- Applies immediately after 0064_wave_e_epsilon_reporting.sql (layers 1-5). Number claims
+-- 0066_wave_e_epsilon_reporting_registry.sql -- Wave E lane epsilon, file 2 of 8.
+-- Applies immediately after 0065_wave_e_epsilon_reporting.sql (layers 1-5). Number claims
 -- at MERGE; the timeout is PRECAUTIONARY (pure DDL over empty new relations).
 --
 -- DESIGN HOME: wave-e-design-reporting-part2.md SS7 (claim assessment, anti-smuggling, protected

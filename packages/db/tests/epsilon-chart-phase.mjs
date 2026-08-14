@@ -106,6 +106,80 @@ export async function registerChartPhase(t, world) {
     world.epsilonChart = ok.chart_template_version_id;
   });
 
+  await t.test("stage 2 holds ONE axis to one dimension, one temporality and one shared window", async () => {
+    // Visibility and state say each series MAY be plotted. They say nothing about whether
+    // plotting them TOGETHER tells the truth -- so every series below is this firm's, approved
+    // and individually lawful, and only COMPATIBILITY can refuse the chart.
+    const admin = await ensureEpsilonAdmin(world);
+    const approved = async (spec) => {
+      const version = await proposeMetricDefinition(admin, { client: base.client, ...spec });
+      await approveMetricDefinition(owner, version);
+      return version;
+    };
+    const money = base.definitionVersionId;                       // money · flow · 2020-01-01..
+    const ratio = await approved({
+      key: `ratio_${randomUUID().slice(0, 8)}`, unit: "ratio",
+      ast: metricAst({ root: { node: "percent_change", current: measure({ set: "revenue" }),
+        prior: { node: "lag", periods: 1, of: measure({ set: "revenue" }) } }, unit: "ratio" }),
+    });
+    const balance = await approved({
+      key: `balance_${randomUUID().slice(0, 8)}`, unit: "money", temporality: "point_in_time",
+      resultScale: 0,
+      ast: metricAst({ root: measure({ set: "bank", aspect: "closing_balance" }), unit: "money",
+        temporality: "point_in_time", resultScale: 0 }),
+    });
+    const retired = await approved({
+      key: `retired_${randomUUID().slice(0, 8)}`, unit: "money", resultScale: 2,
+      appliesFrom: "2020-01-01", appliesTo: "2021-12-31",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money", resultScale: 2 }),
+    });
+    const later = await approved({
+      key: `later_${randomUUID().slice(0, 8)}`, unit: "money", resultScale: 2,
+      appliesFrom: "2023-01-01",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money", resultScale: 2 }),
+    });
+    const twoSeries = (a, b) => ({ extra: { series: [
+      { series_key: "a", definition_version_id: a }, { series_key: "b", definition_version_id: b }] } });
+
+    for (const [label, spec, reason] of [
+      ["money against a ratio on one axis",
+        chartSpec({ definitionVersionId: money, ...twoSeries(money, ratio) }), "series_unit_incompatible"],
+      ["a period flow against a period-end balance",
+        chartSpec({ definitionVersionId: money, ...twoSeries(money, balance) }), "series_temporality_incompatible"],
+      ["two series whose effective windows never overlap",
+        chartSpec({ definitionVersionId: retired, ...twoSeries(retired, later) }), "series_effective_windows_disjoint"],
+      ["a ratio threshold drawn on a money axis",
+        chartSpec({ definitionVersionId: money,
+          thresholds: [{ threshold_key: "t", source: "metric_version", definition_version_id: ratio }] }),
+        "threshold_unit_incompatible"],
+      ["a non-zero dimensionless constant drawn on a money axis",
+        chartSpec({ definitionVersionId: money,
+          thresholds: [{ threshold_key: "t", source: "metric_constant", constant_key: "half" }] }),
+        "threshold_unit_incompatible"],
+    ]) {
+      const error = await caught(() => publishChart(owner, {
+        chartKey: `incompat-${randomUUID().slice(0, 6)}`, spec }));
+      assert.equal(error?.code, "CLR10", `${label}: ${error?.code} ${error?.message}`);
+      assert.equal(reasonOf(error), reason, `${label}: ${error?.message}`);
+    }
+
+    // THE COMPATIBLE CHART STILL PUBLISHES. A compatibility rule that refused every multi-series
+    // chart would pass the matrix above and make charts useless -- so two money/flow series with
+    // overlapping windows, and a ZERO baseline (the one dimensionally neutral value), are proven
+    // to seal rather than merely assumed to.
+    const second = await approved({
+      key: `second_money_${randomUUID().slice(0, 8)}`, unit: "money", resultScale: 2,
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money", resultScale: 2 }),
+    });
+    const compatible = await publishChart(owner, {
+      chartKey: `compatible-${randomUUID().slice(0, 6)}`,
+      spec: chartSpec({ definitionVersionId: money, ...twoSeries(money, second),
+        thresholds: [{ threshold_key: "zero", source: "metric_constant", constant_key: "zero" }] }),
+    });
+    assert.ok(compatible.chart_template_version_id,
+      "two money flows sharing a window, with a zero baseline, publish");
+  });
+
   await t.test("stage 3: a cell evaluated against ANOTHER snapshot cannot be sealed into the run", async () => {
     // Two snapshots over the same period. The run pins the SECOND; the evaluation runs against
     // the FIRST. Nothing in the delta tables forbids that -- the epsilon seal is what catches it.

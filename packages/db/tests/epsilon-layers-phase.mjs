@@ -1,9 +1,11 @@
 // Wave E lane EPSILON -- phase 1: the six template layers. NOT a test file.
 //
 // Proves: the shipped wording table is EMPTY and its verified-provenance CHECK bites; every
-// publish/draft floor by role and by report class; publication freeze; and the two E-R8 floor-1
-// walls (no numeric literal, no protected placeholder bound to a supplied literal) at BOTH the
-// template and the spec layer.
+// publish/draft floor by role and by report class; publication freeze; and the E-R8 floor-1
+// walls at BOTH the template and the spec layer -- no numeric literal, no protected placeholder
+// bound to a supplied literal, no protected content TYPED with no binding declared at all, and
+// no currency amount typed at the draft layer (with the ruled template-layer exemption asserted
+// rather than assumed).
 
 import {
   assert, randomUUID, rootQuery, withActor, ROLES,
@@ -225,8 +227,13 @@ export async function registerLayersPhase(t, world) {
     const smuggles = [
       ["a cell binding the legal name to typed text",
         { node: "cell", column_span: 1, binds: "entity_legal_name", content: { node: "text", value: "ACME SDN BHD" } }],
+      // A text node may never bind a protected placeholder AT ALL -- text is by construction a
+      // supplied literal, so the value here is deliberately innocuous: the refusal must come from
+      // the SHAPE of the binding, not from anything detectable in the string. (The same node with
+      // a registration number in it is refused one wall earlier -- see the unconditional test
+      // below -- which is why this arm cannot use one.)
       ["a text node binding the registration number",
-        { node: "text", value: "202301000123 (1234567-A)", binds: "registration_identifiers" }],
+        { node: "text", value: "as registered", binds: "registration_identifiers" }],
       ["a heading binding the claim wording to a literal",
         { node: "heading", level: 1, binds: "claim_wording", content: { node: "text", value: "Prepared in accordance with MPERS" } }],
       ["a cell binding a total to a different placeholder",
@@ -251,6 +258,110 @@ export async function registerLayersPhase(t, world) {
         { node: "cell", column_span: 1, binds: "prepared_by_label", content: { node: "text", value: "Prepared by" } }] }]),
     });
     assert.ok(ok.report_template_version_id);
+  });
+
+  await t.test("protected content is refused with NO binding declared, at both layers", async () => {
+    // The conditional-enforcement hole: `binds` is metadata the AUTHOR supplies, so an author who
+    // hard-codes an entity name simply omits it. The wall below does not wait to be told.
+    const publish = (block) => publishTemplate(bob, {
+      templateKey: `typed-${randomUUID().slice(0, 6)}`, reportClass: "management",
+      claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
+      layout: layoutAst(null, [{ section_key: "summary", blocks: [block] }]),
+    });
+    for (const [label, value, family, shape] of [
+      ["a hard-coded legal name", "ACME SDN BHD", "entity_legal_name", "legal_entity_suffix"],
+      ["a hard-coded Berhad name", "Acme Holdings Berhad", "entity_legal_name", "legal_entity_suffix"],
+      ["a hard-coded registration number", "Company No. 202301000123", "registration_identifiers", "digit_run_6plus"],
+      ["a hard-coded compliance sentence",
+        "These statements are prepared in accordance with the Malaysian Private Entities Reporting Standard.",
+        "claim_wording", "claim_lexicon_phrase"],
+      ["a hard-coded standard token", "Basis of preparation: MPERS", "claim_wording", "claim_lexicon_phrase"],
+      ["a hard-coded assurance phrase", "and give a true and fair view of the state of affairs",
+        "claim_wording", "claim_lexicon_phrase"],
+    ]) {
+      const error = await caught(() => publish({ node: "text", value }));
+      assert.equal(error?.code, "CLR10", `${label}: ${error?.message}`);
+      assert.equal(reasonOf(error), "protected_content_typed", `${label}: ${error?.message}`);
+      const detail = errorDetail(error);
+      assert.equal(detail.placeholder_key, family, `${label} names its protected family`);
+      assert.equal(detail.shape, shape, `${label} names the shape that matched`);
+      assert.match(detail.fix ?? "", /through a placeholder node/,
+        `${label}: the refusal names the placeholder mechanism as the remedy`);
+    }
+    // LAWFUL REFERENCE SHAPES STAY LAWFUL. If this arm ever fails, the wall has started eating
+    // the labels a real report needs, and the fix is the wall, not the label.
+    const lawful = await publishTemplate(bob, {
+      templateKey: `lawful-${randomUUID().slice(0, 6)}`, reportClass: "management",
+      claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
+      layout: layoutAst(null, [{ section_key: "summary", blocks: [
+        { node: "text", value: "FY2025 comparatives" },
+        { node: "text", value: "Note 12 to the accounts" },
+        { node: "text", value: "Approved on 2026-08-13" },
+        { node: "text", value: "See Section 2.14" }] }]),
+    });
+    assert.ok(lawful.report_template_version_id, "years, note references, dates and section refs pass");
+  });
+
+  await t.test("a typed currency amount is refused at the DRAFT layer, and the template layer is the ruled exemption", async () => {
+    const client = await freshActiveClient(alice, `eps-currency-${randomUUID().slice(0, 6)}`);
+    for (const [label, value, shape] of [
+      ["a thousands-grouped amount", "RM 125,000", "thousands_grouped"],
+      ["a bare grouped amount", "125,000", "thousands_grouped"],
+      ["a currency-marked amount", "RM 5000 recognised in the period", "currency_marked"],
+      ["a decimal amount", "1250.00 carried forward", "decimal_amount"],
+    ]) {
+      const error = await caught(() => draftSpec(alice, {
+        client, specKey: `currency-${randomUUID().slice(0, 6)}`,
+        templateVersionId: world.epsilonMgmtTemplate,
+        layout: layoutAst(null, [{ section_key: "summary", blocks: [{ node: "text", value }] }]),
+      }));
+      assert.equal(error?.code, "CLR10", `${label}: ${error?.message}`);
+      assert.equal(reasonOf(error), "string_encoded_numeral_forbidden", `${label}: ${error?.message}`);
+      assert.equal(errorDetail(error).shape, shape, `${label} names the shape that matched`);
+      assert.match(errorDetail(error).fix ?? "", /metric_ref or a placeholder/,
+        `${label}: the refusal names the placeholder mechanism as the remedy`);
+    }
+    // Lawful at the draft layer too -- the currency wall must not eat a period label.
+    const lawful = await draftSpec(alice, {
+      client, specKey: `currency-ok-${randomUUID().slice(0, 6)}`,
+      templateVersionId: world.epsilonMgmtTemplate,
+      layout: layoutAst(null, [{ section_key: "summary", blocks: [
+        { node: "text", value: "FY2025 vs FY2024, Note 12" }] }]),
+    });
+    assert.ok(lawful.report_spec_version_id);
+    // THE RULED BOUNDARY, asserted rather than assumed: the currency wall is the DRAFT layer's.
+    // Template, house-style and statutory-wording text is publish-gated behind a role floor, and
+    // the ruling exempts it. A future pass that widens the wall to templates is changing a
+    // RULING -- this arm is where it will find that out.
+    const templateExempt = await publishTemplate(bob, {
+      templateKey: `currency-exempt-${randomUUID().slice(0, 6)}`, reportClass: "management",
+      claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
+      layout: layoutAst(null, [{ section_key: "summary", blocks: [
+        { node: "text", value: "RM 125,000 (illustrative)" }] }]),
+    });
+    assert.ok(templateExempt.report_template_version_id,
+      "the publish-gated template layer is the ruled exemption from the draft-time currency wall");
+  });
+
+  await t.test("an unregistered validation scope refuses rather than choosing a wall", async () => {
+    // Directly, because no verb can reach it: every caller passes a literal scope. The branch is
+    // still the one that decides WHICH wall applies, so it gets a positive proof rather than a
+    // reading of the source.
+    const ast = { ast: "clara.layout/v1", sections: [{ section_key: "summary", blocks: [
+      { node: "text", value: "Summary" }] }] };
+    for (const [label, scope] of [["null", null], ["an invented scope", "draft"], ["blank", ""]]) {
+      const error = await caught(() => rootQuery(
+        "select clara._validate_layout_ast_v1($1::jsonb, $2)", [JSON.stringify(ast), scope]));
+      assert.equal(error?.code, "CLR10", `${label}: ${error?.message}`);
+      assert.equal(reasonOf(error), "validation_scope_unknown", `${label}: ${error?.message}`);
+    }
+    // And both registered scopes DO validate -- an assertion that only ever refused would pass
+    // against a function that refused everything.
+    for (const scope of ["template", "spec"]) {
+      const row = (await rootQuery("select clara._validate_layout_ast_v1($1::jsonb, $2) shape",
+        [JSON.stringify(ast), scope])).rows[0];
+      assert.deepEqual(row.shape.sections, ["summary"], `scope ${scope} validates`);
+    }
   });
 
   await t.test("the SAME two walls run again at the spec layer, so an override cannot reintroduce them", async () => {

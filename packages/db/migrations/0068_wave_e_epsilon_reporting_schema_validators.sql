@@ -1,7 +1,7 @@
--- 0067_wave_e_epsilon_reporting_schema_validators.sql -- Wave E lane epsilon, file 4 of 7.
+-- 0068_wave_e_epsilon_reporting_schema_validators.sql -- Wave E lane epsilon, file 4 of 8.
 --
--- Applies after 0066_wave_e_epsilon_reporting_registry_seeds.sql and before
--- 0068_wave_e_epsilon_reporting_security.sql. Number claims at MERGE; the timeout is
+-- Applies after 0067_wave_e_epsilon_reporting_registry_seeds.sql and before
+-- 0069_wave_e_epsilon_reporting_security.sql. Number claims at MERGE; the timeout is
 -- PRECAUTIONARY. (Seven files, not two, because of the repo's 500-line discipline -- the
 -- lane-delta four-file split is the precedent; the file names sort into apply order.)
 --
@@ -10,7 +10,8 @@
 --
 --   V1  clara._layout_structural_int_fields   -- the CLOSED structural-integer allow-list.
 --   V2  clara._validate_layout_ast_v1         -- E-R8 floor 1: NO numeric literal node, only
---                                                structural integers; and no protected
+--                                                structural integers; no protected content typed
+--                                                into the one display-text leaf; and no protected
 --                                                placeholder bound to a user-supplied literal.
 --   V3  clara._validate_chart_spec_ast_v1     -- SS8 stage 1: closed schema, no inline values /
 --                                                SQL / JS / formulas, named axis policies only,
@@ -34,9 +35,15 @@ begin
   if (select count(*) from clara.protected_placeholders) <> 8 then
     raise exception 'epsilon validators: the protected-placeholder list is not seeded' using errcode = 'CLR10';
   end if;
-  if to_regprocedure('clara._validate_layout_ast_v1(jsonb)') is not null then
+  if to_regprocedure('clara._validate_layout_ast_v1(jsonb,text)') is not null then
     raise exception 'epsilon validators partial birth: clara._validate_layout_ast_v1 already exists'
       using errcode = 'CLR10';
+  end if;
+  -- The author-text wall reads the claim lexicon as DATA. If it is unseeded the wall would be
+  -- silently empty on its claim-wording family, so this file refuses to deploy over an
+  -- unseeded lexicon rather than shipping a wall with a hole in it.
+  if (select count(*) from clara.claim_phrase_lexicon) = 0 then
+    raise exception 'epsilon validators: the claim-phrase lexicon is not seeded' using errcode = 'CLR10';
   end if;
 end $pre$;
 
@@ -59,7 +66,7 @@ create function clara._layout_structural_int_fields() returns text[]
 $$;
 revoke all on function clara._layout_structural_int_fields() from public;
 
-create function clara._validate_layout_ast_v1(p_ast jsonb) returns jsonb
+create function clara._validate_layout_ast_v1(p_ast jsonb, p_scope text) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare
   todo jsonb[]; n jsonb; k text; i int := 1;
@@ -67,7 +74,15 @@ declare
   allowed text[]; required text[]; kk text; vv jsonb; child jsonb;
   v_sections text[] := '{}'; v_placeholders text[] := '{}'; v_metrics text[] := '{}';
   v_charts text[] := '{}'; v_nodes int := 0; v_binds text; s jsonb;
+  v_text text; v_family text; v_shape text;
 begin
+  -- SCOPE IS EXPLICIT, NEVER DEFAULTED. It selects which half of the author-text wall applies,
+  -- so a caller that forgot to say which layer it is publishing gets a refusal rather than the
+  -- weaker of the two walls. `template` is the publish-gated layer, `spec` the draft layer.
+  if p_scope is null or p_scope not in ('template', 'spec') then
+    raise exception 'layout validation scope is not registered' using errcode = 'CLR10',
+      detail = '{"reason":"validation_scope_unknown","fix":"validate a layout at scope template or spec"}';
+  end if;
   if p_ast is null or jsonb_typeof(p_ast) <> 'object'
      or exists (select 1 from jsonb_object_keys(p_ast) q where q <> all (array['ast', 'sections']))
      or coalesce(p_ast->>'ast', '') <> 'clara.layout/v1'
@@ -166,10 +181,88 @@ begin
       end if;
     end loop;
 
+    -- =================================================================================
+    -- THE AUTHOR-TEXT WALL. `text.value` is the ONE display-text leaf this grammar has: every
+    -- other string a node carries -- section_key, and the placeholder / metric / chart / note /
+    -- wording keys -- is a KEY resolved against a DB row, and a key never reaches paper as
+    -- itself. So scanning `value` is not a SAMPLE of the author's text; structurally it IS the
+    -- author's text, which is what lets this wall be stated as a closed claim over the layer
+    -- rather than as a best effort.
+    --
+    -- TWO FAMILIES, TWO SCOPES.
+    --   PROTECTED IDENTITY fires at BOTH scopes. Enforcement here is UNCONDITIONAL -- it does
+    --   not wait for the author to declare `binds`, because an author who hard-codes an entity
+    --   name simply omits the field. A hard-coded registration number or legal name in a
+    --   TEMPLATE is the worse case, not the excused one: the template is reused across every
+    --   client bound to it.
+    --   CURRENCY SHAPE fires at scope 'spec' only (ruled). Template, house-style and
+    --   statutory-wording text is publish-gated behind a role floor and a maker's act; the
+    --   draft-time wall exists for what a model, or a hurried user, types into a one-off
+    --   override.
+    --
+    -- HONEST LIMITS, STATED RATHER THAN HIDDEN. This is a MISTAKE-NET over one leaf, not the
+    -- containment. It does NOT catch a spelled-out numeral ("one hundred and twenty five
+    -- thousand"), a small unmarked decimal ("12.50"), a bare four-digit run (indistinguishable
+    -- from a year), a foreign-language legal-entity suffix, or a transliterated entity name.
+    -- Lawful reference shapes stay lawful by construction: "FY2025", "Note 12", "2026-08-13"
+    -- and "MPERS 2.14"-style paragraph references carry no separated digit group, no currency
+    -- marker and no six-digit run. The CONTAINMENT is structural and lives elsewhere -- every
+    -- figure on the face of a statement resolves through metric_ref/placeholder, and E-R8's
+    -- JSON-number allow-list above refuses the numeric node outright.
+    -- =================================================================================
+    if k = 'text' then
+      if jsonb_typeof(n->'value') <> 'string' then
+        raise exception 'layout text value must be a string' using errcode = 'CLR10',
+          detail = '{"reason":"unknown_field","fix":"a text node carries a string value"}';
+      end if;
+      v_text := n->>'value';
+      v_family := null; v_shape := null;
+      -- (1) PROTECTED IDENTITY -- both scopes. The six-or-more digit run is one rule serving two
+      -- protected families at once: no lawful label carries six consecutive digits (a year is
+      -- four, a note reference one to three, a date is grouped), so such a run is either a
+      -- registered identifier or a figure -- and both resolve from the DB, never from typing.
+      if v_text ~ '[0-9]{6,}' then
+        v_family := 'registration_identifiers'; v_shape := 'digit_run_6plus';
+      elsif v_text ~* '(^|[^[:alnum:]])(SDN\.?[[:space:]]*BHD|BERHAD|BHD|PLT)([^[:alnum:]]|$)' then
+        v_family := 'entity_legal_name'; v_shape := 'legal_entity_suffix';
+      elsif exists (select 1 from clara.claim_phrase_lexicon l
+                     where l.match_kind = 'substring_ci'
+                       and position(lower(l.phrase) in lower(v_text)) > 0) then
+        -- DATA-DRIVEN, not invented: the same lexicon lane zeta's gate-3 scan reads. Effective
+        -- windows are deliberately IGNORED here -- a phrase that was ever the compliance claim
+        -- is never lawful as typed text, and consulting a window would need a clock this
+        -- function must not have (the x42 forbidden-clock family).
+        v_family := 'claim_wording'; v_shape := 'claim_lexicon_phrase';
+      end if;
+      if v_family is not null then
+        raise exception 'protected content may not be typed into a report layout' using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'protected_content_typed', 'placeholder_key', v_family,
+            'shape', v_shape, 'node', k, 'scope', p_scope,
+            'fix', format('resolve %L from %s through a placeholder node, never as typed text',
+              v_family, coalesce((select p.resolves_from from clara.protected_placeholders p
+                                   where p.placeholder_key = v_family), 'the DB')))::text;
+      end if;
+      -- (2) CURRENCY SHAPE -- draft scope only (ruled). E-R4 in the string domain: a figure the
+      -- deterministic evaluator never produced, wearing quotes.
+      if p_scope = 'spec' then
+        if v_text ~ '[0-9]{1,3}(,[0-9]{3})+' then v_shape := 'thousands_grouped';
+        elsif v_text ~* '(^|[^[:alpha:]])(RM|MYR|USD|SGD|EUR|GBP)\.?[[:space:]]*[0-9]' then v_shape := 'currency_marked';
+        elsif v_text ~ '[0-9]{4,}\.[0-9]{2}([^0-9]|$)' then v_shape := 'decimal_amount';
+        else v_shape := null; end if;
+        if v_shape is not null then
+          raise exception 'a currency amount may not be typed into a report' using errcode = 'CLR10',
+            detail = jsonb_build_object('reason', 'string_encoded_numeral_forbidden', 'node', k,
+              'shape', v_shape, 'scope', p_scope,
+              'fix', 'every figure comes from the DB algebra -- reference it with a metric_ref or a placeholder, never as typed text')::text;
+        end if;
+      end if;
+    end if;
+
     -- THE PROTECTED-PLACEHOLDER ARM (SS7, publish-time half). A node that BINDS a protected
     -- placeholder must resolve it FROM THE DB: its content is exactly the placeholder node. A
     -- text node binding one, or a container whose content is a literal, is the smuggle this
-    -- refuses -- and it refuses by NAME, so the message states the remedy.
+    -- refuses -- and it refuses by NAME, so the message states the remedy. It is the DECLARED
+    -- half of the wall; the block above is the undeclared half.
     if n ? 'binds' then
       if jsonb_typeof(n->'binds') <> 'string' or nullif(n->>'binds', '') is null then
         raise exception 'layout binds must be a placeholder key' using errcode = 'CLR10',
@@ -213,7 +306,7 @@ begin
   return jsonb_build_object('sections', to_jsonb(v_sections), 'placeholders', to_jsonb(v_placeholders),
     'metric_keys', to_jsonb(v_metrics), 'chart_keys', to_jsonb(v_charts), 'nodes', v_nodes);
 end $$;
-revoke all on function clara._validate_layout_ast_v1(jsonb) from public;
+revoke all on function clara._validate_layout_ast_v1(jsonb, text) from public;
 
 -- =====================================================================================
 -- V3 -- THE CHART SPEC VALIDATOR, STAGE 1 (closed JSON-schema validation). "No inline values,
@@ -224,6 +317,7 @@ create function clara._validate_chart_spec_ast_v1(p_spec jsonb) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare
   x jsonb; kk text; vv jsonb; v_series text[] := '{}'; v_versions uuid[] := '{}';
+  v_series_versions uuid[] := '{}'; v_threshold_versions uuid[] := '{}';
   v_constants text[] := '{}'; todo jsonb[]; i int := 1; n jsonb;
 begin
   if p_spec is null or jsonb_typeof(p_spec) <> 'object' then
@@ -307,6 +401,7 @@ begin
     end if;
     v_series := v_series || (x->>'series_key');
     v_versions := v_versions || (x->>'definition_version_id')::uuid;
+    v_series_versions := v_series_versions || (x->>'definition_version_id')::uuid;
   end loop;
 
   for x in select value from jsonb_array_elements(p_spec->'thresholds') loop
@@ -321,11 +416,18 @@ begin
         detail = '{"reason":"threshold_literal_forbidden","fix":"a threshold names exactly one DB source: a metric_constant key or an approved definition version"}';
     end if;
     if x->>'source' = 'metric_constant' then v_constants := v_constants || (x->>'constant_key');
-    else v_versions := v_versions || (x->>'definition_version_id')::uuid; end if;
+    else
+      v_versions := v_versions || (x->>'definition_version_id')::uuid;
+      v_threshold_versions := v_threshold_versions || (x->>'definition_version_id')::uuid;
+    end if;
   end loop;
 
+  -- The series and threshold version lists are kept APART as well as unioned: stage 2 asks a
+  -- different question of each (a threshold must match the axis the series define, not the other
+  -- way round), and a single merged list cannot answer it.
   return jsonb_build_object('axis_policy', p_spec->>'axis_policy', 'series_keys', to_jsonb(v_series),
-    'definition_version_ids', to_jsonb(v_versions), 'constant_keys', to_jsonb(v_constants));
+    'definition_version_ids', to_jsonb(v_versions), 'series_version_ids', to_jsonb(v_series_versions),
+    'threshold_version_ids', to_jsonb(v_threshold_versions), 'constant_keys', to_jsonb(v_constants));
 end $$;
 revoke all on function clara._validate_chart_spec_ast_v1(jsonb) from public;
 
@@ -336,6 +438,9 @@ revoke all on function clara._validate_chart_spec_ast_v1(jsonb) from public;
 create function clara._validate_chart_spec_semantics_v1(p_firm uuid, p_spec jsonb) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare v_shape jsonb; v uuid; ck text; v_state text; v_seen int;
+  v_dims int; v_temps int; v_from date; v_to date; v_temporality text; v_bad text;
+  v_cur smallint; v_days smallint; v_cnt smallint;
+  v_ccur smallint; v_cdays smallint; v_ccnt smallint; v_zero boolean;
 begin
   v_shape := clara._validate_chart_spec_ast_v1(p_spec);
   for v in select (value#>>'{}')::uuid from jsonb_array_elements(v_shape->'definition_version_ids') loop
@@ -353,14 +458,93 @@ begin
           'fix', 'plot a canonical, firm_approved or draft definition -- superseded and rejected never plot')::text;
     end if;
   end loop;
+  -- ===================================================================================
+  -- AXIS COMPATIBILITY. Visibility and state say each series MAY be plotted; they say nothing
+  -- about whether plotting them TOGETHER tells the truth. Money against a ratio, a stock
+  -- (point_in_time) against a flow, or two series whose effective windows never overlap each
+  -- render a picture that is individually sourced and jointly misleading -- E-R4's harm with a
+  -- chart drawn around it. ONE AXIS, ONE DIMENSION, ONE TEMPORALITY, ONE SHARED WINDOW.
+  --
+  -- The dimension compared is delta's own (currency_power, days_power, count_power) triple, not
+  -- the unit KEY: a later unit row that is money by another name stays compatible, and two keys
+  -- that merely spell alike do not (review law 3 -- spelling is not identity).
+  -- ===================================================================================
+  select count(distinct (mu.currency_power, mu.days_power, mu.count_power)),
+         count(distinct mv.temporality_key), max(mv.applies_from),
+         min(mv.applies_to) filter (where mv.applies_to is not null)
+    into v_dims, v_temps, v_from, v_to
+    from jsonb_array_elements(v_shape->'series_version_ids') e
+    join clara.metric_definition_versions mv on mv.id = (e#>>'{}')::uuid
+    join clara.metric_units mu on mu.unit_key = mv.unit_key;
+  if v_dims > 1 then
+    raise exception 'chart series do not share a unit dimension' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'series_unit_incompatible', 'distinct_dimensions', v_dims,
+        'fix', 'plot one dimension per chart -- money and ratio series need separate charts, not a shared axis')::text;
+  end if;
+  if v_temps > 1 then
+    select string_agg(distinct mv.temporality_key, ',' order by mv.temporality_key) into v_temporality
+      from jsonb_array_elements(v_shape->'series_version_ids') e
+      join clara.metric_definition_versions mv on mv.id = (e#>>'{}')::uuid;
+    raise exception 'chart series do not share a temporality' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'series_temporality_incompatible', 'temporalities', v_temporality,
+        'fix', 'plot one temporality per chart -- a period-end balance and a period flow are different quantities')::text;
+  end if;
+  if v_to is not null and v_from > v_to then
+    raise exception 'chart series effective windows do not overlap' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'series_effective_windows_disjoint',
+        'latest_applies_from', v_from, 'earliest_applies_to', v_to,
+        'fix', 'plot definition versions whose effective windows share at least one day')::text;
+  end if;
+  -- The axis dimension itself, read from any series (they are proven identical above).
+  select mu.currency_power, mu.days_power, mu.count_power into v_cur, v_days, v_cnt
+    from jsonb_array_elements(v_shape->'series_version_ids') e
+    join clara.metric_definition_versions mv on mv.id = (e#>>'{}')::uuid
+    join clara.metric_units mu on mu.unit_key = mv.unit_key
+   limit 1;
+  -- A threshold is drawn ON the axis, so it answers to the axis.
+  select string_agg(distinct (e#>>'{}'), ',') into v_bad
+    from jsonb_array_elements(v_shape->'threshold_version_ids') e
+    join clara.metric_definition_versions mv on mv.id = (e#>>'{}')::uuid
+    join clara.metric_units mu on mu.unit_key = mv.unit_key
+   where (mu.currency_power, mu.days_power, mu.count_power)
+         is distinct from (v_cur, v_days, v_cnt);
+  if v_bad is not null then
+    raise exception 'chart threshold does not share the axis dimension' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'threshold_unit_incompatible', 'definition_version_ids', v_bad,
+        'fix', 'a threshold is drawn on the series axis -- give it the same unit dimension')::text;
+  end if;
+
   foreach ck in array coalesce(
       array(select value#>>'{}' from jsonb_array_elements(v_shape->'constant_keys')), '{}'::text[]) loop
-    select count(*) into v_seen from clara.metric_constants
+    select count(*), count(distinct (currency_power, days_power, count_power)),
+           min(currency_power), min(days_power), min(count_power), bool_and(numerator = 0)
+      into v_seen, v_dims, v_ccur, v_cdays, v_ccnt, v_zero
+      from clara.metric_constants
      where constant_key = ck and (firm_id is null or firm_id = p_firm);
     if v_seen = 0 then
       raise exception 'chart threshold constant is not this firm''s' using errcode = 'CLR11',
         detail = jsonb_build_object('reason', 'metric_constant_not_in_firm', 'constant_key', ck,
           'fix', 'reference a versioned constant this firm can see')::text;
+    end if;
+    -- FAIL-CLOSED on ambiguity. If the visible versions of a constant disagree about their
+    -- dimension, no clock-free reading of this spec can say which one the chart means -- and
+    -- this validator must have no clock (the x42 forbidden-clock family).
+    if v_dims > 1 then
+      raise exception 'chart threshold constant has more than one dimension' using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'metric_constant_dimension_ambiguous', 'constant_key', ck,
+          'fix', 'reference a constant whose visible versions agree on their dimension')::text;
+    end if;
+    -- ZERO IS DIMENSIONALLY NEUTRAL, and it is the one value that is. A zero baseline is
+    -- meaningful on any axis -- nought ringgit and a nought ratio are the same point -- so a
+    -- constant whose every visible version is zero-valued rides any dimension. Any OTHER
+    -- dimensionless constant drawn on a money axis is a bare number on a money scale, which is
+    -- precisely the misleading picture this refuses.
+    if not v_zero and (v_ccur, v_cdays, v_ccnt) is distinct from (v_cur, v_days, v_cnt) then
+      raise exception 'chart threshold constant does not share the axis dimension' using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'threshold_unit_incompatible', 'constant_key', ck,
+          'axis_dimension', format('(%s,%s,%s)', v_cur, v_days, v_cnt),
+          'constant_dimension', format('(%s,%s,%s)', v_ccur, v_cdays, v_ccnt),
+          'fix', 'a threshold is drawn on the series axis -- give it the same unit dimension, or reference a zero baseline')::text;
     end if;
   end loop;
   return v_shape;
@@ -439,6 +623,6 @@ begin
   if current_user <> (select v from _epsilon_validator_pre where k = 'deploy_principal') then
     raise exception 'epsilon validators tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'epsilon validators OK: layout AST refuses every non-structural JSON number (allow-list of 8 structural fields) and every protected placeholder bound to a supplied literal; chart AST refuses inline values/SQL/JS/formulas, ad-hoc axis bounds and literal thresholds over the WHOLE tree, admits only the four named axis policies and requires the same-source data table; the manifest key list is % keys for a draft, % for pre_sign, % for a signed original, and an unknown kind raises rather than returning an empty requirement. All 5 validators ungranted to every app role.',
+  raise notice 'epsilon validators OK: layout AST refuses every non-structural JSON number (allow-list of 8 structural fields), every protected placeholder bound to a supplied literal, and -- UNCONDITIONALLY, at the one display-text leaf the grammar has -- typed registration identifiers, legal-entity suffixes and any claim-lexicon phrase (both scopes) plus typed currency amounts (scope spec); an unregistered scope refuses outright. Chart AST refuses inline values/SQL/JS/formulas, ad-hoc axis bounds and literal thresholds over the WHOLE tree, admits only the four named axis policies and requires the same-source data table; stage 2 additionally holds one axis to one unit dimension, one temporality and one shared effective window, and holds every threshold to the axis dimension. The manifest key list is % keys for a draft, % for pre_sign, % for a signed original, and an unknown kind raises rather than returning an empty requirement. All 5 validators ungranted to every app role.',
     v_base, v_pre, v_signed;
 end $tail$;

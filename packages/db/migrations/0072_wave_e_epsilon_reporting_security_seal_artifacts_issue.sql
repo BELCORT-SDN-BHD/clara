@@ -1,7 +1,7 @@
--- 0071_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql -- lane epsilon, file 8/8.
+-- 0072_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql -- lane epsilon, file 8/8.
 --
 -- Applies last of the epsilon set, immediately after
--- 0070_wave_e_epsilon_reporting_security_seal_artifacts.sql (the seal core + wrapper).
+-- 0071_wave_e_epsilon_reporting_security_seal_artifacts.sql (the seal core + wrapper).
 -- Number claims at MERGE; the timeout is PRECAUTIONARY.
 --
 --   A2  clara.approve_report_for_issue -- key 2 floor + maker/checker; binds the EXACT hash.

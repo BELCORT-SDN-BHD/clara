@@ -1,4 +1,4 @@
--- 0064_wave_e_epsilon_reporting.sql -- Wave E lane epsilon, file 1 of 7: LAYERS 1-5.
+-- 0065_wave_e_epsilon_reporting.sql -- Wave E lane epsilon, file 1 of 8: LAYERS 1-5.
 --
 -- MIGRATION NUMBERS claim at MERGE (standing law, .claude/rules/db-migrations.md). This file
 -- lands AFTER lane delta (0058-0061: metrics, behavior, security, residuals), 0056 (close

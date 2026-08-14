@@ -1,7 +1,7 @@
--- 0066_wave_e_epsilon_reporting_registry_seeds.sql -- Wave E lane epsilon, file 3 of 7.
+-- 0067_wave_e_epsilon_reporting_registry_seeds.sql -- Wave E lane epsilon, file 3 of 8.
 --
--- Applies after 0065_wave_e_epsilon_reporting_registry.sql and before
--- 0067_wave_e_epsilon_reporting_schema_validators.sql. Number claims at MERGE; the
+-- Applies after 0066_wave_e_epsilon_reporting_registry.sql and before
+-- 0068_wave_e_epsilon_reporting_schema_validators.sql. Number claims at MERGE; the
 -- timeout is PRECAUTIONARY -- a few dozen reference rows.
 --
 -- THE CURATOR SEEDS: profile identities, their two vintages, the section/slot skeletons by
