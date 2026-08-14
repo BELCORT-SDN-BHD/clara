@@ -42,6 +42,21 @@ export const OPAQUE_READS: Record<string, string> = {
   adjustment_run_due: "clara._wdb_rerun_breach's to_jsonb(e.collision) detail payload (a text[] loop-record field, not a declared scalar) reaches this read's depth-2 closure — round-8 M1's collision-detail splice; Direction-1 protection is OFF for this whole envelope, not only the new key (see dbSeamCensus.test.ts's own r9n2 cell)",
   coding_lane: "projects through a view/composite, no jsonb_build_object in the body",
   get_bank_reconciliation: "to_jsonb over the receipt row + snapshot composites (0038/0040)",
+  // [Wave E lane theta] clara.get_close_plan's receipt branch carries
+  // `'evaluator_version_ids', to_jsonb(v_receipt.evaluator_version_ids)` --
+  // v_receipt is a `record` (`select cr.* into v_receipt from clara.close_receipts
+  // cr ...`), so `v_receipt.evaluator_version_ids` is a QUALIFIED RECORD FIELD, not
+  // a bare declared-scalar identifier (the same adjustment_run_due/e.collision shape
+  // above: declaredScalarLocals only recognises a bare name the declare block types
+  // at a scalar, and fails on the dot). The underlying value is a uuid[] -- an ARRAY,
+  // never an object, so it is genuinely keyless in truth -- but the static instrument
+  // cannot resolve a record field's type to prove that, and conservatively marks the
+  // whole read opaque rather than guess. PROTECTION LOST, STATED: Direction-1 is OFF
+  // for this whole envelope, not only this one key; manually re-verified at fix time
+  // that every key toClosePlan's own mapper reads (fiscal_year.id, fiscal_year.
+  // client_id, close_run.state, receipt.state, checks) is a literal this read
+  // actually emits.
+  get_close_plan: "to_jsonb(v_receipt.evaluator_version_ids) -- v_receipt is a record, not a declared scalar (the adjustment_run_due/e.collision shape); the underlying uuid[] is genuinely keyless but the instrument cannot prove a record field's type",
   get_coding_rule: "to_jsonb over the rule row",
   get_draft_review: "to_jsonb over the entry + proposal rows",
   get_lint_finding: "to_jsonb over the finding row",
@@ -67,7 +82,13 @@ export const OPAQUE_READS: Record<string, string> = {
  *  the measured set, so a new unmapped read is a failure. */
 export const UNMAPPED_READS: Record<string, string> = {
   get_vendor_binding: "reviewApi.getVendorBinding casts the envelope straight to VendorBindingDetail — no mapper, nothing to diff",
+  // [Wave E lane theta] closeApi.listFiscalYears: `Array.isArray(out) ? (out as
+  // FiscalYearRow[]) : []` — a bare cast over the array, no toX mapper.
+  list_fiscal_years: "closeApi.listFiscalYears casts the envelope straight to FiscalYearRow[] — no mapper, nothing to diff",
   preview_wrong_client_correction: "the correction preview is cast straight to its detail type — no mapper, nothing to diff",
+  // [Wave E lane theta] reportsApi.snapshotState: `typeof out === "string" ? out
+  // : "unknown"` — a scalar string result, no envelope to map.
+  snapshot_state: "reportsApi.snapshotState narrows the envelope straight to a string ('current'|'stale'|'unknown') — no mapper, nothing to diff",
 };
 
 /** DIRECTION 1 — keys a mapper reads that the DB never emits, ACCEPTED because
@@ -211,6 +232,17 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   get_adjustment_run: "entry verb wall wall_advice",
   get_bank_reconciliation: "acknowledged_outstanding anchor_amount_cents anchor_consumed_cents available bank_account_ids bank_uncleared_opening_cents client_id consumed counterpart_line_id cutoff firm_id first_statement_id gl_cents matched_line_cents opening_tie_delta_cents pair_complete_in_period reversal_entry_id reversal_pairs_excluded statement_status unavailable_reason",
   get_bank_statement: "lines statement",
+  // [Wave E lane theta] toClosePlan (closeApi.ts) only READS the guard keys it
+  // needs to validate the envelope's shape (fiscal_year.id, fiscal_year.
+  // client_id, close_run.state, receipt.state, and that checks is an array) --
+  // it then returns the envelope through, and every other field is read
+  // DIRECTLY in close/page.tsx's JSX (readiness counts, per-gate rows, the
+  // receipt panel, the closing-position table), never inside a toX-named
+  // mapper closure this census walks. Same shape as get_bank_reconciliation/
+  // get_document_extract/list_review_queue above: a real, rendered surface
+  // whose consumption the census's mapper-closure instrument cannot see,
+  // recorded honestly rather than narrowed to make the ledger look shorter.
+  get_close_plan: "applies_when attestation attested_at attested_by books_watermark check_key close_entry_id close_run_id closed_at closed_by closing_position closing_tb_digest dataset_sha256 drawer end_reason ended_at ended_by ends_on evaluated_at evaluator_version_ids fy_end_source gate_digest item_key items kind label measured measured_digest ordinal pl_net_cents reason receipt_id result retained_earnings_account run_state segregation_mode self_attestation started_at started_by starts_on status title",
   get_coding_rule: "counterparty name question registration_no rule",
   get_depreciation_authority: "client_id",
   get_depreciation_run: "client_id",
