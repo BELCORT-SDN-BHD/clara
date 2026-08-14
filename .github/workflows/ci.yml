@@ -718,6 +718,37 @@ jobs:
           PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
             node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
 
+      # Wave-E θ contract drill (the same anti-misleading-green wiring as the δ drill above,
+      # the identical hazard shape: the package sweep preloads the wave gate (--import
+      # tests/theta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_THETA for
+      # every file in the sweep — so if a numbering/merge accident ever left 0064 off the
+      # chain, theta-close-plan.test.mjs would skip loudly-but-green in the only leg that runs
+      # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain,
+      # then the theta contract run FOCUSED with the variable explicitly UNSET — on a pre-θ
+      # chain it FAILS by design (the gate's stated focused-run polarity), and post-θ it must
+      # be green with ZERO skips. get_close_plan is a read (not a one-way ceremony like δ's
+      # evaluator deploy), so its own database is not load-bearing for correctness the way
+      # δ's is — it's here for the same reason every other wave drill gets one: isolation from
+      # the concurrent all-packages sweep's shared clara_ci database, so this leg's result is
+      # never confounded by what else that sweep did to it. Guarded by presence so pre-merge
+      # branches without θ stay green: the step no-ops until the numbered
+      # wave_e_theta_close_plan migration is on disk — keyed on 0064 directly, the one file
+      # whose absence would matter (theta ships a single migration, unlike δ/ε's multi-file
+      # waves).
+      - name: Wave-E θ contract drill (isolated DB, focused, allow-missing UNSET)
+        working-directory: packages/db
+        run: |
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_theta_close_plan.sql 2>/dev/null | head -1)"
+          if [ -z "$m" ]; then
+            echo "no numbered wave_e_theta_close_plan migration on disk — the θ contract has nothing to drill yet"; exit 0
+          fi
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_theta_contract_ci'
+          PGDATABASE=clara_theta_contract_ci pnpm migrate
+          PGDATABASE=clara_theta_contract_ci pnpm seed
+          unset CLARA_ALLOW_MISSING_WAVE_E_THETA
+          PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
+            node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
