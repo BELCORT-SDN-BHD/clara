@@ -27,7 +27,8 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-acceptance-matrix.md` | live | The acceptance matrix, minted before build: how to read a cell, then Sections A–E (part 1 of 2). |
 | `wave-e-acceptance-matrix-part2.md` | live | Matrix continued: Section F (the E-R12 client-facts trio) and the cross-section sweeps, run order and closing-verification template. |
 | `roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
-| `wave-e-delta-handoff-2026-08-13.md` | live | Clock-out checkpoint for δ final-finding closure: owner rulings, sole-writer ownership, acceptance hold, working-tree custody and exact resume order. |
+| `wave-e-delta-handoff-2026-08-13.md` | live | Clock-out checkpoint for δ final-finding closure: owner rulings, sole-writer ownership, acceptance hold, working-tree custody and exact resume order. **Discharged by the night run** — kept as the rulings' source of record. |
+| `wave-e-delta-ceremony-asrun.md` | completed/ | The 0058-0063 live ceremony as run: positive reads, the two field findings (SUSET, pooler-pid), deviations with grounds, the no-print DSN bridge. |
 
 ## `completed/` — closed waves and slices
 

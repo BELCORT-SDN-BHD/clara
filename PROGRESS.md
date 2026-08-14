@@ -9,9 +9,13 @@ file wins or it is stale — and truing it is the first thing you do.
 
 *(as of 2026-08-14 early morning, the Wave E night run — trued at every clock-out)*
 
-- **Live DB:** 56 migrations, frontier **`0057_wave_e_registry_snapshots`**. Repo frontier:
-  **`0063`** — six new migrations built, reviewed and PG17-accepted this night (δ `0058-0061`
-  + the RS name-only guard pair `0062-0063`), PR pending; live apply awaits the ceremony.
+- **Live DB: 62 migrations, frontier `0063_rs_name_only_lift_floor`** — the 0058-0063
+  ceremony ran 2026-08-14 from merged `main` (PRs #233/#234/#236; as-run:
+  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`). **Both evaluator closures are
+  DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is ARMED**
+  (name-only fact through the audited door; the S4.5 behavioural self-proof fired on live).
+  The A30b receipt table is live and empty. Two field findings stopped the ceremony cleanly
+  and were fixed same-night (the SUSET guarded pin #234; the session-pin nonce #236).
 - **The δ review record:** cross-model (codex xhigh, initially NOT-MERGEABLE with 6 blockers)
   + a native 8-dimension adversarially-verified pass → an adjudicated fix docket (fake-receipt
   validation, in-body `check_function_bodies` double-layer refusal, owner-only RS lift floor,
@@ -48,11 +52,11 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave E · β | the close model (`0056`) | ceremonied | #228 |
 | Wave E · γ | period registry + month snapshots (`0057`) | ceremonied | #231 |
 | harness-v2 | the grand refactor — ADR-0069 | merged | #232 |
-| Wave E · δ + RS guard + harness hardening | `0058-0063` + runner hardening + the dispatch-model hook — full ladder run (cross-model review → fix docket → re-verify → PG17 acceptance 87/87) | in review (PR-1) | — |
-| Wave E · ε | FS reporting DB layer (7 migrations authored): template layers · claim assessment (incl. the seal-gate composition fix, η's cross-lane find) · chart AST · sealed artifacts — own-stage battery 48/48 + δ/θ coexistence proof | built, own PR next | — |
-| Wave E · ζ | render worker + freeze CI half + DR §10 — authoring (render_jobs 4-file set + packages/reporting-render on disk) | building | — |
-| Wave E · η | chatTurn_v11 + four wake wrappers (agent-lane cores calling δ internals; granted wrappers carry no DML) — DB half + v11 files authored, F7 rounding fold-in pending validation | building | — |
-| Wave E · θ | `get_close_plan` + `/close` + `/reports` (plumbing grade) — rig 4/4 + dashboard 739/739 | built, own PR queued | — |
+| Wave E · δ + RS guard + harness hardening | `0058-0063` + runner hardening + the dispatch-model hook | **ceremonied (LIVE)** | #233 #234 #236 |
+| Wave E · θ | `0064` `get_close_plan` + `/close` + `/reports` — re-sequenced ahead of ε | in review | #237 |
+| Wave E · ε | FS reporting DB layer, 8 migrations (renumbering to `0065-0072`) — the independent-review fix round in progress (9 blockers + 13 majors docket; batch 1 of ~3 landed, 53/53) | fix round | #235 |
+| Wave E · ζ | render worker + freeze CI half + DR §10 — phase-1 complete (71/71 + 11/11), holding for GO phase-2 behind ε | built, holding | — |
+| Wave E · η | chatTurn_v11 + wake wrappers — complete and rebound to ε's final 14-arg core; render-preview chain deferred to the OBO lane by ruling | built, holding | — |
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -60,21 +64,18 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **Land PR-1** (δ `0058-0061` + RS guard `0062-0063` + runner hardening + harness hooks +
-   docs): CI green on the two self-hosted runners → merge → the 0058-0063 ceremony from merged
-   `main` (backup first · restored-backup rehearsal of the RS S3 arming + S4.5 self-proof ·
-   additive apply with `lock_timeout` for the two trigger DDLs · `NOTIFY pgrst` · freeze
-   `--lock-deployed` · positive reads). The evaluator `deployed=true` flip is a separate staged
-   step inside the same ceremony (owner authorized the night run to include it).
-2. **The ε → θ → ζ/η PR train**, each on the full ladder: ε claims numbers at its merge prep
-   (its `--import` gate joins the package.json chain then); θ behind ε; ζ and η after their
-   validations (η's rig run needs the post-PR-1 frontier + ε staged; ζ carries a Law-1
-   independent pass on the leader-dispatch touch + the freeze manifest for its render modules).
-3. **Owner-key acceptance items** (the constitutional human half, whenever the owner sits):
+1. **Land θ (#237)**: CI + the independent review pass → merge (claims `0064`).
+2. **Finish ε's fix round** (#235): the remaining docket batches → focused codex re-verify →
+   renumber `0065-0072` (rebase over θ; keep all four `--import` gates in order) → merge.
+3. **Then ζ phase-2** (docker/Typst spike → double-render drill → rig → fly app + the
+   `reports/` bucket-prefix ceremony step + Supavisor re-read) and **η GO VALIDATE** (rig run
+   against the post-ε frontier), each closing through its own PR + ceremony; η's runtime
+   deploy carries the chatTurn v11 cutover and the deferred runtime-image refresh.
+4. **Owner-key acceptance items** (the constitutional human half, whenever the owner sits):
    the E-R9 corpus on live books — sandbox battery → BEE FY2025 first real close (drawer keys)
    → RPR historical MPERS pack → RS snapshot witness; wording seeds behind #43 (MASB verify)
    + #44; the ms/zh claim-policy copy (fail-closed until supplied).
-4. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25) —
+5. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25) —
    both parked for that sitting (ADR-062/0065).
 
 ## Backlog
