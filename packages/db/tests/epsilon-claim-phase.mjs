@@ -10,11 +10,11 @@ import {
   assert, rootQuery, withActor, ROLES, caught, errorDetail, assertRefusal,
   sealArtifact, sealDataset, assessClaim, approveIssue, buildManifest, sha64, MPERS_SECTIONS,
   proposeMetricDefinition, approveMetricDefinition, supersedeMetricDefinition,
-  measure, metricAst,
+  evaluateMetricHuman, randomUUID, measure, metricAst,
 } from "./epsilon-fixtures.mjs";
 import {
   buildEpsilonWorld, seedRigProfile, seedVerifiedWording, profileVersion, assessmentRow,
-  ensureEpsilonAdmin,
+  artifactRows, ensureEpsilonAdmin,
 } from "./epsilon-world.mjs";
 
 /** Disable a table's user triggers for one statement, then always put them back. */
@@ -372,6 +372,98 @@ export async function registerClaimPhase(t, world) {
       { locale: "ms", n: 1, keys: "standard_name_token" },
       { locale: "zh", n: 1, keys: "standard_name_token" },
     ], "en is populated; ms and zh carry the name token ONLY, pending owner verification");
+  });
+
+  await t.test("a run evaluated AGAIN after its dataset was sealed cannot mint an artifact", async () => {
+    // The counts-are-blind hole. Arm 2b re-derives draft/non-statutory COUNTS, and a second
+    // APPROVED definition moves neither: 0/0 before, 0/0 after. So the assessment still reads
+    // true while the dataset it describes has stopped being this run's population, and a
+    // one-point dataset would seal as the pre-sign of a two-cell run. Nothing is arithmetically
+    // wrong in that artifact; it simply documents a run that moved on.
+    const admin = await ensureEpsilonAdmin(world);
+    const w = await buildEpsilonWorld(world, { tag: "population-drift", reportClass: "management" });
+    const sealedPoints = Number((await rootQuery(
+      `select count(*)::int n from clara.report_dataset_points p
+         join clara.report_datasets d on d.id = p.dataset_id
+        where d.report_run_id=$1 and d.chart_spec_version_id is null`, [w.runId])).rows[0].n);
+    assert.ok(sealedPoints >= 1, "the run sealed a dataset over the cells it had");
+
+    // A second definition, APPROVED -- so it is invisible to every count arm 2b looks at.
+    const second = await proposeMetricDefinition(admin, {
+      client: w.client, key: `drift_${randomUUID().slice(0, 8)}`, unit: "money",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money" }),
+    });
+    await approveMetricDefinition(owner, second);
+    await evaluateMetricHuman(owner, { client: w.client, definitionVersion: second,
+      periodIds: [w.period.id], snapshotId: w.snapshotId, runId: w.runId });
+
+    const assessed = await assessmentRow(w.runId);
+    assert.equal(assessed.check_receipt.draft_definition_cells, 0);
+    assert.equal(assessed.check_receipt.non_statutory_cells, 0);
+    assert.equal(Number((await rootQuery(
+      "select count(*)::int n from clara.metric_cells where run_id=$1", [w.runId])).rows[0].n),
+      sealedPoints + 1, "the run now carries a cell the sealed dataset never saw");
+
+    for (const kind of ["draft_watermarked", "pre_sign"]) {
+      const sha = sha64(`drift-${kind}-${w.runId}`);
+      const error = await caught(async () => sealArtifact(owner, { runId: w.runId, kind, sha256: sha,
+        manifest: await buildManifest({ runId: w.runId, kind, sha256: sha }) }));
+      const detail = assertRefusal(error, "CLR42", "dataset_population_stale", kind);
+      assert.equal(detail.sealed_cells, sealedPoints);
+      assert.equal(detail.current_cells, sealedPoints + 1);
+      assert.equal(detail.cells_missing_from_dataset.length, 1,
+        "and the refusal names the cell the dataset does not carry");
+    }
+    assert.equal((await artifactRows(w.runId)).length, 0,
+      "neither kind minted a row -- a watermarked draft of a stale population is still a document");
+  });
+
+  await t.test("the seal HOLDS a lock that a concurrent supersession must wait for", async () => {
+    // The TOCTOU window: re-deriving the assessment proves it true at the instant of the read,
+    // and the artifact lands later in the same transaction. Without a lock shared with delta's
+    // supersession path, a supersede can commit in between and the seal inserts over a verdict
+    // that stopped being true mid-transaction.
+    //
+    // A pause cannot be injected into the function, so the property is proven from the OTHER
+    // side, which is the side that matters: with the seal's transaction still open, delta's
+    // supersession UPDATE against a contributing definition version must BLOCK. If it can
+    // proceed, the window is open by definition.
+    const w = await buildEpsilonWorld(world, { tag: "seal-lock", reportClass: "management" });
+    const sha = sha64(`seal-lock-${w.runId}`);
+    const manifest = await buildManifest({ runId: w.runId, kind: "draft_watermarked", sha256: sha });
+    const contributing = (await rootQuery(
+      "select distinct definition_version_id d from clara.metric_cells where run_id=$1 and definition_version_id is not null",
+      [w.runId])).rows[0].d;
+    assert.ok(contributing, "the run has a contributing definition version to contend over");
+
+    const supersedeUnderTimeout = () => caught(() =>
+      withActor({ role: ROLES.fnOwner, transaction: true }, async (b) => {
+        await b.query("set local lock_timeout='700ms'");
+        return b.query("update clara.metric_definition_versions set state='superseded' where id=$1",
+          [contributing]);
+      }));
+
+    let blocked;
+    const done = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, async (a) => {
+      await a.query(
+        `select clara._seal_report_artifact_core($1,$2,$3,'draft_watermarked','pdf',$4,4096,$5::jsonb,null,$6)`,
+        [world.firms.A, owner, w.runId, sha, JSON.stringify(manifest), `seal-lock-${sha.slice(0, 8)}`]);
+      // A's transaction is still open here, so its FOR SHARE locks are still held.
+      blocked = await supersedeUnderTimeout();
+      throw new Error("rollback the seal");
+    }));
+    assert.match(done?.message ?? "", /rollback the seal/, "the seal transaction was rolled back");
+    assert.equal(blocked?.code, "55P03",
+      `a supersession racing an open seal must WAIT, not proceed: ${blocked?.code} ${blocked?.message}`);
+
+    // THE CONTROL, without which the arm above proves only that something refused: once the
+    // seal's transaction is gone, the same statement no longer times out on a lock. Whatever
+    // happens to it then, it is not 55P03 -- so the block came from the seal's lock and not from
+    // a standing condition on the row.
+    const afterwards = await supersedeUnderTimeout();
+    assert.notEqual(afterwards?.code, "55P03",
+      "with no seal in flight the same UPDATE is not lock-blocked");
+    assert.equal((await artifactRows(w.runId)).length, 0, "the rolled-back seal left no artifact");
   });
 
   await t.test("the fail-closed branches nothing else reaches are proven to refuse", async () => {

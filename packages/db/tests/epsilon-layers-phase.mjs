@@ -302,7 +302,7 @@ export async function registerLayersPhase(t, world) {
     assert.ok(lawful.report_template_version_id, "years, note references, dates and section refs pass");
   });
 
-  await t.test("a typed currency amount is refused at the DRAFT layer, and the template layer is the ruled exemption", async () => {
+  await t.test("a typed currency amount is refused at BOTH layers, and the small-decimal limit is deliberate", async () => {
     const client = await freshActiveClient(alice, `eps-currency-${randomUUID().slice(0, 6)}`);
     for (const [label, value, shape] of [
       ["a thousands-grouped amount", "RM 125,000", "thousands_grouped"],
@@ -329,18 +329,35 @@ export async function registerLayersPhase(t, world) {
         { node: "text", value: "FY2025 vs FY2024, Note 12" }] }]),
     });
     assert.ok(lawful.report_spec_version_id);
-    // THE RULED BOUNDARY, asserted rather than assumed: the currency wall is the DRAFT layer's.
-    // Template, house-style and statutory-wording text is publish-gated behind a role floor, and
-    // the ruling exempts it. A future pass that widens the wall to templates is changing a
-    // RULING -- this arm is where it will find that out.
-    const templateExempt = await publishTemplate(bob, {
-      templateKey: `currency-exempt-${randomUUID().slice(0, 6)}`, reportClass: "management",
+    // THE BOUNDARY MOVED, and this arm is where the old one was asserted. The currency wall was
+    // ruled DRAFT-ONLY on the reasoning that template text is publish-gated; the independent
+    // review found "RM 125,000" published into a template passing, and the widening was ruled
+    // 2026-08-14. A role floor proves a human published it, not that the figure was theirs to
+    // type -- and a template is reused across every client bound to it.
+    const templateAmount = await caught(() => publishTemplate(bob, {
+      templateKey: `currency-template-${randomUUID().slice(0, 6)}`, reportClass: "management",
       claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
       layout: layoutAst(null, [{ section_key: "summary", blocks: [
         { node: "text", value: "RM 125,000 (illustrative)" }] }]),
+    }));
+    assert.equal(templateAmount?.code, "CLR10", templateAmount?.message);
+    assert.equal(reasonOf(templateAmount), "string_encoded_numeral_forbidden",
+      "the publish gate is not a licence to type a figure into a reusable template");
+    assert.equal(errorDetail(templateAmount).scope, "template",
+      "and the refusal names the layer it fired at");
+    // THE LICENSED LIMIT, asserted so it stays a decision rather than drifting into a gap: a bare
+    // small decimal is NOT caught, because "12.50" and "Section 2.14" are the same shape and the
+    // ruling keeps section/note references lawful. A rule that caught the first would refuse the
+    // second. If this arm ever starts failing, someone has widened the wall onto lawful
+    // cross-references and should read the limit note in the validator before "fixing" it.
+    const smallDecimal = await publishTemplate(bob, {
+      templateKey: `currency-limit-${randomUUID().slice(0, 6)}`, reportClass: "management",
+      claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
+      layout: layoutAst(null, [{ section_key: "summary", blocks: [
+        { node: "text", value: "See Section 2.14" }] }]),
     });
-    assert.ok(templateExempt.report_template_version_id,
-      "the publish-gated template layer is the ruled exemption from the draft-time currency wall");
+    assert.ok(smallDecimal.report_template_version_id,
+      "a two-decimal cross-reference stays lawful -- the documented limit of the shape wall");
   });
 
   await t.test("an unregistered validation scope refuses rather than choosing a wall", async () => {

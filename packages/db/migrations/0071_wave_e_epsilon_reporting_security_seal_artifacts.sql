@@ -128,6 +128,7 @@ declare
   prior jsonb; v_missing text[]; v_id uuid; v_removed boolean; v_key text;
   v_manifest_hash text; v_claim jsonb; v_expected_presign text;
   v_draft_now int; v_nonstat_now int; v_pins jsonb; v_wrong text[];
+  v_cells_now int; v_cells_sealed int; v_unsealed_cells uuid[];
 begin
   select * into r from clara.report_runs where id = p_report_run_id and firm_id = p_firm;
   if not found then
@@ -175,11 +176,56 @@ begin
         detail = jsonb_build_object('reason', 'claim_status_unreadable', 'status', a.status,
           'fix', 'extend the seal gate deliberately when a new claim state is ruled')::text;
   end if;
+  -- GATE 1, ARM 2a: THE DATASET MUST STILL DESCRIBE THE RUN'S CELLS.
+  --
+  -- Arm 2b below re-derives the assessment's COUNTS, and counts are blind to the population that
+  -- produced them: evaluate a second APPROVED definition under a run whose dataset is already
+  -- sealed and both counts stay 0/0, so a one-point dataset from before the evaluation would seal
+  -- as this run's pre-sign. The artifact would be internally consistent and describe a run that
+  -- has moved on -- the reproducibility promise broken without a single number being wrong.
+  --
+  -- So the population is compared as a SET, not as a size: every cell of the run must be IN the
+  -- sealed FS dataset. The count comparison alone would miss a cell replaced one-for-one, and the
+  -- set comparison alone would miss nothing today (metric_cells is append-only) but costs nothing
+  -- and does not depend on that remaining true.
+  select count(*)::int into v_cells_now
+    from clara.metric_cells mc where mc.client_id = r.client_id and mc.run_id = r.id;
+  select count(*)::int into v_cells_sealed
+    from clara.report_dataset_points p where p.dataset_id = ds.id;
+  select coalesce(array_agg(mc.id order by mc.id), '{}') into v_unsealed_cells
+    from clara.metric_cells mc
+   where mc.client_id = r.client_id and mc.run_id = r.id
+     and not exists (select 1 from clara.report_dataset_points p
+                      where p.dataset_id = ds.id and p.cell_id = mc.id);
+  if v_cells_now is distinct from v_cells_sealed
+     or coalesce(array_length(v_unsealed_cells, 1), 0) > 0 then
+    raise exception 'this run has evaluated cells the sealed dataset does not carry' using errcode = 'CLR42',
+      detail = jsonb_build_object('reason', 'dataset_population_stale', 'report_run_id', r.id,
+        'dataset_id', ds.id, 'sealed_cells', v_cells_sealed, 'current_cells', v_cells_now,
+        'cells_missing_from_dataset', to_jsonb(v_unsealed_cells),
+        'fix', 'the run was evaluated again after its dataset was sealed -- open a new run and seal a dataset that describes it')::text;
+  end if;
+
   -- GATE 1, ARM 2b: THE ASSESSMENT MUST STILL BE TRUE, not merely present. The stored row is the
   -- recorded instrument, but currency is proven HERE, at the enforcement point, because the
   -- population it describes can move after it was written: a definition superseded through delta's
   -- audited verb between assess and seal leaves a row saying uncertified=false about cells that
   -- are no longer canonical. Re-derive and refuse on drift rather than inherit a stale verdict.
+  --
+  -- THE LOCK IS PART OF THE CHECK, not housekeeping around it. Re-deriving without one leaves a
+  -- committed window: this body reads a definition as canonical, delta's supersession commits, and
+  -- this body then inserts an artifact over a verdict that stopped being true mid-transaction --
+  -- a check that is right at the instant it runs and wrong by the instant it matters. FOR SHARE on
+  -- the contributing version rows is the narrowest mutual exclusion that closes it: delta's
+  -- supersession UPDATEs those exact rows, so it must now wait for this seal to commit or roll
+  -- back, and this seal must wait for an in-flight supersession before it reads. Rows, not an
+  -- advisory key, because the rows are what both paths already touch -- no new convention for a
+  -- future writer to forget.
+  perform 1 from clara.metric_definition_versions mdv
+   where mdv.id in (select distinct mc.definition_version_id from clara.metric_cells mc
+                     where mc.client_id = r.client_id and mc.run_id = r.id
+                       and mc.definition_version_id is not null)
+   for share;
   select count(*) filter (where mdv.state = 'draft')::int,
          count(*) filter (where mc.definition_version_id is null
                              or mdv.state not in ('canonical', 'firm_approved'))::int

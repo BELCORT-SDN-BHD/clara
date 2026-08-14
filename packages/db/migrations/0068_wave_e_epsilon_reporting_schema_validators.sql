@@ -195,20 +195,33 @@ begin
     --   name simply omits the field. A hard-coded registration number or legal name in a
     --   TEMPLATE is the worse case, not the excused one: the template is reused across every
     --   client bound to it.
-    --   CURRENCY SHAPE fires at scope 'spec' only (ruled). Template, house-style and
-    --   statutory-wording text is publish-gated behind a role floor and a maker's act; the
-    --   draft-time wall exists for what a model, or a hurried user, types into a one-off
-    --   override.
+    --   CURRENCY SHAPE now fires at BOTH scopes too. It was ruled spec-only on the reasoning
+    --   that template text is publish-gated behind a role floor and a maker's act -- but a role
+    --   floor proves a human published it, not that what they published was a figure they were
+    --   entitled to type, and a template is reused across EVERY client bound to it. A hard-coded
+    --   amount there is the same harm as a hard-coded name, multiplied the same way. There is no
+    --   lawful use for a currency amount in a template: every figure on the face of a statement
+    --   resolves through metric_ref. (Widening ruled 2026-08-14 with the orchestrator, on the
+    --   independent review's finding that "RM 125,000" published into a template passed.)
     --
     -- HONEST LIMITS, STATED RATHER THAN HIDDEN. This is a MISTAKE-NET over one leaf, not the
     -- containment. It does NOT catch a spelled-out numeral ("one hundred and twenty five
-    -- thousand"), a small unmarked decimal ("12.50"), a bare four-digit run (indistinguishable
-    -- from a year), a foreign-language legal-entity suffix, or a transliterated entity name.
-    -- Lawful reference shapes stay lawful by construction: "FY2025", "Note 12", "2026-08-13"
-    -- and "MPERS 2.14"-style paragraph references carry no separated digit group, no currency
-    -- marker and no six-digit run. The CONTAINMENT is structural and lives elsewhere -- every
-    -- figure on the face of a statement resolves through metric_ref/placeholder, and E-R8's
-    -- JSON-number allow-list above refuses the numeric node outright.
+    -- thousand"), a bare four-digit run (indistinguishable from a year), a foreign-language
+    -- legal-entity suffix, or a transliterated entity name.
+    --
+    -- AND IT DOES NOT CATCH A BARE SMALL DECIMAL ("12.50"), WHICH IS A DELIBERATE LIMIT RATHER
+    -- THAN AN OVERSIGHT, because the alternative is worse. "12.50" and "Section 2.14" are the
+    -- same shape; nothing in the string says which is money. The ruling keeps section, note and
+    -- paragraph references lawful, so a rule that caught the first would refuse the second -- and
+    -- refusing an author's lawful cross-reference teaches them the wall is noise, which is how a
+    -- wall stops being read. The wall therefore catches a decimal only where the string ITSELF
+    -- carries evidence of money: a currency marker, or an integer part too large to be a
+    -- reference. Lawful reference shapes stay lawful by construction: "FY2025", "Note 12",
+    -- "2026-08-13", "Section 2.14".
+    --
+    -- The CONTAINMENT is structural and lives elsewhere -- every figure on the face of a
+    -- statement resolves through metric_ref/placeholder, and E-R8's JSON-number allow-list above
+    -- refuses the numeric node outright.
     -- =================================================================================
     if k = 'text' then
       if jsonb_typeof(n->'value') <> 'string' then
@@ -242,19 +255,17 @@ begin
               v_family, coalesce((select p.resolves_from from clara.protected_placeholders p
                                    where p.placeholder_key = v_family), 'the DB')))::text;
       end if;
-      -- (2) CURRENCY SHAPE -- draft scope only (ruled). E-R4 in the string domain: a figure the
-      -- deterministic evaluator never produced, wearing quotes.
-      if p_scope = 'spec' then
-        if v_text ~ '[0-9]{1,3}(,[0-9]{3})+' then v_shape := 'thousands_grouped';
-        elsif v_text ~* '(^|[^[:alpha:]])(RM|MYR|USD|SGD|EUR|GBP)\.?[[:space:]]*[0-9]' then v_shape := 'currency_marked';
-        elsif v_text ~ '[0-9]{4,}\.[0-9]{2}([^0-9]|$)' then v_shape := 'decimal_amount';
-        else v_shape := null; end if;
-        if v_shape is not null then
-          raise exception 'a currency amount may not be typed into a report' using errcode = 'CLR10',
-            detail = jsonb_build_object('reason', 'string_encoded_numeral_forbidden', 'node', k,
-              'shape', v_shape, 'scope', p_scope,
-              'fix', 'every figure comes from the DB algebra -- reference it with a metric_ref or a placeholder, never as typed text')::text;
-        end if;
+      -- (2) CURRENCY SHAPE -- BOTH scopes. E-R4 in the string domain: a figure the deterministic
+      -- evaluator never produced, wearing quotes.
+      if v_text ~ '[0-9]{1,3}(,[0-9]{3})+' then v_shape := 'thousands_grouped';
+      elsif v_text ~* '(^|[^[:alpha:]])(RM|MYR|USD|SGD|EUR|GBP)\.?[[:space:]]*[0-9]' then v_shape := 'currency_marked';
+      elsif v_text ~ '[0-9]{4,}\.[0-9]{2}([^0-9]|$)' then v_shape := 'decimal_amount';
+      else v_shape := null; end if;
+      if v_shape is not null then
+        raise exception 'a currency amount may not be typed into a report' using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'string_encoded_numeral_forbidden', 'node', k,
+            'shape', v_shape, 'scope', p_scope,
+            'fix', 'every figure comes from the DB algebra -- reference it with a metric_ref or a placeholder, never as typed text')::text;
       end if;
     end if;
 
@@ -758,6 +769,6 @@ begin
   if current_user <> (select v from _epsilon_validator_pre where k = 'deploy_principal') then
     raise exception 'epsilon validators tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'epsilon validators OK: layout AST refuses every non-structural JSON number (allow-list of 8 structural fields), every protected placeholder bound to a supplied literal, and -- UNCONDITIONALLY, at the one display-text leaf the grammar has -- typed registration identifiers, legal-entity suffixes and any claim-lexicon phrase (both scopes) plus typed currency amounts (scope spec); an unregistered scope refuses outright. Chart AST refuses inline values/SQL/JS/formulas, ad-hoc axis bounds and literal thresholds over the WHOLE tree, admits only the four named axis policies and requires the same-source data table; stage 2 additionally holds one axis to one unit dimension, one temporality and one shared effective window, and holds every threshold to the axis dimension. The manifest key list is % keys for a draft, % for pre_sign, % for a signed original, and an unknown kind raises rather than returning an empty requirement -- and every one of those keys resolves to a registered SHAPE, so a null attestation refuses the seal instead of sealing over evidence of nothing. All 7 validators ungranted to every app role.',
+  raise notice 'epsilon validators OK: layout AST refuses every non-structural JSON number (allow-list of 8 structural fields), every protected placeholder bound to a supplied literal, and -- UNCONDITIONALLY, at the one display-text leaf the grammar has -- typed registration identifiers, legal-entity suffixes, any claim-lexicon phrase and any typed currency amount, at BOTH scopes; an unregistered scope refuses outright. Chart AST refuses inline values/SQL/JS/formulas, ad-hoc axis bounds and literal thresholds over the WHOLE tree, admits only the four named axis policies and requires the same-source data table; stage 2 additionally holds one axis to one unit dimension, one temporality and one shared effective window, and holds every threshold to the axis dimension. The manifest key list is % keys for a draft, % for pre_sign, % for a signed original, and an unknown kind raises rather than returning an empty requirement -- and every one of those keys resolves to a registered SHAPE, so a null attestation refuses the seal instead of sealing over evidence of nothing. All 7 validators ungranted to every app role.',
     v_base, v_pre, v_signed;
 end $tail$;
