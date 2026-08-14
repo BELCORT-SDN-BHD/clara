@@ -158,11 +158,20 @@ begin
     raise exception 'a render job''s pinned request is immutable' using errcode = 'CLR08',
       detail = '{"reason":"render_job_request_immutable","fix":"enqueue a new job; a changed pin is a different render"}';
   end if;
-  -- Terminal is terminal. A done/failed job that could go back to claimable would let a second
-  -- render of an already-sealed artifact look ordinary.
-  if old.state in ('done', 'failed') and new.state is distinct from old.state then
-    raise exception 'a terminal render job does not reopen' using errcode = 'CLR08',
-      detail = jsonb_build_object('reason', 'render_job_terminal', 'state', old.state)::text;
+  -- TERMINAL IS TERMINAL, AND IT IS THE WHOLE ROW (codex M2). An earlier version guarded only the
+  -- state VALUE, which left a done job's artifact_id, last_error, finished_at, attempts and
+  -- dispatch bookkeeping freely mutable — so a definer-path defect could rewrite which artifact a
+  -- completed job produced, or erase the evidence of how it completed, without reopening it and
+  -- without tripping this trigger. Attribution that can be rewritten after the fact is not
+  -- attribution. Once terminal, NOTHING moves: the comparison is the whole row, so a column a
+  -- later migration adds is protected by default rather than by somebody remembering to list it.
+  if old.state in ('done', 'failed') then
+    if to_jsonb(new) is distinct from to_jsonb(old) then
+      raise exception 'a terminal render job is immutable' using errcode = 'CLR08',
+        detail = jsonb_build_object('reason', 'render_job_terminal', 'state', old.state,
+          'fix', 'a finished job records what happened; enqueue a new job rather than editing a closed one')::text;
+    end if;
+    return new;
   end if;
   return new;
 end $$;

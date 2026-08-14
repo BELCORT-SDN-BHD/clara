@@ -14,11 +14,11 @@
       "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
     "packages/reporting-render/lib/layout.mjs": {
-      "sha256": "b9bbfd2176c08c35d832bcc0888f2b0678ebe2d4fdd758ab08acfeec65b20cf0",
+      "sha256": "8e94a39b457d2ca653f01194b65d133b9d13a130013cb022a6a35cc16694fc6e",
       "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
     "packages/reporting-render/lib/lexicon.mjs": {
-      "sha256": "cb533579aa4e09e68ebf5b8ba0e6819c9e705ed71f31401fd8e5ed3997178a5a",
+      "sha256": "da43208eb64231ec44a80a8758d8af49df7bf138dc978a9853930facebba14f9",
       "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
     "packages/reporting-render/lib/manifest.mjs": {
@@ -284,22 +284,6 @@
       "sha256": "377176911b7a7760238fe04e6492ab4aa5d780499c128b68b1ab034db16f4074",
       "note": "",
       "deployed": true
-    },
-    "packages/runtime/workflows/chatTurn.v11.impl.ts": {
-      "sha256": "afdb8cb8d60e2722019e795ad7c94340105e7ea3c50ae5401e2c10759949f752",
-      "note": ""
-    },
-    "packages/runtime/workflows/chatTurn.v11.prompt.ts": {
-      "sha256": "24bfb0968ac71126774a8c0de995c4e232d6f730f83fec8998fff1ab82aa8eee",
-      "note": ""
-    },
-    "packages/runtime/workflows/chatTurn.v11.tools.ts": {
-      "sha256": "b2bb5cbc3c2f5517f85383cc32a43a377a198e4d58c1ad777a39f91e5fa7a489",
-      "note": ""
-    },
-    "packages/runtime/workflows/chatTurn.v11.ts": {
-      "sha256": "26b23143286182845bf5a5a0df4ef8fb650babce5f1e289e6339fc1a032b6dfe",
-      "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",

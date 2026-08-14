@@ -66,14 +66,23 @@ export function readDispatchConfig(env = process.env) {
   const machineId = env.CLARA_RENDER_FLY_MACHINE_ID || null;
   const image = env.CLARA_RENDER_IMAGE_REF || null;
   const region = env.CLARA_RENDER_FLY_REGION || "sin";
+  const imageDigest = env.CLARA_RENDER_IMAGE_DIGEST || null;
+  const sourceCommit = env.CLARA_RENDER_SOURCE_COMMIT || null;
   const missing = [];
   if (!token) missing.push("CLARA_RENDER_FLY_API_TOKEN");
   if (!app) missing.push("CLARA_RENDER_FLY_APP");
   // One of the two start modes must be configured: start a pre-created machine, or create one
   // from a PINNED image reference. Neither present is unwired.
   if (!machineId && !image) missing.push("CLARA_RENDER_FLY_MACHINE_ID or CLARA_RENDER_IMAGE_REF");
+  // THE CREATE PATH ALSO NEEDS THE WORKER'S TWO PINS (codex M9), and their absence is reported as
+  // UNWIRED rather than discovered at the API call: an unwired leader logs loudly and stamps
+  // nothing, whereas a failed create burns a cooldown per cycle to learn the same fact. The START
+  // path does not need them — a pre-created machine already carries its own env.
+  if (!machineId && image && (!imageDigest || !sourceCommit)) {
+    missing.push("CLARA_RENDER_IMAGE_DIGEST + CLARA_RENDER_SOURCE_COMMIT (required by the create path)");
+  }
   if (missing.length > 0) return { configured: false, missing };
-  return { configured: true, token, app, machineId, image, region };
+  return { configured: true, token, app, machineId, image, region, imageDigest, sourceCommit };
 }
 
 /**
@@ -96,6 +105,25 @@ async function startRenderMachine(cfg, log) {
     log(`[reconcile] render dispatch started machine ${cfg.machineId}`);
     return { mode: "start", machine_id: cfg.machineId };
   }
+  // THE TWO MANDATORY WORKER PINS RIDE ON THE MACHINE (codex M9). The worker REFUSES to seal
+  // without CLARA_RENDER_IMAGE_DIGEST and CLARA_RENDER_SOURCE_COMMIT — correctly, since a manifest
+  // that cannot name the image it came from is not reproducible. But this create path supplied
+  // neither, so a leader configured with CLARA_RENDER_IMAGE_REF would have created a machine that
+  // booted, refused, and exited without claiming anything: every request silently falling through
+  // to the scheduled wake, with the renderer looking alive the whole time. The refusal was right;
+  // the dispatcher was not feeding it.
+  //
+  // They are read from the leader's own env and REQUIRED here rather than defaulted: a machine
+  // started without them can do nothing useful, so failing the dispatch (which is recorded on the
+  // job rows) is strictly better than starting one that will exit.
+  const digest = cfg.imageDigest;
+  const commit = cfg.sourceCommit;
+  if (!digest || !commit) {
+    throw new Error(
+      "cannot create a render machine without CLARA_RENDER_IMAGE_DIGEST and CLARA_RENDER_SOURCE_COMMIT — "
+      + "the worker refuses to seal without them, so the machine would boot and exit having done nothing",
+    );
+  }
   const res = await fetch(`${FLY_API}/apps/${encodeURIComponent(cfg.app)}/machines`, {
     method: "POST",
     headers,
@@ -107,6 +135,10 @@ async function startRenderMachine(cfg, log) {
         auto_destroy: true,
         restart: { policy: "no" },
         guest: { cpu_kind: "shared", cpus: 1, memory_mb: 1024 },
+        env: {
+          CLARA_RENDER_IMAGE_DIGEST: digest,
+          CLARA_RENDER_SOURCE_COMMIT: commit,
+        },
       },
     }),
   });

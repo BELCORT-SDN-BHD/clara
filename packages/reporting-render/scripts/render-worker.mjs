@@ -71,7 +71,13 @@ function shapePayload(p, documentMeta) {
       point_status: pt.point_status,
       displayed_text: pt.displayed_text,
       displayed_scale: pt.dimensions?.displayed_scale,
-      na_label: pt.dimensions?.na_label ?? "n/a",
+      // CARRIED VERBATIM, NEVER AUTHORED (codex M4). An earlier draft substituted "n/a" when the
+      // sealed token was missing, which meant a payload or schema regression could change what a
+      // statement SAYS about a missing figure without changing a single sealed byte — the worker
+      // writing disclosure language is exactly what E-R8 and the manifest rulings forbid. ε now
+      // seals dimensions.na_label from δ's own display_token (null for an ok cell), so a non-ok
+      // point with no label is a defect upstream; layout.mjs refuses it rather than inventing one.
+      na_label: pt.dimensions?.na_label ?? null,
       cell_id: pt.cell_id,
     };
   }
@@ -162,6 +168,9 @@ async function runOneJob(client, job, env) {
       lexicon: payload.claim_phrase_lexicon,
       claimPhraseAllowed: decision.claimPhraseAllowed,
       resolvedPlaceholders: assembled.resolvedPlaceholders,
+      // The manifest's pinned metadata is cross-checked against what the PDF actually carries,
+      // not merely recorded beside it (codex M11).
+      documentMeta,
     });
     const extractedTextSha256 = bytesSha256(Buffer.from(text, "utf8"));
 

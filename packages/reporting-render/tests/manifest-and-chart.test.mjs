@@ -13,7 +13,7 @@ import {
   AXIS_POLICIES, assertChartTableParity, axisBounds, barGeometry, readSeries, readThresholds,
   sameSourceTable, thresholdGeometry,
 } from "../lib/chart.mjs";
-import { typstLength } from "../lib/layout.mjs";
+import { typstIdentifier, typstLength } from "../lib/layout.mjs";
 
 function reasonOf(fn) {
   try {
@@ -314,7 +314,28 @@ test("an unknown threshold source refuses rather than being skipped", () => {
 test("a missing resolved_thresholds array refuses — the renderer never resolves thresholds itself", () => {
   strictEqual(reasonOf(() => readThresholds(undefined)), "chart_thresholds_unreadable");
   strictEqual(reasonOf(() => readThresholds(null)), "chart_thresholds_unreadable");
+  // An EMPTY array is a legitimate answer ("this chart has no thresholds"); an ABSENT one is a
+  // malformed payload. The DB column is `not null default '[]'`, so the two are genuinely
+  // different facts — and layout.mjs no longer collapses them with `?? []` (codex M3), which had
+  // turned this refusal into a chart that drew with its control lines silently gone.
   deepStrictEqual(readThresholds([]), []);
+});
+
+test("typstIdentifier admits a plain key and REFUSES anything that can leave a comment", () => {
+  for (const ok of ["notes", "statement_of_financial_position", "mpers.s3", "a-b:c", "A1"]) {
+    strictEqual(typstIdentifier(ok, "section_key"), ok);
+  }
+  // The blocker: a newline ends a Typst line comment, so everything after it becomes DOCUMENT
+  // SOURCE — in a financial statement, a fabricated figure inside sealed bytes.
+  for (const bad of [
+    "notes\n#par[#text(\"RM 1,000,000\")]",
+    "notes\r\n#pagebreak()",
+    "", "   ", null, undefined,
+    "notes #par[]", "notes*bold*", "notes$x$", "a".repeat(129),
+  ]) {
+    strictEqual(reasonOf(() => typstIdentifier(bad, "section_key")), "layout_identifier_invalid",
+      `${JSON.stringify(String(bad).slice(0, 30))} must be refused`);
+  }
 });
 
 test("a threshold OUTSIDE the axis is reported, never clamped to the frame", () => {

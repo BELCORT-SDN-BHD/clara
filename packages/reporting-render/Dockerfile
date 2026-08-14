@@ -18,7 +18,14 @@
 # from the distribution, and NO system fonts on the path the engine is allowed to read.
 # The archived artefact is the image DIGEST (recorded in every manifest), never a tag.
 # ============================================================================================
-FROM node:20-bookworm-slim AS runner
+# THE BASE IS PINNED BY DIGEST, NOT BY TAG (codex M10). `node:20-bookworm-slim` is a MUTABLE
+# pointer: the same Dockerfile at the same source commit would pull a different Node, a different
+# libc and a different set of system libraries after any upstream push — which is precisely the
+# cross-rebuild guarantee this lane measured and wrote into DR-render.md. A tag here would have
+# made that measured claim false the first time upstream moved, and nothing would have said so.
+# The tag is kept in the comment for readability; the digest is what builds.
+#   node:20-bookworm-slim as of 2026-08-14
+FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
@@ -28,9 +35,23 @@ WORKDIR /app
 # other rather than trusted.
 # fontconfig is deliberately NOT installed: the engine runs with --ignore-system-fonts and an
 # explicit --font-path, and an absent system font stack is a stronger guarantee than a flag.
+# apt packages are VERSION-PINNED (codex M10). Unversioned `apt-get install` resolves against
+# whatever the Debian mirror holds that day, so a rebuild could silently change the extractor —
+# and the extractor's exact version is a REQUIRED manifest key precisely because the gate-3 scan
+# must be repeatable seven years later. Pinning here and reading the version from the binary at
+# run time are two halves of one claim: the pin says what should be there, the read says what is.
+# To bump: change the version, rebuild, and re-run the double-render drill including its control.
+# Read from `apt-cache policy` inside the pinned base, not guessed — an invented version number
+# fails the build loudly, which is the good direction, but it also proves the pin was never
+# verified against the image it pins.
+ARG PINNED_POPPLER_VERSION=22.12.0-2+deb12u3
+ARG PINNED_XZ_VERSION=5.4.1-1+deb12u1
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl poppler-utils xz-utils; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl \
+      "poppler-utils=${PINNED_POPPLER_VERSION}" \
+      "xz-utils=${PINNED_XZ_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
     pdftotext -v 2>&1 | head -1
 

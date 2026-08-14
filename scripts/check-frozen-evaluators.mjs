@@ -32,7 +32,8 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 
 // Every git call goes through execFileSync with an argv array — never a shell string — so a ref
@@ -266,9 +267,22 @@ function main() {
     EVALUATOR_DEF.lastIndex = 0;
     const hits = [...src.matchAll(EVALUATOR_DEF)];
     if (hits.length === 0) continue;
-    if (!VERSION_ROW.test(src)) {
-      const names = [...new Set(hits.map((h) => h[1].toLowerCase()))].join(", ");
-      violations.push(`NO VERSION ROW    ${rel}  defines evaluator(s) ${names} but mints NO clara.evaluator_versions row. An evaluator that is recut or introduced without a version row is invisible to clara.verify_evaluator_freeze(), which compares only rows it knows about — so the freeze would pass by knowing nothing. Add the version row (undeployed; the ceremony flips it).`);
+    // PER EVALUATOR, NOT PER FILE (codex M7). A single file-wide `insert into
+    // clara.evaluator_versions` used to satisfy this rule no matter how many evaluators the file
+    // defined — so a migration shipping two and registering one passed, leaving the second outside
+    // the DB checksum closure entirely. The registry keys on evaluator_name, so the check now asks
+    // for each defined evaluator's OWN name to appear in a version-row insert. Names are matched
+    // against the bare stem (`evaluate_metric_v1` -> `evaluate_metric`) because that is the form
+    // clara.evaluator_versions.evaluator_name actually carries, verified against delta's 0059.
+    const versionRowText = VERSION_ROW.test(src) ? src : "";
+    for (const name of [...new Set(hits.map((h) => h[1].toLowerCase()))]) {
+      const bare = name.replace(/^clara\./, "");
+      const stem = bare.replace(/_v\d+$/, "");
+      const registered = versionRowText
+        && (versionRowText.includes(`'${stem}'`) || versionRowText.includes(`'${bare}'`));
+      if (!registered) {
+        violations.push(`NO VERSION ROW    ${rel}  defines ${name} but mints no clara.evaluator_versions row naming '${stem}'. An evaluator introduced or recut without its OWN version row is invisible to clara.verify_evaluator_freeze(), which compares only rows it knows about — so the freeze would pass by knowing nothing. A file-wide insert does not cover a second evaluator in the same file.`);
+      }
     }
     for (const h of hits) {
       const name = h[1].toLowerCase();
@@ -293,6 +307,12 @@ function main() {
 // Exported for the self-test; the CLI path is the default.
 export { extractBody, scanEvaluators, hashText };
 
-if (relative(REPO_ROOT, process.argv[1] ?? "").replace(/\\/g, "/") === "scripts/check-frozen-evaluators.mjs") {
+// RUN-DIRECTLY DETECTION, LOCATION-INDEPENDENT. An earlier version compared this file's path
+// RELATIVE TO ITS OWN REPO_ROOT against a hard-coded "scripts/check-frozen-evaluators.mjs" — so
+// invoking the checker from any other working directory made the comparison fail and the process
+// exit 0 HAVING CHECKED NOTHING. A gate that silently no-ops when called from the wrong place is
+// the false-green shape, and it was found by the end-to-end self-test that runs this file against
+// a throwaway repo (codex M8's fix finding its own bug on the first run).
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   process.exit(main());
 }

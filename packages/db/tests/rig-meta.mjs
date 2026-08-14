@@ -165,6 +165,31 @@ const REPORTING_0065_HUMAN_FNS = [
   "seal_report_artifact", "approve_report_for_issue", "verify_report_artifact",
 ];
 const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
+// 0073-0076 [Wave E lane ζ] the render queue. Same closed-set discipline as ε's block above: the
+// estate roster must NAME every function that holds a grant, so a sanctioned addition is a
+// reviewed line here rather than a surprise in the sweep.
+//
+// THE RUNTIME SIX — the render worker's and the leader's whole surface. clara_runtime holds NO
+// table privilege on clara.render_jobs (not even SELECT), so these verbs ARE the queue's reachable
+// API, and each names its consumer:
+//   claim_render_job          · the worker takes one job (for update skip locked)
+//   render_job_payload        · the worker reads ONLY what its claimed job pins (lease-scoped)
+//   complete_render_job       · the worker's one write — seals through ε's _seal_report_artifact_core
+//   fail_render_job           · the worker records why a render did not happen
+//   render_dispatch_begin     · the LEADER's due-read + attempt stamp (the Law-1 touch)
+//   render_dispatch_record    · the leader's outcome receipt for that attempt
+const RENDER_0073_RUNTIME_FNS = [
+  "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
+  "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
+];
+// THE HUMAN ONE. replay_render_inputs is the DR §10 seven-year drill's executable door: it returns
+// a sealed artifact's OWN pinned inputs so an operator can re-render and compare. STABLE, writes
+// nothing, enqueues nothing — and deliberately NOT runtime-granted, because a recovery instrument
+// must not become a second path the worker can walk.
+const RENDER_0073_HUMAN_FNS = ["replay_render_inputs"];
+// The internals stay ungranted to every application role and are asserted so in-migration:
+// render_request_manifest_v1, enqueue_render_job (ε's seal calls it), _tf_render_job_lifecycle.
+const RENDER_0073_COHORT = [...RENDER_0073_RUNTIME_FNS, ...RENDER_0073_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -759,6 +784,8 @@ export const ALLOWED = {
     // validators are deliberately ABSENT from this roster: they are granted to nobody, so the
     // sweep's expected=false is the assertion that ζ's and η's JWT-less callers reach them only
     // as clara_fn_owner internals (see the block above)
+    ...RENDER_0073_HUMAN_FNS, // 0073-0076 [Wave E lane ζ] the DR §10 replay door — an OPERATOR's
+    // recovery instrument (stable, writes nothing, enqueues nothing), clara_authenticated ONLY
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -780,6 +807,10 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
+    ...RENDER_0073_RUNTIME_FNS, // 0073-0076 [Wave E lane ζ] the render queue's whole reachable
+    // API: four worker verbs (claim, payload, complete, fail), the leader's dispatch pair, and
+    // the enqueue fallback sweep. clara_runtime holds NO table privilege on clara.render_jobs,
+    // so this roster IS the surface — see the block above for each verb's consumer
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
@@ -929,6 +960,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
+  failures.push(...cohortFailures("0073-0076 wave E render queue", RENDER_0073_COHORT, liveNames));
   return failures;
 }
 

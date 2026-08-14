@@ -49,9 +49,20 @@ exercised directly (`npm test`, 71 cases):
 | `lib/canonical-json.mjs` | the deterministic serialisation everything else derives from |
 
 Those six carry the `@frozen` marker, so `scripts/check-frozen-workflows.mjs` hash-locks them and
-their import closure on every PR (design §4.2). The impure adapters — `engine.mjs`, `extract.mjs`,
-`db.mjs`, `objects.mjs` — deliberately do not, so that the freeze surface stays the part that must
-not drift.
+their import closure on every PR (design §4.2).
+
+**The five adapters deliberately carry no freeze marker, and each has the same reason:** every one
+of them imports something outside this package (`packages/runtime/lib/storage.mjs`) or shells out
+to a pinned binary, and the freeze-lint freezes a marked file's *entire relative import closure* —
+so marking any of them would hash-lock a runtime-lane file that lane legitimately edits, and the
+next storage change would fail this gate for a reason that has nothing to do with rendering.
+
+That includes **`fonts.mjs`, which is the security-sensitive one** and therefore worth stating
+rather than leaving to inference: it fetches and hash-verifies typefaces, so a future change there
+— a system-font fallback, a relaxed verify — would escape the frozen surface. Its protection is
+not the freeze marker but its own battery (ten cases, every refusal exercised) plus the fact that
+the *decisions* it feeds (`layout.mjs`'s font-hash validation) are frozen. If the import boundary
+ever changes so `fonts.mjs` depends on nothing outside this package, it should be frozen too.
 
 ## What it is NOT allowed to do
 

@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { RenderRefusal } from "../lib/decisions.mjs";
 import {
   RULED_LOCALES,
+  assertDocumentMetadataApplied,
   assertLexiconCoverage,
   assertProtectedPlaceholdersDrawn,
   findClaimPhrases,
@@ -198,6 +199,23 @@ test("the same claim phrase in an ELIGIBLE artifact passes and is reported", () 
   strictEqual(r.scanned, true);
   strictEqual(r.body_hits.length, 1);
   ok(r.residual.includes("image"), "the scan reports its own residual rather than implying none");
+});
+
+test("§7(d): manifest-pinned metadata ABSENT from the PDF refuses (codex M11)", () => {
+  const documentMeta = { title: "ACME FS 2025", subject: "statutory 2025-01-01..2025-12-31", keywords: "report_run:abc" };
+  // Present in the extracted metadata block -> passes.
+  ok(assertDocumentMetadataApplied({
+    metadata: "Title: ACME FS 2025\nSubject: statutory 2025-01-01..2025-12-31\nKeywords: report_run:abc",
+    documentMeta,
+  }));
+  // The manifest pins a subject the PDF never carried -> the two disagree, so refuse.
+  try {
+    assertDocumentMetadataApplied({ metadata: "Title: ACME FS 2025", documentMeta });
+    throw new Error("expected a refusal");
+  } catch (err) {
+    strictEqual(err.reason, "document_metadata_not_applied");
+    strictEqual(err.detail.missing.length, 2);
+  }
 });
 
 test("the gate refuses on a partial lexicon EVEN IF the document is clean", () => {

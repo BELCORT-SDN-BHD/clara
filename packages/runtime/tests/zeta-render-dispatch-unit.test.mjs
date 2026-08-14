@@ -15,10 +15,15 @@ import { test } from "node:test";
 
 import { readDispatchConfig, reconcileRenderDispatch } from "../lib/reconciler-render.mjs";
 
+// The CREATE path carries the worker's two mandatory pins (codex M9): the worker refuses to seal
+// without them, so a machine created without them boots, refuses and exits having claimed nothing
+// — every request falling silently to the scheduled wake while the renderer looks alive.
 const FULL_ENV = {
   CLARA_RENDER_FLY_API_TOKEN: "tok",
   CLARA_RENDER_FLY_APP: "clara-render",
   CLARA_RENDER_IMAGE_REF: "registry.fly.io/clara-render@sha256:abc",
+  CLARA_RENDER_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+  CLARA_RENDER_SOURCE_COMMIT: "b".repeat(40),
 };
 
 /**
@@ -59,12 +64,41 @@ test("an unwired deploy is detected by NAME, not by a truthiness check", () => {
 
 test("either start mode configures it: a pre-created machine id, or a pinned image ref", () => {
   strictEqual(readDispatchConfig(FULL_ENV).configured, true);
+  // The START path needs no image pins — a pre-created machine already carries its own env.
   const byMachine = readDispatchConfig({
     CLARA_RENDER_FLY_API_TOKEN: "tok", CLARA_RENDER_FLY_APP: "clara-render",
     CLARA_RENDER_FLY_MACHINE_ID: "m1",
   });
   strictEqual(byMachine.configured, true);
   strictEqual(byMachine.machineId, "m1");
+});
+
+test("the CREATE path is UNWIRED without the worker's two mandatory pins (codex M9)", () => {
+  for (const drop of ["CLARA_RENDER_IMAGE_DIGEST", "CLARA_RENDER_SOURCE_COMMIT"]) {
+    const cfg = readDispatchConfig({ ...FULL_ENV, [drop]: undefined });
+    strictEqual(cfg.configured, false, `${drop} must be required by the create path`);
+    ok(cfg.missing.some((m) => m.includes("CLARA_RENDER_IMAGE_DIGEST")),
+      "the refusal names both pins together — they are useless apart");
+  }
+  // Reported as UNWIRED rather than discovered at the API call: an unwired leader logs loudly and
+  // stamps nothing, whereas a failed create burns a cooldown per cycle to learn the same fact.
+});
+
+test("a created machine CARRIES the two pins in its env", async () => {
+  let sentBody = null;
+  const client = fakeClient({ due: { due: 1, job_ids: ["j1"] } });
+  globalThis.fetch = async (url, init) => {
+    sentBody = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ id: "m-new" }), text: async () => "" };
+  };
+  try {
+    await reconcileRenderDispatch(client, { env: FULL_ENV, log: () => {} });
+  } finally {
+    delete globalThis.fetch;
+  }
+  ok(sentBody, "the create call was made");
+  strictEqual(sentBody.config.env.CLARA_RENDER_IMAGE_DIGEST, FULL_ENV.CLARA_RENDER_IMAGE_DIGEST);
+  strictEqual(sentBody.config.env.CLARA_RENDER_SOURCE_COMMIT, FULL_ENV.CLARA_RENDER_SOURCE_COMMIT);
 });
 
 test("the region defaults to sin — the same city as the database", () => {
