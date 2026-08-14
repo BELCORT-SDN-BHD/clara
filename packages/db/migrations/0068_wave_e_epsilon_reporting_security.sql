@@ -33,7 +33,7 @@ begin
       raise exception 'epsilon security requires % (file 4 not applied)', n using errcode = 'CLR10';
     end if;
   end loop;
-  if to_regprocedure('clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)') is not null then
+  if to_regprocedure('clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)') is not null then
     raise exception 'epsilon security partial birth: clara.draft_report_spec already exists' using errcode = 'CLR10';
   end if;
 end $pre$;
@@ -261,10 +261,16 @@ revoke all on function clara.publish_chart_template_version(text, text, jsonb, d
 -- would CLR04 on every call against a JWT-resolving body. Every check below stays in the core and
 -- nothing agent-specific is added to it, so there is ONE piece of drafting judgement rather than
 -- eta re-deriving it. The core is granted to NOBODY; each lane brings its own audited door.
+-- p_effective_from is an ARGUMENT, never the session clock. A spec version's effective window is
+-- an accounting fact about the period it presents, not about the minute the server happened to
+-- run the call -- and the estate forbids deriving a date from the session clock outright (the
+-- x42 forbidden-clock family asserts ZERO clara objects do it). This also makes all four
+-- publishing verbs uniform: every one of them takes its own effective_from.
 create function clara._draft_report_spec_core(
     p_actor uuid, p_firm uuid, p_obo uuid, p_wake_kind text,
     p_client uuid, p_spec_key text, p_title text, p_report_template_version_id uuid,
-    p_locale text, p_parameters jsonb, p_overrides jsonb, p_layout_ast jsonb, p_op_key text) returns jsonb
+    p_locale text, p_parameters jsonb, p_overrides jsonb, p_layout_ast jsonb,
+    p_effective_from date, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare t record; v_spec uuid; v_id uuid; v_rev int; prior jsonb; v_hash bytea; v_shape jsonb;
 begin
@@ -272,10 +278,11 @@ begin
     raise exception 'client not found' using errcode = 'CLR11', detail = '{"reason":"client_not_in_firm"}';
   end if;
   if coalesce(p_locale, '') not in ('en', 'ms', 'zh') or nullif(btrim(coalesce(p_spec_key, '')), '') is null
+     or p_effective_from is null
      or p_parameters is null or jsonb_typeof(p_parameters) <> 'object'
      or p_overrides is null or jsonb_typeof(p_overrides) <> 'object' then
     raise exception 'report spec draft is malformed' using errcode = 'CLR10',
-      detail = '{"reason":"unknown_field","fix":"supply a spec key, a registered locale and object parameters/overrides"}';
+      detail = '{"reason":"unknown_field","fix":"supply a spec key, a registered locale, effective_from and object parameters/overrides"}';
   end if;
   select * into t from clara.report_template_versions
    where id = p_report_template_version_id and firm_id = p_firm and state = 'published';
@@ -288,7 +295,7 @@ begin
   prior := clara._reserve_op(p_firm, 'draft_report_spec', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'key', p_spec_key,
       'template', p_report_template_version_id, 'locale', p_locale, 'parameters', p_parameters,
-      'overrides', p_overrides, 'layout', p_layout_ast)));
+      'overrides', p_overrides, 'layout', p_layout_ast, 'from', p_effective_from)));
   if prior is not null then return prior; end if;
 
   select id into v_spec from clara.report_specs where client_id = p_client and spec_key = p_spec_key for update;
@@ -298,7 +305,12 @@ begin
       returning id into v_spec;
   end if;
   select coalesce(max(revision), 0) + 1 into v_rev from clara.report_spec_versions where report_spec_id = v_spec;
-  update clara.report_spec_versions set state = 'superseded', effective_to = current_date
+  if exists (select 1 from clara.report_spec_versions
+              where report_spec_id = v_spec and state = 'published' and effective_from >= p_effective_from) then
+    raise exception 'report spec effective window overlaps or reverses' using errcode = 'CLR10',
+      detail = '{"reason":"effective_window_overlap","fix":"draft with an effective_from after the current version''s"}';
+  end if;
+  update clara.report_spec_versions set state = 'superseded', effective_to = p_effective_from - 1
    where report_spec_id = v_spec and state = 'published';
   v_hash := clara._hash(jsonb_build_object('schema', 'clara.report-spec/v1',
     'template_version', p_report_template_version_id, 'locale', p_locale, 'parameters', p_parameters,
@@ -307,7 +319,7 @@ begin
       report_template_version_id, report_class, locale, parameters, overrides, layout_ast,
       content_sha256, state, effective_from, drafted_by)
     values (p_firm, p_client, v_spec, v_rev, p_report_template_version_id, t.report_class, p_locale,
-      p_parameters, p_overrides, p_layout_ast, v_hash, 'published', current_date, p_actor)
+      p_parameters, p_overrides, p_layout_ast, v_hash, 'published', p_effective_from, p_actor)
     returning id into v_id;
   -- The on-behalf-of and wake-kind columns come from the CALLER's lane, so a wake-drafted spec is
   -- distinguishable in the audit log from a human-drafted one without a second writer.
@@ -317,20 +329,22 @@ begin
     jsonb_build_object('report_spec_id', v_spec, 'report_spec_version_id', v_id, 'revision', v_rev,
       'report_class', t.report_class, 'content_sha256', encode(v_hash, 'hex'), 'layout', v_shape));
 end $$;
-revoke all on function clara._draft_report_spec_core(uuid, uuid, uuid, text, uuid, text, text, uuid, text, jsonb, jsonb, jsonb, text) from public;
+revoke all on function clara._draft_report_spec_core(uuid, uuid, uuid, text, uuid, text, text, uuid, text, jsonb, jsonb, jsonb, date, text) from public;
 
 -- THE HUMAN DOOR. Signature unchanged, so no caller moves; it resolves the context and delegates.
 create function clara.draft_report_spec(
     p_client uuid, p_spec_key text, p_title text, p_report_template_version_id uuid,
-    p_locale text, p_parameters jsonb, p_overrides jsonb, p_layout_ast jsonb, p_op_key text) returns jsonb
+    p_locale text, p_parameters jsonb, p_overrides jsonb, p_layout_ast jsonb,
+    p_effective_from date, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare c record;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   return clara._draft_report_spec_core(c.actor, c.firm, null, null, p_client, p_spec_key, p_title,
-    p_report_template_version_id, p_locale, p_parameters, p_overrides, p_layout_ast, p_op_key);
+    p_report_template_version_id, p_locale, p_parameters, p_overrides, p_layout_ast,
+    p_effective_from, p_op_key);
 end $$;
-revoke all on function clara.draft_report_spec(uuid, text, text, uuid, text, jsonb, jsonb, jsonb, text) from public;
+revoke all on function clara.draft_report_spec(uuid, text, text, uuid, text, jsonb, jsonb, jsonb, date, text) from public;
 
 reset role;
 
@@ -339,7 +353,7 @@ grant execute on function
   clara.publish_house_style_version(text, text, jsonb, jsonb, date, text),
   clara.publish_report_template_version(text, text, text, text, uuid, uuid, jsonb, date, text),
   clara.publish_chart_template_version(text, text, jsonb, date, text),
-  clara.draft_report_spec(uuid, text, text, uuid, text, jsonb, jsonb, jsonb, text)
+  clara.draft_report_spec(uuid, text, text, uuid, text, jsonb, jsonb, jsonb, date, text)
   to clara_authenticated;
 
 do $tail$
@@ -378,14 +392,14 @@ begin
   -- were copied back into the wrapper there would be two drafting rules to keep in step -- which
   -- is exactly the drift the split exists to prevent.
   select count(*) into v_wrong from pg_proc p
-   where p.oid = 'clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)'::regprocedure
+   where p.oid = 'clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)'::regprocedure
      and (p.prosrc !~ '_draft_report_spec_core' or p.prosrc !~ '_human_ctx'
           or p.prosrc ~ 'report_template_version_not_in_firm' or p.prosrc ~ '_validate_layout_ast_v1');
   if v_wrong <> 0 then
     raise exception 'epsilon security tail: the draft wrapper is not a thin delegator' using errcode = 'CLR10';
   end if;
   select count(*) into v_wrong from pg_proc p
-   where p.oid = 'clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)'::regprocedure
+   where p.oid = 'clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)'::regprocedure
      and (p.prosrc ~ '_human_ctx' or p.prosrc !~ 'report_template_version_not_in_firm'
           or p.prosrc !~ '_validate_layout_ast_v1' or p.prosrc !~ 'client_not_in_firm');
   if v_wrong <> 0 then

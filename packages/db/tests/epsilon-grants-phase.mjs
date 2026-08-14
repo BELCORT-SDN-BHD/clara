@@ -197,7 +197,7 @@ export async function registerGrantsPhase(t, world) {
       "clara._validate_chart_spec_semantics_v1(uuid,jsonb)", "clara._report_manifest_required_keys(text)",
       "clara._report_dataset_payload_v1(uuid)", "clara.verify_report_dataset(uuid)",
       "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)",
-      "clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)"]) {
+      "clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)"]) {
       for (const role of ["clara_authenticated", "clara_agent_ro", "clara_wake_interactive",
         "clara_wake_proactive", "clara_runtime", "public"]) {
         assert.equal((await rootQuery("select has_function_privilege($1, $2, 'EXECUTE') p", [role, internal])).rows[0].p,
@@ -262,9 +262,9 @@ export async function registerGrantsPhase(t, world) {
     // lane brings its own audited door to the SAME drafting rule, rather than eta re-deriving it.
     const [wrapper, core] = await Promise.all([
       rootQuery(`select prosrc from pg_proc
-        where oid='clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)'::regprocedure`),
+        where oid='clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)'::regprocedure`),
       rootQuery(`select prosrc from pg_proc
-        where oid='clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)'::regprocedure`),
+        where oid='clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)'::regprocedure`),
     ]);
     for (const check of ["client_not_in_firm", "report_template_version_not_in_firm",
       "_validate_layout_ast_v1", "_reserve_op"]) {

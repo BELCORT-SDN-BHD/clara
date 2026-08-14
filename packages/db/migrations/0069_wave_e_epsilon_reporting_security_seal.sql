@@ -26,7 +26,7 @@ insert into _epsilon_seal_pre values ('deploy_principal', session_user);
 
 do $pre$
 begin
-  if to_regprocedure('clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)') is null then
+  if to_regprocedure('clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)') is null then
     raise exception 'epsilon seal requires clara.draft_report_spec (file 5 not applied)' using errcode = 'CLR10';
   end if;
   if to_regprocedure('clara.assess_report_claim(uuid)') is not null then

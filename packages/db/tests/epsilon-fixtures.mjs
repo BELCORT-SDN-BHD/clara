@@ -45,7 +45,7 @@ export const EPSILON_ENTRYPOINTS = Object.freeze([
   ["publish_house_style_version", "clara.publish_house_style_version(text,text,jsonb,jsonb,date,text)"],
   ["publish_report_template_version", "clara.publish_report_template_version(text,text,text,text,uuid,uuid,jsonb,date,text)"],
   ["publish_chart_template_version", "clara.publish_chart_template_version(text,text,jsonb,date,text)"],
-  ["draft_report_spec", "clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,text)"],
+  ["draft_report_spec", "clara.draft_report_spec(uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)"],
   ["open_report_run", "clara.open_report_run(uuid,uuid,uuid,uuid,text)"],
   ["assess_report_claim", "clara.assess_report_claim(uuid)"],
   ["seal_report_dataset", "clara.seal_report_dataset(uuid,uuid[],text)"],
@@ -167,13 +167,15 @@ export const publishChart = (sub, { chartKey, title = chartKey, spec,
   ], { p_chart_spec_ast: "jsonb", p_effective_from: "date" });
 
 export const draftSpec = (sub, { client, specKey, title = specKey, templateVersionId,
-  locale = "en", parameters = { currency: "MYR" }, overrides = {}, layout, opKey = null }) =>
+  locale = "en", parameters = { currency: "MYR" }, overrides = {}, layout,
+  effectiveFrom = "2016-01-01", opKey = null }) =>
   call(sub, "draft_report_spec", [
     ["p_client", client], ["p_spec_key", specKey], ["p_title", title],
     ["p_report_template_version_id", templateVersionId], ["p_locale", locale],
     ["p_parameters", JSON.stringify(parameters)], ["p_overrides", JSON.stringify(overrides)],
-    ["p_layout_ast", JSON.stringify(layout)], ["p_op_key", opKey ?? opk("eps-spec")],
-  ], { p_parameters: "jsonb", p_overrides: "jsonb", p_layout_ast: "jsonb" });
+    ["p_layout_ast", JSON.stringify(layout)], ["p_effective_from", effectiveFrom],
+    ["p_op_key", opKey ?? opk("eps-spec")],
+  ], { p_parameters: "jsonb", p_overrides: "jsonb", p_layout_ast: "jsonb", p_effective_from: "date" });
 
 export const openRun = (sub, { client, specVersionId, snapshotId, periodId, opKey = null }) =>
   call(sub, "open_report_run", [
