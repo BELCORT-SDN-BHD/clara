@@ -176,6 +176,24 @@ begin
         detail = jsonb_build_object('reason', 'claim_status_unreadable', 'status', a.status,
           'fix', 'extend the seal gate deliberately when a new claim state is ruled')::text;
   end if;
+  -- THE RUN LOCK, AND IT IS DELTA'S, NOT A SECOND ONE OF OURS.
+  --
+  -- Everything from here to the artifact insert reasons about the run's cell population, and that
+  -- population has exactly one writer: delta's evaluator. It serializes per run on
+  -- pg_advisory_xact_lock(hashtextextended(firm || ':' || run_id, 0)) -- 0059's key, reproduced
+  -- here VERBATIM and deliberately. Any other key would be a second mechanism that happens to
+  -- look like mutual exclusion while excluding nothing: two locks are not a lock.
+  --
+  -- Holding it is what makes the two checks below sound rather than merely true-when-read. The
+  -- population comparison would otherwise be raced by an evaluation landing a cell after the read
+  -- and before the insert; and the freshness enumeration would otherwise enumerate under one
+  -- snapshot and derive under another, so a definition that BECAME contributing in between would
+  -- never be locked at all. One acquisition closes both, because it removes the writer that
+  -- creates the gap instead of racing it.
+  --
+  -- 0059 is merged and frozen: this consumes its lock, it does not touch it.
+  perform pg_advisory_xact_lock(hashtextextended(p_firm::text || ':' || r.id::text, 0));
+
   -- GATE 1, ARM 2a: THE DATASET MUST STILL DESCRIBE THE RUN'S CELLS.
   --
   -- Arm 2b below re-derives the assessment's COUNTS, and counts are blind to the population that
@@ -215,23 +233,38 @@ begin
   -- THE LOCK IS PART OF THE CHECK, not housekeeping around it. Re-deriving without one leaves a
   -- committed window: this body reads a definition as canonical, delta's supersession commits, and
   -- this body then inserts an artifact over a verdict that stopped being true mid-transaction --
-  -- a check that is right at the instant it runs and wrong by the instant it matters. FOR SHARE on
-  -- the contributing version rows is the narrowest mutual exclusion that closes it: delta's
-  -- supersession UPDATEs those exact rows, so it must now wait for this seal to commit or roll
-  -- back, and this seal must wait for an in-flight supersession before it reads. Rows, not an
-  -- advisory key, because the rows are what both paths already touch -- no new convention for a
-  -- future writer to forget.
-  perform 1 from clara.metric_definition_versions mdv
-   where mdv.id in (select distinct mc.definition_version_id from clara.metric_cells mc
-                     where mc.client_id = r.client_id and mc.run_id = r.id
-                       and mc.definition_version_id is not null)
-   for share;
-  select count(*) filter (where mdv.state = 'draft')::int,
+  -- a check that is right at the instant it runs and wrong by the instant it matters. The run lock
+  -- above excludes the EVALUATOR; it does not exclude SUPERSESSION, which serializes per definition
+  -- and never touches the run. So the version rows are taken FOR SHARE as well: delta's supersession
+  -- UPDATEs those exact rows, so it must wait for this seal to finish, and this seal waits for an
+  -- in-flight supersession before it reads. Rows, not a third advisory key, because the rows are
+  -- what both paths already touch -- no new convention for a future writer to forget.
+  --
+  -- LOCKING AND DERIVING ARE ONE STATEMENT, not two. Enumerating the contributing versions in one
+  -- statement and deriving the verdict in the next reads them under two snapshots, and anything
+  -- that BECAME contributing in between is derived over but never locked -- the enumeration's own
+  -- blind spot. Folding the FOR SHARE into the deriving query makes the set that is locked and the
+  -- set that is measured the same set by construction, which is a property of the statement rather
+  -- than of the order two statements happen to run in.
+  with contributing as (
+    select mc.definition_version_id as dvid
+      from clara.metric_cells mc
+     where mc.client_id = r.client_id and mc.run_id = r.id
+       and mc.definition_version_id is not null
+     group by mc.definition_version_id
+  ), locked as (
+    select mdv.id, mdv.state
+      from clara.metric_definition_versions mdv
+      join contributing c on c.dvid = mdv.id
+       for share of mdv
+  )
+  select count(*) filter (where l.state = 'draft')::int,
          count(*) filter (where mc.definition_version_id is null
-                             or mdv.state not in ('canonical', 'firm_approved'))::int
+                             or l.state is null
+                             or l.state not in ('canonical', 'firm_approved'))::int
     into v_draft_now, v_nonstat_now
     from clara.metric_cells mc
-    left join clara.metric_definition_versions mdv on mdv.id = mc.definition_version_id
+    left join locked l on l.id = mc.definition_version_id
    where mc.client_id = r.client_id and mc.run_id = r.id;
   if (v_nonstat_now > 0) is distinct from a.uncertified
      or v_nonstat_now is distinct from coalesce((a.check_receipt->>'non_statutory_cells')::int, -1)

@@ -779,15 +779,24 @@ jobs:
       # a run, and an issued run is one-way. The sweep's copy has already been through that, and a
       # consumed database is not valid evidence for a contract about sealing.
       #
-      # Presence-guarded so pre-merge branches without ε stay green — and guarded on the LAST file
-      # of the set, not the first: a partial merge that dropped the security half would otherwise
-      # satisfy a first-file guard and drill a chain that cannot enforce anything.
+      # ABSENCE FAILS. The first cut of this step exited 0 when the migration was missing, copying
+      # δ's pre-merge courtesy — which put a skip-green branch inside the very step whose reason to
+      # exist is that a skip-green branch elsewhere hides a missing lane. Once ε is on main the
+      # migrations are never legitimately absent, so absence means a numbering or merge accident:
+      # exactly the accident this drill is the last line of defence against. It fails loudly.
+      #
+      # Guarded on the LAST file of the set, not the first: a partial merge that dropped the
+      # security half would satisfy a first-file guard and then drill a chain that cannot enforce
+      # anything.
       - name: Wave-E ε contract drill (isolated DB, focused, allow-missing UNSET)
         working-directory: packages/db
         run: |
           m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql 2>/dev/null | head -1)"
           if [ -z "$m" ]; then
-            echo "no numbered wave_e_epsilon issue migration on disk — the ε contract has nothing to drill yet"; exit 0
+            echo "::error::no numbered wave_e_epsilon_reporting_security_seal_artifacts_issue migration on disk."
+            echo "The ε lane is merged, so its migrations cannot be legitimately absent — this is a"
+            echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
+            exit 1
           fi
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
           PGDATABASE=clara_epsilon_contract_ci pnpm migrate

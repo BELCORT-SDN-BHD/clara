@@ -467,6 +467,14 @@ begin
         'fix', 'seal a dataset once, while the run is drafting')::text;
   end if;
 
+  -- THE SAME RUN LOCK THE EVALUATOR TAKES (0059's key, verbatim). This body reads the run's cells
+  -- and then freezes them into a digest; an evaluation landing a cell between the read and the
+  -- freeze would seal a dataset that is missing one. That was survivable before -- the artifact
+  -- seal's population check refuses on the difference -- but "survivable" there means the run is
+  -- permanently unsealable through no fault of the operator, a trap the artifact fix would
+  -- otherwise have created. Excluding the writer here is cheaper than explaining the trap.
+  perform pg_advisory_xact_lock(hashtextextended(c.firm::text || ':' || r.id::text, 0));
+
   -- THE PIN, verified rather than assumed: every contributing cell's evaluation context must
   -- name the run's own books snapshot. A cell evaluated against some other snapshot would make
   -- the sealed dataset a mixture nobody could reproduce.

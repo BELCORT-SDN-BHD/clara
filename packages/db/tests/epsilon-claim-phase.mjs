@@ -464,6 +464,40 @@ export async function registerClaimPhase(t, world) {
     assert.notEqual(afterwards?.code, "55P03",
       "with no seal in flight the same UPDATE is not lock-blocked");
     assert.equal((await artifactRows(w.runId)).length, 0, "the rolled-back seal left no artifact");
+
+    // THE ARM THE FIRST VERSION OF THIS CELL LACKED, and the gap that let a residual survive a
+    // round: superseding a PRE-EXISTING contributing row is the easy half, because that row was
+    // enumerated and locked. The dangerous half is a definition that BECOMES contributing while
+    // the seal is in flight -- it is derived over but was never in the enumeration to be locked.
+    // The run lock is what closes it: EVALUATION is the only way a new definition joins a run's
+    // population, and the evaluator serializes on the same key this seal now holds.
+    const w2 = await buildEpsilonWorld(world, { tag: "seal-lock-add", reportClass: "management" });
+    const sha2 = sha64(`seal-lock-add-${w2.runId}`);
+    const manifest2 = await buildManifest({ runId: w2.runId, kind: "draft_watermarked", sha256: sha2 });
+    const newcomer = await proposeMetricDefinition(await ensureEpsilonAdmin(world), {
+      client: w2.client, key: `newcomer_${randomUUID().slice(0, 8)}`, unit: "money",
+      ast: metricAst({ root: measure({ set: "expense" }), unit: "money" }),
+    });
+    await approveMetricDefinition(owner, newcomer);
+
+    let addBlocked;
+    const done2 = await caught(() => withActor({ role: ROLES.fnOwner, transaction: true }, async (a) => {
+      await a.query(
+        `select clara._seal_report_artifact_core($1,$2,$3,'draft_watermarked','pdf',$4,4096,$5::jsonb,null,$6)`,
+        [world.firms.A, owner, w2.runId, sha2, JSON.stringify(manifest2), `lock-add-${sha2.slice(0, 8)}`]);
+      // A holds the run lock. An evaluation into THIS run must now wait for it.
+      addBlocked = await caught(() => withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true },
+        async (b) => {
+          await b.query("set local lock_timeout='700ms'");
+          return b.query(
+            "select clara.evaluate_metric_v1($1::uuid,$2::uuid,$3::uuid[],$4::uuid,$5::uuid)",
+            [w2.client, newcomer, [w2.period.id], w2.snapshotId, w2.runId]);
+        }));
+      throw new Error("rollback the seal");
+    }));
+    assert.match(done2?.message ?? "", /rollback the seal/);
+    assert.equal(addBlocked?.code, "55P03",
+      `an evaluation joining a run mid-seal must WAIT: ${addBlocked?.code} ${addBlocked?.message}`);
   });
 
   await t.test("the fail-closed branches nothing else reaches are proven to refuse", async () => {

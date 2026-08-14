@@ -4,8 +4,9 @@
 // publish/draft floor by role and by report class; publication freeze; and the E-R8 floor-1
 // walls at BOTH the template and the spec layer -- no numeric literal, no protected placeholder
 // bound to a supplied literal, no protected content TYPED with no binding declared at all, and
-// no currency amount typed at the draft layer (with the ruled template-layer exemption asserted
-// rather than assumed).
+// no currency amount typed at EITHER layer. The wall's licensed limits (a bare small decimal, a
+// spelled-out numeral, years and section/note references) are pinned as PASSING cases, so a later
+// widening cannot revoke a ruling silently.
 
 import {
   assert, randomUUID, rootQuery, withActor, ROLES,
@@ -345,19 +346,32 @@ export async function registerLayersPhase(t, world) {
       "the publish gate is not a licence to type a figure into a reusable template");
     assert.equal(errorDetail(templateAmount).scope, "template",
       "and the refusal names the layer it fired at");
-    // THE LICENSED LIMIT, asserted so it stays a decision rather than drifting into a gap: a bare
-    // small decimal is NOT caught, because "12.50" and "Section 2.14" are the same shape and the
-    // ruling keeps section/note references lawful. A rule that caught the first would refuse the
-    // second. If this arm ever starts failing, someone has widened the wall onto lawful
-    // cross-references and should read the limit note in the validator before "fixing" it.
-    const smallDecimal = await publishTemplate(bob, {
-      templateKey: `currency-limit-${randomUUID().slice(0, 6)}`, reportClass: "management",
-      claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
-      layout: layoutAst(null, [{ section_key: "summary", blocks: [
-        { node: "text", value: "See Section 2.14" }] }]),
-    });
-    assert.ok(smallDecimal.report_template_version_id,
-      "a two-decimal cross-reference stays lawful -- the documented limit of the shape wall");
+    // THE LICENSED LIMITS, pinned in BOTH directions so they stay DECISIONS rather than drifting
+    // into gaps. Asserting only that a lawful reference passes leaves the licence itself
+    // unmeasured: a later currency-regex widening would revoke a ruling and no test would go red.
+    // Each arm below is a shape the ruling deliberately does NOT catch, and it must keep passing.
+    //
+    // If one of these starts failing, someone has widened the wall past what was ruled -- read the
+    // limit note in the validator before "fixing" the test.
+    for (const [label, value] of [
+      ["a two-decimal cross-reference", "See Section 2.14"],
+      ["a bare small decimal, indistinguishable from that reference", "Profit was 12.50"],
+      ["a spelled-out numeral, licensed by the ruling", "one hundred and twenty five thousand ringgit"],
+      ["a year and a note reference", "FY2025 comparatives, Note 12"],
+    ]) {
+      const ok = await publishTemplate(bob, {
+        templateKey: `currency-limit-${randomUUID().slice(0, 6)}`, reportClass: "management",
+        claimCapability: "no_claim", houseStyleVersionId: world.epsilonStyle,
+        layout: layoutAst(null, [{ section_key: "summary", blocks: [{ node: "text", value }] }]),
+      });
+      assert.ok(ok.report_template_version_id, `${label} stays lawful at the template layer`);
+      const draft = await draftSpec(alice, {
+        client, specKey: `limit-${randomUUID().slice(0, 6)}`,
+        templateVersionId: world.epsilonMgmtTemplate,
+        layout: layoutAst(null, [{ section_key: "summary", blocks: [{ node: "text", value }] }]),
+      });
+      assert.ok(draft.report_spec_version_id, `${label} stays lawful at the draft layer too`);
+    }
   });
 
   await t.test("an unregistered validation scope refuses rather than choosing a wall", async () => {
