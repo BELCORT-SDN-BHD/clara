@@ -25,7 +25,7 @@ import {
   has0056, caught, cleanCloseableFY, beginClose, finalizeClose, attestClose,
   BANK1, REVN, addDaysStr,
 } from "./x56-fixtures.mjs";
-import { mintInteractive } from "./s6-helpers.mjs";
+import { mintInteractive, filedDocument } from "./s6-helpers.mjs";
 
 let ready = false;
 let has56 = false;
@@ -221,7 +221,7 @@ test("T2 a nonexistent fiscal_year_id refuses CLR11 (no existence oracle)", asyn
 // foreign data, never a distinguishable "exists but not yours" answer.
 // ===========================================================================
 
-test("T3 a real fiscal year in a FOREIGN firm reads as the identical not-found refusal -- never foreign data", async (t) => {
+test("T3 a real fiscal year in a FOREIGN firm reads as the BYTE-IDENTICAL refusal to a nonexistent one -- never foreign data, never an oracle in the text", async (t) => {
   if (skipTheta(t)) return;
   const owner = world.users.alice; // firm A
   const foreignOwner = world.users.dave; // firm B
@@ -231,10 +231,22 @@ test("T3 a real fiscal year in a FOREIGN firm reads as the identical not-found r
   const own = await getClosePlan(owner, { fy: fx.fy });
   assert.equal(own.fiscal_year.id, fx.fy, "mandatory setup: the owning firm's read succeeds");
 
-  const err = await caught(() => getClosePlan(foreignOwner, { fy: fx.fy }));
-  assert.ok(err, "firm B must be refused firm A's fiscal year");
-  assert.equal(err.code, "CLR11", `expected CLR11 (got ${err.code} -- ${err.message})`);
-  const detail = JSON.parse(err.detail ?? "{}");
+  const nonexistentErr = await caught(() => getClosePlan(owner, { fy: randomUUID() }));
+  const foreignErr = await caught(() => getClosePlan(foreignOwner, { fy: fx.fy }));
+  assert.ok(nonexistentErr, "a random fiscal_year_id must refuse, never return an empty plan");
+  assert.ok(foreignErr, "firm B must be refused firm A's fiscal year");
+  assert.equal(nonexistentErr.code, "CLR11", `expected CLR11 (got ${nonexistentErr.code} -- ${nonexistentErr.message})`);
+  assert.equal(foreignErr.code, "CLR11", `expected CLR11 (got ${foreignErr.code} -- ${foreignErr.message})`);
+  // THE NO-ORACLE PROOF, byte-for-byte (fix-docket finding 4): SQLSTATE
+  // equality alone lets an oracle hide in the message or detail text -- an
+  // implementation that returns CLR11 for both cases but embeds "exists in
+  // another firm" only in the foreign-FY message would still pass a
+  // code-only assertion. message and detail must be IDENTICAL strings.
+  assert.equal(foreignErr.message, nonexistentErr.message,
+    "the foreign-FY refusal's MESSAGE must be byte-identical to the nonexistent-FY refusal's -- any difference is an oracle");
+  assert.equal(foreignErr.detail, nonexistentErr.detail,
+    "the foreign-FY refusal's DETAIL must be byte-identical to the nonexistent-FY refusal's -- any difference is an oracle");
+  const detail = JSON.parse(foreignErr.detail ?? "{}");
   assert.equal(detail.reason, "fiscal_year_not_in_firm");
 });
 
@@ -270,7 +282,9 @@ test("T4 clara_agent_ro can execute get_close_plan (privilege state) and a real 
 
   // Cross-firm under the agent lane too: a wake credential minted for firm A
   // must not see firm B's data even by construction (there is none to leak
-  // here, but the SAME refusal code must fire).
+  // here, but the SAME refusal code must fire) -- and BYTE-COMPARED against
+  // the wake lane's OWN nonexistent-FY refusal (fix-docket finding 4), so an
+  // oracle cannot hide in the text under either lane, independently proved.
   const fxB = await cleanCloseableFY(world.users.dave, { tag: "theta-t4-b", startsOn: "2027-01-01" });
   let crossErr = null;
   try {
@@ -279,4 +293,93 @@ test("T4 clara_agent_ro can execute get_close_plan (privilege state) and a real 
   } catch (e) { crossErr = e; }
   assert.ok(crossErr, "firm A's wake credential must be refused firm B's fiscal year");
   assert.equal(crossErr.code, "CLR11", `expected CLR11 (got ${crossErr.code} -- ${crossErr.message})`);
+
+  let wakeNonexistentErr = null;
+  try {
+    await wakeQuery(ROLES.agentRo, cred.secret,
+      "select clara.get_close_plan(p_fiscal_year_id => $1) as r", [randomUUID()]);
+  } catch (e) { wakeNonexistentErr = e; }
+  assert.ok(wakeNonexistentErr, "a random fiscal_year_id must refuse under the wake lane too");
+  assert.equal(wakeNonexistentErr.code, "CLR11", `expected CLR11 (got ${wakeNonexistentErr.code} -- ${wakeNonexistentErr.message})`);
+  assert.equal(crossErr.message, wakeNonexistentErr.message,
+    "wake lane: the foreign-FY refusal's MESSAGE must be byte-identical to the nonexistent-FY refusal's -- any difference is an oracle");
+  assert.equal(crossErr.detail, wakeNonexistentErr.detail,
+    "wake lane: the foreign-FY refusal's DETAIL must be byte-identical to the nonexistent-FY refusal's -- any difference is an oracle");
+});
+
+// ===========================================================================
+// T5 -- the stale attestation branch, reached for REAL (fix-docket finding
+// 5): attest one outstanding item, change the measured set (a second uncoded
+// document lands in the FY), force a fresh audited re-evaluation of the SAME
+// check by attesting the new item (attest_close_exception re-measures the
+// whole gate as part of attesting, 0056:1872's A20 recovery fix -- it does
+// not trust a stored digest), and confirm the FIRST item's attestation now
+// reads 'stale' -- bound to a digest the current measurement has moved past
+// -- while the second item's fresh attestation reads 'live'.
+//
+// uncoded_documents, not unapproved_drafts_in_period, is the vehicle: once
+// begin_close flips the FY to 'closing', the closed-period wall's LINES
+// sibling (_tf_period_wall_lines, 0056) refuses EVERY journal_lines write
+// tied to that FY -- including a fresh, never-approved draft -- because it
+// walls the FY's close WINDOW, not the touch's approval state (measured
+// directly: a second draft entry inserted here raises CLR19). document_filings
+// carries only the SERIALIZE half of the wall (0056 S4(B)), never the refusal
+// half, so filing a second uncoded document mid-close is the honest way to
+// change a drawer-2 gate's measured set without fighting a wall this lane
+// does not own.
+// ===========================================================================
+
+test("T5 an attestation goes stale when the measured set changes under a fresh audited re-evaluation", async (t) => {
+  if (skipTheta(t)) return;
+  const owner = world.users.alice;
+  const startsOn = "2027-01-01";
+  const fx = await cleanCloseableFY(owner, { tag: "theta-t5", startsOn });
+
+  const docA = await filedDocument(owner, { firm: world.firms.A, client: fx.client, financialDate: addDaysStr(startsOn, 60) });
+
+  const begun = await beginClose(owner, { fy: fx.fy, opKey: opk("theta-t5-begin") });
+
+  const afterBegin = await getClosePlan(owner, { fy: fx.fy });
+  const rowAfterBegin = afterBegin.checks.find((c) => c.check_key === "uncoded_documents");
+  assert.equal(rowAfterBegin.result.state, "fail", "mandatory setup: an uncoded document inside the FY fails the gate");
+  assert.ok(rowAfterBegin.items.some((it) => it.item_key === docA.filingId), "mandatory setup: A is a named outstanding item");
+
+  // Attest A -- binds to a digest naming ONLY A outstanding (attest's own
+  // fresh re-evaluation, 0056:1872).
+  await attestClose(owner, {
+    closeRun: begun.close_run_id, checkKey: "uncoded_documents",
+    itemKey: docA.filingId, reason: "theta t5: accept A first", opKey: opk("theta-t5-attest-a"),
+  });
+  const afterA = await getClosePlan(owner, { fy: fx.fy });
+  const rowAfterA = afterA.checks.find((c) => c.check_key === "uncoded_documents");
+  const itemAAfterA = rowAfterA.items.find((it) => it.item_key === docA.filingId);
+  assert.ok(itemAAfterA, "mandatory setup: A is still a named outstanding item");
+  assert.equal(itemAAfterA.attestation.state, "live", "mandatory setup: A's attestation is live immediately after attesting");
+
+  // Change the measured set: a SECOND uncoded document lands in the FY, mid-close.
+  const docB = await filedDocument(owner, { firm: world.firms.A, client: fx.client, financialDate: addDaysStr(startsOn, 65) });
+
+  // Force the fresh audited re-evaluation: attesting B re-measures the WHOLE
+  // gate (both A and B are uncoded at this point), producing a NEW
+  // close_gate_results row whose digest differs from the one A's attestation
+  // bound to -- A's underlying condition (still uncoded) never went away, so
+  // it stays a named outstanding item, now under a superseded digest.
+  await attestClose(owner, {
+    closeRun: begun.close_run_id, checkKey: "uncoded_documents",
+    itemKey: docB.filingId, reason: "theta t5: accept B, re-measuring the gate", opKey: opk("theta-t5-attest-b"),
+  });
+
+  const afterB = await getClosePlan(owner, { fy: fx.fy });
+  const rowAfterB = afterB.checks.find((c) => c.check_key === "uncoded_documents");
+  const itemAAfterB = rowAfterB.items.find((it) => it.item_key === docA.filingId);
+  const itemBAfterB = rowAfterB.items.find((it) => it.item_key === docB.filingId);
+  assert.ok(itemAAfterB, "A is still a named outstanding item after the re-measurement -- its underlying document never got coded");
+  assert.ok(itemBAfterB, "B is a named outstanding item too");
+  assert.equal(itemAAfterB.attestation.state, "stale",
+    "A's attestation is bound to a SUPERSEDED digest now that B's presence moved the measured set -- it must read stale, never live");
+  assert.equal(itemBAfterB.attestation.state, "live",
+    "B's attestation is fresh against the CURRENT digest");
+  // Sanity: a genuinely absent attestation is still its own distinct state,
+  // not conflated with stale (both are "not live", but for different reasons).
+  assert.notEqual(itemAAfterB.attestation.state, "absent");
 });

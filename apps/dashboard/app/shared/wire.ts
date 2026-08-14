@@ -101,19 +101,25 @@ export async function pgrestError(res: Response, what: string): Promise<PgrestEr
   return err;
 }
 
-export async function pgrestSelect<T>(pathAndQuery: string, token: string): Promise<T[]> {
+/** `signal` is optional and additive (theta finding 1): a caller racing a fast-
+ *  changing selection (e.g. a client picker) passes an AbortController's signal
+ *  so a superseded request is actually cancelled in flight, not merely ignored
+ *  after the fact. Every existing caller that omits it is unaffected. */
+export async function pgrestSelect<T>(pathAndQuery: string, token: string, signal?: AbortSignal): Promise<T[]> {
   const base = supabaseBase();
   if (!base) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured");
   const res = await fetch(`${base}/rest/v1/${pathAndQuery}`, {
     headers: pgrestHeaders(token, false),
     cache: "no-store",
+    signal,
   });
   if (!res.ok) throw await pgrestError(res, "read");
   return (await res.json()) as T[];
 }
 
-/** POST a governed function on the human lane. Returns its jsonb result (or null). */
-export async function rpc(fn: string, args: Record<string, unknown>, token: string): Promise<unknown> {
+/** POST a governed function on the human lane. Returns its jsonb result (or null).
+ *  `signal` is optional and additive — see `pgrestSelect`'s note. */
+export async function rpc(fn: string, args: Record<string, unknown>, token: string, signal?: AbortSignal): Promise<unknown> {
   const base = supabaseBase();
   if (!base) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured (governed writers need PostgREST)");
   const res = await fetch(`${base}/rest/v1/rpc/${fn}`, {
@@ -121,6 +127,7 @@ export async function rpc(fn: string, args: Record<string, unknown>, token: stri
     headers: pgrestHeaders(token, true),
     body: JSON.stringify(args),
     cache: "no-store",
+    signal,
   });
   if (!res.ok) throw await pgrestError(res, fn);
   return res.json().catch(() => null);

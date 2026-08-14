@@ -11,8 +11,22 @@
 // and never a raw digit; drawer-3 rows are visibly marked non-blocking. The
 // UI computes no cents -- pl_net_cents and every other figure ride straight
 // from the plan document via the shared fmtCents helper.
+//
+// CLIENT-SWITCH RACE (fix-docket finding 1, BLOCKER): a fast client-A then
+// client-B selection can leave client A's fiscal-year list or plan resolving
+// AFTER B is already selected. Two independent layers close it: (1) every
+// async fetch here carries an AbortController tied to the effect's own
+// dependencies (React's cleanup aborts the PREVIOUS request the instant the
+// selection changes) PLUS a monotonically-bumped generation ref checked
+// before any setState, so even a response that raced past the abort is
+// discarded; (2) a render-time belt -- `visiblePlan` below never exposes a
+// fetched plan whose OWN `fiscal_year.client_id`/`id` (carried on the plan
+// document itself, not tracked side-band) fails to match the CURRENTLY
+// selected client/FY. The attest action's payload is read only from
+// `visiblePlan`, so it can never fire against a plan that belongs to an
+// abandoned selection.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listClients, type ClientRow } from "../documents/api";
 import { supabaseBase, runtimeBase } from "../shared/wire";
 import { fmtCents, shortId } from "../shared/fmt";
@@ -42,6 +56,12 @@ const GATE_BAND: Record<GateState | "not_yet_measured", string> = {
   not_yet_measured: "bandNotMeasured",
 };
 
+// The states a drawer-2 gate can legitimately be attested FROM -- exactly the
+// states clara.attest_close_exception accepts a call against (fail/unknown/
+// error are all "not passing", and the door does not special-case any of the
+// three). pass/advisory/not_yet_measured have nothing to attest.
+const ATTESTABLE_STATES: ReadonlySet<GateState> = new Set(["fail", "unknown", "error"]);
+
 function GateBadge({ state }: { state: GateState | "not_yet_measured" }) {
   const band = (styles as Record<string, string>)[GATE_BAND[state]] ?? styles.bandNotMeasured;
   return (
@@ -68,7 +88,7 @@ const DRAWER_LABEL: Record<1 | 2 | 3, string> = {
 };
 const DRAWER_BLURB: Record<1 | 2 | 3, string> = {
   1: "No attestation path exists for these checks -- they must pass on their own evidence.",
-  2: "A failing check here clears with a named, reasoned attestation on the specific outstanding item.",
+  2: "A failing, unknown or errored check here clears with a named, reasoned attestation on the specific outstanding item.",
   3: "Informational only. These checks render but never block a close.",
 };
 
@@ -83,6 +103,13 @@ export default function ClosePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Generation counters (the belt alongside AbortController): bumped every
+  // time the thing they guard is superseded, checked before any setState from
+  // a resolved/rejected promise so a response that raced past the abort still
+  // cannot land.
+  const fyListEpoch = useRef(0);
+  const planEpoch = useRef(0);
+
   useEffect(() => {
     setToken(sessionStorage.getItem(TOKEN_KEY) ?? "");
     setTokenDraft(sessionStorage.getItem(TOKEN_KEY) ?? "");
@@ -92,47 +119,90 @@ export default function ClosePage() {
     if (token && supabaseBase()) listClients(token).then(setClients).catch(() => setClients([]));
   }, [token]);
 
+  // Client selection changed: abort any in-flight FY-list fetch for the PRIOR
+  // client, bump the generation, and clear everything downstream immediately
+  // (never leave a stale FY list or plan visible under a new client while the
+  // fresh fetch is still in flight).
   useEffect(() => {
-    if (!token || !clientId) { setFiscalYears([]); setFyId(""); return; }
-    listFiscalYears(token, clientId).then((rows) => {
-      setFiscalYears(rows);
-      setFyId((cur) => (rows.some((r) => r.fiscal_year_id === cur) ? cur : (rows[0]?.fiscal_year_id ?? "")));
-    }).catch(() => setFiscalYears([]));
+    fyListEpoch.current += 1;
+    const epoch = fyListEpoch.current;
+    setFiscalYears([]);
+    setFyId("");
+    setPlan(null);
+    if (!token || !clientId) return;
+    const controller = new AbortController();
+    listFiscalYears(token, clientId, controller.signal)
+      .then((rows) => {
+        if (fyListEpoch.current !== epoch) return; // a later selection already superseded this
+        setFiscalYears(rows);
+        setFyId(rows[0]?.fiscal_year_id ?? "");
+      })
+      .catch(() => {
+        if (controller.signal.aborted || fyListEpoch.current !== epoch) return;
+        setFiscalYears([]);
+      });
+    return () => controller.abort();
   }, [token, clientId]);
 
-  const loadPlan = useCallback(async () => {
+  // ONE fetch implementation for both the automatic (effect-driven) and manual
+  // (Refresh button) paths, so the epoch/abort discipline can never drift
+  // between two copies of the same logic. `signal` is omitted on a manual
+  // click (nothing else is racing it); the epoch check still applies either
+  // way, since a click during an in-flight automatic fetch must still let the
+  // NEWER request win.
+  const loadPlan = useCallback(async (signal?: AbortSignal) => {
     if (!token || !fyId) { setPlan(null); return; }
+    planEpoch.current += 1;
+    const epoch = planEpoch.current;
     setLoading(true); setError(null);
     try {
-      setPlan(await getClosePlan(token, fyId));
+      const p = await getClosePlan(token, fyId, signal);
+      if (planEpoch.current !== epoch) return; // superseded by a later selection
+      setPlan(p);
     } catch (e) {
+      if (signal?.aborted) return; // cancelled, not a real failure
+      if (planEpoch.current !== epoch) return;
       setError((e as Error).message); setPlan(null);
     } finally {
-      setLoading(false);
+      if (planEpoch.current === epoch) setLoading(false);
     }
   }, [token, fyId]);
 
-  useEffect(() => { void loadPlan(); }, [loadPlan]);
+  // fyId changing (including a client-switch's reset) re-triggers this effect;
+  // the cleanup aborts the previous fyId's in-flight request the instant a new
+  // one starts, and loadPlan's own epoch check is the belt underneath that.
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadPlan(controller.signal);
+    return () => controller.abort();
+  }, [loadPlan]);
 
   const saveToken = () => {
     const t = tokenDraft.trim();
     sessionStorage.setItem(TOKEN_KEY, t); setToken(t); setPlan(null); setFiscalYears([]); setFyId("");
   };
 
+  // THE RENDER-TIME BELT (finding 1's second layer): a plan is only ever
+  // shown, and only ever feeds an attest action, when its OWN client_id/id
+  // (carried on the plan document, never a side-tracked assumption) matches
+  // the currently selected client/FY. Anything else renders as "no plan yet"
+  // rather than stale-but-plausible data.
+  const visiblePlan = plan && plan.fiscal_year.client_id === clientId && plan.fiscal_year.id === fyId ? plan : null;
+
   const readinessCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const c of plan?.checks ?? []) {
+    for (const c of visiblePlan?.checks ?? []) {
       const k = c.result.state;
       counts[k] = (counts[k] ?? 0) + 1;
     }
     return counts;
-  }, [plan]);
+  }, [visiblePlan]);
 
   const byDrawer = useMemo(() => {
     const g: Record<1 | 2 | 3, ClosePlanCheck[]> = { 1: [], 2: [], 3: [] };
-    for (const c of plan?.checks ?? []) g[c.drawer].push(c);
+    for (const c of visiblePlan?.checks ?? []) g[c.drawer].push(c);
     return g;
-  }, [plan]);
+  }, [visiblePlan]);
 
   return (
     <main className={styles.page}>
@@ -175,22 +245,22 @@ export default function ClosePage() {
           ) : null}
           {error ? <p className={styles.banner}>Could not load the close plan: {error}</p> : null}
 
-          {plan ? (
+          {visiblePlan ? (
             <>
               <section className={styles.fySummary}>
                 <div className={styles.fyHead}>
-                  <span className={styles.fyTitle}>{plan.fiscal_year.label}</span>
-                  <span className={styles.idChip}>{plan.fiscal_year.status}</span>
-                  <span className={styles.idChip}>ordinal {plan.fiscal_year.ordinal}</span>
-                  <span className={styles.idChip}>{plan.fiscal_year.fy_end_source}</span>
+                  <span className={styles.fyTitle}>{visiblePlan.fiscal_year.label}</span>
+                  <span className={styles.idChip}>{visiblePlan.fiscal_year.status}</span>
+                  <span className={styles.idChip}>ordinal {visiblePlan.fiscal_year.ordinal}</span>
+                  <span className={styles.idChip}>{visiblePlan.fiscal_year.fy_end_source}</span>
                 </div>
                 <div className={styles.bounds}>
-                  <span className={styles.bound}>{plan.fiscal_year.starts_on} &ndash; {plan.fiscal_year.ends_on}</span>
+                  <span className={styles.bound}>{visiblePlan.fiscal_year.starts_on} &ndash; {visiblePlan.fiscal_year.ends_on}</span>
                   <span className={styles.bound}>
-                    close run: {plan.close_run.state === "absent" ? "not started" : plan.close_run.run_state}
+                    close run: {visiblePlan.close_run.state === "absent" ? "not started" : visiblePlan.close_run.run_state}
                   </span>
-                  {plan.close_run.state === "present" ? (
-                    <span className={styles.bound}>run id {shortId(plan.close_run.close_run_id)}</span>
+                  {visiblePlan.close_run.state === "present" ? (
+                    <span className={styles.bound}>run id {shortId(visiblePlan.close_run.close_run_id)}</span>
                   ) : null}
                 </div>
                 <div className={styles.readiness}>
@@ -210,7 +280,7 @@ export default function ClosePage() {
                   <p className={styles.drawerBlurb}>{DRAWER_BLURB[drawer]}</p>
                   <div className={styles.gateList}>
                     {byDrawer[drawer].map((c) => (
-                      <GateRow key={c.check_key} check={c} closeRunId={plan.close_run.state === "present" ? plan.close_run.close_run_id : null}
+                      <GateRow key={c.check_key} check={c} closeRunId={visiblePlan.close_run.state === "present" ? visiblePlan.close_run.close_run_id : null}
                         token={token} onAttested={() => void loadPlan()} />
                     ))}
                   </div>
@@ -219,28 +289,28 @@ export default function ClosePage() {
 
               <section className={styles.section}>
                 <p className={styles.sectionTitle}>Close receipt</p>
-                {plan.receipt.state === "absent" ? (
+                {visiblePlan.receipt.state === "absent" ? (
                   <p className={styles.muted}>No close receipt yet -- this fiscal year has not been finalized.</p>
                 ) : (
                   <>
                     <div className={styles.receiptGrid}>
-                      <Field label="Receipt" value={shortId(plan.receipt.receipt_id)} />
-                      <Field label="Kind / status" value={`${plan.receipt.kind} / ${plan.receipt.status}`} />
-                      <Field label="Closed by" value={shortId(plan.receipt.closed_by)} />
-                      <Field label="Closed at" value={plan.receipt.closed_at} />
-                      <Field label="Segregation" value={plan.receipt.segregation_mode ?? "—"} />
-                      <Field label="P&amp;L net" value={fmtCents(plan.receipt.pl_net_cents)} />
-                      <Field label="Retained earnings account" value={plan.receipt.retained_earnings_account} />
-                      <Field label="Closing entry" value={shortId(plan.receipt.close_entry_id)} />
-                      <Field label="Closing TB digest" value={plan.receipt.closing_tb_digest} mono />
-                      <Field label="Gate digest" value={plan.receipt.gate_digest} mono />
-                      <Field label="Dataset sha256" value={plan.receipt.dataset_sha256} mono />
+                      <Field label="Receipt" value={shortId(visiblePlan.receipt.receipt_id)} />
+                      <Field label="Kind / status" value={`${visiblePlan.receipt.kind} / ${visiblePlan.receipt.status}`} />
+                      <Field label="Closed by" value={shortId(visiblePlan.receipt.closed_by)} />
+                      <Field label="Closed at" value={visiblePlan.receipt.closed_at} />
+                      <Field label="Segregation" value={visiblePlan.receipt.segregation_mode ?? "—"} />
+                      <Field label="P&amp;L net" value={fmtCents(visiblePlan.receipt.pl_net_cents)} />
+                      <Field label="Retained earnings account" value={visiblePlan.receipt.retained_earnings_account} />
+                      <Field label="Closing entry" value={shortId(visiblePlan.receipt.close_entry_id)} />
+                      <Field label="Closing TB digest" value={visiblePlan.receipt.closing_tb_digest} mono />
+                      <Field label="Gate digest" value={visiblePlan.receipt.gate_digest} mono />
+                      <Field label="Dataset sha256" value={visiblePlan.receipt.dataset_sha256} mono />
                     </div>
-                    {plan.receipt.closing_position ? (
+                    {visiblePlan.receipt.closing_position ? (
                       <table className={styles.positionTable}>
                         <thead><tr><th>Account</th><th>Closing balance</th></tr></thead>
                         <tbody>
-                          {Object.entries(plan.receipt.closing_position).map(([code, cents]) => (
+                          {Object.entries(visiblePlan.receipt.closing_position).map(([code, cents]) => (
                             <tr key={code}><td>{code}</td><td>{fmtCents(cents)}</td></tr>
                           ))}
                         </tbody>
@@ -270,7 +340,13 @@ function GateRow({ check, closeRunId, token, onAttested }: {
   check: ClosePlanCheck; closeRunId: string | null; token: string; onAttested: () => void;
 }) {
   const state = check.result.state;
-  const canAttest = check.drawer === 2 && closeRunId !== null;
+  // Finding 2: unknown/error are lawfully attestable (attest_close_exception
+  // accepts a call for any not-passing state), so the item list -- and the
+  // attest action inside it -- must render for them too, not only 'fail'.
+  const attestable = state !== "not_yet_measured" && ATTESTABLE_STATES.has(state);
+  const canAttest = check.drawer === 2 && closeRunId !== null && attestable;
+  const hasNonAbsentAttestation = check.items.some((it) => it.attestation.state !== "absent");
+  const showItems = check.items.length > 0 && (attestable || hasNonAbsentAttestation);
   return (
     <div className={styles.gateRow}>
       <div className={styles.gateHead}>
@@ -279,10 +355,7 @@ function GateRow({ check, closeRunId, token, onAttested }: {
         <span className={styles.gateKey}>{check.check_key}</span>
         {check.drawer === 3 ? <span className={styles.nonBlocking}>never blocks the close</span> : null}
       </div>
-      {check.items.length > 0 && !(
-        state !== "fail"
-        && check.items.every((it) => it.item_key === "__gate__" && it.attestation.state === "absent")
-      ) ? (
+      {showItems ? (
         <div className={styles.itemList}>
           {check.items.map((item) => (
             <div key={item.item_key} className={styles.itemRow}>

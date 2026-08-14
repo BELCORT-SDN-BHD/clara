@@ -54,6 +54,12 @@ export type ReportArtifactRow = {
   client_id: string;
   report_run_id: string;
   kind: "draft_watermarked" | "pre_sign" | "signed_original";
+  // storage_key is the content-addressed object key ('firms/<firm>/reports/
+  // <sha256>.<ext>', 0064's own epsilon-registry check) -- carried through so
+  // the row can show WHERE the bytes live, honestly, even though this build
+  // ships no signed-download door for it yet (finding 6: no fabricated link).
+  storage_key: string;
+  key_extension: "pdf" | "json";
   sha256: string;
   byte_size: number;
   claim_removed: boolean;
@@ -80,7 +86,7 @@ export async function listReportArtifacts(token: string, clientId: string): Prom
   try {
     const rows = await pgrestSelect<ReportArtifactRow>(
       `report_artifacts?client_id=eq.${encodeURIComponent(clientId)}` +
-        `&select=id,client_id,report_run_id,kind,sha256,byte_size,claim_removed,uncertified,sealed_by,sealed_at` +
+        `&select=id,client_id,report_run_id,kind,storage_key,key_extension,sha256,byte_size,claim_removed,uncertified,sealed_by,sealed_at` +
         `&order=sealed_at.desc`,
       token,
     );

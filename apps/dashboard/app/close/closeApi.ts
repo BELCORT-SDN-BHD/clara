@@ -24,8 +24,8 @@ export type FiscalYearRow = {
   has_active_reopen_receipt: boolean;
 };
 
-export async function listFiscalYears(token: string, clientId: string): Promise<FiscalYearRow[]> {
-  const out = await rpc("list_fiscal_years", { p_client: clientId }, token);
+export async function listFiscalYears(token: string, clientId: string, signal?: AbortSignal): Promise<FiscalYearRow[]> {
+  const out = await rpc("list_fiscal_years", { p_client: clientId }, token, signal);
   return Array.isArray(out) ? (out as FiscalYearRow[]) : [];
 }
 
@@ -38,6 +38,12 @@ export async function listFiscalYears(token: string, clientId: string): Promise<
 
 export type ClosePlanFiscalYear = {
   id: string;
+  // client_id rides the plan document itself (theta finding 1's belt): the page
+  // cross-checks this against the CURRENTLY selected client at render time, so
+  // a plan fetched for a since-abandoned selection can never render under a
+  // different one even if the request-epoch/abort guard above it were somehow
+  // defeated.
+  client_id: string;
   label: string;
   ordinal: number;
   starts_on: string;
@@ -121,15 +127,15 @@ function toClosePlan(out: unknown): ClosePlan | null {
   const fy = o.fiscal_year as Record<string, unknown> | undefined;
   const closeRun = o.close_run as Record<string, unknown> | undefined;
   const receipt = o.receipt as Record<string, unknown> | undefined;
-  if (!fy || typeof fy.id !== "string") return null;
+  if (!fy || typeof fy.id !== "string" || typeof fy.client_id !== "string") return null;
   if (!closeRun || typeof closeRun.state !== "string") return null;
   if (!receipt || typeof receipt.state !== "string") return null;
   if (!Array.isArray(o.checks)) return null;
   return o as unknown as ClosePlan;
 }
 
-export async function getClosePlan(token: string, fiscalYearId: string): Promise<ClosePlan | null> {
-  const out = await rpc("get_close_plan", { p_fiscal_year_id: fiscalYearId }, token);
+export async function getClosePlan(token: string, fiscalYearId: string, signal?: AbortSignal): Promise<ClosePlan | null> {
+  const out = await rpc("get_close_plan", { p_fiscal_year_id: fiscalYearId }, token, signal);
   return toClosePlan(out);
 }
 

@@ -226,9 +226,14 @@ begin
     order by cr.closed_at desc limit 1;
 
   return jsonb_build_object(
+    -- client_id rides the fiscal_year object itself, not just firm_id: a
+    -- dashboard racing an async client selection cross-checks THIS value
+    -- against its current selection before it will render the plan or let an
+    -- attest action fire (the belt over the client-switch race; the request
+    -- itself is still firm-scoped and per-FY, this is purely a caller-side aid).
     'fiscal_year', jsonb_build_object(
-      'id', v_fy.id, 'label', v_fy.label, 'ordinal', v_fy.ordinal,
-      'starts_on', v_fy.starts_on, 'ends_on', v_fy.ends_on,
+      'id', v_fy.id, 'client_id', v_fy.client_id, 'label', v_fy.label,
+      'ordinal', v_fy.ordinal, 'starts_on', v_fy.starts_on, 'ends_on', v_fy.ends_on,
       'status', v_fy.status, 'fy_end_source', v_fy.fy_end_source),
     'close_run', case when v_run.id is null then
         jsonb_build_object('state', 'absent')
