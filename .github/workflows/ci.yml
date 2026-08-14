@@ -702,14 +702,25 @@ jobs:
       # with ZERO skips. The δ contract is a ONE-WAY ceremony (it deploys the evaluator closures
       # and asserts a pristine metric_cells), which is the other reason it gets its own database:
       # the sweep's run consumes the shared clara_ci copy, and a consumed database is not valid
-      # evidence for this contract. Guarded by presence so pre-merge branches without δ stay
-      # green: the step no-ops until a numbered wave_e_delta_metrics migration is on disk.
+      # evidence for this contract.
+      #
+      # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
+      # the ε R1 finding (an exit-0 guard makes "the migration went missing" indistinguishable
+      # from "the migration hasn't landed yet", the exact shape ε's round-3 fix got a second
+      # codex finding for). RE-TRUED: this step's "pre-merge branches without δ stay green"
+      # rationale no longer holds and is retired here — δ's ci.yml step shipped in the SAME PR
+      # as its migrations, so no honest checkout ever has this step without them; the only
+      # worlds where the guard fires are deletion, rename-out-of-glob, or a merge accident, and
+      # every one of those deserves red, post-merge, forever. δ is long since merged (main
+      # carries the wave_e_delta_metrics migration), so flipping this to fail-closed costs
+      # nothing today and closes the same hole θ's and ε's drills close.
       - name: Wave-E δ contract drill (isolated DB, focused, allow-missing UNSET)
         working-directory: packages/db
         run: |
           m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_delta_metrics.sql 2>/dev/null | head -1)"
           if [ -z "$m" ]; then
-            echo "no numbered wave_e_delta_metrics migration on disk — the δ contract has nothing to drill yet"; exit 0
+            echo "no numbered wave_e_delta_metrics migration on disk (missing or misnumbered) -- δ is merged on main, so absence here is a regression; FAILING rather than skipping (guard-polarity ruling 2026-08-14)."
+            exit 1
           fi
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
           PGDATABASE=clara_delta_contract_ci pnpm migrate
@@ -732,18 +743,14 @@ jobs:
       # the concurrent all-packages sweep's shared clara_ci database, so this leg's result is
       # never confounded by what else that sweep did to it.
       #
-      # PRESENCE GUARD FAILS, NEVER SKIPS. This is deliberately NOT the δ drill's exit-0-on-
-      # absence shape: δ's step landed pre-merge, when a legitimate branch could still exist
-      # without the δ migration, so a no-op-green was the honest answer. θ's ci.yml change
-      # ships in the SAME PR as 0064 — by the time this step is reachable from a merged main,
-      # 0064 is permanently there, so there is no future legitimate "hasn't shipped yet" branch
-      # state left to protect. The only way this guard sees absence after merge is a
-      # regression (0064 deleted or renamed/misnumbered so the glob no longer matches) — and a
-      # regression must turn this step RED, not quietly green-skip. This is the exact shape
-      # ε's round-3 fix got a second codex finding for: an exit-0 guard makes "the migration
-      # went missing" indistinguishable from "the migration hasn't landed yet". Keyed on 0064
-      # directly, the one file whose absence would matter (theta ships a single migration,
-      # unlike δ/ε's multi-file waves).
+      # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
+      # the ε R1 finding: a drill and its lane's migration travel in the SAME commit, so no
+      # honest checkout ever has the drill without the migration — the only worlds where this
+      # guard fires are deletion, rename-out-of-glob, or a merge accident, and every one of
+      # those deserves red, post-merge, forever. Pre-merge branches without θ also lack this
+      # step itself (it lands in the same PR as 0064), so exit-1 cannot hurt them. Keyed on
+      # 0064 directly, the one file whose absence would matter (theta ships a single
+      # migration, unlike δ/ε's multi-file waves).
       - name: Wave-E θ contract drill (isolated DB, focused, allow-missing UNSET)
         working-directory: packages/db
         run: |
