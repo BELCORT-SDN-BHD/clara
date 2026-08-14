@@ -9,9 +9,12 @@ file wins or it is stale — and truing it is the first thing you do.
 
 *(as of 2026-08-14 early morning, the Wave E night run — trued at every clock-out)*
 
-- **Live DB: 62 migrations, frontier `0063_rs_name_only_lift_floor`** — the 0058-0063
-  ceremony ran 2026-08-14 from merged `main` (PRs #233/#234/#236; as-run:
-  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`). **Both evaluator closures are
+- **Live DB: 71 migrations, frontier `0072_wave_e_epsilon_reporting_security_seal_artifacts_issue`**
+  — the 0064-0072 ceremony ran 2026-08-14 morning from merged `main` (θ #237 squash 6cb6e461 +
+  ε #235 squash c29abc16; 9/9 applied clean, zero stops, backup banked to R2 first
+  (2026-08-14T07-54-02-433Z, 207MB full profile), positive reads + pgrst NOTIFY recorded;
+  as-run doc pending). The earlier 0058-0063 ceremony record:
+  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`. **Both evaluator closures are
   DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is ARMED**
   (name-only fact through the audited door; the S4.5 behavioural self-proof fired on live).
   The A30b receipt table is live and empty. Two field findings stopped the ceremony cleanly
@@ -53,10 +56,10 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave E · γ | period registry + month snapshots (`0057`) | ceremonied | #231 |
 | harness-v2 | the grand refactor — ADR-0069 | merged | #232 |
 | Wave E · δ + RS guard + harness hardening | `0058-0063` + runner hardening + the dispatch-model hook | **ceremonied (LIVE)** | #233 #234 #236 |
-| Wave E · θ | `0064` `get_close_plan` + `/close` + `/reports` — re-sequenced ahead of ε | in review | #237 |
-| Wave E · ε | FS reporting DB layer, 8 migrations (renumbering to `0065-0072`) — the independent-review fix round in progress (9 blockers + 13 majors docket; batch 1 of ~3 landed, 53/53) | fix round | #235 |
-| Wave E · ζ | render worker + freeze CI half + DR §10 — phase-1 complete (71/71 + 11/11), holding for GO phase-2 behind ε | built, holding | — |
-| Wave E · η | chatTurn_v11 + wake wrappers — complete and rebound to ε's final 14-arg core; render-preview chain deferred to the OBO lane by ruling | built, holding | — |
+| Wave E · θ | `0064` `get_close_plan` + `/close` + `/reports` — T17 grant round + focused drill + guard-polarity uniformity | **ceremonied (LIVE)** | #237 |
+| Wave E · ε | FS reporting DB layer `0065-0072` — three codex rounds to MERGE-READY, ten-commit rebase with byte-identical contribution guard | **ceremonied (LIVE)** | #235 |
+| Wave E · ζ | render worker + freeze CI half + DR §10 — spike/drill/fly-groundwork done (93/93), custody branch pushed; RIG LEG running against the post-ε frontier | rig leg | — |
+| Wave E · η | chatTurn_v11 + wake wrappers — dedicated agent spawned 2026-08-14 with the inheritance packet (custody branch + NUL fix + the 14-arg core map); VALIDATE-η in progress | validating | — |
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -189,6 +192,69 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   candidate, not tonight's.
 - **The ε/η/θ/ζ byte sets are IN this worktree but NOT in PR-1** — their commits ride their own
   PRs; until then they are untracked working state (do not mistake local presence for merged).
+- **WSL VM idle teardown masqueraded as a disk I/O fault (2026-08-14, RESOLVED).** After the
+  disk-full recovery, containers died Exited(255) seconds after start and the distro logged
+  `getpwuid(0) failed 5` — read initially as VHDX corruption. The real cause: WSL tears the VM
+  down moments after the last wsl.exe client detaches, so every short-lived poll (`wsl docker
+  ps`) booted the VM, exited, and doomed the containers it was checking. Fix: a keeper process
+  during container work + `%USERPROFILE%\.wslconfig` `vmIdleTimeout=-1` (permanent from the
+  next WSL restart). Lesson for every rig script: hold one attached wsl.exe for the life of the
+  stage, and never diagnose VM health through a probe that itself cycles the VM.
+- **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** on this repo under
+  Windows, the three tracked long-path PDFs under `packages/runtime/test-storage/` make
+  `git rebase --abort` fail (`could not move back`) with the rebase state SURVIVING, and a
+  follow-up `git reset --hard` also fails (the unresolved index writes through the same long
+  paths) — the instinctive abort→hard-reset pair leaves the clone MORE stuck at each step.
+  Escape that works: `git rebase --quit`, then a MIXED `git reset <sha>` (index-only, no
+  long-path writes), then `git symbolic-ref HEAD refs/heads/<branch>`; verify the target sha
+  is an ancestor of origin BEFORE resetting so the recovery is free by construction. Prefer
+  fresh short-path clones (with `core.longpaths true`) for any conflict-bearing operation.
+- **Local-only test-isolation flake in the db package (pre-existing, NOT a functional defect):**
+  `a21-prestate.test.mjs` leaks `PGDATABASE` from its subprocess setup into the shared Node
+  process, so a full-suite run against a REUSED database inflates failures (13 vs the true 7)
+  and `pipeline.test.mjs`'s own error self-diagnoses the mismatch ("PGDATABASE=a21_prestate_…
+  != url db …"). On a fresh single-pass database the same 7 fail deterministically in the two
+  untouched files (`a21-prestate`, `pipeline` — last touched ba22326/e8dfcce); CI runs both
+  green, so this is a LOCAL sequencing/env artifact. Found by θ during the T17 round
+  (2026-08-14). Fix candidate: scope the env var inside the subprocess only. η's bytes exist in the
+  worktree (four untracked `chatTurn.v11*` files, a modified `registry.ts`, and the untracked
+  wake-wrappers migration, UNNUMBERED under packages/db/migrations) but no live agent owns the
+  lane; ζ verified by
+  enumeration that it never wrote a byte of η. **The "14-arg core" phrase was RIGHT after
+  all** (corrected twice, 2026-08-14): ε's `_draft_report_spec_core` — the function η's wake
+  wrapper delegates to — is exactly 14 args on merged main (0069:272, `p_actor, p_firm,
+  p_obo, p_wake_kind, p_client, p_spec_key, p_title, p_report_template_version_id, p_locale,
+  p_parameters, p_overrides, p_layout_ast, p_effective_from, p_op_key`); the interim "13-arg"
+  count missed `p_effective_from date`. η's own three cores remain 9/15/6-arg. The core is
+  granted to NOBODY; a wake wrapper calls it directly (the human wrapper hardcodes
+  obo/wake_kind to null). Precisely: η's report-spec delegation TARGETS the 14-arg core;
+  part 2 was rebound, part 1's prestate probe was not (the one-line apply blocker η's
+  VALIDATE found). A subtlety the successful apply could never catch: ε's core takes
+  `(p_actor, p_firm, …)` while η's own three cores take `(p_firm, p_actor, …)` — a uuid,uuid
+  transposition invisible to to_regprocedure and every catalog assertion; η verified all four
+  call sites by parameter NAME from bytes (all correct, including the one crossing
+  conventions). Whoever
+  resumes η derives the rebind target from the bytes, not the phrase. A dedicated η agent is
+  spawned after ε merges. **Custody (2026-08-14): both orphan lanes are now snapshotted
+  off-machine** — `zeta-custody-20260814` (8891296, 39 files) and `eta-custody-20260814`
+  (3155071, 9 files incl. the part2 wake-wrappers migration, eta-contract.test.mjs and the
+  presence gate that the first enumeration had missed), both parented on fd0830a, pushed,
+  server-confirmed, migrations left UNNUMBERED (numbers claim at merge). The shared
+  `frozen-workflows.json` (carrying BOTH lanes' registrations) rides the ζ branch — η's
+  commit message says so. **η pre-build item:** `chatTurn.v11.tools.ts:82` embeds two RAW NUL
+  bytes as hash-material separators — works at runtime but makes git treat the file as
+  binary (unreviewable) and the idempotency key silently fragile to any editor/formatter
+  touch; fix is escaping them (`\0`) before any η build continues.
+- **The 2026-08-14 disk-full event + the VHDX compaction residue.** C: hit 0 bytes mid-run; root
+  cause was 301 orphaned docker volumes (60.15GB) inside the WSL VHDX — the night's disposable
+  PG17 stages never pruned — plus an 11.4GB npm cache. Both purged (`docker system prune -af
+  --volumes` + cache delete); C: recovered to ~12GB free and the VHDX has ~950G internal room,
+  so container work re-uses the existing allocation without growing the file. RESIDUE: the
+  59.7GB `ext4.vhdx` itself stays large — compaction (`diskpart compact vdisk`) needs an
+  elevated shell, which the agent session does not have; WSL's `--set-sparse` self-reports a
+  data-corruption risk and was not forced. Owner-key item: run the compact from an admin
+  PowerShell if the ~50GB matters. Standing practice going forward: long fleet runs prune
+  docker volumes as stages finish, not at the end.
 
 ## Session log
 
