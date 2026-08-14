@@ -137,6 +137,24 @@ const METRICS_0058_HUMAN_FNS = [
 // and must live or die together, so a name that silently vanishes while its exemption survives
 // here is a finding rather than a quiet pass.
 const METRICS_0058_COHORT = [...METRICS_0058_HUMAN_FNS];
+// 0064 [Wave E lane theta]: the close-plan-as-document read. ONE name on
+// clara_authenticated -- the /close consumer (closeApi.ts's getClosePlan, called
+// from close/page.tsx). Originally authored with clara_agent_ro granted too (the
+// design skeleton's own §4 text: "Granted to clara_authenticated and
+// clara_agent_ro (read)") -- T17 caught it, and this row is the fix: grepped
+// across packages/runtime and the whole repo, nothing outside this lane's own
+// files calls clara.get_close_plan, so the agent grant was speculative
+// surface-widening (the ADR-0070 ruling 8 shape, the declined speculative
+// cores) and was REVOKED from the migration itself, not merely left unlisted
+// here.
+//
+// THE AGENT ROW IS EMPTY DELIBERATELY -- the same 0057/B6 shape (see that
+// block above): the function's own resolver (clara.actor_firm_id(), 0002:
+// 440-443) stays dual-lane-capable on purpose, so re-adding clara_agent_ro's
+// EXECUTE grant WHEN a real agent-lane consumer ships is a one-line grant
+// statement in the migration plus a one-line addition here naming that
+// consumer -- no resolver rewrite needed either side of that boundary.
+const CLOSE_PLAN_0064_HUMAN_FNS = ["get_close_plan"];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -721,6 +739,9 @@ export const ALLOWED = {
     // lifecycle verbs, the two frozen-input minters, the evaluator pair, the independent E6
     // re-check, the A30b attempt-receipt writer and the freeze verifier — clara_authenticated
     // ONLY, every floor body-enforced; agent/wake/runtime gain ZERO (see the block above)
+    ...CLOSE_PLAN_0064_HUMAN_FNS, // 0064 [Wave E lane θ] the close-plan-as-document read —
+    // clara_authenticated ONLY (the /close consumer); agent row empty by T17's ruling,
+    // not by omission — see the block above
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

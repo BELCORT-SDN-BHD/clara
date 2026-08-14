@@ -21,28 +21,42 @@
 -- surfaces (/close, /reports) that consume this read ship in the SAME PR under
 -- apps/dashboard/app/close/** and apps/dashboard/app/reports/**, outside this file.
 --
--- DUAL-LANE GRANT (clara_authenticated AND clara_agent_ro -- a read, and the
--- ONLY one of 0056's close-model reads granted to the agent lane). 0056 S6.4e's
--- own header explains why get_close_readiness/verify_close/list_fiscal_years are
--- clara_authenticated-ONLY: those bodies resolve context through clara._human_ctx,
--- i.e. JWT claims -- a session-settable GUC -- so an agent-role grant on a
--- JWT-trusting body is either dark (no membership resolves under clara_agent_ro)
--- or a cross-tenant read for a session that forges request.jwt.claims. This
--- function instead resolves its caller's firm through clara.actor_firm_id()
--- (0002:440-443), the standing dual-lane resolver already granted to BOTH roles:
--- coalesce(clara.wake_firm(), clara.jwt_firm()) -- the wake credential's
--- STRUCTURAL, credential-table-backed firm wins when a wake session is live (the
--- agent lane, never JWT-claim-trusted), the JWT membership's firm otherwise (the
--- human lane). Reused verbatim, never re-derived, so the two lanes cannot drift
--- apart from the resolver every other dual-role body already leans on. The
--- underlying tables (fiscal_years, close_gate_checks, close_runs,
--- close_gate_results, close_attestations, close_receipts) carry NO clara_agent_ro
--- RLS policy at all (0056's own posture: human-only visibility, by owner-policy
--- bypass only) -- so this function is SECURITY DEFINER, owned by clara_fn_owner,
--- and performs its own explicit firm-congruence filter on every read exactly as
--- get_close_readiness does; the definer read's tenant safety rests on that filter,
--- never on the tables' own RLS (0056 S1's own A6e lesson, applied here to a
--- caller that is sometimes an agent rather than a human).
+-- GRANT: clara_authenticated ONLY, per T17's grant-matrix ruling (rig-isolation.
+-- test.mjs:531) -- a shipped consumer names the grant, not a design doc's
+-- anticipation of one. /close (apps/dashboard/app/close/closeApi.ts's
+-- getClosePlan, called from close/page.tsx) is that consumer, on the human JWT
+-- lane. clara_agent_ro was granted at authoring (the design skeleton's own
+-- SS4 text reads "Granted to clara_authenticated and clara_agent_ro (read)")
+-- and REVOKED here after T17 caught it: grepped across packages/runtime and the
+-- whole repo, nothing outside this lane's own files calls clara.get_close_plan
+-- today -- a grant with no shipped consumer is speculative surface-widening,
+-- the ADR-0070 ruling 8 shape (the declined speculative cores), not a
+-- design-anticipated one the census should be told to accept.
+--
+-- THE RESOLVER STAYS DUAL-LANE-CAPABLE ON PURPOSE, even though only one role
+-- holds the grant today. 0056 S6.4e's own header explains why
+-- get_close_readiness/verify_close/list_fiscal_years are clara_authenticated-
+-- ONLY *by construction*: those bodies resolve context through
+-- clara._human_ctx, i.e. JWT claims -- a session-settable GUC -- so an
+-- agent-role grant on a JWT-trusting body is either dark or a cross-tenant read
+-- for a session that forges request.jwt.claims; retrofitting one of those
+-- bodies for an agent grant later would mean rewriting the body, not just the
+-- grant. This function instead resolves its caller's firm through
+-- clara.actor_firm_id() (0002:440-443), the standing dual-lane resolver already
+-- granted to both app roles: coalesce(clara.wake_firm(), clara.jwt_firm()) --
+-- the wake credential's STRUCTURAL, credential-table-backed firm wins when a
+-- wake session is live, the JWT membership's firm otherwise. Because the
+-- resolver already handles both lanes correctly, re-adding clara_agent_ro's
+-- EXECUTE grant WHEN a real agent-lane consumer ships is a one-line grant
+-- statement plus a T17 roster pin naming that consumer -- no change to this
+-- function's body. The underlying tables (fiscal_years, close_gate_checks,
+-- close_runs, close_gate_results, close_attestations, close_receipts) carry NO
+-- clara_agent_ro RLS policy at all (0056's own posture: human-only visibility,
+-- by owner-policy bypass only) -- so this function is SECURITY DEFINER, owned
+-- by clara_fn_owner, and performs its own explicit firm-congruence filter on
+-- every read exactly as get_close_readiness does; the definer read's tenant
+-- safety rests on that filter, never on the tables' own RLS (0056 S1's own A6e
+-- lesson).
 --
 -- LIVE-INERT, ADDITIVE, NO D1 WINDOW. This file creates ONE new function and
 -- touches no existing body, no existing table, no trigger. It is additive in the
@@ -265,7 +279,10 @@ begin
 end $$;
 alter function clara.get_close_plan(uuid) owner to clara_fn_owner;
 revoke all on function clara.get_close_plan(uuid) from public;
-grant execute on function clara.get_close_plan(uuid) to clara_authenticated, clara_agent_ro;
+-- clara_authenticated only -- T17's ruling (rig-isolation.test.mjs:531): the
+-- /close consumer is the shipped one; clara_agent_ro has none today (revoked
+-- after grep confirmed it, see the file header).
+grant execute on function clara.get_close_plan(uuid) to clara_authenticated;
 
 reset role;
 
@@ -304,18 +321,15 @@ begin
   end if;
 
   -- (2.2) THE GRANT MATRIX, by has_function_privilege STATE, never grant-statement
-  -- text (0056 S11.5's own instrument): clara_authenticated AND clara_agent_ro can
-  -- execute (the one dual-lane read this file adds); every other app/wake role
-  -- gains NOTHING new.
+  -- text (0056 S11.5's own instrument): clara_authenticated (the shipped /close
+  -- consumer) can execute; every other app/wake role -- clara_agent_ro included,
+  -- per T17's ruling (rig-isolation.test.mjs:531): no shipped agent-lane
+  -- consumer exists today -- gains NOTHING.
   if not has_function_privilege('clara_authenticated', 'clara.get_close_plan(uuid)', 'execute') then
     raise exception 'theta S2.2: clara_authenticated cannot execute get_close_plan -- the read is dark'
       using errcode = 'CLR10';
   end if;
-  if not has_function_privilege('clara_agent_ro', 'clara.get_close_plan(uuid)', 'execute') then
-    raise exception 'theta S2.2: clara_agent_ro cannot execute get_close_plan -- the spec grant is missing'
-      using errcode = 'CLR10';
-  end if;
-  foreach v_t in array array['clara_runtime','clara_wake_interactive','clara_wake_proactive'] loop
+  foreach v_t in array array['clara_agent_ro','clara_runtime','clara_wake_interactive','clara_wake_proactive'] loop
     if has_function_privilege(v_t, 'clara.get_close_plan(uuid)', 'execute') then
       raise exception 'theta S2.2: % holds EXECUTE on get_close_plan -- outside the intended grant matrix', v_t
         using errcode = 'CLR10';
@@ -325,5 +339,5 @@ begin
     raise exception 'theta S2.2: PUBLIC holds EXECUTE on get_close_plan' using errcode = 'CLR10';
   end if;
 
-  raise notice 'theta OK: clara.get_close_plan(uuid) created -- STABLE, SECURITY DEFINER, dual-granted to clara_authenticated + clara_agent_ro, no other role reached. Additive, no D1 window, LIVE-INERT until the first fiscal_years row exists.';
+  raise notice 'theta OK: clara.get_close_plan(uuid) created -- STABLE, SECURITY DEFINER, granted to clara_authenticated only (T17 ruling; the resolver stays dual-lane-capable for a future agent grant, clara_agent_ro reached today by nobody). Additive, no D1 window, LIVE-INERT until the first fiscal_years row exists.';
 end $s2$;

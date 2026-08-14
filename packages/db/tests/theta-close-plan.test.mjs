@@ -251,60 +251,44 @@ test("T3 a real fiscal year in a FOREIGN firm reads as the BYTE-IDENTICAL refusa
 });
 
 // ===========================================================================
-// T4 -- the clara_agent_ro grant, asserted POSITIVELY: not just a privilege
-// check (state, not text) but a REAL successful call under a minted wake
-// credential, whose answer matches the human lane's for the same firm/FY.
+// T4 -- the clara_agent_ro grant, asserted NEGATIVELY (T17's ruling,
+// rig-isolation.test.mjs:531): no shipped consumer calls get_close_plan
+// through the agent read lane today -- grepped across packages/runtime and
+// the whole repo, nothing outside this lane's own files does -- so the grant
+// this file originally shipped was speculative surface-widening (the
+// ADR-0070 ruling 8 shape) and was revoked from the migration. Both
+// instruments, matrix-style, the same discipline a positive grant would get,
+// just flipped: the privilege STATE is false, and a REAL wake-credential call
+// is refused (42501, before the body ever runs -- the design's own §3.1
+// negative-battery shape for an agent-denied read). clara_authenticated's
+// grant is checked positively in the same test, so the row reads as one
+// matrix rather than two disconnected assertions.
 // ===========================================================================
 
-test("T4 clara_agent_ro can execute get_close_plan (privilege state) and a real wake-credential call succeeds with the same answer as the human lane", async (t) => {
+test("T4 clara_agent_ro CANNOT execute get_close_plan (no shipped consumer, T17); clara_authenticated can", async (t) => {
   if (skipTheta(t)) return;
   const owner = world.users.alice; // firm A
   const fx = await cleanCloseableFY(owner, { tag: "theta-t4", startsOn: "2027-01-01" });
 
-  // Absence is not evidence -- a real call is the only positive proof this grant
-  // works, but the privilege STATE is checked too (both instruments, matrix-style).
   const priv = await rootQuery(
-    "select has_function_privilege('clara_agent_ro','clara.get_close_plan(uuid)','execute') as ok",
+    "select has_function_privilege('clara_authenticated','clara.get_close_plan(uuid)','execute') as auth, " +
+    "has_function_privilege('clara_agent_ro','clara.get_close_plan(uuid)','execute') as agent",
   );
-  assert.equal(priv.rows[0].ok, true, "clara_agent_ro must hold EXECUTE on get_close_plan");
+  assert.equal(priv.rows[0].auth, true, "clara_authenticated must hold EXECUTE on get_close_plan -- the /close consumer needs it");
+  assert.equal(priv.rows[0].agent, false, "clara_agent_ro must NOT hold EXECUTE on get_close_plan -- no shipped agent-lane consumer exists");
 
-  const cred = await mintInteractive(world.firms.A);
-  const agentRes = await wakeQuery(ROLES.agentRo, cred.secret,
-    "select clara.get_close_plan(p_fiscal_year_id => $1) as r", [fx.fy]);
-  const agentPlan = agentRes.rows[0].r;
-  assert.ok(agentPlan, "the agent lane's call must actually succeed, not merely be granted");
-  assert.equal(agentPlan.fiscal_year.id, fx.fy, "the agent lane resolves the SAME fiscal year the human lane would");
-  assert.equal(agentPlan.fiscal_year.status, "open");
-  assert.equal(agentPlan.checks.length, 13);
-
+  // The human lane's real call still succeeds (positive control -- revoking
+  // the agent grant must never collaterally break the shipped consumer).
   const humanPlan = await getClosePlan(owner, { fy: fx.fy });
-  assert.deepEqual(agentPlan, humanPlan, "the agent lane and the human lane see the identical plan for the same firm");
+  assert.equal(humanPlan.fiscal_year.id, fx.fy, "mandatory setup: the human lane's real call still succeeds");
 
-  // Cross-firm under the agent lane too: a wake credential minted for firm A
-  // must not see firm B's data even by construction (there is none to leak
-  // here, but the SAME refusal code must fire) -- and BYTE-COMPARED against
-  // the wake lane's OWN nonexistent-FY refusal (fix-docket finding 4), so an
-  // oracle cannot hide in the text under either lane, independently proved.
-  const fxB = await cleanCloseableFY(world.users.dave, { tag: "theta-t4-b", startsOn: "2027-01-01" });
-  let crossErr = null;
-  try {
-    await wakeQuery(ROLES.agentRo, cred.secret,
-      "select clara.get_close_plan(p_fiscal_year_id => $1) as r", [fxB.fy]);
-  } catch (e) { crossErr = e; }
-  assert.ok(crossErr, "firm A's wake credential must be refused firm B's fiscal year");
-  assert.equal(crossErr.code, "CLR11", `expected CLR11 (got ${crossErr.code} -- ${crossErr.message})`);
-
-  let wakeNonexistentErr = null;
-  try {
-    await wakeQuery(ROLES.agentRo, cred.secret,
-      "select clara.get_close_plan(p_fiscal_year_id => $1) as r", [randomUUID()]);
-  } catch (e) { wakeNonexistentErr = e; }
-  assert.ok(wakeNonexistentErr, "a random fiscal_year_id must refuse under the wake lane too");
-  assert.equal(wakeNonexistentErr.code, "CLR11", `expected CLR11 (got ${wakeNonexistentErr.code} -- ${wakeNonexistentErr.message})`);
-  assert.equal(crossErr.message, wakeNonexistentErr.message,
-    "wake lane: the foreign-FY refusal's MESSAGE must be byte-identical to the nonexistent-FY refusal's -- any difference is an oracle");
-  assert.equal(crossErr.detail, wakeNonexistentErr.detail,
-    "wake lane: the foreign-FY refusal's DETAIL must be byte-identical to the nonexistent-FY refusal's -- any difference is an oracle");
+  // Absence is not evidence -- a real, denied call is the only positive proof
+  // the revoke actually took, not just a privilege-table read.
+  const cred = await mintInteractive(world.firms.A);
+  const err = await caught(() => wakeQuery(ROLES.agentRo, cred.secret,
+    "select clara.get_close_plan(p_fiscal_year_id => $1) as r", [fx.fy]));
+  assert.ok(err, "a real wake-credential call must be refused -- the grant is gone, not merely unused");
+  assert.equal(err.code, "42501", `expected 42501 (permission denied, before the body ever runs) -- got ${err.code} -- ${err.message}`);
 });
 
 // ===========================================================================
