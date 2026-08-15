@@ -13,7 +13,7 @@ import {
   evaluateMetricHuman, randomUUID, measure, metricAst,
 } from "./epsilon-fixtures.mjs";
 import {
-  buildEpsilonWorld, seedRigProfile, seedVerifiedWording, profileVersion, assessmentRow,
+  buildEpsilonWorld, seedRigProfile, seedVerifiedWording, assessmentRow,
   artifactRows, ensureEpsilonAdmin,
 } from "./epsilon-world.mjs";
 
@@ -49,15 +49,25 @@ export async function registerClaimPhase(t, world) {
   });
 
   await t.test("a statutory pack whose required wording is unverified assesses FAILED and refuses a pre_sign", async () => {
-    const mpers = await profileVersion("mpers_company", 1);
+    // THE FIXTURE IS RIG-LOCAL, and that is the whole correction. This cell used to bind the
+    // SHIPPED mpers_company profile and assert it fails "because owner task #43 has landed no
+    // verified wording" -- which tested whether the owner had done #43 yet, not whether epsilon
+    // enforces the law. It went red the moment the wording lane seeded real rows.
+    //
+    // The law is: a pack whose REQUIRED wording is unverified assesses `failed` and cannot seal a
+    // pre_sign. Proven here against a profile this test seeds itself and deliberately leaves
+    // unworded, so it holds in every world -- before #43, after it, and after whatever the owner
+    // verifies next. (Its sibling below seeds the SAME rig shape WITH verified wording and gets
+    // `eligible`; the pair is the real evidence, and only one of them was written correctly.)
+    const rig = await seedRigProfile("unverified");
     const w = await buildEpsilonWorld(world, { tag: "claim-failed", reportClass: "statutory",
-      profileVersionId: mpers, sections: MPERS_SECTIONS });
+      profileVersionId: rig.profileVersionId, sections: MPERS_SECTIONS });
     assert.equal(w.sealed.claim_assessment.status, "failed",
-      "owner task #43 has landed no verified wording, so every statutory pack fails today");
+      "required wording that cannot be verified fails the pack, whatever else the estate has seeded");
     const row = await assessmentRow(w.runId);
     assert.deepEqual(row.reason_codes, ["required_wording_unverified"]);
-    assert.equal(row.check_receipt.unverified_required_wording_keys.length, 5,
-      "the receipt names every required wording key it could not verify");
+    assert.equal(row.check_receipt.unverified_required_wording_keys.length, MPERS_SECTIONS.length,
+      "the receipt names every required wording key it could not verify -- counted from the fixture, not pinned to a literal");
 
     const sha = sha64(`failed-${w.runId}`);
     const refused = await caught(async () => sealArtifact(owner, { runId: w.runId, kind: "pre_sign",
@@ -341,37 +351,59 @@ export async function registerClaimPhase(t, world) {
       "select count(*)::int n from clara.report_claim_assessments where report_run_id=$1", [w.runId])).rows[0].n), 1);
   });
 
-  await t.test("EVERY locale with no effective claim policy REFUSES rather than borrowing another's label", async () => {
-    // Both fail-closed locales, not one: ms and zh are separate rows the owner has yet to supply,
-    // and a fallback added for either would be a compliance claim in a language nobody verified.
-    for (const locale of ["ms", "zh"]) {
-      const w = await buildEpsilonWorld(world, { tag: `claim-locale-${locale}`, reportClass: "management",
-        locale, seal: false });
-      const error = await caught(() => assessClaim(owner, w.runId));
-      const detail = assertRefusal(error, "CLR10", "claim_policy_absent", locale);
-      assert.equal(detail.locale, locale, `the refusal names ${locale}, not whichever locale it fell back to`);
-      assert.match(detail.fix ?? "", /claim-policy row for this locale/);
+  await t.test("a locale with no effective claim policy REFUSES rather than borrowing another's label", async () => {
+    // THE ABSENCE IS MANUFACTURED, not borrowed. This cell used to point at ms and zh because the
+    // owner had not supplied their policy rows yet -- so it tested the owner's to-do list, and the
+    // moment the wording lane seeds ms/zh it would have gone red while the law it cared about was
+    // still perfectly enforced. The law: a locale whose claim policy does not resolve REFUSES,
+    // rather than silently rendering a compliance claim in a language nobody verified.
+    //
+    // EXPIRED, not deleted, and driven through the GRANTED door -- two corrections this cell
+    // earned while being written. A DELETE is refused by report_claim_assessments' FK the moment
+    // any earlier pack has cited the row, which is most databases. And assess_report_claim
+    // resolves a human context, so it cannot be called from the fn_owner transaction that does the
+    // expiring (CLR04, no authenticated actor) -- the state change and the exercise are separate
+    // acts by separate principals, which is what the product does too.
+    //
+    // Expiry is also the truer shape: assess resolves the policy by EFFECTIVE WINDOW against the
+    // run's period_start, so closing that window is exactly the "no policy is effective for this
+    // locale" state the refusal exists for.
+    const locale = "en";                       // the one locale guaranteed populated in every world
+    const w = await buildEpsilonWorld(world, { tag: "claim-locale", reportClass: "management",
+      locale, seal: false });
+    const before = (await rootQuery(
+      "select id, effective_to from clara.claim_policy_versions where locale = $1 order by id",
+      [locale])).rows;
+    assert.ok(before.length > 0, `${locale} has a policy to expire, so the refusal below is about its absence`);
+    let refusal;
+    try {
+      await withTriggersOff("claim_policy_versions", () => rootQuery(
+        "update clara.claim_policy_versions set effective_to = $2::date - 1 where locale = $1",
+        [locale, w.period.period_start]));
+      refusal = await caught(() => assessClaim(owner, w.runId));
+    } finally {
+      // Restored per row from what was read, not blanket-nulled: a locale the owner lands later
+      // may carry a real end date, and a test that "restores" by inventing one is a test that
+      // quietly edits reference data.
+      for (const row of before) {
+        await withTriggersOff("claim_policy_versions", () => rootQuery(
+          "update clara.claim_policy_versions set effective_to = $2 where id = $1", [row.id, row.effective_to]));
+      }
     }
-    // And en, the one locale that IS supplied, assesses -- otherwise the two refusals above would
-    // be consistent with a claim policy that never resolves for anybody.
-    const en = await buildEpsilonWorld(world, { tag: "claim-locale-en", reportClass: "management",
-      locale: "en", seal: false });
-    assert.equal((await assessClaim(owner, en.runId)).status, "not_applicable",
-      "en resolves its policy row, so the ms/zh refusals are about those locales");
+    const detail = assertRefusal(refusal, "CLR10", "claim_policy_absent", locale);
+    assert.equal(detail.locale, locale, "the refusal names the locale, not whichever one it fell back to");
+    assert.match(detail.fix ?? "", /claim-policy row for this locale/);
 
-    // THE LEXICON POPULATIONS, asserted exactly. Lane zeta's gate-3 scan must treat a locale whose
-    // lexicon has no effective row as a REFUSAL; what ms and zh actually carry today is the
-    // standard's own name token and nothing else, and that is an owner item of the #43 family --
-    // recorded here so an invented Malay or Chinese compliance phrase shows up as a test failure
-    // rather than as a shipped guess.
-    const lexicon = (await rootQuery(
-      `select locale, count(*)::int n, coalesce(string_agg(distinct phrase_key, ',' order by phrase_key), '') keys
-         from clara.claim_phrase_lexicon group by locale order by locale`)).rows;
-    assert.deepEqual(lexicon, [
-      { locale: "en", n: 4, keys: "compliance_sentence,standard_full_name,standard_name_token,true_and_fair" },
-      { locale: "ms", n: 1, keys: "standard_name_token" },
-      { locale: "zh", n: 1, keys: "standard_name_token" },
-    ], "en is populated; ms and zh carry the name token ONLY, pending owner verification");
+    // And with the policy restored, the SAME run assesses -- without which the refusal above
+    // would be consistent with a claim policy that never resolves for anybody.
+    assert.equal((await assessClaim(owner, w.runId)).status, "not_applicable",
+      "the policy resolves again once restored, so the refusal was about its absence");
+
+    // NOTE: the exact per-locale lexicon census that used to live here has MOVED to the wording
+    // lane's own tests, where the data it describes is maintained. An exact key census is worth
+    // having -- it is what turns an unintended phrase addition into a red test rather than a
+    // silent change -- but it is an assertion about THEIR seed, and a test over another lane's
+    // reference data is the defect this whole cell is the fix for.
   });
 
   await t.test("a run evaluated AGAIN after its dataset was sealed cannot mint an artifact", async () => {

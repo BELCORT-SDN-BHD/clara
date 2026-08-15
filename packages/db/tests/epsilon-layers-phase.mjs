@@ -1,6 +1,7 @@
 // Wave E lane EPSILON -- phase 1: the six template layers. NOT a test file.
 //
-// Proves: the shipped wording table is EMPTY and its verified-provenance CHECK bites; every
+// Proves: every wording row claiming `verified` carries its provenance quartet and the CHECK
+// refuses one that does not (a floor over reference data, not a claim that the table is empty); every
 // publish/draft floor by role and by report class; publication freeze; and the E-R8 floor-1
 // walls at BOTH the template and the spec layer -- no numeric literal, no protected placeholder
 // bound to a supplied literal, no protected content TYPED with no binding declared at all, and
@@ -16,21 +17,33 @@ import {
 } from "./epsilon-fixtures.mjs";
 import { profileVersion, ensureEpsilonAdmin } from "./epsilon-world.mjs";
 
-const SHIPPED_PROFILES = ["mpers_company", "convention_sole_prop"];
-
-export async function shippedWordingCount() {
-  return Number((await rootQuery(
-    "select count(*)::int n from clara.statutory_wording where profile_key = any($1)",
-    [SHIPPED_PROFILES])).rows[0].n);
+/** Rows claiming `verified` that cannot evidence it. The durable floor over reference data:
+ *  it is empty in an empty table and stays meaningful once real wording lands. */
+export async function unprovenancedVerifiedWording() {
+  return (await rootQuery(
+    `select profile_key, wording_key, locale from clara.statutory_wording
+      where verification_state = 'verified'
+        and (source_manifest is null or source_sha256 is null
+             or verified_by is null or verified_at is null)
+      order by profile_key, wording_key, locale`)).rows;
 }
 
 export async function registerLayersPhase(t, world) {
   const { alice, bob, carol } = world.users;
   const admin = await ensureEpsilonAdmin(world);
 
-  await t.test("layer 2 ships ZERO wording rows and its verified-provenance CHECK bites", async () => {
-    assert.equal(await shippedWordingCount(), 0,
-      "owner task #43 gates every wording row; inventing one is a FAIL of matrix D5");
+  await t.test("every wording row claiming `verified` carries its full provenance quartet", async () => {
+    // THIS CELL USED TO ASSERT THE TABLE WAS EMPTY, and that was a defect: it asserted the state
+    // of SHIPPED REFERENCE DATA that ANOTHER lane owns, so it was really testing whether the owner
+    // had done task #43 yet rather than testing anything about epsilon. It went red the moment the
+    // wording lane seeded real rows, through no fault of that lane's.
+    //
+    // The durable form is the inverse: not "there are no rows" but "every row that claims
+    // verification carries the evidence of it". True vacuously in an empty table, and it gets
+    // STRONGER as real wording lands instead of dying on contact with it -- which is what a test
+    // over reference data should do.
+    assert.deepEqual(await unprovenancedVerifiedWording(), [],
+      "a row may not claim `verified` without the manifest, sha, verifier and timestamp of the act");
     assert.deepEqual((await rootQuery(
       `select profile_key, revision, applies_to_periods_beginning_from::text f,
               applies_to_periods_beginning_to::text t
@@ -55,7 +68,12 @@ export async function registerLayersPhase(t, world) {
       assert.equal(error?.code, "23514", `a verified row missing ${missing} is refused: ${error?.message}`);
       assert.match(error.message, /ck_statutory_wording_verified_provenance/);
     }
-    assert.equal(await shippedWordingCount(), 0, "no forged row survived");
+    // Scoped to the rows this cell tried to forge, by their own key prefix -- not to the table's
+    // total, which real wording legitimately makes non-zero and which would have made this
+    // assertion a hostage to another lane's seed.
+    assert.deepEqual((await rootQuery(
+      "select wording_key from clara.statutory_wording where wording_key like 'forged\\_%' order by wording_key")).rows,
+      [], "no forged row survived");
   });
 
   await t.test("layer 3 house style is an OWNER floor and its assets must be content-addressed", async () => {
@@ -415,8 +433,11 @@ export async function registerLayersPhase(t, world) {
     assert.equal(viewer?.code, "CLR04", "drafting a spec is key 1 -- a viewer holds no key");
   });
 
-  await t.test("the shipped wording table is STILL empty after the whole layer phase", async () => {
-    assert.equal(await shippedWordingCount(), 0,
-      "read at the end as well as the start: the gate is a state, and a state can be moved");
+  await t.test("the provenance floor still holds after the whole layer phase", async () => {
+    // Read at the end as well as the start, and now with teeth it did not have before: this phase
+    // SEEDS rig wording of its own (seedVerifiedWording), so a helper that wrote a `verified` row
+    // without the quartet would be caught here rather than only in the CHECK's own cell.
+    assert.deepEqual(await unprovenancedVerifiedWording(), [],
+      "nothing this phase wrote claims verification it cannot evidence");
   });
 }
