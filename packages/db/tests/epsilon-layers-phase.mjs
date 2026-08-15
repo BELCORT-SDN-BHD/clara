@@ -31,9 +31,12 @@ export async function wordingProvenanceConstraint() {
 /** A TRIPWIRE, and labelled as one rather than dressed up as a floor.
  *
  *  While the CHECK above exists and is valid this predicate is its exact De Morgan negation, so
- *  it CANNOT return a row -- it is empty at 0 wording rows and at 22 alike. It earns its place
- *  only in the narrow window the constraint read cannot cover: a row that predates the constraint,
- *  or one admitted while it was NOT VALID. Belt to that read's braces, nothing more.
+ *  it CANNOT return a row -- it is empty at 0 wording rows and at 22 alike. It earns its place in
+ *  exactly ONE narrow window the constraint read cannot cover: rows GRANDFATHERED past validation,
+ *  i.e. present when the constraint was dropped and re-added NOT VALID. Postgres still enforces a
+ *  NOT VALID CHECK against every new INSERT and UPDATE -- it only skips validating rows that were
+ *  already there -- so "admitted while NOT VALID" is not a second scenario, and saying so would
+ *  overstate what this tripwire covers. Belt to that read's braces, nothing more.
  *
  *  (It shipped as the "durable floor" in the first cut of this fix, which was the same
  *  cannot-fail defect this PR exists to remove, one layer down. The forge loop below is what

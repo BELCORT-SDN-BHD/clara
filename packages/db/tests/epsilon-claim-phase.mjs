@@ -368,14 +368,19 @@ export async function registerClaimPhase(t, world) {
     // Expiry is also the truer shape: assess resolves the policy by EFFECTIVE WINDOW against the
     // run's period_start, so closing that window is exactly the "no policy is effective for this
     // locale" state the refusal exists for.
-    // A SECOND LOCALE MUST BE LIVE, or "does not borrow" is untestable. The first cut expired
-    // `en` -- pre-#43 the ONLY populated locale -- so after the expiry there was nothing left to
-    // borrow FROM and a fallback bug could not have been detected. That made the cell's
-    // discriminating power depend on the seeded world, which is the same coupling this PR removes,
-    // pointing the other way. So the neighbour is seeded here when it is absent, and torn down
-    // with the rest.
-    const locale = "en";                       // the one locale guaranteed populated in every world
-    const neighbour = "ms";
+    // A SECOND LOCALE MUST BE LIVE, or "does not borrow" is untestable -- and WHICH one is live
+    // decides which fallback shapes the cell can see. Two cuts got this wrong in turn:
+    //   1st: expired `en`, pre-#43 the only populated locale, leaving nothing to borrow from at
+    //        all -- so no fallback of any shape was detectable.
+    //   2nd: expired `en` with `ms` kept live -- which catches a fallback reaching for ANY OTHER
+    //        locale, but NOT the likeliest shape of the bug: `if no policy for sv.locale then use
+    //        en`. With en itself expired, a hardcoded-en fallback finds nothing, the refusal fires
+    //        anyway, and the cell passes GREEN with the bug present.
+    // So the roles are reversed: `en` stays LIVE as the neighbour, and a NON-en locale is the
+    // subject that gets expired. Now both shapes are covered -- a hardcoded-en fallback resolves
+    // the live en row and seals, and a general any-other-locale fallback does too.
+    const locale = "ms";                       // the subject: expired for the run's period
+    const neighbour = "en";                    // left LIVE -- what a hardcoded-en fallback grabs
     const w = await buildEpsilonWorld(world, { tag: "claim-locale", reportClass: "management",
       locale, seal: false });
     const nw = await buildEpsilonWorld(world, { tag: "claim-locale-nb", reportClass: "management",
@@ -383,58 +388,65 @@ export async function registerClaimPhase(t, world) {
     const before = (await rootQuery(
       "select id, effective_to::text effective_to from clara.claim_policy_versions where locale = $1 order by id",
       [locale])).rows;
-    assert.ok(before.length > 0, `${locale} has a policy to expire, so the refusal below is about its absence`);
-    const neighbourSeeded = (await rootQuery(
-      "select count(*)::int n from clara.claim_policy_versions where locale = $1", [neighbour])).rows[0].n === 0;
+    // Pre-#43 the subject locale has no policy at all, so there is nothing to expire -- seed one.
+    // Post-#43 it is real and this is a no-op.
+    const subjectSeeded = before.length === 0;
     let refusal;
     try {
-      if (neighbourSeeded) {
+      if (subjectSeeded) {
         await withTriggersOff("claim_policy_versions", () => rootQuery(
           `insert into clara.claim_policy_versions(policy_key,version,locale,status_labels,effective_from,source_note)
            values('fs_claim_policy',1,$1,
              jsonb_build_object('eligible','x','not_applicable','x','stripped','x','failed','x'),
-             '2016-01-01','rig: the neighbour a fallback bug would borrow from')`, [neighbour]));
+             '2016-01-01','rig: the subject locale, so there is a window to close')`, [locale]));
       }
       assert.equal((await assessClaim(owner, nw.runId)).status, "not_applicable",
-        `${neighbour} resolves its own policy -- so it is available to be borrowed from, which is what makes the refusal below meaningful`);
+        `${neighbour} resolves its own policy and stays LIVE -- so a fallback hardcoded to it would find one, which is what makes the refusal below meaningful`);
       await withTriggersOff("claim_policy_versions", () => rootQuery(
         "update clara.claim_policy_versions set effective_to = $2::date - 1 where locale = $1",
         [locale, w.period.period_start]));
       refusal = await caught(() => assessClaim(owner, w.runId));
     } finally {
-      // THE PRIMARY RESTORE GOES FIRST, and that ordering is load-bearing. The first cut cleaned
-      // the neighbour up first with a DELETE -- which the report_claim_assessments FK refuses the
-      // moment the neighbour's own assessment cites it -- so the cleanup threw and `en` was left
-      // expired for every later cell in the phase. Same FK that ruled out DELETE inside the test;
-      // it reaches the teardown too.
+      // THE SUBJECT'S RESTORE GOES FIRST, and that ordering is load-bearing. An earlier cut ran a
+      // cleanup DELETE ahead of it -- which report_claim_assessments' FK refuses the moment the
+      // row's own assessment cites it -- so the teardown threw and the locale was left expired for
+      // every later cell in the phase. Same FK that ruled DELETE out inside the test; it reaches
+      // the teardown too. A teardown that throws is a teardown that strands.
       for (const row of before) {
         await withTriggersOff("claim_policy_versions", () => rootQuery(
           "update clara.claim_policy_versions set effective_to = $2::date where id = $1",
           [row.id, row.effective_to]));
       }
-      // The rig neighbour is EXPIRED rather than deleted, for the same FK reason, and its failure
-      // can no longer strand anything above it.
-      if (neighbourSeeded) {
-        // Closed AT effective_from, not before it: ck_cpv_window requires
-        // effective_to >= effective_from, so a "safely early" date is a constraint violation.
-        // A single-day window in 2016 excludes every run this battery builds.
+      // A rig-seeded subject is restored to LIVE here rather than removed, because the assertion
+      // below needs it resolvable; it is closed out after that.
+      if (subjectSeeded) {
         await withTriggersOff("claim_policy_versions", () => rootQuery(
-          `update clara.claim_policy_versions set effective_to = effective_from
-            where locale = $1 and source_note like 'rig:%'`, [neighbour]));
+          `update clara.claim_policy_versions set effective_to = null
+            where locale = $1 and source_note like 'rig:%'`, [locale]));
       }
     }
     const detail = assertRefusal(refusal, "CLR10", "claim_policy_absent", locale);
     assert.equal(detail.locale, locale, "the refusal names the locale, not whichever one it fell back to");
     assert.match(detail.fix ?? "", /claim-policy row for this locale/);
 
-    // THE NO-BORROWING HALF, which is the whole point and which the first cut could not make:
-    // the neighbour's policy was LIVE throughout the refusal above. So a fallback that reached for
-    // another locale's label would have found one and succeeded, and this cell would be red.
+    // THE NO-BORROWING HALF, which is the whole point: `en` was LIVE throughout the refusal above.
+    // So a fallback hardcoded to en -- the likeliest shape of the bug -- would have resolved it and
+    // sealed, and so would a fallback reaching for any other locale. Either way this cell goes red.
     //
-    // And with the policy restored, the SAME run assesses -- without which the refusal above
+    // And with the subject's policy restored, the SAME run assesses -- without which the refusal
     // would be consistent with a claim policy that never resolves for anybody.
     assert.equal((await assessClaim(owner, w.runId)).status, "not_applicable",
       "the policy resolves again once restored, so the refusal was about its absence");
+
+    // Now the rig-seeded subject can be closed out; it had to stay live for the read above.
+    if (subjectSeeded) {
+      // Closed AT effective_from, never before it: ck_cpv_window requires
+      // effective_to >= effective_from, so a "safely early" date is a constraint violation.
+      // A single-day 2016 window excludes every run this battery builds.
+      await withTriggersOff("claim_policy_versions", () => rootQuery(
+        `update clara.claim_policy_versions set effective_to = effective_from
+          where locale = $1 and source_note like 'rig:%'`, [locale]));
+    }
 
     // NOTE: the exact per-locale lexicon census that used to live here has MOVED to the wording
     // lane's own tests, where the data it describes is maintained. An exact key census is worth
