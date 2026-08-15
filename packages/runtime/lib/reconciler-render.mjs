@@ -86,11 +86,6 @@ export function readDispatchConfig(env = process.env) {
 }
 
 /**
- * Start a render machine. Two modes, both idempotent-ish in the direction that matters: starting
- * an already-running machine, or creating a second one, costs money and time but can never
- * produce a second artifact (see arm (iii) above).
- */
-/**
  * Queue hygiene: park the crash-only jobs that burned every attempt without reporting, and SAY SO.
  *
  * A reaped job is the one event in this belt that means a firm's statutory PDF will not exist
@@ -114,6 +109,11 @@ async function reapExhausted(client, log) {
   }
 }
 
+/**
+ * Start a render machine. Two modes, both idempotent-ish in the direction that matters: starting
+ * an already-running machine, or creating a second one, costs money and time but can never
+ * produce a second artifact (see arm (iii) above).
+ */
 async function startRenderMachine(cfg, log) {
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
   const signal = AbortSignal.timeout(FLY_TIMEOUT_MS);
@@ -199,6 +199,13 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     return { renderOk: true, renderDue: 0, renderDispatched: 0, renderDormant: true };
   }
 
+  // REAP-WITHOUT-DISPATCH IS LAWFUL, and the surface probe above deliberately does not ask about
+  // the reap verb. The probe answers "can this leader dispatch", which gates the dispatch half; the
+  // reap is queue hygiene that a deployment with no Fly wiring still needs. If the verb is missing
+  // (a database behind this build), the call below fails, is logged, and returns 0 — the same
+  // fail-soft shape the due-read has, and the dormant check above already covers the pre-migration
+  // case for the whole belt.
+  //
   // QUEUE HYGIENE RUNS FIRST, AND UNCONDITIONALLY (round-4 major). The reap used to live inside
   // the due-read below, which sits after the unwired early return — so on a deployment that
   // deliberately relies on the scheduled machine (a SUPPORTED configuration, named in the very log

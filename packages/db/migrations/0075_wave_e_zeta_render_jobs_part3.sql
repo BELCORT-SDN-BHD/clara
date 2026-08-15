@@ -1,15 +1,17 @@
--- UNNUMBERED_wave_e_zeta_render_jobs_part3.sql -- lane zeta, file 3 of 4 (CLAIM + DISPATCH).
+-- 0075_wave_e_zeta_render_jobs_part3.sql -- lane zeta, file 3 of 5 (CLAIM + DISPATCH + REAP).
 --
---   Z5  clara.claim_render_job       -- the worker's claim (for update skip locked)
---   Z6  clara.fail_render_job        -- bounded retry, then a terminal failure with its reason
---   Z7  clara.render_dispatch_begin  -- the LEADER's due-read + attempt stamp (cooldown)
---   Z8  clara.render_dispatch_record -- the leader's outcome receipt for that attempt
+--   Z5  clara.claim_render_job            -- the worker's claim (for update skip locked)
+--   Z5b clara.render_job_payload          -- the worker's per-job read
+--   Z6  clara.fail_render_job             -- bounded retry, then a terminal failure with its reason
+--   Z6b clara.reap_exhausted_render_jobs  -- queue hygiene: park the crash-only jobs at their cap
+--   Z7  clara.render_dispatch_begin       -- the LEADER's due-read + attempt stamp (cooldown)
+--   Z8  clara.render_dispatch_record      -- the leader's outcome receipt for that attempt
 --
--- These four ARE acceptance cell A33's instrument. Arm (i) reads the claim directly (two
--- concurrent callers, one job, exactly one non-null answer) rather than inferring it from an
--- artifact appearing later; arm (ii) reads a leaderless queue staying claimable with its wait
--- recorded; arm (iii) is closed in file 4, where a second completion of an already-sealed run
--- reconciles to ONE artifact by a positive re-read, never by assuming the write was a no-op.
+-- The claim, the failure path and the two dispatch verbs ARE acceptance cell A33's instrument. Arm
+-- (i) reads the claim directly (two concurrent callers, one job, exactly one non-null answer)
+-- rather than inferring it from an artifact appearing later; arm (ii) reads a leaderless queue
+-- staying claimable with its wait recorded; arm (iii) is closed in file 4, where a second
+-- completion of an already-sealed run reconciles to ONE artifact by a positive re-read.
 --
 -- Number claims at MERGE; the timeout is PRECAUTIONARY.
 
@@ -22,11 +24,10 @@ insert into _zeta_claim_pre values ('deploy_principal', session_user);
 -- PRESTATE. The column census here covers what Z5b (render_job_payload) reads, which file 2's
 -- census does NOT: that one covers only the manifest builder's own reads.
 --
--- WHY BOTH EXIST RATHER THAN ONE. Without this list, a rename in an upstream lane surfaces as a
--- bare SQL error at APPLY -- loud and fail-closed, but it names a column, not a remedy, and it
--- names it during a ceremony rather than at review. With it, the refusal says which lane's table
--- moved and that the fix is to re-read that table and update Z5b, never to relax the check.
--- Every name below was read from the on-disk DDL, not assumed.
+-- WHY BOTH EXIST RATHER THAN ONE. Without this list, a rename upstream surfaces as a bare SQL error
+-- at APPLY -- loud and fail-closed, but it names a column rather than a remedy, and it names it
+-- during a ceremony rather than at review. With it, the refusal says which lane's table moved and
+-- that the fix is to re-read it and update Z5b. Every name below was read from the on-disk DDL.
 -- =====================================================================================
 do $pre$
 declare
@@ -116,13 +117,11 @@ begin
      select c.id from clara.render_jobs c
       where (c.state = 'claimable'
              or (c.state = 'running' and c.lease_expires_at < now()))
-        -- THE RETRY CAP IS ENFORCED HERE, NOT ONLY IN THE FAILURE PATH (codex B1).
-        -- fail_render_job parks a job at the cap, but it only runs when a worker LIVES long
-        -- enough to report its own failure. A CRASH-ONLY job -- the worker dies between the claim
-        -- and the failure write -- never reaches that code, so its lease simply expires and it
-        -- becomes claimable again. Without this predicate `attempts` climbs past max_attempts
-        -- forever and every cycle starts another PAID machine on a job that can never finish.
-        -- A cap enforced only on the path that requires cooperation is not a cap.
+        -- THE RETRY CAP IS ENFORCED HERE, NOT ONLY IN THE FAILURE PATH (codex B1). fail_render_job
+        -- parks a job at the cap, but only runs when a worker LIVES long enough to report. A
+        -- CRASH-ONLY job never reaches that code: its lease expires and it becomes claimable again,
+        -- so without this predicate `attempts` climbs past max_attempts forever and every cycle
+        -- starts another PAID machine. A cap enforced only on the cooperative path is not a cap.
         and c.attempts < c.max_attempts
       order by c.enqueued_at, c.id
       for update skip locked
@@ -142,16 +141,14 @@ revoke all on function clara.claim_render_job(text, interval) from public;
 -- =====================================================================================
 -- Z5b -- WHAT THE WORKER IS ALLOWED TO READ.
 --
--- The render worker runs as clara_runtime, which holds SELECT on NONE of epsilon's tables (its
--- uniform hardening pass revokes every write and grants SELECT to clara_authenticated only). So
--- the worker cannot browse the reporting schema at all: it asks for the payload of a job IT
--- HOLDS, and the lease check is what scopes the read. A worker with no live lease reads nothing.
+-- The render worker runs as clara_runtime, which holds SELECT on NONE of epsilon's tables, so it
+-- cannot browse the reporting schema at all: it asks for the payload of a job IT HOLDS, and the
+-- lease check is what scopes the read. A worker with no live lease reads nothing.
 --
--- E-R8 FLOOR 1 IS ENFORCED IN THE SHAPE OF THIS PAYLOAD. Cell values leave as `displayed_text`
--- -- the string the DB already computed -- and never as a number the renderer could re-format.
--- The renderer therefore has nothing to round, no locale to apply and no thousands separator to
--- choose; "no model and no user can type a number into a report" extends to "and neither can
--- the typesetter".
+-- E-R8 FLOOR 1 IS ENFORCED IN THE SHAPE OF THIS PAYLOAD. Cell values leave as `displayed_text` --
+-- the string the DB already computed -- never as a number the renderer could re-format. So there is
+-- nothing to round and no locale to apply: "no model and no user can type a number into a report"
+-- extends to "and neither can the typesetter".
 -- =====================================================================================
 create function clara.render_job_payload(p_job uuid, p_worker text) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
@@ -258,10 +255,10 @@ begin
     raise exception 'render job not found' using errcode = 'CLR11',
       detail = '{"reason":"render_job_not_found"}';
   end if;
-  -- THE LEASE MUST STILL BE LIVE (codex M1). Identity alone is not authority: a slow worker whose
-  -- lease expired has already had the job taken from it, and letting it park the row afterwards
-  -- discards a SECOND worker's in-flight render under stale authority. complete_render_job already
-  -- checks liveness; the failure path must hold the same standard, or the cheaper verb becomes the
+  -- THE LEASE MUST STILL BE LIVE (codex M1). Identity alone is not authority: a worker whose lease
+  -- expired has already had the job taken from it, and letting it park the row afterwards discards
+  -- a SECOND worker's in-flight render under stale authority. complete_render_job already checks
+  -- liveness; the failure path holds the same standard, or the cheaper verb becomes the
   -- way around the expensive one.
   if j.state <> 'running'
      or j.claimed_by is distinct from nullif(btrim(coalesce(p_worker, '')), '')
@@ -286,25 +283,18 @@ revoke all on function clara.fail_render_job(uuid, text, jsonb) from public;
 -- =====================================================================================
 -- Z6b -- THE REAP, AS ITS OWN VERB. Queue hygiene, not dispatch.
 --
--- IT LIVES HERE RATHER THAN INSIDE render_dispatch_begin because of where its only caller sat: the
--- runtime's dispatch belt returns EARLY when the Fly deploy is unwired, and that is a SUPPORTED
--- configuration (the scheduled machine is the documented fall-back). So on exactly the deployments
--- that rely on the fallback, the reap never ran and a crash-only job at its cap stayed `running`
--- forever with no terminal state and nothing for an operator to read. Separating it lets the belt
--- run hygiene unconditionally and start machines only when it can.
+-- ITS OWN VERB, because its only caller sat behind the dispatch belt's unwired early return -- and
+-- an unwired deploy is SUPPORTED (the scheduled machine is the documented fall-back). So on exactly
+-- the deployments relying on that fallback, a crash-only job at its cap stayed `running` forever
+-- with no terminal state and nothing to read. It also must NOT stamp dispatch_attempts, which
+-- render_dispatch_begin does, so a flag on that verb would have coupled hygiene to stamping.
 --
--- IT DOES NOT STAMP. render_dispatch_begin increments dispatch_attempts, which is exactly what must
--- NOT happen on an unwired deployment ("an unwired dispatch stamps NOTHING and says so loudly"), so
--- the two are separate verbs rather than one with a flag.
---
--- IMMEDIATE, NOT GRACED (round-4 re-ruling). A round-3 draft waited half a lease past expiry so a
--- slow-but-healthy worker would not be terminated. The panel walked the states and the grace saves
--- nothing: an at-cap row can never be re-claimed (the claim predicate requires attempts <
--- max_attempts) and a post-expiry completion is refused anyway (file 4's liveness check), so the
--- only things the delay bought were paid machines dispatched for jobs nobody can claim, and a
--- terminal signal arriving late. The worker's own fence (clara.render_lease_alive, file 5) is what
--- protects a slow render, and it does so where the protection is real: it stops the worker BEFORE
--- it spends money, rather than pretending a row it can no longer complete is still alive.
+-- IMMEDIATE, NOT GRACED (round-4 re-ruling). A draft waited half a lease past expiry to spare a
+-- slow-but-healthy worker. That saves nothing: an at-cap row can never be re-claimed (the claim
+-- requires attempts < max_attempts) and a post-expiry completion is refused anyway (file 4's
+-- liveness check), so the delay bought only paid machines for unclaimable jobs and a late terminal
+-- signal. The worker's own fence (clara.render_lease_alive, file 5) is what protects a slow render,
+-- and it protects it where the protection is real: it stops the worker BEFORE it spends money.
 -- =====================================================================================
 create function clara.reap_exhausted_render_jobs() returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -361,10 +351,9 @@ begin
     select j.id from clara.render_jobs j
      where (j.state = 'claimable' or (j.state = 'running' and j.lease_expires_at < now()))
        -- DEFENCE IN DEPTH (round-4): a job at its attempt cap is not dispatchable, because no
-       -- worker can claim it -- the claim predicate requires attempts < max_attempts. Without this
-       -- term the sweep would propose it and a paid machine would boot, find nothing claimable and
-       -- exit. The reap normally takes such a row first; this makes the due-read correct on its own
-       -- rather than correct because something else ran.
+       -- worker can claim it -- the claim requires attempts < max_attempts. Without this term the
+       -- sweep proposes it and a paid machine boots, finds nothing claimable and exits. The reap
+       -- normally takes such a row first; this makes the due-read correct on its own.
        and j.attempts < j.max_attempts
        and (j.last_dispatch_at is null
             or j.last_dispatch_at < now() - coalesce(p_cooldown, interval '10 minutes'))
@@ -408,14 +397,12 @@ begin
   end if;
   v_asked := coalesce(array_length(coalesce(p_job_ids, '{}'::uuid[]), 1), 0);
   -- TERMINAL ROWS ARE SKIPPED, NOT WRITTEN (round-2 major). The receipt is written AFTER the Fly
-  -- round trip -- up to the dispatch timeout -- and a job in that batch can legitimately turn
-  -- `done` or `failed` inside the window (a second worker finishes it; the sweep reaps it at its
-  -- cap). File 1's terminal wall now refuses ANY change to a terminal row, so a single such row
-  -- made this one statement raise CLR08 and roll back the WHOLE batch: no job got its receipt, and
-  -- the one fact this design exists to preserve -- "we could not start the renderer" -- was lost
-  -- for four healthy jobs because a fifth had finished. The wall is right; the write is what has to
-  -- yield. `skipped` is returned rather than swallowed, so a caller can see the difference between
-  -- "recorded for all of them" and "recorded for the ones still open".
+  -- round trip, and a job in that batch can legitimately turn `done` or `failed` inside the window.
+  -- File 1's terminal wall refuses ANY change to a terminal row, so one such row made this
+  -- statement raise CLR08 and roll back the WHOLE batch -- four healthy jobs lost "we could not
+  -- start the renderer" because a fifth had finished. The wall is right; the write yields.
+  -- `skipped` is returned rather than swallowed, so a caller sees the difference between "recorded
+  -- for all of them" and "recorded for the ones still open".
   update clara.render_jobs j
      set last_dispatch_ok = p_ok,
          last_dispatch_error = case when p_ok then null else coalesce(p_detail, '{}'::jsonb) end
@@ -448,9 +435,8 @@ grant execute on function
 do $grants$
 declare
   -- render_job_payload IS ON THIS ROSTER NOW, AND ITS ABSENCE WAS A REAL DEFECT: created, revoked
-  -- from public, never GRANTED -- so the first real render would have died on "permission denied",
-  -- and the battery missed it by reading the queue directly instead of walking the worker's own
-  -- read path. The lesson is the census's: a roster of what to check cannot report what is absent.
+  -- from public, never GRANTED -- the first real render would have died on "permission denied", and
+  -- the battery missed it by reading the queue directly. A roster cannot report what is absent.
   v_runtime text[] := array['claim_render_job', 'render_job_payload', 'enqueue_missing_render_jobs',
     'fail_render_job', 'render_dispatch_begin', 'render_dispatch_record',
     'reap_exhausted_render_jobs'];
@@ -468,13 +454,12 @@ begin
     raise exception 'zeta claim tail: clara_runtime EXECUTE set is %, expected %',
       v_granted, v_runtime using errcode = 'CLR10';
   end if;
-  -- (2) And to NOBODY else -- EXCLUDING, not enumerating (codex M5), and with PUBLIC VISIBLE (the
-  -- round-2 minor). This census used to name the seven roles it knew about, so any role NOT on that
-  -- list could hold EXECUTE on a render verb and the tail would still pass: clara_storage_docs
-  -- today, an inherited role tomorrow. An allow-list of two -- the owner, whose entry is ownership
-  -- not a grant, and clara_runtime -- refuses the rest. And it LEFT joins pg_roles: aclexplode
-  -- reports a PUBLIC grant with grantee = 0, which matches no pg_roles row, so an inner join
-  -- silently dropped the single grant that would matter most while this tail printed "and no one".
+  -- (2) And to NOBODY else -- EXCLUDING, not enumerating (codex M5), with PUBLIC VISIBLE (round-2).
+  -- This census used to name the seven roles it knew about, so any role NOT on that list could hold
+  -- EXECUTE and the tail would still pass. An allow-list of two -- the owner, whose entry is
+  -- ownership not a grant, and clara_runtime -- refuses the rest. And it LEFT joins pg_roles:
+  -- aclexplode reports a PUBLIC grant with grantee = 0, matching no pg_roles row, so an inner join
+  -- dropped the one grant that would matter most while this tail printed "and no one".
   select count(*) into v_leak from pg_proc p
     cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
     left join pg_roles rr on rr.oid = acl.grantee
@@ -491,16 +476,21 @@ end $grants$;
 do $tail$
 declare v_skip int;
 begin
-  -- THE CLAIM REALLY IS A SKIP-LOCKED CLAIM, and the sweep really skips locked rows -- asked of the
-  -- LIVE bodies, not asserted from the file. A claim that silently lost `skip locked` would serialise
-  -- every worker behind one row lock and A33 arm (i) would still pass: one job is still claimed once.
+  -- THE CLAIM REALLY IS A SKIP-LOCKED CLAIM, the sweep really skips locked rows, AND SO DOES THE
+  -- REAP -- asked of the LIVE bodies, not asserted from the file. A claim that silently lost
+  -- `skip locked` would serialise every worker behind one row lock and A33 arm (i) would still
+  -- pass: one job is still claimed once. The reap joined this census when it became its own verb
+  -- (round 4/5): it takes row locks on the leader's cycle exactly as the other two do, so leaving
+  -- it out would have been the census covering the parts written first rather than the property.
   select count(*) into v_skip from pg_proc
    where (oid = 'clara.claim_render_job(text,interval)'::regprocedure
           and pg_get_functiondef(oid) ilike '%for update skip locked%')
       or (oid = 'clara.render_dispatch_begin(interval,int)'::regprocedure
+          and pg_get_functiondef(oid) ilike '%skip locked%')
+      or (oid = 'clara.reap_exhausted_render_jobs()'::regprocedure
           and pg_get_functiondef(oid) ilike '%skip locked%');
-  if v_skip <> 2 then
-    raise exception 'zeta claim tail: only % of the 2 live bodies still skip locked rows', v_skip
+  if v_skip <> 3 then
+    raise exception 'zeta claim tail: only % of the 3 live bodies still skip locked rows', v_skip
       using errcode = 'CLR10';
   end if;
   if current_user <> (select v from _zeta_claim_pre where k = 'deploy_principal') then

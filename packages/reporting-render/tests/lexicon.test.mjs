@@ -4,7 +4,7 @@
 // pass. Everything else in this file exists to make that refusal meaningful — a scan that cannot
 // find a phrase it was given would make the coverage gate theatre.
 
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 
 import { RenderRefusal } from "../lib/decisions.mjs";
@@ -239,6 +239,32 @@ test("§7(d): manifest-pinned metadata ABSENT from the PDF refuses (codex M11)",
     metadata: "Title: ACME FS 2025\nKeywords: report_run:abc\nCreationDate: Wed Dec 31 00:00:00 2025 UTC",
     documentMeta,
   }));
+});
+
+test("§7(d): the receipt records WHICH keys were checked and which were empty — one source", () => {
+  // An empty pin cannot be searched for, so the arm neither passes nor fails on it. What must not
+  // happen is a receipt that reads like proof of a check that never ran: `checked` and `skipped`
+  // come from the loop itself, not from a hand-maintained list beside it.
+  const r = assertDocumentMetadataApplied({
+    metadata: "Title: ACME FS 2025",
+    documentMeta: { title: "ACME FS 2025", keywords: "" },
+  });
+  deepStrictEqual(r.checked, ["title"]);
+  deepStrictEqual(r.skipped, ["keywords"]);
+
+  // And the receipt the scan seals carries the same two lists, so a reader seven years out can tell
+  // a full pass from a half one.
+  const scan = scanFinalArtifact({
+    text: "ACME SDN BHD\nStatement of financial position",
+    metadata: "Title: ACME FS 2025",
+    lexicon: FULL,
+    claimPhraseAllowed: false,
+    resolvedPlaceholders: [{ key: "entity_legal_name", value: "ACME SDN BHD" }],
+    documentMeta: { title: "ACME FS 2025", keywords: "" },
+  });
+  strictEqual(scan.metadata_cross_check.ran, true);
+  deepStrictEqual(scan.metadata_cross_check.checked_keys, ["title"]);
+  deepStrictEqual(scan.metadata_cross_check.skipped_empty_keys, ["keywords"]);
 });
 
 test("the gate refuses on a partial lexicon EVEN IF the document is clean", () => {

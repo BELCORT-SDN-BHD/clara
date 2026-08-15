@@ -289,13 +289,13 @@ const METRICS_0059_CLOCK_NAMES = ["approve_metric_definition"];
 // this battery against databases pinned earlier, where this function does not exist.
 const REPORTING_0072_CLOCK_NAMES = ["approve_report_for_issue"];
 
-// 0075/0076 [Wave E lane ζ]: FIVE lawful bare-clock readers, and every one is a QUEUE LIFECYCLE
+// 0075/0076 [Wave E lane ζ]: the readers listed in the two arrays below, and every one is a QUEUE LIFECYCLE
 // INSTANT rather than a business day. claim_render_job stamps claimed_at/first_claimed_at, sets
 // lease_expires_at = now() + the lease, and records the observed queue wait; render_job_payload and
 // fail_render_job compare lease_expires_at against now() to decide whether the caller still holds
 // the job it is speaking for; complete_render_job makes that same liveness check and stamps
-// finished_at; render_dispatch_begin measures its cooldown (last_dispatch_at < now() - cooldown) and
-// reaps leases that expired at the attempt cap. All of it is timestamptz machinery on
+// finished_at; render_dispatch_begin measures its cooldown (last_dispatch_at < now() - cooldown);
+// reap_exhausted_render_jobs compares a dead lease against now(). All of it is timestamptz machinery on
 // clara.render_jobs, and none of it reaches a date-typed column.
 //
 // WHY NOT clara._book_today(), stated because "use the authority" is the reflex this roster otherwise
@@ -304,8 +304,8 @@ const REPORTING_0072_CLOCK_NAMES = ["approve_report_for_issue"];
 // threshold as-of arrive from lane ε's pins contract as DB-owned rows, never from a clock, so there
 // is no date-typed decision here for the authority to own.
 //
-// MEASURED, not inferred: arm (D)'s own detector, run over the 0073-0076 surface, flags these five
-// and no other — enqueue_render_job, enqueue_missing_render_jobs, render_dispatch_record and
+// MEASURED, not inferred: arm (D)'s own detector, run over the 0073-0076 surface, flags exactly the
+// names in the two arrays below and no other — enqueue_render_job, enqueue_missing_render_jobs, render_dispatch_record and
 // render_request_manifest_v1 carry no clock token. render_jobs.enqueued_at is a column DEFAULT,
 // which lives in the table definition rather than in a pg_proc body and correctly does not flag.
 // (replay_render_inputs moved to 0079 and is covered by that block's own measurement; the reap
@@ -318,7 +318,7 @@ const RENDER_0075_CLOCK_NAMES = ["claim_render_job", "fail_render_job", "render_
 const RENDER_0076_CLOCK_NAMES = ["complete_render_job"];
 
 // 0079 [Wave E lane ζ, the human doors + the worker's fence]: ONE more, and it is the same shape as
-// its six siblings above. clara.render_lease_alive answers "does this worker still hold this job",
+// its siblings above. clara.render_lease_alive answers "does this worker still hold this job",
 // which is `lease_expires_at > now()` — a lease deadline, an instant, and the cheapest possible
 // read: the worker calls it before the expensive typesetting step and before uploading, so a render
 // that outran its lease abandons instead of spending money on bytes the seal will refuse.

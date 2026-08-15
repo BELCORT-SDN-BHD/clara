@@ -1,4 +1,4 @@
--- UNNUMBERED_wave_e_zeta_render_jobs_part2.sql -- lane zeta, file 2 of 4 (THE PIN + THE ENQUEUE).
+-- 0074_wave_e_zeta_render_jobs_part2.sql -- lane zeta, file 2 of 5 (THE PIN + THE ENQUEUE).
 --
 --   Z2  clara.render_request_manifest_v1   -- the PINNED-INPUTS half of the manifest, DB-built
 --   Z3  clara.enqueue_render_job           -- internal; epsilon's seal calls this ONE line
@@ -299,9 +299,13 @@ begin
         'fix', 'read the failed job''s last_error, then call clara.requeue_render_job(job id, why) to mint a successor')::text;
   end if;
 
-  -- The inference carries the key's predicate, and the read below asks for the row that is still IN
-  -- the key: a run can hold a failed row AND its live successor, so "the row with this manifest" is
-  -- no longer unique and this select would raise "query returned more than one row".
+  -- THREE QUESTIONS, AND THEY ARE NOT THE SAME QUESTION — said plainly because an earlier version
+  -- of this comment claimed they were. The refusal above asks (run, kind): has this REQUEST failed
+  -- terminally. The INSERT's conflict inference asks (run, manifest_sha256), because that is what
+  -- the partial unique index is and an inference cannot ask anything else. The read below asks
+  -- (run, kind) again, matching the refusal. The middle one being digest-keyed is a property of the
+  -- index, not a choice available here; what matters is that the two questions this function
+  -- CONTROLS agree with each other.
   insert into clara.render_jobs(firm_id, client_id, report_run_id, kind, request_manifest,
       manifest_sha256, requested_by)
     values (r.firm_id, r.client_id, r.id, p_kind, v_manifest, v_sha, r.requested_by)
@@ -313,20 +317,27 @@ begin
   -- row to return, and answering with `{"render_job_id": null}` would hand the caller a receipt
   -- for a job that does not exist.
   --
-  -- KIND-SCOPED, not digest-scoped (round-4). The refusal above already asks about this run and
-  -- kind; asking a DIFFERENT question here left a walk open — a failed A plus a live B of the same
-  -- kind (B minted by the requeue door under a drifted digest) let this verb insert a THIRD row,
-  -- because A's digest is out of the partial key and B's digest is not the one being inserted. One
-  -- question, asked the same way on both sides: is there a live job for this request?
+  -- AND `too_many_rows` IS A REAL STATE, not an impossible one (round-5): the index keys on the
+  -- DIGEST, so two live jobs of the same kind carrying DIFFERENT manifests are index-legal. Both
+  -- doors refuse to create that shape deliberately, but two concurrent enqueues either side of an
+  -- upstream change can still race into it. Unhandled, it surfaces as a bare 21000 with no reason
+  -- token — the one shape this lane's callers cannot act on.
   begin
     select * into strict j from clara.render_jobs
      where report_run_id = r.id and kind = p_kind and state <> 'failed';
-  exception when no_data_found then
-    raise exception 'the render job for this request was terminated by a concurrent caller'
-      using errcode = 'CLR43',
-      detail = jsonb_build_object('reason', 'render_job_raced', 'report_run_id', r.id,
-        'manifest_sha256', v_sha,
-        'fix', 'read the job for this run and kind, then requeue it through clara.requeue_render_job if it is terminally failed')::text;
+  exception
+    when no_data_found then
+      raise exception 'the render job for this request was terminated by a concurrent caller'
+        using errcode = 'CLR43',
+        detail = jsonb_build_object('reason', 'render_job_raced', 'report_run_id', r.id,
+          'manifest_sha256', v_sha,
+          'fix', 'read the job for this run and kind, then requeue it through clara.requeue_render_job if it is terminally failed')::text;
+    when too_many_rows then
+      raise exception 'this run and kind hold more than one live render job'
+        using errcode = 'CLR43',
+        detail = jsonb_build_object('reason', 'render_job_ambiguous', 'report_run_id', r.id,
+          'kind', p_kind,
+          'fix', 'two live jobs for one request means two concurrent enqueues raced across an upstream change; fail the surplus job through clara.fail_render_job and let the remaining one run')::text;
   end;
   if v_id is not null then
     perform clara._audit(r.firm_id, r.requested_by, null, null, 'enqueue_render_job', null,

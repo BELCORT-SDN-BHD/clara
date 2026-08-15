@@ -195,11 +195,42 @@ select clara.requeue_render_job('<failed job id>', 'fly capacity incident 2026-0
   written both on the new row (`requeue_reason`) and into the audit log. A render costs money and
   re-runs a client's statements; that is not a machine's decision to make, so no runtime role holds
   this grant and `clara.enqueue_render_job` refuses to resurrect a failed request on its own.
-- The successor **copies the pinned request verbatim** rather than re-deriving it. Re-deriving would
-  answer "what would we pin today", and a template published in the meantime would silently render a
-  different document under the same request.
+- The successor **RE-DERIVES the pinned request from today's facts.** It does not copy the
+  predecessor's manifest, and copying was never on offer: `clara.seal_report_artifact`'s gate
+  re-derives every DB-owned pin at completion and refuses a manifest that disagrees with it. Since
+  `clara.statutory_wording` is append-only, one verified row landing after the failure moves the
+  aggregate the pins hash — so a verbatim successor would be refused at completion, every time,
+  after burning its five attempts. Re-derivation is what makes the retry completable at all.
 - It carries `supersedes_render_job_id`, so the chain from incident to eventual artifact is readable
-  years later. Only one successor may be live at a time (`render_job_already_requeued`).
+  years later. Only one successor may be live per **(run, kind)** at a time
+  (`render_job_already_requeued`).
+
+### If something upstream moved, you are asked before it renders
+
+When the re-derived digest differs from the failed job's, the call **REFUSES** and hands back both
+digests:
+
+```
+CLR43  requeue_manifest_drifted
+       superseded_manifest_sha256: <the failed job's>
+       manifest_sha256:            <today's>
+```
+
+That is not an error to route around — it is the door telling you the successor would render a
+**different document** from the one that failed, because verified wording, a published template or
+the resolved layout moved in between. Read both manifests. If the newer document is the one the firm
+should have, say so explicitly:
+
+```sql
+select clara.requeue_render_job('<failed job id>', 'wording landed 2026-08-15', true);
+--                                                                             ^ p_accept_drift
+```
+
+The flag defaults to **false**, so nobody consents by omission, and the audit row records
+`manifest_changed`, `drift_accepted` and **both digests** — "the retry rendered a different document,
+and a named person accepted that" is readable years later. A verbatim retry of the old document is
+not available through any door; if the old document specifically is what you need, that is the
+replay drill above, which reproduces the sealed artifact rather than sealing a new one.
 
 **Read the failure before requeuing.** The reap fires on jobs whose workers never reported — an
 image that cannot start, an OOM, a Fly capacity incident. Requeuing without fixing the cause simply

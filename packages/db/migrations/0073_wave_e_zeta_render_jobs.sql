@@ -1,4 +1,4 @@
--- UNNUMBERED_wave_e_zeta_render_jobs.sql -- lane zeta, file 1 of 4 (THE QUEUE TABLE).
+-- 0073_wave_e_zeta_render_jobs.sql -- lane zeta, file 1 of 5 (THE QUEUE TABLE).
 --
 -- THE RENDER QUEUE (design wave-e-design-reporting-part2.md SS10). The zeta set applies AFTER
 -- the whole epsilon set (it FKs clara.report_runs and clara.report_artifacts) and after delta
@@ -143,7 +143,6 @@ create table clara.render_jobs (
   -- The produced artifact cannot belong to another run: a composite FK, not a promise.
   foreign key (artifact_id, report_run_id) references clara.report_artifacts (id, report_run_id),
   unique (id, report_run_id),
-  -- A lease exists exactly while the job is claimed.
   -- A lease exists exactly while the job is claimed, AND a running job always has one (round-4).
   -- The state tie is not tidiness: the reap's predicate compares lease_expires_at, and a `running`
   -- row with a NULL lease would make that comparison NULL — the row would never reap, never be

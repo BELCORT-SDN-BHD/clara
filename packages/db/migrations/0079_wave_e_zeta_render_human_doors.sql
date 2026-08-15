@@ -178,9 +178,29 @@ begin
         'fix', case j.state when 'done' then 'this job produced an artifact; use clara.replay_render_inputs to re-render it as a drill'
                             else 'the job is still live; let it finish or fail before requeuing' end)::text;
   end if;
+  -- THE CHEAP DEFINITIVE REFUSAL COMES FIRST (round-5). Re-deriving the manifest walks the whole
+  -- pin set; the live-job read is one indexed lookup and its answer is final either way. Ordering
+  -- them the other way meant a caller whose request already had a live successor paid for a full
+  -- derivation to be told something the cheap read knew. Both are correct in either order — this
+  -- one is correct and does not do work it will throw away.
+  --
+  -- ONE SUCCESSOR PER (RUN, KIND), NOT PER DIGEST — the round-4 correction, and the same reasoning
+  -- that moved enqueue's refusal off the digest in the round-3 commit. Keyed on the digest, this
+  -- read missed the case re-derivation creates: requeue A after drift mints B under a FRESH digest,
+  -- so requeuing A again finds no live row with A's digest and mints C. Two live jobs for one run
+  -- and one kind, both claiming to succeed A, and the partial index cannot object because their
+  -- digests differ. What "already has a live job" means is a live job for this REQUEST -- the run
+  -- and the kind -- whatever it hashed to.
+  select id into v_live from clara.render_jobs
+   where report_run_id = j.report_run_id and kind = j.kind and state <> 'failed';
+  if v_live is not null then
+    raise exception 'this render request already has a live job' using errcode = 'CLR43',
+      detail = jsonb_build_object('reason', 'render_job_already_requeued', 'render_job_id', v_live)::text;
+  end if;
+
   -- TODAY's pins, from the same builder the first enqueue used. If nothing moved, this digest
   -- equals the predecessor's and the successor is a plain retry; if wording or a template version
-  -- moved, it differs, and that difference is reported rather than hidden.
+  -- moved, it differs, and the drift gate below refuses until an operator says otherwise.
   v_manifest := clara.render_request_manifest_v1(j.report_run_id, j.kind);
   v_sha := encode(clara._hash(v_manifest), 'hex');
   v_drift := v_sha is distinct from j.manifest_sha256;
@@ -198,20 +218,6 @@ begin
       detail = jsonb_build_object('reason', 'requeue_manifest_drifted',
         'superseded_manifest_sha256', j.manifest_sha256, 'manifest_sha256', v_sha,
         'fix', 'something this render depends on moved since the failure -- verified wording, a published template, the resolved layout. Read both manifests, and if the newer document is the one you want, call again with p_accept_drift => true. A verbatim retry is not on offer: the seal re-derives every pin and would refuse it.')::text;
-  end if;
-
-  -- ONE SUCCESSOR PER (RUN, KIND), NOT PER DIGEST — the round-4 correction, and the same reasoning
-  -- that moved enqueue's refusal off the digest in the round-3 commit. Keyed on the digest, this
-  -- read missed the case re-derivation creates: requeue A after drift mints B under a FRESH digest,
-  -- so requeuing A again finds no live row with A's digest and mints C. Two live jobs for one run
-  -- and one kind, both claiming to succeed A, and the partial index cannot object because their
-  -- digests differ. What "already has a live job" means is a live job for this REQUEST -- the run
-  -- and the kind -- whatever it hashed to.
-  select id into v_live from clara.render_jobs
-   where report_run_id = j.report_run_id and kind = j.kind and state <> 'failed';
-  if v_live is not null then
-    raise exception 'this render request already has a live job' using errcode = 'CLR43',
-      detail = jsonb_build_object('reason', 'render_job_already_requeued', 'render_job_id', v_live)::text;
   end if;
 
   begin

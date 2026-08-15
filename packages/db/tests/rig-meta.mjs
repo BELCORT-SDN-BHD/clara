@@ -169,23 +169,27 @@ const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
 // estate roster must NAME every function that holds a grant, so a sanctioned addition is a
 // reviewed line here rather than a surprise in the sweep.
 //
-// THE RUNTIME SIX — the render worker's and the leader's whole surface. clara_runtime holds NO
-// table privilege on clara.render_jobs (not even SELECT), so these verbs ARE the queue's reachable
-// API, and each names its consumer:
-//   claim_render_job          · the worker takes one job (for update skip locked)
-//   render_job_payload        · the worker reads ONLY what its claimed job pins (lease-scoped)
-//   complete_render_job       · the worker's one write — seals through ε's _seal_report_artifact_core
-//   fail_render_job           · the worker records why a render did not happen
-//   render_dispatch_begin     · the LEADER's due-read + attempt stamp (the Law-1 touch)
-//   render_dispatch_record    · the leader's outcome receipt for that attempt
+// THE RUNTIME ROSTER — the render worker's and the leader's whole surface, counted from the array
+// below rather than spelled as a number in this sentence, because the number has now been wrong
+// twice. clara_runtime holds NO table privilege on clara.render_jobs (not even SELECT), so these
+// verbs ARE the queue's reachable API, and each names its consumer:
+//   claim_render_job            · the worker takes one job (for update skip locked)
+//   render_job_payload          · the worker reads ONLY what its claimed job pins (lease-scoped)
+//   complete_render_job         · the worker's one write — seals through ε's _seal_report_artifact_core
+//   fail_render_job             · the worker records why a render did not happen
+//   render_lease_alive          · the worker's own fence: does it still hold this job (0079)
+//   render_dispatch_begin       · the LEADER's due-read + attempt stamp (the Law-1 touch)
+//   render_dispatch_record      · the leader's outcome receipt for that attempt
+//   reap_exhausted_render_jobs  · queue hygiene: park the crash-only jobs stuck at their cap
+//   enqueue_missing_render_jobs · the leader's fallback enqueue when ε's seal call was missed
 const RENDER_0073_RUNTIME_FNS = [
   "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
   "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
-  // 0079's one runtime verb: the worker's own lease fence. It reads a boolean and writes nothing,
-  // and it is what lets a slow-but-healthy render discover it has lost its job BEFORE spending
-  // money finishing it — the machine half of the reap's grace margin.
+  // The FENCE reads a boolean and writes nothing: it is what lets a render that outran its lease
+  // discover the job is no longer its own BEFORE it spends money finishing bytes the seal would
+  // refuse. It is not a grace period — the reap is immediate; this is the worker stopping itself.
   "render_lease_alive",
-  // and the reap, which moved OUT of render_dispatch_begin so queue hygiene runs even on a
+  // And the reap, which moved OUT of render_dispatch_begin so queue hygiene runs even on a
   // deployment whose dispatch is deliberately unwired (the scheduled-machine fallback).
   "reap_exhausted_render_jobs",
 ];

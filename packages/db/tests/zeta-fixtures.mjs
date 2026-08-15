@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 
 import { buildWorld, roleQuery, rootQuery, withActor } from "./epsilon-fixtures.mjs";
-import { buildEpsilonWorld } from "./epsilon-world.mjs";
+import { buildEpsilonWorld, seedRigProfile } from "./epsilon-world.mjs";
 
 export const ZETA_RELATIONS = Object.freeze(["render_jobs"]);
 export const ZETA_ENTRYPOINTS = Object.freeze([
@@ -100,17 +100,22 @@ export async function sealedRun(tag, opts = {}) {
 }
 
 /**
- * A sealed run whose template BINDS A STATUTORY PROFILE — the only shape in which the statutory
- * wording pin exists at all. The ordinary rig run is `management` class with no profile, so its
- * statutory_wording_sha256 pin is null and no wording row can move it; a drift test built on that
- * run would silently assert nothing, which is the exact failure mode the drift arm exists to close.
+ * A sealed run whose template BINDS A RIG-ONLY STATUTORY PROFILE — the only shape in which the
+ * statutory wording pin exists at all, built the way lane ε says it must be.
+ *
+ * TWO RULES MEET HERE, and the first draft broke the second one. (1) The ordinary rig run is
+ * `management` class with no profile, so its statutory_wording_sha256 pin is NULL and no wording
+ * row can move it — a drift test built on that run asserts nothing. (2) epsilon-world.mjs:7-12:
+ * rig wording is inserted against a RIG-ONLY profile, NEVER against the shipped mpers_company one,
+ * whose zero-wording posture is a live assertion the ε battery re-reads at start and at end (owner
+ * task #43's gate). Forging verified wording onto the shipped profile would have made ζ's fixture
+ * quietly break ε's — the sort of cross-lane damage that shows up as someone else's red run.
+ * So this mints a fresh rig profile through ε's own `seedRigProfile` and binds THAT.
  */
 export async function sealedStatutoryRun(tag) {
-  const profile = (await rootQuery(
-    "select id from clara.statutory_profile_versions where profile_key = 'mpers_company' order by revision desc limit 1"
-  )).rows[0];
-  assert.ok(profile, "the shipped mpers_company profile must exist for a statutory run");
-  return sealedRun(tag, { reportClass: "statutory", profileVersionId: profile.id });
+  const { profileKey, profileVersionId } = await seedRigProfile(`zeta-${tag}`);
+  const { world, eps } = await sealedRun(tag, { reportClass: "statutory", profileVersionId });
+  return { world, eps, profileKey };
 }
 
 /**
@@ -165,23 +170,22 @@ export async function sealArtifact(eps, worker = "battery-sealer", kind = "pre_s
  * Returns the digest of the request manifest AFTER the move, so a caller can assert against a
  * value the database computed rather than one the test assumed.
  */
-export async function driftWording(eps, kind = "pre_sign") {
+export async function driftWording(eps, profileKey, kind = "pre_sign") {
+  assert.ok(profileKey && profileKey.startsWith("epsilon_rig_"),
+    "drift is landed against a RIG-ONLY profile (epsilon-world.mjs:7-12); the shipped profiles' zero-wording posture is a live assertion, not spare fixture space");
   const before = (await asOwner("select clara.render_request_manifest_v1($1, $2) m",
     [eps.runId, kind])).rows[0].m;
+  // The window opens 2016-01-01 and never closes, so it covers any rig period — the aggregate the
+  // pin hashes selects on `applies_to_periods_beginning_from <= period_start`, and a row outside
+  // that window would leave the pin unmoved and the assertion below would (correctly) fail.
   await asOwner(
     `insert into clara.statutory_wording(profile_key, wording_key, locale,
        applies_to_periods_beginning_from, wording_text, source_manifest, source_sha256,
        verification_state, verified_by, verified_at, source_note)
-     select v.profile_key, 'zeta_drift_' || substr(md5(random()::text), 1, 8), 'en',
+     values ($1, 'zeta_drift_' || substr(md5(random()::text), 1, 8), 'en',
        date '2016-01-01', 'RIG DRIFT WORDING', jsonb_build_object('source', 'rig'), repeat('b', 64),
-       'verified', clara.agent_user_id(), now(), 'rig-only drift row'
-       from clara.statutory_profile_versions v
-      where v.id = (select tv.statutory_profile_version_id
-                      from clara.report_runs r
-                      join clara.report_spec_versions sv on sv.id = r.report_spec_version_id
-                      join clara.report_template_versions tv on tv.id = sv.report_template_version_id
-                     where r.id = $1)`,
-    [eps.runId]);
+       'verified', clara.agent_user_id(), now(), 'rig-only drift row: simulates wording landing between a failure and its requeue')`,
+    [profileKey]);
   const after = (await asOwner("select clara.render_request_manifest_v1($1, $2) m",
     [eps.runId, kind])).rows[0].m;
   assert.notDeepEqual(after, before,

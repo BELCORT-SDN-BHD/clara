@@ -1,4 +1,4 @@
--- UNNUMBERED_wave_e_zeta_render_jobs_part4.sql -- lane zeta, file 4 of 4 (THE WORKER'S WRITE).
+-- 0076_wave_e_zeta_render_jobs_part4.sql -- lane zeta, file 4 of 5 (THE WORKER'S WRITE).
 --
 --   Z9  clara.complete_render_job  -- the worker's completion, granted to clara_runtime
 --

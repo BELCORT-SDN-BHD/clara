@@ -157,6 +157,24 @@ test("zeta: the FENCE protects a slow worker — the reap is immediate, and the 
     "select clara.render_lease_alive('00000000-0000-4000-8000-00000000dead', 'slow') a")).rows[0].a, false);
 });
 
+test("zeta: a RUNNING job can never carry a null lease — the reap's arithmetic cannot go fail-open", async (t) => {
+  if (await skipUnlessZeta(t)) return;
+  const { eps } = await sealedRun("lease-tie");
+  await parkQueue();
+  const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
+
+  // The reap compares `lease_expires_at < now()`. A `running` row with a NULL lease would make that
+  // comparison NULL — never true — so the row would never reap, never be claimable (its state is
+  // not 'claimable') and never terminate: stranded by arithmetic rather than by decision. The CHECK
+  // is what makes that state unrepresentable, and this cell is its positive proof.
+  await assert.rejects(
+    asOwner(`update clara.render_jobs set state='running', claimed_by=null, claimed_at=null,
+        lease_expires_at=null where id=$1`, [job.render_job_id]),
+    (e) => e.code === "23514" && /ck_rj_lease_paired/.test(e.message ?? ""),
+    "a running row without a lease must be refused by the constraint, not merely avoided by convention",
+  );
+});
+
 test("zeta: one terminal job in a dispatch batch does not cost the others their receipt", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps: a } = await sealedRun("receipt-a");
@@ -267,7 +285,7 @@ test("zeta: a terminally failed job has a lawful successor, and only through the
 
 test("zeta: when the pins have MOVED, the requeue re-derives, refuses silently drifting, and records both digests", async (t) => {
   if (await skipUnlessZeta(t)) return;
-  const { world, eps } = await sealedStatutoryRun("drift");
+  const { world, eps, profileKey } = await sealedStatutoryRun("drift");
   await parkQueue();
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
   const id = job.render_job_id;
@@ -278,7 +296,7 @@ test("zeta: when the pins have MOVED, the requeue re-derives, refuses silently d
   // MOVE AN UPSTREAM INPUT. Without this the cell cannot tell a re-derivation from a verbatim copy:
   // both produce the predecessor's digest when nothing has changed, which is exactly why the
   // round-3 version of this test passed against the code it was written to condemn.
-  const { before, after } = await driftWording(eps);
+  const { before, after } = await driftWording(eps, profileKey);
   assert.notEqual(JSON.stringify(before), JSON.stringify(after));
 
   // A DRIFTED ENQUEUE still refuses and still names the door — the refusal is keyed on the run and
@@ -321,4 +339,18 @@ test("zeta: when the pins have MOVED, the requeue re-derives, refuses silently d
   assert.equal(audit.drift_accepted, true);
   assert.equal(audit.superseded_manifest_sha256, job.manifest_sha256,
     "the audit row carries BOTH digests, so 'the retry rendered a different document' is readable years later");
+
+  // THE DOUBLE-REQUEUE ARM, RUN WHERE IT CAN ACTUALLY FAIL. Requeuing A again now that B is live
+  // under a DIFFERENT digest is the exact walk the old digest-keyed read missed: it would have
+  // found no live row carrying A's digest and minted a third job, leaving two live successors to
+  // one failure with the partial index unable to object. The non-drifted version of this assertion
+  // passes against both predicates and proves nothing.
+  await assert.rejects(
+    humanQuery(world.users.alice, "select clara.requeue_render_job($1, 'again', true)", [id]),
+    (e) => e.code === "CLR43" && /render_job_already_requeued/.test(e.detail ?? ""),
+    "one live successor per (run, kind) — whatever the successor's manifest hashed to",
+  );
+  assert.equal((await rootQuery(
+    "select count(*)::int n from clara.render_jobs where report_run_id=$1 and kind='pre_sign' and state <> 'failed'",
+    [eps.runId])).rows[0].n, 1, "exactly one live job for this request");
 });
