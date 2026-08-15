@@ -1,13 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connConfig, makeClient } from "../lib/pg.mjs";
-import { attachMigrationNoticeListener, MIGRATION_CONNECT_TIMEOUT_MS, migrate } from "../scripts/migrate.mjs";
 import {
+  attachMigrationNoticeListener,
+  MIGRATION_CONNECT_TIMEOUT_MS,
+  migrate,
+  migrationChecksum,
+} from "../scripts/migrate.mjs";
+import {
+  ALLOWED_MIGRATION_ISOLATION,
   DEFAULT_MIGRATION_ISOLATION,
   executeMigrationBody,
   MIGRATION_ISOLATION_PINS,
@@ -514,10 +519,9 @@ test("a connect failure is named and cleaned up like any other migration failure
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 const PINNED_0057 = "0057_wave_e_registry_snapshots";
-// The runner's own checksum recipe (scripts/migrate.mjs): sha256 over the file with CRLF
-// normalised to LF, so a checkout's line endings cannot move a checksum.
-const runnerChecksum = (text) => createHash("sha256").update(text.replace(/\r\n/gu, "\n"), "utf8").digest("hex");
 const STOP = "isolation-capture-stop";
+const ISOLATION_SQL =
+  "select pg_catalog.current_setting('transaction_isolation'::pg_catalog.text) as isolation";
 
 /** Answers the session-pin conversation; returns undefined when the SQL is not part of it. */
 function pinConversation(sql, parameters, state) {
@@ -539,24 +543,35 @@ function pinConversation(sql, parameters, state) {
 }
 
 /**
- * Drive migrate() over a directory and record the exact BEGIN each migration opens with.
+ * Drive migrate() over a directory, recording the exact BEGIN each migration opens with and
+ * every statement the execution client is sent.
  *
- * The execution client stops the run at the first post-BEGIN evidence read (the freeze
- * catalog query, which is uniquely identified by `registry_exists`) — far enough to have
- * SEEN the BEGIN, and short of simulating an entire successful migration.
- * @returns {Promise<{begins: string[], error: Error}>}
+ * The execution client stops the run at the first post-BEGIN freeze read (uniquely
+ * identified by `registry_exists`) — far enough to have seen the BEGIN and the runner's
+ * isolation read-back, and short of simulating an entire successful migration.
+ *
+ * `reportIsolation` makes the SERVER disagree with the BEGIN, which is the only way to tell
+ * a real read-back from a decorative one.
+ * @returns {Promise<{begins: string[], statements: string[], error: Error}>}
  */
-async function recordMigrationBegins(dir) {
+async function recordMigrationBegins(dir, { reportIsolation } = {}) {
   const begins = [];
+  const statements = [];
   const state = { nonce: undefined };
   const client = (kind) => ({
     on() {},
     async connect() {},
     async query(sql, parameters = []) {
       const trimmed = sql.trim();
+      if (kind === "execution") statements.push(trimmed);
       if (kind === "execution" && trimmed.startsWith("begin")) {
         begins.push(trimmed);
         return { rows: [] };
+      }
+      if (kind === "execution" && trimmed === ISOLATION_SQL) {
+        // Echo what the BEGIN asked for, unless the cell is deliberately lying.
+        const asked = (begins.at(-1) ?? "").replace("begin isolation level ", "");
+        return { rows: [{ isolation: reportIsolation ?? asked }] };
       }
       if (kind === "execution" && begins.length && sql.includes("registry_exists")) throw new Error(STOP);
       const answer = pinConversation(sql, parameters, state);
@@ -575,28 +590,40 @@ async function recordMigrationBegins(dir) {
   } catch (thrown) {
     error = thrown;
   }
-  return { begins, error };
+  return { begins, statements, error };
 }
 
-test("the 0057 isolation pin matches the migration's real bytes on disk", () => {
-  // The pin is only ever as true as the file it names. If 0057 is ever renumbered the
-  // checksum still resolves it; if its BYTES ever change, this cell is where that shows.
-  const pin = MIGRATION_ISOLATION_PINS.find(({ version }) => version === PINNED_0057);
-  assert.ok(pin, `${PINNED_0057} carries an isolation pin`);
-  assert.equal(pin.isolation, "repeatable read");
-  assert.equal(pin.checksum, runnerChecksum(readFileSync(join(MIGRATIONS_DIR, `${PINNED_0057}.sql`), "utf8")));
+test("EVERY isolation pin names a real migration file, with exactly those bytes, at an allowed level", () => {
+  // Iterates the TABLE, not one hard-coded row: a second pin added without its file, or
+  // with a stale checksum, or at a level the BEGIN builder would refuse, fails here.
+  // The checksum is computed with the RUNNER'S OWN recipe (imported, never re-implemented),
+  // so a future change to that recipe reds this cell instead of silently diverging from it.
+  assert.ok(MIGRATION_ISOLATION_PINS.length >= 1, "the pin table is not empty");
+  for (const pin of MIGRATION_ISOLATION_PINS) {
+    const onDisk = readFileSync(join(MIGRATIONS_DIR, `${pin.version}.sql`), "utf8");
+    assert.equal(migrationChecksum(onDisk), pin.checksum, `${pin.version}: the pinned checksum is this file's`);
+    assert.ok(ALLOWED_MIGRATION_ISOLATION.includes(pin.isolation), `${pin.version}: ${pin.isolation} is an allowed level`);
+  }
+  // And the one the whole PR exists for, named so a reader sees which file this is about.
+  assert.equal(MIGRATION_ISOLATION_PINS.find(({ version }) => version === PINNED_0057)?.isolation, "repeatable read");
 });
 
-test("migrationIsolationLevel: pinned bytes resolve, unpinned bytes get the explicit default, a pinned version with other bytes REFUSES", () => {
+test("migrationIsolationLevel: pinned bytes resolve, unpinned get the explicit default, and BOTH ways of drifting REFUSE", () => {
   const pin = MIGRATION_ISOLATION_PINS.find(({ version }) => version === PINNED_0057);
   assert.equal(migrationIsolationLevel(PINNED_0057, pin.checksum), "repeatable read");
   // Identity, not spelling: the same bytes under a renumbered version still resolve.
-  assert.equal(migrationIsolationLevel("0099_renumbered_registry_snapshots", pin.checksum), "repeatable read");
+  assert.equal(migrationIsolationLevel("0099_wave_e_registry_snapshots", pin.checksum), "repeatable read");
   assert.equal(migrationIsolationLevel("0001_anything", "f".repeat(64)), DEFAULT_MIGRATION_ISOLATION);
   assert.equal(DEFAULT_MIGRATION_ISOLATION, "read committed");
+  // Edited in place.
   assert.throws(
     () => migrationIsolationLevel(PINNED_0057, "0".repeat(64)),
-    /carries a transaction-isolation pin for checksum c0eabe47.*this file's checksum is 0{64}.*Refusing to migrate/su,
+    /matches the transaction-isolation pin for 0057_wave_e_registry_snapshots .* by version.*Refusing to migrate/su,
+  );
+  // Renumbered AND edited — matches neither key, and used to fall through to the default.
+  assert.throws(
+    () => migrationIsolationLevel("0099_wave_e_registry_snapshots", "0".repeat(64)),
+    /by name family.*Refusing to migrate/su,
   );
 });
 
@@ -628,25 +655,72 @@ test("an unpinned migration opens at READ COMMITTED, stated explicitly rather th
   }
 });
 
-test("a pinned version arriving with DIFFERENT bytes aborts before any transaction is opened", async () => {
-  // Fail-closed, and early: the refusal must land before a client is connected, so it
-  // costs no session and strands no half-open transaction. The empty recording is
+test("a pinned version arriving with DIFFERENT bytes aborts in PRE-FLIGHT — nothing earlier in the chain is applied", async () => {
+  // Fail-closed, and early. The drifted file is numbered ABOVE a perfectly good unpinned
+  // one, so a per-migration resolution would have applied 0001 first and only then
+  // refused; pre-flight means the run changes nothing at all. The empty recording is
   // evidence only because the two cells above prove this same recorder records.
   const dir = mkdtempSync(join(tmpdir(), "clara-isolation-drifted-"));
   try {
+    writeFileSync(join(dir, "0001_unpinned.sql"), "select 1;", "utf8");
     writeFileSync(join(dir, `${PINNED_0057}.sql`), "select 'not the pinned bytes';", "utf8");
     const { begins, error } = await recordMigrationBegins(dir);
-    assert.match(error.message, /carries a transaction-isolation pin for checksum c0eabe47/u);
+    assert.match(error.message, /matches the transaction-isolation pin for 0057_wave_e_registry_snapshots/u);
     assert.match(error.message, /Refusing to migrate/u);
-    assert.deepEqual(begins, [], "no transaction was opened for the drifted file");
+    assert.deepEqual(begins, [], "no transaction was opened — not even for the healthy 0001 ahead of it");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("the isolation pin does not touch the session baseline it rides beside", () => {
-  // BEGIN ISOLATION LEVEL sets transaction_isolation; the baseline pins
-  // default_transaction_isolation. They are different parameters, and assertBaseline plus
-  // the wrapper's post-RESET ALL restore keep comparing the one they always did.
-  assert.equal(MIGRATION_SESSION_BASELINE.default_transaction_isolation, "read committed");
+test("the runner REFUSES when the server reports a different isolation than the BEGIN asked for", async () => {
+  // The pin is a MEASURED fact, not an assertion. A BEGIN is a request; if the backend
+  // opened at something else — a pooler replaying a stale session, a future runner change
+  // that drops the clause — the sentinel silently gets its coin flip back. This cell is
+  // what makes the read-back load-bearing rather than decorative: the fake server lies,
+  // and the runner has to catch it.
+  const dir = mkdtempSync(join(tmpdir(), "clara-isolation-lie-"));
+  try {
+    copyFileSync(join(MIGRATIONS_DIR, `${PINNED_0057}.sql`), join(dir, `${PINNED_0057}.sql`));
+    const { begins, error } = await recordMigrationBegins(dir, { reportIsolation: "read committed" });
+    assert.deepEqual(begins, ["begin isolation level repeatable read"], "the runner still ASKED for the pin");
+    assert.match(
+      error.message,
+      /opened at transaction_isolation "read committed", not the "repeatable read" it was opened with/u,
+    );
+    assert.doesNotMatch(error.message, new RegExp(STOP, "u"), "it refused BEFORE the first evidence read");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the isolation pin leaves the session baseline alone — and that baseline check still bites", async () => {
+  // Two halves, because the frozen-literal version of this assertion passed on origin/main
+  // and could not fail for any change this diff could make.
+  //
+  // (1) MEASURED on the conversation: across a full pinned migration open, the only
+  // statements naming transaction_isolation are the BEGIN and the runner's read-back —
+  // nothing SETS it, and nothing touches default_transaction_isolation off-baseline.
+  const dir = mkdtempSync(join(tmpdir(), "clara-isolation-baseline-"));
+  let statements;
+  try {
+    copyFileSync(join(MIGRATIONS_DIR, `${PINNED_0057}.sql`), join(dir, `${PINNED_0057}.sql`));
+    ({ statements } = await recordMigrationBegins(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const touching = statements.filter((sql) => /isolation/u.test(sql));
+  assert.deepEqual(touching, ["begin isolation level repeatable read", ISOLATION_SQL],
+    "only the BEGIN and the read-back mention isolation at all");
+  assert.equal(statements.some((sql) => /set[_ ].*transaction_isolation/u.test(sql) && !sql.startsWith("begin")), false,
+    "no statement SETS an isolation parameter");
+
+  // (2) BEHAVIOURAL: the baseline assertion that would catch a leaked default is alive.
+  // A session whose default_transaction_isolation has drifted must still be refused —
+  // otherwise half (1) would be guarding a check that no longer checks anything.
+  const drifted = { ...MIGRATION_SESSION_BASELINE, default_transaction_isolation: "repeatable read" };
+  await assert.rejects(
+    () => executeMigrationBody(baselineClient({ settings: drifted }), "select 1", null, PIN_NONCE),
+    /baseline mismatch for default_transaction_isolation: expected read committed, saw repeatable read/u,
+  );
 });

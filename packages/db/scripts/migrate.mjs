@@ -29,6 +29,7 @@ import {
   assertNoTransactionControl,
   DEFAULT_MIGRATION_ISOLATION,
   executeMigrationBody,
+  MIGRATION_ISOLATION_PINS,
   migrationIsolationLevel,
   migrationServerVersionNum,
   migrationStatementTimeout,
@@ -80,7 +81,13 @@ const FREEZE_GUARDS = [
   },
 ];
 
-function sha256(text) {
+/**
+ * THE migration checksum recipe — sha256 over the file with CRLF normalised to LF, so a
+ * checkout's line endings cannot move a checksum. Exported because it is the ledger's
+ * identity function and the isolation pins are keyed on it: anything that needs to speak
+ * about a migration's identity must use THIS definition rather than re-implement it.
+ */
+export function migrationChecksum(text) {
   return createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex");
 }
 
@@ -325,7 +332,7 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
         drift.push(`applied migration ${version} is MISSING from disk (deleted or renamed). Applied migrations are immutable history — restore the file; never delete or rename it.`);
         continue;
       }
-      if (sha256(readFileSync(join(migrationsDir, onDisk.file), "utf8")) !== checksum) {
+      if (migrationChecksum(readFileSync(join(migrationsDir, onDisk.file), "utf8")) !== checksum) {
         drift.push(`applied migration ${version} was MODIFIED after being applied (checksum drift). Migrations are immutable — add a new migration file instead.`);
       }
     }
@@ -338,21 +345,35 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
       }
     }
 
+    // PRE-FLIGHT over everything about to be applied, beside the immutability refusals
+    // above and BEFORE the first body runs. A pin that no longer resolves is a
+    // history-integrity fault of the same family as checksum drift, and an operator should
+    // learn it from a run that changed nothing — not after 0056 has already landed.
+    // Each file is read exactly once here and carried into the apply loop, so the bytes
+    // that were checksummed are the bytes that execute.
+    const pending = [];
+    for (const { file, version } of migrations) {
+      if (applied.has(version)) continue;
+      const sql = readFileSync(join(migrationsDir, file), "utf8");
+      const checksum = migrationChecksum(sql);
+      assertNoTransactionControl(sql, version);
+      assertNoCheckFunctionBodyOverride(sql, version);
+      pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
+    }
+    // A ceremony against an already-migrated database applies nothing, so the per-migration
+    // note below never fires — and silence there would read as "no pin is in play" when the
+    // truth is "the pin already did its work". Say so out loud instead.
+    const appliedPins = MIGRATION_ISOLATION_PINS.filter((pin) => applied.has(pin.version));
+    if (appliedPins.length) {
+      log(`  note: ${appliedPins.length} isolation-pinned migration(s) already applied and skipped (${appliedPins.map((pin) => `${pin.version} · ${pin.isolation}`).join(", ")}) — the pin governed the transaction that applied them`);
+    }
+
     let count = 0;
     // Server-observed backend pid -> the migration that ran on it. A repeat inside one
     // invocation means a connection was REUSED, which would carry session state from one
     // migration into the next; the runner refuses rather than migrating on that premise.
     const backendPids = new Map();
-    for (const { file, version } of migrations) {
-      if (applied.has(version)) continue;
-      const sql = readFileSync(join(migrationsDir, file), "utf8");
-      const checksum = sha256(sql);
-      assertNoTransactionControl(sql, version);
-      assertNoCheckFunctionBodyOverride(sql, version);
-      // Resolved HERE, beside the other file-level refusals: a pin whose checksum no
-      // longer matches must abort before a client is even connected, so a refusal costs
-      // no session and leaves no half-open transaction behind.
-      const isolation = migrationIsolationLevel(version, checksum);
+    for (const { version, sql, checksum, isolation } of pending) {
       if (isolation !== DEFAULT_MIGRATION_ISOLATION) {
         log(`  note: ${version} is applied under ${isolation} isolation (checksum-pinned — see MIGRATION_ISOLATION_PINS)`);
       }
@@ -387,6 +408,19 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
         // unbounded session. Disarmed again below so executeMigrationBody still opens on
         // the untouched baseline it asserts.
         const preRearm = () => armMigrationTimeout(client, bodyTimeout);
+        // MEASURED FROM THE SERVER, never assumed from the statement we sent. A BEGIN is a
+        // request; only the backend can say what the transaction actually opened at, and a
+        // silent disagreement would hand 0057's sentinel back its coin flip while the
+        // ceremony log claimed the pin held. Same law as every other premise in this runner.
+        await preRearm();
+        const observedIsolation = (
+          await client.query("select pg_catalog.current_setting('transaction_isolation'::pg_catalog.text) as isolation")
+        ).rows[0]?.isolation;
+        if (observedIsolation !== isolation) {
+          throw new Error(
+            `migration ${version} opened at transaction_isolation ${JSON.stringify(observedIsolation)}, not the ${JSON.stringify(isolation)} it was opened with — refusing to migrate on a transaction whose isolation the runner cannot vouch for`,
+          );
+        }
         const freezeBefore = await readFreezeStates(client, preRearm);
         const ledgerBefore = await readLedgerIdentity(client, preRearm);
         const receiptsBefore = await readLedgerReceipts(client, preRearm);

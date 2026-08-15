@@ -86,11 +86,30 @@ export const MIGRATION_SESSION_BASELINE = Object.freeze({
 // Under REPEATABLE READ the transaction's snapshot is taken before any xid the
 // transaction can allocate, so own-xid >= xmax always and the sentinel is deterministically
 // false. That is a proof, not a narrower window.
+//
+// WHAT REPEATABLE READ COSTS, stated rather than glossed. A pinned migration's transaction
+// holds ONE snapshot for its whole life, and that has a second consequence beyond the one
+// bought above: the runner's before/after evidence reads (freezeBefore / ledgerBefore /
+// receiptsBefore against their post-body counterparts) then compare two views of the SAME
+// frozen snapshot, so a THIRD PARTY committing to those tables mid-migration is invisible
+// to the comparison. Accepted, with its reason: the migration's own writes are visible to
+// itself at any isolation, so the guard still catches what the migration did; and 0057 is
+// only ever applied on a FRESH CHAIN — CI drills, DR replay, a new environment — where
+// there is no lawful concurrent writer to clara.evaluator_versions or the ledger at all.
+// Determinism for the sentinel is bought with third-party-change detection the fresh-chain
+// case does not need.
+//
+// FOR THE NEXT PIN AUTHOR — the hazard you will actually hit is a DATA BACKFILL. Under
+// REPEATABLE READ a backfill reads from the frozen snapshot, so rows committed by
+// concurrent writers after it was taken are invisible and get silently skipped, and an
+// UPDATE that touches a concurrently-modified row raises 40001 instead of re-reading it.
+// Neither shows up on a quiesced fresh chain and both are live-deploy failures. Pin a
+// backfill here only with a write-quiesce window (the D1 obligation) or not at all.
 export const DEFAULT_MIGRATION_ISOLATION = "read committed";
 
 // The only levels this runner will interpolate into a BEGIN. Membership is checked before
 // the clause is built, so the isolation string can never be anything but one of these.
-const ALLOWED_MIGRATION_ISOLATION = new Set([DEFAULT_MIGRATION_ISOLATION, "repeatable read"]);
+export const ALLOWED_MIGRATION_ISOLATION = Object.freeze([DEFAULT_MIGRATION_ISOLATION, "repeatable read"]);
 
 // Keyed on the CHECKSUM, because the checksum is the file's identity and the version
 // string is only its spelling — a renumbered 0057 is still the file that needs this.
@@ -102,26 +121,35 @@ export const MIGRATION_ISOLATION_PINS = Object.freeze([
   }),
 ]);
 
+/** A migration's NAME without its claimed number — `0057_wave_e_x` and `0079_wave_e_x` share one. */
+const migrationFamily = (version) => version.replace(/^\d{4}_/u, "");
+
 /**
  * The isolation level a migration with these exact bytes must be applied under.
  *
- * FAIL-CLOSED on the version/checksum split: a version that carries a pin but arrives
- * with different bytes is an edited applied migration, and which isolation the changed
- * file needs is not something the runner may guess.
+ * Resolution is by CHECKSUM — identity, not spelling — so a legitimately renumbered file
+ * still resolves. Both ways of missing that key are FAIL-CLOSED rather than silently
+ * defaulted, because a pinned file arriving with unexpected bytes is an edited applied
+ * migration and which isolation the changed file needs is not the runner's to guess:
+ *   - same version, different bytes: the file was edited in place;
+ *   - same NAME FAMILY under another number, different bytes: it was renumbered AND
+ *     edited, which matches neither key and would otherwise fall through to the default.
  * @returns {string} one of ALLOWED_MIGRATION_ISOLATION
  */
 export function migrationIsolationLevel(version, checksum) {
   const pinned = MIGRATION_ISOLATION_PINS.find((pin) => pin.checksum === checksum);
   if (!pinned) {
-    const byVersion = MIGRATION_ISOLATION_PINS.find((pin) => pin.version === version);
-    if (byVersion) {
+    const drifted = MIGRATION_ISOLATION_PINS.find(
+      (pin) => pin.version === version || migrationFamily(pin.version) === migrationFamily(version),
+    );
+    if (drifted) {
       throw new Error(
-        `migration ${version} carries a transaction-isolation pin for checksum ${byVersion.checksum}, but this file's checksum is ${checksum} — an applied migration's bytes are immutable, and the runner will not guess which isolation the changed file needs. Refusing to migrate.`,
+        `migration ${version} matches the transaction-isolation pin for ${drifted.version} (checksum ${drifted.checksum}) by ${drifted.version === version ? "version" : "name family"}, but this file's checksum is ${checksum} — an applied migration's bytes are immutable, and the runner will not guess which isolation the changed file needs. Refusing to migrate.`,
       );
     }
     return DEFAULT_MIGRATION_ISOLATION;
   }
-  if (!ALLOWED_MIGRATION_ISOLATION.has(pinned.isolation)) {
+  if (!ALLOWED_MIGRATION_ISOLATION.includes(pinned.isolation)) {
     throw new Error(
       `migration ${version} is pinned to a transaction-isolation level the runner does not allow: ${JSON.stringify(pinned.isolation)}`,
     );
