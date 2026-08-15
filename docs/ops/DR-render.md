@@ -168,6 +168,21 @@ the SECURITY DEFINER verbs and holds no direct table read on either relation.
 19, unnamed 7, PostgREST 2, Supavisor auth_query 2, postgres_exporter 1, pg_cron 1, pg_net 1. This
 app adds a peak of 1, so the projected peak is 34/60. A point-in-time read, not a high-water mark.
 
+**The leader's dispatch half — bound 2026-08-15, on the second attempt.** The three
+`CLARA_RENDER_FLY_*` values were first set with `--stage` and the runtime restarted; the restart
+did NOT bind them. Staged secrets are applied by creating a **new machine version**, and a
+restart reuses the machine's existing config, secret set included — so the runtime came back
+healthy carrying exactly the environment it already had, and the readiness probe's 200 was true
+throughout without ever contradicting the absence. `fly secrets deploy -a clara-runtime` bound them.
+Verified by a **process** read — `printenv CLARA_RENDER_FLY_APP` inside the running VM returning
+`clara-render`, against the same command exiting 1 before the deploy, with `CLARA_STORAGE_ROLE`
+as the positive control. The leader now starts machine `2862624f777308` directly; the hourly
+schedule returns to being the fallback it was designed as.
+
+*`fly secrets list` shows staged values with a `Staged` status and is an APP-level read: it
+reports what is set on the application, not what is bound inside a running VM. Reading it as
+confirmation is what produced a "verified present" for an environment that did not have them.*
+
 **WHAT THIS RUN DOES NOT ESTABLISH.** No sealed artifact was produced, because no render job
 existed to claim — so the end-to-end round trip (replay a real artifact's pinned inputs, re-render,
 compare to `expected_sha256`) is **still unrun**, and the drill above proves reproducibility of the
@@ -289,7 +304,10 @@ attempt a seal that must fail. Step 3 necessarily comes after, because it needs 
    enqueue and the hourly fallback still drains them, so renders are **delayed, never stranded**
    (cell A33 arm ii), and the belt still reaps exhausted jobs. The chicken-and-egg is the reason
    this is a step rather than a footnote — the machine id does not exist until step 2 of the deploy
-   block has run.
+   block has run. Set these with `fly secrets set`/`import` and then **`fly secrets deploy`** —
+   staged secrets bind by creating a new machine version, and **restarting the machine does not
+   bind them**. Verify with a process read (`printenv CLARA_RENDER_FLY_APP` inside the VM), never
+   with `fly secrets list`.
 
 ## Dispatch, and what happens when it fails
 
