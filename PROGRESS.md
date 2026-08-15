@@ -7,18 +7,27 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-14 early morning, the Wave E night run — trued at every clock-out)*
+*(as of 2026-08-15, the Wave E close — trued at every clock-out)*
 
-- **Live DB: 71 migrations, frontier `0072_wave_e_epsilon_reporting_security_seal_artifacts_issue`**
-  — the 0064-0072 ceremony ran 2026-08-14 morning from merged `main` (θ #237 squash 6cb6e461 +
-  ε #235 squash c29abc16; 9/9 applied clean, zero stops, backup banked to R2 first
-  (2026-08-14T07-54-02-433Z, 207MB full profile), positive reads + pgrst NOTIFY recorded;
-  as-run doc pending). The earlier 0058-0063 ceremony record:
-  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`. **Both evaluator closures are
-  DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is ARMED**
-  (name-only fact through the audited door; the S4.5 behavioural self-proof fired on live).
-  The A30b receipt table is live and empty. Two field findings stopped the ceremony cleanly
-  and were fixed same-night (the SUSET guarded pin #234; the session-pin nonce #236).
+- **Live DB: 79 migrations, frontier `0084` (the B4 approve-verb maker rule).** Three
+  ceremonies ran from merged `main` this close: 0058-0063 (2026-08-14,
+  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`), 0064-0072 (2026-08-14 morning,
+  `docs/plan/completed/wave-e-theta-epsilon-ceremony-asrun.md`), and 0077-0084 (2026-08-15,
+  with a D1 write-quiesce for the writer-body swaps, the chatTurn v11 runtime deploy and the
+  freeze deploy-lock — as-run + locked `frozen-workflows.json` ride PR #243). Every apply
+  backed up to R2 first; positive reads + pgrst NOTIFY recorded each time. **Both evaluator
+  closures are DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is
+  ARMED** (name-only fact through the audited door; the S4.5 behavioural self-proof fired on
+  live). The A30b receipt table is live and empty.
+- **The render deployment is LIVE and WIRED (ζ's fly ceremony, 2026-08-15):** app
+  `clara-render`, machine `2862624f777308` (hourly schedule, restart on-failure max 3), image
+  `registry.fly.io/clara-render:render-1@sha256:b25b600d…50ca6a` (four independent agreeing
+  reads), the `reports/` storage policy pair ADDED (docs pair untouched; no UPDATE policy —
+  x-upsert:false immutability stands), first live worker run a clean drain
+  (`sealed=0 refused=0 abandoned=0`, typst 0.12.0 confirmed live), and the leader's dispatch
+  half BOUND on `clara-runtime` (token minted + relayed stdin-to-stdin, machine restarted,
+  `/ready` 200). The end-to-end re-render DR drill is deliberately still unrun (no sealed
+  artifact exists yet) — `docs/ops/DR-render.md` keeps that boundary explicit (PR #244).
 - **The δ review record:** cross-model (codex xhigh, initially NOT-MERGEABLE with 6 blockers)
   + a native 8-dimension adversarially-verified pass → an adjudicated fix docket (fake-receipt
   validation, in-body `check_function_bodies` double-layer refusal, owner-only RS lift floor,
@@ -28,13 +37,16 @@ file wins or it is stale — and truing it is the first thing you do.
   PG17 with source==staged==applied SHA-256 equality.
 - **Hard constraint 12 is now STRUCTURAL:** `0062` walls RS-customer enrichment in the DB
   (fact-driven, uuid-pinned, behavioural self-proof at apply); `0063` makes lifting it an
-  OWNER act. The AGENTS.md parenthetical ("rests on you") is stale pending its own docs PR
-  after the owner reconciles the foreign AGENTS.md modification.
+  OWNER act. The AGENTS.md parenthetical is TRUED (this branch; the original checkout's
+  foreign AGENTS.md/PROGRESS.md modifications were discarded with the owner's approval after
+  their intent — naming the graph MCP — was absorbed into the truing).
 - **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5
   mechanically enforced, 44-case selftest in CI) beside pinned-ids; `.claude/rules/db-tests.md`
   + `handoffs.md`; the ci.yml Wave-E δ contract drill (closes the sweep-skip false-green shape).
-- **Runtime:** Fly `clara-runtime` **v60**, single machine, `/ready` green. Dashboard: Pages
-  `app.clarabook.com`. `clara-backup` daily.
+- **Runtime:** Fly `clara-runtime`, single machine, `/ready` green — the chatTurn **v11**
+  cutover is deployed and the three `CLARA_RENDER_FLY_*` dispatch values are bound (restart
+  2026-08-15). Dashboard: Pages `app.clarabook.com`. `clara-backup` daily. `clara-render`
+  hourly (see the render bullet above).
 - **Books pins:** RS trial balance **3,396,500 = 3,396,500** (`trial_balance_as_of`, re-read at
   every ceremony) · RS customers **11/11 NAME-ONLY** (the enrichment trap holds; the one
   registered counterparty is a vendor, out of scope) · `client_facts` = 7 rows (3 carryover +
@@ -58,8 +70,12 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave E · δ + RS guard + harness hardening | `0058-0063` + runner hardening + the dispatch-model hook | **ceremonied (LIVE)** | #233 #234 #236 |
 | Wave E · θ | `0064` `get_close_plan` + `/close` + `/reports` — T17 grant round + focused drill + guard-polarity uniformity | **ceremonied (LIVE)** | #237 |
 | Wave E · ε | FS reporting DB layer `0065-0072` — three codex rounds to MERGE-READY, ten-commit rebase with byte-identical contribution guard | **ceremonied (LIVE)** | #235 |
-| Wave E · ζ | render worker + freeze CI half + DR §10 — spike/drill/fly-groundwork done (93/93), custody branch pushed; RIG LEG running against the post-ε frontier | rig leg | — |
-| Wave E · η | chatTurn_v11 + wake wrappers — dedicated agent spawned 2026-08-14 with the inheritance packet (custody branch + NUL fix + the 14-arg core map); VALIDATE-η in progress | validating | — |
+| Wave E · ζ | render worker + freeze CI half + DR §10, migrations `0079-0083` — seven review rounds (5 blockers incl. a Typst-injection wall and a cross-tenant replay door; a testimony-sweep discipline with a mechanical proof harness); merged 69d11aba. **NOTE: the squash subject on main says "0073-0076" — stale pre-renumber testimony, immutable; the migrations DIRECTORY is the numbering authority and reads 0079-0083.** Fly ceremony ran 2026-08-15 (see posture); DR docs PR #244 | **ceremonied (LIVE)** | #239 #244 |
+| Wave E · η | chatTurn_v11 + four wake wrappers `0077-0078` — behavioural battery with mutation proof; merged f852ae43. B4 (the approve-verb maker rule, `0084`, four arms incl. ARM-0 orphan adoption) merged f90e0fd5→faf33ecb; runtime v11 deployed at the 0077-0084 ceremony | **ceremonied (LIVE)** | #240 #242 |
+| S0.9 runner fix | checksum-keyed per-migration isolation pin (0057 → repeatable read, MEASURED post-BEGIN); the birth-sentinel cluster race killed | **merged** | #241 |
+| Wave-E close paperwork | the 0077-0084 ceremony as-run + the freeze deploy-lock (140/140 locked) | in review (CI) | #243 |
+| B3 | `reopen_fiscal_year` → the `ends_on`-dated formal prior-period adjustment under the target-bound M2 permit (ADR-068 ruling 1); opus build lane dispatched 2026-08-15, worktree-isolated, UNNUMBERED until merge | building | — |
+| MASB wording seed | the #43 packet (dossier + 2 amendments) → ε's statutory wording tables via the audited door; sonnet lane dispatched 2026-08-15. **Merge HELD for the owner's ms/zh sign-off** | building (HOLD) | — |
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -67,19 +83,23 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **Land θ (#237)**: CI + the independent review pass → merge (claims `0064`).
-2. **Finish ε's fix round** (#235): the remaining docket batches → focused codex re-verify →
-   renumber `0065-0072` (rebase over θ; keep all four `--import` gates in order) → merge.
-3. **Then ζ phase-2** (docker/Typst spike → double-render drill → rig → fly app + the
-   `reports/` bucket-prefix ceremony step + Supavisor re-read) and **η GO VALIDATE** (rig run
-   against the post-ε frontier), each closing through its own PR + ceremony; η's runtime
-   deploy carries the chatTurn v11 cutover and the deferred runtime-image refresh.
+1. **Merge #243 + #244 on green** (both docs-only single-lane; #244's review pass is done) —
+   then the wave-close state-truing docs PR (this branch's PROGRESS/AGENTS/ADR-0070
+   supplement, rebuilt as a snapshot off fresh `main`).
+2. **B3 to live**: lane report → independent review (judgement logic — law 1) → the ADR-061
+   ladder → merge (claims its number above `0084`) → D1 ceremony. **Hard deadline: before the
+   BEE FY2025 close finalizes, and in any case before any real reopen.**
+3. **MASB wording seed**: lane report → review to PR-ready → **HOLD for the owner's ms/zh
+   sign-off** (their sitting) → merge + ceremony.
 4. **Owner-key acceptance items** (the constitutional human half, whenever the owner sits):
-   the E-R9 corpus on live books — sandbox battery → BEE FY2025 first real close (drawer keys)
-   → RPR historical MPERS pack → RS snapshot witness; wording seeds behind #43 (MASB verify)
-   + #44; the ms/zh claim-policy copy (fail-closed until supplied).
+   the E-R9 corpus on live books — sandbox battery → BEE FY2025 first real close (drawer
+   keys; B3 must land first) → RPR historical MPERS pack → RS snapshot witness; the #43
+   wording packet review + ms/zh sign-off (packet is research-complete, scratchpad
+   `masb-wording-dossier-v1.md` + amendments); the ms/zh claim-policy copy (fail-closed until
+   supplied); the optional elevated `diskpart` VHDX compact (~50GB).
 5. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25) —
-   both parked for that sitting (ADR-062/0065).
+   both parked for that sitting (ADR-062/0065) — plus the registered CI economics overhaul
+   (see Backlog).
 
 ## Backlog
 
@@ -125,6 +145,50 @@ Wave-G reset; reminders RETIRED per ADR-0068; the capitalised/mixed-purchase tax
 question rides it, and the Gate D residuals ride along) · Gate S real-XML leg (first genuine
 e-invoice) · FINCARE RSINV-2510/02
 needs a human coding decision.
+
+**η residuals (registered at the Wave-E close, PRs #240/#242):**
+- **The blank-op-key idiom is whitespace-blind, estate-wide** — single-argument `btrim()`
+  trims SPACES only, so a tab-only or newline-only op key passes every blank-key refusal in
+  the estate: η's four wake wrappers and the pre-existing sites whose expression they copied
+  character-for-character. Not an η regression, and not reachable from the real caller
+  (`stableOpKey` normalizes before the key is built). The fix is one whitespace-class-aware
+  expression applied at every site in a single pass — per-lane patching would leave the
+  estate inconsistent, which is worse than the current uniform blind spot.
+  *(owner-ruled estate-wide; η comparison sheet, PR #240)*
+- **The co-effective policy seed-test wants its own fixture design** — promoting B1/B2's
+  red-proofs to permanent cells needs a rig seed carrying two co-effective `eps_v1`
+  versions, but `clara.edge_policy_sets` is append-only: such a seed cannot be torn down
+  between runs and would change the estate every later cell reads. Registered honestly
+  rather than forced in at merge time. *(PR #240 residual)*
+- **δ-family: policy resolution is window-blind on the wall side** —
+  `clara._tf_metric_cell_integrity` resolves policies with NO effective-window filter and
+  re-derives `resolved_inputs_sha256` from that resolution, so a window-filtering preview
+  core would CLR11 every preview. η's compose core therefore matches the wall term-for-term
+  and fail-closes the mismatch as an effectivity REFUSAL — a false refusal, never a false
+  preview. The compensating control retires when wall and writer resolve by window
+  together, on δ's own ladder. *(B1 adjudication, PR #240)*
+- **0084's out-of-tree derivation tooling is RETAINED** at `C:\ct\` (gen-approve.mjs +
+  build-migration.mjs) as the reproduction path for the body substitution; the migration
+  itself stands on three in-repo proofs (prosrc prestate pin, tail token re-read, δ's
+  census) and does not depend on them.
+
+**CI economics overhaul (owner-requested assessment 2026-08-15; REGISTERED for Wave F):**
+the CONTENT is right (lint/secrets/typecheck/build/unit/integration/migration+upgrade drills/
+DR round-trip/deploy-onto-existing — few estates carry the last two per-PR at all) and the
+docs-only classifier fence already works (docs PRs run lint-only, minutes). The COST problem
+is structural: the monolithic `ci` job re-proves EVERY closed wave's drill serially on two
+runners (~45-60 min and growing one full-chain apply per wave). The registered fix, in order
+of leverage: (1) demote CLOSED-wave drills to the weekly sweep, keep only the CURRENT wave's
+drill per-PR (biggest cut; the weekly sweep + the estate suite still cover regressions);
+(2) split the monolithic job into parallel jobs (dashboard/runtime/db-core/drills/DR);
+(3) real pnpm-store + docker-layer caching (also kills the setup-pnpm race); (4) HYBRID
+runners — GitHub-hosted for the cheap fast legs (lint/typecheck/unit), self-hosted for the
+DB estate (wholesale GH-hosted is slower per-core and burns paid minutes on the heavy legs);
+(5) the ci.yml composite-action refactor (the 500-line overflow). Batch-CI-per-wave was
+CONSIDERED AND REJECTED: tonight alone the per-PR gate caught T17 drift, a seam census gap,
+the frontier-ordering violation and the S0.9 flake — defects that would have compounded
+across a wave batch. Scope routing, not frequency reduction. (Any change to per-PR
+uniformity itself is ADR-061 territory — an owner ruling, not an optimization.)
 
 **Wave-F planning inputs:** FX-lite (BNM rate tables, DB-computed) · the LLM third reader
 (#25) · the settlement-corroboration door BUILD (E-R13) · claims accounting (E-R10) · staff
@@ -186,24 +250,51 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   the third skeleton amendment · S11.4c's absent-function branch tests `''` where a no-row
   SELECT leaves NULL (near-zero reachability). One-word/two-char fixes for the next 0057-area
   batch.
-- **Working-tree custody:** a foreign `AGENTS.md` modification exists in the ORIGINAL checkout
-  (not this worktree); reconcile it with the owner before any AGENTS.md edit — the constraint-12
-  parenthetical truing waits on that. The `.tmp-delta-*` / `.tmp-e6-*` stages and `err.txt`
-  remain foreign/historical evidence — still untouched, still not to be deleted without
-  authorization (they are now superseded as evidence by the 2026-08-14 acceptance record).
+- **Working-tree custody (RESOLVED 2026-08-15):** the original checkout's foreign
+  `AGENTS.md`/`PROGRESS.md` modifications were discarded with the owner's approval after
+  their intent was absorbed (constraint-12 truing + naming the graph MCP, both on this
+  branch). The `wave-e-delta-build` worktree's untracked ε/η/θ/ζ working copies (UNNUMBERED
+  migrations, v11 files, the reporting-render package, tests) are now STALE DUPLICATES of
+  merged content — verified byte-for-byte against `origin/main` for the tracked-file overlaps
+  — and are cleanup candidates once ζ's teardown completes; the `.tmp-delta-*` / `.tmp-e6-*`
+  stages ride along (superseded as evidence by the 2026-08-14 acceptance record).
 - **ci.yml exceeds the 500-line harness file limit** (pre-existing; a GitHub workflow cannot
   split across files) — the hook flags every edit; a composite-action refactor is a future
   candidate, not tonight's.
-- **The ε/η/θ/ζ byte sets are IN this worktree but NOT in PR-1** — their commits ride their own
-  PRs; until then they are untracked working state (do not mistake local presence for merged).
-- **WSL VM idle teardown masqueraded as a disk I/O fault (2026-08-14, RESOLVED).** After the
-  disk-full recovery, containers died Exited(255) seconds after start and the distro logged
-  `getpwuid(0) failed 5` — read initially as VHDX corruption. The real cause: WSL tears the VM
-  down moments after the last wsl.exe client detaches, so every short-lived poll (`wsl docker
-  ps`) booted the VM, exited, and doomed the containers it was checking. Fix: a keeper process
-  during container work + `%USERPROFILE%\.wslconfig` `vmIdleTimeout=-1` (permanent from the
-  next WSL restart). Lesson for every rig script: hold one attached wsl.exe for the life of the
-  stage, and never diagnose VM health through a probe that itself cycles the VM.
+- **WSL VM idle teardown masqueraded as a disk I/O fault (2026-08-14; NAT half corrected
+  2026-08-15).** After the disk-full recovery, containers died Exited(255) seconds after start
+  and the distro logged `getpwuid(0) failed 5` — read initially as VHDX corruption. The real
+  cause: WSL tears the VM down moments after the last wsl.exe client detaches, so every
+  short-lived poll (`wsl docker ps`) booted the VM, exited, and doomed the containers it was
+  checking. **Correction to the first fix note:** `vmIdleTimeout=-1` is INVALID (silently
+  ignored); `vmIdleTimeout=86400000` holds the VM — but the NAT session STILL dies ~10 min
+  after the last client detaches (port-forwards vanish while the VM lives), so a detached
+  OS-level keeper remains required for any port-dependent work
+  (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList "-e","sleep","43200"`). And never
+  `wsl --shutdown` while the CI runners are busy (it killed running jobs twice) — restart
+  runner services via `wsl -u root systemctl restart`, never by VM teardown. Rig-script law
+  stands: hold one attached client for the life of the stage, and never diagnose VM health
+  through a probe that itself cycles the VM.
+- **0057's S0.9 birth self-test is a LATENT CLUSTER-RACE FLAKE on main (2026-08-15, root-caused
+  and reproduced; fix commissioned).** The guard at 0057:250 asserts
+  `pg_visible_in_snapshot(pg_current_xact_id(), pg_current_snapshot())` is false — but that
+  expression is true iff ANY transaction that acquired a later xid has COMPLETED anywhere on
+  the CLUSTER (snapshot xmax = latestCompletedXid+1; own xid is never in xip_list), so under
+  READ COMMITTED it is a ~30ms race per 0057 application, four tickets per CI run in the
+  Slice-5 docs-upgrade drill (shared service container = cross-database churn). Reproduced on
+  main's own bytes (4 trips in 5 with a concurrent committer; 0 in 12 quiet). 0057's RUNTIME
+  watermark predicate is SOUND (it reads a stored committed snapshot); only the birth-time
+  self-proof is race-exposed. FIX (runner lane, own PR, full ladder — 0057's bytes are
+  immutable): a per-migration isolation pin in migrate.mjs keyed on version + sha256
+  (identity, not spelling), pinning exactly 0057 to REPEATABLE READ (snapshot precedes any
+  own-xid allocation → deterministically false), fail-closed on sha mismatch; blanket RR is
+  REJECTED — 0019 explicitly refuses it (CLR32). Validated: 0/5 under churn with the pin vs
+  4/5 control; full drill 4/4. **RESOLVED 2026-08-15: PR #241 merged (f90e0fd5)** — the
+  checksum-keyed isolation pin is live in the runner, the pin is MEASURED (post-BEGIN
+  read-back of transaction_isolation with a refusal on mismatch), and the applied-skip note
+  states only what the ledger records. The flake is dead for fresh-chain applies; live 0057
+  predates the pin (applied at READ COMMITTED, race won) and its runtime predicate was always
+  sound.
 - **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** on this repo under
   Windows, the three tracked long-path PDFs under `packages/runtime/test-storage/` make
   `git rebase --abort` fail (`could not move back`) with the rebase state SURVIVING, and a
@@ -220,35 +311,14 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   != url db …"). On a fresh single-pass database the same 7 fail deterministically in the two
   untouched files (`a21-prestate`, `pipeline` — last touched ba22326/e8dfcce); CI runs both
   green, so this is a LOCAL sequencing/env artifact. Found by θ during the T17 round
-  (2026-08-14). Fix candidate: scope the env var inside the subprocess only. η's bytes exist in the
-  worktree (four untracked `chatTurn.v11*` files, a modified `registry.ts`, and the untracked
-  wake-wrappers migration, UNNUMBERED under packages/db/migrations) but no live agent owns the
-  lane; ζ verified by
-  enumeration that it never wrote a byte of η. **The "14-arg core" phrase was RIGHT after
-  all** (corrected twice, 2026-08-14): ε's `_draft_report_spec_core` — the function η's wake
-  wrapper delegates to — is exactly 14 args on merged main (0069:272, `p_actor, p_firm,
-  p_obo, p_wake_kind, p_client, p_spec_key, p_title, p_report_template_version_id, p_locale,
-  p_parameters, p_overrides, p_layout_ast, p_effective_from, p_op_key`); the interim "13-arg"
-  count missed `p_effective_from date`. η's own three cores remain 9/15/6-arg. The core is
-  granted to NOBODY; a wake wrapper calls it directly (the human wrapper hardcodes
-  obo/wake_kind to null). Precisely: η's report-spec delegation TARGETS the 14-arg core;
-  part 2 was rebound, part 1's prestate probe was not (the one-line apply blocker η's
-  VALIDATE found). A subtlety the successful apply could never catch: ε's core takes
-  `(p_actor, p_firm, …)` while η's own three cores take `(p_firm, p_actor, …)` — a uuid,uuid
-  transposition invisible to to_regprocedure and every catalog assertion; η verified all four
-  call sites by parameter NAME from bytes (all correct, including the one crossing
-  conventions). Whoever
-  resumes η derives the rebind target from the bytes, not the phrase. A dedicated η agent is
-  spawned after ε merges. **Custody (2026-08-14): both orphan lanes are now snapshotted
-  off-machine** — `zeta-custody-20260814` (8891296, 39 files) and `eta-custody-20260814`
-  (3155071, 9 files incl. the part2 wake-wrappers migration, eta-contract.test.mjs and the
-  presence gate that the first enumeration had missed), both parented on fd0830a, pushed,
-  server-confirmed, migrations left UNNUMBERED (numbers claim at merge). The shared
-  `frozen-workflows.json` (carrying BOTH lanes' registrations) rides the ζ branch — η's
-  commit message says so. **η pre-build item:** `chatTurn.v11.tools.ts:82` embeds two RAW NUL
-  bytes as hash-material separators — works at runtime but makes git treat the file as
-  binary (unreviewable) and the idempotency key silently fragile to any editor/formatter
-  touch; fix is escaping them (`\0`) before any η build continues.
+  (2026-08-14). Fix candidate: scope the env var inside the subprocess only. *(The η/ζ
+  orphan-custody narrative that used to ride this bullet is CLOSED — both lanes merged and
+  ceremonied 2026-08-14/15; the `zeta-custody-20260814`/`eta-custody-20260814` snapshot
+  branches remain in git history as evidence. The v11 tools NUL-byte item was resolved on η's
+  own ladder before merge — the merged `chatTurn.v11.tools.ts` is text-reviewable.)*
+- **The estate-wide whitespace-blind blank-op-key idiom** stays REGISTERED under η residuals
+  in the Backlog (single-pass estate fix, owner-ruled) — noted here so a Known-issues-only
+  reader does not miss it.
 - **The 2026-08-14 disk-full event + the VHDX compaction residue.** C: hit 0 bytes mid-run; root
   cause was 301 orphaned docker volumes (60.15GB) inside the WSL VHDX — the night's disposable
   PG17 stages never pruned — plus an 11.4GB npm cache. Both purged (`docker system prune -af
@@ -262,6 +332,23 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Session log
 
+- **2026-08-14/15 (the wave close)** — θ+ε merged and ceremonied (0064-0072, morning);
+  ζ closed through seven review rounds (the grep-evidence rule + the phrase-family
+  testimony-sweep harness minted mid-ladder) and merged as 0079-0083; η recovered from the
+  180-red out-of-tree staging desync (the history-integrity guard was RIGHT all along),
+  merged 0077-0078, then B4 (0084, four arms incl. ARM-0) after the adversarial panel
+  found the null-maker fail-open; S0.9 root-caused to the cluster-wide birth-sentinel race
+  and killed by the checksum-keyed isolation pin (#241). Codex's quota exhausted mid-close;
+  the review lanes switched to native fresh-context panels per the owner's ruling and held
+  the bar. The 0077-0084 ceremony ran with a D1 write-quiesce + the chatTurn v11 deploy +
+  the freeze deploy-lock (140/140). ζ's fly ceremony landed `clara-render` live
+  (tag-and-digest image, reports/ policy pair, clean first drain) and the dispatch half was
+  wired onto `clara-runtime` via the stdin-to-stdin relay. The #43 MASB wording packet was
+  researched to sign-off-ready from official sources. ADR-0070 gained the wave-close
+  supplement (rulings 10-13). B3 and the wording-seed build lanes dispatched. Four of the
+  orchestrator's own rulings were reversed by evidence during the rounds (grace window,
+  verbatim requeue, digest-alone machine form, a genuine-check edge) — recorded as the
+  triangle cutting both ways.
 - **2026-08-12** — the α+β EARLY ceremony (0055+0056 live, MSIC debt discharged, ADR-0067) ·
   the ADR-0068 evening sitting (B3 ruled · sign-offs · Gate-P defers) · lane γ end-to-end
   (build → 7-round ladder → 42 findings killed → PR #231 merged → 0057 ceremonied) · the
