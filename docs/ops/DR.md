@@ -502,6 +502,9 @@ now EXPIRED on both sides — observed read-only, never answered) · §3's worke
 ## 10. Sealed-report reproducibility (Wave E lane ζ)
 
 **A sealed artifact you have never re-rendered from its pinned dataset + evaluator + renderer digest
-is not proven reproducible.** The drill, the deploy commands of record, and the two ceremony steps
-that are NOT inherited (the storage role's `reports/` prefix; the Supavisor headroom re-read) live
-in **`docs/ops/DR-render.md`** — the `DR-full-drill.md` split precedent.
+is not proven reproducible.** The drill, the deploy commands of record, and the ceremony steps that
+are NOT inherited (the storage role's `reports/` prefix; the Supavisor headroom re-read; the
+leader's dispatch wiring, which can only be done once the machine exists) live in
+**`docs/ops/DR-render.md`** — the `DR-full-drill.md` split precedent. The deploy ceremony was run
+2026-08-15; the re-render drill itself is **still unrun**, and DR-render.md's exercised-evidence
+section keeps those two facts apart.
