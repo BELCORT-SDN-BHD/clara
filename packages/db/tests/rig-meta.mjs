@@ -205,6 +205,24 @@ const RENDER_0073_HUMAN_FNS = ["replay_render_inputs", "requeue_render_job"];
 // The internals stay ungranted to every application role and are asserted so in-migration:
 // render_request_manifest_v1, enqueue_render_job (ε's seal calls it), _tf_render_job_lifecycle.
 const RENDER_0073_COHORT = [...RENDER_0073_RUNTIME_FNS, ...RENDER_0073_HUMAN_FNS];
+// 0077-0078 [Wave E lane η] the ad-hoc authoring lane's granted surface: the FOUR wake wrappers,
+// EXECUTE to clara_wake_interactive and to nothing else, each carrying an interactive-only
+// clara.wake_fn_allowlist row. Same closed-set reason as the blocks above — they ship as one
+// grant matrix across the pair's second file and must live or die together.
+//
+// The THREE cores those wrappers delegate to (_eta_compose_metric_preview_core,
+// _eta_save_metric_definition_draft_core, _eta_request_report_preview_core) are deliberately
+// ABSENT from every roster in this file, exactly as ε's two internal cores are: they are granted
+// to nobody, so the sweep's expected=false IS the assertion that the wrappers are the only door.
+// That absence is load-bearing twice over — it is also what keeps δ's four-app-executable-
+// definition-writer census at four, since every INSERT in this lane lives inside those cores.
+// list_metric_catalog appears nowhere here on purpose: it is an RLS-scoped SELECT the agent role
+// already reads, and the lane creates no function and no grant for it.
+const AUTHORING_0077_WAKE_FNS = [
+  "wake_compose_metric_preview", "wake_save_metric_definition_draft",
+  "wake_draft_report_spec", "wake_request_report_preview",
+];
+const AUTHORING_0077_COHORT = [...AUTHORING_0077_WAKE_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -808,7 +826,7 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
@@ -979,6 +997,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
   failures.push(...cohortFailures("0073-0076 + 0079 wave E render queue", RENDER_0073_COHORT, liveNames));
+  failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   return failures;
 }
 
