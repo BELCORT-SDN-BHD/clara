@@ -121,6 +121,28 @@ ships a writer-body change.
 (Design authority: `docs/plan/completed/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
 behaviour is a PostgreSQL property, not a Clara mechanism.)
 
+## Transaction-isolation pins
+
+Every migration opens **READ COMMITTED**, stated explicitly on the `BEGIN` and then
+**read back from the server** and refused on mismatch — `0019_wiki_boundary` refuses
+outright under repeatable read (CLR32), so this is never a global switch.
+
+`MIGRATION_ISOLATION_PINS` (`scripts/migration-atomicity.mjs`) is the one exception list,
+keyed on a migration's **checksum** — its identity, not its number, so a renumbered file
+still resolves. A pinned name arriving with unexpected bytes aborts in pre-flight, before
+anything is applied. Today it holds exactly one entry: `0057_wave_e_registry_snapshots`
+runs REPEATABLE READ, because its S0.9 birth sentinel asks whether the transaction's own
+xid is visible in its own snapshot — a question with no stable answer under READ COMMITTED,
+since any transaction completing after ours anywhere on the cluster pushes the snapshot's
+`xmax` past our xid.
+
+**Before adding a pin, read the trade recorded above the table.** A repeatable-read
+transaction holds one snapshot for its whole life: the runner's before/after evidence reads
+stop seeing third-party changes (accepted — a pinned migration only ever applies on a fresh
+chain), and a **data backfill** under it silently skips rows committed after the snapshot
+and raises 40001 on concurrently-modified rows. Backfills want the D1 write-quiesce window
+or no pin at all.
+
 ## CI
 
 CI applies every migration to a **throwaway `postgres:17` service container**
