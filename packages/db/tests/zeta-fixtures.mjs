@@ -20,7 +20,8 @@ export const ZETA_ENTRYPOINTS = Object.freeze([
   ["render_dispatch_record", "clara.render_dispatch_record(uuid[],boolean,jsonb)"],
   ["complete_render_job", "clara.complete_render_job(uuid,text,text,bigint,jsonb)"],
   ["replay_render_inputs", "clara.replay_render_inputs(uuid)"],
-  ["requeue_render_job", "clara.requeue_render_job(uuid,text)"],
+  ["requeue_render_job", "clara.requeue_render_job(uuid,text,boolean)"],
+  ["reap_exhausted_render_jobs", "clara.reap_exhausted_render_jobs()"],
   ["render_lease_alive", "clara.render_lease_alive(uuid,text)"],
   ["_seal_report_artifact_core",
     "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)"],
@@ -92,10 +93,24 @@ export async function sharedWorld() {
   return _world;
 }
 
-export async function sealedRun(tag) {
+export async function sealedRun(tag, opts = {}) {
   const world = await sharedWorld();
-  const eps = await buildEpsilonWorld(world, { tag: `zeta-${tag}`, seal: true });
+  const eps = await buildEpsilonWorld(world, { tag: `zeta-${tag}`, seal: true, ...opts });
   return { world, eps };
+}
+
+/**
+ * A sealed run whose template BINDS A STATUTORY PROFILE — the only shape in which the statutory
+ * wording pin exists at all. The ordinary rig run is `management` class with no profile, so its
+ * statutory_wording_sha256 pin is null and no wording row can move it; a drift test built on that
+ * run would silently assert nothing, which is the exact failure mode the drift arm exists to close.
+ */
+export async function sealedStatutoryRun(tag) {
+  const profile = (await rootQuery(
+    "select id from clara.statutory_profile_versions where profile_key = 'mpers_company' order by revision desc limit 1"
+  )).rows[0];
+  assert.ok(profile, "the shipped mpers_company profile must exist for a statutory run");
+  return sealedRun(tag, { reportClass: "statutory", profileVersionId: profile.id });
 }
 
 /**
@@ -136,6 +151,42 @@ export async function sealArtifact(eps, worker = "battery-sealer", kind = "pre_s
     [job.render_job_id, worker, sha, JSON.stringify(manifest)])).rows[0].r;
   assert.ok(done.report_artifact_id, "the fixture must actually seal an artifact");
   return { jobId: job.render_job_id, artifactId: done.report_artifact_id, sha256: sha };
+}
+
+/**
+ * MOVE AN UPSTREAM INPUT, so a "the manifest is re-derived" assertion can actually fail.
+ *
+ * A cell that requeues where nothing has changed passes identically against a verbatim COPY and a
+ * fresh DERIVATION — it is mutation-incapable, which is how round 3 shipped a cell that proved
+ * nothing about the fix it was written for. clara.statutory_wording is append-only and the pins
+ * aggregate over its verified rows, so landing one more verified row for the run's profile is the
+ * smallest honest way to make today's derivation differ from yesterday's.
+ *
+ * Returns the digest of the request manifest AFTER the move, so a caller can assert against a
+ * value the database computed rather than one the test assumed.
+ */
+export async function driftWording(eps, kind = "pre_sign") {
+  const before = (await asOwner("select clara.render_request_manifest_v1($1, $2) m",
+    [eps.runId, kind])).rows[0].m;
+  await asOwner(
+    `insert into clara.statutory_wording(profile_key, wording_key, locale,
+       applies_to_periods_beginning_from, wording_text, source_manifest, source_sha256,
+       verification_state, verified_by, verified_at, source_note)
+     select v.profile_key, 'zeta_drift_' || substr(md5(random()::text), 1, 8), 'en',
+       date '2016-01-01', 'RIG DRIFT WORDING', jsonb_build_object('source', 'rig'), repeat('b', 64),
+       'verified', clara.agent_user_id(), now(), 'rig-only drift row'
+       from clara.statutory_profile_versions v
+      where v.id = (select tv.statutory_profile_version_id
+                      from clara.report_runs r
+                      join clara.report_spec_versions sv on sv.id = r.report_spec_version_id
+                      join clara.report_template_versions tv on tv.id = sv.report_template_version_id
+                     where r.id = $1)`,
+    [eps.runId]);
+  const after = (await asOwner("select clara.render_request_manifest_v1($1, $2) m",
+    [eps.runId, kind])).rows[0].m;
+  assert.notDeepEqual(after, before,
+    "the drift fixture must actually move the pins, or every assertion built on it is vacuous");
+  return { before, after };
 }
 
 /** A distinct 64-hex per worker tag, so two fixtures in one file never collide on artifact bytes. */

@@ -90,6 +90,30 @@ export function readDispatchConfig(env = process.env) {
  * an already-running machine, or creating a second one, costs money and time but can never
  * produce a second artifact (see arm (iii) above).
  */
+/**
+ * Queue hygiene: park the crash-only jobs that burned every attempt without reporting, and SAY SO.
+ *
+ * A reaped job is the one event in this belt that means a firm's statutory PDF will not exist
+ * without a human, so the line names the runs and the door that repairs them. Its own try/catch:
+ * hygiene failing must never stop a dispatch that could still start work, and a swallowed error
+ * would be its own silence, so the failure is logged and the belt continues.
+ */
+async function reapExhausted(client, log) {
+  try {
+    const r = (await client.query("select clara.reap_exhausted_render_jobs() as r")).rows[0]?.r ?? {};
+    const reaped = Number(r?.reaped ?? 0);
+    if (reaped > 0) {
+      log(`[reconcile] render reap: ${reaped} job(s) parked failed at their attempt cap without a worker report`
+        + ` — these need clara.requeue_render_job(<job id>, <why>) once the cause is fixed;`
+        + ` run_ids=${JSON.stringify(r?.reaped_run_ids ?? [])}`);
+    }
+    return reaped;
+  } catch (err) {
+    log(`[reconcile] render reap error: ${err?.message ?? err}`);
+    return 0;
+  }
+}
+
 async function startRenderMachine(cfg, log) {
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
   const signal = AbortSignal.timeout(FLY_TIMEOUT_MS);
@@ -175,6 +199,14 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     return { renderOk: true, renderDue: 0, renderDispatched: 0, renderDormant: true };
   }
 
+  // QUEUE HYGIENE RUNS FIRST, AND UNCONDITIONALLY (round-4 major). The reap used to live inside
+  // the due-read below, which sits after the unwired early return — so on a deployment that
+  // deliberately relies on the scheduled machine (a SUPPORTED configuration, named in the very log
+  // line under it) a crash-only job at its attempt cap was never terminated at all: no terminal
+  // state, no reason, nothing an operator could read, forever. Reaping is not part of dispatching;
+  // it is keeping the queue honest, and it must not be gated on being able to start machines.
+  const reap = await reapExhausted(client, log);
+
   const cfg = readDispatchConfig(env);
   if (!cfg.configured) {
     // LOUD, EVERY CYCLE, DELIBERATELY. The leader does not log its sweep result, so a
@@ -182,7 +214,8 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     // occurrence — the same argument reconciler.mjs makes for its cancel-edge logging. Nothing is
     // stamped and nothing is lost; the scheduled machine remains the fallback.
     log(`[reconcile] render dispatch UNWIRED — missing ${cfg.missing.join(", ")}; renders fall back to the scheduled wake (delayed, not stranded)`);
-    return { renderOk: false, renderDue: 0, renderDispatched: 0, renderUnconfigured: true };
+    return { renderOk: false, renderDue: 0, renderDispatched: 0, renderUnconfigured: true,
+      renderReaped: reap };
   }
 
   let due;
@@ -194,22 +227,9 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     return { renderOk: false, renderDue: 0, renderDispatched: 0 };
   }
 
-  // THE REAP IS REPORTED BEFORE THE EARLY RETURN, and that ordering is the whole fix (round-3
-  // major). A reaped job is a render that will never happen without a human — the one event in
-  // this belt that can strand a firm's statutory PDF — and it was being computed by the sweep,
-  // returned in this payload, and then thrown away: the early return below fires exactly when the
-  // queue's only job was the reaped one, so the single most important case produced no operator
-  // signal at all while the migration's own comment claimed the repair was observable.
-  const reaped = Number(due?.reaped ?? 0);
-  if (reaped > 0) {
-    log(`[reconcile] render reap: ${reaped} job(s) parked failed at their attempt cap without a worker report`
-      + ` — these need clara.requeue_render_job(<job id>, <why>) once the cause is fixed;`
-      + ` run_ids=${JSON.stringify(due?.reaped_run_ids ?? [])}`);
-  }
-
   const jobIds = Array.isArray(due?.job_ids) ? due.job_ids : [];
   if (jobIds.length === 0) {
-    return { renderOk: true, renderDue: 0, renderDispatched: 0, renderReaped: reaped };
+    return { renderOk: true, renderDue: 0, renderDispatched: 0, renderReaped: reap };
   }
   // The observed wait is reported on every dispatch, not only on a slow one: A33 arm (ii) asks
   // for the delay to be recorded, and a number you only print when it looks bad is a number
@@ -245,7 +265,7 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     renderOk: outcome.ok,
     renderDue: jobIds.length,
     renderDispatched: outcome.ok ? jobIds.length : 0,
-    renderReaped: reaped,
+    renderReaped: reap,
     renderReceiptSkipped: skipped,
     renderOldestWaitSeconds: Number(due?.oldest_wait_seconds ?? 0),
   };

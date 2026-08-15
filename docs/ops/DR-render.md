@@ -88,10 +88,16 @@ that leaves the output identical means the pin is not wired to anything, which i
 than a mismatch. **This binds every engine-version bump** — the Dockerfile's bump procedure names
 this drill, all three arms, for exactly that reason.
 
-**First execution (build spike, 2026-08-14):** DETERMINISM **PASS** (A == B,
+**HISTORICAL — first execution (build spike, 2026-08-14), under the TWO-ARM definitions this
+document used at the time.** DETERMINISM **PASS** (A == B,
 `53b3d2c2978fc7693eaa205c8ec0c81961d2bcc081a1bbd851541d1be4058e62`), CONTROL **PASS** (C differed,
 `33c325906bba2d13960f2f0d19d37f856ebff50235e33946cf233255a19762ff`), against
 `typst 0.12.0 (737895d7)` with `pdftotext 22.12.0` on `node v20.20.2 / x86_64`.
+
+> That run rendered a hand-written fixture that pinned no document date, so "C differed" was the
+> correct control THEN and is **not** evidence for the drill as it now stands: under the three-arm
+> table above, a differing C would be a FAILURE. Kept as the dated record of what was actually
+> observed, not as current evidence. The current arms are A==B, A==C and A!=D.
 
 **Stable across an image REBUILD, which is the stronger property and the one this section actually
 needs.** The drill was re-run after the image was rebuilt from a changed Dockerfile, and every

@@ -85,12 +85,14 @@ RUN set -eux; \
 # moment; from then on the PIN is what matters — every later build must produce this exact hash or
 # it stops.
 #
-# A BUMP RE-RUNS THE FULL DRILL, BOTH ARMS. A new engine version is a new determinism claim, and
-# the claim is not "two renders matched" — it is "two renders matched AND a third with a changed
-# input did not". Byte-equality proves nothing unless the output is CAPABLE of varying: a drill
-# that passes because it is measuring a constant has measured nothing. So the bump procedure is
-# fetch the new asset, record its hash the same way, then run docs/ops/DR-render.md's drill
-# INCLUDING the control render (a different SOURCE_DATE_EPOCH must produce different bytes).
+# A BUMP RE-RUNS THE FULL DRILL, ALL THREE ARMS. A new engine version is a new determinism claim,
+# and the claim is not "two renders matched" — it is "two renders matched, a changed wall clock did
+# NOT move the bytes, and a changed pinned input DID". Byte-equality proves nothing unless the
+# output is CAPABLE of varying: a drill that passes because it is measuring a constant has measured
+# nothing. So the bump procedure is fetch the new asset, record its hash the same way, then run
+# docs/ops/DR-render.md's drill in full — determinism (A==B), the clock arm (a different
+# SOURCE_DATE_EPOCH must produce IDENTICAL bytes, because a real document pins its date from the
+# reporting period), and the control (a different pinned input must produce different bytes).
 # Reporting only the A==B arm would be a green light nobody earned.
 ARG PINNED_TYPST_VERSION=0.12.0
 ARG PINNED_TYPST_SHA256=605130a770ebd59a4a579673079cb913a13e75985231657a71d6239a57539ec3

@@ -1,4 +1,4 @@
--- 0079_wave_e_zeta_render_human_doors.sql -- lane zeta, file 5 of 5 (THE TWO HUMAN DOORS).
+-- 0079_wave_e_zeta_render_human_doors.sql -- lane zeta, file 5 of 5 (THE HUMAN DOORS + THE FENCE).
 --
 -- THE NUMBER IS NOT CONTIGUOUS WITH THIS LANE'S OTHER FOUR, and that is correct: 0077/0078 are lane
 -- eta's, claimed while this file was being written, and numbers are claimed at MERGE against the
@@ -14,9 +14,11 @@
 --
 -- WHY THIS FILE EXISTS AT ALL. Files 1-4 are the machine lane: the queue, the pinned request, the
 -- claim/dispatch verbs and the completion seal, every one of them granted to clara_runtime alone.
--- These two are the opposite -- granted to clara_authenticated and to NOTHING else, called by a
--- person, reachable by no worker. Keeping them together makes the grant census in the tail a
--- statement about the whole human surface rather than about one function at a time.
+-- The two DOORS here are the opposite -- granted to clara_authenticated and to NOTHING else, called
+-- by a person, reachable by no worker. Keeping them together makes the grant census in the tail a
+-- statement about the whole human surface rather than about one function at a time. The FENCE rides
+-- with them because it was born of the same review round; it is censused separately, as the one
+-- runtime-granted object in the file, precisely so that "the human surface" stays a clean claim.
 --
 -- THE REQUEUE DOOR ANSWERS A REAL STRANDING, found in round-2 review. File 3's reap terminates a
 -- job that burned every attempt without reporting; file 1's wall makes a terminal row immutable;
@@ -48,7 +50,7 @@ begin
     raise exception 'zeta file 5 requires files 1-4' using errcode = 'CLR10',
       detail = '{"reason":"zeta_queue_incomplete"}';
   end if;
-  if to_regprocedure('clara.requeue_render_job(uuid,text)') is not null
+  if to_regprocedure('clara.requeue_render_job(uuid,text,boolean)') is not null
      or to_regprocedure('clara.render_lease_alive(uuid,text)') is not null then
     raise exception 'zeta partial birth: a file-5 object already exists' using errcode = 'CLR10';
   end if;
@@ -148,10 +150,11 @@ revoke all on function clara.replay_render_inputs(uuid) from public;
 --     this report -- so the artifact still seals on_behalf_of that person; the operator who
 --     pressed requeue is the AUDIT row's actor, which is where an operational act belongs).
 -- =====================================================================================
-create function clara.requeue_render_job(p_job uuid, p_reason text) returns jsonb
+create function clara.requeue_render_job(p_job uuid, p_reason text,
+                                         p_accept_drift boolean default false) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare c record; j record; v_live uuid; v_new uuid; v_reason text;
-        v_manifest jsonb; v_sha text;
+        v_manifest jsonb; v_sha text; v_drift boolean;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   v_reason := btrim(coalesce(p_reason, ''));
@@ -180,13 +183,32 @@ begin
   -- moved, it differs, and that difference is reported rather than hidden.
   v_manifest := clara.render_request_manifest_v1(j.report_run_id, j.kind);
   v_sha := encode(clara._hash(v_manifest), 'hex');
+  v_drift := v_sha is distinct from j.manifest_sha256;
 
-  -- ONE SUCCESSOR, NOT A QUEUE OF THEM — and the INSERT is the arbiter, not this read. The check
-  -- is kept because it names the row that is already carrying the work, which a bare
-  -- unique_violation cannot; but two operators pressing requeue in the same second would both pass
-  -- a check-then-insert, so the typed refusal is raised from the constraint as well.
+  -- DRIFT IS CONSENTED TO, NOT ANNOUNCED AFTERWARDS (round-4 ruling; the self_approval_attestation
+  -- pattern). Re-deriving is right — a verbatim copy cannot pass the seal — but it means the
+  -- successor may render a DIFFERENT document from the one that failed: a template published or a
+  -- wording row verified since the first attempt changes what the statements say. Telling the
+  -- operator that in the return value, after the job is minted, is telling them too late. So when
+  -- the digests differ the door REFUSES and hands back both, and the retry carries an explicit
+  -- p_accept_drift => true. Fail-closed: the default is false, so a caller who never heard of drift
+  -- cannot consent to it by omission.
+  if v_drift and not coalesce(p_accept_drift, false) then
+    raise exception 'the re-derived request differs from the one that failed' using errcode = 'CLR43',
+      detail = jsonb_build_object('reason', 'requeue_manifest_drifted',
+        'superseded_manifest_sha256', j.manifest_sha256, 'manifest_sha256', v_sha,
+        'fix', 'something this render depends on moved since the failure -- verified wording, a published template, the resolved layout. Read both manifests, and if the newer document is the one you want, call again with p_accept_drift => true. A verbatim retry is not on offer: the seal re-derives every pin and would refuse it.')::text;
+  end if;
+
+  -- ONE SUCCESSOR PER (RUN, KIND), NOT PER DIGEST — the round-4 correction, and the same reasoning
+  -- that moved enqueue's refusal off the digest in the round-3 commit. Keyed on the digest, this
+  -- read missed the case re-derivation creates: requeue A after drift mints B under a FRESH digest,
+  -- so requeuing A again finds no live row with A's digest and mints C. Two live jobs for one run
+  -- and one kind, both claiming to succeed A, and the partial index cannot object because their
+  -- digests differ. What "already has a live job" means is a live job for this REQUEST -- the run
+  -- and the kind -- whatever it hashed to.
   select id into v_live from clara.render_jobs
-   where report_run_id = j.report_run_id and manifest_sha256 = v_sha and state <> 'failed';
+   where report_run_id = j.report_run_id and kind = j.kind and state <> 'failed';
   if v_live is not null then
     raise exception 'this render request already has a live job' using errcode = 'CLR43',
       detail = jsonb_build_object('reason', 'render_job_already_requeued', 'render_job_id', v_live)::text;
@@ -211,7 +233,7 @@ begin
       -- "the retry did not render the same document", which re-derivation makes possible and
       -- which a verbatim copy would have hidden behind a refusal at completion.
       'manifest_sha256', v_sha, 'superseded_manifest_sha256', j.manifest_sha256,
-      'manifest_changed', v_sha is distinct from j.manifest_sha256,
+      'manifest_changed', v_drift, 'drift_accepted', coalesce(p_accept_drift, false),
       'reason', v_reason, 'predecessor_last_error', j.last_error));
 
   return jsonb_build_object('render_job_id', v_new, 'supersedes_render_job_id', j.id,
@@ -219,10 +241,10 @@ begin
     'manifest_sha256', v_sha, 'superseded_manifest_sha256', j.manifest_sha256,
     -- The caller is TOLD when the successor is not the same document, rather than finding out at
     -- completion. `false` here is the ordinary case: nothing upstream moved.
-    'manifest_changed', v_sha is distinct from j.manifest_sha256,
+    'manifest_changed', v_drift, 'drift_accepted', coalesce(p_accept_drift, false),
     'requeue_reason', v_reason);
 end $$;
-revoke all on function clara.requeue_render_job(uuid, text) from public;
+revoke all on function clara.requeue_render_job(uuid, text, boolean) from public;
 
 -- =====================================================================================
 -- THE WORKER'S FENCE -- the machine half of the reap fix, and the only runtime verb in this file.
@@ -259,7 +281,7 @@ reset role;
 -- deciding that a failure deserves another paid render. The fence is the mirror image: a worker's
 -- own liveness check, useless to a human and granted to no human.
 grant execute on function clara.replay_render_inputs(uuid) to clara_authenticated;
-grant execute on function clara.requeue_render_job(uuid, text) to clara_authenticated;
+grant execute on function clara.requeue_render_job(uuid, text, boolean) to clara_authenticated;
 grant execute on function clara.render_lease_alive(uuid, text) to clara_runtime;
 
 do $tail$

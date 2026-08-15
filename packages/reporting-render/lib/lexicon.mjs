@@ -170,14 +170,24 @@ export function assertProtectedPlaceholdersDrawn({ text, resolvedPlaceholders })
  * kind of stale comment that teaches a future reader the wrong invariant. Both arms run in CI on
  * every code PR, and together they are a stronger instrument than a substring search.
  */
+/** ONE SOURCE for what §7(d) cross-checks — the loop below walks it and the receipt reports it, so
+ *  a key added here cannot be checked-but-unreported or reported-but-unchecked. */
+export const CROSS_CHECKED_METADATA_KEYS = Object.freeze(["title", "keywords"]);
+
 export function assertDocumentMetadataApplied({ metadata, documentMeta }) {
   const haystack = normalizeForMatch(
     typeof metadata === "string" ? metadata : JSON.stringify(metadata ?? {}),
   );
   const missing = [];
-  for (const key of ["title", "keywords"]) {
+  const checked = [];
+  const skipped = [];
+  for (const key of CROSS_CHECKED_METADATA_KEYS) {
     const value = documentMeta?.[key];
-    if (typeof value !== "string" || value.trim() === "") continue; // legitimately empty
+    // AN EMPTY PIN IS NOT A CHECK, and the receipt says which happened (round-4). A blank value
+    // cannot be searched for, so this arm neither passes nor fails on it — recording it as
+    // `skipped` is what stops a receipt reading like proof of something that never ran.
+    if (typeof value !== "string" || value.trim() === "") { skipped.push(key); continue; }
+    checked.push(key);
     if (!haystack.includes(normalizeForMatch(value))) missing.push({ key, value });
   }
   if (missing.length > 0) {
@@ -185,7 +195,7 @@ export function assertDocumentMetadataApplied({ metadata, documentMeta }) {
       `${missing.length} manifest-pinned metadata value(s) are absent from the produced PDF`,
       { missing, fix: "the manifest and the artifact disagree about the document's own metadata; refuse rather than seal one of them" });
   }
-  return true;
+  return { checked, skipped };
 }
 
 export function scanFinalArtifact({ text, metadata, lexicon, claimPhraseAllowed, resolvedPlaceholders, documentMeta }) {
@@ -201,7 +211,7 @@ export function scanFinalArtifact({ text, metadata, lexicon, claimPhraseAllowed,
       "the artifact scan was asked to run without the manifest's document metadata; §7(d) cannot be skipped",
       { fix: "pass documentMeta from the final manifest — an unchecked artifact must not seal" });
   }
-  assertDocumentMetadataApplied({ metadata, documentMeta });
+  const metaCheck = assertDocumentMetadataApplied({ metadata, documentMeta });
 
   const metadataText = typeof metadata === "string" ? metadata : JSON.stringify(metadata ?? {});
   const bodyHits = findClaimPhrases({ text, lexicon });
@@ -225,7 +235,7 @@ export function scanFinalArtifact({ text, metadata, lexicon, claimPhraseAllowed,
     // THE RECEIPT RECORDS WHICH ARMS RAN, not merely that a scan happened. `scanned: true` alone
     // could not distinguish a full pass from one that skipped §7(d), and this receipt is sealed
     // into the artifact's manifest — a reader seven years out has only what it says.
-    metadata_cross_check: { ran: true, checked_keys: ["title", "keywords"] },
+    metadata_cross_check: { ran: true, checked_keys: metaCheck.checked, skipped_empty_keys: metaCheck.skipped },
     lexicon_rows_by_locale: coverage.byLocale,
     // Named, not implied: what this scan does NOT cover.
     residual: "claim text baked into an image is not reachable by text extraction; images are owner-published, content-addressed assets pinned in the manifest",

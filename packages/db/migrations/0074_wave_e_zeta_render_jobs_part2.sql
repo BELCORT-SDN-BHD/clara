@@ -312,9 +312,15 @@ begin
   -- job was failed by another session between the insert's do-nothing and this read, there is no
   -- row to return, and answering with `{"render_job_id": null}` would hand the caller a receipt
   -- for a job that does not exist.
+  --
+  -- KIND-SCOPED, not digest-scoped (round-4). The refusal above already asks about this run and
+  -- kind; asking a DIFFERENT question here left a walk open — a failed A plus a live B of the same
+  -- kind (B minted by the requeue door under a drifted digest) let this verb insert a THIRD row,
+  -- because A's digest is out of the partial key and B's digest is not the one being inserted. One
+  -- question, asked the same way on both sides: is there a live job for this request?
   begin
     select * into strict j from clara.render_jobs
-     where report_run_id = r.id and manifest_sha256 = v_sha and state <> 'failed';
+     where report_run_id = r.id and kind = p_kind and state <> 'failed';
   exception when no_data_found then
     raise exception 'the render job for this request was terminated by a concurrent caller'
       using errcode = 'CLR43',

@@ -144,8 +144,13 @@ create table clara.render_jobs (
   foreign key (artifact_id, report_run_id) references clara.report_artifacts (id, report_run_id),
   unique (id, report_run_id),
   -- A lease exists exactly while the job is claimed.
+  -- A lease exists exactly while the job is claimed, AND a running job always has one (round-4).
+  -- The state tie is not tidiness: the reap's predicate compares lease_expires_at, and a `running`
+  -- row with a NULL lease would make that comparison NULL — the row would never reap, never be
+  -- claimable, and never terminate. A fail-open arithmetic hole is worth a CHECK.
   constraint ck_rj_lease_paired check (
-    (claimed_by is null) = (claimed_at is null) and (claimed_by is null) = (lease_expires_at is null)),
+    (claimed_by is null) = (claimed_at is null) and (claimed_by is null) = (lease_expires_at is null)
+    and (state <> 'running' or claimed_by is not null)),
   constraint ck_rj_claim_delay_paired check ((first_claimed_at is null) = (claim_delay_ms is null)),
   -- A terminal state is stamped, and only a 'done' job may name an artifact.
   constraint ck_rj_terminal_stamped check ((state in ('done', 'failed')) = (finished_at is not null)),

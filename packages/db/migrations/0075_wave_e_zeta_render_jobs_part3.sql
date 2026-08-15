@@ -284,6 +284,63 @@ end $$;
 revoke all on function clara.fail_render_job(uuid, text, jsonb) from public;
 
 -- =====================================================================================
+-- Z6b -- THE REAP, AS ITS OWN VERB. Queue hygiene, not dispatch.
+--
+-- IT LIVES HERE RATHER THAN INSIDE render_dispatch_begin because of where its only caller sat: the
+-- runtime's dispatch belt returns EARLY when the Fly deploy is unwired, and that is a SUPPORTED
+-- configuration (the scheduled machine is the documented fall-back). So on exactly the deployments
+-- that rely on the fallback, the reap never ran and a crash-only job at its cap stayed `running`
+-- forever with no terminal state and nothing for an operator to read. Separating it lets the belt
+-- run hygiene unconditionally and start machines only when it can.
+--
+-- IT DOES NOT STAMP. render_dispatch_begin increments dispatch_attempts, which is exactly what must
+-- NOT happen on an unwired deployment ("an unwired dispatch stamps NOTHING and says so loudly"), so
+-- the two are separate verbs rather than one with a flag.
+--
+-- IMMEDIATE, NOT GRACED (round-4 re-ruling). A round-3 draft waited half a lease past expiry so a
+-- slow-but-healthy worker would not be terminated. The panel walked the states and the grace saves
+-- nothing: an at-cap row can never be re-claimed (the claim predicate requires attempts <
+-- max_attempts) and a post-expiry completion is refused anyway (file 4's liveness check), so the
+-- only things the delay bought were paid machines dispatched for jobs nobody can claim, and a
+-- terminal signal arriving late. The worker's own fence (clara.render_lease_alive, file 5) is what
+-- protects a slow render, and it does so where the protection is real: it stops the worker BEFORE
+-- it spends money, rather than pretending a row it can no longer complete is still alive.
+-- =====================================================================================
+create function clara.reap_exhausted_render_jobs() returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_reaped int; v_reaped_runs uuid[];
+begin
+  -- SKIP LOCKED, like every other row access in this file: a worker inside fail_render_job on an
+  -- exhausted row must not stall queue hygiene for every firm until its transaction ends.
+  with exhausted as (
+    select j.id from clara.render_jobs j
+     where j.state = 'running' and j.lease_expires_at < now() and j.attempts >= j.max_attempts
+     for update of j skip locked),
+  reaped as (
+    update clara.render_jobs t
+       set state = 'failed', finished_at = now(),
+           claimed_by = null, claimed_at = null, lease_expires_at = null,
+           last_error = jsonb_build_object('reason', 'failed_at_cap_without_report',
+             'attempts', t.attempts, 'max_attempts', t.max_attempts,
+             'detail', 'every claim was lost before the worker could record an outcome -- the workers crashed, were killed, or never reached fail_render_job',
+             -- THE REMEDY NAMES THE DOOR THAT EXISTS: enqueue_render_job refuses to resurrect a
+             -- terminally failed request for this run and kind, so the audited successor door is
+             -- the way back.
+             'fix', 'inspect the render machine logs for the window this job was claimed in, then call clara.requeue_render_job(this job id, why) to mint a successor once the cause is fixed')
+      from exhausted e
+     where t.id = e.id
+    returning t.id, t.report_run_id)
+  -- The RUN IDS travel with the count: a log line saying "1 reaped" sends an operator hunting; one
+  -- naming the run points them at the report that will not exist until they act.
+  select count(*)::int, coalesce(array_agg(distinct r.report_run_id), '{}')
+    into v_reaped, v_reaped_runs
+    from reaped r;
+  return jsonb_build_object('reaped', coalesce(v_reaped, 0),
+    'reaped_run_ids', to_jsonb(coalesce(v_reaped_runs, '{}'::uuid[])));
+end $$;
+revoke all on function clara.reap_exhausted_render_jobs() from public;
+
+-- =====================================================================================
 -- Z7 -- THE LEADER'S DISPATCH READ. DUE ARITHMETIC IS DB-OWNED (the reconciler-fa.mjs law):
 -- the runtime asks whether anything is due and is TOLD which jobs; it never re-derives it.
 --
@@ -298,59 +355,17 @@ revoke all on function clara.fail_render_job(uuid, text, jsonb) from public;
 create function clara.render_dispatch_begin(p_cooldown interval default interval '10 minutes',
                                             p_max int default 5) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_ids uuid[]; v_due int; v_oldest timestamptz; v_wait bigint; v_reaped int;
-        v_reaped_runs uuid[];
+declare v_ids uuid[]; v_due int; v_oldest timestamptz; v_wait bigint;
 begin
-  -- REAP THE EXHAUSTED FIRST (codex B1, the other half). The claim predicate now refuses a job at
-  -- its cap, which stops the paid-machine loop -- but a job that merely stops being claimable is
-  -- STRANDED, not finished: no terminal state, no reason, nothing for an operator to read. It is
-  -- reaped HERE because this is the sweep that would otherwise keep proposing it, and because a
-  -- claim must never touch rows other than the one it claims. `failed_at_cap_without_report` names
-  -- the shape: workers that never reported, a different incident from one that failed and said so.
-  --
-  -- SKIP LOCKED HERE TOO (round-2 minor). This was a plain UPDATE, so the leader's ~2s sweep took
-  -- BLOCKING row locks in a function whose every other access deliberately skips them -- one worker
-  -- inside fail_render_job on an exhausted row would stall the dispatch read for every firm until
-  -- its transaction ended. The tail census asserts this function skips locked rows; that claim now
-  -- covers the whole body rather than the part written second.
-  -- ONLY A DOUBLY-DEAD JOB REAPS (round-3 major). An expired lease alone does not mean the worker
-  -- is gone: a healthy render that legitimately outran CLARA_RENDER_LEASE_SECONDS has an expired
-  -- lease and is still working, and reaping it flips the row terminal so its completion is refused
-  -- AFTER the pages were typeset and the money spent. The margin is half the job's OWN lease
-  -- (lease_expires_at - claimed_at is exactly the lease it was granted), so a slow worker gets that
-  -- much more rope while a crashed one still terminates on the next sweep after it. The other half
-  -- of this fix is in the worker: it re-checks its lease before the expensive step and before
-  -- completing, and abandons quietly if it has lost it, so a fenced worker never completes against
-  -- a reaped row and a reaped row never steals a completable render.
-  with exhausted as (
-    select j.id from clara.render_jobs j
-     where j.state = 'running' and j.attempts >= j.max_attempts
-       and now() > j.lease_expires_at + (j.lease_expires_at - j.claimed_at) / 2
-     for update of j skip locked),
-  reaped as (
-    update clara.render_jobs t
-       set state = 'failed', finished_at = now(),
-           claimed_by = null, claimed_at = null, lease_expires_at = null,
-           last_error = jsonb_build_object('reason', 'failed_at_cap_without_report',
-             'attempts', t.attempts, 'max_attempts', t.max_attempts,
-             'detail', 'every claim was lost before the worker could record an outcome -- the workers crashed, were killed, or never reached fail_render_job',
-             -- THE REMEDY NAMES THE DOOR THAT EXISTS (round-2 major). This used to say "enqueue a
-             -- new job", which was structurally impossible: enqueue_render_job re-derives the same
-             -- request for the same run and kind and refuses to resurrect a terminally failed one.
-             -- clara.requeue_render_job is the audited human door that mints a SUCCESSOR instead.
-             'fix', 'inspect the render machine logs for the window this job was claimed in, then call clara.requeue_render_job(this job id, why) to mint a successor once the cause is fixed')
-      from exhausted e
-     where t.id = e.id
-    returning t.id, t.report_run_id)
-  -- THE RUN IDS TRAVEL WITH THE COUNT. A leader log line saying "1 reaped" sends an operator
-  -- hunting; one naming the run points them at the report that will not exist until they act.
-  select count(*)::int, coalesce(array_agg(distinct r.report_run_id), '{}')
-    into v_reaped, v_reaped_runs
-    from reaped r;
-
   with due as (
     select j.id from clara.render_jobs j
      where (j.state = 'claimable' or (j.state = 'running' and j.lease_expires_at < now()))
+       -- DEFENCE IN DEPTH (round-4): a job at its attempt cap is not dispatchable, because no
+       -- worker can claim it -- the claim predicate requires attempts < max_attempts. Without this
+       -- term the sweep would propose it and a paid machine would boot, find nothing claimable and
+       -- exit. The reap normally takes such a row first; this makes the due-read correct on its own
+       -- rather than correct because something else ran.
+       and j.attempts < j.max_attempts
        and (j.last_dispatch_at is null
             or j.last_dispatch_at < now() - coalesce(p_cooldown, interval '10 minutes'))
      order by j.enqueued_at, j.id
@@ -368,10 +383,10 @@ begin
     from stamped s;
   v_wait := case when v_oldest is null then null
                  else (extract(epoch from (now() - v_oldest)))::bigint end;
-  -- `reaped` is REPORTED, not merely done: a crash-only job dying at its cap is an incident the
-  -- leader's log should carry, and a silent repair is how a dying renderer stays unnoticed.
-  return jsonb_build_object('reaped', coalesce(v_reaped, 0),
-    'reaped_run_ids', to_jsonb(coalesce(v_reaped_runs, '{}'::uuid[])),
+  -- The reap is NOT part of this answer any more (round-4): it is clara.reap_exhausted_render_jobs,
+  -- called by the belt above its unwired early-return, so hygiene runs on deployments that never
+  -- dispatch at all.
+  return jsonb_build_object(
     'due', coalesce(v_due, 0), 'job_ids', to_jsonb(v_ids),
     'oldest_enqueued_at', v_oldest, 'oldest_wait_seconds', v_wait);
 end $$;
@@ -418,7 +433,8 @@ grant execute on function
   clara.render_job_payload(uuid, text),
   clara.fail_render_job(uuid, text, jsonb),
   clara.render_dispatch_begin(interval, int),
-  clara.render_dispatch_record(uuid[], boolean, jsonb)
+  clara.render_dispatch_record(uuid[], boolean, jsonb),
+  clara.reap_exhausted_render_jobs()
   to clara_runtime;
 
 -- THE HUMAN DOORS ARE FILE 5's. The replay door and the requeue door are granted to
@@ -436,10 +452,13 @@ declare
   -- and the battery missed it by reading the queue directly instead of walking the worker's own
   -- read path. The lesson is the census's: a roster of what to check cannot report what is absent.
   v_runtime text[] := array['claim_render_job', 'render_job_payload', 'enqueue_missing_render_jobs',
-    'fail_render_job', 'render_dispatch_begin', 'render_dispatch_record'];
+    'fail_render_job', 'render_dispatch_begin', 'render_dispatch_record',
+    'reap_exhausted_render_jobs'];
   v_granted text[]; v_leak int;
 begin
-  -- (1) The six runtime verbs are granted to clara_runtime -- the set, read from live ACLs.
+  -- (1) The runtime verbs named in the array above are granted to clara_runtime -- the set, read
+  -- from live ACLs. Counted from the roster rather than spelled in prose, so adding one cannot
+  -- leave a comment claiming a number the array no longer has.
   select coalesce(array_agg(distinct p.proname order by p.proname), '{}') into v_granted
     from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
     join pg_roles rr on rr.oid = acl.grantee
@@ -466,7 +485,7 @@ begin
     raise exception 'zeta claim tail: % EXECUTE grant(s) on a render verb to a role that must not hold one',
       v_leak using errcode = 'CLR10';
   end if;
-  raise notice 'zeta claim grants OK: the six runtime verbs (claim, payload, fail, dispatch begin+record, enqueue fallback) are granted to clara_runtime and to NO other role -- asserted by EXCLUDING the owner and clara_runtime rather than by naming the roles I happened to think of, and by a census that can SEE a PUBLIC grant, so neither a future role nor world-executable can hold EXECUTE unnoticed. The two human doors are file 5''s and are censused there.';
+  raise notice 'zeta claim grants OK: the runtime verbs on this file''s roster (claim, payload, fail, dispatch begin+record, the enqueue fallback and the reap) are granted to clara_runtime and to NO other role -- asserted by EXCLUDING the owner and clara_runtime rather than by naming the roles I happened to think of, and by a census that can SEE a PUBLIC grant, so neither a future role nor world-executable can hold EXECUTE unnoticed. The two human doors are file 5''s and are censused there.';
 end $grants$;
 
 do $tail$
@@ -487,5 +506,5 @@ begin
   if current_user <> (select v from _zeta_claim_pre where k = 'deploy_principal') then
     raise exception 'zeta claim tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'zeta claim OK: the claim refuses a job at its attempt cap and the sweep reaps exhausted ones as `failed`, so a crash-only job cannot start paid machines forever. The claim takes the oldest claimable-or-expired job FOR UPDATE SKIP LOCKED and the dispatch sweep skips locked rows -- BOTH read from the live function bodies rather than asserted from this file -- and the claim records the observed wait on the JOB row. Dispatch stamps its attempt BEFORE the start call so a failing dispatch backs off on its cooldown instead of storming; the outcome is recorded per job, so "could not start the renderer" is a readable fact rather than a silence.';
+  raise notice 'zeta claim OK: the claim refuses a job at its attempt cap, the DUE READ refuses it too (a job nobody can claim must not start a paid machine), and clara.reap_exhausted_render_jobs parks it `failed` IMMEDIATELY once its lease is dead -- no grace, because a graced at-cap row is neither claimable nor completable and the delay only bought late terminal signals. A slow-but-healthy worker is protected by its own fence (clara.render_lease_alive) instead, which stops it BEFORE it spends money rather than pretending its row is still alive. The claim takes the oldest claimable-or-expired job FOR UPDATE SKIP LOCKED and the dispatch sweep skips locked rows -- BOTH read from the live function bodies rather than asserted from this file -- and the claim records the observed wait on the JOB row. Dispatch stamps its attempt BEFORE the start call so a failing dispatch backs off on its cooldown instead of storming; the outcome is recorded per job, so "could not start the renderer" is a readable fact rather than a silence.';
 end $tail$;

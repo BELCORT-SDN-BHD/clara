@@ -35,7 +35,7 @@ const FULL_ENV = {
  * statement. Every matcher here therefore anchors on `select clara.<verb>`, which is the shape the
  * belt actually issues.
  */
-function fakeClient({ surface = true, due = { due: 0, job_ids: [] }, throwOn = null } = {}) {
+function fakeClient({ surface = true, due = { due: 0, job_ids: [] }, reap = { reaped: 0, reaped_run_ids: [] }, throwOn = null } = {}) {
   const calls = [];
   return {
     calls,
@@ -43,6 +43,7 @@ function fakeClient({ surface = true, due = { due: 0, job_ids: [] }, throwOn = n
       calls.push({ sql, params });
       if (throwOn && sql.includes(throwOn)) throw new Error(`boom: ${throwOn}`);
       if (sql.includes("to_regprocedure")) return { rows: [{ surface }] };
+      if (sql.includes("select clara.reap_exhausted_render_jobs")) return { rows: [{ r: reap }] };
       if (sql.includes("select clara.render_dispatch_begin")) return { rows: [{ r: due }] };
       if (sql.includes("select clara.render_dispatch_record")) {
         return { rows: [{ r: { recorded: (params?.[0] ?? []).length } }] };
@@ -121,9 +122,32 @@ test("an UNWIRED dispatch stamps NOTHING and says so loudly", async () => {
   const r = await reconcileRenderDispatch(client, { env: {}, log: (m) => lines.push(m) });
   strictEqual(r.renderUnconfigured, true);
   strictEqual(r.renderOk, false);
-  strictEqual(client.calls.length, 1, "no cooldown may be burned by a leader that cannot dispatch");
   ok(lines.some((l) => l.includes("UNWIRED") && l.includes("delayed, not stranded")),
     "the unwired case must name itself every cycle — a de-duplicated warning becomes silence");
+  // NOTHING IS STAMPED: no due-read, so no dispatch_attempts incremented and no cooldown burned by
+  // a leader that cannot dispatch. The reap DOES run (below) — hygiene is not dispatch.
+  // Matched on the CALL form, not the bare name: the surface probe above it reads
+  // `to_regprocedure('clara.render_dispatch_begin(...)')`, so a substring test for the name would
+  // pass against the probe and prove nothing about stamping.
+  ok(!client.calls.some((c) => c.sql.includes("select clara.render_dispatch_begin")),
+    "an unwired leader must not stamp an attempt it cannot make");
+  ok(!client.calls.some((c) => c.sql.includes("select clara.render_dispatch_record")));
+});
+
+test("an UNWIRED deployment still REAPS — the supported fallback must not strand crash-only jobs", async () => {
+  // The round-4 major, as a cell. The scheduled machine is a supported configuration, named in the
+  // unwired log line itself; before this fix the reap sat behind that early return, so exactly the
+  // deployments relying on the fallback never terminated a crash-only job at its cap — no terminal
+  // state, no reason, nothing to read, forever.
+  const lines = [];
+  const client = fakeClient({ reap: { reaped: 2, reaped_run_ids: ["run-a", "run-b"] } });
+  const r = await reconcileRenderDispatch(client, { env: {}, log: (m) => lines.push(m) });
+  strictEqual(r.renderUnconfigured, true);
+  strictEqual(r.renderReaped, 2, "hygiene ran even though dispatch could not");
+  ok(client.calls.some((c) => c.sql.includes("clara.reap_exhausted_render_jobs")));
+  const line = lines.find((l) => l.includes("render reap"));
+  ok(line && line.includes("run-a") && line.includes("requeue_render_job"),
+    "the reap line names the stranded runs and the door that repairs them");
 });
 
 // === A33 arm (i): dispatch within cadence =========================================================
@@ -150,12 +174,15 @@ test("a REAP is logged even when nothing is due — the case that strands a firm
   // payload, and thrown away — the one event that means a firm's statutory PDF will not exist
   // without a human produced NO operator signal at all.
   const lines = [];
-  const client = fakeClient({ due: { due: 0, job_ids: [], reaped: 1, reaped_run_ids: ["run-77"] } });
+  const client = fakeClient({
+    due: { due: 0, job_ids: [] },
+    reap: { reaped: 1, reaped_run_ids: ["run-77"] },
+  });
   const r = await reconcileRenderDispatch(client, {
     env: FULL_ENV, log: (m) => lines.push(m), startRenderMachine: async () => ({}),
   });
   strictEqual(r.renderDue, 0);
-  strictEqual(r.renderReaped, 1, "the count survives the early return");
+  strictEqual(r.renderReaped, 1, "the count survives the nothing-due early return");
   const reapLine = lines.find((l) => l.includes("render reap"));
   ok(reapLine, "a reap must be logged BEFORE the early return, not after it");
   ok(reapLine.includes("run-77"), "the line names the run, so an operator can find the report");

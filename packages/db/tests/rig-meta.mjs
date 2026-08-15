@@ -185,6 +185,9 @@ const RENDER_0073_RUNTIME_FNS = [
   // and it is what lets a slow-but-healthy render discover it has lost its job BEFORE spending
   // money finishing it — the machine half of the reap's grace margin.
   "render_lease_alive",
+  // and the reap, which moved OUT of render_dispatch_begin so queue hygiene runs even on a
+  // deployment whose dispatch is deliberately unwired (the scheduled-machine fallback).
+  "reap_exhausted_render_jobs",
 ];
 // THE HUMAN ONES (migration 0079, the two doors a person calls). replay_render_inputs is the DR §10
 // seven-year drill's executable door: it returns a sealed artifact's OWN pinned inputs so an

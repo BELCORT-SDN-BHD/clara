@@ -305,15 +305,16 @@ const REPORTING_0072_CLOCK_NAMES = ["approve_report_for_issue"];
 // is no date-typed decision here for the authority to own.
 //
 // MEASURED, not inferred: arm (D)'s own detector, run over the 0073-0076 surface, flags these five
-// and no other — enqueue_render_job, enqueue_missing_render_jobs, render_dispatch_record,
-// replay_render_inputs and render_request_manifest_v1 carry no clock token. render_jobs.enqueued_at
-// is a column DEFAULT, which lives in the table definition rather than in a pg_proc body and
-// correctly does not flag.
+// and no other — enqueue_render_job, enqueue_missing_render_jobs, render_dispatch_record and
+// render_request_manifest_v1 carry no clock token. render_jobs.enqueued_at is a column DEFAULT,
+// which lives in the table definition rather than in a pg_proc body and correctly does not flag.
+// (replay_render_inputs moved to 0079 and is covered by that block's own measurement; the reap
+// moved out of render_dispatch_begin into its own verb and is listed with 0075's names below.)
 //
 // Frontier-gated for the reason the 0046/0055/0056/0057/0059/0072 blocks state: db-slice-frontiers
 // runs this battery against databases pinned earlier, where these functions do not exist.
 const RENDER_0075_CLOCK_NAMES = ["claim_render_job", "fail_render_job", "render_dispatch_begin",
-  "render_job_payload"];
+  "render_job_payload", "reap_exhausted_render_jobs"];
 const RENDER_0076_CLOCK_NAMES = ["complete_render_job"];
 
 // 0079 [Wave E lane ζ, the human doors + the worker's fence]: ONE more, and it is the same shape as
