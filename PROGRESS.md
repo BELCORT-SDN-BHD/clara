@@ -26,9 +26,13 @@ file wins or it is stale — and truing it is the first thing you do.
   reads), the `reports/` storage policy pair ADDED (docs pair untouched; no UPDATE policy —
   x-upsert:false immutability stands), first live worker run a clean drain
   (`sealed=0 refused=0 abandoned=0`, typst 0.12.0 confirmed live), and the leader's dispatch
-  half BOUND on `clara-runtime` (token minted + relayed stdin-to-stdin, machine restarted,
-  `/ready` 200). The end-to-end re-render DR drill is deliberately still unrun (no sealed
-  artifact exists yet) — `docs/ops/DR-render.md` keeps that boundary explicit (PR #244).
+  half BOUND on `clara-runtime` — token minted + relayed stdin-to-stdin, staged, then
+  **`fly secrets deploy`** (a plain machine restart does NOT bind staged secrets — ζ caught
+  the first "bound" claim resting on an app-level `secrets list` read), verified by the
+  PROCESS read (`printenv CLARA_RENDER_FLY_APP` → `clara-render` from inside the running VM,
+  with the pre-deploy exit-1 as the negative and `CLARA_STORAGE_ROLE` as the positive
+  control) + `/ready` 200. The end-to-end re-render DR drill is deliberately still unrun (no
+  sealed artifact exists yet) — `docs/ops/DR-render.md` keeps that boundary explicit (#244).
 - **The δ review record:** cross-model (codex xhigh, initially NOT-MERGEABLE with 6 blockers)
   + a native 8-dimension adversarially-verified pass → an adjudicated fix docket (fake-receipt
   validation, in-body `check_function_bodies` double-layer refusal, owner-only RS lift floor,
@@ -98,7 +102,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    the E-R9 corpus on live books — sandbox battery → BEE FY2025 first real close (drawer
    keys; B3 must land first) → RPR historical MPERS pack → RS snapshot witness; the #43
    wording packet review + ms/zh sign-off (packet is research-complete, scratchpad
-   `masb-wording-dossier-v1.md` + amendments); the ms/zh claim-policy copy (fail-closed until
+   the masb-wording dossier v1 + two amendments, session scratchpad — not in-repo until the
+   seed migration lands); the ms/zh claim-policy copy (fail-closed until
    supplied); the optional elevated `diskpart` VHDX compact (~50GB).
 5. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25) —
    both parked for that sitting (ADR-062/0065) — plus the registered CI economics overhaul

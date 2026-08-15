@@ -66,7 +66,7 @@ back green. That is the absence-as-evidence law applied to determinism — the s
 guard that passes because it lost the ability to fail.
 
 So **every run of this drill renders four times**, and the document it renders is the product's own
-emission — `assemble()`'s output via `scripts/drill-fixture.mjs`, not a hand-written fixture, because
+emission — `assemble()`'s output via `packages/reporting-render/scripts/drill-fixture.mjs`, not a hand-written fixture, because
 a fixture cannot see an engine mismatch in a preamble it never emits. Three arms, all required:
 
 | Arm | Assertion | What it establishes |
@@ -220,7 +220,7 @@ sealed artifact.
 
 **The storage variables are `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE` and
 `CLARA_STORAGE_ROLE_JWT`** — the names `packages/runtime/lib/storage.mjs` actually reads, reached
-from the worker through `lib/objects.mjs`. `CLARA_STORAGE_URL` is the **full private-bucket object
+from the worker through `packages/reporting-render/lib/objects.mjs`. `CLARA_STORAGE_URL` is the **full private-bucket object
 base** (the Storage REST `/storage/v1/object/<bucket>` base), because `storage.mjs` builds object
 URLs as `${base}/${key}`; a bare `https://<project-ref>.supabase.co` is the wrong shape and will
 produce wrong URLs. *An earlier revision of this file passed a `CLARA_RENDER_STORAGE_URL` that
@@ -254,7 +254,7 @@ attempt a seal that must fail. Step 3 necessarily comes after, because it needs 
    **Done 2026-08-15, and here is the shape that worked.** Two policies were ADDED —
    `clara_storage_reports_insert` (cmd=a, `WITH CHECK`) and `clara_storage_reports_select` (cmd=r,
    `USING`), both to `clara_storage_docs` — each cloned from the live `docs` pair's byte-exact
-   predicate with exactly two substitutions: `/docs/` → `/reports/`, and the extension class →
+   predicate with exactly two substitutions: the path segment docs → reports, and the extension class →
    `(pdf|json)`, matching `safeReportKey`'s
    `^firms/[0-9a-f-]{36}/reports/[0-9a-f]{64}\.(pdf|json)$`. **Add, do not ALTER:** permissive
    policies are OR'd, so a new pair extends reach while leaving the live document-intake path — the
