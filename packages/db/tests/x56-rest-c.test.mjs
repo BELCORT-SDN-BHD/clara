@@ -17,7 +17,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
+  has0056, hasB3, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
   grantCapability, revokeCapability, freshActiveClient, proposeFY, openFY, addDaysStr,
   forgeClosedPeriodMovement, setupCloseCoa, plainEntry, BANK1, RE1, REVN, EXPN,
 } from "./x56-fixtures.mjs";
@@ -65,12 +65,19 @@ test("A19e finalize_close authors the closing entry in-body (draft then census-v
              '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g'), '\\s+', ' ', 'g'))
            ~* 'update[[:space:]]+(only[[:space:]]+)?(clara[[:space:]]*\\.[[:space:]]*)?journal_entries[[:space:]]+set[[:space:]]+status[[:space:]]*=[[:space:]]*''approved'''
   `)).rows[0];
-  assert.equal(census.n, 5, `expected exactly 5 approve-writers (got ${census.n}: ${census.names})`);
+  // [B3 / ADR-068 ruling 1] FRONTIER-GATED, the same way this rig already gates 0056 itself
+  // (x42b0-r8-tails.4): once the B3 pair lands, reopen_fiscal_year performs its OWN
+  // census-visible flip instead of delegating to reverse_entry, so the roster grows five to
+  // six. NAMES first, so a drift NAMES itself rather than reading as an off-by-one.
+  const b3 = await hasB3();
   assert.equal(
     census.names,
-    "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry",
-    "the pinned four PLUS finalize_close, in collate \"C\" order",
+    b3
+      ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reopen_fiscal_year, reverse_entry"
+      : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry",
+    "the pinned four PLUS finalize_close (PLUS reopen_fiscal_year once B3 lands), in collate \"C\" order",
   );
+  assert.equal(census.n, b3 ? 6 : 5, `approve-writer count (got ${census.n}: ${census.names})`);
 
   // The body itself: born draft, flipped by a literal UPDATE (never an insert-approved,
   // which would be invisible to the census above).

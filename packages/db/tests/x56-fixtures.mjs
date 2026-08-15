@@ -26,6 +26,18 @@ export async function has0056() {
   return g.rows.length > 0;
 }
 
+/** B3 (ADR-068 ruling 1) frontier probe: has the ends_on-dated reopen reversal landed?
+ *  Read from clara.schema_migrations by the file STEM, never by a number -- migration
+ *  numbers are claimed at merge, so a number gate would break the moment the pair is
+ *  renumbered. The regex form (not LIKE) keeps the underscores literal. Part 1 is what
+ *  carries the body, so part 1's row is the gate; `$` anchors it away from part 2's stem. */
+export async function hasB3() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'b3_reopen_ends_on$'",
+  );
+  return r.rows[0].n === 1;
+}
+
 export async function caught(fn) {
   try { await fn(); return null; } catch (e) { return e; }
 }
