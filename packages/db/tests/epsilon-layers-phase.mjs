@@ -1,6 +1,7 @@
 // Wave E lane EPSILON -- phase 1: the six template layers. NOT a test file.
 //
-// Proves: the shipped wording table is EMPTY and its verified-provenance CHECK bites; every
+// Proves: every wording row claiming `verified` carries its provenance quartet and the CHECK
+// refuses one that does not (a floor over reference data, not a claim that the table is empty); every
 // publish/draft floor by role and by report class; publication freeze; and the E-R8 floor-1
 // walls at BOTH the template and the spec layer -- no numeric literal, no protected placeholder
 // bound to a supplied literal, no protected content TYPED with no binding declared at all, and
@@ -16,21 +17,58 @@ import {
 } from "./epsilon-fixtures.mjs";
 import { profileVersion, ensureEpsilonAdmin } from "./epsilon-world.mjs";
 
-const SHIPPED_PROFILES = ["mpers_company", "convention_sole_prop"];
+/** The provenance CHECK itself, read POSITIVELY from the catalog. This is the assertion with a
+ *  real failure mode -- dropped, renamed, or left NOT VALID all turn it red -- and it is the one
+ *  that carries the floor. */
+export async function wordingProvenanceConstraint() {
+  return (await rootQuery(
+    `select c.conname, c.contype, c.convalidated
+       from pg_constraint c
+      where c.conrelid = 'clara.statutory_wording'::regclass
+        and c.conname = 'ck_statutory_wording_verified_provenance'`)).rows[0] ?? null;
+}
 
-export async function shippedWordingCount() {
-  return Number((await rootQuery(
-    "select count(*)::int n from clara.statutory_wording where profile_key = any($1)",
-    [SHIPPED_PROFILES])).rows[0].n);
+/** A TRIPWIRE, and labelled as one rather than dressed up as a floor.
+ *
+ *  While the CHECK above exists and is valid this predicate is its exact De Morgan negation, so
+ *  it CANNOT return a row -- it is empty at 0 wording rows and at 22 alike. It earns its place in
+ *  exactly ONE narrow window the constraint read cannot cover: rows GRANDFATHERED past validation,
+ *  i.e. present when the constraint was dropped and re-added NOT VALID. Postgres still enforces a
+ *  NOT VALID CHECK against every new INSERT and UPDATE -- it only skips validating rows that were
+ *  already there -- so "admitted while NOT VALID" is not a second scenario, and saying so would
+ *  overstate what this tripwire covers. Belt to that read's braces, nothing more.
+ *
+ *  (It shipped as the "durable floor" in the first cut of this fix, which was the same
+ *  cannot-fail defect this PR exists to remove, one layer down. The forge loop below is what
+ *  actually discriminates.) */
+export async function unprovenancedVerifiedWording() {
+  return (await rootQuery(
+    `select profile_key, wording_key, locale from clara.statutory_wording
+      where verification_state = 'verified'
+        and (source_manifest is null or source_sha256 is null
+             or verified_by is null or verified_at is null)
+      order by profile_key, wording_key, locale`)).rows;
 }
 
 export async function registerLayersPhase(t, world) {
   const { alice, bob, carol } = world.users;
   const admin = await ensureEpsilonAdmin(world);
 
-  await t.test("layer 2 ships ZERO wording rows and its verified-provenance CHECK bites", async () => {
-    assert.equal(await shippedWordingCount(), 0,
-      "owner task #43 gates every wording row; inventing one is a FAIL of matrix D5");
+  await t.test("the verified-provenance CHECK is present, valid, and bites on every quartet member", async () => {
+    // TWO DEFECTS DEEP, and the second one was mine twice over. The cell originally asserted the
+    // shipped wording table was EMPTY -- reference data another lane owns, so it tested whether
+    // the owner had done task #43 rather than testing epsilon. The first fix replaced that with a
+    // sweep for `verified` rows missing a quartet member and called it a durable floor. It is not:
+    // that predicate is the exact De Morgan negation of the CHECK, so while the CHECK stands the
+    // sweep CANNOT return a row -- an unfailable assertion swapped for an unfailable assertion,
+    // which is precisely the class this PR exists to remove.
+    //
+    // What carries the floor is a POSITIVE read of the constraint itself, which has real failure
+    // modes: dropped, renamed, or left NOT VALID.
+    const ck = await wordingProvenanceConstraint();
+    assert.ok(ck, "ck_statutory_wording_verified_provenance exists on clara.statutory_wording");
+    assert.equal(ck.contype, "c", "and it is a CHECK constraint");
+    assert.equal(ck.convalidated, true, "and it is VALIDATED -- a NOT VALID constraint admits the rows it names");
     assert.deepEqual((await rootQuery(
       `select profile_key, revision, applies_to_periods_beginning_from::text f,
               applies_to_periods_beginning_to::text t
@@ -55,7 +93,12 @@ export async function registerLayersPhase(t, world) {
       assert.equal(error?.code, "23514", `a verified row missing ${missing} is refused: ${error?.message}`);
       assert.match(error.message, /ck_statutory_wording_verified_provenance/);
     }
-    assert.equal(await shippedWordingCount(), 0, "no forged row survived");
+    // Scoped to the rows this cell tried to forge, by their own key prefix -- not to the table's
+    // total, which real wording legitimately makes non-zero and which would have made this
+    // assertion a hostage to another lane's seed.
+    assert.deepEqual((await rootQuery(
+      "select wording_key from clara.statutory_wording where wording_key like 'forged\\_%' order by wording_key")).rows,
+      [], "no forged row survived");
   });
 
   await t.test("layer 3 house style is an OWNER floor and its assets must be content-addressed", async () => {
@@ -415,8 +458,18 @@ export async function registerLayersPhase(t, world) {
     assert.equal(viewer?.code, "CLR04", "drafting a spec is key 1 -- a viewer holds no key");
   });
 
-  await t.test("the shipped wording table is STILL empty after the whole layer phase", async () => {
-    assert.equal(await shippedWordingCount(), 0,
-      "read at the end as well as the start: the gate is a state, and a state can be moved");
+  await t.test("the provenance CHECK survives the whole layer phase", async () => {
+    // Read at the end as well as the start, because the gate is a STATE and a state can be moved:
+    // this phase forges rows against the constraint and runs publication-freeze attempts under
+    // clara_fn_owner, and a helper that dropped or invalidated the constraint on its way through
+    // would leave every later cell asserting nothing.
+    //
+    // The first cut of this cell justified itself by claiming the phase seeds rig wording of its
+    // own. It does not -- seedVerifiedWording's only call site is the CLAIM phase, which runs
+    // after this one. The honest reason to re-read is constraint integrity, not written rows.
+    const ck = await wordingProvenanceConstraint();
+    assert.ok(ck?.convalidated, "the CHECK is still present and valid at the end of the phase");
+    assert.deepEqual(await unprovenancedVerifiedWording(), [],
+      "and the tripwire behind it is still clear");
   });
 }
