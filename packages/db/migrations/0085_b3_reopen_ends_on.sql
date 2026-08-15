@@ -300,22 +300,22 @@ begin
   end if;
 
   -- ===================================================================================
-  -- SEGREGATION ON THE REVERSAL -- 0084's B4 pattern extended to this act, in
-  -- clara._approve_entry_core's OWN vocabulary (CLR05 · distinct_checker · self_attestation ·
-  -- attestation_required; no new refusal words minted). The mirror is HIGH-STAKES by
-  -- construction and this body approves it in-body, so the wall binding every other
-  -- high-stakes approval must bind here too. Pre-B3 it applied BY ACCIDENT -- the mirror was
-  -- left a draft and a second human approved it through approve_entry -- and that accident
-  -- was doing real work.
+  -- SEGREGATION ON THE REVERSAL -- 0084's B4 pattern extended to this act. The mirror is
+  -- HIGH-STAKES and approved in-body, so the wall binding every other high-stakes approval
+  -- binds here; pre-B3 it applied BY ACCIDENT (draft mirror, second human via approve_entry)
+  -- and was doing real work. FOUR tokens below are clara._approve_entry_core's OWN, character
+  -- for character: CLR05 · distinct_checker · self_attestation · attestation_required. The
+  -- FIFTH, no_eligible_human, is NOT in that body at all (measured: zero occurrences) -- it is
+  -- the 0084 / approve_metric_definition family's, and its arm is deliberately STRICTER than
+  -- the core, which at eligible=0 falls through to an attestation where this refuses outright.
+  -- Erring CLOSED with nobody accountable is right, but it WIDENS the wall rather than copying
+  -- it, so it is named here: "matches exactly" is true only of the four.
   --
-  -- MEASURED AGAINST THE CLOSER, NOT THE REOPENER, and that choice is the design. The
-  -- reopener necessarily AUTHORS the mirror, so measuring maker-vs-checker against themselves
-  -- would refuse every reopen in every multi-checker firm and name no reachable remedy -- a
-  -- rule with no lawful path is a broken verb, not a control. The human CHECKED is the one
-  -- who signed the close being reversed; a different eligible human reopening it is two
-  -- accountable humans, each under their own credential -- finalize_close's own shape. And
-  -- NOBODY'S CONSENT IS ASSERTED BY ANYBODY ELSE: there is no p_checker naming an absent
-  -- human, because a uuid typed by one human is not another's approval.
+  -- MEASURED AGAINST THE CLOSER, NOT THE REOPENER, and that choice is the design. The reopener
+  -- necessarily AUTHORS the mirror, so measuring maker-vs-checker against themselves would
+  -- refuse every reopen in a multi-checker firm and name no reachable remedy -- a rule with no
+  -- lawful path is a broken verb. The human CHECKED is whoever signed the close, so a different
+  -- eligible human reopening is two accountable humans; and NO p_checker names an absent one.
   -- ===================================================================================
   v_eligible := clara.eligible_checker_count(c.firm);
   select je.checker_actor into v_checked from clara.journal_entries je where je.id = v_entry;
