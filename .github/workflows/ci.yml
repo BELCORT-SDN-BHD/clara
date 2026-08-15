@@ -209,6 +209,34 @@ jobs:
           # Same deal for the dispatch-model guard (AGENTS.md hard constraint 5).
           node scripts/hooks/dispatch-model-guard.selftest.mjs
 
+      # The .sql half of the freeze family (§4.2). check-frozen-workflows.mjs reads the TS
+      # workflow bodies; a deterministic EVALUATOR lives in a migration, so nothing above can
+      # see it. The self-test rides along for the same reason the guards' do: this checker's
+      # own CLI guard once exited 0 having checked nothing, and only an end-to-end run against
+      # a mutated body catches that class.
+      - name: Evaluator freeze-lint + self-test (§4.2 · the .sql half the workflow lint cannot reach)
+        run: |
+          node scripts/check-frozen-evaluators.mjs
+          node scripts/check-frozen-evaluators.selftest.mjs
+
+      # Lane ζ's render package is NOT a pnpm workspace member (pnpm-workspace.yaml says why),
+      # so `pnpm -r` cannot see it and it would otherwise reach main with no CI at all. It is
+      # driven here by explicit steps, in the UNCONDITIONAL lint job, with no skip-allowing
+      # variable: a missing or broken module FAILS here rather than skipping quietly.
+      #
+      # `pnpm --dir` on purpose, and this is load-bearing rather than stylistic: it runs the
+      # package's own scripts with the REPO'S PINNED eslint resolved from the root install,
+      # whereas `npx eslint` inside a non-member package resolves nothing locally and would
+      # DOWNLOAD an unpinned eslint from the registry onto the self-hosted runner on every PR.
+      # No install step is needed: `check` is `node --check` (syntax only) and the unit battery
+      # imports nothing outside the package — `pg` is reached only by lib/db.mjs, which the
+      # tests never load, and which the image installs from the package's own manifest.
+      - name: Render package drill (lane ζ · check + lint + the judgement battery)
+        run: |
+          pnpm --dir packages/reporting-render run check
+          pnpm --dir packages/reporting-render run lint
+          pnpm --dir packages/reporting-render run test
+
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
       # gitleaks binary (not a mutable action tag); config + allowlist in
@@ -309,6 +337,48 @@ jobs:
             echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
             $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
           fi
+
+  # =========================================================================
+  # THE DOUBLE-RENDER BYTE-EQUALITY GATE (Wave E lane ζ; design part2 §9/§10).
+  #
+  # docs/ops/DR-render.md states that every PR performs this drill — so the pipeline performs it.
+  # A document claiming a gate the pipeline does not run is worse than no claim, because it is
+  # read as evidence.
+  #
+  # ALL THREE ARMS ARE ASSERTED BY THE SCRIPT: two renders of identical inputs must MATCH; a third
+  # under a changed SOURCE_DATE_EPOCH must ALSO match (the document pins its date from the
+  # reporting period, so the environment's clock is not an input to a real render and must not move
+  # the artifact); and a fourth built from a changed PINNED INPUT must DIFFER. Byte-equality proves
+  # nothing unless the output is capable of varying, and a run where the fourth arm MATCHED is a
+  # worse finding than a mismatch — it means the manifest is wired to nothing and the first arm was
+  # vacuous.
+  #
+  # AND IT COMPILES THE PRODUCT'S OWN PREAMBLE, not only a fixture. A hand-written fixture cannot
+  # see an engine-version mismatch in what assemble() actually emits — the round-2 finding that
+  # cost a whole render path — so the script renders assemble()'s real output against the pinned
+  # engine as its first arm.
+  #
+  # Its own job because it builds an image; fail-closed on the classifier in the same != 'false'
+  # polarity as `ci` (an absent or garbled output RUNS the job rather than skipping it green).
+  # =========================================================================
+  render-drill:
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
+    runs-on: [self-hosted, linux, clara]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.19.5
+      # The fixture is typeset with a content-addressed font MOUNTED at run time, exactly as
+      # production supplies them — the image ships no font directory at all, so a drill that
+      # found one would not be testing what ships.
+      - name: Ensure a drill font is present
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+      - name: Build the renderer image (pinned engine + pinned extractor)
+        run: docker build -f packages/reporting-render/Dockerfile -t clara-render:ci .
+      - name: Double-render drill — determinism, the control arm, and the real preamble
+        run: node packages/reporting-render/scripts/double-render-drill.mjs --image clara-render:ci
 
   ci:
     needs: changes

@@ -1,0 +1,17 @@
+{
+  "name": "@clara/reporting-render",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clara deterministic report render worker (Wave E lane ζ) — a SEPARATE, self-contained Fly app (`clara-render`, sin) that claims clara.render_jobs over a short-lived DSN session, typesets a sealed dataset with a pinned declarative engine, runs the §7 gate-3 claim scan over the FINAL PDF bytes with a pinned extractor, puts the content-addressed object, and completes the job so the artifact is sealed. NOT a pnpm workspace member (excluded in pnpm-workspace.yaml, the packages/backup precedent); NEVER installed into @clara/runtime. Its deps are installed inside its own Docker image.",
+  "scripts": {
+    "check": "node --check scripts/render-worker.mjs && node --check scripts/verify-reports-prefix.mjs && node --check lib/canonical-json.mjs && node --check lib/decisions.mjs && node --check lib/lexicon.mjs && node --check lib/chart.mjs && node --check lib/layout.mjs && node --check lib/manifest.mjs && node --check lib/engine.mjs && node --check lib/extract.mjs && node --check lib/db.mjs && node --check lib/objects.mjs && node --check lib/fonts.mjs",
+    "lint": "eslint .",
+    "test": "node --test tests/",
+    "worker": "node scripts/render-worker.mjs",
+    "verify:reports-prefix": "node scripts/verify-reports-prefix.mjs"
+  },
+  "dependencies": {
+    "pg": "8.20.0"
+  }
+}

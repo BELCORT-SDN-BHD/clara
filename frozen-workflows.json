@@ -1,6 +1,30 @@
 {
   "version": 1,
   "workflows": {
+    "packages/reporting-render/lib/canonical-json.mjs": {
+      "sha256": "33b665f68c1e79b059f218d96f150b386235eccea66b0520c7dd97fce233c60f",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/reporting-render/lib/chart.mjs": {
+      "sha256": "d6cbcb5e033169062dde4a03f72b4f69cf224bff2c6767221c3e2a39bfcc3e29",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/reporting-render/lib/decisions.mjs": {
+      "sha256": "2f4e9ffe9d733b90173106b00d2beb3ae6c5c7d8cb749c74ae6f04fdac557139",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/reporting-render/lib/layout.mjs": {
+      "sha256": "bc416972436ef18ff6b2de137facc4f172fc597efbc4ff957ad12ea20be6377b",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/reporting-render/lib/lexicon.mjs": {
+      "sha256": "b3397d6dc186158cfec03bebc0d483cf6ef0d01055e76b82b75d090394b16c3a",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/reporting-render/lib/manifest.mjs": {
+      "sha256": "bf95b2a02e40d23d065afd13e940ad0cafa630d7533e0abf6bc3c7f3a089fec9",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
     "packages/runtime/lib/malaysian-registration.mjs": {
       "sha256": "49f8a2672577b5d567ddeddadc1d7207a6519126a330100cc821cde919ba74e8",
       "note": "",

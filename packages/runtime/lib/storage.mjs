@@ -249,3 +249,105 @@ export async function verifyWikiCanonical(key, expectedSha256) {
   if (actual !== expectedSha256) throw new StorageError("checksum_mismatch", "wiki canonical readback hash mismatch");
   return { sha256: actual };
 }
+
+// ---------------------------------------------------------------------------
+// Wave E lane ζ — the sealed-report object family (design part2 §9, "Custody"). ADDITIVE ONLY,
+// and the third key family beside safeKey (docs) and safeWikiKey (wiki): a safeReportKey
+// validator plus put/verify siblings sharing the same private realConfig()/test-shim plumbing.
+// The docs and wiki regexes above are UNTOUCHED, so a report key can never be put on the docs or
+// wiki path and vice-versa.
+//
+// Same `firm-docs` bucket, deliberately (§9): the wiki family made exactly this call so the daily
+// R2 mirror covers the bytes for free — a new bucket needs its own mirror, restore drill and role.
+//
+// THE BUCKET POLICY IS NOT INHERITED, AND THAT IS THE POINT (§9, R18/MINOR 25). safeKey's live
+// regex admits only `firms/…/docs/…` and the role check is about the ROLE, not the prefix — so
+// the storage role's policy must be extended to the `reports/` prefix DELIBERATELY. That
+// extension is a named ceremony step with a positive read (upload one object, read it back by
+// key) before the first seal; it is written down in docs/ops/DR.md §10, not implied here.
+//
+// Overwrite is structurally impossible (x-upsert:false → a 409 is idempotent success), which is
+// what makes an at-least-once render safe: the key is the content address, so a second identical
+// render writes the same bytes to the same key and the second PUT is a no-op.
+// ---------------------------------------------------------------------------
+export function safeReportKey(key) {
+  const value = String(key || "");
+  if (!/^firms\/[0-9a-f-]{36}\/reports\/[0-9a-f]{64}\.(pdf|json)$/i.test(value)) {
+    throw new StorageError("storage_error", "canonical report storage key is invalid");
+  }
+  return value;
+}
+
+function reportLocalPath(key) {
+  return join(testRoot(), ...safeReportKey(key).split("/"));
+}
+function reportObjectUrl(base, key) {
+  return `${base}/${safeReportKey(key).split("/").map(encodeURIComponent).join("/")}`;
+}
+async function reportLocalPut(filePath, key) {
+  const dest = reportLocalPath(key);
+  await mkdir(dirname(dest), { recursive: true });
+  try {
+    await pipeline(createReadStream(filePath), createWriteStream(dest, { flags: "wx", mode: 0o600 }));
+    return { created: true, existed: false };
+  } catch (err) {
+    if (err?.code === "EEXIST") return { created: false, existed: true };
+    await rm(dest, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+export async function putReportCanonical(filePath, key, mime = "application/pdf") {
+  safeReportKey(key);
+  if (process.env.RELAY_TEST_MODE === "1") {
+    const injected = globalThis.__claraStorageForTest;
+    return injected?.put ? injected.put(filePath, key, mime) : reportLocalPut(filePath, key);
+  }
+  const { base, jwt } = realConfig();
+  const response = await fetch(reportObjectUrl(base, key), {
+    method: "POST",
+    headers: { authorization: `Bearer ${jwt}`, apikey: jwt, "content-type": mime, "x-upsert": "false" },
+    body: createReadStream(filePath),
+    duplex: "half",
+  });
+  if (response.ok) return { created: true, existed: false };
+  // Supabase wraps its real status inside the BODY (the 2026-07-26 finding the docs family
+  // documents above): a duplicate comes back as HTTP 400 with {"statusCode":"409",...}. Read the
+  // body once and branch on what it says — a duplicate report object is idempotent SUCCESS, and
+  // treating it as a fatal error is exactly what would make an at-least-once render unsafe.
+  const body = await response.text().catch(() => "");
+  let inner = null;
+  try { inner = JSON.parse(body); } catch { /* not JSON — fall through to the raw body */ }
+  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
+    return { created: false, existed: true };
+  }
+  throw new StorageError(
+    "storage_error",
+    `report storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
+  );
+}
+
+async function reportResponseFor(key) {
+  if (process.env.RELAY_TEST_MODE === "1") {
+    const injected = globalThis.__claraStorageForTest;
+    if (injected?.get) return injected.get(key);
+    return createReadStream(reportLocalPath(key));
+  }
+  const { base, jwt } = realConfig();
+  const response = await fetch(reportObjectUrl(base, key), { headers: { authorization: `Bearer ${jwt}`, apikey: jwt } });
+  if (!response.ok || !response.body) throw new StorageError("storage_error", `report storage read failed (${response.status})`);
+  return response.body;
+}
+
+export async function hashReportCanonical(key) {
+  const body = await reportResponseFor(safeReportKey(key));
+  const hash = createHash("sha256");
+  for await (const chunk of body) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export async function verifyReportCanonical(key, expectedSha256) {
+  const actual = await hashReportCanonical(key);
+  if (actual !== expectedSha256) throw new StorageError("checksum_mismatch", "report canonical readback hash mismatch");
+  return { sha256: actual };
+}

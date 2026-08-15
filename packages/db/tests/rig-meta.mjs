@@ -165,6 +165,46 @@ const REPORTING_0065_HUMAN_FNS = [
   "seal_report_artifact", "approve_report_for_issue", "verify_report_artifact",
 ];
 const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
+// 0079-0083 [Wave E lane ζ] the render queue. Same closed-set discipline as ε's block above: the
+// estate roster must NAME every function that holds a grant, so a sanctioned addition is a
+// reviewed line here rather than a surprise in the sweep.
+//
+// THE RUNTIME ROSTER — the render worker's and the leader's whole surface, counted from the array
+// below rather than spelled as a number in this sentence, because the number has now been wrong
+// twice. clara_runtime holds NO table privilege on clara.render_jobs (not even SELECT), so these
+// verbs ARE the queue's reachable API, and each names its consumer:
+//   claim_render_job            · the worker takes one job (for update skip locked)
+//   render_job_payload          · the worker reads ONLY what its claimed job pins (lease-scoped)
+//   complete_render_job         · the worker's one write — seals through ε's _seal_report_artifact_core
+//   fail_render_job             · the worker records why a render did not happen
+//   render_lease_alive          · the worker's own fence: does it still hold this job (0079)
+//   render_dispatch_begin       · the LEADER's due-read + attempt stamp (the Law-1 touch)
+//   render_dispatch_record      · the leader's outcome receipt for that attempt
+//   reap_exhausted_render_jobs  · queue hygiene: park the crash-only jobs stuck at their cap
+//   enqueue_missing_render_jobs · the leader's fallback enqueue when ε's seal call was missed
+const RENDER_ZETA_RUNTIME_FNS = [
+  "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
+  "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
+  // The FENCE reads a boolean and writes nothing: it is what lets a render that outran its lease
+  // discover the job is no longer its own BEFORE it spends money finishing bytes the seal would
+  // refuse. It is not a grace period — the reap is immediate; this is the worker stopping itself.
+  "render_lease_alive",
+  // And the reap, which moved OUT of render_dispatch_begin so queue hygiene runs even on a
+  // deployment whose dispatch is deliberately unwired (the scheduled-machine fallback).
+  "reap_exhausted_render_jobs",
+];
+// THE HUMAN ONES (migration 0079, the two doors a person calls). replay_render_inputs is the DR §10
+// seven-year drill's executable door: it returns a sealed artifact's OWN pinned inputs so an
+// operator can re-render and compare — STABLE, writes nothing, enqueues nothing.
+// requeue_render_job is the lawful way out of a terminal failure: it mints a SUCCESSOR job (the
+// failed row stays immutable) and records the predecessor and the operator's reason.
+// Both are deliberately NOT runtime-granted: a recovery instrument must not become a second path
+// the worker can walk, and nothing machine-side gets to decide that a failure deserves another
+// paid render.
+const RENDER_ZETA_HUMAN_FNS = ["replay_render_inputs", "requeue_render_job"];
+// The internals stay ungranted to every application role and are asserted so in-migration:
+// render_request_manifest_v1, enqueue_render_job (ε's seal calls it), _tf_render_job_lifecycle.
+const RENDER_ZETA_COHORT = [...RENDER_ZETA_RUNTIME_FNS, ...RENDER_ZETA_HUMAN_FNS];
 // 0077-0078 [Wave E lane η] the ad-hoc authoring lane's granted surface: the FOUR wake wrappers,
 // EXECUTE to clara_wake_interactive and to nothing else, each carrying an interactive-only
 // clara.wake_fn_allowlist row. Same closed-set reason as the blocks above — they ship as one
@@ -777,6 +817,11 @@ export const ALLOWED = {
     // validators are deliberately ABSENT from this roster: they are granted to nobody, so the
     // sweep's expected=false is the assertion that ζ's and η's JWT-less callers reach them only
     // as clara_fn_owner internals (see the block above)
+    // 0079 [Wave E lane ζ] BOTH human doors — the array is the enumeration and the block where it
+    // is declared describes each. They are not the same kind of verb: replay_render_inputs is
+    // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
+    // writes an audit row. Both are clara_authenticated ONLY.
+    ...RENDER_ZETA_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -798,6 +843,10 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
+    ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
+    // reachable API — the array is the enumeration; the block where it is declared names each
+    // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
+    // this roster IS the surface
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
@@ -947,6 +996,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
+  failures.push(...cohortFailures("0079-0083 wave E render queue", RENDER_ZETA_COHORT, liveNames));
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   return failures;
 }
