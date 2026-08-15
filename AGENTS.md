@@ -66,8 +66,10 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
     **mistake-net for verbatim-id write shapes**, not containment: the ids' primary protection
     is this constraint plus the DB walls, and deliberate obfuscation is out of scope by design.
 12. **ROME SECRETARY's customers are NAME-ONLY — never enrich them** with a registration
-    number or a TIN. (A DB-side guard is a registered candidate; until it lands, this one
-    rests on you.)
+    number or a TIN. (STRUCTURAL since 2026-08-14: `0062` walls it in the DB — fact-driven,
+    uuid-pinned, behaviourally self-proven at apply — and `0063` makes lifting it an
+    OWNER-only act through the audited door. The constraint stays here as the law the wall
+    enforces.)
 13. **Four firms, and they are not interchangeable:** **BELCORT** is the real, high-stakes
     firm (ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION — its sole proprietor is
     not an employee, his account is EQUITY) · **ROME PUBLIC ADVISORY** is the synthetic
@@ -110,8 +112,9 @@ way:* the `codex:codex-rescue` companion queue is unreliable (it has stalled for
 output, or a native subagent.
 
 **Ground before you build.** On a new or compacted session, and before answering any
-architecture question or changing code: query the graph for structure, then read the one menu
-row that covers the question. A few targeted queries beat a fan-out.
+architecture question or changing code: query the graph for structure (the
+`codebase-memory-mcp` server — `search_graph` / `query_graph` / `get_architecture`), then
+read the one menu row that covers the question. A few targeted queries beat a fan-out.
 
 **Ask the owner first** before deleting or overwriting a file you did not create, and before
 any genuinely destructive or irreversible operation — a DROP on shared state, a project
@@ -139,7 +142,7 @@ Law 1 is the floor, not the ceiling.
 
 1. Read `PROGRESS.md` — posture, live lanes, backlog.
 2. Read the `docs/adr/README.md` digest.
-3. Ground: a graph query plus the relevant menu row.
+3. Ground: a graph query (`codebase-memory-mcp`) plus the relevant menu row.
 4. Recall memory for preferences and lessons (not state — see constraint 8).
 
 **Clock out** — before the session ends, and before any compaction:
@@ -149,7 +152,8 @@ Law 1 is the floor, not the ceiling.
    issues if truing it needs a decision.
 3. Grill the owner on any ambiguity or foreign change you found and could not resolve.
 4. Refresh memory — lessons and preferences only.
-5. Re-index the codebase graph if code changed materially.
+5. Re-index the codebase graph (`codebase-memory-mcp` · `index_repository`) if code changed
+   materially.
 
 ## CI/CD
 

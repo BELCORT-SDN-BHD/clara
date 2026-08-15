@@ -29,6 +29,8 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
 | `wave-e-delta-handoff-2026-08-13.md` | live | Clock-out checkpoint for δ final-finding closure: owner rulings, sole-writer ownership, acceptance hold, working-tree custody and exact resume order. **Discharged by the night run** — kept as the rulings' source of record. |
 | `wave-e-delta-ceremony-asrun.md` | completed/ | The 0058-0063 live ceremony as run: positive reads, the two field findings (SUSET, pooler-pid), deviations with grounds, the no-print DSN bridge. |
+| `wave-e-theta-epsilon-ceremony-asrun.md` | completed/ | The 0064-0072 live ceremony as run (θ+ε together): 9/9 clean, backup-first, the Windows pnpm-shim trap, the probe-defect lesson, the live #43 gate. |
+| `wave-e-final-ceremony-asrun.md` | completed/ | The 0077-0084 live ceremony as run (η wake wrappers + ζ render family + B4): D1 write-quiesce, the chatTurn v11 deploy, the freeze deploy-lock (140/140), positive reads throughout. |
 
 ## `completed/` — closed waves and slices
 
