@@ -554,15 +554,19 @@ function pinConversation(sql, parameters, state) {
  * a real read-back from a decorative one.
  * @returns {Promise<{begins: string[], statements: string[], error: Error}>}
  */
-async function recordMigrationBegins(dir, { reportIsolation } = {}) {
+async function recordMigrationBegins(dir, { reportIsolation, applied = [] } = {}) {
   const begins = [];
   const statements = [];
+  const logs = [];
   const state = { nonce: undefined };
   const client = (kind) => ({
     on() {},
     async connect() {},
     async query(sql, parameters = []) {
       const trimmed = sql.trim();
+      if (kind === "control" && sql.includes("select version,checksum from clara.schema_migrations")) {
+        return { rows: applied };
+      }
       if (kind === "execution") statements.push(trimmed);
       if (kind === "execution" && trimmed.startsWith("begin")) {
         begins.push(trimmed);
@@ -583,15 +587,43 @@ async function recordMigrationBegins(dir, { reportIsolation } = {}) {
   let built = 0;
   let error;
   try {
-    await migrate({ dir, log() {}, cleanupTimeoutMs: 200, clientFactory() {
+    await migrate({ dir, log: (line) => logs.push(line), cleanupTimeoutMs: 200, clientFactory() {
       built += 1;
       return built <= 2 ? client(built === 1 ? "lock" : "control") : client("execution");
     } });
   } catch (thrown) {
     error = thrown;
   }
-  return { begins, statements, error };
+  return { begins, statements, logs, error };
 }
+
+test("the applied-skip note finds a pinned migration by CHECKSUM, and claims only what the ledger records", async () => {
+  // The ledger is version -> checksum and records no isolation at all, so the note must not
+  // claim the pin governed the transaction that applied it: every environment ceremonied
+  // before this pin existed applied 0057 at READ COMMITTED and won the coin flip. Law 2, in
+  // the one log line an operator would consult.
+  //
+  // Staged under a DIFFERENT NUMBER with the pinned bytes — the renumber case — so the cell
+  // fails if the lookup ever goes back to keying on the version string.
+  const dir = mkdtempSync(join(tmpdir(), "clara-isolation-applied-"));
+  try {
+    const bytes = readFileSync(join(MIGRATIONS_DIR, `${PINNED_0057}.sql`), "utf8");
+    const renumbered = "0079_wave_e_registry_snapshots";
+    writeFileSync(join(dir, `${renumbered}.sql`), bytes, "utf8");
+    const { begins, logs, error } = await recordMigrationBegins(dir, {
+      applied: [{ version: renumbered, checksum: migrationChecksum(bytes) }],
+    });
+    assert.equal(error, undefined, "an already-migrated database is a clean no-op");
+    assert.deepEqual(begins, [], "nothing was re-applied");
+    const note = logs.find((line) => line.includes("isolation-pinned migration(s) already applied"));
+    assert.ok(note, "the note fires even though the pin landed under another number");
+    assert.match(note, /this run does not re-apply them, and the pin governs only transactions this runner opens/u);
+    assert.doesNotMatch(note, /governed the transaction that applied them/u,
+      "the note must not assert an isolation the ledger never recorded");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("EVERY isolation pin names a real migration file, with exactly those bytes, at an allowed level", () => {
   // Iterates the TABLE, not one hard-coded row: a second pin added without its file, or

@@ -361,11 +361,20 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
       pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
     }
     // A ceremony against an already-migrated database applies nothing, so the per-migration
-    // note below never fires — and silence there would read as "no pin is in play" when the
-    // truth is "the pin already did its work". Say so out loud instead.
-    const appliedPins = MIGRATION_ISOLATION_PINS.filter((pin) => applied.has(pin.version));
+    // note below never fires — and silence there would read as "no pin is in play". Say what
+    // is KNOWN and no more: the ledger records that a version was applied and with which
+    // checksum, never which isolation the transaction that applied it ran at. On every
+    // environment ceremonied before this pin existed, that transaction was READ COMMITTED —
+    // it took the coin flip and won — so a note claiming the pin governed it would be false
+    // in exactly the log line an operator consults.
+    //
+    // Matched by CHECKSUM, like every other identity question here: `applied` is
+    // version -> checksum, and a pinned file that landed under a different number is still
+    // the same file.
+    const appliedChecksums = new Set(applied.values());
+    const appliedPins = MIGRATION_ISOLATION_PINS.filter((pin) => appliedChecksums.has(pin.checksum));
     if (appliedPins.length) {
-      log(`  note: ${appliedPins.length} isolation-pinned migration(s) already applied and skipped (${appliedPins.map((pin) => `${pin.version} · ${pin.isolation}`).join(", ")}) — the pin governed the transaction that applied them`);
+      log(`  note: ${appliedPins.length} isolation-pinned migration(s) already applied and skipped (${appliedPins.map((pin) => `${pin.version} · ${pin.isolation}`).join(", ")}); this run does not re-apply them, and the pin governs only transactions this runner opens`);
     }
 
     let count = 0;

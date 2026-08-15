@@ -1,11 +1,10 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
-import { migrate } from "../scripts/migrate.mjs";
+import { migrate, migrationChecksum } from "../scripts/migrate.mjs";
 import { MIGRATION_SESSION_BASELINE, TRANSACTION_TIMEOUT_MIN_SERVER_VERSION_NUM } from "../scripts/migration-atomicity.mjs";
 import { connectionConfig, disposableDatabaseName, withDatabaseEnv } from "./migrate-harness.mjs";
 
@@ -62,7 +61,7 @@ test("migration session GUCs cannot weaken a later migration", async () => {
     /relation "clara\.guc_missing_relation" does not exist/,
     "the ambient database default is off, so this rejection IS the proof the session pin held");
   assert.deepEqual((await db.query("select version,checksum from clara.schema_migrations order by version")).rows,
-    [{ version: "0001_guc_poison", checksum: createHash("sha256").update(poisonSql, "utf8").digest("hex") }]);
+    [{ version: "0001_guc_poison", checksum: migrationChecksum(poisonSql) }]);
   assert.deepEqual((await db.query("select marker from clara.guc_poison_committed")).rows, [{ marker: "0001 ran" }]);
   assert.equal((await db.query("select to_regclass('clara.guc_later_semantics_started') is null absent")).rows[0].absent, true);
   assert.equal((await db.query("select to_regprocedure('clara.invalid_under_clean_baseline()') is null absent")).rows[0].absent, true);
