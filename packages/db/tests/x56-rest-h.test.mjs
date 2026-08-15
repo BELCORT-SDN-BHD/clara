@@ -19,7 +19,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, hasB3, cleanCloseableFY, recordClientFact, forgeClosedPeriodMovement,
+  has0056, hasB3, reopenerFor, cleanCloseableFY, recordClientFact, forgeClosedPeriodMovement,
   beginClose, attestClose, finalizeClose, abandonClose, reopenFY, verifyClose,
   getCloseReadiness, plainEntry, REVN, EXPN, BANK1, addDaysStr,
 } from "./x56-fixtures.mjs";
@@ -62,7 +62,9 @@ test("reopen-receipt settlement: close -> reopen -> re-close flips the reopen re
   const closed1 = await finalizeClose(owner, { fy: fx.fy });
   assert.ok(closed1.receipt_id, "mandatory setup: the first close succeeds");
 
-  const reopened = await reopenFY(owner, {
+  // [B3] the reversal of a close is a distinct-checker act: reopen as a second eligible human.
+  const settleReopener = await reopenerFor(owner, { closer: owner, alternate: world.users.grace });
+  const reopened = await reopenFY(settleReopener, {
     fy: fx.fy, reason: "x56 reopen-settlement: reopening to prove the re-close settlement",
     correctionTarget: { entry_ids: [closed1.close_entry_id] },
   });

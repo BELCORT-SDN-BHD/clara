@@ -41,7 +41,7 @@ begin
       using errcode = 'CLR10';
   end if;
   select prosrc into v_src from pg_proc
-    where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure;
+    where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text,text)'::regprocedure;
   if v_src is null then
     raise exception '0086: clara.reopen_fiscal_year is absent at its pinned signature'
       using errcode = 'CLR10';
@@ -52,11 +52,29 @@ begin
     raise exception '0086: the live reopen body does not carry part 1''s ends_on route -- the pair applied out of order, or something replaced the body between them'
       using errcode = 'CLR10';
   end if;
-  -- The body must NOT still be 0056's: part 1's own prestate pins that sha, and reading it
-  -- here from the same literal keeps this file independent of part 1's temp table.
+  -- The body must NOT still be 0056's: the same literal part 1's prestate refuses on, read
+  -- here independently rather than handed over.
   if encode(sha256(convert_to(v_src, 'UTF8')), 'hex')
      = '3ecf3380877951b7c984cc1883814a3b44aa4926fe9c5859e4433fc8c1d95f6c' then
     raise exception '0086: the live reopen body is still 0056''s'
+      using errcode = 'CLR10';
+  end if;
+  -- (1b) THE OLD 4-ARG FORM IS GONE. Part 1 drops it; if it survived, a caller could still
+  -- reach a reopen that approves a high-stakes reversal with no segregation determination,
+  -- and the two overloads would make an unqualified 4-arg call ambiguous.
+  if to_regprocedure('clara.reopen_fiscal_year(uuid,text,jsonb,text)') is not null then
+    raise exception '0086: the pre-B3 4-arg reopen_fiscal_year still exists beside the new one'
+      using errcode = 'CLR10';
+  end if;
+  -- (1c) THE SEGREGATION DETERMINATION IS IN THE BODY, in _approve_entry_core's own
+  -- vocabulary. These four tokens are the wall the MAJOR review finding required: without
+  -- them the reversal is a one-human act wearing a two-human costume.
+  if position('distinct_checker' in v_src) = 0
+     or position('self_attestation' in v_src) = 0
+     or position('attestation_required' in v_src) = 0
+     or position('clara.eligible_checker_count(c.firm)' in v_src) = 0
+     or position('self_approval_attestation = v_attest' in v_src) = 0 then
+    raise exception '0086: the reopen body carries no segregation determination (CLR05 arms / eligible-checker count / the attestation on the approved row)'
       using errcode = 'CLR10';
   end if;
 
@@ -146,15 +164,22 @@ begin
   -- never inner-joined away).
   -- =========================================================================
   if not exists (select 1 from pg_proc
-                  where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure
+                  where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text,text)'::regprocedure
                     and prosecdef and pg_get_userbyid(proowner) = 'clara_fn_owner') then
     raise exception '0086: reopen_fiscal_year is not a clara_fn_owner SECURITY DEFINER'
+      using errcode = 'CLR10';
+  end if;
+  -- Part 1 sets role to clara_fn_owner for the replace and resets it. SET ROLE is
+  -- session-scoped, not transaction-scoped, so a missing reset would follow the runner's
+  -- connection into every later migration -- checked here, in the next file, where it shows.
+  if current_role = 'clara_fn_owner' or current_user = 'clara_fn_owner' then
+    raise exception '0086: the session is still running as clara_fn_owner -- part 1 did not reset its role'
       using errcode = 'CLR10';
   end if;
   select coalesce(array_agg(g order by g), '{}') into v_grantees from (
     select distinct case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as g
       from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
-     where p.oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure
+     where p.oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text,text)'::regprocedure
        and a.privilege_type = 'EXECUTE' and a.grantee <> p.proowner) q;
   if v_grantees is distinct from array['clara_authenticated'] then
     raise exception '0086: reopen_fiscal_year grantees are %, expected exactly {clara_authenticated}', v_grantees

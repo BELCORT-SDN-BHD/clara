@@ -15,7 +15,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, freshActiveClient, proposeFY, openFY,
+  has0056, reopenSig, caught, freshActiveClient, proposeFY, openFY,
 } from "./x56-fixtures.mjs";
 
 let ready = false;
@@ -143,7 +143,6 @@ const CLOSE_VERBS = [
   "clara.finalize_close(uuid,text,text)",
   "clara.attest_close_exception(uuid,text,text,text,text)",
   "clara.abandon_close(uuid,text,text)",
-  "clara.reopen_fiscal_year(uuid,text,jsonb,text)",
   "clara.open_fiscal_year(uuid,text,date,date,text,text)",
   "clara.grant_firm_capability(uuid,text,text,text)",
   "clara.revoke_firm_capability(uuid,text,text,text)",
@@ -159,7 +158,9 @@ test("A9 the close/approve-class verb set (verbs + the three close readers, Code
     ["00000000-0000-4000-8000-000000000000", opk("x56-a9")],
   ), "agent_ro begin_close");
 
-  for (const sig of CLOSE_VERBS) {
+  // [B3] the reopen signature is frontier-dependent (p_attestation is appended once B3 lands),
+  // so it joins the sweep by ASKING the catalog rather than by a hard-coded regprocedure.
+  for (const sig of [...CLOSE_VERBS, await reopenSig()]) {
     const r = await rootQuery(
       `select has_function_privilege('clara_agent_ro', $1::regprocedure, 'EXECUTE') as agent_ro,
               has_function_privilege('clara_wake_proactive', $1::regprocedure, 'EXECUTE') as wake_proactive,

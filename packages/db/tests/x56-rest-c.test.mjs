@@ -424,9 +424,15 @@ test("A28 key 2 and key 3 are independent: key-2-only admits close but not reope
   assert.equal(closeErr2.code, "CLR04");
   assert.equal(JSON.parse(closeErr2.detail ?? "{}").capability, "close_and_attest");
 
+  // [B3] the reopen is also a DISTINCT-CHECKER act: the human who signed a close may not
+  // reverse it. `fx` was closed by `human` itself, so key-3-only is exercised against a year
+  // OWNER closed -- which is what the cell is actually about (does key 3 alone admit reopen?),
+  // now measured without also asking one human to check their own work.
+  await beginClose(owner, { fy: fx2.fy });
+  await finalizeClose(owner, { fy: fx2.fy });
   const reopened2 = await reopenFY(human, {
-    fy: fx.fy, reason: "x56 a28: key-3-only reopen succeeds",
-    correctionTarget: { entry_ids: [fx.revenueEntry] },
+    fy: fx2.fy, reason: "x56 a28: key-3-only reopen succeeds",
+    correctionTarget: { entry_ids: [fx2.revenueEntry] },
   });
   assert.ok(reopened2.reopen_receipt_id, "key-3-only: reopen SUCCEEDS");
 

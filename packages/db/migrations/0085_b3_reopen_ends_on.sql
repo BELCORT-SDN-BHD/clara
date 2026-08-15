@@ -8,68 +8,67 @@
 -- packages/db/scripts/migrate.mjs skips any filename without four leading digits, so an
 -- unnumbered file would silently never apply and every gate would pass on an unchanged DB.
 --
--- TWO FILES, ONE CHANGE, ORDER OBLIGATORY. This file carries the prestate, the replaced body
--- and the post-checks that make the replacement SAFE to leave in place; its sibling
--- 0086_b3_reopen_ends_on_part2.sql carries the estate-wide censuses and MUST FOLLOW, and
--- REFUSES to apply unless this one already did. NAMED RESIDUE: between the two commits the
--- new body is live with its safety post-checks passed but the estate-wide approve-writer
--- census not yet re-taken. If part 2 fails the run aborts with part 1 applied -- fix forward
--- with a new migration, never by hand-editing either file.
+-- TWO FILES, ONE CHANGE, ORDER OBLIGATORY. This file carries the prestate and the replaced
+-- body; its sibling 0086_b3_reopen_ends_on_part2.sql carries EVERY post-check and census and
+-- MUST FOLLOW -- it refuses to apply unless this one already did, by two independent reads
+-- (part 1's ledger row, and the live body's own markers). NAMED RESIDUE: between the two
+-- commits the replaced body is live and NOT yet verified from outside; what stands in that
+-- window is the body's own per-act assertions (it re-reads its landed date, status and permit
+-- consumption and raises) plus the prestate that refused to replace an unrecognised body. If
+-- part 2 fails the run aborts with part 1 applied -- fix forward, never by hand-editing either.
 --
 -- WHAT WAS WRONG, MEASURED ON A FULLY MIGRATED RIG BEFORE ANY EDIT (transcript in the PR
 -- record). 0056's reopen routes its unwind through clara.reverse_entry, and
 -- clara.is_high_stakes returns TRUE for any is_year_end entry -- which the mirror INHERITS, so
 -- reverse_entry's high-stakes arm left the mirror a DRAFT and never stamped the original's
--- reversed_by: mirror.status='draft' · mirror.posting_date=TODAY · original.reversed_by=null ·
--- the reopen_reversal permit at entries_used=0. The close was not unwound AT ALL, and the one
--- entry claiming to unwind it sat outside the year it belonged to. A re-close then recomputed
--- a P&L the still-standing closing entry had already zeroed, minted nothing, and the whole
--- reopen round-tripped to a silent no-op. Both halves die here.
+-- reversed_by: mirror.status='draft' · posting_date=TODAY · original.reversed_by=null · the
+-- permit at entries_used=0. The close was not unwound AT ALL, and a re-close then recomputed a
+-- P&L the still-standing closing entry had already zeroed and minted nothing.
 --
--- THE RULING, AND WHY THE ORDER CHANGED. ADR-068 (1): a year-end close pair is PERIOD
--- MACHINERY, not a business transaction, so placing its reversal in its own period falsifies
--- nothing -- while today-dating it pollutes the successor year's interim P&L with the whole
--- reopened year until the successor's own close. The never-backdate law STANDS for transaction
--- reversals: clara.reverse_entry is NOT TOUCHED here (pinned unmoved below) and no verb gains
--- a caller-supplied posting date. The one backdated write in the estate is the one the permit
--- NAMES.
+-- BUT THAT STALL WAS DOING REAL WORK, and B3 must not cash it in: a DRAFT mirror could only be
+-- approved by a SECOND human through approve_entry, whose CLR05 wall refuses distinct_checker.
+-- Approving in-body without that determination would turn a two-human act into a one-human
+-- one, so the SEGREGATION block below carries the wall explicitly -- 0084's B4 pattern, in
+-- clara._approve_entry_core's own vocabulary, measured against the CLOSER (see its comment).
 --
---   0056's order was: status flip -> receipts -> reverse_entry (the permit a mere BELT that
---   nothing ever consumed, because flipping first made the wall pass everything).
---   THIS file's order is: permit -> mirror (draft -> census-visible flip, CONSUMING the
---   permit while the year is still CLOSED) -> status flip -> the original's reversal-linkage
---   stamp -> receipts. The permit becomes LOAD-BEARING: it names exactly one PRE-GENERATED
---   entry id, admits exactly one approved-class touch, and is consumed exactly once. A second
---   touch under it finds no capacity; a touch on any other id never matches its target at all.
---   The linkage stamp on the ORIGINAL is deliberately AFTER the flip -- it touches an
---   already-approved row, and giving the permit a second unit to cover it would be the generic
---   backdating door this shape exists to keep shut.
+-- THE RULING. ADR-068 (1): a year-end close pair is PERIOD MACHINERY, not a business
+-- transaction, so placing its reversal in its own period falsifies nothing -- while
+-- today-dating it pollutes the successor year's interim P&L with the whole reopened year. The
+-- never-backdate law STANDS for transaction reversals: clara.reverse_entry is NOT TOUCHED here
+-- (part 2 pins it unmoved) and no verb gains a caller-supplied posting DATE.
 --
--- The four reversal walls reverse_entry carries are CALLED BY NAME rather than argued away,
--- and the subledger hook is CALLED with its no-op then ASSERTED -- as finalize_close does for
--- the closing entry it mints. THE ACT'S OWN FACTS ARE UNMOVED: created_at is now(), the actor
--- is the reopening human, the receipts and audit rows carry the true moment. Only posting_date
--- -- the ACCOUNTING date, which is what a period is made of -- is the year's end.
+--   0056's order: status flip -> receipts -> reverse_entry (the permit a BELT nothing consumed,
+--   because flipping first made the wall pass everything). THIS file's order: segregation ->
+--   permit -> mirror (draft -> census-visible flip, CONSUMING the permit while the year is
+--   still CLOSED) -> status flip -> the original's linkage stamp -> receipts. The permit is
+--   LOAD-BEARING: one PRE-GENERATED entry id, one approved-class touch, consumed once. The
+--   linkage stamp sits AFTER the flip deliberately -- giving the permit a second unit would
+--   widen it from one named entry to two.
 --
--- D1 WRITE-QUIESCE BINDS THIS DEPLOY: it replaces a deployed audited writer's body, and
--- PostgreSQL runs an in-flight PL/pgSQL call to completion on the body it STARTED with, so a
--- reopen spanning this migration would run the OLD route. Apply inside a write-quiesce window
--- (packages/db/README.md, "Deploy contract").
+-- The four reversal walls reverse_entry carries are CALLED BY NAME rather than argued away, and
+-- the subledger hook is CALLED with its no-op then ASSERTED. THE ACT'S OWN FACTS ARE UNMOVED:
+-- created_at is now(), the actor is the reopening human, the receipts and audit rows carry the
+-- true moment. Only posting_date -- the ACCOUNTING date -- is the year's end.
 --
--- CELLS: packages/db/tests/x85-b3-reopen-ends-on.test.mjs (contract-blind: every claim is
--- probed off the LIVE catalog, never this file).
+-- D1 WRITE-QUIESCE BINDS THIS DEPLOY: it replaces a deployed audited writer's body AND changes
+-- its signature (p_attestation appended + defaulted, the 4-arg form dropped), so an in-flight
+-- call spanning it would run the OLD route. Apply inside a write-quiesce window
+-- (packages/db/README.md). No runtime or dashboard caller exists today.
+--
+-- CELLS: packages/db/tests/x85-b3-*.test.mjs (contract-blind: every claim is probed off the
+-- LIVE catalog or a behavioural run, never off this file).
 set local statement_timeout = '5min';
 
 -- =====================================================================================
 -- S0 -- PRESTATE. Everything this file's new order DEPENDS ON is measured here, before
 -- anything changes. The dependency is NEW: 0056 could afford the wall being a belt; this
--- file writes into a still-closed year and cannot.
+-- file writes into a still-closed year and cannot. No stash table -- every value compared
+-- against is a LITERAL here or in part 2, which outlives the transaction a temp table dies in.
+-- The callee roster 0056 checked is NOT re-checked: `check_function_bodies` resolves every
+-- static call in the replacement at CREATE time, so the create below IS that check.
 -- =====================================================================================
-create temp table _b3_pre(k text primary key, v text not null) on commit drop;
-insert into _b3_pre values ('deploy_user', current_user), ('deploy_role', current_role);
-
 do $pre$
-declare v_src text; v_wall text; v_imm text; v_grantees text[]; v_n int; v_missing text;
+declare v_src text; v_wall text; v_imm text; v_n int; v_missing text;
 begin
   -- (0.1) The change-of-record owners this file reads or replaces must be applied, in order.
   select coalesce(string_agg(s.n, ', '), '') into v_missing
@@ -79,20 +78,6 @@ begin
     raise exception '0085 S0.1: not recorded as applied: % -- apply in order', v_missing
       using errcode = 'CLR10';
   end if;
-
-  -- (0.2) Every function the replaced body calls exists at the signature it is called by.
-  select coalesce(string_agg(s.n, ', '), '') into v_missing from unnest(array[
-    'clara.reopen_fiscal_year(uuid,text,jsonb,text)', 'clara.reverse_entry(uuid,text,text)',
-    'clara._assert_balanced(uuid)', 'clara._subledger_on_approve(uuid)',
-    'clara._subledger_allocated_items_present(uuid)', 'clara._bank_live_match_present(uuid)',
-    'clara._fa_reversal_blocked(uuid)', 'clara._wdb_reversal_blocked(uuid)',
-    'clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)',
-    'clara._append_event(uuid,text,uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb)'
-  ]) s(n) where to_regprocedure(s.n) is null;
-  if v_missing <> '' then
-    raise exception '0085 S0.2: required function(s) absent: %', v_missing using errcode = 'CLR10';
-  end if;
-
   -- (0.3) THE BODY BEING REPLACED, PINNED EXACTLY (the 0084 precedent): prosrc is the body
   -- alone, no signature and no formatting drift, so a checksum is honest here.
   select prosrc into v_src from pg_proc
@@ -116,12 +101,10 @@ begin
     raise exception '0085 partial birth: the reopen body already dates something at ends_on'
       using errcode = 'CLR10';
   end if;
-  insert into _b3_pre values ('old_prosrc_sha256', encode(sha256(convert_to(v_src, 'UTF8')), 'hex'));
   -- (0.4) THE WALL MUST ACTUALLY ENFORCE. 0056 could treat the permit as a belt because it
   -- flipped the year open first; this file writes INTO a closed year and is admitted only by
-  -- the permit. Both triggers (entry + lines sibling), their bindings and the wall's three
-  -- load-bearing clauses are therefore read POSITIVELY -- an absent arm would make the new
-  -- order a silent open door.
+  -- the permit. Both triggers, their bindings, and the wall's load-bearing clauses are read
+  -- POSITIVELY -- an absent arm would make the new order a silent open door.
   select count(*) into v_n from pg_trigger g
     where not g.tgisinternal and g.tgenabled = 'O'
       and ((g.tgrelid = 'clara.journal_entries'::regclass and g.tgname = 't_period_wall'
@@ -132,13 +115,18 @@ begin
     raise exception '0085 S0.4: the enabled period-wall pair on journal_entries + journal_lines reads % of 2', v_n
       using errcode = 'CLR10';
   end if;
-  select prosrc into v_wall from pg_proc where oid = 'clara._tf_period_wall()'::regprocedure;
-  if position('reopen_reversal' in v_wall) = 0
-     or position('new.id = p.target_entry_id' in v_wall) = 0
+  -- THE ARM PROBE READS THE REOPEN ARM, NOT WHICHEVER COMES FIRST. `position('reopen_reversal')`
+  -- and `position('new.id = p.target_entry_id')` are BOTH satisfied by the close_entry arm --
+  -- position() returns the FIRST occurrence -- so a recut that narrowed exactly the arm this
+  -- file depends on would deploy green and fail at run time on a live reopen. The probe is the
+  -- reopen arm's OWN predicate, whole and contiguous, over the whitespace-collapsed body.
+  select regexp_replace(prosrc, '\s+', ' ', 'g') into v_wall from pg_proc
+    where oid = 'clara._tf_period_wall()'::regprocedure;
+  if position('p.purpose = ''reopen_reversal'' and (new.reversal_of = p.target_entry_id or new.id = p.target_entry_id)' in v_wall) = 0
      or position('entries_used < p.entries_expected' in v_wall) = 0
      or position('entries_used = entries_used + 1' in v_wall) = 0
      or position('write_into_closed_period' in v_wall) = 0 then
-    raise exception '0085 S0.4: _tf_period_wall no longer carries the target-bound reopen_reversal arm, the capacity test or the consumption -- the new order rests on all three'
+    raise exception '0085 S0.4: _tf_period_wall no longer carries the reopen_reversal arm''s own target predicate, the capacity test or the consumption -- the new order rests on all three'
       using errcode = 'CLR10';
   end if;
   -- The permit table still binds a target on every row and still admits the purpose.
@@ -159,45 +147,38 @@ begin
     raise exception '0085 S0.5: _tf_entry_immutable no longer carries the draft-to-approved arm or the reversal-linkage-pair arm -- the mirror flip and the original''s stamp both rest on them'
       using errcode = 'CLR10';
   end if;
-  -- (0.6) THE 0057 S11.2 OBLIGATION, FORWARD ARM. reopen_fiscal_year becomes a DIRECT
-  -- journal_entries writer here -- exactly the roster shape 0057 censuses: a named mover's
-  -- effect table must carry the staleness trigger, or a reopen would move presented figures
-  -- with nothing marking the snapshots that showed them.
-  select count(*) into v_n from pg_trigger g
-    where g.tgrelid = 'clara.journal_entries'::regclass and g.tgname = 't_snapshot_staleness'
-      and not g.tgisinternal;
-  if v_n <> 1 then
-    raise exception '0085 S0.6: journal_entries carries no staleness trigger -- the new mover would be uncovered'
+  -- (0.6) THE SEGREGATION WALL THIS BODY EXTENDS must still be the one it was derived from:
+  -- _approve_entry_core's high-stakes arms and the counter they use. The body re-implements
+  -- them for an approval it performs in-body, so a recut that dropped or renamed one would
+  -- leave this file enforcing a rule the estate no longer keeps.
+  select prosrc into v_imm from pg_proc
+    where oid = 'clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure;
+  if position('distinct_checker' in v_imm) = 0
+     or position('self_attestation' in v_imm) = 0
+     or position('attestation_required' in v_imm) = 0
+     or position('clara.eligible_checker_count(c.firm)>=2' in v_imm) = 0 then
+    raise exception '0085 S0.6: _approve_entry_core no longer carries the CLR05 high-stakes arms this body extends -- re-derive the reopen segregation rule against the live wall'
       using errcode = 'CLR10';
   end if;
-  -- (0.7) The grant surface is exactly what 0056 left, and this file must not move it.
-  select coalesce(array_agg(g order by g), '{}') into v_grantees from (
-    select distinct case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as g
-      from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
-     where p.oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure
-       and a.privilege_type = 'EXECUTE' and a.grantee <> p.proowner) q;
-  if v_grantees is distinct from array['clara_authenticated'] then
-    raise exception '0085 S0.7: reopen_fiscal_year grantees are %, expected exactly {clara_authenticated}', v_grantees
-      using errcode = 'CLR10';
-  end if;
-  -- reverse_entry's own body is stashed so the tail can prove this file left it alone.
-  insert into _b3_pre
-    select 'reverse_entry_sha256', encode(sha256(convert_to(prosrc, 'UTF8')), 'hex')
-      from pg_proc where oid = 'clara.reverse_entry(uuid,text,text)'::regprocedure;
+  -- Note: the 0057 staleness obligation, the grantee surface and reverse_entry's own pin are
+  -- END-state claims, so part 2 makes them where they can actually be measured.
 end $pre$;
 set role clara_fn_owner;
 -- =====================================================================================
--- S1 -- THE BODY. 0056's, carried across verbatim except for the EFFECTS section, which is
--- rewritten whole: every guard, both ordering checks, the acquisition order and the dedupe
--- are unchanged, and the correction-target reader gains two explicit shape arms.
+-- S1 -- THE BODY. 0056's, carried across verbatim except for the SEGREGATION and EFFECTS
+-- sections: every guard, both ordering checks, the acquisition order and the dedupe are
+-- unchanged; the correction-target reader gains two explicit shape arms.
 -- =====================================================================================
 create or replace function clara.reopen_fiscal_year(
-    p_fy uuid, p_reason text, p_correction_target jsonb, p_op_key text) returns jsonb
+    p_fy uuid, p_reason text, p_correction_target jsonb, p_op_key text,
+    p_attestation text default null) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; v_fy record; v_dedupe jsonb; v_receipt record; v_entry uuid;
   v_new_receipt uuid; v_target_ok boolean := false; e uuid;
   v_mirror uuid; v_permit uuid; v_used int; v_n int; v_posted date; v_status text;
+  v_eligible int; v_checked uuid; v_attest text; v_self boolean; v_mode text;
+  v_reversal jsonb;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if not clara._has_capability(c.firm, c.actor, 'reopen') then
@@ -319,14 +300,59 @@ begin
   end if;
 
   -- ===================================================================================
-  -- EFFECTS (B3, ADR-068 ruling 1). The prior-period adjustment lands FIRST, while the
-  -- year is still CLOSED, so the permit is what admits it rather than an already-open
-  -- door. Then the status flip; then the original's linkage stamp; then the receipts.
+  -- SEGREGATION ON THE REVERSAL -- 0084's B4 pattern extended to this act, in
+  -- clara._approve_entry_core's OWN vocabulary (CLR05 · distinct_checker · self_attestation ·
+  -- attestation_required; no new refusal words minted). The mirror is HIGH-STAKES by
+  -- construction and this body approves it in-body, so the wall binding every other
+  -- high-stakes approval must bind here too. Pre-B3 it applied BY ACCIDENT -- the mirror was
+  -- left a draft and a second human approved it through approve_entry -- and that accident
+  -- was doing real work.
+  --
+  -- MEASURED AGAINST THE CLOSER, NOT THE REOPENER, and that choice is the design. The
+  -- reopener necessarily AUTHORS the mirror, so measuring maker-vs-checker against themselves
+  -- would refuse every reopen in every multi-checker firm and name no reachable remedy -- a
+  -- rule with no lawful path is a broken verb, not a control. The human CHECKED is the one
+  -- who signed the close being reversed; a different eligible human reopening it is two
+  -- accountable humans, each under their own credential -- finalize_close's own shape. And
+  -- NOBODY'S CONSENT IS ASSERTED BY ANYBODY ELSE: there is no p_checker naming an absent
+  -- human, because a uuid typed by one human is not another's approval.
+  -- ===================================================================================
+  v_eligible := clara.eligible_checker_count(c.firm);
+  select je.checker_actor into v_checked from clara.journal_entries je where je.id = v_entry;
+  v_checked := coalesce(v_checked, v_receipt.closed_by);
+  v_attest  := nullif(btrim(coalesce(p_attestation, '')), '');
+  -- THE NULL ARM IS ITS OWN ARM. A close recording no accountable signer makes
+  -- `v_checked = c.actor` evaluate to NULL, so no arm below would fire and the reversal would
+  -- approve with neither a checker nor an attestation -- 0084's own first defect, where a
+  -- branch meant to be permissive became no branch at all.
+  if v_eligible = 0 then
+    raise exception 'this firm has no eligible human checker; a signed close cannot be reversed'
+      using errcode = 'CLR05', detail = '{"reason":"no_eligible_human"}';
+  elsif v_checked is null and v_attest is null then
+    raise exception 'the close being reopened records no accountable signer -- adopt its reversal with an explicit attestation'
+      using errcode = 'CLR05', detail = '{"reason":"attestation_required"}';
+  elsif v_eligible >= 2 and v_checked = c.actor then
+    raise exception 'the reversal of a year-end close is high-stakes and needs a distinct checker: a close may not be reopened by the human who signed it -- a different eligible human holding the reopen capability must perform it'
+      using errcode = 'CLR05', detail = '{"reason":"distinct_checker"}';
+  elsif v_checked = c.actor and v_attest is null then
+    raise exception 'the sole eligible human may reverse their own close only with an explicit attestation'
+      using errcode = 'CLR05', detail = '{"reason":"self_attestation"}';
+  end if;
+  -- The DETERMINATION, recorded rather than inferred. An attestation is kept only where it was
+  -- REQUIRED (0084's `case when v_attest_required` shape), so a volunteered string on a genuine
+  -- two-person reopen never reads as a self-approval on the permanent record.
+  v_self := v_checked is null or v_checked = c.actor;
+  v_mode := case when v_self then 'solo_self_attested' else 'two_person' end;
+  if not v_self then v_attest := null; end if;
+
+  -- ===================================================================================
+  -- EFFECTS (B3, ADR-068 ruling 1). The prior-period adjustment lands FIRST, while the year
+  -- is still CLOSED, so the permit is what admits it. Then the status flip; then the
+  -- original's linkage stamp; then the receipts. The four walls reverse_entry carries are
+  -- CALLED BY NAME rather than argued away: a P&L-to-retained-earnings roll touches none of
+  -- those domains, but that is a property of the chart, so it is proven per reopen.
   -- ===================================================================================
   if v_entry is not null then
-    -- The four walls reverse_entry carries, CALLED BY NAME on the closing entry rather than
-    -- argued away: a P&L-to-retained-earnings roll touches none of these domains, but that is
-    -- a property of the chart, so it is proven per reopen.
     if clara._subledger_allocated_items_present(v_entry) then
       raise exception 'the closing entry carries allocated open items; unallocate before reopening'
         using errcode = 'CLR10', detail = '{"reason":"allocated_items_present"}';
@@ -348,9 +374,8 @@ begin
         'reopen_reversal', v_mirror, 1)
       returning id into v_permit;
     -- THE MIRROR, DATED ends_on. Per-line inverse at the finest grain the original carries
-    -- (never a net aggregate: a summarised unwind that ties in total still leaves every
-    -- account wrong). Born a DRAFT then flipped -- finalize_close's authoring path, and the
-    -- only one the approve-writer census can see.
+    -- (never a net aggregate: a summarised unwind that ties in total still leaves every account
+    -- wrong). Born a DRAFT then flipped -- the only path the approve-writer census can see.
     insert into clara.journal_entries(id, client_id, status, posting_date, memo, origin,
         resolution_id, is_opening_balance, is_year_end, tax_affecting,
         maker_actor, last_human_editor, reversal_of, reversal_reason)
@@ -365,12 +390,11 @@ begin
              l.description, l.counterparty_id
         from clara.journal_lines l where l.entry_id = v_entry order by l.line_no;
     perform clara._assert_balanced(v_mirror);
-    -- THE CENSUS-VISIBLE FLIP (matrix A19e's shape): the statement that consumes the permit,
-    -- and an insert-approved would be invisible to 0045's approve-writer detector. The
-    -- reopening human is maker and checker of PERIOD MACHINERY under the reopen capability
-    -- (key 3), as the closer is of the closing entry finalize_close mints.
+    -- THE CENSUS-VISIBLE FLIP (matrix A19e's shape): the statement that consumes the permit;
+    -- an insert-approved would be invisible to 0045's approve-writer detector. The segregation
+    -- determination above is what licenses it, and its attestation rides the row.
     update clara.journal_entries set status='approved', approved_at = now(),
-        checker_actor = c.actor
+        checker_actor = c.actor, self_approval_attestation = v_attest
       where id = v_mirror;
     perform clara._subledger_on_approve(v_mirror);
     select count(*) into v_n from clara.open_items oi where oi.entry_id = v_mirror;
@@ -394,13 +418,11 @@ begin
         using errcode = 'CLR19', detail = '{"reason":"write_into_closed_period"}';
     end if;
   end if;
-  -- The year leaves 'closed' only now: everything backdated is already written, under a
-  -- permit that is already spent.
+  -- The year leaves 'closed' only now: everything backdated is written, under a spent permit.
   update clara.fiscal_years set status = 'reopened' where id = p_fy;
   -- THE LINKAGE STAMP on the original: a touch of an already-approved row, so it takes the
-  -- immutability arm admitting exactly the complete reversed_by/reversal_reason pair. It sits
-  -- AFTER the flip deliberately -- covering it with permit capacity would widen the permit
-  -- from one named entry to two, which is the door this shape exists to keep shut.
+  -- immutability arm admitting exactly the complete reversed_by/reversal_reason pair. AFTER the
+  -- flip deliberately -- permit capacity for it would widen the permit from one entry to two.
   if v_entry is not null then
     update clara.journal_entries
        set reversed_by = v_mirror,
@@ -408,26 +430,43 @@ begin
            updated_at = now()
      where id = v_entry;
   end if;
+  -- THE REVERSAL FACTS ARE BUILT ONCE, AND THE EMPTY ARM SAYS SO IN ITS OWN WORDS. A year with
+  -- no closing entry mints no reversal, so a receipt claiming a prior-period-adjustment basis
+  -- and an ends_on posting date would assert an act that never happened -- and close_receipts
+  -- is what a reviewer reconstructs the year from, years later, with no other source. ONE
+  -- object feeds the receipt, the audit row and the return payload, so they cannot drift.
+  v_reversal := case when v_mirror is null then
+      jsonb_build_object('reversal_entry_id', null, 'reversal_posting_date', null,
+        'reversal_permit_id', null, 'reversal_basis', 'no_closing_entry_to_reverse')
+    else
+      jsonb_build_object('reversal_entry_id', v_mirror, 'reversal_posting_date', v_fy.ends_on,
+        'reversal_permit_id', v_permit,
+        'reversal_basis', 'prior_period_adjustment_at_fiscal_year_end') end;
   update clara.close_receipts set status = 'superseded' where id = v_receipt.id;
   insert into clara.close_receipts(firm_id, client_id, fiscal_year_id, close_run_id,
       prior_close_receipt_id, kind, closed_by, segregation_mode, last_preparer_actor,
       self_attestation, pl_net_cents, retained_earnings_account, closing_tb_digest,
       gate_digest, books_watermark, dataset_sha256, close_entry_id, snapshot)
     values (c.firm, v_fy.client_id, p_fy, v_receipt.close_run_id, v_receipt.id, 'reopen',
-      c.actor, v_receipt.segregation_mode, v_receipt.last_preparer_actor, null,
+      -- THE DETERMINATION IS THE REOPEN'S OWN, not the superseded receipt's copied forward:
+      -- these three columns now record who was checked, under which mode, and the attestation
+      -- if one was required. 0056 copied the close's values and wrote a null attestation.
+      c.actor, v_mode, v_checked, v_attest,
       v_receipt.pl_net_cents, v_receipt.retained_earnings_account,
       v_receipt.closing_tb_digest, v_receipt.gate_digest, v_receipt.books_watermark,
       v_receipt.dataset_sha256, v_entry,
       jsonb_build_object('reason', p_reason, 'correction_target', p_correction_target,
         'superseded_receipt_id', v_receipt.id, 'reopened_by', c.actor,
-        'reversal_entry_id', v_mirror, 'reversal_posting_date', v_fy.ends_on,
-        'reversal_permit_id', v_permit,
-        'reversal_basis', 'prior_period_adjustment_at_fiscal_year_end'))
+        'segregation', jsonb_build_object('mode', v_mode, 'checked_actor', v_checked,
+          'eligible_checker_count', v_eligible, 'attested', v_attest is not null,
+          'basis', case when v_checked is null then 'orphan_close'
+                        else 'closing_entry_checker_or_receipt_signer' end))
+      || v_reversal)
     returning id into v_new_receipt;
   perform clara._audit(c.firm, c.actor, null, null, 'reopen_fiscal_year', v_entry,
     jsonb_build_object('fiscal_year_id', p_fy, 'reopen_receipt_id', v_new_receipt,
-      'superseded_receipt_id', v_receipt.id, 'reversal_entry_id', v_mirror,
-      'reversal_posting_date', v_fy.ends_on, 'op_key', p_op_key));
+      'superseded_receipt_id', v_receipt.id, 'segregation_mode', v_mode,
+      'op_key', p_op_key) || v_reversal);
   if v_mirror is not null then
     -- The reversal gets its OWN receipt naming its OWN entry, reusing the permit's vocabulary.
     perform clara._audit(c.firm, c.actor, null, null, 'reopen_reversal', v_mirror,
@@ -445,56 +484,17 @@ begin
     jsonb_build_object('fiscal_year_id', p_fy, 'reopen_receipt_id', v_new_receipt));
   return clara._finish_op(c.firm, 'reopen_fiscal_year', p_op_key,
     jsonb_build_object('reopen_receipt_id', v_new_receipt, 'fiscal_year_id', p_fy,
-      'reversed_entry_id', v_entry, 'reversal_entry_id', v_mirror,
-      'reversal_posting_date', v_fy.ends_on));
+      'reversed_entry_id', v_entry, 'segregation_mode', v_mode) || v_reversal);
 end $$;
 
-reset role;
+-- THE OLD 4-ARG SIGNATURE IS DROPPED, not left beside the new one. p_attestation is APPENDED
+-- with a DEFAULT (the house shape: approve_entry, approve_pair_reversal, attest_close_exception
+-- all extend this way), so every existing 4-arg call still resolves; leaving the old function
+-- would make the call AMBIGUOUS and would leave a body that still approves a high-stakes
+-- reversal with no segregation determination. The grant is re-issued: a new function has none.
+drop function clara.reopen_fiscal_year(uuid, text, jsonb, text);
+revoke all on function clara.reopen_fiscal_year(uuid, text, jsonb, text, text) from public;
+grant execute on function clara.reopen_fiscal_year(uuid, text, jsonb, text, text)
+  to clara_authenticated;
 
--- =====================================================================================
--- S2 -- THE SAFETY POST-CHECKS. Only what makes leaving this body in place SAFE lives
--- here; the estate-wide censuses are part 2's, which must follow.
--- =====================================================================================
-do $post$
-declare v_src text; v_conf text[];
-begin
-  if current_user <> (select v from _b3_pre where k = 'deploy_user')
-     or current_role <> (select v from _b3_pre where k = 'deploy_role') then
-    raise exception '0085 post: deploy principal was not restored (user %, role %)', current_user, current_role
-      using errcode = 'CLR10';
-  end if;
-  select prosrc, proconfig into v_src, v_conf from pg_proc
-    where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure;
-  if encode(sha256(convert_to(v_src, 'UTF8')), 'hex')
-     = (select v from _b3_pre where k = 'old_prosrc_sha256') then
-    raise exception '0085 post: the reopen body is byte-identical to the one measured before the replace'
-      using errcode = 'CLR10';
-  end if;
-  -- THE ROUTE MOVED: no reverse_entry call remains, the mirror is dated ends_on, and the
-  -- permit names the pre-generated mirror with a budget of one.
-  if position('clara.reverse_entry(' in v_src) <> 0
-     or position('''draft'', v_fy.ends_on' in v_src) = 0
-     or position('''reopen_reversal'', v_mirror, 1' in v_src) = 0 then
-    raise exception '0085 post: the replaced body did not land the ends_on route (reverse_entry call, ends_on draft, or the one-unit target-bound permit is wrong)'
-      using errcode = 'CLR10';
-  end if;
-  -- reverse_entry ITSELF IS UNTOUCHED -- the never-backdate law for transactions is a claim
-  -- about THAT body, so it is measured on that body rather than narrated.
-  if (select encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') from pg_proc
-        where oid = 'clara.reverse_entry(uuid,text,text)'::regprocedure)
-     is distinct from (select v from _b3_pre where k = 'reverse_entry_sha256') then
-    raise exception '0085 post: clara.reverse_entry MOVED during this migration -- it must not'
-      using errcode = 'CLR10';
-  end if;
-  -- POSTURE: definer + pinned search_path. Owner, grants and the estate-wide censuses are
-  -- part 2's, and part 2 refuses to be skipped.
-  if v_conf is null or not (v_conf @> array['search_path=clara, pg_temp']
-                            or v_conf @> array['search_path=clara,pg_temp'])
-     or not exists (select 1 from pg_proc
-                     where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure
-                       and prosecdef) then
-    raise exception '0085 post: the replaced function is not a SECURITY DEFINER with a pinned search_path (proconfig %)', v_conf
-      using errcode = 'CLR10';
-  end if;
-  raise notice '0085 part 1 OK (B3, ADR-068 ruling 1): reopen_fiscal_year mints its OWN reversal of the year-end closing entry, DATED the reopened year''s ends_on, per-line at the finest grain the original carries, born draft and flipped by the census-visible UPDATE while the year is still CLOSED -- admitted by a close-write permit naming exactly ONE pre-generated entry id with a budget of ONE. The body re-reads the row and the permit afterwards (is distinct from, never a bare <>) to prove the date, the status and the single consumption rather than assume them. clara.reverse_entry is byte-identical to its pre-migration body: the never-backdate law for transaction reversals is untouched and no verb gained a caller-supplied posting date. 0086_b3_reopen_ends_on_part2.sql carries the estate-wide censuses and MUST FOLLOW.';
-end $post$;
+reset role;

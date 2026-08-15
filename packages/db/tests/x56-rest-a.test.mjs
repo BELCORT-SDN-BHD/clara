@@ -17,7 +17,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, hasB3, caught, cleanCloseableFY, freshActiveClient, beginClose, finalizeClose,
+  has0056, hasB3, reopenSig, reopenerFor, caught, cleanCloseableFY, freshActiveClient, beginClose, finalizeClose,
   reopenFY, grantCapability, revokeCapability, plainEntry, BANK1, addDaysStr,
   proposeFY, openFY,
 } from "./x56-fixtures.mjs";
@@ -166,7 +166,9 @@ test("A5 a closed FY(n) entry cannot be reversed directly (ordering guard refuse
 
   // Reopen: stated reason, named correction target resolving to a real entry of this
   // client -- mints a reopen receipt (right answer).
-  const reopened = await reopenFY(owner, {
+  // [B3] a close is reversed by a DIFFERENT eligible human than the one who signed it.
+  const a5Reopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
+  const reopened = await reopenFY(a5Reopener, {
     fy: fx.fy, reason: "x56 a5: correcting the FY1 revenue entry via the audited reopen path",
     correctionTarget: { entry_ids: [fx.revenueEntry] },
   });
@@ -184,7 +186,7 @@ test("A5 a closed FY(n) entry cannot be reversed directly (ordering guard refuse
   const fx2 = await cleanCloseableFY(owner, { tag: "a5-notarget", prepSub: world.users.hana, startsOn: "2027-01-01" });
   await beginClose(owner, { fy: fx2.fy });
   await finalizeClose(owner, { fy: fx2.fy });
-  const errNoTarget = await caught(() => reopenFY(owner, { fy: fx2.fy, reason: "x56 a5 no target on purpose", correctionTarget: {} }));
+  const errNoTarget = await caught(() => reopenFY(a5Reopener, { fy: fx2.fy, reason: "x56 a5 no target on purpose", correctionTarget: {} }));
   assert.ok(errNoTarget, "a reopen with a correction target resolving to nothing auditable is refused");
   assert.equal(errNoTarget.code, "CLR10");
 });
@@ -211,7 +213,7 @@ test("A5b reopen_fiscal_year's effect order, per frontier: pre-B3 the FY flips B
 
   // Structural: the live body's own statement order.
   const bodyRow = (await rootQuery(
-    "select pg_get_functiondef('clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure) as def",
+    `select pg_get_functiondef('${await reopenSig()}'::regprocedure) as def`,
   )).rows[0];
   const body = bodyRow.def;
   const flipIdx = body.search(/status\s*=\s*'reopened'/i);
@@ -258,7 +260,8 @@ test("A5b reopen_fiscal_year's effect order, per frontier: pre-B3 the FY flips B
   // so what landed was a fresh, correctly-linked DRAFT reversal, today-dated, with
   // the original never stamped. POST-B3 the mirror is APPROVED at the year end and
   // the original carries its linkage. Read what actually happened, not what was assumed.
-  const reopened = await reopenFY(owner, {
+  const a5bReopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
+  const reopened = await reopenFY(a5bReopener, {
     fy: fx.fy, reason: "x56 a5b: reopen to correct the closing entry itself",
     correctionTarget: { entry_ids: [closeEntryId] },
   });

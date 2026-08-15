@@ -19,8 +19,8 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY, bookToday,
-  plainEntry, addDaysStr, BANK1, REVN,
+  has0056, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY, reopenerFor,
+  bookToday, plainEntry, addDaysStr, BANK1, REVN,
 } from "./x56-fixtures.mjs";
 
 let ready = false;
@@ -41,7 +41,11 @@ function skipHere(t) {
   return false;
 }
 
-/** close a clean FY and reopen it; return everything both halves produced. */
+/** close a clean FY and reopen it; return everything both halves produced. The CLOSER and the
+ *  REOPENER are deliberately different humans: post-B3 a year-end close may not be reversed by
+ *  the human who signed it while the firm holds >=2 eligible checkers, which is B3.9's subject
+ *  and every other cell's precondition. reopenerFor() grants the capability and is a no-op on a
+ *  pre-B3 frontier, so these cells stay runnable on both. */
 async function closeThenReopen(tag, { reason = "x85: reopening to correct the year", revCents = 500000, expCents = 200000 } = {}) {
   const owner = world.users.alice;
   const preparer = world.users.hana;
@@ -49,11 +53,12 @@ async function closeThenReopen(tag, { reason = "x85: reopening to correct the ye
   await beginClose(owner, { fy: fx.fy });
   const closed = await finalizeClose(owner, { fy: fx.fy });
   const target = fx.revenueEntry ?? closed.close_entry_id;
+  const reopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
   const before_ = new Date();
-  const reopened = await reopenFY(owner, {
+  const reopened = await reopenFY(reopener, {
     fy: fx.fy, reason, correctionTarget: target ? { entry_ids: [target] } : { check_key: "ar_control_tie" },
   });
-  return { owner, preparer, fx, closed, reopened, calledAt: before_ };
+  return { owner, preparer, reopener, fx, closed, reopened, calledAt: before_ };
 }
 
 // ===========================================================================
@@ -124,7 +129,7 @@ test("B3.1 the reopen reversal is DATED the reopened year's ends_on, inside that
 
 test("B3.2 created_at / approved_at / actor / receipt / audit / events all carry the REAL act, never ends_on", async (t) => {
   if (skipHere(t)) return;
-  const { owner, fx, closed, reopened, calledAt } = await closeThenReopen("b32");
+  const { owner, reopener, fx, closed, reopened, calledAt } = await closeThenReopen("b32");
   const after_ = new Date();
   const m = (await rootQuery(
     `select id, created_at, approved_at, updated_at, maker_actor, checker_actor, last_human_editor
@@ -135,9 +140,19 @@ test("B3.2 created_at / approved_at / actor / receipt / audit / events all carry
   assert.ok(within(m.approved_at), `approved_at is the moment of the act (${m.approved_at})`);
   // And it is emphatically NOT the accounting date: ends_on is a future year here.
   assert.notEqual(String(m.created_at).slice(0, 10), fx.endsOn, "created_at is not ends_on");
-  assert.equal(m.maker_actor, owner, "the reopening human made it");
-  assert.equal(m.checker_actor, owner, "and checked it -- period machinery under the reopen capability, exactly as finalize_close checks the closing entry it mints");
-  assert.equal(m.last_human_editor, owner);
+  assert.equal(m.maker_actor, reopener, "the reopening human made it");
+  assert.equal(m.checker_actor, reopener, "and stands as its checker on the row");
+  assert.equal(m.last_human_editor, reopener);
+  // AND THE REOPENER IS NOT THE CLOSER -- which is what makes the act two-human. The row's
+  // maker and checker are necessarily the same human (one call authors and approves it), so
+  // the segregation lives one level up: in WHO is allowed to make that call at all.
+  assert.notEqual(reopener, owner, "the human who signed the close is not the human who reversed it");
+  const rcptSeg = (await rootQuery(
+    "select segregation_mode, last_preparer_actor, self_attestation from clara.close_receipts where id=$1",
+    [reopened.reopen_receipt_id])).rows[0];
+  assert.equal(rcptSeg.segregation_mode, "two_person", "and the receipt records the determination it took");
+  assert.equal(rcptSeg.last_preparer_actor, owner, "naming the closer as the human who was checked");
+  assert.equal(rcptSeg.self_attestation, null, "with no attestation, because none was required");
 
   // THE RECEIPT: minted now, and it NAMES the reversal, its date and its basis, so the
   // record is recoverable from the receipt alone years later (E-R2's own bar).
@@ -146,7 +161,7 @@ test("B3.2 created_at / approved_at / actor / receipt / audit / events all carry
     [reopened.reopen_receipt_id])).rows[0];
   assert.equal(rcpt.kind, "reopen");
   assert.ok(within(rcpt.closed_at), "the reopen receipt is stamped at the act, not at the year end");
-  assert.equal(rcpt.closed_by, owner, "and attributed to the reopening human");
+  assert.equal(rcpt.closed_by, reopener, "and attributed to the reopening human");
   assert.equal(rcpt.snapshot.reversal_entry_id, m.id, "the receipt names the reversal entry");
   assert.equal(rcpt.snapshot.reversal_posting_date, fx.endsOn, "and the date it was placed at");
   assert.equal(rcpt.snapshot.reversal_basis, "prior_period_adjustment_at_fiscal_year_end",
@@ -160,7 +175,7 @@ test("B3.2 created_at / approved_at / actor / receipt / audit / events all carry
   assert.deepEqual(audits.map((a) => a.fn), ["reopen_fiscal_year", "reopen_reversal"],
     "both receipts are written: the reopen, and the reversal act itself");
   for (const a of audits) {
-    assert.equal(a.actor, owner, `${a.fn} is attributed to the reopening human`);
+    assert.equal(a.actor, reopener, `${a.fn} is attributed to the reopening human`);
     assert.ok(within(a.at), `${a.fn} is stamped at the act`);
   }
   assert.equal(audits[1].entry_id, m.id, "the reversal receipt points at the reversal entry");
@@ -282,14 +297,15 @@ test("B3.4 the reopen's correction target fails CLOSED on every malformed shape,
 // caller to infer it from a missing key.
 // ===========================================================================
 
-test("B3.5 a fiscal year with no closing entry reopens cleanly: no reversal, no permit, and the receipt says so explicitly", async (t) => {
+test("B3.5 a fiscal year with no closing entry reopens cleanly: no reversal, no permit, and the RECEIPT ITSELF says so rather than asserting an adjustment that never happened", async (t) => {
   if (skipHere(t)) return;
   const owner = world.users.alice;
   const fx = await cleanCloseableFY(owner, { tag: "b35", prepSub: world.users.hana, startsOn: "2027-01-01", revCents: 0, expCents: 0 });
   await beginClose(owner, { fy: fx.fy });
   const closed = await finalizeClose(owner, { fy: fx.fy });
   assert.equal(closed.close_entry_id, null, "mandatory setup: a zero-movement year mints no closing entry");
-  const reopened = await reopenFY(owner, {
+  const reopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
+  const reopened = await reopenFY(reopener, {
     fy: fx.fy, reason: "x85 b35: reopening a year that never had a closing entry",
     correctionTarget: { check_key: "ar_control_tie" },
   });
@@ -299,6 +315,123 @@ test("B3.5 a fiscal year with no closing entry reopens cleanly: no reversal, no 
     "select count(*)::int as n from clara.close_write_permits where fiscal_year_id=$1 and purpose='reopen_reversal'",
     [fx.fy])).rows[0].n;
   assert.equal(permits, 0, "and no permit was minted -- a backdating permit with nothing to write is a door left open for no reason");
+
+  // THE RECEIPT IS READ, not assumed. This cell's title advertises a receipt check, so it
+  // performs one: close_receipts is the only source a reviewer reconstructing this year has
+  // years later, and a permanent row claiming a prior-period adjustment on an act that never
+  // occurred is a lie in the durable record, not a cosmetic default.
+  const snap = (await rootQuery(
+    "select snapshot from clara.close_receipts where id=$1", [reopened.reopen_receipt_id])).rows[0].snapshot;
+  assert.equal(snap.reversal_basis, "no_closing_entry_to_reverse",
+    "the receipt names the empty arm in its own words");
+  assert.equal(snap.reversal_entry_id, null, "and asserts no reversal entry");
+  assert.equal(snap.reversal_posting_date, null, "and no posting date for an adjustment that was never made");
   const fy = (await rootQuery("select status from clara.fiscal_years where id=$1", [fx.fy])).rows[0];
   assert.equal(fy.status, "reopened");
+});
+
+// ===========================================================================
+// B3.9 -- SEGREGATION ON THE REVERSAL. The mirror is high-stakes (it inherits
+// is_year_end) and this verb approves it in-body, so the CLR05 wall that binds
+// every other high-stakes approval binds here. Measured against the human who
+// SIGNED the close: a different eligible human reopening is two accountable
+// humans; the signer reopening their own close is self-approval. BOTH arms are
+// red-proofed -- pre-B3 the same call approved with maker=checker and nothing
+// recorded, so both of these cells fail against that body.
+// ===========================================================================
+
+test("B3.9 the human who SIGNED the close cannot reverse it while the firm has >=2 eligible checkers -- CLR05 distinct_checker, and nothing is written", async (t) => {
+  if (skipHere(t)) return;
+  const owner = world.users.alice;
+  const fx = await cleanCloseableFY(owner, { tag: "b39", prepSub: world.users.hana, startsOn: "2027-01-01" });
+  await beginClose(owner, { fy: fx.fy });
+  const closed = await finalizeClose(owner, { fy: fx.fy });
+  const eligible = (await rootQuery(
+    "select clara.eligible_checker_count((select firm_id from clara.clients where id=$1)) as n",
+    [fx.client])).rows[0].n;
+  assert.ok(Number(eligible) >= 2, `mandatory setup: the fixture firm holds >=2 eligible checkers (got ${eligible})`);
+
+  const err = await caught(() => reopenFY(owner, {
+    fy: fx.fy, reason: "x85 b39: the closer attempts to reverse their own close",
+    correctionTarget: { entry_ids: [closed.close_entry_id] },
+  }));
+  assert.ok(err, "the closer may not reopen-and-reverse their own close");
+  assert.equal(err.code, "CLR05", `expected CLR05 (got ${err.code} -- ${err.message})`);
+  assert.equal(JSON.parse(err.detail ?? "{}").reason, "distinct_checker",
+    "and in _approve_entry_core's own vocabulary -- no new refusal word is minted for this act");
+  assert.match(err.message, /different eligible human/i, "the refusal names the remedy, so it is actionable rather than a dead end");
+  // AND AN ATTESTATION DOES NOT BUY PAST IT: at >=2 eligible checkers there is no attestation
+  // door anywhere in the estate, and there is none here.
+  const err2 = await caught(() => reopenFY(owner, {
+    fy: fx.fy, reason: "x85 b39: the closer attempts it again, this time with an attestation",
+    correctionTarget: { entry_ids: [closed.close_entry_id] },
+    attestation: "I am the only one available and I accept responsibility",
+  }));
+  assert.ok(err2, "an attestation is not a door at >=2 eligible checkers");
+  assert.equal(JSON.parse(err2.detail ?? "{}").reason, "distinct_checker");
+
+  // NOTHING WAS WRITTEN by either refusal -- a refusal that half-performed the act would be
+  // worse than one that never fired.
+  const fy = (await rootQuery("select status from clara.fiscal_years where id=$1", [fx.fy])).rows[0];
+  assert.equal(fy.status, "closed", "the year never left 'closed'");
+  const mirrors = (await rootQuery(
+    "select count(*)::int as n from clara.journal_entries where reversal_of=$1", [closed.close_entry_id])).rows[0].n;
+  assert.equal(mirrors, 0, "no reversal entry was minted");
+  const permits = (await rootQuery(
+    "select count(*)::int as n from clara.close_write_permits where fiscal_year_id=$1 and purpose='reopen_reversal'",
+    [fx.fy])).rows[0].n;
+  assert.equal(permits, 0, "and no backdating permit was left behind");
+});
+
+test("B3.9b the SOLE eligible human may reverse their own close, but only through a recorded attestation -- which lands on the entry row AND on the receipt", async (t) => {
+  if (skipHere(t)) return;
+  // A FIRM OF ONE, built in its own world so no other cell's fixtures are touched: every
+  // membership but the owner's is deactivated, so eligible_checker_count = 1 and the
+  // distinct-checker rule cannot be satisfied by anybody at all. This is BELCORT's own shape,
+  // which is why the sole-eligible door has to exist and has to cost an attestation.
+  const solo = await wb.buildWaveBWorld();
+  const owner = solo.users.alice;
+  await rootQuery(
+    "update clara.firm_memberships set status='removed' where firm_id=$1 and user_id <> $2",
+    [solo.firms.A, owner]);
+  const fx = await cleanCloseableFY(owner, { tag: "b39b", startsOn: "2027-01-01" });
+  const eligible = (await rootQuery(
+    "select clara.eligible_checker_count((select firm_id from clara.clients where id=$1)) as n",
+    [fx.client])).rows[0].n;
+  assert.equal(Number(eligible), 1, `mandatory setup: a firm of exactly one eligible checker (got ${eligible})`);
+  await beginClose(owner, { fy: fx.fy });
+  const closed = await finalizeClose(owner, { fy: fx.fy, selfAttestation: "x85 b39b: solo close" });
+
+  // Without the attestation: REFUSED, in the estate's own sole-eligible vocabulary.
+  const err = await caught(() => reopenFY(owner, {
+    fy: fx.fy, reason: "x85 b39b: the sole human reverses their own close, unattested",
+    correctionTarget: { entry_ids: [closed.close_entry_id] },
+  }));
+  assert.ok(err, "even the sole eligible human does not get a frictionless self-reversal");
+  assert.equal(err.code, "CLR05", `expected CLR05 (got ${err.code} -- ${err.message})`);
+  assert.equal(JSON.parse(err.detail ?? "{}").reason, "self_attestation");
+
+  // With it: admitted, and the attestation is RECORDED in both durable places.
+  const att = "x85 b39b: I am the sole eligible checker of this firm and I take responsibility for reversing my own close";
+  const reopened = await reopenFY(owner, {
+    fy: fx.fy, reason: "x85 b39b: the sole human reverses their own close, attested",
+    correctionTarget: { entry_ids: [closed.close_entry_id] }, attestation: att,
+  });
+  assert.ok(reopened.reopen_receipt_id, "the attested sole path is admitted");
+  assert.equal(reopened.segregation_mode, "solo_self_attested", "and the payload names the mode it took");
+  const row = (await rootQuery(
+    "select status, self_approval_attestation, checker_actor from clara.journal_entries where id=$1",
+    [reopened.reversal_entry_id])).rows[0];
+  assert.equal(row.status, "approved", "the reversal is approved");
+  assert.equal(row.self_approval_attestation, att, "the attestation rides the ENTRY row -- where every other self-approved high-stakes entry carries it");
+  const rcpt = (await rootQuery(
+    "select segregation_mode, self_attestation, last_preparer_actor, snapshot from clara.close_receipts where id=$1",
+    [reopened.reopen_receipt_id])).rows[0];
+  assert.equal(rcpt.segregation_mode, "solo_self_attested", "and the RECEIPT records the determination, not the superseded close's copied one");
+  assert.equal(rcpt.self_attestation, att, "with the attestation itself");
+  assert.equal(rcpt.last_preparer_actor, owner, "naming the human who was checked");
+  assert.equal(rcpt.snapshot.segregation.mode, "solo_self_attested");
+  assert.equal(Number(rcpt.snapshot.segregation.eligible_checker_count), 1,
+    "the snapshot records WHY the sole path was lawful -- the count, at the moment of the act");
+  assert.equal(rcpt.snapshot.segregation.attested, true);
 });

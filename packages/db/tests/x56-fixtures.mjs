@@ -38,6 +38,14 @@ export async function hasB3() {
   return r.rows[0].n === 1;
 }
 
+/** The reopen verb's LIVE signature. B3 appends p_attestation (defaulted) and drops the 4-arg
+ *  form, so anything probing by regprocedure has to ask rather than hard-code. */
+export async function reopenSig() {
+  return (await hasB3())
+    ? "clara.reopen_fiscal_year(uuid,text,jsonb,text,text)"
+    : "clara.reopen_fiscal_year(uuid,text,jsonb,text)";
+}
+
 export async function caught(fn) {
   try { await fn(); return null; } catch (e) { return e; }
 }
@@ -155,13 +163,37 @@ export async function abandonClose(sub, { closeRun, reason, opKey = null }) {
   return r.rows[0].r;
 }
 
-export async function reopenFY(sub, { fy, reason, correctionTarget, opKey = null }) {
+/** FRONTIER-AWARE. B3 (ADR-068 ruling 1) appends p_attestation, so the wrapper calls the
+ *  5-arg form once B3 has landed and the 4-arg form before it -- one call site for both. */
+export async function reopenFY(sub, { fy, reason, correctionTarget, opKey = null, attestation = null }) {
+  const b3 = await hasB3();
   const r = await humanQuery(
     sub,
-    "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4) as r",
-    [fy, reason, JSON.stringify(correctionTarget), opKey ?? opk("x56-reopen")],
+    b3
+      ? "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4, p_attestation => $5) as r"
+      : "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4) as r",
+    b3
+      ? [fy, reason, JSON.stringify(correctionTarget), opKey ?? opk("x56-reopen"), attestation]
+      : [fy, reason, JSON.stringify(correctionTarget), opKey ?? opk("x56-reopen")],
   );
   return r.rows[0].r;
+}
+
+/** POST-B3 A REOPEN IS A DISTINCT-CHECKER ACT: the reversal of a year-end close is high-stakes,
+ *  so the human who SIGNED the close may not be the one who reverses it while the firm has >=2
+ *  eligible checkers (clara._approve_entry_core's own CLR05 rule, extended to this act). The
+ *  factory default grants the reopen capability to owners only, so the lawful shape is to grant
+ *  it to a second eligible human and reopen as them. Returns the actor to reopen as -- and is a
+ *  NO-OP on a pre-B3 frontier, where the closer may still reopen their own close. */
+export async function reopenerFor(owner, { closer, alternate, reason = "x56 rig: the reopen is a distinct-checker act" }) {
+  if (!(await hasB3()) || alternate == null || alternate === closer) return closer;
+  // IDEMPOTENT: uq_capability_active is a partial unique index over live grants, so a second
+  // grant to the same human raises. Cells share a world, so this helper is called many times.
+  const live = await rootQuery(
+    `select 1 from clara.firm_capability_grants g
+      where g.user_id=$1 and g.capability='reopen' and g.revoked_at is null`, [alternate]);
+  if (live.rows.length === 0) await grantCapability(owner, { user: alternate, capability: "reopen", reason });
+  return alternate;
 }
 
 export async function verifyClose(sub, { receipt }) {

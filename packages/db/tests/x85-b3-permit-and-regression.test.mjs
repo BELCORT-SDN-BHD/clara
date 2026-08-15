@@ -29,8 +29,8 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, cleanCloseableFY, freshActiveClient, setupCloseCoa, beginClose,
-  attestClose, finalizeClose, reopenFY, bookToday, plainEntry, addDaysStr,
+  has0056, hasB3, caught, cleanCloseableFY, freshActiveClient, setupCloseCoa, beginClose,
+  attestClose, finalizeClose, reopenFY, reopenerFor, bookToday, plainEntry, addDaysStr,
   BANK1, REVN, EXPN,
 } from "./x56-fixtures.mjs";
 
@@ -83,7 +83,9 @@ test("B3.6 the reopen's own close-write permit names the PRE-GENERATED reversal 
   const fx = await cleanCloseableFY(owner, { tag: "b36", prepSub: world.users.hana, startsOn: "2027-01-01" });
   await beginClose(owner, { fy: fx.fy });
   const closed = await finalizeClose(owner, { fy: fx.fy });
-  const reopened = await reopenFY(owner, {
+  // The reopen is a distinct-checker act post-B3 (B3.9); reopen as a second eligible human.
+  const reopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
+  const reopened = await reopenFY(reopener, {
     fy: fx.fy, reason: "x85 b36: reopening to read the permit the act minted",
     correctionTarget: { entry_ids: [closed.close_entry_id] },
   });
@@ -240,11 +242,20 @@ test("B3.8 clara.reverse_entry is BYTE-IDENTICAL to the body B3 was authored aga
     "and its interface is unchanged: there is no posting-date parameter for a caller to backdate through");
   assert.equal(r.prosecdef, true);
   assert.equal(r.owner, "clara_fn_owner");
-  // The reopen verb's own interface is unchanged too -- B3 moved the DATE, never the door.
-  const ro = (await rootQuery(
-    "select pg_get_function_arguments(oid) as args from pg_proc where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure")).rows[0];
-  assert.equal(ro.args, "p_fy uuid, p_reason text, p_correction_target jsonb, p_op_key text",
-    "reopen_fiscal_year gained no date parameter either: the ends_on it uses is READ from the fiscal year, never supplied");
+  // The reopen verb gained EXACTLY ONE parameter and it is an ATTESTATION, not a date: the
+  // ends_on it uses is READ from the fiscal-year row and can never be supplied by a caller.
+  // Frontier-gated, because B3 is what appends it (and drops the 4-arg form, so exactly one
+  // overload exists at either frontier -- asserted, since two would make calls ambiguous).
+  const b3 = await hasB3();
+  const overloads = (await rootQuery(
+    `select count(*)::int as n, string_agg(pg_get_function_arguments(oid), ' | ' order by pronargs) as args
+       from pg_proc where pronamespace='clara'::regnamespace and proname='reopen_fiscal_year'`)).rows[0];
+  assert.equal(Number(overloads.n), 1, `exactly one reopen_fiscal_year exists (got ${overloads.args})`);
+  assert.equal(overloads.args, b3
+    ? "p_fy uuid, p_reason text, p_correction_target jsonb, p_op_key text, p_attestation text DEFAULT NULL::text"
+    : "p_fy uuid, p_reason text, p_correction_target jsonb, p_op_key text",
+    "post-B3 the only new parameter is p_attestation, defaulted -- no posting-date parameter anywhere");
+  assert.doesNotMatch(overloads.args, /date/i, "and no parameter of a date type at either frontier");
 });
 
 test("B3.8b an ordinary transaction reversal is still TODAY-dated, never the original's date (regression floor: green on both sides of B3)", async (t) => {
