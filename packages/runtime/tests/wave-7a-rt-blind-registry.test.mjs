@@ -21,6 +21,7 @@ const registry = await import("../workflows/registry.ts");
 const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
 const entryAutoDraftV5 = await import("../workflows/autoDraft.v5.ts");
+const entryChatTurnV11 = await import("../workflows/chatTurn.v11.ts");
 const entryChatTurnV10 = await import("../workflows/chatTurn.v10.ts");
 const entryChatTurnV9 = await import("../workflows/chatTurn.v9.ts");
 const entryChatTurnV8 = await import("../workflows/chatTurn.v8.ts");
@@ -39,8 +40,17 @@ test("registry pins autoDraft to the v7 export", () => {
   assert.equal(registry.workflows.autoDraft, entryAutoDraftV7.autoDraft_v7);
 });
 
-test("registry pins chatTurn to the v10 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV10.chatTurn_v10);
+// WAVE E / eta (2026-08-15) moved the chatTurn pin one further, v10 -> v11: the ad-hoc
+// authoring closure (five tools, one appended prompt paragraph; the coding lane is v10's,
+// reached by import). The v10 assertion below did not become wrong, it became a POLICY (c)
+// assertion, exactly as the v9 one did at the previous cutover.
+test("registry pins chatTurn to the v11 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV11.chatTurn_v11);
+});
+
+test("registry still EXPORTS chatTurn_v10 so no parked v10 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v10, "function");
+  assert.equal(registry.chatTurn_v10, entryChatTurnV10.chatTurn_v10);
 });
 
 test("registry still EXPORTS autoDraft_v6 so no parked v6 run is stranded (Appendix A policy (c))", () => {
