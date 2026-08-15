@@ -31,6 +31,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-delta-ceremony-asrun.md` | completed/ | The 0058-0063 live ceremony as run: positive reads, the two field findings (SUSET, pooler-pid), deviations with grounds, the no-print DSN bridge. |
 | `wave-e-theta-epsilon-ceremony-asrun.md` | completed/ | The 0064-0072 live ceremony as run (θ+ε together): 9/9 clean, backup-first, the Windows pnpm-shim trap, the probe-defect lesson, the live #43 gate. |
 | `wave-e-final-ceremony-asrun.md` | completed/ | The 0077-0084 live ceremony as run (η wake wrappers + ζ render family + B4): D1 write-quiesce, the chatTurn v11 deploy, the freeze deploy-lock (140/140), positive reads throughout. |
+| `b3-reopen-ceremony-asrun.md` | completed/ | The 0085-0086 live ceremony as run (B3): backup-first, D1 quiesce, ALL-PASS positive reads (81/`0086`, the segregated 5-arg body, the 4-arg form gone), two probe instrument defects owned in-line. |
 
 ## `completed/` — closed waves and slices
 
