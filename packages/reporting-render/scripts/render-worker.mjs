@@ -150,10 +150,11 @@ async function runOneJob(client, job, env) {
     });
     log(`job=${jobId} fonts=${fonts.map((f) => `${f.family}@${f.sha256.slice(0, 12)}`).join(" ")}`);
 
-    // FENCE 1 — BEFORE THE EXPENSIVE STEP. The leader's sweep parks a job `failed` once its lease
-    // has been dead for half a lease more, and this worker may be the reason the lease died: a
-    // legitimately slow render outruns its own lease. Typesetting after losing the job spends money
-    // on bytes nothing will accept, so the worker asks whether it still holds the row and abandons
+    // FENCE 1 — BEFORE THE EXPENSIVE STEP. The leader's sweep parks an at-cap job `failed` as soon
+    // as its lease is dead — immediately, with no grace margin — and a legitimately slow render is
+    // the likeliest reason its own lease died. There is no window in which this worker is safe to
+    // keep going: typesetting after losing the job spends money on bytes the seal will refuse (a
+    // completion needs a LIVE lease). So the worker asks whether it still holds the row and abandons
     // if it does not — WITHOUT calling fail_render_job, because a worker that no longer holds the
     // lease has no authority to write that row's outcome (the stale-authority defect M1 closed).
     if (!(await leaseAlive(client, jobId, WORKER_ID))) {

@@ -8,8 +8,11 @@
 --   file 1 (this)  clara.render_jobs + forced RLS + the lifecycle wall
 --   file 2         clara.render_request_manifest_v1 + clara.enqueue_render_job (the EPSILON
 --                  integration point) + clara.enqueue_missing_render_jobs (the fallback sweep)
---   file 3         clara.claim_render_job / fail_render_job / render_dispatch_begin / _record
+--   file 3         clara.claim_render_job / render_job_payload / fail_render_job /
+--                  reap_exhausted_render_jobs / render_dispatch_begin / _record
 --   file 4         the epsilon seal seam + clara.complete_render_job
+--   file 5 (0079)  the human doors -- replay_render_inputs, requeue_render_job -- and the worker's
+--                  fence, render_lease_alive. Not 0077: eta claimed 0077/0078 (see 0079's header).
 --
 -- WHY A DB QUEUE AND NOT AN HTTP CALL (SS10, four reasons, none of them taste):
 --   (a) the request is enqueued INSIDE the same audited transaction that seals the dataset and

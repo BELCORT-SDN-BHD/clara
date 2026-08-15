@@ -253,17 +253,18 @@ end $$;
 revoke all on function clara.requeue_render_job(uuid, text, boolean) from public;
 
 -- =====================================================================================
--- THE WORKER'S FENCE -- the machine half of the reap fix, and the only runtime verb in this file.
+-- THE WORKER'S FENCE -- the only runtime verb in this file, and the ONLY protection a slow render
+-- gets. There is no grace period anywhere: file 3's reap terminates an at-cap job the moment its
+-- lease is dead. A draft once delayed that reap by half a lease to spare a slow-but-healthy worker,
+-- and the round-4 re-ruling removed it because it protected nothing — an at-cap row can never be
+-- re-claimed and a post-expiry completion is refused anyway — while dispatching paid machines for
+-- unclaimable jobs. Do not re-introduce that margin on the strength of this comment or any other.
 --
--- File 3's reap now waits half a lease past expiry before terminating a job, so a slow-but-healthy
--- render is not killed for being slow. That closes the race from one side only: a worker whose
--- render ran long still has to find out that its lease is gone BEFORE it spends money finishing and
--- BEFORE it tries to seal, or it does the whole job and is refused at the last step.
---
--- So the worker fences itself: it asks this, cheaply, before the expensive typesetting step and
--- again before upload and completion, and abandons quietly if the answer is false -- WITHOUT
--- calling fail_render_job, because a fenced worker has no authority over that row any more and
--- writing a failure it does not own is exactly the stale-authority defect M1 closed.
+-- What a slow worker needs is not more rope but an early answer, so the worker fences itself: it
+-- asks this, cheaply, before the expensive typesetting step and again before upload and completion,
+-- and abandons quietly if the answer is false -- WITHOUT calling fail_render_job, because a fenced
+-- worker has no authority over that row any more and writing a failure it does not own is exactly
+-- the stale-authority defect M1 closed.
 --
 -- It reads one row and returns one boolean. It is STABLE, takes no lock, and tells the caller
 -- nothing about a job it does not hold: the answer for another worker's job, an absent job and a
@@ -345,5 +346,5 @@ begin
   if current_user <> (select v from _zeta_doors_pre where k = 'deploy_principal') then
     raise exception 'zeta doors tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'zeta doors OK: two HUMAN verbs with clara_authenticated their only grantee, and ONE runtime fence with clara_runtime its only grantee -- each proved by a census that can SEE a PUBLIC grant (grantee 0 no longer vanishes in an inner join). replay_render_inputs returns an artifact''s own sealed inputs and moves nothing. requeue_render_job mints a SUCCESSOR to a terminally failed job, RE-DERIVING the pinned request from today''s facts (a verbatim copy would be refused by epsilon''s seal, which re-derives every pin at completion -- so verbatim was a deferred refusal, not a faithful retry) and reporting the predecessor''s digest beside the new one so drift is visible rather than fatal. The failed row itself is never touched: the wall stands and the ledger moves forward. render_lease_alive lets a worker check it still holds its job before spending money and before sealing, so the reap''s half-lease grace and the worker''s own fence close the slow-worker race from both sides. The firm scope of both doors is proven by the behavioural battery, not asserted here -- see the comment above.';
+  raise notice 'zeta doors OK: two HUMAN verbs with clara_authenticated their only grantee, and ONE runtime fence with clara_runtime its only grantee -- each proved by a census that can SEE a PUBLIC grant (grantee 0 no longer vanishes in an inner join). replay_render_inputs returns an artifact''s own sealed inputs and moves nothing. requeue_render_job mints a SUCCESSOR to a terminally failed job, RE-DERIVING the pinned request from today''s facts (a verbatim copy would be refused by epsilon''s seal, which re-derives every pin at completion -- so verbatim was a deferred refusal, not a faithful retry) and REFUSING by default when the re-derived digest differs from the predecessor''s -- the operator is handed both digests and must pass p_accept_drift => true to proceed, so a successor that renders a different document is a consented act rather than an announced one. The failed row itself is never touched: the wall stands and the ledger moves forward. render_lease_alive lets a worker check it still holds its job before spending money and before sealing, which is the ONLY protection a slow render gets: the reap is IMMEDIATE, with no grace margin, because a graced at-cap row is neither claimable nor completable and the delay bought only late terminal signals and paid machines for jobs nobody can claim. The firm scope of both doors is proven by the behavioural battery, not asserted here -- see the comment above.';
 end $tail$;

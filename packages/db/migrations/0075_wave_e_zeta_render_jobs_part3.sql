@@ -53,7 +53,7 @@ declare
     ['claim_phrase_lexicon', 'version'], ['claim_phrase_lexicon', 'phrase'],
     ['claim_phrase_lexicon', 'match_kind'], ['claim_phrase_lexicon', 'effective_from'],
     ['claim_phrase_lexicon', 'effective_to'],
-    -- the verified wording, on the same window file 2 hashed
+    -- the verified wording (this payload draws verified rows; the DIGEST hashes all applicable)
     ['statutory_wording', 'profile_key'], ['statutory_wording', 'wording_key'],
     ['statutory_wording', 'locale'], ['statutory_wording', 'wording_text'],
     ['statutory_wording', 'verification_state'],
@@ -201,8 +201,11 @@ begin
             join clara.chart_template_versions cv on cv.id = d.chart_spec_version_id
            where d.report_run_id = j.report_run_id and d.chart_spec_version_id is not null) x;
 
-  -- VERIFIED wording only, and the same window Z2 hashed. If these two ever disagreed, the
-  -- manifest would pin text the render never saw.
+  -- VERIFIED wording only, on the same period window epsilon's pins use. THE TWO ARE NOT THE SAME
+  -- QUERY: what the renderer may DRAW is verified text, so this filters on verification_state; what
+  -- the manifest PINS is a provenance digest over ALL applicable rows with that state inside the
+  -- hash, so verifying a row MOVES the pin. A window disagreement would pin text the render never
+  -- saw -- but "make the digest verified-only to match" is the wrong repair and breaks the seal.
   select coalesce(jsonb_agg(jsonb_build_object('wording_key', w.wording_key, 'locale', w.locale,
            'wording_text', w.wording_text) order by w.wording_key, w.locale), '[]'::jsonb)
     into v_wording
@@ -334,13 +337,10 @@ revoke all on function clara.reap_exhausted_render_jobs() from public;
 -- Z7 -- THE LEADER'S DISPATCH READ. DUE ARITHMETIC IS DB-OWNED (the reconciler-fa.mjs law):
 -- the runtime asks whether anything is due and is TOLD which jobs; it never re-derives it.
 --
--- THE ATTEMPT IS STAMPED HERE, BEFORE the Fly call, and the cooldown is measured from the
--- attempt. A dispatch that fails therefore backs off for the cooldown instead of re-firing on
--- every ~2s leader cycle; the cost is that a failed start delays the render by one cooldown,
--- which is the DELAYED-not-STRANDED direction A33 arm (ii) requires.
---
--- A job held under a LIVE lease is not due: a worker is on it. An EXPIRED lease is due again,
--- for the same reason Z5 lets it be reclaimed.
+-- THE ATTEMPT IS STAMPED HERE, BEFORE the Fly call, so a failing dispatch backs off for the
+-- cooldown instead of re-firing every ~2s; the cost is one cooldown of delay, which is the
+-- DELAYED-not-STRANDED direction A33 arm (ii) requires. A job under a LIVE lease is not due (a
+-- worker is on it); an EXPIRED lease is due again, for the reason Z5 lets it be reclaimed.
 -- =====================================================================================
 create function clara.render_dispatch_begin(p_cooldown interval default interval '10 minutes',
                                             p_max int default 5) returns jsonb
@@ -496,5 +496,5 @@ begin
   if current_user <> (select v from _zeta_claim_pre where k = 'deploy_principal') then
     raise exception 'zeta claim tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'zeta claim OK: the claim refuses a job at its attempt cap, the DUE READ refuses it too (a job nobody can claim must not start a paid machine), and clara.reap_exhausted_render_jobs parks it `failed` IMMEDIATELY once its lease is dead -- no grace, because a graced at-cap row is neither claimable nor completable and the delay only bought late terminal signals. A slow-but-healthy worker is protected by its own fence (clara.render_lease_alive) instead, which stops it BEFORE it spends money rather than pretending its row is still alive. The claim takes the oldest claimable-or-expired job FOR UPDATE SKIP LOCKED and the dispatch sweep skips locked rows -- BOTH read from the live function bodies rather than asserted from this file -- and the claim records the observed wait on the JOB row. Dispatch stamps its attempt BEFORE the start call so a failing dispatch backs off on its cooldown instead of storming; the outcome is recorded per job, so "could not start the renderer" is a readable fact rather than a silence.';
+  raise notice 'zeta claim OK: the claim refuses a job at its attempt cap, the DUE READ refuses it too (a job nobody can claim must not start a paid machine), and clara.reap_exhausted_render_jobs parks it `failed` IMMEDIATELY once its lease is dead -- no grace, because a graced at-cap row is neither claimable nor completable and the delay only bought late terminal signals. A slow-but-healthy worker is protected by its own fence (clara.render_lease_alive) instead, which stops it BEFORE it spends money rather than pretending its row is still alive. The claim takes the oldest claimable-or-expired job FOR UPDATE SKIP LOCKED while the dispatch sweep and the reap skip locked rows -- all THREE read from the live function bodies rather than asserted from this file -- and the claim records the observed wait on the JOB row. Dispatch stamps its attempt BEFORE the start call so a failing dispatch backs off on its cooldown instead of storming; the outcome is recorded per job, so "could not start the renderer" is a readable fact rather than a silence.';
 end $tail$;

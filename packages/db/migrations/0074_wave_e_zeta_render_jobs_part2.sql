@@ -337,7 +337,12 @@ begin
         using errcode = 'CLR43',
         detail = jsonb_build_object('reason', 'render_job_ambiguous', 'report_run_id', r.id,
           'kind', p_kind,
-          'fix', 'two live jobs for one request means two concurrent enqueues raced across an upstream change; fail the surplus job through clara.fail_render_job and let the remaining one run')::text;
+          -- THE REMEDY IS THE ONE A CALLER CAN ACTUALLY PERFORM (round-6). This used to say "fail
+          -- the surplus job through clara.fail_render_job", which nobody can do: a surplus raced row
+          -- is `claimable` with claimed_by NULL, and fail_render_job requires a running row, a
+          -- matching claimant and a live lease -- and is granted to clara_runtime only. A remedy no
+          -- role can execute is worse than none, because it sends an operator looking for a door.
+          'fix', 'two live jobs for one request means two concurrent enqueues raced across an upstream change. Nothing needs doing by hand: a worker will claim one and complete it, and the other becomes unclaimable the moment an artifact exists for the run -- it then burns its attempts and the leader''s reap parks it `failed` with its reason on the row. Read both jobs first (their manifests differ, which is why the index admitted both) and confirm the one that completes is the request you want; if it is not, requeue the failed one through clara.requeue_render_job once it terminates.')::text;
   end;
   if v_id is not null then
     perform clara._audit(r.firm_id, r.requested_by, null, null, 'enqueue_render_job', null,
@@ -438,5 +443,5 @@ begin
   if current_user <> (select v from _zeta_pin_pre where k = 'deploy_principal') then
     raise exception 'zeta pin tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'zeta pin OK: the request manifest is built from DB facts ONLY -- no caller supplies any part of it -- with every aggregate ORDERED so the same run pins the same bytes. Verified wording only; JSON null means "this pack has none", absence means the gate refuses. enqueue_render_job is the ONE line epsilon''s seal calls and is ungranted to every app role; enqueue_missing_render_jobs is the leader fallback so a missing epsilon call delays a render rather than losing it.';
+  raise notice 'zeta pin OK: the request manifest is built from DB facts ONLY -- no caller supplies any part of it -- with every aggregate ORDERED so the same run pins the same bytes. The wording digest is EPSILON''s and this file no longer derives one: it hashes ALL applicable rows and carries verification_state INSIDE the hash, so verifying a row MOVES the pin -- the state is not a filter, and an unverified row is not invisible to it. JSON null means "this pack has none", absence means the gate refuses. enqueue_render_job is the ONE line epsilon''s seal calls and is ungranted to every app role; enqueue_missing_render_jobs is the leader fallback so a missing epsilon call delays a render rather than losing it.';
 end $tail$;

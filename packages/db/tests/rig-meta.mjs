@@ -165,7 +165,7 @@ const REPORTING_0065_HUMAN_FNS = [
   "seal_report_artifact", "approve_report_for_issue", "verify_report_artifact",
 ];
 const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
-// 0073-0076 [Wave E lane ζ] the render queue. Same closed-set discipline as ε's block above: the
+// 0073-0076 + 0079 [Wave E lane ζ] the render queue. Same closed-set discipline as ε's block above: the
 // estate roster must NAME every function that holds a grant, so a sanctioned addition is a
 // reviewed line here rather than a surprise in the sweep.
 //
@@ -799,7 +799,7 @@ export const ALLOWED = {
     // validators are deliberately ABSENT from this roster: they are granted to nobody, so the
     // sweep's expected=false is the assertion that ζ's and η's JWT-less callers reach them only
     // as clara_fn_owner internals (see the block above)
-    ...RENDER_0073_HUMAN_FNS, // 0073-0076 [Wave E lane ζ] the DR §10 replay door — an OPERATOR's
+    ...RENDER_0073_HUMAN_FNS, // 0079 [Wave E lane ζ] the DR §10 replay door — an OPERATOR's
     // recovery instrument (stable, writes nothing, enqueues nothing), clara_authenticated ONLY
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
@@ -822,10 +822,10 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
-    ...RENDER_0073_RUNTIME_FNS, // 0073-0076 [Wave E lane ζ] the render queue's whole reachable
-    // API: four worker verbs (claim, payload, complete, fail), the leader's dispatch pair, and
-    // the enqueue fallback sweep. clara_runtime holds NO table privilege on clara.render_jobs,
-    // so this roster IS the surface — see the block above for each verb's consumer
+    ...RENDER_0073_RUNTIME_FNS, // 0073-0076 + 0079 [Wave E lane ζ] the render queue's whole
+    // reachable API — the array is the enumeration; the block where it is declared names each
+    // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
+    // this roster IS the surface
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
@@ -975,7 +975,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
-  failures.push(...cohortFailures("0073-0076 wave E render queue", RENDER_0073_COHORT, liveNames));
+  failures.push(...cohortFailures("0073-0076 + 0079 wave E render queue", RENDER_0073_COHORT, liveNames));
   return failures;
 }
 

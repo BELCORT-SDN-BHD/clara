@@ -55,10 +55,11 @@ async function hasDispatchSurface(client) {
 }
 
 /**
- * The dispatch configuration, read POSITIVELY. Returns null when the deploy has not been wired,
- * which is a LOUD no-op rather than a failed dispatch: an unwired leader must not burn a cooldown
- * per cycle stamping attempts it was never able to make. The Fly scheduled machine still picks
- * the work up on its own cadence, so unwired means slower, never stranded.
+ * The dispatch configuration, read POSITIVELY. Returns `{configured: false, missing: [...]}` when
+ * the deploy has not been wired — the NAMES of what is absent, not a bare null, so the log line can
+ * say which secret to set. That is a LOUD no-op rather than a failed dispatch: an unwired leader
+ * must not burn a cooldown per cycle stamping attempts it was never able to make. The Fly scheduled
+ * machine still picks the work up on its own cadence, so unwired means slower, never stranded.
  */
 export function readDispatchConfig(env = process.env) {
   const token = env.CLARA_RENDER_FLY_API_TOKEN;

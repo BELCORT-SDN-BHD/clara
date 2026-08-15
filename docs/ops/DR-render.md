@@ -196,7 +196,8 @@ select clara.requeue_render_job('<failed job id>', 'fly capacity incident 2026-0
   re-runs a client's statements; that is not a machine's decision to make, so no runtime role holds
   this grant and `clara.enqueue_render_job` refuses to resurrect a failed request on its own.
 - The successor **RE-DERIVES the pinned request from today's facts.** It does not copy the
-  predecessor's manifest, and copying was never on offer: `clara.seal_report_artifact`'s gate
+  predecessor's manifest, and copying was never on offer: the seal gate the worker actually goes
+  through — `clara._seal_report_artifact_core`, called by `clara.complete_render_job` —
   re-derives every DB-owned pin at completion and refuses a manifest that disagrees with it. Since
   `clara.statutory_wording` is append-only, one verified row landing after the failure moves the
   aggregate the pins hash — so a verbatim successor would be refused at completion, every time,
