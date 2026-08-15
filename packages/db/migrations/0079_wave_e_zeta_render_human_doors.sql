@@ -1,4 +1,11 @@
--- 0077_wave_e_zeta_render_human_doors.sql -- lane zeta, file 5 of 5 (THE TWO HUMAN DOORS).
+-- 0079_wave_e_zeta_render_human_doors.sql -- lane zeta, file 5 of 5 (THE TWO HUMAN DOORS).
+--
+-- THE NUMBER IS NOT CONTIGUOUS WITH THIS LANE'S OTHER FOUR, and that is correct: 0077/0078 are lane
+-- eta's, claimed while this file was being written, and numbers are claimed at MERGE against the
+-- live frontier rather than reserved in blocks. Nothing here does slot arithmetic -- the prestate
+-- names the OBJECTS it needs (files 1-4's queue and verbs), not the numbers they landed on -- so the
+-- renumber was a rename plus this sentence. The one ordering fact that matters: lexical order is
+-- ledger order, and 0079 applies after eta's two, which it neither reads nor needs.
 --
 --   clara.replay_render_inputs  -- the DR drill's read: an artifact's own sealed inputs (moved
 --                                  here from file 3, unchanged except for the firm scope)

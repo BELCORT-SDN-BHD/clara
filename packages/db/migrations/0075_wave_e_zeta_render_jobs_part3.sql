@@ -405,7 +405,7 @@ grant execute on function
   to clara_runtime;
 
 -- THE HUMAN DOORS ARE FILE 5's. The replay door and the requeue door are granted to
--- clara_authenticated and live in 0077 with their own census — this file's surface is the machine
+-- clara_authenticated and live in 0079 with their own census — this file's surface is the machine
 -- lane and nothing else, which is what lets the census below say "clara_runtime, and no one".
 
 -- THE CENSUS RUNS IN TWO BLOCKS ON PURPOSE. The wiki dynamic-SQL gate (0019 §9) reads a `do` block

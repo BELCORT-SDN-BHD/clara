@@ -182,7 +182,7 @@ const RENDER_0073_RUNTIME_FNS = [
   "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
   "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
 ];
-// THE HUMAN ONES (migration 0077, the two doors a person calls). replay_render_inputs is the DR §10
+// THE HUMAN ONES (migration 0079, the two doors a person calls). replay_render_inputs is the DR §10
 // seven-year drill's executable door: it returns a sealed artifact's OWN pinned inputs so an
 // operator can re-render and compare — STABLE, writes nothing, enqueues nothing.
 // requeue_render_job is the lawful way out of a terminal failure: it mints a SUCCESSOR job (the
