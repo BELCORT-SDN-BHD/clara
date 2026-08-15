@@ -12,11 +12,8 @@
 // file, so the variable stays unset and a pre-zeta database fails LOUDLY. Final acceptance is
 // exactly that focused shape with the variable UNSET, and accounts for ZERO skips.
 //
-// WIRING (a merge-time item, not this lane's file to change): the package test script currently
-// preloads only the delta gate —
-//   "test": "node --test --test-concurrency=1 --import ./tests/delta-preintegration-gate.mjs tests/"
-// Until this module is preloaded alongside it, the package-wide sweep hard-fails on
-// zeta-render-queue.test.mjs against any database without the zeta migrations. Either add a
-// further `--import ./tests/zeta-preintegration-gate.mjs`, or set the variable in the delta gate.
-// This file exists so that wiring is a one-token change by whoever owns package.json.
+// WIRING: packages/db/package.json's `test` script preloads this module alongside the delta,
+// rs-guard, theta and epsilon gates. It was written before that line existed and said the wiring
+// was somebody else's merge-time item; leaving an unwired gate in the tree is exactly the shape
+// that reads as protection and provides none, so the import was added with it.
 process.env.CLARA_ALLOW_MISSING_WAVE_E_ZETA = "1";

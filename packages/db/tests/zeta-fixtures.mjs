@@ -20,6 +20,7 @@ export const ZETA_ENTRYPOINTS = Object.freeze([
   ["render_dispatch_record", "clara.render_dispatch_record(uuid[],boolean,jsonb)"],
   ["complete_render_job", "clara.complete_render_job(uuid,text,text,bigint,jsonb)"],
   ["replay_render_inputs", "clara.replay_render_inputs(uuid)"],
+  ["requeue_render_job", "clara.requeue_render_job(uuid,text)"],
   ["_seal_report_artifact_core",
     "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)"],
 ]);
@@ -94,6 +95,53 @@ export async function sealedRun(tag) {
   const world = await sharedWorld();
   const eps = await buildEpsilonWorld(world, { tag: `zeta-${tag}`, seal: true });
   return { world, eps };
+}
+
+/**
+ * Drive one run all the way to a SEALED ARTIFACT, the way the worker does: enqueue, claim, complete.
+ *
+ * It exists because a cell that needed an artifact used to guard itself with `if (arts.length > 0)`
+ * — and `sealedRun` seals a DATASET, never an artifact, so that guard was always false and the
+ * assertions inside it never ran once. A conditional body is a skip the runner does not count:
+ * the cell reported green while testing nothing. Anything needing an artifact now MAKES one and
+ * asserts unconditionally.
+ *
+ * The environment half of the manifest is synthesised with the SAME shape the worker builds (the
+ * request half is carried verbatim), so a fixture that drifted from the worker would fail epsilon's
+ * shape validation here rather than prove something about itself.
+ */
+export async function sealArtifact(eps, worker = "battery-sealer", kind = "pre_sign") {
+  // Park first: one world serves the file, claim_render_job hands out the OLDEST job, and without
+  // this the fixture completes some earlier case's job and seals an artifact on the wrong run.
+  await parkQueue();
+  await asOwner("select clara.enqueue_render_job($1, $2)", [eps.runId, kind]);
+  const job = (await asRuntime("select clara.claim_render_job($1) j", [worker])).rows[0].j;
+  assert.equal(job?.report_run_id, eps.runId, "the claim must return the job this fixture enqueued");
+  const sha = createSha(worker);
+  const manifest = {
+    ...job.request_manifest,
+    render_request_sha256: job.manifest_sha256,
+    assembler_version: "clara.reporting-render/v1",
+    renderer_image_digest: `sha256:${"c".repeat(64)}`,
+    renderer_source_commit: "d".repeat(40),
+    node_version: "v20.19.5", os_version: "linux test", architecture: "x64",
+    font_engine_version: "typst 0.0.0-test",
+    document_metadata: { title: "battery", creation_date_utc: "2025-12-31T00:00:00Z" },
+    extracted_text_sha256: "e".repeat(64),
+    extraction_tool: "pdftotext (poppler-utils) 0.0.0-test",
+    ...(kind === "pre_sign" ? { pre_sign_pdf_sha256: sha } : {}),
+  };
+  const done = (await asRuntime("select clara.complete_render_job($1, $2, $3, 4096, $4::jsonb) r",
+    [job.render_job_id, worker, sha, JSON.stringify(manifest)])).rows[0].r;
+  assert.ok(done.report_artifact_id, "the fixture must actually seal an artifact");
+  return { jobId: job.render_job_id, artifactId: done.report_artifact_id, sha256: sha };
+}
+
+/** A distinct 64-hex per worker tag, so two fixtures in one file never collide on artifact bytes. */
+function createSha(tag) {
+  let h = 0;
+  for (const ch of tag) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h.toString(16).padStart(8, "0").repeat(8);
 }
 
 /**

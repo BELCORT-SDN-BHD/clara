@@ -202,20 +202,34 @@ test("the same claim phrase in an ELIGIBLE artifact passes and is reported", () 
 });
 
 test("§7(d): manifest-pinned metadata ABSENT from the PDF refuses (codex M11)", () => {
-  const documentMeta = { title: "ACME FS 2025", subject: "statutory 2025-01-01..2025-12-31", keywords: "report_run:abc" };
+  // The checked set is title + keywords: the two values whose EXACT text the manifest owns and the
+  // pinned engine actually writes. The dates are emitted but not substring-checked (the engine
+  // chooses their format); the drill's control arm is what proves that pin is wired.
+  const documentMeta = {
+    title: "ACME FS 2025", keywords: "report_run:abc",
+    creation_date_utc: "2025-12-31T00:00:00Z", source_date_epoch: 1767139200,
+  };
   // Present in the extracted metadata block -> passes.
   ok(assertDocumentMetadataApplied({
-    metadata: "Title: ACME FS 2025\nSubject: statutory 2025-01-01..2025-12-31\nKeywords: report_run:abc",
+    metadata: "Title: ACME FS 2025\nKeywords: report_run:abc\nCreationDate: D:20251231000000Z",
     documentMeta,
   }));
-  // The manifest pins a subject the PDF never carried -> the two disagree, so refuse.
+  // The manifest pins keywords the PDF never carried -> the two disagree, so refuse.
   try {
     assertDocumentMetadataApplied({ metadata: "Title: ACME FS 2025", documentMeta });
     throw new Error("expected a refusal");
   } catch (err) {
     strictEqual(err.reason, "document_metadata_not_applied");
-    strictEqual(err.detail.missing.length, 2);
+    strictEqual(err.detail.missing.length, 1);
+    strictEqual(err.detail.missing[0].key, "keywords");
   }
+  // A date-format difference is NOT a refusal, and this cell says so out loud: the manifest's ISO
+  // date and the Info dictionary's D: form are the same instant written two ways, so checking one
+  // against the other would refuse every real document.
+  ok(assertDocumentMetadataApplied({
+    metadata: "Title: ACME FS 2025\nKeywords: report_run:abc\nCreationDate: Wed Dec 31 00:00:00 2025 UTC",
+    documentMeta,
+  }));
 });
 
 test("the gate refuses on a partial lexicon EVEN IF the document is clean", () => {

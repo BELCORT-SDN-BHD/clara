@@ -172,14 +172,21 @@ test("zeta: dispatch stamps its attempt BEFORE the start call, and records the o
 test("zeta: the fallback sweep enqueues a sealed run that nobody enqueued", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("fallback");
-  const swept = (await asRuntime("select clara.enqueue_missing_render_jobs(25) r")).rows[0].r;
+  // THE SWEEP IS GLOBAL, SO THIS CELL READS ITS OWN RUN RATHER THAN A GLOBAL COUNTER, and asks for
+  // the function's own cap rather than 25. Run against a database holding only this battery's
+  // fixtures both were the same thing; run inside the full suite they are not — other lanes leave
+  // sealed runs behind, they queue AHEAD of this one on requested_at, and one of THEM failing to
+  // enqueue is their fact, not this cell's. `failed = 0` asserted the whole database's tidiness
+  // and would have gone red on a neighbour's fixture while this run was enqueued perfectly.
+  const swept = (await asRuntime("select clara.enqueue_missing_render_jobs(500) r")).rows[0].r;
   assert.ok(swept.enqueued >= 1, "a sealed run with no artifact and no job must be picked up");
-  assert.equal(swept.failed, 0);
+  const mine = (swept.errors ?? []).filter((e) => e.report_run_id === eps.runId);
+  assert.deepEqual(mine, [], `this run must not be among the sweep's failures: ${JSON.stringify(mine)}`);
   const n = (await rootQuery("select count(*)::int n from clara.render_jobs where report_run_id = $1",
     [eps.runId])).rows[0].n;
   assert.equal(n, 1);
   // Idempotent: a second sweep finds nothing to do for the same run.
-  const twice = (await asRuntime("select clara.enqueue_missing_render_jobs(25) r")).rows[0].r;
+  const twice = (await asRuntime("select clara.enqueue_missing_render_jobs(500) r")).rows[0].r;
   const stillOne = (await rootQuery("select count(*)::int n from clara.render_jobs where report_run_id = $1",
     [eps.runId])).rows[0].n;
   assert.equal(stillOne, 1, `a second sweep must not double-enqueue (swept ${JSON.stringify(twice)})`);

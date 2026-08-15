@@ -83,9 +83,10 @@ export function sourceDateEpoch(requestManifest) {
 }
 
 /**
- * The deterministic Info dictionary + XMP inputs (§10: "normalized PDF metadata and trailer
- * identifiers"). The document id is the canonical digest of the pinned request — so the same
- * inputs give the same /ID, and different inputs cannot collide onto one.
+ * The deterministic Info dictionary + XMP inputs (§10's "normalized PDF metadata"). Determinism
+ * comes from SOURCE_DATE_EPOCH, which is derived from the reporting period rather than a clock, so
+ * two renders of the same request carry the same dates — and the drill's control arm proves that
+ * pin is wired by changing the epoch and requiring the bytes to move.
  *
  * `title` is DB-OWNED and passed in from the resolved layout. This module will not invent one: a
  * statement's title is statutory wording or firm-published template text, and a renderer that
@@ -94,13 +95,22 @@ export function sourceDateEpoch(requestManifest) {
 export function documentMetadata({ requestManifest, title, uncertified, watermark }) {
   requireNonEmptyString(title, "document_title");
   const epoch = sourceDateEpoch(requestManifest);
-  const docId = canonicalSha256(requestManifest);
   const iso = new Date(epoch * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  // ONLY WHAT THE PRODUCED FILE ACTUALLY CARRIES IS PINNED HERE (round 2). Earlier drafts also
+  // pinned a `subject` and a derived `document_id`/`trailer_id`. The pinned engine (Typst 0.12.0)
+  // can set title, author, keywords and a date, and has no facility for a PDF Subject or for the
+  // trailer /ID — nothing in this package ever wrote them, and no post-processing step exists to.
+  // So they were pins on values the artifact could not hold: the manifest would have described a
+  // document that does not exist, and §7(d)'s cross-check could not have caught the disagreement
+  // because it never looked at them. Removed rather than left as a claim nobody verifies.
+  //
+  // If the engine pin moves to >=0.13, `subject` comes back through `#set document(description:)`
+  // and joins the checked set in lexicon.mjs; the trailer /ID would still need a post-processing
+  // tool this image deliberately does not carry.
   return {
     title,
     // Author is the FIRM's published identity in the house style, not a person and not the
     // renderer. Producer/Creator name the pinned toolchain, which is already in the manifest.
-    subject: `${requestManifest?.report_class ?? "report"} ${requestManifest?.reporting_period?.period_start ?? ""}..${requestManifest?.reporting_period?.period_end ?? ""}`.trim(),
     keywords: [
       `report_run:${requestManifest?.report_run_id ?? ""}`,
       `dataset:${requestManifest?.dataset_sha256 ?? ""}`,
@@ -110,11 +120,6 @@ export function documentMetadata({ requestManifest, title, uncertified, watermar
     creation_date_utc: iso,
     modification_date_utc: iso,
     source_date_epoch: epoch,
-    document_id: docId,
-    // The trailer's two-element /ID array is BOTH halves of the same derived id: a PDF's second
-    // id element is meant to change when a file is updated in place, and these files are never
-    // updated in place — they are content-addressed and overwrite-impossible.
-    trailer_id: [docId.slice(0, 32), docId.slice(0, 32)],
   };
 }
 

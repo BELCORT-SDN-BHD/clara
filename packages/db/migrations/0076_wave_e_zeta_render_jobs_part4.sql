@@ -100,10 +100,13 @@ end $pre$;
 -- it did not widen epsilon's human verb by so much as a role. It sits outside the block above for
 -- the reason file 3's tail states: to the wiki dynamic-SQL gate, an 'EXECUTE' literal in a block
 -- that also reads a function body is not distinguishable from an injected statement.
+-- The LEFT join and the coalesce are the same round-2 correction the leak censuses below carry: a
+-- PUBLIC grant is grantee 0, so an inner join would let "world-executable" appear and disappear
+-- between the two readings without either of them noticing.
 insert into _zeta_seam_pre
-select 'seal_grantees', coalesce(string_agg(rr.rolname, ',' order by rr.rolname), '(none)')
+select 'seal_grantees', coalesce(string_agg(coalesce(rr.rolname, 'PUBLIC'), ',' order by coalesce(rr.rolname, 'PUBLIC')), '(none)')
   from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
-  join pg_roles rr on rr.oid = acl.grantee
+  left join pg_roles rr on rr.oid = acl.grantee
  where p.oid = 'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure
    and acl.privilege_type = 'EXECUTE';
 
@@ -282,9 +285,9 @@ declare
 begin
   -- (2) The human verb's grantees are EXACTLY what they were before this file ran. Zeta creates
   -- one machine verb and must not widen epsilon's human one by so much as a role.
-  select coalesce(string_agg(rr.rolname, ',' order by rr.rolname), '(none)') into v_acl_now
+  select coalesce(string_agg(coalesce(rr.rolname, 'PUBLIC'), ',' order by coalesce(rr.rolname, 'PUBLIC')), '(none)') into v_acl_now
     from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
-    join pg_roles rr on rr.oid = acl.grantee
+    left join pg_roles rr on rr.oid = acl.grantee
    where p.oid = 'clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure
      and acl.privilege_type = 'EXECUTE';
   select v into v_acl_before from _zeta_seam_pre where k = 'seal_grantees';
@@ -293,23 +296,27 @@ begin
       v_acl_before, v_acl_now using errcode = 'CLR10';
   end if;
   -- (3) The core is reachable by NO app role, and complete_render_job only by clara_runtime.
+  -- Both arms LEFT join pg_roles so a PUBLIC grant (grantee 0, matching no role row and no
+  -- `clara\_%` pattern) is counted rather than silently dropped — round-2 minor.
   select count(*) into v_leak from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
+    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
+    left join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
      and p.proname = '_seal_report_artifact_core'
-     and rr.rolname like 'clara\_%' and rr.rolname <> 'clara_fn_owner';
+     and (rr.rolname is null or (rr.rolname like 'clara\_%' and rr.rolname <> 'clara_fn_owner'));
   if v_leak <> 0 then
     raise exception 'zeta file 4 tail: % app-role EXECUTE grant(s) on the seal core', v_leak
       using errcode = 'CLR10';
   end if;
   select count(*) into v_leak from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
+    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
+    left join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
      -- The owner is excluded for the same reason file 2's census states at length: aclexplode
      -- always yields clara_fn_owner's own implicit entry for a function it owns, so testing
      -- `<> 'clara_runtime'` alone counts ownership as a stray grant.
      and p.proname = 'complete_render_job'
-     and rr.rolname not in ('clara_runtime', 'clara_fn_owner');
+     and coalesce(rr.rolname, 'PUBLIC') not in ('clara_runtime', 'clara_fn_owner');
   if v_leak <> 0 then
     raise exception 'zeta file 4 tail: complete_render_job granted to % non-runtime role(s)', v_leak
       using errcode = 'CLR10';

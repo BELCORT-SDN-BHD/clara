@@ -209,35 +209,33 @@ jobs:
           # Same deal for the dispatch-model guard (AGENTS.md hard constraint 5).
           node scripts/hooks/dispatch-model-guard.selftest.mjs
 
-      # Wave E lane ζ: the EVALUATOR freeze gate (design wave-e-design-reporting.md §4.2's CI
-      # half). Called out explicitly beside its workflow sibling even though `pnpm lint` now runs
-      # it — the same visibility the freeze-lint above gets, and for the same reason: a gate
-      # buried in a compound script is a gate nobody notices going missing. Its self-test runs the
-      # REAL checker against a throwaway repo and asserts a nonzero exit on a mutated body, so a
-      # green here means enforcement exists rather than that the arithmetic is right.
+      # The .sql half of the freeze family (§4.2). check-frozen-workflows.mjs reads the TS
+      # workflow bodies; a deterministic EVALUATOR lives in a migration, so nothing above can
+      # see it. The self-test rides along for the same reason the guards' do: this checker's
+      # own CLI guard once exited 0 having checked nothing, and only an end-to-end run against
+      # a mutated body catches that class.
       - name: Evaluator freeze-lint + self-test (§4.2 · the .sql half the workflow lint cannot reach)
         run: |
           node scripts/check-frozen-evaluators.mjs
           node scripts/check-frozen-evaluators.selftest.mjs
 
-      # Wave E lane ζ: the RENDER PACKAGE's own drill. packages/reporting-render is deliberately
-      # NOT a pnpm workspace member (its deps install inside its Docker image), so `pnpm -r`
-      # cannot see it and NOTHING in the standard gates touches its 93-cell judgement battery —
-      # the sweep-skip false-green shape at package scale. This step is its presence gate: it
-      # installs the package's own deps, then runs syntax, lint and the battery.
+      # Lane ζ's render package is NOT a pnpm workspace member (pnpm-workspace.yaml says why),
+      # so `pnpm -r` cannot see it and it would otherwise reach main with no CI at all. It is
+      # driven here by explicit steps, in the UNCONDITIONAL lint job, with no skip-allowing
+      # variable: a missing or broken module FAILS here rather than skipping quietly.
       #
-      # PRESENCE-GATE POLARITY, the house law: the battery runs with no skip-allowing variable, so
-      # a missing or broken module FAILS here rather than skipping quietly. `--frozen-lockfile` is
-      # deliberately NOT used: the package has no lockfile entry by design (that is why it is
-      # excluded), so this install is its own, isolated to its own directory.
+      # `pnpm --dir` on purpose, and this is load-bearing rather than stylistic: it runs the
+      # package's own scripts with the REPO'S PINNED eslint resolved from the root install,
+      # whereas `npx eslint` inside a non-member package resolves nothing locally and would
+      # DOWNLOAD an unpinned eslint from the registry onto the self-hosted runner on every PR.
+      # No install step is needed: `check` is `node --check` (syntax only) and the unit battery
+      # imports nothing outside the package — `pg` is reached only by lib/db.mjs, which the
+      # tests never load, and which the image installs from the package's own manifest.
       - name: Render package drill (lane ζ · check + lint + the judgement battery)
-        working-directory: packages/reporting-render
         run: |
-          npm install --omit=dev --no-audit --no-fund
-          npm run check
-          npx eslint .
-          node --test tests/
-
+          pnpm --dir packages/reporting-render run check
+          pnpm --dir packages/reporting-render run lint
+          pnpm --dir packages/reporting-render run test
 
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
@@ -352,6 +350,11 @@ jobs:
   # is capable of varying, and a run where the control MATCHED is a worse finding than a mismatch
   # — it means the pin is wired to nothing and the first arm was vacuous.
   #
+  # AND IT COMPILES THE PRODUCT'S OWN PREAMBLE, not only a fixture. A hand-written fixture cannot
+  # see an engine-version mismatch in what assemble() actually emits — the round-2 finding that
+  # cost a whole render path — so the script renders assemble()'s real output against the pinned
+  # engine as its first arm.
+  #
   # Its own job because it builds an image; fail-closed on the classifier in the same != 'false'
   # polarity as `ci` (an absent or garbled output RUNS the job rather than skipping it green).
   # =========================================================================
@@ -371,7 +374,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-dejavu-core
       - name: Build the renderer image (pinned engine + pinned extractor)
         run: docker build -f packages/reporting-render/Dockerfile -t clara-render:ci .
-      - name: Double-render drill — determinism AND the control arm
+      - name: Double-render drill — determinism, the control arm, and the real preamble
         run: node packages/reporting-render/scripts/double-render-drill.mjs --image clara-render:ci
 
   ci:
@@ -766,14 +769,25 @@ jobs:
       # with ZERO skips. The δ contract is a ONE-WAY ceremony (it deploys the evaluator closures
       # and asserts a pristine metric_cells), which is the other reason it gets its own database:
       # the sweep's run consumes the shared clara_ci copy, and a consumed database is not valid
-      # evidence for this contract. Guarded by presence so pre-merge branches without δ stay
-      # green: the step no-ops until a numbered wave_e_delta_metrics migration is on disk.
+      # evidence for this contract.
+      #
+      # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
+      # the ε R1 finding (an exit-0 guard makes "the migration went missing" indistinguishable
+      # from "the migration hasn't landed yet", the exact shape ε's round-3 fix got a second
+      # codex finding for). RE-TRUED: this step's "pre-merge branches without δ stay green"
+      # rationale no longer holds and is retired here — δ's ci.yml step shipped in the SAME PR
+      # as its migrations, so no honest checkout ever has this step without them; the only
+      # worlds where the guard fires are deletion, rename-out-of-glob, or a merge accident, and
+      # every one of those deserves red, post-merge, forever. δ is long since merged (main
+      # carries the wave_e_delta_metrics migration), so flipping this to fail-closed costs
+      # nothing today and closes the same hole θ's and ε's drills close.
       - name: Wave-E δ contract drill (isolated DB, focused, allow-missing UNSET)
         working-directory: packages/db
         run: |
           m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_delta_metrics.sql 2>/dev/null | head -1)"
           if [ -z "$m" ]; then
-            echo "no numbered wave_e_delta_metrics migration on disk — the δ contract has nothing to drill yet"; exit 0
+            echo "no numbered wave_e_delta_metrics migration on disk (missing or misnumbered) -- δ is merged on main, so absence here is a regression; FAILING rather than skipping (guard-polarity ruling 2026-08-14)."
+            exit 1
           fi
           PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
           PGDATABASE=clara_delta_contract_ci pnpm migrate
@@ -781,6 +795,82 @@ jobs:
           unset CLARA_ALLOW_MISSING_WAVE_E_DELTA
           PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
             node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
+
+      # Wave-E θ contract drill (the same anti-misleading-green wiring as the δ drill above,
+      # the identical hazard shape: the package sweep preloads the wave gate (--import
+      # tests/theta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_THETA for
+      # every file in the sweep — so if a numbering/merge accident ever left 0064 off the
+      # chain, theta-close-plan.test.mjs would skip loudly-but-green in the only leg that runs
+      # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain,
+      # then the theta contract run FOCUSED with the variable explicitly UNSET — on a pre-θ
+      # chain it FAILS by design (the gate's stated focused-run polarity), and post-θ it must
+      # be green with ZERO skips. get_close_plan is a read (not a one-way ceremony like δ's
+      # evaluator deploy), so its own database is not load-bearing for correctness the way
+      # δ's is — it's here for the same reason every other wave drill gets one: isolation from
+      # the concurrent all-packages sweep's shared clara_ci database, so this leg's result is
+      # never confounded by what else that sweep did to it.
+      #
+      # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
+      # the ε R1 finding: a drill and its lane's migration travel in the SAME commit, so no
+      # honest checkout ever has the drill without the migration — the only worlds where this
+      # guard fires are deletion, rename-out-of-glob, or a merge accident, and every one of
+      # those deserves red, post-merge, forever. Pre-merge branches without θ also lack this
+      # step itself (it lands in the same PR as 0064), so exit-1 cannot hurt them. Keyed on
+      # 0064 directly, the one file whose absence would matter (theta ships a single
+      # migration, unlike δ/ε's multi-file waves).
+      - name: Wave-E θ contract drill (isolated DB, focused, allow-missing UNSET)
+        working-directory: packages/db
+        run: |
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_theta_close_plan.sql 2>/dev/null | head -1)"
+          if [ -z "$m" ]; then
+            echo "0064_wave_e_theta_close_plan.sql is not on disk (missing or misnumbered) -- theta merged in this PR, so absence here is a regression, not a pre-merge state; FAILING rather than skipping (the exit-0 anti-pattern ε's round-3 fix was caught on)."
+            exit 1
+          fi
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_theta_contract_ci'
+          PGDATABASE=clara_theta_contract_ci pnpm migrate
+          PGDATABASE=clara_theta_contract_ci pnpm seed
+          unset CLARA_ALLOW_MISSING_WAVE_E_THETA
+          PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
+            node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
+
+      # Wave-E ε contract drill — the δ drill's shape, for the same hazard on the reporting lane.
+      # The package sweep preloads tests/epsilon-preintegration-gate.mjs, which sets
+      # CLARA_ALLOW_MISSING_WAVE_E_EPSILON for every file in the sweep; so if a numbering or merge
+      # accident ever left the ε migrations off the chain, the ENTIRE ε battery would skip
+      # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
+      # database, the full on-disk chain, then the ε contract FOCUSED with the variable explicitly
+      # UNSET — on a pre-ε chain that FAILS by design (the gate's stated focused-run polarity),
+      # and post-ε it must be green with ZERO skips.
+      #
+      # It gets its OWN database for a reason of its own: the ε battery seals artifacts and issues
+      # a run, and an issued run is one-way. The sweep's copy has already been through that, and a
+      # consumed database is not valid evidence for a contract about sealing.
+      #
+      # ABSENCE FAILS. The first cut of this step exited 0 when the migration was missing, copying
+      # δ's pre-merge courtesy — which put a skip-green branch inside the very step whose reason to
+      # exist is that a skip-green branch elsewhere hides a missing lane. Once ε is on main the
+      # migrations are never legitimately absent, so absence means a numbering or merge accident:
+      # exactly the accident this drill is the last line of defence against. It fails loudly.
+      #
+      # Guarded on the LAST file of the set, not the first: a partial merge that dropped the
+      # security half would satisfy a first-file guard and then drill a chain that cannot enforce
+      # anything.
+      - name: Wave-E ε contract drill (isolated DB, focused, allow-missing UNSET)
+        working-directory: packages/db
+        run: |
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql 2>/dev/null | head -1)"
+          if [ -z "$m" ]; then
+            echo "::error::no numbered wave_e_epsilon_reporting_security_seal_artifacts_issue migration on disk."
+            echo "The ε lane is merged, so its migrations cannot be legitimately absent — this is a"
+            echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
+            exit 1
+          fi
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
+          PGDATABASE=clara_epsilon_contract_ci pnpm migrate
+          PGDATABASE=clara_epsilon_contract_ci pnpm seed
+          unset CLARA_ALLOW_MISSING_WAVE_E_EPSILON
+          PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
+            node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
 
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR

@@ -241,48 +241,6 @@ end $$;
 revoke all on function clara.render_job_payload(uuid, text) from public;
 
 -- =====================================================================================
--- Z5c -- THE REPLAY DOOR (codex B5). The seven-year re-render drill needs an EXECUTABLE path.
--- Without it the drill is prose that cannot be performed: a completed job is terminal and can
--- never be re-claimed (by design), and nothing else feeds a sealed dataset back through the chain,
--- so the mandated recovery proof was unreachable and DR §10 was a promise rather than a procedure.
---
--- IT IS A REPLAY, NOT A REQUEUE, and that is the whole point: it returns the artifact's OWN pinned
--- inputs and touches the job ledger not at all -- nothing enqueued, nothing dispatched, no state
--- moved, so a drill can never be mistaken for a production render or seal a second artifact. It
--- returns the SEALED MANIFEST verbatim rather than re-deriving the pins, because re-deriving would
--- answer "what would we pin today" and the drill asks "does today's renderer reproduce what we
--- pinned THEN". A mismatch is a finding to record, never something the DB acts on.
--- =====================================================================================
-create function clara.replay_render_inputs(p_artifact uuid) returns jsonb
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
-declare art record; ds record;
-begin
-  select * into art from clara.report_artifacts where id = p_artifact;
-  if not found then
-    raise exception 'report artifact not found' using errcode = 'CLR11',
-      detail = '{"reason":"report_artifact_not_found"}';
-  end if;
-  select * into ds from clara.report_datasets
-   where report_run_id = art.report_run_id and chart_spec_version_id is null;
-  return jsonb_build_object(
-    'replay_of_artifact_id', art.id,
-    'report_run_id', art.report_run_id,
-    'kind', art.kind,
-    -- The bytes the drill must reproduce, and the manifest that says how.
-    'expected_sha256', art.sha256,
-    'expected_byte_size', art.byte_size,
-    'sealed_manifest', art.manifest,
-    'renderer_image_digest', art.manifest->>'renderer_image_digest',
-    'dataset_id', ds.id,
-    'dataset_sha256', case when ds.id is null then null else encode(ds.dataset_sha256, 'hex') end,
-    'storage_key', art.storage_key,
-    'sealed_at', art.sealed_at,
-    -- Stated in the payload so a drill transcript carries its own boundary.
-    'replay_note', 'These are the artifact''s OWN sealed inputs. Re-render from renderer_image_digest and compare against expected_sha256. This function enqueues nothing, dispatches nothing and seals nothing; a mismatch is a finding to record, not a state to repair.');
-end $$;
-revoke all on function clara.replay_render_inputs(uuid) from public;
-
--- =====================================================================================
 -- Z6 -- FAIL A JOB. Bounded retry; the reason is REQUIRED and is recorded either way.
 -- A job below its attempt cap returns to 'claimable'; AT the cap it becomes terminal 'failed'
 -- with the reason on the row -- so a stranded render is visible as a ROW rather than as silence.
@@ -348,14 +306,30 @@ begin
   -- reaped HERE because this is the sweep that would otherwise keep proposing it, and because a
   -- claim must never touch rows other than the one it claims. `failed_at_cap_without_report` names
   -- the shape: workers that never reported, a different incident from one that failed and said so.
-  update clara.render_jobs
+  --
+  -- SKIP LOCKED HERE TOO (round-2 minor). This was a plain UPDATE, so the leader's ~2s sweep took
+  -- BLOCKING row locks in a function whose every other access deliberately skips them -- one worker
+  -- inside fail_render_job on an exhausted row would stall the dispatch read for every firm until
+  -- its transaction ended. The tail census asserts this function skips locked rows; that claim now
+  -- covers the whole body rather than the part written second.
+  with exhausted as (
+    select j.id from clara.render_jobs j
+     where j.state = 'running' and j.lease_expires_at < now() and j.attempts >= j.max_attempts
+     for update of j skip locked)
+  update clara.render_jobs t
      set state = 'failed', finished_at = now(),
          claimed_by = null, claimed_at = null, lease_expires_at = null,
          last_error = jsonb_build_object('reason', 'failed_at_cap_without_report',
-           'attempts', attempts, 'max_attempts', max_attempts,
+           'attempts', t.attempts, 'max_attempts', t.max_attempts,
            'detail', 'every claim was lost before the worker could record an outcome -- the workers crashed, were killed, or never reached fail_render_job',
-           'fix', 'inspect the render machine logs for the window this job was claimed in; enqueue a new job once the cause is fixed')
-   where state = 'running' and lease_expires_at < now() and attempts >= max_attempts;
+           -- THE REMEDY NAMES THE DOOR THAT EXISTS (round-2 major). This used to say "enqueue a new
+           -- job", which was structurally impossible: enqueue_render_job re-derives the same request
+           -- manifest, hits the idempotency key and returns this dead row, and the fallback sweep
+           -- skips any run that already has a pre_sign job. clara.requeue_render_job is the audited
+           -- human door that mints a SUCCESSOR row instead.
+           'fix', 'inspect the render machine logs for the window this job was claimed in, then call clara.requeue_render_job(this job id, why) to mint a successor once the cause is fixed')
+    from exhausted e
+   where t.id = e.id;
   get diagnostics v_reaped = row_count;
 
   with due as (
@@ -394,18 +368,29 @@ revoke all on function clara.render_dispatch_begin(interval, int) from public;
 -- =====================================================================================
 create function clara.render_dispatch_record(p_job_ids uuid[], p_ok boolean, p_detail jsonb)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_n int;
+declare v_n int; v_asked int;
 begin
   if p_ok is null then
     raise exception 'a dispatch receipt states whether the start succeeded' using errcode = 'CLR43',
       detail = '{"reason":"render_dispatch_outcome_required"}';
   end if;
-  update clara.render_jobs
+  v_asked := coalesce(array_length(coalesce(p_job_ids, '{}'::uuid[]), 1), 0);
+  -- TERMINAL ROWS ARE SKIPPED, NOT WRITTEN (round-2 major). The receipt is written AFTER the Fly
+  -- round trip -- up to the dispatch timeout -- and a job in that batch can legitimately turn
+  -- `done` or `failed` inside the window (a second worker finishes it; the sweep reaps it at its
+  -- cap). File 1's terminal wall now refuses ANY change to a terminal row, so a single such row
+  -- made this one statement raise CLR08 and roll back the WHOLE batch: no job got its receipt, and
+  -- the one fact this design exists to preserve -- "we could not start the renderer" -- was lost
+  -- for four healthy jobs because a fifth had finished. The wall is right; the write is what has to
+  -- yield. `skipped` is returned rather than swallowed, so a caller can see the difference between
+  -- "recorded for all of them" and "recorded for the ones still open".
+  update clara.render_jobs j
      set last_dispatch_ok = p_ok,
          last_dispatch_error = case when p_ok then null else coalesce(p_detail, '{}'::jsonb) end
-   where id = any (coalesce(p_job_ids, '{}'::uuid[]));
+   where j.id = any (coalesce(p_job_ids, '{}'::uuid[]))
+     and j.state not in ('done', 'failed');
   get diagnostics v_n = row_count;
-  return jsonb_build_object('recorded', v_n, 'ok', p_ok);
+  return jsonb_build_object('recorded', v_n, 'skipped', greatest(v_asked - v_n, 0), 'ok', p_ok);
 end $$;
 revoke all on function clara.render_dispatch_record(uuid[], boolean, jsonb) from public;
 
@@ -419,11 +404,9 @@ grant execute on function
   clara.render_dispatch_record(uuid[], boolean, jsonb)
   to clara_runtime;
 
--- THE REPLAY DOOR IS A HUMAN READ, NOT A RUNTIME ONE. The DR drill is performed by an operator,
--- not by the worker: it is a bookkeeper-floor read of an artifact the firm already owns, and the
--- machine lane has no business enumerating sealed artifacts. It is also STABLE and writes
--- nothing, so granting it widens reachability and never scope (RLS still scopes the artifact).
-grant execute on function clara.replay_render_inputs(uuid) to clara_authenticated;
+-- THE HUMAN DOORS ARE FILE 5's. The replay door and the requeue door are granted to
+-- clara_authenticated and live in 0077 with their own census — this file's surface is the machine
+-- lane and nothing else, which is what lets the census below say "clara_runtime, and no one".
 
 -- THE CENSUS RUNS IN TWO BLOCKS ON PURPOSE. The wiki dynamic-SQL gate (0019 §9) reads a `do` block
 -- that calls pg_get_functiondef as a change-of-record patch site and treats every literal in it as
@@ -437,7 +420,7 @@ declare
   -- read path. The lesson is the census's: a roster of what to check cannot report what is absent.
   v_runtime text[] := array['claim_render_job', 'render_job_payload', 'enqueue_missing_render_jobs',
     'fail_render_job', 'render_dispatch_begin', 'render_dispatch_record'];
-  v_granted text[]; v_leak int; v_replay int;
+  v_granted text[]; v_leak int;
 begin
   -- (1) The six runtime verbs are granted to clara_runtime -- the set, read from live ACLs.
   select coalesce(array_agg(distinct p.proname order by p.proname), '{}') into v_granted
@@ -449,32 +432,24 @@ begin
     raise exception 'zeta claim tail: clara_runtime EXECUTE set is %, expected %',
       v_granted, v_runtime using errcode = 'CLR10';
   end if;
-  -- (2) And to NOBODY else -- EXCLUDING, not enumerating (codex M5). This census used to name the
-  -- seven roles it knew about, so any role NOT on that list could hold EXECUTE on a render verb and
-  -- the tail would still pass: clara_storage_docs today, an inherited role tomorrow. An allow-list
-  -- of two -- the owner, whose entry is ownership not a grant, and clara_runtime -- refuses the rest.
+  -- (2) And to NOBODY else -- EXCLUDING, not enumerating (codex M5), and with PUBLIC VISIBLE (the
+  -- round-2 minor). This census used to name the seven roles it knew about, so any role NOT on that
+  -- list could hold EXECUTE on a render verb and the tail would still pass: clara_storage_docs
+  -- today, an inherited role tomorrow. An allow-list of two -- the owner, whose entry is ownership
+  -- not a grant, and clara_runtime -- refuses the rest. And it LEFT joins pg_roles: aclexplode
+  -- reports a PUBLIC grant with grantee = 0, which matches no pg_roles row, so an inner join
+  -- silently dropped the single grant that would matter most while this tail printed "and no one".
   select count(*) into v_leak from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
+    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
+    left join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
      and p.proname = any (v_runtime)
-     and rr.rolname not in ('clara_runtime', 'clara_fn_owner');
+     and coalesce(rr.rolname, 'PUBLIC') not in ('clara_runtime', 'clara_fn_owner');
   if v_leak <> 0 then
     raise exception 'zeta claim tail: % EXECUTE grant(s) on a render verb to a role that must not hold one',
       v_leak using errcode = 'CLR10';
   end if;
-  -- (3) THE REPLAY DOOR is a HUMAN read and reaches no machine lane. It exists (the DR drill is
-  -- unperformable without it), it is granted to clara_authenticated and to no runtime/wake/agent
-  -- role -- an operator's recovery instrument must not become a second path the worker can walk.
-  select count(*) into v_replay from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
-   where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
-     and p.proname = 'replay_render_inputs'
-     and rr.rolname not in ('clara_authenticated', 'clara_fn_owner');
-  if to_regprocedure('clara.replay_render_inputs(uuid)') is null or v_replay <> 0 then
-    raise exception 'zeta claim tail: the replay door is absent or reachable by % non-human role(s)',
-      v_replay using errcode = 'CLR10';
-  end if;
-  raise notice 'zeta claim grants OK: the six runtime verbs (claim, payload, fail, dispatch begin+record, enqueue fallback) are granted to clara_runtime and to NO other role -- asserted by EXCLUDING the owner and clara_runtime rather than by naming the roles I happened to think of, so a future or inherited role cannot hold EXECUTE unnoticed. The replay door exists and is reachable by humans only.';
+  raise notice 'zeta claim grants OK: the six runtime verbs (claim, payload, fail, dispatch begin+record, enqueue fallback) are granted to clara_runtime and to NO other role -- asserted by EXCLUDING the owner and clara_runtime rather than by naming the roles I happened to think of, and by a census that can SEE a PUBLIC grant, so neither a future role nor world-executable can hold EXECUTE unnoticed. The two human doors are file 5''s and are censused there.';
 end $grants$;
 
 do $tail$

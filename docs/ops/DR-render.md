@@ -24,10 +24,20 @@ and timezone. Re-rendering means running THAT digest again against THAT dataset.
 
 ## The drill (described)
 
-1. Read the target artifact's inputs first: `clara.verify_report_artifact(<artifact_id>)`. Inputs
-   must reconcile before a byte claim means anything. Then read the artifact row's `manifest` for
-   `renderer_image_digest`, `dataset_id`, `dataset_sha256`, `books_snapshot_id`,
-   `evaluator_versions` and `asset_hashes`.
+1. Read the target artifact's inputs first, through the door built for it:
+   `select clara.replay_render_inputs('<artifact_id>');` — a **human** verb (granted to
+   `clara_authenticated`, never to the worker's role), `STABLE`, firm-scoped in its own body, and it
+   moves nothing: no job is enqueued, nothing is dispatched, no state changes. It returns the
+   artifact's **own sealed manifest** verbatim (so the drill re-renders what was pinned THEN, not
+   what the system would pin today) plus `expected_sha256`, `expected_byte_size`,
+   `renderer_image_digest`, `dataset_id`, `dataset_sha256`, `storage_key` and `sealed_at`.
+   Then run `clara.verify_report_artifact(<artifact_id>)` — inputs must reconcile before a byte
+   claim means anything — and read the manifest for `books_snapshot_id`, `evaluator_versions` and
+   `asset_hashes`.
+
+   *A foreign artifact id and an absent one return the identical refusal, by design: the door is
+   not an oracle for which ids exist. If you get `report_artifact_not_found` on an id you believe
+   in, check which firm you are authenticated as before checking the id.*
 2. Pull the pinned image **by digest**: `docker pull registry.fly.io/clara-render@sha256:<digest>`.
    A tag is not acceptable here, and the worker refuses one — the whole point of the drill is that
    the name still resolves to the bytes it resolved to when the artifact was sealed.
@@ -147,4 +157,34 @@ written to be a measurement rather than a hope.
 
 A dispatch that could not start a machine is recorded on the job rows themselves
 (`last_dispatch_ok`, `last_dispatch_error`), because "no render appeared" and "we could not start
-the renderer" are different facts and only the second one is actionable.
+the renderer" are different facts and only the second one is actionable. A job in that batch that
+has already gone terminal is **skipped** by the receipt write and counted in the return's `skipped`
+— the terminal row is immutable, and one finished job must not cost its four neighbours their
+receipt.
+
+## When a job dies for good — the requeue door
+
+A job that burns every attempt without any worker reporting is parked `failed` by the leader's
+sweep, with `last_error.reason = failed_at_cap_without_report`. That row is **immutable and stays**:
+it is the record of what happened.
+
+To produce the report anyway, mint its successor:
+
+```sql
+select clara.requeue_render_job('<failed job id>', 'fly capacity incident 2026-08-15');
+```
+
+- **Human-only** (`clara_authenticated`), firm-scoped, and **audited** — the operator is the audit
+  row's actor, the report's original requester rides as `on_behalf_of`, and the stated reason is
+  written both on the new row (`requeue_reason`) and into the audit log. A render costs money and
+  re-runs a client's statements; that is not a machine's decision to make, so no runtime role holds
+  this grant and `clara.enqueue_render_job` refuses to resurrect a failed request on its own.
+- The successor **copies the pinned request verbatim** rather than re-deriving it. Re-deriving would
+  answer "what would we pin today", and a template published in the meantime would silently render a
+  different document under the same request.
+- It carries `supersedes_render_job_id`, so the chain from incident to eventual artifact is readable
+  years later. Only one successor may be live at a time (`render_job_already_requeued`).
+
+**Read the failure before requeuing.** The reap fires on jobs whose workers never reported — an
+image that cannot start, an OOM, a Fly capacity incident. Requeuing without fixing the cause simply
+burns another five attempts.

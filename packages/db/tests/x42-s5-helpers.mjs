@@ -289,6 +289,33 @@ const METRICS_0059_CLOCK_NAMES = ["approve_metric_definition"];
 // this battery against databases pinned earlier, where this function does not exist.
 const REPORTING_0072_CLOCK_NAMES = ["approve_report_for_issue"];
 
+// 0075/0076 [Wave E lane ζ]: FIVE lawful bare-clock readers, and every one is a QUEUE LIFECYCLE
+// INSTANT rather than a business day. claim_render_job stamps claimed_at/first_claimed_at, sets
+// lease_expires_at = now() + the lease, and records the observed queue wait; render_job_payload and
+// fail_render_job compare lease_expires_at against now() to decide whether the caller still holds
+// the job it is speaking for; complete_render_job makes that same liveness check and stamps
+// finished_at; render_dispatch_begin measures its cooldown (last_dispatch_at < now() - cooldown) and
+// reaps leases that expired at the attempt cap. All of it is timestamptz machinery on
+// clara.render_jobs, and none of it reaches a date-typed column.
+//
+// WHY NOT clara._book_today(), stated because "use the authority" is the reflex this roster otherwise
+// enforces: _book_today returns a DATE, and a lease deadline is an instant. This lane decides NO
+// accounting date at all — the render's period_start/period_end, the effective windows and the
+// threshold as-of arrive from lane ε's pins contract as DB-owned rows, never from a clock, so there
+// is no date-typed decision here for the authority to own.
+//
+// MEASURED, not inferred: arm (D)'s own detector, run over the 0073-0076 surface, flags these five
+// and no other — enqueue_render_job, enqueue_missing_render_jobs, render_dispatch_record,
+// replay_render_inputs and render_request_manifest_v1 carry no clock token. render_jobs.enqueued_at
+// is a column DEFAULT, which lives in the table definition rather than in a pg_proc body and
+// correctly does not flag.
+//
+// Frontier-gated for the reason the 0046/0055/0056/0057/0059/0072 blocks state: db-slice-frontiers
+// runs this battery against databases pinned earlier, where these functions do not exist.
+const RENDER_0075_CLOCK_NAMES = ["claim_render_job", "fail_render_job", "render_dispatch_begin",
+  "render_job_payload"];
+const RENDER_0076_CLOCK_NAMES = ["complete_render_job"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -301,6 +328,8 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0057_%")) names.push(...REGISTRY_0057_CLOCK_NAMES);
   if (await applied("0059_%")) names.push(...METRICS_0059_CLOCK_NAMES);
   if (await applied("0072_%")) names.push(...REPORTING_0072_CLOCK_NAMES);
+  if (await applied("0075_%")) names.push(...RENDER_0075_CLOCK_NAMES);
+  if (await applied("0076_%")) names.push(...RENDER_0076_CLOCK_NAMES);
   return names.sort();
 }
 

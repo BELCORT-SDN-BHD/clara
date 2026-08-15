@@ -58,14 +58,19 @@ export function readSeries(points) {
   return points.map((p) => {
     const ok = p?.point_status === "ok";
     if (!ok) {
+      // The gap's DISCLOSURE TOKEN travels with the gap (round-2 M4). ε seals dimensions.na_label
+      // from δ's display_token, and the same-source table has to print something in that cell —
+      // so it prints the sealed token or refuses. Carrying it here is what lets layout.mjs do
+      // that without a renderer-authored word.
       return { seriesKey: String(p?.series_key ?? ""), ordinal: Number(p?.ordinal ?? 0),
-        cellId: p?.cell_id ?? null, plotted: false, displayedText: p?.displayed_text ?? null, value: null };
+        cellId: p?.cell_id ?? null, plotted: false, displayedText: p?.displayed_text ?? null,
+        naLabel: p?.dimensions?.na_label ?? null, value: null };
     }
     const dims = p?.dimensions ?? {};
     const value = rational(toBigInt(dims.exact_numerator, "exact_numerator"),
       toBigInt(dims.exact_denominator, "exact_denominator"));
     return { seriesKey: String(p.series_key), ordinal: Number(p.ordinal), cellId: p.cell_id ?? null,
-      plotted: true, displayedText: p.displayed_text ?? null, value };
+      plotted: true, displayedText: p.displayed_text ?? null, naLabel: null, value };
   });
 }
 
@@ -140,6 +145,9 @@ export function sameSourceTable(points) {
     cell_id: p.cellId,
     // The reported figure: the database's own string. Never re-formatted here.
     displayed_text: p.plotted ? p.displayedText : null,
+    // And for a gap, the DB's own sealed disclosure token — null for a plotted point, so the two
+    // fields are never both populated and the table cell has exactly one lawful source.
+    na_label: p.plotted ? null : p.naLabel,
     plotted: p.plotted,
   })).sort((a, b) => (a.series_key < b.series_key ? -1 : a.series_key > b.series_key ? 1 : a.ordinal - b.ordinal));
 }

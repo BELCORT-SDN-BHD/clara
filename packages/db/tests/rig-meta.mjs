@@ -182,11 +182,15 @@ const RENDER_0073_RUNTIME_FNS = [
   "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
   "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
 ];
-// THE HUMAN ONE. replay_render_inputs is the DR §10 seven-year drill's executable door: it returns
-// a sealed artifact's OWN pinned inputs so an operator can re-render and compare. STABLE, writes
-// nothing, enqueues nothing — and deliberately NOT runtime-granted, because a recovery instrument
-// must not become a second path the worker can walk.
-const RENDER_0073_HUMAN_FNS = ["replay_render_inputs"];
+// THE HUMAN ONES (migration 0077, the two doors a person calls). replay_render_inputs is the DR §10
+// seven-year drill's executable door: it returns a sealed artifact's OWN pinned inputs so an
+// operator can re-render and compare — STABLE, writes nothing, enqueues nothing.
+// requeue_render_job is the lawful way out of a terminal failure: it mints a SUCCESSOR job (the
+// failed row stays immutable) and records the predecessor and the operator's reason.
+// Both are deliberately NOT runtime-granted: a recovery instrument must not become a second path
+// the worker can walk, and nothing machine-side gets to decide that a failure deserves another
+// paid render.
+const RENDER_0073_HUMAN_FNS = ["replay_render_inputs", "requeue_render_job"];
 // The internals stay ungranted to every application role and are asserted so in-migration:
 // render_request_manifest_v1, enqueue_render_job (ε's seal calls it), _tf_render_job_lifecycle.
 const RENDER_0073_COHORT = [...RENDER_0073_RUNTIME_FNS, ...RENDER_0073_HUMAN_FNS];

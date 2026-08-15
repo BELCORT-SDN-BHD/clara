@@ -74,10 +74,19 @@ set role clara_fn_owner;
 -- RETRIEVED, never regenerated (SS9, ruled) -- so "there is no such thing as a render job for a
 -- signed original" is a CHECK here rather than a convention somebody has to remember.
 --
--- unique (report_run_id, manifest_sha256) IS the idempotency key. It is unconditional, not
--- partial on state: a completed job stays in the way of a duplicate enqueue forever, which is the
--- whole point -- the second enqueue of an identical request is a no-op that returns the first
--- job, in whatever state it reached.
+-- (report_run_id, manifest_sha256) IS the idempotency key, and it holds for every state EXCEPT a
+-- terminal failure. A `done` job stays in the way of a duplicate enqueue forever, which is the
+-- whole point -- the second enqueue of an identical request is a no-op that returns the first job.
+--
+-- WHY 'failed' IS OUT OF THE KEY (round-2 major). It was unconditional, and combined with the
+-- attempt-cap reap and the whole-row terminal wall that PERMANENTLY STRANDED a report run: a
+-- transient capacity incident burned five claims, the sweep parked the job `failed`, and after that
+-- re-enqueue was a no-op returning the dead row, the fallback sweep skipped the run for having a
+-- job, and no role could edit the row. The firm's statutory PDF became unproducible except by
+-- migration. An idempotency key exists to stop a DUPLICATE LIVE request, not to make a failure
+-- final forever, so a terminally failed row steps out of the key and the ledger can move forward
+-- through clara.requeue_render_job (file 5) -- an audited human act that mints a SUCCESSOR row and
+-- leaves the failed one immutable and readable.
 -- =====================================================================================
 create table clara.render_jobs (
   id                uuid primary key default gen_random_uuid(),
@@ -115,13 +124,19 @@ create table clara.render_jobs (
   last_dispatch_error jsonb,
   artifact_id       uuid,
   last_error        jsonb,
+  -- THE SUCCESSION LINK (file 5's requeue door). Set once, at insert, on a job minted to replace a
+  -- terminally failed one; null on every ordinary enqueue. Both columns are part of the REQUEST
+  -- half of the row, so the lifecycle wall below freezes them for free -- a successor cannot later
+  -- rewrite whose failure it answers, or why.
+  supersedes_render_job_id uuid references clara.render_jobs(id),
+  requeue_reason    text check (requeue_reason is null or btrim(requeue_reason) <> ''),
+  constraint ck_rj_requeue_paired check ((supersedes_render_job_id is null) = (requeue_reason is null)),
   enqueued_at       timestamptz not null default now(),
   finished_at       timestamptz,
   foreign key (report_run_id, firm_id, client_id)
     references clara.report_runs (id, firm_id, client_id),
   -- The produced artifact cannot belong to another run: a composite FK, not a promise.
   foreign key (artifact_id, report_run_id) references clara.report_artifacts (id, report_run_id),
-  unique (report_run_id, manifest_sha256),
   unique (id, report_run_id),
   -- A lease exists exactly while the job is claimed.
   constraint ck_rj_lease_paired check (
@@ -133,6 +148,10 @@ create table clara.render_jobs (
   constraint ck_rj_done_has_artifact check (state <> 'done' or artifact_id is not null),
   constraint ck_rj_failed_has_reason check (state <> 'failed' or last_error is not null)
 );
+-- THE IDEMPOTENCY KEY, as a partial unique index (see the header). Everything but a terminally
+-- failed row is in it, so one live-or-completed job per pinned request is still structural.
+create unique index ux_render_jobs_request on clara.render_jobs (report_run_id, manifest_sha256)
+  where state <> 'failed';
 -- The claim scan's index: claimable-or-expired, oldest first.
 create index ix_render_jobs_claimable on clara.render_jobs (state, lease_expires_at, enqueued_at, id)
   where state in ('claimable', 'running');
@@ -206,7 +225,8 @@ create trigger t_renderjobs_lifecycle before update or delete on clara.render_jo
 -- THE TAIL CENSUS. Read POSITIVELY from the live catalog -- never re-stated from the DDL above.
 -- =====================================================================================
 do $tail$
-declare v_rls record; v_pol int; v_leak int; v_kinds int; v_agent_now text; v_agent_before text;
+declare v_rls record; v_pol int; v_leak int; v_kinds int; v_key int;
+        v_agent_now text; v_agent_before text;
 begin
   select relrowsecurity, relforcerowsecurity into v_rls from pg_class
    where oid = 'clara.render_jobs'::regclass;
@@ -237,6 +257,17 @@ begin
     raise exception 'zeta queue tail: the render kind CHECK is not the two-kind form (% matches)',
       v_kinds using errcode = 'CLR10';
   end if;
+  -- THE IDEMPOTENCY KEY IS THE PARTIAL ONE, asked of the catalog rather than assumed from the DDL
+  -- above. Both halves matter and each fails a different way: unconditional and a requeue can never
+  -- mint a successor (the run strands, which is the defect this shape exists to close); absent
+  -- altogether and a duplicate enqueue silently starts a second paid render of the same request.
+  select count(*) into v_key from pg_index i join pg_class c on c.oid = i.indexrelid
+   where i.indrelid = 'clara.render_jobs'::regclass and i.indisunique and i.indpred is not null
+     and c.relname = 'ux_render_jobs_request';
+  if v_key <> 1 then
+    raise exception 'zeta queue tail: the request idempotency key is not one partial unique index (% found)',
+      v_key using errcode = 'CLR10';
+  end if;
   select coalesce(string_agg(table_name, ',' order by table_name), '(none)') into v_agent_now
     from information_schema.table_privileges
    where table_schema = 'clara' and grantee = 'clara_agent_ro' and privilege_type = 'SELECT';
@@ -248,5 +279,5 @@ begin
   if current_user <> (select v from _zeta_queue_pre where k = 'deploy_principal') then
     raise exception 'zeta queue tail: role was not reset (user %)', current_user using errcode = 'CLR10';
   end if;
-  raise notice 'zeta queue OK: clara.render_jobs is forced-RLS with the owner/human policy pair and ZERO write privilege for any app role. The idempotency key is unique(report_run_id, manifest_sha256) over the REQUEST manifest; the kind CHECK admits draft_watermarked and pre_sign only -- a signed original is retained and retrieved, never rendered. The pinned request is immutable and a terminal job never reopens. clara_agent_ro gained nothing.';
+  raise notice 'zeta queue OK: clara.render_jobs is forced-RLS with the owner/human policy pair and ZERO write privilege for any app role. The idempotency key is a PARTIAL unique index on (report_run_id, manifest_sha256) where state <> ''failed'' -- read from the catalog, not assumed -- so one live-or-completed job per pinned request is structural while a terminally failed one can still be answered by a successor through clara.requeue_render_job (file 5); the kind CHECK admits draft_watermarked and pre_sign only -- a signed original is retained and retrieved, never rendered. The pinned request is immutable, including the succession link, and a terminal job never reopens. clara_agent_ro gained nothing.';
 end $tail$;

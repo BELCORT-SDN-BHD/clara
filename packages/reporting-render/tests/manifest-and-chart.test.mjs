@@ -116,17 +116,30 @@ test("document metadata is a pure function of the pinned request — two calls a
   deepStrictEqual(a, b);
   strictEqual(a.creation_date_utc, "2025-12-31T00:00:00Z");
   strictEqual(a.modification_date_utc, a.creation_date_utc);
-  strictEqual(a.document_id, canonicalSha256(request));
-  deepStrictEqual(a.trailer_id, [a.document_id.slice(0, 32), a.document_id.slice(0, 32)]);
+  // AND IT PINS NOTHING THE FILE CANNOT CARRY (round 2). subject/document_id/trailer_id were
+  // removed because the pinned engine can set neither a PDF Subject nor the trailer /ID, so those
+  // pins were claims no artifact could honour and no cross-check ever read. This cell asserts the
+  // absence on purpose: re-adding one without an emission path is the defect, not the omission.
+  for (const gone of ["subject", "document_id", "trailer_id"]) {
+    ok(!(gone in a), `${gone} must not be pinned while nothing emits it`);
+  }
 });
 
-test("a different pinned input gives a different document id", () => {
-  const other = documentMetadata({
-    requestManifest: { ...request, dataset_sha256: "d".repeat(64) },
+test("a different pinned input gives different manifest bytes — identity is the request digest", () => {
+  // The identity property the removed document_id was standing in for still holds, one layer down
+  // and where it is actually load-bearing: the canonical digest of the pinned request, which is
+  // what the job carries as render_request_sha256 and what the DB re-proves at completion.
+  const other = { ...request, dataset_sha256: "d".repeat(64) };
+  ok(canonicalSha256(other) !== canonicalSha256(request));
+  // The document metadata still MOVES with the period, which is what makes the dates a pin rather
+  // than a clock reading.
+  const shifted = documentMetadata({
+    requestManifest: { ...request, reporting_period: { ...request.reporting_period, period_end: "2026-06-30" } },
     title: "Financial statements", uncertified: false, watermark: false,
   });
   const base = documentMetadata({ requestManifest: request, title: "Financial statements", uncertified: false, watermark: false });
-  ok(other.document_id !== base.document_id);
+  ok(shifted.creation_date_utc !== base.creation_date_utc);
+  ok(shifted.source_date_epoch !== base.source_date_epoch);
 });
 
 test("the assembler will not invent a title", () => {

@@ -277,13 +277,34 @@ begin
   v_manifest := clara.render_request_manifest_v1(r.id, p_kind);
   v_sha := encode(clara._hash(v_manifest), 'hex');
 
+  -- A TERMINAL FAILURE IS ANSWERED THROUGH THE AUDITED DOOR, NOT THROUGH HERE. File 1's key is
+  -- partial (`where state <> 'failed'`) so that a failed request CAN be retried at all -- an
+  -- unconditional key plus the attempt-cap reap left a run permanently unproducible. But partial
+  -- alone would let this verb quietly mint the successor itself: no stated reason, no link to the
+  -- failure it answers, and a machine path (epsilon's seal, the leader's fallback sweep) able to
+  -- re-run a job that already burned five paid machines. So the resurrection is refused here and
+  -- lives in clara.requeue_render_job, where a person names the incident and the act is audited.
+  if exists (select 1 from clara.render_jobs
+              where report_run_id = r.id and manifest_sha256 = v_sha and state = 'failed')
+     and not exists (select 1 from clara.render_jobs
+              where report_run_id = r.id and manifest_sha256 = v_sha and state <> 'failed') then
+    raise exception 'this render request has already failed terminally' using errcode = 'CLR43',
+      detail = jsonb_build_object('reason', 'render_job_failed_terminally', 'report_run_id', r.id,
+        'manifest_sha256', v_sha,
+        'fix', 'read the failed job''s last_error, then call clara.requeue_render_job(job id, why) to mint a successor')::text;
+  end if;
+
+  -- The inference carries the key's predicate, and the read below asks for the row that is still IN
+  -- the key: a run can hold a failed row AND its live successor, so "the row with this manifest" is
+  -- no longer unique and this select would raise "query returned more than one row".
   insert into clara.render_jobs(firm_id, client_id, report_run_id, kind, request_manifest,
       manifest_sha256, requested_by)
     values (r.firm_id, r.client_id, r.id, p_kind, v_manifest, v_sha, r.requested_by)
-    on conflict (report_run_id, manifest_sha256) do nothing
+    on conflict (report_run_id, manifest_sha256) where state <> 'failed' do nothing
     returning id into v_id;
 
-  select * into j from clara.render_jobs where report_run_id = r.id and manifest_sha256 = v_sha;
+  select * into j from clara.render_jobs
+   where report_run_id = r.id and manifest_sha256 = v_sha and state <> 'failed';
   if v_id is not null then
     perform clara._audit(r.firm_id, r.requested_by, null, null, 'enqueue_render_job', null,
       jsonb_build_object('report_run_id', r.id, 'render_job_id', j.id, 'kind', p_kind,
@@ -338,18 +359,23 @@ grant execute on function clara.enqueue_missing_render_jobs(int) to clara_runtim
 do $tail$
 declare v_leak int; v_keys int;
 begin
-  -- The two internals are granted to NO app role; only the sweep is runtime-callable.
+  -- The two internals are granted to NO app role; only the sweep is runtime-callable. PUBLIC is
+  -- named explicitly (round-2 minor): aclexplode reports a world grant with grantee = 0, which
+  -- neither matches a pg_roles row nor the `clara\_%` pattern, so the widest possible grant was the
+  -- one shape this census could not see.
   select count(*) into v_leak from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
+    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
+    left join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
      and p.proname in ('render_request_manifest_v1', 'enqueue_render_job')
-     and rr.rolname like 'clara\_%' and rr.rolname <> 'clara_fn_owner';
+     and (rr.rolname is null or (rr.rolname like 'clara\_%' and rr.rolname <> 'clara_fn_owner'));
   if v_leak <> 0 then
     raise exception 'zeta pin tail: % app-role EXECUTE grant(s) on an internal render function',
       v_leak using errcode = 'CLR10';
   end if;
   select count(*) into v_leak from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl join pg_roles rr on rr.oid = acl.grantee
+    cross join lateral aclexplode(coalesce(p.proacl, '{}')) acl
+    left join pg_roles rr on rr.oid = acl.grantee
    where p.pronamespace = 'clara'::regnamespace and acl.privilege_type = 'EXECUTE'
      -- THE OWNER IS NOT A GRANTEE. aclexplode expands proacl, which for a function created by
      -- clara_fn_owner ALWAYS carries the owner's own implicit entry (clara_fn_owner=X/clara_fn_owner)
@@ -357,8 +383,9 @@ begin
      -- a stray grant and the census fails on a correct database -- which is exactly what the rig
      -- leg caught here, at apply, with the migration rolled back. Exclude the owner explicitly; the
      -- sibling checks above do the same thing with their `<> 'clara_fn_owner'` clause.
+     -- And a PUBLIC grant reads as 'PUBLIC' rather than vanishing in an inner join (round-2 minor).
      and p.proname = 'enqueue_missing_render_jobs'
-     and rr.rolname not in ('clara_runtime', 'clara_fn_owner');
+     and coalesce(rr.rolname, 'PUBLIC') not in ('clara_runtime', 'clara_fn_owner');
   if v_leak <> 0 then
     raise exception 'zeta pin tail: enqueue_missing_render_jobs granted to % non-runtime role(s)',
       v_leak using errcode = 'CLR10';
