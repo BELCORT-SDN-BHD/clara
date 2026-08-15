@@ -805,6 +805,51 @@ jobs:
           PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
             node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
 
+      # Wave-E η contract drill — the ε drill's shape, for the same hazard on the authoring lane.
+      # The package sweep preloads tests/eta-preintegration-gate.mjs, which sets
+      # CLARA_ALLOW_MISSING_WAVE_E_ETA for every file in the sweep; so if a numbering or merge
+      # accident ever left the η migrations off the chain, the ENTIRE η battery would skip
+      # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
+      # database, the full on-disk chain, then the η contract FOCUSED with the variable explicitly
+      # UNSET — on a pre-η chain that FAILS by design (the gate's stated focused-run polarity),
+      # and post-η it must be green with ZERO skips.
+      #
+      # ABSENCE FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with ε's R1
+      # finding. Once η is on main its migrations are never legitimately absent, so absence means a
+      # numbering or merge accident: exactly the accident this drill is the last line of defence
+      # against. It fails loudly.
+      #
+      # GUARDED ON part2, THE LAST FILE OF THE SET — and for η that matters more than it does for
+      # the siblings, because part 1 alone is a legitimate-LOOKING state BY CONSTRUCTION. Part 1
+      # creates the three cores and grants nothing; that is η's own documented fail-safe residue
+      # between the halves. So a first-file guard would be satisfied by a partial merge that
+      # dropped the GRANTED half, and would then drill a chain with no wrappers, no EXECUTE grants
+      # and no allowlist rows — the entire surface this contract exists to measure.
+      #
+      # Its own database, because η's cells are whole-catalog CENSUSES: the four app-executable
+      # definition writers, and the three cores being reachable by no application role. Any other
+      # battery that adds a clara function carrying definition DML, or widens a grant, moves those
+      # numbers — so a shared, already-consumed database is not valid evidence for a census.
+      # (`pnpm seed` is here for uniformity with the sibling drills; every η assertion reads the
+      # catalog and needs no seed data.)
+      - name: Wave-E η contract drill (isolated DB, focused, allow-missing UNSET)
+        working-directory: packages/db
+        run: |
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_eta_wake_wrappers_part2.sql 2>/dev/null | head -1)"
+          if [ -z "$m" ]; then
+            echo "::error::no numbered wave_e_eta_wake_wrappers_part2 migration on disk."
+            echo "The η lane is merged, so its migrations cannot be legitimately absent — this is a"
+            echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
+            echo "part2 is the GRANTED half: without it there are no wrappers, no EXECUTE grants and no allowlist rows."
+            exit 1
+          fi
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_eta_contract_ci'
+          PGDATABASE=clara_eta_contract_ci pnpm migrate
+          PGDATABASE=clara_eta_contract_ci pnpm seed
+          unset CLARA_ALLOW_MISSING_WAVE_E_ETA
+          PGDATABASE=clara_eta_contract_ci CLARA_RIG_DB=1 \
+            node --test --test-concurrency=1 tests/eta-contract.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
