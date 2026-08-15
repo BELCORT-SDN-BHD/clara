@@ -3,27 +3,33 @@
   "workflows": {
     "packages/reporting-render/lib/canonical-json.mjs": {
       "sha256": "33b665f68c1e79b059f218d96f150b386235eccea66b0520c7dd97fce233c60f",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/reporting-render/lib/chart.mjs": {
       "sha256": "d6cbcb5e033169062dde4a03f72b4f69cf224bff2c6767221c3e2a39bfcc3e29",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/reporting-render/lib/decisions.mjs": {
       "sha256": "2f4e9ffe9d733b90173106b00d2beb3ae6c5c7d8cb749c74ae6f04fdac557139",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/reporting-render/lib/layout.mjs": {
       "sha256": "bc416972436ef18ff6b2de137facc4f172fc597efbc4ff957ad12ea20be6377b",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/reporting-render/lib/lexicon.mjs": {
       "sha256": "b3397d6dc186158cfec03bebc0d483cf6ef0d01055e76b82b75d090394b16c3a",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/reporting-render/lib/manifest.mjs": {
       "sha256": "bf95b2a02e40d23d065afd13e940ad0cafa630d7533e0abf6bc3c7f3a089fec9",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/runtime/lib/malaysian-registration.mjs": {
       "sha256": "49f8a2672577b5d567ddeddadc1d7207a6519126a330100cc821cde919ba74e8",
@@ -287,19 +293,23 @@
     },
     "packages/runtime/workflows/chatTurn.v11.impl.ts": {
       "sha256": "afdb8cb8d60e2722019e795ad7c94340105e7ea3c50ae5401e2c10759949f752",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v11.prompt.ts": {
       "sha256": "24bfb0968ac71126774a8c0de995c4e232d6f730f83fec8998fff1ab82aa8eee",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v11.tools.ts": {
       "sha256": "93435aa63ddbbf363b07b33d79a5d39d4b87e4df617d3fb476a7b3f46c4e7585",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v11.ts": {
       "sha256": "26b23143286182845bf5a5a0df4ef8fb650babce5f1e289e6339fc1a032b6dfe",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
