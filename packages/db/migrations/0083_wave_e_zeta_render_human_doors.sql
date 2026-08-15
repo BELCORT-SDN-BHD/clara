@@ -1,11 +1,22 @@
--- 0079_wave_e_zeta_render_human_doors.sql -- lane zeta, file 5 of 5 (THE HUMAN DOORS + THE FENCE).
+-- 0083_wave_e_zeta_render_human_doors.sql -- lane zeta, file 5 of 5 (THE HUMAN DOORS + THE FENCE).
 --
--- THE NUMBER IS NOT CONTIGUOUS WITH THIS LANE'S OTHER FOUR, and that is correct: 0077/0078 are lane
--- eta's, claimed while this file was being written, and numbers are claimed at MERGE against the
--- live frontier rather than reserved in blocks. Nothing here does slot arithmetic -- the prestate
--- names the OBJECTS it needs (files 1-4's queue and verbs), not the numbers they landed on -- so the
--- renumber was a rename plus this sentence. The one ordering fact that matters: lexical order is
--- ledger order, and 0079 applies after eta's two, which it neither reads nor needs.
+-- WHY THIS LANE STARTS AT 0079 AND NOT 0073, and why the gap below it is lawful. Numbers are
+-- claimed at MERGE against the live frontier, never reserved in blocks. Lane eta merged first, so
+-- the frontier became 0078 -- and packages/db/scripts/migrate.mjs REFUSES a pending migration
+-- numbered at or below the highest applied one ("a late-inserted lower number would run out of
+-- order; migration history is append-only"). This lane's original 0073-0076 were exactly that, and
+-- the deploy-onto-existing CI leg proved it deterministically before any ceremony could: it builds
+-- at main's frontier, then applies the branch. So all five files moved ABOVE the frontier
+-- (0073-0076 -> 0079-0082, and this one 0079 -> 0083) rather than filling the vacated slots, which
+-- would have re-created the same out-of-order refusal for anyone building from an earlier point.
+--
+-- GAPS ARE LAWFUL; ONLY OUT-OF-ORDER IS REFUSED. A fresh chain reads 0001-0072, then eta's
+-- 0077-0078, then this lane's 0079-0083, and the combined ceremony applies them in that order.
+--
+-- The renumber cost a rename and these sentences because NOTHING in this lane does slot arithmetic:
+-- every prestate names the OBJECTS it needs -- files 1-4's queue and verbs, epsilon's pins function
+-- and seal core -- rather than the numbers they happened to land on. That discipline has now been
+-- priced three times and paid for itself each time.
 --
 --   clara.replay_render_inputs  -- the DR drill's read: an artifact's own sealed inputs (moved
 --                                  here from file 3, unchanged except for the firm scope)

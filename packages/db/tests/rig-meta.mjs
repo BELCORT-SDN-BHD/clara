@@ -165,7 +165,7 @@ const REPORTING_0065_HUMAN_FNS = [
   "seal_report_artifact", "approve_report_for_issue", "verify_report_artifact",
 ];
 const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
-// 0073-0076 + 0079 [Wave E lane ζ] the render queue. Same closed-set discipline as ε's block above: the
+// 0079-0083 [Wave E lane ζ] the render queue. Same closed-set discipline as ε's block above: the
 // estate roster must NAME every function that holds a grant, so a sanctioned addition is a
 // reviewed line here rather than a surprise in the sweep.
 //
@@ -182,7 +182,7 @@ const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
 //   render_dispatch_record      · the leader's outcome receipt for that attempt
 //   reap_exhausted_render_jobs  · queue hygiene: park the crash-only jobs stuck at their cap
 //   enqueue_missing_render_jobs · the leader's fallback enqueue when ε's seal call was missed
-const RENDER_0073_RUNTIME_FNS = [
+const RENDER_ZETA_RUNTIME_FNS = [
   "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
   "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
   // The FENCE reads a boolean and writes nothing: it is what lets a render that outran its lease
@@ -201,10 +201,10 @@ const RENDER_0073_RUNTIME_FNS = [
 // Both are deliberately NOT runtime-granted: a recovery instrument must not become a second path
 // the worker can walk, and nothing machine-side gets to decide that a failure deserves another
 // paid render.
-const RENDER_0073_HUMAN_FNS = ["replay_render_inputs", "requeue_render_job"];
+const RENDER_ZETA_HUMAN_FNS = ["replay_render_inputs", "requeue_render_job"];
 // The internals stay ungranted to every application role and are asserted so in-migration:
 // render_request_manifest_v1, enqueue_render_job (ε's seal calls it), _tf_render_job_lifecycle.
-const RENDER_0073_COHORT = [...RENDER_0073_RUNTIME_FNS, ...RENDER_0073_HUMAN_FNS];
+const RENDER_ZETA_COHORT = [...RENDER_ZETA_RUNTIME_FNS, ...RENDER_ZETA_HUMAN_FNS];
 // 0077-0078 [Wave E lane η] the ad-hoc authoring lane's granted surface: the FOUR wake wrappers,
 // EXECUTE to clara_wake_interactive and to nothing else, each carrying an interactive-only
 // clara.wake_fn_allowlist row. Same closed-set reason as the blocks above — they ship as one
@@ -821,7 +821,7 @@ export const ALLOWED = {
     // is declared describes each. They are not the same kind of verb: replay_render_inputs is
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
-    ...RENDER_0073_HUMAN_FNS,
+    ...RENDER_ZETA_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -843,7 +843,7 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
-    ...RENDER_0073_RUNTIME_FNS, // 0073-0076 + 0079 [Wave E lane ζ] the render queue's whole
+    ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
     // this roster IS the surface
@@ -996,7 +996,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
-  failures.push(...cohortFailures("0073-0076 + 0079 wave E render queue", RENDER_0073_COHORT, liveNames));
+  failures.push(...cohortFailures("0079-0083 wave E render queue", RENDER_ZETA_COHORT, liveNames));
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   return failures;
 }

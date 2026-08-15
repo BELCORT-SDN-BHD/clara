@@ -1,4 +1,4 @@
--- 0073_wave_e_zeta_render_jobs.sql -- lane zeta, file 1 of 5 (THE QUEUE TABLE).
+-- 0079_wave_e_zeta_render_jobs.sql -- lane zeta, file 1 of 5 (THE QUEUE TABLE).
 --
 -- THE RENDER QUEUE (design wave-e-design-reporting-part2.md SS10). The zeta set applies AFTER
 -- the whole epsilon set (it FKs clara.report_runs and clara.report_artifacts) and after delta
@@ -11,8 +11,9 @@
 --   file 3         clara.claim_render_job / render_job_payload / fail_render_job /
 --                  reap_exhausted_render_jobs / render_dispatch_begin / _record
 --   file 4         the epsilon seal seam + clara.complete_render_job
---   file 5 (0079)  the human doors -- replay_render_inputs, requeue_render_job -- and the worker's
---                  fence, render_lease_alive. Not 0077: eta claimed 0077/0078 (see 0079's header).
+--   file 5 (0083)  the human doors -- replay_render_inputs, requeue_render_job -- and the worker's
+--                  fence, render_lease_alive. The lane sits ABOVE eta's 0077/0078; 0083's header
+--                  records why the whole set moved up rather than filling the gap below.
 --
 -- WHY A DB QUEUE AND NOT AN HTTP CALL (SS10, four reasons, none of them taste):
 --   (a) the request is enqueued INSIDE the same audited transaction that seals the dataset and

@@ -1,4 +1,4 @@
--- 0075_wave_e_zeta_render_jobs_part3.sql -- lane zeta, file 3 of 5 (CLAIM + DISPATCH + REAP).
+-- 0081_wave_e_zeta_render_jobs_part3.sql -- lane zeta, file 3 of 5 (CLAIM + DISPATCH + REAP).
 --
 --   Z5  clara.claim_render_job            -- the worker's claim (for update skip locked)
 --   Z5b clara.render_job_payload          -- the worker's per-job read
@@ -425,7 +425,7 @@ grant execute on function
   to clara_runtime;
 
 -- THE HUMAN DOORS ARE FILE 5's. The replay door and the requeue door are granted to
--- clara_authenticated and live in 0079 with their own census — this file's surface is the machine
+-- clara_authenticated and live in 0083 with their own census — this file's surface is the machine
 -- lane and nothing else, which is what lets the census below say "clara_runtime, and no one".
 
 -- THE CENSUS RUNS IN TWO BLOCKS ON PURPOSE. The wiki dynamic-SQL gate (0019 §9) reads a `do` block
