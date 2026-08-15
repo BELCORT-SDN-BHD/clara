@@ -9,7 +9,13 @@ file wins or it is stale — and truing it is the first thing you do.
 
 *(as of 2026-08-15, the Wave E close — trued at every clock-out)*
 
-- **Live DB: 79 migrations, frontier `0084` (the B4 approve-verb maker rule).** Three
+- **Live DB: 81 migrations, frontier `0086` (B3's estate censuses).** The B3 ceremony ran
+  2026-08-16 (D1 write-quiesce; `docs/plan/completed/b3-reopen-ceremony-asrun.md`):
+  `reopen_fiscal_year` is now the `ends_on`-dated formal prior-period adjustment under the
+  target-bound M2 permit, and reversing a close is a SEGREGATED act (reopener ≠ closer at
+  ≥2 eligible; attested sole path; adoption arm for orphaned closes) — live BEFORE the
+  first real close, as ADR-068 required. The pre-B3 silent-no-op reopen defect is dead.
+  Earlier this close: three
   ceremonies ran from merged `main` this close: 0058-0063 (2026-08-14,
   `docs/plan/completed/wave-e-delta-ceremony-asrun.md`), 0064-0072 (2026-08-14 morning,
   `docs/plan/completed/wave-e-theta-epsilon-ceremony-asrun.md`), and 0077-0084 (2026-08-15,
@@ -79,8 +85,9 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave E · η | chatTurn_v11 + four wake wrappers `0077-0078` — behavioural battery with mutation proof; merged f852ae43. B4 (the approve-verb maker rule, `0084`, four arms incl. ARM-0 orphan adoption) merged f90e0fd5→faf33ecb; runtime v11 deployed at the 0077-0084 ceremony | **ceremonied (LIVE)** | #240 #242 |
 | S0.9 runner fix | checksum-keyed per-migration isolation pin (0057 → repeatable read, MEASURED post-BEGIN); the birth-sentinel cluster race killed | **merged** | #241 |
 | Wave-E close paperwork | the 0077-0084 ceremony as-run + the freeze deploy-lock (140/140 locked), merged 263aa2d; ζ's DR-render docs merged 2b01219; this truing PR closes the set | merged | #243 #244 |
-| B3 | `reopen_fiscal_year` → the `ends_on`-dated formal prior-period adjustment under the target-bound M2 permit (ADR-068 ruling 1); opus build lane dispatched 2026-08-15, worktree-isolated, UNNUMBERED until merge | building | — |
-| MASB wording seed | the #43 packet (dossier + 2 amendments) → ε's statutory wording tables via the audited door; sonnet lane dispatched 2026-08-15. **Merge HELD for the owner's ms/zh sign-off** | building (HOLD) | — |
+| B3 | `reopen_fiscal_year` → the `ends_on`-dated prior-period adjustment + the segregation wall (reopener≠closer / attested sole / adoption arm), migrations `0085-0086`; four-lens review (9 refuted / 4 survived → fix round → CONFIRMED ×6); found the pre-B3 silent-no-op reopen bug AND the 0056 closing_transfer/SST latent (task #17); merged 3203093, **ceremonied 2026-08-16** | **ceremonied (LIVE)** | #247 |
+| ε wording-state fix | the four assert-shipped-state cells → law-shaped fixtures (three cuts to an honest discriminator; the counterfactual table as proof); sequenced AHEAD of the wording merge; merged 585346f0 | **merged** | #246 |
+| MASB wording seed | the #43 packet → statutory wording via the 0067-sanctioned path; branch wording/masb-seed @ bf72db1, payload re-derived clean twice, five review fixes confirmed, combined-green with ε's fix (fail 0). **PR-ready; merge HELD for the owner's ms/zh sign-off + three ruling items** (Issue-3 both-labels call · benar-dan-patut seed-or-hold · the zh/ms issuability asymmetry) | **review-closed (HOLD)** | — |
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -93,31 +100,39 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    it), then re-index the codebase graph (`codebase-memory-mcp` · `index_repository`) — code
    changed materially this wave (0064-0084 + the runtime v11 + the reporting-render package)
    and the graph is a wave behind until this runs.
-2. **B3 to live**: lane report → independent review (judgement logic — law 1) → the ADR-061
-   ladder → merge (claims its number above `0084`) → D1 ceremony. **Hard deadline: before the
-   BEE FY2025 close finalizes, and in any case before any real reopen.**
-3. **MASB wording seed**: lane report → review to PR-ready → **HOLD for the owner's ms/zh
-   sign-off** (their sitting) → merge + ceremony.
-4. **Owner-key acceptance items** (the constitutional human half, whenever the owner sits):
-   the E-R9 corpus on live books — sandbox battery → BEE FY2025 first real close (drawer
-   keys; B3 must land first) → RPR historical MPERS pack → RS snapshot witness; the #43
-   wording packet review + ms/zh sign-off (packet is research-complete, scratchpad
-   the masb-wording dossier v1 + two amendments, session scratchpad — not in-repo until the
-   seed migration lands); the ms/zh claim-policy copy (fail-closed until
-   supplied); the optional elevated `diskpart` VHDX compact (~50GB).
-5. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25) —
-   both parked for that sitting (ADR-062/0065) — plus the registered CI economics overhaul
-   (see Backlog).
+2. **Owner-key acceptance items** (the constitutional human half, whenever the owner sits):
+   the #43 sign-off sitting — ms/zh wording + three ruling items (the Issue-3 both-labels
+   judgment call · benar-dan-patut seed-or-hold · **the zh/ms issuability asymmetry: at
+   merge, en AND zh statutory packs become issuable while ms stays blocked at 4/5, and
+   `authority_level` is decorative at the gate**) → then the wording PR (renumbers above
+   `0086`) merges + its ceremony; the E-R9 corpus on live books — sandbox battery → **BEE
+   FY2025 first real close (drawer keys; B3 is now LIVE, the prerequisite is met)** → RPR
+   historical MPERS pack → RS snapshot witness; the ms/zh claim-policy copy (fail-closed
+   until supplied); the optional elevated `diskpart` VHDX compact (~50GB).
+3. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25)
+   (ADR-062/0065) + the CI economics overhaul + **the vision audit's six gaps and three
+   recommendations** (the vision-alignment-audit document, session scratchpad, delivered to
+   the owner 2026-08-16 — the
+   non-agentic interview is the one true drift; the audited freeform-read tool and the eval
+   harness are the highest-leverage builds) + the closing_transfer/SST latent (below).
 
 ## Backlog
 
 Registered but not scheduled. Sources of record in brackets.
 
 **Named build debts (deadline-triggered):**
-- **B3 implementation** — `reopen_fiscal_year` moves from the today-dated mirror to the
-  dedicated `ends_on`-dated reversal under the target-bound permit. **Before the first real
-  close finalizes (BEE FY2025), and in any case before any real reopen.** When it lands,
-  `reopen_fiscal_year` joins 0057's S11.2 writer-census roster. *(ADR-0068)*
+- ~~B3 implementation~~ — **RETIRED 2026-08-16**: live as `0085-0086` (ceremonied; the
+  S11.2 roster join discharged in-code, verified by the four-lens review). *(ADR-0068)*
+- **The `closing_transfer`/SST-turnover latent (0056)** — finalize_close's closing entry is
+  born `is_year_end` with `closing_transfer=false` and approved-row immutability means it
+  can never be marked afterwards, so 0016's SST turnover exclusion is DEAD for close-model
+  clients: post-close, the ends_on month's income bucket carries the full-year closing
+  DEBIT and rolling-12 turnover reads ~0 — an SST registration watch that should fire does
+  not (advisory-only blast radius: a wrong warning, never a wrong book). Found twice
+  independently (the B3 review's accounting lens; the vision audit). Own migration + full
+  ladder: mark closing entries + reopen mirrors at birth, or fix 0016's population
+  predicate. **Before the first real close is relied on for SST turnover (BEE FY2025 at the
+  latest).** *(task #17; B3 PR body carries the site cites)*
 - **`closing_stock` producer verb** — before any real goods-trader close. *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. *(ADR-043)*
 - **δ NAMED RESIDUALS (all deliberate, each recorded in its file/PR):** F10 — a DB-level
@@ -346,6 +361,18 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Session log
 
+- **2026-08-16 (the post-wave tail, same session)** — the #43 wording seed built to
+  review-closed (payload re-derived clean twice; four honest hold-backs incl. a
+  fabricated-citation refusal; PR-ready at bf72db1, held for the owner); ε's four
+  assert-shipped-state cells rewritten law-shaped and merged (#246) ahead of the wording
+  path; **B3 built, four-lens-reviewed (9 refuted / 4 survived incl. a segregation-wall
+  MAJOR fixed via the B4 arms + a real 0056 silent-no-op reopen bug killed), merged (#247)
+  and ceremonied (81/`0086`) — before the first real close, as ruled**; the vision-alignment
+  audit delivered (sequenced-not-drifted; one true drift = the non-agentic interview; six
+  gaps registered for Wave F); the closing_transfer/SST latent found twice independently and
+  registered; one runner outage (WSL VM stop) diagnosed by annotation and recovered by
+  service restart, never VM teardown. One reviewer ran five assignments five-for-five with
+  zero relitigated and zero waved-through findings.
 - **2026-08-14/15 (the wave close)** — θ+ε merged and ceremonied (0064-0072, morning);
   ζ closed through seven review rounds (the grep-evidence rule + the phrase-family
   testimony-sweep harness minted mid-ladder) and merged as 0079-0083; η recovered from the
