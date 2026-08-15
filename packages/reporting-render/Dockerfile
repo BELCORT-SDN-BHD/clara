@@ -44,6 +44,24 @@ WORKDIR /app
 # Read from `apt-cache policy` inside the pinned base, not guessed — an invented version number
 # fails the build loudly, which is the good direction, but it also proves the pin was never
 # verified against the image it pins.
+#
+# WHEN THE PIN VANISHES, AND IT WILL. Debian mirrors carry only the CURRENT point release of a
+# stable package, so the day bookworm rolls poppler to deb12u4 this exact version disappears and
+# `apt-get install` fails with "Version ... not found" — on every PR in the repo, including ones
+# that touch nothing here. That is the accepted cost of a reproducible image, not a defect, and the
+# remedy is a two-minute bump rather than a floating pin:
+#
+#   1. docker run --rm node@<the digest pinned above> sh -c 'apt-get update >/dev/null && apt-cache policy poppler-utils xz-utils'
+#   2. copy the reported Candidate versions into the two ARGs below
+#   3. rebuild and run scripts/double-render-drill.mjs — ALL THREE arms, because a new poppler is a
+#      new extractor and the artifact's extracted_text_sha256 is part of what gets sealed
+#   4. record the old and new versions in the PR body; a sealed artifact names its extractor
+#      version in its manifest, so this is a change a reader seven years out may need to explain
+#
+# The alternative — pointing apt at snapshot.debian.org so the exact version never vanishes — was
+# considered and NOT taken: it makes every image build depend on a single upstream archive whose
+# availability nobody here controls, and trades a loud, dated, two-minute failure for a silent
+# dependency on someone else's uptime.
 ARG PINNED_POPPLER_VERSION=22.12.0-2+deb12u3
 ARG PINNED_XZ_VERSION=5.4.1-1+deb12u1
 RUN set -eux; \

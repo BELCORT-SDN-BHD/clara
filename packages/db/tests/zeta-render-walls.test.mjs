@@ -107,6 +107,53 @@ test("zeta: the replay door is FIRM-SCOPED — another firm's caller reads exact
     "a foreign artifact and an absent id must produce the IDENTICAL refusal, or the door tells a caller which ids exist");
 });
 
+test("zeta: the reap spares a SLOW worker and the worker fences itself once it is gone", async (t) => {
+  if (await skipUnlessZeta(t)) return;
+  const { eps } = await sealedRun("slow-worker");
+  await parkQueue();
+  const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
+  const id = job.render_job_id;
+
+  // WHILE THE LEASE IS LIVE the fence says so — the positive arm, without which every assertion
+  // below would also pass against a fence that always answered false.
+  await asOwner(`update clara.render_jobs
+      set state='running', claimed_by='slow', claimed_at=now(),
+          lease_expires_at=now()+interval '5 minutes', attempts=max_attempts where id=$1`, [id]);
+  assert.equal((await asRuntime("select clara.render_lease_alive($1, 'slow') a", [id])).rows[0].a, true);
+
+  // A HEALTHY WORKER THAT RAN LONG: at its cap, lease expired a moment ago, still rendering. The
+  // reap must NOT take it. The two halves of this fix do DIFFERENT jobs and the difference is the
+  // point: the grace margin keeps the row RECLAIMABLE instead of terminal, so the render is
+  // delayed rather than stranded; the fence tells the slow worker to STOP, because its completion
+  // would be refused for a dead lease anyway (M1) and typesetting on is money spent for nothing.
+  await asOwner(`update clara.render_jobs
+      set claimed_at=now()-interval '10 minutes', lease_expires_at=now()-interval '1 second'
+    where id=$1`, [id]);
+  const early = (await asRuntime("select clara.render_dispatch_begin(interval '0 seconds', 5) r")).rows[0].r;
+  assert.equal((await rootQuery("select state from clara.render_jobs where id=$1", [id])).rows[0].state,
+    "running", "a lease that expired one second ago is a slow worker, not a dead one — the row stays reclaimable");
+  assert.ok(!(early.reaped_run_ids ?? []).includes(eps.runId));
+  assert.equal((await asRuntime("select clara.render_lease_alive($1, 'slow') a", [id])).rows[0].a, false,
+    "the fence is strict liveness: past expiry the worker abandons rather than finishing work nothing will accept");
+
+  // PAST THE GRACE (the lease was 10 minutes, so half of it is 5): now it is doubly dead and the
+  // sweep reaps it, naming the run so an operator can find the report that will not exist.
+  await asOwner(`update clara.render_jobs
+      set claimed_at=now()-interval '40 minutes', lease_expires_at=now()-interval '30 minutes'
+    where id=$1`, [id]);
+  const late = (await asRuntime("select clara.render_dispatch_begin(interval '0 seconds', 5) r")).rows[0].r;
+  assert.ok(Number(late.reaped) >= 1, "a doubly-dead job is reaped");
+  assert.ok((late.reaped_run_ids ?? []).includes(eps.runId),
+    "the sweep reports WHICH run was stranded — a bare count sends an operator hunting");
+
+  // The fence keeps saying false on a reaped row, and says nothing to a worker that never held it:
+  // another worker's job, a terminal job and an absent id are one plain `false`.
+  assert.equal((await asRuntime("select clara.render_lease_alive($1, 'slow') a", [id])).rows[0].a, false);
+  assert.equal((await asRuntime("select clara.render_lease_alive($1, 'someone-else') a", [id])).rows[0].a, false);
+  assert.equal((await asRuntime(
+    "select clara.render_lease_alive('00000000-0000-4000-8000-00000000dead', 'slow') a")).rows[0].a, false);
+});
+
 test("zeta: one terminal job in a dispatch batch does not cost the others their receipt", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps: a } = await sealedRun("receipt-a");
@@ -178,14 +225,27 @@ test("zeta: a terminally failed job has a lawful successor, and only through the
   assert.notEqual(re.render_job_id, id, "a successor is a NEW row; the failed one is history");
 
   const rows = (await rootQuery(
-    `select id, state, supersedes_render_job_id, requeue_reason, manifest_sha256
+    `select id, state, supersedes_render_job_id, requeue_reason, manifest_sha256, request_manifest
        from clara.render_jobs where report_run_id = $1 order by enqueued_at`, [eps.runId])).rows;
   const pred = rows.find((r) => r.id === id);
   const succ = rows.find((r) => r.id === re.render_job_id);
   assert.equal(pred.state, "failed", "the predecessor stays exactly as it was — the wall is not weakened");
   assert.equal(succ.requeue_reason, "fly capacity incident 2026-08-15");
-  assert.equal(succ.manifest_sha256, pred.manifest_sha256,
-    "the successor retries THE SAME pinned request; re-deriving it could silently render something else");
+
+  // THE MANIFEST IS RE-DERIVED, and the digests are BOTH reported. Nothing upstream moved in this
+  // fixture, so the fresh digest equals the predecessor's and manifest_changed is false — but the
+  // successor's manifest is today's derivation either way. A verbatim copy would be refused at
+  // completion by epsilon's seal, which re-derives every pin: statutory_wording is append-only, so
+  // one later verified row moves the aggregate and a copied manifest becomes permanently
+  // unsealable. Round 2 shipped the copy; round 3 corrected it.
+  assert.equal(re.superseded_manifest_sha256, pred.manifest_sha256,
+    "the predecessor's digest travels with the successor, so drift is readable rather than silent");
+  assert.equal(succ.manifest_sha256, re.manifest_sha256);
+  assert.equal(re.manifest_changed, false, "nothing upstream moved in this fixture");
+  const fresh = (await asOwner("select clara.render_request_manifest_v1($1, 'pre_sign') m",
+    [eps.runId])).rows[0].m;
+  assert.deepEqual(succ.request_manifest, fresh,
+    "the successor carries TODAY's pins — the same thing a fresh enqueue would build");
 
   // ONE successor, not a queue of them.
   await assert.rejects(

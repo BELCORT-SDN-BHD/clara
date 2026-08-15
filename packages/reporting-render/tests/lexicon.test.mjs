@@ -154,6 +154,11 @@ test("every drawn placeholder present passes", () => {
 // === THE WHOLE GATE ============================================================================
 
 const drawn = [{ key: "entity_legal_name", value: "ACME SDN BHD" }];
+// §7(d) is FAIL-CLOSED: scanFinalArtifact refuses without the manifest's document metadata, so
+// every call below supplies it. These fixtures used to omit it and the gate quietly skipped that
+// arm — which is the defect, not the fixture's convenience. `Title: ACME` appears in each
+// metadata blob so the cross-check has something true to find.
+const SCAN_META = { title: "ACME", keywords: "" };
 
 test("a claim phrase in an INELIGIBLE artifact refuses, and names where it was found", () => {
   try {
@@ -163,6 +168,7 @@ test("a claim phrase in an INELIGIBLE artifact refuses, and names where it was f
       lexicon: FULL,
       claimPhraseAllowed: false,
       resolvedPlaceholders: drawn,
+      documentMeta: SCAN_META,
     });
     throw new Error("expected a refusal");
   } catch (err) {
@@ -180,6 +186,7 @@ test("a claim phrase hidden in the METADATA is caught — a claim in Title/Subje
       lexicon: FULL,
       claimPhraseAllowed: false,
       resolvedPlaceholders: drawn,
+      documentMeta: SCAN_META,
     });
     throw new Error("expected a refusal");
   } catch (err) {
@@ -195,6 +202,7 @@ test("the same claim phrase in an ELIGIBLE artifact passes and is reported", () 
     lexicon: FULL,
     claimPhraseAllowed: true,
     resolvedPlaceholders: drawn,
+    documentMeta: SCAN_META,
   });
   strictEqual(r.scanned, true);
   strictEqual(r.body_hits.length, 1);
@@ -204,7 +212,8 @@ test("the same claim phrase in an ELIGIBLE artifact passes and is reported", () 
 test("§7(d): manifest-pinned metadata ABSENT from the PDF refuses (codex M11)", () => {
   // The checked set is title + keywords: the two values whose EXACT text the manifest owns and the
   // pinned engine actually writes. The dates are emitted but not substring-checked (the engine
-  // chooses their format); the drill's control arm is what proves that pin is wired.
+  // chooses their format); the drill's clock and control arms are what prove that pin is wired —
+  // a changed epoch must leave the bytes identical, a changed pinned input must move them.
   const documentMeta = {
     title: "ACME FS 2025", keywords: "report_run:abc",
     creation_date_utc: "2025-12-31T00:00:00Z", source_date_epoch: 1767139200,
@@ -240,6 +249,7 @@ test("the gate refuses on a partial lexicon EVEN IF the document is clean", () =
       lexicon: [EN],
       claimPhraseAllowed: false,
       resolvedPlaceholders: drawn,
+      documentMeta: SCAN_META,
     })),
     "claim_lexicon_locale_missing",
   );

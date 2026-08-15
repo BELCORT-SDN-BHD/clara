@@ -21,6 +21,7 @@ export const ZETA_ENTRYPOINTS = Object.freeze([
   ["complete_render_job", "clara.complete_render_job(uuid,text,text,bigint,jsonb)"],
   ["replay_render_inputs", "clara.replay_render_inputs(uuid)"],
   ["requeue_render_job", "clara.requeue_render_job(uuid,text)"],
+  ["render_lease_alive", "clara.render_lease_alive(uuid,text)"],
   ["_seal_report_artifact_core",
     "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)"],
 ]);

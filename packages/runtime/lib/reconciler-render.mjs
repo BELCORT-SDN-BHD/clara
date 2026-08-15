@@ -194,9 +194,22 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     return { renderOk: false, renderDue: 0, renderDispatched: 0 };
   }
 
+  // THE REAP IS REPORTED BEFORE THE EARLY RETURN, and that ordering is the whole fix (round-3
+  // major). A reaped job is a render that will never happen without a human — the one event in
+  // this belt that can strand a firm's statutory PDF — and it was being computed by the sweep,
+  // returned in this payload, and then thrown away: the early return below fires exactly when the
+  // queue's only job was the reaped one, so the single most important case produced no operator
+  // signal at all while the migration's own comment claimed the repair was observable.
+  const reaped = Number(due?.reaped ?? 0);
+  if (reaped > 0) {
+    log(`[reconcile] render reap: ${reaped} job(s) parked failed at their attempt cap without a worker report`
+      + ` — these need clara.requeue_render_job(<job id>, <why>) once the cause is fixed;`
+      + ` run_ids=${JSON.stringify(due?.reaped_run_ids ?? [])}`);
+  }
+
   const jobIds = Array.isArray(due?.job_ids) ? due.job_ids : [];
   if (jobIds.length === 0) {
-    return { renderOk: true, renderDue: 0, renderDispatched: 0 };
+    return { renderOk: true, renderDue: 0, renderDispatched: 0, renderReaped: reaped };
   }
   // The observed wait is reported on every dispatch, not only on a slow one: A33 arm (ii) asks
   // for the delay to be recorded, and a number you only print when it looks bad is a number
@@ -213,9 +226,18 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     outcome = { ok: false, detail: { error: String(err?.message ?? err) } };
     log(`[reconcile] render dispatch start failed: ${outcome.detail.error}`);
   }
+  let skipped = 0;
   try {
-    await client.query("select clara.render_dispatch_record($1::uuid[], $2::boolean, $3::jsonb) as r",
-      [jobIds, outcome.ok, JSON.stringify(outcome.detail)]);
+    const rec = (await client.query("select clara.render_dispatch_record($1::uuid[], $2::boolean, $3::jsonb) as r",
+      [jobIds, outcome.ok, JSON.stringify(outcome.detail)])).rows[0]?.r ?? {};
+    // A SKIPPED RECEIPT IS REPORTED TOO. The verb skips rows that went terminal during the Fly
+    // round trip — correct, because a terminal row is immutable — but silently skipping them would
+    // leave "we could not start the renderer" unrecorded for those jobs with nothing saying so.
+    skipped = Number(rec?.skipped ?? 0);
+    if (skipped > 0) {
+      log(`[reconcile] render dispatch receipt: ${rec?.recorded ?? 0} recorded, ${skipped} skipped`
+        + ` (those jobs went terminal during the start call — their outcome is on the row that finished them)`);
+    }
   } catch (err) {
     log(`[reconcile] render dispatch receipt error: ${err?.message ?? err}`);
   }
@@ -223,6 +245,8 @@ export async function reconcileRenderDispatch(client, opts = {}) {
     renderOk: outcome.ok,
     renderDue: jobIds.length,
     renderDispatched: outcome.ok ? jobIds.length : 0,
+    renderReaped: reaped,
+    renderReceiptSkipped: skipped,
     renderOldestWaitSeconds: Number(due?.oldest_wait_seconds ?? 0),
   };
 }

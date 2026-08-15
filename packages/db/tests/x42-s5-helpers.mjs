@@ -316,6 +316,24 @@ const RENDER_0075_CLOCK_NAMES = ["claim_render_job", "fail_render_job", "render_
   "render_job_payload"];
 const RENDER_0076_CLOCK_NAMES = ["complete_render_job"];
 
+// 0079 [Wave E lane ζ, the human doors + the worker's fence]: ONE more, and it is the same shape as
+// its six siblings above. clara.render_lease_alive answers "does this worker still hold this job",
+// which is `lease_expires_at > now()` — a lease deadline, an instant, and the cheapest possible
+// read: the worker calls it before the expensive typesetting step and before uploading, so a render
+// that outran its lease abandons instead of spending money on bytes the seal will refuse.
+//
+// WHY NOT clara._book_today(): the same reason as every entry above — _book_today returns a DATE and
+// this is a comparison against a timestamptz deadline. Nothing in this lane decides an accounting
+// date at all.
+//
+// MEASURED, not inferred: arm (D)'s own detector over 0079's three objects flags this one and
+// neither of the other two — replay_render_inputs and requeue_render_job carry no clock token
+// (the successor's enqueued_at is a column DEFAULT, which lives in the table definition rather
+// than in a pg_proc body).
+//
+// Frontier-gated for the reason the 0046/0055/0056/0057/0059/0072 blocks state.
+const RENDER_0079_CLOCK_NAMES = ["render_lease_alive"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -330,6 +348,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0072_%")) names.push(...REPORTING_0072_CLOCK_NAMES);
   if (await applied("0075_%")) names.push(...RENDER_0075_CLOCK_NAMES);
   if (await applied("0076_%")) names.push(...RENDER_0076_CLOCK_NAMES);
+  if (await applied("0079_%")) names.push(...RENDER_0079_CLOCK_NAMES);
   return names.sort();
 }
 

@@ -162,8 +162,13 @@ export function assertProtectedPlaceholdersDrawn({ text, resolvedPlaceholders })
  * The dates are deliberately NOT checked here: the engine writes them in its own formats (the Info
  * dictionary's D:YYYYMMDD form and XMP's ISO form), so matching manifest text against them would
  * be asserting the engine's formatting, not the pin. What proves the date pin is wired is the
- * double-render drill's CONTROL arm — change SOURCE_DATE_EPOCH and the bytes must move — which is
- * a stronger instrument than a substring search, and it runs in CI on every code PR.
+ * double-render drill, and this sentence is load-bearing enough to be worth stating exactly: its
+ * CLOCK arm changes SOURCE_DATE_EPOCH and requires the bytes to stay IDENTICAL (the document's date
+ * comes from the reporting period, so the environment cannot move a sealed artifact), while its
+ * CONTROL arm changes a pinned input and requires them to move. An earlier version of this comment
+ * described the clock arm with the opposite polarity, from before assemble() pinned the date — the
+ * kind of stale comment that teaches a future reader the wrong invariant. Both arms run in CI on
+ * every code PR, and together they are a stronger instrument than a substring search.
  */
 export function assertDocumentMetadataApplied({ metadata, documentMeta }) {
   const haystack = normalizeForMatch(
@@ -186,7 +191,17 @@ export function assertDocumentMetadataApplied({ metadata, documentMeta }) {
 export function scanFinalArtifact({ text, metadata, lexicon, claimPhraseAllowed, resolvedPlaceholders, documentMeta }) {
   const coverage = assertLexiconCoverage(lexicon);
   assertProtectedPlaceholdersDrawn({ text, resolvedPlaceholders });
-  if (documentMeta) assertDocumentMetadataApplied({ metadata, documentMeta });
+  // FAIL-CLOSED ON ABSENCE, like every sibling arm of this gate (round-3 minor). This read
+  // `if (documentMeta)`, so a caller that forgot to pass the manifest's document metadata — a
+  // refactor, a new call site, a payload shape change — silently skipped §7(d) entirely and the
+  // receipt below still said `scanned: true`. An absent manifest is not "nothing to check"; it is
+  // "we cannot check", which is a refusal here exactly as an unreadable metadata block is.
+  if (!documentMeta || typeof documentMeta !== "object") {
+    throw new RenderRefusal("document_metadata_absent",
+      "the artifact scan was asked to run without the manifest's document metadata; §7(d) cannot be skipped",
+      { fix: "pass documentMeta from the final manifest — an unchecked artifact must not seal" });
+  }
+  assertDocumentMetadataApplied({ metadata, documentMeta });
 
   const metadataText = typeof metadata === "string" ? metadata : JSON.stringify(metadata ?? {});
   const bodyHits = findClaimPhrases({ text, lexicon });
@@ -207,6 +222,10 @@ export function scanFinalArtifact({ text, metadata, lexicon, claimPhraseAllowed,
     claim_phrase_allowed: claimPhraseAllowed,
     body_hits: bodyHits,
     metadata_hits: metadataHits,
+    // THE RECEIPT RECORDS WHICH ARMS RAN, not merely that a scan happened. `scanned: true` alone
+    // could not distinguish a full pass from one that skipped §7(d), and this receipt is sealed
+    // into the artifact's manifest — a reader seven years out has only what it says.
+    metadata_cross_check: { ran: true, checked_keys: ["title", "keywords"] },
     lexicon_rows_by_locale: coverage.byLocale,
     // Named, not implied: what this scan does NOT cover.
     residual: "claim text baked into an image is not reachable by text extraction; images are owner-published, content-addressed assets pinned in the manifest",

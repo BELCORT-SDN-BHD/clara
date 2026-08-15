@@ -181,6 +181,10 @@ const REPORTING_0065_COHORT = [...REPORTING_0065_HUMAN_FNS];
 const RENDER_0073_RUNTIME_FNS = [
   "claim_render_job", "render_job_payload", "complete_render_job", "fail_render_job",
   "render_dispatch_begin", "render_dispatch_record", "enqueue_missing_render_jobs",
+  // 0079's one runtime verb: the worker's own lease fence. It reads a boolean and writes nothing,
+  // and it is what lets a slow-but-healthy render discover it has lost its job BEFORE spending
+  // money finishing it — the machine half of the reap's grace margin.
+  "render_lease_alive",
 ];
 // THE HUMAN ONES (migration 0079, the two doors a person calls). replay_render_inputs is the DR §10
 // seven-year drill's executable door: it returns a sealed artifact's OWN pinned inputs so an

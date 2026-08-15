@@ -85,8 +85,10 @@ export function sourceDateEpoch(requestManifest) {
 /**
  * The deterministic Info dictionary + XMP inputs (§10's "normalized PDF metadata"). Determinism
  * comes from SOURCE_DATE_EPOCH, which is derived from the reporting period rather than a clock, so
- * two renders of the same request carry the same dates — and the drill's control arm proves that
- * pin is wired by changing the epoch and requiring the bytes to move.
+ * two renders of the same request carry the same dates. The drill proves that pin from BOTH sides:
+ * its clock arm changes SOURCE_DATE_EPOCH and requires the bytes to stay identical (the
+ * environment cannot move a sealed artifact), and its control arm changes a pinned input — the
+ * reporting period — and requires the bytes to move.
  *
  * `title` is DB-OWNED and passed in from the resolved layout. This module will not invent one: a
  * statement's title is statutory wording or firm-published template text, and a renderer that

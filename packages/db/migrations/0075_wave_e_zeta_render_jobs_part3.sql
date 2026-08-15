@@ -299,6 +299,7 @@ create function clara.render_dispatch_begin(p_cooldown interval default interval
                                             p_max int default 5) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_ids uuid[]; v_due int; v_oldest timestamptz; v_wait bigint; v_reaped int;
+        v_reaped_runs uuid[];
 begin
   -- REAP THE EXHAUSTED FIRST (codex B1, the other half). The claim predicate now refuses a job at
   -- its cap, which stops the paid-machine loop -- but a job that merely stops being claimable is
@@ -312,25 +313,40 @@ begin
   -- inside fail_render_job on an exhausted row would stall the dispatch read for every firm until
   -- its transaction ended. The tail census asserts this function skips locked rows; that claim now
   -- covers the whole body rather than the part written second.
+  -- ONLY A DOUBLY-DEAD JOB REAPS (round-3 major). An expired lease alone does not mean the worker
+  -- is gone: a healthy render that legitimately outran CLARA_RENDER_LEASE_SECONDS has an expired
+  -- lease and is still working, and reaping it flips the row terminal so its completion is refused
+  -- AFTER the pages were typeset and the money spent. The margin is half the job's OWN lease
+  -- (lease_expires_at - claimed_at is exactly the lease it was granted), so a slow worker gets that
+  -- much more rope while a crashed one still terminates on the next sweep after it. The other half
+  -- of this fix is in the worker: it re-checks its lease before the expensive step and before
+  -- completing, and abandons quietly if it has lost it, so a fenced worker never completes against
+  -- a reaped row and a reaped row never steals a completable render.
   with exhausted as (
     select j.id from clara.render_jobs j
-     where j.state = 'running' and j.lease_expires_at < now() and j.attempts >= j.max_attempts
-     for update of j skip locked)
-  update clara.render_jobs t
-     set state = 'failed', finished_at = now(),
-         claimed_by = null, claimed_at = null, lease_expires_at = null,
-         last_error = jsonb_build_object('reason', 'failed_at_cap_without_report',
-           'attempts', t.attempts, 'max_attempts', t.max_attempts,
-           'detail', 'every claim was lost before the worker could record an outcome -- the workers crashed, were killed, or never reached fail_render_job',
-           -- THE REMEDY NAMES THE DOOR THAT EXISTS (round-2 major). This used to say "enqueue a new
-           -- job", which was structurally impossible: enqueue_render_job re-derives the same request
-           -- manifest, hits the idempotency key and returns this dead row, and the fallback sweep
-           -- skips any run that already has a pre_sign job. clara.requeue_render_job is the audited
-           -- human door that mints a SUCCESSOR row instead.
-           'fix', 'inspect the render machine logs for the window this job was claimed in, then call clara.requeue_render_job(this job id, why) to mint a successor once the cause is fixed')
-    from exhausted e
-   where t.id = e.id;
-  get diagnostics v_reaped = row_count;
+     where j.state = 'running' and j.attempts >= j.max_attempts
+       and now() > j.lease_expires_at + (j.lease_expires_at - j.claimed_at) / 2
+     for update of j skip locked),
+  reaped as (
+    update clara.render_jobs t
+       set state = 'failed', finished_at = now(),
+           claimed_by = null, claimed_at = null, lease_expires_at = null,
+           last_error = jsonb_build_object('reason', 'failed_at_cap_without_report',
+             'attempts', t.attempts, 'max_attempts', t.max_attempts,
+             'detail', 'every claim was lost before the worker could record an outcome -- the workers crashed, were killed, or never reached fail_render_job',
+             -- THE REMEDY NAMES THE DOOR THAT EXISTS (round-2 major). This used to say "enqueue a
+             -- new job", which was structurally impossible: enqueue_render_job re-derives the same
+             -- request for the same run and kind and refuses to resurrect a terminally failed one.
+             -- clara.requeue_render_job is the audited human door that mints a SUCCESSOR instead.
+             'fix', 'inspect the render machine logs for the window this job was claimed in, then call clara.requeue_render_job(this job id, why) to mint a successor once the cause is fixed')
+      from exhausted e
+     where t.id = e.id
+    returning t.id, t.report_run_id)
+  -- THE RUN IDS TRAVEL WITH THE COUNT. A leader log line saying "1 reaped" sends an operator
+  -- hunting; one naming the run points them at the report that will not exist until they act.
+  select count(*)::int, coalesce(array_agg(distinct r.report_run_id), '{}')
+    into v_reaped, v_reaped_runs
+    from reaped r;
 
   with due as (
     select j.id from clara.render_jobs j
@@ -355,6 +371,7 @@ begin
   -- `reaped` is REPORTED, not merely done: a crash-only job dying at its cap is an incident the
   -- leader's log should carry, and a silent repair is how a dying renderer stays unnoticed.
   return jsonb_build_object('reaped', coalesce(v_reaped, 0),
+    'reaped_run_ids', to_jsonb(coalesce(v_reaped_runs, '{}'::uuid[])),
     'due', coalesce(v_due, 0), 'job_ids', to_jsonb(v_ids),
     'oldest_enqueued_at', v_oldest, 'oldest_wait_seconds', v_wait);
 end $$;

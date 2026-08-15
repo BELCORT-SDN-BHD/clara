@@ -29,7 +29,7 @@ import { assemble } from "../lib/layout.mjs";
 import { buildFinalManifest, documentMetadata, environmentPins, sourceDateEpoch } from "../lib/manifest.mjs";
 import { ENGINE_NAME, engineVersion, renderPdf } from "../lib/engine.mjs";
 import { EXTRACTOR_NAME, extractMetadata, extractText, extractorVersion } from "../lib/extract.mjs";
-import { claimJob, completeJob, failJob, jobPayload, withSession } from "../lib/db.mjs";
+import { claimJob, completeJob, failJob, jobPayload, leaseAlive, withSession } from "../lib/db.mjs";
 import { fetchFonts } from "../lib/fonts.mjs";
 import { putAndVerify, stageBytes } from "../lib/objects.mjs";
 
@@ -150,6 +150,16 @@ async function runOneJob(client, job, env) {
     });
     log(`job=${jobId} fonts=${fonts.map((f) => `${f.family}@${f.sha256.slice(0, 12)}`).join(" ")}`);
 
+    // FENCE 1 — BEFORE THE EXPENSIVE STEP. The leader's sweep parks a job `failed` once its lease
+    // has been dead for half a lease more, and this worker may be the reason the lease died: a
+    // legitimately slow render outruns its own lease. Typesetting after losing the job spends money
+    // on bytes nothing will accept, so the worker asks whether it still holds the row and abandons
+    // if it does not — WITHOUT calling fail_render_job, because a worker that no longer holds the
+    // lease has no authority to write that row's outcome (the stale-authority defect M1 closed).
+    if (!(await leaseAlive(client, jobId, WORKER_ID))) {
+      log(`job=${jobId} ABANDONED before render: the lease is no longer ours (reaped or reclaimed)`);
+      return { abandoned: true };
+    }
     const bytes = await renderPdf({
       source: assembled.typst,
       fontDir,
@@ -187,6 +197,16 @@ async function runOneJob(client, job, env) {
     });
     assertRequiredKeys({ manifest: finalManifest, kind: job.kind });
 
+    // FENCE 2 — BEFORE UPLOAD AND SEAL. The render is done and cost what it cost; what must not
+    // happen now is a write against a row this worker no longer holds. Checked here rather than
+    // relying on complete_render_job's own liveness refusal, because that refusal arrives AFTER the
+    // object has been PUT into storage — and the storage key is content-addressed and
+    // overwrite-impossible, so a stranded object is the one part of this that cannot be undone.
+    if (!(await leaseAlive(client, jobId, WORKER_ID))) {
+      log(`job=${jobId} ABANDONED before upload: the lease is no longer ours; the rendered bytes are discarded rather than stored`);
+      return { abandoned: true };
+    }
+
     // --- custody BEFORE the seal: the registry row must never point at an object that is not
     // there. The PUT is overwrite-impossible and the read-back re-hashes it.
     const stored = await putAndVerify({ filePath: pdfPath, firmId: job.firm_id, sha256 });
@@ -209,13 +229,18 @@ async function main() {
   log(`worker=${WORKER_ID} engine=${env.pins.font_engine_version} extractor=${env.extractor.name} ${env.extractor.version}`);
   let done = 0;
   let refused = 0;
+  let abandoned = 0;
   for (let i = 0; i < MAX_JOBS; i++) {
     const finished = await withSession(async (client) => {
       const job = await claimJob(client, WORKER_ID, LEASE_SECONDS);
       if (!job) return true; // nothing claimable — drained
       try {
-        await runOneJob(client, job, env);
-        done += 1;
+        const result = await runOneJob(client, job, env);
+        // ABANDONED IS NOT SEALED, and it is not a refusal either. A fenced worker lost its lease
+        // mid-job: it wrote nothing, it owes the row nothing, and counting it as a seal would make
+        // the drain's own log claim an artifact that does not exist.
+        if (result?.abandoned) abandoned += 1;
+        else done += 1;
       } catch (err) {
         refused += 1;
         const reason = err instanceof RenderRefusal
@@ -232,7 +257,7 @@ async function main() {
     });
     if (finished) break;
   }
-  log(`DONE — sealed=${done} refused=${refused}`);
+  log(`DONE — sealed=${done} refused=${refused} abandoned=${abandoned}`);
   // A refusal is a legitimate outcome of a run (a failed claim assessment, an unresolvable pin),
   // not a crash: exit 0 so the scheduled machine's restart policy does not spin on it. The
   // refusals are on the rows, which is where an operator looks.

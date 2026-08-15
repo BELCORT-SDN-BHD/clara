@@ -259,6 +259,20 @@ over printing a live webpage**; if a browser is ever used, the entire browser/OS
 pinned and archived. The engine choice is a build-time spike; the **acceptance test is fixed either
 way** — double-render byte equality in CI, re-render-from-archived-digest equality in the drill.
 
+> **AMENDMENT 2026-08-15 (lane ζ as-built, owner-ruled).** "Normalized PDF metadata **and trailer
+> identifiers**" is narrowed to what the pinned engine can actually carry. Typst 0.12.0 sets
+> `title`, `author`, `keywords` and `date`; it offers no facility for a PDF **Subject** or for the
+> trailer **/ID**, and this image deliberately carries no post-processing tool that could write
+> them. The manifest therefore pins neither: a manifest that pinned a document id the artifact does
+> not hold would be a claim about a document that does not exist — the exact disagreement §7(d)'s
+> cross-check exists to catch, and one that cross-check could never have caught, because it never
+> looked at those fields. The honest manifest wins over the aspirational one. **What replaces the
+> lost coverage:** the date pin is proven by the drill's clock arm (a changed `SOURCE_DATE_EPOCH`
+> must leave the bytes identical) and its control arm (a changed pinned input must move them),
+> which together are a stronger instrument than a substring match ever was. If the engine pin
+> moves to ≥0.13, `subject` returns via `#set document(description:)` and rejoins the checked set;
+> the trailer /ID would still need a tool this image does not ship.
+
 **DR.md §10 + Supavisor.** DR.md's last `##` is §9 (`docs/ops/DR.md:349`; the file runs to `:497`);
 §10 lands after it, structured like §5/§5b (described drill at `:152` + exercised evidence at `:203`)
 and joined to §9's existing cadence **in DR.md's own vocabulary, quoted exactly** — the section header

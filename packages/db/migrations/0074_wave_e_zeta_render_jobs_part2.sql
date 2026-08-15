@@ -284,10 +284,15 @@ begin
   -- failure it answers, and a machine path (epsilon's seal, the leader's fallback sweep) able to
   -- re-run a job that already burned five paid machines. So the resurrection is refused here and
   -- lives in clara.requeue_render_job, where a person names the incident and the act is audited.
+  -- KEYED ON (run, kind), NOT ON THE DIGEST. The requeue door RE-DERIVES the manifest, so a
+  -- successor legitimately carries a different sha when wording or a template version has moved --
+  -- and a digest-keyed refusal would therefore miss the case it exists to catch, letting this verb
+  -- mint an unaudited successor the moment anything upstream drifted. What has failed is the
+  -- REQUEST for this run and kind, whatever it hashed to.
   if exists (select 1 from clara.render_jobs
-              where report_run_id = r.id and manifest_sha256 = v_sha and state = 'failed')
+              where report_run_id = r.id and kind = p_kind and state = 'failed')
      and not exists (select 1 from clara.render_jobs
-              where report_run_id = r.id and manifest_sha256 = v_sha and state <> 'failed') then
+              where report_run_id = r.id and kind = p_kind and state <> 'failed') then
     raise exception 'this render request has already failed terminally' using errcode = 'CLR43',
       detail = jsonb_build_object('reason', 'render_job_failed_terminally', 'report_run_id', r.id,
         'manifest_sha256', v_sha,
@@ -303,8 +308,20 @@ begin
     on conflict (report_run_id, manifest_sha256) where state <> 'failed' do nothing
     returning id into v_id;
 
-  select * into j from clara.render_jobs
-   where report_run_id = r.id and manifest_sha256 = v_sha and state <> 'failed';
+  -- STRICT, so a raced row is a named refusal rather than a jsonb of nulls. If the conflicting
+  -- job was failed by another session between the insert's do-nothing and this read, there is no
+  -- row to return, and answering with `{"render_job_id": null}` would hand the caller a receipt
+  -- for a job that does not exist.
+  begin
+    select * into strict j from clara.render_jobs
+     where report_run_id = r.id and manifest_sha256 = v_sha and state <> 'failed';
+  exception when no_data_found then
+    raise exception 'the render job for this request was terminated by a concurrent caller'
+      using errcode = 'CLR43',
+      detail = jsonb_build_object('reason', 'render_job_raced', 'report_run_id', r.id,
+        'manifest_sha256', v_sha,
+        'fix', 'read the job for this run and kind, then requeue it through clara.requeue_render_job if it is terminally failed')::text;
+  end;
   if v_id is not null then
     perform clara._audit(r.firm_id, r.requested_by, null, null, 'enqueue_render_job', null,
       jsonb_build_object('report_run_id', r.id, 'render_job_id', j.id, 'kind', p_kind,

@@ -128,9 +128,14 @@ create table clara.render_jobs (
   -- terminally failed one; null on every ordinary enqueue. Both columns are part of the REQUEST
   -- half of the row, so the lifecycle wall below freezes them for free -- a successor cannot later
   -- rewrite whose failure it answers, or why.
-  supersedes_render_job_id uuid references clara.render_jobs(id),
+  -- COMPOSITE, like the artifact link below and for the same reason (round-3 minor): a bare
+  -- id-only reference would let a successor name a predecessor belonging to a DIFFERENT RUN, which
+  -- is precisely the kind of cross-run link the composite FK on artifact_id exists to make
+  -- impossible. The (id, report_run_id) unique key already on this table is what it points at.
+  supersedes_render_job_id uuid,
   requeue_reason    text check (requeue_reason is null or btrim(requeue_reason) <> ''),
   constraint ck_rj_requeue_paired check ((supersedes_render_job_id is null) = (requeue_reason is null)),
+  foreign key (supersedes_render_job_id, report_run_id) references clara.render_jobs (id, report_run_id),
   enqueued_at       timestamptz not null default now(),
   finished_at       timestamptz,
   foreign key (report_run_id, firm_id, client_id)

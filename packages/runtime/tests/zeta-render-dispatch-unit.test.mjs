@@ -144,6 +144,24 @@ test("a due job starts a machine exactly once and records SUCCESS", async () => 
   strictEqual(receipt.params[1], true);
 });
 
+test("a REAP is logged even when nothing is due — the case that strands a firm cannot be silent", async () => {
+  // The exact shape of the round-3 major: the sweep reaped the queue's only job, so `job_ids` is
+  // empty and the belt early-returns. The reap count was computed by the DB, returned in this
+  // payload, and thrown away — the one event that means a firm's statutory PDF will not exist
+  // without a human produced NO operator signal at all.
+  const lines = [];
+  const client = fakeClient({ due: { due: 0, job_ids: [], reaped: 1, reaped_run_ids: ["run-77"] } });
+  const r = await reconcileRenderDispatch(client, {
+    env: FULL_ENV, log: (m) => lines.push(m), startRenderMachine: async () => ({}),
+  });
+  strictEqual(r.renderDue, 0);
+  strictEqual(r.renderReaped, 1, "the count survives the early return");
+  const reapLine = lines.find((l) => l.includes("render reap"));
+  ok(reapLine, "a reap must be logged BEFORE the early return, not after it");
+  ok(reapLine.includes("run-77"), "the line names the run, so an operator can find the report");
+  ok(reapLine.includes("requeue_render_job"), "and it names the door that repairs it");
+});
+
 test("nothing due means no start call and no receipt", async () => {
   let started = 0;
   const client = fakeClient({ due: { due: 0, job_ids: [] } });

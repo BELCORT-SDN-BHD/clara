@@ -65,18 +65,28 @@ engine had been emitting a fixed placeholder, every arm of an A-versus-B test wo
 back green. That is the absence-as-evidence law applied to determinism — the same shape as a
 guard that passes because it lost the ability to fail.
 
-So **every run of this drill renders a THIRD time with one input deliberately changed** — a
-different `SOURCE_DATE_EPOCH` — and asserts those bytes **differ**. Two arms, both required:
+So **every run of this drill renders four times**, and the document it renders is the product's own
+emission — `assemble()`'s output via `scripts/drill-fixture.mjs`, not a hand-written fixture, because
+a fixture cannot see an engine mismatch in a preamble it never emits. Three arms, all required:
 
 | Arm | Assertion | What it establishes |
 |---|---|---|
 | A vs B | identical sha256 | the render is reproducible |
-| A vs C | **different** sha256 | the inputs actually reach the bytes, so the first arm is a measurement rather than a tautology |
+| A vs C (changed `SOURCE_DATE_EPOCH`) | **identical** sha256 | the environment's clock is not an input — a real document pins its date from the reporting period, so two lawful re-renders of one manifest cannot disagree because a wall clock moved |
+| A vs D (changed pinned input — a different `period_end`) | **different** sha256 | the manifest actually reaches the bytes, so the first arm is a measurement rather than a tautology |
 
-A run reporting only A == B is **not** a pass, and neither is one where C matched: a changed input
+**The clock arm's polarity was inverted here until 2026-08-15, and the flip is the honest record of
+a design change rather than a correction of a typo.** While the drill rendered a fixture that pinned
+no date of its own, `SOURCE_DATE_EPOCH` was the only thing reaching the PDF's timestamps, so
+requiring it to CHANGE the bytes was the right capable-of-varying control. Once `assemble()` began
+pinning the document's date from the reporting period — which is what makes a re-render reproducible
+seven years out — the epoch stopped being an input at all, and the old arm would have failed. The
+capable-of-varying job moved to arm D, where a changed *manifest* must move the bytes.
+
+A run reporting only A == B is **not** a pass, and neither is one where D matched: a changed input
 that leaves the output identical means the pin is not wired to anything, which is a worse finding
 than a mismatch. **This binds every engine-version bump** — the Dockerfile's bump procedure names
-this drill, both arms, for exactly that reason.
+this drill, all three arms, for exactly that reason.
 
 **First execution (build spike, 2026-08-14):** DETERMINISM **PASS** (A == B,
 `53b3d2c2978fc7693eaa205c8ec0c81961d2bcc081a1bbd851541d1be4058e62`), CONTROL **PASS** (C differed,

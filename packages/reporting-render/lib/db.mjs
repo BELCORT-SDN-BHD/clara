@@ -65,6 +65,18 @@ export async function jobPayload(client, jobId, workerId) {
   return r.rows[0]?.p ?? null;
 }
 
+/**
+ * THE FENCE. `true` only while this worker still holds a live lease on this job. Everything else —
+ * another worker's job, a reaped row, a finished one, an id that does not exist — is a plain
+ * `false`, so a fenced worker learns it must stop without learning anything about rows it does not
+ * hold. A transport error is NOT a false: it throws, because "we could not ask" and "we no longer
+ * hold it" are different facts and only one of them means abandon.
+ */
+export async function leaseAlive(client, jobId, workerId) {
+  const r = await client.query("select clara.render_lease_alive($1, $2) as alive", [jobId, workerId]);
+  return r.rows[0]?.alive === true;
+}
+
 export async function completeJob(client, { jobId, workerId, sha256, byteSize, manifest }) {
   const r = await client.query("select clara.complete_render_job($1, $2, $3, $4::bigint, $5::jsonb) as r",
     [jobId, workerId, sha256, String(byteSize), JSON.stringify(manifest)]);

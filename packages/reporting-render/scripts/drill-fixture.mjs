@@ -41,6 +41,15 @@ const FONT_SHA = "b".repeat(64);
  * @param {{fontFamily?: string, watermark?: boolean, uncertified?: boolean, periodEnd?: string}} [opts]
  */
 export function buildDrillDocument(opts = {}) {
+  return assemble(drillInputs(opts));
+}
+
+/**
+ * The same inputs, UNASSEMBLED. The unit battery mutates one point or one key and asserts which
+ * refusal fires, which needs the inputs rather than the finished source — and building them from
+ * this one place is what keeps the refusals under test and the document CI compiles identical.
+ */
+export function drillInputs(opts = {}) {
   const fontFamily = opts.fontFamily ?? "DejaVu Sans";
   const request = opts.periodEnd
     ? { ...DRILL_REQUEST, reporting_period: { ...DRILL_REQUEST.reporting_period, period_end: opts.periodEnd } }
@@ -107,12 +116,12 @@ export function buildDrillDocument(opts = {}) {
     }],
   };
 
-  return assemble({
+  return {
     layoutAst,
     payload,
     decision: { kind: "draft_watermarked", status: "passed", watermark: opts.watermark ?? true,
       uncertified: opts.uncertified ?? true },
     style: { author: "BELCORT SDN BHD", paper: "a4", margin: "20mm", body_size_pt: 10 },
     fonts: [{ family: fontFamily, sha256: FONT_SHA }],
-  });
+  };
 }

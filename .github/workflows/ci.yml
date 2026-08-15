@@ -345,10 +345,13 @@ jobs:
   # A document claiming a gate the pipeline does not run is worse than no claim, because it is
   # read as evidence.
   #
-  # BOTH ARMS ARE ASSERTED BY THE SCRIPT: two renders of identical inputs must MATCH, and a third
-  # with a changed SOURCE_DATE_EPOCH must DIFFER. Byte-equality proves nothing unless the output
-  # is capable of varying, and a run where the control MATCHED is a worse finding than a mismatch
-  # — it means the pin is wired to nothing and the first arm was vacuous.
+  # ALL THREE ARMS ARE ASSERTED BY THE SCRIPT: two renders of identical inputs must MATCH; a third
+  # under a changed SOURCE_DATE_EPOCH must ALSO match (the document pins its date from the
+  # reporting period, so the environment's clock is not an input to a real render and must not move
+  # the artifact); and a fourth built from a changed PINNED INPUT must DIFFER. Byte-equality proves
+  # nothing unless the output is capable of varying, and a run where the fourth arm MATCHED is a
+  # worse finding than a mismatch — it means the manifest is wired to nothing and the first arm was
+  # vacuous.
   #
   # AND IT COMPILES THE PRODUCT'S OWN PREAMBLE, not only a fixture. A hand-written fixture cannot
   # see an engine-version mismatch in what assemble() actually emits — the round-2 finding that
