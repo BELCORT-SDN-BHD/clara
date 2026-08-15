@@ -77,7 +77,16 @@ export function authoringRefusal(err: DbError): AuthoringResult {
   // would have requested; a policy-effectivity refusal names the root period start; an invalid
   // request names the offending class. Dropping those left the model holding a sentence where the
   // database had handed it a diagnosis.
-  const { reason: _reason, fix: _fix, ...details } = detail;
+  // Built by exclusion rather than by rest-destructuring: the underscore-prefixed-binding
+  // convention is not exempted by this package's eslint config, and disabling the rule to keep a
+  // tidier expression would be trading a real gate for a cosmetic one.
+  // KNOWN GAP, registered on the PR and carried by the follow-up: `reason`/`fix` are excluded here
+  // unconditionally but only captured above when they are STRINGS, so a non-string one (a jsonb
+  // array, say) reaches neither the named field nor this map.
+  const details: Record<string, unknown> = {};
+  for (const key of Object.keys(detail)) {
+    if (key !== "reason" && key !== "fix") details[key] = detail[key];
+  }
   return { ok: false, code, reason, fix, message, details };
 }
 
