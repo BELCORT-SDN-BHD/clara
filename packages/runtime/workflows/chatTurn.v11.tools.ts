@@ -53,8 +53,22 @@ function detailOf(err: DbError): Record<string, unknown> {
   if (!err?.detail) return {};
   try {
     const parsed = JSON.parse(err.detail) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    // An ARRAY satisfies `typeof === "object"`, so the obvious check admits one and it then
+    // spreads as {0:…,1:…} — the model would read positional indices as though the database had
+    // named those fields. Nothing in the estate authors an array detail today; it is carried
+    // under a named key rather than dropped, because a payload we cannot shape is still evidence.
+    if (parsed === null) return {}; // a literal JSON null carries nothing to forward
+    if (Array.isArray(parsed)) return { detail_items: parsed };
+    if (typeof parsed === "object") return parsed as Record<string, unknown>;
+    // A JSON SCALAR — a bare number, boolean or string — parses cleanly and is not an object, so the
+    // obvious typeof test returns {} and the database's words vanish. That is the THIRD shape in
+    // this one function to be silently dropped by a check written for the expected case (the others:
+    // a non-string reason/fix, and an array). Carried under a name, like the others.
+    return { detail_value: parsed };
   } catch {
+    // PostgreSQL's own details are PLAIN TEXT (a unique violation says `Key (x)=(y) already
+    // exists`), so they land here and yield nothing. That is deliberate: only payloads this
+    // estate authored as JSON are shaped for a model to act on.
     return {};
   }
 }
@@ -78,14 +92,19 @@ export function authoringRefusal(err: DbError): AuthoringResult {
   // request names the offending class. Dropping those left the model holding a sentence where the
   // database had handed it a diagnosis.
   // Built by exclusion rather than by rest-destructuring: the underscore-prefixed-binding
-  // convention is not exempted by this package's eslint config, and disabling the rule to keep a
-  // tidier expression would be trading a real gate for a cosmetic one.
-  // KNOWN GAP, registered on the PR and carried by the follow-up: `reason`/`fix` are excluded here
-  // unconditionally but only captured above when they are STRINGS, so a non-string one (a jsonb
-  // array, say) reaches neither the named field nor this map.
+  // convention is not exempted by this package's eslint config, and disabling the rule to buy a
+  // tidier expression would trade a real gate for a cosmetic one.
+  //
+  // A key is dropped from this map ONLY when it was actually captured into a named field above —
+  // that is, only when it was a string. An earlier cut excluded `reason`/`fix` unconditionally,
+  // which meant a non-string one (a jsonb array, say) was surfaced NOWHERE: not in the named
+  // field, which requires a string, and not here. That is the exact silent loss this map exists
+  // to end, one level down, so the condition is the capture test rather than the key name.
   const details: Record<string, unknown> = {};
   for (const key of Object.keys(detail)) {
-    if (key !== "reason" && key !== "fix") details[key] = detail[key];
+    if (key === "reason" && reason !== null) continue;
+    if (key === "fix" && fix !== null) continue;
+    details[key] = detail[key];
   }
   return { ok: false, code, reason, fix, message, details };
 }

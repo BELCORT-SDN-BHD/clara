@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { rootQuery, ROLES } from "./a21-helpers.mjs";
 import { buildWorld, endPool } from "./epsilon-fixtures.mjs";
 import { registerBehaviourPhase } from "./eta-behaviour-phase.mjs";
+import { registerApprovalOboPhase } from "./eta-approval-obo-phase.mjs";
 
 const caught = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
@@ -40,10 +41,18 @@ const CORES = Object.freeze([
  *  tests/eta-preintegration-gate.mjs (preloaded by the package test script) sets
  *  CLARA_ALLOW_MISSING_WAVE_E_ETA and this suite skips LOUDLY. A FOCUSED run does not preload the
  *  gate, so an unmigrated database fails here instead of greening through. */
+/** BOTH halves of this lane, because they ship in different migrations. Probing only the 0077
+ *  wrapper made a database at 0083 look "eta present" while the 0084 approval cells had nothing to
+ *  test — they would hard-FAIL on a dev chain instead of skipping loudly, which is the exact
+ *  false-signal the gate exists to prevent, pointed the other way. The 0084 marker is read off the
+ *  approve body itself rather than a catalog name, since that migration adds no new object. */
 async function etaPresent() {
   return (await rootQuery(
-    "select to_regprocedure($1) is not null as ok",
-    ["clara.wake_compose_metric_preview(uuid,jsonb,uuid[],uuid,text)"],
+    `select to_regprocedure($1) is not null
+        and coalesce((select position('v_maker' in prosrc) > 0 from pg_proc
+                       where oid = to_regprocedure($2)), false) as ok`,
+    ["clara.wake_compose_metric_preview(uuid,jsonb,uuid[],uuid,text)",
+      "clara.approve_metric_definition(uuid,bytea,text,text,text)"],
   )).rows[0].ok;
 }
 
@@ -251,6 +260,14 @@ test("no eta function delegates to a human-context verb, and the human wall is m
 test("the wake authoring surface, invoked end to end under a real wake credential", async (t) => {
   if (!(await gate(t))) return;
   await registerBehaviourPhase(t, await buildWorld());
+});
+
+// THE B4 FOLLOW-UP. An agent-authored draft has to be approvable by a one-owner firm, and must NOT
+// be approvable by the human who directed it. Both halves are behavioural by nature — the rule
+// reads proposal_evidence.on_behalf_of at approval time — so neither is visible to a catalog read.
+test("maker/checker on an agent-authored draft is measured against the directing human", async (t) => {
+  if (!(await gate(t))) return;
+  await registerApprovalOboPhase(t);
 });
 
 after(async () => { await endPool(); });
