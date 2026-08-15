@@ -2,9 +2,9 @@
 // dr-verify.mjs: { src, tgt, STRICT, AUTHORITATIVE_SCHEMAS, MIGRATIONS_DIR, record,
 // bothRows, diffCheck }. Split out of dr-verify.mjs for the file-size cap.
 
-import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { migrationChecksum } from "./migrate.mjs";
 import {
   ident, multisetDiff, tableExists, tablesOf, schemaPresent, SCHEMA_ALLOWLIST, PLATFORM_SCHEMAS,
 } from "./dr-verify-util.mjs";
@@ -25,15 +25,16 @@ const CHURN_TABLES = new Map([
   ["clara.trace_spans", "runtime traces — written per request and pruned on a schedule"],
 ]);
 
-// On-disk migration manifest as Map<version, sha256> — computed EXACTLY the way
-// migrate.mjs records checksums (CRLF→LF normalization, then sha256 hex), so the
-// completeness floor can require exact (version, checksum) equality and a forged
-// name-only ledger FAILs.
+// On-disk migration manifest as Map<version, sha256> — computed with migrate.mjs's OWN
+// checksum function, not a copy of it, so the completeness floor can require exact
+// (version, checksum) equality and a forged name-only ledger FAILs. It used to
+// re-implement the recipe inline; a recipe that is copied is a recipe that can drift,
+// and this comparison is only as sound as the two sides agreeing. Importing migrate.mjs
+// is safe here — its auto-run is behind isMain().
 function onDiskManifest(dir) {
   const m = new Map();
   for (const f of readdirSync(dir).filter((x) => /^\d{4}_.*\.sql$/.test(x))) {
-    const checksum = createHash("sha256").update(readFileSync(join(dir, f), "utf8").replace(/\r\n/g, "\n"), "utf8").digest("hex");
-    m.set(f.replace(/\.sql$/, ""), checksum);
+    m.set(f.replace(/\.sql$/, ""), migrationChecksum(readFileSync(join(dir, f), "utf8")));
   }
   return m;
 }

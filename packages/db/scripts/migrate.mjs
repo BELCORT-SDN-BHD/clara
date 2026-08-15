@@ -27,7 +27,10 @@ import {
   armMigrationTimeout,
   assertNoCheckFunctionBodyOverride,
   assertNoTransactionControl,
+  DEFAULT_MIGRATION_ISOLATION,
   executeMigrationBody,
+  MIGRATION_ISOLATION_PINS,
+  migrationIsolationLevel,
   migrationServerVersionNum,
   migrationStatementTimeout,
   pinMigrationSession,
@@ -78,7 +81,13 @@ const FREEZE_GUARDS = [
   },
 ];
 
-function sha256(text) {
+/**
+ * THE migration checksum recipe — sha256 over the file with CRLF normalised to LF, so a
+ * checkout's line endings cannot move a checksum. Exported because it is the ledger's
+ * identity function and the isolation pins are keyed on it: anything that needs to speak
+ * about a migration's identity must use THIS definition rather than re-implement it.
+ */
+export function migrationChecksum(text) {
   return createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex");
 }
 
@@ -323,7 +332,7 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
         drift.push(`applied migration ${version} is MISSING from disk (deleted or renamed). Applied migrations are immutable history — restore the file; never delete or rename it.`);
         continue;
       }
-      if (sha256(readFileSync(join(migrationsDir, onDisk.file), "utf8")) !== checksum) {
+      if (migrationChecksum(readFileSync(join(migrationsDir, onDisk.file), "utf8")) !== checksum) {
         drift.push(`applied migration ${version} was MODIFIED after being applied (checksum drift). Migrations are immutable — add a new migration file instead.`);
       }
     }
@@ -336,17 +345,47 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
       }
     }
 
+    // PRE-FLIGHT over everything about to be applied, beside the immutability refusals
+    // above and BEFORE the first body runs. A pin that no longer resolves is a
+    // history-integrity fault of the same family as checksum drift, and an operator should
+    // learn it from a run that changed nothing — not after 0056 has already landed.
+    // Each file is read exactly once here and carried into the apply loop, so the bytes
+    // that were checksummed are the bytes that execute.
+    const pending = [];
+    for (const { file, version } of migrations) {
+      if (applied.has(version)) continue;
+      const sql = readFileSync(join(migrationsDir, file), "utf8");
+      const checksum = migrationChecksum(sql);
+      assertNoTransactionControl(sql, version);
+      assertNoCheckFunctionBodyOverride(sql, version);
+      pending.push({ version, sql, checksum, isolation: migrationIsolationLevel(version, checksum) });
+    }
+    // A ceremony against an already-migrated database applies nothing, so the per-migration
+    // note below never fires — and silence there would read as "no pin is in play". Say what
+    // is KNOWN and no more: the ledger records that a version was applied and with which
+    // checksum, never which isolation the transaction that applied it ran at. On every
+    // environment ceremonied before this pin existed, that transaction was READ COMMITTED —
+    // it took the coin flip and won — so a note claiming the pin governed it would be false
+    // in exactly the log line an operator consults.
+    //
+    // Matched by CHECKSUM, like every other identity question here: `applied` is
+    // version -> checksum, and a pinned file that landed under a different number is still
+    // the same file.
+    const appliedChecksums = new Set(applied.values());
+    const appliedPins = MIGRATION_ISOLATION_PINS.filter((pin) => appliedChecksums.has(pin.checksum));
+    if (appliedPins.length) {
+      log(`  note: ${appliedPins.length} isolation-pinned migration(s) already applied and skipped (${appliedPins.map((pin) => `${pin.version} · ${pin.isolation}`).join(", ")}); this run does not re-apply them, and the pin governs only transactions this runner opens`);
+    }
+
     let count = 0;
     // Server-observed backend pid -> the migration that ran on it. A repeat inside one
     // invocation means a connection was REUSED, which would carry session state from one
     // migration into the next; the runner refuses rather than migrating on that premise.
     const backendPids = new Map();
-    for (const { file, version } of migrations) {
-      if (applied.has(version)) continue;
-      const sql = readFileSync(join(migrationsDir, file), "utf8");
-      const checksum = sha256(sql);
-      assertNoTransactionControl(sql, version);
-      assertNoCheckFunctionBodyOverride(sql, version);
+    for (const { version, sql, checksum, isolation } of pending) {
+      if (isolation !== DEFAULT_MIGRATION_ISOLATION) {
+        log(`  note: ${version} is applied under ${isolation} isolation (checksum-pinned — see MIGRATION_ISOLATION_PINS)`);
+      }
       const bodyTimeout = migrationStatementTimeout(sql);
       const client = clientFactory({ connectionTimeoutMillis: MIGRATION_CONNECT_TIMEOUT_MS }); attachMigrationNoticeListener(client, log);
       let failure;
@@ -369,12 +408,28 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
           log(`  note: backend pid ${backendPid} also served ${priorVersion} — expected through a session pooler, which recycles server backends; the session-pin nonce is what proves this session was freshly pinned`);
         }
         backendPids.set(backendPid, version);
-        await client.query("begin");
+        // The level is always stated, never inherited: the session default this runner
+        // pins and the level a transaction actually opens at are different parameters,
+        // and only what BEGIN says binds this transaction.
+        await client.query(`begin isolation level ${isolation}`);
         // The PRE-body evidence snapshot gets the same bound as the identical post-body
         // reads: a hung catalog read fails loudly instead of stalling a ceremony on an
         // unbounded session. Disarmed again below so executeMigrationBody still opens on
         // the untouched baseline it asserts.
         const preRearm = () => armMigrationTimeout(client, bodyTimeout);
+        // MEASURED FROM THE SERVER, never assumed from the statement we sent. A BEGIN is a
+        // request; only the backend can say what the transaction actually opened at, and a
+        // silent disagreement would hand 0057's sentinel back its coin flip while the
+        // ceremony log claimed the pin held. Same law as every other premise in this runner.
+        await preRearm();
+        const observedIsolation = (
+          await client.query("select pg_catalog.current_setting('transaction_isolation'::pg_catalog.text) as isolation")
+        ).rows[0]?.isolation;
+        if (observedIsolation !== isolation) {
+          throw new Error(
+            `migration ${version} opened at transaction_isolation ${JSON.stringify(observedIsolation)}, not the ${JSON.stringify(isolation)} it was opened with — refusing to migrate on a transaction whose isolation the runner cannot vouch for`,
+          );
+        }
         const freezeBefore = await readFreezeStates(client, preRearm);
         const ledgerBefore = await readLedgerIdentity(client, preRearm);
         const receiptsBefore = await readLedgerReceipts(client, preRearm);
