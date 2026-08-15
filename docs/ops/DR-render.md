@@ -108,13 +108,72 @@ re-pulling — an image and getting the same bytes out, so the property under te
 determinism does not rest on build-time nondeterminism happening to be absent from a particular
 layer cache, which is the failure a same-image drill cannot see.
 
-## Exercised evidence — **NOT YET RUN**
+## Exercised evidence — **RUN 2026-08-15**
 
-**This section is deliberately empty of results.** DR.md §5 and §5b carry verbatim transcripts
-because those drills were executed; this one has not been, and a described drill recorded as
-though it were an exercised one is precisely the failure DR.md §5's own scope note was written to
-prevent. The first run lands here in the same shape — the commands, the observed hashes, and the
-PASS/FAIL — replacing this paragraph.
+The deploy ceremony was executed from merged `main` at **`faf33ecbbc6b350baba85d75048c8483f2485a31`**.
+What follows is what was observed, not what was intended.
+
+**Renderer image digest — four independent agreeing reads.**
+
+```
+sha256:b25b600d6689ecfab4fe0342c3474fdad2f75b651c4e9e8d74b45b403650ca6a
+```
+
+The push transcript printed it; `docker pull` by digest re-derived it (a pull by digest is
+content-addressed — the client rehashes the bytes and refuses them on mismatch); `fly image show`
+reported it for the live machine; and Fly's own runner logged `Pulling container image
+registry.fly.io/clara-render@sha256:b25b600d…` at machine start. Four tools, four reads, one value.
+One read would have been the build transcript describing itself.
+
+**The three-arm drill, against that digest** (not against a locally-built approximation of it):
+
+```
+  A (epoch 1767139200)  aeed77d6887d35959797468a9dc3512e19854507ad543d13506464eacc4c0d37
+  B (same inputs)       aeed77d6887d35959797468a9dc3512e19854507ad543d13506464eacc4c0d37
+  C (epoch 1234567890)  aeed77d6887d35959797468a9dc3512e19854507ad543d13506464eacc4c0d37
+  D (changed period)    80ac2def5567de35c9bedf60463473bfff2d244f44795ae2fed8be2638d81a86
+  DETERMINISM PASS — A == B
+  CLOCK       PASS — a changed SOURCE_DATE_EPOCH leaves the bytes
+  CONTROL     PASS — a changed pinned input changes the bytes
+double-render-drill: PASS — all three arms
+```
+
+Run from Windows via the script's documented portability overrides
+(`CLARA_DRILL_DOCKER="wsl -e docker"`, host/guest stage translation, explicit `CLARA_DRILL_FONT`),
+which is the first exercise of that path. Registry auth was `flyctl auth token` piped into
+`docker login --password-stdin` — stdin, never argv.
+
+**First live worker run** (machine `2862624f777308`, `clara-render-worker`):
+
+```
+clara-render: worker=clara-render:56203e97… engine=typst typst 0.12.0 (737895d7) extractor=pdftotext (poppler-utils) 22.12.0
+clara-render: DONE — sealed=0 refused=0 abandoned=0
+Main child exited normally with code: 0
+```
+
+The engine pin is confirmed **live** as typst 0.12.0 — the version the fixture's preamble is
+written against. Exit 0 with all three counters at zero is a clean drain: the worker connected,
+went through `claim_render_job`, and found nothing claimable. Machine config read back from Fly:
+`schedule: hourly`, `restart: on-failure max_retries 3`, image pinned at
+`registry.fly.io/clara-render:render-1@sha256:b25b600d…`.
+
+**Storage identity, read from inside the machine.** `session_user=clara_runtime_login`,
+`current_user=clara_runtime` after the worker's own `set role`. The storage credential decoded from
+its own claims: `role=clara_storage_docs`, `exp=2027-01-15T05:16:35Z`, matching the designated
+`CLARA_STORAGE_ROLE`. Direct `select` on `clara.render_jobs` and `clara.firms` returned **42501
+permission denied** — recorded as a positive finding: the renderer reaches the queue only through
+the SECURITY DEFINER verbs and holds no direct table read on either relation.
+
+**Supavisor headroom: `33 / 60`** (prior standing measure 35/60). By `application_name`: Supavisor
+19, unnamed 7, PostgREST 2, Supavisor auth_query 2, postgres_exporter 1, pg_cron 1, pg_net 1. This
+app adds a peak of 1, so the projected peak is 34/60. A point-in-time read, not a high-water mark.
+
+**WHAT THIS RUN DOES NOT ESTABLISH.** No sealed artifact was produced, because no render job
+existed to claim — so the end-to-end round trip (replay a real artifact's pinned inputs, re-render,
+compare to `expected_sha256`) is **still unrun**, and the drill above proves reproducibility of the
+engine inside the image, not of a sealed artifact from live data. The §"drill (described)" steps
+remain described. That distinction is the entire reason this section exists, and a later reader
+must not read a green deploy ceremony as a green DR drill.
 
 ## Deploy — the commands of record
 
@@ -123,31 +182,66 @@ is it. **Do not run a plain `fly deploy`:** on a service-less app it still creat
 machine, i.e. it would fire a live render run on every deploy.
 
 ```sh
+fly apps create clara-render --org personal
+
+# The FOUR secrets the worker needs. Values come from the environment or a file fed to stdin —
+# never argv, never chat, never the image. DATABASE_URL carries the SAME value clara-runtime
+# holds as CLARA_RUNTIME_DATABASE_URL: the worker executes `set role clara_runtime`, so its
+# login must be clara_runtime_login.
+#   DATABASE_URL · CLARA_STORAGE_URL · CLARA_STORAGE_ROLE · CLARA_STORAGE_ROLE_JWT
+fly secrets import -a clara-render --stage   # reads name=value pairs from stdin
+
 fly deploy . --config packages/reporting-render/fly.toml \
     --dockerfile packages/reporting-render/Dockerfile \
     --build-only --push --image-label render-1 -a clara-render
 
-fly machine run registry.fly.io/clara-render:render-1 \
+fly machine run registry.fly.io/clara-render:render-1@sha256:<the digest the push printed> \
     -a clara-render --region sin --schedule hourly \
     --vm-size shared-cpu-1x --vm-memory 1024 \
-    -e CLARA_RENDER_IMAGE_DIGEST=sha256:<the digest the push printed> \
-    -e CLARA_RENDER_SOURCE_COMMIT=<40-hex commit> \
-    -e CLARA_RENDER_STORAGE_URL=https://<project-ref>.supabase.co
+    -e CLARA_RENDER_IMAGE_DIGEST=sha256:<the same digest> \
+    -e CLARA_RENDER_SOURCE_COMMIT=<40-hex commit>
 ```
+
+**The image reference is TAG-AND-DIGEST, and both halves are load-bearing.** A bare tag is
+mutable — a later push with the same `--image-label` silently repoints it, which is the very
+confusion the worker's refuse-a-tag-where-a-digest-belongs check exists to prevent, except the
+mutable reference would be the machine's own image. Pinning the digest alongside the tag makes the
+machine's image and the manifest's `renderer_image_digest` agree *by construction* rather than by
+an operator copying one into the other. **Digest ALONE does not work:** `fly machine run
+registry.fly.io/clara-render@sha256:…` fails on flyctl v0.4.66 — it resolves the reference and then
+appends the digest a second time, producing `…@sha256:…@sha256:…`, which the API rejects with
+`config.image: invalid image identifier`. Observed 2026-08-15, not theorised.
 
 `fly machine run` **disregards fly.toml configuration entirely** — its flag set IS the runtime
 contract. The image digest and the source commit are passed here because an image cannot know its
 own digest while it is being built; the worker **refuses to seal without them**, and refuses a tag
 where a digest belongs, so "unknown" and "reproducible" can never be indistinguishable inside a
-sealed artifact. Secrets (`DATABASE_URL`, the storage role JWT, and the Fly API token the runtime
-leader uses to dispatch) ride as `fly secrets` — never as argv, never in the image.
+sealed artifact.
+
+**The storage variables are `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE` and
+`CLARA_STORAGE_ROLE_JWT`** — the names `packages/runtime/lib/storage.mjs` actually reads, reached
+from the worker through `lib/objects.mjs`. `CLARA_STORAGE_URL` is the **full private-bucket object
+base** (the Storage REST `/storage/v1/object/<bucket>` base), because `storage.mjs` builds object
+URLs as `${base}/${key}`; a bare `https://<project-ref>.supabase.co` is the wrong shape and will
+produce wrong URLs. *An earlier revision of this file passed a `CLARA_RENDER_STORAGE_URL` that
+nothing in the repo read — the ceremony of 2026-08-15 found it by running the command. The failure
+would have been fail-closed (`realConfig()` throws `storage_error` 503 rather than sealing
+anything), but the run would have refused every upload.*
+
+**These are `fly secrets`, not `-e` flags**, because two of them are credentials; `CLARA_STORAGE_ROLE`
+is only a role name and may ride either way. Staged secrets ("staged, not set on VMs") bind when
+the machine is created, which is why the secrets step precedes the machine step.
 
 **Running flyctl from Windows** carries the same three hazards DR.md §9 step 6 records for
 `clara-backup`: a guest path is written `//run/…` (flyctl validates it with the HOST's rules),
 `MSYS_NO_PATHCONV=1` is needed under Git Bash, and any command override must sit after a `--`
 terminator.
 
-## Two ceremony steps that are NOT inherited
+## Three ceremony steps that are NOT inherited
+
+**Order matters: step 1 comes BEFORE the machine is created.** `fly machine run --schedule hourly`
+creates a machine that starts immediately, so a machine standing before the prefix is reachable can
+attempt a seal that must fail. Step 3 necessarily comes after, because it needs the machine's id.
 
 1. **Extend the storage role's policy to the `reports/` prefix.** `safeKey`'s live regex admits
    only `firms/…/docs/…`, and the storage role check in `packages/runtime/lib/storage.mjs` is
@@ -156,11 +250,46 @@ terminator.
    object and read it back **by key**, before the first seal. An absent policy would otherwise
    surface as a failed render at the worst possible moment, and "the role already works for docs"
    is an inference, not a read.
+
+   **Done 2026-08-15, and here is the shape that worked.** Two policies were ADDED —
+   `clara_storage_reports_insert` (cmd=a, `WITH CHECK`) and `clara_storage_reports_select` (cmd=r,
+   `USING`), both to `clara_storage_docs` — each cloned from the live `docs` pair's byte-exact
+   predicate with exactly two substitutions: `/docs/` → `/reports/`, and the extension class →
+   `(pdf|json)`, matching `safeReportKey`'s
+   `^firms/[0-9a-f-]{36}/reports/[0-9a-f]{64}\.(pdf|json)$`. **Add, do not ALTER:** permissive
+   policies are OR'd, so a new pair extends reach while leaving the live document-intake path — the
+   one that took the 2026-07-26 outage — outside the blast radius. **Clone the live predicate; do
+   not compose one** from a description: the live text validates uuid version and variant nibbles
+   more strictly than `safeKey` does, and a hand-written predicate looks right while differing.
+   Both commands are required — a read-only extension passes a shallow check and then fails at the
+   first seal. **No UPDATE policy**: the PUT is overwrite-impossible (`x-upsert:false`), which is
+   what makes a sealed artifact's object immutable, and granting UPDATE to clear an error would
+   quietly dismantle that.
+
+   *A GET cannot answer this question.* Probing `reports/` with a read returns
+   `404 not_found NoSuchKey` whether the prefix is permitted or forbidden — under RLS a denied
+   SELECT yields no row, and object storage reports no-row as not-found. This was established on
+   2026-08-15 with a negative control: a prefix no policy admits answered identically to the
+   known-good `docs/` prefix. **Only the write discriminates**, which is why the step is a PUT
+   followed by a read-back and not a probe.
+
 2. **Re-verify Supavisor headroom before deploy** — the standing law every consumer-adding wave
-   has followed. Last measured **35/60**
-   (`docs/plan/completed/wave-e-f6f9-acceptance.md`). This app adds **no standing sessions**: a
+   has followed. Last measured **33/60** (2026-08-15 ceremony; 35/60 previously, at
+   `docs/plan/completed/wave-e-f6f9-acceptance.md`). This app adds **no standing sessions**: a
    short-lived DSN session per job, no pool, no LISTEN client, and worker concurrency capped at 1
-   in v1 — so the peak it adds is **1**.
+   in v1 — so the peak it adds is **1**, for a projected 34/60.
+
+3. **Wire the leader's dispatch half — on `clara-runtime`, AFTER the machine exists.**
+   `readDispatchConfig` (`packages/runtime/lib/reconciler-render.mjs`) requires
+   `CLARA_RENDER_FLY_API_TOKEN`, `CLARA_RENDER_FLY_APP=clara-render`, and either
+   `CLARA_RENDER_FLY_MACHINE_ID` or `CLARA_RENDER_IMAGE_REF`; `CLARA_RENDER_FLY_REGION` defaults to
+   `sin`. Prefer the **machine id** — it starts THAT machine instead of creating a new one each
+   time. The token needs machine-START rights on `clara-render`, so a token scoped to
+   `clara-runtime` alone will not do. Until this is set, the deployment is *unwired*: jobs still
+   enqueue and the hourly fallback still drains them, so renders are **delayed, never stranded**
+   (cell A33 arm ii), and the belt still reaps exhausted jobs. The chicken-and-egg is the reason
+   this is a step rather than a footnote — the machine id does not exist until step 2 of the deploy
+   block has run.
 
 ## Dispatch, and what happens when it fails
 
