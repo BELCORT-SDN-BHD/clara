@@ -79,3 +79,48 @@ The uniform ladder earned its cost thrice over in one night: the δ cross-model 
 six blockers after 63/63 green batteries; the ε round found nine (incl. a seal-gate
 time-of-check hole and string-encoded numerals) after 51/51; the estate sweeps caught a
 forbidden-clock defect no lane battery could see. Generator-≠-evaluator is not a formality.
+
+## Supplement — the wave-close rounds (2026-08-14/15)
+
+What landed after the night run: migrations **0064-0084** all LIVE across two further
+ceremonies (0064-0072; then 0077-0084 with a D1 write-quiesce, the chatTurn v11 deploy and
+the freeze deploy-lock), plus ζ's fly ceremony (`clara-render` live from merged main, first
+worker run a clean drain, the leader's dispatch half wired on `clara-runtime`). Codex's
+quota exhausted mid-close; per the owner's fallback ruling the review lanes switched to
+native fresh-context panels, which performed at level (they found the ci.yml stale-base
+clobber, a replay tenant hole, the Typst version mismatch, and the null-maker fail-open).
+
+Rulings minted in the close rounds (continuing the numbering above):
+
+10. **Guard polarity — the ARM-0 law.** An identity-measuring guard handles the NULL or
+    absent principal as its own FIRST arm, refusing or routing to the strictest path —
+    never resolving it by inference. Three-valued logic turns a described branch into no
+    branch: a NULL operand poisons every arm's predicate and the act sails through the gap
+    BETWEEN arms; comparisons reachable by NULL use `is not distinct from`. *(0084 — the
+    null-maker fail-open, found by the adversarial panel after green batteries)*
+11. **Adoption semantics.** An orphaned proposal (no directing human, a departed director,
+    a NULL proposer) is approvable only as an ADOPTION through `self_approval_attestation`
+    — the deadlock is opened by an attestation door, not by frictionless approval. The
+    maker/checker measure runs against the DIRECTING human (`proposal_evidence.
+    on_behalf_of`), never the mechanical actor, with standing re-read at approval time.
+    *(0084)*
+12. **The isolation pin.** Migration isolation is a checksum-keyed PER-MIGRATION pin in the
+    runner (0057 → `repeatable read`), and the pin is MEASURED post-BEGIN by a
+    `current_setting` read-back, not assumed from the request; a blanket isolation raise
+    was rejected (0019's CLR32 refuses it). Born of S0.9: 0057's birth sentinel raced the
+    cluster-wide `latestCompletedXid` under read committed (~30ms window). *(the S0.9 fix)*
+13. **Requeue re-derives; reap is immediate.** A human requeue of a failed render
+    RE-DERIVES the pinned inputs and records both digests, drift consented via
+    `p_accept_drift` (verbatim requeue rejected — the seal itself re-derives, so a
+    verbatim copy can only agree by luck). Expired render leases are reaped IMMEDIATELY —
+    a grace window was proven useless by its own arithmetic (an at-cap expired row is
+    neither claimable nor completable) and publicly reverted; the worker self-fences via
+    `render_lease_alive`. *(ζ, rounds 4-6)*
+
+Two field laws with teeth, recorded here because each burned a full diagnostic cycle:
+**number migrations IN-REPO** — an out-of-tree staging directory desynchronizes the DB's
+applied history from the tested tree and the history-integrity guard fires correctly en
+masse (η's 180 reds, two wrong diagnoses first); and **a probe that cannot say NO has a
+meaningless YES** — ζ's storage read probe answered `not_found` identically for permitted
+and forbidden prefixes (proven by its own negative control), so only the WRITE probe
+answers a write question (the operator shape is in `docs/ops/DR-render.md`).
