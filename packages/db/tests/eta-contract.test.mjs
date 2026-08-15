@@ -80,11 +80,21 @@ test("every eta wrapper is a pinned security definer reachable ONLY by clara_wak
         (await rootQuery("select has_function_privilege($1,$2::regprocedure,'EXECUTE') ok", [role, signature])).rows[0].ok,
         false, `${name}: ${role} must hold no EXECUTE`);
     }
-    assert.equal((await rootQuery(
-      `select not exists(select 1 from pg_proc p cross join lateral
-         aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
-        where p.oid = $1::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') ok`, [signature],
-    )).rows[0].ok, true, `${name}: PUBLIC holds no EXECUTE`);
+    // THE EXACT GRANTEE SURFACE, enumerated rather than sampled — and re-proved CONTINUOUSLY,
+    // which is the half the migration cannot do. The migration's tail asserts this same surface,
+    // but only at APPLY: a grant added by a LATER migration would never re-run it, and until this
+    // cell existed the loop above was the only ongoing check — a hand-list, which by construction
+    // cannot refuse a role nobody thought to name. This is the battery's own stated split (the
+    // migration proves it at apply, this file re-proves it after the fact) finally honoured for
+    // grants. PUBLIC is grantee 0, so the probe this replaces is subsumed.
+    const grantees = (await rootQuery(
+      `select distinct case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as g
+         from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where p.oid = $1::regprocedure and a.privilege_type = 'EXECUTE' and a.grantee <> p.proowner
+        order by g`, [signature],
+    )).rows.map((r) => r.g);
+    assert.deepEqual(grantees, [ROLES.wakeInteractive],
+      `${name}: EXECUTE is granted to exactly clara_wake_interactive and nothing else (found ${JSON.stringify(grantees)})`);
   }
 });
 
@@ -100,6 +110,18 @@ test("every eta core that writes is reachable by no application role", async (t)
         (await rootQuery("select has_function_privilege($1,$2::regprocedure,'EXECUTE') ok", [role, signature])).rows[0].ok,
         false, `${signature}: ${role} must not reach the ungranted core`);
     }
+    // The same enumerated surface as the wrappers, expecting EMPTY. "Ungranted" is this lane's
+    // whole privilege claim, and a claim of ABSENCE is exactly the kind a sampled hand-list cannot
+    // make: it can only report the roles it names. This asks the catalog for every non-owner
+    // grantee and requires there to be none.
+    const grantees = (await rootQuery(
+      `select distinct case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as g
+         from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where p.oid = $1::regprocedure and a.privilege_type = 'EXECUTE' and a.grantee <> p.proowner
+        order by g`, [signature],
+    )).rows.map((r) => r.g);
+    assert.deepEqual(grantees, [],
+      `${signature}: the core carries NO non-owner EXECUTE grantee (found ${JSON.stringify(grantees)})`);
   }
 });
 

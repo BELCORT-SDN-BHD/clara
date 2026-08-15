@@ -22,11 +22,22 @@
 // audit_log) rather than trusting the receipt the function returned — the receipt is part of what
 // is under test, and a wrapper that mis-binds identity can still return a well-formed one.
 //
-// FIXTURE WEIGHT, DELIBERATE. This phase builds only what a spec draft structurally requires: a
-// house style and a published management template. It does NOT run epsilon's world builder, so it
-// deploys no evaluator and mints no metric cell — which keeps eta's battery out of the ordering
-// constraint delta's contract imposes (delta asserts a pristine metric_cells and an undeployed
-// evaluator as its own preconditions).
+// FIXTURE WEIGHT, IN TWO TIERS — AND THE ORDERING CONSEQUENCE OF THE SECOND, STATED RATHER THAN
+// DISCOVERED. Most cells build only what a spec draft structurally requires: a house style and a
+// published management template. They touch no evaluator and mint no cell.
+//
+// The COMPOSE cells cannot be that cheap, because a preview EVALUATES. They need books, a month
+// period, a pinned metric-input snapshot, published account sets, and delta's evaluator DEPLOYED —
+// a one-way ceremony this phase performs only if it has not already happened — and they therefore
+// MINT a composition cell. That was not avoidable: the whole point of those cells is that a
+// transposed (p_firm, p_actor) pair in the compose wrapper is invisible until the thing actually
+// runs.
+//
+// The consequence is an ordering constraint, and it is epsilon's existing one rather than a new
+// class: delta's contract asserts a pristine clara.metric_cells and an UNDEPLOYED evaluator as its
+// own preconditions, so delta's battery must run BEFORE this one on a shared database. The package
+// sweep satisfies that by filename order (delta-* < epsilon-* < eta-*), and the focused eta drill
+// owns its own database, where nothing else runs at all.
 
 import {
   assert, randomUUID, rootQuery, withActor, ROLES, opk, firmIdOf,
@@ -331,5 +342,20 @@ export async function registerBehaviourPhase(t, world) {
     ]));
     assert.equal(blank?.code, "CLR10", `blank op key refused (${blank?.code} ${blank?.message})`);
     assert.equal(errorDetail(blank).class, "op_key", "the refusal names op_key as the offending class");
+  });
+
+  // CELL 11 — and the fourth wrapper, which is the one whose blank-key floor is easiest to argue
+  // away: its core refuses every call today regardless, so the key looks decorative. It is not. The
+  // floor has to be in place BEFORE the OBO evaluator core lands and turns this into a real writer,
+  // because at that moment a wrapper that had been quietly accepting blanks starts minting a render
+  // per replayed step. The cell covers the whitespace form, not just the empty string — a key of
+  // spaces is blank in every sense that matters to an idempotency key.
+  await t.test("wake_request_report_preview refuses a blank op key", async () => {
+    const blank = await caught(() => asWake(cred.secret, PREVIEW_SQL, [randomUUID(), "   "]));
+    assert.equal(blank?.code, "CLR10", `blank op key refused (${blank?.code} ${blank?.message})`);
+    assert.equal(errorDetail(blank).class, "op_key", "the refusal names op_key as the offending class");
+    // And it refuses on the KEY, before the spec id is ever looked up — the uuid above names no
+    // spec, so a CLR11 'not found' here would mean the floor sits after the lookup instead of before.
+    assert.notEqual(blank?.code, "CLR11", "the key floor precedes the spec lookup");
   });
 }
