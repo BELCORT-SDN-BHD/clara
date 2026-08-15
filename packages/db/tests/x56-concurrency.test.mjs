@@ -18,7 +18,7 @@ import {
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import { holdThenContend } from "./rig-docs-race.mjs";
 import {
-  has0056, caught, cleanCloseableFY, birthCounterparty,
+  has0056, hasB3, reopenerFor, caught, cleanCloseableFY, birthCounterparty,
   beginClose, finalizeClose,
   AR1, REVN, addDaysStr,
 } from "./x56-fixtures.mjs";
@@ -176,15 +176,21 @@ test("A13c reopen_fiscal_year's acquisition order is row -> 004 -> 007 (structur
   const fx1 = await cleanCloseableFY(owner, { tag: "a13c-1", prepSub: preparer, startsOn: "2027-01-01" });
   await beginClose(owner, { fy: fx1.fy });
   const closed1 = await finalizeClose(owner, { fy: fx1.fy });
+  // [B3] the reopen is a distinct-checker act, and its arity is frontier-dependent -- both
+  // resolved once here so the two raw two-session drivers below stay literal SQL.
+  const reopener = await reopenerFor(owner, { closer: owner, alternate: preparer });
+  const reopenSql = (await hasB3())
+    ? "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4, p_attestation => null) as r"
+    : "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4) as r";
 
   const out1 = await holdThenContend({
     a: { role: ROLES.fnOwner, run: async (c) => {
       await c.query("select id from clara.journal_entries where id=$1 for update", [closed1.close_entry_id]);
       return { held: true };
     } },
-    b: { role: ROLES.authenticated, jwtSub: owner, run: async (c) => {
+    b: { role: ROLES.authenticated, jwtSub: reopener, run: async (c) => {
       const r = await c.query(
-        "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4) as r",
+        reopenSql,
         [fx1.fy, "x56 a13c direction 1: row-lock contender holds first", JSON.stringify({ check_key: "ar_control_tie" }), opk("x56-a13c-1")],
       );
       return r.rows[0].r;
@@ -204,9 +210,9 @@ test("A13c reopen_fiscal_year's acquisition order is row -> 004 -> 007 (structur
   const closed2 = await finalizeClose(owner, { fy: fx2.fy });
 
   const out2 = await holdThenContend({
-    a: { role: ROLES.authenticated, jwtSub: owner, run: async (c) => {
+    a: { role: ROLES.authenticated, jwtSub: reopener, run: async (c) => {
       const r = await c.query(
-        "select clara.reopen_fiscal_year(p_fy => $1, p_reason => $2, p_correction_target => $3::jsonb, p_op_key => $4) as r",
+        reopenSql,
         [fx2.fy, "x56 a13c direction 2: reopen holds first", JSON.stringify({ check_key: "ar_control_tie" }), opk("x56-a13c-2")],
       );
       return r.rows[0].r;

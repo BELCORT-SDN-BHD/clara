@@ -335,10 +335,31 @@ const RENDER_0082_CLOCK_NAMES = ["complete_render_job"];
 // Frontier-gated for the reason the 0046/0055/0056/0057/0059/0072 blocks state.
 const RENDER_0083_CLOCK_NAMES = ["render_lease_alive"];
 
+// B3 [ADR-068 ruling 1]: ONE lawful bare-clock reader joins, and it is a DECLARED change.
+// clara.reopen_fiscal_year now mints the year-end close's reversal itself instead of
+// delegating to clara.reverse_entry, so it carries that verb's two timestamptz stamps --
+// `approved_at = now()` on the mirror's census-visible flip and `updated_at = now()` on the
+// original's reversal-linkage pair. Both are audit instants: WHEN the reopen happened.
+//
+// THE ACCOUNTING DATE IS EXPLICITLY NOT FROM THE CLOCK, which is the whole point of B3. The
+// mirror's posting_date is `v_fy.ends_on`, READ FROM THE FISCAL-YEAR ROW -- an authority, and
+// the same class of authority the 0056 block's five readers already use. So this entry is the
+// arm's intended outcome (a declared reader with a stated reason), not a regression: the body
+// reads the wall clock for the two columns that record the act, and reads a period authority
+// for the one column that decides where the money lands.
+//
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER. B3's pair is numbered at MERGE, so a
+// `like '0085_%'` gate would silently drop this name the moment the pair is renumbered --
+// and a silently-shrunk roster is exactly the drift arm (D) exists to catch.
+const B3_REOPEN_CLOCK_NAMES = ["reopen_fiscal_year"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
     `select count(*)::int as n from clara.schema_migrations where version like '${pat}'`
+  )).rows[0].n === 1;
+  const appliedStem = async (re) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
   const names = [...S5_25_BARE_TOKEN_ROSTER];
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
@@ -350,6 +371,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0081_%")) names.push(...RENDER_0081_CLOCK_NAMES);
   if (await applied("0082_%")) names.push(...RENDER_0082_CLOCK_NAMES);
   if (await applied("0083_%")) names.push(...RENDER_0083_CLOCK_NAMES);
+  if (await appliedStem("b3_reopen_ends_on$")) names.push(...B3_REOPEN_CLOCK_NAMES);
   return names.sort();
 }
 

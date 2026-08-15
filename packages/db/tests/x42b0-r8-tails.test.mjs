@@ -200,11 +200,17 @@ test("x42.r8.tails.4 TAIL 1(a) approve-path census, widened, matches the pinned 
   )).rows[0];
   // [0056 β] finalize_close's census-visible flip is the FIFTH approve writer (0056's own
   // S11.3 counts five against the same detector shape). Frontier-gated.
+  // [B3 / ADR-068 ruling 1] the SIXTH is reopen_fiscal_year, which mints its own ends_on-dated
+  // reversal of the closing entry in-body instead of delegating to reverse_entry. Gated on the
+  // migration STEM, never a number: B3's numbers are claimed at merge.
   const n56a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0056_%'")).rows[0].n;
-  assert.equal(r.n, n56a === 1 ? 5 : 4);
-  assert.equal(r.names, n56a === 1
-    ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry"
-    : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, reverse_entry");
+  const nB3a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version ~ 'b3_reopen_ends_on$'")).rows[0].n;
+  assert.equal(r.n, nB3a === 1 ? 6 : (n56a === 1 ? 5 : 4));
+  assert.equal(r.names, nB3a === 1
+    ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reopen_fiscal_year, reverse_entry"
+    : n56a === 1
+      ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry"
+      : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, reverse_entry");
 });
 
 test("x42.r8.tails.4b TAIL 1(b) hook-caller census, widened WITH the self-match guard, matches the pinned four — and WITHOUT the guard, self-matches the hook itself (proving the guard is load-bearing)", async (t) => {
@@ -217,11 +223,16 @@ test("x42.r8.tails.4b TAIL 1(b) hook-caller census, widened WITH the self-match 
         and ${WIDENED_CONCAT_SRC} like '%clara._subledger_on_approve(%'`,
   )).rows[0];
   // [0056 β] same fifth caller, same gate. Names asserted FIRST so a drift NAMES itself.
+  // [B3] and the same sixth: reopen's own approve path CALLS the hook (never argues it a
+  // no-op) and then asserts the no-op on the row, so the caller set grows with the writers.
   const n56b = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0056_%'")).rows[0].n;
-  assert.equal(guarded.names, n56b === 1
-    ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry"
-    : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, reverse_entry");
-  assert.equal(guarded.n, n56b === 1 ? 5 : 4);
+  const nB3b = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version ~ 'b3_reopen_ends_on$'")).rows[0].n;
+  assert.equal(guarded.names, nB3b === 1
+    ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reopen_fiscal_year, reverse_entry"
+    : n56b === 1
+      ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry"
+      : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, reverse_entry");
+  assert.equal(guarded.n, nB3b === 1 ? 6 : (n56b === 1 ? 5 : 4));
 
   const unguarded = (await rootQuery(
     `select count(*)::int as n, bool_or(p.proname = '_subledger_on_approve') as self_matched
@@ -231,7 +242,7 @@ test("x42.r8.tails.4b TAIL 1(b) hook-caller census, widened WITH the self-match 
   )).rows[0];
   assert.equal(unguarded.self_matched, true,
     "pg_get_functiondef's own header line for _subledger_on_approve must self-match its own call shape — this is exactly why TAIL 1(b) needed the p.proname<>target guard, MEASURED here independently of the migration's own DO block");
-  assert.equal(Number(unguarded.n), n56b === 1 ? 6 : 5, "unguarded, the count reads callers+1 (the pinned set plus the hook self-matching) — the false failure the guard exists to prevent");
+  assert.equal(Number(unguarded.n), (nB3b === 1 ? 6 : (n56b === 1 ? 5 : 4)) + 1, "unguarded, the count reads callers+1 (the pinned set plus the hook self-matching) — the false failure the guard exists to prevent");
 });
 
 // ===========================================================================

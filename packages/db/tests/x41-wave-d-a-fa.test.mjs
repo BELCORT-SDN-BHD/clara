@@ -191,10 +191,11 @@ test("x41.a3 splice census: _fa_on_approve lives INSIDE the shared _subledger_on
       where n.nspname='clara' and p.prosrc like '%_subledger_on_approve%' and p.proname <> '_subledger_on_approve'
       order by 1`,
   )).rows.map((x) => x.proname);
-  // [0056 β] finalize_close = the FIFTH caller (its census-visible flip calls the shared
-  // hook; the x56 battery proves it zero-op on the closing entry). Frontier-gated.
-  const n56 = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0056_%'")).rows[0].n;
-  assert.equal(callers.length, n56 === 1 ? 5 : 4, `the caller census holds post-splice (got ${callers.length}: ${callers.join(", ")})`);
+  // [0056 β] finalize_close is the FIFTH caller; [B3, ADR-068 ruling 1] reopen_fiscal_year the
+  // SIXTH (it CALLS the hook on the reversal it mints; x85 proves the no-op). Frontier-gated —
+  // B3 by migration STEM, never a number, because B3's pair is numbered at merge.
+  const at = async (p) => (await rootQuery(`select count(*)::int as n from clara.schema_migrations where version ${p}`)).rows[0].n, n56 = await at("like '0056_%'"), nB3 = await at("~ 'b3_reopen_ends_on$'");
+  assert.equal(callers.length, nB3 === 1 ? 6 : (n56 === 1 ? 5 : 4), `the caller census holds post-splice (got ${callers.length}: ${callers.join(", ")})`);
 
   const shared = await fnSource("_subledger_on_approve");
   assert.ok(shared.includes("_fa_on_approve"), "the FA hook is spliced into the SHARED _subledger_on_approve (ONE CoR splice, design §2.1)");

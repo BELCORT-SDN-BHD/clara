@@ -19,7 +19,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, cleanCloseableFY, recordClientFact, forgeClosedPeriodMovement,
+  has0056, hasB3, reopenerFor, cleanCloseableFY, recordClientFact, forgeClosedPeriodMovement,
   beginClose, attestClose, finalizeClose, abandonClose, reopenFY, verifyClose,
   getCloseReadiness, plainEntry, REVN, EXPN, BANK1, addDaysStr,
 } from "./x56-fixtures.mjs";
@@ -62,7 +62,9 @@ test("reopen-receipt settlement: close -> reopen -> re-close flips the reopen re
   const closed1 = await finalizeClose(owner, { fy: fx.fy });
   assert.ok(closed1.receipt_id, "mandatory setup: the first close succeeds");
 
-  const reopened = await reopenFY(owner, {
+  // [B3] the reversal of a close is a distinct-checker act: reopen as a second eligible human.
+  const settleReopener = await reopenerFor(owner, { closer: owner, alternate: world.users.grace });
+  const reopened = await reopenFY(settleReopener, {
     fy: fx.fy, reason: "x56 reopen-settlement: reopening to prove the re-close settlement",
     correctionTarget: { entry_ids: [closed1.close_entry_id] },
   });
@@ -71,28 +73,31 @@ test("reopen-receipt settlement: close -> reopen -> re-close flips the reopen re
   assert.equal(reopenReceiptRow.kind, "reopen");
   assert.equal(reopenReceiptRow.status, "active", "mandatory setup: the reopen receipt is ACTIVE before any re-close");
 
-  // The reopen's own reverse_entry call left a DRAFT mirror (the closing entry is
-  // high-stakes, is_year_end propagates) -- approve it so the books are clean and
-  // the re-close does not need a fresh attestation for an unrelated reason.
+  // PRE-B3 the reopen's reverse_entry call left a DRAFT mirror (the closing entry is
+  // high-stakes, is_year_end propagates) -- approve it so the books are clean and the
+  // re-close does not need a fresh attestation for an unrelated reason. POST-B3
+  // (ADR-068 ruling 1) the reopen approves its own ends_on-dated reversal in-body, so
+  // there is nothing left to approve and this manual step would refuse CLR10.
   const mirrorRow = (await rootQuery(
-    "select id, revision_token from clara.journal_entries where reversal_of=$1",
+    "select id, revision_token, status from clara.journal_entries where reversal_of=$1",
     [closed1.close_entry_id],
   )).rows[0];
   assert.ok(mirrorRow, "mandatory setup: the reopen minted a reversal mirror of the closing entry");
-  // Maker-checker distinctness (CLR05): the mirror's maker_actor is OWNER (reopen_fiscal_year's
-  // own reverse_entry call ran as owner); a high-stakes entry needs a DIFFERENT checker.
-  await approveEntry(preparer, { entry: mirrorRow.id, expectedRevision: mirrorRow.revision_token, opKey: opk("x56-reopensettle-mirror-approve") });
+  if (await hasB3()) {
+    assert.equal(mirrorRow.status, "approved", "post-B3 the mirror arrives already approved -- the reopen is its own audited writer");
+  } else {
+    // Maker-checker distinctness (CLR05): the mirror's maker_actor is OWNER (reopen_fiscal_year's
+    // own reverse_entry call ran as owner); a high-stakes entry needs a DIFFERENT checker.
+    assert.equal(mirrorRow.status, "draft", "pre-B3 the high-stakes mirror is left draft");
+    await approveEntry(preparer, { entry: mirrorRow.id, expectedRevision: mirrorRow.revision_token, opKey: opk("x56-reopensettle-mirror-approve") });
+  }
 
   // Segregation (matrix A12) at the RE-close: only owner holds close_and_attest here,
-  // so owner must be the closer -- but the mirror posts at TODAY's wall-clock date
-  // (measured: reverse_entry does not inherit the original's posting_date), outside
-  // the FY's own span, so it never enters finalize_close's "last preparer" query
-  // (posting_date between starts_on and ends_on). Left alone, that query's most-
-  // recent IN-RANGE touch is the ORIGINAL closing entry's own reversed_by stamp --
-  // whose last_human_editor is still owner (unchanged by that stamp), tripping
-  // segregation against owner-as-closer no matter who approves the mirror. Post one
-  // more small IN-FY entry, by a non-owner actor, after the reopen -- the genuine way
-  // this stays clean in practice.
+  // so owner must be the closer -- but the most recent IN-FY touch is owner's either way
+  // (pre-B3 it is the ORIGINAL closing entry's own reversed_by stamp, whose
+  // last_human_editor is still owner; post-B3 it is the ends_on-dated mirror itself,
+  // which owner made). Post one more small IN-FY entry, by a non-owner actor, after the
+  // reopen -- the genuine way this stays clean in practice.
   await plainEntry(preparer, { client: fx.client, debit: BANK1, credit: REVN, cents: 100, postingDate: addDaysStr(fx.startsOn, 200), memo: "x56 reopen-settlement: a small post-reopen IN-FY touch by a non-owner actor" });
 
   const begun2 = await beginClose(owner, { fy: fx.fy });

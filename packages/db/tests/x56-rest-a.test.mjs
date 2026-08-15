@@ -17,7 +17,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, cleanCloseableFY, freshActiveClient, beginClose, finalizeClose,
+  has0056, hasB3, reopenSig, reopenerFor, caught, cleanCloseableFY, freshActiveClient, beginClose, finalizeClose,
   reopenFY, grantCapability, revokeCapability, plainEntry, BANK1, addDaysStr,
   proposeFY, openFY,
 } from "./x56-fixtures.mjs";
@@ -166,7 +166,9 @@ test("A5 a closed FY(n) entry cannot be reversed directly (ordering guard refuse
 
   // Reopen: stated reason, named correction target resolving to a real entry of this
   // client -- mints a reopen receipt (right answer).
-  const reopened = await reopenFY(owner, {
+  // [B3] a close is reversed by a DIFFERENT eligible human than the one who signed it.
+  const a5Reopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
+  const reopened = await reopenFY(a5Reopener, {
     fy: fx.fy, reason: "x56 a5: correcting the FY1 revenue entry via the audited reopen path",
     correctionTarget: { entry_ids: [fx.revenueEntry] },
   });
@@ -184,20 +186,24 @@ test("A5 a closed FY(n) entry cannot be reversed directly (ordering guard refuse
   const fx2 = await cleanCloseableFY(owner, { tag: "a5-notarget", prepSub: world.users.hana, startsOn: "2027-01-01" });
   await beginClose(owner, { fy: fx2.fy });
   await finalizeClose(owner, { fy: fx2.fy });
-  const errNoTarget = await caught(() => reopenFY(owner, { fy: fx2.fy, reason: "x56 a5 no target on purpose", correctionTarget: {} }));
+  const errNoTarget = await caught(() => reopenFY(a5Reopener, { fy: fx2.fy, reason: "x56 a5 no target on purpose", correctionTarget: {} }));
   assert.ok(errNoTarget, "a reopen with a correction target resolving to nothing auditable is refused");
   assert.equal(errNoTarget.code, "CLR10");
 });
 
 // ===========================================================================
-// A5b -- the reopen's EFFECT ORDER is required, not incidental: the FY status
-// leaves 'closed' BEFORE reverse_entry stamps the closing entry. Read both the
-// live body's textual order and a behavioural probe that attempts the reversal
-// FIRST (while still closed) and is refused by the wall.
+// A5b -- the reopen's EFFECT ORDER is required, not incidental, and B3
+// (ADR-068 ruling 1) INVERTED which order that is. Pre-B3: the FY status
+// leaves 'closed' BEFORE reverse_entry stamps the closing entry, because the
+// wall would refuse the stamp otherwise. Post-B3: the ends_on-dated reversal
+// lands FIRST, while the year is still closed, admitted by the target-bound
+// permit -- and the flip follows it. Read the live body's textual order and a
+// behavioural probe, on whichever frontier is live.
 // ===========================================================================
 
-test("A5b reopen_fiscal_year flips FY status BEFORE reversing the closing entry -- structural order + a probe refused pre-flip", async (t) => {
+test("A5b reopen_fiscal_year's effect order, per frontier: pre-B3 the FY flips BEFORE reverse_entry; post-B3 the ends_on-dated mirror lands FIRST under the permit and the flip follows", async (t) => {
   if (skip56(t)) return;
+  const b3 = await hasB3();
   const owner = world.users.alice;
   const fx = await cleanCloseableFY(owner, { tag: "a5b", prepSub: world.users.hana, startsOn: "2027-01-01" });
   await beginClose(owner, { fy: fx.fy });
@@ -207,14 +213,24 @@ test("A5b reopen_fiscal_year flips FY status BEFORE reversing the closing entry 
 
   // Structural: the live body's own statement order.
   const bodyRow = (await rootQuery(
-    "select pg_get_functiondef('clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure) as def",
+    `select pg_get_functiondef('${await reopenSig()}'::regprocedure) as def`,
   )).rows[0];
   const body = bodyRow.def;
   const flipIdx = body.search(/status\s*=\s*'reopened'/i);
   const reverseIdx = body.indexOf("clara.reverse_entry(");
   assert.ok(flipIdx >= 0, "the body sets fiscal_years.status = 'reopened' somewhere");
-  assert.ok(reverseIdx >= 0, "the body calls clara.reverse_entry somewhere");
-  assert.ok(flipIdx < reverseIdx, "the status flip is textually BEFORE the reverse_entry call -- the order the wall requires");
+  if (!b3) {
+    assert.ok(reverseIdx >= 0, "the body calls clara.reverse_entry somewhere");
+    assert.ok(flipIdx < reverseIdx, "the status flip is textually BEFORE the reverse_entry call -- the order the wall requires");
+  } else {
+    assert.equal(reverseIdx, -1, "post-B3 the reopen no longer routes through reverse_entry at all -- the never-backdate law for TRANSACTIONS keeps that body untouched, so the period machinery gets its own writer instead of a parameter on the generic one");
+    const mirrorFlipIdx = body.search(/status\s*=\s*'approved',\s*approved_at\s*=\s*now\(\)/);
+    const stampIdx = body.indexOf("reversed_by = v_mirror");
+    assert.ok(mirrorFlipIdx >= 0, "the body performs its own census-visible approve of the mirror");
+    assert.ok(stampIdx >= 0, "the body stamps the original's reversal linkage itself");
+    assert.ok(mirrorFlipIdx < flipIdx, "the mirror's approve is textually BEFORE the status flip -- if it were not, the year would already be open and the permit would stop being what admits the backdated write");
+    assert.ok(stampIdx > flipIdx, "the original's linkage stamp is AFTER the flip -- giving the permit a second unit to cover it would widen it from one named entry to two");
+  }
 
   // Behavioural: BEFORE any reopen, the closing entry's protected row cannot be
   // touched directly. NOTE (measured, not assumed): the closing entry is high-
@@ -239,23 +255,34 @@ test("A5b reopen_fiscal_year flips FY status BEFORE reversing the closing entry 
   assert.ok(preErr, "the closing entry's protected row cannot be touched directly, before any reopen");
   assert.equal(preErr.code, "CLR08", `measured: CLR08 (entry-immutability) fires before the period wall gets to evaluate this specific write (got ${preErr.code} -- ${preErr.message})`);
 
-  // The real reopen: succeeds. Its own reverse_entry call ALSO takes the
-  // high-stakes draft-mirror branch (the closing entry's is_year_end propagates to
-  // the mirror) -- so what "lands" is a fresh, correctly-linked DRAFT reversal
-  // entry, not a flip of the original row itself. Read what actually happened,
-  // not what was assumed.
-  const reopened = await reopenFY(owner, {
+  // The real reopen: succeeds. PRE-B3 its reverse_entry call took the high-stakes
+  // draft-mirror branch (the closing entry's is_year_end propagates to the mirror),
+  // so what landed was a fresh, correctly-linked DRAFT reversal, today-dated, with
+  // the original never stamped. POST-B3 the mirror is APPROVED at the year end and
+  // the original carries its linkage. Read what actually happened, not what was assumed.
+  const a5bReopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
+  const reopened = await reopenFY(a5bReopener, {
     fy: fx.fy, reason: "x56 a5b: reopen to correct the closing entry itself",
     correctionTarget: { entry_ids: [closeEntryId] },
   });
   assert.ok(reopened.reopen_receipt_id, "the reopen succeeds");
   const mirrorRow = (await rootQuery(
-    "select status, reversal_of, is_year_end from clara.journal_entries where reversal_of=$1",
+    "select id, status, reversal_of, is_year_end, posting_date::text as posting_date from clara.journal_entries where reversal_of=$1",
     [closeEntryId],
   )).rows[0];
-  assert.ok(mirrorRow, "reopen's reverse_entry call minted a correctly-linked mirror entry");
-  assert.equal(mirrorRow.is_year_end, true, "the mirror inherits is_year_end -- still high-stakes, still takes the draft branch");
-  assert.equal(mirrorRow.status, "draft", "measured: a high-stakes reversal mirror is left DRAFT even when reached through reopen -- a human must still approve it");
+  assert.ok(mirrorRow, "the reopen minted a correctly-linked mirror entry");
+  assert.equal(mirrorRow.is_year_end, true, "the mirror inherits is_year_end from the closing entry");
+  const origRow = (await rootQuery(
+    "select reversed_by from clara.journal_entries where id=$1", [closeEntryId])).rows[0];
+  if (!b3) {
+    assert.equal(mirrorRow.status, "draft", "measured: a high-stakes reversal mirror is left DRAFT even when reached through reopen -- a human must still approve it");
+    assert.equal(origRow.reversed_by, null, "measured: the draft branch never stamps the original");
+  } else {
+    assert.equal(mirrorRow.status, "approved", "post-B3 the reopen approves its own reversal in-body under the reopen capability, exactly as finalize_close approves the closing entry it mints");
+    assert.equal(mirrorRow.posting_date, fx.endsOn, "the reversal is DATED the reopened year's ends_on -- a formal prior-period adjustment placed in its own period");
+    assert.equal(origRow.reversed_by, mirrorRow.id, "the original closing entry carries its reversal linkage, naming the ends_on-dated mirror");
+    assert.equal(reopened.reversal_entry_id, mirrorRow.id, "the receipt payload names the reversal entry it minted");
+  }
   assert.equal(reopened.reversed_entry_id, closeEntryId, "the reopen names the closing entry as what it reversed");
   const fyRow = (await rootQuery("select status from clara.fiscal_years where id=$1", [fx.fy])).rows[0];
   assert.equal(fyRow.status, "reopened");

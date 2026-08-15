@@ -17,8 +17,8 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY, addDaysStr,
-  proposeFY, openFY,
+  has0056, reopenSig, reopenerFor, caught, cleanCloseableFY, beginClose, finalizeClose,
+  reopenFY, addDaysStr, proposeFY, openFY,
 } from "./x56-fixtures.mjs";
 
 let ready = false;
@@ -56,7 +56,7 @@ after(async () => { printLaneNotes("x56-rest-f"); printSkipCount("x56-rest-f"); 
 test("reopen ordering guard structural: the same predicate appears TWICE, the second occurrence AFTER both advisory locks and the v_fy re-read", async (t) => {
   if (skip56(t)) return;
   const bodyRaw = (await rootQuery(
-    "select pg_get_functiondef('clara.reopen_fiscal_year(uuid,text,jsonb,text)'::regprocedure) as def",
+    `select pg_get_functiondef('${await reopenSig()}'::regprocedure) as def`,
   )).rows[0].def;
   const body = bodyRaw.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   const predicateRe = /later\.ordinal\s*>\s*v_fy\.ordinal[\s\S]{0,80}status\s+in\s*\(\s*'closing'\s*,\s*'closed'\s*\)/gi;
@@ -93,8 +93,12 @@ test("reopen ordering guard behavioral: the ordinary sequential case still refus
   await beginClose(owner, { fy: opened2.fiscal_year_id });
   await finalizeClose(owner, { fy: opened2.fiscal_year_id });
 
+  // [B3] a close is reversed by a DIFFERENT eligible human than its signer; owner closed both
+  // years here, so every reopen below runs as the second capability holder. The ORDERING guard
+  // this cell is about is unaffected -- it fires before the segregation determination.
+  const ordReopener = await reopenerFor(owner, { closer: owner, alternate: drafter });
   // FY1 first: refused -- FY2 (later, closed) is in the way.
-  const err = await caught(() => reopenFY(owner, {
+  const err = await caught(() => reopenFY(ordReopener, {
     fy: fx1.fy, reason: "x56 reopenord: attempt FY1 out of order",
     correctionTarget: { entry_ids: [fx1.revenueEntry] },
   }));
@@ -103,7 +107,7 @@ test("reopen ordering guard behavioral: the ordinary sequential case still refus
   assert.equal(JSON.parse(err.detail ?? "{}").reason, "reopen_ordering_violation");
 
   // FY2 first (the newest): admitted -- no later FY stands in the way.
-  const reopened2 = await reopenFY(owner, {
+  const reopened2 = await reopenFY(ordReopener, {
     fy: opened2.fiscal_year_id, reason: "x56 reopenord: FY2 reopens newest-first, correctly",
     correctionTarget: { entry_ids: [fx1.revenueEntry] },
   });
@@ -111,7 +115,7 @@ test("reopen ordering guard behavioral: the ordinary sequential case still refus
 
   // NOW FY1 admits too -- FY2 is 'reopened', not 'closing'/'closed', so it no
   // longer blocks.
-  const reopened1 = await reopenFY(owner, {
+  const reopened1 = await reopenFY(ordReopener, {
     fy: fx1.fy, reason: "x56 reopenord: FY1 now reopens, FY2 no longer blocks it",
     correctionTarget: { entry_ids: [fx1.revenueEntry] },
   });
