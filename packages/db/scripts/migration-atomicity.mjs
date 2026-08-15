@@ -59,6 +59,76 @@ export const MIGRATION_SESSION_BASELINE = Object.freeze({
   lock_timeout: "0",
 });
 
+// The per-migration TRANSACTION ISOLATION.
+//
+// Distinct from the baseline above, deliberately: that pins the session DEFAULT, this is
+// the level the runner's own per-migration transaction opens at. The baseline stays
+// "read committed" either way — `BEGIN ISOLATION LEVEL` sets transaction_isolation, not
+// default_transaction_isolation, so assertBaseline and the wrapper's post-`RESET ALL`
+// restore keep comparing the same parameter they always did.
+//
+// READ COMMITTED is the default and the corpus depends on it: 0019_wiki_boundary's
+// publication path REFUSES outright under repeatable read (CLR32, "wiki publication
+// cannot run under repeatable read isolation"). Measured — applying the whole chain
+// under a blanket repeatable read dies there. So this is a per-migration exception and
+// never a global switch.
+//
+// 0057 is the one exception, and an APPLIED file's immutable bytes force it. Its S0.9
+// birth sentinel proves the watermark instrument by asking whether this transaction's own
+// xid is visible in its own snapshot. Measured on PostgreSQL 17.11, that question has no
+// stable answer under READ COMMITTED:
+//   - a snapshot never lists the caller's own xid in xip_list, and its xmax is
+//     latestCompletedXid + 1;
+//   - so the predicate is TRUE exactly when some OTHER transaction ANYWHERE on the
+//     cluster took an xid after ours and then completed, pushing xmax past us;
+//   - which made the sentinel a coin flip — the same bytes passed on a quiet cluster and
+//     raised in 4 of 5 applications under a concurrent committer.
+// Under REPEATABLE READ the transaction's snapshot is taken before any xid the
+// transaction can allocate, so own-xid >= xmax always and the sentinel is deterministically
+// false. That is a proof, not a narrower window.
+export const DEFAULT_MIGRATION_ISOLATION = "read committed";
+
+// The only levels this runner will interpolate into a BEGIN. Membership is checked before
+// the clause is built, so the isolation string can never be anything but one of these.
+const ALLOWED_MIGRATION_ISOLATION = new Set([DEFAULT_MIGRATION_ISOLATION, "repeatable read"]);
+
+// Keyed on the CHECKSUM, because the checksum is the file's identity and the version
+// string is only its spelling — a renumbered 0057 is still the file that needs this.
+export const MIGRATION_ISOLATION_PINS = Object.freeze([
+  Object.freeze({
+    version: "0057_wave_e_registry_snapshots",
+    checksum: "c0eabe478f08ba1b8f889df5d2a7f09c51f2baf418313709f676caeefe09c697",
+    isolation: "repeatable read",
+  }),
+]);
+
+/**
+ * The isolation level a migration with these exact bytes must be applied under.
+ *
+ * FAIL-CLOSED on the version/checksum split: a version that carries a pin but arrives
+ * with different bytes is an edited applied migration, and which isolation the changed
+ * file needs is not something the runner may guess.
+ * @returns {string} one of ALLOWED_MIGRATION_ISOLATION
+ */
+export function migrationIsolationLevel(version, checksum) {
+  const pinned = MIGRATION_ISOLATION_PINS.find((pin) => pin.checksum === checksum);
+  if (!pinned) {
+    const byVersion = MIGRATION_ISOLATION_PINS.find((pin) => pin.version === version);
+    if (byVersion) {
+      throw new Error(
+        `migration ${version} carries a transaction-isolation pin for checksum ${byVersion.checksum}, but this file's checksum is ${checksum} — an applied migration's bytes are immutable, and the runner will not guess which isolation the changed file needs. Refusing to migrate.`,
+      );
+    }
+    return DEFAULT_MIGRATION_ISOLATION;
+  }
+  if (!ALLOWED_MIGRATION_ISOLATION.has(pinned.isolation)) {
+    throw new Error(
+      `migration ${version} is pinned to a transaction-isolation level the runner does not allow: ${JSON.stringify(pinned.isolation)}`,
+    );
+  }
+  return pinned.isolation;
+}
+
 // PostgreSQL 17 introduced transaction_timeout, which bounds a WHOLE transaction and
 // terminates the session (FATAL) when it fires — a migration's runner-owned transaction
 // is exactly the long transaction it would kill. A poisoned database- or role-level

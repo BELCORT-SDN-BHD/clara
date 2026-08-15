@@ -27,7 +27,9 @@ import {
   armMigrationTimeout,
   assertNoCheckFunctionBodyOverride,
   assertNoTransactionControl,
+  DEFAULT_MIGRATION_ISOLATION,
   executeMigrationBody,
+  migrationIsolationLevel,
   migrationServerVersionNum,
   migrationStatementTimeout,
   pinMigrationSession,
@@ -347,6 +349,13 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
       const checksum = sha256(sql);
       assertNoTransactionControl(sql, version);
       assertNoCheckFunctionBodyOverride(sql, version);
+      // Resolved HERE, beside the other file-level refusals: a pin whose checksum no
+      // longer matches must abort before a client is even connected, so a refusal costs
+      // no session and leaves no half-open transaction behind.
+      const isolation = migrationIsolationLevel(version, checksum);
+      if (isolation !== DEFAULT_MIGRATION_ISOLATION) {
+        log(`  note: ${version} is applied under ${isolation} isolation (checksum-pinned — see MIGRATION_ISOLATION_PINS)`);
+      }
       const bodyTimeout = migrationStatementTimeout(sql);
       const client = clientFactory({ connectionTimeoutMillis: MIGRATION_CONNECT_TIMEOUT_MS }); attachMigrationNoticeListener(client, log);
       let failure;
@@ -369,7 +378,10 @@ export async function migrate({ log = console.log, dir, clientFactory = makeClie
           log(`  note: backend pid ${backendPid} also served ${priorVersion} — expected through a session pooler, which recycles server backends; the session-pin nonce is what proves this session was freshly pinned`);
         }
         backendPids.set(backendPid, version);
-        await client.query("begin");
+        // The level is always stated, never inherited: the session default this runner
+        // pins and the level a transaction actually opens at are different parameters,
+        // and only what BEGIN says binds this transaction.
+        await client.query(`begin isolation level ${isolation}`);
         // The PRE-body evidence snapshot gets the same bound as the identical post-body
         // reads: a hung catalog read fails loudly instead of stalling a ceremony on an
         // unbounded session. Disarmed again below so executeMigrationBody still opens on
