@@ -37,7 +37,9 @@ manifest → the manifest is sealed. The scan runs strictly **before** the seal 
 ## Where the decisions live
 
 Everything that DECIDES is a pure function with no database, no container and no PDF, so it can be
-exercised directly (`npm test`, 71 cases):
+exercised directly with `npm test` — which prints its own case count, and is the number to quote
+rather than one written here (a spelled count over an enumerable set has been wrong twice in this
+lane already):
 
 | Module | Decides |
 |---|---|

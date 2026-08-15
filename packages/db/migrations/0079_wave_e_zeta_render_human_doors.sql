@@ -13,7 +13,9 @@
 --   clara.render_lease_alive    -- the worker's own fence (the ONE runtime verb here; see below)
 --
 -- WHY THIS FILE EXISTS AT ALL. Files 1-4 are the machine lane: the queue, the pinned request, the
--- claim/dispatch verbs and the completion seal, every one of them granted to clara_runtime alone.
+-- claim/dispatch verbs and the completion seal. Every one of those that holds a grant holds it to
+-- clara_runtime alone, and two hold none at all (render_request_manifest_v1 and enqueue_render_job
+-- are reachable only as fn_owner internals -- file 2's tail asserts it).
 -- The two DOORS here are the opposite -- granted to clara_authenticated and to NOTHING else, called
 -- by a person, reachable by no worker. Keeping them together makes the grant census in the tail a
 -- statement about the whole human surface rather than about one function at a time. The FENCE rides
@@ -139,10 +141,13 @@ revoke all on function clara.replay_render_inputs(uuid) from public;
 -- Verbatim was never "render the predecessor's document"; it was a deferred refusal, and it would
 -- have stranded a run permanently through the very door built to end stranding.
 --
--- So the successor pins TODAY's inputs, and the drift is made VISIBLE instead of fatal: the
--- predecessor's digest travels beside the fresh one in the return and in the audit row, with an
--- explicit `manifest_changed` flag. An operator can see that the document they get is not the
--- document that failed, which is the honest fact — the alternative was a door that always failed.
+-- So the successor pins TODAY's inputs -- and when those differ from the predecessor's, THE DOOR
+-- REFUSES rather than reporting the difference afterwards. `requeue_manifest_drifted` carries both
+-- digests and nothing is minted: no row, no audit entry. A caller who wants the newer document
+-- calls again with p_accept_drift => true, and THAT call records both digests and the accepted
+-- flag. An earlier draft only announced the drift in the return value of a job it had already
+-- created, which told the operator too late; round 4 made it a refusal, and the inline comment at
+-- the gate below is the authority for this paragraph.
 --
 -- WHAT IT STILL DOES NOT DO, and each of these is deliberate:
 --   * it does not touch the failed row (the terminal wall stands; the failure stays readable);

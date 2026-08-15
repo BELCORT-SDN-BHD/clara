@@ -38,8 +38,13 @@
 -- moves one constant and breaks nothing.
 --
 -- ROLE POSTURE, AND THE ONE JUDGEMENT CALL IN IT. Every verb in files 2-4 is SECURITY DEFINER
--- under clara_fn_owner and is granted to clara_runtime ONLY (the reconcile_autopost_rules /
--- run_depreciation_period precedent: a plain call on the already-role-set leader connection).
+-- under clara_fn_owner, and every verb that holds a grant at all holds it to clara_runtime ONLY
+-- (the reconcile_autopost_rules / run_depreciation_period precedent: a plain call on the
+-- already-role-set leader connection). TWO OF THEM HOLD NO GRANT: render_request_manifest_v1 and
+-- enqueue_render_job are revoked from public and granted to nobody -- epsilon's seal reaches the
+-- enqueue as an internal fn_owner call, and file 2's own tail asserts that. Saying "granted to
+-- clara_runtime ONLY" as a universal would send a reader wiring a runtime path to the enqueue and
+-- finding out at deploy time; the human doors and the fence live in file 5 with their own census.
 -- clara_runtime holds NO table privilege on clara.render_jobs -- not even SELECT -- so the queue
 -- is reachable only through those verbs. The RENDER WORKER is a second consumer of that same
 -- clara_runtime lane; a dedicated clara_render role would be tighter, and is registered as a

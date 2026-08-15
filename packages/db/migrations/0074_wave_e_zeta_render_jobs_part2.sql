@@ -337,12 +337,16 @@ begin
         using errcode = 'CLR43',
         detail = jsonb_build_object('reason', 'render_job_ambiguous', 'report_run_id', r.id,
           'kind', p_kind,
-          -- THE REMEDY IS THE ONE A CALLER CAN ACTUALLY PERFORM (round-6). This used to say "fail
-          -- the surplus job through clara.fail_render_job", which nobody can do: a surplus raced row
-          -- is `claimable` with claimed_by NULL, and fail_render_job requires a running row, a
-          -- matching claimant and a live lease -- and is granted to clara_runtime only. A remedy no
-          -- role can execute is worse than none, because it sends an operator looking for a door.
-          'fix', 'two live jobs for one request means two concurrent enqueues raced across an upstream change. Nothing needs doing by hand: a worker will claim one and complete it, and the other becomes unclaimable the moment an artifact exists for the run -- it then burns its attempts and the leader''s reap parks it `failed` with its reason on the row. Read both jobs first (their manifests differ, which is why the index admitted both) and confirm the one that completes is the request you want; if it is not, requeue the failed one through clara.requeue_render_job once it terminates.')::text;
+          -- WHAT ACTUALLY HAPPENS, WHICH IS UGLIER THAN EITHER PREVIOUS VERSION OF THIS TEXT SAID.
+          -- Round 5 named clara.fail_render_job as the remedy: nobody can perform it (a surplus row
+          -- is `claimable` with claimed_by NULL; that verb needs running + matching claimant + live
+          -- lease, and is runtime-only). Round 6 replaced it with a mechanism that does not exist --
+          -- "becomes unclaimable once an artifact exists" (the claim predicate has no such term),
+          -- "burns its attempts" while unclaimable (attempts increment only inside a claim), "the
+          -- reap parks it" (the reap requires `running`). Twice the text described a system that
+          -- would be tidier than this one. The truth is that the surplus row STAYS CLAIMABLE and
+          -- costs real money on its way out, and an operator is owed that rather than reassurance.
+          'fix', 'two live jobs for one request means two concurrent enqueues raced across an upstream change, and the surplus one is NOT harmless. It stays claimable, so it will be dispatched -- a paid machine -- render the document in full, and be refused only at the seal (render_output_conflict: this run already carries a different sealed artifact of this kind). The worker records that refusal through fail_render_job, which returns the job to claimable below its cap, and the cycle repeats until max_attempts parks it failed. Expect up to max_attempts paid renders producing bytes that can never be sealed. There is NO door that cancels a claimable job today -- an operator cancel verb is REGISTERED as a Wave-F residual, not available -- so reading both jobs (their manifests differ, which is why the index admitted both) is DIAGNOSIS, not a remedy: it tells you which request survives, and if the survivor is the wrong one, requeue the other through clara.requeue_render_job after it terminates.')::text;
   end;
   if v_id is not null then
     perform clara._audit(r.firm_id, r.requested_by, null, null, 'enqueue_render_job', null,

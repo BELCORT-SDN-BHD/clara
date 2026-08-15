@@ -799,8 +799,11 @@ export const ALLOWED = {
     // validators are deliberately ABSENT from this roster: they are granted to nobody, so the
     // sweep's expected=false is the assertion that ζ's and η's JWT-less callers reach them only
     // as clara_fn_owner internals (see the block above)
-    ...RENDER_0073_HUMAN_FNS, // 0079 [Wave E lane ζ] the DR §10 replay door — an OPERATOR's
-    // recovery instrument (stable, writes nothing, enqueues nothing), clara_authenticated ONLY
+    // 0079 [Wave E lane ζ] BOTH human doors — the array is the enumeration and the block where it
+    // is declared describes each. They are not the same kind of verb: replay_render_inputs is
+    // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
+    // writes an audit row. Both are clara_authenticated ONLY.
+    ...RENDER_0073_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
