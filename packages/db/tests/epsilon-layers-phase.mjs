@@ -17,8 +17,27 @@ import {
 } from "./epsilon-fixtures.mjs";
 import { profileVersion, ensureEpsilonAdmin } from "./epsilon-world.mjs";
 
-/** Rows claiming `verified` that cannot evidence it. The durable floor over reference data:
- *  it is empty in an empty table and stays meaningful once real wording lands. */
+/** The provenance CHECK itself, read POSITIVELY from the catalog. This is the assertion with a
+ *  real failure mode -- dropped, renamed, or left NOT VALID all turn it red -- and it is the one
+ *  that carries the floor. */
+export async function wordingProvenanceConstraint() {
+  return (await rootQuery(
+    `select c.conname, c.contype, c.convalidated
+       from pg_constraint c
+      where c.conrelid = 'clara.statutory_wording'::regclass
+        and c.conname = 'ck_statutory_wording_verified_provenance'`)).rows[0] ?? null;
+}
+
+/** A TRIPWIRE, and labelled as one rather than dressed up as a floor.
+ *
+ *  While the CHECK above exists and is valid this predicate is its exact De Morgan negation, so
+ *  it CANNOT return a row -- it is empty at 0 wording rows and at 22 alike. It earns its place
+ *  only in the narrow window the constraint read cannot cover: a row that predates the constraint,
+ *  or one admitted while it was NOT VALID. Belt to that read's braces, nothing more.
+ *
+ *  (It shipped as the "durable floor" in the first cut of this fix, which was the same
+ *  cannot-fail defect this PR exists to remove, one layer down. The forge loop below is what
+ *  actually discriminates.) */
 export async function unprovenancedVerifiedWording() {
   return (await rootQuery(
     `select profile_key, wording_key, locale from clara.statutory_wording
@@ -32,18 +51,21 @@ export async function registerLayersPhase(t, world) {
   const { alice, bob, carol } = world.users;
   const admin = await ensureEpsilonAdmin(world);
 
-  await t.test("every wording row claiming `verified` carries its full provenance quartet", async () => {
-    // THIS CELL USED TO ASSERT THE TABLE WAS EMPTY, and that was a defect: it asserted the state
-    // of SHIPPED REFERENCE DATA that ANOTHER lane owns, so it was really testing whether the owner
-    // had done task #43 yet rather than testing anything about epsilon. It went red the moment the
-    // wording lane seeded real rows, through no fault of that lane's.
+  await t.test("the verified-provenance CHECK is present, valid, and bites on every quartet member", async () => {
+    // TWO DEFECTS DEEP, and the second one was mine twice over. The cell originally asserted the
+    // shipped wording table was EMPTY -- reference data another lane owns, so it tested whether
+    // the owner had done task #43 rather than testing epsilon. The first fix replaced that with a
+    // sweep for `verified` rows missing a quartet member and called it a durable floor. It is not:
+    // that predicate is the exact De Morgan negation of the CHECK, so while the CHECK stands the
+    // sweep CANNOT return a row -- an unfailable assertion swapped for an unfailable assertion,
+    // which is precisely the class this PR exists to remove.
     //
-    // The durable form is the inverse: not "there are no rows" but "every row that claims
-    // verification carries the evidence of it". True vacuously in an empty table, and it gets
-    // STRONGER as real wording lands instead of dying on contact with it -- which is what a test
-    // over reference data should do.
-    assert.deepEqual(await unprovenancedVerifiedWording(), [],
-      "a row may not claim `verified` without the manifest, sha, verifier and timestamp of the act");
+    // What carries the floor is a POSITIVE read of the constraint itself, which has real failure
+    // modes: dropped, renamed, or left NOT VALID.
+    const ck = await wordingProvenanceConstraint();
+    assert.ok(ck, "ck_statutory_wording_verified_provenance exists on clara.statutory_wording");
+    assert.equal(ck.contype, "c", "and it is a CHECK constraint");
+    assert.equal(ck.convalidated, true, "and it is VALIDATED -- a NOT VALID constraint admits the rows it names");
     assert.deepEqual((await rootQuery(
       `select profile_key, revision, applies_to_periods_beginning_from::text f,
               applies_to_periods_beginning_to::text t
@@ -433,11 +455,18 @@ export async function registerLayersPhase(t, world) {
     assert.equal(viewer?.code, "CLR04", "drafting a spec is key 1 -- a viewer holds no key");
   });
 
-  await t.test("the provenance floor still holds after the whole layer phase", async () => {
-    // Read at the end as well as the start, and now with teeth it did not have before: this phase
-    // SEEDS rig wording of its own (seedVerifiedWording), so a helper that wrote a `verified` row
-    // without the quartet would be caught here rather than only in the CHECK's own cell.
+  await t.test("the provenance CHECK survives the whole layer phase", async () => {
+    // Read at the end as well as the start, because the gate is a STATE and a state can be moved:
+    // this phase forges rows against the constraint and runs publication-freeze attempts under
+    // clara_fn_owner, and a helper that dropped or invalidated the constraint on its way through
+    // would leave every later cell asserting nothing.
+    //
+    // The first cut of this cell justified itself by claiming the phase seeds rig wording of its
+    // own. It does not -- seedVerifiedWording's only call site is the CLAIM phase, which runs
+    // after this one. The honest reason to re-read is constraint integrity, not written rows.
+    const ck = await wordingProvenanceConstraint();
+    assert.ok(ck?.convalidated, "the CHECK is still present and valid at the end of the phase");
     assert.deepEqual(await unprovenancedVerifiedWording(), [],
-      "nothing this phase wrote claims verification it cannot evidence");
+      "and the tripwire behind it is still clear");
   });
 }
