@@ -45,6 +45,20 @@ file wins or it is stale — and truing it is the first thing you do.
   with the pre-deploy exit-1 as the negative and `CLARA_STORAGE_ROLE` as the positive
   control) + `/ready` 200. The end-to-end re-render DR drill is deliberately still unrun (no
   sealed artifact exists yet) — `docs/ops/DR-render.md` keeps that boundary explicit (#244).
+- **The post-wave tail is CLOSED OUT (2026-08-16 continuation session):** the E-R9
+  close-lifecycle battery is merged (#253, d179e04a — 30 cells, three clean proof-runs incl.
+  one at frontier `0088`; its review round hardened the machine-role census to a
+  catalog-derived whitelist, pinned the ARM-0 predicate by identity, added the
+  `revise_entry` freeze arm and made the B3 gate hard-assert instead of skip); the Wave-G
+  E2E corpus design is merged (#254, 0970062f — 11 owner-decision points + 3 proposals for
+  the sittings); the reconciler belt-isolation fix is merged (#255, 2bd7e12c — the §C
+  open-task-settle starvation gap closed with per-item wraps + assembly-level containment,
+  halt-class errors rethrown by class identity, 19-cell unit battery; **NOT yet deployed —
+  rides the next `clara-runtime` deploy window**, see Next 1). The shared checkout is trued
+  to `main` and the codebase graph re-indexed (15,805 nodes). Each PR took an independent
+  fresh-context review + a finding→fix→re-verify round before merge; strict branch
+  protection serialized the merges exactly as the #244 note predicted (`update-branch` +
+  re-green each, never `--admin`).
 - **The δ review record:** cross-model (codex xhigh, initially NOT-MERGEABLE with 6 blockers)
   + a native 8-dimension adversarially-verified pass → an adjudicated fix docket (fake-receipt
   validation, in-body `check_function_bodies` double-layer refusal, owner-only RS lift floor,
@@ -94,6 +108,9 @@ file wins or it is stale — and truing it is the first thing you do.
 | B3 | `reopen_fiscal_year` → the `ends_on`-dated prior-period adjustment + the segregation wall (reopener≠closer / attested sole / adoption arm), migrations `0085-0086`; four-lens review (9 refuted / 4 survived → fix round → CONFIRMED ×6); found the pre-B3 silent-no-op reopen bug AND the 0056 closing_transfer/SST latent (task #17); merged 3203093, **ceremonied 2026-08-16** | **ceremonied (LIVE)** | #247 |
 | ε wording-state fix | the four assert-shipped-state cells → law-shaped fixtures (three cuts to an honest discriminator; the counterfactual table as proof); sequenced AHEAD of the wording merge; merged 585346f0 | **merged** | #246 |
 | MASB wording seed | the #43 packet → statutory wording via the 0067-sanctioned path, migrations `0087-0088`; payload re-derived clean twice; **owner sign-off 2026-08-16** (both-labels ratified · benar-dan-patut held · asymmetry accepted); merged cd0dea2, **ceremonied 2026-08-16 — E-R14 OPEN (en+zh issuable)** | **ceremonied (LIVE)** | #249 |
+| E-R9 battery | the 30-cell close-lifecycle battery → review round (catalog-derived machine-role census · ARM-0 predicate-identity pin · `revise_entry` freeze arm · hard B3 gate); 30/30 zero-skip at `0088`; merged d179e04a | **merged** | #253 |
+| Wave-G corpus design | the owner-directed E2E corpus design (5 slots incl. BEE, two consecutive FY closes each, green+brown split, OD-1..11 + P-1..3); review round restored the (65,747.97) sign convention at every restatement + argued OD-9/10/11 inline; merged 0970062f | **merged** | #254 |
+| Reconciler belt isolation | the §C open-task-settle starvation + five same-class probe gaps closed (per-item wraps mirroring A/B/D · assembly-level `belt()` containment · halt identity preserved by class); 19-cell unit battery; law-1 review (no blocker) + fix round (honest heartbeat rationale · counted §C failures · spoofed-name contrast cell); merged 2bd7e12c — **deploy pending, Next 1** | **merged (deploy pending)** | #255 |
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -101,11 +118,13 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **The fresh Wave-F session's first acts:** at the SHARED checkout, `git checkout main` +
-   pull (it sits on stale `wave-e-delta` @ 1a66a61 — a worktree-isolated session cannot true
-   it), then re-index the codebase graph (`codebase-memory-mcp` · `index_repository`) — code
-   changed materially this wave (0064-0084 + the runtime v11 + the reporting-render package)
-   and the graph is a wave behind until this runs.
+1. **Deploy #255's runtime bundle at the next `clara-runtime` deploy window** — a plain fly
+   deploy from merged `main` (lib-only change: no writer-body swap, no quiesce, no manifest
+   change; the frozen workflow surface is untouched). Verify by `/ready` + a PROCESS read,
+   per the ζ ceremony law. Until then the LIVE reconciler still carries the §C settle
+   starvation latent (bounded: one cycle per throw; needs a persistently-failing row; no
+   live occurrence observed). *(The 2026-08-15 "fresh session first acts" item is DONE
+   2026-08-16: shared checkout trued to `main`; graph re-indexed, 15,805 nodes.)*
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (signed with three dispositions, merged #249, ceremonied; E-R14
    OPEN). **The BEE FY2025 live close — DEFERRED ON ACCOUNTING-CORRECTNESS GROUNDS
@@ -135,7 +154,15 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    recommendations** (`docs/plan/research/wave-f/vision-alignment-audit.md` — committed
    in-repo at clock-out; delivered to the owner 2026-08-16 — the
    non-agentic interview is the one true drift; the audited freeform-read tool and the eval
-   harness are the highest-leverage builds) + the closing_transfer/SST latent (below).
+   harness are the highest-leverage builds; **NOTE the audit's SST-direction claim is
+   CORRECTED in-file, 2026-08-16** — the defect DEFLATES turnover, see the Backlog entry)
+   + **the closing_transfer/SST ruling R1** (below — Fix A recommended; R1 is the one
+   genuine owner question: does the P&L→RE roll count as a "closing transfer" for the SST
+   turnover exclusion?) + **the Wave-G corpus decisions OD-1..OD-11 + P-1..P-3**
+   (`docs/plan/active/wave-g-e2e-corpus-design.md`, merged #254 — esp. OD-5: provision a
+   second eligible principal so B3's distinct-checker arm actually fires in the reopen
+   drill) + **the BEE opening-TB record discrepancy** (Known issues — which record
+   describes the live book?).
 
 ## Backlog
 
@@ -150,11 +177,39 @@ Registered but not scheduled. Sources of record in brackets.
   clients: post-close, the ends_on month's income bucket carries the full-year closing
   DEBIT and rolling-12 turnover reads ~0 — an SST registration watch that should fire does
   not (advisory-only blast radius: a wrong warning, never a wrong book). Found twice
-  independently (the B3 review's accounting lens; the vision audit). Own migration + full
-  ladder: mark closing entries + reopen mirrors at birth, or fix 0016's population
-  predicate. **Before the first real close whose SST turnover anyone relies on — BEE FY2025
-  itself is deferred wholesale to Wave G, so the natural slot is the Wave-F fix queue with
-  no near-term client deadline.** *(task #17; B3 PR body carries the site cites)*
+  independently (the B3 review's accounting lens; the vision audit). **ANALYZED TO A
+  SITTING-READY RECOMMENDATION 2026-08-16 (task #17):** mechanism byte-confirmed
+  (`0016:602`'s exclusion is dead because `0056:2242-2246` births the entry without the
+  marker; wall at `0016:4943-4986` admits the marker draft-to-draft only), and the
+  DIRECTION corrected — income closing lines are DEBITS, `0016:582-588` sums credit−debit,
+  so the defect DEFLATES rolling-12 turnover; the real harm is PERMANENT SUPPRESSION of
+  the 80% early-warning ladder (`0016:679`), never a false alarm (the vision audit's
+  inflation claim is corrected in-file). **Fix A recommended** — mark closing entries AND
+  the B3 reopen mirrors (`0085:379-386`) at birth, BOTH writer bodies in ONE migration (a
+  single-body fix INVERTS the defect into compounding inflation — the highest-value review
+  assertion). Fix B (recut the 0016 evaluator) is STRUCTURALLY BLOCKED by the evaluator
+  freeze (recut trips DUPLICATE+RECUT; the compliant path would need a `_v2` fork of both
+  evaluators + a runtime deploy + a permanent two-evaluator estate) and would leave a lie
+  in the data. 13-cell battery spec'd (T6 catches Fix B's regression class; T2/T4/T8/T9
+  contract-blind). Shape: two `create or replace`, no signature change, D1 write-quiesce on
+  the 0085 template; forward-only proof asserted fail-closed at apply (zero
+  close_receipt-bearing entries — could not be read from live during analysis, so it is
+  ASSERTED, never assumed). **Builds after the sitting's R1 ruling** (does the P&L→RE roll
+  count as a "closing transfer" for the exclusion? 0016's authors assumed yes at
+  `0016:210-219`); R1a (mirror inherits the marker) and R1b (a `clara_authenticated`-only
+  DEFINER stamp does not breach the human-lane-marker pin, asserted CLR03-intact at apply)
+  ride as sub-confirmations. BEE FY2025 defers wholesale to Wave G, so no near-term client
+  deadline — but the fix gates the corpus's CLIENT-SST-1 slot (OD-7). *(task #17; B3 PR
+  body carries the original site cites)*
+- **Reconciler follow-ups (from #255's law-1 review, 2026-08-16 — all pre-existing, none
+  blocking):** the `expired` key collision (`reconciler.mjs:617` spreads `intakeRecovery`
+  unconditionally after `expiry`, always clobbering `expireClarifies`' count — unread by
+  `leader.mjs` today; renaming a receipt key is a small behaviour change, own PR) · the
+  leader render-pair try/catch (`leader.mjs:200-211`) still swallows halt-class errors
+  (unreachable today — neither render belt touches relay — but it is the one remaining
+  halt-eating catch in the leader path) · `wiki-projection.mjs:333-346`/`:594-599` carry
+  three bare `to_regprocedure` probes (different loop, per-event checkpoint failure model;
+  the same absent-vs-unreadable question applies).
 - **`closing_stock` producer verb** — before any real goods-trader close. *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. *(ADR-043)*
 - **δ NAMED RESIDUALS (all deliberate, each recorded in its file/PR):** F10 — a DB-level
@@ -168,6 +223,19 @@ Registered but not scheduled. Sources of record in brackets.
   Supavisor headroom re-measure is deferred to η/ζ deploys (δ v1 wires zero standing
   consumers). η—not δ—owns the production human/OBO/wake caller; direct wake/runtime evaluator
   grants and synthetic human JWTs remain forbidden.
+
+**The VACUOUS-GREEN-GATE class (registered generally, 2026-08-16):** a gate that passes
+because it had NOTHING IN SCOPE is not evidence — it must be distinguished from a gate that
+measured a population and found it clean. BEE instances, mechanism-verified at file:line on
+main's bytes: the uncoded gate blind with 21/21 filings NULL `financial_date`
+(`0056:1397`'s BETWEEN is never satisfied by NULL, and `:1404-1405`'s own comment makes the
+miss permanent); the bank gates blind with 0 registered accounts vs RM39,252.03 of real
+balance (`0056:1360-1361` enumerates only `bank_statements`). A THIRD instance found at the
+corpus-design grounding (registered as the doc's P-3, not built): drawer 1 returns `tie` on
+an EMPTY `bank_accounts` registry (`0056:962` initialises `v_state := 'tie'`; no zero-census
+branch) — one level below the very comment (`:969-972`) that cites the ADR-066 lesson. Rule
+adopted in the Wave-G corpus (`wave-g-e2e-corpus-design.md` §7): every close gate must be
+EXERCISED — nonvacuously — by at least one corpus slot.
 
 **Beta-boundary instruments (registered at the harness refactor, ADR-0069):**
 - a quality-score document, A–D per domain/layer (file minted at the beta boundary) · the monthly harness-simplification ablation
@@ -304,11 +372,22 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 - **Working-tree custody (RESOLVED 2026-08-15):** the original checkout's foreign
   `AGENTS.md`/`PROGRESS.md` modifications were discarded with the owner's approval after
   their intent was absorbed (constraint-12 truing + naming the graph MCP, both on this
-  branch). The `wave-e-delta-build` worktree's untracked ε/η/θ/ζ working copies (UNNUMBERED
-  migrations, v11 files, the reporting-render package, tests) are now STALE DUPLICATES of
-  merged content — verified byte-for-byte against `origin/main` for the tracked-file overlaps
-  — and are cleanup candidates once ζ's teardown completes; the `.tmp-delta-*` / `.tmp-e6-*`
-  stages ride along (superseded as evidence by the 2026-08-14 acceptance record).
+  branch). **CLEANUP EXECUTED 2026-08-16:** the `wave-e-delta-build` worktree's untracked
+  ε/η/θ/ζ working copies and the `.tmp-delta-*`/`.tmp-e6-*` stages are DELETED — with a
+  correction to the earlier wording: hash-verification found 26/31 were NOT byte-identical
+  to main; they were PRE-REVIEW DRAFTS (ancestors — sampled diffs confirm main's versions
+  are the revised descendants, e.g. 0064 +60/−39, the θ test +124/−37; "byte-for-byte" was
+  true only of the TRACKED-file overlaps). Deleted as superseded: the finals are on `main`,
+  the lane states survive in the custody branches, and the acceptance records carry the
+  evidence. The worktree's status is clean.
+- **The BEE opening-TB record discrepancy (owner adjudication, found 2026-08-16 at the
+  corpus-design grounding):** this file's BEE-deferral bullet (Next 2) says the book holds
+  "an empty opening TB", while ADR-043 records a FINALIZED keyed opening seed `1e60960e`
+  tying at RM 210,000.00 = 210,000.00 with capital (65,747.97) — the same figure as the
+  owner's desk FY2025 capital B/F. Both cannot describe the live book. Which is current is
+  the owner's read (a live query at the next sitting settles it); the corpus doc carries it
+  as open question 1. Until adjudicated, treat NEITHER as ground truth in acceptance
+  reasoning.
 - **ci.yml exceeds the 500-line harness file limit** (pre-existing; a GitHub workflow cannot
   split across files) — the hook flags every edit; a composite-action refactor is a future
   candidate, not tonight's.
@@ -383,6 +462,24 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Session log
 
+- **2026-08-16 (the continuation session, after /clear)** — the board's four carryover
+  tasks driven to done or sitting-ready by pinned parallel lanes (three Workflow fan-outs +
+  two fix rounds, every dispatch model-pinned): the E-R9 battery merged through its
+  independent review round (#253 — the review's MAJOR turned the machine-role blacklist
+  into a catalog-derived whitelist); the Wave-G corpus design authored, reviewed and merged
+  (#254 — ~30 cite-checks zero-discrepancy; found the third vacuous-green instance and the
+  ≥2-eligible-principals reopen-drill hazard; the fix lane's whole-doc grep caught a third
+  unsigned (65,747.97) the reviewer's location description missed); the vision audit's
+  reconciler claim verified with a LOCATION CORRECTION (the load-bearing gap was
+  reconcileTasks §C, not the belt assembly; lint was as clean as SST) and FIXED at #255
+  (law-1 review: no blocker; its fix round rewrote a heartbeat rationale the bytes
+  contradicted and counted the §C failures per the F1 law); the SST latent analyzed to a
+  sitting-ready Fix-A recommendation with the audit's direction claim corrected in-file
+  (deflation — permanent early-warning suppression, not inflation). Shared checkout trued
+  to `main`; graph re-indexed; strict-protection merge serialization ran exactly per the
+  #244 note (update-branch + re-green ×2, no --admin); the stale-draft custody cleanup
+  executed with hash-verification and recorded honestly (pre-review ancestors, not
+  duplicates). Tasks #18/#19/#20 closed; #17 holds for the sitting's R1.
 - **2026-08-16 (the post-wave tail, same session)** — the #43 wording seed built to
   review-closed (payload re-derived clean twice; four honest hold-backs incl. a
   fabricated-citation refusal; PR-ready at bf72db1, held for the owner); ε's four
