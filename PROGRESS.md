@@ -108,15 +108,28 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    and the graph is a wave behind until this runs.
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (signed with three dispositions, merged #249, ceremonied; E-R14
-   OPEN). NEXT UP: **the BEE FY2025 first real close** — the click-by-click packet is
-   DELIVERED (session scratchpad, bee-fy2025-close-packet.md; the E-R9 sandbox battery
-   30/30 twice-proven on virgin rigs; readiness CONDITIONALLY READY with two owner
-   pre-steps: approve the Lucy Artistry Lab draft `ca4276a9`, record
-   `trade_nature=services`; the year FREEZES at `begin_close` so both pre-steps come
-   FIRST; solo path — `p_self_attestation` mandatory) → then the first real render/seal
-   round-trip closes DR-render's unrun-drill boundary → RPR historical MPERS pack → RS
-   snapshot witness; the ms/zh claim-policy copy (fail-closed until supplied); the optional
-   elevated `diskpart` VHDX compact (~50GB, sequenced when runners are idle).
+   OPEN). **The BEE FY2025 live close — DEFERRED ON ACCOUNTING-CORRECTNESS GROUNDS
+   (2026-08-16 live-fire sitting, owner-directed "make the right choice"):** the owner's
+   desk management accounts (LUXE WEALTH, proprietor-certified, TIN on file) state FY2025
+   SALES RM 68,640.00 / net PROFIT RM 47,245.65 / capital B/F (65,747.97), while Clara's
+   BEE book holds RM 0 income, an empty opening TB, and ~19 UNCODED ingested filings (the
+   year's real receipts — Maxis RM 2,495.40, the entertainment batch, the FA invoice all
+   identified against the claim folder). Finalizing would have sealed a knowingly-false
+   loss on a REAL client — refused under hard constraint 1. The machinery half of E-R9
+   stands PROVEN (30/30 twice on virgin rigs; every live gate read green; the auth→/close→
+   /queue chain exercised end-to-end via the owner's own session); **the refusal itself is
+   the live-fire's best outcome — five product signals pointed at the incompleteness before
+   the desk evidence confirmed it.** The management-accounts figures are the GOLDEN
+   STANDARD for the rebuild. **PATH RULED (owner, 2026-08-16): the BEE close and its
+   catch-up defer WHOLESALE to the Wave-G reset + full E2E rebuild from raw documents** —
+   the golden figures above are that rebuild's acceptance bar (the book must tie to
+   RM 68,640 sales / RM 47,245.65 profit before the close seals). No BEE coding sittings
+   in Wave F. The Lucy `ca4276a9` RM 500 draft is a VENDOR
+   (subcontractor) bill — correctly coded, approval rides the catch-up sitting; the
+   readiness lane's "revenue document" label was a misread, corrected here. Then: the first
+   real render/seal round-trip (closes DR-render's unrun-drill boundary) → RPR historical
+   MPERS pack → RS snapshot witness; the ms/zh claim-policy copy (fail-closed until
+   supplied); the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
 3. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25)
    (ADR-062/0065) + the CI economics overhaul + **the vision audit's six gaps and three
    recommendations** (the vision-alignment-audit document, session scratchpad, delivered to
