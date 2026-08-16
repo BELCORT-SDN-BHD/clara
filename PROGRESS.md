@@ -202,7 +202,7 @@ Registered but not scheduled. Sources of record in brackets.
   deadline — but the fix gates the corpus's CLIENT-SST-1 slot (OD-7). *(task #17; B3 PR
   body carries the original site cites)*
 - **Reconciler follow-ups (from #255's law-1 review, 2026-08-16 — all pre-existing, none
-  blocking):** the `expired` key collision (`reconciler.mjs:617` spreads `intakeRecovery`
+  blocking):** the `expired` key collision (`reconciler.mjs:633` spreads `intakeRecovery`
   unconditionally after `expiry`, always clobbering `expireClarifies`' count — unread by
   `leader.mjs` today; renaming a receipt key is a small behaviour change, own PR) · the
   leader render-pair try/catch (`leader.mjs:200-211`) still swallows halt-class errors
