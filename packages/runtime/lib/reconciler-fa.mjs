@@ -41,6 +41,10 @@
 // client row) internally — the runtime supplies only client_id, the period, and an op_key.
 
 import { randomUUID } from "node:crypto";
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported: reconciler.mjs
+// imports THIS module, so importing back would cycle. SAME import specifier (./relay.mjs) as
+// reconciler.mjs's own import, so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const FA_PERIOD_CAP = 24; // bounded — never loop unboundedly on a poisoned/misconfigured client
 
@@ -65,7 +69,23 @@ async function activeClientIds(client) {
 export async function reconcileFaRuns(client, opts = {}) {
   const log = opts.log ?? (() => {});
 
-  if (!(await hasDepreciationSurface(client))) {
+  // THE PROBE IS ISOLATED, and "absent" and "unreadable" must not report the same thing (the
+  // reconciler-render.mjs:192-198 precedent, cloned). A catalog read that THROWS is a connection
+  // or session problem, not a dormant surface: answering {faOk:true, dormant:true} would tell
+  // leader.mjs:194 the daily belt succeeded and park the FA cadence for another 24 HOURS on the
+  // strength of a failed read. faOk:false instead — the leader retries next cycle. And bare, the
+  // throw propagated out of the belt entirely and aborted the sweep behind it.
+  let surface;
+  try {
+    surface = await hasDepreciationSurface(client);
+  } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
+    log(`[reconcile] fa surface probe error: ${err?.message ?? err}`);
+    return { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: false };
+  }
+  if (!surface) {
     // 0041 not yet applied — a clean no-op, never a failure (the image boots dormant on 0040
     // per the design's runtime-image-first ceremony order).
     return { faOk: true, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: true };

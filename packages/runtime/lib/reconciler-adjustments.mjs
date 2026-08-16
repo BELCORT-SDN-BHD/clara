@@ -70,6 +70,10 @@
 // channel nor starts a workflow run.
 
 import { randomUUID } from "node:crypto";
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported: reconciler.mjs
+// imports THIS module, so importing back would cycle. SAME import specifier (./relay.mjs) as
+// reconciler.mjs's own import, so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const ADJ_PERIOD_CAP = 24; // bounded — never loop unboundedly on a poisoned/misconfigured client (the FA belt's cap, cloned)
 
@@ -99,7 +103,23 @@ async function activeClientIds(client) {
 export async function reconcileAdjustmentRuns(client, opts = {}) {
   const log = opts.log ?? (() => {});
 
-  if (!(await hasAdjustmentSurface(client))) {
+  // THE PROBE IS ISOLATED, exactly as reconciler-fa.mjs and reconciler-render.mjs:192-198 do it:
+  // a catalog read that THROWS is a connection or session problem, never a dormant surface, and
+  // reporting the two identically would tell leader.mjs:195 the daily belt succeeded and park
+  // the adjustment cadence for another 24 HOURS on the strength of a failed read. adjOk:false
+  // instead — retried next cycle. Bare, the throw also escaped the belt and aborted the sweep
+  // behind it.
+  let surface;
+  try {
+    surface = await hasAdjustmentSurface(client);
+  } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
+    log(`[reconcile] adjustment surface probe error: ${err?.message ?? err}`);
+    return { adjOk: false, adjExamined: 0, adjPosted: 0, adjDrafted: 0, adjFailed: 0, adjDormant: false, adjBlockedClients: 0, adjTransientBlockedClients: 0 };
+  }
+  if (!surface) {
     // the adjustment surface (0045) is not yet applied — a clean no-op, never a failure
     // (the image boots dormant on pre-0045 per the design's runtime-image-first ceremony
     // order).

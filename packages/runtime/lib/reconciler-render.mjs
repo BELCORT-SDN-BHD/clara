@@ -40,6 +40,12 @@
 // process.env at call time and is never logged, never interpolated into a message, and never
 // passed on a command line.
 
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported (reconciler.mjs
+// does not import this module, but the sibling files that DO get imported by it need the inline
+// form too, and one idiom across all four beats a mixed one). SAME import specifier (./relay.mjs)
+// as reconciler.mjs's own import, so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
+
 const DISPATCH_COOLDOWN = process.env.CLARA_RENDER_DISPATCH_COOLDOWN || "10 minutes";
 const DISPATCH_MAX = Number(process.env.CLARA_RENDER_DISPATCH_MAX || 5);
 const FLY_API = process.env.CLARA_RENDER_FLY_API || "https://api.machines.dev/v1";
@@ -287,9 +293,29 @@ export async function reconcileRenderDispatch(client, opts = {}) {
 export async function reconcileRenderEnqueue(client, opts = {}) {
   const log = opts.log ?? (() => {});
   const limit = Number(opts.limit ?? process.env.CLARA_RENDER_ENQUEUE_LIMIT ?? 25);
-  const has = await client.query(
-    "select to_regprocedure('clara.enqueue_missing_render_jobs(int)') is not null as surface");
-  if (has.rows[0]?.surface !== true) return { renderEnqueueOk: true, renderEnqueued: 0, renderEnqueueDormant: true };
+  // ISOLATED LIKE ITS SIBLING (reconcileRenderDispatch's own probe, ~100 lines up, which already
+  // reasons that "a catalog read failing is a connection problem, not a dormant surface, and the
+  // two must not report the same thing"). This half was the odd one out and ran bare. Stated
+  // precisely, because the consequence here is smaller than the §C one and should not be
+  // oversold: the throw did not strand anything — leader.mjs:209's shared render try/catch
+  // caught it, and the dispatch half had already run. What it DID cost is the distinction the
+  // sibling exists to preserve. A failed probe surfaced as a generic `render belt error` with no
+  // receipt at all, so "this database has no ζ migration yet" and "this leader could not read the
+  // catalog" were indistinguishable to anything reading the return value. Now the belt says
+  // renderEnqueueOk:false, which leader.mjs:207 already knows how to act on: the daily cadence is
+  // NOT advanced, so the fallback retries next cycle instead of parking for 24 hours.
+  let surface;
+  try {
+    surface = (await client.query(
+      "select to_regprocedure('clara.enqueue_missing_render_jobs(int)') is not null as surface")).rows[0]?.surface === true;
+  } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
+    log(`[reconcile] render enqueue surface probe error: ${err?.message ?? err}`);
+    return { renderEnqueueOk: false, renderEnqueued: 0 };
+  }
+  if (!surface) return { renderEnqueueOk: true, renderEnqueued: 0, renderEnqueueDormant: true };
   try {
     const r = (await client.query("select clara.enqueue_missing_render_jobs($1::int) as r", [limit])).rows[0]?.r ?? {};
     const failed = Number(r?.failed ?? 0);
