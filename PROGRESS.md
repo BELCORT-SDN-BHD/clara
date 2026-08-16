@@ -9,7 +9,13 @@ file wins or it is stale — and truing it is the first thing you do.
 
 *(as of 2026-08-15, the Wave E close — trued at every clock-out)*
 
-- **Live DB: 81 migrations, frontier `0086` (B3's estate censuses).** The B3 ceremony ran
+- **Live DB: 83 migrations, frontier `0088` (the #43 wording lexicon).** The wording-seed
+  ceremony ran 2026-08-16 after the owner's sign-off
+  (`docs/plan/completed/masb-wording-ceremony-asrun.md`): 22 statutory-wording rows + 9
+  lexicon + 3 claim policies, byte-per-packet. **E-R14 IS OPEN: en and zh statutory packs
+  are ISSUABLE** (mpers_company rev 1 en 5/5 + zh 5/5 verified; rev 2 en 5/5 ready for
+  2027); ms stays gated at 4/5 per the sign-off (notes.title held back — fabricated
+  citation). Earlier the same day, the B3 ceremony ran
   2026-08-16 (D1 write-quiesce; `docs/plan/completed/b3-reopen-ceremony-asrun.md`):
   `reopen_fiscal_year` is now the `ends_on`-dated formal prior-period adjustment under the
   target-bound M2 permit, and reversing a close is a SEGREGATED act (reopener ≠ closer at
@@ -87,7 +93,7 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave-E close paperwork | the 0077-0084 ceremony as-run + the freeze deploy-lock (140/140 locked), merged 263aa2d; ζ's DR-render docs merged 2b01219; this truing PR closes the set | merged | #243 #244 |
 | B3 | `reopen_fiscal_year` → the `ends_on`-dated prior-period adjustment + the segregation wall (reopener≠closer / attested sole / adoption arm), migrations `0085-0086`; four-lens review (9 refuted / 4 survived → fix round → CONFIRMED ×6); found the pre-B3 silent-no-op reopen bug AND the 0056 closing_transfer/SST latent (task #17); merged 3203093, **ceremonied 2026-08-16** | **ceremonied (LIVE)** | #247 |
 | ε wording-state fix | the four assert-shipped-state cells → law-shaped fixtures (three cuts to an honest discriminator; the counterfactual table as proof); sequenced AHEAD of the wording merge; merged 585346f0 | **merged** | #246 |
-| MASB wording seed | the #43 packet → statutory wording via the 0067-sanctioned path; branch wording/masb-seed @ bf72db1, payload re-derived clean twice, five review fixes confirmed, combined-green with ε's fix (fail 0). **PR-ready; merge HELD for the owner's ms/zh sign-off + three ruling items** (Issue-3 both-labels call · benar-dan-patut seed-or-hold · the zh/ms issuability asymmetry) | **review-closed (HOLD)** | — |
+| MASB wording seed | the #43 packet → statutory wording via the 0067-sanctioned path, migrations `0087-0088`; payload re-derived clean twice; **owner sign-off 2026-08-16** (both-labels ratified · benar-dan-patut held · asymmetry accepted); merged cd0dea2, **ceremonied 2026-08-16 — E-R14 OPEN (en+zh issuable)** | **ceremonied (LIVE)** | #249 |
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -100,15 +106,17 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    it), then re-index the codebase graph (`codebase-memory-mcp` · `index_repository`) — code
    changed materially this wave (0064-0084 + the runtime v11 + the reporting-render package)
    and the graph is a wave behind until this runs.
-2. **Owner-key acceptance items** (the constitutional human half, whenever the owner sits):
-   the #43 sign-off sitting — ms/zh wording + three ruling items (the Issue-3 both-labels
-   judgment call · benar-dan-patut seed-or-hold · **the zh/ms issuability asymmetry: at
-   merge, en AND zh statutory packs become issuable while ms stays blocked at 4/5, and
-   `authority_level` is decorative at the gate**) → then the wording PR (renumbers above
-   `0086`) merges + its ceremony; the E-R9 corpus on live books — sandbox battery → **BEE
-   FY2025 first real close (drawer keys; B3 is now LIVE, the prerequisite is met)** → RPR
-   historical MPERS pack → RS snapshot witness; the ms/zh claim-policy copy (fail-closed
-   until supplied); the optional elevated `diskpart` VHDX compact (~50GB).
+2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
+   **DONE 2026-08-16** (signed with three dispositions, merged #249, ceremonied; E-R14
+   OPEN). NEXT UP: **the BEE FY2025 first real close** — the click-by-click packet is
+   DELIVERED (session scratchpad, bee-fy2025-close-packet.md; the E-R9 sandbox battery
+   30/30 twice-proven on virgin rigs; readiness CONDITIONALLY READY with two owner
+   pre-steps: approve the Lucy Artistry Lab draft `ca4276a9`, record
+   `trade_nature=services`; the year FREEZES at `begin_close` so both pre-steps come
+   FIRST; solo path — `p_self_attestation` mandatory) → then the first real render/seal
+   round-trip closes DR-render's unrun-drill boundary → RPR historical MPERS pack → RS
+   snapshot witness; the ms/zh claim-policy copy (fail-closed until supplied); the optional
+   elevated `diskpart` VHDX compact (~50GB, sequenced when runners are idle).
 3. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25)
    (ADR-062/0065) + the CI economics overhaul + **the vision audit's six gaps and three
    recommendations** (the vision-alignment-audit document, session scratchpad, delivered to
