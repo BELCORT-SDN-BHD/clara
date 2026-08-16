@@ -125,7 +125,7 @@ sen, with each remaining difference named as a specific missing document
 
 > **OD-3 (OWNER DECISION) — the acceptance-bar figures, per client per FY.** These are the
 > numbers the book must tie to before its close seals. **Only BEE's are recorded today**
-> (FY2025 sales RM 68,640.00 / profit RM 47,245.65 / capital B/F 65,747.97 — `PROGRESS.md`).
+> (FY2025 sales RM 68,640.00 / profit RM 47,245.65 / capital B/F (65,747.97) — `PROGRESS.md`).
 > Every other slot's bar arrives with items 1–4 above. The build never proposes one.
 
 > **OD-4 (OWNER DECISION) — document custody and PDPA for real client papers.** Item 6 puts
@@ -198,7 +198,24 @@ re-derived from the corrected FY1 receipt and not double-counted**.
 > 14), so this is squarely the owner's call, not the build's. **One consequence worth pricing:**
 > the opening-seed registry is one-shot per client (`uq_opening_seed_registry_once`) and both
 > real clients' slots are spent — a reset frees them, which is the **only** way the
-> document-tied carry-down (the K-doc door) can ever be proven on a real client.
+> document-tied carry-down (the K-doc door) can ever be proven on a real client. **This whole
+> survivor list is conditional on OD-10, immediately below** — it describes what a reset
+> spares only if the sitting rules the corpus runs on the live project at all.
+
+> **OD-10 (OWNER DECISION) — does the corpus run on the live project post-reset, or on a
+> separate project?** This is genuinely two-sided, not a formality. **For the live project:**
+> the reset *is* the discharge Wave G exists to prove — running the corpus in the same project
+> the frozen bytes currently occupy is the only way a reset actually retires them, and
+> `docs/ops/DR.md`'s backup/restore discipline already covers the downside; OD-6's survivor
+> list is the concrete shape of what that costs. **For a separate project:** it is the safer
+> sandbox — nothing about ROME SECRETARY's pinned TB, ROME PROPERTIES' 29 approved entries or
+> BEE's keyed opening seed is put at risk by a corpus run gone wrong — but it discharges
+> nothing: the stuck-bytes claim stays exactly as untested as it is today, and the corpus
+> proves the product without ever proving the reset. The live-project path also has no undo
+> once run: OD-6's survivor list executes against real books, and a mistake there is not a
+> sandbox mistake. **Recommendation: live project** — discharging the stuck-bytes claim is the
+> point of Wave G, not a side effect — **but the sitting should rule this with the
+> irreversibility priced in, not assumed away.**
 
 ## 6. What each slot uniquely proves
 
@@ -227,6 +244,14 @@ have failed it.**
 > wrong warning, never a wrong book). **Recommendation: land the fix before CLIENT-SST-1's
 > FY1 close.** Running the SST slot on the known-broken predicate would produce a corpus
 > result nobody can interpret.
+
+> **OD-9 (OWNER DECISION) — which locale(s) each corpus pack issues in.** `mpers_company`
+> revision 1 ships **en** and **zh** at full 5/5 wording coverage (the #43 ceremony); **ms**
+> sits at **4/5** — one clause short, gated closed by design. A corpus that only ever issues
+> **en** proves nothing about the claim gate's fail-closed path; issuing **ms** once, knowing
+> it must refuse, is the cheapest negative control in the whole run (§7.4). **Recommendation:
+> en for every pack; zh on at least one slot; ms attempted exactly once, on a slot the owner
+> names, and it must REFUSE — a PASS there is the finding, not the wording.**
 
 ## 7. The vacuous-green lesson, applied
 
@@ -336,6 +361,16 @@ Named so they cannot creep in at the sitting:
   with its evidence and takes its own ladder. This document changes no code and no gate.
 - **Inventing any golden figure.** Every acceptance bar arrives from the owner's desk.
 
+> **OD-11 (OWNER DECISION) — sequencing against Wave F.** This corpus's own run script (§5,
+> step 1: "firm setup -> client onboarding interview") presumes a **real signed-in session** —
+> signin, firm setup, the surfaces a firm actually operates through — not the hand-minted JWTs
+> every live-fire sitting has authenticated with so far. Running the corpus ahead of that floor
+> would still prove the DB and the workflow layer, but not the *product*: the thing the owner
+> and staff will actually use never gets exercised, and a defect in the UX floor itself could
+> not surface. **Recommendation: sequence the corpus's first run after the Wave-G UX floor**
+> (real session auth, signin, firm-setup) **lands, so the run is whole-product — not a
+> machinery-only run wearing a product's name.**
+
 ## 10. Owner decision points, collected
 
 | | Decision | Build's recommendation |
@@ -356,7 +391,7 @@ Named so they cannot creep in at the sitting:
 
 1. **BEE's opening TB — which record is current?** `PROGRESS.md` describes BEE as holding *"an
    empty opening TB"* at the live-fire sitting, while ADR-043 records a **finalized** keyed
-   opening seed (`1e60960e`) tying at RM 210,000.00 with capital 65,747.97 — the same figure
+   opening seed (`1e60960e`) tying at RM 210,000.00 with capital (65,747.97) — the same figure
    the owner's FY2025 golden bar gives as capital B/F. These may both be true of different
    dates, or one may be stale. **The build cannot adjudicate this; the owner can.** It matters
    because it decides whether BEE's Wave-G run is brown-field from an existing seed or from a
