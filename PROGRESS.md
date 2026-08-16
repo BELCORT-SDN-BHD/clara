@@ -7,7 +7,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-15, the Wave E close — trued at every clock-out)*
+*(as of 2026-08-16, the Wave E close — trued at every clock-out)*
 
 - **Live DB: 83 migrations, frontier `0088` (the #43 wording lexicon).** The wording-seed
   ceremony ran 2026-08-16 after the owner's sign-off
@@ -132,8 +132,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    supplied); the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
 3. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25)
    (ADR-062/0065) + the CI economics overhaul + **the vision audit's six gaps and three
-   recommendations** (the vision-alignment-audit document, session scratchpad, delivered to
-   the owner 2026-08-16 — the
+   recommendations** (`docs/plan/research/wave-f/vision-alignment-audit.md` — committed
+   in-repo at clock-out; delivered to the owner 2026-08-16 — the
    non-agentic interview is the one true drift; the audited freeform-read tool and the eval
    harness are the highest-leverage builds) + the closing_transfer/SST latent (below).
 
@@ -152,8 +152,9 @@ Registered but not scheduled. Sources of record in brackets.
   not (advisory-only blast radius: a wrong warning, never a wrong book). Found twice
   independently (the B3 review's accounting lens; the vision audit). Own migration + full
   ladder: mark closing entries + reopen mirrors at birth, or fix 0016's population
-  predicate. **Before the first real close is relied on for SST turnover (BEE FY2025 at the
-  latest).** *(task #17; B3 PR body carries the site cites)*
+  predicate. **Before the first real close whose SST turnover anyone relies on — BEE FY2025
+  itself is deferred wholesale to Wave G, so the natural slot is the Wave-F fix queue with
+  no near-term client deadline.** *(task #17; B3 PR body carries the site cites)*
 - **`closing_stock` producer verb** — before any real goods-trader close. *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. *(ADR-043)*
 - **δ NAMED RESIDUALS (all deliberate, each recorded in its file/PR):** F10 — a DB-level
@@ -390,7 +391,7 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   MAJOR fixed via the B4 arms + a real 0056 silent-no-op reopen bug killed), merged (#247)
   and ceremonied (81/`0086`) — before the first real close, as ruled**; the vision-alignment
   audit delivered (sequenced-not-drifted; one true drift = the non-agentic interview; six
-  gaps registered for Wave F); the closing_transfer/SST latent found twice independently and
+  gaps logged for the Wave-F planning sitting); the closing_transfer/SST latent found twice independently and
   registered; one runner outage (WSL VM stop) diagnosed by annotation and recovered by
   service restart, never VM teardown. One reviewer ran five assignments five-for-five with
   zero relitigated and zero waved-through findings.

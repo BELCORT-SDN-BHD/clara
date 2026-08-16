@@ -106,7 +106,7 @@ These conventions governed the append-only log and still govern this directory:
 | [0067](0067-lanes-alpha-and-beta-land.md) | Lanes α+β land; the CI gate survives on zero minutes | 2026-08-11 | discharged · *narrative* | The self-hosted runner is **private-repo only** → digest. Discharges the 0062 MSIC debt. |
 | [0068](0068-the-evening-sitting-b3-ruled.md) | The evening sitting: B3 ruled; Gate-P defers to the Wave-G reset | 2026-08-11 | standing | The `ends_on` reopen variant + its named build trigger; supersedes 0066/PART-2's Gate-P reminder clause. |
 | [0069](0069-harness-grand-refactor.md) | The harness grand refactor: the repo becomes the system of record | 2026-08-12 | standing | Repo-wins state authority; the docs-only review lane (the one ADR-061 amendment); ADRs per-file + this digest; pins hook-enforced; PROJECTLOG/REBUILD-PLAN dissolved. |
-| [0070](0070-the-wave-e-night-run.md) | The Wave E night run: δ + the RS guard land LIVE; the whole-wave authorization | 2026-08-14/15 | standing · *narrative* | Thirteen rulings: the night run's nine (seal-currency, the numeral wall, machine-sealer attribution, the owner-only RS lift, η's deferred OBO chain, the op-key interpretation, same-family freeze imports, consumer-driven core splits, explicit effective dates) + the wave-close supplement's four — **guard polarity/ARM-0** (NULL principal is its own first arm; `is not distinct from`), **adoption semantics** (orphaned proposals approve only through the attestation door; maker/checker measures the DIRECTING human), **the isolation pin** (checksum-keyed per-migration, measured post-BEGIN; blanket raise refused), **requeue re-derives + immediate reap**. Field laws: guarded SUSET pin, session-pin nonce, CONFLICTING-silent-no-run, MAX_PATH staging, the wave presence-gate shape, number-migrations-IN-REPO, a-probe-that-cannot-say-NO. |
+| [0070](0070-the-wave-e-night-run.md) | The Wave E night run: δ + the RS guard land LIVE; the whole-wave authorization | 2026-08-13/15 | standing · *narrative* | Thirteen rulings: the night run's nine (seal-currency, the numeral wall, machine-sealer attribution, the owner-only RS lift, η's deferred OBO chain, the op-key interpretation, same-family freeze imports, consumer-driven core splits, explicit effective dates) + the wave-close supplement's four — **guard polarity/ARM-0** (NULL principal is its own first arm; `is not distinct from`), **adoption semantics** (orphaned proposals approve only through the attestation door; maker/checker measures the DIRECTING human), **the isolation pin** (checksum-keyed per-migration, measured post-BEGIN; blanket raise refused), **requeue re-derives + immediate reap**. Field laws: guarded SUSET pin, session-pin nonce, CONFLICTING-silent-no-run, MAX_PATH staging, the wave presence-gate shape, number-migrations-IN-REPO, a-probe-that-cannot-say-NO. |
 
 **Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
@@ -118,12 +118,16 @@ it a number** (it would be the only renumbering in this conversion) — flagged,
 
 # THE STANDING LAWS DIGEST
 
-Every law still binding TODAY, deduplicated, with its source. It is a reading of all 68
-entries, not a mechanical extraction. On any divergence, the cited ADR governs.
+Every law still binding TODAY, deduplicated, with its source. It is a reading of all
+entries through ADR-0070, not a mechanical extraction. On any divergence, the cited ADR
+governs.
 
-> **SIGNED OFF — Tao (BELCORT), 2026-08-12.** The 67 laws below are ratified as the
+> **SIGNED OFF — Tao (BELCORT), 2026-08-12.** Laws 1-67 below are ratified as the
 > current standing set at the ADR-0069 harness refactor. Additions or supersessions land
 > as new ADR entries; this digest is re-trued whenever one does.
+> **RE-TRUED 2026-08-16 (the Wave-E clock-out):** laws 68-70 fold ADR-0070's wave-close
+> supplement (rulings 10-13) into the digest; they carry the standing status of their
+> source ADR and enter the ratified set at the owner's next digest sign-off.
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -351,3 +355,21 @@ entries, not a mechanical extraction. On any divergence, the cited ADR governs.
 67. **Never re-grill a ratified contract.** Wave E (0065/E-R1..E-R14) · §7-A
     (0063/7A-R1..R12) · Wave D and D-b (0055/WD-R1..R15, 0057/WDB-G1..G16) and any
     ladder's adjudications or settled residuals. Cite them; do not re-open them.
+
+## 8 · The Wave-E close supplement (folded 2026-08-16; source ADR-0070 rulings 10-13)
+
+68. **Guard polarity — the ARM-0 law.** An identity-measuring guard handles the NULL or
+    absent principal as its own FIRST arm (refuse or route strictest), never by inference;
+    NULL-reachable comparisons use `is not distinct from` — a CASE whose arms are all
+    NULL-poisoned is an open door drawn as a wall. *(0070 §10; born of 0084's
+    null-maker fail-open)*
+69. **Adoption semantics.** An orphaned proposal (no directing human / departed /
+    NULL proposer) is approvable only as an ADOPTION through a recorded attestation —
+    never frictionless; maker/checker measures the DIRECTING human with standing re-read
+    at approval time. The same arms extend to any later act that mints-and-approves in
+    one call (B3's reopen applied them reopener-vs-closer). *(0070 §11; 0084; 0085)*
+70. **The isolation pin + requeue-re-derives.** Migration isolation is a checksum-keyed
+    PER-MIGRATION runner pin, MEASURED post-BEGIN by read-back (blanket raises refused,
+    0019/CLR32); and a human requeue of a failed render RE-DERIVES pinned inputs
+    recording both digests (drift consented via `p_accept_drift`), with expired render
+    leases reaped immediately. *(0070 §12-13)*

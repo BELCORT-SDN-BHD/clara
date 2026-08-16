@@ -12,13 +12,16 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Durable substrate**: the Workflow DevKit Postgres world (`workflow` +
   `@workflow/world-postgres`, `ai@7.0.31`), built by Nitro with the
   `workflow/nitro` compiler module (Appendix A).
-- **The chat loop** (`workflows/chatTurn.v10.ts` + its FROZEN closure
-  `chatTurn.v10.impl.ts` / `chatTurn.v10.prompt.ts`; the v1→v10 history follows
-  Appendix A — v1–v9 stay frozen + reachable for parked runs): a coding-capable
-  advisor with the `draft_journal_entry` write tool that streams the model to
-  the run's writable, reads the client context pack with a per-attempt wake
-  credential (minted INSIDE the step, never crossing a step boundary), and
-  parks on a hook when it needs a firm-visible clarify.
+- **The chat loop** (`workflows/chatTurn.v11.ts` + its FROZEN closure
+  `chatTurn.v11.impl.ts` / `chatTurn.v11.prompt.ts` / `chatTurn.v11.tools.ts`;
+  the v1→v11 history follows Appendix A — v1–v10 stay frozen + reachable for
+  parked runs): a coding-capable advisor with the `draft_journal_entry` write
+  tool plus the four Wave-E authoring tools (metric preview/draft, report-spec
+  draft, report preview — the last a named structural refusal until the OBO
+  evaluator lane), streaming the model to the run's writable, reading the
+  client context pack with a per-attempt wake credential (minted INSIDE the
+  step, never crossing a step boundary), and parking on a hook when it needs a
+  firm-visible clarify.
 - **Two-login pools** (`lib/pools.mjs`): a `clara_runtime` pool + a read-only
   `clara_agent_ro` pool, txn-local GUCs, ROLLBACK-before-release,
   discard-on-any-connection-error (the P4 discipline).
@@ -99,8 +102,8 @@ Azure.
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
 `chatTurn_v2` (Slice 6) added the narrow WRITE capability; **the registry pins
-`chatTurn: chatTurn_v10` and `autoDraft: autoDraft_v7`** (as of the F6–F9 batch, ADR-066;
-live on `clara-runtime` **v60**, with the repo frontier at migration `0054`). v1–v9 stay
+`chatTurn: chatTurn_v11` and `autoDraft: autoDraft_v7`** (v11 deployed at the Wave-E
+0077-0084 ceremony, 2026-08-15; the live DB frontier is migration `0088`). v1–v10 stay
 frozen + reachable for parked runs; v7 = Wave B's
 `'wiki_coding'` pack purpose + the txn-local `clara.pack_consumer` GUC + the
 citation-visible wiki framing; v8 = the Wave-C closing batch; v9 = the §7-A
