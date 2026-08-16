@@ -13,21 +13,21 @@ work still open for negotiation.
 Status key: **live** = current build target, changes expected · **historical** = closed, frozen,
 cite-only · **superseded** = replaced/retired, kept only as a pointer to where its content went.
 
-## `active/` — Wave E, in build (contract ratified ADR-065, campaign design landed PR #223)
+## `active/` — the forward roadmap + Wave E's contract set (Wave E CLOSED 2026-08-16, live frontier 83/`0088`)
 
 | File | Status | Hook |
 |---|---|---|
-| `wave-e-contract.md` | live | The Wave E contract of record, E-R1..E-R14 (ADR-065). |
-| `wave-e-design-skeleton.md` | live | Campaign design skeleton, §1–§2.8 (part 1 of 4). |
-| `wave-e-design-skeleton-part2.md` | live | Skeleton continued, §2.9–§2.12 (the E-R6 close-model / E-R12 client-facts hookup). |
-| `wave-e-design-skeleton-part3.md` | live | Skeleton continued, §3–§6. |
-| `wave-e-design-skeleton-part4.md` | live | Skeleton conclusion. |
-| `wave-e-design-reporting.md` | live | The FS/reporting-engine design half (part 1 of 2). |
-| `wave-e-design-reporting-part2.md` | live | Reporting design continued. |
-| `wave-e-acceptance-matrix.md` | live | The acceptance matrix, minted before build: how to read a cell, then Sections A–E (part 1 of 2). |
-| `wave-e-acceptance-matrix-part2.md` | live | Matrix continued: Section F (the E-R12 client-facts trio) and the cross-section sweeps, run order and closing-verification template. |
 | `roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
-| `wave-e-delta-handoff-2026-08-13.md` | live | Clock-out checkpoint for δ final-finding closure: owner rulings, sole-writer ownership, acceptance hold, working-tree custody and exact resume order. **Discharged by the night run** — kept as the rulings' source of record. |
+| `wave-e-contract.md` | historical | The Wave E contract of record, E-R1..E-R14 (ADR-065) — ratified, never re-grilled (digest law 67); cite-only now the wave is ceremonied. |
+| `wave-e-design-skeleton.md` | historical | Campaign design skeleton, §1–§2.8 (part 1 of 4) — as-built; the ceremony as-runs are the operative record. |
+| `wave-e-design-skeleton-part2.md` | historical | Skeleton continued, §2.9–§2.12 (the E-R6 close-model / E-R12 client-facts hookup). |
+| `wave-e-design-skeleton-part3.md` | historical | Skeleton continued, §3–§6. |
+| `wave-e-design-skeleton-part4.md` | historical | Skeleton conclusion. |
+| `wave-e-design-reporting.md` | historical | The FS/reporting-engine design half (part 1 of 2). |
+| `wave-e-design-reporting-part2.md` | historical | Reporting design continued. |
+| `wave-e-acceptance-matrix.md` | historical | The acceptance matrix (part 1 of 2) — the five `completed/` ceremony as-runs are now the acceptance evidence of record. |
+| `wave-e-acceptance-matrix-part2.md` | historical | Matrix continued: Section F and the cross-section sweeps. |
+| `wave-e-delta-handoff-2026-08-13.md` | historical | Clock-out checkpoint for δ final-finding closure — **discharged by the night run**; kept as the rulings' source of record. |
 | `wave-e-delta-ceremony-asrun.md` | completed/ | The 0058-0063 live ceremony as run: positive reads, the two field findings (SUSET, pooler-pid), deviations with grounds, the no-print DSN bridge. |
 | `wave-e-theta-epsilon-ceremony-asrun.md` | completed/ | The 0064-0072 live ceremony as run (θ+ε together): 9/9 clean, backup-first, the Windows pnpm-shim trap, the probe-defect lesson, the live #43 gate. |
 | `wave-e-final-ceremony-asrun.md` | completed/ | The 0077-0084 live ceremony as run (η wake wrappers + ζ render family + B4): D1 write-quiesce, the chatTurn v11 deploy, the freeze deploy-lock (140/140), positive reads throughout. |
