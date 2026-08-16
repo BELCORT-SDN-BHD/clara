@@ -30,6 +30,10 @@
 
 import { listTaskMetas, mergeTaskMeta, removeTaskMeta, writeTaskMeta } from "./spool.mjs";
 import { verifyCanonical } from "./storage.mjs";
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported: reconciler.mjs
+// imports THIS module, so importing back would cycle. The class must come from the SAME import
+// specifier (./relay.mjs) so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS || 15000);
 let warnedDocumentSelectGap = false;
@@ -304,6 +308,9 @@ export async function reconcileDocumentTasks(client, deps) {
   try {
     index = await documentTaskIndex(client, deps);
   } catch (err) {
+    // A HALT must still reach the leader even through this belt-boundary catch (the wrapper's own
+    // law in reconciler.mjs's belt()) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] document task index unreadable — no document task was examined this cycle: ${err?.message ?? err}`);
     return { ...out, documentTaskIndexOk: false };
   }

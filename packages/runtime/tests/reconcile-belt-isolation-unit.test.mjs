@@ -173,6 +173,7 @@ test("§C: the LATER BELTS still run — the starvation cell, at the shape the l
   }, "runReconcilerSweep is what the leader awaits — one un-settleable task is a task-level fault, never a cycle-level one");
 
   assert.equal(swept.settledTerminal, 1, "the sweep's own receipt shows the healthy row settled");
+  assert.equal(swept.settleFailed, 1, "the doomed row's failure is COUNTED, not only logged — the autodraft edge's own law");
   assert.deepEqual(swept.beltErrors, [], "the failure was contained AT THE ITEM, so no belt is named as having escaped");
   // Keys only a belt sequenced AFTER reconcileTasks can contribute. A sweep that aborted at the
   // settle could not have produced them.
@@ -251,6 +252,23 @@ test("HALT: the `err.halt` flag form escapes too — including from a wrap that 
     },
   }).then(() => null, (e) => e);
   assert.equal(thrown, flagged, "the flag form propagates from a pre-existing wrap as well as from the new ones");
+});
+
+test("HALT: a NAME-spoofed error (right string, wrong class) is CONTAINED — spelling is not identity", async () => {
+  // Same position as the first HALT cell above — the §C belt-level SELECT — but the thrown
+  // object is a plain Error wearing the halt's NAME, not an instance of TaxonomyHaltError and
+  // without the `.halt` flag. isLeaderHalt tests `err instanceof TaxonomyHaltError || err?.halt`,
+  // so a name-only impostor must fail BOTH arms and be contained like any other belt fault — if
+  // the guard ever regressed to a name check, this cell (not the two identity cells above it,
+  // which pass equally under either test) is the one that would catch it.
+  const spoof = Object.assign(new Error("spoof"), { name: "TaxonomyHaltError" });
+  const client = sweepClient({
+    failOn: (sql) => (/status in \('running','awaiting_input'\)/.test(sql) ? spoof : null),
+  });
+  const log = [];
+  const swept = await runReconcilerSweep(client, chatDeps((m) => log.push(m)));
+  assert.deepEqual(swept.beltErrors, ["task reconcile"], "a same-named-but-wrong-class error is an ORDINARY belt fault, not a halt");
+  assert.ok(log.some((m) => /\[reconcile\] task reconcile error: spoof/.test(m)), "…logged and contained like any other belt error");
 });
 
 test("HALT: the contrast — an ORDINARY error in the same position is contained, so the two cells above are load-bearing", async () => {
@@ -399,9 +417,12 @@ test("heartbeat: a failed beat SKIPS the remainder of the sweep, deliberately an
 
   assert.equal(swept.heartbeatOk, false);
   assert.deepEqual(swept.beltErrors, ["heartbeat"], "named, so a caller sees a skipped sweep rather than an empty one");
-  // The QUIESCE GUARDS (0022:136-143, 0023) read this beat to decide whether a runtime is live
-  // before replacing a live writer's body. Beat-then-write is the ordering they depend on: a
-  // leader that cannot record "I am alive" must not go on making writes it cannot account for.
+  // NOT because the quiesce guards depend on THIS specific beat — they read ANY component's
+  // beat within 90s (0022_extraction_slice_x1.sql:133-142, 0023:80-95), so the independent
+  // 'control'/'world' beats already keep them satisfied. The real reason: a leader that cannot
+  // complete the CHEAPEST write on its own connection — a single-row upsert — has nothing
+  // useful to do with that connection this cycle; skip, log loud, retry in ~2s. Nothing that
+  // breaks that upsert would spare the belts below it — they share the same connection.
   assert.equal(client.queries.length, 1, "NOTHING ran after the failed beat — the skip is real, not cosmetic");
   assert.ok(log.some((m) => /heartbeat error — SKIPPING the remainder of this sweep/.test(m)), "and it says why");
   assert.ok(!("settledTerminal" in swept), "no belt reported, because no belt ran");

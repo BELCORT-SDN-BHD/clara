@@ -41,6 +41,10 @@
 // client row) internally — the runtime supplies only client_id, the period, and an op_key.
 
 import { randomUUID } from "node:crypto";
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported: reconciler.mjs
+// imports THIS module, so importing back would cycle. SAME import specifier (./relay.mjs) as
+// reconciler.mjs's own import, so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const FA_PERIOD_CAP = 24; // bounded — never loop unboundedly on a poisoned/misconfigured client
 
@@ -75,6 +79,9 @@ export async function reconcileFaRuns(client, opts = {}) {
   try {
     surface = await hasDepreciationSurface(client);
   } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] fa surface probe error: ${err?.message ?? err}`);
     return { faOk: false, faExamined: 0, faPosted: 0, faNoop: 0, faFailed: 0, dormant: false };
   }

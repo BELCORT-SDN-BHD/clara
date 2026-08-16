@@ -40,6 +40,12 @@
 // process.env at call time and is never logged, never interpolated into a message, and never
 // passed on a command line.
 
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported (reconciler.mjs
+// does not import this module, but the sibling files that DO get imported by it need the inline
+// form too, and one idiom across all four beats a mixed one). SAME import specifier (./relay.mjs)
+// as reconciler.mjs's own import, so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
+
 const DISPATCH_COOLDOWN = process.env.CLARA_RENDER_DISPATCH_COOLDOWN || "10 minutes";
 const DISPATCH_MAX = Number(process.env.CLARA_RENDER_DISPATCH_MAX || 5);
 const FLY_API = process.env.CLARA_RENDER_FLY_API || "https://api.machines.dev/v1";
@@ -303,6 +309,9 @@ export async function reconcileRenderEnqueue(client, opts = {}) {
     surface = (await client.query(
       "select to_regprocedure('clara.enqueue_missing_render_jobs(int)') is not null as surface")).rows[0]?.surface === true;
   } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] render enqueue surface probe error: ${err?.message ?? err}`);
     return { renderEnqueueOk: false, renderEnqueued: 0 };
   }

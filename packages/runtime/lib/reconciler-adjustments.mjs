@@ -70,6 +70,10 @@
 // channel nor starts a workflow run.
 
 import { randomUUID } from "node:crypto";
+// Same identity test as reconciler.mjs's isLeaderHalt, inlined rather than imported: reconciler.mjs
+// imports THIS module, so importing back would cycle. SAME import specifier (./relay.mjs) as
+// reconciler.mjs's own import, so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const ADJ_PERIOD_CAP = 24; // bounded — never loop unboundedly on a poisoned/misconfigured client (the FA belt's cap, cloned)
 
@@ -109,6 +113,9 @@ export async function reconcileAdjustmentRuns(client, opts = {}) {
   try {
     surface = await hasAdjustmentSurface(client);
   } catch (err) {
+    // A HALT must still reach the leader even through this probe catch (the belt() wrapper's own
+    // law in reconciler.mjs) — re-check before containing.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] adjustment surface probe error: ${err?.message ?? err}`);
     return { adjOk: false, adjExamined: 0, adjPosted: 0, adjDrafted: 0, adjFailed: 0, adjDormant: false, adjBlockedClients: 0, adjTransientBlockedClients: 0 };
   }

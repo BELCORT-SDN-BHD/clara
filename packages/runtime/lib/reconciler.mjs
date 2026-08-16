@@ -151,7 +151,7 @@ export async function settleTaskTerminal(client, taskId, outcome, errorCode) {
  */
 export async function reconcileTasks(client, deps) {
   const { enqueueChatTurn, getRun, onlyFirm = null, graceInterval = GRACE_REENQUEUE, log = () => {} } = deps;
-  const out = { reenqueued: 0, settledTerminal: 0, cancelled: 0, abortedOrphans: 0 };
+  const out = { reenqueued: 0, settledTerminal: 0, cancelled: 0, abortedOrphans: 0, settleFailed: 0 };
 
   // A) queued-without-run beyond the grace window -> re-enqueue.
   const stuck = await client.query(
@@ -267,6 +267,12 @@ export async function reconcileTasks(client, deps) {
         await settleTaskTerminal(client, t.id, "cancelled", null); // cancel_requested→cancelled (legal)
         out.settledTerminal += 1;
       } catch (err) {
+        // A HALT must still reach the leader even from inside a per-item catch — see the belt()
+        // wrapper's own comment. Nothing today can raise one here (settleTaskTerminal/the repair
+        // UPDATE never throw TaxonomyHaltError), but a per-item catch that did not re-check would
+        // silently swallow one if that ever changed.
+        if (isLeaderHalt(err)) throw err;
+        out.settleFailed += 1;
         log(`[reconcile] settle failed task=${t.id} status=${t.status} engine=${engineTerminal}: ${err?.message ?? err}`);
       }
       // The `continue` sits OUTSIDE the catch deliberately. If the UPDATE landed and the
@@ -282,6 +288,10 @@ export async function reconcileTasks(client, deps) {
         await settleTaskTerminal(client, t.id, settle.outcome, settle.errorCode);
         out.settledTerminal += 1;
       } catch (err) {
+        // Same guard, same reason as the repair branch above — a HALT must not be eaten by a
+        // per-item catch even though nothing today raises one from settleTaskTerminal.
+        if (isLeaderHalt(err)) throw err;
+        out.settleFailed += 1;
         log(`[reconcile] settle failed task=${t.id} status=${t.status} engine=${engineTerminal} outcome=${settle.outcome}: ${err?.message ?? err}`);
       }
     } else {
@@ -570,17 +580,23 @@ export async function runReconcilerSweep(client, deps) {
     }
   };
 
-  // THE HEARTBEAT IS THE ONE DELIBERATE FAIL-FAST, and it is now deliberate rather than
-  // incidental. It is not merely observability: the migration QUIESCE GUARDS read this table to
-  // decide whether a runtime is live before replacing a live writer's body (0022:136-143,
-  // 0023 — "a runtime heartbeat is fresh ... stop clara-runtime and re-apply"). Beating and
-  // then writing is the ordering that guard depends on, so a leader that CANNOT record "I am
-  // alive" must not go on to make writes it cannot account for. Skipping costs one cycle (~2s,
-  // retried immediately) and says why in one line; it cannot reproduce the starvation this
-  // change exists to kill, because the failure modes that break a single-row upsert on the
-  // leader's own connection (dead socket, revoked grant, catalog drift) break every belt below
-  // it too — and they take /ready down through the SAME table via the 'control' beat
-  // (control.mjs:204, health.mjs:99-115), so the supervisor, not this loop, is the recovery.
+  // THE HEARTBEAT IS THE ONE DELIBERATE FAIL-FAST. NOT, as an earlier version of this comment
+  // claimed, because the migration quiesce guards or /ready depend on THIS specific beat — they
+  // do not: 0022/0023's quiesce guards read ANY component's beat within 90s
+  // (0022_extraction_slice_x1.sql:133-142, 0023:80-95), which the INDEPENDENT 'control' beat
+  // (control.mjs:204) and the supervisor's 'world' beat already keep hot on their own loops —
+  // the reconciler beat is redundant to them, not load-bearing for them. And the writer those
+  // migrations swap, clara.execute_rule_post, is never called by this sweep at all — its only
+  // caller is rule-post.mjs:53, an independent loop. /ready (health.mjs:99-115) reads only
+  // 'world' and 'control'; nothing anywhere reads the 'reconciler' component.
+  //
+  // The defensible reason is narrower and leans on no downstream reader: a leader that cannot
+  // complete the CHEAPEST possible write on its own connection — a single-row upsert — has
+  // nothing useful to do with that connection this cycle. Skip the sweep, log one loud line,
+  // retry in ~2s. This cannot reproduce the starvation this change exists to kill, because
+  // nothing that breaks that upsert (dead socket, revoked grant, catalog drift) would spare the
+  // belts below it — they run on the SAME connection, so a fault that stops the beat stops them
+  // too; skipping first only shortens the cycle, it never turns a healthy belt into a skipped one.
   try {
     await heartbeat(client, "reconciler");
   } catch (err) {
