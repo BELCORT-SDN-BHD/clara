@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip, waveAEnsureReady,
-  draftEntryV3, freshResolution, upsertAccountClassed, approveEntry, opk,
+  draftEntryV3, freshResolution, upsertAccountClassed, approveEntry, opk, reviseEntry,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
@@ -163,6 +163,26 @@ test("R9.G1b THE YEAR FREEZES THE MOMENT begin_close RUNS: inside a 'closing' ye
   assert.equal(approve.code, "CLR19", `expected CLR19 (got ${approve.code} — ${approve.message})`);
   assert.equal(detailOf(approve).reason, "write_into_closed_period");
   assert.equal(detailOf(approve).fy_status, "closing", "and it names the state the year is in");
+
+  // (b2) THE CHANGE ARM: the pre-existing draft cannot be REVISED mid-close either. revise_entry
+  // stays a draft-only verb (e.status<>'draft' never fires here — this draft still IS one) so it
+  // reaches its own delete-then-reinsert of journal_lines, and THAT is what the lines wall bites
+  // on — "whatever the parent's status" (a), not only the approved-class touch driven above.
+  // Same bookkeeper principal (bob) the draft was raised by; same revision token, unrotated by
+  // either refused attempt above.
+  const revise = await caught(() => reviseEntry(world.users.bob, {
+    entry: draftId,
+    lines: [
+      { account_code: EXPN, debit_cents: 22200, credit_cents: 0, description: "er9 rig: revised dr" },
+      { account_code: BANK1, debit_cents: 0, credit_cents: 22200, description: "er9 rig: revised cr" },
+    ],
+    expectedRevision: d.revision_token,
+    opKey: opk("er9-freeze-revise"),
+  }));
+  assert.ok(revise, "the pre-existing draft cannot be REVISED mid-close either");
+  assert.equal(revise.code, "CLR19", `expected CLR19 (got ${revise.code} — ${revise.message})`);
+  assert.match(revise.message, /its lines may not change/i, "and the LINES wall is what says so, exactly as for a fresh insert");
+  assert.equal(detailOf(revise).reason, "write_into_closed_period");
 
   // (c) THE LAWFUL WAY BACK: abandon the close. The run is STAMPED, never deleted, and the
   // year normalizes to 'open' — editable again.
@@ -355,20 +375,24 @@ test("R9.H1 years close OLDEST-FIRST and reopen NEWEST-FIRST — both refuse by 
   assert.equal((await verifyClose(world.users.alice, { receipt: c1.receipt_id })).successor_tie,
     "consumed_by_successor_close", "and FY1's pin now reads as consumed by its successor");
 
-  if (b3) {
-    await grantCapability(world.users.alice, {
-      user: world.users.hana, capability: "reopen", reason: "er9 rig: key 3 for the ordering arm",
-    });
-    const reErr = await caught(() => reopenFY(world.users.hana, {
-      fy: fx.fy, reason: "er9 rig: reopening FY1 while FY2 stands closed",
-      correctionTarget: { entry_ids: [fx.revenueEntry] },
-    }));
-    assert.ok(reErr, "reopening an earlier year while a later one is closed must refuse");
-    assert.equal(reErr.code, "CLR41", `expected CLR41 (got ${reErr.code} — ${reErr.message})`);
-    assert.equal(detailOf(reErr).reason, "reopen_ordering_violation");
-  } else {
-    noteLane("R9.H1: the reopen-ordering arm was skipped — B3 is not applied");
-  }
+  // HARD-ASSERTED, NEVER noteLane+skip: no CI leg runs er9-* against a pre-0085 chain (the
+  // upgrade drills invoke single focused files, ci.yml:691,:762; er9-* is named nowhere in
+  // ci.yml) — a false b3 reading here (a renumber, a broken version-regex, a partial apply)
+  // would silently drop this reopen-ordering arm with the file staying green throughout. See
+  // er9-reopen-recycle.test.mjs's before() for the matching hard assertion over that file's
+  // whole 8-cell reopen half.
+  assert.equal(b3, true,
+    "B3 (0085/0086 ends_on reopen) must be present whenever 0056 is — a false reading is itself the bug, not a legitimate skip");
+  await grantCapability(world.users.alice, {
+    user: world.users.hana, capability: "reopen", reason: "er9 rig: key 3 for the ordering arm",
+  });
+  const reErr = await caught(() => reopenFY(world.users.hana, {
+    fy: fx.fy, reason: "er9 rig: reopening FY1 while FY2 stands closed",
+    correctionTarget: { entry_ids: [fx.revenueEntry] },
+  }));
+  assert.ok(reErr, "reopening an earlier year while a later one is closed must refuse");
+  assert.equal(reErr.code, "CLR41", `expected CLR41 (got ${reErr.code} — ${reErr.message})`);
+  assert.equal(detailOf(reErr).reason, "reopen_ordering_violation");
 });
 
 test("R9.H2 the model is LIVE-INERT until a human opens a year, and there is NO existence oracle: an absent fiscal year and a foreign firm's real one refuse identically, code and message", async (t) => {
@@ -408,12 +432,37 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
   ];
   if (b3) fns.push("clara.reopen_fiscal_year(uuid,text,jsonb,text,text)");
 
+  // THE PROBE SET IS DERIVED FROM THE CATALOG, NEVER A HAND-MAINTAINED BLACKLIST — a role
+  // invented later is covered by construction rather than by remembering to update this file.
+  // 0022_extraction_slice_x1.sql:1550-1556 names the blacklist anti-pattern in prose (a direct
+  // grant to a login role or "any role invented later" passes a four-name blacklist while a
+  // stale notice still claims "clara_authenticated only"); this cell now follows the whitelist
+  // shape it argues for. The two sanctioned EXECUTE holders on a close verb are clara_authenticated
+  // (the human door) and clara_fn_owner (holds EXECUTE implicitly as the SECURITY DEFINER's
+  // owner) — every OTHER clara_ role in pg_roles must hold none.
+  const sanctioned = new Set(["clara_authenticated", "clara_fn_owner"]);
+  const machineRoles = (await rootQuery(
+    "select rolname from pg_roles where rolname ~ '^clara_' order by rolname",
+  )).rows.map((r) => r.rolname).filter((r) => !sanctioned.has(r));
+  // mandatory setup: today's estate (0002 six + 0006's two _login roles + 0009's
+  // clara_wake_write_login) carries exactly seven non-sanctioned clara_ roles — the four the
+  // old blacklist named PLUS clara_agent_read_login, clara_runtime_login, clara_wake_write_login,
+  // which it silently missed. A role invented later only grows this set; it is never re-hardcoded.
+  assert.equal(machineRoles.length, 7,
+    `mandatory setup: expected the seven known non-sanctioned clara_ roles (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
+  for (const expected of [
+    "clara_agent_ro", "clara_agent_read_login", "clara_runtime", "clara_runtime_login",
+    "clara_wake_interactive", "clara_wake_proactive", "clara_wake_write_login",
+  ]) {
+    assert.ok(machineRoles.includes(expected), `mandatory setup: the derived census includes ${expected}`);
+  }
+
   for (const f of fns) {
     const exists = (await rootQuery("select to_regprocedure($1) is not null as ok", [f])).rows[0].ok;
     assert.equal(exists, true, `${f} exists at the pinned signature — a moved signature would make this cell vacuous`);
     const human = (await rootQuery("select has_function_privilege('clara_authenticated',$1,'execute') as p", [f])).rows[0].p;
     assert.equal(human, true, `clara_authenticated can execute ${f} — the human door is open`);
-    for (const role of ["clara_agent_ro", "clara_runtime", "clara_wake_interactive", "clara_wake_proactive"]) {
+    for (const role of machineRoles) {
       const can = (await rootQuery("select has_function_privilege($1,$2,'execute') as p", [role, f])).rows[0].p;
       assert.equal(can, false, `${role} holds NO execute on ${f} — the close is a human act by construction`);
     }

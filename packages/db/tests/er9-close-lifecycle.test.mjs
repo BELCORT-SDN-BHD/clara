@@ -126,7 +126,7 @@ test("R9.A3 get_close_plan BEFORE any close run: all 13 catalog checks ride with
     assert.equal(c.items[0].attestation.state, "absent");
   }
   const drawers = plan.checks.map((c) => c.drawer);
-  assert.deepEqual([...drawers].sort(), drawers, "the plan is ordered by drawer");
+  assert.deepEqual([...drawers].sort((a, b) => a - b), drawers, "the plan is ordered by drawer");
   assert.equal(plan.checks.filter((c) => c.drawer === 1).length, 6, "six drawer-1 identities");
   assert.equal(plan.checks.filter((c) => c.drawer === 2).length, 5, "five drawer-2 default-refuse checks");
   assert.equal(plan.checks.filter((c) => c.drawer === 3).length, 2, "two drawer-3 advisory checks");
@@ -219,6 +219,8 @@ test("R9.B2 the plan and the readiness read AGREE, check for check and digest fo
   const attestations = (await rootQuery(
     "select count(*)::int as n from clara.close_attestations where close_run_id=$1", [W.run])).rows[0].n;
   assert.equal(attestations, 0, "mandatory setup: this run carries no attestations at all");
+  assert.ok(readiness.gates.some((g) => g.state === "pass"),
+    "mandatory setup: at least one gate actually reads pass, so 'passing ones included' below is proven of THIS run, not merely asserted in prose");
   for (const r of readiness.gates) {
     assert.equal(r.attested, false,
       `${r.check_key}: with zero attestation rows the coverage test is false for EVERY gate, passing ones included`);
@@ -292,7 +294,7 @@ test("R9.C2 the closing entry's SHAPE: dated the year end, born year-end-flagged
 
   const lines = await lineRows(W.entry1);
   assert.equal(lines.length, 3, "two moved P&L accounts + one retained-earnings line");
-  assert.equal(lines[0].account_code, EXPN, "lines are ordered by account code: the expense first");
+  assert.equal(lines[0].account_code, EXPN, "lines are ordered by line_no: the expense first");
   assert.equal(Number(lines[0].debit_cents), 0);
   assert.equal(Number(lines[0].credit_cents), EXP_CENTS, "a net-debit expense is CREDITED away, to the cent");
   assert.equal(lines[1].account_code, REVN);

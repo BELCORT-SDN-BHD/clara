@@ -36,7 +36,13 @@ before(async () => {
   has56 = await has0056();
   if (!has56) { noteLane("0056 not applied — close model absent"); return; }
   b3 = await hasB3();
-  if (!b3) { noteLane("B3 (0085/0086) NOT applied — the reopen half of the E-R9 corpus cannot run"); return; }
+  // HARD-ASSERTED, NEVER noteLane+skip: no CI leg runs er9-* against a pre-0085 chain (the
+  // upgrade drills invoke single focused files, ci.yml:691,:762; er9-* is named nowhere in
+  // ci.yml), so a false b3 reading here would silently drop this file's entire 8-cell reopen
+  // half — skip prints to stderr, exit 0, CI green. A renumber, a hotfix that makes the
+  // version-regex frontier probe count 2 or 0, or a partial apply must fail LOUD here instead.
+  assert.equal(b3, true,
+    "B3 (0085/0086 ends_on reopen) must be present whenever 0056 is — a false reading is itself the bug, not a legitimate skip");
   world = await wb.buildWaveBWorld();
   W = await cleanCloseableFY(world.users.alice, {
     tag: "er9re", prepSub: world.users.bob,
@@ -156,6 +162,20 @@ test("R9.D3 the attestation_required (ARM-0 orphan-adoption) arm is a BELT, not 
 
   const src = (await rootQuery(
     "select prosrc from pg_proc where oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text,text)'::regprocedure")).rows[0].prosrc;
+  // LEG (i) — the actual fallback expression, not just its tokens: v_checked is set from the
+  // closing entry's checker_actor and falls back to v_receipt.closed_by, character for
+  // character (0085_b3_reopen_ends_on.sql:322). This is what makes leg (ii)'s attnotnull
+  // binding above actually cover the arm's precondition, rather than the two facts merely
+  // living near each other in the same function body.
+  assert.ok(src.includes("coalesce(v_checked, v_receipt.closed_by)"),
+    "leg (i): the checked-human fallback IS the receipt's own closed_by, verbatim — the predicate whose NOT NULL column (leg ii) makes the arm unreachable, not a token that merely happens to appear");
+  // LEG (ii)'s PREDICATE ITSELF — the exact guard shape that raises attestation_required, both
+  // operands null (0085_b3_reopen_ends_on.sql:331). Asserting this string (not just that the
+  // token "attestation_required" appears somewhere) proves the refusal is gated on the SAME
+  // v_checked that leg (i) derives from closed_by, closing the loop from column constraint to
+  // the exact branch condition it disarms.
+  assert.ok(src.includes("v_checked is null and v_attest is null"),
+    "leg (ii): the unreachable arm's own guard — v_checked IS NULL (impossible per leg i + the NOT NULL column) AND v_attest IS NULL — proved as the predicate's identity, not merely its token spellings");
   assert.ok(src.includes("attestation_required"), "the orphan-adoption belt is present in the DEPLOYED body");
   assert.ok(src.includes("no_eligible_human"), "and so is the stricter zero-eligible refusal above it");
   assert.ok(src.includes("distinct_checker") && src.includes("self_attestation"),
