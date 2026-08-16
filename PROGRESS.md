@@ -120,10 +120,11 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    /queue chain exercised end-to-end via the owner's own session); **the refusal itself is
    the live-fire's best outcome — five product signals pointed at the incompleteness before
    the desk evidence confirmed it.** The management-accounts figures are the GOLDEN
-   STANDARD for the rebuild. PATH FORWARD (owner picks): the Wave-F opening "BEE catch-up
-   sitting" (code the 19 ingested filings through the product's own loop + opening TB +
-   sales invoices, close when the book ties to RM 68,640/47,245.65) OR defer wholesale to
-   the Wave-G reset+E2E rebuild. The Lucy `ca4276a9` RM 500 draft is a VENDOR
+   STANDARD for the rebuild. **PATH RULED (owner, 2026-08-16): the BEE close and its
+   catch-up defer WHOLESALE to the Wave-G reset + full E2E rebuild from raw documents** —
+   the golden figures above are that rebuild's acceptance bar (the book must tie to
+   RM 68,640 sales / RM 47,245.65 profit before the close seals). No BEE coding sittings
+   in Wave F. The Lucy `ca4276a9` RM 500 draft is a VENDOR
    (subcontractor) bill — correctly coded, approval rides the catch-up sitting; the
    readiness lane's "revenue document" label was a misread, corrected here. Then: the first
    real render/seal round-trip (closes DR-render's unrun-drill boundary) → RPR historical
