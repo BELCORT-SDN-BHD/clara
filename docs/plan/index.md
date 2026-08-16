@@ -18,6 +18,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | File | Status | Hook |
 |---|---|---|
 | `roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
+| `wave-g-e2e-corpus-design.md` | live | The Wave-G factory-reset + full E2E corpus DESIGN, for the owner's sitting (owner-directed 2026-08-16): the slot matrix (3–4 additional real clients at RPR rigor, two consecutive FY closes each, green-field vs brown-field), the golden-standard handover per client, the per-client run script, the exercise-every-gate rule against the vacuous-green class, the edge-case lens, and eleven marked owner decisions. **Nothing in it is ratified.** |
 | `wave-e-contract.md` | historical | The Wave E contract of record, E-R1..E-R14 (ADR-065) — ratified, never re-grilled (digest law 67); cite-only now the wave is ceremonied. |
 | `wave-e-design-skeleton.md` | historical | Campaign design skeleton, §1–§2.8 (part 1 of 4) — as-built; the ceremony as-runs are the operative record. |
 | `wave-e-design-skeleton-part2.md` | historical | Skeleton continued, §2.9–§2.12 (the E-R6 close-model / E-R12 client-facts hookup). |
