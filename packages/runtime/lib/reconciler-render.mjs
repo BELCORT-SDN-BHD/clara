@@ -287,9 +287,26 @@ export async function reconcileRenderDispatch(client, opts = {}) {
 export async function reconcileRenderEnqueue(client, opts = {}) {
   const log = opts.log ?? (() => {});
   const limit = Number(opts.limit ?? process.env.CLARA_RENDER_ENQUEUE_LIMIT ?? 25);
-  const has = await client.query(
-    "select to_regprocedure('clara.enqueue_missing_render_jobs(int)') is not null as surface");
-  if (has.rows[0]?.surface !== true) return { renderEnqueueOk: true, renderEnqueued: 0, renderEnqueueDormant: true };
+  // ISOLATED LIKE ITS SIBLING (reconcileRenderDispatch's own probe, ~100 lines up, which already
+  // reasons that "a catalog read failing is a connection problem, not a dormant surface, and the
+  // two must not report the same thing"). This half was the odd one out and ran bare. Stated
+  // precisely, because the consequence here is smaller than the §C one and should not be
+  // oversold: the throw did not strand anything — leader.mjs:209's shared render try/catch
+  // caught it, and the dispatch half had already run. What it DID cost is the distinction the
+  // sibling exists to preserve. A failed probe surfaced as a generic `render belt error` with no
+  // receipt at all, so "this database has no ζ migration yet" and "this leader could not read the
+  // catalog" were indistinguishable to anything reading the return value. Now the belt says
+  // renderEnqueueOk:false, which leader.mjs:207 already knows how to act on: the daily cadence is
+  // NOT advanced, so the fallback retries next cycle instead of parking for 24 hours.
+  let surface;
+  try {
+    surface = (await client.query(
+      "select to_regprocedure('clara.enqueue_missing_render_jobs(int)') is not null as surface")).rows[0]?.surface === true;
+  } catch (err) {
+    log(`[reconcile] render enqueue surface probe error: ${err?.message ?? err}`);
+    return { renderEnqueueOk: false, renderEnqueued: 0 };
+  }
+  if (!surface) return { renderEnqueueOk: true, renderEnqueued: 0, renderEnqueueDormant: true };
   try {
     const r = (await client.query("select clara.enqueue_missing_render_jobs($1::int) as r", [limit])).rows[0]?.r ?? {};
     const failed = Number(r?.failed ?? 0);

@@ -124,15 +124,33 @@ export async function reconcileDocumentIntakes(client, deps = {}) {
 
   // A live finalized ingest reservation is bound to its processing task. Only a
   // terminal intake whose unsettled carrier has NO task is orphaned/refundable.
-  const orphaned = await client.query(
-    `select r.id from clara.document_ingest_reservations r
-       join clara.document_intakes i on i.id=r.intake_id and i.firm_id=r.firm_id
-      where r.state in ('reserved','resized') and r.task_id is null
-        and i.status in ('finalized','adopted','failed')
-        and ($1::uuid is null or r.firm_id=$1)
-      order by r.created_at limit 100`,
-    [deps.onlyFirm ?? null],
-  );
+  //
+  // GUARDED LIKE ITS SIBLING ABOVE, and it was not: this SELECT ran completely bare while the
+  // intake SELECT twenty lines up already degraded cleanly on the missing-surface/permission
+  // pair. The asymmetry was the whole defect — on a database where the runtime lacks SELECT on
+  // document_ingest_reservations (or the table is not yet there), the first half of this sweeper
+  // returned its partial receipt politely and the second half threw, aborting the sweep from
+  // here on. The isDocumentSelectUnavailable pair degrades to the partial receipt already
+  // computed; anything else is a genuine fault and stays LOUD (now contained at the belt
+  // boundary in runReconcilerSweep, so loud no longer means the whole cycle dies).
+  let orphaned;
+  try {
+    orphaned = await client.query(
+      `select r.id from clara.document_ingest_reservations r
+         join clara.document_intakes i on i.id=r.intake_id and i.firm_id=r.firm_id
+        where r.state in ('reserved','resized') and r.task_id is null
+          and i.status in ('finalized','adopted','failed')
+          and ($1::uuid is null or r.firm_id=$1)
+        order by r.created_at limit 100`,
+      [deps.onlyFirm ?? null],
+    );
+  } catch (err) {
+    if (isDocumentSelectUnavailable(err)) {
+      log(`[reconcile] orphan reservation SELECT unavailable: ${err?.message ?? err}`);
+      return out;
+    }
+    throw err;
+  }
   for (const row of orphaned.rows) {
     try {
       const refunded = await client.query("select clara.refund_ingest_reservation($1,$2,$3) as receipt", [
@@ -271,7 +289,26 @@ export async function reconcileDocumentTasks(client, deps) {
   }
 
   // Read AFTER the release, so a row the DB just released reads 'queued' here on its own.
-  const { tasks, corruptRebuilt } = await documentTaskIndex(client, deps);
+  //
+  // CONTAINED AT THE BELT BOUNDARY, and the inner re-throw at documentTaskIndex's own catch
+  // STAYS. Those two facts belong together: documentTaskIndex deliberately re-raises anything
+  // that is NOT the missing-surface/permission pair, because a genuine fault must never be
+  // laundered into "the durable spool says there are no tasks" — an empty index is
+  // indistinguishable from a healthy idle firm, and dispatch decisions are made off it. But
+  // loud is not the same as fatal: bare, that re-throw left the document belt as the one
+  // remaining way for a single failed read to abort every sweeper behind it (intakes, spool
+  // TTL, the daily belts). Caught HERE, the belt reports what it actually did — the release
+  // count it already earned — and the sweep goes on. `documentTaskIndexOk:false` says the index
+  // was never read, so a zero task count is never mistaken for "nothing to do".
+  let index;
+  try {
+    index = await documentTaskIndex(client, deps);
+  } catch (err) {
+    log(`[reconcile] document task index unreadable — no document task was examined this cycle: ${err?.message ?? err}`);
+    return { ...out, documentTaskIndexOk: false };
+  }
+  const { tasks, corruptRebuilt } = index;
+  out.documentTaskIndexOk = true; // POSITIVE evidence, set only where a read actually returned
   out.documentSidecarCorruptRebuilt = corruptRebuilt;
   for (const task of tasks) {
     if (!task?.taskId) continue;

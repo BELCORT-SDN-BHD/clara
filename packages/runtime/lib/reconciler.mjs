@@ -18,6 +18,12 @@
 // source; the reconciler never treats engine 'running' as "finished".
 
 import { sweepSpoolTtl } from "./spool.mjs";
+// The HALT class itself, not its spelling. runReconcilerSweep's per-belt containment must let a
+// taxonomy HALT through to leader.mjs:218 (onHalt → process.exit(2), crash-only supervision), and
+// the only way to be sure the thing it rethrows IS the thing the leader catches is to test against
+// the SAME class object from the SAME module — a name test (`err.name === "TaxonomyHaltError"`)
+// would pass for any impostor and, worse, silently stop matching if the class were ever renamed.
+import { TaxonomyHaltError } from "./relay.mjs";
 import { isRunNotFound, reconcileDocumentIntakes, reconcileDocumentTasks } from "./reconciler-documents.mjs";
 import { reconcileSstWatches } from "./reconciler-sst.mjs";
 import { reconcileLintBelt } from "./reconciler-lint.mjs";
@@ -241,19 +247,43 @@ export async function reconcileTasks(client, deps) {
       }
     }
     if (!engineTerminal) continue; // 'running'/'pending' (incl. a parked run) — in flight.
+    // ISOLATED PER TASK — the SAME isolation sections A and B carry above, D carries below,
+    // and reconcileAutoDraftTasks carries on its own terminal edge (§7-A FINDING F1). Until
+    // now the status probe just above was the ONLY caught thing in this section: the repair
+    // UPDATE and BOTH settles below ran bare. So one persistent bad row on THIS edge — a DB
+    // refusal, an anomalous transition, a transient error on the settle statement — threw
+    // straight out of reconcileTasks → runReconcilerSweep and aborted everything sequenced
+    // after it: the REMAINING §C rows, section D, the autodraft edge, documents, intakes,
+    // spool TTL and the daily belts, every ~2s, indefinitely — because the reconciler IS the
+    // thing that would otherwise have healed it. That is section B's Section-I zombie on a
+    // different edge, and it is fixed the same way: log the row, carry on to the next.
+    //
     // A 'running' task whose engine run is CANCELLED can't go running→cancelled (AB11).
     // Route it matrix-legally in one repair txn: running→cancel_requested→cancelled
     // (S4-FX5) — otherwise the pair would be skipped forever.
     if (t.status === "running" && engineTerminal === "cancelled") {
-      await client.query("update clara.agent_tasks set status = 'cancel_requested', updated_at = now() where id = $1 and status = 'running'", [t.id]);
-      await settleTaskTerminal(client, t.id, "cancelled", null); // cancel_requested→cancelled (legal)
-      out.settledTerminal += 1;
+      try {
+        await client.query("update clara.agent_tasks set status = 'cancel_requested', updated_at = now() where id = $1 and status = 'running'", [t.id]);
+        await settleTaskTerminal(client, t.id, "cancelled", null); // cancel_requested→cancelled (legal)
+        out.settledTerminal += 1;
+      } catch (err) {
+        log(`[reconcile] settle failed task=${t.id} status=${t.status} engine=${engineTerminal}: ${err?.message ?? err}`);
+      }
+      // The `continue` sits OUTSIDE the catch deliberately. If the UPDATE landed and the
+      // settle did not, the ROW is now 'cancel_requested' while `t.status` still reads
+      // 'running' from the snapshot — falling through to terminalFor would ask the matrix
+      // about a status the row no longer has and log a spurious "no legal terminal". The
+      // next sweep re-reads the row, and section B owns 'cancel_requested' rows anyway.
       continue;
     }
     const settle = terminalFor(t.status, engineTerminal);
     if (settle) {
-      await settleTaskTerminal(client, t.id, settle.outcome, settle.errorCode);
-      out.settledTerminal += 1;
+      try {
+        await settleTaskTerminal(client, t.id, settle.outcome, settle.errorCode);
+        out.settledTerminal += 1;
+      } catch (err) {
+        log(`[reconcile] settle failed task=${t.id} status=${t.status} engine=${engineTerminal} outcome=${settle.outcome}: ${err?.message ?? err}`);
+      }
     } else {
       log(`[reconcile] no legal terminal for task=${t.id} status=${t.status} engine=${engineTerminal} — skipping`);
     }
@@ -471,6 +501,14 @@ export { reconcileAdjustmentRuns };
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
 
+/** True iff this error belongs to the LEADER, not to the sweep. Mirrors leader.mjs:218's own
+ *  test byte-for-byte (`err instanceof TaxonomyHaltError || err?.halt`) so the two can never
+ *  disagree about what a HALT is: a halt must reach onHalt → process.exit(2), and no
+ *  containment added here is ever allowed to eat one. */
+function isLeaderHalt(err) {
+  return err instanceof TaxonomyHaltError || !!err?.halt;
+}
+
 /**
  * Run every sweeper once + a heartbeat. Trace prune runs on a coarser cadence
  * (opts.prune=true) so it does not scan on every fast sweep; the autopost-rule
@@ -478,6 +516,12 @@ export { reconcileAdjustmentRuns };
  * compliance-watch repair belt runs on the leader's daily flag (opts.sstWatches=true);
  * the per-client wiki-lint belt runs on the leader's daily flag (opts.lintBelt=true); the FA
  * belt (opts.faRuns=true) and the D-b adjustment belt (opts.adjRuns=true) run on the same flag.
+ *
+ * EVERY belt is individually contained (see the wrapper's own comment): one belt's escape
+ * costs that belt this cycle and never the belts behind it. The result carries `heartbeatOk`
+ * and `beltErrors` (the names of the belts that threw, empty on a clean sweep) so a caller
+ * can SEE a contained failure rather than infer it from a missing counter. A HALT is the one
+ * error that still propagates — the leader owns it.
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
  *          autopostRules?:boolean, sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
@@ -485,42 +529,90 @@ export { reconcileAdjustmentRuns };
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
-  await heartbeat(client, "reconciler");
-  const expiry = await expireClarifies(client, { onlyFirm: deps.onlyFirm ?? null });
-  const tasks = await reconcileTasks(client, deps);
-  const autodraftTasks = await reconcileAutoDraftTasks(client, deps);
-  const documentTasks = await reconcileDocumentTasks(client, { ...deps, integrity: deps.prune === true });
-  const documentIntakes = await reconcileDocumentIntakes(client, deps);
+  // BELT-AND-BRACES CONTAINMENT AT THE ASSEMBLY LEVEL. Every belt below already isolates its
+  // own faults per item or per client — and this repo has now twice discovered that "a sweeper
+  // that cannot fail" is a claim, not a fact (the Section-I cancel-edge zombie, reconcileTasks
+  // section B; the §7-A F1 autodraft-settle zombie). Both times ONE unhandled throw deep in one
+  // belt aborted every belt sequenced after it, every ~2s, indefinitely. This wrapper makes that
+  // shape structurally unreachable: a belt's escape costs THAT belt this cycle and nothing else.
+  //
+  // TWO ERRORS ARE DELIBERATELY NOT CONTAINED HERE:
+  //   * A HALT (isLeaderHalt) is RETHROWN — it is the leader's crash-only signal and swallowing
+  //     it would turn an un-routable state into a silent, permanently-degraded loop.
+  //   * ...and that is the only one. CONNECTION-CLASS errors are contained like everything else,
+  //     which MATCHES the estate exactly: the three wraps that already existed here (intake
+  //     artifact recovery, spool TTL, trace prune) and the leader's own render pair
+  //     (leader.mjs:200-211) all log-and-continue on a conn error rather than rethrowing.
+  //     Consequence, stated plainly: a connection that dies mid-sweep no longer short-circuits
+  //     to leader.mjs:222's teardown-and-reconnect from INSIDE the sweep. It surfaces at most
+  //     one cycle later and by two independent routes — the pg client's own 'error' event sets
+  //     `connErr`, which leader.mjs:172 rethrows at the top of the next cycle, and the BARE
+  //     runRelayCycle/drainCycle calls (leader.mjs:175-176) run BEFORE the sweep on that same
+  //     connection. The cost is one cycle of belts logging failures against a dead socket; the
+  //     purchase is that no belt can starve its siblings. Rethrowing conn errors here would
+  //     re-open exactly the hole this change closes, because `isConnErr` is a MESSAGE-PATTERN
+  //     test (listen.mjs:7-12) and any belt fault whose text happened to match would abort the
+  //     sweep again.
+  const beltErrors = [];
+  const belt = async (name, run, fallback = {}) => {
+    try {
+      return await run();
+    } catch (err) {
+      if (isLeaderHalt(err)) throw err;
+      beltErrors.push(name);
+      // The `[reconcile] <name> error:` idiom, and the three pre-existing names, are preserved
+      // verbatim so an operator's existing log greps keep matching. Logged EVERY cycle, never
+      // de-duplicated: the leader does not log the sweep result, so a one-shot line would turn
+      // a persistent strand into silence after its first occurrence (the argument section B and
+      // reconciler-render.mjs:220-223 already make for their own lines).
+      log(`[reconcile] ${name} error: ${err?.message ?? err}`);
+      return fallback;
+    }
+  };
+
+  // THE HEARTBEAT IS THE ONE DELIBERATE FAIL-FAST, and it is now deliberate rather than
+  // incidental. It is not merely observability: the migration QUIESCE GUARDS read this table to
+  // decide whether a runtime is live before replacing a live writer's body (0022:136-143,
+  // 0023 — "a runtime heartbeat is fresh ... stop clara-runtime and re-apply"). Beating and
+  // then writing is the ordering that guard depends on, so a leader that CANNOT record "I am
+  // alive" must not go on to make writes it cannot account for. Skipping costs one cycle (~2s,
+  // retried immediately) and says why in one line; it cannot reproduce the starvation this
+  // change exists to kill, because the failure modes that break a single-row upsert on the
+  // leader's own connection (dead socket, revoked grant, catalog drift) break every belt below
+  // it too — and they take /ready down through the SAME table via the 'control' beat
+  // (control.mjs:204, health.mjs:99-115), so the supervisor, not this loop, is the recovery.
+  try {
+    await heartbeat(client, "reconciler");
+  } catch (err) {
+    if (isLeaderHalt(err)) throw err;
+    log(`[reconcile] heartbeat error — SKIPPING the remainder of this sweep (the quiesce guards read this beat; a leader that cannot record liveness must not keep writing): ${err?.message ?? err}`);
+    return { heartbeatOk: false, beltErrors: ["heartbeat"] };
+  }
+
+  const expiry = await belt("clarify expiry", () => expireClarifies(client, { onlyFirm: deps.onlyFirm ?? null }));
+  const tasks = await belt("task reconcile", () => reconcileTasks(client, deps));
+  const autodraftTasks = await belt("autodraft reconcile", () => reconcileAutoDraftTasks(client, deps));
+  const documentTasks = await belt("document task reconcile", () => reconcileDocumentTasks(client, { ...deps, integrity: deps.prune === true }));
+  const documentIntakes = await belt("document intake reconcile", () => reconcileDocumentIntakes(client, deps));
   let intakeRecovery = { recovered: 0, deferred: 0, expired: 0 };
   if (typeof deps.recoverDocumentIntakes === "function") {
-    try {
-      intakeRecovery = await deps.recoverDocumentIntakes();
-    } catch (err) {
-      log(`[reconcile] intake artifact recovery error: ${err?.message ?? err}`);
-    }
+    intakeRecovery = await belt("intake artifact recovery", () => deps.recoverDocumentIntakes(), intakeRecovery);
   }
-  let spool = { spoolRemoved: 0 };
-  try {
-    spool = await sweepSpoolTtl();
-  } catch (err) {
-    log(`[reconcile] spool TTL sweep error: ${err?.message ?? err}`);
-  }
-  let autopost = {};
-  if (deps.autopostRules) autopost = await reconcileAutopostRules(client, { log });
-  let sst = {};
-  if (deps.sstWatches) sst = await reconcileSstWatches(client, { log });
-  let lint = {};
-  if (deps.lintBelt) lint = await reconcileLintBelt(client, { log });
-  let fa = {};
-  if (deps.faRuns) fa = await reconcileFaRuns(client, { log });
-  const adj = deps.adjRuns ? await reconcileAdjustmentRuns(client, { log }) : {}; // Wave D-b belt (0045)
-  let prune = { pruned: 0 };
-  if (deps.prune) {
-    try {
-      prune = await pruneTraces(client, {});
-    } catch (err) {
-      log(`[reconcile] trace prune error: ${err?.message ?? err}`);
-    }
-  }
-  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...prune };
+  const spool = await belt("spool TTL sweep", () => sweepSpoolTtl(), { spoolRemoved: 0 });
+  // The five DAILY belts fall back to their OWN ok:false, never to `{}`. leader.mjs advances the
+  // 24h cadence only on a truthy `*Ok` (lines 191-195), so an absent key would already retry next
+  // cycle — but saying it explicitly is the difference between a contract and an accident, and it
+  // is the one thing a reviewer should not have to derive from undefined-is-falsy.
+  const autopost = deps.autopostRules ? await belt("autopost rules", () => reconcileAutopostRules(client, { log }), { autopostOk: false }) : {};
+  const sst = deps.sstWatches ? await belt("sst watches", () => reconcileSstWatches(client, { log }), { sstOk: false }) : {};
+  const lint = deps.lintBelt ? await belt("lint belt", () => reconcileLintBelt(client, { log }), { lintOk: false }) : {};
+  const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
+  const adj = deps.adjRuns ? await belt("adjustment runs", () => reconcileAdjustmentRuns(client, { log }), { adjOk: false }) : {}; // Wave D-b belt (0045)
+  const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
+  // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
+  // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
+  // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
+  // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
+  // logged is one grep away from invisible).
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...prune };
 }
