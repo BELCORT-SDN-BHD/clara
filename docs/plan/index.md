@@ -161,6 +161,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 |---|---|---|
 | `rebuild-plan-history.md` | historical | The former REBUILD-PLAN.md's verbatim Phase-3 + Phase-4 dated STATUS chronology, archived at this refactor. |
 | `progress-archive-2026-08.md` | historical | PROGRESS.md's split-out (the outgrow law, 2026-08-18): the sixteen terminal Wave-E lane rows + the session log through 2026-08-16, verbatim. |
+| `pr232-body-notes.md` | historical | PR #232's body-notes material (the harness grand refactor) — re-homed at the 2026-08-18 sweep from the repo root, where it sat as *_PR-BODY-NOTES.md*; bytes untouched. |
 
 ## `docs/plan/` root
 

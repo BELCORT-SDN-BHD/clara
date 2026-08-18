@@ -489,7 +489,7 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   uncommitted cosmetic AGENTS.md wording tweak ("menu"→"Harness menu" ×3) found in the
   tree — named, not silently absorbed. Harness sweep (owner-prompted): `docs/plan/index.md`
   re-trued (Wave-F live set + the PATH-STABILITY convention made explicit; PRD line 3
-  reconciled); root README + `_PR-BODY-NOTES.md` re-home → immediate follow-up PR (both
+  reconciled); root README + the PR-232 body-notes re-home → immediate follow-up PR (both
   outside the docs-only fence). Docs-only PR; single-lane review per ADR-0069.
 
 ---
