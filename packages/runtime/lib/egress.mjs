@@ -190,6 +190,20 @@ export const AZURE_ENGINE_SNAPSHOT = Object.freeze({
 // granted the consumer records the DB-side HELD state (clara.set_wiki_synthesis_hold); the DB owns
 // the final backstop (publish_wiki_page_version refuses synthesis='model' under a live hold).
 // ---------------------------------------------------------------------------
+// TRUED AT F-A1 PR-2 (design §3.5: "GOVERNED_EGRESS_PURPOSES is trued (statement_extraction +
+// witness_extraction)"). This registry had drifted to a single entry while the DB grew two more
+// typed purposes — a stale registry is worse than none, because a reader checking "is this
+// purpose governed?" against it would have got NO for a purpose the database governs. Each entry
+// below was written by reading what the migrations ENFORCE, not what a design intended:
+//   * the purpose vocabulary CHECK on all three relations — 0090 §7a, now
+//     ('wiki_synthesis','statement_extraction','witness_extraction');
+//   * the per-purpose document-hash rule, ck_egress_dispatch_authorizations_doc_sha — 0090 §7b:
+//     wiki REQUIRES a null hash, statement and witness each REQUIRE a non-null one, as three
+//     separate conjuncts so a fourth purpose inherits nothing by accident;
+//   * where the consent question is actually ASKED, which differs per purpose and is the single
+//     most misreadable thing here (see `gatedAt` on each entry).
+// This object is DOCUMENTATION AND A LOOKUP, never an authorization: nothing in the runtime may
+// treat a purpose's presence here as permission. The DB verbs are the only gate.
 export const GOVERNED_EGRESS_PURPOSES = Object.freeze({
   wiki_synthesis: Object.freeze({
     purpose: "wiki_synthesis",
@@ -199,7 +213,62 @@ export const GOVERNED_EGRESS_PURPOSES = Object.freeze({
       "clara.client_egress_purpose_consents + clara.client_egress_purpose_activations"
       + " (live = revoked_at/deactivated_at is null), reached ONLY via"
       + " clara.prepare_egress_dispatch / clara.consume_egress_dispatch",
+    // EVENT-driven: the projection consumer asks at dispatch time and records a DB-side hold.
+    gatedAt: "dispatch (lib/wiki-projection.mjs)",
+    documentSha256: "forbidden (ck_egress_dispatch_authorizations_doc_sha: must be null)",
     heldStatePath: "clara.set_wiki_synthesis_hold / clara.wiki_synthesis_holds",
+    dataClass: "client_confidential",
+    engineIdRequired: true,
+  }),
+  statement_extraction: Object.freeze({
+    purpose: "statement_extraction",
+    description:
+      "The bank-statement lane's SECOND reader — the typed vendor engine over a pdf/image"
+      + " statement (Wave C-b, migration 0038). Reader-1 re-reads stored geometry and never"
+      + " egresses; the csv/ofx statement_parse lane never egresses at all.",
+    consentRequired: true,
+    consentSurface:
+      "clara.client_egress_purpose_consents + clara.client_egress_purpose_activations"
+      + " (live = revoked_at/deactivated_at is null), reached ONLY via"
+      + " clara.prepare_egress_dispatch / clara.consume_egress_dispatch",
+    // ENQUEUE-gated, and that is structural rather than stylistic: the ratified ADR-0020 §6
+    // byte-identity battery pins claim_document_processing_task's prosrc and asserts it carries
+    // NO call edge into the typed-consent surface, so the gate CANNOT live in the claim body.
+    // The dispatch pair still wraps the vendor call — enqueue answers "may we", dispatch
+    // answers "may we still, right now".
+    gatedAt: "enqueue (clara._enqueue_invoice_facts_core) + dispatch (statementFacts.v1.behavior.mjs)",
+    documentSha256: "required (ck_egress_dispatch_authorizations_doc_sha: must be non-null)",
+    // No hold relation: a refusal settles the TASK terminally through the audited writer.
+    heldStatePath:
+      "none — clara.fail_statement_facts(task,'consent_inactive'), or the enqueue gate's"
+      + " never-claimed failed receipt ('consent_inactive' / 'statement_multi_client')",
+    dataClass: "client_confidential",
+    engineIdRequired: true,
+  }),
+  witness_extraction: Object.freeze({
+    purpose: "witness_extraction",
+    description:
+      "The LLM witness pair over ONE document — BOTH channels under this one purpose (F-A1"
+      + " design §3.5, owner ruling OQ-2). The vision channel sends the client's original filed"
+      + " bytes; the TEXT channel re-sends OCR-derived client content to the vendor, which is an"
+      + " egress event under law 58's plain reading and not a local read.",
+    consentRequired: true,
+    consentSurface:
+      "clara.client_egress_purpose_consents + clara.client_egress_purpose_activations"
+      + " (live = revoked_at/deactivated_at is null), reached ONLY via"
+      + " clara.prepare_egress_dispatch / clara.consume_egress_dispatch",
+    gatedAt: "enqueue (clara._enqueue_invoice_facts_core, 0090 §7e) + dispatch, ONCE PER CHANNEL"
+      + " (witnessFacts.v1.behavior.mjs) — two authorizations per document, never one shared",
+    documentSha256: "required (ck_egress_dispatch_authorizations_doc_sha: must be non-null)",
+    // Stated honestly: unlike the statement lane there is no `fail_witness_facts` verb in the
+    // merged estate, so a dispatch-time refusal cannot settle the task with its named reason.
+    // It is recorded as a clara.llm_usage_events row with outcome='refused' and the task is left
+    // to the DB's own per-lane attempt cap, which settles it 'attempt_cap' with
+    // document.llm_witness_failed. The enqueue gate DOES mint named receipts.
+    heldStatePath:
+      "none — the enqueue gate mints a never-claimed failed receipt ('witness_consent_inactive'"
+      + " / 'witness_multi_client'); a dispatch-time refusal records clara.llm_usage_events"
+      + " outcome='refused' and the claim-time attempt cap settles the task",
     dataClass: "client_confidential",
     engineIdRequired: true,
   }),

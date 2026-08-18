@@ -22,6 +22,7 @@ import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { statementFacts_v1 } from "./statementFacts.v1.js";
+import { witnessFacts_v1 } from "./witnessFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
@@ -42,6 +43,7 @@ export const workflows = {
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   statementFacts: statementFacts_v1,
+  witnessFacts: witnessFacts_v1,
   autoDraft: autoDraft_v7,
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
@@ -139,6 +141,13 @@ export const workflows = {
 // documentIngest ocr/structured_parse precedent. It opens the `bank_statement` ->
 // `skipped_kind` dead end 0026 left behind. DEPLOY ORDER IS BINDING (design part2 §5): this
 // runtime image ships FIRST, then migration 0038, then the consent ceremony — which is also
+// (F-A1 PR-2 ADDS a second brand-new class, `witnessFacts: witnessFacts_v1`, on the same terms:
+// nothing repointed, no existing body touched. It serves the new `llm_witness` lane — two model
+// channels over ONE document, each its own memoized step, one atomic persist. Its tasks are NOT
+// minted yet: `_enqueue_invoice_facts_core`'s llm_witness gate is deliberately inert at this
+// frontier and `enqueueForLane` does not name the lane, so this image lands and is verified live
+// BEFORE PR-3's router recut flips it on — the positive-read law, design §6. Its PROMPTS are
+// inside the frozen closure by decision M8, so a prompt tweak is a witnessFacts.v2.)
 // why `enqueueForLane` (lib/reconciler-documents.mjs) became an explicit allowlist in the
 // same change, so a migration-before-runtime window can never route a bank statement into a
 // consentless generic OCR run. GH #152 repointed BOTH interview classes v2->v3 (the park/hook

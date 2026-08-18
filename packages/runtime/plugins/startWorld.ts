@@ -23,6 +23,7 @@ import { workflows } from "../workflows/registry.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
+import { makeWitnessFactsServices } from "../workflows/witnessFacts.v1.services.mjs";
 import { stopIntakeIngress } from "../lib/spool.mjs";
 import { startManagedScanner } from "../lib/scan.mjs";
 
@@ -71,6 +72,13 @@ export default definePlugin(() => {
   // and the corroborator/payload builder. Kept OUT of the frozen closure so parser and
   // vendor tuning against real Maybank output is never a workflow-version change (AB-16).
   (globalThis as unknown as { __claraStatementFactsServices?: unknown }).__claraStatementFactsServices = makeStatementFactsServices();
+  // F-A1: the witness lane's own bundle — the canonical download plus the ONE model adapter both
+  // channels call. Kept OUT of the frozen closure so a model id, a timeout or a provider content
+  // shape is config rather than a workflow version (AB-16); the PROMPTS are the deliberate
+  // exception and live inside the closure (design M8). Injected unconditionally even though
+  // nothing mints `llm_witness` tasks yet: the image must be able to run the lane BEFORE PR-3's
+  // router recut turns it on, which is the whole point of the deploy order (positive-read law).
+  (globalThis as unknown as { __claraWitnessFactsServices?: unknown }).__claraWitnessFactsServices = makeWitnessFactsServices();
   // The MyInvois local_facts consumer reuses the document services (temp-file lifecycle +
   // canonical download); the UBL facts parse runs in its own worker thread.
   const localFactsServices = makeDocumentServices();
