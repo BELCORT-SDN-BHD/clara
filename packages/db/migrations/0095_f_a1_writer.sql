@@ -524,20 +524,39 @@ begin
       -- FRAGMENT: "1,234.56" is a substring of "11,234.56" and of "1,234.567", so a witness that
       -- misread the leading digit would still collect the cited region's real polygon and sail
       -- through C2 on a figure the document never states. The occurrence must be bounded on both
-      -- sides by start/end-of-string or a character outside [0-9.,]. Every regex metacharacter in
-      -- the rendering is escaped first -- the rendering is a MODEL string, so an unescaped '.' or
-      -- '(' would otherwise be a pattern, not a character. Non-monetary fields keep the plain
-      -- substring test: there is no digit-fragment hazard in 'MYR' or '01'.
-      v_verified := v_cited_id is not null and v_cited_text is not null
-        and (case when v_f = any(v_money) then
-                  v_readable
-                  and clara._normalize_invoice_cents(v_raw) is not null
-                  and v_cited_text ~ ('(^|[^0-9.,])'
-                        || regexp_replace(v_raw, '([^a-zA-Z0-9 ])', '\\\1', 'g')
-                        || '($|[^0-9.,])')
-                  else position(v_raw in v_cited_text) > 0 end);
-      v_cents := case when v_f = any(v_money) and v_readable
-                      then clara._normalize_invoice_cents(v_raw) else null end;
+      -- sides by start/end-of-string or a character outside [0-9.,-]. THE MINUS SIGN IS IN THE
+      -- CLASS (review NC-3) and it is not decoration: without it, a witness quoting "1.00" off a
+      -- printed "-1.00" verifies clean and persists +100 cents against the region that states
+      -- MINUS one ringgit -- a sign flip with real geometry behind it, which is the worst shape
+      -- a wrong number can take. Every regex metacharacter in the rendering is escaped first --
+      -- the rendering is a MODEL string, so an unescaped '.' or '(' would otherwise be a
+      -- pattern, not a character. Non-monetary fields keep the plain substring test: there is no
+      -- digit-fragment hazard in 'MYR' or '01' (the residual that leaves on the seven reference
+      -- paths is registered in f-a1-annexes.md's review-fold record, NC-2).
+      --
+      -- NC-1, AND IT IS THE WHOLE REASON THIS IS A STATEMENT LADDER RATHER THAN AN AND CHAIN.
+      -- PostgreSQL does NOT promise left-to-right evaluation of AND operands (§4.2.14: the order
+      -- of evaluation of subexpressions is not defined, and the planner may reorder them), so
+      -- writing `v_readable and <normalize> is not null and <regex>` would leave the normalizer
+      -- legally free to run FIRST -- and on a 30-digit rendering it raises 22003 and rolls back
+      -- the entire persist. That is exactly the C4 violation M6's guard exists to prevent: the
+      -- old shape short-circuited in practice, but short-circuiting is the planner's luck, not
+      -- the language's law. A plpgsql `if` is a statement boundary, and a statement boundary IS
+      -- a guarantee. The normalizer is also now called ONCE instead of twice.
+      v_verified := false;
+      v_cents := null;
+      if v_f = any(v_money) then
+        if v_readable then
+          v_cents := clara._normalize_invoice_cents(v_raw);
+        end if;
+        if v_cents is not null and v_cited_id is not null and v_cited_text is not null then
+          v_verified := v_cited_text ~ ('(^|[^0-9.,-])'
+            || regexp_replace(v_raw, '([^a-zA-Z0-9 ])', '\\\1', 'g')
+            || '($|[^0-9.,-])');
+        end if;
+      elsif v_cited_id is not null and v_cited_text is not null then
+        v_verified := position(v_raw in v_cited_text) > 0;
+      end if;
       if v_verified then
         -- nit 2: the page locator is cast only when it IS an unsigned integer literal (the
         -- 0091:131 idiom). A malformed OCR locator degrades to a null page rather than raising

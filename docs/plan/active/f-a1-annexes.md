@@ -292,3 +292,31 @@ closes, so a later reader can tell a cell that guards a ruling from a cell that 
 - **M7** the identity leaf is `clara.evaluate_witness_identity_v1` with its own manifest entry
   AND its own one-member `clara.evaluator_versions` row (the source-side lint requires a version
   row in the same file for every `clara.evaluate_*` it discovers).
+
+**Re-review pass (NC-1…NC-6). Folded:** NC-1 — the writer's monetary verification is a plpgsql
+statement ladder, not an AND chain: PostgreSQL does not promise operand evaluation order
+(§4.2.14), so the old shape left `clara._normalize_invoice_cents` legally free to run BEFORE the
+magnitude guard and raise 22003 mid-persist; short-circuiting was the planner's luck, not the
+language's law. NC-3 — the minus sign joins BOTH boundary classes (`[^0-9.,-]`), so a witness
+quoting `1.00` off a printed `-1.00` no longer verifies as +100 cents against the very region
+that states the negative.
+
+**NAMED RESIDUAL (NC-2), carried deliberately:** the token boundary is **monetary-only**. The
+seven optional reference paths keep the plain substring test, so a digit-fragment quote can still
+verify for `invoice.customer_registration` / `invoice.vendor_registration` /
+`invoice.customer_taxid`. The direction is fail-OPEN on **the self-referential withdrawal alone**
+— a fragment will not equal `client_identifiers.value_normalized`, so the withdrawal simply does
+not fire and the side is judged on geometry as before; it can produce a `corroborated` identity
+verdict on a mis-quoted registration, never a wrong AMOUNT (`corroborated` carries no identity
+term, N5). It rides PR-2's prompt discipline and PR-3's corpus obligations, with M3's
+`value ⊆ raw` rule already narrowing the `invoice_id` half of the same surface. Closing it is a
+`_v2` decision, not a PR-1 one — the leaf is frozen.
+
+**Checked clean by the re-review (NC-5, NC-6), recorded so the next reader need not re-derive
+it:** the witness envelope's `currency` key carries the alphabetic reduction of what the witness
+actually *read* (e.g. `RM`), not a normalized ISO code — no live consumer reads that key, and
+`explicit_non_myr` (which consumers do read) is the three-valued verdict, so nothing downstream
+is misled. And `clara.witness_citation_regions` grants `clara_runtime` nothing it did not already
+hold: the same rows are reachable to that role through the writer's own resolver on the pinned
+OCR extraction; the function publishes the ORDINAL, which is the thing PR-2 needs and the only
+thing it adds.

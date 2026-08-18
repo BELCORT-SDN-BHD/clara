@@ -444,12 +444,14 @@ test("M3: the reference-value contract — a value must be a substring of its ra
   }
 });
 
-test("M4: the monetary citation match is TOKEN-BOUNDED — a digit fragment does not verify", async (t) => {
+test("M4/NC-3: the monetary citation match is TOKEN-BOUNDED — neither a digit fragment nor a sign flip verifies", async (t) => {
   if (gate(t)) return;
-  // The two OCR lines are BOTH seeded up front (see ocrFixture's note on renumbering).
+  // The four OCR lines are ALL seeded up front (see ocrFixture's note on renumbering).
   const o = await ocrFixture(world.users.alice, world.clients.A1, {
     frag: "PREVIOUS BALANCE RM 11,234.56",
     bounded: "Total: RM 1,234.56",
+    neg: "ROUNDING ADJUSTMENT -1.00",
+    pos: "SERVICE CHARGE RM 1.00",
   });
   const RAW = "1,234.56";   // a plain SUBSTRING of "11,234.56" — that is the whole hazard
   // (a) the fragment. Pre-fix this VERIFIED and handed the witness the wrong line's polygon for a
@@ -479,6 +481,37 @@ test("M4: the monetary citation match is TOKEN-BOUNDED — a digit fragment does
     const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.amount_due");
     assert.ok(rr.locator.polygon.length > 0, "a token-bounded occurrence verifies");
     assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "bounded"));
+  }
+  // (c) NC-3, THE SIGN FLIP. "1.00" is a plain substring of "-1.00", and the boundary class
+  // without the minus would have called it bounded (a space precedes the '-'... but the char
+  // immediately before "1.00" IS the '-', which is the character that carries the sign). So a
+  // witness quoting "1.00" off a printed "-1.00" would have persisted +100 cents WITH the real
+  // polygon of the line that states MINUS one ringgit — a sign flip wearing verified geometry.
+  {
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const text = textCall(o, { citations: [...goodCitations(o),
+      { field_path: "invoice.discount", region_idx: o.idxOf.neg }] });
+    text.envelope.witness.answers["invoice.discount"] = { state: "value", raw: "1.00" };
+    const vision = visionCall(o, { fields: { ...goodFields(), "invoice.discount": "1.00" } });
+    const r = await persist(taskId, text, vision);
+    const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.discount");
+    assert.equal(rr.locator.polygon.length, 0, "a positive rendering quoted off a NEGATIVE printing does NOT verify");
+    assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "neg"),
+      "the resolved (but unverified) region uuid is still recorded");
+    assert.equal(rr.monetary_cents, "100", "…and the read still persists whole (C4)");
+  }
+  // (d) the SAME rendering off a genuinely positive printing still verifies, so the term under
+  // test is the MINUS in the boundary class and not the rendering itself.
+  {
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const text = textCall(o, { citations: [...goodCitations(o),
+      { field_path: "invoice.discount", region_idx: o.idxOf.pos }] });
+    text.envelope.witness.answers["invoice.discount"] = { state: "value", raw: "1.00" };
+    const vision = visionCall(o, { fields: { ...goodFields(), "invoice.discount": "1.00" } });
+    const r = await persist(taskId, text, vision);
+    const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.discount");
+    assert.ok(rr.locator.polygon.length > 0, "the same rendering off a positive printing verifies");
+    assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "pos"));
   }
 });
 
