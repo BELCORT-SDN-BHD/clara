@@ -20,7 +20,7 @@ import { MockLanguageModelV4 } from "ai/test";
 
 import * as fx from "./relay-fixtures.mjs";
 import { normalizeAzureLayout } from "../lib/egress.mjs";
-import { callWitnessModel, WITNESS_ENGINE_SNAPSHOT } from "../workflows/witnessFacts.v1.services.mjs";
+import { callWitnessModel, witnessMediaType, WITNESS_ENGINE_SNAPSHOT } from "../workflows/witnessFacts.v1.services.mjs";
 
 export const WITNESS_PURPOSE = "witness_extraction";
 
@@ -76,9 +76,60 @@ export function witnessServices(tmpRoot) {
       return { path: destination, sha256 };
     },
     callWitnessModel,
+    witnessMediaType,
     engineSnapshot: WITNESS_ENGINE_SNAPSHOT,
+    log: (m) => logLines.push(String(m)),
   };
 }
+
+/** Every line the lane's settle path shouted, so a cell can assert the LOUD fallback actually
+ *  spoke rather than trusting that it would. Cleared per cell by `resetWitnessLog`. */
+export const logLines = [];
+export const resetWitnessLog = () => { logLines.length = 0; };
+
+/**
+ * A RIG STAND-IN for `clara.fail_witness_facts`, which does NOT exist in the merged estate — it
+ * ships in F-A1 PR-3's migration (see witnessFacts.v1.dispatch.mjs's ordering argument).
+ *
+ * READ THIS BEFORE TRUSTING A CELL THAT USES IT. This function exists ONLY to prove the runtime
+ * makes the right CALL: the name, the two-argument shape, and that a terminal outcome reaches it
+ * with the right code. It is deliberately minimal and it is NOT a prediction of PR-3's body —
+ * that verb will also refund, audit and emit `document.llm_witness_failed`, none of which is
+ * asserted here. The PR-1 assembly lesson is exactly this hazard (a scaffold the real dependency
+ * later diverges from), so the stand-in's whole contract is stated in one line: task -> failed,
+ * error_code = the code the runtime passed. When PR-3 lands, these cells run against the real
+ * verb and any divergence in the CALL SHAPE is a finding on one side or the other.
+ */
+export async function installFailWitnessFactsStandIn() {
+  await fx.rootQuery(`
+    create or replace function clara.fail_witness_facts(p_task uuid, p_reason text) returns jsonb
+      language plpgsql security definer set search_path = clara, pg_temp as $fn$
+    declare t record;
+    begin
+      select * into t from clara.document_processing_tasks where id = p_task for update;
+      if not found or t.lane <> 'llm_witness' then
+        raise exception 'llm-witness task not found' using errcode='CLR16';
+      end if;
+      if t.status = 'failed' then
+        return jsonb_build_object('task_id', p_task, 'status', 'failed',
+          'reason', coalesce(t.error_code, p_reason), 'replayed', true);
+      end if;
+      update clara.document_processing_tasks
+        set status='failed', error_code=p_reason, finished_at=now() where id = p_task;
+      return jsonb_build_object('task_id', p_task, 'status', 'failed', 'reason', p_reason);
+    end $fn$`);
+  await fx.rootQuery("grant execute on function clara.fail_witness_facts(uuid,text) to clara_runtime");
+}
+
+/** Remove the stand-in — the state the merged estate is ACTUALLY in, and the state the
+ *  absent-verb fallback cell needs. */
+export async function dropFailWitnessFactsStandIn() {
+  await fx.rootQuery("drop function if exists clara.fail_witness_facts(uuid,text)");
+}
+
+export const failWitnessFactsExists = () =>
+  fx.rootQuery("select to_regprocedure('clara.fail_witness_facts(uuid,text)') is not null as ok")
+    .then((r) => r.rows[0].ok === true);
 
 /** One channel's wire object: the ELEVEN belt answers plus the two optional reference answers,
  *  in the flat shape the prompt closure's schema asks the model for. */
@@ -250,8 +301,17 @@ export async function buildWitnessSituation(label, {
   // extractions are historical'), which is itself worth knowing about this rig.
   const ocrId = ocr ? await seedOcrExtraction({ firm, documentId: doc.documentId, pageCount }) : null;
   const ids = {};
-  for (const r of regions) {
-    ids[r.label] = await seedOcrRegion({ firm, extraction: ocrId, fieldPath: `ocr_${r.label}`, textContent: r.text });
+  const spatialOrder = [];
+  for (const [i, r] of regions.entries()) {
+    // STACKED DOWN THE PAGE, one band per region, in the order the caller listed them. The
+    // citation ordinal is `row_number() over (order by id)` over UUIDs, so it is effectively
+    // random with respect to this layout — which is the whole point: a cell can then tell
+    // READING ORDER (this) apart from IDX ORDER (the DB's) instead of watching them coincide.
+    ids[r.label] = await seedOcrRegion({
+      firm, extraction: ocrId, fieldPath: `ocr_${r.label}`, textContent: r.text,
+      locator: { page: 1, polygon: [0, i * 10, 5, i * 10, 5, i * 10 + 5, 0, i * 10 + 5] },
+    });
+    spatialOrder.push(r.label);
   }
   // The citation ordinal is `row_number() over (order by id)` over uuids, so it is NOT insertion
   // order — read the published numbering back rather than assuming it (the whole point of M5).
@@ -268,7 +328,7 @@ export async function buildWitnessSituation(label, {
   return {
     owner, firm, client,
     documentId: doc.documentId, sha256: doc.sha256, mime, storagePath: doc.storagePath,
-    ocrId, regionIds: ids, idxOf, numbered,
+    ocrId, regionIds: ids, idxOf, numbered, spatialOrder,
     taskId: task.taskId, engineId: task.engineId, versionN: task.versionN,
     consent: consentRecord,
     /** The claim-receipt-shaped `doc` the frozen behaviour consumes. */

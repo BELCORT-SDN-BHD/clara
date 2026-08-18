@@ -702,15 +702,19 @@
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v1.behavior.mjs": {
-      "sha256": "be68c44de9833c670ab7c39780fed2815c0416906f0a2413787e26568190c25e",
+      "sha256": "fcef31b5f17213a7bc84bcbcf6ec901d08f8825400f4962353d9c4ae7d41a930",
       "note": "F-A1 PR-2 — the witness pair's behavioural closure: two channels, one typed egress purpose (witness_extraction) dispatched ONCE PER CHANNEL, one atomic persist. UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
+    "packages/runtime/workflows/witnessFacts.v1.dispatch.mjs": {
+      "sha256": "b3e378b58e019e1f822940c54f4abe01b9911806b6ede9c9a532a1ffe044cc6c",
+      "note": "F-A1 PR-2 review fold — the DB-verb plumbing split out of the behaviour when it crossed the 500-line gate: authorization, the pinned reads, the reading-order citation reader (B2), metering, and the terminal settle through clara.fail_witness_facts (which ships in PR-3's migration; the ordering argument and the 42883 fallback live in the file)."
+    },
     "packages/runtime/workflows/witnessFacts.v1.impl.ts": {
-      "sha256": "d34b67be89b1dbc422c8276f9f02130f31e10c36944547a9aed0c31311a51dea",
+      "sha256": "50ce8d3837bbd1376273993d007b85b30a9eb1dee50d6c93891e8852f374837f",
       "note": "F-A1 PR-2 — the four steps. Each model call is its OWN memoized step so a persist retry replays the stored envelopes instead of buying two more model calls."
     },
     "packages/runtime/workflows/witnessFacts.v1.prompts.mjs": {
-      "sha256": "d032af3fbb4afb41413b052914741262e564a85b7cb8d91eec87e7780a0f1c3b",
+      "sha256": "940653edd32fccc3b7b6bbd6ee7bed2ebe704892d5cab63938d58960f7c9b37f",
       "note": "F-A1 PR-2 — the prompt closure. FROZEN BY DECISION (design M8): a prompt edit IS a body edit, so every post-deploy tweak is a witnessFacts.v2 + ceremony, and the corpus-tuning loop runs pre-freeze."
     },
     "packages/runtime/workflows/witnessFacts.v1.ts": {

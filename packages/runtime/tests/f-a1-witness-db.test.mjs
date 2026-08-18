@@ -21,11 +21,12 @@ import { tmpdir } from "node:os";
 
 import * as fx from "./relay-fixtures.mjs";
 import {
-  buildWitnessSituation, readDispatchAuthorizations, readExtractions, readFactRegions,
-  readTask, readUsageRows, readWitnessState, witnessMock, witnessServices, witnessWire,
+  buildWitnessSituation, dropFailWitnessFactsStandIn, installFailWitnessFactsStandIn,
+  readExtractions, readFactRegions, readTask, readUsageRows, readWitnessState, witnessMock,
+  witnessServices, witnessWire,
 } from "./f-a1-witness-fixtures.mjs";
 import {
-  persistWitnessPair, runWitnessTextRead, runWitnessVisionRead, WITNESS_EVENT_TYPE, WITNESS_PURPOSE,
+  persistWitnessPair, runWitnessTextRead, runWitnessVisionRead,
 } from "../workflows/witnessFacts.v1.behavior.mjs";
 import { witnessPromptHash } from "../workflows/witnessFacts.v1.prompts.mjs";
 
@@ -51,9 +52,14 @@ before(async () => {
   const base = process.env.CLARA_TEST_TMP_ROOT || tmpdir();
   await mkdir(base, { recursive: true });
   tmpRoot = await mkdtemp(join(base, "clara-witness-"));
+  // `clara.fail_witness_facts` ships in PR-3's migration; the rig STAND-IN lets these cells prove
+  // the runtime makes the right CALL. Its limits are stated at the fixture — it is not a
+  // prediction of PR-3's body.
+  if (READY) await installFailWitnessFactsStandIn();
 });
 after(async () => {
   delete globalThis.__claraModelForTest;
+  if (READY) await dropFailWitnessFactsStandIn();
   await fx.endPool();
   await rm(tmpRoot, { recursive: true, force: true });
 });
@@ -167,6 +173,35 @@ test("f-a1.pr2.c the numbering the PROMPT shows equals clara.witness_citation_re
     assert.ok(shownLines.includes(`${marker} ${row.text_content}`),
       `the prompt must show region ${row.idx} with its OWN published idx, page and text (got ${JSON.stringify(shownLines)})`);
   }
+
+  // (1b) B2: THE ORDER IS SPATIAL, THE NUMBER IS THE DB'S. The fixture stacks its regions down
+  // the page in REGIONS order; the ordinal is row_number() over uuids and is unrelated to that.
+  // So the prompt must read down the page while the brackets carry the DB's own numbers.
+  assert.deepEqual(
+    shownLines.map((l) => l.replace(/^\[\d+ p\d+\] /, "")),
+    REGIONS.map((r) => r.text),
+    "display order == reading order (page, then top-left y, then x) — a model handed a SHUFFLED "
+    + "invoice is doing a strictly harder job than reading a printed one",
+  );
+  assert.deepEqual(
+    shownLines.map((l) => Number(/^\[(\d+)/.exec(l)[1])),
+    REGIONS.map((r) => s.idxOf[r.label]),
+    "…and each line carries the ordinal clara.witness_citation_regions published for THAT region",
+  );
+  // ANTI-VACUITY, computed rather than hoped for. A `notDeepEqual` against idx order would be
+  // FLAKY — the ordinal is uuid-derived, so it coincides with reading order about once in 5040
+  // runs of a seven-region document, and a test that fails on a coin flip is worse than a weak
+  // one. Instead the expected order is DERIVED here from the DB's own locators, independently of
+  // both the fixture's array and the reader's implementation: whatever the ordinal happens to be,
+  // the prompt must read down the page.
+  const spatial = (await fx.rootQuery(
+    "select w.idx, r.locator from clara.witness_citation_regions($1) w"
+    + " join clara.document_regions r on r.id = w.region_id", [s.ocrId])).rows
+    .map((row) => ({ idx: Number(row.idx), y: Number(row.locator.polygon[1]), x: Number(row.locator.polygon[0]) }))
+    .sort((a, b) => (a.y - b.y) || (a.x - b.x) || (a.idx - b.idx))
+    .map((row) => row.idx);
+  assert.deepEqual(shownLines.map((l) => Number(/^\[(\d+)/.exec(l)[1])), spatial,
+    "the prompt's line order is the page's own geometry, whatever the ordinal turned out to be");
   assert.match(calls[0].system, /NEVER cite a region number that is not in the list/,
     "the frozen system prompt reached the provider intact");
 
@@ -218,73 +253,10 @@ test("f-a1.pr2.d a persist REPLAY re-uses the stored envelopes and buys NO furth
   assert.equal(rows.length, 2, "a replay mints no second pair");
 });
 
-// =======================================================================================
-// EGRESS — the refusal path, and the two dispatch authorizations.
-// =======================================================================================
-
-test("f-a1.pr2.e NO live consent -> the read REFUSES before any model call, and records a 'refused' usage row", { skip }, async () => {
-  const s = await buildWitnessSituation("noconsent", { regions: REGIONS, consent: false });
-  const calls = witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
-
-  await assert.rejects(
-    () => runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc),
-    (err) => err.code === "witness_consent_inactive" && err.witnessRefusal === true,
-  );
-  assert.equal(calls.length, 0, "NO model call — the bytes never left");
-
-  const usage = await readUsageRows(s.taskId);
-  assert.equal(usage.length, 1, "a refusal is still a metering event worth recording");
-  assert.equal(usage[0].channel, "text");
-  assert.equal(usage[0].outcome, "refused");
-  assert.equal(usage[0].engine_id, s.engineId, "the TASK's own engine stamp, never a literal from the runtime");
-  assert.equal(usage[0].prompt_hash, witnessPromptHash("text"));
-  assert.equal((await readTask(s.taskId)).status, "running",
-    "NAMED GAP: there is no clara.fail_witness_facts, so a dispatch-time refusal cannot settle the task — the DB's attempt cap does");
-  assert.equal((await readDispatchAuthorizations(s.firm)).length, 0, "no authorization was minted");
-});
-
-test("f-a1.pr2.f the vision channel refuses the same way, and neither channel bypasses the gate", { skip }, async () => {
-  const s = await buildWitnessSituation("noconsent2", { regions: REGIONS, consent: false });
-  const calls = witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
-  await assert.rejects(
-    () => runWitnessVisionRead(services(), withRuntime, s.taskId, s.claimDoc),
-    (err) => err.code === "witness_consent_inactive",
-  );
-  assert.equal(calls.length, 0, "the vision channel is gated too — one purpose, BOTH channels");
-  const usage = await readUsageRows(s.taskId);
-  assert.deepEqual(usage.map((u) => [u.channel, u.outcome]), [["vision", "refused"]]);
-});
-
-test("f-a1.pr2.g more than one live filing client -> witness_multi_client, no model call", { skip }, async () => {
-  const s = await buildWitnessSituation("multi", { regions: REGIONS });
-  const second = await fx.createClient(s.owner, { name: `${s.owner}-second`, opKey: fx.opk("cli2") });
-  await fx.rootQuery(
-    "insert into clara.document_filings (firm_id, document_id, client_id, basis) values ($1,$2,$3,'legacy-0007')",
-    [s.firm, s.documentId, second]);
-  const calls = witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
-  await assert.rejects(
-    () => runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc),
-    (err) => err.code === "witness_multi_client" && err.witnessRefusal === true,
-  );
-  assert.equal(calls.length, 0);
-});
-
-test("f-a1.pr2.h TWO sha-bound authorizations per document — one per channel, both CONSUMED", { skip }, async () => {
-  const s = await buildWitnessSituation("dispatch", { regions: REGIONS });
-  witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
-  await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc);
-  await runWitnessVisionRead(services(), withRuntime, s.taskId, s.claimDoc);
-
-  const auths = await readDispatchAuthorizations(s.firm);
-  assert.equal(auths.length, 2, "each model call wraps its OWN dispatch — never one authorization shared across two egresses");
-  for (const a of auths) {
-    assert.equal(a.purpose, WITNESS_PURPOSE);
-    assert.equal(a.event_type, WITNESS_EVENT_TYPE);
-    assert.equal(Number(a.event_seq), s.versionN, "task-driven: the 'event' is the task's own version_n");
-    assert.equal(a.document_sha256, s.sha256, "sha-bound (0090 §7b) — an authorization for document A can never be spent on document B");
-    assert.ok(a.consumed_at != null, "consume is the linearization point and it COMMITTED");
-  }
-});
+// THE EGRESS CELLS — the consent refusals, the terminal settle (B1), the pre-egress media-type
+// and size refusals (M4/N5), the mid-run park (M5) and the two dispatch authorizations — live in
+// their own battery: packages/runtime/tests/f-a1-witness-egress.test.mjs. Their subject is the
+// DISPATCH BOUNDARY; this file's is the lane's orchestration and what it persists.
 
 // =======================================================================================
 // PROVENANCE — the engine stamp must name the model that is about to be called.
@@ -325,13 +297,19 @@ test("f-a1.pr2.p an absent engine snapshot is a wiring fault, never a skipped ch
 // USAGE METERING — one row per call, including a failed one.
 // =======================================================================================
 
-test("f-a1.pr2.i one usage row per model call, with token counts, duration and outcome", { skip }, async () => {
+test("f-a1.pr2.i M2 EXACTLY one usage row per model call — counted AFTER the persist, against calls made", { skip }, async () => {
   const s = await buildWitnessSituation("usage", { regions: REGIONS });
-  witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
-  await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc);
-  await runWitnessVisionRead(services(), withRuntime, s.taskId, s.claimDoc);
+  const calls = witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
+  const textRead = await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc);
+  const visionRead = await runWitnessVisionRead(services(), withRuntime, s.taskId, s.claimDoc);
+  // THE COUNT IS TAKEN AFTER THE PERSIST, and that is the whole point of this cell. The writer
+  // accepts an optional inline `usage` blob and forwards it to record_llm_usage_event, so a
+  // caller that passed usage in BOTH places would double every token count in the firm's spend
+  // trail — and a pre-persist count could never see it. One record, at the moment of spending.
+  await persistWitnessPair(services(), withRuntime, s.taskId, textRead, visionRead);
 
   const usage = await readUsageRows(s.taskId);
+  assert.equal(usage.length, calls.length, "total metering rows == model calls MADE");
   assert.equal(usage.length, 2);
   assert.deepEqual(usage.map((u) => u.channel).sort(), ["text", "vision"]);
   for (const u of usage) {
@@ -345,6 +323,25 @@ test("f-a1.pr2.i one usage row per model call, with token counts, duration and o
   }
   const hashes = new Set(usage.map((u) => u.prompt_hash));
   assert.equal(hashes.size, 2, "the two channels are distinguishable in the spend trail by prompt hash");
+});
+
+test("f-a1.pr2.i2 M2 the writer call blobs carry NO usage key — call-time metering is the single record", { skip }, async () => {
+  const s = await buildWitnessSituation("nousageblob", { regions: REGIONS });
+  witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
+  const textRead = await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc);
+  const visionRead = await runWitnessVisionRead(services(), withRuntime, s.taskId, s.claimDoc);
+  // The read receipts DO carry usage (it is what the call cost, and it rides the memoized
+  // envelope) — the assertion is that persistWitnessPair does not forward it.
+  assert.ok(textRead.usage && Number.isInteger(textRead.usage.duration_ms));
+  const seen = [];
+  const spy = async (fn) => withRuntime(async (client) => fn({
+    query: (sql, params) => { if (/persist_witness_facts/.test(sql)) seen.push(params); return client.query(sql, params); },
+  }));
+  await persistWitnessPair(services(), spy, s.taskId, textRead, visionRead);
+  assert.equal(seen.length, 1, "one persist call");
+  const [, textBlob, visionBlob] = seen[0];
+  assert.deepEqual(Object.keys(JSON.parse(textBlob)).sort(), ["citations", "envelope", "input_pin", "prompt_hash"]);
+  assert.deepEqual(Object.keys(JSON.parse(visionBlob)).sort(), ["envelope", "input_pin", "prompt_hash"]);
 });
 
 test("f-a1.pr2.j a FAILED model call still meters — a call that cost money is recorded whether or not it produced a read", { skip }, async () => {
@@ -421,4 +418,41 @@ test("f-a1.pr2.n a MALFORMED value answer degrades to silence rather than aborti
   assert.equal(out.status, "done", "the pair persists; the predicate is what refuses");
   const verdict = await readWitnessState(s.documentId, out.receipt.text_extraction_id, out.receipt.vision_extraction_id);
   assert.equal(verdict.corroborated, false);
+});
+
+test("f-a1.pr2.n2 M1 a DOWNGRADED answer makes the read corroboration-INELIGIBLE, and the pair does not corroborate", { skip }, async () => {
+  // THE ACCOUNTING ONE. `amount_due` is an absence-permissive belt: an honest `not_printed` takes
+  // its absence arm and the pair still corroborates. So if a DOWNGRADE emitted a bare
+  // not_printed, a model that said "amount_due is printed" and then failed to quote it would be
+  // read as "amount_due is not printed" — a derived absence taking a permissive arm, and the
+  // amount would corroborate on a document nobody actually read correctly (law 27(2)).
+  const s = await buildWitnessSituation("ineligible", { regions: REGIONS });
+  const unusable = { state: "value", raw: "   " };   // said value, gave nothing usable
+  witnessMock({
+    text: { ...wire({ "invoice.amount_due": unusable }), citations: citationsFor(s) },
+    vision: wire({ "invoice.amount_due": unusable }),
+  });
+  const textRead = await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc);
+  const visionRead = await runWitnessVisionRead(services(), withRuntime, s.taskId, s.claimDoc);
+  assert.equal(textRead.envelope.corroboration_ineligible, "witness_answer_unusable");
+  assert.equal(visionRead.envelope.corroboration_ineligible, "witness_answer_unusable");
+
+  const out = await persistWitnessPair(services(), withRuntime, s.taskId, textRead, visionRead);
+  assert.equal(out.status, "done", "C4: the read persists WHOLE — the writer never refuses a read for being wrong");
+  const verdict = await readWitnessState(s.documentId, out.receipt.text_extraction_id, out.receipt.vision_extraction_id);
+  assert.equal(verdict.corroborated, false,
+    "the strict reader refuses an ineligible read outright rather than corroborating around the hole");
+  assert.equal(verdict.corroboration_ineligible, "witness_answer_unusable",
+    "and it SAYS why, so the reason reaches a human instead of dying in the runtime");
+
+  // The control: the SAME document with an honest not_printed for amount_due DOES corroborate,
+  // which is what makes the cell above a statement about downgrades rather than about amount_due.
+  const ctl = await buildWitnessSituation("ineligible-control", { regions: REGIONS });
+  witnessMock({ text: { ...wire(), citations: citationsFor(ctl) }, vision: wire() });
+  const t2 = await runWitnessTextRead(services(), withRuntime, ctl.taskId, ctl.claimDoc);
+  const v2 = await runWitnessVisionRead(services(), withRuntime, ctl.taskId, ctl.claimDoc);
+  assert.equal("corroboration_ineligible" in t2.envelope, false);
+  const out2 = await persistWitnessPair(services(), withRuntime, ctl.taskId, t2, v2);
+  const ok = await readWitnessState(ctl.documentId, out2.receipt.text_extraction_id, out2.receipt.vision_extraction_id);
+  assert.equal(ok.corroborated, true, "an honest not_printed on amount_due takes the belt's absence arm");
 });

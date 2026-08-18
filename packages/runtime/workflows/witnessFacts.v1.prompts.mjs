@@ -25,11 +25,10 @@
 // STRUCTURALLY REFUSE (CLR10, aborting the whole persist) a `value` answer whose `raw` is blank
 // or over 200 characters. A provider's strict structured-output mode is happiest with a FLAT,
 // all-required, nullable-valued object, and a model WILL occasionally emit `{"state":"value",
-// "raw":null}`. So the model answers a flat shape and `toWriterEnvelope` below normalizes it to
-// the writer's exact discriminated shape, downgrading anything malformed to `not_printed`. That
-// is the permissive-writer / strict-reader split applied one layer earlier: a bad answer
-// persists whole as silence and the predicate's belts refuse it (silence is never a pass), and
-// a single malformed field can never abort a persist C4 requires to complete.
+// "raw":null}`. So the model answers a flat shape and `toWriterEnvelope` normalizes it to the
+// writer's exact one — downgrading anything unusable, and STAMPING the envelope
+// corroboration-ineligible when it does (M1), so a derived absence never passes as an honest
+// silence. A single malformed field can then never abort a persist C4 requires to complete.
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -197,8 +196,14 @@ const SHARED_RULES = [
 
 export const WITNESS_TEXT_SYSTEM_PROMPT = [
   "You are a careful reader of ONE Malaysian supplier invoice for an accounting firm. You are",
-  "given the document's OCR text as NUMBERED REGIONS, in document order. Your job is to report",
-  "what the document PRINTS and to CITE the region you read each fact from.",
+  "given the document's OCR text as NUMBERED REGIONS. Your job is to report what the document",
+  "PRINTS and to CITE the region you read each fact from.",
+  "",
+  "The regions are laid out in READING ORDER — top to bottom, left to right, page by page — so",
+  "you can follow the page as it was printed. The NUMBER on each region is its IDENTIFIER, not",
+  "its position: the numbers are not consecutive down the page and you must never infer anything",
+  "from their order, their gaps, or which number is larger. Cite the number printed on the region",
+  "you actually read, exactly as it appears in brackets.",
   "",
   WITNESS_INERT_DATA_LINE,
   "",
@@ -256,16 +261,20 @@ export const WITNESS_VISION_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * The TEXT channel's user prompt: the numbered regions, in the DB's own ordinal order.
+ * The TEXT channel's user prompt: the numbered regions, RENDERED IN THE ORDER THE CALLER GIVES
+ * THEM (reading order — the caller sorts spatially) and each carrying the DB's own ordinal as
+ * its identifier.
  *
- * THE NUMBERING IS NOT OURS TO CHOOSE. `region_idx` resolves server-side against
- * `clara.witness_citation_regions(ocr_extraction_id)` — the writer's own resolver ordinal
- * published as a reader (0095 §1, review M5). The caller reads that function and passes its
- * rows through unchanged; this builder RENDERS them and never re-sorts, re-numbers, or
- * re-indexes. `clara.get_document_extract`'s `idx` is a DIFFERENT ordinal and must never reach
- * here (0054:32-42 — it is dense across every chosen extraction, so it would resolve a citation
- * to the wrong region the moment the document carries a second done extraction, which is
- * exactly the state a witness document is in).
+ * THE NUMBERING IS NOT OURS TO CHOOSE, and it is separate from the ORDER. `region_idx` resolves
+ * server-side against `clara.witness_citation_regions(ocr_extraction_id)` — the writer's own
+ * resolver ordinal published as a reader (0095 §1, review M5) — and that ordinal is
+ * `row_number() over (order by id)` over UUIDs, i.e. effectively random with respect to the
+ * page. So this builder RENDERS whatever order it is handed and copies each `idx` through
+ * VERBATIM: the idx is the key, the position is only presentation. It never re-numbers.
+ * `clara.get_document_extract`'s `idx` is a DIFFERENT ordinal and must never reach here
+ * (0054:32-42 — it is dense across every chosen extraction, so it would resolve a citation to
+ * the wrong region the moment the document carries a second done extraction, which is exactly
+ * the state a witness document is in).
  *
  * @param {{ regions: Array<{idx: number, page: number|null, text_content: string}> }} args
  * @returns {{ prompt: string, shown: number, truncated: boolean }}
@@ -276,7 +285,15 @@ export function buildWitnessTextPrompt({ regions }) {
   let shown = 0;
   let truncated = false;
   for (const r of regions ?? []) {
-    const text = String(r?.text_content ?? "").replace(/\r?\n/g, " ").trim();
+    // THE DOCUMENT IS DATA, AND THE FENCE IS PART OF THAT PROMISE (PRD §6 law 5). A region whose
+    // OCR text happens to contain the closing fence would otherwise end the data block early and
+    // let everything after it read as instructions — the oldest injection shape there is, and one
+    // an attacker only has to print on a PDF to attempt. Neutralized here rather than trusted to
+    // the model: the traced defence is that the fence a reader sees is always one WE emitted.
+    const text = String(r?.text_content ?? "")
+      .replace(/<\/?document_ocr_regions>/gi, "[fence]")
+      .replace(/\r?\n/g, " ")
+      .trim();
     const page = Number.isInteger(r?.page) ? ` p${r.page}` : "";
     const line = `[${Number(r?.idx)}${page}] ${text}`;
     if (used + line.length + 1 > WITNESS_REGION_BLOCK_MAX_CHARS) {
@@ -337,10 +354,13 @@ export function witnessPromptHash(channel) {
   const vocabulary = channel === "text"
     ? [...WITNESS_BELT_FIELDS, ...WITNESS_REFERENCE_ANSWER_FIELDS, ...WITNESS_CITATION_FIELDS]
     : [...WITNESS_BELT_FIELDS, ...WITNESS_REFERENCE_ANSWER_FIELDS];
+  // ONE JSON array rather than fields concatenated around a separator byte. The first cut used a
+  // literal NUL there — invisible in an editor, invisible in a diff, and a control byte inside a
+  // source file the bundle-grep law needs to stay greppable TEXT. JSON.stringify is injective
+  // (it escapes quotes, newlines and control characters inside each member), so it separates the
+  // fields without inventing a byte nobody can see.
   return createHash("sha256")
-    .update(`witnessFacts.v1 ${channel} `, "utf8")
-    .update(system, "utf8")
-    .update(` ${vocabulary.join(",")}`, "utf8")
+    .update(JSON.stringify(["witnessFacts.v1", channel, system, vocabulary]), "utf8")
     .digest("hex");
 }
 
@@ -348,29 +368,49 @@ export function witnessPromptHash(channel) {
 // Wire -> writer normalization.
 // ---------------------------------------------------------------------------------------
 
+/** The `corroboration_ineligible` reason a DOWNGRADED answer stamps on its channel's envelope
+ *  (M1) — the predicate's ineligibility gate (0023:309) then refuses the whole read. */
+export const WITNESS_ANSWER_UNUSABLE = "witness_answer_unusable";
+
+/**
+ * One wire answer -> the writer's discriminated shape, plus whether it was DOWNGRADED.
+ *
+ * A downgrade is not a not_printed. `{state:"value"}` with a blank, over-long or otherwise
+ * unusable rendering means the model SAID the document prints this field and then failed to give
+ * a usable quote — a DERIVED absence. Emitting a bare `not_printed` for it would dress that
+ * derivation in an honest silence's clothes, and every belt in the predicate treats
+ * `not_printed` as a legitimate absence arm. Law 27(2): a derived absence falls to the
+ * fail-closed branch, so the caller stamps `corroboration_ineligible` on the envelope and the
+ * strict reader refuses the read outright rather than quietly corroborating around the hole.
+ */
 function normalizeAnswer(field, wire) {
-  const notPrinted = { state: "not_printed" };
-  if (!wire || typeof wire !== "object") return notPrinted;
-  if (wire.state !== "value") return notPrinted;
+  const downgrade = { answer: { state: "not_printed" }, downgraded: true };
+  if (!wire || typeof wire !== "object") return downgrade;
+  if (wire.state === "not_printed") return { answer: { state: "not_printed" }, downgraded: false };
+  if (wire.state !== "value") return downgrade;
   const raw = typeof wire.raw === "string" ? wire.raw.trim() : "";
-  // A blank or over-long rendering is a REFUSED read, downgraded to silence rather than sent:
-  // the writer would refuse the whole call structurally (CLR10) for either, aborting a persist
-  // C4 requires to complete. Never truncated — see WITNESS_RAW_MAX_CHARS.
-  if (raw === "" || wire.raw.length > WITNESS_RAW_MAX_CHARS) return notPrinted;
+  // A blank or over-long rendering is a REFUSED read, downgraded rather than sent: the writer
+  // would refuse the whole call structurally (CLR10) for either, aborting a persist C4 requires
+  // to complete. Never truncated — see WITNESS_RAW_MAX_CHARS.
+  if (raw === "" || wire.raw.length > WITNESS_RAW_MAX_CHARS) return downgrade;
   const answer = { state: "value", raw: wire.raw };
-  if (!WITNESS_REFERENCE_ANSWER_FIELDS.includes(field)) return answer;
+  if (!WITNESS_REFERENCE_ANSWER_FIELDS.includes(field)) return { answer, downgraded: false };
   const value = typeof wire.value === "string" ? wire.value.trim() : "";
-  if (value === "" || wire.value.length > WITNESS_RAW_MAX_CHARS) return answer;
+  // A dropped `value` is NOT a downgrade: the reading itself stands on its `raw`, and the value
+  // slot is an optional cross-regime convenience (M3). Only the ANSWER going unusable is one.
+  if (value === "" || wire.value.length > WITNESS_RAW_MAX_CHARS) return { answer, downgraded: false };
   // The M3 write-verification, pre-applied so a bad `value` costs the KEY and never the call:
   // an id must be something the document actually prints, and a date must be a real ISO date.
-  if (field === "invoice.invoice_id" && !wire.raw.includes(value)) return answer;
+  if (field === "invoice.invoice_id" && !wire.raw.includes(value)) return { answer, downgraded: false };
   if (field === "invoice.invoice_date") {
-    if (!ISO_DATE.test(value)) return answer;
+    if (!ISO_DATE.test(value)) return { answer, downgraded: false };
     const [y, m, d] = value.split("-").map(Number);
     const probe = new Date(Date.UTC(y, m - 1, d));
-    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() + 1 !== m || probe.getUTCDate() !== d) return answer;
+    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() + 1 !== m || probe.getUTCDate() !== d) {
+      return { answer, downgraded: false };
+    }
   }
-  return { ...answer, value };
+  return { answer: { ...answer, value }, downgraded: false };
 }
 
 /**
@@ -384,22 +424,38 @@ export function toWriterEnvelope(channel, wire) {
   const answersIn = src.answers && typeof src.answers === "object" ? src.answers : {};
   /** @type {Record<string, unknown>} */
   const answers = {};
-  for (const f of WITNESS_BELT_FIELDS) answers[f] = normalizeAnswer(f, answersIn[f]);
-  for (const f of WITNESS_REFERENCE_ANSWER_FIELDS) answers[f] = normalizeAnswer(f, answersIn[f]);
-  return { witness: { channel, contest: src.contest === true, answers } };
+  let downgraded = false;
+  for (const f of [...WITNESS_BELT_FIELDS, ...WITNESS_REFERENCE_ANSWER_FIELDS]) {
+    const out = normalizeAnswer(f, answersIn[f]);
+    answers[f] = out.answer;
+    downgraded = downgraded || out.downgraded;
+  }
+  // N3: CONTEST FAILS TOWARD WITHDRAWAL. `contest` is REQUIRED in the wire schema, so an absent,
+  // non-boolean or otherwise malformed value is a broken read — and the contest marker's only
+  // effect is to WITHDRAW identity fields from corroboration. Reading a malformed marker as
+  // `false` would resolve an unknown in the permissive direction; only an explicit boolean false
+  // means "I looked and the party blocks agree".
+  const envelope = { witness: { channel, contest: src.contest !== false, answers } };
+  // M1: a DERIVED absence must not wear an honest not_printed's clothes. One unusable answer
+  // makes the whole read corroboration-ineligible; the predicate's own gate (0023:309) refuses
+  // it. Deliberately whole-read rather than per-field: the belts are a conjunction, and a
+  // reader that silently corroborated the other ten fields around a hole is the exact
+  // permissive-by-omission shape law 27(2) exists to close.
+  if (downgraded) envelope.corroboration_ineligible = WITNESS_ANSWER_UNUSABLE;
+  return envelope;
 }
 
 /**
  * Normalize the TEXT channel's citations into the writer's array.
  *
- * ONE CITATION PER FIELD, ENFORCED HERE. Two citations for one field_path that differ in
- * region_idx or raw make the writer forfeit the WHOLE call (0095 §6, the 0023 write-boundary
- * idiom) — a model that hedges by citing twice would lose the entire pair, both channels, for a
- * disagreement about one field. First-wins collapse keeps the reading and lets the predicate's
- * own belts judge it. An unknown field_path, a non-integer idx, a reference citation with no
- * quote, and an over-long quote are all DROPPED: the fact then persists geometry-less and C2
- * refuses to corroborate it, which is the designed outcome for a citation that cannot be
- * checked — never a refusal of the read.
+ * A CONFLICTING DUPLICATE DROPS ITS FIELD ENTIRELY (M3). Two citations for one field_path that
+ * differ make the writer forfeit the WHOLE call (0095 §6, the 0023 write-boundary idiom), so the
+ * conflict is resolved HERE — by DISCARDING that field's geometry, not by keeping whichever
+ * citation arrived first. The model was told a double citation is discarded, and first-wins
+ * would promote a coin flip to evidence: picking one of two disagreeing claims and attaching a
+ * real polygon to it. The fact persists GEOMETRY-LESS and C2 refuses it. Identical duplicates
+ * are not a conflict and collapse silently. An unknown field_path, a non-integer idx, and a
+ * reference citation with a missing or over-long quote are DROPPED the same way.
  *
  * @param {unknown} wire
  */
@@ -407,11 +463,12 @@ export function toWriterCitations(wire) {
   const list = Array.isArray(/** @type {{citations?: unknown}} */ (wire ?? {}).citations)
     ? /** @type {Array<Record<string, unknown>>} */ (/** @type {{citations: unknown[]}} */ (wire).citations)
     : [];
-  /** @type {Map<string, {field_path: string, region_idx: number, raw?: string}>} */
+  /** @type {Map<string, {entry: {field_path: string, region_idx: number, raw?: string}, key: string} | null>} */
   const byField = new Map();
   for (const c of list) {
     const field = typeof c?.field_path === "string" ? c.field_path : "";
-    if (!WITNESS_CITATION_FIELDS.includes(field) || byField.has(field)) continue;
+    if (!WITNESS_CITATION_FIELDS.includes(field)) continue;
+    if (byField.get(field) === null) continue;      // already conflicted — stays dropped
     // `Number(null)` is 0 and `Number.isInteger(0)` is true, so a missing idx would sail through
     // a bare Number() coercion and reach the writer as region_idx 0 — a number the ordinal never
     // produces (it is 1-based), so it would resolve nothing and silently look like a failed
@@ -420,16 +477,24 @@ export function toWriterCitations(wire) {
     const idx = c.region_idx;
     const isReferenceOnly = !WITNESS_BELT_FIELDS.includes(field);
     const raw = typeof c?.raw === "string" ? c.raw : "";
+    /** @type {{field_path: string, region_idx: number, raw?: string}} */
+    let entry;
     if (isReferenceOnly) {
       // The seven reference paths carry their quoted rendering in the CITATION (0095 §10) —
       // without one the writer inserts nothing at all, so an empty quote is a dropped citation.
       if (raw.trim() === "" || raw.length > WITNESS_RAW_MAX_CHARS) continue;
-      byField.set(field, { field_path: field, region_idx: idx, raw });
+      entry = { field_path: field, region_idx: idx, raw };
     } else {
       // For a belt field the writer reads ONLY region_idx; the rendering is the answer's own
-      // `raw`, the single locked source (0095 §9). A `raw` here would be a second copy.
-      byField.set(field, { field_path: field, region_idx: idx });
+      // `raw`, the single locked source (0095 §9). A `raw` here would be a second copy — and it
+      // is excluded from the conflict key for the same reason: two belt citations differing only
+      // in `raw` name the SAME geometry and are not in conflict.
+      entry = { field_path: field, region_idx: idx };
     }
+    const key = JSON.stringify([entry.region_idx, entry.raw ?? null]);   // injective + PRINTABLE
+    const seen = byField.get(field);
+    if (seen === undefined) byField.set(field, { entry, key });
+    else if (seen.key !== key) byField.set(field, null);   // CONFLICT -> drop the field outright
   }
-  return [...byField.values()];
+  return [...byField.values()].filter((v) => v !== null).map((v) => v.entry);
 }

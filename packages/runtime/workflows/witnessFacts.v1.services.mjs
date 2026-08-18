@@ -132,8 +132,11 @@ export async function callWitnessModel({ channel, system, prompt, schema, file, 
   if (file) {
     const mediaType = witnessMediaType(file.mime);
     if (!mediaType) {
-      // Terminal, and BEFORE any dispatch is consumed by the caller's own ordering: a media type
-      // the vision endpoint cannot read is a fact about the document, not a transient fault.
+      // DEFENCE IN DEPTH ONLY. The authoritative refusal is upstream in the frozen behaviour,
+      // which checks `witnessMediaType` BEFORE minting an authorization (review M4) — reaching
+      // this line would mean an authorization was already consumed for bytes that cannot leave.
+      // Kept because this adapter is callable on its own and must never hand the provider a
+      // media type its conversion throws on.
       throw Object.assign(new Error(`witness vision channel cannot read media type '${file.mime}'`), { code: "bad_type" });
     }
     const bytes = await readFile(file.path);
@@ -172,6 +175,10 @@ export function makeWitnessFactsServices() {
     downloadCanonical: base.downloadCanonical,
     // The ONLY line in this lane that sends anything anywhere.
     callWitnessModel,
+    // The frozen behaviour asks this BEFORE minting an authorization (review M4), so the
+    // provider's own media-type contract has to be readable from outside the adapter.
+    witnessMediaType,
     engineSnapshot: WITNESS_ENGINE_SNAPSHOT,
+    log: (message) => console.error(message),
   });
 }

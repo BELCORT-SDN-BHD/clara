@@ -285,15 +285,16 @@ export const GOVERNED_EGRESS_PURPOSES = Object.freeze({
     gatedAt: "enqueue (clara._enqueue_invoice_facts_core, 0090 §7e) + dispatch, ONCE PER CHANNEL"
       + " (witnessFacts.v1.behavior.mjs) — two authorizations per document, never one shared",
     documentSha256: "required (ck_egress_dispatch_authorizations_doc_sha: must be non-null)",
-    // Stated honestly: unlike the statement lane there is no `fail_witness_facts` verb in the
-    // merged estate, so a dispatch-time refusal cannot settle the task with its named reason.
-    // It is recorded as a clara.llm_usage_events row with outcome='refused' and the task is left
-    // to the DB's own per-lane attempt cap, which settles it 'attempt_cap' with
-    // document.llm_witness_failed. The enqueue gate DOES mint named receipts.
+    // No hold relation: a refusal settles the TASK terminally, the same shape the statement lane
+    // uses. `clara.fail_witness_facts` ships in F-A1 PR-3's migration — i.e. AFTER the runtime
+    // image that calls it, which is safe only because nothing mints an llm_witness task until
+    // that same migration's router recut (the call site is unreachable in the gap). The runtime
+    // ALSO records a clara.llm_usage_events row with outcome='refused' at the moment of the
+    // refusal — that is the metering trail, not the task's verdict.
     heldStatePath:
-      "none — the enqueue gate mints a never-claimed failed receipt ('witness_consent_inactive'"
-      + " / 'witness_multi_client'); a dispatch-time refusal records clara.llm_usage_events"
-      + " outcome='refused' and the claim-time attempt cap settles the task",
+      "none — clara.fail_witness_facts(task,'witness_consent_inactive'), or the enqueue gate's"
+      + " never-claimed failed receipt ('witness_consent_inactive' / 'witness_multi_client');"
+      + " a refused dispatch additionally records clara.llm_usage_events outcome='refused'",
     dataClass: "client_confidential",
     engineIdRequired: true,
   }),

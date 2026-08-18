@@ -55,11 +55,17 @@ type WitnessFactsServices = {
   removeTempFile(path: string): Promise<unknown>;
   downloadCanonical(key: string, destination: string, sha256: string): Promise<unknown>;
   callWitnessModel(call: WitnessModelCall): Promise<{ object: unknown; usage?: Record<string, unknown> }>;
+  /** The provider's media-type contract, asked BEFORE an authorization is minted (review M4):
+   *  bytes that can never leave must not consume a single-use dispatch on the way to finding
+   *  that out. Returns the provider media type, or null when the channel cannot read it. */
+  witnessMediaType(mime: string): string | null;
   /** The engine identity this image serves. The behaviour compares it against the engine_id the
    *  ROUTER stamped on the task BEFORE any egress, so a pair can never carry a provenance
    *  receipt naming a model that was not called. Required, not optional: an absent snapshot is a
    *  wiring fault, and skipping the check when the answer is missing would be fail-open. */
   engineSnapshot: { engineId: string };
+  /** Where a settle failure shouts. Optional; defaults to console.error. */
+  log?: (message: string) => void;
 };
 
 /** The flat document metadata the claim receipt carries on a 'running'/'replayed' claim
@@ -171,7 +177,12 @@ export async function persistWitnessFactsStep(
  *  boundary rather than left to the engine's default three attempts. A transient fault is
  *  rethrown UNCHANGED (code, message and all) so the step retries; anything terminal becomes a
  *  FatalError, which the durable engine does not retry. `classifyWitnessFailure` (frozen) owns
- *  the split; this function only applies it. */
+ *  the split; this function only applies it.
+ *
+ *  THE TASK ITSELF IS ALREADY SETTLED by the time a terminal error reaches here — the behaviour's
+ *  `withTerminalSettle` called `clara.fail_witness_facts(task, code)` on the way out (review B1).
+ *  This function only shapes the ERROR the durable engine sees; it is not what ends the task, and
+ *  it must not be described as one. */
 function rethrowWitness(err: unknown): unknown {
   const verdict = classifyWitnessFailure(err);
   if (verdict.retry) return err;
