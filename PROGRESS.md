@@ -116,7 +116,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on `f-a1/pr1`: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly; annex B carries the assembly record. Next: integration verification → fresh-context review (Codex per the availability rule) → PR | building | — |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on branch f-a1/pr1: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly; annex B carries the assembly record. Next: integration verification → fresh-context review (Codex per the availability rule) → PR | building | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -476,7 +476,7 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   **0094-0095** usage + writer (12/12; clock-ordered pair with the +1µs guarantee). The
   writer lane's TRUE-merged-chain rig caught the one cross-lane defect (fixtures probing
   pre-rename constraint names — the predicate lane had validated against its authoring
-  scaffold); fixed at assembly. Assembly on `f-a1/pr1`: scaffold deleted, numbers 0089-0095
+  scaffold); fixed at assembly. Assembly on branch f-a1/pr1: scaffold deleted, numbers 0089-0095
   claimed, every internal UNNUMBERED reference trued (incl. the `evaluator_versions` data
   value per the 0059 convention), x1-reextraction's stale comment trued, annex B assembly
   record + two Known-issues registrations (the limits-upsert hazard; the statement-pair

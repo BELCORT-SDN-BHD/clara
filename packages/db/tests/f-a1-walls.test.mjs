@@ -368,7 +368,7 @@ test("f-a1.i typed purpose ABSENT: prepare_egress_dispatch refuses witness_extra
 
 test("f-a1.j the witness doc_sha arm forces doc_sha NON-NULL at prepare time (mirrors statement_extraction's arm)", async () => {
   mustBeReady();
-  const { users, clients } = world;
+  const { clients } = world;
   const firm = await firmOf(clients.A2);
   const r = await prepareDispatchSha({ firm, client: clients.A2, documentSha256: null });
   assert.deepEqual(r, { verdict: "unknown", authorization_id: null }, `a null document_sha256 must refuse for purpose=witness_extraction, got ${JSON.stringify(r)}`);

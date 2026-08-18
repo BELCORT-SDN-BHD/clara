@@ -182,7 +182,7 @@ preserved: a witness that cites the buyer's registration as vendor_registration 
 purchase document self-matches and is withdrawn. The wrong-party battery cells and
 D12's pre-committed demotion rule stand unchanged.
 
-**PR-1 assembly record (2026-08-18 late night; branch `f-a1/pr1`, migrations
+**PR-1 assembly record (2026-08-18 late night; branch f-a1/pr1, migrations
 0089-0095).** Four builder lanes, each rig-green on its own throwaway postgres:17;
 adjudications made at assembly: (i) the ONE cross-lane defect — `f-a1-fixtures.mjs`
 probed the pre-rename `_0038` constraint names while 0090 renames them to `_f_a1`;
