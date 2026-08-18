@@ -2,12 +2,13 @@
 
 > **Design doc of record for Wave-F Track A item F-A1** (`docs/plan/active/wave-f-contract.md`
 > §F-A1). **v3, 2026-08-18** — two fresh-context adversarial lanes (attack + independent
-> byte-verify, repo at 84d9c97) reviewed v1 (34 findings folded) and RE-VERIFIED v2 (all
-> resolved; one partial + their 12 new findings folded here). The Codex cross-model pass is BLOCKED by a
-> vendor usage limit until 2026-08-20 — a **named precondition of build PR-1**, not of this
-> doc. Binds under: ADR-0071 G1.1 + C1-C4; digest laws 71-76; PRD §6 (law 5 is the "§6.5"
-> inert-data referent). Every build PR takes the uniform ADR-061 ladder; the predicate and
-> every recut guard is judgement logic (review law 1).
+> byte-verify, repo at 84d9c97): 34 v1 findings folded → 12 more (+1 partial) at the v2
+> re-verify → 2 more at the v3 confirmation (the cross-regime clock; a wording race) —
+> 48 adjudicated, all confirmed on final bytes, both lanes unconditional MERGEABLE. The
+> Codex cross-model pass is BLOCKED by a vendor usage limit until 2026-08-20 — a **named
+> precondition of build PR-1**, not of this doc. Binds under: ADR-0071 G1.1 + C1-C4; digest laws 71-76; PRD §6 (law 5 is the "§6.5"
+> inert-data referent). Every build PR takes the uniform ADR-061 ladder; the predicate
+> and every recut guard is judgement logic (review law 1).
 
 ## 1 · The ruled shape (what is fixed, not designable)
 
@@ -410,13 +411,12 @@ never assumed (law 27(2)).
 
 - **OQ-1 · The LLM vendor's processor status.** Vision sends original client bytes —
   and text sends OCR-derived client content — to the LLM provider. Options:
-  (a) OpenAI under a new ADR-011-grade bundle (DPA, disclosure, PDPA basis,
-  no-training retention, deletion); (b) Azure-hosted OpenAI models, staying inside
-  the existing Azure processor relationship. **Default until ruled: fail-closed** —
+  (a) OpenAI under a new ADR-011-grade bundle (DPA, disclosure, PDPA, no-training
+  retention, deletion); (b) Azure-hosted OpenAI inside the existing processor
+  relationship. **Default until ruled: fail-closed** —
   real-client documents hold; the build proves on labelled synthetic + firm-own.
-  Recommendation: (b) if model availability suffices.
-- **OQ-2 · Ratify the witness_extraction purpose** (one purpose, both channels,
-  sha-bound per document) per WB-R23's typed-consent doctrine.
+  Recommended: (b) if model availability suffices.
+- **OQ-2** · ratify witness_extraction (one purpose, both channels, sha-bound) — WB-R23.
 
 ## 6 · Build sequencing (deploy order BINDING; every recut names its live body)
 
