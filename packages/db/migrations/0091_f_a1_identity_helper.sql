@@ -1,9 +1,9 @@
--- UNNUMBERED_f_a1_identity_helper.sql — F-A1 PR-1, part 0 of 3: THE IDENTITY VERDICT LEAF.
+-- 0091_f_a1_identity_helper.sql — F-A1 PR-1, part 0 of 3: THE IDENTITY VERDICT LEAF.
 -- =====================================================================================
 -- APPLY ORDER (alphabetical, and that is deliberate — nothing else keys on it):
---   0. UNNUMBERED_f_a1_identity_helper.sql   (this file) clara._witness_identity_v1
---   1. UNNUMBERED_f_a1_predicate.sql         clara.evaluate_witness_fact_state_v1 + the freeze
---   2. UNNUMBERED_f_a1_predicate_part2.sql   the two dispatch recuts + the caller census
+--   0. 0091_f_a1_identity_helper.sql   (this file) clara._witness_identity_v1
+--   1. 0092_f_a1_predicate.sql         clara.evaluate_witness_fact_state_v1 + the freeze
+--   2. 0093_f_a1_predicate_part2.sql   the two dispatch recuts + the caller census
 -- Numbers are claimed at MERGE time (hard constraint 10). The three-file split exists for the
 -- repo's 500-line cap; the seam was chosen at the one place the predicate has a genuinely
 -- separable question — "which counterparty block does this registration belong to" — rather

@@ -1,7 +1,7 @@
--- UNNUMBERED_f_a1_usage.sql -- Wave-F Track A, F-A1 PR-1, writer lane piece 1 of 2:
+-- 0094_f_a1_usage.sql -- Wave-F Track A, F-A1 PR-1, writer lane piece 1 of 2:
 -- clara.llm_usage_events + clara.record_llm_usage_event.
 -- =====================================================================================
--- APPLY ORDER: this file FIRST, UNNUMBERED_f_a1_writer.sql SECOND (alphabetical, and that is
+-- APPLY ORDER: this file FIRST, 0095_f_a1_writer.sql SECOND (alphabetical, and that is
 -- deliberate: persist_witness_facts calls clara.record_llm_usage_event, so its dependency must
 -- already exist). Numbers are claimed at MERGE time (hard constraint 10;
 -- .claude/rules/db-migrations.md). Design of record: f-a1-witness-pair-design.md SS3.6 + Annex C.

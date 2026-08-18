@@ -61,10 +61,10 @@ export async function witnessReady() {
     select to_regprocedure('clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)') is not null as predicate,
            to_regprocedure('clara._witness_identity_v1(uuid,uuid,boolean)') is not null as identity,
            exists(select 1 from pg_constraint
-                   where conname = 'ck_document_extractions_engine_kind_0038'
+                   where conname = 'ck_document_extractions_engine_kind_f_a1'
                      and pg_get_constraintdef(oid) like '%llm\\_text\\_facts%') as kinds,
            exists(select 1 from pg_constraint
-                   where conname = 'ck_processing_task_lane_0038'
+                   where conname = 'ck_processing_task_lane_f_a1'
                      and pg_get_constraintdef(oid) like '%llm\\_witness%') as lane,
            position('evaluate_witness_fact_state_v1' in
              (select p.prosrc from pg_proc p
@@ -78,7 +78,7 @@ export async function witnessReady() {
     throw new Error("F-A1 DRIFT: clara.evaluate_witness_fact_state_v1 exists but clara._invoice_fact_state_at does not dispatch to it — part 2 of the pair was not applied");
   }
   if (!s.kinds || !s.lane) {
-    throw new Error("F-A1 DRIFT: the predicate is applied but the witness engine_kind / lane CHECKs are NOT widened. This battery cannot insert a witness row. On a rig apply the local scaffold packages/db/migrations-scaffold/ZZ_rig_only_kind_widening.sql; in CI the WALLS lane's widening is the real dependency.");
+    throw new Error("F-A1 DRIFT: the predicate is applied but the witness engine_kind / lane CHECKs are NOT widened (ck_*_f_a1 absent). This battery cannot insert a witness row. Apply 0090_f_a1_walls.sql first — it renames the 0038-suffixed CHECKs to the _f_a1 suffix this probe reads. (The authoring-era rig scaffold kept the old names; it was deleted at PR-1 assembly.)");
   }
   return true;
 }

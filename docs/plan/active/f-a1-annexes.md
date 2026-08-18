@@ -182,6 +182,25 @@ preserved: a witness that cites the buyer's registration as vendor_registration 
 purchase document self-matches and is withdrawn. The wrong-party battery cells and
 D12's pre-committed demotion rule stand unchanged.
 
+**PR-1 assembly record (2026-08-18 late night; branch `f-a1/pr1`, migrations
+0089-0095).** Four builder lanes, each rig-green on its own throwaway postgres:17;
+adjudications made at assembly: (i) the ONE cross-lane defect — `f-a1-fixtures.mjs`
+probed the pre-rename `_0038` constraint names while 0090 renames them to `_f_a1`;
+caught by the writer lane's TRUE-merged-chain rig (the predicate lane had validated
+against its authoring scaffold, since deleted) and fixed at assembly — the lesson is
+the scaffold class itself: a stand-in the real dependency later diverges from. (ii)
+The filing-client join (design silence): resolved via `document_filings` live
+filings, ambiguity refuses — folded into §3.3. (iii) The M11 census dispositions:
+`invoice.contact_person` / `invoice.myinvois_uuid` / `invoice.myinvois_longid` are
+persisted-but-unread (allowlist-only, no reader) — RETIRED from the witness schema;
+`invoice.tax_breakdown` stays a structured-branch-only key, promotion to a witness
+belt is a `_v2` decision. (iv) 0090 ships at 1803 lines under the 0038=9529-line
+migration precedent (the 500-line harness hook has no CI gate and self-contained
+prestate/tail evidence outranks fragmentation — the predicate lane's 3-way split was
+its own equally valid call). (v) `evaluator_versions.migration_version` trued to
+`0092_f_a1_predicate` per the 0059 convention; every internal UNNUMBERED reference
+renumbered in the claiming commit.
+
 ## Annex C · The test battery sketch (design §7; contract-blind cells ▣)
 
 - Writer: idempotent replay returns the stored receipt ▣ · retry replays memoized

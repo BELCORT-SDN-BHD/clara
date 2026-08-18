@@ -59,7 +59,7 @@ let w = null;
 // existing A10/A11/A9 reversals run unchanged and the remainder must hash to the untouched
 // 19-migration prestate.
 // =========================================================================
-// AMENDMENT F-A1 (Wave-F Track A, PR-1 "the walls", UNNUMBERED_f_a1_walls.sql). Both
+// AMENDMENT F-A1 (Wave-F Track A, PR-1 "the walls", 0090_f_a1_walls.sql). Both
 // members of §6's closed set gain a THIRD deliberately-changed layer, OUTERMOST of all
 // (authored latest, so reversed FIRST — the same "reverse outermost-first" discipline
 // the 0038 block above states). claim_document_processing_task: llm_witness joins the

@@ -1,6 +1,6 @@
--- UNNUMBERED_f_a1_predicate_part2.sql — F-A1 PR-1, part 2 of 3: THE TWO DISPATCH RECUTS.
+-- 0093_f_a1_predicate_part2.sql — F-A1 PR-1, part 2 of 3: THE TWO DISPATCH RECUTS.
 -- =====================================================================================
--- APPLY AFTER UNNUMBERED_f_a1_identity_helper.sql and UNNUMBERED_f_a1_predicate.sql. Numbers are
+-- APPLY AFTER 0091_f_a1_identity_helper.sql and 0092_f_a1_predicate.sql. Numbers are
 -- claimed at MERGE time (hard constraint 10). THIS is the file that moves the hot path: it ships
 -- a change of record of the two LIVE judgement bodies every invoice document already reaches.
 --
@@ -69,7 +69,7 @@ begin
   -- (0.1) THE PREDICATE AND ITS CLOSURE ARE ALREADY IN PLACE. Dispatching to a body that does
   -- not exist would leave every witness document raising 42883 at read time.
   if to_regprocedure('clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)') is null then
-    raise exception 'F-A1 part2 prestate: clara.evaluate_witness_fact_state_v1 is absent — apply UNNUMBERED_f_a1_identity_helper.sql and UNNUMBERED_f_a1_predicate.sql FIRST'
+    raise exception 'F-A1 part2 prestate: clara.evaluate_witness_fact_state_v1 is absent — apply 0091_f_a1_identity_helper.sql and 0092_f_a1_predicate.sql FIRST'
       using errcode='CLR10';
   end if;
   perform clara.verify_evaluator_freeze();

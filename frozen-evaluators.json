@@ -27,8 +27,8 @@
     },
     "clara.evaluate_witness_fact_state_v1": {
       "sha256": "3e2c66c713b43499d79cfedbb419486403400c04bb5febdedfc2001d1621cfb8",
-      "migration": "packages/db/migrations/UNNUMBERED_f_a1_predicate.sql",
-      "note": "F-A1 PR-1, the LLM witness-pair corroboration predicate. UNDEPLOYED: authored on branch f-a1/pr1-predicate and not yet applied to any live project, so the deploy-lock is deliberately absent -- it is granted by the --lock-deployed ceremony AFTER the PR-1 ceremony runs from merged main, never by --update. The migration filename is UNNUMBERED because numbers are claimed at MERGE time (hard constraint 10); this entry must be re-pointed at the numbered filename in the same commit that numbers it, or the MISSING check will fire. Registry closure is FOUR members, one more than the design's three: the file-size split gave the identity geometry its own body (clara._witness_identity_v1), and a called leaf outside the closure is exactly the half-freeze this manifest exists to prevent."
+      "migration": "packages/db/migrations/0092_f_a1_predicate.sql",
+      "note": "F-A1 PR-1, the LLM witness-pair corroboration predicate. UNDEPLOYED: not yet applied to any live project, so the deploy-lock is deliberately absent -- it is granted by the --lock-deployed ceremony AFTER the PR-1 ceremony runs from merged main, never by --update. (Authored as UNNUMBERED_f_a1_predicate.sql; re-pointed to 0092 in the commit that claimed the numbers, per hard constraint 10.) Registry closure is FOUR members, one more than the design's three: the file-size split gave the identity geometry its own body (clara._witness_identity_v1), and a called leaf outside the closure is exactly the half-freeze this manifest exists to prevent."
     }
   }
 }

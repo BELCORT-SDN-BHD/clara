@@ -1,5 +1,5 @@
 // F-A1 (Wave-F Track A) PR-1 piece 2 -- THE WALLS battery, for
-// migrations/UNNUMBERED_f_a1_walls.sql (number claimed at merge). NOT contract-blind: this
+// migrations/0090_f_a1_walls.sql (number claimed at merge). NOT contract-blind: this
 // lane authored the migration, so every cell targets the ACTUAL installed behaviour. Design:
 // docs/plan/active/f-a1-witness-pair-design.md + f-a1-annexes.md (Annex A walls 1-9/12, Annex
 // C "Walls" cells).
@@ -18,9 +18,9 @@
 // ever sets v_lane:='llm_witness'; the fn is ungranted to every app role). Proven instead by
 // (a) successful migration apply, (b) the wb-0020 restore-pair hash match, (c) f-a1.m below.
 //
-// DO NOT run as part of the default sweep (CLARA_MIGRATIONS_DIR must point at a scratch copy
-// of packages/db/migrations containing this file, numbered -- the deliverable ships
-// UNNUMBERED). Orchestrator/rig-only until merged.
+// Runs in the default sweep once 0090 sits in the real migrations chain (post-merge). The
+// authoring-era caveat (scratch CLARA_MIGRATIONS_DIR with a temporarily-numbered copy,
+// because the deliverable shipped UNNUMBERED) retired at PR-1 assembly.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ let ready = false;
 let world = null;
 
 /** THE CAPABILITY, read from the catalog -- the instrument production itself uses. A single
- *  unambiguous marker for "has UNNUMBERED_f_a1_walls.sql landed on this database": the
+ *  unambiguous marker for "has 0090_f_a1_walls.sql landed on this database": the
  *  witness-own concurrency column exists nowhere before this migration. */
 async function f_a1Ready() {
   const r = await rootQuery(
@@ -64,7 +64,7 @@ after(async () => {
 });
 
 function mustBeReady() {
-  assert.ok(ready, "UNNUMBERED_f_a1_walls.sql is not applied on this database (llm_witness_concurrency column absent) -- this battery must FAIL, not skip, against a pre-F-A1 chain");
+  assert.ok(ready, "0090_f_a1_walls.sql is not applied on this database (llm_witness_concurrency column absent) -- this battery must FAIL, not skip, against a pre-F-A1 chain");
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ async function assertCheckViolation(fn, label) {
   }
 }
 
-test("META: UNNUMBERED_f_a1_walls.sql is applied", async () => {
+test("META: 0090_f_a1_walls.sql is applied", async () => {
   mustBeReady();
 });
 

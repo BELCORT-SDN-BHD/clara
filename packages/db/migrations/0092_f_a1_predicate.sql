@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a1_predicate.sql — F-A1 PR-1, part 1 of 3: THE SUCCESSOR PREDICATE.
+-- 0092_f_a1_predicate.sql — F-A1 PR-1, part 1 of 3: THE SUCCESSOR PREDICATE.
 -- =====================================================================================
 -- MIGRATION NUMBER IS CLAIMED AT MERGE TIME (hard constraint 10; .claude/rules/db-migrations.md);
 -- nothing keys on it — the battery gates on the STABLE SUFFIX `_f_a1_predicate`. SPLIT INTO
@@ -55,7 +55,7 @@ begin
     perform 'clara._normalize_invoice_cents(text)'::regprocedure;
     perform 'clara._witness_identity_v1(uuid,uuid,boolean)'::regprocedure;
   exception when others then
-    raise exception 'F-A1 prestate: a declared frozen-closure leaf is absent (clara._fact_hash / clara._normalize_invoice_cents / clara._witness_identity_v1 — apply UNNUMBERED_f_a1_identity_helper.sql FIRST)' using errcode='CLR10';
+    raise exception 'F-A1 prestate: a declared frozen-closure leaf is absent (clara._fact_hash / clara._normalize_invoice_cents / clara._witness_identity_v1 — apply 0091_f_a1_identity_helper.sql FIRST)' using errcode='CLR10';
   end;
   -- (0.2) NOT ALREADY APPLIED — a second apply fails loudly, never silently re-registers.
   if to_regprocedure('clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)') is not null then
@@ -417,7 +417,7 @@ begin
       closure_sha256, migration_version, deployed)
     values('evaluate_witness_fact_state', 1,
       'clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)', h,
-      'UNNUMBERED_f_a1_predicate', false) returning id into e;
+      '0092_f_a1_predicate', false) returning id into e;
   insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
       body_sha256, firm_id)
     select e, o, s, sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text,'UTF8')), null::uuid

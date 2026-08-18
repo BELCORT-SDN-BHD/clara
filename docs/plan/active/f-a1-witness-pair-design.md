@@ -171,7 +171,11 @@ POSITIVE sales-direction evidence): the SELF-REFERENTIAL WITHDRAWAL.** A side
 `client_identifiers` value (kind tin/ssm) is the client's own block, not a
 counterparty — that side is WITHDRAWN from counterparty corroboration. Not an error:
 the region facts persist (C4) and 0022's direction evidence keeps reading them
-(0022:1309-1341). Both sides matching withdraws both and flags contest.
+(0022:1309-1341). Both sides matching withdraws both and flags contest. **The filing
+client resolves via `clara.document_filings`' live filings** (`documents.client_id` is
+GONE at the frontier — measured at build, prestate-pinned in 0091); ≠1 distinct live
+filing client makes the withdrawal unevaluable and every identity verdict REFUSES
+(fail-closed; assembly clarification, 2026-08-18).
 Polarity-free by construction — no document_kind or direction input, so no
 circularity with 0022:1307's derived polarity; the mislabelled-block defense is
 preserved (a witness that cites the buyer's registration as vendor_registration on

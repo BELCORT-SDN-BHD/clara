@@ -116,7 +116,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). In flight: the PR-1 first piece — the 0017 kind-scoped-supersede migration + battery (isolated worktree, resumed post-limit with the M3/M4/M5 addendum) | building | — |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on `f-a1/pr1`: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly; annex B carries the assembly record. Next: integration verification → fresh-context review (Codex per the availability rule) → PR | building | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -394,23 +394,25 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 - **ci.yml exceeds the 500-line harness file limit** (pre-existing; a GitHub workflow cannot
   split across files) — the hook flags every edit; a composite-action refactor is a future
   candidate, not tonight's.
-- **WSL VM idle teardown masqueraded as a disk I/O fault (2026-08-14; NAT half corrected
-  2026-08-15).** After the disk-full recovery, containers died Exited(255) seconds after start
-  and the distro logged `getpwuid(0) failed 5` — read initially as VHDX corruption. The real
-  cause: WSL tears the VM down moments after the last wsl.exe client detaches, so every
-  short-lived poll (`wsl docker ps`) booted the VM, exited, and doomed the containers it was
-  checking. **Correction to the first fix note:** `vmIdleTimeout=-1` is INVALID (silently
-  ignored); `vmIdleTimeout=86400000` holds the VM — but the NAT session STILL dies ~10 min
-  after the last client detaches (port-forwards vanish while the VM lives), so a detached
-  OS-level keeper remains required for any port-dependent work
-  (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList "-e","sleep","43200"`). And never
-  `wsl --shutdown` while the CI runners are busy (it killed running jobs twice) — restart
-  runner services via `wsl -u root systemctl restart`, never by VM teardown. Rig-script law
-  stands: hold one attached client for the life of the stage, and never diagnose VM health
-  through a probe that itself cycles the VM.
+- **WSL VM/NAT operating law** (2026-08-14/15 incident; full narrative in
+  `docs/plan/completed/progress-archive-2026-08.md`): detached keeper for any
+  port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList
+  "-e","sleep","43200"` — NAT dies ~10 min after the last client detaches even with the
+  VM held); NEVER `wsl --shutdown` with runners busy (restart services via
+  `wsl -u root systemctl restart`); never diagnose VM health with a probe that cycles the VM.
 - ~~0057's S0.9 birth self-test cluster-race flake~~ — **RESOLVED 2026-08-15 (PR #241,
   f90e0fd5)**: the checksum-keyed REPEATABLE-READ isolation pin, measured post-BEGIN; full
   record moved verbatim to `docs/plan/completed/progress-archive-2026-08.md` (2026-08-18).
+- **The 0007 firm-limits pseudo-upsert trigger is column-hardcoded**
+  (`_tf_firm_document_limits_upsert`): a partial-column INSERT against an existing firm row
+  silently RESETS the other limit columns to their defaults, and 0090's new
+  `llm_witness_concurrency` is invisible to it entirely (settable only by direct UPDATE).
+  Pre-existing; found by the F-A1 walls lane 2026-08-18, documented in 0090 §4's comment.
+  Fix is its own small migration + battery, unscheduled.
+- **The statement-reader pair self-supersedes by uuid coin flip TODAY** (0038:1781-1798 —
+  same kind, same transaction-scoped `extracted_at`): a live pre-existing defect the F-A1
+  kind-scoping does NOT touch (both readers share one kind); COUNTED and named at every
+  0089 apply, heals at F-A1 PR-4's re-kinding. Design §3.9 note 5 is the record.
 - **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** on this repo under
   Windows, the three tracked long-path PDFs under `packages/runtime/test-storage/` make
   `git rebase --abort` fail (`could not move back`) with the rebase state SURVIVING, and a
@@ -420,54 +422,26 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   long-path writes), then `git symbolic-ref HEAD refs/heads/<branch>`; verify the target sha
   is an ancestor of origin BEFORE resetting so the recovery is free by construction. Prefer
   fresh short-path clones (with `core.longpaths true`) for any conflict-bearing operation.
-- **Local-only test-isolation flake in the db package (pre-existing, NOT a functional defect):**
-  `a21-prestate.test.mjs` leaks `PGDATABASE` from its subprocess setup into the shared Node
-  process, so a full-suite run against a REUSED database inflates failures (13 vs the true 7)
-  and `pipeline.test.mjs`'s own error self-diagnoses the mismatch ("PGDATABASE=a21_prestate_…
-  != url db …"). On a fresh single-pass database the same 7 fail deterministically in the two
-  untouched files (`a21-prestate`, `pipeline` — last touched ba22326/e8dfcce); CI runs both
-  green, so this is a LOCAL sequencing/env artifact. Found by θ during the T17 round
-  (2026-08-14). Fix candidate: scope the env var inside the subprocess only. *(The η/ζ
-  orphan-custody narrative that used to ride this bullet is CLOSED — both lanes merged and
-  ceremonied 2026-08-14/15; the `zeta-custody-20260814`/`eta-custody-20260814` snapshot
-  branches remain in git history as evidence. The v11 tools NUL-byte item was resolved on η's
-  own ladder before merge — the merged `chatTurn.v11.tools.ts` is text-reviewable.)*
+- **Local-only test-isolation flake in the db package** (pre-existing, NOT functional):
+  `a21-prestate.test.mjs` leaks `PGDATABASE` into the shared Node process — reused-DB
+  full-suite runs inflate failures (13 vs the true 7; `pipeline.test.mjs` self-diagnoses the
+  mismatch); CI green both. Fix candidate: scope the env var inside the subprocess. (The η/ζ
+  custody narrative that rode this bullet is CLOSED — custody branches remain in history.)
 - **The estate-wide whitespace-blind blank-op-key idiom** stays REGISTERED under η residuals
   in the Backlog (single-pass estate fix, owner-ruled) — noted here so a Known-issues-only
   reader does not miss it.
-- **The 2026-08-14 disk-full event + the VHDX compaction residue.** C: hit 0 bytes mid-run; root
-  cause was 301 orphaned docker volumes (60.15GB) inside the WSL VHDX — the night's disposable
-  PG17 stages never pruned — plus an 11.4GB npm cache. Both purged (`docker system prune -af
-  --volumes` + cache delete); C: recovered to ~12GB free and the VHDX has ~950G internal room,
-  so container work re-uses the existing allocation without growing the file. RESIDUE: the
-  59.7GB `ext4.vhdx` itself stays large — compaction (`diskpart compact vdisk`) needs an
-  elevated shell, which the agent session does not have; WSL's `--set-sparse` self-reports a
-  data-corruption risk and was not forced. Owner-key item: run the compact from an admin
-  PowerShell if the ~50GB matters. Standing practice going forward: long fleet runs prune
-  docker volumes as stages finish, not at the end.
+- **VHDX compaction residue** (2026-08-14 disk-full event; full narrative archived): the
+  ~60GB `ext4.vhdx` stays large — the elevated `diskpart compact vdisk` is an OWNER-KEY item
+  (runners idle first). Standing practice: fleet runs prune docker volumes as stages finish.
 
 ## Session log
 
 *(Entries through 2026-08-16 moved verbatim to
 `docs/plan/completed/progress-archive-2026-08.md` at the 2026-08-18 clock-out.)*
 
-- **2026-08-18 (the Agentic Charter session)** — the owner's vision-alignment questions
-  driven to full resolution: the 2026-08-16 audit re-grounded by a six-lane code-level
-  deep scan (pinned sonnet-5 xhigh; 340 tool calls; findings N1-N6), the owner grilled
-  through the decision tree one question at a time (every ruling preceded by a plain-language
-  briefing with costs stated; three build recommendations declined and the dissents
-  filed), and **ADR-0071 minted** — judgement becomes the unattended posting authority,
-  the LLM witness pair replaces the reader estate, the rules machine retires, close key ①
-  and bank matching go agentic, reporting goes two-tier, internet goes two-tier,
-  meter-never-cap. Digest re-trued (laws 71-76 + nine clause annotations); PRD /
-  ARCHITECTURE / roadmap surgically amended; `docs/plan/active/wave-f-contract.md` minted
-  (two tracks + the F-A10 retirement condition); PROGRESS split per the outgrow law (terminal
-  lane rows + old session log → `docs/plan/completed/progress-archive-2026-08.md`). Carried one pre-existing
-  uncommitted cosmetic AGENTS.md wording tweak ("menu"→"Harness menu" ×3) found in the
-  tree — named, not silently absorbed. Harness sweep (owner-prompted): `docs/plan/index.md`
-  re-trued (Wave-F live set + the PATH-STABILITY convention made explicit; PRD line 3
-  reconciled); root README + the PR-232 body-notes re-home → immediate follow-up PR (both
-  outside the docs-only fence). Docs-only PR; single-lane review per ADR-0069.
+- **2026-08-18 (the Agentic Charter session)** — ADR-0071 minted (twelve rulings, laws
+  71-76); the full entry moved verbatim to
+  `docs/plan/completed/progress-archive-2026-08.md` at the late-night outgrow sweep.
 - **2026-08-18 (evening, 开工)** — Next 1 executed: #255 deployed as `clara-runtime` v63,
   triple-verified (v62 negative control → v63 PROCESS reads → `/ready`); lane row retired.
   Then the F-A1 design: a seven-lane grounding sweep + completeness critic over the
@@ -488,6 +462,26 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   register / battery sketch — the 500-line split). The 0017 builder lane (killed mid-run
   by the usage limit) RESUMED post-reset with the M3/M4/M5 addendum. S0.9's resolved
   record archived per the outgrow law. Docs-only PR: this truing + the v3.1 fold set.
+- **2026-08-18 (late night, PR-1 build + assembly)** — four builder lanes delivered PR-1's
+  DB estate, each rig-green on its own throwaway postgres:17: **0089** the 0017 kind-scope
+  (10-cell battery; the pre-fix census proved the cross-kind defect live — 16/17 OCR rows
+  superseded, 0/17 post-fix); **0090** the walls (subscriber census →
+  `document.llm_witness_failed` minted + event-type-registered; the witness-OWN concurrency
+  column; four purpose verbs + `prepare_egress_dispatch` recut — two discovered obligations
+  beyond the design's nine; wb-0020 restore pairs machine-derived, 9/9 with byte-exact
+  reversal); **0091-0093** the predicate trio (identity leaf + frozen evaluator, 4-member
+  CLOSED closure + the two dispatch recuts with an 11-body/27-site caller census; 36/36 new
+  + 104/104 pre-existing green; the filing-client join resolved FAIL-CLOSED via
+  `document_filings` — a design silence, folded to §3.3; M11 census: 3 paths retire);
+  **0094-0095** usage + writer (12/12; clock-ordered pair with the +1µs guarantee). The
+  writer lane's TRUE-merged-chain rig caught the one cross-lane defect (fixtures probing
+  pre-rename constraint names — the predicate lane had validated against its authoring
+  scaffold); fixed at assembly. Assembly on `f-a1/pr1`: scaffold deleted, numbers 0089-0095
+  claimed, every internal UNNUMBERED reference trued (incl. the `evaluator_versions` data
+  value per the 0059 convention), x1-reextraction's stale comment trued, annex B assembly
+  record + two Known-issues registrations (the limits-upsert hazard; the statement-pair
+  coin flip). Owner ruling recorded the same evening: review lanes NEVER wait for Codex —
+  native substitutes, Codex rejoins when available.
 
 ---
 

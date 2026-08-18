@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a1_kind_scoped_supersede.sql -- Wave-F Track A, F-A1 PR-1's hard precondition
+-- 0089_f_a1_kind_scoped_supersede.sql -- Wave-F Track A, F-A1 PR-1's hard precondition
 -- (docs/plan/active/f-a1-witness-pair-design.md SS3.9 / SS6.2 / D11): the 0017 authority
 -- trigger's kind-blind supersede is made KIND-SCOPED. This is the FIRST piece of PR-1 --
 -- the CHECK-constraint widenings, lane lists, purpose CHECKs and persist_witness_facts
@@ -92,7 +92,7 @@ declare
 begin
   -- (0.1) The migration this file's trigger belongs to must already be applied.
   if not exists (select 1 from clara.schema_migrations where version ~ '^0017_') then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.1: 0017 is not applied -- clara._tf_set_authoritative_extraction_0017 does not exist yet'
+    raise exception '0089_f_a1_kind_scoped_supersede S0.1: 0017 is not applied -- clara._tf_set_authoritative_extraction_0017 does not exist yet'
       using errcode = 'CLR10';
   end if;
 
@@ -100,12 +100,12 @@ begin
   select prosrc into v_src from pg_proc
     where oid = 'clara._tf_set_authoritative_extraction_0017()'::regprocedure;
   if v_src is null then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.2: clara._tf_set_authoritative_extraction_0017() is absent'
+    raise exception '0089_f_a1_kind_scoped_supersede S0.2: clara._tf_set_authoritative_extraction_0017() is absent'
       using errcode = 'CLR10';
   end if;
   v_sha := encode(sha256(convert_to(v_src, 'UTF8')), 'hex');
   if v_sha <> 'e603399e0f3e92d247609fb4a5d4e1c69bb58dc6c4de9b8170377229928b67fe' then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.2: _tf_set_authoritative_extraction_0017 is not the reviewed 0017 body (prosrc sha256 %) -- refusing to replace an unrecognised body',
+    raise exception '0089_f_a1_kind_scoped_supersede S0.2: _tf_set_authoritative_extraction_0017 is not the reviewed 0017 body (prosrc sha256 %) -- refusing to replace an unrecognised body',
       v_sha using errcode = 'CLR10';
   end if;
 
@@ -117,13 +117,13 @@ begin
      or position('for update' in v_src) = 0
      or position('(new.extracted_at,new.id)>(v_current_at,v_current)' in v_src) = 0
      or position('accepted extraction has no owning document' in v_src) = 0 then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.3: the live trigger body is missing a token this file''s replacement depends on -- re-derive against the live catalog before proceeding'
+    raise exception '0089_f_a1_kind_scoped_supersede S0.3: the live trigger body is missing a token this file''s replacement depends on -- re-derive against the live catalog before proceeding'
       using errcode = 'CLR10';
   end if;
   -- (0.4) PARTIAL-BIRTH GUARD (the 0085 idiom): the live body must NOT already carry any
   -- kind-scoping -- this file refuses to double-apply itself under a different number.
   if position('v_kind_current' in v_src) <> 0 or position('engine_kind=new.engine_kind' in v_src) <> 0 then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.4: the live trigger body already carries kind-scoping -- this file must not apply twice'
+    raise exception '0089_f_a1_kind_scoped_supersede S0.4: the live trigger body already carries kind-scoping -- this file must not apply twice'
       using errcode = 'CLR10';
   end if;
 
@@ -138,7 +138,7 @@ begin
      or v_trig.tgenabled is distinct from 'O'
      -- tgtype 5 = TRIGGER_TYPE_ROW | TRIGGER_TYPE_AFTER | TRIGGER_TYPE_INSERT (bits 0,1,4).
      or v_trig.tgtype is distinct from 5 then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.5: t_document_extractions_authority_0017 is not bound AFTER INSERT FOR EACH ROW ENABLED on clara.document_extractions as expected (name %, enabled %, type %)',
+    raise exception '0089_f_a1_kind_scoped_supersede S0.5: t_document_extractions_authority_0017 is not bound AFTER INSERT FOR EACH ROW ENABLED on clara.document_extractions as expected (name %, enabled %, type %)',
       v_trig.tgname, v_trig.tgenabled, v_trig.tgtype using errcode = 'CLR10';
   end if;
 
@@ -148,7 +148,7 @@ begin
     where p.oid = 'clara._tf_set_authoritative_extraction_0017()'::regprocedure
       and r.rolname = 'clara_fn_owner' and p.prosecdef;
   if v_conf is null or not ('search_path=clara, pg_temp' = any(v_conf)) then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.6: the live trigger is not owned by clara_fn_owner / SECURITY DEFINER / search_path=clara,pg_temp as expected'
+    raise exception '0089_f_a1_kind_scoped_supersede S0.6: the live trigger is not owned by clara_fn_owner / SECURITY DEFINER / search_path=clara,pg_temp as expected'
       using errcode = 'CLR10';
   end if;
 
@@ -162,7 +162,7 @@ begin
       and position('extraction_not_accepted' in prosrc) <> 0
       and position('stale_extraction_version' in prosrc) <> 0
   ) then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede S0.7: clara._assert_opening_extraction_ref no longer carries both extraction_not_accepted and stale_extraction_version -- the design''s "the CLR31 consumer distinguishes them" premise no longer holds'
+    raise exception '0089_f_a1_kind_scoped_supersede S0.7: clara._assert_opening_extraction_ref no longer carries both extraction_not_accepted and stale_extraction_version -- the design''s "the CLR31 consumer distinguishes them" premise no longer holds'
       using errcode = 'CLR10';
   end if;
 end
@@ -204,7 +204,7 @@ begin
     from clara.document_extractions;
   create temporary table _fa1_pre_stash(k text primary key, v numeric) on commit drop;
   insert into _fa1_pre_stash values ('row_count', v_n), ('checksum', v_chk);
-  raise notice 'UNNUMBERED_f_a1_kind_scoped_supersede S0b(a): zero-data-touch stash captured -- % row(s), checksum % -- re-verified byte-for-byte in the tail census',
+  raise notice '0089_f_a1_kind_scoped_supersede S0b(a): zero-data-touch stash captured -- % row(s), checksum % -- re-verified byte-for-byte in the tail census',
     v_n, v_chk;
 
   -- (b) THE PRE-EXISTING SAME-KIND STATEMENT-PAIR COIN-FLIP, COUNTED AND NAMED, NEVER
@@ -220,7 +220,7 @@ begin
      and a.engine_kind = b.engine_kind and a.version_n = b.version_n
      and a.engine_id <> b.engine_id and a.id < b.id
     where a.superseded_by = b.id or b.superseded_by = a.id;
-  raise notice 'UNNUMBERED_f_a1_kind_scoped_supersede S0b(b): PRE-EXISTING same-kind statement-reader-pair coin-flip -- % document(s), % pair(s) where one reader row supersedes its sibling purely on the (extracted_at,id) tie-break. This is a live production condition that PREDATES this file, is NOT introduced or worsened by it (reader1/reader2 stay one engine_kind by design, so within-kind scoping applies to them exactly as document-wide scoping always did), and is NOT repaired here: superseded_by is a one-way, once-only transition (0007:663-676, CLR08), so an in-place fix would itself be an unaudited data mutation. Documented for the record; a remedy (if any) is a separate, deliberate change with its own review.',
+  raise notice '0089_f_a1_kind_scoped_supersede S0b(b): PRE-EXISTING same-kind statement-reader-pair coin-flip -- % document(s), % pair(s) where one reader row supersedes its sibling purely on the (extracted_at,id) tie-break. This is a live production condition that PREDATES this file, is NOT introduced or worsened by it (reader1/reader2 stay one engine_kind by design, so within-kind scoping applies to them exactly as document-wide scoping always did), and is NOT repaired here: superseded_by is a one-way, once-only transition (0007:663-676, CLR08), so an in-place fix would itself be an unaudited data mutation. Documented for the record; a remedy (if any) is a separate, deliberate change with its own review.',
     v_pair_docs, v_pair_rows;
 end
 $pre_addendum$;
@@ -326,24 +326,24 @@ begin
     into v_n, v_chk
     from clara.document_extractions;
   if v_pre_n is null or v_pre_chk is null then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: the S0b(a) zero-data-touch stash is missing -- S0b did not run, or ran in a different transaction'
+    raise exception '0089_f_a1_kind_scoped_supersede tail: the S0b(a) zero-data-touch stash is missing -- S0b did not run, or ran in a different transaction'
       using errcode = 'CLR10';
   end if;
   if v_n is distinct from v_pre_n or v_chk is distinct from v_pre_chk then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: clara.document_extractions data CHANGED during this migration (row_count % -> %, checksum % -> %) -- this file must touch the trigger FUNCTION only',
+    raise exception '0089_f_a1_kind_scoped_supersede tail: clara.document_extractions data CHANGED during this migration (row_count % -> %, checksum % -> %) -- this file must touch the trigger FUNCTION only',
       v_pre_n, v_n, v_pre_chk, v_chk using errcode = 'CLR10';
   end if;
-  raise notice 'UNNUMBERED_f_a1_kind_scoped_supersede tail: zero-data-touch CONFIRMED -- % row(s), checksum % identical before and after', v_n, v_chk;
+  raise notice '0089_f_a1_kind_scoped_supersede tail: zero-data-touch CONFIRMED -- % row(s), checksum % identical before and after', v_n, v_chk;
 
   select prosrc into v_src from pg_proc
     where oid = 'clara._tf_set_authoritative_extraction_0017()'::regprocedure;
   if v_src is null then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: the trigger function is absent after replacement'
+    raise exception '0089_f_a1_kind_scoped_supersede tail: the trigger function is absent after replacement'
       using errcode = 'CLR10';
   end if;
   v_sha := encode(sha256(convert_to(v_src, 'UTF8')), 'hex');
   if v_sha = 'e603399e0f3e92d247609fb4a5d4e1c69bb58dc6c4de9b8170377229928b67fe' then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: the live body is still the pre-file 0017 body -- the replacement did not take'
+    raise exception '0089_f_a1_kind_scoped_supersede tail: the live body is still the pre-file 0017 body -- the replacement did not take'
       using errcode = 'CLR10';
   end if;
 
@@ -359,14 +359,14 @@ begin
      or position('for update' in v_src) = 0
      or position('(new.extracted_at,new.id)>(v_current_at,v_current)' in v_src) = 0
      or position('(new.extracted_at,new.id)>(v_kind_current_at,v_kind_current)' in v_src) = 0 then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: the replaced body is missing an expected kind-scoping or carried-over token, or does not carry engine_kind=new.engine_kind at exactly the three expected sites (got %)',
+    raise exception '0089_f_a1_kind_scoped_supersede tail: the replaced body is missing an expected kind-scoping or carried-over token, or does not carry engine_kind=new.engine_kind at exactly the three expected sites (got %)',
       (select count(*) from regexp_matches(v_src, 'de\.engine_kind\s*=\s*new\.engine_kind', 'g')) using errcode = 'CLR10';
   end if;
   -- The pointer block must carry NO superseded_by write of its own any more -- every
   -- assignment to superseded_by in the body must sit in the within-kind block, which is
   -- textually ABOVE the pointer's own "update clara.documents" line.
   if position('set superseded_by=' in substring(v_src from position('update clara.documents' in v_src))) <> 0 then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: a superseded_by write survives at or after the pointer block -- the within-kind/pointer split did not land as designed'
+    raise exception '0089_f_a1_kind_scoped_supersede tail: a superseded_by write survives at or after the pointer block -- the within-kind/pointer split did not land as designed'
       using errcode = 'CLR10';
   end if;
 
@@ -377,7 +377,7 @@ begin
       and not tg.tgisinternal;
   if v_trig.tgname is distinct from 't_document_extractions_authority_0017'
      or v_trig.tgenabled is distinct from 'O' or v_trig.tgtype is distinct from 5 then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: the trigger binding moved (name %, enabled %, type %)',
+    raise exception '0089_f_a1_kind_scoped_supersede tail: the trigger binding moved (name %, enabled %, type %)',
       v_trig.tgname, v_trig.tgenabled, v_trig.tgtype using errcode = 'CLR10';
   end if;
 
@@ -387,11 +387,11 @@ begin
   if v_owner is distinct from 'clara_fn_owner' or v_secdef is distinct from true
      or v_conf is null or not ('search_path=clara, pg_temp' = any(v_conf))
      or v_acl is distinct from '{clara_fn_owner=X/clara_fn_owner}' then
-    raise exception 'UNNUMBERED_f_a1_kind_scoped_supersede tail: owner/security/search_path/ACL drifted (owner %, secdef %, config %, acl %)',
+    raise exception '0089_f_a1_kind_scoped_supersede tail: owner/security/search_path/ACL drifted (owner %, secdef %, config %, acl %)',
       v_owner, v_secdef, v_conf, v_acl using errcode = 'CLR10';
   end if;
 
-  raise notice 'UNNUMBERED_f_a1_kind_scoped_supersede tail: OK -- clara._tf_set_authoritative_extraction_0017 replaced (old sha e603399e..., new sha %), kind-scoped within-kind bookkeeping installed at all three engine_kind=new.engine_kind sites, the document-wide pointer comparison and corrupt-pointer guard carried verbatim, superseded_by writes now live ONLY in the within-kind block, trigger binding/owner/security/search_path/ACL unmoved, zero document_extractions data rows touched (checksum-proven), and the pre-existing same-kind statement-pair coin-flip is counted and left untouched per S0b(b). No table created or altered; workflow/graphile_worker/spike untouched.',
+  raise notice '0089_f_a1_kind_scoped_supersede tail: OK -- clara._tf_set_authoritative_extraction_0017 replaced (old sha e603399e..., new sha %), kind-scoped within-kind bookkeeping installed at all three engine_kind=new.engine_kind sites, the document-wide pointer comparison and corrupt-pointer guard carried verbatim, superseded_by writes now live ONLY in the within-kind block, trigger binding/owner/security/search_path/ACL unmoved, zero document_extractions data rows touched (checksum-proven), and the pre-existing same-kind statement-pair coin-flip is counted and left untouched per S0b(b). No table created or altered; workflow/graphile_worker/spike untouched.',
     v_sha;
 end
 $tail$;

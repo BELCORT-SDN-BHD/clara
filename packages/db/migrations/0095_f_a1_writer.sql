@@ -1,7 +1,7 @@
--- UNNUMBERED_f_a1_writer.sql -- Wave-F Track A, F-A1 PR-1, writer lane piece 2 of 2:
+-- 0095_f_a1_writer.sql -- Wave-F Track A, F-A1 PR-1, writer lane piece 2 of 2:
 -- clara.persist_witness_facts (the atomic idempotent two-row persist).
 -- =====================================================================================
--- APPLY ORDER: UNNUMBERED_f_a1_usage.sql FIRST (clara.record_llm_usage_event, called from
+-- APPLY ORDER: 0094_f_a1_usage.sql FIRST (clara.record_llm_usage_event, called from
 -- SS11 below), this file SECOND -- and LAST in F-A1 PR-1's whole DB deploy order (design SS6):
 -- the 0017 kind-scoped fix, the walls (kinds/lane/prefix CHECKs + the witness-own concurrency
 -- column) and the predicate (+ its identity leaf + the two dispatch recuts) must already be
@@ -87,7 +87,7 @@ begin
 
   -- (0.2) THE SIBLING USAGE FILE (dependency: SS11 below calls record_llm_usage_event).
   if to_regprocedure('clara.record_llm_usage_event(uuid,uuid,uuid,text,text,text,int,int,int,text)') is null then
-    raise exception 'f_a1_writer prestate: clara.record_llm_usage_event is absent -- apply UNNUMBERED_f_a1_usage.sql first' using errcode='CLR10';
+    raise exception 'f_a1_writer prestate: clara.record_llm_usage_event is absent -- apply 0094_f_a1_usage.sql first' using errcode='CLR10';
   end if;
 
   -- (0.3) THE 0017 KIND-SCOPED FIX -- read positively: the within-kind marker this file's

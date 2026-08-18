@@ -1,7 +1,7 @@
 // Wave-F Track A, F-A1 PR-1 — the 0017 authority trigger's KIND-SCOPED supersede
 // (docs/plan/active/f-a1-witness-pair-design.md SS3.9 / SS6.2 / D11).
 //
-// migrations/UNNUMBERED_f_a1_kind_scoped_supersede.sql replaces
+// migrations/0089_f_a1_kind_scoped_supersede.sql replaces
 // clara._tf_set_authoritative_extraction_0017() so that within-kind supersede
 // bookkeeping is scoped to engine_kind, decoupled from the document-wide
 // authoritative_extraction_id pointer (which stays exactly as it was: the
@@ -11,9 +11,9 @@
 // one-way once-only transition, 0007:663-676, CLR08).
 //
 // READINESS. Keyed on the LIVE CATALOG, never a migration number: this file's
-// migration is UNNUMBERED on purpose (numbers are claimed at merge,
-// .claude/rules/db-migrations.md) and carries no stable numbered suffix to key
-// a schema_migrations probe against. `hasKindScopedSupersede()` reads the
+// migration was authored UNNUMBERED (numbers are claimed at merge,
+// .claude/rules/db-migrations.md; it landed as 0089 at PR-1 assembly), and the
+// catalog key stays the right probe either way. `hasKindScopedSupersede()` reads the
 // trigger function's own prosrc for the kind-scoping marker. Every cell in
 // this file FAILS LOUDLY against a database that lacks the fix (the 0021-
 // ratchet idiom, x1-helpers.mjs's fail0022): this file's entire purpose is to
@@ -78,7 +78,7 @@ function gate() {
     throw new Error(
       "the kind-scoped 0017 trigger is NOT live (clara._tf_set_authoritative_extraction_0017"
       + " carries no 'v_kind_current' marker) -- apply"
-      + " migrations/UNNUMBERED_f_a1_kind_scoped_supersede.sql (renumbered) first. This battery"
+      + " migrations/0089_f_a1_kind_scoped_supersede.sql (renumbered) first. This battery"
       + " is REQUIRED to fail against a pre-fix database.");
   }
 }
