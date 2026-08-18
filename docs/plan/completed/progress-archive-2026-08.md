@@ -2,9 +2,10 @@
 
 > Split out of `PROGRESS.md` at the 2026-08-18 clock-out (the log's own law: a file that
 > outgrows a read is SPLIT, never rewritten or pruned — every byte below is verbatim).
-> The lane rows here are all terminal (ceremonied or merged); per the state vocabulary a
-> lane leaves the live table once ceremonied. `PROGRESS.md` keeps the live rows and the
-> current session log, and points here.
+> The lane rows here are all terminal (ceremonied, or merged where nothing needed a
+> ceremony — docs/test/CI work); the vocabulary's leave-once-ceremonied rule extends to
+> merged-terminal rows. `PROGRESS.md` keeps the live rows and the current session log,
+> and points here.
 
 ## The Wave-E lane table (terminal rows, as they stood 2026-08-18)
 

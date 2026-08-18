@@ -9,8 +9,8 @@ file wins or it is stale — and truing it is the first thing you do.
 
 *(as of 2026-08-18, the Agentic Charter — trued at every clock-out)*
 
-- **THE AGENTIC CHARTER IS RULED (ADR-0071, 2026-08-18; digest laws 71-75).** The owner's
-  eleven-ruling grilling (structured-question record, plain-language briefing before every
+- **THE AGENTIC CHARTER IS RULED (ADR-0071, 2026-08-18; digest laws 71-76).** The owner's
+  twelve-ruling grilling (structured-question record, plain-language briefing before every
   ruling) resolved the vision-alignment questions wholesale: **the agent's own judgement is
   the unattended posting authority** (zero runtime guardrails, permanent — build dissent on
   file); amounts are custodied by the **LLM witness pair** (same provider, text×vision
@@ -477,12 +477,12 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 - **2026-08-18 (the Agentic Charter session)** — the owner's vision-alignment questions
   driven to full resolution: the 2026-08-16 audit re-grounded by a six-lane code-level
   deep scan (pinned sonnet-5 xhigh; 340 tool calls; findings N1-N6), the owner grilled
-  through eleven decision points one at a time (every ruling preceded by a plain-language
+  through the decision tree one question at a time (every ruling preceded by a plain-language
   briefing with costs stated; three build recommendations declined and the dissents
   filed), and **ADR-0071 minted** — judgement becomes the unattended posting authority,
   the LLM witness pair replaces the reader estate, the rules machine retires, close key ①
   and bank matching go agentic, reporting goes two-tier, internet goes two-tier,
-  meter-never-cap. Digest re-trued (laws 71-75 + eight clause annotations); PRD /
+  meter-never-cap. Digest re-trued (laws 71-76 + nine clause annotations); PRD /
   ARCHITECTURE / roadmap surgically amended; `docs/plan/active/wave-f-contract.md` minted
   (two tracks + the F-A10 retirement condition); PROGRESS split per the outgrow law (terminal
   lane rows + old session log → `docs/plan/completed/progress-archive-2026-08.md`). Carried one pre-existing

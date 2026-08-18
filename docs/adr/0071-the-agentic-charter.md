@@ -1,7 +1,7 @@
 ### ADR-0071 — THE AGENTIC CHARTER: judgement becomes the posting authority; the LLM witness pair replaces the reader estate; the rules machine retires (2026-08-18)
 
-**Eleven owner rulings plus two recorded principles, minted in one structured-question
-grilling session (in-session record; the orchestrator's plain-language briefing preceded
+**Twelve owner rulings (the G1 family's five, plus G2-G4 and G6-G9), one dissolution
+(G5) and two recorded principles, minted in one structured-question grilling session (in-session record; the orchestrator's plain-language briefing preceded
 every ruling, and each option carried its cost stated in advance). The session's evidence
 base is the 2026-08-16 vision-alignment audit
 (`docs/plan/research/wave-f/vision-alignment-audit.md`) plus a six-lane code-level deep
@@ -177,7 +177,10 @@ the agent's, at full product force, prepared for human review and human e-filing
   point" is superseded — wake-wrapped posting/matching entry points now exist for the
   agent. The *lane-split-by-GRANT* principle itself STANDS and is the mechanism of the
   new grants. Digest law 2's invariant (d) is amended: the agent's *read* path stays
-  structurally read-only; a wake-scoped, allowlisted agentic *write* lane exists.
+  structurally read-only; a wake-scoped, allowlisted agentic *write* lane exists. The
+  invariant's old "plan→approve" descriptor narrows with it to the human lane (the
+  agentic lane has no approve step by G1's own terms) — named here so the phrase's
+  removal from PRD §6.2(d)/ARCHITECTURE §0(4) is itemized, not silent.
 - **ADR-025 + digest law 5 + law 12:** the human-signed-rule posting authority, the
   "no unbounded/agent-initiated auto-approve" scope and rule-derived autopost
   eligibility are superseded by G1/G1.4. §4.95's nine-control OCR-sales envelope
