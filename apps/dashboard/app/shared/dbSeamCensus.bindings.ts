@@ -254,7 +254,11 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // unconsumed BY THE DASHBOARD and correctly listed here; the dashboard's own
   // get_document_extract reader (chat/review.ts getMachineTotal) needs the region `id`,
   // not the ordinal, and was deliberately left alone.
-  get_document_extract: "basis byte_size bytes_verified_at client_id document document_kind engine_confidence engine_id engine_kind envelope_text extraction_id extraction_status field_path filed_at filing financial_date id idx locator locator_kind max_chars mime_type monetary_cents monetary_raw normalization_version original_filename page_count raw_sha256 sha256 status text_content unassigned version_n",
+  // `extracted_at` entered with migration 0090_f_a1_walls (WAVE F / F-A1 review M7): the
+  // cross-REGIME precedence clock the witness dispatch resolves by. Its consumer is the
+  // runtime (PR-3a's autoDraft_v8 selection rule), the census's declared blind spot —
+  // unconsumed BY THE DASHBOARD and listed here deliberately, same as `idx` above.
+  get_document_extract: "basis byte_size bytes_verified_at client_id document document_kind engine_confidence engine_id engine_kind envelope_text extracted_at extraction_id extraction_status field_path filed_at filing financial_date id idx locator locator_kind max_chars mime_type monetary_cents monetary_raw normalization_version original_filename page_count raw_sha256 sha256 status text_content unassigned version_n",
   get_draft_review: "account_type counterparty_name current_outcome decision extraction_id fingerprint line_no name_normalized proposal registration_normalized signed_by vendor_binding_id",
   // `month`/`months`/`skip_reason` are INTERNAL keys of _fa_asset_charges and the
   // run-skip helper, pulled in by the depth-2 closure; they are not envelope keys.
