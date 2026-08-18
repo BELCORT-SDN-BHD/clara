@@ -5,10 +5,11 @@
 Clara runs the accounting lifecycle (onboarding → ongoing close → tax → reporting)
 under professional human control, with a shared RLS-isolated Postgres as the
 single source of truth. As of **ADR-0071 (the Agentic Charter, 2026-08-18)**
-routine bookkeeping — coding, posting, bank matching, adjustments — runs
-unattended on the agent's own judgement over structural DB walls; professional
-control concentrates at the statutory boundary (the close's finalize/attest/
-reopen keys, reconciliation exceptions, statutory wording, e-filing). This repo
+routine bookkeeping — coding, posting, bank matching, adjustments — is RULED to
+run unattended on the agent's own judgement over structural DB walls (the build
+is Wave F, `docs/plan/active/wave-f-contract.md`); professional control
+concentrates at the statutory boundary (the close's finalize/attest/reopen
+keys, reconciliation exceptions, statutory wording, e-filing). This repo
 is the rebuild from the Gate-1 audit + Gate-2 blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
 `docs/ARCHITECTURE.md`. Plans → `docs/plan/index.md`.**
 
@@ -28,7 +29,7 @@ is the rebuild from the Gate-1 audit + Gate-2 blueprint. **Product law → `docs
   checkpointed; LangGraph JS is the named fallback behind a seam. Proven in the
   Slice-0 spike (`spike/`, `docs/ARCHITECTURE.md` Appendix A). The
   host is ratified in `docs/adr/` (ADR-014). `packages/runtime` is the full
-  durable runtime — the chat loop, the unattended coder, document intake, the
+  durable runtime — the chat loop, the coding floor, document intake, the
   consumer lanes and daily belts (`packages/runtime/README.md`).
 - **Dashboard** — **Next.js 15** on **Cloudflare Pages** (`app.clarabook.com`;
   Vercel dropped, ADR-024), dashboard-direct on the Supabase session JWT
@@ -38,7 +39,7 @@ is the rebuild from the Gate-1 audit + Gate-2 blueprint. **Product law → `docs
 
 ```
 packages/db/          versioned SQL migrations + seeds + DR tooling + test rig
-packages/runtime/     the Clara durable runtime (WDK substrate; chat + unattended lanes; intake)
+packages/runtime/     the Clara durable runtime (WDK substrate; chat + coding lanes; intake)
 packages/reporting-render/  the sealed-render worker (pinned Typst; the clara-render Fly app)
 packages/backup/      the clara-backup Fly service (daily DR bundle to R2; docs/ops/DR.md)
 apps/dashboard/       Next.js 15 dashboard (plumbing-grade pages; the OS surface lands at Wave G)
