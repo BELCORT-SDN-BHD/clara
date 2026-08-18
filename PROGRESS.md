@@ -24,11 +24,10 @@ file wins or it is stale — and truing it is the first thing you do.
   disciplines). Wave F re-scoped to TWO PARALLEL TRACKS —
   `docs/plan/active/wave-f-contract.md` is the contract of record, and its **F-A10
   retirement condition** guarantees two architectures never enter Wave G. Supersessions
-  enumerated exactly in the ADR; §6.1 and invariants (a)(b)(c) stand untouched. The
-  2026-08-18 deep scan's findings **N1-N6** are registered (N1 draft-time SST-shape gap →
-  F-A2 · N2 report-preview shipped-refusal → F-A5 OBO lane · N3 chart_kind ignored by the
-  renderer → F-A5 · N4 close-read grant reversal recipes → F-A4 · N5 fix-field backfill →
-  F-T4 · N6 doc-truth staleness, Known issues).
+  enumerated exactly in the ADR; §6.1 and invariants (a)(b)(c) stand untouched. Deep-scan
+  findings **N1-N6** registered with dispositions (N1→F-A2 · N2/N3→F-A5 · N4→F-A4 ·
+  N5→F-T4 · N6 doc-truth staleness incl. stale `0056:57`/autodraft-header/runtime-README
+  lines — Wave-F fix-queue riders).
 
 - **Live DB: 83 migrations, frontier `0088` (the #43 wording lexicon).** The wording-seed
   ceremony ran 2026-08-16 after the owner's sign-off
@@ -119,9 +118,8 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 | Reconciler belt isolation | the §C open-task-settle starvation + five same-class probe gaps closed (per-item wraps mirroring A/B/D · assembly-level `belt()` containment · halt identity preserved by class); 19-cell unit battery; law-1 review (no blocker) + fix round (honest heartbeat rationale · counted §C failures · spoofed-name contrast cell); merged 2bd7e12c — **deploy pending, Next 1** | **merged (deploy pending)** | #255 |
 
-*(The Wave-E table's sixteen terminal rows — α through the corpus design, all
-ceremonied/merged — moved verbatim to
-`docs/plan/completed/progress-archive-2026-08.md` at the 2026-08-18 clock-out.)*
+*(The sixteen terminal Wave-E rows moved verbatim to
+`docs/plan/completed/progress-archive-2026-08.md`, 2026-08-18.)*
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -489,8 +487,10 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   (two tracks + the F-A10 retirement condition); PROGRESS split per the outgrow law (terminal
   lane rows + old session log → `docs/plan/completed/progress-archive-2026-08.md`). Carried one pre-existing
   uncommitted cosmetic AGENTS.md wording tweak ("menu"→"Harness menu" ×3) found in the
-  tree — named here, not silently absorbed. Docs-only PR; single-lane review per
-  ADR-0069.
+  tree — named, not silently absorbed. Harness sweep (owner-prompted): `docs/plan/index.md`
+  re-trued (Wave-F live set + the PATH-STABILITY convention made explicit; PRD line 3
+  reconciled); root README + `_PR-BODY-NOTES.md` re-home → immediate follow-up PR (both
+  outside the docs-only fence). Docs-only PR; single-lane review per ADR-0069.
 
 ---
 

@@ -5,6 +5,17 @@ Authored at the 2026-08-12 harness docs-tree refactor, when this directory split
 former REBUILD-PLAN.md's archived chronology). `research/` is untouched by this refactor and
 keeps its own tree of per-wave cross-model research dossiers.
 
+**The path-stability convention (made explicit 2026-08-18, at the ADR-0071 harness sweep):**
+a document minted under `active/` KEEPS its minted path when its wave closes — **status
+lives in this index, never in the path** — because closed-wave paths are cited verbatim by
+immutable artifacts (migrations `0064`/`0065`, hooks, test batteries cite
+`docs/plan/active/wave-e-…` at file:line, and a migration's bytes can never be edited).
+Documents authored AFTER a wave closes (ceremony as-runs, acceptance records) land in
+`completed/` directly. This sentence is the reconciliation of PRD line 3's
+active-then-completed wording with the citation-stability that the immutable estate
+requires — the same authority split as the ζ squash-subject precedent (the directory is
+the authority; frozen testimony goes stale honestly).
+
 **Wave contracts of CLOSED waves are historical records of record: never re-grill them, cite
 them.** If you're building against a closed wave's mechanism, read the file below for what was
 ratified and why — don't re-open the question with the owner. Only `active/` documents describe
@@ -13,13 +24,14 @@ work still open for negotiation.
 Status key: **live** = current build target, changes expected · **historical** = closed, frozen,
 cite-only · **superseded** = replaced/retired, kept only as a pointer to where its content went.
 
-## `active/` — the forward roadmap + Wave E's contract set (Wave E CLOSED 2026-08-16, live frontier 83/`0088`)
+## `active/` — Wave F's live set + Wave E's citation-stable historical set (Wave E CLOSED 2026-08-16; ADR-0071 ruled 2026-08-18; live frontier 83/`0088`)
 
 | File | Status | Hook |
 |---|---|---|
-| `roadmap.md` | live | Wave F/G forward roadmap, the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
-| `wave-g-e2e-corpus-design.md` | live | The Wave-G factory-reset + full E2E corpus DESIGN, for the owner's sitting (owner-directed 2026-08-16): the slot matrix (3–4 additional real clients at RPR rigor, two consecutive FY closes each, green-field vs brown-field), the golden-standard handover per client, the per-client run script, the exercise-every-gate rule against the vacuous-green class, the edge-case lens, and eleven marked owner decisions. **Nothing in it is ratified.** |
-| `wave-e-contract.md` | historical | The Wave E contract of record, E-R1..E-R14 (ADR-065) — ratified, never re-grilled (digest law 67); cite-only now the wave is ceremonied. |
+| `wave-f-contract.md` | **live** | **The Wave-F contract of record** (ADR-0071 execution): Track A the agentic core (F-A1 witness-pair extraction → F-A2 agentic posting → bank/close/reporting/filing/internet agency, F-A1..A9) ∥ Track B tax (F-T1..T4), plus **F-A10 — the retirement completion condition** (two architectures never enter Wave G). |
+| `roadmap.md` | live | Wave F/G forward roadmap (re-scoped two-track at ADR-0071), the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
+| `wave-g-e2e-corpus-design.md` | live | The Wave-G factory-reset + full E2E corpus DESIGN, for the owner's sitting (owner-directed 2026-08-16): the slot matrix (3–4 additional real clients at RPR rigor, two consecutive FY closes each, green-field vs brown-field), the golden-standard handover per client, the per-client run script, the exercise-every-gate rule against the vacuous-green class, the edge-case lens, and eleven marked owner decisions. **Nothing in it is ratified**, and its step-4 "standing rules earn autopost" wording takes a G1-alignment amendment at the sitting (ADR-0071). |
+| `wave-e-contract.md` | historical | The Wave E contract of record, E-R1..E-R14 (ADR-065) — ratified, never re-grilled (digest law 67); cite-only now the wave is ceremonied. **ADR-0071 supersedes specific clauses in place** (E-R5/E-R18 approver, E-R11 key ①, E-R13 absorbed, #25) — the file's bytes stay; the ADR names the changes. |
 | `wave-e-design-skeleton.md` | historical | Campaign design skeleton, §1–§2.8 (part 1 of 4) — as-built; the ceremony as-runs are the operative record. |
 | `wave-e-design-skeleton-part2.md` | historical | Skeleton continued, §2.9–§2.12 (the E-R6 close-model / E-R12 client-facts hookup). |
 | `wave-e-design-skeleton-part3.md` | historical | Skeleton continued, §3–§6. |
@@ -140,11 +152,12 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-lane-beta-acceptance.md` | historical | Lane β as-run acceptance record (`0056`, PR #228). |
 | `wave-e-lane-gamma-acceptance.md` | historical | Lane γ as-run ceremony record: `0057` applied quiesce-free, E5 taken live, the trap re-proven (PR #231). |
 
-### The former REBUILD-PLAN.md
+### The former REBUILD-PLAN.md + the PROGRESS archive
 
 | File | Status | Hook |
 |---|---|---|
 | `rebuild-plan-history.md` | historical | The former REBUILD-PLAN.md's verbatim Phase-3 + Phase-4 dated STATUS chronology, archived at this refactor. |
+| `progress-archive-2026-08.md` | historical | PROGRESS.md's split-out (the outgrow law, 2026-08-18): the sixteen terminal Wave-E lane rows + the session log through 2026-08-16, verbatim. |
 
 ## `docs/plan/` root
 
