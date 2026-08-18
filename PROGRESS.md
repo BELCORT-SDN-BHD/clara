@@ -32,8 +32,9 @@ file wins or it is stale — and truing it is the first thing you do.
 - **Live DB: 90 migrations, frontier `0095` (the F-A1 witness estate — ceremonied
   2026-08-19 ~03:30 MYT, `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): 28/28
   positive reads, evaluators deployed 4/4 one-way, LIVE-INERT for witness work until
-  PR-3 mints the lane. Field firsts: 0092's in-file quiesce guard fired correctly
-  (structural D1); the statement-pair coin-flip measured on live (15 docs/24 pairs,
+  PR-3 mints the lane. Field notes: the in-file quiesce guard (0023's mechanism,
+  carried by 0092) FIRED in a live ceremony for the first time — the recipe now waits
+  110s post-stop; the statement-pair coin-flip measured on live (15 docs/24 pairs,
   named not repaired, heals at PR-4).** Earlier: the wording-seed
   ceremony ran 2026-08-16 after the owner's sign-off
   (`docs/plan/completed/masb-wording-ceremony-asrun.md`): 22 statutory-wording rows + 9
@@ -441,8 +442,7 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Session log
 
-*(Entries through 2026-08-16 moved verbatim to
-`docs/plan/completed/progress-archive-2026-08.md` at the 2026-08-18 clock-out.)*
+*(Entries through 2026-08-16: verbatim in `docs/plan/completed/progress-archive-2026-08.md`.)*
 
 - **2026-08-18 (the Agentic Charter session)** — ADR-0071 minted (twelve rulings,
   laws 71-76); full entry in the archive.

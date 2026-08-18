@@ -51,7 +51,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-final-ceremony-asrun.md` | completed/ | The 0077-0084 live ceremony as run (η wake wrappers + ζ render family + B4): D1 write-quiesce, the chatTurn v11 deploy, the freeze deploy-lock (140/140), positive reads throughout. |
 | `b3-reopen-ceremony-asrun.md` | completed/ | The 0085-0086 live ceremony as run (B3): backup-first, D1 quiesce, ALL-PASS positive reads (81/`0086`, the segregated 5-arg body, the 4-arg form gone), two probe instrument defects owned in-line. |
 | `masb-wording-ceremony-asrun.md` | completed/ | The 0087-0088 live ceremony as run (#43): backup-first, no quiesce, ALL-PASS reads (83/`0088`; en 5/5 + zh 5/5 verified — E-R14 OPEN; ms 4/5 per the sign-off), the owner's three dispositions of record. |
-| `f-a1-pr1-ceremony-asrun.md` | completed/ | The 0089-0095 live ceremony as run (F-A1 PR-1, 2026-08-19): backup-first, D1 with the 110s staleness wait (0092's in-file quiesce guard — structural D1, a first), 28/28 positive reads (90/`0095`), evaluator deploy flip 2→4 + `--lock-deployed`, the sslmode deviation + dsn-pipe harness gap recorded, the live statement-pair coin-flip measured (15 docs/24 pairs). |
+| `f-a1-pr1-ceremony-asrun.md` | completed/ | The 0089-0095 live ceremony as run (F-A1 PR-1, 2026-08-19): backup-first, D1 with the 110s staleness wait (the 0023-lineage in-file quiesce guard's first live FIRING), 28/28 positive reads (90/`0095`), evaluator deploy flip 2→4 + `--lock-deployed`, the sslmode deviation + dsn-pipe harness gap recorded, the live statement-pair coin-flip measured (15 docs/24 pairs). |
 
 ## `completed/` — closed waves and slices
 

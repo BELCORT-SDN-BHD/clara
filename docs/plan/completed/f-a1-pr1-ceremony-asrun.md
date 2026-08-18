@@ -60,10 +60,12 @@ runtime-only verbs awaiting PR-2's workflow.
 ## Field notes
 
 1. **The 0092 in-file quiesce guard fired, correctly, on the first attempt** — the
-   builders encoded the D1 obligation structurally (refuse while any runtime heartbeat
-   is <90s stale). A first for the estate, and it caught a real gap: the recipe's old
-   8-second post-stop pause is NOT a quiesce. The recipe now reads: stop, wait 110s,
-   apply. The guard's refusal message named the fix exactly.
+   D1 obligation encoded structurally (refuse while any runtime heartbeat is <90s
+   stale; the mechanism is 0023:77-98's, credited in 0092's own header — 0022/0023
+   carry it too). This is the first time the guard has actually FIRED in a live
+   ceremony, and it caught a real gap: the recipe's old 8-second post-stop pause is
+   NOT a quiesce. The recipe now reads: stop, wait 110s, apply. The guard's refusal
+   message named the fix exactly.
 2. **`fly.exe` on Windows exits non-zero ("The handle is invalid") after SUCCESSFUL
    non-tty `ssh console -C` runs** — under `set -e` this reads as failure. Every ssh
    capture in the ceremony script tolerates the exit code and trusts captured output.
