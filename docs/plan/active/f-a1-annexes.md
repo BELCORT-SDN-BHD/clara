@@ -8,7 +8,10 @@
 > verdict MERGEABLE-WITH-CONDITIONS; every condition folded into the design doc the
 > same day). Annex C is the design's §7 test-battery sketch, moved and EXTENDED with
 > the PR-0 fold's cells. Wall
-> numbers (wall 1–12) and "§7 cell" references in the design doc resolve HERE.
+> numbers (wall 1–13) and "§7 cell" references in the design doc resolve HERE.
+> **Wall 13 was added at the adjudicated PR-1 review (2026-08-18, finding B2): the estate
+> survey named the two refusal-code CHECKs but not the row-level UPDATE trigger that owns the
+> queued→failed TRANSITION, and the enqueue gate flips a queued task in place.**
 
 ## Annex A · The estate as-built
 
@@ -106,6 +109,21 @@ distinguished by engine_id with a same-engine_id refusal (0038:1777-1798).
     pins `claim_document_processing_task` and `_enqueue_invoice_facts_core` by exact
     prosrc SHA-256 with machine-derived restore pairs — every recut owes a new pair
     under its stated discipline.
+13. **the queued→failed TRANSITION ARM in `clara._tf_processing_task_update`** (live body =
+    0040 S4.11a's recut of 0038 E2b's recut of 0011:1286; 0042/0044 only NAME it in their
+    censuses and 0051 asserts it byte-UNCHANGED twice). **Missing from the v3 inventory and
+    added at the adjudicated PR-1 review (B2).** Wall 7 widens the two refusal-code CHECKs so
+    the VALUES `witness_consent_inactive` / `witness_multi_client` are storable; this trigger
+    is what admits the MOVE. `_enqueue_invoice_facts_core`'s llm_witness gate does not insert
+    a fresh row when a queued task already exists — it **flips that row in place**
+    (`update … set status='failed', error_code=v_gate … where status='queued'`), and the
+    transition table admitted queued→failed only for `('budget','attempt_cap')`, the two
+    STATEMENT-scoped gate verdicts (0038 E2b) and lane-scoped `skipped_kind` (0040 S4.11a).
+    The flip would therefore raise CLR16 the first time PR-3's router mints a witness task —
+    the same half-wall shape 0038:7200-7205 records for the forgotten second refusal-code
+    CHECK. The arm is LANE-SCOPED (`new.lane='llm_witness'`) exactly as its two predecessors
+    are, so no future writer can flip a queued invoice/classify/ocr/statement task to a
+    witness verdict. Shipped in 0090 section 10; battery cell `f-a1.q`.
 
 **Runtime plane.** Frozen closure = @frozen files + RELATIVE imports only; the
 adapters/services/reader family are globalThis-injected infra, absent from
@@ -182,6 +200,25 @@ preserved: a witness that cites the buyer's registration as vendor_registration 
 purchase document self-matches and is withdrawn. The wrong-party battery cells and
 D12's pre-committed demotion rule stand unchanged.
 
+**PR-1 assembly record (2026-08-18 late night; branch f-a1/pr1, migrations
+0089-0095).** Four builder lanes, each rig-green on its own throwaway postgres:17;
+adjudications made at assembly: (i) the ONE cross-lane defect — `f-a1-fixtures.mjs`
+probed the pre-rename `_0038` constraint names while 0090 renames them to `_f_a1`;
+caught by the writer lane's TRUE-merged-chain rig (the predicate lane had validated
+against its authoring scaffold, since deleted) and fixed at assembly — the lesson is
+the scaffold class itself: a stand-in the real dependency later diverges from. (ii)
+The filing-client join (design silence): resolved via `document_filings` live
+filings, ambiguity refuses — folded into §3.3. (iii) The M11 census dispositions:
+`invoice.contact_person` / `invoice.myinvois_uuid` / `invoice.myinvois_longid` are
+persisted-but-unread (allowlist-only, no reader) — RETIRED from the witness schema;
+`invoice.tax_breakdown` stays a structured-branch-only key, promotion to a witness
+belt is a `_v2` decision. (iv) 0090 ships at 1803 lines under the 0038=9529-line
+migration precedent (the 500-line harness hook has no CI gate and self-contained
+prestate/tail evidence outranks fragmentation — the predicate lane's 3-way split was
+its own equally valid call). (v) `evaluator_versions.migration_version` trued to
+`0092_f_a1_predicate` per the 0059 convention; every internal UNNUMBERED reference
+renumbered in the claiming commit.
+
 ## Annex C · The test battery sketch (design §7; contract-blind cells ▣)
 
 - Writer: idempotent replay returns the stored receipt ▣ · retry replays memoized
@@ -224,3 +261,62 @@ D12's pre-committed demotion rule stand unchanged.
   wrong-page equal-amount shape rides the corpus (M13).
 - Freeze: verify_evaluator_freeze green; FREEZE_GUARDS trips on a doctored body
   (throwaway); wb-0020 restore pairs prove reversal.
+
+**PR-1 adjudicated-review fold (2026-08-18), the cells it added.** Each names the finding it
+closes, so a later reader can tell a cell that guards a ruling from a cell that guards a shape:
+
+- **B1 · the three field classes.** C2's geometry conjunct is scoped to the NINE MONETARY belt
+  members; `invoice.currency` and `invoice.type_code` are TOKENS whose citation is OPTIONAL and
+  which carry no geometry term. The gating cell is a GREEN one: an invoice whose OCR prints only
+  `RM 103.75` — no MYR token anywhere to cite — CORROBORATES. Plus: an uncited type_code
+  corroborates while an uncited CN still refuses; an uncited foreign token still sets
+  `explicit_non_myr`; an unrecognisable token corroborates nothing and is not foreign either;
+  and an uncited MONETARY field still refuses, which is what makes the class split the term
+  under test rather than a general loosening.
+- **B2 · wall 13** (`f-a1.q`): a queued llm_witness task flips to failed on either witness
+  refusal code; an unlisted code is still CLR16; the same code on a queued invoice task is still
+  CLR16 (the arm is lane-scoped).
+- **M1** a cited `invoice.customer_taxid` persists as a verified region (0022:1336-1341 reads it).
+- **M2** `"contest":"unknown"` is a structural refusal; boolean and absent are both accepted.
+- **M3** the reference-value contract: a quoted `Invoice No.: INV-001` with `value` `INV-001`
+  emits `INV-001`; a day-first date rendering plus its `2026-01-15` value emits the ISO form
+  (the form the cross-regime duplicate walls compare); disagreeing channels DROP the
+  key without touching the amount verdict; a `value` outside its `raw`, a non-existent ISO date,
+  and an answer key outside the eleven-plus-two are all refused.
+- **M4** the monetary citation match is token-bounded: `1,234.56` cited to `RM 11,234.56` does
+  NOT verify (geometry-less), while the same rendering inside `Total: RM 1,234.56` does.
+- **M5** parity: `clara.witness_citation_regions(ocr_extraction)`'s whole (idx → region_id) map
+  equals what `_witness_resolve_citation` resolves, and is stable across a witness persist.
+- **M6** a 30-digit rendering persists geometry-less with NULL cents and the predicate refuses —
+  neither side raises 22003; a `raw` over 200 characters is a structural refusal.
+- **M7** the identity leaf is `clara.evaluate_witness_identity_v1` with its own manifest entry
+  AND its own one-member `clara.evaluator_versions` row (the source-side lint requires a version
+  row in the same file for every `clara.evaluate_*` it discovers).
+
+**Re-review pass (NC-1…NC-6). Folded:** NC-1 — the writer's monetary verification is a plpgsql
+statement ladder, not an AND chain: PostgreSQL does not promise operand evaluation order
+(§4.2.14), so the old shape left `clara._normalize_invoice_cents` legally free to run BEFORE the
+magnitude guard and raise 22003 mid-persist; short-circuiting was the planner's luck, not the
+language's law. NC-3 — the minus sign joins BOTH boundary classes (`[^0-9.,-]`), so a witness
+quoting `1.00` off a printed `-1.00` no longer verifies as +100 cents against the very region
+that states the negative.
+
+**NAMED RESIDUAL (NC-2), carried deliberately:** the token boundary is **monetary-only**. The
+seven optional reference paths keep the plain substring test, so a digit-fragment quote can still
+verify for `invoice.customer_registration` / `invoice.vendor_registration` /
+`invoice.customer_taxid`. The direction is fail-OPEN on **the self-referential withdrawal alone**
+— a fragment will not equal `client_identifiers.value_normalized`, so the withdrawal simply does
+not fire and the side is judged on geometry as before; it can produce a `corroborated` identity
+verdict on a mis-quoted registration, never a wrong AMOUNT (`corroborated` carries no identity
+term, N5). It rides PR-2's prompt discipline and PR-3's corpus obligations, with M3's
+`value ⊆ raw` rule already narrowing the `invoice_id` half of the same surface. Closing it is a
+`_v2` decision, not a PR-1 one — the leaf is frozen.
+
+**Checked clean by the re-review (NC-5, NC-6), recorded so the next reader need not re-derive
+it:** the witness envelope's `currency` key carries the alphabetic reduction of what the witness
+actually *read* (e.g. `RM`), not a normalized ISO code — no live consumer reads that key, and
+`explicit_non_myr` (which consumers do read) is the three-valued verdict, so nothing downstream
+is misled. And `clara.witness_citation_regions` grants `clara_runtime` nothing it did not already
+hold: the same rows are reachable to that role through the writer's own resolver on the pinned
+OCR extraction; the function publishes the ORDINAL, which is the thing PR-2 needs and the only
+thing it adds.

@@ -223,6 +223,31 @@ const AUTHORING_0077_WAKE_FNS = [
   "wake_draft_report_spec", "wake_request_report_preview",
 ];
 const AUTHORING_0077_COHORT = [...AUTHORING_0077_WAKE_FNS];
+// 0090-0095 [Wave-F Track A, F-A1] the LLM witness-pair lane. Same closed-set discipline as the
+// blocks above, and its own cohort per the "wholly present or wholly absent" rule (0024's note):
+// folding these into an earlier migration's cohort would make a pre-F-A1 database report a
+// PARTIAL cohort — a false failure several migrations early.
+//
+// THE RUNTIME ROSTER — three names, each with its consumer:
+//   record_llm_usage_event   · 0094. PR-2's runtime meters a model call AT CALL TIME, including a
+//                              call that never reaches a persist. Runtime-only because it is the
+//                              worker's own receipt; no human writes metering.
+//   persist_witness_facts    · 0095. The atomic idempotent two-row persist — the persist_invoice_
+//                              facts precedent exactly (a task-bound runtime writer).
+//   witness_citation_regions · 0095. The ONE citation numbering, published so PR-2's prompt
+//                              builder can number regions against the identical query the server
+//                              resolves a citation with. Runtime-only for the same reason the
+//                              writer is: it exists to serve the worker mid-call, and a human
+//                              read of the same rows already goes through get_document_extract.
+// NO HUMAN NAMES: F-A1 adds no human door. clara_authenticated's F-A1 surface is a table SELECT
+// on clara.llm_usage_events (RLS-scoped), not an EXECUTE, so it belongs to no roster here.
+// The INTERNALS stay ungranted to every application role and are asserted so in-migration:
+// _witness_answers_ok, _witness_resolve_citation, evaluate_witness_fact_state_v1,
+// evaluate_witness_identity_v1 — the sweep's expected=false IS that assertion.
+const WITNESS_F_A1_RUNTIME_FNS = [
+  "record_llm_usage_event", "persist_witness_facts", "witness_citation_regions",
+];
+const WITNESS_F_A1_COHORT = [...WITNESS_F_A1_RUNTIME_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -857,6 +882,10 @@ export const ALLOWED = {
     ...WAVE_A21_RUNTIME_FNS, // 0016 [A2.1 §C] SST evaluators + classify_document (runtime ONLY; agent zero)
     ...WAVE_B_0020_RUNTIME_FNS, // 0020 [§3.3/§3.4/§5.1/§5.3] dispatch authorization + the doc->client resolver
     ...FAIL_CLASSIFY_0024_RUNTIME_FNS, // 0024 the classify lane's terminal-fail writer
+    ...WITNESS_F_A1_RUNTIME_FNS, // 0090-0095 [Wave-F Track A, F-A1] the witness-pair lane's whole
+    // reachable API — usage metering, the atomic pair persist, and the citation numbering PR-2's
+    // prompt builder must number against. The block where the array is declared names each verb
+    // and its consumer; F-A1 grants no human EXECUTE at all
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -998,6 +1027,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
   failures.push(...cohortFailures("0079-0083 wave E render queue", RENDER_ZETA_COHORT, liveNames));
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
+  failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   return failures;
 }
 

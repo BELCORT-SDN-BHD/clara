@@ -35,7 +35,11 @@ async function ensureEvaluatorDeployed() {
     await db.query("update clara.evaluator_versions set deployed=true where not deployed");
   });
   const verified = (await rootQuery("select clara.verify_evaluator_freeze() r")).rows[0].r;
-  assert.equal(verified.verified_deployed, 2, "the one-way evaluator ceremony committed both closures");
+  // FOUR since F-A1 (Wave-F Track A, 0091/0092) registered clara.evaluate_witness_fact_state_v1
+  // and clara.evaluate_witness_identity_v1 beside delta's two. The flip above is `where not
+  // deployed`, so it commits the whole registered roster; this asserts the roster's SIZE, and
+  // delta-contract.test.mjs is where the roster is pinned BY NAME.
+  assert.equal(verified.verified_deployed, 4, "the one-way evaluator ceremony committed every registered closure");
   return `deployed ${pending}`;
 }
 

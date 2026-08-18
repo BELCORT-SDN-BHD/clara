@@ -122,6 +122,52 @@
   the lane states survive in the custody branches, and the acceptance records carry the
   evidence. The worktree's status is clean.
 
+## Entries archived 2026-08-18 late night (outgrow law; moved verbatim)
+
+- **2026-08-18 (the Agentic Charter session)** — the owner's vision-alignment questions
+  driven to full resolution: the 2026-08-16 audit re-grounded by a six-lane code-level
+  deep scan (pinned sonnet-5 xhigh; 340 tool calls; findings N1-N6), the owner grilled
+  through the decision tree one question at a time (every ruling preceded by a plain-language
+  briefing with costs stated; three build recommendations declined and the dissents
+  filed), and **ADR-0071 minted** — judgement becomes the unattended posting authority,
+  the LLM witness pair replaces the reader estate, the rules machine retires, close key ①
+  and bank matching go agentic, reporting goes two-tier, internet goes two-tier,
+  meter-never-cap. Digest re-trued (laws 71-76 + nine clause annotations); PRD /
+  ARCHITECTURE / roadmap surgically amended; `docs/plan/active/wave-f-contract.md` minted
+  (two tracks + the F-A10 retirement condition); PROGRESS split per the outgrow law (terminal
+  lane rows + old session log → `docs/plan/completed/progress-archive-2026-08.md`). Carried one pre-existing
+  uncommitted cosmetic AGENTS.md wording tweak ("menu"→"Harness menu" ×3) found in the
+  tree — named, not silently absorbed. Harness sweep (owner-prompted): `docs/plan/index.md`
+  re-trued (Wave-F live set + the PATH-STABILITY convention made explicit; PRD line 3
+  reconciled); root README + the PR-232 body-notes re-home → immediate follow-up PR (both
+  outside the docs-only fence). Docs-only PR; single-lane review per ADR-0069.
+
+- **WSL VM idle teardown masqueraded as a disk I/O fault (2026-08-14; NAT half corrected
+  2026-08-15).** After the disk-full recovery, containers died Exited(255) seconds after start
+  and the distro logged `getpwuid(0) failed 5` — read initially as VHDX corruption. The real
+  cause: WSL tears the VM down moments after the last wsl.exe client detaches, so every
+  short-lived poll (`wsl docker ps`) booted the VM, exited, and doomed the containers it was
+  checking. **Correction to the first fix note:** `vmIdleTimeout=-1` is INVALID (silently
+  ignored); `vmIdleTimeout=86400000` holds the VM — but the NAT session STILL dies ~10 min
+  after the last client detaches (port-forwards vanish while the VM lives), so a detached
+  OS-level keeper remains required for any port-dependent work
+  (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList "-e","sleep","43200"`). And never
+  `wsl --shutdown` while the CI runners are busy (it killed running jobs twice) — restart
+  runner services via `wsl -u root systemctl restart`, never by VM teardown. Rig-script law
+  stands: hold one attached client for the life of the stage, and never diagnose VM health
+  through a probe that itself cycles the VM.
+
+- **The 2026-08-14 disk-full event + the VHDX compaction residue.** C: hit 0 bytes mid-run; root
+  cause was 301 orphaned docker volumes (60.15GB) inside the WSL VHDX — the night's disposable
+  PG17 stages never pruned — plus an 11.4GB npm cache. Both purged (`docker system prune -af
+  --volumes` + cache delete); C: recovered to ~12GB free and the VHDX has ~950G internal room,
+  so container work re-uses the existing allocation without growing the file. RESIDUE: the
+  59.7GB `ext4.vhdx` itself stays large — compaction (`diskpart compact vdisk`) needs an
+  elevated shell, which the agent session does not have; WSL's `--set-sparse` self-reports a
+  data-corruption risk and was not forced. Owner-key item: run the compact from an admin
+  PowerShell if the ~50GB matters. Standing practice going forward: long fleet runs prune
+  docker volumes as stages finish, not at the end.
+
 ## Known-issues entries archived 2026-08-18 (resolved; moved verbatim per the outgrow law)
 
 - **0057's S0.9 birth self-test is a LATENT CLUSTER-RACE FLAKE on main (2026-08-15, root-caused

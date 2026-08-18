@@ -64,9 +64,11 @@ test("[0022] a bookkeeper re-extracts an already-extracted document: a NEW queue
 
   // The prior extraction is untouched until the NEW one settles: re-extraction is a
   // request, not a retraction. Nothing about the current evidence changes at this point.
-  // (Counted over the invoice_facts chain only: the 0017 authority trigger already
-  // superseded the fixture's PRIMARY OCR extraction when the facts extraction landed, which
-  // is correct and predates this call.)
+  // (Counted over the invoice_facts chain only. Under the original kind-blind 0017 trigger
+  // the fixture's PRIMARY OCR extraction was cross-kind-superseded the moment the facts
+  // extraction landed; since 0089's kind-scoped recut the OCR row stays unsuperseded.
+  // Either way this count reads the invoice_facts kind alone, so the assertion is
+  // regime-independent — comment trued at PR-1 assembly.)
   const live = await rootQuery(
     `select count(*)::int n from clara.document_extractions
       where document_id=$1 and engine_kind='invoice_facts' and superseded_by is not null`,
