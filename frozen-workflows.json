@@ -700,6 +700,22 @@
       "sha256": "ffaf17b5787f4238c54da8e79959acc591d7bb7b4ec55e0c3da614b8d286da52",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/witnessFacts.v1.behavior.mjs": {
+      "sha256": "be68c44de9833c670ab7c39780fed2815c0416906f0a2413787e26568190c25e",
+      "note": "F-A1 PR-2 — the witness pair's behavioural closure: two channels, one typed egress purpose (witness_extraction) dispatched ONCE PER CHANNEL, one atomic persist. UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/witnessFacts.v1.impl.ts": {
+      "sha256": "d34b67be89b1dbc422c8276f9f02130f31e10c36944547a9aed0c31311a51dea",
+      "note": "F-A1 PR-2 — the four steps. Each model call is its OWN memoized step so a persist retry replays the stored envelopes instead of buying two more model calls."
+    },
+    "packages/runtime/workflows/witnessFacts.v1.prompts.mjs": {
+      "sha256": "d032af3fbb4afb41413b052914741262e564a85b7cb8d91eec87e7780a0f1c3b",
+      "note": "F-A1 PR-2 — the prompt closure. FROZEN BY DECISION (design M8): a prompt edit IS a body edit, so every post-deploy tweak is a witnessFacts.v2 + ceremony, and the corpus-tuning loop runs pre-freeze."
+    },
+    "packages/runtime/workflows/witnessFacts.v1.ts": {
+      "sha256": "8b3f21d983f082f5c4fb63a184be107c92abbb9adf689d21903d0871e2e860f0",
+      "note": "F-A1 PR-2 — a brand-new frozen workflow CLASS for the llm_witness lane. Nothing mints its tasks until PR-3's router recut. UNDEPLOYED: the deploy-lock is the ceremony's act."
     }
   }
 }
