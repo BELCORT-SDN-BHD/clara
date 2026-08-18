@@ -141,9 +141,11 @@ set role clara_fn_owner;
 -- for being wrong — but silence is NOT corroboration), and `not_printed` takes the belt's absence
 -- arm. Silence is a refusal, never a pass (law 27(2)). AND THE TWO
 -- STATEMENTS OF ONE WITNESS MUST AGREE: the text witness says each thing twice, once as an
--- envelope answer and once as a cited region the server verified, so `value` must mean EXACTLY
--- ONE verified region and `not_printed` NO region at all. A witness whose envelope contradicts
--- its own citations has not read the document, whichever half happens to be right.
+-- envelope answer and once as a cited region the server verified. A witness whose envelope
+-- contradicts its own citations has not read the document, whichever half happens to be right —
+-- so `not_printed` means NO region on EVERY field, and `value` means EXACTLY ONE verified region
+-- on the NINE AMOUNTS. On the two TOKEN fields `value` means at most one (zero is the honest
+-- uncitable case the class split above exists for; two conflicting regions still refuse).
 create function clara.evaluate_witness_fact_state_v1(p_document uuid, p_text_x uuid, p_vision_x uuid)
   returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $wit$
