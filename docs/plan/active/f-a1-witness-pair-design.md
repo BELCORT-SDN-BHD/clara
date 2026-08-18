@@ -225,8 +225,10 @@ PR-2's prompt builder uses comes from `clara.witness_citation_regions` — the w
 resolver's own ordinal published as a reader (M5), never `get_document_extract`'s
 DIFFERENT idx**; the server resolves idx → region uuid against the PINNED ocr extraction at
 write time (the F9 discipline — uuids bound at write, idx never stored) and VERIFIES:
-the witness's quoted rendering is a substring of the cited region's text_content AND
-parses to the claimed cents. Verification beats content-search on all three v1 holes
+the quoted rendering occurs TOKEN-BOUNDED in the cited region's text_content
+(monetary fields — a bare substring admits digit fragments, review M4/NC-3) AND
+normalizes to the stored cents, re-derived from the rendering itself (PRD §6).
+Verification beats content-search on all three v1 holes
 (ambiguous equal amounts, flattened multi-amount lines, label ownership — the witness
 reads labels in context and its citation is checkable). The vision-witness cannot
 cite (it never sees regions); it contributes the VALUE only, and its agreement is on
@@ -245,8 +247,7 @@ is the RIGHT region: on a multi-page document where a page-1 subtotal equals the
 grand total, a wrong-page citation verifies clean. The independent anchors are the
 vision channel's agreement, the arithmetic identity and the belts; the §7 corpus
 carries a wrong-page equal-amount cell. The witness fact region carries
-`locator_kind='page_polygon'` (0007:207-208's closed set — the 0023:305 locator
-term holds unchanged). The `doc_review`
+`locator_kind='page_polygon'` (0007:207-208's closed set). The `doc_review`
 side-by-side surface highlights the CITED region — verified, so never the
 wrong box.
 
