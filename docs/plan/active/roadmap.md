@@ -5,15 +5,34 @@
 `docs/plan/completed/rebuild-plan-history.md`; live state is `PROGRESS.md`; the `coding_kind`
 roadmap table moved into `docs/ARCHITECTURE.md`.*
 
-## Wave F — tax
+## Wave F — two parallel tracks (re-scoped by ADR-0071, 2026-08-18; contract of record: `docs/plan/active/wave-f-contract.md`)
 
-The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02,
-bad-debt relief); the payroll deadline calendar; **last: the draft tax computation**
-(add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1). *Inherited by
-ADR-0065:* the **settlement-corroboration door BUILD** (E-R13 — executes the registered 7A-R3
-narrowing + defines the alternate corroboration predicate) · the **claims accounting class**
-(employee paid-on-behalf, E-R10) · **third-reader planning** (#25) · the **FX-lite decision**
-(passed through the E grill unruled — must be ruled at F planning).
+**Track A — the agentic core** (the Charter's build half): F-A1 the LLM witness-pair
+extraction (retires the Azure semantic readers + the deterministic reader family; OCR
+demoted to coordinates+text, vendor-swappable) · F-A2 the agentic posting lane (unattended
+judgement-posts across every document class; the rules machine's execution tier retires;
+KB/history becomes the learning fuel) · F-A3 bank agency (agentic match/adjust; the red pen
+stays human) · F-A4 close key ① (begin/abandon + the preparation surface) · F-A5 reporting
+agency (the analysis sandbox, definition self-approval, the OBO evaluator lane, chart-kind
+renderers) · F-A6 the interview model layer · F-A7 the filing verb · F-A8 the internet lane
+(official feeds → effective-dated tables; the open web read tool) · F-A9 metering ·
+F-A10 **the retirement completion condition — two architectures never enter Wave G**.
+
+**Track B — tax** (unchanged in content): the SST engine per the practice map (periods,
+payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline
+calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms —
+the slice allowed to slip to v1.1). The P-TAX split governs: statutory arithmetic in
+effective-dated tables + deterministic evaluators; tax judgement and paperwork are the
+agent's, prepared for human review and human e-filing.
+
+*Dispositions of the old inherited items:* the **settlement-corroboration door** (E-R13) is
+ABSORBED into F-A3's agentic matching (noted, not silently dropped) · the **claims
+accounting class** (E-R10) rides Track B's fix queue — the generic lane now posts
+unattended, so the class needs only its account-convention design · **third-reader
+planning (#25)** is SUPERSEDED by the witness pair (ADR-0071/G1.1) · the **FX-lite
+decision** stays a sitting item; its principle is pre-seeded (ADR-0071/P-FX) and law 18
+(MYR-only) stands · the fix queue: task #17 `closing_transfer` (after the sitting's R1) ·
+P-3 bank zero-census · N1 draft-time SST-shape check · N5 `fix`-field backfill.
 
 ## Wave G — the OS surface
 
@@ -24,7 +43,10 @@ backlog** (E-R10: userflow/signin/signup/firm-setup · raw-document click-throug
 session auth replacing the hand-mint JWT) · the **claims submission/approval surface**.
 *Close-out (owner-ruled 2026-08-11, ADR-0068-adjacent):* the **factory reset + full E2E
 rebuild from raw documents** — the definitive stuck-bytes discharge; beta's "real data
-untouchable" resumption rides the same gate.
+untouchable" resumption rides the same gate. *(ADR-0071 consequence: the corpus E2E tests
+the NEW architecture only — Wave F's F-A10 retirement condition guarantees no second
+architecture survives into it; the corpus doc's step-4 "standing rules earn autopost"
+wording takes its G1-alignment amendment at the corpus sitting.)*
 
 ## Risks (top 8)
 

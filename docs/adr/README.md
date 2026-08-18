@@ -107,8 +107,7 @@ These conventions governed the append-only log and still govern this directory:
 | [0068](0068-the-evening-sitting-b3-ruled.md) | The evening sitting: B3 ruled; Gate-P defers to the Wave-G reset | 2026-08-11 | standing | The `ends_on` reopen variant + its named build trigger; supersedes 0066/PART-2's Gate-P reminder clause. |
 | [0069](0069-harness-grand-refactor.md) | The harness grand refactor: the repo becomes the system of record | 2026-08-12 | standing | Repo-wins state authority; the docs-only review lane (the one ADR-061 amendment); ADRs per-file + this digest; pins hook-enforced; PROJECTLOG/REBUILD-PLAN dissolved. |
 | [0070](0070-the-wave-e-night-run.md) | The Wave E night run: δ + the RS guard land LIVE; the whole-wave authorization | 2026-08-13/15 | standing · *narrative* | Thirteen rulings: the night run's nine (seal-currency, the numeral wall, machine-sealer attribution, the owner-only RS lift, η's deferred OBO chain, the op-key interpretation, same-family freeze imports, consumer-driven core splits, explicit effective dates) + the wave-close supplement's four — **guard polarity/ARM-0** (NULL principal is its own first arm; `is not distinct from`), **adoption semantics** (orphaned proposals approve only through the attestation door; maker/checker measures the DIRECTING human), **the isolation pin** (checksum-keyed per-migration, measured post-BEGIN; blanket raise refused), **requeue re-derives + immediate reap**. Field laws: guarded SUSET pin, session-pin nonce, CONFLICTING-silent-no-run, MAX_PATH staging, the wave presence-gate shape, number-migrations-IN-REPO, a-probe-that-cannot-say-NO. |
-
-**Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
+| [0071](0071-the-agentic-charter.md) | THE AGENTIC CHARTER: judgement becomes the posting authority; the LLM witness pair; the rules machine retires | 2026-08-18 | standing | Eleven rulings + two principles from the owner's vision grilling. Supersedes (exactly enumerated in-file): ADR-015's never-signs clause · ADR-025/laws 5+12 · law 4's agentic-lane reach + WCA-R7 · law 8's judgement half · ADR-047's roster + #25 · law 14's reader half · WB-R2 + 0064's anti-circular (moot) · E-R5/E-R18 · E-R11 key ① · the bank zero-grant law · PRD §8 budgets · ARCH §4.1 no-web. §6.1 and invariants (a)(b)(c) stand. Wave F re-scoped (`docs/plan/active/wave-f-contract.md`); laws 71-75 fold below. | The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
 owner rulings, so it is preserved as a file rather than dropped; the `a` suffix keeps it
 in source order without claiming an ADR number it never had. **The owner may wish to give
@@ -128,6 +127,10 @@ governs.
 > **RE-TRUED 2026-08-16 (the Wave-E clock-out):** laws 68-70 fold ADR-0070's wave-close
 > supplement (rulings 10-13) into the digest; they carry the standing status of their
 > source ADR and enter the ratified set at the owner's next digest sign-off.
+> **RE-TRUED 2026-08-18 (ADR-0071, the Agentic Charter):** the owner's eleven-ruling
+> grilling supersedes the clauses annotated below and folds laws 71-75 (§9). The
+> supersessions were ruled in-session by the owner directly; the annotations here are
+> the re-truing that ADR's own text mandates.
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -140,21 +143,34 @@ governs.
 2. **Four structural invariants, enforced in the DB, not by model discipline:** client
    attribution (≥0.95), provenance binding (`source_doc_sha256` + `document_id` validated
    in-txn), wake authority (per-wake allowlist), write authorization (structural
-   read-only agent role). *(0002; realized 0015)*
-3. **Write authorization is lane-split by GRANT, never detected at runtime.**
-   Agent-never-signs is the ABSENCE of an entry point, not a runtime check. *(0015)*
+   read-only agent role). *(0002; realized 0015. Invariant (d) amended by 0071: the
+   agent's READ path stays structurally read-only; a wake-scoped, allowlisted agentic
+   WRITE lane now exists — (a)(b)(c) untouched.)*
+3. **Write authorization is lane-split by GRANT, never detected at runtime.** *(0015 —
+   the lane-split-by-GRANT principle stands and is the mechanism of 0071's new verbs.
+   The "agent-never-signs is the ABSENCE of an entry point" clause is SUPERSEDED by
+   0071: wake-wrapped posting/matching entry points now exist for the agent.)*
 4. **Maker/checker is modelled always**, hard distinct-approver gate on the high-stakes
    lane, solo firms record an attestation, and the agent can never satisfy a human
-   sign-off. *(0003; BELCORT's threshold is RM100,000 per 0044)*
-5. **Auto-approve is scoped, not forbidden:** no *unbounded or agent-initiated*
-   auto-approve. A human-signed rule IS the posting authority. *(0025)*
+   sign-off. *(0003; BELCORT's threshold is RM100,000 per 0044. SCOPED by 0071: the
+   HUMAN lane keeps all of this unchanged; the agentic lane's unattended writes route
+   to no human checker at any amount, and "never satisfy a human sign-off" narrows to
+   the surviving human acts — close keys ②③, `except_bank_line`, opening-seed
+   approval, statutory wording, `canonical` definitions, capability grants, e-filing.)*
+5. ~~**Auto-approve is scoped, not forbidden:** no *unbounded or agent-initiated*
+   auto-approve. A human-signed rule IS the posting authority.~~ *(0025 — SUPERSEDED
+   by 0071/G1: the agent's own judgement is the unattended posting authority, under
+   the witness-pair and wall regime of law 71.)*
 6. **Reverse-not-delete is structural** — there is no delete verb anywhere in the schema.
    *(0005, 0042a/WB-R29)*
 7. **Visibility-first for everything judgement-flavored**, with exactly ONE ruled
    exception: the drawer-2 close gates. *(0002 + 0065/E-R2)*
 8. **The wiki informs, never decides** — no gate/bound/floor/autopost function may read
    wiki; authority paths must be bit-identical with and without it. *(0004, 0032/WB-R6,
-   0039)*
+   0039. NARROWED by 0071: the mechanical half stands — no DB gate/bound/floor function
+   reads wiki — but on the agentic lane the knowledge layer now lawfully informs the
+   judgement that IS the posting authority, so the bit-identity guarantee is superseded
+   there; the knowledge layer is that lane's learning loop, law 73.)*
 9. **The subledger is intrinsic:** the audited write composes the GL leg and the open item
    in ONE transaction. *(0005; the debt paid at 0052)*
 10. **Idempotency keys are the mandatory floor** — durable-engine step memoization is not
@@ -164,19 +180,26 @@ governs.
 
 ## 2 · Accounting and domain law
 
-12. **Autopost eligibility.** Posting authority derives from verified in-system approvals
+12. ~~**Autopost eligibility.** Posting authority derives from verified in-system approvals
     only: no autopost rules from seeding, ever *(0046/WB-R2)*; hand-drafts are never
     autopost fuel and hand-created rules past the floor are refused *(0063)*; and an entry
     a rule posted itself can never count as evidence for its own authority — the
-    anti-circular floor exclusion *(0064)*.
+    anti-circular floor exclusion *(0064)*.~~ *(SUPERSEDED by 0071/G1.4: the rules
+    machine's execution tier retires; WB-R2 and the anti-circular exclusion are moot
+    with the machinery they governed. Unattended authority is law 71's.)*
 13. **Corroboration is agreement, not confidence.** Two independent readers agreeing to
     the sen ∧ the document's own arithmetic identity ∧ the polygon wall ∧ MYR. Vendor
     self-reported confidence is gone; reader disagreement is a refusal, never a tie to
     adjudicate; `request_reextraction` is human-invoked-only, no machine caller ever.
-    *(0047)*
+    *(0047. ROSTER REDEFINED by 0071/G1.1: the readers are the LLM witness pair — one
+    read of the OCR raw text, one of the original image, same provider, two channels —
+    under the C1-C4 gates (law 72). "Agreement, not confidence" and
+    refusal-on-disagreement stand; the re-extraction clause is untouched.)*
 14. **For bank statements the running-balance CHAIN is the second reader** (structured);
     OCR needs two readers AND the chain. *(0051/WC-R7 — a deliberate strengthening of
-    0047)*
+    0047. AMENDED by 0071: the CHAIN requirement stands as a C3 mechanical identity;
+    the `prebuilt-bankStatement` reader retires with the reader estate, its seat taken
+    by the witness pair.)*
 15. **Unsigned single-column amounts are REFUSED by design**, and `enter_bank_statement`
     binds to a FILED document only. *(0053)*
 16. **Malaysian tax facts live in effective-dated policy tables, never in product-law
@@ -206,7 +229,9 @@ governs.
     *(0065/E-R14)*
 25. **The close model's governance:** three-drawer gates; three keys with a
     firm-configurable authorization list (default owner-only, partners by explicit audited
-    grant); the agent structurally key-less and grant-less. *(0065/E-R2, E-R11)*
+    grant). *(0065/E-R2, E-R11. AMENDED by 0071/G2: key ① — begin/abandon + the whole
+    preparation surface — is agent-holdable; keys ②③ stay owner/partner human acts and
+    B3's segregation wall stands. "Structurally key-less" now describes keys ②③ only.)*
 
 ## 3 · Review and evidence law
 
@@ -373,3 +398,38 @@ governs.
     0019/CLR32); and a human requeue of a failed render RE-DERIVES pinned inputs
     recording both digests (drift consented via `p_accept_drift`), with expired render
     leases reaped immediately. *(0070 §12-13)*
+
+## 9 · The Agentic Charter supplement (folded 2026-08-18; source ADR-0071)
+
+71. **Judgement is the unattended posting authority; walls validate.** The agent
+    posts, matches and adjusts unattended on her own judgement — no human-signed rule,
+    no amount routing, no ramp, no sampling, no dark launch, permanently (the owner's
+    G1.2/G1.3 rulings; the build's contrary recommendation is on file in 0071). What
+    validates: the witness pair (law 72), invariants (a)(b)(c), balance, CLR19, and
+    the receipts. The surviving HUMAN acts, exactly: close keys ②③ ·
+    `except_bank_line` · opening-seed approval · statutory wording · `canonical`
+    definitions · capability grants · e-filing. *(0071/G1-G3)*
+72. **The LLM witness pair.** Unattended amounts require two independent LLM reads —
+    the stored OCR raw text and the original image, same provider, two channels —
+    agreeing to the sen under a versioned deterministic DB predicate (the model never
+    grades its own agreement); every witnessed amount anchors to a layout region; the
+    document's arithmetic identity and the bank chain stay as mechanical checks; both
+    reads persist with model+version and injection-hardened prompts. OCR supplies
+    coordinates and text fidelity only and is vendor-swappable. *(0071/G1.1, C1-C4)*
+73. **The knowledge layer is the learning loop.** The rules machine's execution tier
+    is retired; approved history and per-client patterns feed the context pack, and on
+    the agentic lane knowledge lawfully informs the deciding judgement. No DB
+    gate/bound/floor function reads wiki (law 8's mechanical half). *(0071/G1.4)*
+74. **Reporting is two-tier.** The analysis sandbox is free — watermarked
+    non-authoritative, structurally unreachable from the seal chain; on the formal
+    side the agent self-promotes metric definitions to `firm_approved` and runs the
+    open→evaluate→seal→render chain through the OBO lane. `canonical` stays
+    migration-only; statutory wording stays owner-signed; the claim gate stays
+    mechanical; e-filing stays human. *(0071/G4)*
+75. **The internet is two-tier.** Number-bearing facts (FX, rates, thresholds) enter
+    only through effective-dated policy tables fed from named official sources; open
+    web reading is otherwise unrestricted under three disciplines — fetched content is
+    inert data, every web-derived basis is cited (URL + date + quote), official
+    Malaysian sources are preferred for rules questions. A web page can never be a
+    posting's source document (provenance binding). *(0071/G9; the FX three-moment
+    principle P-FX rides the future FX wave, law 18 unchanged)*

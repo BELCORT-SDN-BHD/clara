@@ -7,7 +7,28 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-16, the Wave E close — trued at every clock-out)*
+*(as of 2026-08-18, the Agentic Charter — trued at every clock-out)*
+
+- **THE AGENTIC CHARTER IS RULED (ADR-0071, 2026-08-18; digest laws 71-75).** The owner's
+  eleven-ruling grilling (structured-question record, plain-language briefing before every
+  ruling) resolved the vision-alignment questions wholesale: **the agent's own judgement is
+  the unattended posting authority** (zero runtime guardrails, permanent — build dissent on
+  file); amounts are custodied by the **LLM witness pair** (same provider, text×vision
+  channels, C1-C4 gates — deterministic DB verdict to the sen, region anchoring, arithmetic
+  identities kept, stamped persisted reads); **the rules machine's execution tier retires**
+  (knowledge layer = the learning loop); close **key ① goes to the agent, keys ②③ stay
+  human**; bank **matching/adjustments go agentic, the red pen stays human**; reporting
+  splits **sandbox-free / formal-side self-approved-to-firm_approved** (canonical + wording
+  governance unchanged); **eval harness DECLINED**; **meter-never-cap**; internet is
+  **two-tier** (official feeds→effective-dated tables + open web reading under three
+  disciplines). Wave F re-scoped to TWO PARALLEL TRACKS —
+  `docs/plan/active/wave-f-contract.md` is the contract of record, and its **F-A10
+  retirement condition** guarantees two architectures never enter Wave G. Supersessions
+  enumerated exactly in the ADR; §6.1 and invariants (a)(b)(c) stand untouched. The
+  2026-08-18 deep scan's findings **N1-N6** are registered (N1 draft-time SST-shape gap →
+  F-A2 · N2 report-preview shipped-refusal → F-A5 OBO lane · N3 chart_kind ignored by the
+  renderer → F-A5 · N4 close-read grant reversal recipes → F-A4 · N5 fix-field backfill →
+  F-T4 · N6 doc-truth staleness, Known issues).
 
 - **Live DB: 83 migrations, frontier `0088` (the #43 wording lexicon).** The wording-seed
   ceremony ran 2026-08-16 after the owner's sign-off
@@ -94,23 +115,13 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave E · α | the E-R12 client-facts trio (`0055`) | ceremonied | #226 |
-| Wave E · β | the close model (`0056`) | ceremonied | #228 |
-| Wave E · γ | period registry + month snapshots (`0057`) | ceremonied | #231 |
-| harness-v2 | the grand refactor — ADR-0069 | merged | #232 |
-| Wave E · δ + RS guard + harness hardening | `0058-0063` + runner hardening + the dispatch-model hook | **ceremonied (LIVE)** | #233 #234 #236 |
-| Wave E · θ | `0064` `get_close_plan` + `/close` + `/reports` — T17 grant round + focused drill + guard-polarity uniformity | **ceremonied (LIVE)** | #237 |
-| Wave E · ε | FS reporting DB layer `0065-0072` — three codex rounds to MERGE-READY, ten-commit rebase with byte-identical contribution guard | **ceremonied (LIVE)** | #235 |
-| Wave E · ζ | render worker + freeze CI half + DR §10, migrations `0079-0083` — seven review rounds (5 blockers incl. a Typst-injection wall and a cross-tenant replay door; a testimony-sweep discipline with a mechanical proof harness); merged 69d11aba. **NOTE: the squash subject on main says "0073-0076" — stale pre-renumber testimony, immutable; the migrations DIRECTORY is the numbering authority and reads 0079-0083.** Fly ceremony ran 2026-08-15 (see posture); DR docs PR #244 | **ceremonied (LIVE)** | #239 #244 |
-| Wave E · η | chatTurn_v11 + four wake wrappers `0077-0078` — behavioural battery with mutation proof; merged f852ae43. B4 (the approve-verb maker rule, `0084`, four arms incl. ARM-0 orphan adoption) merged f90e0fd5→faf33ecb; runtime v11 deployed at the 0077-0084 ceremony | **ceremonied (LIVE)** | #240 #242 |
-| S0.9 runner fix | checksum-keyed per-migration isolation pin (0057 → repeatable read, MEASURED post-BEGIN); the birth-sentinel cluster race killed | **merged** | #241 |
-| Wave-E close paperwork | the 0077-0084 ceremony as-run + the freeze deploy-lock (140/140 locked), merged 263aa2d; ζ's DR-render docs merged 2b01219; this truing PR closes the set | merged | #243 #244 |
-| B3 | `reopen_fiscal_year` → the `ends_on`-dated prior-period adjustment + the segregation wall (reopener≠closer / attested sole / adoption arm), migrations `0085-0086`; four-lens review (9 refuted / 4 survived → fix round → CONFIRMED ×6); found the pre-B3 silent-no-op reopen bug AND the 0056 closing_transfer/SST latent (task #17); merged 3203093, **ceremonied 2026-08-16** | **ceremonied (LIVE)** | #247 |
-| ε wording-state fix | the four assert-shipped-state cells → law-shaped fixtures (three cuts to an honest discriminator; the counterfactual table as proof); sequenced AHEAD of the wording merge; merged 585346f0 | **merged** | #246 |
-| MASB wording seed | the #43 packet → statutory wording via the 0067-sanctioned path, migrations `0087-0088`; payload re-derived clean twice; **owner sign-off 2026-08-16** (both-labels ratified · benar-dan-patut held · asymmetry accepted); merged cd0dea2, **ceremonied 2026-08-16 — E-R14 OPEN (en+zh issuable)** | **ceremonied (LIVE)** | #249 |
-| E-R9 battery | the 30-cell close-lifecycle battery → review round (catalog-derived machine-role census · ARM-0 predicate-identity pin · `revise_entry` freeze arm · hard B3 gate); 30/30 zero-skip at `0088`; merged d179e04a | **merged** | #253 |
-| Wave-G corpus design | the owner-directed E2E corpus design (5 slots incl. BEE, two consecutive FY closes each, green+brown split, OD-1..11 + P-1..3); review round restored the (65,747.97) sign convention at every restatement + argued OD-9/10/11 inline; merged 0970062f | **merged** | #254 |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` (F-A1 witness-pair extraction first) | design | — |
+| Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 | Reconciler belt isolation | the §C open-task-settle starvation + five same-class probe gaps closed (per-item wraps mirroring A/B/D · assembly-level `belt()` containment · halt identity preserved by class); 19-cell unit battery; law-1 review (no blocker) + fix round (honest heartbeat rationale · counted §C failures · spoofed-name contrast cell); merged 2bd7e12c — **deploy pending, Next 1** | **merged (deploy pending)** | #255 |
+
+*(The Wave-E table's sixteen terminal rows — α through the corpus design, all
+ceremonied/merged — moved verbatim to
+`docs/plan/completed/progress-archive-2026-08.md` at the 2026-08-18 clock-out.)*
 
 State vocabulary: `design` · `building` · `in review` · `merged` · `ceremonied` · `blocked` ·
 `parked`. A `blocked` lane names its blocker in the Scope cell. A lane leaves this table only
@@ -149,19 +160,19 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    real render/seal round-trip (closes DR-render's unrun-drill boundary) → RPR historical
    MPERS pack → RS snapshot witness; the ms/zh claim-policy copy (fail-closed until
    supplied); the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
-3. **Wave-F planning sitting** (owner): the FX-lite ruling + the third-reader roadmap (#25)
-   (ADR-062/0065) + the CI economics overhaul + **the vision audit's six gaps and three
-   recommendations** (`docs/plan/research/wave-f/vision-alignment-audit.md` — committed
-   in-repo at clock-out; delivered to the owner 2026-08-16 — the
-   non-agentic interview is the one true drift; the audited freeform-read tool and the eval
-   harness are the highest-leverage builds; **NOTE the audit's SST-direction claim is
-   CORRECTED in-file, 2026-08-16** — the defect DEFLATES turnover, see the Backlog entry)
-   + **the closing_transfer/SST ruling R1** (below — Fix A recommended; R1 is the one
-   genuine owner question: does the P&L→RE roll count as a "closing transfer" for the SST
-   turnover exclusion?) + **the Wave-G corpus decisions OD-1..OD-11 + P-1..P-3**
-   (`docs/plan/active/wave-g-e2e-corpus-design.md`, merged #254 — esp. OD-5: provision a
-   second eligible principal so B3's distinct-checker arm actually fires in the reopen
-   drill) + **the BEE opening-TB record discrepancy** (Known issues — which record
+3. **Wave-F BUILD kickoff per the contract** (`docs/plan/active/wave-f-contract.md`):
+   Track A starts at F-A1 (witness-pair extraction) → F-A2 (agentic posting); Track B
+   (tax) runs in parallel. **The vision-alignment questions are RULED — ADR-0071 closed
+   them** (the audit's three recommendations dispositioned: interview ADOPTED F-A7b ·
+   freeform read ADOPTED F-A6 · eval harness DECLINED/G7; the six gaps all land in the
+   contract or are dissolved). Every build item takes the uniform ADR-061 ladder.
+4. **The remaining owner-sitting items** (NOT reached by ADR-0071, still open): **R1**
+   (`closing_transfer`/SST — Fix A recommended, task #17 builds after the ruling) + **the
+   Wave-G corpus decisions OD-1..OD-11 + P-1..P-3** (`wave-g-e2e-corpus-design.md` — incl.
+   OD-5's second eligible principal, and the corpus doc's step-4 "standing rules earn
+   autopost" wording needing its G1-alignment amendment) + **the CI economics overhaul** +
+   **FX-lite build timing** (principle pre-seeded as ADR-0071/P-FX; law 18 MYR-only
+   stands) + **the BEE opening-TB record discrepancy** (Known issues — which record
    describes the live book?).
 
 ## Backlog
@@ -309,9 +320,9 @@ the frontier-ordering violation and the S0.9 flake — defects that would have c
 across a wave batch. Scope routing, not frequency reduction. (Any change to per-PR
 uniformity itself is ADR-061 territory — an owner ruling, not an optimization.)
 
-**Wave-F planning inputs:** FX-lite (BNM rate tables, DB-computed) · the LLM third reader
-(#25) · the settlement-corroboration door BUILD (E-R13) · claims accounting (E-R10) · staff
-allowances · self-billed e-invoice detection · WHT mechanic. **Wave-G:** the OS surface + the
+**Wave-F planning inputs — DISPOSED by ADR-0071/contract:** #25 SUPERSEDED (witness pair) ·
+E-R13 ABSORBED (F-A3) · FX-lite principle pre-seeded (P-FX; timing stays a sitting item) ·
+claims (E-R10) → F-T4 · staff allowances / self-billed detection / WHT stay Track-B candidates. **Wave-G:** the OS surface + the
 UX-debt backlog (E-R10) + design trio population + **the owner-ruled factory reset + full
 E2E rebuild from raw documents** (the definitive stuck-bytes discharge; beta's "real data
 untouchable" resumption rides the same gate). **Forward roadmaps + risks + the Phase-5
@@ -462,83 +473,24 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Session log
 
-- **2026-08-16 (the continuation session, after /clear)** — the board's four carryover
-  tasks driven to done or sitting-ready by pinned parallel lanes (three Workflow fan-outs +
-  two fix rounds, every dispatch model-pinned): the E-R9 battery merged through its
-  independent review round (#253 — the review's MAJOR turned the machine-role blacklist
-  into a catalog-derived whitelist); the Wave-G corpus design authored, reviewed and merged
-  (#254 — ~30 cite-checks zero-discrepancy; found the third vacuous-green instance and the
-  ≥2-eligible-principals reopen-drill hazard; the fix lane's whole-doc grep caught a third
-  unsigned (65,747.97) the reviewer's location description missed); the vision audit's
-  reconciler claim verified with a LOCATION CORRECTION (the load-bearing gap was
-  reconcileTasks §C, not the belt assembly; lint was as clean as SST) and FIXED at #255
-  (law-1 review: no blocker; its fix round rewrote a heartbeat rationale the bytes
-  contradicted and counted the §C failures per the F1 law); the SST latent analyzed to a
-  sitting-ready Fix-A recommendation with the audit's direction claim corrected in-file
-  (deflation — permanent early-warning suppression, not inflation). Shared checkout trued
-  to `main`; graph re-indexed; strict-protection merge serialization ran exactly per the
-  #244 note (update-branch + re-green ×2, no --admin); the stale-draft custody cleanup
-  executed with hash-verification and recorded honestly (pre-review ancestors, not
-  duplicates). Tasks #18/#19/#20 closed; #17 holds for the sitting's R1.
-- **2026-08-16 (the post-wave tail, same session)** — the #43 wording seed built to
-  review-closed (payload re-derived clean twice; four honest hold-backs incl. a
-  fabricated-citation refusal; PR-ready at bf72db1, held for the owner); ε's four
-  assert-shipped-state cells rewritten law-shaped and merged (#246) ahead of the wording
-  path; **B3 built, four-lens-reviewed (9 refuted / 4 survived incl. a segregation-wall
-  MAJOR fixed via the B4 arms + a real 0056 silent-no-op reopen bug killed), merged (#247)
-  and ceremonied (81/`0086`) — before the first real close, as ruled**; the vision-alignment
-  audit delivered (sequenced-not-drifted; one true drift = the non-agentic interview; six
-  gaps logged for the Wave-F planning sitting); the closing_transfer/SST latent found twice independently and
-  registered; one runner outage (WSL VM stop) diagnosed by annotation and recovered by
-  service restart, never VM teardown. One reviewer ran five assignments five-for-five with
-  zero relitigated and zero waved-through findings.
-- **2026-08-14/15 (the wave close)** — θ+ε merged and ceremonied (0064-0072, morning);
-  ζ closed through seven review rounds (the grep-evidence rule + the phrase-family
-  testimony-sweep harness minted mid-ladder) and merged as 0079-0083; η recovered from the
-  180-red out-of-tree staging desync (the history-integrity guard was RIGHT all along),
-  merged 0077-0078, then B4 (0084, four arms incl. ARM-0) after the adversarial panel
-  found the null-maker fail-open; S0.9 root-caused to the cluster-wide birth-sentinel race
-  and killed by the checksum-keyed isolation pin (#241). Codex's quota exhausted mid-close;
-  the review lanes switched to native fresh-context panels per the owner's ruling and held
-  the bar. The 0077-0084 ceremony ran with a D1 write-quiesce + the chatTurn v11 deploy +
-  the freeze deploy-lock (140/140). ζ's fly ceremony landed `clara-render` live
-  (tag-and-digest image, reports/ policy pair, clean first drain) and the dispatch half was
-  wired onto `clara-runtime` via the stdin-to-stdin relay. The #43 MASB wording packet was
-  researched to sign-off-ready from official sources. ADR-0070 gained the wave-close
-  supplement (rulings 10-13). B3 and the wording-seed build lanes dispatched. Four of the
-  orchestrator's own rulings were reversed by evidence during the rounds (grace window,
-  verbatim requeue, digest-alone machine form, a genuine-check edge) — recorded as the
-  triangle cutting both ways.
-- **2026-08-12** — the α+β EARLY ceremony (0055+0056 live, MSIC debt discharged, ADR-0067) ·
-  the ADR-0068 evening sitting (B3 ruled · sign-offs · Gate-P defers) · lane γ end-to-end
-  (build → 7-round ladder → 42 findings killed → PR #231 merged → 0057 ceremonied) · the
-  harness grand refactor grilled (10 rulings + 5 supplements + 5 increments), built by five
-  lanes, then merged as PR #232 (ADR-0069).
-- **2026-08-13/14 (the night run)** — owner authorized the ENTIRE Wave E with full permission.
-  The /clear wiped the prior session's task board and writer transcripts; state was reconstructed
-  from bytes via a 20-agent assessment (16 requirement verdicts + mid-edit sweep + completeness
-  critic), minting `.claude/rules/handoffs.md`. Eight parallel lanes then closed δ (integrated +
-  runner), built the RS name-only guard pair, the dispatch-model hook, and lanes ε/ζ/η/θ. The
-  ADR-061 ladder ran in full: codex xhigh initial review (6 blockers — fake-receipt validation,
-  in-body check_function_bodies bypass, RS lift/arming polarity among them) + a native
-  8-dimension adversarially-verified pass (percent_change dimension gap, exact-division rounding,
-  login-shell loops, pack-v5 consumer pins, the CI sweep-skip false-green) → adjudicated fix
-  docket → three fix lanes → codex re-verify ALL-CONFIRMED → numbers 0058-0063 claimed (B4
-  migration_version literal trued at rename) → PG17 acceptance 87/87 zero-skip with three-way
-  SHA-256 equality. η's cross-lane review of ε found and fixed the seal-gate composition hole
-  (uncertified now covers the full non-canonical population; 'stripped' de-conflated to
-  section-deviation). Three interview-v3 residuals verified CLOSED. A session-limit outage
-  killed all lanes mid-flight and the run resumed lossless from transcripts + bytes.
-- **2026-08-13 (earlier)** — Wave E δ reached final-finding closure, not final acceptance. Exact-rational
-  evaluation, E6, pack ordering/replay/atomic rollback, the 5,000-cell concurrency wall, A29
-  lifecycle census, recursive A31 operand evidence, x57 staleness firing and migration-runner
-  connection/NOTICE hardening were built and repeatedly reviewed. Independent lanes then found
-  remaining run identity, selector, temporal reason, historical provenance, freeze, composition,
-  refusal-receipt and runner-lifecycle gaps. Owner ruled: preserve the hard 5,000-cell limit and
-  use a separate immutable refusal/cancellation receipt where no truthful metric cell can exist;
-  δ v1 stays human-authenticated-only and η owns future OBO/wake wrappers. Clock-out paused the
-  two sole writers at safe checkpoints; final review and pristine PG17 remain held. No commit,
-  PR, numbering, merge, live mutation or deployment occurred.
+*(Entries through 2026-08-16 moved verbatim to
+`docs/plan/completed/progress-archive-2026-08.md` at the 2026-08-18 clock-out.)*
+
+- **2026-08-18 (the Agentic Charter session)** — the owner's vision-alignment questions
+  driven to full resolution: the 2026-08-16 audit re-grounded by a six-lane code-level
+  deep scan (pinned sonnet-5 xhigh; 340 tool calls; findings N1-N6), the owner grilled
+  through eleven decision points one at a time (every ruling preceded by a plain-language
+  briefing with costs stated; three build recommendations declined and the dissents
+  filed), and **ADR-0071 minted** — judgement becomes the unattended posting authority,
+  the LLM witness pair replaces the reader estate, the rules machine retires, close key ①
+  and bank matching go agentic, reporting goes two-tier, internet goes two-tier,
+  meter-never-cap. Digest re-trued (laws 71-75 + eight clause annotations); PRD /
+  ARCHITECTURE / roadmap surgically amended; `docs/plan/active/wave-f-contract.md` minted
+  (two tracks + the F-A10 retirement condition); PROGRESS split per the outgrow law (terminal
+  lane rows + old session log → `docs/plan/completed/progress-archive-2026-08.md`). Carried one pre-existing
+  uncommitted cosmetic AGENTS.md wording tweak ("menu"→"Harness menu" ×3) found in the
+  tree — named here, not silently absorbed. Docs-only PR; single-lane review per
+  ADR-0069.
 
 ---
 
