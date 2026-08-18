@@ -110,6 +110,29 @@ function polygons(regions) {
     : [];
 }
 
+// THE PAGE KEY IS WRITTEN TWICE, ON PURPOSE (F-A1 PR-2, owner-adjudicated at the source).
+//
+// `document_regions.locator` is free jsonb (0007:209 checks only that it IS an object) and the
+// live estate grew TWO page spellings, each with real readers:
+//   * `page_number` — this producer's original, read by the vendor-identity geometry
+//     (0028:275-276, 0028:306-307, 0030:268-269) and by lib/statement-layout-reader.mjs:152 /
+//     lib/table-cell-geometry.mjs:46.
+//   * `page`        — read by the evidence surfaces (0011:3736, 0015:2543/2577) and by the whole
+//     F-A1 witness estate: clara.witness_citation_regions (0095:301), the writer's fact locator
+//     (0095:565/605) and clara.evaluate_witness_identity_v1's page grouping (0091:150/166).
+//
+// Before this change a REAL Azure region was invisible to every `->>'page'` reader, so a witness
+// pair's fact regions landed with a NULL page and the identity leaf's geometry test refused on
+// EVERY document — fail-closed, but vacuous: the D12 defense would never have fired in
+// production. The fix is here, at the SOURCE, rather than in the readers: 0091's leaf is a FROZEN
+// evaluator closure member, so changing it means a `_v2` re-mint with a new registry row, which
+// is not worth it for a key spelling. Writing both keys moves nothing — `page_number` keeps its
+// exact meaning and its existing readers — and it costs one jsonb key per region.
+//
+// NAMED INTERIM LIMITATION, and it is not closed by this change: OCR rows COMMITTED BEFORE this
+// producer shipped carry `page_number` only. A witness run over such a document still publishes a
+// null page, so its identity geometry still refuses fail-closed until that document is re-OCR'd.
+// Amounts are unaffected — C2's geometry conjunct anchors on the polygon, not the page.
 export function normalizeAzureLayout(payload, task) {
   const result = payload?.analyzeResult || payload || {};
   const pages = Array.isArray(result.pages) ? result.pages : [];
@@ -119,7 +142,7 @@ export function normalizeAzureLayout(payload, task) {
       for (const region of polygons(line.boundingRegions?.length ? line.boundingRegions : [{ pageNumber: page.pageNumber, polygon: line.polygon }])) {
         regions.push({
           locator_kind: "page_polygon",
-          locator: { page_number: region.pageNumber, polygon: region.polygon },
+          locator: { page: region.pageNumber, page_number: region.pageNumber, polygon: region.polygon },
           field_path: `pages.${Number(page.pageNumber || 1)}.lines.${index}`,
           text_content: String(line.content || ""),
           engine_confidence: line.confidence == null ? null : Number(line.confidence),
@@ -134,7 +157,9 @@ export function normalizeAzureLayout(payload, task) {
       for (const region of polygons(cell.boundingRegions)) {
         regions.push({
           locator_kind: "page_polygon",
-          locator: { page_number: region.pageNumber, polygon: region.polygon },
+          // Both spellings, for the reason stated above this function. Table cells are region
+          // rows exactly like lines are, so a witness may cite one and it must carry a page too.
+          locator: { page: region.pageNumber, page_number: region.pageNumber, polygon: region.polygon },
           field_path: `tables.${tableIndex}.cells.${cellIndex}`,
           text_content: String(cell.content || ""),
           engine_confidence: cell.confidence == null ? null : Number(cell.confidence),

@@ -14,10 +14,94 @@
 // fixtures quietly testing two different things.
 
 import { randomUUID } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { MockLanguageModelV4 } from "ai/test";
+
 import * as fx from "./relay-fixtures.mjs";
-import { WITNESS_ENGINE_SNAPSHOT } from "../workflows/witnessFacts.v1.services.mjs";
+import { normalizeAzureLayout } from "../lib/egress.mjs";
+import { callWitnessModel, WITNESS_ENGINE_SNAPSHOT } from "../workflows/witnessFacts.v1.services.mjs";
 
 export const WITNESS_PURPOSE = "witness_extraction";
+
+/** Canonical bytes for the vision channel — a real (tiny) PDF, so the file content part the AI
+ *  SDK builds is a genuine `application/pdf` part rather than a placeholder. */
+export const PDF_BYTES = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
+
+/**
+ * A scripted witness model, armed through `globalThis.__claraModelForTest` — the same override
+ * every other model lane in this runtime uses, so no key is needed and nothing reaches the
+ * network. Returns the CALL LOG: every "no model call was made" assertion in these batteries
+ * counts entries here rather than reading a log line.
+ *
+ * The channel is told apart by the PRESENCE OF A FILE PART in the converted prompt — the
+ * structural difference between the two channels, not a string sniff.
+ */
+export function witnessMock({ text, vision, throwOn = null }) {
+  const calls = [];
+  globalThis.__claraModelForTest = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      const parts = (options?.prompt ?? []).flatMap((m) => (Array.isArray(m?.content) ? m.content : []));
+      const channel = parts.some((p) => p?.type === "file") ? "vision" : "text";
+      calls.push({
+        channel,
+        parts: parts.map((p) => p?.type),
+        // The USER text exactly as the provider would have received it — the only honest way to
+        // assert what the model was shown.
+        text: parts.filter((p) => p?.type === "text").map((p) => String(p.text ?? "")).join("\n"),
+        system: (options?.prompt ?? []).filter((m) => m?.role === "system")
+          .map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"),
+      });
+      if (throwOn === channel) throw Object.assign(new Error("mock witness model failure"), { code: "engine_error" });
+      return {
+        content: [{ type: "text", text: JSON.stringify(channel === "vision" ? vision : text) }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: { inputTokens: { total: 1200, noCache: 1200 }, outputTokens: { total: 340 } },
+        warnings: [],
+      };
+    },
+  });
+  return calls;
+}
+
+/** The injected bundle: the REAL model adapter and the REAL engine snapshot (so the AI SDK path,
+ *  the file content part and the engine-stamp guard are all genuinely exercised), real temp-file
+ *  lifecycle, and a storage stub that writes the canonical bytes. */
+export function witnessServices(tmpRoot) {
+  return {
+    taskTempPath: (taskId) => join(tmpRoot, `witness-${taskId}.pdf`),
+    removeTempFile: (p) => rm(p, { force: true }),
+    downloadCanonical: async (_key, destination, sha256) => {
+      await writeFile(destination, PDF_BYTES);
+      return { path: destination, sha256 };
+    },
+    callWitnessModel,
+    engineSnapshot: WITNESS_ENGINE_SNAPSHOT,
+  };
+}
+
+/** One channel's wire object: the ELEVEN belt answers plus the two optional reference answers,
+ *  in the flat shape the prompt closure's schema asks the model for. */
+export const witnessAnswer = (raw) => (raw == null ? { state: "not_printed", raw: null } : { state: "value", raw });
+export function witnessWire(fields = {}) {
+  const answers = {
+    "invoice.total": witnessAnswer("RM 103.75"),
+    "invoice.total_excl_tax": witnessAnswer("RM 94.30"),
+    "invoice.tax_total": witnessAnswer("RM 5.66"),
+    "invoice.service_charge": witnessAnswer("RM 3.77"),
+    "invoice.rounding": witnessAnswer("RM 0.02"),
+    "invoice.discount": witnessAnswer(null),
+    "invoice.delivery": witnessAnswer(null),
+    "invoice.amount_due": witnessAnswer(null),
+    "invoice.deposit": witnessAnswer(null),
+    "invoice.currency": witnessAnswer("MYR"),
+    "invoice.type_code": witnessAnswer("01"),
+    "invoice.invoice_id": { state: "not_printed", raw: null, value: null },
+    "invoice.invoice_date": { state: "not_printed", raw: null, value: null },
+    ...fields,
+  };
+  return { answers, contest: false };
+}
 
 /** THE ENGINE ID THE ROUTER MUST STAMP — the real snapshot constant, not a rig invention. The
  *  behaviour refuses to egress when the task's stamp and this image's model disagree, so using
@@ -72,6 +156,48 @@ export async function seedOcrRegion({ firm, extraction, fieldPath, textContent, 
     [firm, extraction, JSON.stringify(locator), fieldPath, textContent],
   );
   return r.rows[0].id;
+}
+
+/**
+ * Seed OCR regions THROUGH THE REAL PRODUCER — `normalizeAzureLayout`, called on an Azure-shaped
+ * payload, with its output rows inserted verbatim. Nothing here hand-writes a locator, so the
+ * cells that read a page back are measuring what the production pipeline actually commits rather
+ * than what a fixture author believed it commits (the PR-1 assembly lesson: a scaffold the real
+ * dependency later diverges from).
+ *
+ * `lines` is [{ text, box: [x0,y0,x1,y1], page? }] — a rectangle, expanded to the four-corner
+ * polygon Azure emits.
+ */
+export async function seedAzureRegions({ firm, extraction, lines }) {
+  const payload = {
+    analyzeResult: {
+      content: lines.map((l) => l.text).join("\n"),
+      pages: [{
+        pageNumber: 1,
+        lines: lines.map((l) => {
+          const [x0, y0, x1, y1] = l.box;
+          return {
+            content: l.text,
+            boundingRegions: [{ pageNumber: l.page ?? 1, polygon: [x0, y0, x1, y0, x1, y1, x0, y1] }],
+          };
+        }),
+      }],
+    },
+  };
+  const normalized = normalizeAzureLayout(payload, { engineId: "azure-di:prebuilt-layout:2024-11-30", versionN: 1 });
+  const ids = [];
+  for (const r of normalized.regions) {
+    const row = await fx.rootQuery(
+      `insert into clara.document_regions
+         (firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence,
+          monetary_raw, monetary_cents)
+       values ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9) returning id`,
+      [firm, extraction, r.locator_kind, JSON.stringify(r.locator), r.field_path, r.text_content,
+        r.engine_confidence, r.monetary_raw, r.monetary_cents],
+    );
+    ids.push(row.rows[0].id);
+  }
+  return { regions: normalized.regions, ids };
 }
 
 /** A CLAIMED (`running`) llm_witness task — the state `persist_witness_facts` requires. Built
@@ -175,4 +301,9 @@ export const readDispatchAuthorizations = (firm) =>
   ).then((r) => r.rows);
 export const readWitnessState = (documentId, textId, visionId) =>
   fx.rootQuery("select clara.evaluate_witness_fact_state_v1($1,$2,$3) as v", [documentId, textId, visionId])
+    .then((r) => r.rows[0].v);
+/** The identity leaf, called directly so a cell can see whether its GEOMETRY path was reached
+ *  rather than only whether the amount verdict came out. */
+export const readWitnessIdentity = (documentId, textId, contest = false) =>
+  fx.rootQuery("select clara.evaluate_witness_identity_v1($1,$2,$3) as v", [documentId, textId, contest])
     .then((r) => r.rows[0].v);

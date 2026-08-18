@@ -15,26 +15,28 @@
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { MockLanguageModelV4 } from "ai/test";
 
 import * as fx from "./relay-fixtures.mjs";
 import {
   buildWitnessSituation, readDispatchAuthorizations, readExtractions, readFactRegions,
-  readTask, readUsageRows, readWitnessState,
+  readTask, readUsageRows, readWitnessState, witnessMock, witnessServices, witnessWire,
 } from "./f-a1-witness-fixtures.mjs";
 import {
   persistWitnessPair, runWitnessTextRead, runWitnessVisionRead, WITNESS_EVENT_TYPE, WITNESS_PURPOSE,
 } from "../workflows/witnessFacts.v1.behavior.mjs";
-import { callWitnessModel, WITNESS_ENGINE_SNAPSHOT } from "../workflows/witnessFacts.v1.services.mjs";
 import { witnessPromptHash } from "../workflows/witnessFacts.v1.prompts.mjs";
 
 const READY = await witnessReady();
 const skip = READY ? false : "F-A1 witness estate absent (clara.persist_witness_facts / witness_citation_regions)";
 const withRuntime = (fn) => fx.asRuntime(fn);
 let tmpRoot;
+/** The injected bundle — the REAL model adapter, the REAL engine snapshot, a storage stub.
+ *  Shared with the locator battery so the two files cannot drift into testing two harnesses. */
+const services = () => witnessServices(tmpRoot);
+const wire = witnessWire;
 
 async function witnessReady() {
   const r = await fx.rootQuery(
@@ -60,7 +62,6 @@ after(async () => {
 // The document under test: LAI LOU MEI's own arithmetic, the same base the DB batteries anchor
 // to — 94.30 + 3.77 + 5.66 + 0.02 = 103.75.
 // ---------------------------------------------------------------------------------------
-const PDF_BYTES = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
 const REGIONS = [
   { label: "total", text: "TOTAL DUE RM 103.75 nett" },
   { label: "net", text: "SUBTOTAL RM 94.30" },
@@ -71,26 +72,6 @@ const REGIONS = [
   { label: "type", text: "Doc Type Code: 01" },
 ];
 
-const answer = (raw) => (raw == null ? { state: "not_printed", raw: null } : { state: "value", raw });
-function wire(fields = {}) {
-  const answers = {
-    "invoice.total": answer("RM 103.75"),
-    "invoice.total_excl_tax": answer("RM 94.30"),
-    "invoice.tax_total": answer("RM 5.66"),
-    "invoice.service_charge": answer("RM 3.77"),
-    "invoice.rounding": answer("RM 0.02"),
-    "invoice.discount": answer(null),
-    "invoice.delivery": answer(null),
-    "invoice.amount_due": answer(null),
-    "invoice.deposit": answer(null),
-    "invoice.currency": answer("MYR"),
-    "invoice.type_code": answer("01"),
-    "invoice.invoice_id": { state: "not_printed", raw: null, value: null },
-    "invoice.invoice_date": { state: "not_printed", raw: null, value: null },
-    ...fields,
-  };
-  return { answers, contest: false };
-}
 const citationsFor = (s) => [
   { field_path: "invoice.total", region_idx: s.idxOf.total, raw: null },
   { field_path: "invoice.total_excl_tax", region_idx: s.idxOf.net, raw: null },
@@ -100,51 +81,6 @@ const citationsFor = (s) => [
   { field_path: "invoice.currency", region_idx: s.idxOf.ccy, raw: null },
   { field_path: "invoice.type_code", region_idx: s.idxOf.type, raw: null },
 ];
-
-/** A scripted witness model. Distinguishes the channel by the PRESENCE OF A FILE PART in the
- *  converted prompt — the structural difference between the two channels, not a string sniff. */
-function witnessMock({ text, vision, throwOn = null }) {
-  const calls = [];
-  const model = new MockLanguageModelV4({
-    doGenerate: async (options) => {
-      const parts = (options?.prompt ?? []).flatMap((m) => (Array.isArray(m?.content) ? m.content : []));
-      const channel = parts.some((p) => p?.type === "file") ? "vision" : "text";
-      calls.push({
-        channel,
-        parts: parts.map((p) => p?.type),
-        // The USER text exactly as the provider would have received it — the only honest way to
-        // assert what the model was shown.
-        text: parts.filter((p) => p?.type === "text").map((p) => String(p.text ?? "")).join("\n"),
-        system: (options?.prompt ?? []).filter((m) => m?.role === "system")
-          .map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"),
-      });
-      if (throwOn === channel) throw Object.assign(new Error("mock witness model failure"), { code: "engine_error" });
-      return {
-        content: [{ type: "text", text: JSON.stringify(channel === "vision" ? vision : text) }],
-        finishReason: { unified: "stop", raw: "stop" },
-        usage: { inputTokens: { total: 1200, noCache: 1200 }, outputTokens: { total: 340 } },
-        warnings: [],
-      };
-    },
-  });
-  globalThis.__claraModelForTest = model;
-  return calls;
-}
-
-/** The injected bundle: REAL model adapter (so the AI SDK path and the file part are genuinely
- *  exercised), real temp-file lifecycle, a storage stub that writes the canonical bytes. */
-function services() {
-  return {
-    taskTempPath: (taskId) => join(tmpRoot, `witness-${taskId}.pdf`),
-    removeTempFile: (p) => rm(p, { force: true }),
-    downloadCanonical: async (_key, destination, sha256) => {
-      await writeFile(destination, PDF_BYTES);
-      return { path: destination, sha256 };
-    },
-    callWitnessModel,
-    engineSnapshot: WITNESS_ENGINE_SNAPSHOT,
-  };
-}
 
 // =======================================================================================
 // THE HAPPY PAIR, END TO END.
@@ -380,35 +316,10 @@ test("f-a1.pr2.p an absent engine snapshot is a wiring fault, never a skipped ch
   assert.equal(calls.length, 0);
 });
 
-// =======================================================================================
-// THE LIVE LOCATOR-KEY DIVERGENCE — measured, not asserted from the design.
-// =======================================================================================
-
-test("f-a1.pr2.q REAL Azure regions carry `page_number`, so witness_citation_regions publishes a NULL page — measured", { skip }, async () => {
-  // normalizeAzureLayout (lib/egress.mjs:122) writes `locator.page_number`; the F-A1 estate
-  // (0091:150/166, 0095:301) reads `locator->>'page'`. This cell MEASURES the consequence on a
-  // real database rather than reasoning about it. Direction: fail-CLOSED — an unknown page
-  // degrades the prompt's page marker and makes the identity leaf's page grouping refuse. It is
-  // a DB-side (PR-1) shape; PR-2's job is to not fabricate a page on top of it.
-  const s = await buildWitnessSituation("locatorkeys", { regions: [] });
-  const azureShaped = await fx.rootQuery(
-    `insert into clara.document_regions (firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
-     values ($1,$2,'page_polygon','{"page_number":1,"polygon":[0,0,1,0,1,1,0,1]}'::jsonb,'pages.1.lines.0','TOTAL DUE RM 103.75',0.97)
-     returning id`, [s.firm, s.ocrId]);
-  const witnessShaped = await fx.rootQuery(
-    `insert into clara.document_regions (firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
-     values ($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,0,1,1,0,1]}'::jsonb,'pages.1.lines.1','SUBTOTAL RM 94.30',0.97)
-     returning id`, [s.firm, s.ocrId]);
-
-  const published = await fx.rootQuery(
-    "select idx, page, region_id from clara.witness_citation_regions($1) order by idx", [s.ocrId]);
-  const azureRow = published.rows.find((r) => r.region_id === azureShaped.rows[0].id);
-  const witnessRow = published.rows.find((r) => r.region_id === witnessShaped.rows[0].id);
-  assert.equal(azureRow.page, null,
-    "the REFERENCE producer's own spelling publishes no page through the witness door — a live divergence, reported as an F-A1 finding");
-  assert.equal(witnessRow.page, 1, "the F-A1 spelling does");
-  assert.ok(Number.isInteger(azureRow.idx), "the IDX — the part the citation contract actually depends on — is unaffected");
-});
+// THE LOCATOR-KEY CELLS (the page-spelling fix at the source, and its negative twin) live in
+// their own battery: packages/runtime/tests/f-a1-witness-locator.test.mjs. They need a different
+// fixture shape — regions seeded THROUGH the real normalizeAzureLayout — and their subject is the
+// producer plus the identity leaf's geometry path rather than this lane's orchestration.
 
 // =======================================================================================
 // USAGE METERING — one row per call, including a failed one.

@@ -17,22 +17,29 @@
 // draws between orchestration and reading a page).
 //
 // ---------------------------------------------------------------------------------------
-// THE LOCATOR-KEY DIVERGENCE, STATED HERE BECAUSE IT IS LIVE AND LOAD-BEARING.
+// THE LOCATOR-KEY DIVERGENCE, AND WHY THE ACCESSOR STILL READS BOTH.
 //
 // `document_regions.locator` is a free jsonb object (0007:209 checks only that it IS an
 // object). Two page-key spellings exist in the live estate and NEITHER is wrong-by-contract:
 //
-//   * `page_number` — what normalizeAzureLayout writes (egress.mjs:122), and what the vendor
-//     identity geometry reads (0028:275-276, 0028:306-307, 0030:268-269).
+//   * `page_number` — the vendor-identity geometry's spelling (0028:275-276, 0028:306-307,
+//     0030:268-269) plus statement-layout-reader.mjs:152 / table-cell-geometry.mjs:46.
 //   * `page`        — what the evidence surfaces read (0011:3736, 0015:2543/2577) and what the
 //     F-A1 witness estate reads (0091:150/166, 0095:301/565/605).
 //
-// So a region produced by the REAL Azure pass carries `page_number` and is invisible to a
-// `->>'page'` read. `regionPage()` below reads BOTH — it is the honest accessor for anything
-// that merely wants to know which page a region sits on. It is NOT a fix for the DB-side
-// readers, which this module cannot reach; the divergence is reported as an F-A1 finding.
-// Nothing here silently rewrites a producer's locator to paper over it: a normalizer that
-// quietly renamed the key would make the two DB reader families disagree about the same row.
+// F-A1 PR-2 fixed this AT THE SOURCE: `normalizeAzureLayout` now writes BOTH keys with the same
+// value (see its own header for the full argument, including why the frozen 0091 evaluator was
+// not re-minted as a `_v2` instead). Every region produced from that point carries a page both
+// reader families can see.
+//
+// `regionPage()` below still reads BOTH, and that is not belt-and-braces — it is the only honest
+// accessor for the rows that ALREADY EXIST. OCR committed before the producer changed carries
+// `page_number` only, and no migration back-fills it (document_regions is append-only). The
+// named interim consequence: a witness run over a pre-change document still publishes a null
+// page through `witness_citation_regions`, so its identity geometry refuses fail-closed until
+// that document is re-OCR'd. Amounts are unaffected — C2 anchors on the polygon, not the page.
+// Nothing here rewrites a stored locator to paper over it: a normalizer that renamed the key on
+// read would make the two DB reader families disagree about the same row.
 // ---------------------------------------------------------------------------------------
 
 /**
@@ -73,11 +80,11 @@ export const EXTRACTION_REGION_KEYS = Object.freeze([
 /**
  * The page a region sits on, or null when the locator states none.
  *
- * Reads BOTH live spellings (see the header): `page` first — the spelling the witness estate
- * and the evidence surfaces publish — then `page_number`, the spelling the Azure producer
- * writes. A non-integer, negative, or absent value is NULL, never a guess: "absence is not
- * evidence" applies to a page number as much as to anything else, and a fabricated page 1 on a
- * multi-page bill would put a citation's highlight on the wrong sheet.
+ * Reads BOTH live spellings (see the header): `page` first — the spelling the witness estate and
+ * the evidence surfaces read, and which the producer now writes — then `page_number`, which
+ * pre-change rows carry alone. A non-integer, negative, or absent value is NULL, never a guess:
+ * "absence is not evidence" applies to a page number as much as to anything else, and a
+ * fabricated page 1 on a multi-page bill would put a citation's highlight on the wrong sheet.
  *
  * @param {Record<string, unknown>|null|undefined} locator
  * @returns {number|null}
