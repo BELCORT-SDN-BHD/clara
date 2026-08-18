@@ -4,8 +4,12 @@
 
 Clara runs the accounting lifecycle (onboarding → ongoing close → tax → reporting)
 under professional human control, with a shared RLS-isolated Postgres as the
-single source of truth. This repo is the rebuild from the Gate-1 audit + Gate-2
-blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
+single source of truth. As of **ADR-0071 (the Agentic Charter, 2026-08-18)**
+routine bookkeeping — coding, posting, bank matching, adjustments — runs
+unattended on the agent's own judgement over structural DB walls; professional
+control concentrates at the statutory boundary (the close's finalize/attest/
+reopen keys, reconciliation exceptions, statutory wording, e-filing). This repo
+is the rebuild from the Gate-1 audit + Gate-2 blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
 `docs/ARCHITECTURE.md`. Plans → `docs/plan/index.md`.**
 
 > **Status → `PROGRESS.md`** (posture, live lanes, backlog) — the single state
@@ -23,8 +27,9 @@ blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
   Supabase-adjacent), with all durable state in our own Postgres so every step is
   checkpointed; LangGraph JS is the named fallback behind a seam. Proven in the
   Slice-0 spike (`spike/`, `docs/ARCHITECTURE.md` Appendix A). The
-  host is ratified in `docs/adr/` (ADR-014). `packages/runtime` is the Slice-1
-  skeleton (durable substrate + health/ready).
+  host is ratified in `docs/adr/` (ADR-014). `packages/runtime` is the full
+  durable runtime — the chat loop, the unattended coder, document intake, the
+  consumer lanes and daily belts (`packages/runtime/README.md`).
 - **Dashboard** — **Next.js 15** on **Cloudflare Pages** (`app.clarabook.com`;
   Vercel dropped, ADR-024), dashboard-direct on the Supabase session JWT
   (`apps/dashboard`).
@@ -33,9 +38,10 @@ blueprint. **Product law → `docs/product/PRD.md`. Target architecture →
 
 ```
 packages/db/          versioned SQL migrations + seeds + DR tooling + test rig
-packages/runtime/     Clara agent-runtime skeleton (WDK durable substrate, /health, /ready)
+packages/runtime/     the Clara durable runtime (WDK substrate; chat + unattended lanes; intake)
+packages/reporting-render/  the sealed-render worker (pinned Typst; the clara-render Fly app)
 packages/backup/      the clara-backup Fly service (daily DR bundle to R2; docs/ops/DR.md)
-apps/dashboard/       Next.js 15 dashboard skeleton
+apps/dashboard/       Next.js 15 dashboard (plumbing-grade pages; the OS surface lands at Wave G)
 scripts/              repo governance gates (freeze-lint, leak-scan, harness-links, …) + hooks/
 docs/                 PRD, architecture, plan, design, audit (source of truth)
 spike/                the frozen Slice-0 runtime spike (NOT a workspace member)
@@ -88,6 +94,10 @@ PR and:
    smoke test** and runs the **DR dump/restore self-test** against it.
 
 CI touches only a disposable container. It never connects to the real project.
+It runs on **two self-hosted WSL2 runner instances** (private-repo only —
+`docs/ops/ci-runner.md`); a **docs-only diff** (`docs/**`, `AGENTS.md`,
+`CLAUDE.md`, `PROGRESS.md`, matched literally) runs the lint leg only, and a
+weekly scheduled sweep re-proves every leg regardless.
 
 ## Workflow-versioning policy (do not skip)
 
