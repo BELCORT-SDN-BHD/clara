@@ -252,10 +252,14 @@ test("x54.c the ADDITIVE promise holds — every pre-0054 region key is still pu
   for (const k of expected) {
     assert.ok(k in region, `region key "${k}" must survive the recut — the live frozen consumers and the dashboard read these`);
   }
+  // F-A1 PR-1 (M7, additive read-seam widening) adds `extracted_at` beside idx. The RATCHET
+  // is updated here, deliberately, for exactly the reason it exists: a key that shows up
+  // unannounced is a finding; a key added by a reviewed migration that also documents WHY
+  // (docs/plan/active/f-a1-witness-pair-design.md SS3.8, wall M7) is a conscious widening.
   assert.deepEqual(
     Object.keys(region).sort(),
-    [...expected, "idx"].sort(),
-    "the region envelope must be EXACTLY the eleven carried keys plus idx — an unaccounted-for key crosses the DB↔surface seam unmeasured",
+    [...expected, "idx", "extracted_at"].sort(),
+    "the region envelope must be EXACTLY the eleven original carried keys plus idx plus F-A1's extracted_at — an unaccounted-for key crosses the DB↔surface seam unmeasured",
   );
 });
 
