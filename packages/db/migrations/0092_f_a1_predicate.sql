@@ -220,8 +220,37 @@ begin
   -- declare its own read corroboration-ineligible, and either declaration is decisive.
   v_ineligible := coalesce(nullif(btrim(v_tenv->>'corroboration_ineligible'),''),
                            nullif(btrim(v_venv->>'corroboration_ineligible'),''));
-  v_contest := coalesce((v_tenv->'witness'->>'contest')::boolean, false)
-            or coalesce((v_venv->'witness'->>'contest')::boolean, false);
+  -- THE CONTEST MARKER, READ RAISE-PROOF AND FAIL-CLOSED (owner ruling on the M2 residual).
+  -- A hard `(->>'contest')::boolean` raises 22P02 on a string like "unknown" — out of a STABLE
+  -- predicate that ~30 live call sites reach through clara._invoice_fact_state, so one malformed
+  -- envelope would detonate every later read of that document rather than refuse it. THE WRITE
+  -- BOUNDARY IS THE INTEGRITY WALL: the writer's answers validator in 0095 (M2) refuses a
+  -- non-boolean `contest` structurally — its name is deliberately NOT written in call form here,
+  -- because §C's converse closure probe reads this comment as part of the body and a prose
+  -- `name(` would read as a call to a leaf outside the frozen closure (it caught exactly that on
+  -- the first rig apply) — and persist_witness_facts is the only door onto these rows. This is
+  -- the frozen body's NEVER-RAISE BELT, the same principle M6's magnitude pre-guard applies to
+  -- clara._normalize_invoice_cents — and belts state their failure DIRECTION:
+  --   'boolean'        -> the witness's own value, exactly as before;
+  --   absent / 'null'  -> false, exactly as before;
+  --   any other type   -> TRUE. A malformed contest marker is an untrustworthy read, and
+  --                       contest WITHDRAWS the identity fields (§3.3, invoice-vendor-identity
+  --                       .mjs:458-472). So the only thing this arm can ever do is ADD a
+  --                       withdrawal; it can never admit a counterparty corroboration that the
+  --                       boolean path would have refused. `corroborated` is untouched either
+  --                       way — it carries no identity term (N5).
+  -- ABSENT AND json-null COALESCE ONTO ONE ARM DELIBERATELY: `jsonb_typeof` returns SQL NULL for
+  -- a missing key, and a simple `case expr when null` compares with `=`, which is never true —
+  -- absence would have fallen through to the else arm and manufactured a contest out of silence.
+  -- Written as a coalesce so the absent case is HANDLED rather than defaulted.
+  v_contest := (case coalesce(jsonb_typeof(v_tenv->'witness'->'contest'), 'null')
+                  when 'boolean' then coalesce((v_tenv->'witness'->>'contest')::boolean, false)
+                  when 'null' then false
+                  else true end)
+            or (case coalesce(jsonb_typeof(v_venv->'witness'->'contest'), 'null')
+                  when 'boolean' then coalesce((v_venv->'witness'->>'contest')::boolean, false)
+                  when 'null' then false
+                  else true end);
 
   -- 2. THE TEXT ROW'S SERVER-VERIFIED REGIONS. One aggregate per field_path carrying the
   -- cardinality COUNT beside every value — 0023's RESIDUAL-4 discipline: a conflicting DUPLICATE

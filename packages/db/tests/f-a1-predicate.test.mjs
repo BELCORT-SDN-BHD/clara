@@ -436,6 +436,42 @@ test("BOTH sides matching withdraws BOTH and flags contest; a witness-reported c
   assert.equal(c.identity_contest, true);
 });
 
+test("a MALFORMED contest marker does not RAISE — it withdraws (the frozen body's never-raise belt, failing toward withdrawal)", async (t) => {
+  if (gate(t)) return;
+  // The write boundary (M2, clara._witness_answers_ok) refuses a non-boolean `contest`
+  // structurally, so this shape cannot come through persist_witness_facts. This cell reaches
+  // AROUND the writer on purpose — landWitnessPair inserts the two rows directly — because the
+  // claim under test is about the PREDICATE: it is STABLE and ~30 live call sites reach it
+  // through clara._invoice_fact_state, so a hard ::boolean cast would turn one malformed
+  // envelope into an exception on every later read of that document rather than a refusal.
+  const firm = await firmOf(world.clients.A1);
+  for (const side of ["text", "vision"]) {
+    const shape = witnessShape({ fields: BASE, extraRegions: identityRegions({
+      vendorName: "SUPPLIER SDN BHD", vendorReg: "201801000999",
+      customerName: "THE CLIENT SDN BHD", customerReg: "202001009999" }) });
+    (side === "text" ? shape.textEnvelope : shape.visionEnvelope).witness.contest = "unknown";
+    const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A1, kind: "invoice" });
+    const pair = await landWitnessPair(cited.documentId, shape);
+    // (a) it RETURNS. A raise here is the whole defect, so the call completing is the evidence.
+    const s = await evaluatePair(cited.documentId, pair.textId, pair.visionId);
+    assert.ok(s && Object.keys(s).length > 0, `${side}: a real envelope, never a raise and never '{}'`);
+    // (b) …and the failure DIRECTION is withdrawal: an untrustworthy marker withdraws both
+    // identity sides rather than letting either corroborate.
+    assert.equal(s.vendor_registration_verdict, "withdrawn_contest", `${side}: the vendor side is withdrawn`);
+    assert.equal(s.customer_registration_verdict, "withdrawn_contest", `${side}: the customer side is withdrawn`);
+    assert.equal(s.identity_contest, true, `${side}: …and the contest is flagged`);
+    // (c) the AMOUNT verdict is untouched — `corroborated` carries no identity term (N5).
+    assert.equal(s.corroborated, true, `${side}: a malformed contest never touches the amount verdict`);
+  }
+  // The exact twin with a WELL-FORMED absent marker corroborates identity normally, so the term
+  // doing the work above is the malformed marker and not some other wall.
+  const clean = await verdict(await witnessDoc({ extraRegions: identityRegions({
+    vendorName: "SUPPLIER SDN BHD", vendorReg: "201801000999",
+    customerName: "THE CLIENT SDN BHD", customerReg: "202001009999" }) }));
+  assert.equal(clean.vendor_registration_verdict, "corroborated");
+  assert.equal(Object.prototype.hasOwnProperty.call(clean, "identity_contest"), false);
+});
+
 test("identity: a TIE refuses, and a missing anchor refuses", async (t) => {
   if (gate(t)) return;
   // Equidistant: the registration box sits exactly between the two name boxes.
