@@ -107,3 +107,17 @@
   δ v1 stays human-authenticated-only and η owns future OBO/wake wrappers. Clock-out paused the
   two sole writers at safe checkpoints; final review and pristine PG17 remain held. No commit,
   PR, numbering, merge, live mutation or deployment occurred.
+
+## Known-issues records archived 2026-08-18 (moved verbatim from PROGRESS.md)
+
+- **Working-tree custody (RESOLVED 2026-08-15):** the original checkout's foreign
+  `AGENTS.md`/`PROGRESS.md` modifications were discarded with the owner's approval after
+  their intent was absorbed (constraint-12 truing + naming the graph MCP, both on this
+  branch). **CLEANUP EXECUTED 2026-08-16:** the `wave-e-delta-build` worktree's untracked
+  ε/η/θ/ζ working copies and the `.tmp-delta-*`/`.tmp-e6-*` stages are DELETED — with a
+  correction to the earlier wording: hash-verification found 26/31 were NOT byte-identical
+  to main; they were PRE-REVIEW DRAFTS (ancestors — sampled diffs confirm main's versions
+  are the revised descendants, e.g. 0064 +60/−39, the θ test +124/−37; "byte-for-byte" was
+  true only of the TRACKED-file overlaps). Deleted as superseded: the finals are on `main`,
+  the lane states survive in the custody branches, and the acceptance records carry the
+  evidence. The worktree's status is clean.

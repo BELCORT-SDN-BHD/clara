@@ -116,7 +116,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` (F-A1 witness-pair extraction first) | design | — |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc `docs/plan/active/f-a1-witness-pair-design.md` (v3, two-lane fresh-context adversarial review to unconditional MERGEABLE, 2026-08-18); BUILD gated on PR-0 (the Codex cross-model pass, vendor limit lifts 2026-08-20) + the OQ-1/OQ-2 sitting | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -162,11 +162,15 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    them** (the audit's three recommendations dispositioned: interview ADOPTED F-A7b ·
    freeform read ADOPTED F-A6 · eval harness DECLINED/G7; the six gaps all land in the
    contract or are dissolved). Every build item takes the uniform ADR-061 ladder.
+   **F-A1's design doc is DONE (see the lane row)**; its build sequence is PR-0..PR-4 +
+   PR-3a per the doc's §6, with the 0017 trigger fix a hard PR-1 precondition.
 4. **The remaining owner-sitting items** (NOT reached by ADR-0071, still open): **R1**
    (`closing_transfer`/SST — Fix A recommended, task #17 builds after the ruling) + **the
    Wave-G corpus decisions OD-1..OD-11 + P-1..P-3** (`wave-g-e2e-corpus-design.md` — incl.
    OD-5's second eligible principal, and the corpus doc's step-4 "standing rules earn
-   autopost" wording needing its G1-alignment amendment) + **the CI economics overhaul** +
+   autopost" wording needing its G1-alignment amendment) + **F-A1 OQ-1/OQ-2** (the
+   LLM-vendor processor status; the witness_extraction typed purpose —
+   `docs/plan/active/f-a1-witness-pair-design.md` §5) + **the CI economics overhaul** +
    **FX-lite build timing** (principle pre-seeded as ADR-0071/P-FX; law 18 MYR-only
    stands) + **the BEE opening-TB record discrepancy** (Known issues — which record
    describes the live book?).
@@ -376,17 +380,8 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   the third skeleton amendment · S11.4c's absent-function branch tests `''` where a no-row
   SELECT leaves NULL (near-zero reachability). One-word/two-char fixes for the next 0057-area
   batch.
-- **Working-tree custody (RESOLVED 2026-08-15):** the original checkout's foreign
-  `AGENTS.md`/`PROGRESS.md` modifications were discarded with the owner's approval after
-  their intent was absorbed (constraint-12 truing + naming the graph MCP, both on this
-  branch). **CLEANUP EXECUTED 2026-08-16:** the `wave-e-delta-build` worktree's untracked
-  ε/η/θ/ζ working copies and the `.tmp-delta-*`/`.tmp-e6-*` stages are DELETED — with a
-  correction to the earlier wording: hash-verification found 26/31 were NOT byte-identical
-  to main; they were PRE-REVIEW DRAFTS (ancestors — sampled diffs confirm main's versions
-  are the revised descendants, e.g. 0064 +60/−39, the θ test +124/−37; "byte-for-byte" was
-  true only of the TRACKED-file overlaps). Deleted as superseded: the finals are on `main`,
-  the lane states survive in the custody branches, and the acceptance records carry the
-  evidence. The worktree's status is clean.
+- **Working-tree custody — RESOLVED 2026-08-15/16**; the full record moved verbatim to
+  `docs/plan/completed/progress-archive-2026-08.md` (2026-08-18).
 - **The BEE opening-TB record discrepancy (owner adjudication, found 2026-08-16 at the
   corpus-design grounding):** this file's BEE-deferral bullet (Next 2) says the book holds
   "an empty opening TB", while ADR-043 records a FINALIZED keyed opening seed `1e60960e`
@@ -491,6 +486,11 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   outside the docs-only fence). Docs-only PR; single-lane review per ADR-0069.
 - **2026-08-18 (evening, 开工)** — Next 1 executed: #255 deployed as `clara-runtime` v63,
   triple-verified (v62 negative control → v63 PROCESS reads → `/ready`); lane row retired.
+  Then the F-A1 design: a seven-lane grounding sweep + completeness critic over the
+  extraction estate, design v1→v3 through a two-lane fresh-context adversarial review
+  (48 findings adjudicated at the bytes; both lanes unconditional MERGEABLE on the final
+  bytes). The Codex lane was BLOCKED by a vendor usage limit (lifts 2026-08-20) —
+  re-registered as the build's PR-0 gate, not waived. OQ-1/OQ-2 queued for the sitting.
 
 ---
 
