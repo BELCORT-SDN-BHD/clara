@@ -368,20 +368,18 @@ export function witnessPromptHash(channel) {
 // Wire -> writer normalization.
 // ---------------------------------------------------------------------------------------
 
-/** The `corroboration_ineligible` reason a DOWNGRADED answer stamps on its channel's envelope
- *  (M1) — the predicate's ineligibility gate (0023:309) then refuses the whole read. */
+/** The `corroboration_ineligible` reason a downgraded BELT answer stamps (M1/D5). */
 export const WITNESS_ANSWER_UNUSABLE = "witness_answer_unusable";
 
 /**
  * One wire answer -> the writer's discriminated shape, plus whether it was DOWNGRADED.
  *
  * A downgrade is not a not_printed. `{state:"value"}` with a blank, over-long or otherwise
- * unusable rendering means the model SAID the document prints this field and then failed to give
- * a usable quote — a DERIVED absence. Emitting a bare `not_printed` for it would dress that
- * derivation in an honest silence's clothes, and every belt in the predicate treats
- * `not_printed` as a legitimate absence arm. Law 27(2): a derived absence falls to the
- * fail-closed branch, so the caller stamps `corroboration_ineligible` on the envelope and the
- * strict reader refuses the read outright rather than quietly corroborating around the hole.
+ * unusable rendering means the model SAID the document prints this field and then failed to quote
+ * it — a DERIVED absence. Emitting a bare `not_printed` would dress that derivation in an honest
+ * silence's clothes, and every belt treats `not_printed` as a legitimate absence arm. Law 27(2):
+ * a derived absence falls to the fail-closed branch, so a BELT downgrade makes the caller stamp
+ * `corroboration_ineligible` and the strict reader refuses the read outright.
  */
 function normalizeAnswer(field, wire) {
   const downgrade = { answer: { state: "not_printed" }, downgraded: true };
@@ -428,18 +426,20 @@ export function toWriterEnvelope(channel, wire) {
   for (const f of [...WITNESS_BELT_FIELDS, ...WITNESS_REFERENCE_ANSWER_FIELDS]) {
     const out = normalizeAnswer(f, answersIn[f]);
     answers[f] = out.answer;
-    downgraded = downgraded || out.downgraded;
+    // D5: ONLY A BELT FIELD'S downgrade condemns the read. The two reference answers carry no
+    // amount and no belt term, so killing the amount verdict over a fumbled invoice-NUMBER quote
+    // would refuse a document whose nine monetary members and both tokens are perfectly readable
+    // — a far larger refusal than law 27(2) asks for. The reference downgrade still happens (the
+    // answer becomes not_printed, its `value` drops); it just does not make the read ineligible.
+    downgraded = downgraded || (out.downgraded && WITNESS_BELT_FIELDS.includes(f));
   }
-  // N3: CONTEST FAILS TOWARD WITHDRAWAL. `contest` is REQUIRED in the wire schema, so an absent,
-  // non-boolean or otherwise malformed value is a broken read — and the contest marker's only
-  // effect is to WITHDRAW identity fields from corroboration. Reading a malformed marker as
-  // `false` would resolve an unknown in the permissive direction; only an explicit boolean false
-  // means "I looked and the party blocks agree".
+  // N3: CONTEST FAILS TOWARD WITHDRAWAL. It is REQUIRED in the wire schema, so an absent or
+  // non-boolean value is a broken read — and the marker's only effect is to WITHDRAW identity
+  // fields. Only an explicit boolean false means "I looked and the party blocks agree".
   const envelope = { witness: { channel, contest: src.contest !== false, answers } };
-  // M1: a DERIVED absence must not wear an honest not_printed's clothes. One unusable answer
-  // makes the whole read corroboration-ineligible; the predicate's own gate (0023:309) refuses
-  // it. Deliberately whole-read rather than per-field: the belts are a conjunction, and a
-  // reader that silently corroborated the other ten fields around a hole is the exact
+  // M1: one unusable BELT answer makes the whole read corroboration-ineligible and the
+  // predicate's own gate (0023:309) refuses it. Whole-read rather than per-field on purpose: the
+  // belts are a conjunction, so corroborating the other ten around a hole is the exact
   // permissive-by-omission shape law 27(2) exists to close.
   if (downgraded) envelope.corroboration_ineligible = WITNESS_ANSWER_UNUSABLE;
   return envelope;

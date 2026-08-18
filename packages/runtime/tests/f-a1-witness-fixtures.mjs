@@ -100,12 +100,46 @@ export const resetWitnessLog = () => { logLines.length = 0; };
  * error_code = the code the runtime passed. When PR-3 lands, these cells run against the real
  * verb and any divergence in the CALL SHAPE is a finding on one side or the other.
  */
+/** The marker the stand-in carries in its own body, so `drop` can tell OUR substitute from the
+ *  real verb by reading it rather than by assuming which one is installed (review D3). */
+const STAND_IN_MARKER = "F-A1 PR-2 RIG STAND-IN -- not PR-3's body";
+/** The refusal codes PR-3's migration must add to ck_processing_task_error_code_f_a1 beside the
+ *  two witness consent codes. `wait_exhausted` is D1's; the CHECK does not admit it today. */
+const STAND_IN_CODES = ["wait_exhausted"];
+let widenedCheck = null;   // the constraint definition we replaced, for exact restoration
+
 export async function installFailWitnessFactsStandIn() {
+  // EXISTENCE-GATED (D3): once PR-3 lands, the REAL verb is present and these cells must run
+  // against it — installing over it would replace the thing under test with a scaffold, which is
+  // precisely the PR-1 assembly defect. Nothing is installed and nothing is later dropped.
+  if (await failWitnessFactsExists()) return { installed: false, reason: "real verb present" };
+
+  // The error-code CHECK does not admit `wait_exhausted` yet, so the stand-in could not store it.
+  // Widened here, captured EXACTLY so `drop` can put it back. PR-3 owes the same widening.
+  const con = await fx.rootQuery(
+    "select pg_get_constraintdef(oid) as def from pg_constraint where conname='ck_processing_task_error_code_f_a1'");
+  const def = con.rows[0]?.def ?? null;
+  if (def && !STAND_IN_CODES.every((c) => def.includes(`'${c}'`))) {
+    // REBUILT FROM THE CATALOG'S OWN LITERALS, not by string surgery on the rendered definition —
+    // pg_get_constraintdef emits a parenthesized `= ANY (ARRAY[...::text])` form, and patching
+    // that text produced `argument of CHECK must be type boolean, not type record`. The admitted
+    // set is read out, the new codes appended, the constraint written fresh. Restoration replays
+    // the ORIGINAL rendered definition verbatim, which is valid SQL after `add constraint <name>`.
+    widenedCheck = def;
+    const admitted = [...def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
+    const all = [...new Set([...admitted, ...STAND_IN_CODES])];
+    await fx.rootQuery("alter table clara.document_processing_tasks drop constraint ck_processing_task_error_code_f_a1");
+    await fx.rootQuery(
+      "alter table clara.document_processing_tasks add constraint ck_processing_task_error_code_f_a1"
+      + ` check (error_code is null or error_code in (${all.map((c) => `'${c}'`).join(",")}))`);
+  }
+
   await fx.rootQuery(`
-    create or replace function clara.fail_witness_facts(p_task uuid, p_reason text) returns jsonb
+    create function clara.fail_witness_facts(p_task uuid, p_reason text) returns jsonb
       language plpgsql security definer set search_path = clara, pg_temp as $fn$
     declare t record;
     begin
+      -- ${STAND_IN_MARKER}
       select * into t from clara.document_processing_tasks where id = p_task for update;
       if not found or t.lane <> 'llm_witness' then
         raise exception 'llm-witness task not found' using errcode='CLR16';
@@ -119,12 +153,26 @@ export async function installFailWitnessFactsStandIn() {
       return jsonb_build_object('task_id', p_task, 'status', 'failed', 'reason', p_reason);
     end $fn$`);
   await fx.rootQuery("grant execute on function clara.fail_witness_facts(uuid,text) to clara_runtime");
+  return { installed: true };
 }
 
-/** Remove the stand-in — the state the merged estate is ACTUALLY in, and the state the
- *  absent-verb fallback cell needs. */
+/**
+ * Remove ONLY what this file installed (D3), decided by READING the committed body for our
+ * marker. A `drop function if exists` would happily delete PR-3's real verb off a rig that had it
+ * — a fixture quietly destroying the estate it was supposed to be testing against.
+ */
 export async function dropFailWitnessFactsStandIn() {
-  await fx.rootQuery("drop function if exists clara.fail_witness_facts(uuid,text)");
+  const r = await fx.rootQuery(
+    "select position($1 in prosrc) > 0 as ours from pg_proc"
+    + " where oid = to_regprocedure('clara.fail_witness_facts(uuid,text)')", [STAND_IN_MARKER]);
+  if (r.rows[0]?.ours !== true) return { dropped: false, reason: "absent, or not ours" };
+  await fx.rootQuery("drop function clara.fail_witness_facts(uuid,text)");
+  if (widenedCheck) {
+    await fx.rootQuery("alter table clara.document_processing_tasks drop constraint ck_processing_task_error_code_f_a1");
+    await fx.rootQuery(`alter table clara.document_processing_tasks add constraint ck_processing_task_error_code_f_a1 ${widenedCheck}`);
+    widenedCheck = null;
+  }
+  return { dropped: true };
 }
 
 export const failWitnessFactsExists = () =>

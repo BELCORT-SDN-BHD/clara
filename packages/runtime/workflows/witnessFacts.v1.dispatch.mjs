@@ -20,6 +20,42 @@ export const WITNESS_EVENT_TYPE = "witness.extraction";
  *  belt on a door that is already narrower, not a new product limit. */
 export const WITNESS_MAX_VISION_BYTES = 30_000_000;
 
+/**
+ * HOW LONG A CLAIMED TASK MAY KEEP WAITING (review D1).
+ *
+ * THE WEDGE THIS CLOSES, measured at the claim body's bytes rather than assumed. A WAIT rethrows
+ * so the step retries — and the first cut claimed "the DB's per-document attempt cap bounds the
+ * total", WHICH IS FALSE. The attempt cap lives in `claim_document_processing_task`, and that
+ * body returns the replayed branch only for the SAME workflow_run_id; ANY other run meets
+ * `if t.status<>'queued' then raise CLR16` (0090 §5). So once a task is `running`, no later run
+ * can re-claim it, `attempt_count` never increments again, and the cap never fires. A task that
+ * waits forever holds one of the lane's two concurrency slots forever, and two of them wedge the
+ * firm's whole witness lane — the exact failure the terminal settle exists to prevent, reached
+ * through the one door that had no bound on it.
+ *
+ * THE SCENARIO THAT GETS THERE: a rolling deploy where one instance carries a different
+ * CLARA_WITNESS_MODEL_ID than the router's stamped engine_id. Every attempt fails the
+ * engine-stamp guard, which is deliberately a WAIT (the right image makes the same task succeed),
+ * so the task retries, is re-driven, waits again — and never dies. Two such documents and the
+ * lane stops.
+ *
+ * THE MECHANISM, chosen because it is PROVABLE rather than plausible. A per-step counter cannot
+ * work: a durable step memoizes its RETURN VALUE, and a step that throws has none, so nothing a
+ * failing step computes survives its own retry. The task's own `started_at` does survive — it is
+ * DB-owned, written once at claim time, and readable by every attempt in every run and every
+ * process. So the bound is wall-clock since the claim, evaluated by the DATABASE's clock (never
+ * the runtime's, which can skew between instances). 45 minutes is far past any legitimate
+ * transient — the longest honest wait here is an OCR pass that has not landed — and far short of
+ * leaving a slot held for a shift.
+ */
+export const WITNESS_WAIT_BUDGET_MS = 45 * 60 * 1000;
+
+/** The code a wait-exhausted task settles with. NEW VOCABULARY: `ck_processing_task_error_code_f_a1`
+ *  (0090 §8) does not admit it yet — PR-3's migration must add it beside the two witness consent
+ *  codes. Until then the settle is refused by the CHECK and `settleWitnessFailure` degrades to its
+ *  loud fallback, exactly as it does for the absent verb. Stated, not smuggled. */
+export const WITNESS_WAIT_EXHAUSTED = "wait_exhausted";
+
 export function receipt(row) {
   return row?.receipt ?? row?.result ?? row ?? {};
 }
@@ -115,6 +151,27 @@ export async function readTaskStatus(client, taskId) {
   return r.rows[0]?.status == null ? null : String(r.rows[0].status);
 }
 
+/**
+ * Has this claimed task been waiting past its budget (review D1)? Compared by the DATABASE's
+ * clock against the DB-owned `started_at`, so the answer is the same from every instance in a
+ * rolling deploy — a runtime-side `Date.now()` would let a skewed clock give two instances two
+ * different verdicts about the same task.
+ *
+ * Read POSITIVELY and fail toward CONTINUING to wait: only a row this query actually SAW, with a
+ * non-null `started_at` genuinely older than the budget, returns true. A missing row or a null
+ * `started_at` returns false — killing a task on the strength of an absence would turn a read
+ * failure into a settled document.
+ */
+export async function waitBudgetExhausted(client, taskId, budgetMs = WITNESS_WAIT_BUDGET_MS) {
+  const r = await client.query(
+    "select (started_at is not null and now() - started_at > make_interval(secs => $2::numeric)) as spent,"
+    + " extract(epoch from (now() - started_at)) as waited_s"
+    + " from clara.document_processing_tasks where id=$1",
+    [taskId, budgetMs / 1000],
+  );
+  return { spent: r.rows[0]?.spent === true, waitedSeconds: Number(r.rows[0]?.waited_s ?? 0) };
+}
+
 /** The PINNED OCR extraction the text channel reads and pins itself to: the newest DONE
  *  `engine_kind='ocr'` extraction of this document, by the live generation order
  *  (`version_n desc, id desc` — 0054:242-245's own distinct-on ordering, so the pin names the
@@ -133,22 +190,52 @@ export async function readPinnedOcrExtraction(client, doc) {
   return { id: String(row.id), pageCount: Number.isInteger(row.page_count) ? row.page_count : null };
 }
 
-/** The top-left corner of a flat `[x0,y0,x1,y1,…]` polygon, for READING-ORDER presentation only.
+/** The bounding box of a flat `[x0,y0,x1,y1,…]` polygon, for READING-ORDER presentation only.
  *  A malformed or absent polygon sorts LAST rather than first: an unplaceable region must not
  *  claim the top of the page, and it still keeps its idx, so it stays fully citable. */
-function topLeft(locator) {
+function boundingBox(locator) {
   const poly = Array.isArray(locator?.polygon) ? locator.polygon : [];
   let minX = Infinity;
   let minY = Infinity;
+  let maxY = -Infinity;
   for (let i = 0; i + 1 < poly.length; i += 2) {
     const x = Number(poly[i]);
     const y = Number(poly[i + 1]);
     if (Number.isFinite(x) && Number.isFinite(y)) {
       if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
       if (x < minX) minX = x;
     }
   }
-  return { x: minX, y: minY };
+  const height = Number.isFinite(minY) && Number.isFinite(maxY) ? maxY - minY : 0;
+  return { x: minX, y: minY, height: height > 0 ? height : 0 };
+}
+
+/**
+ * THE PAGE A REGION SORTS ON (review D4). `clara.witness_citation_regions` publishes
+ * `locator->>'page'` only, so a row written before the producer carried both spellings publishes
+ * a NULL page and would sort to the end of a multi-page document — scrambling reading order for
+ * exactly the legacy documents that need it most.
+ *
+ * DUPLICATED FROM `lib/extraction-result.mjs`'s `regionPage`, DELIBERATELY, and this is the
+ * chatTurn_v8 law rather than laziness: importing that module relatively would pull a tunable lib
+ * module into THIS frozen closure, making every future edit to the ExtractionResult seam a
+ * workflow-version change. The rule is stated once canonically there and mirrored here; the
+ * batteries assert both against the same live locator shapes, so a divergence is a finding.
+ *
+ * The DISPLAYED marker is NOT this value — the prompt prints `w.page` and nothing else, so a
+ * region whose page we only INFERRED sorts correctly while still showing no page number. Sorting
+ * is a presentation guess; a printed page number is a claim.
+ */
+function sortPage(publishedPage, locator) {
+  if (publishedPage != null) return publishedPage;
+  for (const key of ["page", "page_number"]) {
+    const raw = locator?.[key];
+    if (raw == null) continue;
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    if (Number.isInteger(n) && n >= 0) return n;
+  }
+  return null;
 }
 
 /**
@@ -178,24 +265,64 @@ export async function readCitationRegions(client, ocrExtractionId) {
     + " join clara.document_regions r on r.id = w.region_id",
     [ocrExtractionId],
   );
-  return r.rows
-    .map((row) => ({
-      idx: Number(row.idx),
-      page: row.page == null ? null : Number(row.page),
-      text_content: String(row.text_content ?? ""),
-      at: topLeft(row.locator),
-    }))
-    .sort((a, b) => {
-      // A null page sorts LAST for the same reason a malformed polygon does — never invented as
-      // page 1, which would interleave unplaceable regions through a real page's reading order.
-      const pa = a.page == null ? Number.MAX_SAFE_INTEGER : a.page;
-      const pb = b.page == null ? Number.MAX_SAFE_INTEGER : b.page;
-      if (pa !== pb) return pa - pb;
-      if (a.at.y !== b.at.y) return a.at.y - b.at.y;
-      if (a.at.x !== b.at.x) return a.at.x - b.at.x;
-      return a.idx - b.idx;   // total order, so the prompt is byte-stable across reads
-    })
-    .map(({ idx, page, text_content }) => ({ idx, page, text_content }));
+  const rows = r.rows.map((row) => ({
+    idx: Number(row.idx),
+    // What the prompt PRINTS: the published page, or nothing. Never the inferred one.
+    page: row.page == null ? null : Number(row.page),
+    text_content: String(row.text_content ?? ""),
+    // What the prompt SORTS on: the published page, falling back to the locator's other live
+    // spelling (D4) so a pre-change multi-page document still reads down the page.
+    sortPage: sortPage(row.page == null ? null : Number(row.page), row.locator),
+    box: boundingBox(row.locator),
+  }));
+
+  // STRICT PASS: a total order, so the prompt is byte-stable across reads. A null page and a
+  // malformed polygon both sort LAST — never invented as page 1, which would interleave
+  // unplaceable regions through a real page's reading order.
+  rows.sort((a, b) => {
+    const pa = a.sortPage == null ? Number.MAX_SAFE_INTEGER : a.sortPage;
+    const pb = b.sortPage == null ? Number.MAX_SAFE_INTEGER : b.sortPage;
+    if (pa !== pb) return pa - pb;
+    if (a.box.y !== b.box.y) return a.box.y - b.box.y;
+    if (a.box.x !== b.box.x) return a.box.x - b.box.x;
+    return a.idx - b.idx;
+  });
+
+  // LINE BANDING (review D7). Side-by-side columns — a label at x=0 and its amount at x=400 —
+  // are almost never at the SAME y to the last decimal, so a strict y sort interleaves the two
+  // columns and separates every label from its own figure: the shuffled-document defect again,
+  // one level finer. Regions within half a line-height of each other are therefore treated as ONE
+  // LINE and ordered left to right.
+  //
+  // BANDED BY A GREEDY SCAN, NOT BY A TOLERANT COMPARATOR. "|Δy| < tol" is not transitive — a
+  // near b, b near c, a far from c — and Array.prototype.sort with an inconsistent comparator has
+  // no defined result at all. Grouping first, then sorting WITHIN each group by x, is a total
+  // order in both passes and gives the same answer every time.
+  const banded = [];
+  let line = [];
+  let anchor = null;
+  const flush = () => {
+    if (line.length === 0) return;
+    line.sort((a, b) => (a.box.x - b.box.x) || (a.idx - b.idx));
+    banded.push(...line);
+    line = [];
+  };
+  for (const row of rows) {
+    const sameBand = anchor
+      && anchor.sortPage === row.sortPage
+      && Number.isFinite(anchor.box.y) && Number.isFinite(row.box.y)
+      // Tolerance from the SMALLER of the two heights, so a tall block never swallows a line
+      // beside it. Zero-height or unknown geometry gets no tolerance: it bands only with an
+      // exactly-equal y, which is the honest reading of "we do not know how tall this is".
+      && Math.abs(row.box.y - anchor.box.y) <= 0.5 * Math.min(anchor.box.height, row.box.height);
+    if (!sameBand) {
+      flush();
+      anchor = row;
+    }
+    line.push(row);
+  }
+  flush();
+  return banded.map(({ idx, page, text_content }) => ({ idx, page, text_content }));
 }
 
 /**

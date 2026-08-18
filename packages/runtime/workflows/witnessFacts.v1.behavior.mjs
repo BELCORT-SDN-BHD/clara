@@ -77,12 +77,18 @@ import {
   readWitnessContext,
   recordUsage,
   settleWitnessFailure,
+  waitBudgetExhausted,
   WITNESS_EVENT_TYPE,
   WITNESS_MAX_VISION_BYTES,
   WITNESS_PURPOSE,
+  WITNESS_WAIT_BUDGET_MS,
+  WITNESS_WAIT_EXHAUSTED,
 } from "./witnessFacts.v1.dispatch.mjs";
 
-export { WITNESS_EVENT_TYPE, WITNESS_MAX_VISION_BYTES, WITNESS_PURPOSE };
+export {
+  WITNESS_EVENT_TYPE, WITNESS_MAX_VISION_BYTES, WITNESS_PURPOSE,
+  WITNESS_WAIT_BUDGET_MS, WITNESS_WAIT_EXHAUSTED,
+};
 
 /** Copied VERBATIM from invoiceFacts.v1.behavior.mjs / statementFacts.v1.behavior.mjs. One
  *  ratified set, not reinvented: `internal` is deliberately NOT retryable — fail closed on the
@@ -98,12 +104,32 @@ function witnessRefusal(code, message) {
   return Object.assign(new FatalError(`witness read refused (${code}): ${message}`), { code, witnessRefusal: true });
 }
 
-/** A WAIT: neither a vendor fault nor a fact about this document — a deployment window, a filing
- *  correction in flight, an OCR substrate that has not landed, a task the DB has parked. Rethrown
- *  so the step retries; the DB's per-document attempt cap bounds the total. A WAIT never settles
- *  and never meters: nothing was dispatched and nothing was spent. */
+/**
+ * A WAIT: neither a vendor fault nor a fact about this document — a deployment window, a filing
+ * correction in flight, an OCR substrate that has not landed, a task the DB has parked. Rethrown
+ * so the step retries. A WAIT never meters (nothing was dispatched, nothing was spent) and never
+ * settles — UNTIL its budget is spent.
+ *
+ * IT IS NOT THE ATTEMPT CAP THAT BOUNDS THIS, and the first cut said it was. The cap lives in
+ * `claim_document_processing_task`, which only ever re-admits the SAME workflow_run_id; every
+ * other run meets `if t.status<>'queued' then raise CLR16` (0090 §5). Once a task is `running` it
+ * can never be re-claimed, so `attempt_count` never moves again and the cap never fires. The real
+ * bound is `WITNESS_WAIT_BUDGET_MS` measured from the task's own `started_at` — see that constant
+ * for the rolling-deploy scenario it closes and why a memoized counter could not.
+ */
 function witnessWait(message) {
   return Object.assign(new Error(message), { code: "internal", claraRetry: true });
+}
+
+/** A WAIT whose budget is spent: terminal, settled, and it says what it had been waiting for. */
+function witnessWaitExhausted(cause, waitedSeconds) {
+  return Object.assign(
+    new FatalError(
+      `witness task waited ${Math.round(waitedSeconds)}s past its budget without progressing`
+      + ` — last reason: ${cause instanceof Error ? cause.message : String(cause)}`,
+    ),
+    { code: WITNESS_WAIT_EXHAUSTED, witnessRefusal: true, cause },
+  );
 }
 
 function witnessFailureCode(err) {
@@ -211,21 +237,40 @@ async function withMeteredChannel(services, withRuntime, taskId, doc, channel, p
 }
 
 /**
- * TERMINAL OUTCOMES SETTLE THE TASK (review B1); WAITs and transient faults do not.
+ * TERMINAL OUTCOMES SETTLE THE TASK (review B1); a WAIT settles only once its budget is spent (D1).
  *
  * Wraps a whole channel read, INCLUDING the pre-egress refusals that happen before any metering
  * (an unreadable media type, an oversized payload) — those are facts about the document, so they
- * must end the task just as a consent refusal does. `classifyWitnessFailure` owns the split; the
- * settle is best-effort and never masks the error the caller is about to see.
+ * must end the task just as a consent refusal does. It also wraps the PERSIST (D2): a terminal
+ * raise out of the writer is just as capable of wedging a slot as a refused dispatch.
+ *
+ * `classifyWitnessFailure` owns the terminal/retryable split; the settle is best-effort and never
+ * masks the error the caller is about to see.
  */
 async function withTerminalSettle(services, withRuntime, taskId, run) {
+  const log = services?.log ?? console.error;
   try {
     return await run();
   } catch (err) {
     const verdict = classifyWitnessFailure(err);
-    if (!verdict.retry) {
-      await settleWitnessFailure(withRuntime, taskId, verdict.code, services?.log ?? console.error);
+    if (verdict.retry) {
+      // A WAIT is still a wait — unless it has been one for too long. The budget is read from the
+      // DB (its clock, its `started_at`) rather than counted in this process, because nothing a
+      // failing step computes survives its own retry.
+      let budget = { spent: false, waitedSeconds: 0 };
+      try {
+        budget = await withRuntime((client) => waitBudgetExhausted(client, taskId));
+      } catch {
+        // Fail toward CONTINUING to wait: a failed budget read must not kill a live task.
+        budget = { spent: false, waitedSeconds: 0 };
+      }
+      if (!budget.spent) throw err;
+      const exhausted = witnessWaitExhausted(err, budget.waitedSeconds);
+      log(`[witness] task ${taskId} settling '${WITNESS_WAIT_EXHAUSTED}': ${exhausted.message}`);
+      await settleWitnessFailure(withRuntime, taskId, WITNESS_WAIT_EXHAUSTED, log);
+      throw exhausted;
     }
+    await settleWitnessFailure(withRuntime, taskId, verdict.code, log);
     throw err;
   }
 }
@@ -344,11 +389,15 @@ export async function persistWitnessPair(services, withRuntime, taskId, textRead
     envelope: visionRead.envelope,
   };
   const pagesUsed = Number.isInteger(textRead.pages_used) && textRead.pages_used >= 0 ? textRead.pages_used : null;
-  const out = await callWriter(
+  // D2: the writer's own structural refusals (equal prompt hashes, a malformed vocabulary, a task
+  // in the wrong state) raise CLR10/CLR16 — terminal by nature, and until now they left the task
+  // `running` with nothing to re-claim it. A raise out of the persist wedges a concurrency slot
+  // exactly as a refused dispatch does, so it settles through the same door.
+  const out = await withTerminalSettle(services, withRuntime, taskId, () => callWriter(
     withRuntime,
     "select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as receipt",
     [taskId, JSON.stringify(textCall), JSON.stringify(visionCall), pagesUsed],
-  );
+  ));
   return { taskId, status: "done", receipt: out };
 }
 

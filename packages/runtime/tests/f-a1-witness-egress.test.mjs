@@ -224,6 +224,66 @@ test("f-a1.pr2.g more than one live filing client -> witness_multi_client, no mo
 });
 
 // =======================================================================================
+// THE WAIT IS BOUNDED (review D1) — the one door that had no bound on it.
+// =======================================================================================
+
+test("f-a1.pr2.f5 D1 a WAIT within budget keeps waiting; the SAME wait past budget settles wait_exhausted", { skip }, async () => {
+  // The scenario: a rolling deploy where one instance's CLARA_WITNESS_MODEL_ID disagrees with the
+  // router's stamped engine_id. Every attempt fails the engine-stamp guard, which is deliberately
+  // a WAIT — and a `running` task can never be re-claimed (any other run meets CLR16 at
+  // 0090 §5), so attempt_count never moves and the cap never fires. Two such documents hold both
+  // concurrency slots and the firm's witness lane stops.
+  const s = await buildWitnessSituation("waitbudget", {
+    regions: REGIONS, engineId: "llm-openai:some-other-model:v1",
+  });
+  const calls = witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
+
+  // WITHIN budget: still a wait, still unsettled, still retryable.
+  await assert.rejects(
+    () => runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc),
+    (err) => err.claraRetry === true && /did not call/.test(err.message),
+  );
+  assert.equal((await readTask(s.taskId)).status, "running", "a fresh wait must NOT be settled");
+
+  // Age the claim past the budget — the DB-owned `started_at` is the only thing that survives a
+  // step's own retry, which is why the bound is measured from it rather than counted in-process.
+  await fx.rootQuery(
+    "update clara.document_processing_tasks set started_at = now() - interval '46 minutes' where id=$1",
+    [s.taskId]);
+  resetWitnessLog();
+  await assert.rejects(
+    () => runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc),
+    (err) => err.code === "wait_exhausted" && err.witnessRefusal === true
+      && /past its budget/.test(err.message) && /did not call/.test(err.message),
+    "it becomes terminal AND still names what it had been waiting for",
+  );
+  assert.equal(calls.length, 0, "no model call on either attempt — the guard is upstream of egress");
+  const task = await readTask(s.taskId);
+  assert.equal(task.status, "failed", "the slot is released");
+  assert.equal(task.error_code, "wait_exhausted");
+  assert.match(logLines.join("\n"), /wait_exhausted/);
+});
+
+test("f-a1.pr2.f6 D1 a failed budget READ fails toward continuing to wait, never toward killing a live task", { skip }, async () => {
+  const s = await buildWitnessSituation("budgetreadfail", {
+    regions: REGIONS, engineId: "llm-openai:some-other-model:v1",
+  });
+  witnessMock({ text: { ...wire(), citations: citationsFor(s) }, vision: wire() });
+  // A pool that answers the budget probe with an error, and nothing else differently.
+  const brittle = (fn) => fx.asRuntime((client) => fn({
+    query: (sql, params) => (/waited_s/.test(sql)
+      ? Promise.reject(new Error("budget probe unavailable"))
+      : client.query(sql, params)),
+  }));
+  await assert.rejects(
+    () => runWitnessTextRead(services(), brittle, s.taskId, s.claimDoc),
+    (err) => err.claraRetry === true,
+    "an unreadable budget must not promote a wait to a settle",
+  );
+  assert.equal((await readTask(s.taskId)).status, "running");
+});
+
+// =======================================================================================
 // THE AUTHORIZED PATH — two dispatches, one per channel.
 // =======================================================================================
 

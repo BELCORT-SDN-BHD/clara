@@ -254,6 +254,28 @@ test("M1 a dropped reference `value` is NOT a downgrade — the reading still st
     "the value slot is an optional cross-regime convenience; losing it does not make the READ unusable");
 });
 
+test("D5 an unusable REFERENCE answer downgrades but does NOT condemn the amount verdict", () => {
+  const env = toWriterEnvelope("text", {
+    answers: wireAnswers({
+      "invoice.total": value("RM 103.75"),
+      "invoice.invoice_id": { state: "value", raw: "   ", value: null },
+    }),
+    contest: false,
+  });
+  assert.deepEqual(env.witness.answers["invoice.invoice_id"], { state: "not_printed" },
+    "the unusable reference answer still degrades to silence");
+  assert.equal("corroboration_ineligible" in env, false,
+    "…but it carries no amount and no belt term, so refusing the whole read over a fumbled "
+    + "invoice-NUMBER quote would be a far larger refusal than law 27(2) asks for");
+  assert.deepEqual(env.witness.answers["invoice.total"], { state: "value", raw: "RM 103.75" });
+
+  // The contrast that makes it a statement about FIELD CLASS rather than about downgrades.
+  const belt = toWriterEnvelope("text", {
+    answers: wireAnswers({ "invoice.amount_due": { state: "value", raw: "   " } }), contest: false,
+  });
+  assert.equal(belt.corroboration_ineligible, WITNESS_ANSWER_UNUSABLE, "a BELT downgrade does condemn it");
+});
+
 test("N3 a malformed contest marker fails toward WITHDRAWAL, never toward permissive", () => {
   for (const bad of [undefined, null, "unknown", "false", 0, 1, {}]) {
     const env = toWriterEnvelope("text", { answers: wireAnswers(), contest: bad });
