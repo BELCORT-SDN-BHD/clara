@@ -2,17 +2,15 @@
 
 > **Design doc of record for Wave-F Track A item F-A1** (`docs/plan/active/wave-f-contract.md`
 > §F-A1). **v3, 2026-08-18** — two fresh-context adversarial lanes (attack + independent
-> byte-verify, repo at 84d9c97): 34 v1 findings folded → 12 more (+1 partial) at the v2
-> re-verify → 2 more at the v3 confirmation (the cross-regime clock; a wording race) —
-> 48 adjudicated, all confirmed on final bytes, both lanes unconditional MERGEABLE. The
-> Codex cross-model pass was BLOCKED by a vendor usage limit — **re-shaped by owner ruling
-> (v3.1, 2026-08-18 night): a third native fresh-context adversarial lane substitutes for
-> THIS build; Codex re-enters at future builds** (§5, §6.1). **That pass RAN the same
-> night — MERGEABLE-WITH-CONDITIONS (3 blockers · 15 material · 5 nits; 53 cites
-> checked, 51 clean); every condition is folded in below, and the finding-by-finding
-> adjudication + the estate survey live in `f-a1-annexes.md`.** **v3.1 also records §5 RULED
-> in-session** (OQ-1 OpenAI-direct · OQ-2 ratified · cutover direct-release, dissent on
-> file) **and the §3.9 census verdict.** Binds under: ADR-0071 G1.1 + C1-C4; digest laws 71-76; PRD §6 (law 5 is the "§6.5"
+> byte-verify, repo at 84d9c97) folded 48 findings across v1→v3, all confirmed on final
+> bytes, both lanes unconditional MERGEABLE. **v3.1 (2026-08-18 night):** §5 RULED
+> in-session (OQ-1 OpenAI-direct · OQ-2 ratified · cutover direct-release, dissent on
+> file); PR-0 re-shaped by owner ruling to a third NATIVE adversarial lane — which RAN:
+> MERGEABLE-WITH-CONDITIONS, every condition folded in below (the register + the estate
+> survey live in `f-a1-annexes.md`); the §3.9 census verdict recorded. The BUILD's own
+> adjudicated review round (2 blockers · 7 material, incl. B1's C2-overreach and B2's
+> transition-trigger arm) folded PRE-FREEZE the same night — Annex B/C carry that
+> record too. Binds under: ADR-0071 G1.1 + C1-C4; digest laws 71-76; PRD §6 (law 5 is the "§6.5"
 > inert-data referent). Every build PR takes the uniform ADR-061 ladder; the predicate
 > and every recut guard is judgement logic (review law 1).
 
@@ -31,10 +29,9 @@
 
 ## 2 · The estate as-built — moved to `f-a1-annexes.md` Annex A
 
-The full survey (data plane · verdict machinery · the twelve walls · runtime plane ·
-reader lessons) lives in `docs/plan/active/f-a1-annexes.md` (split at v3.1 under the
-500-line harness file limit; the N1/N2 cite fixes applied there). Wall numbers cited
-below (wall 1–12) resolve in Annex A; the PR-0 adjudication register is its Annex B.
+The full survey (data plane · verdict machinery · the thirteen walls · runtime plane ·
+reader lessons) lives in `docs/plan/active/f-a1-annexes.md`; wall numbers cited below
+resolve there, and the adjudication registers are its Annex B/C.
 
 ## 3 · The design
 
@@ -127,6 +124,12 @@ AMOUNT verdict with no identity term (today's posture, unchanged).**
 **The canonical `extraction_id` is the TEXT-witness row** — its regions carry the
 verified citations (§3.4), so consumers that read regions off the bound extraction
 (0022:1309-1328, 0036's shape checks) keep working against one designated row.
+**The reference-value contract (M3):** `invoice_id`/`invoice_date` answers may
+carry a normalized `value` beside the verbatim `raw` (write-verified:
+substring-of-raw / ISO date); the envelope emits `coalesce(value, raw)` and DROPS
+the key on cross-channel disagreement — the duplicate-bill/sales walls
+(0015:1402/1425-1429) compare these keys by exact equality ACROSS regimes, and the
+value slot is what keeps a legacy `INV-001` and a witness quote colliding.
 
 **Conjunct census (v1 finding 3; COMPLETED at PR-0 B1 — every 0023 OCR-branch belt,
 disposition stated):** per-field sen-exact agreement (text values from the canonical
@@ -143,9 +146,11 @@ becomes a battery cell) · present-but-unreadable guards · cardinality guards �
 `type_code='01'` required — CN/DN corroboration-ineligible (the structured branch's
 0023:243-245 posture inherited; a witness reliably reports type_code where Azure
 rarely did, closing the old OCR branch's silent gap — M12) · MYR
-under the inherited asymmetry (both witnesses must cite explicit MYR evidence;
-absence or disagreement → not corroborated; explicit foreign → explicit_non_myr →
-CLR21 currency_unsupported). No confidence term (postverify reasserted). The
+under the inherited asymmetry — **currency and type_code are TOKEN belts (PR-1
+review B1): answered on both channels, citation OPTIONAL, NO geometry term — C2
+anchors the NINE monetary members only; `RM`|`MYR` both confirm MYR
+(confirm-or-refuse, never manufacture)**; absence or disagreement → not
+corroborated; explicit foreign → explicit_non_myr → CLR21 currency_unsupported. No confidence term (postverify reasserted). The
 structured `clara-%` branch stays byte-untouched inside the dispatching
 `_invoice_fact_state_at`. **The required-answer rule (B1 — the belts keep their
 FORCE under a supplier that chooses what to emit):** every belt field is REQUIRED in
@@ -198,8 +203,11 @@ design round. Accounting-correctness picks the fallback direction, not the sched
 frozen-evaluators.json (append-only manifest; same-file registration row per
 check-frozen-evaluators.mjs), under `set local search_path=pg_catalog,pg_temp` so the
 stored hash reproduces (the 0059 recorded reason). **The closure is declared
-minimal and explicit**: `evaluate_witness_fact_state_v1` + `_fact_hash` +
-`_normalize_invoice_cents` (+ `_is_explicit_non_myr` if called). The two shared
+minimal and explicit — FOUR members as built**: `evaluate_witness_fact_state_v1` +
+`evaluate_witness_identity_v1` (the identity leaf, born at the build's file split;
+own registry row + manifest entry so the `evaluate_*` lint covers it at review
+time — PR-1 review M7) + `_fact_hash` +
+`_normalize_invoice_cents`. The two shared
 leaves are ALREADY de-facto immutable (every stored fact_hash depends on them);
 the freeze makes that structural, and the design states the cost: they can never be
 CoR'd again — a change is a `_v2` re-mint with a new registry row. The `_v1` name is
@@ -212,7 +220,10 @@ agreement cell.
 ### 3.4 C2: cite-and-verify, not search (v1 finding 11)
 
 The text-witness receives NUMBERED regions and must CITE the region idx it read each
-fact from; the server resolves idx → region uuid against the PINNED ocr extraction at
+fact from (the two token belts excepted — citation optional, B1); **the numbering
+PR-2's prompt builder uses comes from `clara.witness_citation_regions` — the write
+resolver's own ordinal published as a reader (M5), never `get_document_extract`'s
+DIFFERENT idx**; the server resolves idx → region uuid against the PINNED ocr extraction at
 write time (the F9 discipline — uuids bound at write, idx never stored) and VERIFIES:
 the witness's quoted rendering is a substring of the cited region's text_content AND
 parses to the claimed cents. Verification beats content-search on all three v1 holes
@@ -406,31 +417,23 @@ none is attempted) (M4).
   self-match term is the SELF-REFERENTIAL WITHDRAWAL (B3 as amended — polarity-free),
   never a refusal.
 
-## 5 · Owner sitting questions — RULED (2026-08-18 night, in-session; the questions as
-asked are kept for the record)
+## 5 · Owner sitting questions — RULED (2026-08-18 night, in-session)
 
-- **OQ-1 · The LLM vendor — RULED: OpenAI direct (option a).** Vision sends original
-  client bytes — and text sends OCR-derived client content — to the LLM provider. The
-  options were (a) OpenAI direct under an ADR-011-grade bundle (DPA, disclosure, PDPA,
-  no-training retention, deletion); (b) Azure-hosted OpenAI inside the existing
-  processor relationship (this doc's prior recommendation). The owner ruled **(a)**:
-  the runtime's existing seam — classify/chat/autoDraft already call `openai()`
-  directly today (classify-llm.mjs:14,114-117, byte-checked at ruling time) — so the
-  witness pair adds NO second provider; the genuinely new egress is the vision
-  channel's original-image bytes. The ADR-011-grade paperwork (OpenAI DPA +
-  engagement-letter disclosure) moves to the owner/legal backlog, NON-BLOCKING per the
-  cutover ruling below.
+- **OQ-1 · The LLM vendor — RULED: OpenAI direct (option a;** option (b) Azure-hosted
+  OpenAI, this doc's prior recommendation, DECLINED**).** The runtime's existing seam —
+  classify/chat/autoDraft already call `openai()` directly (classify-llm.mjs:14,114-117,
+  byte-checked at ruling time) — so the witness pair adds NO second provider; the
+  genuinely new egress is the vision channel's original-image bytes. The ADR-011-grade
+  paperwork (OpenAI DPA + engagement-letter disclosure) rides the owner/legal backlog,
+  NON-BLOCKING per the cutover ruling below.
 - **OQ-2 — RULED: RATIFIED.** `witness_extraction` (one typed purpose, both channels,
   sha-bound) joins the governed-egress registry — WB-R23 discharged.
-- **Cutover posture — RULED: DIRECT RELEASE.** Real client documents flow through the
-  witness lane at PR-3 cutover with no paperwork hold ("直接放行"). The agent's
-  recommendation — sign the OpenAI DPA before cutover — is on file as DISSENT
-  (ADR-0071 house style: dissent-then-execute); the DPA stays an owner-key legal
-  item, non-blocking.
+- **Cutover posture — RULED: DIRECT RELEASE.** Real client documents flow at PR-3
+  cutover with no paperwork hold ("直接放行"); the agent's DPA-first recommendation is
+  on file as DISSENT (dissent-then-execute); the DPA stays owner-key, non-blocking.
 - **PR-0 — RE-SHAPED (same ruling set):** the Codex cross-model pass is replaced for
-  THIS build by a third native fresh-context adversarial lane (implementor's-walk +
-  accounting-correctness + runtime-collision lenses + the §3.9 census notes); Codex
-  re-enters at future builds when the vendor limit lifts. §6.1 amended.
+  THIS build by a third native fresh-context adversarial lane; Codex re-enters at
+  future builds when the vendor limit lifts (a standing rule since). §6.1 amended.
 
 ## 6 · Build sequencing (deploy order BINDING; every recut names its live body)
 
@@ -472,9 +475,8 @@ asked are kept for the record)
 
 ## 7 · Test battery sketch — moved to `f-a1-annexes.md` Annex C
 
-The full cell list (writer · predicate · end-to-end evidence · continuity · walls ·
-E2E corpus · freeze; contract-blind cells marked ▣) lives in Annex C. Every "§7
-cell" reference in this doc resolves there.
+The full cell list (contract-blind cells marked ▣) plus the review-fold additions
+live in Annex C; every "§7 cell" reference in this doc resolves there.
 
 ## 8 · Registered risks and named non-goals
 

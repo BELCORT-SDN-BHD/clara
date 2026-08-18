@@ -116,7 +116,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on branch f-a1/pr1: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly; annex B carries the assembly record. Next: integration verification → fresh-context review (Codex per the availability rule) → PR | building | — |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on branch f-a1/pr1: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly. **Verify+review round DONE (head ebcc709)**: the integration verify's 36 census reds (all EXTENDED, never weakened) + the opus fresh-context review's 2 blockers/7 material/6 nits (B1 the C2-overreach that would have zeroed corroboration on RM-printed invoices; B2 the missing queued→failed trigger arm → wall 13) ALL adjudicated, fixed PRE-FREEZE, re-proven (δ-drill 63/63 · ε 69/69 · f-a1 family green · sweep 2470/2508 with 1 Windows-only environmental red). Next: fix-diff re-review → PR | building | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -463,25 +463,26 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   by the usage limit) RESUMED post-reset with the M3/M4/M5 addendum. S0.9's resolved
   record archived per the outgrow law. Docs-only PR: this truing + the v3.1 fold set.
 - **2026-08-18 (late night, PR-1 build + assembly)** — four builder lanes delivered PR-1's
-  DB estate, each rig-green on its own throwaway postgres:17: **0089** the 0017 kind-scope
-  (10-cell battery; the pre-fix census proved the cross-kind defect live — 16/17 OCR rows
-  superseded, 0/17 post-fix); **0090** the walls (subscriber census →
-  `document.llm_witness_failed` minted + event-type-registered; the witness-OWN concurrency
-  column; four purpose verbs + `prepare_egress_dispatch` recut — two discovered obligations
-  beyond the design's nine; wb-0020 restore pairs machine-derived, 9/9 with byte-exact
-  reversal); **0091-0093** the predicate trio (identity leaf + frozen evaluator, 4-member
-  CLOSED closure + the two dispatch recuts with an 11-body/27-site caller census; 36/36 new
-  + 104/104 pre-existing green; the filing-client join resolved FAIL-CLOSED via
-  `document_filings` — a design silence, folded to §3.3; M11 census: 3 paths retire);
-  **0094-0095** usage + writer (12/12; clock-ordered pair with the +1µs guarantee). The
-  writer lane's TRUE-merged-chain rig caught the one cross-lane defect (fixtures probing
-  pre-rename constraint names — the predicate lane had validated against its authoring
-  scaffold); fixed at assembly. Assembly on branch f-a1/pr1: scaffold deleted, numbers 0089-0095
-  claimed, every internal UNNUMBERED reference trued (incl. the `evaluator_versions` data
-  value per the 0059 convention), x1-reextraction's stale comment trued, annex B assembly
-  record + two Known-issues registrations (the limits-upsert hazard; the statement-pair
-  coin flip). Owner ruling recorded the same evening: review lanes NEVER wait for Codex —
-  native substitutes, Codex rejoins when available.
+  DB estate (0089-0095), each rig-green on its own throwaway postgres:17; the 0089 pre-fix
+  census proved the cross-kind supersede defect LIVE (16/17 OCR rows) and 0/17 post-fix;
+  the filing-client join resolved FAIL-CLOSED via `document_filings` (design silence,
+  §3.3); the writer lane's TRUE-merged-chain rig caught the one cross-lane defect
+  (fixtures probing pre-rename constraint names), fixed at assembly; annex B carries the
+  full record. Two Known-issues registered (limits-upsert hazard; statement-pair coin
+  flip). Owner ruling same evening: review lanes NEVER wait for Codex.
+- **2026-08-18 (deep night, the verify+review→fix round)** — integration verify: F-A1
+  itself fully green, 36 suite reds ALL one class (closed-world censuses lawfully
+  outgrown — extended with named rosters, never weakened; incl. CI's own δ-contract
+  drill leg). The opus fresh-context review (law 1): NOT-MERGEABLE → 2 blockers
+  (B1 C2-overreach onto the two token belts — would have zeroed corroboration on every
+  RM-printed invoice, caught PRE-FREEZE; B2 the queued→failed trigger arm → wall 13) +
+  7 material (customer_taxid restored; contest validated write-side + raise-proof
+  fail-closed read; the M3 reference-value contract for the cross-regime duplicate
+  walls; token-bounded citation matching; the witness_citation_regions numbering door;
+  magnitude guards; the identity leaf renamed into the lint's discovery surface) +
+  6 nits — all adjudicated (one review disposition AMENDED, one residual RULED),
+  fixed on f-a1/pr1-fixes and re-proven; design/annex/PROGRESS trued. Next:
+  fix-diff re-review → PR.
 
 ---
 
