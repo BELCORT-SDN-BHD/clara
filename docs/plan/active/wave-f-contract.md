@@ -1,7 +1,7 @@
 # Wave F — the two-track contract (ADR-0071 execution)
 
 > **Contract of record for Wave F**, minted 2026-08-18 from the owner's Agentic Charter
-> rulings (`docs/adr/0071-the-agentic-charter.md`; digest laws 71-75). Wave F runs TWO
+> rulings (`docs/adr/0071-the-agentic-charter.md`; digest laws 71-76). Wave F runs TWO
 > PARALLEL TRACKS. Every item below takes the uniform ADR-061 ladder at build time; this
 > contract scopes, it does not waive review. Live state lives in `PROGRESS.md`; this file
 > is the scope authority until the wave closes.

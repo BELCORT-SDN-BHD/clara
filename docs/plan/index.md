@@ -11,7 +11,10 @@ lives in this index, never in the path** — because closed-wave paths are cited
 immutable artifacts (migrations `0064`/`0065`, hooks, test batteries cite
 `docs/plan/active/wave-e-…` at file:line, and a migration's bytes can never be edited).
 Documents authored AFTER a wave closes (ceremony as-runs, acceptance records) land in
-`completed/` directly. This sentence is the reconciliation of PRD line 3's
+`completed/` directly. The convention is FORWARD-ONLY from 2026-08-12: the wave contracts
+and design docs already sitting in `completed/` were created at those paths by the harness
+refactor itself (commit `1a66a61`), never renamed out of `active/` — no history contradicts
+this paragraph. This sentence is the reconciliation of PRD line 3's
 active-then-completed wording with the citation-stability that the immutable estate
 requires — the same authority split as the ζ squash-subject precedent (the directory is
 the authority; frozen testimony goes stale honestly).
@@ -28,7 +31,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 
 | File | Status | Hook |
 |---|---|---|
-| `wave-f-contract.md` | **live** | **The Wave-F contract of record** (ADR-0071 execution): Track A the agentic core (F-A1 witness-pair extraction → F-A2 agentic posting → bank/close/reporting/filing/internet agency, F-A1..A9) ∥ Track B tax (F-T1..T4), plus **F-A10 — the retirement completion condition** (two architectures never enter Wave G). |
+| `wave-f-contract.md` | **live** | **The Wave-F contract of record** (ADR-0071 execution): Track A the agentic core, F-A1..A9 (witness-pair extraction; agentic posting; bank, close, reporting, freeform-read, filing+interview, internet agency; metering — F-A1→F-A2 is the only hard chain, the rest fan out) ∥ Track B tax (F-T1..T4), plus **F-A10 — the retirement completion condition** (two architectures never enter Wave G). |
 | `roadmap.md` | live | Wave F/G forward roadmap (re-scoped two-track at ADR-0071), the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
 | `wave-g-e2e-corpus-design.md` | live | The Wave-G factory-reset + full E2E corpus DESIGN, for the owner's sitting (owner-directed 2026-08-16): the slot matrix (3–4 additional real clients at RPR rigor, two consecutive FY closes each, green-field vs brown-field), the golden-standard handover per client, the per-client run script, the exercise-every-gate rule against the vacuous-green class, the edge-case lens, and eleven marked owner decisions. **Nothing in it is ratified**, and its step-4 "standing rules earn autopost" wording takes a G1-alignment amendment at the sitting (ADR-0071). |
 | `wave-e-contract.md` | historical | The Wave E contract of record, E-R1..E-R14 (ADR-065) — ratified, never re-grilled (digest law 67); cite-only now the wave is ceremonied. **ADR-0071 supersedes specific clauses in place** (E-R5/E-R18 approver, E-R11 key ①, E-R13 absorbed, #25) — the file's bytes stay; the ADR names the changes. |

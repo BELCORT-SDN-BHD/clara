@@ -14,7 +14,8 @@ judgement-posts across every document class; the rules machine's execution tier 
 KB/history becomes the learning fuel) · F-A3 bank agency (agentic match/adjust; the red pen
 stays human) · F-A4 close key ① (begin/abandon + the preparation surface) · F-A5 reporting
 agency (the analysis sandbox, definition self-approval, the OBO evaluator lane, chart-kind
-renderers) · F-A6 the interview model layer · F-A7 the filing verb · F-A8 the internet lane
+renderers) · F-A6 the audited freeform read · F-A7 the filing verb + the interview model layer
+(F-A7a/F-A7b) · F-A8 the internet lane
 (official feeds → effective-dated tables; the open web read tool) · F-A9 metering ·
 F-A10 **the retirement completion condition — two architectures never enter Wave G**.
 
