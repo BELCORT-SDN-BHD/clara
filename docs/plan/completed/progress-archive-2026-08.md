@@ -121,3 +121,26 @@
   true only of the TRACKED-file overlaps). Deleted as superseded: the finals are on `main`,
   the lane states survive in the custody branches, and the acceptance records carry the
   evidence. The worktree's status is clean.
+
+## Known-issues entries archived 2026-08-18 (resolved; moved verbatim per the outgrow law)
+
+- **0057's S0.9 birth self-test is a LATENT CLUSTER-RACE FLAKE on main (2026-08-15, root-caused
+  and reproduced; fix commissioned).** The guard at 0057:250 asserts
+  `pg_visible_in_snapshot(pg_current_xact_id(), pg_current_snapshot())` is false — but that
+  expression is true iff ANY transaction that acquired a later xid has COMPLETED anywhere on
+  the CLUSTER (snapshot xmax = latestCompletedXid+1; own xid is never in xip_list), so under
+  READ COMMITTED it is a ~30ms race per 0057 application, four tickets per CI run in the
+  Slice-5 docs-upgrade drill (shared service container = cross-database churn). Reproduced on
+  main's own bytes (4 trips in 5 with a concurrent committer; 0 in 12 quiet). 0057's RUNTIME
+  watermark predicate is SOUND (it reads a stored committed snapshot); only the birth-time
+  self-proof is race-exposed. FIX (runner lane, own PR, full ladder — 0057's bytes are
+  immutable): a per-migration isolation pin in migrate.mjs keyed on version + sha256
+  (identity, not spelling), pinning exactly 0057 to REPEATABLE READ (snapshot precedes any
+  own-xid allocation → deterministically false), fail-closed on sha mismatch; blanket RR is
+  REJECTED — 0019 explicitly refuses it (CLR32). Validated: 0/5 under churn with the pin vs
+  4/5 control; full drill 4/4. **RESOLVED 2026-08-15: PR #241 merged (f90e0fd5)** — the
+  checksum-keyed isolation pin is live in the runner, the pin is MEASURED (post-BEGIN
+  read-back of transaction_isolation with a refusal on mismatch), and the applied-skip note
+  states only what the ledger records. The flake is dead for fresh-chain applies; live 0057
+  predates the pin (applied at READ COMMITTED, race won) and its runtime predicate was always
+  sound.

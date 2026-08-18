@@ -5,8 +5,14 @@
 > byte-verify, repo at 84d9c97): 34 v1 findings folded → 12 more (+1 partial) at the v2
 > re-verify → 2 more at the v3 confirmation (the cross-regime clock; a wording race) —
 > 48 adjudicated, all confirmed on final bytes, both lanes unconditional MERGEABLE. The
-> Codex cross-model pass is BLOCKED by a vendor usage limit until 2026-08-20 — a **named
-> precondition of build PR-1**, not of this doc. Binds under: ADR-0071 G1.1 + C1-C4; digest laws 71-76; PRD §6 (law 5 is the "§6.5"
+> Codex cross-model pass was BLOCKED by a vendor usage limit — **re-shaped by owner ruling
+> (v3.1, 2026-08-18 night): a third native fresh-context adversarial lane substitutes for
+> THIS build; Codex re-enters at future builds** (§5, §6.1). **That pass RAN the same
+> night — MERGEABLE-WITH-CONDITIONS (3 blockers · 15 material · 5 nits; 53 cites
+> checked, 51 clean); every condition is folded in below, and the finding-by-finding
+> adjudication + the estate survey live in `f-a1-annexes.md`.** **v3.1 also records §5 RULED
+> in-session** (OQ-1 OpenAI-direct · OQ-2 ratified · cutover direct-release, dissent on
+> file) **and the §3.9 census verdict.** Binds under: ADR-0071 G1.1 + C1-C4; digest laws 71-76; PRD §6 (law 5 is the "§6.5"
 > inert-data referent). Every build PR takes the uniform ADR-061 ladder; the predicate
 > and every recut guard is judgement logic (review law 1).
 
@@ -23,122 +29,12 @@
 - OCR demotes to coordinates+text behind a formalized ExtractionResult seam. Retires:
   `invoiceFacts.v1.azure`, `statementFacts.v1.engine`, the eight-reader family.
 
-## 2 · The estate as-built (verified twice at the bytes; live-body provenance stated)
+## 2 · The estate as-built — moved to `f-a1-annexes.md` Annex A
 
-**Data plane.** `documents`: sha256 + storage_path only, no bytes column
-(0003:64-77, 0007:53-55). `document_extractions`: append-only-except-one-supersede
-(0007:663-676); unique `(document_id, engine_id, version_n, engine_kind)`
-(`uq_document_extractions_doc_engine_version_kind`, 0026:225-226; the load-bearing
-comment at 0038:1769-1774). OCR raw text lives twice: whole-document
-`envelope.content` (egress.mjs:150-156) and per-line `document_regions.text_content`
-with page_polygon locators (egress.mjs:113-131; writer 0007:2163-2210). The read seam
-is `get_document_extract` — newest done extraction per engine_kind, distinct-on, NO
-allowlist (0054:242-245); dense per-call region `idx` (0054:280), UNSTABLE across
-generations by documented contract (0054:32-42, 73-81).
-
-**Verdict machinery.** `_invoice_fact_state_at` live body 0023:109-367 (0016:2127
-superseded): structured `clara-%` branch geometry-exempt and byte-untouched since;
-OCR branch = MYR + geometry + per-field agreement (`outcome='typed_collapsed'`,
-0023:215-216, coalesced never-NULL 0023:208-214) + the arithmetic identity + **the
-belt set §3.3 must carry in full**: `v_total > 0` · `amount_due` absent-or-equal
-(0023:307) · `deposit` absent-or-zero (0023:308) · `net,tax >= 0` (0023:315-321) ·
-the service_charge/discount/delivery sign belt (0023:329-333) · `abs(rounding) <= 99`
-(0023:334-341, carrying an EXECUTED forge counterexample) · present-but-unreadable
-guards · cardinality guards. Confidence structurally excluded (postverify
-0023:1245-1266). The 1-arg resolver `_invoice_fact_state` (live 0016:2259-2273) is
-a FLAT select-then-delegate (generation-ordered, `version_n desc`, 0016:2270) joining
-`engine_kind='invoice_facts'` + `lane in ('invoice_facts','local_facts')` — "CoR" in
-this repo's migration headers means CHANGE OF RECORD, not a dispatch structure; ~30+
-live call sites across 0011/0013/0015/0016 (autopost, duplicate walls 0015:1402/1425-1430,
-lane routing 0011:1533-1548, tie-outs) reach corroboration ONLY through it — for any
-document it cannot resolve it returns `'{}'::jsonb` and every consumer's check
-silently passes (law 27(2): a derived absence falls to the permissive branch — the
-central hazard §3.3 exists to close). `_write_entry_evidence` (0009:411-472, never
-recut) hardcodes `_invoice_fact_state` at 0009:429 and mints tier 'verified' only on
-the THREE-term conjunction corroborated ∧ field='invoice.total' ∧ cents-equal
-(0009:462-466); `_corroboration_bound` (0009:211-225) requires tier='verified'
-(0009:219) and re-derives `_fact_hash` (0009:222-223). The bank side:
-`_persist_statement_core` (0038:1385-~1864) — two-reader agreement + CHAIN +
-continuity write-time-only under CLR10; persists the pair as TWO rows under ONE kind
-distinguished by engine_id with a same-engine_id refusal (0038:1777-1798).
-
-**The walls a new lane must widen or join (live bodies named):**
-1. engine_kind CHECK — five values (0038:7254-7259, tail 9226-9228).
-2. lane CHECK — eight values (0038:7213-7215, tail 9174-9178).
-3. lane↔engine prefix CHECK (0038:7238-7243) — disjunctive arms, unnamed lane refused;
-   the `clara-fixture:%` first arm (0038:7239) is lane-blind by design (the rig's door).
-4. claim-time gates in `claim_document_processing_task` (live 0038:6839): kill-switch
-   triple (0038:6866-6867), legacy purpose-blind consent `lane='invoice_facts'` only
-   (0038:6869-6881), **attempt cap** (0038:6907-6910), **concurrency accounting**
-   (0038:6929-6931) — each with its own postcheck (0038:6959-6967). A lane in no list
-   egresses with no kill switch and no consent: fail-OPEN by omission (F4 truth table
-   0050:33-41, 92-113).
-5. `release_held_document_tasks` (live body = 0050's recut of 0038:7143) is NESTED:
-   outer lane list (0050:206) + inner kill-switch-only branch `lane in
-   ('ocr','statement_facts')` (0050:214) — joining only the outer list stalls held
-   witness tasks forever.
-6. typed-purpose surface: three relations (0038:5470-5473), purpose CHECKs closed to
-   ('wiki_synthesis','statement_extraction') (0038:5503-5505), the per-purpose doc_sha
-   arm `ck_egress_dispatch_authorizations_doc_sha` (0038:5539-5544) with 0038:5520-5521
-   stating a third purpose "must state its own" rule; drops are BY NAME per the
-   0038:5462 contract. The claim body carries NO typed-consent call edge — asserted by
-   the ADR-0020 §6 byte-identity battery (0038:6971-6976), which is why the statement
-   lanes gate typed consent at ENQUEUE inside `_enqueue_invoice_facts_core` (0038's
-   design 4.3/4.4 block). GOVERNED_EGRESS_PURPOSES (egress.mjs:193-206) is stale
-   (wiki_synthesis only).
-7. TWO refusal-code CHECKs, not one: `ck_processing_task_binding_0038`
-   (0038:7298-7306, never-claimed set) AND `ck_processing_task_error_code_0038`
-   (0038:7279-7286) — 0038:7200-7205 records that v1 of that design forgot the second.
-8. matcher allowlist `engine_kind in ('ocr','structured_parse')` (0011:48, 0015:~430,
-   preserved-verbatim comment 0015:401) — witness kinds excluded, fail-closed.
-9. metering: `_reserve_processing_call` **live body 0038:7050-7082** (0009:581-610 is
-   the pre-0038 body — 0038:8737; recutting from the dead body reverts the statement
-   lane, the exact 0050:20-30 incident class); CLR18 on unlisted lanes; ten call
-   sites, all enqueue-side, no trigger forces it. The agent token meter refuses
-   `refused_budget` (0011:2442+, CLR29) — a shape law 76 forbids for automation.
-   No model-usage column exists on document lanes; engine_id/engine_config is the
-   stamping slot.
-10. `request_reextraction` (live 0026:994-1250, third of three bodies): admission door
-    `engine_kind='invoice_facts' and status='done'` (0026:1133-1134) with the receipt
-    branch ordered after it (0026:1135); hardcoded retiring engine at 0026:1059;
-    human-only triple-held (0022:330, 0025:554-564, 0026:1723); reserves the page
-    budget only for `v_lane='invoice_facts'` (0026:1229-1238).
-11. the 0017 kind-blind supersede trigger (0017:1506-1547, AFTER INSERT **FOR EACH
-    ROW**; tie-break `(extracted_at,id)` at 0017:1532) + its CLR31 pointer consumer
-    (0017:1719-1726). Both rows of a one-transaction pair share `now()`, so **the
-    witness pair would supersede ITSELF by uuid coin flip** — and `superseded_by` is
-    a one-way once-only transition (0007:663-676, CLR08).
-12. the ADR-0020 §6 byte-identity battery (packages/db/tests/wave-b/wb-0020-legacy.test.mjs)
-    pins `claim_document_processing_task` and `_enqueue_invoice_facts_core` by exact
-    prosrc SHA-256 with machine-derived restore pairs — every recut owes a new pair
-    under its stated discipline.
-
-**Runtime plane.** Frozen closure = @frozen files + RELATIVE imports only; the
-adapters/services/reader family are globalThis-injected infra, absent from
-frozen-workflows.json — **except `packages/runtime/lib/malaysian-registration.mjs`,
-which IS in the manifest** and must not be touched by any retirement sweep. The
-behavior triads are frozen AND deploy-locked; registry monotonicity enforced
-(check-frozen-workflows.mjs:16-21, 32-35). The LIVE consumers of extraction facts are
-frozen bodies: autoDraft.v7.tools.ts:96 filters `engine_kind === "invoice_facts"`;
-the stale confidence mirror is autoDraft.v7.tools.ts:73,107 (live drift, pre-existing).
-Provider seam: `resolveModel(modelId)` → `globalThis.__claraModelForTest ??
-openai(modelId)`, uniformly OpenAI; no vision/image content-part usage exists in Clara
-source (greenfield against AI SDK file parts). Structured-output precedent:
-classify-llm.mjs (generateObject, zod, AbortSignal.timeout, no retry). Vision bytes
-via `downloadCanonical` (storage.mjs:142-159, hash-verified to local disk). The
-classify router and `enqueueForLane`'s EXPLICIT ALLOWLIST
-(reconciler-documents.mjs:78-91) are the runtime's lane gate — the allowlist, not the
-router's location, is the load-bearing protection.
-
-**Reader lessons that must survive** (behavioural law, not implementation): currency
-asymmetry (invoice-currency-reader.mjs:280-306 — confirm-or-refuse, never manufacture);
-contest-withdraws (invoice-vendor-identity.mjs:458-472); the CLR23 wrong-counterparty
-geometric defense (invoice-vendor-identity.mjs:22-55, 218-236 — §3.3's identity design
-succeeds it); statement refusal ORDER (statement-corroboration.mjs:173-202); statement
-currency posture is absence→MYR (statement-corroboration.mjs:41-43, WC-R5) — the
-OPPOSITE of the invoice posture, preserved as-is; descriptions never load-bearing;
-W3 geometry honesty; `invoice-amount-grammar.mjs` is a shared leaf
-(opening-tb-grammar imports it) — excluded from retirement.
+The full survey (data plane · verdict machinery · the twelve walls · runtime plane ·
+reader lessons) lives in `docs/plan/active/f-a1-annexes.md` (split at v3.1 under the
+500-line harness file limit; the N1/N2 cite fixes applied there). Wall numbers cited
+below (wall 1–12) resolve in Annex A; the PR-0 adjudication register is its Annex B.
 
 ## 3 · The design
 
@@ -147,6 +43,10 @@ W3 geometry honesty; `invoice-amount-grammar.mjs` is a shared leaf
 New lane **`llm_witness`**, one task per document, one new frozen workflow class
 **witnessFacts.v1** (new files packages/runtime/workflows/witnessFacts.v1.ts +
 .impl.ts + .behavior.mjs + .services.mjs + .prompts.mjs; adapters globalThis-injected).
+**The prompts are FROZEN-closure members (M8, decided here):** witnessFacts.v1 imports
+.prompts.mjs relatively, so a prompt edit IS a body edit — every tweak after deploy is
+a witnessFacts.v2 + ceremony (runtime-workflows law). The corpus-tuning loop (D12's
+measure-then-adjust) therefore runs BEFORE the first freeze/deploy; cost registered §8.
 Behavior: claim → downloadCanonical (vision bytes) + read the pinned ocr extraction
 (text + numbered regions) → two model calls as separate memoized steps →
 **clara.persist_witness_facts** once.
@@ -164,8 +64,13 @@ envelopes, never re-calls the model (the reads are their own steps). **Independe
 receipt (checkable, not vacuous):** the text row's envelope must name the pinned OCR
 extraction id as its input; the vision row's must name `documents.sha256`; both carry
 prompt hashes, refused on equality. No distinct-model requirement — G1.1 chose
-same-provider; the channel is the independence axis. The same-engine_id refusal shape
-is NOT mirrored (under two kinds it could never fire — a probe that cannot say NO).
+same-provider; the channel is the independence axis. **The pair join key, written out
+(M15): `(document_id, engine_id, version_n)` resolving TWO rows distinguished by
+engine_kind — both rows carry ONE shared engine_id.** This deliberately INVERTS the
+statement pair's discriminator (there: one kind, two engine_ids, same-engine_id
+refused — 0038:1769-1780); here the KIND discriminates, engine_id carries the shared
+model identity, and the same-engine_id refusal shape is NOT mirrored (under two kinds
+it could never fire — a probe that cannot say NO).
 Conflicting-duplicate forfeiture applies within each read's own row set.
 
 ### 3.2 Engine identity and stamping
@@ -191,7 +96,11 @@ a dispatcher that resolves the newest fact-bearing generation across BOTH regime
 ordering key. `version_n` is a PER-LANE counter (0026:216-217; every mint is
 lane-scoped), so a witness pair starts at 1 and a version_n rule would let a stale
 legacy read outrank it forever; version_n orders within-lane only; a clock tie
-prefers the witness pair); (c) `_write_entry_evidence`
+prefers the witness pair. **And WITHIN a regime the live ordering key is preserved
+verbatim** — the task `version_n desc, id desc` of 0016:2270 for legacy, the pinned
+pair for witness; `extracted_at` decides ONLY between the two regimes' per-regime
+winners, so a multi-generation legacy document's resolution cannot silently move
+(M6; §7's continuity cell covers exactly that document)); (c) `_write_entry_evidence`
 inherits the fix through (b) automatically (its 0009:429 call is the wrapper), making
 the verified tier reachable for witness-born documents — the three-term tier
 conjunction (corroborated ∧ 'invoice.total' ∧ cents-equal) then holds unchanged. The
@@ -214,18 +123,31 @@ means the same emission RULES, never always-emit-all-17.
 verified citations (§3.4), so consumers that read regions off the bound extraction
 (0022:1309-1328, 0036's shape checks) keep working against one designated row.
 
-**Conjunct census (v1 finding 3 — every 0023 OCR-branch belt, disposition stated):**
-ALL CARRIED, none dropped: per-field sen-exact agreement (both witnesses, computed in
-SQL from the two persisted row sets — strengthening 0023's envelope-assertion read) ·
+**Conjunct census (v1 finding 3; COMPLETED at PR-0 B1 — every 0023 OCR-branch belt,
+disposition stated):** per-field sen-exact agreement (text values from the canonical
+row's server-VERIFIED regions; vision values from the vision row's persisted
+ENVELOPE — region-less by §3.1, so its cents are envelope-asserted: the exact posture
+0023:194-200 defends, INHERITED here rather than claimed stronger — B2) ·
 region anchoring per C2 · the six-term arithmetic identity · `v_total > 0` ·
-amount_due absent-or-equal · deposit absent-or-zero · net/tax non-negative ·
+amount_due absent-or-equal · deposit absent-or-zero · the ineligibility envelope
+gate (`corroboration_ineligible` null — 0023:309, B1) · net AND tax STATED, single
+and non-negative (0023:310-311, 315-321 + the nil-tax law 0023:299-303: an unstated
+tax NEVER infers zero — B1) ·
 the component sign belt · `abs(rounding) <= 99` (the executed forge counterexample
-becomes a battery cell) · present-but-unreadable guards · cardinality guards · MYR
+becomes a battery cell) · present-but-unreadable guards · cardinality guards ·
+`type_code='01'` required — CN/DN corroboration-ineligible (the structured branch's
+0023:243-245 posture inherited; a witness reliably reports type_code where Azure
+rarely did, closing the old OCR branch's silent gap — M12) · MYR
 under the inherited asymmetry (both witnesses must cite explicit MYR evidence;
 absence or disagreement → not corroborated; explicit foreign → explicit_non_myr →
 CLR21 currency_unsupported). No confidence term (postverify reasserted). The
 structured `clara-%` branch stays byte-untouched inside the dispatching
-`_invoice_fact_state_at`.
+`_invoice_fact_state_at`. **The required-answer rule (B1 — the belts keep their
+FORCE under a supplier that chooses what to emit):** every belt field is REQUIRED in
+both witness schemas, answered with a value or an explicit `not_printed` token; a
+missing answer is a refused read (persisted whole per C4, but silence is NOT
+corroborated), and `not_printed` takes the belt's absence arm. Silence is a refusal,
+never a pass (law 27(2)).
 
 **Identity fields (the CLR23 hazard — v1 blocker 2).** Pairwise agreement alone is
 refused as the wall: two same-provider reads fail correlatedly on exactly the layouts
@@ -237,12 +159,18 @@ a registration corroborates only when its cited region is strictly closer (2D bo
 distance, tie refuses, missing anchor refuses) to the vendor-name cited region than
 to the customer-name cited region (and symmetrically for customer_registration).
 A witness-reported contest marker withdraws the field. **Plus one genuinely
-INDEPENDENT DB-owned term the retirement leaves standing: a candidate
-vendor_registration that normalizes to the FILING CLIENT's own `client_identifiers`
-value (kind tin/ssm) REFUSES** — on a purchase document the client IS the buyer;
-0022:1326-1328 already runs this check's mirror for direction evidence. The SALES
-mirror holds too: a candidate customer_registration that normalizes to the filing
-client's own identifiers refuses (on a sales document the client is the seller). **Named
+INDEPENDENT DB-owned term the retirement leaves standing — RESTATED at PR-0 B3 (the
+v3 wording read 0022's polarity SIGNAL as a refusal; 0022:1326-1342's `v_hard_ok` is
+POSITIVE sales-direction evidence): the SELF-REFERENTIAL WITHDRAWAL.** A side
+(vendor or customer) whose registration normalizes to the FILING CLIENT's own
+`client_identifiers` value (kind tin/ssm) is the client's own block, not a
+counterparty — that side is WITHDRAWN from counterparty corroboration. Not an error:
+the region facts persist (C4) and 0022's direction evidence keeps reading them
+(0022:1309-1341). Both sides matching withdraws both and flags contest.
+Polarity-free by construction — no document_kind or direction input, so no
+circularity with 0022:1307's derived polarity; the mislabelled-block defense is
+preserved (a witness that cites the buyer's registration as vendor_registration on
+a purchase document self-matches the client and is withdrawn). **Named
 honest weakness:**
 the anchor DESIGNATION (which block is the vendor's) is witness-supplied where Azure's
 typed field supplied it independently before — so §7's battery gains a wrong-party
@@ -251,7 +179,7 @@ invoice-vendor-identity.mjs:37-48 shape) and (ii) the MISLABELLED-BLOCK shape: a
 compact invoice whose bill-to block sits above the seller block, where a witness
 cites the buyer's name region as vendor_name AND the adjacent buyer registration as
 vendor_registration — the distance test then CONFIRMS the wrong pairing, so only
-the self-match refusal and the cell can catch it — both must NOT corroborate; and
+the self-referential withdrawal and the cell can catch it — both must NOT corroborate; and
 the **decision rule is pre-committed**: if the wrong-party cells fail on the measured corpus,
 identity fields are demoted to non-corroboration-bearing (drafts carry them; hard
 counterparty resolution keeps its human) and that fallback ships without a new
@@ -290,7 +218,15 @@ region uuid inside the locator jsonb, and **`engine_confidence` = NULL** — sta
 no successor toolface mirror re-introduces the ≥0.95 term the DB gate excludes. A missing/failed citation persists the fact
 geometry-less (C4's persist-whole duty — the writer never refuses a read for being
 wrong) and the predicate's C2 wall refuses corroboration: the
-permissive-writer/strict-reader split, kept deliberately. The `doc_review`
+permissive-writer/strict-reader split, kept deliberately. **What verification
+proves — stated honestly (M13):** the citation is SELF-consistent (quote is a
+substring of the cited region and parses to the claimed cents) — not alone that it
+is the RIGHT region: on a multi-page document where a page-1 subtotal equals the
+grand total, a wrong-page citation verifies clean. The independent anchors are the
+vision channel's agreement, the arithmetic identity and the belts; the §7 corpus
+carries a wrong-page equal-amount cell. The witness fact region carries
+`locator_kind='page_polygon'` (0007:207-208's closed set — the 0023:305 locator
+term holds unchanged). The `doc_review`
 side-by-side surface highlights the CITED region — verified, so never the
 wrong box.
 
@@ -310,18 +246,29 @@ battery pins the claim body free of typed-consent edges), minting never-claimed
 `consent_inactive`-family receipts; `prepare/consume_egress_dispatch` wrap each model
 call at dispatch time. The legacy purpose-blind branch is NOT widened.
 GOVERNED_EGRESS_PURPOSES is trued (statement_extraction + witness_extraction). Real
-client documents stay held until the owner's processor paperwork exists (OQ-1); the
-build proves itself on ADR-048-labelled synthetic + firm-own documents. Both wb-0020
+client documents flow at PR-3 cutover with NO paperwork hold (owner ruling 2026-08-18
+— §5; the DPA rides the owner/legal backlog non-blocking); the build still proves
+itself on ADR-048-labelled synthetic + firm-own documents. Both wb-0020
 pinned bodies (`claim_document_processing_task`, `_enqueue_invoice_facts_core`) get
-machine-derived restore pairs in the same PR (wall 12).
+machine-derived restore pairs in the same PR (wall 12). **The claim body's
+terminal-event case follows the LANE (M9):** an llm_witness attempt-cap failure must
+not fire the invoice twin through the 0038:6918-6922 else branch — a lane-true event
+is the default, decided at PR-1 WITH the subscriber census attached (the
+0038:6915-6917 recorded class).
 
 ### 3.6 Metering without capping
 
 No `_reserve_processing_call` (verified: nothing forces it — all ten call sites are
 enqueue-side; the live 0038:7050 body would CLR18 an unlisted lane, so not calling it
-is the only workable shape). Per-call usage rows (`clara.llm_usage_events`,
+is the only workable shape; the opted-into claim branch also calls
+`_refund_processing_call` unconditionally at 0038:6914 — harmless by bytes, 0038:7128
+returns null on no reservation — N3). Per-call usage rows (`clara.llm_usage_events`,
 append-only, FORCE RLS) + envelope stamps; NO spend refusal (law 76). Engine-protective
-bounds kept: the claim body's attempt cap and concurrency window (§3.5 wires both).
+bounds kept: the claim body's attempt cap and a concurrency window that is
+**witness-OWN (M10)** — llm_witness gets its own counter/limit column, never the
+shared `ocr_concurrency` default-2 window (0038:6926-6932, counted across
+ocr/invoice_facts/statement_facts), which must not absorb the slowest lane;
+engine-protective, not a spend cap; the interim both-regimes contention is §8's.
 New enqueue-refusal codes join BOTH refusal CHECKs (wall 7). **Registered exposure
 (§8):** at cutover the firm daily page budget stops applying to the invoice path —
 the attempt cap and concurrency window are the only structural brakes, and metering
@@ -350,16 +297,26 @@ reference producer; witness reads consume it. The classify router core recuts to
 `llm_witness` tasks; `enqueueForLane`'s explicit allowlist gains the lane (named as
 the real protection). **Consumer widening = NEW frozen versions, not edits** (v1's
 plan collided with the freeze): autoDraft_v8 + chatTurn_v12 ship in PR-3a with the
-engine_kind literal widened (autoDraft.v7.tools.ts:96) and the stale confidence
-mirror fixed (live drift at autoDraft.v7.tools.ts:73,107 — pre-existing, corrected
-in the successor, never compounded). Witness landings renumber every ocr region idx
+selection rule SPELLED OUT (M7) — widen the kind filter AND resolve the regimes
+separately: the witness regime resolves via the pinned pair (task/version_n join),
+never `Math.max(version_n)` across regimes (autoDraft.v7.tools.ts:98-99 would
+silently drop a witness pair at version_n=1 beside a legacy v3); regime precedence
+by `extracted_at`, which `get_document_extract` starts PUBLISHING in PR-1 (additive
+read-seam widening — 0054:284-289 lacks it today). The stale confidence mirror
+(autoDraft.v7.tools.ts:73,107 with the load-bearing `conf >= 0.95` at :110 — live
+drift, pre-existing) is corrected in the successor, never compounded. Witness landings renumber every ocr region idx
 (witness kinds sort before 'ocr' under 0054:280) — a new EVENT of the documented
 instability; the frozen toolfaces already guard within-turn resolution by their
 idx→id snapshot map (each entry tagged `idx:id@extraction_id#version_n`, resolved by
 the idx FIELD inside the snapshot the model actually read, refusing otherwise —
 autoDraft.v7.tools.ts:142-167, `evidenceIdxUnresolvedRefusal`), and §7 pins it with
 a cell. Persisted evidence is immune outright: `_write_entry_evidence` stores region
-uuids, never idx (0009:467-470).
+uuids, never idx (0009:467-470). **The read-seam char budget (M14):** two new
+envelopes enter `get_document_extract`'s no-allowlist distinct-on set, and the 20k
+default budget spends envelopes FIRST (0054:207, 254-258) — a persist-whole vision
+envelope could starve the OCR regions the frozen toolfaces cite. PR-1 bounds the
+vision envelope or excludes witness envelopes from the budgeted set; §7 asserts
+region coverage does not shrink after a witness persist.
 
 ### 3.9 The 0017 trigger — a HARD PR-1 precondition (v1 finding: intra-pair self-supersede)
 
@@ -377,6 +334,37 @@ argument written out (the 0054 wake_secret precedent): a trigger conditional on 
 txn-local GUC is safe only if no principal can INSERT into document_extractions
 outside the SECURITY DEFINER writers — asserted by a tail census of INSERT grants,
 never assumed (law 27(2)).
+
+**Census DONE + the PR-0 M1-M5 cluster folded (2026-08-18; each byte-confirmed):**
+no production consumer depends on cross-kind supersede for correctness — the CLR31
+opening-TB consumer keeps refusing, via `stale_extraction_version` instead of
+`extraction_not_accepted` (§7 cell); every INSERT path into document_extractions is
+a named SECURITY DEFINER writer (non-owner roles hold SELECT only — 0007:2740,
+0008:36), so even the fallback shape's bypass argument would hold. The PREFERRED
+kind-scoped shape proceeds under FIVE binding notes: **(1)** BOTH branches carry the
+kind scope — the winner sweep (0017:1533-1535) AND the late-arrival demotion
+(0017:1539-1541); scoping one lets the self-supersede return through the other (M1).
+**(2)** The demotion's target is the newest done row OF THE NEW ROW'S OWN KIND —
+never the cross-kind document pointer (M5). **(3)** The writer inserts the pair as
+TWO separate INSERT statements (the 0038:1781/1790 precedent): AFTER-INSERT-FOR-
+EACH-ROW triggers fire at end of STATEMENT, so a one-statement pair under the OLD
+trigger superseded BOTH rows and left the pointer corrupt — permanently, CLR31
+`opening_extraction_pointer_corrupt` on the next done extraction (M3; §7 exercises
+the writer's real shape AND the multi-row variant). **(4)** Pointer determinism is
+WRITER-controlled: explicit per-insert `extracted_at` via `clock_timestamp()`
+(0007:194 is default-only; only UPDATE is trigger-guarded), vision first, text
+last — the document-wide pointer lands on the TEXT row, never by uuid coin flip.
+And the pointer is NOT the predicate's `extraction_id`: a later OCR re-extraction
+may move `documents.authoritative_extraction_id` off the text row (kind-scoping
+stops the supersede, not the pointer); consumers reach the pair through the
+resolver dispatch, and 0017's own bodies are the pointer's only readers (verified
+blast radius: 0017:1512, 1536, 1703, 1723 + its self-assertion battery) (M2).
+**(5)** The same-kind statement pair self-supersedes TODAY — a LIVE pre-existing
+production defect (0038:1781-1797: one transaction, same kind, default
+`extracted_at`), which kind-scoping does NOT fix; it heals at PR-4's re-kinding,
+and PR-1's prestate COUNTS and documents the existing coin-flipped rows without
+repairing them (`superseded_by` is once-only — in-place repair is impossible, and
+none is attempted) (M4).
 
 ## 4 · Decision register (v3)
 
@@ -405,30 +393,53 @@ never assumed (law 27(2)).
   'invoice.total' pin working unchanged.
 - **D11** the 0017 fix is a hard PR-1 precondition with a named fallback shape.
 - **D12** identity fields: geometric successor with the pre-committed demotion rule
-  (§3.3) — measurement decides, accounting-correctness picks the fallback.
+  (§3.3) — measurement decides, accounting-correctness picks the fallback. The
+  self-match term is the SELF-REFERENTIAL WITHDRAWAL (B3 as amended — polarity-free),
+  never a refusal.
 
-## 5 · Owner sitting questions (narrow; accounting-safe defaults stated)
+## 5 · Owner sitting questions — RULED (2026-08-18 night, in-session; the questions as
+asked are kept for the record)
 
-- **OQ-1 · The LLM vendor's processor status.** Vision sends original client bytes —
-  and text sends OCR-derived client content — to the LLM provider. Options:
-  (a) OpenAI under a new ADR-011-grade bundle (DPA, disclosure, PDPA, no-training
-  retention, deletion); (b) Azure-hosted OpenAI inside the existing processor
-  relationship. **Default until ruled: fail-closed** —
-  real-client documents hold; the build proves on labelled synthetic + firm-own.
-  Recommended: (b) if model availability suffices.
-- **OQ-2** · ratify witness_extraction (one purpose, both channels, sha-bound) — WB-R23.
+- **OQ-1 · The LLM vendor — RULED: OpenAI direct (option a).** Vision sends original
+  client bytes — and text sends OCR-derived client content — to the LLM provider. The
+  options were (a) OpenAI direct under an ADR-011-grade bundle (DPA, disclosure, PDPA,
+  no-training retention, deletion); (b) Azure-hosted OpenAI inside the existing
+  processor relationship (this doc's prior recommendation). The owner ruled **(a)**:
+  the runtime's existing seam — classify/chat/autoDraft already call `openai()`
+  directly today (classify-llm.mjs:14,114-117, byte-checked at ruling time) — so the
+  witness pair adds NO second provider; the genuinely new egress is the vision
+  channel's original-image bytes. The ADR-011-grade paperwork (OpenAI DPA +
+  engagement-letter disclosure) moves to the owner/legal backlog, NON-BLOCKING per the
+  cutover ruling below.
+- **OQ-2 — RULED: RATIFIED.** `witness_extraction` (one typed purpose, both channels,
+  sha-bound) joins the governed-egress registry — WB-R23 discharged.
+- **Cutover posture — RULED: DIRECT RELEASE.** Real client documents flow through the
+  witness lane at PR-3 cutover with no paperwork hold ("直接放行"). The agent's
+  recommendation — sign the OpenAI DPA before cutover — is on file as DISSENT
+  (ADR-0071 house style: dissent-then-execute); the DPA stays an owner-key legal
+  item, non-blocking.
+- **PR-0 — RE-SHAPED (same ruling set):** the Codex cross-model pass is replaced for
+  THIS build by a third native fresh-context adversarial lane (implementor's-walk +
+  accounting-correctness + runtime-collision lenses + the §3.9 census notes); Codex
+  re-enters at future builds when the vendor limit lifts. §6.1 amended.
 
 ## 6 · Build sequencing (deploy order BINDING; every recut names its live body)
 
-1. **PR-0 (gate)**: the Codex cross-model design pass (blocked until 2026-08-20 by
-   vendor usage limit) — runs before PR-1 merges; its findings fold here first.
+1. **PR-0 (gate)**: a third native fresh-context adversarial design pass (the owner's
+   2026-08-18 substitution ruling — §5; Codex re-enters at future builds) — runs
+   before PR-1 merges; its findings fold here first.
 2. **PR-1 (DB)**: the 0017 trigger fix (hard precondition, §3.9) · kinds+lane+
    prefix CHECK recuts · claim-body lists ×3 + release ×2 (+ restore pairs for both
    wb-0020-pinned bodies) · purpose CHECKs by name + the witness doc_sha arm · BOTH
    refusal-code CHECKs · persist_witness_facts (idempotent) · the v1 predicate +
    evaluator_versions + frozen-evaluators.json (catalog search_path) · the TWO
    dispatch recuts (`_invoice_fact_state_at`, `_invoice_fact_state`) with a caller
-   census tail · llm_usage_events. **PR-1 mints no witness work** (no router change,
+   census tail · llm_usage_events · the witness-own concurrency column (M10) ·
+   `get_document_extract` publishes `extracted_at` + the witness-envelope budget
+   bound (M7/M14) · the full 22-path field_path census with an emit/retire
+   disposition each (M11 — `invoice.customer_taxid` feeds 0022:1336-1338;
+   contact_person and the two myinvois ids named) · the lane-true terminal event
+   with its subscriber census (M9). **PR-1 mints no witness work** (no router change,
    no re-extraction door change; an old runtime cannot mint the lane —
    enqueueForLane allowlist + lane CHECK) — but it is NOT inert: the two dispatch
    recuts replace LIVE hot-path bodies reached by every existing invoice document,
@@ -450,39 +461,11 @@ never assumed (law 27(2)).
    adapters + their direct-import test estates; malaysian-registration.mjs and
    invoice-amount-grammar.mjs excluded by name.
 
-## 7 · Test battery sketch (contract-blind cells ▣)
+## 7 · Test battery sketch — moved to `f-a1-annexes.md` Annex C
 
-- Writer: idempotent replay returns the stored receipt ▣ · retry replays memoized
-  envelopes (no second model call) · equal prompt hashes refused · missing input pins
-  refused · conflicting duplicate forfeits within one read ▣ · failed citation
-  persists geometry-less · post-persist: neither row superseded, pointer
-  deterministic (§3.9).
-- Predicate: sen-exact agreement corroborates ▣ · one-sen disagreement refuses ▣ ·
-  missing region refuses (C2) · transposed net/tax refuses (0023's counterexample) ·
-  **the rounding-forge counterexample refuses** (|rounding|≤99 carried) · negative
-  component forge refuses (sign belt) · amount_due/deposit belts ▣ · MYR asymmetry ×3 ·
-  identity: the wrong-party cell set — buyer-registration-only refuses AND the
-  mislabelled-block shape refuses (via the client-registration self-match term) ·
-  cross-regime precedence by `extracted_at` — a witness pair at version_n=1 minted
-  AFTER a legacy v3 read WINS, and vice versa ▣ ·
-  contest-withdraws · cross-generation pair refused (same task/version_n only) ▣ ·
-  never-NULL corroborated ▣ · no confidence token (postverify) · structured branch
-  byte-unmoved · resolver dispatch: a witness document resolves through
-  `_invoice_fact_state` and the duplicate-bill wall FIRES for it ▣.
-- End-to-end evidence: witness pair → cited region → provenance_tier='verified' →
-  approve succeeds; and its negative twin (uncorroborated → 'model_read' → CLR21).
-- Continuity: a pre-existing invoice_facts document's `_invoice_fact_state` output is
-  byte-identical before and after the dispatch recuts (the 0023:357 exact-diff idiom)
-  · the inlined evidence digest (0009:456-459) and `_fact_hash` agree on one input set.
-- Walls: lane/prefix CHECK refusals ▣ · claim holds without the switch · attempt cap
-  + concurrency arms exercised nonvacuously · held witness task RELEASES when the
-  switch returns (the inner-branch cell) · typed purpose absent → enqueue refusal
-  receipt; present-for-other-doc → refused (sha arm) ▣ · OCR region idx pinned
-  across a witness persist (the toolface idx→id snapshot-map cell).
-- E2E corpus: the 29-document capture set re-run; corroboration rate MEASURED vs the
-  deterministic baseline; the wrong-party set is gating (D12's rule).
-- Freeze: verify_evaluator_freeze green; FREEZE_GUARDS trips on a doctored body
-  (throwaway); wb-0020 restore pairs prove reversal.
+The full cell list (writer · predicate · end-to-end evidence · continuity · walls ·
+E2E corpus · freeze; contract-blind cells marked ▣) lives in Annex C. Every "§7
+cell" reference in this doc resolves there.
 
 ## 8 · Registered risks and named non-goals
 
@@ -495,6 +478,11 @@ never assumed (law 27(2)).
 - **The agent token meter's refusal branch** (0011:2442+) violates law 76 for
   automation generally — F-A9's remit.
 - **Interim architecture split** between PR-3 and PR-4 (invoice new-regime, statements
-  old) — named; F-A10 judges at wave close.
+  old) — named; F-A10 judges at wave close; the witness-own concurrency window (M10)
+  prevents cross-lane starvation during the split, and the statement pair's LIVE
+  self-supersede defect (§3.9 note 5) persists until PR-4.
+- **Prompt freeze iteration cost (M8)** — prompts are frozen-closure members, so every
+  post-deploy tweak is a new witnessFacts version + ceremony; the corpus-tuning loop
+  runs PRE-freeze, and post-deploy tuning being ceremony-priced is the accepted trade.
 - **Non-goals**: no structured-branch change, matcher widening, agent re-extraction,
   new field_path namespace, frozen-v1 edits, or touching the two §6.7-named leaves.
