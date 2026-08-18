@@ -58,6 +58,53 @@ let w = null;
 // verified to reconstruct the predecessor EXACTLY; they reverse outermost-first, then the
 // existing A10/A11/A9 reversals run unchanged and the remainder must hash to the untouched
 // 19-migration prestate.
+// =========================================================================
+// AMENDMENT F-A1 (Wave-F Track A, PR-1 "the walls", UNNUMBERED_f_a1_walls.sql). Both
+// members of §6's closed set gain a THIRD deliberately-changed layer, OUTERMOST of all
+// (authored latest, so reversed FIRST — the same "reverse outermost-first" discipline
+// the 0038 block above states). claim_document_processing_task: llm_witness joins the
+// kill-switch triple and the attempt cap, gains its OWN concurrency window (M10, never
+// folded into the shared ocr/invoice_facts/statement_facts count), and the attempt-cap
+// terminal-event CASE gains a lane-true 'document.llm_witness_failed' arm (M9).
+// _enqueue_invoice_facts_core gains ONE new elsif branch: the INERT witness_extraction
+// typed-consent gate, byte-verified inert (v_lane is never assigned 'llm_witness'
+// anywhere at this frontier — no mime/kind arm mints it before PR-3). Pairs below are
+// MACHINE-DERIVED (packages/db/scratch — reverseApply against the real dumped pre/post
+// prosrc, byte-equality asserted) exactly like 0038's own pairs, and mechanically
+// verified to reconstruct the 0038-era predecessor EXACTLY; they reverse first, then
+// RESTORE_0038's own pairs run unchanged, then A10/A11's for claim.
+const RESTORE_FA1 = {
+"claim": [
+[
+"  if t.lane in ('ocr','invoice_facts','statement_facts','llm_witness')\n     and not coalesce(p_egress_approved,false) then",
+"  if t.lane in ('ocr','invoice_facts','statement_facts')\n     and not coalesce(p_egress_approved,false) then",
+],
+[
+"  -- 0038: the attempt cap is now PER EGRESSING LANE. The sum was keyed on the literal\n  -- 'invoice_facts' while the branch it guards was too; widening the branch without re-keying\n  -- the sum would let one lane's attempts cap the other's. F-A1 PR-1: llm_witness joins the\n  -- same per-lane cap.\n  if t.lane in ('invoice_facts','statement_facts','llm_witness') then\n    select coalesce(sum(attempt_count),0)::int into v_attempts\n      from clara.document_processing_tasks where document_id=t.document_id\n        and lane=t.lane;\n    if v_attempts>=3 then\n      update clara.document_processing_tasks set status='failed',error_code='attempt_cap',\n        finished_at=now() where id=p_task;\n      perform clara._refund_processing_call(p_task,'attempt_cap');\n      -- 0038 as-built fix: the terminal event follows the LANE -- a statement task's cap\n      -- must fire the statement feed (its subscribed twin), never wake the autodraft\n      -- consumer with a phantom invoice failure. F-A1 PR-1 (M9): llm_witness gets its OWN\n      -- twin -- the subscriber census (packages/runtime/lib/autodraft.mjs's\n      -- AUTODRAFT_EVENT_TYPES, and a repo-wide grep for both existing type strings) found\n      -- no consumer of either existing type that a witness-lane failure could misfire into,\n      -- so the lane-true default applies rather than folding into the invoice twin.\n      perform clara._append_event(t.firm_id,\n        case when t.lane='statement_facts' then 'document.statement_facts_failed'\n             when t.lane='llm_witness' then 'document.llm_witness_failed'\n             else 'document.invoice_facts_failed' end,\n        null,null,null,null,\n        null,t.document_id,null,jsonb_build_object('task_id',p_task,'reason','attempt_cap'));\n      return jsonb_build_object('task_id',p_task,'status','failed','reason','attempt_cap');\n    end if;\n  end if;",
+"  -- 0038: the attempt cap is now PER EGRESSING LANE. The sum was keyed on the literal\n  -- 'invoice_facts' while the branch it guards was too; widening the branch without re-keying\n  -- the sum would let one lane's attempts cap the other's.\n  if t.lane in ('invoice_facts','statement_facts') then\n    select coalesce(sum(attempt_count),0)::int into v_attempts\n      from clara.document_processing_tasks where document_id=t.document_id\n        and lane=t.lane;\n    if v_attempts>=3 then\n      update clara.document_processing_tasks set status='failed',error_code='attempt_cap',\n        finished_at=now() where id=p_task;\n      perform clara._refund_processing_call(p_task,'attempt_cap');\n      -- 0038 as-built fix: the terminal event follows the LANE -- a statement task's cap\n      -- must fire the statement feed (its subscribed twin), never wake the autodraft\n      -- consumer with a phantom invoice failure.\n      perform clara._append_event(t.firm_id,\n        case when t.lane='statement_facts' then 'document.statement_facts_failed'\n             else 'document.invoice_facts_failed' end,\n        null,null,null,null,\n        null,t.document_id,null,jsonb_build_object('task_id',p_task,'reason','attempt_cap'));\n      return jsonb_build_object('task_id',p_task,'status','failed','reason','attempt_cap');\n    end if;\n  end if;",
+],
+[
+"  select coalesce(l.ocr_concurrency,2) into v_cap from clara.firms f\n    left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;\n  select count(*)::int into v_running from clara.document_processing_tasks\n    where firm_id=t.firm_id and lane in ('ocr','invoice_facts','statement_facts')\n      and status='running';\n  if t.lane in ('ocr','invoice_facts','statement_facts') and v_running>=v_cap then\n    raise exception 'document-processing concurrency limit reached' using errcode='CLR18';\n  end if;\n  -- F-A1 PR-1 (M10): llm_witness gets its OWN concurrency window, counted over\n  -- lane='llm_witness' alone -- it must NEVER be folded into the shared ocr/invoice_facts/\n  -- statement_facts count above, or the slowest lane could starve the others' throughput.\n  -- The limit column (llm_witness_concurrency) is nullable with a table-level default of 2,\n  -- coalesced here exactly the way ocr_concurrency is above.\n  if t.lane='llm_witness' then\n    select coalesce(l.llm_witness_concurrency,2) into v_cap from clara.firms f\n      left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;\n    select count(*)::int into v_running from clara.document_processing_tasks\n      where firm_id=t.firm_id and lane='llm_witness' and status='running';\n    if v_running>=v_cap then\n      raise exception 'document-processing concurrency limit reached' using errcode='CLR18';\n    end if;\n  end if;",
+"  select coalesce(l.ocr_concurrency,2) into v_cap from clara.firms f\n    left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;\n  select count(*)::int into v_running from clara.document_processing_tasks\n    where firm_id=t.firm_id and lane in ('ocr','invoice_facts','statement_facts')\n      and status='running';\n  if t.lane in ('ocr','invoice_facts','statement_facts') and v_running>=v_cap then\n    raise exception 'document-processing concurrency limit reached' using errcode='CLR18';\n  end if;",
+]
+],
+"router": [
+[
+"      return jsonb_build_object('task_id',v_task,'document_id',p_document,\n        'status','failed','reason',v_gate);\n    end if;\n  elsif v_lane='llm_witness' then\n    -- F-A1 PR-1 (design SS3.5/SS6, wall 6): the SAME enqueue-time typed-consent gate, keyed\n    -- on purpose='witness_extraction' instead of 'statement_extraction', with its OWN named\n    -- refusal codes (wall 7) rather than a reuse of the statement family's bare literals --\n    -- witness and statement consent are granted independently, so the codes must stay\n    -- distinguishable. INERT AT PR-1: nothing in this body (or anywhere else at this\n    -- frontier) ever assigns v_lane:='llm_witness' -- no mime/kind arm mints it yet, and the\n    -- lane CHECK plus enqueueForLane's runtime allowlist keep an old image from reaching this\n    -- branch even by accident. Wired now so the gate exists the moment PR-3's router recut\n    -- adds the classification arm, rather than landing a second CoR on this pinned body then.\n    select array_agg(distinct f.client_id) into v_stmt_clients\n      from clara.document_filings f\n      where f.document_id=p_document and f.retired_at is null;\n    if coalesce(array_length(v_stmt_clients,1),0)>1 then\n      v_gate:='witness_multi_client';\n    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then\n      -- Zero active filings: no client exists who could have authorized this read. Fail closed.\n      v_gate:='witness_consent_inactive';\n    else\n      v_stmt_client:=v_stmt_clients[1];\n      if not exists(select 1 from clara.client_egress_purpose_activations a\n          join clara.client_egress_purpose_consents c\n            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id\n              and c.purpose=a.purpose\n          where a.firm_id=d.firm_id and a.client_id=v_stmt_client\n            and a.purpose='witness_extraction'\n            and a.deactivated_at is null and c.revoked_at is null) then\n        v_gate:='witness_consent_inactive';\n      end if;\n    end if;\n    if v_gate is not null then\n      update clara.document_processing_tasks\n        set status='failed', error_code=v_gate, finished_at=now()\n        where document_id=p_document and lane=v_lane and status='queued';\n      get diagnostics v_flip = row_count;\n      if v_flip = 0 then\n        select id into v_task from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane\n            and status='failed' and error_code=v_gate\n          order by version_n desc limit 1;\n        if v_task is not null then\n          return jsonb_build_object('task_id',v_task,'document_id',p_document,\n            'status','failed','reason',v_gate);\n        end if;\n        select coalesce(max(version_n),0)+1 into v_version\n          from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane;\n        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,\n            engine_config,version_n,lane,status,error_code,finished_at)\n          values(d.firm_id,p_document,v_engine,'{}'::jsonb,\n            v_version,v_lane,'failed',v_gate,now())\n          returning id into v_task;\n      else\n        select id into v_task from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane\n            and status='failed' and error_code=v_gate\n          order by version_n desc limit 1;\n      end if;\n      perform clara._append_event(d.firm_id,'document.llm_witness_failed',\n        null,null,null,null,\n        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));\n      return jsonb_build_object('task_id',v_task,'document_id',p_document,\n        'status','failed','reason',v_gate);\n    end if;\n  end if;",
+"      return jsonb_build_object('task_id',v_task,'document_id',p_document,\n        'status','failed','reason',v_gate);\n    end if;\n  end if;",
+]
+]
+};
+function applyRestoreFA1(member, src) {
+  for (const [frm, to] of RESTORE_FA1[member]) {
+    if (src.split(frm).length !== 2) {
+      throw new Error(`F-A1 restore(${member}): pair not found exactly once -- the live body drifted from the ratified F-A1 walls shape: ${frm.slice(0, 100)}`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 const RESTORE_0038 = {
 "claim": [
 [
@@ -171,7 +218,9 @@ const BYTE_IDENTICAL = {
     len: 3637, sha: "d02763514e282f8f041137cc4aba5f3c8187019f4dfe543cf96edd5e7495acd9",
     exact: "f9da98aa7c3a7a37ee79f5e67e523429c83f10bf4247489946f66457e80f312d",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
-    restore: (src) => applyRestore0038("claim", src)
+    // F-A1 is the OUTERMOST (newest) layer: reverse it FIRST, on the raw live body, so the
+    // 0038 pairs below then find the EXACT pre-F-A1 text they were derived against.
+    restore: (src) => applyRestore0038("claim", applyRestoreFA1("claim", src))
       .replace(
         "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text; v_secret text;\n",
         "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text;\n",
@@ -185,11 +234,19 @@ const BYTE_IDENTICAL = {
         "    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size);\n",
       ),
     restoreMust: [
-      /lane in \('ocr','invoice_facts','statement_facts'\)/,
-      /if t\.lane in \('invoice_facts','statement_facts'\) then/,
+      // Widened to admit EITHER the 0038-only three-lane form (checked after F-A1's own
+      // reversal has already run but before 0038's) OR the F-A1 four-lane form the live
+      // body actually carries today — an unqualified three-lane literal no longer occurs
+      // verbatim once llm_witness joins the list.
+      /lane in \('ocr','invoice_facts','statement_facts'(,'llm_witness')?\)/,
+      /if t\.lane in \('invoice_facts','statement_facts'(,'llm_witness')?\) then/,
       /v_secret:=gen_random_uuid\(\)::text;/,
       /claim_secret_digest=sha256\(convert_to\(v_secret,'UTF8'\)\)/,
       /'claim_secret',v_secret\);/,
+      // F-A1's own markers: present in the live body, must be GONE after the full reversal.
+      /t\.lane='llm_witness'/,
+      /document\.llm_witness_failed/,
+      /llm_witness_concurrency/,
     ],
   },
   // AMENDMENT (ratified 2026-07-28, owner ruling on task #27 — Gate P blocker: "the facts
@@ -226,7 +283,9 @@ const BYTE_IDENTICAL = {
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
-    restore: (src) => applyRestore0038("router", src)
+    // F-A1 is the OUTERMOST (newest) layer: reverse it FIRST (the ONE inert llm_witness
+    // elsif branch, wall 6), so 0038's own pairs then find the exact pre-F-A1 text.
+    restore: (src) => applyRestore0038("router", applyRestoreFA1("router", src))
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",
@@ -267,6 +326,10 @@ const BYTE_IDENTICAL = {
       /amendment A11/,
       /d\.document_kind in \('invoice','credit_note','debit_note','receipt'\)/,
       /where id=p_document for update;\n {2}if not found then raise exception 'document not found'/,
+      // F-A1's own marker: present in the live body, must be GONE after the full reversal.
+      /elsif v_lane='llm_witness' then/,
+      /witness_multi_client/,
+      /witness_consent_inactive/,
     ],
   },
   // AMENDMENTS A6→A7 (ratified 2026-07-25, contract v1.4 §5.6/§5.7). This is the ONE member of

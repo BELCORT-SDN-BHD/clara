@@ -4,26 +4,31 @@
     "clara.evaluate_fs_pack_v1": {
       "sha256": "69086e62a2c9f52989f9bedb821343dca26e4dcf74cb242f05dc56ef30b8308b",
       "migration": "packages/db/migrations/0059_wave_e_delta_metrics_behavior.sql",
-      "deployed": true,
-      "note": "Wave E lane delta, the FS pack driver. DEPLOYED: the 0058-0063 ceremony ran 2026-08-14 from merged main and verify_evaluator_freeze reports 2/2 closures deployed and frozen on the live project. This entry said UNDEPLOYED because it was written before that ceremony and never trued afterwards (codex M6) -- which would have left the live body outside the append-only hash lock the moment the checker was wired, so a source rebaseline of a LIVE evaluator would have passed."
+      "note": "Wave E lane delta, the FS pack driver. DEPLOYED: the 0058-0063 ceremony ran 2026-08-14 from merged main and verify_evaluator_freeze reports 2/2 closures deployed and frozen on the live project. This entry said UNDEPLOYED because it was written before that ceremony and never trued afterwards (codex M6) -- which would have left the live body outside the append-only hash lock the moment the checker was wired, so a source rebaseline of a LIVE evaluator would have passed.",
+      "deployed": true
     },
     "clara.evaluate_metric_v1": {
       "sha256": "2de7665d627875c1e575970b32363b57f4ef376f99c0525aade798f54ce1f2d2",
       "migration": "packages/db/migrations/0059_wave_e_delta_metrics_behavior.sql",
-      "deployed": true,
-      "note": "Wave E lane delta, the typed metric evaluator. DEPLOYED -- see the fs_pack note. The DB half (clara.verify_evaluator_freeze, run by migrate.mjs between every migration body and its commit) compares only rows flagged deployed, and both delta closures now are; this manifest must agree with that, because a deployed-vs-undeployed disagreement is exactly the gap an append-only lock cannot see across."
+      "note": "Wave E lane delta, the typed metric evaluator. DEPLOYED -- see the fs_pack note. The DB half (clara.verify_evaluator_freeze, run by migrate.mjs between every migration body and its commit) compares only rows flagged deployed, and both delta closures now are; this manifest must agree with that, because a deployed-vs-undeployed disagreement is exactly the gap an append-only lock cannot see across.",
+      "deployed": true
     },
     "clara.evaluate_sst_watch": {
       "sha256": "57e644849be142435c0331a953aaa98cfa7282d0dfdbb6fc818382cd0b80440c",
       "migration": "packages/db/migrations/0016_a21_compliance_watch.sql",
-      "deployed": true,
-      "note": "Wave A2.1 SST compliance-watch evaluator. LIVE on the project (0016 is applied), so its body is immutable vs origin/main forever. It predates clara.evaluator_versions and has no registry row; the DB-side verifier therefore says nothing about it and THIS manifest is its only freeze. That asymmetry is recorded rather than papered over: adding a retrospective registry row would be a claim about a deploy nobody made."
+      "note": "Wave A2.1 SST compliance-watch evaluator. LIVE on the project (0016 is applied), so its body is immutable vs origin/main forever. It predates clara.evaluator_versions and has no registry row; the DB-side verifier therefore says nothing about it and THIS manifest is its only freeze. That asymmetry is recorded rather than papered over: adding a retrospective registry row would be a claim about a deploy nobody made.",
+      "deployed": true
     },
     "clara.evaluate_sst_watches_all": {
       "sha256": "2aead0a6e62e9cfbfcbb50e173d61721356be0da602db0cc40f83372e743f569",
       "migration": "packages/db/migrations/0016_a21_compliance_watch.sql",
-      "deployed": true,
-      "note": "The all-clients driver beside evaluate_sst_watch; same LIVE status and the same recorded asymmetry."
+      "note": "The all-clients driver beside evaluate_sst_watch; same LIVE status and the same recorded asymmetry.",
+      "deployed": true
+    },
+    "clara.evaluate_witness_fact_state_v1": {
+      "sha256": "3e2c66c713b43499d79cfedbb419486403400c04bb5febdedfc2001d1621cfb8",
+      "migration": "packages/db/migrations/UNNUMBERED_f_a1_predicate.sql",
+      "note": "F-A1 PR-1, the LLM witness-pair corroboration predicate. UNDEPLOYED: authored on branch f-a1/pr1-predicate and not yet applied to any live project, so the deploy-lock is deliberately absent -- it is granted by the --lock-deployed ceremony AFTER the PR-1 ceremony runs from merged main, never by --update. The migration filename is UNNUMBERED because numbers are claimed at MERGE time (hard constraint 10); this entry must be re-pointed at the numbered filename in the same commit that numbers it, or the MISSING check will fire. Registry closure is FOUR members, one more than the design's three: the file-size split gave the identity geometry its own body (clara._witness_identity_v1), and a called leaf outside the closure is exactly the half-freeze this manifest exists to prevent."
     }
   }
 }

@@ -116,7 +116,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc `docs/plan/active/f-a1-witness-pair-design.md` (v3, two-lane fresh-context adversarial review to unconditional MERGEABLE, 2026-08-18); BUILD gated on PR-0 (the Codex cross-model pass, vendor limit lifts 2026-08-20) + the OQ-1/OQ-2 sitting | design | — |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). In flight: the PR-1 first piece — the 0017 kind-scoped-supersede migration + battery (isolated worktree, resumed post-limit with the M3/M4/M5 addendum) | building | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -168,9 +168,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    (`closing_transfer`/SST — Fix A recommended, task #17 builds after the ruling) + **the
    Wave-G corpus decisions OD-1..OD-11 + P-1..P-3** (`wave-g-e2e-corpus-design.md` — incl.
    OD-5's second eligible principal, and the corpus doc's step-4 "standing rules earn
-   autopost" wording needing its G1-alignment amendment) + **F-A1 OQ-1/OQ-2** (the
-   LLM-vendor processor status; the witness_extraction typed purpose —
-   `docs/plan/active/f-a1-witness-pair-design.md` §5) + **the CI economics overhaul** +
+   autopost" wording needing its G1-alignment amendment) + ~~F-A1 OQ-1/OQ-2~~ (RULED
+   in-session 2026-08-18 night — design doc §5) + **the CI economics overhaul** +
    **FX-lite build timing** (principle pre-seeded as ADR-0071/P-FX; law 18 MYR-only
    stands) + **the BEE opening-TB record discrepancy** (Known issues — which record
    describes the live book?).
@@ -360,7 +359,9 @@ documented history.
 - **UNOWNED — the interview e2e de-pin** — `interview-e2e.mjs` names `interview.v2.core.ts` inside a clause that says no version is named there. True today, stale at the next core bump: a dated tripwire.
 
 **Owner/legal:** the C6 checklist (DPA · disclosure text · PDPA basis) before any vendor trace
-export · the first monthly LIGHT DR sitting (to schedule) · PITR (deferred, owner-tracked) ·
+export · **the OpenAI processor bundle (DPA + engagement-letter disclosure) — NON-BLOCKING
+by the 2026-08-18 direct-release cutover ruling; the agent's DPA-first recommendation is on
+file as dissent (F-A1 design §5)** · the first monthly LIGHT DR sitting (to schedule) · PITR (deferred, owner-tracked) ·
 server-side branch protection (plan upgrade) · WB-R22 target capability · PRD §9 deferred
 product questions · the old SGD-document clarify in the owner's inbox.
 
@@ -407,26 +408,9 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   runner services via `wsl -u root systemctl restart`, never by VM teardown. Rig-script law
   stands: hold one attached client for the life of the stage, and never diagnose VM health
   through a probe that itself cycles the VM.
-- **0057's S0.9 birth self-test is a LATENT CLUSTER-RACE FLAKE on main (2026-08-15, root-caused
-  and reproduced; fix commissioned).** The guard at 0057:250 asserts
-  `pg_visible_in_snapshot(pg_current_xact_id(), pg_current_snapshot())` is false — but that
-  expression is true iff ANY transaction that acquired a later xid has COMPLETED anywhere on
-  the CLUSTER (snapshot xmax = latestCompletedXid+1; own xid is never in xip_list), so under
-  READ COMMITTED it is a ~30ms race per 0057 application, four tickets per CI run in the
-  Slice-5 docs-upgrade drill (shared service container = cross-database churn). Reproduced on
-  main's own bytes (4 trips in 5 with a concurrent committer; 0 in 12 quiet). 0057's RUNTIME
-  watermark predicate is SOUND (it reads a stored committed snapshot); only the birth-time
-  self-proof is race-exposed. FIX (runner lane, own PR, full ladder — 0057's bytes are
-  immutable): a per-migration isolation pin in migrate.mjs keyed on version + sha256
-  (identity, not spelling), pinning exactly 0057 to REPEATABLE READ (snapshot precedes any
-  own-xid allocation → deterministically false), fail-closed on sha mismatch; blanket RR is
-  REJECTED — 0019 explicitly refuses it (CLR32). Validated: 0/5 under churn with the pin vs
-  4/5 control; full drill 4/4. **RESOLVED 2026-08-15: PR #241 merged (f90e0fd5)** — the
-  checksum-keyed isolation pin is live in the runner, the pin is MEASURED (post-BEGIN
-  read-back of transaction_isolation with a refusal on mismatch), and the applied-skip note
-  states only what the ledger records. The flake is dead for fresh-chain applies; live 0057
-  predates the pin (applied at READ COMMITTED, race won) and its runtime predicate was always
-  sound.
+- ~~0057's S0.9 birth self-test cluster-race flake~~ — **RESOLVED 2026-08-15 (PR #241,
+  f90e0fd5)**: the checksum-keyed REPEATABLE-READ isolation pin, measured post-BEGIN; full
+  record moved verbatim to `docs/plan/completed/progress-archive-2026-08.md` (2026-08-18).
 - **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** on this repo under
   Windows, the three tracked long-path PDFs under `packages/runtime/test-storage/` make
   `git rebase --abort` fail (`could not move back`) with the rebase state SURVIVING, and a
@@ -491,6 +475,19 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   (48 findings adjudicated at the bytes; both lanes unconditional MERGEABLE on the final
   bytes). The Codex lane was BLOCKED by a vendor usage limit (lifts 2026-08-20) —
   re-registered as the build's PR-0 gate, not waived. OQ-1/OQ-2 queued for the sitting.
+- **2026-08-18 (night, the F-A1 rulings + build kickoff)** — owner ruled in-session (design
+  doc §5): OQ-1 **OpenAI-direct** (Azure declined) · OQ-2 **witness_extraction RATIFIED**
+  (WB-R23) · cutover **DIRECT RELEASE** (the DPA-first recommendation filed as dissent;
+  DPA → Owner/legal, non-blocking) · PR-0 **re-shaped to a third native adversarial lane**
+  (Codex re-enters at future builds). The 0017 consumer census ran + was byte-spot-checked
+  (kind-scoping breaks no production consumer; the INSERT surface provably centralized).
+  The PR-0-native lane RAN (opus, fresh context): MERGEABLE-WITH-CONDITIONS — 3 blockers +
+  15 material + 5 nits, ALL adjudicated at the bytes and folded (B3's disposition AMENDED
+  to the polarity-free self-referential withdrawal — the review's own document_kind fix
+  was unsound); design → v3.1 + the new `f-a1-annexes.md` (estate survey / adjudication
+  register / battery sketch — the 500-line split). The 0017 builder lane (killed mid-run
+  by the usage limit) RESUMED post-reset with the M3/M4/M5 addendum. S0.9's resolved
+  record archived per the outgrow law. Docs-only PR: this truing + the v3.1 fold set.
 
 ---
 
