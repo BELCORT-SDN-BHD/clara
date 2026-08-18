@@ -73,8 +73,8 @@ file wins or it is stale — and truing it is the first thing you do.
   E2E corpus design is merged (#254, 0970062f — 11 owner-decision points + 3 proposals for
   the sittings); the reconciler belt-isolation fix is merged (#255, 2bd7e12c — the §C
   open-task-settle starvation gap closed with per-item wraps + assembly-level containment,
-  halt-class errors rethrown by class identity, 19-cell unit battery; **NOT yet deployed —
-  rides the next `clara-runtime` deploy window**, see Next 1). The shared checkout is trued
+  halt-class errors rethrown by class identity, 19-cell unit battery; **DEPLOYED 2026-08-18
+  as `clara-runtime` release v63** — see the Runtime bullet). The shared checkout is trued
   to `main` and the codebase graph re-indexed (15,805 nodes). Each PR took an independent
   fresh-context review + a finding→fix→re-verify round before merge; strict branch
   protection serialized the merges exactly as the #244 note predicted (`update-branch` +
@@ -94,9 +94,11 @@ file wins or it is stale — and truing it is the first thing you do.
 - **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5
   mechanically enforced, 44-case selftest in CI) beside pinned-ids; `.claude/rules/db-tests.md`
   + `handoffs.md`; the ci.yml Wave-E δ contract drill (closes the sweep-skip false-green shape).
-- **Runtime:** Fly `clara-runtime`, single machine, `/ready` green — the chatTurn **v11**
-  cutover is deployed and the three `CLARA_RENDER_FLY_*` dispatch values are bound (restart
-  2026-08-15). Dashboard: Pages `app.clarabook.com`. `clara-backup` daily. `clara-render`
+- **Runtime:** Fly `clara-runtime`, single machine, `/ready` green — **v63 (2026-08-18)
+  carries #255's belt isolation** (ζ-law: v62 negative control read 0 `isLeaderHalt`; v63
+  PROCESS reads positive in BOTH in-VM homes — the lib copy and the bundled server
+  output, the load-bearing one; reconciler heartbeat beating). chatTurn **v11** deployed; the three
+  `CLARA_RENDER_FLY_*` dispatch values bound (2026-08-15). Dashboard: Pages `app.clarabook.com`. `clara-backup` daily. `clara-render`
   hourly (see the render bullet above).
 - **Books pins:** RS trial balance **3,396,500 = 3,396,500** (`trial_balance_as_of`, re-read at
   every ceremony) · RS customers **11/11 NAME-ONLY** (the enrichment trap holds; the one
@@ -116,7 +118,6 @@ file wins or it is stale — and truing it is the first thing you do.
 |---|---|---|---|
 | Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` (F-A1 witness-pair extraction first) | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
-| Reconciler belt isolation | the §C open-task-settle starvation + five same-class probe gaps closed (per-item wraps mirroring A/B/D · assembly-level `belt()` containment · halt identity preserved by class); 19-cell unit battery; law-1 review (no blocker) + fix round (honest heartbeat rationale · counted §C failures · spoofed-name contrast cell); merged 2bd7e12c — **deploy pending, Next 1** | **merged (deploy pending)** | #255 |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
 `docs/plan/completed/progress-archive-2026-08.md`, 2026-08-18.)*
@@ -127,13 +128,10 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **Deploy #255's runtime bundle at the next `clara-runtime` deploy window** — a plain fly
-   deploy from merged `main` (lib-only change: no writer-body swap, no quiesce, no manifest
-   change; the frozen workflow surface is untouched). Verify by `/ready` + a PROCESS read,
-   per the ζ ceremony law. Until then the LIVE reconciler still carries the §C settle
-   starvation latent (bounded: one cycle per throw; needs a persistently-failing row; no
-   live occurrence observed). *(The 2026-08-15 "fresh session first acts" item is DONE
-   2026-08-16: shared checkout trued to `main`; graph re-indexed, 15,805 nodes.)*
+1. ~~Deploy #255's runtime bundle~~ — **DONE 2026-08-18: `clara-runtime` v63** (from
+   merged `main` 64d8f8a; verification recorded in the Runtime posture bullet). The §C
+   settle-starvation latent is closed on live. *(The 2026-08-15 "fresh session first
+   acts" item was DONE 2026-08-16: checkout trued; graph re-indexed, 15,805 nodes.)*
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (signed with three dispositions, merged #249, ceremonied; E-R14
    OPEN). **The BEE FY2025 live close — DEFERRED ON ACCOUNTING-CORRECTNESS GROUNDS
@@ -491,6 +489,8 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   re-trued (Wave-F live set + the PATH-STABILITY convention made explicit; PRD line 3
   reconciled); root README + the PR-232 body-notes re-home → immediate follow-up PR (both
   outside the docs-only fence). Docs-only PR; single-lane review per ADR-0069.
+- **2026-08-18 (evening, 开工)** — Next 1 executed: #255 deployed as `clara-runtime` v63,
+  triple-verified (v62 negative control → v63 PROCESS reads → `/ready`); lane row retired.
 
 ---
 
