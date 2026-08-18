@@ -8,7 +8,16 @@
 // batteries staged regions without a subsequent classify mint, so only live could catch it.
 //
 // These cells stage the REAL order against the REAL trigger and pin the kind-honest read:
-// a classify supersede must NOT starve the geometry; a genuine later re-OCR MUST win.
+// a classify verdict must NOT starve the geometry; a genuine later re-OCR MUST win.
+//
+// SECOND ERA (2026-08-18, migration 0089 — F-A1 PR-1): the 0017 trigger itself went
+// KIND-SCOPED, so a doc_classify verdict no longer supersedes the ocr row AT ALL — the
+// hazard the first cell was minted for is now structurally impossible for cross-kind
+// landings, and its mandatory setup asserts the NEW live shape (ocr stays unsuperseded).
+// The cell is kept, not deleted: reader-1's kind-honest filter must stay correct under
+// BOTH shapes (statement-layout-reader.mjs:111 only treats an ocr row as dead when its
+// superseder is ITSELF an ocr row — true in either era), and the within-kind half of the
+// original hazard still exists and is pinned by the re-OCR cell below.
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -39,7 +48,7 @@ async function seedRegion({ firm, extraction, fieldPath, textContent }) {
   );
 }
 
-test("a doc_classify supersede does NOT starve reader-1: the layout geometry stays readable in the real pipeline order", { skip }, async () => {
+test("a doc_classify verdict does NOT starve reader-1: since 0089 it never supersedes the ocr row, and the geometry stays readable in the real pipeline order", { skip }, async () => {
   const { firm, owner } = await rig.buildFirm();
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
 
@@ -50,17 +59,16 @@ test("a doc_classify supersede does NOT starve reader-1: the layout geometry sta
   await seedRegion({ firm, extraction: ocr, fieldPath: "line", textContent: "BEGINNING BALANCE 0.00" });
   await seedRegion({ firm, extraction: ocr, fieldPath: "line", textContent: "ENDING BALANCE 0.00" });
 
-  // 2. Then the classifier verdicts land — the REAL 0017 trigger fires on each insert and
-  //    points the OCR row's superseded_by at the classify extraction (kind-blind).
+  // 2. Then the classifier verdicts land — the REAL trigger fires on each insert. Since
+  //    0089 (kind-scoped supersede) a doc_classify verdict touches ONLY its own kind:
+  //    the OCR row must come out of this with superseded_by still NULL.
   await seedExtraction({ firm, document, engineId: "clara-classify-llm:v1", engineKind: "doc_classify" });
   await seedExtraction({ firm, document, engineId: "clara-classify-human:v1", engineKind: "doc_classify" });
 
   const sup = await rig.rootQuery(
-    `select s.engine_kind as superseder_kind from clara.document_extractions e
-       join clara.document_extractions s on s.id = e.superseded_by
-      where e.id = $1`, [ocr]);
-  assert.equal(sup.rows[0]?.superseder_kind, "doc_classify",
-    "mandatory setup: the REAL trigger superseded the ocr row with a doc_classify verdict — the exact live shape");
+    `select e.superseded_by from clara.document_extractions e where e.id = $1`, [ocr]);
+  assert.equal(sup.rows[0]?.superseded_by, null,
+    "mandatory setup: since 0089 the REAL trigger leaves the ocr row UNSUPERSEDED by a doc_classify verdict — the exact live shape (the pre-0089 kind-blind supersede is the hazard this cell was minted for, now structurally gone)");
 
   const regions = await rig.asRoot((client) => readStatementLayoutRegions(client, { documentId: document, firmId: firm }));
   assert.equal(regions.length, 2, "reader-1 still reads the geometry — a classify verdict replaces classify authority, never the page");
