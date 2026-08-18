@@ -450,9 +450,128 @@ test("no CONFIDENCE token anywhere in the predicate closure (postverify — ADR-
     `select string_agg(regexp_replace(p.prosrc,'--[^` + String.fromCharCode(10) + `]*','','g'), '|') as src
        from pg_proc p
       where p.oid in ('clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)'::regprocedure,
-                      'clara._witness_identity_v1(uuid,uuid,boolean)'::regprocedure)`);
+                      'clara.evaluate_witness_identity_v1(uuid,uuid,boolean)'::regprocedure)`);
   assert.equal(/engine_confidence|\bv_conf\b|0\.95/.test(r.rows[0].src), false,
     "the executable text of the closure reads no confidence signal");
+});
+
+// ===========================================================================
+// B1 — the three field classes: C2 geometry binds the NINE AMOUNTS, and the two
+// TOKEN fields are citation-optional. The review's failure scenario, as a GREEN cell.
+// ===========================================================================
+
+test("THE REAL MALAYSIAN INVOICE: OCR prints only 'RM 103.75' and no MYR token anywhere — no currency citation exists, and the pair still CORROBORATES (B1)", async (t) => {
+  if (gate(t)) return;
+  // The exact document the C2-everywhere rule would have refused: the currency evidence is the
+  // "RM" inside the amount rendering, and there is no standalone currency string on the page for
+  // a witness to cite. The nine amounts are clean and fully cited.
+  const d = await witnessDoc({
+    rawOverride: { "invoice.currency": "RM 103.75" },
+    noRegions: ["invoice.currency"],
+  });
+  const s = await verdict(d);
+  assert.equal(s.corroborated, true, "an uncited currency token does NOT refuse — the citation is optional for a token field");
+  assert.equal(s.currency, "RM", "the emitted currency is the alphabetic reduction of what was actually read");
+  assert.equal(s.explicit_non_myr, false, "'RM' is a Malaysian rendering, never a foreign one");
+});
+
+test("type_code corroborates with NO citation, and the value comes from the ANSWER (B1/M12)", async (t) => {
+  if (gate(t)) return;
+  const d = await witnessDoc({ noRegions: ["invoice.type_code"] });
+  const s = await verdict(d);
+  assert.equal(s.corroborated, true, "an uncited type_code does not refuse");
+  assert.equal(s.type_code, "01", "…and the value is still published, read off the answer");
+  // The VALUE rule is untouched by the citation becoming optional: a CN still refuses.
+  const cn = await verdict(await witnessDoc({
+    fields: { ...BASE, "invoice.type_code": "02" }, noRegions: ["invoice.type_code"],
+  }));
+  assert.equal(cn.corroborated, false, "an uncited CN is still corroboration-ineligible (M12)");
+});
+
+test("an uncited FOREIGN currency still sets explicit_non_myr, and channels disagreeing on currency still refuse (B1)", async (t) => {
+  if (gate(t)) return;
+  const usd = await verdict(await witnessDoc({
+    fields: { ...BASE, "invoice.currency": "USD" }, noRegions: ["invoice.currency"],
+  }));
+  assert.equal(usd.corroborated, false, "USD never corroborates");
+  assert.equal(usd.explicit_non_myr, true, "…and it is an EXPLICIT foreign reading -> CLR21");
+  const split = await verdict(await witnessDoc({
+    visionOverride: { "invoice.currency": "SGD" }, noRegions: ["invoice.currency"],
+  }));
+  assert.equal(split.corroborated, false, "one channel MYR and the other SGD refuses");
+  assert.equal(split.explicit_non_myr, true);
+  // …and a currency neither channel can name at all is NOT foreign — it is simply unconfirmed.
+  const mush = await verdict(await witnessDoc({
+    rawOverride: { "invoice.currency": "Amount payable" }, noRegions: ["invoice.currency"],
+  }));
+  assert.equal(mush.corroborated, false, "an unrecognisable currency token never manufactures MYR");
+  assert.equal(mush.explicit_non_myr, false, "…and it is not a foreign reading either");
+});
+
+test("C2 still binds EVERY AMOUNT: an uncited monetary field refuses even though an uncited token does not (B1)", async (t) => {
+  if (gate(t)) return;
+  // The term under test is the FIELD CLASS, shown as an exact diff: the same document, the same
+  // "answered but uncited" shape, refuses for a money field and passes for a token field.
+  for (const path of ["invoice.total", "invoice.tax_total", "invoice.service_charge"]) {
+    const s = await verdict(await witnessDoc({ noRegions: [path] }));
+    assert.equal(s.corroborated, false, `an uncited ${path} refuses — C2 binds every witnessed AMOUNT`);
+  }
+  assert.equal((await verdict(await witnessDoc({ noRegions: ["invoice.currency", "invoice.type_code"] }))).corroborated,
+    true, "…while both token fields uncited together still corroborate");
+});
+
+// ===========================================================================
+// M3 — the reference-value contract (the cross-regime duplicate walls).
+// ===========================================================================
+
+test("M3: a quoted invoice_id with a normalized `value` emits the VALUE, and a date raw emits its ISO value", async (t) => {
+  if (gate(t)) return;
+  const d = await witnessDoc({ refAnswers: {
+    text: {
+      "invoice.invoice_id": { raw: "Invoice No.: INV-001", value: "INV-001" },
+      "invoice.invoice_date": { raw: "15/01/2026", value: "2026-01-15" },
+    },
+    vision: {
+      "invoice.invoice_id": { raw: "INV-001", value: "INV-001" },
+      "invoice.invoice_date": { raw: "15 Jan 2026", value: "2026-01-15" },
+    },
+  } });
+  const s = await verdict(d);
+  assert.equal(s.invoice_id, "INV-001", "the envelope emits the normalized value, not the quoted rendering");
+  assert.equal(s.invoice_date, "2026-01-15", "…and an ISO date the duplicate walls can compare across regimes");
+  assert.equal(s.corroborated, true, "the reference contract never touches the amount verdict");
+});
+
+test("M3: when the two channels' values DISAGREE the key is DROPPED — and the amount verdict is untouched", async (t) => {
+  if (gate(t)) return;
+  const d = await witnessDoc({ refAnswers: {
+    text: { "invoice.invoice_id": { raw: "INV-001", value: "INV-001" } },
+    vision: { "invoice.invoice_id": { raw: "INV-002", value: "INV-002" } },
+  } });
+  const s = await verdict(d);
+  assert.equal(s.invoice_id, null, "a cross-channel disagreement drops the reference key");
+  assert.equal(s.corroborated, true,
+    "…and DOES NOT block amount corroboration — absence-permissive, the legacy conditional-emission shape");
+  // Only ONE channel answering is enough (absence-permissive), which is the term doing the work.
+  const one = await verdict(await witnessDoc({ refAnswers: {
+    text: { "invoice.invoice_id": { raw: "INV-777", value: "INV-777" } }, vision: {},
+  } }));
+  assert.equal(one.invoice_id, "INV-777");
+});
+
+// ===========================================================================
+// M6 — an absurd magnitude is UNREADABLE, never an exception.
+// ===========================================================================
+
+test("M6: a 30-digit rendering makes the predicate REFUSE without raising 22003", async (t) => {
+  if (gate(t)) return;
+  const huge = "RM " + "1".repeat(30) + ".00";
+  const d = await witnessDoc({ visionOverride: {}, rawOverride: { "invoice.total": huge } });
+  // rawOverride carries to the vision channel too, so the vision answer is the absurd string and
+  // the predicate's own clara._normalize_invoice_cents call is the one under test.
+  const s = await verdict(d);
+  assert.equal(s.corroborated, false, "present-but-unreadable is NOT corroboration");
+  assert.equal(s.corroborated === null, false, "…and the read completed: no 22003 escaped the predicate");
 });
 
 test("the belt roster this predicate REQUIRES is exactly the eleven the fixtures state", async (t) => {

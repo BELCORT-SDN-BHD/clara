@@ -99,6 +99,18 @@ begin
   if coalesce(p_outcome,'') not in ('success','refused','error','timeout') then
     raise exception 'llm usage outcome is not a recognised value' using errcode='CLR10';
   end if;
+  -- THE TASK AND THE DOCUMENT MUST BE THE SAME DOCUMENT'S (review nit 3). Both FKs bind
+  -- (id, firm_id), so the row cannot cross a FIRM -- but nothing tied the task to the DOCUMENT,
+  -- so a caller could meter a call against document A while naming a task on document B and the
+  -- metering trail would attribute the spend to the wrong client's file. Read POSITIVELY and
+  -- fail closed: only a task row this read actually SAW, naming this document, passes. A NULL on
+  -- either side skips the comparison rather than inventing one -- both columns are NOT NULL on
+  -- the table, so the FKs catch that case with their own error.
+  if p_task is not null and p_document is not null
+     and not exists (select 1 from clara.document_processing_tasks t
+                      where t.id = p_task and t.document_id = p_document) then
+    raise exception 'llm usage event names a task that does not belong to this document' using errcode='CLR10';
+  end if;
   -- NO SPEND REFUSAL ANYWHERE (law 76): this verb never inspects a budget, a cap or a
   -- concurrency window -- it is a pure metering record, always accepted for a well-formed call.
   insert into clara.llm_usage_events(firm_id,document_id,task_id,channel,engine_id,prompt_hash,
@@ -163,6 +175,12 @@ begin
       where f.oid='clara.record_llm_usage_event(uuid,uuid,uuid,text,text,text,int,int,int,text)'::regprocedure
         and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
     raise exception 'f_a1_usage tail: PUBLIC executes record_llm_usage_event' using errcode='CLR10';
+  end if;
+  -- nit 3: the task<->document consistency guard is in the COMMITTED body.
+  if position('names a task that does not belong to this document' in
+      (select p.prosrc from pg_proc p
+        where p.oid='clara.record_llm_usage_event(uuid,uuid,uuid,text,text,text,int,int,int,text)'::regprocedure)) = 0 then
+    raise exception 'f_a1_usage tail: record_llm_usage_event does not assert task.document_id = p_document' using errcode='CLR10';
   end if;
 
   raise notice 'f_a1_usage tail: OK -- llm_usage_events installed (forced RLS, 2 policies, append-only + no-truncate triggers, clara_authenticated SELECT); record_llm_usage_event installed (definer, search_path pinned, EXECUTE to clara_runtime only, no PUBLIC, no spend refusal). No table in workflow/graphile_worker/spike touched; no D1 quiesce needed (pure addition).';

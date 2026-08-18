@@ -21,6 +21,27 @@
 -- service_charge, discount, delivery, amount_due, deposit, currency, type_code). This file
 -- stores that envelope VERBATIM as document_extractions.envelope for each row.
 --
+-- TWO REFINEMENTS OF THAT CONTRACT, both adjudicated at review and both VALIDATED here so a
+-- malformed shape can never reach the predicate as silence:
+--   (a) `witness.contest` (M2) is OPTIONAL, and when present must be a JSON BOOLEAN (or an
+--       explicit null). The predicate casts it with `(->>'contest')::boolean`, so a string like
+--       "unknown" raises 22P02 out of a STABLE read the whole estate calls -- a structural
+--       malformation that must be refused at the WRITE boundary, exactly like a bad answers
+--       vocabulary, rather than detonating at every later read.
+--   (b) `answers` may ADDITIONALLY carry `invoice.invoice_id` and `invoice.invoice_date` (M3),
+--       and nothing else beyond the eleven. Each such optional answer takes the same
+--       {state, raw} shape plus an OPTIONAL normalized `value`:
+--         invoice_id   -- `value` MUST be a substring of `raw`   (else structural refusal)
+--         invoice_date -- `value` MUST parse as an ISO date YYYY-MM-DD (else structural refusal)
+--       WHY: the duplicate-bill wall (0015:1402) and the duplicate-sales wall (0015:1425-1429)
+--       compare `_invoice_fact_state(...)->>'invoice_id'` / `'invoice_date'` by EXACT EQUALITY
+--       ACROSS REGIMES. A legacy Azure read emits the typed normalized value ("INV-001",
+--       "2026-01-15"); a witness's citable rendering has to be a SUBSTRING of the OCR region it
+--       cites ("Invoice No.: INV-001", "15/01/2026"). Without the value slot the same bill read
+--       twice under two regimes would never collide and the wall would go SILENTLY PERMISSIVE.
+--       The predicate emits coalesce(value, raw) and DROPS the key when the two channels
+--       disagree -- absence-permissive, never amount-blocking (0092 §3, M3).
+--
 -- THE CHOSEN SIGNATURE (deviation report): two call-shaped jsonb blobs, one per channel, rather
 -- than a persist_invoice_facts-style flat arg list -- there are now two independent reads, each
 -- with its own input pin, prompt hash, envelope and citations.
@@ -32,17 +53,24 @@
 --                 default. region_idx resolves against a DENSE ordinal computed AT WRITE TIME
 --                 over the pinned OCR extraction's OWN regions ONLY, idx = row_number() over
 --                 (order by id) -- never stored (the F9 discipline). THIS IS THE LOCKED
---                 CONTRACT PR-2's prompt builder must number against: the numbers shown to the
---                 model must come from the identical query (same pinned extraction, same
---                 `order by id`) or a witness's idx would resolve to the wrong region.
+--                 CONTRACT PR-2's prompt builder must number against, AND IT NOW HAS A DOOR:
+--                 clara.witness_citation_regions(p_ocr_extraction) (SECTION 1 below, review M5)
+--                 returns EXACTLY this numbering. PR-2's prompt builder MUST read the idx from
+--                 THAT function -- never from clara.get_document_extract, whose own `idx` is a
+--                 DIFFERENT ordinal (dense over (engine_kind, version_n, r.id) across every
+--                 chosen extraction, 0054:32-42) and would resolve a witness's citation to the
+--                 wrong region the moment the document carries more than one done extraction.
 --                 For a BELT field_path (one of the eleven), only region_idx is read from a
 --                 citation entry -- the quoted rendering is `envelope.witness.answers[path].raw`,
 --                 the single locked source, never a second copy in the citation. For one of the
---                 SIX OPTIONAL reference fields (invoice.invoice_id, invoice.invoice_date,
---                 invoice.customer_name, invoice.customer_registration, invoice.vendor_name,
---                 invoice.vendor_registration -- read by clara.evaluate_witness_fact_state_v1's
---                 main body and by clara._witness_identity_v1, NOT part of the required-answer
---                 vocabulary), the citation entry itself carries "raw".
+--                 SEVEN OPTIONAL reference fields (invoice.invoice_id, invoice.invoice_date,
+--                 invoice.customer_name, invoice.customer_registration, invoice.customer_taxid,
+--                 invoice.vendor_name, invoice.vendor_registration -- read by
+--                 clara.evaluate_witness_fact_state_v1's main body, by
+--                 clara.evaluate_witness_identity_v1, and -- for customer_taxid -- by
+--                 0022:1336-1341's live `v_buyer_hit` direction disjunct, which reads
+--                 field_path='invoice.customer_taxid' off the BOUND extraction; NOT part of the
+--                 required-answer vocabulary), the citation entry itself carries "raw".
 --               "usage"?: {"input_tokens"?:int,"output_tokens"?:int,"duration_ms"?:int,
 --                          "outcome"?:text} }  -- optional; see SS11 below.
 --   p_vision = { "input_pin": "<documents.sha256, 64 lowercase hex>", "prompt_hash": "...",
@@ -52,9 +80,15 @@
 -- RECEIPT SHAPE (PR-2 builds against this): {"task_id","document_id","engine_id","version_n",
 -- "text_extraction_id","vision_extraction_id","status":"done","replayed":bool}.
 -- CITE-AND-VERIFY (SS3.4, the write half). A citation VERIFIES when its region_idx resolves
--- against the pinned OCR extraction AND the quoted rendering is a substring of that region's
+-- against the pinned OCR extraction AND the quoted rendering occurs in that region's
 -- text_content AND (money fields only) the rendering parses to cents via
--- clara._normalize_invoice_cents. A verified citation writes text_content/monetary_raw = the
+-- clara._normalize_invoice_cents. FOR A MONETARY FIELD THE OCCURRENCE MUST BE TOKEN-BOUNDED
+-- (review M4): a bare substring test accepts a DIGIT FRAGMENT -- "1,234.56" is a substring of
+-- "11,234.56" and of "1,234.567" -- so a witness quoting the wrong number by one leading digit
+-- would collect the right region's polygon and pass C2 on a figure the document never states.
+-- The match is therefore anchored on both sides by start-of-string or a character outside
+-- [0-9.,]; the non-monetary fields keep the plain substring test, where no digit-fragment hazard
+-- exists. A verified citation writes text_content/monetary_raw = the
 -- exact rendering, monetary_cents = the normalized cents (NULL for currency/type_code and the
 -- six optional fields), polygon = the cited region's own polygon, locator carries the cited
 -- region's own uuid as `source_region_id`, engine_confidence = NULL always (the >=0.95 mirror
@@ -65,10 +99,17 @@
 --
 -- STRUCTURAL REFUSALS ONLY (raise; every other outcome persists whole): task not claimed / wrong
 -- lane / wrong state (CLR16) -- missing input pins / equal prompt hashes / malformed answers
--- vocabulary (not all eleven fields answered, or an unsupported citation field_path) (CLR10) --
+-- vocabulary (not all eleven fields answered, an answer key outside the eleven plus the two M3
+-- reference keys, a non-boolean `contest`, a `raw` longer than 200 characters, a bad M3 `value`,
+-- or an unsupported citation field_path) (CLR10) --
 -- conflicting-duplicate citations for one field_path within the TEXT read's own set (CLR10, the
 -- 0023 write-boundary idiom: two citations differing in region_idx/raw for the SAME field_path
 -- forfeit the WHOLE call -- nothing is inserted; identical duplicates collapse).
+-- THE 200-CHARACTER BOUND ON `raw` (M6) is structural, not cosmetic: `raw` is an unbounded model
+-- string that this file feeds to clara._normalize_invoice_cents, which multiplies by 100 and
+-- casts to bigint -- a 30-digit rendering RAISES 22003 and would roll back a persist C4 says
+-- must complete. The bound plus the magnitude pre-guard in section 9 close it from both ends;
+-- the leaf itself is a FROZEN closure member and cannot be repaired in place.
 set local statement_timeout = '5min';   -- precautionary; nothing here scans a large relation
 
 -- =====================================================================================
@@ -80,8 +121,9 @@ begin
     raise exception 'f_a1_writer prestate: 0088_masb_wording_seed_lexicon is not applied -- frontier mismatch' using errcode='CLR10';
   end if;
 
-  -- (0.1) NOT ALREADY APPLIED.
-  if to_regprocedure('clara.persist_witness_facts(uuid,jsonb,jsonb,int)') is not null then
+  -- (0.1) NOT ALREADY APPLIED -- both the writer and the M5 numbering door this file adds.
+  if to_regprocedure('clara.persist_witness_facts(uuid,jsonb,jsonb,int)') is not null
+     or to_regprocedure('clara.witness_citation_regions(uuid)') is not null then
     raise exception 'f_a1_writer prestate: already applied' using errcode='CLR10';
   end if;
 
@@ -124,8 +166,8 @@ begin
   if to_regprocedure('clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)') is null then
     raise exception 'f_a1_writer prestate: clara.evaluate_witness_fact_state_v1 is absent -- apply the predicate migration first' using errcode='CLR10';
   end if;
-  if to_regprocedure('clara._witness_identity_v1(uuid,uuid,boolean)') is null then
-    raise exception 'f_a1_writer prestate: clara._witness_identity_v1 is absent -- apply the identity-helper migration first' using errcode='CLR10';
+  if to_regprocedure('clara.evaluate_witness_identity_v1(uuid,uuid,boolean)') is null then
+    raise exception 'f_a1_writer prestate: clara.evaluate_witness_identity_v1 is absent -- apply the identity-helper migration first' using errcode='CLR10';
   end if;
   if position('evaluate_witness_fact_state_v1' in (select p.prosrc from pg_proc p
         where p.oid='clara._invoice_fact_state_at(uuid,uuid)'::regprocedure)) = 0 then
@@ -155,19 +197,69 @@ declare
   v_belt text[] := array['invoice.total','invoice.total_excl_tax','invoice.tax_total',
     'invoice.rounding','invoice.service_charge','invoice.discount','invoice.delivery',
     'invoice.amount_due','invoice.deposit','invoice.currency','invoice.type_code'];
-  v_answers jsonb; v_f text; v_a jsonb; v_state text;
+  -- M3: the two OPTIONAL reference answers, admitted BESIDE the eleven and nowhere else. An
+  -- unknown key is still a refusal -- a vocabulary that admits anything admits a typo.
+  v_ref text[] := array['invoice.invoice_id','invoice.invoice_date'];
+  v_all text[];
+  v_answers jsonb; v_f text; v_a jsonb; v_state text; v_raw text; v_val text; v_contest jsonb;
 begin
+  v_all := v_belt || v_ref;
   if p_envelope is null or jsonb_typeof(p_envelope) <> 'object' then return false; end if;
   if (p_envelope->'witness'->>'channel') is distinct from p_channel then return false; end if;
+  -- M2: `contest` is OPTIONAL but TYPED. The predicate casts it `(->>'contest')::boolean`, so a
+  -- string like "unknown" would raise 22P02 out of a STABLE read every consumer reaches through
+  -- clara._invoice_fact_state -- a malformation that must die at the write boundary, not at
+  -- every later read. absent / json null / true / false are the whole admissible set.
+  v_contest := p_envelope->'witness'->'contest';
+  if v_contest is not null and jsonb_typeof(v_contest) not in ('boolean','null') then return false; end if;
   v_answers := p_envelope->'witness'->'answers';
   if v_answers is null or jsonb_typeof(v_answers) <> 'object' then return false; end if;
-  if (select count(*) from jsonb_object_keys(v_answers)) <> array_length(v_belt,1) then return false; end if;
-  foreach v_f in array v_belt loop
+  -- Every key is a KNOWN key, and all eleven belt keys are present. (Counting keys alone would
+  -- pass an eleven-key map that swapped a belt field for a reference one.)
+  if exists (select 1 from jsonb_object_keys(v_answers) as k(name)
+              where k.name <> all(v_all)) then return false; end if;
+  foreach v_f in array v_all loop
     v_a := v_answers->v_f;
-    if v_a is null or jsonb_typeof(v_a) <> 'object' then return false; end if;
+    if v_a is null then
+      if v_f = any(v_belt) then return false; end if;   -- a belt answer is REQUIRED (B1)
+      continue;                                          -- a reference answer is OPTIONAL (M3)
+    end if;
+    if jsonb_typeof(v_a) <> 'object' then return false; end if;
     v_state := v_a->>'state';
     if v_state is null or v_state not in ('value','not_printed') then return false; end if;
-    if v_state = 'value' and nullif(btrim(coalesce(v_a->>'raw','')),'') is null then return false; end if;
+    if v_state <> 'value' then continue; end if;
+    v_raw := nullif(btrim(coalesce(v_a->>'raw','')),'');
+    if v_raw is null then return false; end if;
+    -- M6: the length bound. `raw` is an unbounded model string and section 9 hands it to
+    -- clara._normalize_invoice_cents; 200 characters is far past any real invoice rendering and
+    -- far short of anything that could stress a numeric cast. Applied to EVERY answer, so no
+    -- field class has to be remembered later.
+    if length(v_a->>'raw') > 200 then return false; end if;
+    if v_f = any(v_ref) then
+      v_val := nullif(btrim(coalesce(v_a->>'value','')),'');
+      if jsonb_typeof(v_a->'value') is not null
+         and jsonb_typeof(v_a->'value') not in ('string','null') then return false; end if;
+      if v_val is not null then
+        if length(v_a->>'value') > 200 then return false; end if;
+        if v_f = 'invoice.invoice_id' and position(v_val in v_raw) = 0 then
+          -- The normalized id must be something the document ACTUALLY prints: a `value` that is
+          -- not a substring of the quoted rendering is a model-invented identifier, and the
+          -- duplicate-bill wall compares these by exact equality.
+          return false;
+        end if;
+        if v_f = 'invoice.invoice_date' then
+          -- ISO YYYY-MM-DD, shape-checked THEN cast-checked: the regex alone admits 2026-02-31,
+          -- and the cast alone would accept every other input style Postgres's date parser
+          -- tolerates (which is exactly the cross-regime ambiguity this slot exists to remove).
+          if v_val !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then return false; end if;
+          begin
+            perform v_val::date;
+          exception when others then
+            return false;
+          end;
+        end if;
+      end if;
+    end if;
   end loop;
   return true;
 end $$;
@@ -187,6 +279,33 @@ create function clara._witness_resolve_citation(p_ocr_extraction uuid, p_idx int
    where r.idx = p_idx;
 $$;
 revoke all on function clara._witness_resolve_citation(uuid,int) from public;
+
+-- ONE NUMBERING, AND NOW IT IS DB-EXPOSED (review M5). PR-2's prompt builder has to show the
+-- witness model a NUMBER per region, and the server resolves that number back through
+-- _witness_resolve_citation above. Until this function existed the only published ordinal was
+-- clara.get_document_extract's `idx` -- a DIFFERENT ordinal, dense over
+-- (engine_kind, version_n, r.id) across EVERY chosen extraction (0054:32-42) -- so a prompt built
+-- from it would silently resolve a witness's citation to the wrong region the moment the document
+-- carried a second done extraction, which is precisely the state a witness document is in (it has
+-- an OCR extraction AND, after the first pass, its own pair). "Both sides use the same query" is
+-- a claim; a shared FUNCTION is a fact, so the builder reads THIS and the battery proves the two
+-- mappings are identical. SAME QUERY, SAME ORDERING, deliberately duplicated rather than factored
+-- into a shared body: the resolver is on the hot write path and lives in a section whose exact
+-- shape the writer's postcheck pins -- the parity is asserted BEHAVIOURALLY in the battery, which
+-- is the only evidence that would survive one of them being edited anyway.
+create function clara.witness_citation_regions(p_ocr_extraction uuid)
+  returns table(idx int, region_id uuid, page int, text_content text)
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select r.idx::int, r.id,
+         case when (r.locator->>'page') ~ '^[0-9]+$' then (r.locator->>'page')::int end,
+         r.text_content
+    from (select rr.id, rr.text_content, rr.locator,
+                 row_number() over (order by rr.id) as idx
+            from clara.document_regions rr where rr.extraction_id = p_ocr_extraction) r
+   order by r.idx;
+$$;
+revoke all on function clara.witness_citation_regions(uuid) from public;
+grant execute on function clara.witness_citation_regions(uuid) to clara_runtime;
 
 -- =====================================================================================
 -- SECTION 2 -- clara.persist_witness_facts. Claimed-task-bound (reads version_n AND engine_id
@@ -212,14 +331,21 @@ declare
   v_money text[] := array['invoice.total','invoice.total_excl_tax','invoice.tax_total',
     'invoice.rounding','invoice.service_charge','invoice.discount','invoice.delivery',
     'invoice.amount_due','invoice.deposit'];
+  -- SEVEN optional reference paths. `invoice.customer_taxid` is the one the first cut of this
+  -- writer DROPPED, and it is not decorative: 0022:1336-1341's live `v_buyer_hit` disjunct reads
+  -- field_path='invoice.customer_taxid' off the BOUND extraction as one of three ways a document
+  -- can be shown to name the filing client as the BUYER. Under a witness-born extraction that
+  -- path would have been permanently unwritable, so that disjunct would silently never fire and
+  -- the direction evidence would quietly lose a term (M11's census retires exactly three paths --
+  -- contact_person, myinvois_uuid, myinvois_longid -- and this was never one of them).
   v_optional text[] := array['invoice.invoice_id','invoice.invoice_date',
-    'invoice.customer_name','invoice.customer_registration',
+    'invoice.customer_name','invoice.customer_registration','invoice.customer_taxid',
     'invoice.vendor_name','invoice.vendor_registration'];
   v_allowed text[];
   v_f text; v_ans jsonb; v_raw text; v_idx int;
   v_cit record;
   v_cited_id uuid; v_cited_text text; v_cited_locator jsonb;
-  v_verified boolean; v_cents bigint; v_locator2 jsonb;
+  v_verified boolean; v_cents bigint; v_locator2 jsonb; v_readable boolean;
 begin
   v_allowed := v_belt || v_optional;
   if p_pages_used is not null and p_pages_used < 0 then
@@ -346,7 +472,12 @@ begin
     on conflict (document_id,engine_id,version_n,engine_kind) do nothing
     returning id into v_vision_id;
   if v_vision_id is null then
-    raise exception 'impossible state: an ON CONFLICT fired for the vision row (document=%,engine=%,version=%) but no row exists at that key',
+    -- ON CONFLICT DO NOTHING returns NO ROW precisely when a row ALREADY EXISTS at the conflict
+    -- key -- the first cut of this message said the opposite, which would have sent a reader
+    -- hunting for a phantom. And on a task this body has just re-locked as `running`, a pair row
+    -- already sitting at (document, engine, version, kind) IS an impossible state: step 2/7's
+    -- replay branch owns the done case, and nothing else may mint a witness extraction.
+    raise exception 'impossible state: an ON CONFLICT fired for the vision row (document=%,engine=%,version=%) -- the pair row already exists at this key while its task is still running',
       t.document_id,t.engine_id,t.version_n using errcode='CLR35';
   end if;
 
@@ -358,7 +489,7 @@ begin
     on conflict (document_id,engine_id,version_n,engine_kind) do nothing
     returning id into v_text_id;
   if v_text_id is null then
-    raise exception 'impossible state: an ON CONFLICT fired for the text row (document=%,engine=%,version=%) but no row exists at that key',
+    raise exception 'impossible state: an ON CONFLICT fired for the text row (document=%,engine=%,version=%) -- the pair row already exists at this key while its task is still running',
       t.document_id,t.engine_id,t.version_n using errcode='CLR35';
   end if;
 
@@ -377,12 +508,41 @@ begin
         select r.region_id, r.text_content, r.locator into v_cited_id, v_cited_text, v_cited_locator
           from clara._witness_resolve_citation(v_ocr_ext, v_idx) r;
       end if;
+      -- M6, THE MAGNITUDE PRE-GUARD, evaluated BEFORE any normalization on this rendering.
+      -- clara._normalize_invoice_cents multiplies by 100 and casts to bigint, so >13 digits
+      -- before the decimal RAISES 22003 -- and a raise here would roll back the WHOLE persist,
+      -- which is exactly the C4 duty this writer exists to honour ("persist whole; never refuse a
+      -- read for being wrong"). An unreadable magnitude therefore fails VERIFICATION and lands
+      -- geometry-less with NULL cents, the same landing a failed citation gets. The leaf is a
+      -- frozen closure member and cannot be repaired in place; the predicate carries the twin
+      -- guard on its own side (0092 §3).
+      v_readable := length(regexp_replace(split_part(regexp_replace(
+        upper(btrim(coalesce(v_raw,''))), '(MYR|RM)|[,[:space:]]', '', 'g'),
+        '.', 1), '[^0-9]', '', 'g')) <= 13;
+      -- M4, THE TOKEN BOUNDARY. For a MONETARY field a bare substring test accepts a DIGIT
+      -- FRAGMENT: "1,234.56" is a substring of "11,234.56" and of "1,234.567", so a witness that
+      -- misread the leading digit would still collect the cited region's real polygon and sail
+      -- through C2 on a figure the document never states. The occurrence must be bounded on both
+      -- sides by start/end-of-string or a character outside [0-9.,]. Every regex metacharacter in
+      -- the rendering is escaped first -- the rendering is a MODEL string, so an unescaped '.' or
+      -- '(' would otherwise be a pattern, not a character. Non-monetary fields keep the plain
+      -- substring test: there is no digit-fragment hazard in 'MYR' or '01'.
       v_verified := v_cited_id is not null and v_cited_text is not null
-        and position(v_raw in v_cited_text) > 0
-        and (not (v_f = any(v_money)) or clara._normalize_invoice_cents(v_raw) is not null);
-      v_cents := case when v_f = any(v_money) then clara._normalize_invoice_cents(v_raw) else null end;
+        and (case when v_f = any(v_money) then
+                  v_readable
+                  and clara._normalize_invoice_cents(v_raw) is not null
+                  and v_cited_text ~ ('(^|[^0-9.,])'
+                        || regexp_replace(v_raw, '([^a-zA-Z0-9 ])', '\\\1', 'g')
+                        || '($|[^0-9.,])')
+                  else position(v_raw in v_cited_text) > 0 end);
+      v_cents := case when v_f = any(v_money) and v_readable
+                      then clara._normalize_invoice_cents(v_raw) else null end;
       if v_verified then
-        v_locator2 := jsonb_build_object('page', nullif(v_cited_locator->>'page','')::int,
+        -- nit 2: the page locator is cast only when it IS an unsigned integer literal (the
+        -- 0091:131 idiom). A malformed OCR locator degrades to a null page rather than raising
+        -- 22P02 and rolling back a persist C4 requires to complete.
+        v_locator2 := jsonb_build_object(
+          'page', case when (v_cited_locator->>'page') ~ '^[0-9]+$' then (v_cited_locator->>'page')::int end,
           'polygon', coalesce(v_cited_locator->'polygon','[]'::jsonb), 'source_region_id', v_cited_id);
       elsif v_cited_id is not null then
         v_locator2 := jsonb_build_object('polygon','[]'::jsonb,'source_region_id',v_cited_id);
@@ -415,7 +575,9 @@ begin
       v_verified := v_cited_id is not null and v_cited_text is not null
         and position(v_raw in v_cited_text) > 0;
       if v_verified then
-        v_locator2 := jsonb_build_object('page', nullif(v_cited_locator->>'page','')::int,
+        -- nit 2, again: the page locator cast is guarded (0091:131's idiom).
+        v_locator2 := jsonb_build_object(
+          'page', case when (v_cited_locator->>'page') ~ '^[0-9]+$' then (v_cited_locator->>'page')::int end,
           'polygon', coalesce(v_cited_locator->'polygon','[]'::jsonb), 'source_region_id', v_cited_id);
       elsif v_cited_id is not null then
         v_locator2 := jsonb_build_object('polygon','[]'::jsonb,'source_region_id',v_cited_id);
@@ -470,6 +632,7 @@ reset role;
 -- SECTION 3 -- TAIL CENSUS.
 -- =====================================================================================
 do $tail$
+declare v_sig text;
 begin
   if to_regprocedure('clara.persist_witness_facts(uuid,jsonb,jsonb,int)') is null then
     raise exception 'f_a1_writer tail: clara.persist_witness_facts did not install' using errcode='CLR10';
@@ -495,6 +658,55 @@ begin
     raise exception 'f_a1_writer tail: a private helper did not install' using errcode='CLR10';
   end if;
 
-  raise notice 'f_a1_writer tail: OK -- clara.persist_witness_facts installed (definer, search_path pinned, EXECUTE to clara_runtime only, no PUBLIC), both private helpers installed. No table in workflow/graphile_worker/spike touched; no D1 quiesce needed (pure addition).';
+  -- M5: the numbering door, with the SAME posture matrix as the writer itself.
+  if to_regprocedure('clara.witness_citation_regions(uuid)') is null then
+    raise exception 'f_a1_writer tail: clara.witness_citation_regions did not install' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_proc p
+      where p.oid='clara.witness_citation_regions(uuid)'::regprocedure
+        and p.prosecdef and p.proconfig @> array['search_path=clara, pg_temp']
+        and pg_get_userbyid(p.proowner) = 'clara_fn_owner') then
+    raise exception 'f_a1_writer tail: witness_citation_regions is not a search_path-pinned SECURITY DEFINER owned by clara_fn_owner' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_proc p, aclexplode(p.proacl) a
+      where p.oid='clara.witness_citation_regions(uuid)'::regprocedure
+        and a.grantee='clara_runtime'::regrole and a.privilege_type='EXECUTE') then
+    raise exception 'f_a1_writer tail: witness_citation_regions is not EXECUTE-granted to clara_runtime' using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_proc p, aclexplode(p.proacl) a
+      where p.oid='clara.witness_citation_regions(uuid)'::regprocedure
+        and a.grantee <> 'clara_runtime'::regrole and a.grantee <> p.proowner
+        and a.privilege_type='EXECUTE') then
+    raise exception 'f_a1_writer tail: witness_citation_regions is EXECUTE-reachable from a role other than clara_runtime' using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_proc f cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
+      where f.oid='clara.witness_citation_regions(uuid)'::regprocedure
+        and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception 'f_a1_writer tail: PUBLIC executes witness_citation_regions' using errcode='CLR10';
+  end if;
+  -- THE PARITY IS A PROPERTY OF THE TEXT, asserted here so a later edit to one body and not the
+  -- other is caught at APPLY time rather than at the first mis-cited invoice: both numbering
+  -- expressions must be the identical `row_number() over (order by rr.id)` over
+  -- `rr.extraction_id = p_ocr_extraction`. The battery proves the mappings AGREE behaviourally;
+  -- this proves they are the same query.
+  if (select count(*)::int from pg_proc p
+       where p.oid in ('clara._witness_resolve_citation(uuid,int)'::regprocedure,
+                       'clara.witness_citation_regions(uuid)'::regprocedure)
+         and position('row_number() over (order by rr.id) as idx' in p.prosrc) > 0
+         and position('where rr.extraction_id = p_ocr_extraction' in p.prosrc) > 0) <> 2 then
+    raise exception 'f_a1_writer tail: the resolver and the published numbering do not carry the SAME ordinal expression -- one numbering is the whole contract (M5)' using errcode='CLR10';
+  end if;
+  -- M1: the seven optional reference paths, invoice.customer_taxid among them (0022:1336-1341's
+  -- live buyer-hit disjunct reads it), asserted against the COMMITTED body.
+  foreach v_sig in array array['invoice.invoice_id','invoice.invoice_date','invoice.customer_name',
+      'invoice.customer_registration','invoice.customer_taxid','invoice.vendor_name',
+      'invoice.vendor_registration'] loop
+    if position(''''||v_sig||'''' in
+        (select p.prosrc from pg_proc p where p.oid='clara.persist_witness_facts(uuid,jsonb,jsonb,int)'::regprocedure)) = 0 then
+      raise exception 'f_a1_writer tail: the writer''s optional vocabulary does not carry % -- a citable identity path that cannot be written is a live consumer silently starved', v_sig using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice 'f_a1_writer tail: OK -- clara.persist_witness_facts installed (definer, search_path pinned, EXECUTE to clara_runtime only, no PUBLIC), both private helpers installed, and clara.witness_citation_regions published to clara_runtime ONLY as the single citation numbering (same ordinal expression as the resolver, asserted at the bytes). The optional vocabulary carries all seven reference paths incl. invoice.customer_taxid. No table in workflow/graphile_worker/spike touched; no D1 quiesce needed (pure addition).';
 end
 $tail$;

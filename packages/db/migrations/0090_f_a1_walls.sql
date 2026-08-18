@@ -21,7 +21,9 @@
 -- NOT 0038 verbatim); _enqueue_invoice_facts_core's live body is 0038:6199 (E2); the three
 -- purpose CHECKs and the doc_sha CHECK are 0038 E1.1/E1.1b; the four purpose-bearing verbs
 -- and prepare_egress_dispatch/consume_egress_dispatch are 0038 E1.2/E1.3;
--- get_document_extract's live body is 0054:203 (the F9 region-ordinal recut of 0011:3232).
+-- get_document_extract's live body is 0054:203 (the F9 region-ordinal recut of 0011:3232);
+-- _tf_processing_task_update's live body is 0040 S4.11a's recut of 0038 E2b's recut of
+-- 0011:1286 (0042/0044 only NAME it in censuses; 0051 asserts it byte-UNCHANGED twice).
 -- Every prestate below pins the EXACT live prosrc by sha256 (function bodies are
 -- byte-verbatim prosrc, so a sha256 pin is exact) or by discovered-name + a
 -- pg_get_constraintdef substring match for CHECK constraints (pg_get_constraintdef
@@ -41,6 +43,13 @@
 -- a CHECK violation never leaks to the caller as a distinguishing signal -- 0038:5942-5949)
 -- -- it gains its own witness_extraction/doc_sha arm, mirroring the statement one exactly.
 --
+-- ONE WALL WAS MISSING FROM THE ANNEX'S OWN LIST AND IS ADDED HERE AS WALL 13 (section 10,
+-- adjudicated review B2): the row-level UPDATE trigger clara._tf_processing_task_update owns the
+-- queued->failed TRANSITION TABLE, and section 7e's llm_witness gate flips a queued task in
+-- place. Widening the two refusal-code CHECKs (section 8) admits the VALUES; only the trigger
+-- admits the MOVE. Without it the gate raises CLR16 the first time PR-3's router mints a witness
+-- task -- the same half-wall shape 0038:7200-7205 records for the second refusal-code CHECK.
+--
 -- WALL NUMBERS below resolve in Annex A. M7/M9/M10/M14 resolve in the design body.
 
 -- =====================================================================================
@@ -50,8 +59,14 @@
 -- pg_get_constraintdef substring match. Aborts on any mismatch rather than proceeding on a
 -- wrong premise (db-migrations.md, "measure before, measure after").
 -- =====================================================================================
+-- The pre-recut ACL of every function this file replaces, captured BEFORE any DDL so section
+-- 7c/7d's postcheck can assert the matrix is UNMOVED rather than assume it. CREATE OR REPLACE
+-- preserves proacl, so this is a measurement of a claim, not a repair -- and a measurement is
+-- exactly what the claim was missing: "the four verbs and prepare_egress_dispatch keep their
+-- ACLs" was asserted by nobody and read by nothing.
+create temp table _fa1_walls_pre_acl(sig text primary key, acl text);
 do $pre$
-declare v_src text; v_sha text; v_n int;
+declare v_src text; v_sha text; v_n int; v_sig text;
 begin
   if not exists (select 1 from clara.schema_migrations where version = '0088_masb_wording_seed_lexicon') then
     raise exception 'f_a1_walls prestate: 0088_masb_wording_seed_lexicon is not applied -- frontier mismatch' using errcode='CLR10';
@@ -88,6 +103,22 @@ begin
   if v_sha <> '883e5b32d7e624d53d53bc4c5d0f9e00a5cb0afb3563525e8a0ebe41c27ef45e' then
     raise exception 'f_a1_walls prestate: clara._enqueue_invoice_facts_core prosrc sha256 mismatch (got %, expected 883e5b32d7e624d53d53bc4c5d0f9e00a5cb0afb3563525e8a0ebe41c27ef45e) -- this is not the 0038 E2 body the wb-0020 restore pair was derived from', v_sha
       using errcode='CLR10';
+  end if;
+
+  -- _tf_processing_task_update (WALL 13, section 10 -- the LIVE body is 0040's S4.11a recut of
+  -- 0038 E2b's recut of 0011:1286; 0042/0044 only NAME it in their censuses and 0051 asserts it
+  -- is byte-UNCHANGED, so 0040 is the last hand on it). PARTIAL-BIRTH GUARD: neither witness
+  -- refusal code may already appear -- a body carrying one and not the other is a half-applied
+  -- splice, and splicing on top of it would double the arm.
+  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_processing_task_update()'::regprocedure;
+  if v_src is null then raise exception 'f_a1_walls prestate: clara._tf_processing_task_update is GONE' using errcode='CLR10'; end if;
+  v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
+  if v_sha <> 'c0a6bb43c5f51503352f3390838ac8a35a84cdc6b2825e4bd191b28f2324c47b' then
+    raise exception 'f_a1_walls prestate: clara._tf_processing_task_update prosrc sha256 mismatch (got %, expected c0a6bb43c5f51503352f3390838ac8a35a84cdc6b2825e4bd191b28f2324c47b) -- this is not the 0040 S4.11a body this file was authored against', v_sha
+      using errcode='CLR10';
+  end if;
+  if position('witness_consent_inactive' in v_src) <> 0 or position('witness_multi_client' in v_src) <> 0 then
+    raise exception 'f_a1_walls prestate: clara._tf_processing_task_update already names a witness refusal code -- already applied, or half-spliced' using errcode='CLR10';
   end if;
 
   -- get_document_extract (0054:203, the live F9 region-ordinal body).
@@ -169,6 +200,22 @@ begin
         and pg_get_constraintdef(con.oid) like '%statement_extraction%' and pg_get_constraintdef(con.oid) not like '%witness_extraction%') then
     raise exception 'f_a1_walls prestate: ck_egress_dispatch_authorizations_doc_sha not found in its expected 0038 shape' using errcode='CLR10';
   end if;
+
+  -- THE PRE-RECUT ACL MATRIX (the five bodies section 7c/7d replaces), read from the live
+  -- catalog. acldefault() stands in for a NULL proacl so "owner-only default" and an explicitly
+  -- written owner-only grant compare as the same fact rather than as null-vs-text.
+  foreach v_sig in array array[
+      'clara.grant_client_egress_purpose(uuid,text,uuid,text,text)',
+      'clara.activate_client_egress_purpose(uuid,text,uuid,text)',
+      'clara.deactivate_client_egress_purpose(uuid,text,text,text)',
+      'clara.revoke_client_egress_purpose(uuid,text,text,text)',
+      'clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text,text)'] loop
+    insert into _fa1_walls_pre_acl(sig, acl)
+    select v_sig, coalesce(
+      (select string_agg(a.grantee::regrole::text||':'||a.privilege_type, ',' order by a.grantee::regrole::text collate "C", a.privilege_type collate "C")
+         from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where p.oid = v_sig::regprocedure), '(none)');
+  end loop;
 
   -- firm_document_limits: the witness-own concurrency column must not already exist.
   if exists(select 1 from information_schema.columns where table_schema='clara' and table_name='firm_document_limits' and column_name='llm_witness_concurrency') then
@@ -1013,7 +1060,7 @@ alter function clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text,text) ow
 reset role;
 
 do $s7cd_post$
-declare v_src text; v_sha text;
+declare v_src text; v_sha text; v_sig text; v_acl text; v_was text; v_n int;
 begin
   select p.prosrc into v_src from pg_proc p where p.oid='clara.grant_client_egress_purpose(uuid,text,uuid,text,text)'::regprocedure;
   v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
@@ -1043,7 +1090,26 @@ begin
   if position('witness_extraction' in v_src)=0 then
     raise exception 'f_a1_walls S7d postcheck: prepare_egress_dispatch does not name witness_extraction' using errcode='CLR10';
   end if;
-  raise notice 'f_a1_walls S7c/7d: the four typed-purpose verbs and prepare_egress_dispatch recut -- witness_extraction is now grantable/activatable/deactivatable/revocable and sha-gated at prepare time';
+
+  -- THE ACL MATRIX IS UNMOVED, measured against the prestate capture rather than asserted. A
+  -- recut that silently widened who may GRANT a typed egress purpose would be a security change
+  -- wearing a widening's clothes -- and CREATE OR REPLACE preserving proacl is a PROPERTY of the
+  -- statement, not a guarantee about what a future editor writes beside it (a DROP+CREATE, or a
+  -- stray GRANT in the same section, resets it silently).
+  select count(*)::int into v_n from _fa1_walls_pre_acl;
+  if v_n <> 5 then
+    raise exception 'f_a1_walls S7c/7d postcheck: the pre-recut ACL capture holds % rows (expected 5) -- the instrument is not measuring what it claims', v_n using errcode='CLR10';
+  end if;
+  for v_sig, v_was in select sig, acl from _fa1_walls_pre_acl order by sig loop
+    select coalesce(
+      (select string_agg(a.grantee::regrole::text||':'||a.privilege_type, ',' order by a.grantee::regrole::text collate "C", a.privilege_type collate "C")
+         from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where p.oid = v_sig::regprocedure), '(none)') into v_acl;
+    if v_acl is distinct from v_was then
+      raise exception 'f_a1_walls S7c/7d postcheck: % changed ACL across the recut (was [%], now [%]) -- the typed-purpose surface must keep its EXACT pre-recut grant matrix', v_sig, v_was, v_acl using errcode='CLR10';
+    end if;
+  end loop;
+  raise notice 'f_a1_walls S7c/7d: the four typed-purpose verbs and prepare_egress_dispatch recut -- witness_extraction is now grantable/activatable/deactivatable/revocable and sha-gated at prepare time; all 5 bodies keep their EXACT pre-recut ACLs (measured before and after, not assumed)';
 end
 $s7cd_post$;
 
@@ -1742,6 +1808,144 @@ end
 $s9_post$;
 
 -- =====================================================================================
+-- SECTION 10 -- WALL 13: the queued->failed TRANSITION ARM in clara._tf_processing_task_update.
+--
+-- WHY THIS IS A WALL AND NOT A NICETY. Section 7e's llm_witness enqueue gate FLIPS an in-flight
+-- queued task in place:
+--     update clara.document_processing_tasks
+--        set status='failed', error_code=v_gate, finished_at=now()
+--      where document_id=p_document and lane=v_lane and status='queued';
+-- and `v_gate` is 'witness_consent_inactive' or 'witness_multi_client'. The row-level UPDATE
+-- trigger's transition table admits queued->failed ONLY for ('budget','attempt_cap'), the two
+-- STATEMENT-scoped gate verdicts (0038 E2b) and lane-scoped 'skipped_kind' (0040 S4.11a). So the
+-- flip would raise CLR16 'illegal document processing transition queued -> failed' the first time
+-- PR-3's router mints a witness task -- section 8 widened the two CHECKs and section 7e wired the
+-- gate, but the TRANSITION was never opened, which is the half-wall shape this estate has been
+-- bitten by before (0038:7200-7205 records forgetting the SECOND refusal-code CHECK). The gate is
+-- inert today, so the defect is unreachable today; a wall that is only correct while its lane is
+-- dead is not a wall.
+--
+-- LANE-SCOPED, exactly as 0038 E2b and 0040 S4.11a scoped theirs: the two witness codes are
+-- admissible on this transition ONLY for lane='llm_witness'. A queued invoice/classify/ocr/
+-- statement task can never be flipped to a witness verdict by any future writer, and the three
+-- pre-existing arms are carried through untouched.
+--
+-- THE SPLICE DISCIPLINE is 0040 S4.11a's, verbatim in shape: read pg_get_functiondef off the LIVE
+-- catalog, assert the transition table occurs EXACTLY ONCE, replace() only there, execute the
+-- result. Nothing is retyped, so every arm this section does not name survives BY CONSTRUCTION.
+-- D1: this is a live TRIGGER body on the hot path -- the file's header already carries the
+-- write-quiesce obligation for its two other live recuts and this joins them.
+-- =====================================================================================
+set role clara_fn_owner;
+
+do $s10$
+declare
+  v_sig text := 'clara._tf_processing_task_update()';
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if v_def is null then
+    raise exception 'f_a1_walls S10 prestate: clara._tf_processing_task_update is GONE' using errcode='CLR10';
+  end if;
+  v_frm := $f$    v_ok:=(old.status='queued' and new.status in ('running','held_egress'))
+      or (old.status='queued' and new.status='failed'
+          and (new.error_code in ('budget','attempt_cap')
+               or (new.error_code in ('consent_inactive','statement_multi_client')
+                   and new.lane in ('statement_facts','statement_parse'))
+               or (new.error_code='skipped_kind'
+                   and new.lane in ('invoice_facts','statement_facts','statement_parse'))))
+      or (old.status='held_egress' and new.status='queued')
+      or (old.status='running' and new.status in ('done','failed','queued','held_egress'));$f$;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception 'f_a1_walls S10 prestate: the 0040 S4.11a transition table appears % times (expected exactly 1) -- the live body drifted and a splice here would silently revert it', v_cnt
+      using errcode='CLR10';
+  end if;
+
+  v_to := $t$    -- F-A1 PR-1 (wall 13): the WITNESS gate verdicts join the queued->failed arm,
+    -- LANE-SCOPED exactly as 0038 E2b and 0040 S4.11a scoped theirs. _enqueue_invoice_facts_core's
+    -- llm_witness branch flips an in-flight queued task in place when the typed witness_extraction
+    -- consent is absent/inactive or the document is filed to more than one client; both codes are
+    -- never-claimed (ck_processing_task_binding_f_a1) and the flip is their only writer. Scoping is
+    -- the point: no future writer can flip a queued invoice/classify/ocr/statement task to a
+    -- WITNESS verdict, and no lane can flip a running or terminal task at all.
+    v_ok:=(old.status='queued' and new.status in ('running','held_egress'))
+      or (old.status='queued' and new.status='failed'
+          and (new.error_code in ('budget','attempt_cap')
+               or (new.error_code in ('consent_inactive','statement_multi_client')
+                   and new.lane in ('statement_facts','statement_parse'))
+               or (new.error_code in ('witness_consent_inactive','witness_multi_client')
+                   and new.lane='llm_witness')
+               or (new.error_code='skipped_kind'
+                   and new.lane in ('invoice_facts','statement_facts','statement_parse'))))
+      or (old.status='held_egress' and new.status='queued')
+      or (old.status='running' and new.status in ('done','failed','queued','held_egress'));$t$;
+
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+end
+$s10$;
+
+reset role;
+
+do $s10_post$
+declare v_src text; v_stripped text; v_cnt int;
+begin
+  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_processing_task_update()'::regprocedure;
+  -- THE PROBE IS WHITESPACE-STRIPPED, and that is the finding rather than the convenience: the
+  -- arm is written across two source lines with an indentation this file chose, so a probe for
+  -- the literal text would be asserting THIS FILE'S formatting, not the landed predicate. Comments
+  -- are stripped first for the 0093:318-321 reason -- the arm's own commentary NAMES both codes,
+  -- so a naive prosrc match would report the documentation as the behaviour.
+  v_stripped := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'),
+                               '[[:space:]]', '', 'g');
+  if position('new.error_codein(''witness_consent_inactive'',''witness_multi_client'')andnew.lane=''llm_witness''' in v_stripped) = 0 then
+    raise exception 'f_a1_walls S10 postcheck: the lane-scoped witness arm did not land in the EXECUTABLE text of the transition table' using errcode='CLR10';
+  end if;
+  -- PARTIAL BIRTH: exactly one witness arm, and it names BOTH codes. A body carrying one code
+  -- alone is a half-splice that would leave one refusal path raising CLR16 forever.
+  v_cnt := (length(v_stripped) - length(replace(v_stripped, 'witness_consent_inactive', '')))
+           / length('witness_consent_inactive');
+  if v_cnt <> 1 then
+    raise exception 'f_a1_walls S10 postcheck: witness_consent_inactive appears % times in the executable text (expected 1)', v_cnt using errcode='CLR10';
+  end if;
+  v_cnt := (length(v_stripped) - length(replace(v_stripped, 'witness_multi_client', '')))
+           / length('witness_multi_client');
+  if v_cnt <> 1 then
+    raise exception 'f_a1_walls S10 postcheck: witness_multi_client appears % times in the executable text (expected 1)', v_cnt using errcode='CLR10';
+  end if;
+  -- THE THREE PRE-EXISTING ARMS SURVIVED. 0038 E2b's lane scoping marker is counted the way 0040
+  -- itself counts it, and 0011's two immutability raises are named.
+  v_cnt := (length(v_src) - length(replace(v_src,
+             $m$new.lane in ('statement_facts','statement_parse')$m$, '')))
+           / length($m$new.lane in ('statement_facts','statement_parse')$m$);
+  if v_cnt <> 1 then
+    raise exception 'f_a1_walls S10 postcheck: the 0038 E2b lane-scoping marker count is now % (expected 1) -- E2b was disturbed', v_cnt using errcode='CLR10';
+  end if;
+  if position('skipped_kind' in v_src) = 0 then
+    raise exception 'f_a1_walls S10 postcheck: 0040''s re-kind retirement arm was lost' using errcode='CLR10';
+  end if;
+  if position('document processing task identity/config is immutable' in v_src) = 0
+     or position('terminal document processing task is immutable' in v_src) = 0 then
+    raise exception 'f_a1_walls S10 postcheck: a 0011 immutability arm was lost' using errcode='CLR10';
+  end if;
+  -- Binding, owner, security posture and the trigger wiring are unmoved.
+  if not exists (select 1 from pg_proc p where p.oid='clara._tf_processing_task_update()'::regprocedure
+                   and p.prosecdef and p.proconfig @> array['search_path=clara, pg_temp']
+                   and pg_get_userbyid(p.proowner) = 'clara_fn_owner') then
+    raise exception 'f_a1_walls S10 postcheck: _tf_processing_task_update is no longer a search_path-pinned SECURITY DEFINER owned by clara_fn_owner' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_trigger t
+                  where t.tgrelid='clara.document_processing_tasks'::regclass
+                    and t.tgfoid='clara._tf_processing_task_update()'::regprocedure
+                    and not t.tgisinternal) then
+    raise exception 'f_a1_walls S10 postcheck: the trigger binding on clara.document_processing_tasks is gone' using errcode='CLR10';
+  end if;
+  raise notice 'f_a1_walls S10: wall 13 -- clara._tf_processing_task_update''s queued->failed arm now admits (witness_consent_inactive, witness_multi_client) for lane=llm_witness ONLY; both codes appear exactly once in the executable text, 0038 E2b''s statement scoping and 0040''s skipped_kind arm and 0011''s two immutability raises all survive, and the trigger binding/owner/definer posture is unmoved.';
+end
+$s10_post$;
+
+-- =====================================================================================
 -- TAIL CENSUS -- re-reads the live catalog end to end. This is the evidence a reviewer
 -- reads; a tail that only says OK has proven nothing (db-migrations.md).
 -- =====================================================================================
@@ -1798,6 +2002,19 @@ begin
     raise exception 'f_a1_walls tail: firm_document_limits.llm_witness_concurrency is missing or NOT NULL (must be nullable)' using errcode='CLR10';
   end if;
 
-  raise notice 'f_a1_walls tail: engine_kind/lane/prefix CHECKs widened; the typed-purpose surface (3 purpose CHECKs + doc_sha CHECK + 4 verbs + prepare_egress_dispatch) admits witness_extraction; claim_document_processing_task + release_held_document_tasks join llm_witness with its OWN concurrency column; both refusal-code CHECKs carry the witness family; _enqueue_invoice_facts_core carries the inert witness gate; get_document_extract publishes extracted_at and excludes witness envelopes from the char budget. Every recut body verified by exact prosrc sha256.';
+  -- WALL 13 (section 10), re-read here end-to-end rather than trusted from its own postcheck:
+  -- the two witness refusal codes are admissible on queued->failed, and ONLY for llm_witness.
+  -- Read on the comment-stripped, whitespace-stripped EXECUTABLE text -- the arm's commentary
+  -- names both codes, so a raw prosrc probe would pass on the documentation alone (0093:318-321's
+  -- lesson, and review law 3: a guard that reads a NAME reads a projection of the thing).
+  select regexp_replace(regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g'),
+                        '[[:space:]]', '', 'g') into v_def
+    from pg_proc p where p.oid='clara._tf_processing_task_update()'::regprocedure;
+  if v_def is null
+     or position('new.error_codein(''witness_consent_inactive'',''witness_multi_client'')andnew.lane=''llm_witness''' in v_def) = 0 then
+    raise exception 'f_a1_walls tail: the queued->failed transition arm does not admit the witness refusal family for lane=llm_witness -- section 7e''s in-place gate flip would raise CLR16' using errcode='CLR10';
+  end if;
+
+  raise notice 'f_a1_walls tail: engine_kind/lane/prefix CHECKs widened; the typed-purpose surface (3 purpose CHECKs + doc_sha CHECK + 4 verbs + prepare_egress_dispatch, ACL matrix unmoved) admits witness_extraction; claim_document_processing_task + release_held_document_tasks join llm_witness with its OWN concurrency column; both refusal-code CHECKs carry the witness family AND the queued->failed TRANSITION arm now admits it lane-scoped (wall 13); _enqueue_invoice_facts_core carries the inert witness gate; get_document_extract publishes extracted_at and excludes witness envelopes from the char budget. Every recut body verified by exact prosrc sha256.';
 end
 $tail$;

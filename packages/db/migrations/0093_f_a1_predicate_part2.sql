@@ -360,15 +360,26 @@ begin
              and p.proname not in ('_invoice_fact_state','_invoice_fact_state_at')
              and position('clara._invoice_fact_state' in s.src) > 0) x;
   raise notice 'F-A1 caller census: % clara bodies / % call sites reach the resolver and were NOT changed: %', v_c, v_sites, coalesce(v_callers,'(none)');
-  if coalesce(v_c,0) < 5 or coalesce(v_sites,0) < v_c then
+  -- THE FLOOR IS THE NAMED ROSTER, not 5 (adjudicated review nit 4). A floor of 5 against a
+  -- measured population of 11 was slack the census could not see through: five arbitrary bodies
+  -- passing it says nothing about whether the ones the dispatch EXISTS FOR are among them, and a
+  -- count alone passes a substitution (0086 part 2b's lesson, in this file's own idiom). The
+  -- SEVEN below are the behaviour-bearing consumers the design §3.3 enumerates -- the verified
+  -- tier, the autopost lane, the duplicate-bill and duplicate-sales walls, the coding-lane
+  -- routing, and the draft/approve doors that read corroboration before they write -- and each
+  -- is asserted BY NAME against the live catalog. (The full measured population at this frontier
+  -- is 11 bodies / 27 sites; the four not named here -- _ocr_sales_floor_pop, list_review_queue,
+  -- persist_invoice_facts, revise_entry -- ride the same dispatch and are covered by the count.)
+  if coalesce(v_c,0) < 7 or coalesce(v_sites,0) < v_c then
     raise exception 'F-A1 part2 tail: caller census reads % bodies / % sites — the instrument is not measuring what it claims', coalesce(v_c,0), coalesce(v_sites,0) using errcode='CLR10';
   end if;
-  -- A population count cannot say the IMPORTANT ones are in it, so the two whose behaviour this
-  -- dispatch exists for are named individually.
-  foreach v_src in array array['_write_entry_evidence','execute_rule_post'] loop
+  foreach v_src in array array['_write_entry_evidence','execute_rule_post',
+      '_assert_supplier_bill_shape_at','_assert_sales_invoice_shape_at',
+      '_coding_lane_core','_draft_entry_core','_approve_entry_core'] loop
     if not exists (select 1 from pg_proc p where p.pronamespace='clara'::regnamespace
-                     and p.proname = v_src and p.prosrc like '%_invoice_fact_state%') then
-      raise exception 'F-A1 part2 tail: clara.% no longer reaches the resolver — the verified tier / autopost lane would NOT inherit this dispatch', v_src using errcode='CLR10';
+                     and p.proname = v_src
+                     and regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') like '%clara._invoice_fact_state%') then
+      raise exception 'F-A1 part2 tail: clara.% no longer reaches the resolver in its EXECUTABLE text — a behaviour-bearing consumer would NOT inherit this dispatch', v_src using errcode='CLR10';
     end if;
   end loop;
 
@@ -376,6 +387,6 @@ begin
   -- is a closure member, so this must stay green — and asserting it here is what makes that a
   -- measured fact rather than an assumption.
   perform clara.verify_evaluator_freeze();
-  raise notice 'F-A1 part2 tail: OK — exactly 2 bodies recut and 0 created; the 0023 tail and the 0016 legacy select preserved verbatim; no confidence term; the ordering key appears once per regime; % caller bodies / % call sites spared; evaluator freeze green', v_c, v_sites;
+  raise notice 'F-A1 part2 tail: OK — exactly 2 bodies recut and 0 created; the 0023 tail and the 0016 legacy select preserved verbatim; no confidence term; the ordering key appears once per regime; % caller bodies / % call sites spared and all SEVEN behaviour-bearing consumers named individually; evaluator freeze green', v_c, v_sites;
 end
 $fa1_tail2$;

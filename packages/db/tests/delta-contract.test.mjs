@@ -32,27 +32,38 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.metric_cells",
     )).rows[0].n, 0, "a reused/consumed database is not valid evidence for this one-shot contract");
+    // CLOSED-WORLD ROSTER, extended rather than loosened: F-A1 (Wave-F Track A, migrations
+    // 0091/0092) registers two further closures — clara.evaluate_witness_fact_state_v1, the
+    // witness-pair corroboration predicate, and clara.evaluate_witness_identity_v1, its identity
+    // leaf carrying its own one-member closure so the source-side freeze lint discovers it. Both
+    // are BORN UNDEPLOYED like delta's, which is the property this assertion is really about.
     assert.deepEqual((await rootQuery(
       "select evaluator_name,deployed from clara.evaluator_versions order by evaluator_name",
     )).rows, [
       { evaluator_name: "assess_metric_cell_independent", deployed: false },
       { evaluator_name: "evaluate_metric", deployed: false },
+      { evaluator_name: "evaluate_witness_fact_state", deployed: false },
+      { evaluator_name: "evaluate_witness_identity", deployed: false },
     ]);
     await withActor({ transaction: true }, async (db) => {
       const identity = (await db.query("select current_user,session_user")).rows[0];
       assert.equal(identity.current_user, identity.session_user,
         "the deployment ceremony uses the direct session principal");
       await db.query("update clara.evaluator_versions set deployed=true where not deployed");
+      // FOUR, not two: delta's evaluate_metric + assess_metric_cell_independent, plus F-A1's
+      // evaluate_witness_fact_state + evaluate_witness_identity. The ceremony statement is
+      // `where not deployed`, so it has always committed EVERY registered closure — the number
+      // is the roster's size, and the roster is pinned by name three lines above.
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
-      )).rows[0].n, 2);
+      )).rows[0].n, 4);
       assert.equal((await db.query(
         "select clara.verify_evaluator_freeze() r",
-      )).rows[0].r.verified_deployed, 2);
+      )).rows[0].r.verified_deployed, 4);
     });
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.evaluator_versions where deployed",
-    )).rows[0].n, 2, "the named ceremony commits both registered closures before algebra runs");
+    )).rows[0].n, 4, "the named ceremony commits every registered closure before algebra runs");
   });
   await registerPackPhase(t);
   await registerAlgebraPhase(t);

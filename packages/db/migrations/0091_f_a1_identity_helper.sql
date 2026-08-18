@@ -1,7 +1,7 @@
 -- 0091_f_a1_identity_helper.sql — F-A1 PR-1, part 0 of 3: THE IDENTITY VERDICT LEAF.
 -- =====================================================================================
 -- APPLY ORDER (alphabetical, and that is deliberate — nothing else keys on it):
---   0. 0091_f_a1_identity_helper.sql   (this file) clara._witness_identity_v1
+--   0. 0091_f_a1_identity_helper.sql   (this file) clara.evaluate_witness_identity_v1
 --   1. 0092_f_a1_predicate.sql         clara.evaluate_witness_fact_state_v1 + the freeze
 --   2. 0093_f_a1_predicate_part2.sql   the two dispatch recuts + the caller census
 -- Numbers are claimed at MERGE time (hard constraint 10). The three-file split exists for the
@@ -11,6 +11,26 @@
 -- clara.evaluate_witness_fact_state_v1 (registered as ordinal 3 in part 1's
 -- clara.evaluator_versions row), so it carries the same immutability cost as the entrypoint: a
 -- behavioural change is a `_v2` re-mint with a new registry row, never a CoR of this body.
+--
+-- WHY THE NAME IS `evaluate_witness_identity_v1` AND NOT `_witness_identity_v1` (review M7).
+-- check-frozen-evaluators.mjs:62 discovers ONLY `clara.evaluate_*` definitions in migration
+-- files, so an underscore-prefixed leaf would have been catalog-frozen (it is a closure member
+-- in clara.evaluator_versions, checked at APPLY time by verify_evaluator_freeze) but
+-- SOURCE-unfrozen — invisible to the REVIEW-time manifest gate, which is the only moment at
+-- which the fix is still cheap. The `evaluate_` stem is therefore load-bearing here for exactly
+-- the reason 0092's header states for the entrypoint. `clara._fact_hash` and
+-- `clara._normalize_invoice_cents` stay apply-time-covered only: they are pre-existing shared
+-- leaves defined in 0009, and renaming a live function with ~30 call sites is not this PR's
+-- change. Stated, not smuggled.
+--
+-- AND THE MECHANICAL CONSEQUENCE OF THAT NAME, discharged below in §FREEZE: that same lint
+-- requires EVERY `clara.evaluate_*` defined in a migration NEW versus the base ref to mint its
+-- OWN clara.evaluator_versions row IN THE SAME FILE (check-frozen-evaluators.mjs:262-286, the
+-- per-evaluator rule codex M7 tightened). So this leaf carries a one-member registry closure of
+-- its own, BESIDE its membership in part 1's four-member `evaluate_witness_fact_state` closure.
+-- The two are not redundant: the member row freezes it AS PART OF the predicate's closure (a
+-- change there breaks the predicate's aggregate hash), the own row freezes it AS ITSELF (so a
+-- future migration that touched only this body is named by verify_evaluator_freeze directly).
 --
 -- WHAT IT DECIDES (design §3.3, D12): whether a vendor_registration / customer_registration the
 -- TEXT witness cited may be trusted as a COUNTERPARTY identity. It returns verdicts only; it
@@ -42,12 +62,27 @@
 -- fallback stands: if the wrong-party cells fail on the measured corpus, identity fields are
 -- demoted to non-corroboration-bearing and that ships without a new design round.
 set local statement_timeout = '5min';
+-- SEARCH PATH PINNED FOR THE WHOLE FILE, for §FREEZE's sake: pg_get_functiondef's qualification
+-- is session-path dependent (0059:243-245's recorded reason), so the freeze block flips to a
+-- CATALOG-ONLY path and flips back to this one — the same discipline 0092 §B uses, so the two
+-- files hash this body identically.
+set local search_path = clara, pg_temp;
 
 do $fa1_helper_pre$
 begin
-  if to_regprocedure('clara._witness_identity_v1(uuid,uuid,boolean)') is not null then
-    raise exception 'F-A1 identity helper: clara._witness_identity_v1 already exists — already applied'
+  if to_regprocedure('clara.evaluate_witness_identity_v1(uuid,uuid,boolean)') is not null then
+    raise exception 'F-A1 identity helper: clara.evaluate_witness_identity_v1 already exists — already applied'
       using errcode='CLR10';
+  end if;
+  -- The pre-rename name must not be live either: a database carrying it is a HALF-applied
+  -- F-A1 (the pre-M7 build), and creating the renamed twin beside it would leave two bodies
+  -- where the closure claims one.
+  if to_regprocedure('clara._witness_identity_v1(uuid,uuid,boolean)') is not null then
+    raise exception 'F-A1 identity helper: the PRE-RENAME clara._witness_identity_v1 is live — this database carries a pre-M7 F-A1 build; a renamed twin beside it would leave two identity bodies'
+      using errcode='CLR10';
+  end if;
+  if exists (select 1 from clara.evaluator_versions where evaluator_name='evaluate_witness_identity') then
+    raise exception 'F-A1 identity helper: clara.evaluator_versions already carries an evaluate_witness_identity row' using errcode='CLR10';
   end if;
   -- The two relations this leaf reads must be the ones it was authored against.
   -- WHERE THE FILING CLIENT ACTUALLY LIVES, measured rather than assumed: `documents.client_id`
@@ -71,7 +106,7 @@ $fa1_helper_pre$;
 
 set role clara_fn_owner;
 
-create function clara._witness_identity_v1(p_document uuid, p_text_x uuid, p_contest boolean)
+create function clara.evaluate_witness_identity_v1(p_document uuid, p_text_x uuid, p_contest boolean)
   returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $ident$
 declare
@@ -184,14 +219,41 @@ begin
   if v_cv is not null then v_out := v_out || jsonb_build_object('customer_registration_verdict', v_cv); end if;
   return v_out;
 end $ident$;
-revoke all on function clara._witness_identity_v1(uuid,uuid,boolean) from public;
+revoke all on function clara.evaluate_witness_identity_v1(uuid,uuid,boolean) from public;
 
 reset role;
 
+-- §FREEZE — THIS LEAF'S OWN clara.evaluator_versions ROW (see the header). A CATALOG-ONLY
+-- search_path makes pg_get_functiondef's qualification stable for BOTH registration and
+-- verification (0059:243-245's recorded reason, verbatim); registration under any other
+-- search_path stores a hash verify_evaluator_freeze() cannot reproduce — and it must reproduce
+-- under BOTH this row and part 1's four-member closure, which hashes the same body the same way.
+set local search_path=pg_catalog,pg_temp;
+do $fa1_helper_freeze$
+declare e uuid; h bytea;
+begin
+  select sha256(convert_to(string_agg(
+           encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text,'UTF8')),'hex'),
+           '' order by o),'UTF8')) into h
+    from (values (0,'clara.evaluate_witness_identity_v1(uuid,uuid,boolean)')) m(o,s);
+  insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
+      closure_sha256, migration_version, deployed)
+    values('evaluate_witness_identity', 1,
+      'clara.evaluate_witness_identity_v1(uuid,uuid,boolean)', h,
+      '0091_f_a1_identity_helper', false) returning id into e;
+  insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
+      body_sha256, firm_id)
+    select e, o, s, sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text,'UTF8')), null::uuid
+      from (values (0,'clara.evaluate_witness_identity_v1(uuid,uuid,boolean)')) m(o,s);
+end
+$fa1_helper_freeze$;
+set local search_path=clara,pg_temp;
+
 do $fa1_helper_tail$
+declare v_n int;
 begin
   if not exists (select 1 from pg_proc p
-                  where p.oid='clara._witness_identity_v1(uuid,uuid,boolean)'::regprocedure
+                  where p.oid='clara.evaluate_witness_identity_v1(uuid,uuid,boolean)'::regprocedure
                     and p.prosecdef and p.proconfig @> array['search_path=clara, pg_temp']
                     and pg_get_userbyid(p.proowner) = 'clara_fn_owner') then
     raise exception 'F-A1 identity helper tail: not a search_path-pinned SECURITY DEFINER owned by clara_fn_owner'
@@ -199,17 +261,31 @@ begin
   end if;
   if exists (select 1 from pg_proc f
              cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
-              where f.oid='clara._witness_identity_v1(uuid,uuid,boolean)'::regprocedure
+              where f.oid='clara.evaluate_witness_identity_v1(uuid,uuid,boolean)'::regprocedure
                 and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
     raise exception 'F-A1 identity helper tail: PUBLIC executes the identity leaf' using errcode='CLR10';
   end if;
   -- POLARITY-FREE BY CONSTRUCTION, asserted against the COMMITTED body rather than intent: this
   -- leaf must not read document_kind or any direction signal, or B3's circularity returns.
-  if (select p.prosrc from pg_proc p where p.oid='clara._witness_identity_v1(uuid,uuid,boolean)'::regprocedure)
+  if (select p.prosrc from pg_proc p where p.oid='clara.evaluate_witness_identity_v1(uuid,uuid,boolean)'::regprocedure)
        ~* 'document_kind|direction|polarity|coding_kind' then
     raise exception 'F-A1 identity helper tail: the identity leaf reads a POLARITY signal — B3''s circularity with 0022:1307 has returned'
       using errcode='CLR10';
   end if;
-  raise notice 'F-A1 identity helper: OK — clara._witness_identity_v1 created (definer, search_path pinned, no PUBLIC execute, polarity-free)';
+  -- THE PRE-RENAME NAME IS GONE FROM THE CATALOG, read positively rather than assumed from the
+  -- fact that this file never created it: a leaf discoverable under two names is the half-freeze
+  -- the rename exists to close.
+  if to_regprocedure('clara._witness_identity_v1(uuid,uuid,boolean)') is not null then
+    raise exception 'F-A1 identity helper tail: the pre-rename clara._witness_identity_v1 is present' using errcode='CLR10';
+  end if;
+  -- The own registry row landed with exactly one member, and the whole registry still verifies.
+  select count(*)::int into v_n from clara.evaluator_version_members m
+    join clara.evaluator_versions v on v.id = m.evaluator_version_id
+   where v.evaluator_name = 'evaluate_witness_identity';
+  if v_n <> 1 then
+    raise exception 'F-A1 identity helper tail: the evaluate_witness_identity closure has % members, expected 1', v_n using errcode='CLR10';
+  end if;
+  perform clara.verify_evaluator_freeze();
+  raise notice 'F-A1 identity helper: OK — clara.evaluate_witness_identity_v1 created (definer, search_path pinned, no PUBLIC execute, polarity-free); its OWN 1-member evaluator_versions closure is registered and verify_evaluator_freeze() is green; the pre-rename name is absent from the catalog';
 end
 $fa1_helper_tail$;

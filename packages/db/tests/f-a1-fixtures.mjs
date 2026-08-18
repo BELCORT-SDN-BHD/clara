@@ -17,7 +17,10 @@
 //       "contest": <bool, optional>,              -- a witness-reported identity contest marker
 //       "answers": {                              -- REQUIRED for all 11 belt fields, both rows
 //         "<field_path>": { "state": "value", "raw": "<the document's exact rendering>" }
-//                       | { "state": "not_printed" }
+//                       | { "state": "not_printed" },
+//         -- OPTIONAL, and ONLY these two beyond the eleven (M3, the reference-value contract):
+//         "invoice.invoice_id"|"invoice.invoice_date":
+//                         { "state": "value", "raw": "<rendering>", "value"?: "<normalized>" }
 //       }
 //     },
 //     "corroboration_ineligible": <text|null, optional>
@@ -26,6 +29,13 @@
 // The TEXT row additionally carries clara.document_regions rows (server-verified citations); the
 // VISION row carries NO regions (design §3.1) and its cents are re-derived by the predicate from
 // `raw` with clara._normalize_invoice_cents — a model-asserted integer is never read.
+//
+// THE THREE FIELD CLASSES (adjudicated review B1), because the fixtures have to be able to build
+// all three: the NINE MONETARY belt members carry one verified region with real page_polygon
+// geometry (C2); `invoice.currency` and `invoice.type_code` are TOKENS whose citation is
+// OPTIONAL and which carry no geometry conjunct at all. `noRegions` below is how a cell builds
+// the token-without-a-citation shape — the honest Malaysian invoice that prints "RM 103.75" and
+// never a standalone MYR string anywhere a witness could cite.
 
 import { randomUUID } from "node:crypto";
 import { rootQuery } from "./rig-helpers.mjs";
@@ -59,7 +69,7 @@ export const box = (x0, y0, x1, y1, page = 1) => ({ page, polygon: [x0, y0, x1, 
 export async function witnessReady() {
   const r = await rootQuery(`
     select to_regprocedure('clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)') is not null as predicate,
-           to_regprocedure('clara._witness_identity_v1(uuid,uuid,boolean)') is not null as identity,
+           to_regprocedure('clara.evaluate_witness_identity_v1(uuid,uuid,boolean)') is not null as identity,
            exists(select 1 from pg_constraint
                    where conname = 'ck_document_extractions_engine_kind_f_a1'
                      and pg_get_constraintdef(oid) like '%llm\\_text\\_facts%') as kinds,
@@ -93,22 +103,32 @@ export async function witnessReady() {
  * `visionOverride` lets a cell make the vision channel say something DIFFERENT (the one-sen
  * disagreement, the transposition, the foreign currency) without touching the text side.
  * `dropAnswers` removes a field from a roster entirely — the missing-answer refusal.
+ * `noRegions` answers a field but writes NO region for it — the optional-citation shape the two
+ * token fields are allowed to take (B1), and the not-corroborated shape a monetary field takes.
+ * `rawOverride` replaces the rendered `raw` on the TEXT side (and, unless visionOverride says
+ * otherwise, on the vision side too) — how a cell says "RM 103.75" where the fixture would
+ * otherwise render a bare "MYR", or hands the predicate an absurd 30-digit magnitude.
+ * `refAnswers` adds the two OPTIONAL M3 reference answers to one or both channels:
+ *   { text: { "invoice.invoice_id": { raw, value } }, vision: { ... } }
  */
 export function witnessShape({
   fields = {}, visionOverride = {}, dropAnswers = { text: [], vision: [] },
   geometry = {}, extraRegions = [], contest = false, ineligible = null,
+  noRegions = [], rawOverride = {}, refAnswers = { text: {}, vision: {} },
 } = {}) {
   const textAnswers = {}; const visionAnswers = {}; const regions = [];
   const rendered = (path, v) =>
     v === null || v === undefined ? null : (MONEY.includes(path) ? money(v) : String(v));
   for (const path of BELT) {
-    const raw = rendered(path, Object.prototype.hasOwnProperty.call(fields, path) ? fields[path] : null);
+    const base = rendered(path, Object.prototype.hasOwnProperty.call(fields, path) ? fields[path] : null);
+    const raw = base !== null && Object.prototype.hasOwnProperty.call(rawOverride, path)
+      ? rawOverride[path] : base;
     textAnswers[path] = raw === null ? { state: "not_printed" } : { state: "value", raw };
     const vRaw = Object.prototype.hasOwnProperty.call(visionOverride, path)
       ? rendered(path, visionOverride[path])
       : raw;
     visionAnswers[path] = vRaw === null ? { state: "not_printed" } : { state: "value", raw: vRaw };
-    if (raw !== null) {
+    if (raw !== null && !noRegions.includes(path)) {
       regions.push({
         field_path: path, text_content: raw,
         monetary_raw: MONEY.includes(path) ? raw : null,
@@ -120,6 +140,8 @@ export function witnessShape({
   }
   for (const p of dropAnswers.text ?? []) delete textAnswers[p];
   for (const p of dropAnswers.vision ?? []) delete visionAnswers[p];
+  for (const [p, a] of Object.entries(refAnswers.text ?? {})) textAnswers[p] = { state: "value", ...a };
+  for (const [p, a] of Object.entries(refAnswers.vision ?? {})) visionAnswers[p] = { state: "value", ...a };
   for (const r of extraRegions) regions.push(r);
   const env = (channel, answers) => {
     const e = { witness: { channel, answers } };

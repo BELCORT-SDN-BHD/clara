@@ -353,6 +353,33 @@ const RENDER_0083_CLOCK_NAMES = ["render_lease_alive"];
 // and a silently-shrunk roster is exactly the drift arm (D) exists to catch.
 const B3_REOPEN_CLOCK_NAMES = ["reopen_fiscal_year"];
 
+// F-A1 [Wave-F Track A, the LLM witness-pair writer]: ONE more, and it is the same lawful shape
+// as `claim_document_processing_task` and `_enqueue_invoice_facts_core` already on this roster.
+// clara.persist_witness_facts reads the bare clock TWICE and NEITHER read decides an accounting
+// date:
+//   · `clock_timestamp()` stamps document_extractions.extracted_at on each half of the witness
+//     pair — an INSTANT on a timestamptz column, and load-bearing as an instant: the vision row
+//     is stamped first and the text row is bumped at least a microsecond past it, which is what
+//     lands the 0017 kind-scoped supersede trigger's document-wide pointer on the TEXT row
+//     deterministically instead of on a same-transaction uuid coin flip (design §3.9 note 4).
+//     clara._book_today() would be actively WRONG here: it returns a DATE, and a date cannot
+//     order two rows written microseconds apart.
+//   · `now()` stamps document_processing_tasks.finished_at — an audit instant, WHEN the persist
+//     happened, on a timestamptz column.
+// MEASURED, not inferred: arm (D)'s own detector over F-A1's seven new bodies flags this one and
+// none of the other six (record_llm_usage_event's created_at is a column DEFAULT, which lives in
+// the table definition rather than in a pg_proc body; the predicate, its identity leaf, the two
+// private writer helpers and the citation-numbering reader carry no clock token at all).
+// NOT A ::date SITE EITHER: the only `::date` F-A1 adds is `v_val::date` inside
+// clara._witness_answers_ok, a validity probe on a MODEL-SUPPLIED literal already pinned by
+// regex to YYYY-MM-DD — no clock, no timestamptz, timezone-independent by construction, and
+// invisible to every arm of this census by design rather than by luck.
+//
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for B3's stated reason: F-A1's files are numbered
+// at MERGE, so a `like '0095_%'` gate would silently drop this name on a renumber — and a
+// silently-shrunk roster is exactly the drift arm (D) exists to catch.
+const WITNESS_F_A1_CLOCK_NAMES = ["persist_witness_facts"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -372,6 +399,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0082_%")) names.push(...RENDER_0082_CLOCK_NAMES);
   if (await applied("0083_%")) names.push(...RENDER_0083_CLOCK_NAMES);
   if (await appliedStem("b3_reopen_ends_on$")) names.push(...B3_REOPEN_CLOCK_NAMES);
+  if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   return names.sort();
 }
 

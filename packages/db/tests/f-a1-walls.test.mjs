@@ -484,6 +484,57 @@ test("f-a1.n both refusal-code CHECKs accept witness_multi_client / witness_cons
 });
 
 // ===========================================================================
+// WALL 13 -- the queued->failed TRANSITION arm in clara._tf_processing_task_update.
+// The refusal-code CHECKs (wall 7) admit the VALUES; only this trigger admits the MOVE, and
+// section 7e's llm_witness gate flips a queued task IN PLACE. Without it the gate raises CLR16
+// the first time PR-3's router mints a witness task.
+// ===========================================================================
+
+test("f-a1.q wall 13: a queued llm_witness task flips to failed on a WITNESS refusal code, and an unlisted code is still CLR16", async () => {
+  mustBeReady();
+  const { clients } = world;
+  const firm = await firmOf(clients.A1);
+
+  for (const code of ["witness_multi_client", "witness_consent_inactive"]) {
+    // Each sub-case gets its OWN document: uq_document_processing_one_live_lane admits one live
+    // llm_witness task per document, and the first flip leaves a terminal row behind.
+    const doc = await filedDocument(world.users.alice, { firm, client: clients.A1 });
+    const id = await insertWitnessTask(firm, doc.documentId, { status: "queued" });
+    await rootQuery(
+      `update clara.document_processing_tasks set status='failed', error_code=$2, finished_at=now() where id=$1`,
+      [id, code]);
+    const row = await taskRow(id);
+    assert.equal(row.status, "failed", `queued -> failed on ${code} must be admitted for lane=llm_witness`);
+    assert.equal(row.error_code, code);
+  }
+
+  // An unlisted code on the SAME transition is still refused -- the arm widened by exactly two
+  // codes, not by "any witness-shaped string".
+  {
+    const doc = await filedDocument(world.users.alice, { firm, client: clients.A1 });
+    const id = await insertWitnessTask(firm, doc.documentId, { status: "queued" });
+    await assertRaises("CLR16", () => rootQuery(
+      `update clara.document_processing_tasks set status='failed', error_code='engine_error', finished_at=now() where id=$1`,
+      [id]),
+    "a queued llm_witness task must not be flippable to an arbitrary failure code");
+  }
+
+  // …and the widening is LANE-SCOPED: the same two codes on a queued INVOICE task are refused.
+  // (The error_code CHECK admits the value, so the term doing the work here is the lane scope.)
+  {
+    const doc = await filedDocument(world.users.alice, { firm, client: clients.A1 });
+    const r = await rootQuery(
+      `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,status)
+       values($1,$2,'azure-di:prebuilt-invoice:2024-11-30',1,'invoice_facts','queued') returning id`,
+      [firm, doc.documentId]);
+    await assertRaises("CLR16", () => rootQuery(
+      `update clara.document_processing_tasks set status='failed', error_code='witness_multi_client', finished_at=now() where id=$1`,
+      [r.rows[0].id]),
+    "a queued invoice_facts task must NOT be flippable to a witness verdict -- the arm is lane-scoped");
+  }
+});
+
+// ===========================================================================
 // M7/M14 -- get_document_extract: extracted_at published; witness envelopes excluded from
 // the budgeted set while region coverage does not shrink.
 // ===========================================================================

@@ -48,7 +48,11 @@ const gate = (t) => {
 // ---------------------------------------------------------------------------------------
 const CENTS = { total: 10375, net: 9430, tax: 566, svc: 377, round: 2 };
 
-async function ocrFixture(sub, client) {
+// `extraTexts` lands its regions in the SAME pass as the base set, because the citation ordinal
+// is `row_number() over (order by id)` over uuids: a region added after idxOf was computed would
+// silently RENUMBER the base citations (a uuid sorts anywhere), and the cell would then be
+// testing the fixture rather than the writer.
+async function ocrFixture(sub, client, extraTexts = {}) {
   const firm = await firmOf(client);
   const doc = await filedDocument(sub, { firm, client, kind: "invoice" });
   const ocrId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
@@ -60,6 +64,7 @@ async function ocrFixture(sub, client) {
     round: `ROUNDING ADJ ${money(CENTS.round)}`,
     ccy: "Currency stated: MYR only",
     type: "Doc Type Code: 01",
+    ...extraTexts,
   };
   const ids = {};
   for (const [label, textContent] of Object.entries(texts)) {
@@ -342,6 +347,185 @@ test("a missing or failed citation still persists the fact GEOMETRY-LESS — the
     assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "ccy"), "the resolved (but wrong) region uuid is still recorded");
     assert.equal(rr.monetary_raw, money(500), "the witness's claim is still persisted whole");
   }
+});
+
+// ===========================================================================
+// The adjudicated review fold: M1 · M2 · M3 · M4 · M5 · M6.
+// ===========================================================================
+
+test("M1: a cited invoice.customer_taxid persists as a verified region — 0022's buyer-hit disjunct can still read it", async (t) => {
+  if (gate(t)) return;
+  // The OCR page carries the buyer's tax id; the witness cites it.
+  const o = await ocrFixture(world.users.alice, world.clients.A1, { taxid: "Buyer TIN: C12345678900" });
+  const { taskId } = await runningTask(o.firm, o.documentId);
+  const text = textCall(o, { citations: [...goodCitations(o),
+    { field_path: "invoice.customer_taxid", region_idx: o.idxOf.taxid, raw: "C12345678900" }] });
+  const r = await persist(taskId, text, visionCall(o));
+  const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.customer_taxid");
+  assert.ok(rr, "the customer_taxid fact persisted — it was DROPPED from the writer's vocabulary before this fix");
+  assert.equal(rr.text_content, "C12345678900");
+  assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "taxid"), "a verified citation carries the cited OCR region's uuid");
+  assert.ok(rr.locator.polygon.length > 0, "…and its polygon");
+});
+
+test("M2: a non-boolean witness.contest is a STRUCTURAL refusal; boolean and absent are both accepted", async (t) => {
+  if (gate(t)) return;
+  {
+    const o = await ocrFixture(world.users.alice, world.clients.A1);
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const bad = textCall(o); bad.envelope.witness.contest = "unknown";
+    assert.equal((await persistErr(taskId, bad, visionCall(o)))?.code, "CLR10",
+      "a string contest is refused at the write boundary — the predicate casts it ::boolean");
+    assert.equal(await extractionCount(o.documentId), 1, "nothing was inserted");
+  }
+  {
+    const o = await ocrFixture(world.users.alice, world.clients.A1);
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const ok = textCall(o); ok.envelope.witness.contest = true;
+    const v = visionCall(o); v.envelope.witness.contest = false;
+    assert.equal((await persist(taskId, ok, v)).status, "done", "boolean contest is accepted on both channels");
+  }
+});
+
+test("M3: the reference-value contract — a value must be a substring of its raw (id) / a real ISO date, and it reaches the envelope", async (t) => {
+  if (gate(t)) return;
+  {
+    const o = await ocrFixture(world.users.alice, world.clients.A1);
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const bad = textCall(o);
+    bad.envelope.witness.answers["invoice.invoice_id"] =
+      { state: "value", raw: "Invoice No.: INV-001", value: "INV-999" };
+    assert.equal((await persistErr(taskId, bad, visionCall(o)))?.code, "CLR10",
+      "a value the document never prints is a model-invented identifier — refused");
+  }
+  {
+    const o = await ocrFixture(world.users.alice, world.clients.A1);
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const bad = textCall(o);
+    bad.envelope.witness.answers["invoice.invoice_date"] =
+      { state: "value", raw: "31/02/2026", value: "2026-02-31" };
+    assert.equal((await persistErr(taskId, bad, visionCall(o)))?.code, "CLR10",
+      "a shape-valid but non-existent ISO date is refused (the regex alone would pass it)");
+  }
+  {
+    const o = await ocrFixture(world.users.alice, world.clients.A1);
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const text = textCall(o); const vision = visionCall(o);
+    for (const call of [text, vision]) {
+      call.envelope.witness.answers["invoice.invoice_id"] =
+        { state: "value", raw: "Invoice No.: INV-001", value: "INV-001" };
+      call.envelope.witness.answers["invoice.invoice_date"] =
+        { state: "value", raw: "15/01/2026", value: "2026-01-15" };
+    }
+    const r = await persist(taskId, text, vision);
+    const s = (await rootQuery(`select clara.evaluate_witness_fact_state_v1($1,$2,$3) as s`,
+      [o.documentId, r.text_extraction_id, r.vision_extraction_id])).rows[0].s;
+    assert.equal(s.invoice_id, "INV-001", "the envelope emits the normalized value the duplicate walls compare");
+    assert.equal(s.invoice_date, "2026-01-15");
+  }
+  {
+    // A key outside the eleven-plus-two vocabulary is still refused: an admitting vocabulary
+    // admits typos too.
+    const o = await ocrFixture(world.users.alice, world.clients.A1);
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const bad = textCall(o);
+    bad.envelope.witness.answers["invoice.vendor_name"] = { state: "value", raw: "SUPPLIER SDN BHD" };
+    assert.equal((await persistErr(taskId, bad, visionCall(o)))?.code, "CLR10",
+      "only invoice_id / invoice_date may join the eleven");
+  }
+});
+
+test("M4: the monetary citation match is TOKEN-BOUNDED — a digit fragment does not verify", async (t) => {
+  if (gate(t)) return;
+  // The two OCR lines are BOTH seeded up front (see ocrFixture's note on renumbering).
+  const o = await ocrFixture(world.users.alice, world.clients.A1, {
+    frag: "PREVIOUS BALANCE RM 11,234.56",
+    bounded: "Total: RM 1,234.56",
+  });
+  const RAW = "1,234.56";   // a plain SUBSTRING of "11,234.56" — that is the whole hazard
+  // (a) the fragment. Pre-fix this VERIFIED and handed the witness the wrong line's polygon for a
+  // figure the document never states.
+  {
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const text = textCall(o, { citations: [...goodCitations(o),
+      { field_path: "invoice.amount_due", region_idx: o.idxOf.frag }] });
+    text.envelope.witness.answers["invoice.amount_due"] = { state: "value", raw: RAW };
+    const vision = visionCall(o, { fields: { ...goodFields(), "invoice.amount_due": RAW } });
+    const r = await persist(taskId, text, vision);
+    const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.amount_due");
+    assert.equal(rr.locator.polygon.length, 0, "a digit-fragment match does NOT verify — geometry-less");
+    assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "frag"),
+      "the resolved (but unverified) region uuid is still recorded");
+    assert.equal(rr.monetary_cents, "123456", "…while the read still persists whole (C4)");
+  }
+  // (b) the SAME rendering inside a bounded occurrence DOES verify, so the term under test is the
+  // BOUNDARY and not some other wall that happened to be failing too.
+  {
+    const { taskId } = await runningTask(o.firm, o.documentId);
+    const text = textCall(o, { citations: [...goodCitations(o),
+      { field_path: "invoice.amount_due", region_idx: o.idxOf.bounded }] });
+    text.envelope.witness.answers["invoice.amount_due"] = { state: "value", raw: RAW };
+    const vision = visionCall(o, { fields: { ...goodFields(), "invoice.amount_due": RAW } });
+    const r = await persist(taskId, text, vision);
+    const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.amount_due");
+    assert.ok(rr.locator.polygon.length > 0, "a token-bounded occurrence verifies");
+    assert.equal(rr.locator.source_region_id, await ocrRegionId(o, "bounded"));
+  }
+});
+
+test("M5: clara.witness_citation_regions publishes EXACTLY the numbering the resolver resolves against", async (t) => {
+  if (gate(t)) return;
+  const o = await ocrFixture(world.users.alice, world.clients.A1);
+  // The reader's whole (idx -> region_id) map…
+  const published = (await rootQuery(
+    `select idx, region_id, page, text_content from clara.witness_citation_regions($1) order by idx`, [o.ocrId])).rows;
+  assert.ok(published.length >= 7, "the seeded OCR extraction has regions to number");
+  // …compared against what the WRITER's own resolver returns for each of those idx values. This
+  // is the parity that makes "PR-2 must read this" a fact rather than a claim: the prompt builder
+  // reads the left column, the server resolves the right one.
+  for (const row of published) {
+    const resolved = (await rootQuery(
+      `select region_id, text_content from clara._witness_resolve_citation($1,$2)`, [o.ocrId, row.idx])).rows[0];
+    assert.equal(resolved.region_id, row.region_id, `idx ${row.idx} resolves to the published region`);
+    assert.equal(resolved.text_content, row.text_content);
+  }
+  // And it is NOT get_document_extract's idx: that ordinal is dense over every chosen extraction,
+  // so it renumbers the moment a second done extraction exists. Proven, not asserted.
+  const { taskId } = await runningTask(o.firm, o.documentId);
+  await persist(taskId, textCall(o), visionCall(o));
+  const after = (await rootQuery(
+    `select idx, region_id from clara.witness_citation_regions($1) order by idx`, [o.ocrId])).rows;
+  assert.deepEqual(after.map((x) => `${x.idx}:${x.region_id}`), published.map((x) => `${x.idx}:${x.region_id}`),
+    "the witness numbering is STABLE across a witness persist — it is scoped to the pinned OCR extraction alone");
+});
+
+test("M6: a 30-digit rendering persists GEOMETRY-LESS with NULL cents instead of raising 22003", async (t) => {
+  if (gate(t)) return;
+  const huge = "RM " + "1".repeat(30) + ".00";
+  const o = await ocrFixture(world.users.alice, world.clients.A1, { huge: `GRAND TOTAL ${huge}` });
+  const { taskId } = await runningTask(o.firm, o.documentId);
+  const text = textCall(o, { citations: [...goodCitations(o), { field_path: "invoice.deposit", region_idx: o.idxOf.huge }] });
+  text.envelope.witness.answers["invoice.deposit"] = { state: "value", raw: huge };
+  const vision = visionCall(o, { fields: { ...goodFields(), "invoice.deposit": huge } });
+  const r = await persist(taskId, text, vision);  // must NOT raise
+  const rr = (await regionsOf(r.text_extraction_id)).find((x) => x.field_path === "invoice.deposit");
+  assert.equal(rr.monetary_cents, null, "an unreadable magnitude normalizes to NULL, never an exception");
+  assert.equal(rr.locator.polygon.length, 0, "…and lands geometry-less, the failed-citation landing");
+  assert.equal(rr.monetary_raw, huge, "…while the read persists whole (C4)");
+  // The predicate then refuses on it WITHOUT raising either.
+  const s = (await rootQuery(`select clara.evaluate_witness_fact_state_v1($1,$2,$3) as s`,
+    [o.documentId, r.text_extraction_id, r.vision_extraction_id])).rows[0].s;
+  assert.equal(s.corroborated, false, "present-but-unreadable is not corroboration");
+});
+
+test("M6: a `raw` longer than 200 characters is a structural refusal", async (t) => {
+  if (gate(t)) return;
+  const o = await ocrFixture(world.users.alice, world.clients.A1);
+  const { taskId } = await runningTask(o.firm, o.documentId);
+  const bad = textCall(o);
+  bad.envelope.witness.answers["invoice.amount_due"] = { state: "value", raw: "RM " + "9".repeat(300) };
+  assert.equal((await persistErr(taskId, bad, visionCall(o)))?.code, "CLR10");
+  assert.equal(await extractionCount(o.documentId), 1, "nothing was inserted");
 });
 
 // ===========================================================================
