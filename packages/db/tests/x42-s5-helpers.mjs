@@ -379,6 +379,18 @@ const B3_REOPEN_CLOCK_NAMES = ["reopen_fiscal_year"];
 // at MERGE, so a `like '0095_%'` gate would silently drop this name on a renumber — and a
 // silently-shrunk roster is exactly the drift arm (D) exists to catch.
 const WITNESS_F_A1_CLOCK_NAMES = ["persist_witness_facts"];
+// F-A1 PR-4 (the bank-statement witness cutover) adds TWO clock-bearing bodies, and both
+// belong on this roster for honest reasons rather than as an exemption:
+//   * `_persist_statement_core_v2` — the spliced successor of `_persist_statement_core`. It
+//     inherits the ancestor's own date/clock handling verbatim AND adds the two explicit
+//     `clock_timestamp()` insert stamps that make the witness pair's document pointer
+//     deterministic (design SS3.9 note 4) instead of a uuid coin flip. The ANCESTOR is not on
+//     this roster and stays off it: it is byte-untouched by that migration.
+//   * `persist_statement_facts_v2` — the task-lane wrapper, whose `now()` uses are the same
+//     finished_at/settle stamps its v1 sibling already carries.
+// Gated on the migration stem exactly like its siblings above, so a chain that stops short of
+// PR-4 still measures the roster it actually has.
+const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_statement_facts_v2"];
 
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
@@ -400,6 +412,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0083_%")) names.push(...RENDER_0083_CLOCK_NAMES);
   if (await appliedStem("b3_reopen_ends_on$")) names.push(...B3_REOPEN_CLOCK_NAMES);
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
+  if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   return names.sort();
 }
 
