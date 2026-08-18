@@ -6,7 +6,8 @@
 > the bytes; live-body provenance stated; the N1/N2 cite fixes applied at the split).
 > Annex B is the PR-0-native review's finding-by-finding adjudication (2026-08-18;
 > verdict MERGEABLE-WITH-CONDITIONS; every condition folded into the design doc the
-> same day). Annex C is the design's §7 test-battery sketch, moved whole. Wall
+> same day). Annex C is the design's §7 test-battery sketch, moved and EXTENDED with
+> the PR-0 fold's cells. Wall
 > numbers (wall 1–12) and "§7 cell" references in the design doc resolve HERE.
 
 ## Annex A · The estate as-built

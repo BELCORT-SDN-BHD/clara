@@ -116,9 +116,14 @@ subset: corroborated (coalesced never-NULL) · corroboration_ineligible ·
 extraction_id · version_n · total_cents · total_region_id · total_fact_hash ·
 currency · explicit_non_myr · type_code · tax_total_cents · total_excl_tax_cents ·
 rounding_cents · invoice_id · invoice_date · customer_name · customer_registration —
-with 0023's CONDITIONAL-append rule preserved: the six sales/SST keys stay appended
-only-when-non-null (0023:357-364's recorded exact-diff reason), so byte-compatibility
-means the same emission RULES, never always-emit-all-17.
+with 0023's CONDITIONAL-append rule preserved: the six conditional keys (four
+sales/SST + the two identity keys customer_name/customer_registration — N4) stay
+appended only-when-non-null (0023:357-364's recorded exact-diff reason), so
+byte-compatibility means the same emission RULES, never always-emit-all-17.
+**Identity verdicts surface as region facts under the D10 vocabulary and as
+WITNESS-REGIME-ONLY conditional keys — never as new keys on legacy outputs (the
+live envelope has no vendor_* keys, 0023:348-364 — N5); `corroborated` stays an
+AMOUNT verdict with no identity term (today's posture, unchanged).**
 **The canonical `extraction_id` is the TEXT-witness row** — its regions carry the
 verified citations (§3.4), so consumers that read regions off the bound extraction
 (0022:1309-1328, 0036's shape checks) keep working against one designated row.
