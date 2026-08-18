@@ -90,7 +90,7 @@
 -- [0-9.,]; the non-monetary fields keep the plain substring test, where no digit-fragment hazard
 -- exists. A verified citation writes text_content/monetary_raw = the
 -- exact rendering, monetary_cents = the normalized cents (NULL for currency/type_code and the
--- six optional fields), polygon = the cited region's own polygon, locator carries the cited
+-- seven optional fields), polygon = the cited region's own polygon, locator carries the cited
 -- region's own uuid as `source_region_id`, engine_confidence = NULL always (the >=0.95 mirror
 -- must never return). A MISSING OR FAILED
 -- citation still persists the fact GEOMETRY-LESS (locator_kind='page_polygon', an EMPTY polygon
@@ -556,10 +556,15 @@ begin
     end if;
   end loop;
 
-  -- 10. THE SIX OPTIONAL REFERENCE FIELDS -- same cite-and-verify mechanics, but NO answers
+  -- 10. THE SEVEN OPTIONAL REFERENCE FIELDS -- same cite-and-verify mechanics, but NO answers
   -- vocabulary requirement: the witness may simply not have cited one (SS3.3's identity leaf
-  -- degrades to "no verdict" on an uncited field, never an error). `raw` comes from the
-  -- citation entry itself -- there is no `answers` slot for these six.
+  -- degrades to "no verdict" on an uncited field, never an error). THE REGION'S `raw` COMES FROM
+  -- THE CITATION ENTRY, always, for all seven -- including the two that M3 also gives an optional
+  -- ANSWERS slot. The two are different jobs and deliberately not merged: the citation carries
+  -- the quoted rendering the server can VERIFY against a cited OCR region (so the fact persists
+  -- with real geometry the doc_review surface can highlight), while the answer carries the
+  -- normalized `value` the PREDICATE emits for the cross-regime duplicate walls. A witness may
+  -- supply either, both, or neither.
   for v_cit in
     select distinct on (c.field_path) c.field_path as field_path, c.region_idx as region_idx, c.raw as raw
       from jsonb_to_recordset(v_citations) as c(field_path text, region_idx int, raw text)

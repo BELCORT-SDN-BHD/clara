@@ -1,16 +1,17 @@
 // F-A1 (Wave-F Track A) PR-1 piece 2 -- THE WALLS battery, for
 // migrations/0090_f_a1_walls.sql (number claimed at merge). NOT contract-blind: this
 // lane authored the migration, so every cell targets the ACTUAL installed behaviour. Design:
-// docs/plan/active/f-a1-witness-pair-design.md + f-a1-annexes.md (Annex A walls 1-9/12, Annex
-// C "Walls" cells).
+// docs/plan/active/f-a1-witness-pair-design.md + f-a1-annexes.md (Annex A walls 1-9/12/13,
+// Annex C "Walls" cells).
 //
 // SCOPE: engine_kind/lane/prefix CHECKs (walls 1-3); claim_document_processing_task +
 // release_held_document_tasks (walls 4-5 -- llm_witness joins the kill-switch triple, the
 // attempt cap, its OWN concurrency window (M10), and the inner kill-switch-only release
 // branch); typed purpose witness_extraction (wall 6 -- both purpose CHECKs + the doc_sha
 // CHECK + the four purpose verbs + prepare_egress_dispatch); both refusal-code CHECKs (wall
-// 7); get_document_extract's extracted_at (M7) and the witness-envelope budget exclusion
-// (M14). The wb-0020 restore-pair battery (wall 12) is a SEPARATE file
+// 7) AND the queued->failed transition arm they need to be reachable (wall 13, added at the
+// adjudicated PR-1 review -- the CHECKs admit the VALUES, the trigger admits the MOVE);
+// get_document_extract's extracted_at (M7) and the witness-envelope budget exclusion (M14). The wb-0020 restore-pair battery (wall 12) is a SEPARATE file
 // (tests/wave-b/wb-0020-legacy.test.mjs), not duplicated here -- green (9/9) already.
 //
 // _enqueue_invoice_facts_core's inert llm_witness enqueue-gate branch (wall 6's other half)

@@ -14,6 +14,15 @@
 // document-wide pointer = the TEXT row · usage rows append-only and UPDATE/DELETE refuse · RLS
 // cross-firm SELECT sees nothing (BLIND) · end-to-end corroboration through the real predicate
 // and the cross-regime dispatcher · task not claimed/wrong lane/wrong state.
+//
+// PLUS the adjudicated PR-1 review fold: M1 a cited invoice.customer_taxid persists (0022's
+// buyer-hit disjunct reads it) · M2 a non-boolean witness.contest is a structural refusal ·
+// M3 the reference-value contract (value ⊂ raw for the id, a real ISO date for the date, an
+// unknown answer key refused, and the value reaching the predicate's envelope) · M4 the
+// monetary citation match is token-bounded, shown as an exact diff against a bounded twin ·
+// M5 the published citation numbering matches the resolver's, region for region · M6 a
+// 30-digit rendering persists geometry-less with NULL cents instead of raising, and a >200-char
+// raw is refused.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

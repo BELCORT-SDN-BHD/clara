@@ -8,6 +8,12 @@
 // envelope contract (f-a1-fixtures.mjs states it in full), never from the writer's code, so a
 // later divergence between the two is a FINDING rather than a silently-agreeing pair.
 //
+// THE ADJUDICATED PR-1 REVIEW FOLD adds four B1 cells (the three field classes: C2's geometry
+// binds the NINE AMOUNTS, while currency and type_code are citation-optional TOKENS — the
+// gating one is GREEN, an invoice printing only "RM 103.75" with no MYR token anywhere to cite),
+// two M3 cells (the reference-value contract the cross-regime duplicate walls need) and one M6
+// cell (an absurd magnitude is unreadable, never an exception out of a STABLE read).
+//
 // THE POSTING-AUTHORITY CLAIM THIS BATTERY EXISTS TO CHECK: `corroborated: true` is what makes a
 // document's total postable unattended. So the cells are written as an EXACT DIFF around one
 // corroborating base shape — each negative cell changes ONE thing and asserts the verdict flips

@@ -4,7 +4,7 @@
 -- predicate, persist_witness_facts, evaluator_versions, llm_usage_events, the field_path
 -- census) can mint anything against it. Design of record:
 -- docs/plan/active/f-a1-witness-pair-design.md SS3.2/SS3.5/SS3.6/SS3.8/SS6.2 + Annex A
--- (walls 1-9, 12) + Annex C (the Walls battery cells). Migration number claimed at
+-- (walls 1-9, 12, 13) + Annex C (the Walls battery cells). Migration number claimed at
 -- MERGE time (standing law, AGENTS.md + .claude/rules/db-migrations.md).
 --
 -- THIS FILE MINTS NO WITNESS WORK. No router change, no re-extraction-door change, no
