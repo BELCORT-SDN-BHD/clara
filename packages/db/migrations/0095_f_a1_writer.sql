@@ -214,8 +214,9 @@ begin
   if v_contest is not null and jsonb_typeof(v_contest) not in ('boolean','null') then return false; end if;
   v_answers := p_envelope->'witness'->'answers';
   if v_answers is null or jsonb_typeof(v_answers) <> 'object' then return false; end if;
-  -- Every key is a KNOWN key, and all eleven belt keys are present. (Counting keys alone would
-  -- pass an eleven-key map that swapped a belt field for a reference one.)
+  -- HALF ONE: every key present is a KNOWN key. (Half two -- all eleven belt keys are PRESENT --
+  -- is the loop below, which is why the old `count(keys) = 11` test had to go: with thirteen
+  -- admissible names a count would pass a map that swapped a belt field for a reference one.)
   if exists (select 1 from jsonb_object_keys(v_answers) as k(name)
               where k.name <> all(v_all)) then return false; end if;
   foreach v_f in array v_all loop
