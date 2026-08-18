@@ -168,6 +168,15 @@
   PowerShell if the ~50GB matters. Standing practice going forward: long fleet runs prune
   docker volumes as stages finish, not at the end.
 
+- **2026-08-18 (evening, 开工)** — Next 1 executed: #255 deployed as `clara-runtime` v63,
+  triple-verified (v62 negative control → v63 PROCESS reads → `/ready`); lane row retired.
+  Then the F-A1 design: a seven-lane grounding sweep + completeness critic over the
+  extraction estate, design v1→v3 through a two-lane fresh-context adversarial review
+  (48 findings adjudicated at the bytes; both lanes unconditional MERGEABLE on the final
+  bytes). The Codex lane was BLOCKED by a vendor usage limit (lifts 2026-08-20) —
+  re-registered as the build's PR-0 gate, not waived. OQ-1/OQ-2 queued for the sitting.
+  *(Archived at the 2026-08-19 ceremony sweep.)*
+
 ## Known-issues entries archived 2026-08-18 (resolved; moved verbatim per the outgrow law)
 
 - **0057's S0.9 birth self-test is a LATENT CLUSTER-RACE FLAKE on main (2026-08-15, root-caused

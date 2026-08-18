@@ -29,7 +29,13 @@ file wins or it is stale — and truing it is the first thing you do.
   N5→F-T4 · N6 doc-truth staleness incl. stale `0056:57`/autodraft-header/runtime-README
   lines — Wave-F fix-queue riders).
 
-- **Live DB: 83 migrations, frontier `0088` (the #43 wording lexicon).** The wording-seed
+- **Live DB: 90 migrations, frontier `0095` (the F-A1 witness estate — ceremonied
+  2026-08-19 ~03:30 MYT, `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): 28/28
+  positive reads, evaluators deployed 4/4 one-way, LIVE-INERT for witness work until
+  PR-3 mints the lane. Field notes: the in-file quiesce guard (0023's mechanism,
+  carried by 0092) FIRED in a live ceremony for the first time — the recipe now waits
+  110s post-stop; the statement-pair coin-flip measured on live (15 docs/24 pairs,
+  named not repaired, heals at PR-4).** Earlier: the wording-seed
   ceremony ran 2026-08-16 after the owner's sign-off
   (`docs/plan/completed/masb-wording-ceremony-asrun.md`): 22 statutory-wording rows + 9
   lexicon + 3 claim policies, byte-per-packet. **E-R14 IS OPEN: en and zh statutory packs
@@ -116,7 +122,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on branch f-a1/pr1: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly. **Verify+review round DONE (head ebcc709)**: the integration verify's 36 census reds (all EXTENDED, never weakened) + the opus fresh-context review's 2 blockers/7 material/6 nits (B1 the C2-overreach that would have zeroed corroboration on RM-printed invoices; B2 the missing queued→failed trigger arm → wall 13) ALL adjudicated, fixed PRE-FREEZE, re-proven (δ-drill 63/63 · ε 69/69 · f-a1 family green · sweep 2470/2508 with 1 Windows-only environmental red). Next: fix-diff re-review → PR | building | — |
+| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on branch f-a1/pr1: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly. **Verify+review round DONE (head ebcc709)**: the integration verify's 36 census reds (all EXTENDED, never weakened) + the opus fresh-context review's 2 blockers/7 material/6 nits (B1 the C2-overreach that would have zeroed corroboration on RM-printed invoices; B2 the missing queued→failed trigger arm → wall 13) ALL adjudicated, fixed PRE-FREEZE, re-proven (δ-drill 63/63 · ε 69/69 · sweep 2470/2508, 1 Windows-only environmental red) → re-review MERGEABLE → **PR #263 MERGED d8abf19** (CI 3 rounds; 2 more census catches folded) → **CEREMONIED 2026-08-19** (as-run in completed/). Next: **PR-2 the runtime half** (witnessFacts.v1 against the live verbs; AI SDK docs pulled first) → PR-3 cutover (corpus measurement gates) → PR-3a → PR-4 | building | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -365,7 +371,10 @@ file as dissent (F-A1 design §5)** · the first monthly LIGHT DR sitting (to sc
 server-side branch protection (plan upgrade) · WB-R22 target capability · PRD §9 deferred
 product questions · the old SGD-document clarify in the owner's inbox.
 
-**Tooling follow-ups:** the dr-verify trio (UTC hashing · the STRICT canary probe's stale
+**Tooling follow-ups:** **the ceremony DSN bridge belongs IN-REPO** (commit the pooler CA +
+a dsn-pipe successor script; the 2026-08-19 ceremony ran `sslmode=no-verify` because the
+prior sessions' pinned-CA tooling was session-local and gone — the handoffs-rule failure
+shape, twice now) · the dr-verify trio (UTC hashing · the STRICT canary probe's stale
 expectation · the AP-gate ILIKE example) · the runtime boot line should name its bundle
 version (the positive-read law's second leg) · Supavisor headroom re-measure at δ's consumer
 additions · the local disposable Supabase stack (needs Docker) · ComplianceWatchCard
@@ -377,12 +386,9 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   authored in build worktrees, never committed; the renumber procedure's content survives as
   the digest's law 41 (`docs/adr/README.md` §4 · Engineering and CI law) and ADR-058's body. Recorded at the harness-v2 assembly; re-author only if a real
   need appears.
-- **Two γ post-CLEAN NITs** (PR #231 body, residuals 4–5): a +25-line self-citation drift in
-  the third skeleton amendment · S11.4c's absent-function branch tests `''` where a no-row
-  SELECT leaves NULL (near-zero reachability). One-word/two-char fixes for the next 0057-area
-  batch.
-- **Working-tree custody — RESOLVED 2026-08-15/16**; the full record moved verbatim to
-  `docs/plan/completed/progress-archive-2026-08.md` (2026-08-18).
+- **Two γ post-CLEAN NITs** (PR #231 body, residuals 4–5): skeleton self-citation drift ·
+  S11.4c's `''`-vs-NULL branch (near-zero reach). One-word fixes, next 0057-area batch.
+- **Working-tree custody — RESOLVED 2026-08-15/16**; full record in the archive.
 - **The BEE opening-TB record discrepancy (owner adjudication, found 2026-08-16 at the
   corpus-design grounding):** this file's BEE-deferral bullet (Next 2) says the book holds
   "an empty opening TB", while ADR-043 records a FINALIZED keyed opening seed `1e60960e`
@@ -436,19 +442,12 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Session log
 
-*(Entries through 2026-08-16 moved verbatim to
-`docs/plan/completed/progress-archive-2026-08.md` at the 2026-08-18 clock-out.)*
+*(Entries through 2026-08-16: verbatim in `docs/plan/completed/progress-archive-2026-08.md`.)*
 
-- **2026-08-18 (the Agentic Charter session)** — ADR-0071 minted (twelve rulings, laws
-  71-76); the full entry moved verbatim to
-  `docs/plan/completed/progress-archive-2026-08.md` at the late-night outgrow sweep.
-- **2026-08-18 (evening, 开工)** — Next 1 executed: #255 deployed as `clara-runtime` v63,
-  triple-verified (v62 negative control → v63 PROCESS reads → `/ready`); lane row retired.
-  Then the F-A1 design: a seven-lane grounding sweep + completeness critic over the
-  extraction estate, design v1→v3 through a two-lane fresh-context adversarial review
-  (48 findings adjudicated at the bytes; both lanes unconditional MERGEABLE on the final
-  bytes). The Codex lane was BLOCKED by a vendor usage limit (lifts 2026-08-20) —
-  re-registered as the build's PR-0 gate, not waived. OQ-1/OQ-2 queued for the sitting.
+- **2026-08-18 (the Agentic Charter session)** — ADR-0071 minted (twelve rulings,
+  laws 71-76); full entry in the archive.
+- **2026-08-18 (evening, 开工)** — #255 → v63; the F-A1 design driven v1→v3 (48
+  findings, two lanes MERGEABLE); moved verbatim to the archive at the ceremony sweep.
 - **2026-08-18 (night, the F-A1 rulings + build kickoff)** — owner ruled in-session (design
   doc §5): OQ-1 **OpenAI-direct** (Azure declined) · OQ-2 **witness_extraction RATIFIED**
   (WB-R23) · cutover **DIRECT RELEASE** (the DPA-first recommendation filed as dissent;
@@ -483,6 +482,15 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
   6 nits — all adjudicated (one review disposition AMENDED, one residual RULED),
   fixed on f-a1/pr1-fixes and re-proven; design/annex/PROGRESS trued. Next:
   fix-diff re-review → PR.
+- **2026-08-19 (~03:30 MYT, the PR-1 merge + ceremony)** — PR #263 merged (d8abf19;
+  CI took 3 rounds — the dashboard seam ledger and a runtime pre-0089-era cell were
+  the 4th/5th closed-world catches, both extended/trued). The D1 ceremony ran (fourth
+  execution; as-run: `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): backup banked
+  → sleeper DSN bridge (reconstructed — dsn-pipe was session-local and GONE) → stop +
+  110s staleness → 7/7 applied with live prestate evidence → 28/28 positive reads →
+  deploy flip 2→4 → NOTIFY → `/ready` 200 → `--lock-deployed` (manifest in this PR).
+  Deviation recorded: `sslmode=no-verify` (CA-unpinned TLS) — the pinned-CA tooling
+  gap registered under Tooling follow-ups.
 
 ---
 
