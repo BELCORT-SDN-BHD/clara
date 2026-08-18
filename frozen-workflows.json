@@ -263,7 +263,7 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v8.tools.ts": {
-      "sha256": "30196c0abd774ddfae24a8a78def0035b2378f7e7bcf20ac59146ac77764255f",
+      "sha256": "a6bdf1ad71df20d9b49e159ed3da578566d8b80d40915643c3e1b8e8aeef739d",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v8.ts": {
@@ -336,11 +336,11 @@
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v12.impl.ts": {
-      "sha256": "56b8096f8c03a651dfaa8f79529764e4107ac4132280b117840a3aec7ba28d8c",
+      "sha256": "a84b4ca3f12598d8b8971a18ee2bce17192330efbb5135f8161056d27049a370",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v12.tools.ts": {
-      "sha256": "369b05529af002eb5dbd41040264eeff4acc91d4b8c410493bdf1846318ceba6",
+      "sha256": "16b1b14336b2d4c02b0b4fb6ed2b6c39215473cb638f954176d823aaf1499753",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v12.ts": {

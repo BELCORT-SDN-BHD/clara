@@ -88,8 +88,12 @@ function normalizeCurrency(text: string | null | undefined): string | null {
 
 /** ONE regime's resolved latest generation: the rows of that generation (one engine_kind,
  *  the newest version_n WITHIN that kind — never across kinds, M6/M7), a representative
- *  `extracted_at` clock parsed to epoch ms (null when unreadable — never wins a cross-regime
- *  comparison), and whether a confidence term applies to THIS regime at all. Pure, no DB. */
+ *  `extracted_at` clock parsed to epoch ms (null when unreadable), and whether a confidence
+ *  term applies to THIS regime at all. Pure, no DB.
+ *
+ *  A null clock's fate below (`?? -Infinity`): it LOSES to a readable one; two null clocks
+ *  tie, and the tie — like any tie — prefers witness (§3.3), so a null witness clock still
+ *  wins against a null legacy clock, via the tie rule. */
 type RegimeGeneration = { rows: ExtractRegion[]; extractedAt: number | null; requiresConfidence: boolean };
 
 function resolveRegimeGeneration(regions: readonly ExtractRegion[], kind: string, requiresConfidence: boolean): RegimeGeneration | null {
@@ -107,9 +111,10 @@ function resolveRegimeGeneration(regions: readonly ExtractRegion[], kind: string
  *
  *  M7 selection rule (design §3.8 / Annex B row M7): filters to BOTH regimes' kinds, resolves
  *  each regime's own latest generation independently, and — only when both are present —
- *  picks the cross-regime winner by `extracted_at` ALONE, never cross-regime `Math.max
- *  (version_n)` (a per-lane counter, 0026:216-217); a clock tie prefers witness (§3.3). A
- *  single-regime (legacy-only) document needs no comparison and is byte-identical to v7's. */
+ *  picks the cross-regime winner by `extracted_at` ALONE, never `Math.max(version_n)` across
+ *  regimes (a per-lane counter, 0026:216-217) — see RegimeGeneration's own header for the
+ *  null-clock/tie rule. A legacy-only document needs no comparison and is byte-identical to
+ *  v7's. */
 export function readInvoiceFactState(extract: unknown): {
   verifiedTotalCents: number | null;
   corroborated: boolean;
@@ -119,15 +124,14 @@ export function readInvoiceFactState(extract: unknown): {
   if (!Array.isArray(regions) || regions.length === 0) {
     return { verifiedTotalCents: null, corroborated: false, explicitNonMyr: false };
   }
-  // The vision row (`llm_vision_facts`) carries no regions (§3.1) — it can never appear here,
-  // so no filter is needed for it; only the two region-bearing kinds are resolved.
+  // The vision row (`llm_vision_facts`) carries no regions (§3.1), so it needs no filter.
   const legacy = resolveRegimeGeneration(regions, "invoice_facts", true);
   const witness = resolveRegimeGeneration(regions, "llm_text_facts", false);
   if (!legacy && !witness) return { verifiedTotalCents: null, corroborated: false, explicitNonMyr: false };
 
   let winner: RegimeGeneration;
   if (legacy && witness) {
-    // A clock tie prefers the witness regime (design §3.3) — `>=` on the witness side.
+    // `>=` on the witness side — see RegimeGeneration's header for the null/tie rule.
     winner = (witness.extractedAt ?? -Infinity) >= (legacy.extractedAt ?? -Infinity) ? witness : legacy;
   } else {
     winner = (legacy ?? witness) as RegimeGeneration;
@@ -141,10 +145,8 @@ export function readInvoiceFactState(extract: unknown): {
   const polygon = (totalRow?.locator as { polygon?: unknown } | null | undefined)?.polygon;
   const hasGeometry = Array.isArray(polygon) && polygon.length > 0;
   const conf = typeof totalRow?.engine_confidence === "number" ? totalRow.engine_confidence : 0;
-  // CORRECTED: the stale v7 mirror required conf >= 0.95 unconditionally — a term the real DB
-  // gate excluded structurally since 0023 (design §3.3: "No confidence term"). A witness fact
-  // region carries engine_confidence = NULL by design (§3.4); only a witness winner skips the
-  // term, so the legacy mirror's byte behavior is unchanged.
+  // CORRECTED: v7's stale conf >= 0.95 mirror is scoped to legacy alone (the real DB gate
+  // excludes it structurally, 0023) — a witness region carries engine_confidence NULL (§3.4).
   const confidenceOk = winner.requiresConfidence ? conf >= 0.95 : true;
 
   const currency = normalizeCurrency(rows.find((r) => r.field_path === "invoice.currency")?.text_content);
@@ -154,8 +156,7 @@ export function readInvoiceFactState(extract: unknown): {
 }
 
 /** One cited fact as the model supplies it (region INDEX + quote + label), and the resolved
- *  shape the DB evidence writer receives (region ID + quote + the label read BACK OFF THE
- *  REGION, never the model's string) — the toolface stopped taking ids, the wall did not. */
+ *  shape the DB writer receives (region ID + quote + the label read BACK OFF THE REGION). */
 export type DraftEvidence = DraftInput["evidence"][number];
 export type ResolvedEvidence = { region_id: string; quote: string; field_path?: string };
 
@@ -264,15 +265,14 @@ export function resolveEvidenceRegions(
 }
 
 /** THE COUNTERPARTY CONTRACT, layer 2 of 3 (skeleton §2a): the runtime tool derives the
- *  authoritative counterparty kind from coding_kind — a supplier_bill names a vendor,
- *  sales_invoice/sales_credit_note name a customer. Pure. */
+ *  authoritative counterparty kind from coding_kind — supplier_bill -> vendor, sales_* ->
+ *  customer. Pure. */
 export function deriveCounterpartyKind(codingKind: DraftInput["coding_kind"]): "vendor" | "customer" {
   return codingKind === "supplier_bill" ? "vendor" : "customer";
 }
 
-/** PR #204 / 7A-R2, THE BOUND FAMILY: the coding_kind values an admitted direction allows. A
- *  `direction` of null (a pre-migration row) returns null — no early family to check; the DB
- *  draft writer stays the sole authority. Pure. */
+/** PR #204 / 7A-R2: the coding_kind values an admitted direction allows. A `direction` of
+ *  null (a pre-migration row) returns null — no early family to check. Pure. */
 export function allowedCodingKindsForDirection(direction: "sales" | "purchase" | null): readonly DraftInput["coding_kind"][] | null {
   if (direction === "sales") return ["sales_invoice", "sales_credit_note"];
   if (direction === "purchase") return ["supplier_bill"];

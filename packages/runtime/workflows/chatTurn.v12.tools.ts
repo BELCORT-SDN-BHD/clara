@@ -73,7 +73,9 @@ function normalizeCurrency(text: string | null | undefined): string | null {
   return c.length > 0 ? c : null;
 }
 
-/** ONE regime's resolved latest generation — see autoDraft.v8.tools.ts's identical helper. */
+/** ONE regime's resolved latest generation — see autoDraft.v8.tools.ts's identical helper.
+ *  `extractedAt` is null when unreadable; below (`?? -Infinity`) a null clock LOSES to a
+ *  readable one, and two null clocks tie — the tie, like any tie, prefers witness (§3.3). */
 type RegimeGeneration = { rows: ExtractRegion[]; extractedAt: number | null; requiresConfidence: boolean };
 
 function resolveRegimeGeneration(regions: readonly ExtractRegion[], kind: string, requiresConfidence: boolean): RegimeGeneration | null {

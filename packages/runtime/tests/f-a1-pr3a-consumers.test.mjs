@@ -3,8 +3,11 @@
 // idx-stability cell). Companion to autoDraft.v8.tools.ts / chatTurn.v12.tools.ts — see those
 // files' headers for the single statement of what changed and why.
 //
-// SECTION 1 is pure (no DB): registry sanity + the widened kind literal is really present in
-// source (the bundle-grep companion after `pnpm --filter @clara/runtime build`).
+// SECTION 1's TEST BODIES touch no DB (registry sanity + the widened kind literal is really
+// present in source — the bundle-grep companion after `pnpm --filter @clara/runtime build`);
+// the FILE as a whole is not DB-free — rig.mjs refuses to load without a reachable DB target
+// in the environment, and the readiness probes below run at import time regardless of which
+// section's tests actually execute.
 // SECTION 2 goes through the REAL `clara.get_document_extract` RPC against a live rig (never a
 // hand-typed JS fixture for the cross-regime cells) — the point being that `readInvoiceFactState`'s
 // `extracted_at` parsing has to survive whatever string Postgres actually serializes a
@@ -193,4 +196,37 @@ test("chatTurn.v12: the SAME widening reaches provenance_tier through runDraftJo
   const result = await toolsV12.runDraftJournalEntry(ctx, draftInput, reads);
   assert.equal(result.ok, true, `expected ok, got ${JSON.stringify(result)}`);
   assert.equal(result.je_review.provenance_tier, "verified", "a witness-corroborated document must reach chatTurn's DETECTED tier (the DB receipt is the true authority; this proves the FRIENDLY hint is no longer stale for a witness document)");
+});
+
+test("chatTurn.v12: buildToolsV12's compose-over-spread wiring, end to end — read_document and draft_journal_entry are the REAL built tool objects, sharing ONE reads map", { skip }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("f3a7");
+  const doc = await fa1.seedFiledDocument({ firm, uploadedBy: owner, client });
+  await fa1.seedWitnessPair({ firm, document: doc, versionN: 1, totalCents: 45000 });
+  const extract = await fa1.realExtract(owner, doc, client);
+
+  stubPools(extract);
+  const ctx = { firmId: firm, clientId: client, createdBy: owner, taskId: "task-f3a7" };
+  const tools = toolsV12.buildToolsV12(ctx);
+  // read_document is the OVERRIDE, not v11's shadowed original — it must populate the SAME
+  // `reads` map draft_journal_entry's own override reads from (the one real risk the
+  // spread-over-buildToolsV11 composition carries: two DIFFERENT `reads` maps would silently
+  // refuse every citation as evidence_not_read).
+  const readResult = await tools.read_document.execute({ document_id: doc });
+  assert.ok(readResult && typeof readResult === "object" && !("error" in readResult), `read_document must succeed, got ${JSON.stringify(readResult)}`);
+  const totalRegion = readResult.regions.find((r) => r.field_path === "invoice.total");
+  assert.ok(totalRegion, "fixture premise: the witness total region is readable");
+
+  const draftResult = await tools.draft_journal_entry.execute({
+    coding_kind: "supplier_bill",
+    posting_date: "2026-01-31",
+    lines: [
+      { account_code: "600-000", debit_cents: 45000, credit_cents: 0 },
+      { account_code: "400-000", debit_cents: 0, credit_cents: 45000 },
+    ],
+    document_id: doc,
+    counterparty: { existing_id: "22222222-2222-4222-8222-222222222222" },
+    evidence: [{ region_idx: totalRegion.idx, quote: "RM 450.00", field_path: "invoice.total" }],
+  });
+  assert.equal(draftResult.ok, true, `expected ok, got ${JSON.stringify(draftResult)}`);
+  assert.equal(draftResult.je_review.provenance_tier, "verified", "the REAL built tool set must reach the same witness-corroborated tier the direct runDraftJournalEntry call does");
 });

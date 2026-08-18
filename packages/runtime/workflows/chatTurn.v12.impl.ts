@@ -6,11 +6,12 @@
 // never an in-place edit — the registry repoints `chatTurn:` here).
 //
 // THIS FILE (impl) — every step body except the model segment is v10's, re-exported by IMPORT
-// (through v11.impl.js, itself an import of v10's) so it cannot drift. runModelSegmentStepV12
-// differs from v11's in exactly one expression: it binds buildToolsV12 (chatTurn.v12.tools.js)
-// instead of buildToolsV11. SYSTEM_PROMPT_V11 is UNCHANGED — F-A1's widening is read-side only,
-// so no prompt sentence needed a word changed (the region vocabulary is identical across
-// regimes). Two helpers are LOCAL COPIES rather than imports because v10/v11 do not export them
+// DIRECTLY from chatTurn.v10.impl.js (the same source v11.impl.js itself imports from — this
+// file does not route through v11.impl.js) so it cannot drift. runModelSegmentStepV12 differs
+// from v11's in exactly one expression: it binds buildToolsV12 (chatTurn.v12.tools.js) instead
+// of buildToolsV11. SYSTEM_PROMPT_V11 is UNCHANGED — F-A1's widening is read-side only, so no
+// prompt sentence needed a word changed (the region vocabulary is identical across regimes).
+// Two helpers are LOCAL COPIES rather than imports because v10/v11 do not export them
 // (recoverCodingAttempt, stoppedOnSuccessfulDraft) — same v10 rationale, byte-equivalent.
 
 import { streamText, stepCountIs, hasToolCall } from "ai";
