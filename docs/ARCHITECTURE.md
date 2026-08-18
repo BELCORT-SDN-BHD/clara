@@ -11,7 +11,7 @@
 1. **Client attribution** — a DB function (`assert_client_resolved`) gates every client-scoped write on a persisted, ≥0.95, *server-verified* client resolution; no write path exists that skips it.
 2. **Provenance binding** — document-origin writes validate `source_doc_sha256` + `document_id` against a real ingested document row in the same transaction; an invalid or absent pair RAISES.
 3. **Wake authority** — each wake kind carries a DB-enforced **allowlist** of invokable functions; `[proactive]` can call only `record_notification`. Not a blocklist.
-4. **Write authorization** — the agent's read path is **structurally read-only** (a role with no EXECUTE on any volatile writer + `default_transaction_read_only`), so no SELECT-wrapped write is possible; role floors and plan→approve live in the DB.
+4. **Write authorization** — the agent's READ path is **structurally read-only** (a role with no EXECUTE on any volatile writer + `default_transaction_read_only`), so no SELECT-wrapped write is possible; role floors live in the DB. *(Amended by ADR-0071: the agent additionally holds a wake-scoped, allowlisted WRITE lane — posting, matching, adjustments, close key ① — granted by the same lane-split-by-GRANT mechanism; her unattended writes are her own judgement under digest laws 71-72, receipt-stamped with model+version.)*
 
 Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy. **One ruled exception (ADR-065/E-R2, 2026-08-08): the year-end close's drawer-2 gates default-REFUSE until a per-item, named, receipted human attestation — close-readiness at the close boundary is fail-closed-with-attestation, not advisory. Drawer-3 readiness signals remain visibility-first. Drawer-1 items (continuity math, control tie-outs, ordering) are structural invariants, not judgement — this sentence never reached them.**
 
@@ -55,7 +55,8 @@ Three new event-stream consumers join the existing five loops (Wave A2.1, ADR-02
 **The reconciler now carries FIVE daily belts, not one** (as-built 2026-08-06, all on the
 leader's daily flag — `opts.autopostRules` / `sstWatches` / `lintBelt` / `faRuns` / `adjRuns` —
 all feature-detecting their own DB surface so a runtime image can boot before its migration
-lands): the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`, WA2-R10 never-auto-renew) ·
+lands): the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`, WA2-R10 never-auto-renew —
+**retires with the rules machine at Wave F per ADR-0071/G1.4**) ·
 `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the **FA
 depreciation-run** belt (Wave D-a, `0041`) · the **recurring-adjustment** belt (Wave D-b2,
 `0045`). Each belt is **failure-isolated** — an error logs and retries next cycle rather than
@@ -97,7 +98,7 @@ The agent's freeform read path no longer relies on a lexical verb filter. Two la
 ### 3.4 Maker/checker (Gate-1 C4)
 - Every entry stores `maker_actor` (drafter/last human editor) and `checker_actor` (approver), modelled as distinct identities.
 - `approve_entry` on the **high-stakes lane** RAISES if `checker_actor = maker_actor` and the firm has ≥2 eligible humans; solo firms record a `self_approval_attestation`.
-- The agent identity can never be a `checker_actor` on its own postings, and sweep acknowledgements require a bookkeeper+ human. Enforced in the DB, not the UI.
+- *(Superseded on the agentic lane by ADR-0071: the agent IS the recorded approving identity on her unattended posts — model+version on the receipt — at any amount; the human lane's distinct-checker gate and the solo-firm attestation are unchanged, and the surviving human acts are enumerated in PRD §2.)* Sweep acknowledgements require a bookkeeper+ human. Enforced in the DB, not the UI.
 
 ### 3.5 Intrinsic subledger + counterparty entity (Gate-1 C2; fixes F3-1..8)
 - A first-class **`counterparties`** table per client: id-keyed, typed (customer/supplier/both), with **`counterparty_aliases`** children (the PORT'd alias/normalise machinery). Rules, KB evidence, recon hints, and AR/AP open items FK to the counterparty id — so an alias repoint never splits history (fixes C-9). Counterparty **narrative** (who this vendor is, quirks, typical treatments) lives as wiki pages cross-linked to the entity id (Gate-1 C2 §3).
@@ -139,7 +140,7 @@ Integration shape (detail in the research file §6): engine schemas (`workflow_*
 8. **MCP consumption, skills/progressive-disclosure, multi-agent/background jobs** (bulk approve, reconciliation sweeps) as durable jobs.
 
 ### 4.1 Tool catalog (G4-G6)
-Curated typed tools, one per audited mutation class, plus the typed read surface + the audited read-only freeform tool. The catalog is generated from the DB function registry and lint-checked against it (fixes the doctrine drift where a tool named in doctrine had no ToolSpec and would hard-fail — F3-12/I-4). No shell/psql/file/web tools. Skill-load + context-pack retrieval are **gated before any consequential write** (fixes G9 convention-not-gate).
+Curated typed tools, one per audited mutation class, plus the typed read surface + the audited read-only freeform tool. The catalog is generated from the DB function registry and lint-checked against it (fixes the doctrine drift where a tool named in doctrine had no ToolSpec and would hard-fail — F3-12/I-4). No shell/psql/file tools; the WEB READ tool exists under ADR-0071/G9's two-tier discipline (number-bearing facts only via effective-dated tables; open reading with inert-data + citation + official-source preference). Skill-load + context-pack retrieval are **gated before any consequential write** (fixes G9 convention-not-gate).
 
 ### 4.2 Grounding (G2)
 In-context: the current doctrine pack (regenerated fresh against the real registry — fixes the wrong-OCR-vendor drift), the active skill, tool schemas, and the fresh context pack. Retrievable: the full PRD/architecture, the client wiki, historical data via typed reads. The exact in-context/retrievable split is documented and token-budgeted.
@@ -150,7 +151,7 @@ In-context: the current doctrine pack (regenerated fresh against the real regist
 
 - **Layer 1 — the wiki.** Per-client interlinked markdown pages in Storage + a `wiki_pages` index (path, summary, provenance, version, cross-refs) in Postgres, maintained by three operations: **ingest** (an event/document updates the relevant pages, cross-refs, and an append-only wiki log), **query** (retrieve relevant pages → synthesise with citations → optionally file the analysis back), **lint** (scheduled; flags contradictions, stale claims, orphaned pages, gaps → owner). Pages are provenance-cited to immutable sources, versioned, and **injected into every context pack**. Wiki content is **inert data on read** (injection defence).
 - **Layer 2 — typed authority.** `coa_mapping_rules` (user-gated), the `assert_client_resolved` gate, and first-class **`open_questions`** (must-ask) objects with resolution state that block workflows. The three memory-note needs map here (observation/profile → typed profile facts; must_ask → open_questions; rule_hint → low-evidence proposals).
-- **The wiki informs; the typed layer decides.** No wiki page selects an account, lowers a gate, or authorises a write. This is the structural guarantee that replaces the old free-text-note injection surface (C-1).
+- **The wiki informs; the typed layer decides.** No wiki page selects an account, lowers a gate, or authorises a write — no DB gate/bound/floor function reads wiki. *(Narrowed by ADR-0071: on the agentic lane the knowledge layer lawfully informs the judgement that IS the posting authority — it is that lane's learning loop, digest law 73; injection defence is unchanged, wiki content stays inert data on read.)*
 
 ---
 
@@ -172,6 +173,8 @@ Fixes H-1/H-2/H-4 (model-authored numbers laundered as DB-authoritative). Compos
 Firm-scoped keys (`firms/{firm_id}/…`), an **Unassigned lane** for persist-after-OCR-before-assignment (every document persists immediately after OCR — fixes E2), a **storage move capability** so an assigned document's bytes actually relocate (the old wake lane could not move objects — E3), and every generated export in the export taxonomy as an auditable artifact. The document registry stays consistent across storage objects, DB rows, UI tabs, Clara's access, and the unassigned lane. Delete is never granted (reverse-not-delete + retention).
 
 A **`classify` lane** resolves each document's type after layout/structured extraction and before its facts are read, persisting the verdict via the audited `classify_document(...)` — human-recorded kind overrides the model — so the fact-extraction engines are never fed an unclassified or mis-typed document (Wave A2.1, ADR-028/029/030).
+
+**The extraction estate after ADR-0071 (builds in Wave F, `docs/plan/active/wave-f-contract.md` F-A1):** the semantic readers — Azure `prebuilt-invoice`, Azure `prebuilt-bankStatement`, and the deterministic layout-reader family — RETIRE. Facts are witnessed by the **LLM witness pair** (one read of the stored OCR raw text, one of the original image bytes; same provider, two channels), agreeing to the sen under a versioned deterministic DB predicate, every witnessed amount server-snapped to a layout region (so the polygon/evidence walls and `doc_review` keep their fuel), the document's arithmetic identity and the bank running-balance chain retained as mechanical checks, and both reads persisted whole with model+version stamps. OCR itself is demoted to a coordinates-and-text-fidelity supplier — zero semantics — and is vendor-swappable behind the existing normalized envelope/regions shape. Digest law 72 is the binding statement.
 
 ## 7a. Retention (fixes GAP3-4/3-5)
 The 7-year statutory clock anchors at **period-end + filing date** (ITA s.82/82A, CA2016 s.245), not row-creation, and is recomputed on close; `legal_hold` gets a real audited writer.
@@ -266,8 +269,10 @@ it as the authority for where an unbuilt kind's destination is decided.*
 in which direction"* — **not** "what kind of document this is". A document kind earns a typed coding
 lane **only** when a wrong posting would silently corrupt a subledger. Everything else rides the
 generic lane (`coding_kind` NULL), which carries every LAW invariant — client attribution,
-provenance binding, balance, maker/checker, reverse-not-delete — but breeds no rule sightings and
-is permanently ineligible for autopost. **A new `coding_kind` is always a migration, never an agent
+provenance binding, balance, reverse-not-delete. *(The "breeds no sightings, permanently
+ineligible for autopost" clause is SUPERSEDED by ADR-0071: the rules machine retires and the
+generic lane is fully eligible for unattended agentic posting under the witness-pair regime,
+same as every other lane.)* **A new `coding_kind` is always a migration, never an agent
 decision.**
 
 | `document_kind` | Destination | Wave |
@@ -288,13 +293,11 @@ decision.**
 | `agreement_contract` · `knowledge_artifact` | **Never a coding kind** — client wiki | B |
 | `tax_correspondence` | **Never a coding kind** — wiki + tax lane | B / F |
 
-**The honest gap this table exposes is not tier 3, it is tier 2.** The agent may already (1)
-transcribe any document into the generic lane interactively, and (2) propose a rule after ≥3
-human-approved sightings for a human to sign — but **(2) exists only for supplier bills and sales
-invoices**, because sightings breed only on control-account entries. Generic-lane entries breed
-nothing, so the long tail gets no compounding autonomy. **Extending sighting breeding to
-generic-lane shapes is the highest-value autonomy work STILL UNBUILT after Waves C and D**
-(the timing anchor "after Wave C" has passed; the mechanism claim above was re-verified
-2026-08-06 against `0037` — settlements still never breed, and the coding-rule sighting pool
-is still bills + invoices only; `0040`'s `_bank_rule_sightings` is a separate pool over
-statement lines, so it does not discharge this) — not widening this table.
+~~**The honest gap this table exposes is not tier 3, it is tier 2.**~~ **DISSOLVED by
+ADR-0071 (2026-08-18).** The gap this paragraph registered — sightings breeding only on
+supplier bills and sales invoices, the long tail earning no compounding autonomy — was real
+as written (re-verified 2026-08-06 against `0037`), and it is closed not by widening the
+breeding but by retiring the machinery: under G1/G1.4 the agent's own judgement posts every
+document class unattended (witness-pair gated), and the learning loop is the knowledge
+layer, not rule objects. The historical text stands above for provenance; nothing here is
+still a build item.

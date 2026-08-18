@@ -80,7 +80,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 15. **Never disturb the frozen prior build or the Slice-0 spike's parked run** (the
     `workflow` / `graphile_worker` / `spike` schemas).
 
-## The menu — what you need, where the truth lives
+## The Harness menu — what you need, where the truth lives
 
 | When you need | Read |
 |---|---|
@@ -142,13 +142,13 @@ Law 1 is the floor, not the ceiling.
 
 1. Read `PROGRESS.md` — posture, live lanes, backlog.
 2. Read the `docs/adr/README.md` digest.
-3. Ground: a graph query (`codebase-memory-mcp`) plus the relevant menu row.
+3. Ground: a graph query (`codebase-memory-mcp`) plus the relevant harness menu row.
 4. Recall memory for preferences and lessons (not state — see constraint 8).
 
 **Clock out** — before the session ends, and before any compaction:
 
 1. Update `PROGRESS.md`: posture, lanes, backlog.
-2. Harness-sync sweep: anything stale in a menu file gets trued, or flagged under Known
+2. Harness-sync sweep: anything stale in a harness menu file gets trued, or flagged under Known
    issues if truing it needs a decision.
 3. Grill the owner on any ambiguity or foreign change you found and could not resolve.
 4. Refresh memory — lessons and preferences only.
