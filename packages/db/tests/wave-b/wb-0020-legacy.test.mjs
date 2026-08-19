@@ -110,12 +110,17 @@ function applyRestoreFA1(member, src) {
 // set -- _enqueue_invoice_facts_core ("router") -- gains a FOURTH deliberately-changed
 // layer, OUTERMOST of ALL (authored latest: after PR-1's own inert-gate branch, which this
 // amendment's edits sit textually ABOVE, in the earlier mime-routing block the PR-1 layer
-// never touched). PR-3 makes TWO edits, both machine-derived (packages/db/scratch --
-// reverseApply against the real dumped pre/post prosrc, byte-equality asserted) exactly like
-// every prior amendment's pairs: (1) the invoice-kind arm mints llm_witness (engine
-// llm-openai:gpt-5.6-terra:v1) instead of invoice_facts -- the SAME four document_kind
-// values, never widened; (2) the already_completed short-circuit's per-lane engine_kind map
-// gains llm_witness -> llm_text_facts. Reversed FIRST -- before RESTORE_FA1's own PR-1 pair
+// never touched). PR-3 makes THREE edits (the first cut of this amendment said TWO and was
+// caught by this very cell on the first full CI chain -- the M-4 review round added edit 3
+// to 0097 S1 after the pairs were authored): (1) the invoice-kind arm mints llm_witness
+// (engine llm-openai:gpt-5.6-terra:v1) instead of invoice_facts -- the SAME four
+// document_kind values, never widened; (2) the already_completed short-circuit's per-lane
+// engine_kind map gains llm_witness -> llm_text_facts; (3) the already_completed lookup
+// gains the M-4 either-regime legacy fallback (a done invoice_facts row ALSO suppresses,
+// consulted only when the witness lookup found nothing). Pairs 1-2 machine-derived
+// (packages/db/scratch -- reverseApply against the real dumped pre/post prosrc,
+// byte-equality asserted); pair 3 transcribed verbatim from 0097 S1's own v_frm3/v_to3
+// splice literals. Reversed FIRST -- before RESTORE_FA1's own PR-1 pair
 // runs -- because the two amendments touch DISJOINT text spans (PR-3's edits sit in the
 // earlier mime-routing block; PR-1's sits in the later enqueue-time consent-gate block PR-3
 // does not touch at all), so composition order between the two is safe either way, but
@@ -129,6 +134,10 @@ const RESTORE_FA1_PR3 = {
 [
 "    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')\n                       then 'statement_facts'  -- BOTH statement lanes settle a\n                       -- statement_facts extraction (the lane records how the read was\n                       -- bought; the engine_kind what it is -- the 0026:709 precedent)\n                       when v_lane='llm_witness'\n                       then 'llm_text_facts'  -- F-A1 PR-3: the CANONICAL witness row --\n                       -- a done text row proves a done PAIR (one atomic writer transaction,\n                       -- 0095 section 8), so a re-fire is suppressed the moment the pair lands.\n                       else 'invoice_facts' end;",
 "    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')\n                       then 'statement_facts'  -- BOTH statement lanes settle a\n                       -- statement_facts extraction (the lane records how the read was\n                       -- bought; the engine_kind what it is -- the 0026:709 precedent)\n                       else 'invoice_facts' end;",
+],
+[
+"    select e.id into v_task from clara.document_extractions e\n      where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'\n      order by e.version_n desc limit 1;\n    -- F-A1 PR-3 (M-4, RULED): for the invoice-shaped lane ONLY, a done LEGACY extraction ALSO\n    -- suppresses -- v_engine_kind above already names the witness side (llm_text_facts); this\n    -- is the legacy side of the EITHER-REGIME check, consulted only when the witness lookup\n    -- just found nothing.\n    if v_task is null and v_lane='llm_witness' then\n      select e.id into v_task from clara.document_extractions e\n        where e.document_id=p_document and e.engine_kind='invoice_facts' and e.status='done'\n        order by e.version_n desc limit 1;\n    end if;\n    if v_task is not null then",
+"    select e.id into v_task from clara.document_extractions e\n      where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'\n      order by e.version_n desc limit 1;\n    if v_task is not null then",
 ]
 ]
 };
@@ -374,6 +383,7 @@ const BYTE_IDENTICAL = {
       // the full reversal.
       /v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5\.6-terra:v1';/,
       /then 'llm_text_facts'/,
+      /if v_task is null and v_lane='llm_witness' then/,
     ],
   },
   // AMENDMENTS A6→A7 (ratified 2026-07-25, contract v1.4 §5.6/§5.7). This is the ONE member of
