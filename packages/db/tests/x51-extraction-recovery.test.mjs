@@ -92,16 +92,25 @@ test("[0051] a terminally-FAILED first extraction is admitted: a NEW attempt at 
   const before_ = await laneTasks(doc.documentId, "llm_witness");
   assert.equal(before_.length, 1, "exactly one llm_witness task exists");
   assert.equal(before_[0].status, "failed", "…and it is TERMINAL — the state no legal transition exits");
-  assert.equal(before_[0].error_code, "witness_consent_inactive", "…with the fixture's own error_code (the enqueue-time consent gate)");
+  // F-A1 PR-3 review M-7: failedWitnessDoc MAKES the failure rather than inheriting one — it
+  // grants live witness_extraction consent so the auto-enqueue backstop queues NORMALLY, claims
+  // the task, then settles it through clara.fail_witness_facts(task,'internal'), the same verb a
+  // genuine engine failure drives in production. 'internal' is a member of that verb's EXACT
+  // 8-code vocabulary (0097 S2), so it is stamped VERBATIM and never folded to 'engine_error'.
+  // This assertion is pinned to the FIXTURE's chosen code on purpose: the door under test reads
+  // the task's terminal STATUS and never its error_code, so a cell that accepted any code here
+  // would stop noticing if the fixture quietly stopped failing for the reason it claims.
+  assert.equal(before_[0].error_code, "internal",
+    "…with the fixture's own error_code, stamped verbatim by the settle verb clara.fail_witness_facts");
   assert.deepEqual(await witnessExtractionsOf(doc.documentId), [],
-    "…and ZERO llm_text_facts extractions exist: the enqueue-gate flip writes no extraction row, "
-    + "which is why an admission guard phrased against document_extractions could never have "
-    + "admitted this document");
+    "…and ZERO llm_text_facts extractions exist: a failed settle writes no extraction row even "
+    + "though this task was genuinely CLAIMED and RAN, which is why an admission guard phrased "
+    + "against document_extractions could never have admitted this document");
 
   const frozen = await taskRow(doc.taskId);
   const res = await requestReextraction(W.users.bob, {
     document: doc.documentId,
-    reason: "the first attempt died on the consent gate; the document itself is fine",
+    reason: "the first attempt died inside the engine; the document itself is fine",
     opKey: opk("x51"),
   });
 

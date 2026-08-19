@@ -146,10 +146,19 @@ const WITNESS_BELT = [
   "invoice.service_charge", "invoice.discount", "invoice.delivery",
   "invoice.amount_due", "invoice.deposit", "invoice.currency", "invoice.type_code",
 ];
-function x31WitnessEnvelope(channel, totalRaw) {
+/** One channel's envelope. `stated` maps a belt field to its rendering; every belt member it
+ *  omits is answered `not_printed`, which is an ANSWER and not silence (design §3.3 -- the
+ *  roster is REQUIRED for all eleven on BOTH rows, or clara.evaluate_witness_fact_state_v1
+ *  refuses the read outright). `refs` appends the OPTIONAL M3 reference answers, whose slot
+ *  carries the NORMALIZED `value` the cross-regime duplicate walls compare on. */
+function x31WitnessEnvelope(channel, stated, refs = {}) {
   const answers = {};
-  for (const f of WITNESS_BELT) answers[f] = f === "invoice.total" ? { state: "value", raw: totalRaw } : { state: "not_printed" };
-  return { witness: { channel, answers } };
+  for (const f of WITNESS_BELT) {
+    answers[f] = Object.prototype.hasOwnProperty.call(stated, f)
+      ? { state: "value", raw: stated[f] }
+      : { state: "not_printed" };
+  }
+  return { witness: { channel, answers: { ...answers, ...refs } } };
 }
 
 /** Push a NEWER extraction onto an EXISTING (already-extracted) document, through the REAL
@@ -175,9 +184,30 @@ async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendo
     [documentId])).rows[0].id;
   // document_regions is append-only (0007's _tf_append_only) -- a drifted re-read cites NEW
   // regions on the SAME pinned OCR extraction, never an UPDATE of the original quote.
+  //
+  // THE STATED BELT, and it is the witness-regime TWIN of what this fixture used to send
+  // through the legacy lane: `statedIdentityFields(amount)` (net = total, tax = 0) under
+  // `agreedEnvelope()`. Corroboration is not a property of the writer -- it is
+  // clara.evaluate_witness_fact_state_v1's verdict (0092 §4), and it demands net AND tax
+  // STATED and single, an EXPLICIT type_code '01', MYR confirmed INDEPENDENTLY on BOTH
+  // channels, and the identity equation tying to the sen. An envelope that answers only
+  // invoice.total (x1-supersede.test.mjs's shape, whose cells read total_cents and never the
+  // verdict) can therefore never corroborate, and a fixture that shipped one here would leave
+  // the two assertions below testing the fixture's own poverty rather than the drift.
   const money_ = money(amount);
+  const zero = money(0);
+  const stated = {
+    "invoice.total": money_,
+    "invoice.total_excl_tax": money_,
+    "invoice.tax_total": zero,
+    // Both TOKEN fields, whose citation is optional (review B1) -- answered, never cited.
+    "invoice.currency": "MYR",
+    "invoice.type_code": "01",
+  };
   const newFields = [
     { field_path: "invoice.total", text_content: money_ },
+    { field_path: "invoice.total_excl_tax", text_content: `SUBTOTAL ${money_}` },
+    { field_path: "invoice.tax_total", text_content: `SST 0% ${zero}` },
     { field_path: "invoice.invoice_id", text_content: invoiceId },
     { field_path: "invoice.vendor_name", text_content: vendorName },
     // Without a registration region, the re-extraction resolves the vendor via a NAME-ONLY
@@ -200,15 +230,29 @@ async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendo
        from clara.document_regions where extraction_id=$1`,
     [ocrExtraction])).rows;
   const idxById = new Map(idxRows.map((r) => [r.id, r.idx]));
-  const citations = inserted.map((f) => ({ field_path: f.field_path, region_idx: idxById.get(f.id) }));
+  // A citation on one of the SEVEN OPTIONAL reference paths takes its rendering from the
+  // CITATION ENTRY, not from the answers roster (0095 §10) -- an entry without `raw` writes no
+  // region at all, so a reference path cited the belt way lands the state's invoice_id NULL and
+  // this cell would then flag near_duplicate through the ABSENT-id limb (x31.c's path) while
+  // claiming to prove the drifted-id one.
+  const REFERENCE = new Set(["invoice.invoice_id", "invoice.vendor_name", "invoice.vendor_registration"]);
+  const rawOf = new Map(newFields.map((f) => [f.field_path, f.text_content]));
+  const citations = inserted.map((f) => ({
+    field_path: f.field_path,
+    region_idx: idxById.get(f.id),
+    ...(REFERENCE.has(f.field_path) ? { raw: rawOf.get(f.field_path) } : {}),
+  }));
+  // M3's reference-value slot, on BOTH channels: the normalized value the duplicate walls
+  // compare across regimes, beside the document's own rendering the citation carries.
+  const refs = { "invoice.invoice_id": { state: "value", raw: invoiceId, value: invoiceId } };
 
   const text = {
     input_pin: ocrExtraction, prompt_hash: `text-${randomUUID()}`,
-    envelope: x31WitnessEnvelope("text", money_), citations,
+    envelope: x31WitnessEnvelope("text", stated, refs), citations,
   };
   const vision = {
     input_pin: sha256, prompt_hash: `vision-${randomUUID()}`,
-    envelope: x31WitnessEnvelope("vision", money_),
+    envelope: x31WitnessEnvelope("vision", stated, refs),
   };
   await rootQuery(
     "select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as s",
