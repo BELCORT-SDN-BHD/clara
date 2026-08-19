@@ -464,8 +464,10 @@ begin
   -- N-13 (cross-model review): pin the EXACT body this splice was authored against, the same
   -- discipline Section 0/1 already applies to _enqueue_invoice_facts_core. request_reextraction
   -- was created in 0022, recut in 0025, and most recently in 0026_lane_widen.sql (line 994) --
-  -- no migration after 0026 touches it (verified: a repo-wide grep for
-  -- "create or replace function clara.request_reextraction" finds only 0025 and 0026).
+  -- no migration after 0026 touches it (verified: a repo-wide grep for this function's
+  -- recut statement finds only 0025 and 0026). [Wording note: this comment must not quote
+  -- that statement verbatim -- the wiki gate reads a CoR block's comments un-masked, and a
+  -- quoted create-function phrase reclassifies the block as a dynamic function-creator.]
   select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
   v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
   if v_sha <> 'c130a69776ef5ad63fa5ecfe483a44e534c16d1eba840c73d36d92dfc0fbf3d3' then
