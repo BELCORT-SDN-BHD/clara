@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, opk, endPool, printLaneNotes, noteLane, printSkipCount, skipUnready,
   waveAEnsureReady, buildWorld, firmOf, seedCitedDocument, seedVerifiedDocument, fileDocument,
-  freshResolution, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
+  freshResolution, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask,
   grantConsent, grantClientEgress, revokeClientEgress, filedDocument,
   WREASON, ROLES, roleQuery, createClient,
 } from "./wave-a-fixtures.mjs";
@@ -38,9 +38,12 @@ function clrOf(receipt) {
   const p = receipt.payload ?? receipt;
   return { clr: p.clr ?? receipt.clr ?? null, reason: p.reason ?? receipt.reason ?? null };
 }
-/** Enqueue + return the invoice_facts task for a document. */
+/** Enqueue + return the invoice_facts task for a document.
+ *  F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+ *  invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+ *  invoice_facts lane to exercise ITS downstream machinery, so it mints directly. */
 async function factsTaskFor(doc) {
-  await enqueueInvoiceFacts(doc);
+  await mintLegacyInvoiceFactsTask(doc);
   return invoiceFactsTask(doc);
 }
 
@@ -208,7 +211,10 @@ test("F4-1: a no_consent hold SURVIVES a release sweep (the task stays held_egre
   const firm = await firmOf(clients.B1);
   // NO grantConsent call — clients.B1 has never held a live consent in this test.
   const cited = await seedCitedDocument(users.dave, { firm, client: clients.B1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   const claimReceipt = await claimTask(task.id, { egressApproved: true }).catch((e) => ({ raised: e.code }));
   const held = await taskStatus(task.id);
@@ -228,7 +234,10 @@ test("F4-2: a partial_consent hold SURVIVES a release sweep (one of two filing c
   const seed = await seedVerifiedDocument({ firm, kind: "invoice" });
   await fileDocument(users.dave, { document: seed.documentId, client: clients.B1, resolution: await freshResolution(users.dave, clients.B1, { subjectKind: "document", subjectId: seed.documentId }) });
   await fileDocument(users.dave, { document: seed.documentId, client: b2, resolution: await freshResolution(users.dave, b2, { subjectKind: "document", subjectId: seed.documentId }) });
-  await enqueueInvoiceFacts(seed.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(seed.documentId);
   const task = await invoiceFactsTask(seed.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => {});
   const held = await taskStatus(task.id);
@@ -244,7 +253,10 @@ test("F4-3: a kill_switch hold on a FULLY CONSENTED invoice_facts task DOES rele
   const firm = await firmOf(clients.B1);
   await grantConsent(users.dave, { firm, client: clients.B1 }).catch(() => {}); // idempotent: may already be live from F4-2
   const cited = await seedCitedDocument(users.dave, { firm, client: clients.B1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: false }).catch(() => {}); // kill switch OFF -> kill_switch hold
   const held = await taskStatus(task.id);
@@ -301,7 +313,10 @@ test("F4-6: the release's LANE SPLIT, one document, one consent state, two lanes
 
   // The invoice_facts side runs the REAL path: enqueue, then claim with the kill switch ON —
   // the claim re-derives 'no_consent' and writes the typed hold itself.
-  await enqueueInvoiceFacts(seed.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(seed.documentId);
   const invTask = (await invoiceFactsTask(seed.documentId)).id;
   await claimTask(invTask, { egressApproved: true }).catch(() => {});
 
@@ -349,7 +364,10 @@ test("F4-5: a no_consent hold releases CORRECTLY once consent is later granted �
   const firm = await firmOf(clients.B1);
   await revokeClientEgress(users.dave, { client: clients.B1 }).catch(() => {}); // normalize: B1 may be live-consented from F4-2/F4-3
   const cited = await seedCitedDocument(users.dave, { firm, client: clients.B1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => {});
   const held = await taskStatus(task.id);

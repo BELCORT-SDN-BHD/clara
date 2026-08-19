@@ -11,7 +11,7 @@ import {
   opk, endPool, printLaneNotes, noteLane, printSkipCount, skipUnready,
   waveAEnsureReady, buildWorld, firmOf, upsertPayableAccount, upsertAccountClassed,
   seedCitedDocument, freshResolution, draftEntryV3, reviseEntry, billLines, ev, FIELD,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   grantConsent, revisionRows, getEntryDiff, getDocEntryDiff, humanPersona, ROUTINE_CENTS,
 } from "./wave-a-fixtures.mjs";
 import { AP, EXP } from "./wave-a-fixtures.mjs";
@@ -100,7 +100,10 @@ test("facts rotation writes a revision snapshot: persisting invoice_facts on a b
     vendor: { new: { name: "ROTCO SDN BHD", registration_no: "201801007200" } }, evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("rotcite"),
   });
   const before = (await revisionRows(d.entry_id)).length;
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => {});
   await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00"), factField(FIELD.currency, "MYR")]).catch((e) => noteLane(`persist facts (rotation) raised ${e.code}`));

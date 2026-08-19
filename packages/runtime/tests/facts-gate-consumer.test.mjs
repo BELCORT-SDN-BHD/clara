@@ -68,16 +68,19 @@ const factsTasks = (doc, lane) =>
     (r) => r.rows,
   );
 
-test("cycle: an invoice-kind document.classified re-fires enqueue → an invoice_facts task is admitted; the checkpoint converges", { skip }, async () => {
+test("cycle: an invoice-kind document.classified re-fires enqueue → an llm_witness task is admitted; the checkpoint converges", { skip }, async () => {
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- the facts_gate consumer's own wiring (re-fire
+  // clara.enqueue_invoice_facts) is unchanged; only the LANE the core routes to moved.
   const { owner, firm } = await buildFirm("fgc");
   const document = await seedKnownKindDoc({ firm, owner, kind: "invoice" });
   await emitClassified(firm, document, owner);
 
   await drainFactsGate(firm);
 
-  const rows = await factsTasks(document, "invoice_facts");
-  assert.ok(rows.length >= 1, "the gate re-fired the enqueue onto the invoice_facts lane");
-  assert.ok(rows.some((r) => ["queued", "held_egress", "running"].includes(r.status)), `an invoice_facts task is runnable (got: ${rows.map((r) => `${r.status}/${r.error_code}`).join(",")})`);
+  const rows = await factsTasks(document, "llm_witness");
+  assert.ok(rows.length >= 1, "the gate re-fired the enqueue onto the llm_witness lane");
+  assert.ok(rows.some((r) => ["queued", "held_egress", "running", "failed"].includes(r.status)), `an llm_witness task exists, live or a named terminal receipt (no witness_extraction consent exists for this fixture firm, so the enqueue-time gate may legitimately fail it) (got: ${rows.map((r) => `${r.status}/${r.error_code}`).join(",")})`);
   assert.equal(await checkpointSeq(firm, FACTS_GATE_CONSUMER), await headSeq(firm), "facts_gate checkpoint converged to head");
   assert.equal((await deadLettersForFirm(firm, FACTS_GATE_CONSUMER)).length, 0, "no facts_gate dead-letters");
 });
@@ -122,7 +125,8 @@ test("redrive: a seeded facts_gate dead-letter re-fires the enqueue and resolves
   assert.deepEqual({ resolved: res.resolved, consumer: res.consumer }, { resolved: true, consumer: FACTS_GATE_CONSUMER });
   const dl = (await deadLettersForFirm(firm, FACTS_GATE_CONSUMER)).find((d) => d.eventId === eventId);
   assert.equal(dl.status, "resolved", "the dead-letter is marked resolved");
-  assert.ok((await factsTasks(document, "invoice_facts")).length >= 1, "the enqueue re-fired on redrive");
+  // F-A1 PR-3 CUTOVER: llm_witness, not invoice_facts (see the cycle test's own note above).
+  assert.ok((await factsTasks(document, "llm_witness")).length >= 1, "the enqueue re-fired on redrive");
 });
 
 test("redrive refuses when there is no facts_gate dead-letter", { skip }, async () => {

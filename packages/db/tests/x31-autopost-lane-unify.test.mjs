@@ -20,7 +20,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { requestReextraction } from "./x1-helpers.mjs";
 import {
   AP,
   EXP,
@@ -30,11 +29,11 @@ import {
   claimTask,
   codingLane,
   endPool,
-  enqueueInvoiceFacts,
   factField,
   grantConsent,
   humanPersona,
   invoiceFactsTask,
+  mintLegacyInvoiceFactsTask,
   opk,
   persistInvoiceFacts,
   primeReadyFiling,
@@ -143,14 +142,14 @@ async function addLatestOcr(document, text) {
 }
 
 /** Push a NEWER invoice_facts extraction onto an EXISTING (already-extracted)
- *  document via the real re-extraction verb (request_reextraction -> claim ->
- *  persist) -- a bare second enqueue_invoice_facts is a no-op once a task already
- *  exists for (document, lane), so the purpose-built re-extraction path (ADR-047 Q2)
- *  is reused rather than hand-built, exactly as a genuine re-read would, so the new
- *  extraction satisfies clara._invoice_fact_state's own corroboration requirements
- *  identically to seedFactFiling's first pass. */
+ *  document. F-A1 PR-3 CUTOVER: request_reextraction's invoice-shaped arm now mints
+ *  llm_witness too (no dual-run, D9), so the real re-extraction verb no longer lands
+ *  a second task on THIS lane at all -- this cell's whole point is a newer
+ *  invoice_facts (legacy-regime) extraction, feeding the near_duplicate machinery
+ *  the SAME way seedFactFiling's first pass did, so it mints the legacy task
+ *  directly rather than through the now-witness-routed verb. */
 async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendorRegistration }) {
-  await requestReextraction(w.users.alice, { document: documentId });
+  await mintLegacyInvoiceFactsTask(documentId);
   const task = await invoiceFactsTask(documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
@@ -192,7 +191,10 @@ async function seedFactFiling({
     quote: money(amount),
     kind: "invoice",
   });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [

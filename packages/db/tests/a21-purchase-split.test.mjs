@@ -21,7 +21,7 @@ import {
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, agreedEnvelope, factsRegion,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, agreedEnvelope, factsRegion,
   mintInteractive, wakeDraftEntry, checkDefs, rm,
   AP, EXP,
 } from "./a21-helpers.mjs";
@@ -57,7 +57,10 @@ async function purchaseFactsDoc(client, { gross, net = null, tax = null }) {
   // first — stamp the fixture doc 'invoice' at seed (the source-stamped corpus)
   // so the facts lane engages directly; the classify loop is proven elsewhere.
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [

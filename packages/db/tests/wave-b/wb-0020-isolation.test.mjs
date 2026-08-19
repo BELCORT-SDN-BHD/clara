@@ -16,7 +16,7 @@ import {
   rootQuery, opk, endPool, printLaneNotes, noteLane,
   fail0020, wbEnsureReady20,
   buildWaveBWorld, createClient, seedOpeningCoa, seedCitedDocument, filedDocument,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, WREASON,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, WREASON,
   grantConsent, grantClientEgress, revokeClientEgress,
   UNKNOWN_VERDICT, canonical,
   revokePurpose, deactivatePurpose, lightSynthesis, prepareForLatestEvent,
@@ -60,7 +60,10 @@ function clrOf(receipt) {
  *  consent refusal. */
 async function claimInvoiceFacts(sub, { firm, client }) {
   const cited = await seedCitedDocument(sub, { firm, client, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   const receipt = await claimTask(task.id, { egressApproved: true }).catch((e) => ({ raised: e.code }));
   const status = await taskStatus(task.id);
@@ -187,7 +190,9 @@ test("[0020 §9.2]: the MULTI-FILING partial-consent rule is unchanged — a doc
       resolution: await freshResolution(w.users.alice, c, { subjectKind: "document", subjectId: seed.documentId }),
     });
   }
-  await enqueueInvoiceFacts(seed.documentId);
+  // F-A1 PR-3 CUTOVER (see claimInvoiceFacts above): mint the invoice_facts task
+  // directly -- the real enqueue RPC no longer routes an invoice-kind document here.
+  await mintLegacyInvoiceFactsTask(seed.documentId);
   const task = await invoiceFactsTask(seed.documentId);
   const receipt = await claimTask(task.id, { egressApproved: true }).catch(() => null);
   const st = await taskStatus(task.id);

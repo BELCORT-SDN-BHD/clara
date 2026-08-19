@@ -105,6 +105,43 @@ function applyRestoreFA1(member, src) {
   return src;
 }
 
+// =========================================================================
+// AMENDMENT F-A1 PR-3 (the CUTOVER, UNNUMBERED_f_a1_cutover.sql). ONE member of §6's closed
+// set -- _enqueue_invoice_facts_core ("router") -- gains a FOURTH deliberately-changed
+// layer, OUTERMOST of ALL (authored latest: after PR-1's own inert-gate branch, which this
+// amendment's edits sit textually ABOVE, in the earlier mime-routing block the PR-1 layer
+// never touched). PR-3 makes TWO edits, both machine-derived (packages/db/scratch --
+// reverseApply against the real dumped pre/post prosrc, byte-equality asserted) exactly like
+// every prior amendment's pairs: (1) the invoice-kind arm mints llm_witness (engine
+// llm-openai:gpt-5.6-terra:v1) instead of invoice_facts -- the SAME four document_kind
+// values, never widened; (2) the already_completed short-circuit's per-lane engine_kind map
+// gains llm_witness -> llm_text_facts. Reversed FIRST -- before RESTORE_FA1's own PR-1 pair
+// runs -- because the two amendments touch DISJOINT text spans (PR-3's edits sit in the
+// earlier mime-routing block; PR-1's sits in the later enqueue-time consent-gate block PR-3
+// does not touch at all), so composition order between the two is safe either way, but
+// "reverse outermost-first" stays the stated discipline every prior amendment here uses.
+const RESTORE_FA1_PR3 = {
+"router": [
+[
+"    elsif d.document_kind in ('invoice','credit_note','debit_note','receipt') then\n      -- F-A1 PR-3 CUTOVER (design SS3.8/D9): the invoice path now mints llm_witness\n      -- DIRECTLY -- NO DUAL-RUN. Exactly the SAME document-kind set the invoice_facts arm\n      -- served (mirrored above, never widened here). v_engine MUST string-equal\n      -- WITNESS_ENGINE_SNAPSHOT.engineId in witnessFacts.v1.services.mjs -- battery cell\n      -- f-a1.cutover-engine-literal reads both sides and asserts equality.\n      v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5.6-terra:v1';",
+"    elsif d.document_kind in ('invoice','credit_note','debit_note','receipt') then\n      v_lane:='invoice_facts'; v_engine:='azure-di:prebuilt-invoice:2024-11-30';",
+],
+[
+"    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')\n                       then 'statement_facts'  -- BOTH statement lanes settle a\n                       -- statement_facts extraction (the lane records how the read was\n                       -- bought; the engine_kind what it is -- the 0026:709 precedent)\n                       when v_lane='llm_witness'\n                       then 'llm_text_facts'  -- F-A1 PR-3: the CANONICAL witness row --\n                       -- a done text row proves a done PAIR (one atomic writer transaction,\n                       -- 0095 section 8), so a re-fire is suppressed the moment the pair lands.\n                       else 'invoice_facts' end;",
+"    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')\n                       then 'statement_facts'  -- BOTH statement lanes settle a\n                       -- statement_facts extraction (the lane records how the read was\n                       -- bought; the engine_kind what it is -- the 0026:709 precedent)\n                       else 'invoice_facts' end;",
+]
+]
+};
+function applyRestoreFA1PR3(member, src) {
+  for (const [frm, to] of RESTORE_FA1_PR3[member]) {
+    if (src.split(frm).length !== 2) {
+      throw new Error(`F-A1 PR-3 restore(${member}): pair not found exactly once -- the live body drifted from the ratified F-A1 cutover shape: ${frm.slice(0, 100)}`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 const RESTORE_0038 = {
 "claim": [
 [
@@ -283,9 +320,12 @@ const BYTE_IDENTICAL = {
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
-    // F-A1 is the OUTERMOST (newest) layer: reverse it FIRST (the ONE inert llm_witness
-    // elsif branch, wall 6), so 0038's own pairs then find the exact pre-F-A1 text.
-    restore: (src) => applyRestore0038("router", applyRestoreFA1("router", src))
+    // F-A1 PR-3 is the OUTERMOST (newest) layer: reverse it FIRST (the invoice-kind mint arm
+    // + the already_completed engine_kind map, both in the earlier mime-routing block PR-1
+    // never touched), then F-A1 PR-1 (the ONE inert llm_witness elsif branch, wall 6, in the
+    // later consent-gate block PR-3 never touched), so 0038's own pairs then find the exact
+    // pre-F-A1 text.
+    restore: (src) => applyRestore0038("router", applyRestoreFA1("router", applyRestoreFA1PR3("router", src)))
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",
@@ -326,10 +366,14 @@ const BYTE_IDENTICAL = {
       /amendment A11/,
       /d\.document_kind in \('invoice','credit_note','debit_note','receipt'\)/,
       /where id=p_document for update;\n {2}if not found then raise exception 'document not found'/,
-      // F-A1's own marker: present in the live body, must be GONE after the full reversal.
+      // F-A1 PR-1's own marker: present in the live body, must be GONE after the full reversal.
       /elsif v_lane='llm_witness' then/,
       /witness_multi_client/,
       /witness_consent_inactive/,
+      // F-A1 PR-3's own markers (the cutover): present in the live body, must be GONE after
+      // the full reversal.
+      /v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5\.6-terra:v1';/,
+      /then 'llm_text_facts'/,
     ],
   },
   // AMENDMENTS A6→A7 (ratified 2026-07-25, contract v1.4 §5.6/§5.7). This is the ONE member of

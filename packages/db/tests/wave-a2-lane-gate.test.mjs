@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, seedVerifiedDocument, seedCitedDocument,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, grantConsent, revokeClientEgress,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, grantConsent, revokeClientEgress,
 } from "./wave-a-fixtures.mjs";
 
 let ready = false; // 0011 surface present
@@ -169,7 +169,10 @@ test("regression: an invoice_facts task with kill-switch ON but NO consent STILL
   await revokeClientEgress(world.users.alice, { client: world.clients.A2 }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A2, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => null);
   assert.notEqual(await taskStatus(task.id), "running", "an unconsented invoice_facts task never runs — the egress lane still holds (§3.4 unchanged)");
@@ -182,7 +185,10 @@ test("regression: an invoice_facts task with live consent BUT kill-switch OFF ST
   await grantConsent(world.users.alice, { firm, client: world.clients.A1 }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: false }).catch(() => null);
   assert.notEqual(await taskStatus(task.id), "running", "kill-switch OFF still holds the egress lane even with consent");

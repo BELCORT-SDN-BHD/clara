@@ -11,8 +11,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   AP, EXP, FIELD, agreedEnvelope, buildWorld, claimTask,
-  enqueueInvoiceFacts, endPool, factField, factsRegion, freshResolution,
-  grantConsent, humanQuery, invoiceFactsTask, namedCall, opk,
+  endPool, factField, factsRegion, freshResolution,
+  grantConsent, humanQuery, invoiceFactsTask, mintLegacyInvoiceFactsTask, namedCall, opk,
   persistInvoiceFacts, rootQuery, seedCitedDocument, statedIdentityFields,
   upsertAccountClassed, upsertPayableAccount, withActor, withSessionAuth,
 } from "./wave-a-fixtures.mjs";
@@ -143,7 +143,10 @@ async function seedBoundDraft(tag) {
   await grantConsent(w.users.alice, {
     firm: w.firms.A, client: w.clients.A1,
   }).catch(() => {});
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const invoiceId = `${invoicePrefix}${tag}`;

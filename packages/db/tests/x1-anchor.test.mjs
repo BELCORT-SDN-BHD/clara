@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, fnSource,
-  upsertAccountClassed, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
+  upsertAccountClassed, seedCitedDocument, mintLegacyInvoiceFactsTask, claimTask,
   persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry, stampCodingKind,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, draftEntryV3,
   classifyDocument, postViaRule, lastSkipReason, entryStatusOf, counterpartyRows,
@@ -139,8 +139,9 @@ async function fullyAnchoredDoc() {
   const { gross, net, tax, rounding, serviceCharge } = LAI_LOU_MEI;
   const cited = await seedCitedDocument(sub, { firm, client: CLIENT, quote: rm(gross) });
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
-  const task = await invoiceFactsTask(cited.documentId);
+  // F-A1 PR-3 cutover: see mintLegacyInvoiceFactsTask's header (s6-fixtures.mjs) -- the real
+  // enqueue path no longer produces invoice_facts for an invoice-kind document.
+  const task = await mintLegacyInvoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = componentFields({
     gross, net, tax, rounding, serviceCharge,

@@ -19,6 +19,16 @@ import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   has0022, fail0022, requestReextraction, extractedDoc, laneTasks, auditArgs, holdThenContend,
 } from "./x1-helpers.mjs";
+import { grantPurpose, activatePurpose, consentEvidenceDoc } from "./wave-b/wb-0020-helpers.mjs";
+
+// F-A1 PR-3 CUTOVER (UNNUMBERED_f_a1_cutover.sql, design D7/D9): request_reextraction's
+// invoice-shaped-document arm now mints llm_witness -- its OWN version_n counter, its OWN
+// engine literal -- never invoice_facts (no dual-run). Every cell below that reads back the
+// MINTED task now reads the llm_witness lane specifically; extractedDoc's own fixture task
+// stays on invoice_facts (it is the LEGACY population the re-extraction targets), so a cell
+// that wants "everything on this document" reads both lanes explicitly rather than relying on
+// laneTasks' invoice_facts default.
+const WITNESS_ENGINE_ID = "llm-openai:gpt-5.6-terra:v1";
 
 let W = null;
 let live = false;
@@ -37,13 +47,15 @@ const gate = () => fail0022(live);
 
 // ===========================================================================
 
-test("[0022] a bookkeeper re-extracts an already-extracted document: a NEW queued task at version max+1", async () => {
+test("[0022/F-A1 PR-3] a bookkeeper re-extracts an already-extracted document: a NEW queued task on the llm_witness lane, its own version 1", async () => {
   gate();
   const client = W.clients.A1;
   const doc = await extractedDoc(W.users.alice, { client });
   const before_ = await laneTasks(doc.documentId);
   assert.equal(before_.length, 1, "the fixture settled exactly one invoice_facts task (mandatory setup)");
   assert.equal(before_[0].status, "done", "…and it is done — the population `already_completed` locks out");
+  const beforeWitness = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(beforeWitness.length, 0, "no llm_witness task exists yet (mandatory setup)");
 
   const res = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "the total read 1,350.00 but the document says 1,530.00",
@@ -52,14 +64,19 @@ test("[0022] a bookkeeper re-extracts an already-extracted document: a NEW queue
   assert.equal(res.document_id, doc.documentId, "the receipt names the document");
   assert.equal(res.status, "queued", "…and a QUEUED task, not a short-circuit receipt");
   assert.equal(res.reused, false, "…genuinely minted, not recovered");
-  assert.equal(res.version_n, before_[0].version_n + 1, "the new task takes the next version on the lane");
+  // F-A1 PR-3 (D7): the mint targets llm_witness, a lane this document has never carried a
+  // task on before -- its OWN version counter starts at 1, independent of the invoice_facts
+  // lane's own count.
+  assert.equal(res.version_n, 1, "the llm_witness lane's own version counter starts at 1");
 
   const after_ = await laneTasks(doc.documentId);
-  assert.equal(after_.length, 2, "exactly one new task exists");
-  const fresh = after_.find((t) => t.id === res.task_id);
+  assert.equal(after_.length, 1, "the invoice_facts lane is untouched by the re-extraction");
+  const afterWitness = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(afterWitness.length, 1, "exactly one llm_witness task now exists");
+  const fresh = afterWitness.find((t) => t.id === res.task_id);
   assert.equal(fresh.status, "queued", "the committed row is queued");
-  assert.equal(fresh.engine_id, "azure-di:prebuilt-invoice:2024-11-30",
-    "…on the SAME engine the first extraction used, so the version chain composes");
+  assert.equal(fresh.engine_id, WITNESS_ENGINE_ID,
+    "…on the SAME engine literal the cutover router mints — a re-extraction and a first extraction now buy the identical product");
   assert.equal(fresh.error_code, null, "…and carries no error code");
 
   // The prior extraction is untouched until the NEW one settles: re-extraction is a
@@ -91,7 +108,7 @@ test("[0022] the audit row carries the reason, the lane, the version and the hum
   assert.equal(aud.args.reason, reason,
     "the REASON is on the audit row — an unexplained re-extraction is an unexplained change "
     + "to the evidence a posted entry rests on, and the reason is the whole audit value here");
-  assert.equal(aud.args.lane, "invoice_facts", "…with the lane");
+  assert.equal(aud.args.lane, "llm_witness", "…with the lane (F-A1 PR-3: the invoice-shaped re-extraction arm now targets llm_witness)");
   assert.equal(aud.args.version_n, res.version_n, "…and the version");
   assert.equal(aud.outcome, "ok", "…as a completed action");
 });
@@ -111,21 +128,38 @@ test("[0022] the floor is BOOKKEEPER (ADR-047 Q2): a viewer is refused, a bookke
 
 test("[0022] a document with NO completed extraction is refused — the ordinary pipeline is the right door", async () => {
   gate();
-  const client = W.clients.A1;
+  const client = W.clients.A2; // a FRESH client — cell 1's grant on A1 must not leak in here
   const firm = await firmOf(client);
+  // F-A1 PR-3: the coding-time backstop's auto-enqueue now targets llm_witness, which is
+  // consent-gated AT ENQUEUE (0090 wall 6/§7e, live since the cutover) — unlike the retired
+  // invoice_facts path, which had no enqueue-time consent gate at all. Without a live
+  // witness_extraction consent the backstop's own task lands 'failed'/witness_consent_inactive
+  // immediately, which then opens 0051's failed_retry door (a document whose lane's newest
+  // task is 'failed' is eligible for recovery, regardless of WHY it failed) — a widened-but-
+  // safe admission surface this cell does not intend to exercise. Granting consent FIRST
+  // restores the exact precondition 0051's own header names: "the coding-time backstop leaves
+  // its lane task 'queued', never 'failed'".
+  const evidence = await consentEvidenceDoc(W.users.alice, { firm });
+  const grant = await grantPurpose(W.users.alice, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+  await activatePurpose(W.users.alice, { client, purpose: "witness_extraction", consent: grant.consent_id });
+
   const { seedCitedDocument } = await import("./x1-helpers.mjs");
   const fresh = await seedCitedDocument(W.users.alice, { firm, client, kind: "invoice" });
   // NB: filing an invoice-kind document already enqueues the ordinary first-extraction task
-  // (the coding-time backstop), so the assertion is that the verb adds NOTHING, not that the
-  // lane is empty.
-  const before_ = (await laneTasks(fresh.documentId)).length;
+  // (the coding-time backstop, now on llm_witness), so the assertion is that the verb adds
+  // NOTHING, not that the lane is empty.
+  const before_ = (await laneTasks(fresh.documentId, "llm_witness")).length;
+  assert.equal((await rootQuery(
+    "select status from clara.document_processing_tasks where document_id=$1 and lane='llm_witness' order by id limit 1",
+    [fresh.documentId])).rows[0]?.status, "queued",
+    "the backstop's own llm_witness task must be QUEUED (consent live), never failed — the failed_retry door's precondition");
   assert.equal((await rootQuery(
     "select count(*)::int n from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts' and status='done'",
     [fresh.documentId])).rows[0].n, 0, "the document carries no DONE extraction (mandatory setup)");
   await assertRaises("CLR16",
     () => requestReextraction(W.users.bob, { document: fresh.documentId, opKey: opk("rex") }),
     "re-extracting a document that has never been extracted");
-  assert.equal((await laneTasks(fresh.documentId)).length, before_,
+  assert.equal((await laneTasks(fresh.documentId, "llm_witness")).length, before_,
     "…and the verb queued nothing: routing a FIRST extraction through a human verb would "
     + "hide it from the intake path's own receipts");
 });
@@ -188,7 +222,7 @@ test("[0022] the same op_key REPLAYS its receipt; a changed reason under it is R
   const replay = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "the tax line is missing", opKey: key });
   assert.deepEqual(replay, first, "the exact op_key returns the stored receipt byte-identically");
-  assert.equal((await laneTasks(doc.documentId)).length, 2, "one task, however many times the call arrives");
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, 1, "one llm_witness task, however many times the call arrives");
 
   // The reason is IN the request hash, so correcting it under the old key must be an honest
   // refusal — otherwise a bookkeeper who improves the explanation and presses again gets a
@@ -212,7 +246,7 @@ test("[0022] an ACTIVE task is RETURNED, never double-queued", async () => {
   const second = await requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("rex") });
   assert.equal(second.task_id, first.task_id, "the second request names the SAME in-flight task");
   assert.equal(second.reused, true, "…and says so honestly");
-  assert.equal((await laneTasks(doc.documentId)).length, 2,
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, 1,
     "two live tasks on one document/lane would race to persist and the loser would fail on "
     + "the (document_id, engine_id, version_n) unique — a confusing failure for someone who "
     + "simply pressed the button twice");
@@ -228,16 +262,24 @@ test("[0022] the version computation starts ABOVE a terminal task (compute-over-
   // rows rather than skipping them — but the retry itself is proven by the NEXT cell, which
   // forces the conflict for real.
   const doc = await extractedDoc(W.users.alice, { client: W.clients.A1 });
-  const tasks = await laneTasks(doc.documentId);
-  const nextVersion = Math.max(...tasks.map((t) => t.version_n)) + 1;
+  // F-A1 PR-3: the re-extraction mint targets llm_witness (D7), an EMPTY lane for this
+  // document at this point (extractedDoc only ever touches invoice_facts) — so the terminal
+  // winner this cell plants is the lane's very FIRST version, and the retry must land at 2.
+  const witnessTasks = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(witnessTasks.length, 0, "no llm_witness task exists yet (mandatory setup)");
+  const nextVersion = 1;
   const firm = await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId]);
   // The winner: terminal, never claimed, exactly the shape _reserve_processing_call's CLR18
-  // branch leaves behind (workflow_run_id null, started_at null, error_code 'budget').
+  // branch leaves behind (workflow_run_id null, started_at null, error_code 'budget') --
+  // except the LANE and ENGINE are now the ones the cutover router mints (llm_witness never
+  // reserves a page budget at all, D6, but the never-claimed FAILED shape this cell plants is
+  // agnostic to why the task terminated — it exists to prove the version arithmetic, not to
+  // reproduce a real budget refusal).
   await rootQuery(
     `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
         version_n,lane,status,error_code,finished_at)
-     values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','failed','budget',now())`,
-    [firm.rows[0].firm_id, doc.documentId, nextVersion]);
+     values($1,$2,$3,'{}'::jsonb,$4,'llm_witness','failed','budget',now())`,
+    [firm.rows[0].firm_id, doc.documentId, WITNESS_ENGINE_ID, nextVersion]);
 
   const res = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "after the budget failure", opKey: opk("rex") });
@@ -250,7 +292,7 @@ test("[0022] the version computation starts ABOVE a terminal task (compute-over-
   assert.equal(res.status, "queued", "…and minted a live task");
   assert.equal(res.reused, false, "…genuinely fresh, not a recovered in-flight task");
 
-  const committed = await laneTasks(doc.documentId);
+  const committed = await laneTasks(doc.documentId, "llm_witness");
   const fresh = committed.find((t) => t.id === res.task_id);
   assert.equal(fresh.version_n, nextVersion + 1, "the committed row carries that version");
   assert.equal(fresh.status, "queued", "…and is queued");
@@ -279,16 +321,18 @@ test("[0022] the RETRY, forced for real: a conflict lost to a task that goes ter
   // `{document_id, reused:true}` into its op receipt — permanently.
   const doc = await extractedDoc(W.users.alice, { client: W.clients.A1 });
   const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId])).rows[0].firm_id;
-  const tasks = await laneTasks(doc.documentId);
-  const N = Math.max(...tasks.map((t) => t.version_n)) + 1;
+  // F-A1 PR-3: the re-extraction mint targets llm_witness (D7) — an EMPTY lane for this
+  // document, so the winner this cell plants takes that lane's own first version.
+  const witnessTasks = await laneTasks(doc.documentId, "llm_witness");
+  const N = witnessTasks.length ? Math.max(...witnessTasks.map((t) => t.version_n)) + 1 : 1;
 
   const out = await holdThenContend({
     a: {
       run: (c) => c.query(
         `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
             version_n,lane,status,error_code,finished_at)
-         values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','failed','budget',now())`,
-        [firm, doc.documentId, N]),
+         values($1,$2,$3,'{}'::jsonb,$4,'llm_witness','failed','budget',now())`,
+        [firm, doc.documentId, WITNESS_ENGINE_ID, N]),
     },
     b: {
       role: ROLES.authenticated, jwtSub: W.users.bob,
@@ -310,7 +354,7 @@ test("[0022] the RETRY, forced for real: a conflict lost to a task that goes ter
   assert.equal(r.status, "queued", "…live");
   assert.equal(r.reused, false, "…and freshly minted, not a recovered in-flight task");
 
-  const committed = await laneTasks(doc.documentId);
+  const committed = await laneTasks(doc.documentId, "llm_witness");
   assert.equal(committed.filter((t) => t.version_n === N)[0].status, "failed",
     "the winner it lost to is the terminal budget row");
   assert.equal(committed.find((t) => t.id === r.task_id).status, "queued", "…and the verb's own task is queued");
