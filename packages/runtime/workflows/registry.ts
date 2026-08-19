@@ -18,6 +18,7 @@ import { chatTurn_v8 } from "./chatTurn.v8.js";
 import { chatTurn_v9 } from "./chatTurn.v9.js";
 import { chatTurn_v10 } from "./chatTurn.v10.js";
 import { chatTurn_v11 } from "./chatTurn.v11.js";
+import { chatTurn_v12 } from "./chatTurn.v12.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -30,6 +31,7 @@ import { autoDraft_v4 } from "./autoDraft.v4.js";
 import { autoDraft_v5 } from "./autoDraft.v5.js";
 import { autoDraft_v6 } from "./autoDraft.v6.js";
 import { autoDraft_v7 } from "./autoDraft.v7.js";
+import { autoDraft_v8 } from "./autoDraft.v8.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { firmInterview_v3 } from "./firmInterview.v3.js";
@@ -39,12 +41,12 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v11,
+  chatTurn: chatTurn_v12,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   statementFacts: statementFacts_v1,
   witnessFacts: witnessFacts_v1,
-  autoDraft: autoDraft_v7,
+  autoDraft: autoDraft_v8,
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
 } as const;
@@ -272,6 +274,21 @@ export const workflows = {
 // live, or every authoring tool refuses on a missing wrapper (fail-closed, but a full stop on
 // authoring). The v10 body stays frozen, built and EXPORTED so no parked run is stranded (policy
 // (c)) — chatTurn parks are the human-answer kind, so a live run on v10 is the expected case.
+//
+// F-A1 PR-3a repointed `chatTurn:` v11->v12 and `autoDraft:` v7->v8 (the consumer
+// re-versioning design §3.8 / Annex B row M7 requires: F-A1 PR-1's witness-pair regime,
+// `llm_text_facts`/`llm_vision_facts` beside legacy `invoice_facts`, was invisible to both
+// coding-lane toolfaces — a witness-only document's facts were dropped outright by the old
+// `engine_kind === 'invoice_facts'` filter, and a cross-regime `Math.max(version_n)` could
+// silently prefer a stale legacy generation over a fresher witness pair, since version_n is a
+// PER-LANE counter). v8/v12 widen the fact-selection to both regimes, resolve the cross-regime
+// winner by `extracted_at` alone (a clock tie prefers witness, design §3.3), and correct the
+// stale `engine_confidence >= 0.95` mirror the real DB gate excluded structurally since 0023 —
+// scoped to the legacy regime alone, so a legacy document's friendly read stays byte-identical
+// and a witness document (whose fact regions carry engine_confidence NULL by design, §3.4)
+// is no longer silently zeroed out. See autoDraft.v8.tools.ts / chatTurn.v12.tools.ts for the
+// full statement. The v7/v11 bodies stay frozen, built and EXPORTED so no parked run is
+// stranded (policy (c)).
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
@@ -286,6 +303,7 @@ export { chatTurn_v7 };
 export { chatTurn_v8 };
 export { chatTurn_v9 };
 export { chatTurn_v10 };
+export { chatTurn_v11 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -293,5 +311,6 @@ export { autoDraft_v3 };
 export { autoDraft_v4 };
 export { autoDraft_v5 };
 export { autoDraft_v6 };
+export { autoDraft_v7 };
 
 export const workflowNames: string[] = Object.keys(workflows);

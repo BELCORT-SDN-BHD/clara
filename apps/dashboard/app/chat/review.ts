@@ -331,11 +331,26 @@ export type MachineTotal = { cents: number | null; region: string | null; confid
 
 /** The machine-corroborated invoice total from get_document_extract — the card composes
  *  the amount-exception panel (S6-D1) from this + the CLR21 error at approve time
- *  (get_draft_review does NOT carry the exception). Exact 0009 read shape:
- *  { document, unassigned, filing, extractions:[{id, status, version_n, …}],
- *  regions:[{id, extraction_id, engine_kind, version_n, field_path, monetary_cents,
- *  engine_confidence, …}], max_chars }. The machine total = the `invoice.total`
- *  region from the invoice_facts engine, joined to a DONE extraction, latest pass. */
+ *  (get_draft_review does NOT carry the exception). Exact 0009 read shape (F-A1 PR-1
+ *  additive: every extraction/region entry now also carries `extracted_at`):
+ *  { document, unassigned, filing, extractions:[{id, status, version_n, extracted_at, …}],
+ *  regions:[{id, extraction_id, engine_kind, version_n, extracted_at, field_path,
+ *  monetary_cents, engine_confidence, …}], max_chars }. The machine total = the
+ *  `invoice.total` region — from EITHER regime (F-A1's witness pair, `llm_text_facts`,
+ *  reads beside the legacy `invoice_facts` engine), joined to a DONE extraction.
+ *
+ *  THE SAME M7 SELECTION RULE autoDraft.v8/chatTurn.v12 implement (design §3.8; those
+ *  files' headers carry the full finding): resolve each regime's own latest generation
+ *  independently (latest version_n WITHIN one engine_kind, never across kinds — version_n
+ *  is a per-lane counter), then — only when both regimes are present — pick the
+ *  cross-regime winner by `extracted_at` ALONE, never `version_n` across regimes; a clock
+ *  tie prefers the witness regime (design §3.3). A null clock (unreadable/unpublished)
+ *  loses to a readable one; two null clocks tie, and the tie still prefers witness. A
+ *  legacy-only document needs no comparison and is byte-identical to today: same filter,
+ *  same stable sort, same `[0]` pick. `confidence` mirrors the DB verdict's own shape,
+ *  never invented — a witness region's `engine_confidence` is NULL by design (§3.4), so it
+ *  reports `confidence: null` exactly as the region row states; a legacy region's value
+ *  passes through unchanged. */
 export async function getMachineTotal(token: string, documentId: string, clientId?: string | null): Promise<MachineTotal> {
   const raw = (await rpc("get_document_extract", { p_document: documentId, p_client: clientId ?? null }, token)) as Record<string, unknown> | null;
   const ex = (raw ?? {}) as Record<string, unknown>;
@@ -346,11 +361,24 @@ export async function getMachineTotal(token: string, documentId: string, clientI
       .map((e) => str(e.id))
       .filter((id): id is string => id !== null),
   );
-  const totals = arr(ex.regions)
-    .map((r) => (r ?? {}) as Record<string, unknown>)
-    .filter((r) => str(r.engine_kind) === "invoice_facts" && str(r.field_path) === "invoice.total" && doneExtractionIds.has(str(r.extraction_id) ?? ""))
-    .sort((a, b) => num(b.version_n) - num(a.version_n)); // latest facts pass first
-  const top = totals[0];
+  const topOfKind = (kind: string): Record<string, unknown> | undefined =>
+    arr(ex.regions)
+      .map((r) => (r ?? {}) as Record<string, unknown>)
+      .filter((r) => str(r.engine_kind) === kind && str(r.field_path) === "invoice.total" && doneExtractionIds.has(str(r.extraction_id) ?? ""))
+      .sort((a, b) => num(b.version_n) - num(a.version_n))[0]; // latest facts pass first, WITHIN this kind only
+  const legacyTop = topOfKind("invoice_facts");
+  const witnessTop = topOfKind("llm_text_facts");
+  const clockOf = (r: Record<string, unknown> | undefined): number | null => {
+    const raw2 = r ? str(r.extracted_at) : null;
+    const parsed = raw2 ? Date.parse(raw2) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  let top: Record<string, unknown> | undefined;
+  if (legacyTop && witnessTop) {
+    top = (clockOf(witnessTop) ?? -Infinity) >= (clockOf(legacyTop) ?? -Infinity) ? witnessTop : legacyTop;
+  } else {
+    top = legacyTop ?? witnessTop;
+  }
   if (!top) return { cents: null, region: null, confidence: null, quote: null };
   return {
     cents: typeof top.monetary_cents === "number" ? top.monetary_cents : null,
