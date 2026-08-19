@@ -107,11 +107,21 @@ test("f-a1.pr2.e NO live consent -> refuses before any model call, meters it, an
   assert.equal((await readDispatchAuthorizations(s.firm)).length, 0, "no authorization was minted");
 });
 
-test("f-a1.pr2.e2 B1 fallback — with clara.fail_witness_facts ABSENT the lane degrades LOUDLY, never silently", { skip }, async () => {
-  // The state the merged estate is actually in until PR-3's migration applies. The ordering
-  // argument says this window is empty (nothing mints an llm_witness task yet); this cell proves
-  // that if the argument is ever wrong, the operator is TOLD rather than left with a wedged lane.
-  await dropFailWitnessFactsStandIn();
+test("f-a1.pr2.e2 B1 fallback — with clara.fail_witness_facts ABSENT the lane degrades LOUDLY, never silently", { skip }, async (t) => {
+  // The state the merged estate was in until PR-3's 0097 applied. The ordering argument says
+  // that window is empty (nothing mints an llm_witness task yet); this cell proves that if the
+  // argument is ever wrong, the operator is TOLD rather than left with a wedged lane.
+  const dropped = await dropFailWitnessFactsStandIn();
+  if (!dropped.dropped && (await failWitnessFactsExists())) {
+    // Post-0097 era: the REAL migration-installed verb is present, and the drop helper
+    // (correctly) refuses to touch anything that is not its own stand-in — the absent world
+    // this cell needs can no longer be constructed against this database without dropping a
+    // real verb, which is exactly the scaffold-over-real defect the helpers exist to prevent.
+    // The pre-cutover absence window is closed; the runtime's 42883 fallback path retires
+    // together with this cell in the post-cutover cleanup PR.
+    t.skip("post-0097: clara.fail_witness_facts is the real verb — the absence window this cell guards is closed");
+    return;
+  }
   try {
     assert.equal(await failWitnessFactsExists(), false, "precondition: the verb really is absent");
     const s = await buildWitnessSituation("noverb", { regions: REGIONS, consent: false });
