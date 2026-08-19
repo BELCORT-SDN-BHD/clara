@@ -37,11 +37,19 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
-  requestReextraction, extractedDoc, failedFactsDoc, taskRow, laneTasks, extractionsOf,
+  requestReextraction, extractedDoc, failedWitnessDoc, taskRow, laneTasks, extractionsOf,
+  witnessExtractionsOf, WITNESS_ENGINE_ID,
   auditArgs, holdThenContend, seedCitedDocument,
-  invoiceFactsTask, claimTask, failInvoiceFacts, requireRecoveryDoor,
+  claimTask, requireRecoveryDoor,
   markSkip, noteLane, printLaneNotes, printSkipCount,
 } from "./x1-helpers.mjs";
+
+// F-A1 PR-3 CUTOVER NOTE: 0051's failed_retry door reads the document's CURRENT v_lane's
+// newest task status -- for an invoice-shaped document that lane is now llm_witness, never
+// invoice_facts (no dual-run, D9). Every cell below that used failedFactsDoc (the LEGACY
+// F6/LUMINOUS fixture -- kept, byte-unchanged, in x1-helpers.mjs for x51-intake-recovery's own
+// ingest-failure exhibit) now uses failedWitnessDoc, its witness-regime sibling, and reads the
+// llm_witness lane specifically where the original read the bare (invoice_facts) default.
 
 let W = null;
 let ready = false;
@@ -77,23 +85,23 @@ function skip51(t, msg = "the extraction-recovery door is not applied — batter
 
 test("[0051] a terminally-FAILED first extraction is admitted: a NEW attempt at version max+1", async (t) => {
   if (skip51(t)) return;
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
 
   // MANDATORY SETUP, asserted rather than assumed — this is the exact live shape, and if the
   // fixture drifts off it the cell below would be testing something else entirely.
-  const before_ = await laneTasks(doc.documentId);
-  assert.equal(before_.length, 1, "exactly one invoice_facts task exists");
+  const before_ = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(before_.length, 1, "exactly one llm_witness task exists");
   assert.equal(before_[0].status, "failed", "…and it is TERMINAL — the state no legal transition exits");
-  assert.equal(before_[0].error_code, "internal", "…with the exhibit's own error_code");
-  assert.deepEqual(await extractionsOf(doc.documentId), [],
-    "…and ZERO invoice_facts extractions exist: fail_invoice_facts writes no extraction row, "
+  assert.equal(before_[0].error_code, "witness_consent_inactive", "…with the fixture's own error_code (the enqueue-time consent gate)");
+  assert.deepEqual(await witnessExtractionsOf(doc.documentId), [],
+    "…and ZERO llm_text_facts extractions exist: the enqueue-gate flip writes no extraction row, "
     + "which is why an admission guard phrased against document_extractions could never have "
     + "admitted this document");
 
   const frozen = await taskRow(doc.taskId);
   const res = await requestReextraction(W.users.bob, {
     document: doc.documentId,
-    reason: "the first extraction died on an engine fault; the document itself is fine",
+    reason: "the first attempt died on the consent gate; the document itself is fine",
     opKey: opk("x51"),
   });
 
@@ -103,11 +111,11 @@ test("[0051] a terminally-FAILED first extraction is admitted: a NEW attempt at 
   assert.equal(res.reused, false, "…freshly minted, not a recovered in-flight task");
   assert.equal(res.version_n, before_[0].version_n + 1, "…at the next version on the lane");
 
-  const after_ = await laneTasks(doc.documentId);
+  const after_ = await laneTasks(doc.documentId, "llm_witness");
   assert.equal(after_.length, 2, "exactly one new row exists");
   const fresh = after_.find((x) => x.id === res.task_id);
   assert.equal(fresh.status, "queued", "the committed row is queued");
-  assert.equal(fresh.engine_id, "azure-di:prebuilt-invoice:2024-11-30",
+  assert.equal(fresh.engine_id, WITNESS_ENGINE_ID,
     "…on the SAME engine, so the version chain composes");
   assert.equal(fresh.error_code, null, "…and carries no error code");
 
@@ -120,7 +128,7 @@ test("[0051] a terminally-FAILED first extraction is admitted: a NEW attempt at 
 
 test("[0051] the audit row and the stored receipt both name the door, and the op_key replays", async (t) => {
   if (skip51(t)) return;
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   const reason = "engine fault on the only attempt — retrying the same bytes";
   const key = opk("x51");
   const res = await requestReextraction(W.users.bob, { document: doc.documentId, reason, opKey: key });
@@ -133,7 +141,7 @@ test("[0051] the audit row and the stored receipt both name the door, and the op
     "the audit says WHICH door admitted the call — a recovery that cannot be told apart from "
     + "an ordinary re-extraction is a diagnostic that has stopped answering the question");
   assert.equal(aud.args.reason, reason, "…and carries the human's reason");
-  assert.equal(aud.args.lane, "invoice_facts", "…and the lane");
+  assert.equal(aud.args.lane, "llm_witness", "…and the lane (F-A1 PR-3: the invoice-shaped arm now targets llm_witness)");
 
   const stored = await rootQuery(
     "select result from clara.op_receipts where fn='request_reextraction' and result->>'task_id'=$1",
@@ -143,7 +151,7 @@ test("[0051] the audit row and the stored receipt both name the door, and the op
 
   const replay = await requestReextraction(W.users.bob, { document: doc.documentId, reason, opKey: key });
   assert.deepEqual(replay, res, "the same op_key returns the stored receipt byte-identically");
-  assert.equal((await laneTasks(doc.documentId)).length, 2, "…and queued nothing further");
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, 2, "…and queued nothing further");
 });
 
 // ===========================================================================
@@ -159,17 +167,29 @@ test("[0051] a document that has never been extracted is STILL refused — the q
   // widening had been phrased as "no done extraction exists" (an ABSENCE) this cell would go
   // green in the wrong direction and the ordinary first-extraction path would be hidden from
   // the intake receipts that own it.
-  const client = W.clients.A1;
+  //
+  // F-A1 PR-3: the backstop's own auto-enqueue now targets llm_witness, consent-gated AT
+  // ENQUEUE (0090 wall 6/S7e) -- unlike the retired invoice_facts path, which had no
+  // enqueue-time gate at all. Without a live witness_extraction consent the backstop's own
+  // task would land 'failed' immediately, which is EXACTLY the precondition this cell needs
+  // to prove absent -- so consent is granted FIRST, restoring "the backstop leaves its lane
+  // task queued, never failed" (0051's own header, x1-reextraction.test.mjs's analogous fix).
+  const client = W.clients.A2; // a FRESH client -- other cells' A1 grants must not leak in here
   const firm = await firmOf(client);
+  const { grantPurpose, activatePurpose, consentEvidenceDoc } = await import("./wave-b/wb-0020-helpers.mjs");
+  const evidence = await consentEvidenceDoc(W.users.alice, { firm });
+  const grant = await grantPurpose(W.users.alice, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+  await activatePurpose(W.users.alice, { client, purpose: "witness_extraction", consent: grant.consent_id });
+
   const fresh = await seedCitedDocument(W.users.alice, { firm, client, kind: "invoice" });
-  const before_ = await laneTasks(fresh.documentId);
+  const before_ = await laneTasks(fresh.documentId, "llm_witness");
   assert.equal(before_.filter((x) => x.status === "failed").length, 0,
     "mandatory setup: this document's lane holds no FAILED task");
 
   await assertRaises("CLR16",
     () => requestReextraction(W.users.bob, { document: fresh.documentId, opKey: opk("x51") }),
     "re-extracting a document that has never been extracted");
-  assert.equal((await laneTasks(fresh.documentId)).length, before_.length,
+  assert.equal((await laneTasks(fresh.documentId, "llm_witness")).length, before_.length,
     "…and the verb queued nothing");
 });
 
@@ -178,19 +198,26 @@ test("[0051] a document whose lane holds a DONE extraction takes the ordinary do
   // The placement proof. 'failed_retry' is the LAST arm, so a document that ALSO carries a
   // successful extraction must keep answering 'reextraction' — otherwise the widening would
   // have silently relabelled (and re-routed) a population that already worked.
+  //
+  // F-A1 PR-3: extractedDoc still seeds its DONE extraction on the LEGACY invoice_facts lane
+  // (the primary admission door checks BOTH regimes, so this is unaffected) -- but the
+  // re-extraction the PRIMARY door then admits mints on llm_witness (D9, no dual-run), so the
+  // "kill that second attempt" step below now claims+fails the llm_witness task, not an
+  // invoice_facts one.
   const doc = await extractedDoc(W.users.alice, { client: W.clients.A1 });
   const first = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "re-read the total", opKey: opk("x51") });
   assert.equal(first.admission, "reextraction", "mandatory setup: the ordinary door admitted it");
 
-  // Now kill that second attempt, so the lane holds BOTH a done extraction and a failed task.
-  const t2 = await invoiceFactsTask(doc.documentId);
-  await claimTask(t2.id, { egressApproved: true });
-  await failInvoiceFacts(t2.id, "engine_error");
-  assert.equal((await laneTasks(doc.documentId)).filter((x) => x.status === "failed").length, 1,
-    "mandatory setup: a terminally-failed task now exists in the lane");
+  // Now kill that second attempt, so the document holds BOTH a done (legacy) extraction and a
+  // failed (witness-lane) task.
+  const t2 = await claimTask(first.task_id, { egressApproved: true });
+  assert.equal(t2.status, "running");
+  await roleQuery(ROLES.runtime, "select clara.fail_witness_facts($1,$2) as r", [first.task_id, "internal"]);
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).filter((x) => x.status === "failed").length, 1,
+    "mandatory setup: a terminally-failed task now exists in the llm_witness lane");
   assert.equal((await extractionsOf(doc.documentId)).filter((x) => x.status === "done").length, 1,
-    "…alongside the still-live done extraction");
+    "…alongside the still-live done (legacy invoice_facts) extraction");
 
   const second = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "and again", opKey: opk("x51") });
@@ -207,7 +234,7 @@ test("[0051] NEWEST, not ANY: once a recovery is queued the door REFUSES rather 
   // in-flight short-circuit further down stopped it double-minting. An admission that depends
   // on a later guard for its safety is the wrong admission. The door now reads the LANE's
   // NEWEST task, which is the queued recovery, and refuses.
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   const first = await requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") });
   assert.equal(first.admission, "failed_retry", "mandatory setup: the first call was admitted and minted");
   assert.equal(first.reused, false, "…a live task");
@@ -215,7 +242,7 @@ test("[0051] NEWEST, not ANY: once a recovery is queued the door REFUSES rather 
   await assertRaises("CLR16",
     () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") }),
     "a second call while the recovery is still queued");
-  assert.equal((await laneTasks(doc.documentId)).length, 2, "…and no third row was created");
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, 2, "…and no third row was created");
 });
 
 test("[0051] NEWEST, not ANY: a stale failure under a newest-DONE task never re-admits", async (t) => {
@@ -223,22 +250,22 @@ test("[0051] NEWEST, not ANY: a stale failure under a newest-DONE task never re-
   // The second half of finding #5, and the one that matters most: in a schema-valid state
   // where the newest task is 'done' but its extraction row is absent, "any historical failure"
   // would mint over it. The door must fail closed on the POSITIVE newest-'done' read instead.
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId])).rows[0].firm_id;
-  const v = Math.max(...(await laneTasks(doc.documentId)).map((x) => x.version_n)) + 1;
+  const v = Math.max(...(await laneTasks(doc.documentId, "llm_witness")).map((x) => x.version_n)) + 1;
   await rootQuery(
     `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
         version_n,lane,status,workflow_run_id,started_at,finished_at,attempt_count)
-     values ($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','done','rig-run',now(),now(),1)`,
-    [firm, doc.documentId, v]);
-  assert.deepEqual(await extractionsOf(doc.documentId), [],
+     values ($1,$2,$4,'{}'::jsonb,$3,'llm_witness','done','rig-run',now(),now(),1)`,
+    [firm, doc.documentId, v, WITNESS_ENGINE_ID]);
+  assert.deepEqual(await witnessExtractionsOf(doc.documentId), [],
     "mandatory setup: the newest task is DONE while its extraction row is absent — schema-valid, and "
     + "exactly the inconsistent state an any-historical-failure door would mint over");
 
   await assertRaises("CLR16",
     () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") }),
     "re-extracting when the lane's NEWEST task succeeded");
-  assert.equal((await laneTasks(doc.documentId)).length, 2, "…and nothing was minted");
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, 2, "…and nothing was minted");
 });
 
 test("[0051] the kind and mime gates are untouched — an unclassified document is still refused", async (t) => {
@@ -248,7 +275,7 @@ test("[0051] the kind and mime gates are untouched — an unclassified document 
   // before the admission chain is ever reached. 0051 deliberately does not widen this gate
   // (its header records why: the recovered ingest task would be undispatchable on the
   // deployed runtime image). The cell pins that boundary so nobody reads F6 as closed.
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   await rootQuery("update clara.documents set document_kind=null where id=$1", [doc.documentId]);
   await assertRaises("CLR16",
     () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") }),
@@ -273,7 +300,7 @@ test("[0051] the kind and mime gates are untouched — an unclassified document 
 
 test("[0051] the recovery door keeps the BOOKKEEPER floor: a viewer is refused", async (t) => {
   if (skip51(t)) return;
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   await assertRaises(CLR.authz,
     () => requestReextraction(W.users.carol, { document: doc.documentId, opKey: opk("x51") }),
     "carol (viewer) recovering a failed extraction");
@@ -283,12 +310,12 @@ test("[0051] the recovery door keeps the BOOKKEEPER floor: a viewer is refused",
 
 test("[0051] a document in ANOTHER firm is an honest refusal, not a silent no-op", async (t) => {
   if (skip51(t)) return;
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
-  const before_ = (await laneTasks(doc.documentId)).length;
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
+  const before_ = (await laneTasks(doc.documentId, "llm_witness")).length;
   await assertRaises(CLR.notFound,
     () => requestReextraction(W.users.dave, { document: doc.documentId, opKey: opk("x51") }),
     "dave (firm B) recovering firm A's failed extraction");
-  assert.equal((await laneTasks(doc.documentId)).length, before_, "…and nothing was queued");
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, before_, "…and nothing was queued");
 });
 
 test("[0051] NO machine lane gained reach — the structural cost bound survives the widening", async (t) => {
@@ -298,7 +325,7 @@ test("[0051] NO machine lane gained reach — the structural cost bound survives
   // in a loop. A widened admission is exactly the change that could erode that by accident —
   // a recovery door is the kind of thing someone later wants a sweep to drive — so the bound
   // is re-proved on this migration's own gate rather than inherited from 0022's cell.
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   for (const role of [ROLES.runtime, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
     if (!role) continue;
     const err = await roleQuery(role,
@@ -328,17 +355,17 @@ test("[0051] the bounded retry converges on the recovery path too, under a force
   //             `insert ... on conflict do nothing` BLOCKS on A's uncommitted index entry —
   //             proven via pg_blocking_pids, not inferred from timing;
   //   A commits. B wakes, finds no ACTIVE task to recover, recomputes N+1 and succeeds.
-  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const doc = await failedWitnessDoc(W.users.alice, { client: W.clients.A1 });
   const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId])).rows[0].firm_id;
-  const N = Math.max(...(await laneTasks(doc.documentId)).map((x) => x.version_n)) + 1;
+  const N = Math.max(...(await laneTasks(doc.documentId, "llm_witness")).map((x) => x.version_n)) + 1;
 
   const out = await holdThenContend({
     a: {
       run: (c) => c.query(
         `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
             version_n,lane,status,error_code,finished_at)
-         values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','failed','budget',now())`,
-        [firm, doc.documentId, N]),
+         values($1,$2,$4,'{}'::jsonb,$3,'llm_witness','failed','budget',now())`,
+        [firm, doc.documentId, N, WITNESS_ENGINE_ID]),
     },
     b: {
       role: ROLES.authenticated, jwtSub: W.users.bob,
@@ -361,7 +388,7 @@ test("[0051] the bounded retry converges on the recovery path too, under a force
   assert.equal(r.status, "queued", "…live");
   assert.equal(r.reused, false, "…and freshly minted");
 
-  const committed = await laneTasks(doc.documentId);
+  const committed = await laneTasks(doc.documentId, "llm_witness");
   assert.equal(committed.filter((x) => x.version_n === N)[0].status, "failed",
     "the winner it lost to is the terminal budget row");
   assert.equal(committed.find((x) => x.id === r.task_id).status, "queued", "…and the verb's own task is queued");

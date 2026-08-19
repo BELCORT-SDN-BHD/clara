@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import {
   ROLES, humanQuery, roleQuery, rootQuery, wakeQuery, opk, WA_DEFAULTS, ORIGIN,
   seedCitedDocument, filedDocument, freshResolution, billLines, ev,
-  wakeDraftEntry, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  wakeDraftEntry, invoiceFactsTask, mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, statedIdentityFields, agreedEnvelope, firmOf, FIELD, CODING_KIND,
 } from "./wave-a-reads.mjs";
 export * from "./wave-a-reads.mjs";
@@ -315,7 +315,11 @@ export async function readyFiling(sub, { client, amount = 500000, vendorName = "
   await grantConsent(sub, { firm, client }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture's whole point is to exercise the
+  // invoice_facts LANE's downstream machinery (persist/claim/draft/sweep), so it mints
+  // the legacy task directly rather than through the now-witness-routed enqueue RPC.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [

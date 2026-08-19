@@ -144,6 +144,13 @@ export default definePlugin(() => {
         // registry `workflows` object (freeze-lint enqueue-provenance law — a direct
         // workflow-file import handed to start() fails CI).
         enqueueStatementFacts: (taskId: string) => start(workflows.statementFacts, [{ task_id: taskId }]),
+        // F-A1 PR-3 cutover: the llm_witness lane rides its own workflow (witnessFacts_v1),
+        // resolved through the registry `workflows` object exactly like the other facts lanes
+        // (freeze-lint enqueue-provenance law — a direct workflow-file import handed to
+        // start() fails CI). Without this dep, reconciler-documents.mjs's enqueueForLane
+        // returns undefined for lane='llm_witness' and the reconciler warns-once + waits —
+        // never falls through to documentIngest (the explicit-allowlist protection).
+        enqueueWitnessFacts: (taskId: string) => start(workflows.witnessFacts, [{ task_id: taskId }]),
         // The MyInvois local_facts lane (Wave A2) has NO WDK workflow — a facts task is
         // driven by processLocalFactsTask directly (claim/parse/persist). The claim gate
         // makes this reconciler belt idempotent against the local_facts leader loop below.

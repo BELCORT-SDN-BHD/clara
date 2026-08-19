@@ -14,8 +14,8 @@
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, roleQuery, humanQuery, namedCall, opk, fnSource, firmOf,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  failInvoiceFacts, factField, rm, grantConsent,
+  seedCitedDocument, claimTask, persistInvoiceFacts,
+  failInvoiceFacts, factField, rm, grantConsent, mintLegacyInvoiceFactsTask,
 } from "./a21-helpers.mjs";
 
 export * from "./a21-helpers.mjs";
@@ -93,6 +93,25 @@ export async function extractionsOf(document) {
   return r.rows;
 }
 
+/** F-A1 PR-3: the WITNESS-regime sibling of extractionsOf. Reads engine_kind='llm_text_facts'
+ *  -- the CANONICAL, region-bearing, pointer-landing half of the pair (design SS3.1/SS3.3) --
+ *  the same way extractionsOf reads invoice_facts alone. The kind-scoped 0017 trigger
+ *  supersedes text-by-text, never cross-kind, so this is the chain a witness-regime cell
+ *  reads for older/newer/superseded_by exactly as extractionsOf's callers do for the legacy
+ *  chain. */
+export async function witnessExtractionsOf(document) {
+  const r = await rootQuery(
+    `select id, version_n, status, superseded_by from clara.document_extractions
+      where document_id=$1 and engine_kind='llm_text_facts' order by version_n, id`, [document]);
+  return r.rows;
+}
+
+/** The router's locked engine literal for the cutover invoice arm (must string-equal
+ *  WITNESS_ENGINE_SNAPSHOT.engineId in witnessFacts.v1.services.mjs -- f-a1-cutover.test.mjs's
+ *  own cell reads both sides and compares; this is the shared constant every OTHER x1 cell
+ *  that needs to assert the literal reuses, rather than re-typing it). */
+export const WITNESS_ENGINE_ID = "llm-openai:gpt-5.6-terra:v1";
+
 export async function authoritativeExtraction(document) {
   const r = await rootQuery(
     "select authoritative_extraction_id from clara.documents where id=$1", [document]);
@@ -133,6 +152,15 @@ export const LAI_LOU_MEI = {
   gross: 10375, net: 9430, serviceCharge: 377, tax: 566, rounding: 2,
 };
 
+// F-A1 PR-3 CUTOVER NOTE (UNNUMBERED_f_a1_cutover.sql): the router's invoice-kind arm now
+// mints llm_witness, not invoice_facts, for EVERY invoice-shaped document -- no dual-run
+// (design D9). extractedDoc/failedFactsDoc below exist to prove the LEGACY invoice_facts
+// regime's WRITE boundary (claim -> persist/fail) still works unchanged for a document that
+// already carries a legacy task -- exactly the continuity property f-a1-dispatch.test.mjs's
+// own CONTINUITY/CROSS-REGIME cells need (a MULTI-GENERATION legacy document resolving
+// through the recut dispatcher). mintLegacyInvoiceFactsTask (s6-fixtures.mjs, riding the
+// export * chain here) is the SHARED bypass -- see its own header for the full rationale.
+
 /** Seed a filed, kind-stamped invoice document and settle ONE done invoice_facts
  *  extraction over `fields` through the REAL writer (claim -> persist), so every guard the
  *  write boundary carries actually runs. Returns the seedCitedDocument receipt. */
@@ -147,8 +175,7 @@ export async function extractedDoc(sub, { client, cents = 90000, fields = null, 
   // source-stamped corpus (kind at seed, no classifier verdict) exactly as a21-ocr-envelope
   // does, so invoice_facts engages directly.
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
-  const task = await invoiceFactsTask(cited.documentId);
+  const task = await mintLegacyInvoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, fields ?? [
     factField("invoice.total", rm(cents)),
@@ -232,11 +259,33 @@ export async function failedFactsDoc(sub, { client, cents = 90000, reason = "int
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
-  const task = await invoiceFactsTask(cited.documentId);
+  // F-A1 PR-3 cutover note: see mintLegacyInvoiceFactsTask's header above extractedDoc --
+  // the real enqueue path no longer produces this lane for an invoice-kind document.
+  const task = await mintLegacyInvoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await failInvoiceFacts(task.id, reason);
   return { ...cited, taskId: task.id, versionN: task.version_n };
+}
+
+/** F-A1 PR-3: the WITNESS-regime sibling of failedFactsDoc. 0051's failed_retry admission
+ *  door reads the document's CURRENT v_lane's newest task -- for an invoice-shaped document
+ *  that is llm_witness, never invoice_facts, so failedFactsDoc's legacy failure (real as it
+ *  is for x51-intake-recovery-style ingest-failure exhibits) no longer sits where this door
+ *  looks. This fixture reproduces "a terminally-failed FIRST attempt" on the lane that
+ *  actually resolves post-cutover: seed an invoice-kind document WITHOUT granting
+ *  witness_extraction consent, so the coding-time backstop's own auto-enqueue (file_document
+ *  -> _enqueue_invoice_facts_core) fails immediately at the enqueue-time consent gate
+ *  (witness_consent_inactive) -- a genuinely terminal, never-claimed first (and only) attempt,
+ *  functionally equivalent to an engine fault for failed_retry's purposes (its own condition
+ *  reads `pft.status='failed'`, no reason discriminant). Returns the seedCitedDocument receipt
+ *  plus `{ taskId, versionN }` of the failed attempt, matching failedFactsDoc's shape. */
+export async function failedWitnessDoc(sub, { client, cents = 90000 } = {}) {
+  const firm = await firmOf(client);
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents), kind: "invoice" });
+  const failed = (await rootQuery(
+    "select id, version_n from clara.document_processing_tasks where document_id=$1 and lane='llm_witness' order by id limit 1",
+    [cited.documentId])).rows[0];
+  return { ...cited, taskId: failed.id, versionN: failed.version_n };
 }
 
 /** to_jsonb of one processing task — the whole row, so a cell can prove a terminal row was

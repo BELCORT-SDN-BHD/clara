@@ -21,8 +21,8 @@ import {
   codingRuleRows, withSessionAuth,
   // 0046: seedCorroboratingInvoiceFacts drives the REAL facts writer, so these come into
   // local scope rather than riding the `export *` below (which re-exports without binding).
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, agreedEnvelope,
-  grantConsent,
+  claimTask, persistInvoiceFacts, factField, agreedEnvelope,
+  grantConsent, mintLegacyInvoiceFactsTask,
 } from "./wave-a-fixtures.mjs";
 
 export * from "./wave-a-fixtures.mjs";
@@ -447,8 +447,9 @@ export async function seedCorroboratingInvoiceFacts(cited, {
   // self-sufficient. None of the four callers asserts on no_consent.
   if (sub && firm && client) await grantConsent(sub, { firm, client }).catch(() => {});
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
-  const task = await invoiceFactsTask(cited.documentId);
+  // F-A1 PR-3 cutover: see mintLegacyInvoiceFactsTask's header (s6-fixtures.mjs) -- the real
+  // enqueue path no longer produces invoice_facts for an invoice-kind document.
+  const task = await mintLegacyInvoiceFactsTask(cited.documentId);
   const claimed = await claimTask(task.id, { egressApproved: true });
   if (claimed?.status !== "running") {
     throw new Error(

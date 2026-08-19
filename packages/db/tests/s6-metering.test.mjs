@@ -22,7 +22,7 @@ import {
   noteLane,
   firmOf,
   seedCitedDocument,
-  enqueueInvoiceFacts,
+  mintLegacyInvoiceFactsTask,
   invoiceFactsTask,
   claimTask,
   ensureClientEgress,
@@ -69,7 +69,10 @@ test("N-F1 egress OFF: claiming an invoice_facts task with egress NOT approved H
   const firm = await firmOf(clients.A1);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   // A false-egress claim must NOT move the facts task to running.
   await claimTask(task.id, { egressApproved: false }).catch((e) => noteLane(`false-egress claim raised ${e.code} (${e.message}) — held-branch may refuse rather than hold; inspect`));
@@ -84,7 +87,10 @@ test("N-F1 release_held_document_tasks covers the invoice_facts lane (a held fac
   const firm = await firmOf(clients.A2);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: false }).catch(() => {});
   const before = await taskStatus(task.id);
@@ -104,7 +110,10 @@ test("NEW-4 a claimed+persisted invoice_facts task has a processing_call_reserva
   const firm = await firmOf(clients.A1);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00"), factField(FIELD.currency, "MYR")]);
@@ -122,7 +131,10 @@ test("NEW-4 refund-on-failure: fail_invoice_facts moves the task to failed and e
   const firm = await firmOf(clients.A2);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const before = (await rootQuery("select count(*)::int n from clara.domain_events where firm_id=$1 and event_type='document.invoice_facts_failed'", [firm])).rows[0].n;
@@ -140,7 +152,10 @@ test("status honesty: a failed invoice_facts task never touched documents.extrac
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   const st0 = (await rootQuery("select extraction_status from clara.documents where id=$1", [cited.documentId])).rows[0].extraction_status;
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await failInvoiceFacts(task.id, "engine_error").catch((e) => noteLane(`fail_invoice_facts reason 'engine_error' raised ${e.code}; the reason enum may differ (inspect)`));
@@ -164,7 +179,10 @@ test("limit: an unaffordable facts reservation refuses with CLR18 (or lands fail
   await rootQuery("update clara.firm_document_limits set pages_per_day = 0 where firm_id=$1", [firm]).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   // Either the claim/persist refuses CLR18, OR the task lands failed('budget') honestly.
   // The exact enrichment-budget LEVER is contract-silent (companion §5: "Filing

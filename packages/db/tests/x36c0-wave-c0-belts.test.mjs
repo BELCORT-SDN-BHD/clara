@@ -33,7 +33,7 @@ import {
   upsertPayableAccount, upsertAccountClassed, grantConsent,
   seedCitedDocument, freshResolution, draftEntryV3, approveEntry, reverseEntry,
   billLines, ev, FIELD, counterpartyRows, entryStatusOf, rm,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  invoiceFactsTask, mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, agreedEnvelope, factsRegion,
   mintInteractive, wakeDraftEntry,
   addClientIdentifier, addClientAlias,
@@ -121,7 +121,10 @@ async function purchaseFactsDoc(client, { gross, net = null, tax = null }) {
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross) });
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [
@@ -714,7 +717,10 @@ async function salesDirectionFiling() {
   await grantConsent(sub, { firm, client }).catch(() => {});
 
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [

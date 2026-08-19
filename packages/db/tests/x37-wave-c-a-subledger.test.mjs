@@ -91,7 +91,7 @@ import {
   a21EnsureReady, buildWorld, firmOf, createClient,
   upsertPayableAccount, upsertAccountClassed, grantConsent,
   freshResolution, draftEntryV3, approveEntry, reverseEntry, counterpartyRows,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  seedCitedDocument, invoiceFactsTask, mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, statedIdentityFields, agreedEnvelope, factsRegion, mintInteractive, wakeDraftEntry,
   ev, FIELD, billLines, rm, reasonOf, idOf, roleCanExecute, fnSource, checkDefs,
   uniqueIndexDefs, rlsFlags, entryStatusOf, normalize,
@@ -491,7 +491,10 @@ async function openApItem(sub, { client, cp, cents, control = AP1, memo = "x37 p
 async function purchaseDoc(sub, { client, gross }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross), kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
