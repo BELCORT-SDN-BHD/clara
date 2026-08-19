@@ -462,16 +462,23 @@ begin
   end if;
 
   -- N-13 (cross-model review): pin the EXACT body this splice was authored against, the same
-  -- discipline Section 0/1 already applies to _enqueue_invoice_facts_core. request_reextraction
-  -- was created in 0022, recut in 0025, and most recently in 0026_lane_widen.sql (line 994) --
-  -- no migration after 0026 touches it (verified: a repo-wide grep for this function's
-  -- recut statement finds only 0025 and 0026). [Wording note: this comment must not quote
-  -- that statement verbatim -- the wiki gate reads a CoR block's comments un-masked, and a
-  -- quoted create-function phrase reclassifies the block as a dynamic function-creator.]
+  -- discipline Section 0/1 already applies to _enqueue_invoice_facts_core. Provenance, trued
+  -- by a full-chain rig replay (the first cut of this pin was WRONG -- it hashed the raw 0026
+  -- recut and missed the later CoR splices): request_reextraction was created in 0022, recut
+  -- in 0025 and 0026_lane_widen.sql, then SPLICED by change-of-record patches (0040 S4.13's
+  -- op-key idempotency machinery is one; a name-grep for recut statements cannot see splices,
+  -- which is exactly how the first pin went wrong). The sha below is the frontier-0096
+  -- aggregate body a scratch replay of 0001..0096 produces -- the same body the live chain
+  -- carries, since the ledger checksums pin identical files. The three anchor-uniqueness
+  -- counts below remain the load-bearing guard; this sha is the tripwire that the base is
+  -- the exact body the anchors were verified against. [Wording note: this comment must not
+  -- quote a create-function statement verbatim -- the wiki gate reads a CoR block's comments
+  -- un-masked, and a quoted create-function phrase reclassifies the block as a dynamic
+  -- function-creator.]
   select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
   v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
-  if v_sha <> 'c130a69776ef5ad63fa5ecfe483a44e534c16d1eba840c73d36d92dfc0fbf3d3' then
-    raise exception 'f_a1_cutover S3 prestate: clara.request_reextraction prosrc sha256 mismatch (got %, expected c130a69776ef5ad63fa5ecfe483a44e534c16d1eba840c73d36d92dfc0fbf3d3) -- this is not the 0026 body this file was authored against', v_sha
+  if v_sha <> '1ef02d7a4d8ef63407884b1b7885361144371fb9d38ea3cf53fc7c069405ebb8' then
+    raise exception 'f_a1_cutover S3 prestate: clara.request_reextraction prosrc sha256 mismatch (got %, expected 1ef02d7a4d8ef63407884b1b7885361144371fb9d38ea3cf53fc7c069405ebb8) -- this is not the frontier-0096 aggregate body this file was authored against', v_sha
       using errcode='CLR10';
   end if;
 
