@@ -1,6 +1,6 @@
 -- 0096_f_a1_writer_rotation.sql -- Wave-F Track A, F-A1, WRITER-PARITY FIX for
 -- clara.persist_witness_facts (PR-1's writer, migration 0095). Number claimed at MERGE time
--- (standing law); THIS FILE MUST APPLY BEFORE UNNUMBERED_f_a1_cutover.sql (both files'
+-- (standing law); THIS FILE MUST APPLY BEFORE 0097_f_a1_cutover.sql (both files'
 -- headers cross-reference this ordering) -- the cutover is what makes the witness lane the
 -- ONLY invoice-shaped re-extraction settlement path, and this fix closes a real
 -- accounting-correctness hole in that path before the cutover makes it reachable by anything
@@ -98,7 +98,7 @@
 --
 -- NO D1 WRITE-QUIESCE: persist_witness_facts is reached only through claim_document_processing_task
 -- (itself reached only by a queued llm_witness task), and no llm_witness task can exist before
--- this frontier -- the router that mints one ships in UNNUMBERED_f_a1_cutover.sql, AFTER this
+-- this frontier -- the router that mints one ships in 0097_f_a1_cutover.sql, AFTER this
 -- file. This body is therefore live-inert exactly as 0090's own inert branches were: correct by
 -- construction, unreachable until the file that makes it reachable applies.
 set local statement_timeout = '5min';
@@ -124,9 +124,9 @@ begin
   end if;
   -- This file must NOT be applied after the cutover already minted live witness work -- if a
   -- queued/running/done llm_witness task already exists, the router in
-  -- UNNUMBERED_f_a1_cutover.sql landed first, which is the wrong order (this file's own header).
+  -- 0097_f_a1_cutover.sql landed first, which is the wrong order (this file's own header).
   if exists (select 1 from clara.document_processing_tasks where lane='llm_witness') then
-    raise exception 'f_a1_writer_rotation prestate: an llm_witness task ALREADY exists -- this file must apply BEFORE UNNUMBERED_f_a1_cutover.sql, not after' using errcode='CLR10';
+    raise exception 'f_a1_writer_rotation prestate: an llm_witness task ALREADY exists -- this file must apply BEFORE 0097_f_a1_cutover.sql, not after' using errcode='CLR10';
   end if;
   raise notice 'f_a1_writer_rotation prestate: clean -- persist_witness_facts is the exact 0095 body, facts_rotated absent, no llm_witness task exists yet (correct pre-cutover ordering)';
 end
@@ -468,6 +468,6 @@ begin
   if exists (select 1 from clara.document_processing_tasks where lane='llm_witness') then
     raise exception 'f_a1_writer_rotation tail: an llm_witness task exists post-apply -- this file must be the LAST word before any witness work is minted; something applied out of order' using errcode='CLR10';
   end if;
-  raise notice 'f_a1_writer_rotation tail: OK -- persist_witness_facts carries all FOUR writer-parity fixes (B1 filings->entries->task lock ordering, financial_date backfill sourced from the cross-channel-agreed state per M-5, facts_rotated draft rotation, document.invoice_facts_completed emission); live-inert (no llm_witness task exists yet, and none can until UNNUMBERED_f_a1_cutover.sql applies after this file). Census closed 7/7: items 1/3 (page-budget settle, document_kind coalesce) remain named-and-justified absences (provable no-ops for this lane), items 2/6 were already present, items 4/5/7 are fixed here (4/5 hardened by the B1/M-5 review pass). No table in workflow/graphile_worker/spike touched.';
+  raise notice 'f_a1_writer_rotation tail: OK -- persist_witness_facts carries all FOUR writer-parity fixes (B1 filings->entries->task lock ordering, financial_date backfill sourced from the cross-channel-agreed state per M-5, facts_rotated draft rotation, document.invoice_facts_completed emission); live-inert (no llm_witness task exists yet, and none can until 0097_f_a1_cutover.sql applies after this file). Census closed 7/7: items 1/3 (page-budget settle, document_kind coalesce) remain named-and-justified absences (provable no-ops for this lane), items 2/6 were already present, items 4/5/7 are fixed here (4/5 hardened by the B1/M-5 review pass). No table in workflow/graphile_worker/spike touched.';
 end
 $tail$;
