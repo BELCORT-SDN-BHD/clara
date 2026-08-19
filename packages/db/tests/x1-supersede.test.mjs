@@ -159,13 +159,13 @@ test("[0022/F-A1 PR-3] a settled re-extraction lands as a FRESH witness chain an
   assert.equal(state.extraction_id, witnessChain[0].id, "…pinned to the new (text) extraction id");
 });
 
-test("[0022/F-A1] a mid-review re-extraction cannot swap figures under an approver (contract §2 X1 build-time verification; F-A1 PR-3 writer-parity fix, UNNUMBERED_f_a1_writer_rotation.sql)", async () => {
+test("[0022/F-A1] a mid-review re-extraction cannot swap figures under an approver (contract §2 X1 build-time verification; F-A1 PR-3 writer-parity fix, 0096_f_a1_writer_rotation.sql)", async () => {
   gate();
   // Was a KNOWN GAP found while validating PR-3's cutover on this rig: clara.persist_witness_facts
   // (PR-1's writer, 0095) carried no equivalent of clara.persist_invoice_facts' inline
   // "facts_rotated" block, so a witness settle never rotated an open draft's revision token and
   // a stale-token approve succeeded silently. Escalated to the orchestrator, RULED in-charter,
-  // fixed by UNNUMBERED_f_a1_writer_rotation.sql (ported verbatim in shape, applied BEFORE the
+  // fixed by 0096_f_a1_writer_rotation.sql (ported verbatim in shape, applied BEFORE the
   // cutover file). This cell now exercises the SAME mechanism through the witness settlement
   // path it always exercised through the legacy one.
   const client = W.clients.A1;

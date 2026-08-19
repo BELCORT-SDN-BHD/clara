@@ -153,7 +153,7 @@ export const LAI_LOU_MEI = {
   gross: 10375, net: 9430, serviceCharge: 377, tax: 566, rounding: 2,
 };
 
-// F-A1 PR-3 CUTOVER NOTE (UNNUMBERED_f_a1_cutover.sql): the router's invoice-kind arm now
+// F-A1 PR-3 CUTOVER NOTE (0097_f_a1_cutover.sql): the router's invoice-kind arm now
 // mints llm_witness, not invoice_facts, for EVERY invoice-shaped document -- no dual-run
 // (design D9). extractedDoc/failedFactsDoc below exist to prove the LEGACY invoice_facts
 // regime's WRITE boundary (claim -> persist/fail) still works unchanged for a document that

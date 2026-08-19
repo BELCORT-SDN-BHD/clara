@@ -52,7 +52,7 @@ export async function invoiceFactsTask(document) {
   return r.rows[0]?.row ?? null;
 }
 
-/** F-A1 PR-3 CUTOVER (UNNUMBERED_f_a1_cutover.sql): the router's invoice-kind arm now
+/** F-A1 PR-3 CUTOVER (0097_f_a1_cutover.sql): the router's invoice-kind arm now
  *  mints llm_witness, not invoice_facts, for EVERY invoice-shaped document -- no dual-run
  *  (design D9), so enqueueInvoiceFacts()+invoiceFactsTask() above no longer produce anything
  *  for an 'invoice'-kind document. This is the SHARED bypass every legacy-regime fixture

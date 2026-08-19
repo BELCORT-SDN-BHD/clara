@@ -106,7 +106,7 @@ function applyRestoreFA1(member, src) {
 }
 
 // =========================================================================
-// AMENDMENT F-A1 PR-3 (the CUTOVER, UNNUMBERED_f_a1_cutover.sql). ONE member of §6's closed
+// AMENDMENT F-A1 PR-3 (the CUTOVER, 0097_f_a1_cutover.sql). ONE member of §6's closed
 // set -- _enqueue_invoice_facts_core ("router") -- gains a FOURTH deliberately-changed
 // layer, OUTERMOST of ALL (authored latest: after PR-1's own inert-gate branch, which this
 // amendment's edits sit textually ABOVE, in the earlier mime-routing block the PR-1 layer

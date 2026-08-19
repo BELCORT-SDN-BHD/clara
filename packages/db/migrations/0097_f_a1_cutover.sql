@@ -1,11 +1,11 @@
--- UNNUMBERED_f_a1_cutover.sql -- Wave-F Track A, F-A1 (the LLM witness-pair extraction),
+-- 0097_f_a1_cutover.sql -- Wave-F Track A, F-A1 (the LLM witness-pair extraction),
 -- PR-3: THE CUTOVER. Number claimed at MERGE time (standing law, AGENTS.md +
 -- .claude/rules/db-migrations.md). Design of record:
 -- docs/plan/active/f-a1-witness-pair-design.md SS3.5/SS3.8/SS6.4, D7, D9 +
 -- f-a1-annexes.md Annex A walls 4/10/12.
 --
 -- DEPLOY ORDER (BINDING, design SS6.4): this file applies (a) AFTER
--- UNNUMBERED_f_a1_writer_rotation.sql -- checked in this file's own prestate (the
+-- 0096_f_a1_writer_rotation.sql -- checked in this file's own prestate (the
 -- facts_rotated marker) -- and (b) only after the PR-2 runtime image (witnessFacts.v1 +
 -- enqueueForLane's llm_witness arm + startWorld's enqueueWitnessFacts dep) is verified LIVE.
 -- There is no DB-side prestate check that can
@@ -117,11 +117,11 @@ begin
         and pg_get_constraintdef(oid) like '%wait\_exhausted%') then
     raise exception 'f_a1_cutover prestate: ck_processing_task_error_code_f_a1 ALREADY admits wait_exhausted -- already applied' using errcode='CLR10';
   end if;
-  -- UNNUMBERED_f_a1_writer_rotation.sql must apply BEFORE this file (both files' headers name
+  -- 0096_f_a1_writer_rotation.sql must apply BEFORE this file (both files' headers name
   -- the ordering) -- checked here by its own load-bearing marker, not assumed.
   if position('facts_rotated' in
       (select p.prosrc from pg_proc p where p.oid='clara.persist_witness_facts(uuid,jsonb,jsonb,int)'::regprocedure)) = 0 then
-    raise exception 'f_a1_cutover prestate: persist_witness_facts does not carry facts_rotated -- UNNUMBERED_f_a1_writer_rotation.sql must apply BEFORE this file' using errcode='CLR10';
+    raise exception 'f_a1_cutover prestate: persist_witness_facts does not carry facts_rotated -- 0096_f_a1_writer_rotation.sql must apply BEFORE this file' using errcode='CLR10';
   end if;
 
   select p.prosrc into v_src from pg_proc p where p.oid='clara.request_reextraction(uuid,text,text)'::regprocedure;
@@ -623,6 +623,6 @@ begin
         and pg_get_constraintdef(oid) like '%wait\_exhausted%') then
     raise exception 'f_a1_cutover tail: wait_exhausted is not admitted by ck_processing_task_error_code_f_a1' using errcode='CLR10';
   end if;
-  raise notice 'f_a1_cutover tail: OK -- _enqueue_invoice_facts_core mints llm_witness for the invoice-kind arm (no dual-run), already_completed resolves via llm_text_facts; clara.fail_witness_facts installed (clara_runtime-only) admitting the EXACT 8-code runtime vocabulary (bad_type, limit, internal, corrupt, encrypted, witness_consent_inactive, witness_multi_client, wait_exhausted -- else engine_error); request_reextraction''s door widens with branch order preserved and the SAME engine literal. The queued->failed transition stays exactly wall 13''s two witness consent codes (unchanged by this file); the running->failed transition arm is confirmed error_code-and-lane-unconstrained (0090 S10, re-read not re-widened) so it already admits all eight. No table in workflow/graphile_worker/spike touched. Deploy-order note: this file applies ONLY after UNNUMBERED_f_a1_writer_rotation.sql (checked in the prestate) and after the PR-2 runtime image is verified live -- no DB-side prestate can enforce the LATTER ordering (stated in the file header), but an old runtime image cannot mint anything on this lane regardless (enqueueForLane''s allowlist + the 0090 lane/prefix CHECKs, verified independently of this file). D1 write-quiesce taken for sections 1 and 3 (both replace live hot-path bodies); section 2 is a brand-new verb + a CHECK widening, no quiesce owed.';
+  raise notice 'f_a1_cutover tail: OK -- _enqueue_invoice_facts_core mints llm_witness for the invoice-kind arm (no dual-run), already_completed resolves via llm_text_facts; clara.fail_witness_facts installed (clara_runtime-only) admitting the EXACT 8-code runtime vocabulary (bad_type, limit, internal, corrupt, encrypted, witness_consent_inactive, witness_multi_client, wait_exhausted -- else engine_error); request_reextraction''s door widens with branch order preserved and the SAME engine literal. The queued->failed transition stays exactly wall 13''s two witness consent codes (unchanged by this file); the running->failed transition arm is confirmed error_code-and-lane-unconstrained (0090 S10, re-read not re-widened) so it already admits all eight. No table in workflow/graphile_worker/spike touched. Deploy-order note: this file applies ONLY after 0096_f_a1_writer_rotation.sql (checked in the prestate) and after the PR-2 runtime image is verified live -- no DB-side prestate can enforce the LATTER ordering (stated in the file header), but an old runtime image cannot mint anything on this lane regardless (enqueueForLane''s allowlist + the 0090 lane/prefix CHECKs, verified independently of this file). D1 write-quiesce taken for sections 1 and 3 (both replace live hot-path bodies); section 2 is a brand-new verb + a CHECK widening, no quiesce owed.';
 end
 $tail$;

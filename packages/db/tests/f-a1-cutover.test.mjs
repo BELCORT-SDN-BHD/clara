@@ -1,5 +1,5 @@
 // F-A1 (Wave-F Track A) PR-3 -- THE CUTOVER battery, for
-// migrations/UNNUMBERED_f_a1_cutover.sql (number claimed at merge). NOT contract-blind: this
+// migrations/0097_f_a1_cutover.sql (number claimed at merge). NOT contract-blind: this
 // lane authored the migration, so every cell targets the ACTUAL installed behaviour. Design:
 // docs/plan/active/f-a1-witness-pair-design.md §3.5/§3.8/§6.4, D7, D9.
 //
@@ -47,7 +47,7 @@ async function cutoverReady() {
   const s = r.rows[0];
   if (!s.fail_verb && !s.router_cut && !s.reext_cut) return false;
   if (!s.fail_verb || !s.router_cut || !s.reext_cut) {
-    throw new Error(`F-A1 PR-3 DRIFT: a half-applied cutover -- fail_witness_facts=${s.fail_verb} router_cut=${s.router_cut} reext_cut=${s.reext_cut} -- apply UNNUMBERED_f_a1_cutover.sql as a whole`);
+    throw new Error(`F-A1 PR-3 DRIFT: a half-applied cutover -- fail_witness_facts=${s.fail_verb} router_cut=${s.router_cut} reext_cut=${s.reext_cut} -- apply 0097_f_a1_cutover.sql as a whole`);
   }
   return true;
 }
@@ -65,7 +65,7 @@ after(async () => {
 });
 
 function mustBeReady() {
-  assert.ok(ready, "UNNUMBERED_f_a1_cutover.sql is not applied on this database -- this battery must FAIL, not skip, against a pre-PR-3 chain");
+  assert.ok(ready, "0097_f_a1_cutover.sql is not applied on this database -- this battery must FAIL, not skip, against a pre-PR-3 chain");
 }
 
 async function taskRow(id) {
@@ -116,7 +116,7 @@ async function setWitnessConcurrency(firm, n) {
   await rootQuery("update clara.firm_document_limits set llm_witness_concurrency=$2 where firm_id=$1", [firm, n]);
 }
 
-test("META: UNNUMBERED_f_a1_cutover.sql is applied", async () => {
+test("META: 0097_f_a1_cutover.sql is applied", async () => {
   mustBeReady();
 });
 
@@ -410,7 +410,7 @@ test("f-a1-cutover.j the engine literal string-equals the runtime's WITNESS_ENGI
 
 // ===========================================================================
 // SECTION 5 -- clara.persist_witness_facts' writer-parity fixes
-// (UNNUMBERED_f_a1_writer_rotation.sql): the financial_date backfill and the
+// (0096_f_a1_writer_rotation.sql): the financial_date backfill and the
 // document.invoice_facts_completed completion event. (The facts_rotated draft-rotation half
 // of that migration is exercised end-to-end by x1-supersede.test.mjs's mid-review-swap cell,
 // which needs a real open draft + approver -- not duplicated here.)

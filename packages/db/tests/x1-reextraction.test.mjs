@@ -21,7 +21,7 @@ import {
 } from "./x1-helpers.mjs";
 import { grantPurpose, activatePurpose, consentEvidenceDoc } from "./wave-b/wb-0020-helpers.mjs";
 
-// F-A1 PR-3 CUTOVER (UNNUMBERED_f_a1_cutover.sql, design D7/D9): request_reextraction's
+// F-A1 PR-3 CUTOVER (0097_f_a1_cutover.sql, design D7/D9): request_reextraction's
 // invoice-shaped-document arm now mints llm_witness -- its OWN version_n counter, its OWN
 // engine literal -- never invoice_facts (no dual-run). Every cell below that reads back the
 // MINTED task now reads the llm_witness lane specifically; extractedDoc's own fixture task

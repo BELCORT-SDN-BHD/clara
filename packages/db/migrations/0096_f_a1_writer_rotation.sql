@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a1_writer_rotation.sql -- Wave-F Track A, F-A1, WRITER-PARITY FIX for
+-- 0096_f_a1_writer_rotation.sql -- Wave-F Track A, F-A1, WRITER-PARITY FIX for
 -- clara.persist_witness_facts (PR-1's writer, migration 0095). Number claimed at MERGE time
 -- (standing law); THIS FILE MUST APPLY BEFORE UNNUMBERED_f_a1_cutover.sql (both files'
 -- headers cross-reference this ordering) -- the cutover is what makes the witness lane the
