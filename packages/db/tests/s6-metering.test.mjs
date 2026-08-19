@@ -117,6 +117,12 @@ test("NEW-4 a claimed+persisted invoice_facts task has a processing_call_reserva
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00"), factField(FIELD.currency, "MYR")]);
+  // N-14 (cross-model review): this reservation row's provenance moved post-cutover.
+  // Pre-cutover, the retired router reserved it at enqueue time; mintLegacyInvoiceFactsTask
+  // now reserves it itself (the bypass mirrors that enqueue-time side effect exactly, per its
+  // own doc-comment in s6-fixtures.mjs), so what this assertion actually proves is unchanged:
+  // a claimed+persisted invoice_facts task carries a pages-only reservation row, regardless of
+  // which caller opened it.
   const res = await rootQuery("select to_jsonb(r) as row from clara.processing_call_reservations r where r.task_id=$1", [task.id]).catch(() => ({ rows: [] }));
   if (!res.rows.length) { noteLane("no processing_call_reservations row keyed by task_id found — the metering carrier column name may differ; inspect (NEW-4)"); return; }
   const row = res.rows[0].row;

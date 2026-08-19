@@ -141,31 +141,79 @@ async function addLatestOcr(document, text) {
   );
 }
 
-/** Push a NEWER invoice_facts extraction onto an EXISTING (already-extracted)
- *  document. F-A1 PR-3 CUTOVER: request_reextraction's invoice-shaped arm now mints
- *  llm_witness too (no dual-run, D9), so the real re-extraction verb no longer lands
- *  a second task on THIS lane at all -- this cell's whole point is a newer
- *  invoice_facts (legacy-regime) extraction, feeding the near_duplicate machinery
- *  the SAME way seedFactFiling's first pass did, so it mints the legacy task
- *  directly rather than through the now-witness-routed verb. */
+const WITNESS_BELT = [
+  "invoice.total", "invoice.total_excl_tax", "invoice.tax_total", "invoice.rounding",
+  "invoice.service_charge", "invoice.discount", "invoice.delivery",
+  "invoice.amount_due", "invoice.deposit", "invoice.currency", "invoice.type_code",
+];
+function x31WitnessEnvelope(channel, totalRaw) {
+  const answers = {};
+  for (const f of WITNESS_BELT) answers[f] = f === "invoice.total" ? { state: "value", raw: totalRaw } : { state: "not_printed" };
+  return { witness: { channel, answers } };
+}
+
+/** Push a NEWER extraction onto an EXISTING (already-extracted) document, through the REAL
+ *  clara.request_reextraction verb (M-8, cross-model review: restored -- the SAME shape a
+ *  genuine re-read drives, not a hand-built bypass). F-A1 PR-3 CUTOVER: the invoice-shaped
+ *  arm now mints llm_witness, never invoice_facts (no dual-run, D9), so this settles through
+ *  clara.persist_witness_facts instead of persist_invoice_facts -- the SAME shape
+ *  x1-supersede.test.mjs's settleReextraction already proves. The near_duplicate machinery
+ *  this cell exists to test reads through clara._invoice_fact_state, PR-1's cross-regime
+ *  dispatcher (0092/0093), which is regime-agnostic by design -- so landing on the witness
+ *  lane rather than the legacy one changes nothing the assertions below actually check. */
 async function addLatestFacts(documentId, { amount, invoiceId, vendorName, vendorRegistration }) {
-  await mintLegacyInvoiceFactsTask(documentId);
-  const task = await invoiceFactsTask(documentId);
+  const { requestReextraction } = await import("./x1-helpers.mjs");
+  const receipt = await requestReextraction(w.users.alice, { document: documentId, reason: "x31 drifted re-read" });
+  const task = { id: receipt.task_id, version_n: receipt.version_n };
   await claimTask(task.id, { egressApproved: true });
-  await persistInvoiceFacts(task.id, [
-    factField(FIELD.total, money(amount)),
-    factField(FIELD.currency, "MYR"),
-    factField(FIELD.vendorName, vendorName),
-    factField(FIELD.invoiceId, invoiceId),
-    // Without a registration region, the re-extraction resolves the vendor via a
-    // NAME-ONLY lookup, which is `registered_name_ambiguous` (-> vendor_ambiguous,
-    // AB-16) against an already-registered counterparty -- unrelated to what this
-    // cell is proving, so the registration must be carried forward identically.
-    ...(vendorRegistration !== undefined
-      ? [factField("invoice.vendor_registration", vendorRegistration)]
-      : []),
-    ...statedIdentityFields(amount),
-  ], { envelope: agreedEnvelope() });
+
+  const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [documentId])).rows[0].firm_id;
+  const sha256 = (await rootQuery("select sha256 from clara.documents where id=$1", [documentId])).rows[0].sha256;
+  const ocrExtraction = (await rootQuery(
+    `select id from clara.document_extractions
+      where document_id=$1 and engine_kind='ocr' and status='done' order by version_n desc limit 1`,
+    [documentId])).rows[0].id;
+  // document_regions is append-only (0007's _tf_append_only) -- a drifted re-read cites NEW
+  // regions on the SAME pinned OCR extraction, never an UPDATE of the original quote.
+  const money_ = money(amount);
+  const newFields = [
+    { field_path: "invoice.total", text_content: money_ },
+    { field_path: "invoice.invoice_id", text_content: invoiceId },
+    { field_path: "invoice.vendor_name", text_content: vendorName },
+    // Without a registration region, the re-extraction resolves the vendor via a NAME-ONLY
+    // lookup, which is `registered_name_ambiguous` (-> vendor_ambiguous, AB-16) against an
+    // already-registered counterparty -- unrelated to what this cell is proving, so the
+    // registration must be carried forward identically.
+    ...(vendorRegistration !== undefined ? [{ field_path: "invoice.vendor_registration", text_content: vendorRegistration }] : []),
+  ];
+  const inserted = [];
+  for (const f of newFields) {
+    const r = await rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)
+       returning id`,
+      [firm, ocrExtraction, f.field_path, f.text_content]);
+    inserted.push({ field_path: f.field_path, id: r.rows[0].id });
+  }
+  const idxRows = (await rootQuery(
+    `select id, (row_number() over (order by id))::int as idx
+       from clara.document_regions where extraction_id=$1`,
+    [ocrExtraction])).rows;
+  const idxById = new Map(idxRows.map((r) => [r.id, r.idx]));
+  const citations = inserted.map((f) => ({ field_path: f.field_path, region_idx: idxById.get(f.id) }));
+
+  const text = {
+    input_pin: ocrExtraction, prompt_hash: `text-${randomUUID()}`,
+    envelope: x31WitnessEnvelope("text", money_), citations,
+  };
+  const vision = {
+    input_pin: sha256, prompt_hash: `vision-${randomUUID()}`,
+    envelope: x31WitnessEnvelope("vision", money_),
+  };
+  await rootQuery(
+    "select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as s",
+    [task.id, JSON.stringify(text), JSON.stringify(vision), 1]);
+
   const state = (await rootQuery(
     "select clara._invoice_fact_state($1) as state",
     [documentId],

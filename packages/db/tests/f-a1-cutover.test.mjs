@@ -503,3 +503,56 @@ test("f-a1-cutover.m a settled witness pair appends exactly one document.invoice
   const afterReplay = await eventCount(firm, "document.invoice_facts_completed", seed.documentId);
   assert.equal(afterReplay, after_, "a replay appends NO additional event");
 });
+
+// ===========================================================================
+// SECTION 6 -- M-4 (RULED, cross-model review): the already_completed short-circuit is
+// EITHER-REGIME. A done extraction in EITHER legacy invoice_facts OR the witness
+// llm_text_facts row suppresses the automatic backstop's re-mint -- no silent fact-flip
+// under an already-drafted document, no unbudgeted re-read of the legacy corpus. A
+// DELIBERATE regime upgrade stays available through request_reextraction (the human-keyed
+// door, which always mints fresh -- own admission logic, never already_completed) or
+// Wave-G's factory reset. Cell c above already proves the witness-pair side; this section
+// proves the legacy side and the request_reextraction contrast.
+// ===========================================================================
+
+test("f-a1-cutover.n M-4: a document with a DONE legacy invoice_facts extraction ALSO suppresses the automatic re-fire via already_completed -- the EITHER-REGIME short-circuit's legacy side", async () => {
+  mustBeReady();
+  const { clients } = world;
+  const firm = await firmOf(clients.A1);
+  const seed = await seedVerifiedDocument({ firm, client: null, kind: "invoice" });
+  const legacyExtraction = (await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count)
+     values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','invoice_facts',1,'done',1) returning id`,
+    [firm, seed.documentId])).rows[0].id;
+
+  const r = await rootQuery("select clara._enqueue_invoice_facts_core($1) as r", [seed.documentId]);
+  const receipt = r.rows[0].r;
+  assert.equal(receipt.status, "already_completed", `a done LEGACY extraction must ALSO short-circuit (got ${JSON.stringify(receipt)})`);
+  assert.equal(receipt.extraction_id, legacyExtraction, "the reported extraction_id is the legacy invoice_facts row");
+  assert.equal((await tasksOf(seed.documentId)).filter((t) => t.lane === "llm_witness").length, 0,
+    "no llm_witness task was minted -- the backstop never re-derives facts under a DIFFERENT regime on its own");
+});
+
+test("f-a1-cutover.o M-4: request_reextraction is NEVER short-circuited by already_completed -- it still mints fresh over a done LEGACY extraction, the DELIBERATE human-keyed upgrade door", async () => {
+  mustBeReady();
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  const seed = await seedVerifiedDocument({ firm, client: null, kind: "invoice" });
+  await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count)
+     values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','invoice_facts',1,'done',1)`,
+    [firm, seed.documentId]);
+
+  // The automatic backstop suppresses (M-4's whole point)…
+  const auto = await rootQuery("select clara._enqueue_invoice_facts_core($1) as r", [seed.documentId]);
+  assert.equal(auto.rows[0].r.status, "already_completed", "mandatory setup: the automatic backstop suppresses over the legacy extraction");
+
+  // …but the human-keyed door mints fresh regardless -- request_reextraction has its OWN
+  // 'reextraction' admission arm (already-widened to read EITHER regime, section 3 above) and
+  // is never routed through already_completed at all.
+  const res = await requestReextraction(users.bob, { document: seed.documentId });
+  assert.equal(res.status, "queued", "request_reextraction mints fresh -- the deliberate upgrade seam stays open");
+  assert.equal(res.admission, "reextraction");
+  const row = await taskRow(res.task_id);
+  assert.equal(row.lane, "llm_witness", "the fresh mint targets llm_witness, per D9's no-dual-run contract");
+});

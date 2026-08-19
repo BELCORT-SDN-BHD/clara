@@ -26,6 +26,7 @@ import {
   draftEntryV3, approveEntry, freshResolution, ev, FIELD,
   laneTasks, markSkip, requireRecoveryDoor,
   failedWitnessDoc, witnessExtractionsOf,
+  holdThenContend,
 } from "./x1-helpers.mjs";
 
 let W = null;
@@ -219,6 +220,101 @@ test("[0022/F-A1] a mid-review re-extraction cannot swap figures under an approv
   const ok = await approveEntry(W.users.alice, {
     entry: draft.entry_id, expectedRevision: rotated, opKey: opk("x1a2") });
   assert.ok(ok, "with the CURRENT token the same approval goes through");
+});
+
+test("[F-A1 PR-3 B1, cross-model review] persist_witness_facts' facts_rotated block honors the SAME filings->entries->task lock order approve_entry-style callers hold -- a concurrent lock holder BLOCKS the settle (X7 law, proven via pg_blocking_pids), which then completes and rotates cleanly the instant the holder commits: no NULL-token 23502, no escaped draft", async () => {
+  gate();
+  const client = W.clients.A1;
+  const doc = await extractedDoc(W.users.alice, { client, cents: 135000 });
+
+  const draft = await draftEntryV3(W.users.bob, {
+    client,
+    resolution: await freshResolution(W.users.bob, client, {
+      subjectKind: "document", subjectId: doc.documentId }),
+    document: doc.documentId, sha256: doc.sha256,
+    lines: [
+      { account_code: W.coa.A1.expense, debit_cents: 135000, credit_cents: 0, description: "b1-dr" },
+      { account_code: W.coa.A1.cash, debit_cents: 0, credit_cents: 135000, description: "b1-cr" },
+    ],
+    evidence: [ev(doc.regionId, doc.quote, FIELD.total)],
+    opKey: opk("b1d"),
+  });
+  const staleToken = draft.revision_token;
+  assert.ok(staleToken, "the reviewer holds a revision token (mandatory setup)");
+
+  await requestReextraction(W.users.bob, {
+    document: doc.documentId, reason: "b1 lock-order probe", opKey: opk("b1rex") });
+  const queued = (await rootQuery(
+    `select id from clara.document_processing_tasks
+       where document_id=$1 and lane='llm_witness' and status='queued' order by version_n desc limit 1`,
+    [doc.documentId])).rows[0];
+  assert.ok(queued, "mandatory setup: the re-extraction minted a queued llm_witness task");
+  await claimTask(queued.id, { egressApproved: true });
+
+  // Build the settle payload OUTSIDE the race (its own committed reads/writes) -- only the
+  // persist_witness_facts CALL ITSELF runs inside T2, so the race isolates exactly the
+  // serialization contract under test, nothing incidental to it.
+  const ocrExtraction = (await rootQuery(
+    `select id from clara.document_extractions
+       where document_id=$1 and engine_kind='ocr' and status='done' order by version_n desc limit 1`,
+    [doc.documentId])).rows[0].id;
+  const firmId = (await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId])).rows[0].firm_id;
+  const raw = rm(153000);
+  const newRegion = (await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'reextraction_total',$3,1.0)
+     returning id`,
+    [firmId, ocrExtraction, raw])).rows[0];
+  const idx = (await rootQuery(
+    `select idx from (select id, (row_number() over (order by id))::int as idx
+       from clara.document_regions where extraction_id=$1) q where q.id=$2`,
+    [ocrExtraction, newRegion.id])).rows[0].idx;
+  const text = {
+    input_pin: ocrExtraction, prompt_hash: `text-${randomUUID()}`, envelope: witnessEnvelope("text", raw),
+    citations: [{ field_path: "invoice.total", region_idx: idx }],
+  };
+  const vision = { input_pin: doc.sha256, prompt_hash: `vision-${randomUUID()}`, envelope: witnessEnvelope("vision", raw) };
+
+  // T1 (clara_fn_owner, the SAME role every audited SECURITY DEFINER writer runs as, including
+  // _approve_entry_core): holds the filings then entries locks -- the EXACT order B1 puts in
+  // front of persist_witness_facts' own task re-lock. T2 (clara_runtime, persist_witness_facts'
+  // real EXECUTE grantee): the genuine settle call. If B1 regressed (order inverted, or the
+  // locks silently dropped), T2 either races past T1 (provedBlocked=false) or the pair
+  // deadlocks (40P01) -- neither is a passing outcome here.
+  const out = await holdThenContend({
+    a: {
+      role: "clara_fn_owner",
+      run: (c) => c.query(
+        `select 1 from clara.document_filings f
+           where f.document_id=$1 and f.retired_at is null order by f.id for update`,
+        [doc.documentId],
+      ).then(() => c.query(
+        `select 1 from clara.journal_entries e join clara.document_filings f on f.id=e.filing_id
+           where f.document_id=$1 and f.retired_at is null and e.status='draft' order by e.id for update of e`,
+        [doc.documentId],
+      )),
+    },
+    b: {
+      role: "clara_runtime",
+      run: (c) => c.query(
+        "select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as s",
+        [queued.id, JSON.stringify(text), JSON.stringify(vision), 1],
+      ),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "persist_witness_facts genuinely BLOCKED behind the held filings/entries locks -- not a lucky ordering (B1)");
+  assert.equal(out.a.ok, true, `T1 (the lock holder) should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.b.ok, true, `T2 (persist_witness_facts) should succeed once T1 commits, never a NULL-token 23502 or a deadlock: ${out.b.message ?? ""}`);
+
+  const rotated = (await rootQuery(
+    "select revision_token from clara.journal_entries where id=$1", [draft.entry_id])).rows[0].revision_token;
+  assert.ok(rotated, "the draft's revision_token is non-NULL after the race (no NULL-token 23502)");
+  assert.notEqual(rotated, staleToken, "the draft was NOT escaped by the race -- its token rotated exactly as an uncontended settle would rotate it");
+  const rev = await rootQuery(
+    `select reason from clara.journal_entry_revisions where entry_id=$1 order by revision_no desc limit 1`,
+    [draft.entry_id]);
+  assert.equal(rev.rows[0].reason, "facts_rotated", "…and left the named revision row, exactly as an uncontended settle would");
 });
 
 // ===========================================================================

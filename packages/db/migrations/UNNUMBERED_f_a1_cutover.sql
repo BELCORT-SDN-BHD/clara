@@ -158,7 +158,7 @@ set role clara_fn_owner;
 do $router$
 declare
   v_sig text := 'clara._enqueue_invoice_facts_core(uuid)';
-  v_def text; v_frm1 text; v_to1 text; v_frm2 text; v_to2 text; v_cnt int;
+  v_def text; v_frm1 text; v_to1 text; v_frm2 text; v_to2 text; v_frm3 text; v_to3 text; v_cnt int;
 begin
   select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
   if v_def is null then
@@ -210,6 +210,42 @@ begin
                        else 'invoice_facts' end;$t2$;
   v_def := replace(v_def, v_frm2, v_to2);
 
+  -- Edit 3 (M-4, cross-model review, RULED): the already_completed short-circuit is
+  -- EITHER-REGIME for the invoice-shaped lane -- a done extraction in EITHER legacy
+  -- invoice_facts OR the witness llm_text_facts row suppresses a re-mint. Rationale: a
+  -- document this old pipeline already fully drafted from must never silently re-derive its
+  -- facts under a DIFFERENT regime just because the automatic backstop re-fires (file_document/
+  -- finalize_document_intake/confirm_attribution_candidate/approve_wrong_client_correction all
+  -- call this core) -- that would risk a silent fact-flip under an already-drafted document
+  -- (a second, independently-sourced number landing behind an approver's back) and an
+  -- unbudgeted re-read of the legacy corpus (every already-extracted invoice re-buying a
+  -- witness call on its NEXT ordinary re-fire). A DELIBERATE legacy-to-witness upgrade stays
+  -- available through the human-keyed request_reextraction door (which always mints fresh,
+  -- never short-circuits) or Wave-G's factory reset -- never through this silent backstop.
+  v_frm3 := $f3$    select e.id into v_task from clara.document_extractions e
+      where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'
+      order by e.version_n desc limit 1;
+    if v_task is not null then$f3$;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm3, ''))) / length(v_frm3);
+  if v_cnt <> 1 then
+    raise exception 'f_a1_cutover S1 prestate: the already_completed lookup+check appears % times (expected exactly 1) -- the live body drifted from the 0090 S7e shape', v_cnt
+      using errcode='CLR10';
+  end if;
+  v_to3 := $t3$    select e.id into v_task from clara.document_extractions e
+      where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'
+      order by e.version_n desc limit 1;
+    -- F-A1 PR-3 (M-4, RULED): for the invoice-shaped lane ONLY, a done LEGACY extraction ALSO
+    -- suppresses -- v_engine_kind above already names the witness side (llm_text_facts); this
+    -- is the legacy side of the EITHER-REGIME check, consulted only when the witness lookup
+    -- just found nothing.
+    if v_task is null and v_lane='llm_witness' then
+      select e.id into v_task from clara.document_extractions e
+        where e.document_id=p_document and e.engine_kind='invoice_facts' and e.status='done'
+        order by e.version_n desc limit 1;
+    end if;
+    if v_task is not null then$t3$;
+  v_def := replace(v_def, v_frm3, v_to3);
+
   execute v_def;
 end
 $router$;
@@ -229,6 +265,14 @@ begin
   if position($m$when v_lane='llm_witness'
                        then 'llm_text_facts'$m$ in v_src) = 0 then
     raise exception 'f_a1_cutover S1 postcheck: the already_completed map does not resolve llm_witness -> llm_text_facts' using errcode='CLR10';
+  end if;
+  -- M-4 (RULED): the EITHER-REGIME short-circuit -- a done LEGACY invoice_facts extraction
+  -- also suppresses a re-mint for the llm_witness lane, consulted only when the witness
+  -- lookup found nothing.
+  if position($m$if v_task is null and v_lane='llm_witness' then
+      select e.id into v_task from clara.document_extractions e
+        where e.document_id=p_document and e.engine_kind='invoice_facts' and e.status='done'$m$ in v_src) = 0 then
+    raise exception 'f_a1_cutover S1 postcheck: the already_completed short-circuit is not EITHER-REGIME -- the legacy-side fallback check is missing' using errcode='CLR10';
   end if;
   -- Every branch this file does NOT name must survive verbatim.
   if position($m$elsif v_lane='llm_witness' then$m$ in v_src) = 0 then
@@ -263,7 +307,7 @@ begin
                    and pg_get_userbyid(p.proowner) = 'clara_fn_owner') then
     raise exception 'f_a1_cutover S1 postcheck: _enqueue_invoice_facts_core is no longer a search_path-pinned SECURITY DEFINER owned by clara_fn_owner' using errcode='CLR10';
   end if;
-  raise notice 'f_a1_cutover S1: _enqueue_invoice_facts_core recut -- the invoice-kind arm (invoice/credit_note/debit_note/receipt, unwidened) now mints llm_witness with engine llm-openai:gpt-5.6-terra:v1; already_completed resolves llm_witness via the canonical llm_text_facts row; the 0090 S7e consent gate is unchanged text but now LIVE; every other arm (bank_statement, statement_parse, classify, xml, the page-budget reserving list) verified byte-unmoved; ACL/ownership unmoved.';
+  raise notice 'f_a1_cutover S1: _enqueue_invoice_facts_core recut -- the invoice-kind arm (invoice/credit_note/debit_note/receipt, unwidened) now mints llm_witness with engine llm-openai:gpt-5.6-terra:v1; already_completed is EITHER-REGIME (M-4, RULED) -- a done llm_text_facts row OR a done legacy invoice_facts row both suppress a re-mint, never a silent regime upgrade on the automatic backstop; the 0090 S7e consent gate is unchanged text but now LIVE; every other arm (bank_statement, statement_parse, classify, xml, the page-budget reserving list) verified byte-unmoved; ACL/ownership unmoved.';
 end
 $router_post$;
 
@@ -409,11 +453,24 @@ set role clara_fn_owner;
 do $reext$
 declare
   v_sig text := 'clara.request_reextraction(uuid,text,text)';
-  v_def text; v_frm1 text; v_to1 text; v_frm2 text; v_to2 text; v_cnt int;
+  v_def text; v_frm1 text; v_to1 text; v_frm2 text; v_to2 text; v_frm3 text; v_to3 text; v_cnt int;
+  v_src text; v_sha text;
 begin
   select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
   if v_def is null then
     raise exception 'f_a1_cutover S3 prestate: clara.request_reextraction is GONE' using errcode='CLR10';
+  end if;
+
+  -- N-13 (cross-model review): pin the EXACT body this splice was authored against, the same
+  -- discipline Section 0/1 already applies to _enqueue_invoice_facts_core. request_reextraction
+  -- was created in 0022, recut in 0025, and most recently in 0026_lane_widen.sql (line 994) --
+  -- no migration after 0026 touches it (verified: a repo-wide grep for
+  -- "create or replace function clara.request_reextraction" finds only 0025 and 0026).
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
+  v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
+  if v_sha <> 'c130a69776ef5ad63fa5ecfe483a44e534c16d1eba840c73d36d92dfc0fbf3d3' then
+    raise exception 'f_a1_cutover S3 prestate: clara.request_reextraction prosrc sha256 mismatch (got %, expected c130a69776ef5ad63fa5ecfe483a44e534c16d1eba840c73d36d92dfc0fbf3d3) -- this is not the 0026 body this file was authored against', v_sha
+      using errcode='CLR10';
   end if;
 
   -- Edit 1: the invoice-shaped-document engine mint. The kind gate above this text
@@ -457,6 +514,27 @@ begin
         and e.engine_kind in ('invoice_facts', 'llm_text_facts')) then
     v_admission := 'reextraction';$t2$;
   v_def := replace(v_def, v_frm2, v_to2);
+
+  -- Edit 3 (M-6, cross-model review): filed_bootstrap's "zero tasks in v_lane" guard must
+  -- read BOTH lanes for an invoice-shaped document post-cutover, or legacy invoice_facts
+  -- attempt history stops counting -- a document with a FAILED legacy invoice_facts task (but
+  -- zero llm_witness tasks, since v_lane is now llm_witness) would otherwise look
+  -- task-free-in-v_lane and wrongly bootstrap fresh, silently discarding the attempt history
+  -- the ordinary bounded-retry loop and the 3-attempt cap depend on.
+  v_frm3 := $f3$   and not exists (select 1 from clara.document_processing_tasks ptf
+      where ptf.document_id = p_document and ptf.lane = v_lane)$f3$;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm3, ''))) / length(v_frm3);
+  if v_cnt <> 1 then
+    raise exception 'f_a1_cutover S3 prestate: the filed_bootstrap lane guard appears % times (expected exactly 1) -- the live body drifted from the 0026 shape', v_cnt
+      using errcode='CLR10';
+  end if;
+  v_to3 := $t3$   and not exists (select 1 from clara.document_processing_tasks ptf
+      where ptf.document_id = p_document
+        and (ptf.lane = v_lane
+             -- F-A1 PR-3 (M-6, RULED): legacy attempt history still counts against the
+             -- invoice-shaped lane's bootstrap door, even though v_lane is now llm_witness.
+             or (v_lane = 'llm_witness' and ptf.lane = 'invoice_facts')))$t3$;
+  v_def := replace(v_def, v_frm3, v_to3);
 
   execute v_def;
 end
@@ -503,6 +581,9 @@ begin
   if position('filed_bootstrap' in v_src) = 0 then
     raise exception 'f_a1_cutover S3 postcheck: the filed_bootstrap door was lost' using errcode='CLR10';
   end if;
+  if position($m$or (v_lane = 'llm_witness' and ptf.lane = 'invoice_facts')$m$ in v_src) = 0 then
+    raise exception 'f_a1_cutover S3 postcheck: M-6 regressed -- filed_bootstrap''s lane guard no longer reads BOTH lanes for the invoice-shaped door' using errcode='CLR10';
+  end if;
   -- ACLs unmoved (CREATE OR REPLACE preserves them; re-measured, not assumed). Compared by
   -- OID via a regrole cast -- never pg_get_userbyid(0), which is the PUBLIC-grantee trap the
   -- 0026 tail census itself guards with an explicit `grantee = 0 or` arm.
@@ -517,7 +598,7 @@ begin
                    and pg_get_userbyid(p.proowner) = 'clara_fn_owner') then
     raise exception 'f_a1_cutover S3 postcheck: request_reextraction is no longer a search_path-pinned SECURITY DEFINER owned by clara_fn_owner' using errcode='CLR10';
   end if;
-  raise notice 'f_a1_cutover S3: request_reextraction recut -- the invoice-shaped arm mints llm_witness with engine llm-openai:gpt-5.6-terra:v1; the primary admission door admits a done llm_text_facts row BEFORE the receipt_backfill arm (branch order verified); the page-budget reservation clause is byte-untouched and invoice_facts-only (now dead for the invoice arm, which is the D7 contract); receipt_backfill and filed_bootstrap survive; ACL/ownership unmoved.';
+  raise notice 'f_a1_cutover S3: request_reextraction recut -- the invoice-shaped arm mints llm_witness with engine llm-openai:gpt-5.6-terra:v1; the primary admission door admits a done llm_text_facts row BEFORE the receipt_backfill arm (branch order verified); the page-budget reservation clause is byte-untouched and invoice_facts-only (now dead for the invoice arm, which is the D7 contract); receipt_backfill and filed_bootstrap survive, filed_bootstrap''s lane guard now EITHER-REGIME (M-6, RULED) so legacy attempt history still counts; ACL/ownership unmoved.';
 end
 $reext_post$;
 

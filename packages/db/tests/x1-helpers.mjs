@@ -11,9 +11,10 @@
 // 21-migration database rather than skipping. A green X1 battery against a prestate that
 // does not have the verbs would prove nothing at all.
 
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, roleQuery, humanQuery, namedCall, opk, fnSource, firmOf,
+  ROLES, rootQuery, roleQuery, humanQuery, namedCall, opk, fnSource, firmOf,
   seedCitedDocument, claimTask, persistInvoiceFacts,
   failInvoiceFacts, factField, rm, grantConsent, mintLegacyInvoiceFactsTask,
 } from "./a21-helpers.mjs";
@@ -281,11 +282,29 @@ export async function failedFactsDoc(sub, { client, cents = 90000, reason = "int
  *  plus `{ taskId, versionN }` of the failed attempt, matching failedFactsDoc's shape. */
 export async function failedWitnessDoc(sub, { client, cents = 90000 } = {}) {
   const firm = await firmOf(client);
+  // M-7 (cross-model review): MAKE the failure -- grant a live witness_extraction consent
+  // first so the auto-enqueue backstop queues NORMALLY (a consent refusal is a DIFFERENT,
+  // already separately-tested wall — see f-a1-cutover.test.mjs's own consent battery — not
+  // what this fixture exists to prove), claim the resulting task, then fail it for real
+  // through clara.fail_witness_facts, exactly the settle verb a genuine engine failure drives
+  // in production. Selected by version_n desc (never bare `order by id`, which is not a
+  // version ordering guarantee) so a caller reusing this client across multiple documents
+  // always gets ITS document's newest task.
+  const { consentEvidenceDoc, grantPurpose, activatePurpose } = await import("./wave-b/wb-0020-helpers.mjs");
+  const evidence = await consentEvidenceDoc(sub, { firm });
+  const grant = await grantPurpose(sub, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId }).catch(() => null);
+  if (grant) await activatePurpose(sub, { client, purpose: "witness_extraction", consent: grant.consent_id });
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents), kind: "invoice" });
-  const failed = (await rootQuery(
-    "select id, version_n from clara.document_processing_tasks where document_id=$1 and lane='llm_witness' order by id limit 1",
+  const task = (await rootQuery(
+    "select id, version_n from clara.document_processing_tasks where document_id=$1 and lane='llm_witness' order by version_n desc limit 1",
     [cited.documentId])).rows[0];
-  return { ...cited, taskId: failed.id, versionN: failed.version_n };
+  assert.ok(task, "mandatory setup: the auto-enqueue backstop opened an llm_witness task");
+  await claimTask(task.id, { egressApproved: true });
+  await roleQuery(ROLES.runtime, "select clara.fail_witness_facts($1,$2) as r", [task.id, "internal"]);
+  const after = (await rootQuery(
+    "select status from clara.document_processing_tasks where id=$1", [task.id])).rows[0];
+  assert.equal(after.status, "failed", "mandatory setup: failedWitnessDoc actually produced a FAILED task, not an inferred one");
+  return { ...cited, taskId: task.id, versionN: task.version_n };
 }
 
 /** to_jsonb of one processing task — the whole row, so a cell can prove a terminal row was
