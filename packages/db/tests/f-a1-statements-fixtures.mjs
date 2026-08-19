@@ -7,6 +7,12 @@
 // (0038:1175-1338) — never from this PR's own migration file. See the test file's header
 // for the full reading list and the harness note on why every task gets a direct
 // `processing_call_reservations` row.
+//
+// ONE EXCEPTION, NAMED SO THE CONTRACT-BLIND CLAIM ABOVE STAYS TRUE: the three helpers the
+// PART-3 provenance battery needs — `witnessReadersPerChannel`, `taskOnLane` and
+// `coreV2Direct` — are NOT contract-blind. They exist to reach the witness arm's own new
+// refusals, whose identity is their message, and there is nothing else to read that from.
+// Everything parts 1-2 use is unchanged and still blind.
 
 import { randomUUID } from "node:crypto";
 import { ROLES, rootQuery, roleQuery, opk } from "./rig-helpers.mjs";
@@ -107,6 +113,35 @@ export function agreeingWitnessPayload(engineId, h, ch) {
   return witnessReaders(engineId, { ...h }, ch.lines.map((l) => ({ ...l })), { ...h }, ch.lines.map((l) => ({ ...l })));
 }
 
+/** The same envelope with an INDEPENDENT engine_id per channel. `witnessReaders` stamps ONE id
+ *  on both readers — which is why no cell built on it can ever reach the witness arm's
+ *  provenance guards — so the provenance battery (part 3) needs this shape instead. Passing
+ *  `undefined` for a channel OMITS its `engine_id` key entirely, which is the SILENCE case:
+ *  0038's carried `v_e2 := coalesce(nullif(btrim(...)), p_task_engine_id)` turns an absent
+ *  reader2 engine_id INTO the task stamp, so on the witness arm silence must be refused on the
+ *  RAW payload value or the equality test below it is vacuous for that channel. */
+export function witnessReadersPerChannel({ engine1, engine2, h1, lines1, h2, lines2 }) {
+  const channel = (engineId, header, lines) => {
+    const r = { header, lines };
+    if (engineId !== undefined) r.engine_id = engineId;
+    return r;
+  };
+  return {
+    pages_used: 2, corroboration: { verdict: "recorded-by-runtime" },
+    readers: { reader1: channel(engine1, h1, lines1), reader2: channel(engine2, h2, lines2) },
+  };
+}
+
+/** A witness-mode envelope carrying ONLY reader1 — the shape the two-read ladder must refuse
+ *  (`v_two` is true for 'witness' exactly as it is for 'ocr', so a missing second channel is
+ *  `readers_disagree`, never a quietly-accepted single read). */
+export function reader1OnlyPayload(engineId, h, ch) {
+  return {
+    pages_used: 2, corroboration: { verdict: "recorded-by-runtime" },
+    readers: { reader1: { engine_id: engineId, header: { ...h }, lines: ch.lines.map((l) => ({ ...l })) } },
+  };
+}
+
 export async function filedStatementDoc(sub, client) {
   const firm = await firmOf(client);
   return filedDocument(sub, { firm, client, kind: "bank_statement" });
@@ -128,6 +163,33 @@ export async function statementWitnessTask(firm, documentId, { engineId = `llm-o
      values($1,$2,'reserved',$3)`,
     [firm, taskId, pagesReserved]);
   return { taskId, engineId, versionN };
+}
+
+/** A direct-inserted 'running' task on an ARBITRARY lane, with NO processing-call reservation —
+ *  the lane-guard cell needs a task the v2 wrapper will find and then refuse for its lane, and
+ *  proving that means the row must genuinely exist. `engineId` must satisfy the lane<->engine
+ *  prefix CHECK for the lane you pass. */
+export async function taskOnLane(firm, documentId, { lane, engineId, versionN = 1 }) {
+  const r = await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,
+       status,workflow_run_id,started_at)
+     values($1,$2,$3,$4,$5,'running',$6,now()) returning id`,
+    [firm, documentId, engineId, versionN, lane, `rig-stmtlane-${randomUUID().slice(0, 8)}`]);
+  return { taskId: r.rows[0].id, engineId, versionN, lane };
+}
+
+/** Call `clara._persist_statement_core_v2` DIRECTLY as root. The core is revoked from PUBLIC
+ *  and deliberately NOT granted to clara_runtime (the one-ungranted-core law, 0004:6-12), so
+ *  root is the only door — which is exactly what a cell needs to reach a guard the v2 wrapper
+ *  structurally cannot deliver (it always passes the task's own, NOT NULL, engine_id). */
+export async function coreV2Direct({ firm, client, documentId, payload, ingestMode = "witness", taskId, taskEngineId }) {
+  const r = await rootQuery(
+    `select clara._persist_statement_core_v2(
+       p_firm => $1, p_client => $2, p_document => $3, p_payload => $4::jsonb,
+       p_ingest_mode => $5, p_actor => null, p_task => $6, p_bank_account => null,
+       p_engine_kind => 'statement_facts', p_task_engine_id => $7) as r`,
+    [firm, client, documentId, JSON.stringify(payload), ingestMode, taskId, taskEngineId]);
+  return r.rows[0].r;
 }
 
 export async function persistV2(taskId, payload) {

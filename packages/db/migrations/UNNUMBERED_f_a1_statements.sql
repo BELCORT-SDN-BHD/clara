@@ -178,7 +178,19 @@
 -- authorization rows reference it and drops are BY NAME per the 0038:5462 contract. The design
 -- does not imply retiring it, and SS3.5 explicitly trues GOVERNED_EGRESS_PURPOSES to
 -- (statement_extraction + witness_extraction) -- BOTH.
-set local statement_timeout = '5min';   -- precautionary; nothing here scans a large relation
+-- THE TWO TIMEOUTS, and WHICH ONE IS LOAD-BEARING (the migration rules ask for exactly this
+-- distinction rather than leaving a reader to guess).
+--   * `statement_timeout` is PRECAUTIONARY. Section 3 is catalog work, and the two CHECK
+--     recuts validate `clara.document_processing_tasks` / `clara.bank_statements`, which are
+--     small at this frontier. Nothing here scans a large relation.
+--   * `lock_timeout` IS LOAD-BEARING, and the earlier draft's blanket "nothing scans" claim
+--     hid why. Sections 1 and 2 DROP and re-ADD a CHECK on each of those two tables, which
+--     takes ACCESS EXCLUSIVE and then validates every existing row. ACCESS EXCLUSIVE does not
+--     merely wait for the live document pipeline's writers -- once it is queued, every READER
+--     arriving behind it queues too. A bounded wait makes this file fail fast and retryable
+--     instead of stalling document intake for the length of a `statement_timeout`.
+set local statement_timeout = '5min';
+set local lock_timeout = '3s';
 
 -- =====================================================================================
 -- SECTION 0 -- PRESTATE. Every claim this file makes about what it is editing, measured.
@@ -496,6 +508,31 @@ begin
         raise exception ''the witness statement lane requires the task to carry its own engine_id''
           using errcode=''CLR10'',detail=''{"reason":"internal"}'';
       end if;
+      -- THE DB IS THE DECIDER -- which the note above already CLAIMS, and this line is what
+      -- makes the claim true. Section 2 deliberately keeps `azure-%` admissible on lane
+      -- `statement_facts` (every pre-cutover statement task carries that provenance and those
+      -- rows must stay legal), so "all three agree" on its own would happily persist a pair of
+      -- llm_text_facts/llm_vision_facts rows under an AZURE engine id -- a witness receipt
+      -- naming a model that never saw the document. The WITNESS KINDS are what this arm mints,
+      -- so the witness ENGINE FAMILY is a precondition of minting them, and it is enforced
+      -- here rather than trusted from the wrapper or the router. Battery cell.
+      if p_task_engine_id not like ''llm-%'' then
+        raise exception ''the witness statement lane requires an llm-%% engine stamp; the task carries %'', p_task_engine_id
+          using errcode=''CLR10'',detail=''{"reason":"internal"}'';
+      end if;
+      -- READER2''S SILENCE IS NOT AGREEMENT. Step 3 sets
+      -- `v_e2 := coalesce(nullif(btrim(...)), p_task_engine_id)` -- 0038''s own line, carried
+      -- VERBATIM by this splice and deliberately NOT recut, because the legacy `ocr` arm''s
+      -- contract is 0038''s and stays byte-compatible. But that fallback makes the equality
+      -- test below VACUOUS for reader2 on THIS arm: an absent engine_id silently BECOMES the
+      -- task stamp before it is ever tested, so a vision channel that claimed no provenance at
+      -- all would read as one that claimed the right provenance -- a probe that cannot say NO.
+      -- The witness arm therefore tests the RAW payload value, which is the thing that
+      -- actually carries the second channel''s claim. Battery cell.
+      if nullif(btrim(coalesce(v_r2->>''engine_id'','''')),'''') is null then
+        raise exception ''the witness statement lane requires reader2 to name its own engine_id''
+          using errcode=''CLR10'',detail=''{"reason":"internal"}'';
+      end if;
       if v_e1 is distinct from p_task_engine_id or v_e2 is distinct from p_task_engine_id then
         raise exception ''the witness statement channels name an engine_id that is not the task''''s own stamp -- provenance must name the model that received the egress''
           using errcode=''CLR10'',detail=''{"reason":"internal"}'';
@@ -596,6 +633,22 @@ begin
   end if;
   if position('v_wit_txt_at := greatest(' in v_def) = 0 then
     raise exception 'f_a1_statements S3 postcheck: the successor lost the ordered insert clocks (SS3.9 note 4)' using errcode='CLR10';
+  end if;
+  -- THE TWO REVIEW-FOLD HARDENINGS, read off the LIVE body. Both are witness-arm-only
+  -- judgement logic, so a splice that dropped one would leave a successor that still passes
+  -- every other probe in this file while accepting a pair it must refuse.
+  if position('not like ''llm-%''' in v_def) = 0 then
+    raise exception 'f_a1_statements S3 postcheck: the successor lost the witness-arm llm-%% engine-prefix gate' using errcode='CLR10';
+  end if;
+  if position('requires reader2 to name its own engine_id' in v_def) = 0 then
+    raise exception 'f_a1_statements S3 postcheck: the successor lost the witness-arm RAW reader2 engine_id requirement (the 0038 coalesce fallback would make the equality test vacuous on silence)' using errcode='CLR10';
+  end if;
+  -- AND THE LEGACY ARM IS UNDISTURBED: 0038''s same-engine_id refusal must survive exactly
+  -- once. The witness arm deliberately does NOT mirror it (under two KINDS it could never
+  -- fire), so a second copy would mean the splice landed the new arm in the wrong place.
+  v_cnt := (length(v_def) - length(replace(v_def, 'must name two distinct engine_ids', ''))) / length('must name two distinct engine_ids');
+  if v_cnt <> 1 then
+    raise exception 'f_a1_statements S3 postcheck: the legacy arm''s distinct-engine_id refusal count is % (expected exactly 1 -- the ocr arm''s contract is 0038''s and stays byte-compatible)', v_cnt using errcode='CLR10';
   end if;
   -- And the LIVE ANCESTOR is still there and still serving the other three lanes.
   if to_regprocedure(v_sig) is null then
@@ -876,6 +929,6 @@ begin
 
   select count(*)::int into v_n from clara.document_extractions
     where engine_kind in ('llm_text_facts','llm_vision_facts');
-  raise notice 'f_a1_statements tail: clean -- _persist_statement_core_v2 spliced (chain lock, 0039 x1, 0040 x1, BOTH continuity edges, refusal ORDER and the WC-R5 absence->MYR posture all re-asserted on the LIVE successor); the ancestor is untouched and still serves statement_parse + enter_bank_statement; persist_statement_facts_v2 granted to clara_runtime; ingest_mode and the lane<->engine prefix CHECK widened non-vacuously; % witness-kind extraction row(s) exist so far. NOT IN THIS FILE (collision with PR-3 on the wb-0020-pinned _enqueue_invoice_facts_core): the router arm re-aim and the statement typed-consent purpose move to witness_extraction.', v_n;
+  raise notice 'f_a1_statements tail: clean -- _persist_statement_core_v2 spliced (chain lock, 0039 x1, 0040 x1, BOTH continuity edges, refusal ORDER and the WC-R5 absence->MYR posture all re-asserted on the LIVE successor); the witness arm carries all four provenance gates (task stamp present, task stamp llm-%%, reader2 names its OWN engine_id, all three equal) and the legacy arm''s distinct-engine_id refusal survives exactly once; the ancestor is untouched and still serves statement_parse + enter_bank_statement; persist_statement_facts_v2 granted to clara_runtime; ingest_mode and the lane<->engine prefix CHECK widened non-vacuously; % witness-kind extraction row(s) exist so far. NOT IN THIS FILE (collision with PR-3 on the wb-0020-pinned _enqueue_invoice_facts_core): the router arm re-aim and the statement typed-consent purpose move to witness_extraction.', v_n;
 end
 $tail$;

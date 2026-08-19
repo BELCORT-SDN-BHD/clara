@@ -252,11 +252,30 @@ test("f-a1s.i the statement pair cannot be read as invoice corroboration: the 1-
 // (`statement_parse`) lane end-to-end — the one lane this cutover does NOT touch.
 // ===========================================================================
 
-test("f-a1s.j the ancestor is unmoved: clara._persist_statement_core still exists, and the ORIGINAL clara.persist_statement_facts still serves the structured (statement_parse) lane end-to-end", async () => {
+test("f-a1s.j the ancestor is unmoved BY ITS BYTES: clara._persist_statement_core's prosrc sha is the pinned 0038+0039+0040 one, and the ORIGINAL clara.persist_statement_facts still serves the structured (statement_parse) lane end-to-end", async () => {
   mustBeReady();
   const sig = "clara._persist_statement_core(uuid,uuid,uuid,jsonb,text,uuid,uuid,uuid,text,text)";
   const stillThere = (await rootQuery("select to_regprocedure($1) is not null as ok", [sig])).rows[0].ok;
   assert.ok(stillThere, "clara._persist_statement_core must still exist — the ancestor is byte-untouched, never replaced by the v2 successor");
+
+  // BYTE-UNTOUCHED IS A CLAIM ABOUT BYTES, so the cell reads bytes. Existence alone would pass
+  // against an ancestor the cutover had quietly recut — the exact failure the migration's own
+  // tail census refuses to make (its note there records why grepping the body for a WORD is not
+  // evidence: 0039's spliced prose already says "balance witness"). The migration pins this sha
+  // in its prestate and re-checks it in its tail, which proves the ancestor did not move DURING
+  // the apply; this pin proves it has not moved SINCE, on any database the battery runs against.
+  //
+  // THE LITERAL is the sha256 of the LIVE prosrc after 0038 (birth) + 0039 (the
+  // null-defers-to-chain splice) + 0040 (the recon_frontier_backfill splice), measured on a
+  // clean 0001..0095 chain. RE-PIN IT ONLY for a migration that DELIBERATELY re-splices this
+  // body — and then the re-pin belongs in that migration's own PR, with its own tail evidence.
+  // A mismatch here on any other PR is a FINDING, never a test edit.
+  const ANCESTOR_PROSRC_SHA256 = "13b78739ef941d69f3403bd3b37f7f7e1684b783b7d1310a8a4977f409a6821b";
+  const live = (await rootQuery(
+    `select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') as sha
+       from pg_proc p where p.oid = $1::regprocedure`, [sig])).rows[0].sha;
+  assert.equal(live, ANCESTOR_PROSRC_SHA256,
+    `clara._persist_statement_core's body CHANGED — it must stay byte-untouched for the structured (statement_parse) and human (enter_bank_statement) lanes this cutover does not touch (live sha ${live})`);
 
   const sub = world.users.alice; const client = world.clients.A1;
   const firm = await firmOf(client);
