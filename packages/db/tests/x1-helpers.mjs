@@ -117,6 +117,14 @@ export async function witnessExtractionsOf(document) {
  *  actually assert is "the task the door minted carries the SAME literal the door mints", and
  *  that is a question only the live body can answer. The shape is still checked, so an
  *  unreadable or off-shape literal is a loud failure and never a silent pass. */
+// PRECONDITION, STATED BECAUSE IT IS A FRONTIER QUESTION: this reads the mint arm the PR-3
+// CUTOVER installed, so it only answers on a post-cutover database and THROWS otherwise. Every
+// caller today is gated on cutover-ness or runs only at the full frontier, and no slice list
+// (`packages/db/tests/split-lists/`) names one of them — checked, not assumed. If one is ever
+// added to a slice list, gate it on the cutover rather than on 0022/0025: the cells that use
+// this constant are post-cutover cells whatever the literal says, and a throw here would red
+// that leg with a message about a regex instead of about the frontier — the appliedStem-class
+// mistake this file's x42 sibling already paid for once.
 export async function witnessEngineId() {
   const r = await rootQuery(
     "select prosrc from pg_proc where oid='clara._enqueue_invoice_facts_core(uuid)'::regprocedure");
