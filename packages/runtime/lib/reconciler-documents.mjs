@@ -34,6 +34,9 @@ import { verifyCanonical } from "./storage.mjs";
 // imports THIS module, so importing back would cycle. The class must come from the SAME import
 // specifier (./relay.mjs) so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
 import { TaxonomyHaltError } from "./relay.mjs";
+// F-A2 opener ④ — lane-aware mint pacing. Its own module under the same module-size budget that
+// split this file out of reconciler.mjs; read its header for the incident and the FIFO argument.
+import { laneCapHints, laneRunningCounts, makeLaneMintBudget, runningCountsFromSnapshot } from "./reconciler-pacing.mjs";
 
 const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS || 15000);
 let warnedDocumentSelectGap = false;
@@ -281,7 +284,7 @@ async function documentRunState(getRun, runId) {
 /** Reconcile queued-unbound, held-egress, and stranded-running document tasks. */
 export async function reconcileDocumentTasks(client, deps) {
   const log = deps.log ?? (() => {});
-  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0, documentTransportless: 0 };
+  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0, documentTransportless: 0, documentPacedDeferred: 0 };
   if (typeof deps.enqueueDocumentIngest !== "function") return out;
 
   if (process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
@@ -323,6 +326,25 @@ export async function reconcileDocumentTasks(client, deps) {
   const { tasks, corruptRebuilt } = index;
   out.documentTaskIndexOk = true; // POSITIVE evidence, set only where a read actually returned
   out.documentSidecarCorruptRebuilt = corruptRebuilt;
+
+  // F-A2 opener ④: this sweep's per-lane mint budget, built ONCE from a running-task census taken
+  // after the release and before the first mint. `documentPacingSource` says which census the
+  // budget was actually built from — 'db' (the GROUP BY), or 'snapshot' (the degraded fallback) —
+  // so a reader never has to infer it from a counter. Contained exactly like the index read above,
+  // HALT re-checked first: a census that fails must cost pacing its precision, never the sweep.
+  let runningRows = [];
+  let pacingSource = "db";
+  try {
+    runningRows = await laneRunningCounts(client, deps.onlyFirm ?? null);
+  } catch (err) {
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
+    runningRows = runningCountsFromSnapshot(tasks);
+    pacingSource = "snapshot";
+    log(`[reconcile] lane running-count census unavailable — pacing from the sweep's own snapshot instead (it carries a LIMIT, so it may under-count and widen the budget toward the cap; it can never remove the cap): ${err?.message ?? err}`);
+  }
+  out.documentPacingSource = pacingSource;
+  const laneBudget = makeLaneMintBudget(runningRows, deps.laneCaps ?? laneCapHints());
+
   for (const task of tasks) {
     if (!task?.taskId) continue;
     // F4 (H2 acceptance report), the RUNTIME half of the fix. This used to rewrite EVERY
@@ -403,7 +425,19 @@ export async function reconcileDocumentTasks(client, deps) {
         }
         continue;
       }
+      // F-A2 opener ④ — THE PACING GATE, placed HERE deliberately: after every other reason this
+      // task would not be dispatched (held, too young, live run, transport-less, lane not owned
+      // by this image), so a slot is only spent on a task the sweep really would have minted. A
+      // refusal leaves the row untouched — still `queued`, still the oldest in the snapshot — so
+      // the next sweep mints it first. The DB's CLR18 gate remains the authority on the claim.
+      if (!laneBudget.tryMint(task.firmId, task.lane)) {
+        out.documentPacedDeferred += 1;
+        continue;
+      }
       try {
+        // A slot spent on an enqueue that then THROWS is not returned to the budget: we cannot
+        // know whether the run started before the failure, and over-counting our own spend only
+        // paces this sweep slightly slower, where under-counting it would re-open the herd.
         const run = await enqueue(task.taskId);
         await writeTaskMeta(task.taskId, { ...task, runId: run?.runId ?? null, updatedAt: new Date().toISOString() });
         out.documentReenqueued += 1;
@@ -441,6 +475,13 @@ export async function reconcileDocumentTasks(client, deps) {
         else log(`[reconcile] document stranded requeue failed task=${task.taskId}: ${err?.message ?? err}`);
       }
     }
+  }
+
+  // ONE line per sweep, never one per task (~46 deferrals every ~2s would bury the log it exists
+  // to explain) — and never de-duplicated, because a deep queue that STAYS deep is the thing an
+  // operator most needs to keep seeing. The counter rides back in the receipt regardless.
+  if (out.documentPacedDeferred > 0) {
+    log(`[reconcile] lane pacing deferred ${out.documentPacedDeferred} queued task(s) this sweep (census=${pacingSource}) — their lanes' concurrency windows are full; they stay queued and are minted oldest-first next sweep, rather than minting runs that could only die on CLR18.`);
   }
 
   // Coarse integrity pass: verify retained canonical references, never delete.
