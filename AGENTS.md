@@ -89,7 +89,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
 | Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` — **read the digest first**; drill to the ADR only if the digest is thin |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
-| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` |
+| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/`(make sure the files are arranged correctly ) |
 | Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
@@ -121,6 +121,8 @@ any genuinely destructive or irreversible operation — a DROP on shared state, 
 teardown. ADR-060's data authority is the one standing exception, and it is DATA-scoped
 (constraint 14): resetting test books is yours; the mechanisms under test are not.
 
+**Always query the newest, advanced, updated tech stack's official docs** like *Context7* or internet official sources before building or do the devolepment, AVOID any stale standard or old docs being used or referred in development.
+
 **The three review and evidence laws** (minted 2026-08-06; each cost real money to learn):
 
 1. **A PR that changes judgement logic gets an independent review pass before merge** — the
@@ -148,7 +150,7 @@ Law 1 is the floor, not the ceiling.
 **Clock out** — before the session ends, and before any compaction:
 
 1. Update `PROGRESS.md`: posture, lanes, backlog.
-2. Harness-sync sweep: anything stale in a harness menu file gets trued, or flagged under Known
+2. Harness-sync sweep and refresh: anything stale in a harness menu file(## The Harness menu — what you need, where the truth lives) gets trued, or flagged under Known
    issues if truing it needs a decision.
 3. Grill the owner on any ambiguity or foreign change you found and could not resolve.
 4. Refresh memory — lessons and preferences only.

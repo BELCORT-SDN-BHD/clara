@@ -27,7 +27,7 @@ work still open for negotiation.
 Status key: **live** = current build target, changes expected · **historical** = closed, frozen,
 cite-only · **superseded** = replaced/retired, kept only as a pointer to where its content went.
 
-## `active/` — Wave F's live set + Wave E's citation-stable historical set (Wave E CLOSED 2026-08-16; ADR-0071 ruled 2026-08-18; live frontier 83/`0088`)
+## `active/` — Wave F's live build (ADR-0071 ruled 2026-08-18; live frontier 92/`0097_f_a1_cutover`)
 
 | File | Status | Hook |
 |---|---|---|
@@ -36,6 +36,11 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `f-a1-annexes.md` | **live** | F-A1's companion of record (split under the 500-line harness limit): Annex A the estate-as-built survey (data plane · verdict machinery · the twelve walls · runtime plane · reader lessons), Annex B the PR-0 finding-by-finding adjudication register, Annex C the §7 test-battery sketch. Wall and §7-cell references in the design doc resolve here. |
 | `roadmap.md` | live | Wave F/G forward roadmap (re-scoped two-track at ADR-0071), the top-8 risks table, and the Phase-5 verification plan — carried from REBUILD-PLAN at its deletion (ADR-0069). |
 | `wave-g-e2e-corpus-design.md` | live | The Wave-G factory-reset + full E2E corpus DESIGN, for the owner's sitting (owner-directed 2026-08-16): the slot matrix (3–4 additional real clients at RPR rigor, two consecutive FY closes each, green-field vs brown-field), the golden-standard handover per client, the per-client run script, the exercise-every-gate rule against the vacuous-green class, the edge-case lens, and eleven marked owner decisions. **Nothing in it is ratified**, and its step-4 "standing rules earn autopost" wording takes a G1-alignment amendment at the sitting (ADR-0071). |
+
+## `active/` — Wave E's citation-stable historical set (CLOSED 2026-08-16; pinned here PERMANENTLY by the path-stability convention above — `packages/db/migrations/0064_wave_e_theta_close_plan.sql`, `0065_wave_e_epsilon_reporting.sql`, `scripts/hooks/pinned-ids-guard-checks.mjs`, and the `x55`/`x56`/`x57`/`er9-corpus-fixtures` test batteries cite these ten paths verbatim by filename and can never be repointed)
+
+| File | Status | Hook |
+|---|---|---|
 | `wave-e-contract.md` | historical | The Wave E contract of record, E-R1..E-R14 (ADR-065) — ratified, never re-grilled (digest law 67); cite-only now the wave is ceremonied. **ADR-0071 supersedes specific clauses in place** (E-R5/E-R18 approver, E-R11 key ①, E-R13 absorbed, #25) — the file's bytes stay; the ADR names the changes. |
 | `wave-e-design-skeleton.md` | historical | Campaign design skeleton, §1–§2.8 (part 1 of 4) — as-built; the ceremony as-runs are the operative record. |
 | `wave-e-design-skeleton-part2.md` | historical | Skeleton continued, §2.9–§2.12 (the E-R6 close-model / E-R12 client-facts hookup). |
@@ -46,12 +51,8 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-acceptance-matrix.md` | historical | The acceptance matrix (part 1 of 2) — the five `completed/` ceremony as-runs are now the acceptance evidence of record. |
 | `wave-e-acceptance-matrix-part2.md` | historical | Matrix continued: Section F and the cross-section sweeps. |
 | `wave-e-delta-handoff-2026-08-13.md` | historical | Clock-out checkpoint for δ final-finding closure — **discharged by the night run**; kept as the rulings' source of record. |
-| `wave-e-delta-ceremony-asrun.md` | completed/ | The 0058-0063 live ceremony as run: positive reads, the two field findings (SUSET, pooler-pid), deviations with grounds, the no-print DSN bridge. |
-| `wave-e-theta-epsilon-ceremony-asrun.md` | completed/ | The 0064-0072 live ceremony as run (θ+ε together): 9/9 clean, backup-first, the Windows pnpm-shim trap, the probe-defect lesson, the live #43 gate. |
-| `wave-e-final-ceremony-asrun.md` | completed/ | The 0077-0084 live ceremony as run (η wake wrappers + ζ render family + B4): D1 write-quiesce, the chatTurn v11 deploy, the freeze deploy-lock (140/140), positive reads throughout. |
-| `b3-reopen-ceremony-asrun.md` | completed/ | The 0085-0086 live ceremony as run (B3): backup-first, D1 quiesce, ALL-PASS positive reads (81/`0086`, the segregated 5-arg body, the 4-arg form gone), two probe instrument defects owned in-line. |
-| `masb-wording-ceremony-asrun.md` | completed/ | The 0087-0088 live ceremony as run (#43): backup-first, no quiesce, ALL-PASS reads (83/`0088`; en 5/5 + zh 5/5 verified — E-R14 OPEN; ms 4/5 per the sign-off), the owner's three dispositions of record. |
-| `f-a1-pr1-ceremony-asrun.md` | completed/ | The 0089-0095 live ceremony as run (F-A1 PR-1, 2026-08-19): backup-first, D1 with the 110s staleness wait (the 0023-lineage in-file quiesce guard's first live FIRING), 28/28 positive reads (90/`0095`), evaluator deploy flip 2→4 + `--lock-deployed`, the sslmode deviation + dsn-pipe harness gap recorded, the live statement-pair coin-flip measured (15 docs/24 pairs). |
+
+*(These ten stay physically in `active/` forever — see the path-stability convention above. Their ceremony as-run records, which physically live in `completed/` already, are listed there under "Wave E → F ceremony as-run chronology", not here.)*
 
 ## `completed/` — closed waves and slices
 
@@ -157,6 +158,17 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-lane-alpha-acceptance.md` | historical | Lane α as-run acceptance record (`0055`, PR #226). |
 | `wave-e-lane-beta-acceptance.md` | historical | Lane β as-run acceptance record (`0056`, PR #228). |
 | `wave-e-lane-gamma-acceptance.md` | historical | Lane γ as-run ceremony record: `0057` applied quiesce-free, E5 taken live, the trap re-proven (PR #231). |
+
+### Wave E → F ceremony as-run chronology
+
+| File | Status | Hook |
+|---|---|---|
+| `wave-e-delta-ceremony-asrun.md` | historical | The 0058-0063 live ceremony as run: positive reads, the two field findings (SUSET, pooler-pid), deviations with grounds, the no-print DSN bridge. |
+| `wave-e-theta-epsilon-ceremony-asrun.md` | historical | The 0064-0072 live ceremony as run (θ+ε together): 9/9 clean, backup-first, the Windows pnpm-shim trap, the probe-defect lesson, the live #43 gate. |
+| `wave-e-final-ceremony-asrun.md` | historical | The 0077-0084 live ceremony as run (η wake wrappers + ζ render family + B4): D1 write-quiesce, the chatTurn v11 deploy, the freeze deploy-lock (140/140), positive reads throughout. |
+| `b3-reopen-ceremony-asrun.md` | historical | The 0085-0086 live ceremony as run (B3): backup-first, D1 quiesce, ALL-PASS positive reads (81/`0086`, the segregated 5-arg body, the 4-arg form gone), two probe instrument defects owned in-line. |
+| `masb-wording-ceremony-asrun.md` | historical | The 0087-0088 live ceremony as run (#43): backup-first, no quiesce, ALL-PASS reads (83/`0088`; en 5/5 + zh 5/5 verified — E-R14 OPEN; ms 4/5 per the sign-off), the owner's three dispositions of record. |
+| `f-a1-pr1-ceremony-asrun.md` | historical | The 0089-0095 live ceremony as run (F-A1 PR-1, 2026-08-19): backup-first, D1 with the 110s staleness wait (the 0023-lineage in-file quiesce guard's first live FIRING), 28/28 positive reads (90/`0095`), evaluator deploy flip 2→4 + `--lock-deployed`, the sslmode deviation + dsn-pipe harness gap recorded, the live statement-pair coin-flip measured (15 docs/24 pairs). |
 
 ### The former REBUILD-PLAN.md + the PROGRESS archive
 

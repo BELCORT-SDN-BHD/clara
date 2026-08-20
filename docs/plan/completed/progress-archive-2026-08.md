@@ -199,3 +199,36 @@
   states only what the ledger records. The flake is dead for fresh-chain applies; live 0057
   predates the pin (applied at READ COMMITTED, race won) and its runtime predicate was always
   sound.
+
+
+## Posture bullet archived 2026-08-20 (superseded by the F-A1 cutover bullet; frontier moved 0095 -> 0097)
+
+- **Live DB: 90 migrations, frontier `0095` (the F-A1 witness estate — ceremonied
+  2026-08-19 ~03:30 MYT, `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): 28/28
+  positive reads, evaluators deployed 4/4 one-way, LIVE-INERT for witness work until
+  PR-3 mints the lane. Field notes: the in-file quiesce guard (0023's mechanism,
+  carried by 0092) FIRED in a live ceremony for the first time — the recipe now waits
+  110s post-stop; the statement-pair coin-flip measured on live (15 docs/24 pairs,
+  named not repaired, heals at PR-4).** Earlier: the wording-seed
+  ceremony ran 2026-08-16 after the owner's sign-off
+  (`docs/plan/completed/masb-wording-ceremony-asrun.md`): 22 statutory-wording rows + 9
+  lexicon + 3 claim policies, byte-per-packet. **E-R14 IS OPEN: en and zh statutory packs
+  are ISSUABLE** (mpers_company rev 1 en 5/5 + zh 5/5 verified; rev 2 en 5/5 ready for
+  2027); ms stays gated at 4/5 per the sign-off (notes.title held back — fabricated
+  citation). Earlier the same day, the B3 ceremony ran
+  2026-08-16 (D1 write-quiesce; `docs/plan/completed/b3-reopen-ceremony-asrun.md`):
+  `reopen_fiscal_year` is now the `ends_on`-dated formal prior-period adjustment under the
+  target-bound M2 permit, and reversing a close is a SEGREGATED act (reopener ≠ closer at
+  ≥2 eligible; attested sole path; adoption arm for orphaned closes) — live BEFORE the
+  first real close, as ADR-068 required. The pre-B3 silent-no-op reopen defect is dead.
+  Earlier this close: three
+  ceremonies ran from merged `main` this close: 0058-0063 (2026-08-14,
+  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`), 0064-0072 (2026-08-14 morning,
+  `docs/plan/completed/wave-e-theta-epsilon-ceremony-asrun.md`), and 0077-0084 (2026-08-15,
+  with a D1 write-quiesce for the writer-body swaps, the chatTurn v11 runtime deploy and the
+  freeze deploy-lock — as-run + locked `frozen-workflows.json` MERGED at 263aa2d, PR #243).
+  Every apply
+  backed up to R2 first; positive reads + pgrst NOTIFY recorded each time. **Both evaluator
+  closures are DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is
+  ARMED** (name-only fact through the audited door; the S4.5 behavioural self-proof fired on
+  live). The A30b receipt table is live and empty.
