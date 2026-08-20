@@ -23,7 +23,6 @@ import {
   claimTask,
   draftEntryV3,
   endPool,
-  enqueueInvoiceFacts,
   ev,
   factField,
   factsRegion,
@@ -32,6 +31,7 @@ import {
   humanQuery,
   invoiceFactsTask,
   mintAutodraftCred,
+  mintLegacyInvoiceFactsTask,
   opk,
   persistInvoiceFacts,
   resolveOpenQuestion,
@@ -117,7 +117,10 @@ async function seedCurrentDocument({
     quote: "RM 500.00",
     kind: "invoice",
   });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [

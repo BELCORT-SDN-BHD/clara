@@ -39,7 +39,7 @@ import {
   wakeDraftEntry,
   approveEntry,
   entryRow,
-  enqueueInvoiceFacts,
+  mintLegacyInvoiceFactsTask,
   invoiceFactsTask,
   claimTask,
   ensureClientEgress,
@@ -111,7 +111,10 @@ async function billWithClaimedFacts(sub, { client, amount = 500000 }) {
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], codingKind: CODING_KIND,
     opKey: `code-doc:${cited.filingId}:${cited.documentId}`,
   });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   return { draft, cited, task };
@@ -262,7 +265,10 @@ async function setupCorrection(sub, fromClient, toClient, coa) {
   const proposal = await proposeCorrection(sub, { document: cited.documentId, fromClient, toClient, reason: "lock rig" });
   const correctionId = idOf(proposal, "correction_id", "correction");
   const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   return { correctionId, planHash, task, cited };

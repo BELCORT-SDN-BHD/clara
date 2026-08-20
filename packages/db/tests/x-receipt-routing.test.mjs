@@ -14,8 +14,8 @@ import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   requestReextraction, laneTasks, grantConsent, seedCitedDocument, enqueueInvoiceFacts,
-  invoiceFactsTask, claimTask, persistInvoiceFacts, factField, rm, printLaneNotes, noteLane,
-  holdThenContend, docKind,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, rm,
+  printLaneNotes, noteLane, holdThenContend, docKind, WITNESS_ENGINE_ID,
 } from "./x1-helpers.mjs";
 
 let W = null;
@@ -34,8 +34,21 @@ before(async () => {
     await ensureReady();
   } catch { /* dirty tree — probe the live catalog as-is */ }
   has0025 = await has25();
-  if (has0025) W = await buildWorld();
-  else noteLane("0025 absent — x-receipt-routing battery FAILS loudly rather than skipping");
+  if (has0025) {
+    W = await buildWorld();
+    // F-A1 PR-3 CUTOVER: the automatic core (and request_reextraction) now route every
+    // invoice-shaped kind to llm_witness, which is consent-gated AT ENQUEUE (0090 wall
+    // 6/§7e) -- unlike the retired invoice_facts path, which had no enqueue-time consent
+    // gate at all. Without a live consent, the witness task lands 'failed'/
+    // witness_consent_inactive immediately, which can unintentionally open 0051's
+    // failed_retry door for cells that don't intend to exercise it. Every test in this file
+    // drives its fixtures on the SAME client (W.clients.A1), so grant it ONCE here rather
+    // than per-call (a second grant on an already-live consent raises duplicate_live).
+    const { consentEvidenceDoc, grantPurpose, activatePurpose } = await import("./wave-b/wb-0020-helpers.mjs");
+    const evidence = await consentEvidenceDoc(W.users.alice, { firm: await firmOf(W.clients.A1) });
+    const grant = await grantPurpose(W.users.alice, { client: W.clients.A1, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+    await activatePurpose(W.users.alice, { client: W.clients.A1, purpose: "witness_extraction", consent: grant.consent_id });
+  } else noteLane("0025 absent — x-receipt-routing battery FAILS loudly rather than skipping");
 });
 after(async () => { printLaneNotes("x-receipt-routing"); await endPool(); });
 
@@ -63,9 +76,14 @@ async function kindDoc(sub, { client, kind, cents = 90000 }) {
  *  shape x1-helpers' extractedDoc uses, generalised over kind. */
 async function extractedKindDoc(sub, { client, kind, cents = 90000 }) {
   const cited = await kindDoc(sub, { client, kind, cents });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: this fixture's whole point is a DONE invoice_facts (legacy-regime)
+  // extraction, feeding request_reextraction's WIDENED primary admission door (0026 S3 in
+  // the cutover migration, which now also admits a done llm_text_facts row) -- the real
+  // enqueue RPC no longer reaches this lane for an invoice-shaped kind (no dual-run, D9), so
+  // this mints the legacy task directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
-  assert.ok(task, `mandatory setup: a ${kind} document enqueues an invoice_facts task`);
+  assert.ok(task, `mandatory setup: a ${kind} document has an invoice_facts task`);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
     factField("invoice.total", rm(cents)),
@@ -86,17 +104,20 @@ test("META x-receipt-routing: migration 0025 present + the kind gate carries rec
 // (1) A receipt enqueues to invoice_facts — the automatic core (§A).
 // ===========================================================================
 
-test("a filed receipt document enqueues an invoice_facts task (not skipped_kind)", async () => {
+test("a filed receipt document enqueues an llm_witness task (not skipped_kind)", async () => {
   requireReady();
   const client = W.clients.A1;
   const doc = await kindDoc(W.users.alice, { client, kind: "receipt" });
   await enqueueInvoiceFacts(doc.documentId);
-  const tasks = await laneTasks(doc.documentId, "invoice_facts");
+  // F-A1 PR-3 CUTOVER: the automatic core now routes every invoice-shaped kind (receipt
+  // included, 0025's own widening) to llm_witness, never invoice_facts (no dual-run, D9).
+  const tasks = await laneTasks(doc.documentId, "llm_witness");
   const runnable = tasks.filter((t) => ["queued", "held_egress", "running"].includes(t.status));
-  assert.equal(runnable.length, 1, "a receipt enqueues exactly one runnable invoice_facts task");
-  assert.equal(runnable[0].engine_id, "azure-di:prebuilt-invoice:2024-11-30", "on the SAME engine every admitted kind uses");
+  assert.equal(runnable.length, 1, "a receipt enqueues exactly one runnable llm_witness task");
+  assert.equal(runnable[0].engine_id, WITNESS_ENGINE_ID, "on the SAME witness engine every admitted invoice-shaped kind uses");
   const skipped = tasks.filter((t) => t.status === "failed" && t.error_code === "skipped_kind");
   assert.equal(skipped.length, 0, "no skipped_kind receipt was minted for a receipt document");
+  assert.equal((await laneTasks(doc.documentId, "invoice_facts")).length, 0, "the retired invoice_facts arm never fires for this kind post-cutover");
 });
 
 // ===========================================================================
@@ -135,22 +156,26 @@ test("payroll_summary and claim_form ALSO still refuse the facts lane (a broad n
 // (3) request_reextraction on a receipt WITH a prior done extraction — the ordinary case.
 // ===========================================================================
 
-test("request_reextraction on a receipt WITH a prior completed extraction: a new queued task at version max+1", async () => {
+test("request_reextraction on a receipt WITH a prior completed extraction: a new queued llm_witness task at version 1", async () => {
   requireReady();
   const client = W.clients.A1;
   const doc = await extractedKindDoc(W.users.alice, { client, kind: "receipt" });
-  const before_ = await laneTasks(doc.documentId);
-  assert.equal(before_.length, 1, "the fixture settled exactly one invoice_facts task (mandatory setup)");
-  assert.equal(before_[0].status, "done", "…done — receipts corroborate through the SAME pipeline as invoices");
+  const before_ = await laneTasks(doc.documentId, "invoice_facts");
+  assert.equal(before_.length, 1, "the fixture settled exactly one invoice_facts task (mandatory setup — the LEGACY regime this cell feeds the widened admission door)");
+  assert.equal(before_[0].status, "done", "…done — a done legacy row is exactly what the widened 0026 admission door recognizes");
 
   const res = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "the total misread the tax-inclusive figure", opKey: opk("rex-receipt"),
   });
   assert.equal(res.status, "queued", "a QUEUED task, not a short-circuit receipt");
   assert.equal(res.reused, false, "genuinely minted");
-  assert.equal(res.version_n, before_[0].version_n + 1, "the new task takes the next version on the lane");
-  const after_ = await laneTasks(doc.documentId);
-  assert.equal(after_.length, 2, "exactly one new task exists");
+  // F-A1 PR-3 CUTOVER: the re-extraction now mints on llm_witness (design D7/D9) — a FRESH
+  // lane, version-numbered independently of the legacy invoice_facts history (version_n is
+  // minted as max+1 over (document,lane)).
+  assert.equal(res.version_n, 1, "the FIRST version on the llm_witness lane — version numbering is per-lane, not carried over from the legacy regime");
+  const after_ = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(after_.length, 1, "exactly one llm_witness task now exists");
+  assert.equal((await laneTasks(doc.documentId, "invoice_facts")).length, 1, "the legacy row is untouched — no cross-regime supersession (0017 kind-scoped)");
 });
 
 // ===========================================================================
@@ -163,14 +188,16 @@ test("THE BACKFILL: request_reextraction on a receipt with NO prior extraction s
   requireReady();
   const client = W.clients.A1;
   const doc = await kindDoc(W.users.alice, { client, kind: "receipt" });
-  // Mandatory setup: prove this receipt carries NO invoice_facts task or extraction at all —
-  // simulating a document that pre-dates 0025 and was never touched by the automatic pipeline
-  // (kindDoc seeds a citable document but does NOT call enqueueInvoiceFacts).
+  // Mandatory setup: prove this receipt carries NO task or extraction at all on EITHER
+  // regime — simulating a document that pre-dates 0025 and was never touched by the
+  // automatic pipeline (kindDoc seeds a citable document but does NOT call enqueueInvoiceFacts).
   assert.equal((await laneTasks(doc.documentId, "invoice_facts")).length, 0,
     "mandatory setup: no invoice_facts task exists yet");
+  assert.equal((await laneTasks(doc.documentId, "llm_witness")).length, 0,
+    "mandatory setup: no llm_witness task exists yet");
   assert.equal((await rootQuery(
-    "select count(*)::int n from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts' and status='done'",
-    [doc.documentId])).rows[0].n, 0, "mandatory setup: no DONE extraction exists");
+    "select count(*)::int n from clara.document_extractions where document_id=$1 and engine_kind in ('invoice_facts','llm_text_facts') and status='done'",
+    [doc.documentId])).rows[0].n, 0, "mandatory setup: no DONE extraction exists on either regime");
 
   const res = await requestReextraction(W.users.bob, {
     document: doc.documentId, reason: "backfill: pre-0025 receipt, no prior facts pass", opKey: opk("rex-backfill"),
@@ -179,16 +206,17 @@ test("THE BACKFILL: request_reextraction on a receipt with NO prior extraction s
   assert.equal(res.version_n, 1, "the FIRST version for this document/lane — there was nothing to supersede");
   assert.equal(res.reused, false, "genuinely minted, not recovered");
 
-  const tasks = await laneTasks(doc.documentId, "invoice_facts");
+  // F-A1 PR-3 CUTOVER: the backfill now mints on llm_witness (design D7/D9).
+  const tasks = await laneTasks(doc.documentId, "llm_witness");
   assert.equal(tasks.length, 1, "exactly one task now exists");
   assert.equal(tasks[0].status, "queued", "…queued");
-  assert.equal(tasks[0].engine_id, "azure-di:prebuilt-invoice:2024-11-30", "…on the standard engine");
+  assert.equal(tasks[0].engine_id, WITNESS_ENGINE_ID, "…on the witness engine");
 
-  // The budget control still gates this backfill call exactly like every other invoice_facts
-  // reservation (the owner's accepted cost boundary — §C of the migration header).
+  // Meter-never-cap (D6): llm_witness NEVER reserves a page budget — unlike the retired
+  // invoice_facts arm this cell's header once described reserving here.
   const reserved = await rootQuery(
     "select 1 from clara.processing_call_reservations where task_id=$1", [tasks[0].id]);
-  assert.equal(reserved.rows.length, 1, "the backfill's page reservation was made — the standing budget control still applies");
+  assert.equal(reserved.rows.length, 0, "no page-budget reservation exists for an llm_witness task (meter-never-cap, D6)");
 });
 
 test("the backfill relaxation is receipt-ONLY: an invoice with NO prior extraction is still refused CLR16", async () => {
@@ -211,7 +239,7 @@ test("the backfill relaxation is receipt-ONLY: an invoice with NO prior extracti
 // is proven correct on the OTHER two previously-admitted kinds too, not just invoice.)
 // ===========================================================================
 
-test("existing behavior is BYTE-STABLE for credit_note and debit_note: both still route to invoice_facts and still refuse a still-excluded kind", async () => {
+test("existing behavior is BYTE-STABLE for credit_note and debit_note: both still re-extract cleanly and still refuse a still-excluded kind (F-A1 PR-3: onto llm_witness now, not invoice_facts)", async () => {
   requireReady();
   const client = W.clients.A1;
   for (const kind of ["credit_note", "debit_note"]) {
@@ -278,8 +306,9 @@ test("TOCTOU order A: request_reextraction holds the document lock FIRST — it 
   assert.equal(out.b.ok, true, `set_document_kind should succeed once request_reextraction commits: ${out.b.message ?? ""}`);
 
   assert.equal(await docKind(doc.documentId), "invoice", "the correction still lands — it simply had to wait its turn");
-  const tasks = await laneTasks(doc.documentId, "invoice_facts");
-  assert.equal(tasks.length, 1, "exactly one invoice_facts task exists — the legitimately-fired backfill");
+  // F-A1 PR-3 CUTOVER: the legitimately-fired backfill now mints on llm_witness (D7/D9).
+  const tasks = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(tasks.length, 1, "exactly one llm_witness task exists — the legitimately-fired backfill");
 });
 
 test("TOCTOU order B: set_document_kind holds the document lock FIRST — request_reextraction blocks, then sees the NEW kind and correctly refuses (no backfill for a non-receipt)", async () => {
@@ -369,11 +398,26 @@ test("P4 TOCTOU order A: enqueue_invoice_facts holds the document lock FIRST —
 test("P4 TOCTOU order B: set_document_kind holds the document lock FIRST — enqueue_invoice_facts blocks, then sees the NEW kind and routes straight to invoice_facts (never the stale NULL-kind classify route)", async () => {
   requireReady();
   const client = W.clients.A1;
+  const firm = await firmOf(client);
   // See order A's comment: a genuinely task-free document (seedVerifiedDocument bypasses
   // file_document's own auto-enqueue), so a surviving classify task can only mean this
   // function routed on the stale pre-commit NULL snapshot.
   const { seedVerifiedDocument } = await import("./rig-docs-fixtures.mjs");
-  const doc = await seedVerifiedDocument({ firm: await firmOf(client), kind: null });
+  const doc = await seedVerifiedDocument({ firm, kind: null });
+  // F-A1 PR-3 CUTOVER: post-commit this document routes to llm_witness, which is
+  // consent-gated on the document's ACTIVE FILING(S) (0090 wall 6/§7e) — zero filings fails
+  // closed regardless of any consent elsewhere ("no client exists who could have authorized
+  // this read"). seedVerifiedDocument deliberately carries no filing (that's the whole point
+  // of the fixture, order A's comment above), so give it one directly (raw insert — the SAME
+  // bypass x-lane-widen-0026.test.mjs uses, never through file_document, which would itself
+  // auto-enqueue a classify task and break the "genuinely task-free" precondition both TOCTOU
+  // orders depend on) to client A1, who already carries the witness_extraction consent
+  // granted once in before(). This isolates the race's OWN property (which kind snapshot the
+  // core sees) from the unrelated multi-client/no-client gate.
+  await rootQuery(
+    `insert into clara.document_filings(firm_id,document_id,client_id,basis) values ($1,$2,$3,'legacy-0007')`,
+    [firm, doc.documentId, client],
+  );
 
   const out = await holdThenContend({
     a: {
@@ -395,13 +439,17 @@ test("P4 TOCTOU order B: set_document_kind holds the document lock FIRST — enq
   assert.ok(out.provedBlocked, "enqueue_invoice_facts genuinely BLOCKED behind set_document_kind's row lock — not a lucky ordering");
   assert.equal(out.a.ok, true, `set_document_kind (the lock holder) should succeed: ${out.a.message ?? ""}`);
   assert.equal(out.b.ok, true, `enqueue_invoice_facts should succeed once set_document_kind commits: ${out.b.message ?? ""}`);
+  // F-A1 PR-3 CUTOVER: the core now mints llm_witness for 'invoice' (D9) — the queued status
+  // it lands on is unchanged; the LANE it lands on moved. A live witness_extraction consent
+  // for W.clients.A1 is granted once in before() so this genuinely queues rather than
+  // failing closed on witness_consent_inactive.
   assert.equal(out.b.receipt?.status, "queued", "the core still queues — but on the POST-COMMIT kind, not the stale NULL snapshot");
 
   assert.equal(await docKind(doc.documentId), "invoice", "the kind change stands");
   const classifyTasks = await laneTasks(doc.documentId, "classify");
   assert.equal(classifyTasks.length, 0, "NO classify task was ever opened — the core must see the POST-COMMIT 'invoice' kind, never the stale NULL snapshot that would have wrongly routed to classify");
-  const factsTasks = await laneTasks(doc.documentId, "invoice_facts");
-  assert.equal(factsTasks.length, 1, "exactly one invoice_facts task exists — routed correctly on the true, post-commit kind");
+  const factsTasks = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(factsTasks.length, 1, "exactly one llm_witness task exists — routed correctly on the true, post-commit kind");
 });
 
 // ===========================================================================
@@ -426,22 +474,24 @@ test("a pre-0025 receipt carrying a historical skipped_kind terminal row gets it
      values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,1,'invoice_facts','failed','skipped_kind',now())`,
     [firm, doc.documentId],
   );
-  const historical = (await laneTasks(doc.documentId))[0];
+  const historical = (await laneTasks(doc.documentId, "invoice_facts"))[0];
   assert.equal(historical.status, "failed", "mandatory setup: the historical skipped_kind row exists");
   assert.equal(historical.error_code, "skipped_kind", "mandatory setup: it carries the pre-0025 receipt-exclusion marker");
   assert.equal(historical.version_n, 1, "mandatory setup: it is version 1 — nothing else has ever run for this document");
 
-  // The automatic pipeline, now that 'receipt' is admitted, re-drives it.
+  // The automatic pipeline, now that 'receipt' is admitted, re-drives it — F-A1 PR-3
+  // CUTOVER: onto llm_witness (D9), a lane the historical row never touched, so the new
+  // task is version 1 on ITS OWN lane, not "version 2" of the retired invoice_facts lane.
   await enqueueInvoiceFacts(doc.documentId);
 
-  const tasks = await laneTasks(doc.documentId);
-  assert.equal(tasks.length, 2, "a NEW task was minted alongside the historical one");
-  const fresh = tasks.find((t) => t.version_n === 2);
-  assert.ok(fresh, "the new task is at version 2 — the next version above the historical row");
-  assert.equal(fresh.status, "queued", "the new task is live and queued");
-  assert.equal(fresh.error_code, null, "…and carries no error code");
+  const witnessTasks = await laneTasks(doc.documentId, "llm_witness");
+  assert.equal(witnessTasks.length, 1, "a NEW task was minted on the llm_witness lane, alongside the historical invoice_facts one");
+  assert.equal(witnessTasks[0].version_n, 1, "the new task is version 1 — the FIRST task ever on this document's llm_witness lane");
+  assert.equal(witnessTasks[0].status, "queued", "the new task is live and queued");
+  assert.equal(witnessTasks[0].error_code, null, "…and carries no error code");
 
-  const historicalAfter = tasks.find((t) => t.version_n === 1);
+  const historicalAfter = (await laneTasks(doc.documentId, "invoice_facts"))[0];
   assert.equal(historicalAfter.status, "failed", "the historical row is UNTOUCHED — its terminal state is a permanent record");
   assert.equal(historicalAfter.error_code, "skipped_kind", "…and its error_code still names exactly why it was refused, before this migration");
+  assert.equal((await laneTasks(doc.documentId, "invoice_facts")).length, 1, "…and it is still the ONLY row on the retired lane — nothing new was ever minted there");
 });

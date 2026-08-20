@@ -30,7 +30,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, reasonOf, assertRaises,
-  upsertAccountClassed, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
+  upsertAccountClassed, seedCitedDocument, mintLegacyInvoiceFactsTask, claimTask,
   persistInvoiceFacts, failInvoiceFacts, factsRegion, grantConsent, freshResolution, ev, approveEntry,
   mintInteractive, wakeDraftEntry, addClientIdentifier,
   has0022, fail0022, componentFields, LAI_LOU_MEI, COMPONENT, factField,
@@ -77,8 +77,9 @@ async function salesDoc(components) {
   const firm = await firmOf(CLIENT);
   const cited = await seedCitedDocument(W.users.alice, {
     firm, client: CLIENT, quote: rm(components.gross), kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
-  const task = await invoiceFactsTask(cited.documentId);
+  // F-A1 PR-3 cutover: see mintLegacyInvoiceFactsTask's header (s6-fixtures.mjs) -- the real
+  // enqueue path no longer produces invoice_facts for an invoice-kind document.
+  const task = await mintLegacyInvoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = componentFields(components);
   fields.push(factField("invoice.vendor_name", CLIENT_NAME));
@@ -255,8 +256,9 @@ test("[X3/sign] a NEGATIVE component is refused at the write boundary — the co
   const mk = async () => {
     const cited = await seedCitedDocument(W.users.alice, {
       firm, client: CLIENT, quote: rm(11100), kind: "invoice" });
-    await enqueueInvoiceFacts(cited.documentId);
-    const task = await invoiceFactsTask(cited.documentId);
+    // F-A1 PR-3 cutover: see mintLegacyInvoiceFactsTask's header (s6-fixtures.mjs) -- the
+    // real enqueue path no longer produces invoice_facts for an invoice-kind document.
+    const task = await mintLegacyInvoiceFactsTask(cited.documentId);
     await claimTask(task.id, { egressApproved: true });
     return task.id;
   };
@@ -332,8 +334,9 @@ test("[X3] the WRITE boundary guards the new components exactly as it guards the
   const mk = async () => {
     const cited = await seedCitedDocument(W.users.alice, {
       firm, client: CLIENT, quote: rm(10375), kind: "invoice" });
-    await enqueueInvoiceFacts(cited.documentId);
-    const task = await invoiceFactsTask(cited.documentId);
+    // F-A1 PR-3 cutover: see mintLegacyInvoiceFactsTask's header (s6-fixtures.mjs) -- the
+    // real enqueue path no longer produces invoice_facts for an invoice-kind document.
+    const task = await mintLegacyInvoiceFactsTask(cited.documentId);
     await claimTask(task.id, { egressApproved: true });
     return task.id;
   };

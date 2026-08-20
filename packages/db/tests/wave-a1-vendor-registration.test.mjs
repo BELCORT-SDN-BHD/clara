@@ -17,7 +17,7 @@ import {
   waveAEnsureReady, buildWorld, endPool, rootQuery, noteLane,
   markSkip, printSkipCount, firmOf, opk,
   upsertPayableAccount, upsertAccountClassed,
-  grantConsent, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
+  grantConsent, seedCitedDocument, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask,
   persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, FIELD,
   draftEntryV3, approveEntry, freshResolution, billLines, ev, counterpartyRows,
   codingLane, humanPersona, AP, EXP,
@@ -81,7 +81,10 @@ async function targetFiling({ registration = null, amount = 700000 } = {}) {
   await grantConsent(owner, { firm, client }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(owner, { firm, client, quote: "RM 5,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [

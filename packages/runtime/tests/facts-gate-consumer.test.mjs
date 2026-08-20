@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { rootQuery, asRuntime, asFnOwner, buildFirm, headSeq, checkpointSeq, deadLettersForFirm, endPool } from "./relay-fixtures.mjs";
 import { seedVerifiedDocument } from "./matcher-testkit.mjs";
 import { runFactsGateCycle, factsGateHealth, factsGateRedrive, CONSUMERS, FACTS_GATE_CONSUMER, FACTS_GATE_EVENT_TYPE } from "../lib/facts-gate.mjs";
+import { liveWitnessConsent } from "./f-a1-witness-fixtures.mjs";
 
 async function probe0016() {
   const r = await rootQuery(
@@ -34,8 +35,8 @@ after(async () => {
 
 // A verified pdf document with a known kind (the human/classifier verdict — set directly for the
 // fixture; document metadata is not a books/event row). Returns the document id.
-async function seedKnownKindDoc({ firm, owner, kind }) {
-  const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+async function seedKnownKindDoc({ firm, owner, client = null, kind }) {
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner, client });
   await rootQuery("update clara.documents set document_kind=$2 where id=$1", [document, kind]);
   return document;
 }
@@ -68,16 +69,26 @@ const factsTasks = (doc, lane) =>
     (r) => r.rows,
   );
 
-test("cycle: an invoice-kind document.classified re-fires enqueue → an invoice_facts task is admitted; the checkpoint converges", { skip }, async () => {
-  const { owner, firm } = await buildFirm("fgc");
-  const document = await seedKnownKindDoc({ firm, owner, kind: "invoice" });
+test("cycle: an invoice-kind document.classified re-fires enqueue → an llm_witness task is admitted; the checkpoint converges", { skip }, async () => {
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- the facts_gate consumer's own wiring (re-fire
+  // clara.enqueue_invoice_facts) is unchanged; only the LANE the core routes to moved.
+  const { owner, firm, client } = await buildFirm("fgc");
+  // B3 (cross-model review): the llm_witness enqueue is consent-gated AT ENQUEUE (0090 wall
+  // 6/§7e) on the document's ACTIVE FILING(S) -- give the document a real filing (client
+  // passed to seedVerifiedDocument, routed through the audited _seed_verified_document
+  // writer) and grant witness_extraction consent for that SAME client, so the enqueue
+  // genuinely admits rather than failing closed on witness_consent_inactive. "failed" is not
+  // an acceptable outcome here: this cell proves the consumer WIRING drives a real, live task.
+  await liveWitnessConsent(owner, { firm, client });
+  const document = await seedKnownKindDoc({ firm, owner, client, kind: "invoice" });
   await emitClassified(firm, document, owner);
 
   await drainFactsGate(firm);
 
-  const rows = await factsTasks(document, "invoice_facts");
-  assert.ok(rows.length >= 1, "the gate re-fired the enqueue onto the invoice_facts lane");
-  assert.ok(rows.some((r) => ["queued", "held_egress", "running"].includes(r.status)), `an invoice_facts task is runnable (got: ${rows.map((r) => `${r.status}/${r.error_code}`).join(",")})`);
+  const rows = await factsTasks(document, "llm_witness");
+  assert.ok(rows.length >= 1, "the gate re-fired the enqueue onto the llm_witness lane");
+  assert.ok(rows.some((r) => ["queued", "held_egress", "running"].includes(r.status)), `an llm_witness task exists and is LIVE (got: ${rows.map((r) => `${r.status}/${r.error_code}`).join(",")})`);
   assert.equal(await checkpointSeq(firm, FACTS_GATE_CONSUMER), await headSeq(firm), "facts_gate checkpoint converged to head");
   assert.equal((await deadLettersForFirm(firm, FACTS_GATE_CONSUMER)).length, 0, "no facts_gate dead-letters");
 });
@@ -122,7 +133,8 @@ test("redrive: a seeded facts_gate dead-letter re-fires the enqueue and resolves
   assert.deepEqual({ resolved: res.resolved, consumer: res.consumer }, { resolved: true, consumer: FACTS_GATE_CONSUMER });
   const dl = (await deadLettersForFirm(firm, FACTS_GATE_CONSUMER)).find((d) => d.eventId === eventId);
   assert.equal(dl.status, "resolved", "the dead-letter is marked resolved");
-  assert.ok((await factsTasks(document, "invoice_facts")).length >= 1, "the enqueue re-fired on redrive");
+  // F-A1 PR-3 CUTOVER: llm_witness, not invoice_facts (see the cycle test's own note above).
+  assert.ok((await factsTasks(document, "llm_witness")).length >= 1, "the enqueue re-fired on redrive");
 });
 
 test("redrive refuses when there is no facts_gate dead-letter", { skip }, async () => {

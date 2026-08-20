@@ -52,6 +52,41 @@ export async function invoiceFactsTask(document) {
   return r.rows[0]?.row ?? null;
 }
 
+/** F-A1 PR-3 CUTOVER (0097_f_a1_cutover.sql): the router's invoice-kind arm now
+ *  mints llm_witness, not invoice_facts, for EVERY invoice-shaped document -- no dual-run
+ *  (design D9), so enqueueInvoiceFacts()+invoiceFactsTask() above no longer produce anything
+ *  for an 'invoice'-kind document. This is the SHARED bypass every legacy-regime fixture
+ *  across the rig (x1-*, a21-helpers' seedCorroboratingInvoiceFacts, and their siblings)
+ *  needs to keep exercising the invoice_facts WRITE boundary (claim -> persist/fail) that
+ *  F-A1's own dispatch battery relies on for continuity proof -- the x49/x54 idiom
+ *  (f-a1-walls.test.mjs's insertWitnessTask) applied to the SYMMETRIC, now-retired lane: no
+ *  legitimate verb can mint invoice_facts at this frontier, by design, so this mints it
+ *  directly. It also reserves the page budget the retired router used to reserve at enqueue
+ *  time, or persist_invoice_facts' clara._settle_processing_call raises CLR18 'reservation
+ *  not found' the moment it tries to settle one that was never opened. */
+export async function mintLegacyInvoiceFactsTask(document) {
+  // ERA-SYMMETRIC (x37 upgrade-drill catch): inside an upgrade drill's PRE-cutover phase the
+  // era's OWN router auto-enqueues a LIVE invoice_facts task at filing time -- and reserves
+  // its page budget at enqueue, the retired router's contract -- so a second mint here trips
+  // uq_document_processing_one_live_lane (0009: one live task per (document, lane)). A live
+  // row is therefore REUSED as-is, reservation included; the direct mint below is the
+  // post-cutover frontier's shape, where no legitimate verb can produce one and none exists.
+  const live = await rootQuery(
+    "select id, version_n from clara.document_processing_tasks where document_id=$1 and lane=$2 and status in ('queued','held_egress','running') limit 1",
+    [document, INVOICE_FACTS_LANE]);
+  if (live.rows[0]) return live.rows[0];
+  const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [document])).rows[0].firm_id;
+  const v = await rootQuery(
+    "select coalesce(max(version_n),0)+1 as v from clara.document_processing_tasks where document_id=$1 and lane=$2",
+    [document, INVOICE_FACTS_LANE]);
+  const r = await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,version_n,lane,status)
+     values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,$4,'queued') returning id,version_n`,
+    [firm, document, v.rows[0].v, INVOICE_FACTS_LANE]);
+  await rootQuery("select clara._reserve_processing_call($1,1)", [r.rows[0].id]);
+  return r.rows[0];
+}
+
 /** claim_document_processing_task (runtime) — queued→running under the egress
  *  gate (p_egress_approved now covers lane invoice_facts too, N-F1). */
 export async function claimTask(task, { egressApproved = true, workflowRunId = null } = {}) {

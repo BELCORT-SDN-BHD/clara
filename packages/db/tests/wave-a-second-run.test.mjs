@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, opk, endPool, printLaneNotes, noteLane, printSkipCount, skipUnready,
   waveAEnsureReady, buildWorld, firmOf, upsertPayableAccount, upsertAccountClassed,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
+  seedCitedDocument, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask,
   primeReadyFiling, admitAutodraft, beginAutodraft, settleAutodraft, openSweepRun,
   reconcileSweepRuns, acknowledgeSweepRun, sweepItemRows,
   grantClientEgress, revokeClientEgress, filedDocument,
@@ -182,7 +182,10 @@ test("deploy-ordering fail-closed: 0011 live with NO consent row for a client â‡
   // Deliberately DO NOT grant consent for A2 (simulate the pre-seed window).
   // 0016 (P3): classify-first gate â€” kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   const receipt = await claimTask(task.id, { egressApproved: true }).catch((e) => ({ raised: e.code }));
   const st = (await rootQuery("select status from clara.document_processing_tasks where id=$1", [task.id])).rows[0].status;

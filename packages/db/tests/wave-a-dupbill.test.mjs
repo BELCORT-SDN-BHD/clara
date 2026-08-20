@@ -11,7 +11,7 @@ import {
   ROLES, rootQuery, opk, endPool, printLaneNotes, noteLane, printSkipCount, skipUnready,
   waveAEnsureReady, buildWorld, firmOf, upsertPayableAccount, upsertAccountClassed,
   seedCitedDocument, freshResolution, draftEntryV3, approveEntry, billLines, ev, FIELD,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   mintInteractive, wakeBillDraft, grantConsent, concurrentTwoSession, sawDeadlock, GUARD, ROUTINE_CENTS,
 } from "./wave-a-race.mjs";
 import { AP, EXP } from "./wave-a-fixtures.mjs";
@@ -38,7 +38,10 @@ async function dupDraft(sub, { client, reg, invoiceId, name = "DUPCO SDN BHD", a
   const firm = await firmOf(client);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 500.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => {});
   await persistInvoiceFacts(task.id, [

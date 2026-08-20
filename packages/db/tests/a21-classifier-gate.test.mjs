@@ -23,7 +23,7 @@ import {
   a21EnsureReady, skip16, metaProbe0016,
   classifyDocument, setDocumentKind, docKind, docTasks, roleCanExecute,
   grantConsent, seedCitedDocument, filedDocument,
-  enqueueInvoiceFacts, claimTask, persistInvoiceFacts, factField,
+  enqueueInvoiceFacts, mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   checkDefs,
 } from "./a21-helpers.mjs";
 
@@ -227,8 +227,28 @@ test("§5 NULL kind → classify FIRST: the enqueue opens a 'classify' task (not
   // the settle to that claim's own task+run) is what a caller must present.
   const claimed = await claimTask(classifyTask.id, { egressApproved: false });
   await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.95, task: classifyTask.id, run: claimed.workflow_run_id, secret: claimed.claim_secret });
+  // F-A1 PR-3 CUTOVER (B2, cross-model review): the llm_witness enqueue is consent-gated AT
+  // ENQUEUE (0090 wall 6/§7e) -- unlike the retired invoice_facts path, which had no
+  // enqueue-time consent gate at all. Without a live witness_extraction consent the minted
+  // task lands 'failed'/witness_consent_inactive immediately, which factsTaskOf/assert.ok
+  // would NOT catch (a failed row is still a truthy row) -- grant it first, the same pattern
+  // already applied elsewhere in this sweep (x1-reextraction.test.mjs cell 4,
+  // x-receipt-routing.test.mjs's before(), s6-invoice-facts.test.mjs's idempotency cell,
+  // x-fail-classify.test.mjs), so the assertion below actually proves a LIVE admission.
+  const { consentEvidenceDoc, grantPurpose, activatePurpose } = await import("./wave-b/wb-0020-helpers.mjs");
+  const evidence = await consentEvidenceDoc(world.users.alice, { firm: await firmOf(client) });
+  const grant = await grantPurpose(world.users.alice, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+  await activatePurpose(world.users.alice, { client, purpose: "witness_extraction", consent: grant.consent_id });
   await enqueueInvoiceFacts(cited.documentId);
-  assert.ok(await factsTaskOf(cited.documentId, "invoice_facts"), "with kind='invoice' the facts gate admits invoice_facts");
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) — this is the SAME "facts enqueue proceeds" gate this
+  // test is proving, just routed to the new lane. See f-a1-cutover.test.mjs for the full
+  // router battery.
+  assert.equal(await factsTaskOf(cited.documentId, "invoice_facts"), null, "with kind='invoice' the facts gate no longer mints invoice_facts (F-A1 PR-3 cutover)");
+  const witnessTask = await factsTaskOf(cited.documentId, "llm_witness");
+  assert.ok(witnessTask, "with kind='invoice' the facts gate admits llm_witness");
+  assert.ok(["queued", "held_egress", "running"].includes(witnessTask.status),
+    `the admitted llm_witness task must be LIVE, not a consent refusal in disguise (got status=${witnessTask.status}/error_code=${witnessTask.error_code})`);
 });
 
 test("§5 an e_invoice_xml routes to local_facts (deterministically rule-classified — no LLM classify for xml)", async (t) => {
@@ -250,9 +270,13 @@ test("§5 ONLY-IF-NULL stamping: persist_invoice_facts never overwrites an exist
   if (skipHere(t)) return;
   const client = world.clients.A1;
   const cited = await pdfDoc(client, { kind: "credit_note" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: this cell's point is persist_invoice_facts' ONLY-IF-NULL stamping
+  // discipline, not the router's destination lane — the router itself now mints llm_witness
+  // for a credit_note (no dual-run, D9; proven in f-a1-cutover.test.mjs), so this mints the
+  // invoice_facts task directly to keep exercising the LEGACY writer's own behavior.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await factsTaskOf(cited.documentId, "invoice_facts");
-  assert.ok(task, "a credit_note admits invoice_facts (mandatory setup — the gate admits invoice/credit_note/debit_note)");
+  assert.ok(task, "a credit_note task exists on the invoice_facts lane (mandatory setup)");
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
     factField("invoice.total", "RM 5,000.00"),

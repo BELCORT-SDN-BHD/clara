@@ -14,7 +14,7 @@ import {
   ROLES, rootQuery, roleQuery, humanQuery, namedCall, opk, firmOf, endPool,
   printLaneNotes, noteLane, buildWorld, grantConsent,
   classifyDocument, docKind, docTasks, roleCanExecute, fnSource,
-  filedDocument, claimTask, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask,
+  filedDocument, claimTask, seedCitedDocument, enqueueInvoiceFacts, mintLegacyInvoiceFactsTask, invoiceFactsTask,
 } from "./a21-helpers.mjs";
 // The generic two-session forced-schedule driver (X7 law: prove the block via
 // pg_blocking_pids before releasing, the x1/rig-docs-race precedent) — for the
@@ -211,7 +211,11 @@ test("a non-classify task (invoice_facts lane) is refused CLR16 — fail_classif
   const sub = world.users.alice;
   const firm = await firmOf(client);
   const doc = await filedDocument(sub, { firm, client, kind: "invoice" });
-  await enqueueInvoiceFacts(doc.documentId);
+  // F-A1 PR-3 CUTOVER: the automatic core now routes an invoice-kind document to
+  // llm_witness, never invoice_facts (no dual-run, D9) -- this cell only needs A task on
+  // some non-classify lane to prove fail_classify's lane-scoping, so it mints the legacy
+  // invoice_facts task directly rather than through the now-witness-routed enqueue RPC.
+  await mintLegacyInvoiceFactsTask(doc.documentId);
   const task = await invoiceFactsTask(doc.documentId);
   assert.ok(task, "mandatory setup: an invoice_facts task exists");
   await assert.rejects(

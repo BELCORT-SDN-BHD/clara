@@ -150,6 +150,9 @@ export const S5_25_BARE_TOKEN_RE = "\\m(now\\(\\)|current_timestamp\\M|localtime
  *  bare clock token — MEASURED from the live 0001..0041 catalog (round-8 M4), reproduced
  *  verbatim in the shipped migration's S5.25 arm (D) roster. Sorted so a diff against the live
  *  catalog's own sorted string_agg is a plain string comparison. */
+// F-A1 PR-3 (the cutover migration, numbered after 0095 at merge) joined fail_witness_facts to
+// the roster: `finished_at=now()` stamps the SAME timestamptz column its siblings
+// fail_invoice_facts/fail_statement_facts already legitimately stamp bare, no ::date suffix.
 export const S5_25_BARE_TOKEN_ROSTER = [
   // _adv_reversal_admission joined at the round-8 INTEGRATION: lane M3 factored the advance
   // reversal walls into one admission body carrying its parents' lawful as-of idiom
@@ -173,7 +176,7 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "consume_egress_dispatch", "create_client", "create_firm", "create_seeding_batch", "deactivate_bank_account",
   "deactivate_client_egress_purpose", "decline_coding_rule", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
   "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all", "execute_rule_post",
-  "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
+  "fail_classify", "fail_invoice_facts", "fail_statement_facts", "fail_witness_facts", "finalize_document_intake", "get_bank_reconciliation",
   "get_context_pack", "list_autopost_rules", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
   "mark_wiki_citations_stale", "match_bank_line", "merge_counterparties", "mint_wake_credential", "open_interruption",
   "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch", "propose_autopost_rule",

@@ -27,7 +27,7 @@ import {
   classifyDocument, notificationsMatching,
   upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedCorroboratingInvoiceFacts,
   draftEntryV3, approveEntry, stampCodingKind, ev, FIELD, counterpartyRows, sightingRows,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm, fnSource,
 } from "./a21-helpers.mjs";
 // 0022 / X4: whether the OCR-sales anchor lane is held shut by the extraction-slice dark
@@ -140,7 +140,10 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", omit =
   // polarity control still starts unverified). The classify-first loop itself is
   // proven in a21-classifier-gate.
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [

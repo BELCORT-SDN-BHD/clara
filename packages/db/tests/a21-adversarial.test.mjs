@@ -30,7 +30,7 @@ import {
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedCorroboratingInvoiceFacts,
   draftEntryV3, approveEntry, stampCodingKind, reverseEntry, ev, FIELD, counterpartyRows, codingRuleRows,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
+  enqueueInvoiceFacts, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, classifyDocument, rm, reasonOf,
   freshWatchClient, approvedTurnoverEntry, evaluateSstWatch, openWatchRow, watchEventRows,
   setTurnoverClassification, resolveWatch, fnSource, reviseEntry, setDocumentKind, docKind,
@@ -169,7 +169,10 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", confid
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
   if (stampKind) await rootQuery("update clara.documents set document_kind=$2 where id=$1", [cited.documentId, stampKind]);
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [

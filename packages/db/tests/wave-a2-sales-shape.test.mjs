@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, opk, upsertAccountClassed,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  seedCitedDocument, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, factsRegion, grantConsent, freshResolution, ev, approveEntry, mintInteractive, wakeDraftEntry,
   addClientIdentifier, reasonOf,
 } from "./wave-a-fixtures.mjs";
@@ -77,7 +77,10 @@ async function salesFiling({ client, gross, net, tax, typeCode = "01" }) {
   // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
   const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
   const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: rm(gross), kind });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [
@@ -392,7 +395,10 @@ async function salesFilingFor(sub, { client, gross, net, tax, typeCode = "01" })
   // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
   const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross), kind });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [
