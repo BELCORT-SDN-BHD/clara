@@ -23,6 +23,7 @@ import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { statementFacts_v1 } from "./statementFacts.v1.js";
+import { statementFacts_v2 } from "./statementFacts.v2.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
@@ -44,6 +45,8 @@ export const workflows = {
   chatTurn: chatTurn_v12,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
+  // F-A1 PR-4: statementFacts_v2 SHIPS BUILT AND FROZEN BUT IS DELIBERATELY NOT POINTED AT
+  // YET — see the note below. The repoint is the LAST step of the cutover, not this one.
   statementFacts: statementFacts_v1,
   witnessFacts: witnessFacts_v1,
   autoDraft: autoDraft_v8,
@@ -150,6 +153,23 @@ export const workflows = {
 // frontier and `enqueueForLane` does not name the lane, so this image lands and is verified live
 // BEFORE PR-3's router recut flips it on — the positive-read law, design §6. Its PROMPTS are
 // inside the frozen closure by decision M8, so a prompt tweak is a witnessFacts.v2.)
+//
+// (F-A1 PR-4 ADDS `statementFacts_v2` — the bank-statement witness pair — AND DELIBERATELY DOES
+// NOT POINT `statementFacts:` AT IT. This is the one place PR-4 differs from PR-2's posture, and
+// the difference is forced: `llm_witness` was an INERT lane nothing minted, but `statement_facts`
+// is minted TODAY, so the registry key IS the routing and a repoint takes live traffic the moment
+// the image deploys. Until the (deferred) router arm re-aims the statement engine literal from
+// `azure-di:prebuilt-bankStatement.us:2024-11-30` to the witness snapshot
+// `llm-openai:{model}:stmt-witness-v1`, every live statement task would reach v2 stamped with the
+// AZURE literal — and v2's pre-egress provenance guard (assertStatementEngineStamp) correctly
+// WAITS on that mismatch rather than egressing under a false receipt. Those waits would sit in
+// the SHARED ocr concurrency window (statement_facts is not M10-windowed), so they would starve
+// intake OCR as well as themselves until the per-document attempt cap ended them. So the repoint
+// is the LAST step of the cutover: DB persist verb -> PR-3 merge -> the router/consent arm ->
+// THEN this key moves to statementFacts_v2. The engine literal in that router arm and the
+// snapshot in statementFacts.v2.services.mjs must STRING-EQUAL each other; that pairing carries
+// its own battery cell in the follow-up piece.)
+//
 // why `enqueueForLane` (lib/reconciler-documents.mjs) became an explicit allowlist in the
 // same change, so a migration-before-runtime window can never route a bank statement into a
 // consentless generic OCR run. GH #152 repointed BOTH interview classes v2->v3 (the park/hook
@@ -289,6 +309,21 @@ export const workflows = {
 // is no longer silently zeroed out. See autoDraft.v8.tools.ts / chatTurn.v12.tools.ts for the
 // full statement. The v7/v11 bodies stay frozen, built and EXPORTED so no parked run is
 // stranded (policy (c)).
+//
+// F-A1 PR-4 (design §3.7) ADDS `statementFacts_v2` — the bank-statement TEXT+VISION WITNESS
+// PAIR, replacing v1's single Azure prebuilt-bankStatement read on the `statement_facts` lane;
+// `statement_parse` (csv/ofx) is carried over BEHAVIOURALLY UNCHANGED, reached by IMPORTING v1's
+// own claim+process steps rather than copying them (statementFacts.v2.impl.ts). It does NOT
+// repoint `statementFacts:` — see the deferred-repoint note above, near the `workflows` object,
+// for why `statement_facts` being a LIVE (not inert) lane forces that repoint to wait on the DB
+// persist verb, PR-3's merge and the router/consent arm, in that order.
+export { statementFacts_v1 };
+// F-A1 PR-4: statementFacts_v2 ships BUILT, FROZEN and REGISTERED but is deliberately NOT the
+// `statementFacts:` live pointer yet — see the deferred-repoint note above (this file, near the
+// `workflows` object). Exported here (rather than only imported) so it stays reachable and this
+// import is not flagged unused; the repoint to `statementFacts: statementFacts_v2` is the LAST
+// step of the cutover, gated on the DB persist verb, PR-3's merge, and the router/consent arm.
+export { statementFacts_v2 };
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };

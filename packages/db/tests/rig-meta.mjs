@@ -248,12 +248,28 @@ const WITNESS_F_A1_RUNTIME_FNS = [
   "record_llm_usage_event", "persist_witness_facts", "witness_citation_regions",
 ];
 const WITNESS_F_A1_COHORT = [...WITNESS_F_A1_RUNTIME_FNS];
-// F-A1 PR-3 (the cutover migration, numbered after 0095 at merge -- its own cohort per the
+// F-A1 PR-3 (the cutover migration, numbered 0097 at merge -- its own cohort per the
 // "wholly present or wholly absent" rule, same reasoning as WITNESS_F_A1_COHORT above): the
 // settle verb for a running llm_witness task. Mirrors fail_invoice_facts (S6_RUNTIME_FNS) --
 // the SAME task-bound runtime-only shape -- so it is clara_runtime-only EXECUTE, no human door.
 const WITNESS_F_A1_PR3_RUNTIME_FNS = ["fail_witness_facts"];
 const WITNESS_F_A1_PR3_COHORT = [...WITNESS_F_A1_PR3_RUNTIME_FNS];
+// F-A1 PR-4 — the bank-statement witness cutover. Its OWN cohort rather than an addition to
+// BANK_0038_*, and that is not cosmetic: `cohortFailures` tolerates a WHOLLY absent cohort (a
+// chain that stops short of this wave) but fails a PARTIAL one, so folding these two names
+// into the 0038 lists would red every pre-PR-4 database — measured, not assumed (the first cut
+// did exactly that and the baseline chain caught it).
+//   persist_statement_facts_v2 — the witness-pair task wrapper for the `statement_facts` lane,
+//     granted to clara_runtime on the same terms as its v1 sibling (which keeps serving
+//     `statement_parse`; the human/structured cores are unmoved).
+//   _persist_statement_core_v2 — the spliced successor core. UNGRANTED to every application
+//     role (the one-ungranted-core law, 0004:6-12); declaring it here is what makes a future
+//     accidental grant FAIL rather than pass silently.
+const STATEMENT_F_A1_PR4_RUNTIME_FNS = ["persist_statement_facts_v2"];
+const STATEMENT_F_A1_PR4_UNGRANTED_FNS = ["_persist_statement_core_v2"];
+export const STATEMENT_F_A1_PR4_COHORT = [
+  ...STATEMENT_F_A1_PR4_RUNTIME_FNS, ...STATEMENT_F_A1_PR4_UNGRANTED_FNS,
+];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -888,6 +904,8 @@ export const ALLOWED = {
     ...WAVE_A21_RUNTIME_FNS, // 0016 [A2.1 §C] SST evaluators + classify_document (runtime ONLY; agent zero)
     ...WAVE_B_0020_RUNTIME_FNS, // 0020 [§3.3/§3.4/§5.1/§5.3] dispatch authorization + the doc->client resolver
     ...FAIL_CLASSIFY_0024_RUNTIME_FNS, // 0024 the classify lane's terminal-fail writer
+    ...STATEMENT_F_A1_PR4_RUNTIME_FNS, // [Wave-F Track A, F-A1 PR-4] the bank-statement witness
+                                       // task wrapper (its core stays ungranted)
     ...WITNESS_F_A1_RUNTIME_FNS, // 0090-0095 [Wave-F Track A, F-A1] the witness-pair lane's whole
     // reachable API — usage metering, the atomic pair persist, and the citation numbering PR-2's
     // prompt builder must number against. The block where the array is declared names each verb
@@ -1037,6 +1055,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   return failures;
 }
 

@@ -732,6 +732,26 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/statementFacts.v2.behavior.mjs": {
+      "sha256": "c7b02a380c94e8ca7fce0f102be85a8e816c37b379352a18cc066a59c1228807",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v2.dispatch.mjs": {
+      "sha256": "b516d6f944273da8264711f7b2e819b5a9803d71ab18048caf8e71ddbd401471",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v2.impl.ts": {
+      "sha256": "5aad1d2e3b5337e845f4c6edafcd863a83ec49f9a5d206ce6fdb2fa1022f36cb",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v2.prompts.mjs": {
+      "sha256": "9ed0b0f3609f457627244c5e814f257b6bd3847e23ce41cbcfdbb10bd41c43d1",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v2.ts": {
+      "sha256": "c1e917aece04f2c28fa97aea0bd5a990eb294d9c9a5a6aa05f8947d7f947b8ee",
+      "note": ""
+    },
     "packages/runtime/workflows/steps.ts": {
       "sha256": "ffaf17b5787f4238c54da8e79959acc591d7bb7b4ec55e0c3da614b8d286da52",
       "note": "",

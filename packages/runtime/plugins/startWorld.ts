@@ -23,6 +23,7 @@ import { workflows } from "../workflows/registry.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
+import { makeStatementWitnessServices } from "../workflows/statementFacts.v2.services.mjs";
 import { makeWitnessFactsServices } from "../workflows/witnessFacts.v1.services.mjs";
 import { stopIntakeIngress } from "../lib/spool.mjs";
 import { startManagedScanner } from "../lib/scan.mjs";
@@ -72,6 +73,14 @@ export default definePlugin(() => {
   // and the corroborator/payload builder. Kept OUT of the frozen closure so parser and
   // vendor tuning against real Maybank output is never a workflow-version change (AB-16).
   (globalThis as unknown as { __claraStatementFactsServices?: unknown }).__claraStatementFactsServices = makeStatementFactsServices();
+  // F-A1 PR-4 (design SS3.7): the `statement_facts` WITNESS PAIR's own bundle — the canonical
+  // download plus the ONE model adapter both channels call. A SEPARATE global from the bundle
+  // above: `__claraStatementFactsServices` keeps serving the `statement_parse` lane via the
+  // imported v1 step (statementFacts.v2.impl.ts) UNCHANGED, and this bundle is additive rather
+  // than a replacement. Kept OUT of the frozen closure so a model id, a timeout or a provider
+  // content shape is config rather than a workflow version (AB-16); the PROMPTS are the
+  // deliberate exception and live inside statementFacts.v2's closure (design M8, inherited).
+  (globalThis as unknown as { __claraStatementWitnessServices?: unknown }).__claraStatementWitnessServices = makeStatementWitnessServices();
   // F-A1: the witness lane's own bundle — the canonical download plus the ONE model adapter both
   // channels call. Kept OUT of the frozen closure so a model id, a timeout or a provider content
   // shape is config rather than a workflow version (AB-16); the PROMPTS are the deliberate
