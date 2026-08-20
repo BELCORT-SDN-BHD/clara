@@ -6,24 +6,54 @@
 // THE SHAPE. The reconciler's queued branch re-mints a workflow run for EVERY queued task past
 // the grace whose prior run is terminal. That is correct when the queue is shallow and
 // catastrophic when it is deep: the DATABASE gates concurrency at CLAIM time
-// (`claim_document_processing_task` raises CLR18 once the lane's window is full — 0090 §4), so
-// on a 2-slot lane a 46-deep queue mints 46 runs per sweep, of which ~44 die on CLR18 while
-// their retries saturate the runtime's pg pool. Measured live: heartbeat starvation and a
-// health-check flap. Every one of those runs is pure waste — the work they would have done is
-// done by the two that actually claimed.
+// (`claim_document_processing_task` raises CLR18 once the lane's window is full — 0090 §4), so on
+// a 2-slot lane a deep queue produced **~46 runs/sweep dying on CLR18** while their retries
+// saturated the runtime's pg pool — the figure recorded in
+// `docs/plan/completed/f-a1-corpus-measurement.md`, "The incident the run exposed" §1, along with
+// the heartbeat starvation and health-check flap it caused. Every one of those runs is pure
+// waste: the work they would have done is done by the two that actually claimed.
 //
-// THE FIX, owner-ratified: mint at most (free lane slots) runs per sweep. Un-minted tasks are
-// NOT dropped, NOT failed and NOT touched at all — they stay exactly as they were, `queued`, and
-// the next sweep (~2s later) mints them against the slots that have since freed. Because the
-// reconciler's snapshot is ordered by `created_at` and its loop walks it in that order, the
-// pacing is FIFO: the oldest queued task is always the next one minted, so a paced task cannot
-// be starved by a younger one.
+// WHAT THIS MODULE DELIVERS, stated as the exact invariant so nothing has to be inferred:
+//
+//   **A PER-SWEEP MINT BOUND, IN TWO LAYERS.**
+//     * a GLOBAL layer — one sweep never mints more runs than the runtime's own connection pool
+//       can absorb (`RUNTIME_POOL_MAX`, imported BY IDENTITY from pools.mjs, never re-spelled as
+//       a literal). This is the engine-protective bound: the incident's damage was pool
+//       exhaustion, which is a property of the WHOLE sweep and not of any one firm or lane.
+//     * a PER-(FIRM, WINDOW) layer — the fairness bound underneath it: at most (free lane slots)
+//       for each firm's own concurrency window, so no single firm's backlog eats the sweep.
+//   A mint must pass BOTH; a refusal by either spends nothing from the other.
+//
+// **IT DOES NOT BOUND RUNS IN FLIGHT.** This is a bound on MINTS PER SWEEP, not on the number of
+// workflow runs concurrently alive. A minted-but-not-yet-claimed task still reads `queued` with a
+// NULL `workflow_run_id` in the next sweep's snapshot, so under claim latency it is minted again
+// (registered as a named F-A2 follow-up in PROGRESS.md: the sidecar `runId` clobber at
+// reconciler-documents.mjs:198-206 + spool.mjs:124; harmless — the workflow dedupes — but it
+// costs pool checkouts). The global cap BOUNDS that accumulation per sweep; it does not
+// eliminate it, and closing it properly touches a pre-existing path that needs its own review.
+//
+// UN-MINTED TASKS ARE NOT DROPPED, NOT FAILED AND NOT TOUCHED AT ALL — they stay exactly as they
+// were, `queued`, and the next sweep (~2s later) mints them against whatever has since freed.
+//
+// AGE DECIDES WHO WINS, on the DB path. `documentTaskSnapshot` orders by `created_at` and the
+// reconciler's loop walks it in that order, so both layers are consumed oldest-first, ACROSS
+// FIRMS as well as within one. Qualified deliberately: when that SELECT is unavailable the sweep
+// falls back to `listTaskMetas()`, which is spool-DIRECTORY order, not age. Progress is still
+// guaranteed there (every sweep mints up to the cap and a deferred task is untouched), but the
+// oldest-first ORDER is not — it is a property of the snapshot, not of this module.
 //
 // PACING IS NOT AUTHORIZATION. The CLR18 gate in the database remains the only thing that
 // decides whether a claim is legal; this is throughput management sitting in front of it. That
-// is what makes it acceptable for the cap below to be a HINT (see laneCapHints): a hint that is
-// too low only paces slower, and a hint that is too high only returns the pre-fix behaviour —
-// bounded, because the budget is still spent per sweep.
+// is what makes it acceptable for the per-firm cap below to be a HINT (see laneCapHints): a hint
+// that is too low only paces slower, and one that is too high still cannot exceed the global
+// layer.
+
+// THE ENGINE-PROTECTIVE BOUND, BY IDENTITY. `RUNTIME_POOL_MAX` is imported from the module that
+// SIZES the pool, never re-spelled here as a literal or re-read from its env var: a second
+// spelling is a second source of truth, and the one thing this cap must never do is drift from
+// the pool it is protecting (evidence law 3 — a name is a projection of the thing, not the
+// thing). Change `CLARA_RUNTIME_POOL_MAX` and this cap moves with it, automatically.
+import { RUNTIME_POOL_MAX } from "./pools.mjs";
 
 /** The lanes `claim_document_processing_task` actually gates, and the window each is counted in
  *  (0090 §4, read off the migration body — NOT from the lane's spelling):
@@ -71,32 +101,46 @@ export function laneCapHints(env = process.env) {
   };
 }
 
+/** The budget's map key. A JSON identity TUPLE, never a delimiter-joined string: a `|` (or any
+ *  other separator) is a guess about what a firm id or a lane name can never contain, and a wrong
+ *  guess silently merges two windows into one — the kind of defect that shows up as "pacing is
+ *  mysteriously too strict for one firm" and nothing else. One keying discipline across this
+ *  module, so there is no second rule to remember. */
+function windowKey(firmId, group) {
+  return JSON.stringify([String(firmId ?? ""), group]);
+}
+
 /**
- * One sweep's mint budget: cap − already-running, per (firm, window), decremented as it is spent.
+ * One sweep's mint budget, in the two layers the module header names.
  *
  * `runningRows` is a POSITIVE observation — rows a read actually returned — never a derivation.
  * When the census read is unavailable the caller passes what it DID see (or an empty list), and
- * the budget degrades to the full cap: still bounded at ~2 mints per firm per window per sweep,
- * which is the property that matters versus the 46 the incident measured. It never degrades to
- * "unlimited", and it never degrades to "zero".
+ * the per-firm layer degrades to the full cap. It never degrades to "unlimited" (the global layer
+ * still binds) and never to "zero" (a blind sweep must still make progress).
  *
  * @param {Array<{firmId:string, lane:string, running:number}>} runningRows
  * @param {{shared:number, llm_witness:number}} [caps]
+ * @param {number} [globalCap]  total mints this sweep may spend across ALL firms and lanes.
+ *   Defaults to the runtime pool's own size, imported by identity — see the header.
  */
-export function makeLaneMintBudget(runningRows = [], caps = laneCapHints()) {
+export function makeLaneMintBudget(runningRows = [], caps = laneCapHints(), globalCap = RUNTIME_POOL_MAX) {
   const used = new Map();
   for (const row of runningRows) {
     const group = laneConcurrencyGroup(String(row?.lane ?? ""));
     if (!group) continue;
     const n = Number(row.running);
-    const key = `${row.firmId}|${group}`;
+    const key = windowKey(row?.firmId, group);
     used.set(key, (used.get(key) ?? 0) + (Number.isFinite(n) && n > 0 ? n : 0));
   }
+  // Finite-guarded like every other bound here: a junk pool size must never mean "no global
+  // cap". Floored at 1 so a misconfiguration slows the sweep instead of stopping it dead.
+  const parsedGlobal = Math.floor(Number(globalCap));
+  let globalRemaining = Number.isFinite(parsedGlobal) && parsedGlobal > 0 ? parsedGlobal : 5;
   const remaining = new Map();
   const remainingFor = (firmId, lane) => {
     const group = laneConcurrencyGroup(String(lane ?? ""));
     if (!group) return Infinity; // ungated lane — the DB never counts it, so neither do we
-    const key = `${firmId}|${group}`;
+    const key = windowKey(firmId, group);
     if (!remaining.has(key)) {
       const cap = Number(caps?.[group]);
       const free = (Number.isFinite(cap) && cap > 0 ? cap : 2) - (used.get(key) ?? 0);
@@ -106,14 +150,27 @@ export function makeLaneMintBudget(runningRows = [], caps = laneCapHints()) {
   };
   return {
     remainingFor,
-    /** Spend one slot for this (firm, lane). FALSE means the window is full for this sweep and
-     *  the caller must leave the task queued rather than mint a run that could only die on
-     *  CLR18. Ungated lanes always return true and consume nothing. */
+    /** What is left of the SWEEP-WIDE bound. Exposed so the caller can say in its log whether a
+     *  deferral was the engine-protective cap or a firm's own full window — two different
+     *  operator actions, and guessing between them from a single counter is exactly the
+     *  derived-state reading evidence law 2 forbids. */
+    remainingGlobal() { return globalRemaining; },
+    /** Spend one slot for this (firm, lane). FALSE means this sweep will not mint the task — the
+     *  caller must leave it queued rather than mint a run that could only die on CLR18 or add a
+     *  checkout the pool cannot absorb. Ungated lanes still consume the GLOBAL slot (they mint a
+     *  real run and take a real connection); they just have no per-firm window to consume.
+     *
+     *  BOTH LAYERS OR NEITHER. A refusal by either layer spends nothing from the other, so a
+     *  firm whose window is full cannot quietly drain the global budget on tasks it was never
+     *  going to mint. */
     tryMint(firmId, lane) {
+      if (globalRemaining <= 0) return false;
       const left = remainingFor(firmId, lane);
-      if (left === Infinity) return true;
-      if (left <= 0) return false;
-      remaining.set(`${firmId}|${laneConcurrencyGroup(String(lane))}`, left - 1);
+      if (left !== Infinity && left <= 0) return false;
+      if (left !== Infinity) {
+        remaining.set(windowKey(firmId, laneConcurrencyGroup(String(lane))), left - 1);
+      }
+      globalRemaining -= 1;
       return true;
     },
   };

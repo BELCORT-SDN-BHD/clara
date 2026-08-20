@@ -80,15 +80,26 @@ export const WITNESS_ENGINE_SNAPSHOT = Object.freeze({
 export const WITNESS_MODEL_TIMEOUT_DEFAULT_MS = 180_000;
 
 /**
- * The knob's names, newest first. `CLARA_WITNESS_MODEL_TIMEOUT_MS` is the name the F-A2 opener
- * ratified; `CLARA_WITNESS_LLM_TIMEOUT_MS` is the name PR-2 shipped and any live machine may
- * still carry, so it is ACCEPTED rather than dropped — renaming a knob out from under a running
- * deployment silently reverts it to the default, which is the opposite of a config fix.
+ * The knob's names, newest first.
+ *
+ * `CLARA_WITNESS_MODEL_TIMEOUT_MS` is the name the F-A2 opener ratified.
+ * `CLARA_WITNESS_LLM_TIMEOUT_MS` is DEPRECATED but still accepted, and the reason is a fact
+ * rather than a preference: it is the name THIS FILE READ ON `main` before this change
+ * (`witnessFacts.v1.services.mjs:71` at d13341b, shipped by PR-2 / #265), so it is the name any
+ * already-deployed machine would have been configured under. Dropping it would silently revert
+ * such a deployment to the default — a config change nobody made and nobody would see. It is
+ * therefore retired the honest way: still honoured, and LOUD about being obsolete (see the
+ * warn-once below) so the surface can be removed once a deployment has actually moved.
  */
 export const WITNESS_MODEL_TIMEOUT_ENV_NAMES = Object.freeze([
   "CLARA_WITNESS_MODEL_TIMEOUT_MS",
   "CLARA_WITNESS_LLM_TIMEOUT_MS",
 ]);
+
+/** Warn-once state, per process. Once-per-process and not once-per-call: this is read on every
+ *  model call, and a per-call line would be noise an operator learns to filter — which is how a
+ *  misconfiguration survives. */
+const warnedTimeoutEnv = new Set();
 
 /**
  * Resolve the budget from an environment. FINITE-GUARDED (the leader.mjs idiom) and read
@@ -97,16 +108,39 @@ export const WITNESS_MODEL_TIMEOUT_ENV_NAMES = Object.freeze([
  * default. A NaN accepted here would mean NO timeout at all, i.e. exactly the unbounded call this
  * function exists to make impossible, so junk must never be able to switch the bound off.
  *
+ * BUT SILENCE IS THE OTHER FAILURE. An operator who sets `CLARA_WITNESS_MODEL_TIMEOUT_MS=5m` has
+ * done something deliberate, and falling back to the default without a word means their intent
+ * is discarded invisibly — the same class of defect as a guard that cannot say NO. So a knob
+ * that is PRESENT but unusable says so, once, naming what it saw and what is being used instead.
+ * An ABSENT knob is not a mistake and stays quiet.
+ *
  * A FUNCTION, not a module-level const, for two reasons: it is the only shape a battery can
  * exercise without mutating the real `process.env` mid-suite, and the budget is then read at CALL
  * time — so an operator who changes the knob does not have to reason about import order.
  *
  * @param {Record<string, string|undefined>} [env]
+ * @param {(message: string) => void} [warn]
+ * @param {Set<string>} [seen]  the warn-once ledger. INJECTABLE rather than reachable through a
+ *   test-only reset export: "once per process" is itself behaviour worth asserting, and a battery
+ *   that had to reach into module state to test it would be testing the reset, not the rule.
  */
-export function witnessModelTimeoutMs(env = process.env) {
+export function witnessModelTimeoutMs(env = process.env, warn = (m) => console.error(m), seen = warnedTimeoutEnv) {
   for (const name of WITNESS_MODEL_TIMEOUT_ENV_NAMES) {
-    const n = Number(env?.[name]);
-    if (Number.isFinite(n) && n > 0) return n;
+    const raw = env?.[name];
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) {
+      if (name !== WITNESS_MODEL_TIMEOUT_ENV_NAMES[0] && !seen.has(`deprecated:${name}`)) {
+        seen.add(`deprecated:${name}`);
+        warn(`[witness] ${name} is DEPRECATED — it still binds (${n}ms), but rename it to ${WITNESS_MODEL_TIMEOUT_ENV_NAMES[0]}; the alias exists only so an already-deployed machine does not silently revert to the ${WITNESS_MODEL_TIMEOUT_DEFAULT_MS}ms default.`);
+      }
+      return n;
+    }
+    // PRESENT but unusable. Absence is not a mistake and must not be warned about; a value that
+    // was typed and cannot be honoured is.
+    if (raw !== undefined && raw !== null && String(raw).trim() !== "" && !seen.has(`junk:${name}`)) {
+      seen.add(`junk:${name}`);
+      warn(`[witness] ${name}=${JSON.stringify(String(raw))} is not a positive number of milliseconds and was IGNORED — the witness model-call budget falls back to ${WITNESS_MODEL_TIMEOUT_DEFAULT_MS}ms. A junk value must never mean "no timeout", so it is refused rather than coerced.`);
+    }
   }
   return WITNESS_MODEL_TIMEOUT_DEFAULT_MS;
 }

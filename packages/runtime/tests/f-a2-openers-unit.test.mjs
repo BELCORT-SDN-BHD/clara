@@ -35,6 +35,9 @@ import {
   runningCountsFromSnapshot,
 } from "../lib/reconciler-pacing.mjs";
 import { reconcileDocumentTasks } from "../lib/reconciler-documents.mjs";
+// The engine-protective bound, imported from the module that SIZES the pool — the same identity
+// the pacing module imports, so the cell proves the bound IS the pool, not a matching literal.
+import { RUNTIME_POOL_MAX } from "../lib/pools.mjs";
 import {
   callWitnessModel,
   witnessModelTimeoutError,
@@ -96,11 +99,52 @@ test("④ mint-cap arithmetic: the budget is cap minus running, spent one mint a
 });
 
 test("④ zero free slots mints ZERO — the incident's exact shape", () => {
-  // A 2-slot lane with both slots already running: the pre-fix sweep minted one run per queued
-  // task and ~44 of 46 died on CLR18. The budget must mint none at all.
+  // A 2-slot lane with both slots already running. Pre-fix, the sweep minted one run per queued
+  // task and the incident recorded ~46 runs/sweep dying on CLR18
+  // (docs/plan/completed/f-a1-corpus-measurement.md, "The incident the run exposed" §1). The
+  // budget must mint none at all.
   const budget = makeLaneMintBudget([{ firmId: FIRM_A, lane: "llm_witness", running: 2 }], { shared: 2, llm_witness: 2 });
   assert.equal(budget.remainingFor(FIRM_A, "llm_witness"), 0);
   for (let i = 0; i < 46; i++) assert.equal(budget.tryMint(FIRM_A, "llm_witness"), false);
+});
+
+test("④ the GLOBAL cap bounds a sweep across firms, not just within one", () => {
+  // The engine-protective layer. Ten firms each with a completely free 2-slot witness window:
+  // per-firm pacing alone would happily mint 20 runs and hand the pool 20 checkouts it does not
+  // have. The sweep-wide cap is what stops that, and it is the pool's OWN size.
+  const budget = makeLaneMintBudget([], { shared: 2, llm_witness: 2 }, 3);
+  const firms = Array.from({ length: 10 }, (_, i) => `firm-${i}`);
+  const minted = firms.filter((f) => budget.tryMint(f, "llm_witness"));
+  assert.equal(minted.length, 3, "the global cap binds even though every firm's window was free");
+  assert.equal(budget.remainingGlobal(), 0);
+  assert.equal(budget.remainingFor(firms[9], "llm_witness"), 2, "an untouched firm's own window is unspent");
+});
+
+test("④ the global cap is the RUNTIME POOL's own size, by identity — never a re-spelled literal", () => {
+  // Evidence law 3: prove the bound IS its import rather than a number that happens to match.
+  // A default-constructed budget must spend exactly RUNTIME_POOL_MAX mints and then refuse.
+  const budget = makeLaneMintBudget([], { shared: 99, llm_witness: 99 });
+  let minted = 0;
+  while (budget.tryMint(`firm-${minted}`, "llm_witness")) minted += 1;
+  assert.equal(minted, RUNTIME_POOL_MAX);
+  assert.ok(RUNTIME_POOL_MAX > 0, "a non-positive pool size would make the sweep mint nothing");
+});
+
+test("④ a refusal by EITHER layer spends nothing from the other", () => {
+  // A firm whose window is full must not drain the global budget on tasks it will never mint.
+  const budget = makeLaneMintBudget([{ firmId: FIRM_A, lane: "llm_witness", running: 2 }], { shared: 2, llm_witness: 2 }, 4);
+  for (let i = 0; i < 20; i++) assert.equal(budget.tryMint(FIRM_A, "llm_witness"), false);
+  assert.equal(budget.remainingGlobal(), 4, "the full window consumed no global slots");
+  assert.equal(budget.tryMint(FIRM_B, "llm_witness"), true, "another firm can still spend them");
+  assert.equal(budget.remainingGlobal(), 3);
+});
+
+test("④ an ungated lane consumes the GLOBAL slot — it mints a real run and takes a real checkout", () => {
+  const budget = makeLaneMintBudget([], { shared: 2, llm_witness: 2 }, 2);
+  assert.equal(budget.remainingFor(FIRM_A, "classify"), Infinity, "no per-firm window exists for it");
+  assert.equal(budget.tryMint(FIRM_A, "structured_parse"), true);
+  assert.equal(budget.tryMint(FIRM_A, "structured_parse"), true);
+  assert.equal(budget.tryMint(FIRM_A, "structured_parse"), false, "the pool cap still binds it");
 });
 
 test("④ running OVER the cap clamps to zero, never to a negative budget", () => {
@@ -125,10 +169,14 @@ test("④ the triple shares ONE window; llm_witness and other firms are isolated
   assert.equal(budget.tryMint(FIRM_B, "ocr"), false);
 });
 
-test("④ an ungated lane is never paced, however deep its queue", () => {
-  const budget = makeLaneMintBudget([], { shared: 2, llm_witness: 2 });
+test("④ an ungated lane has no PER-FIRM window — the DB never counts it, so neither do we", () => {
+  // It is still subject to the global layer (proved in its own cell above); what it must never
+  // acquire is a per-firm concurrency window the database does not actually enforce.
+  const budget = makeLaneMintBudget([{ firmId: FIRM_A, lane: "classify", running: 99 }], { shared: 2, llm_witness: 2 }, 50);
   assert.equal(budget.remainingFor(FIRM_A, "classify"), Infinity);
+  assert.equal(budget.remainingFor(FIRM_A, "structured_parse"), Infinity);
   for (let i = 0; i < 50; i++) assert.equal(budget.tryMint(FIRM_A, "structured_parse"), true);
+  assert.equal(budget.remainingFor(FIRM_A, "llm_witness"), 2, "a running ungated task never consumed a gated window");
 });
 
 test("④ an absent census degrades to the full cap — bounded, never unlimited and never zero", () => {
@@ -283,14 +331,18 @@ test("④ a census that cannot be read still paces — from the sweep's own snap
 
 test("③ the budget default is the value the corpus run proved, not a guess", () => {
   assert.equal(WITNESS_MODEL_TIMEOUT_DEFAULT_MS, 180_000);
-  assert.equal(witnessModelTimeoutMs({}), 180_000, "an environment naming neither knob gets the default");
+  assert.equal(witnessModelTimeoutMs({}, () => {}, new Set()), 180_000, "an environment naming neither knob gets the default");
 });
 
+/** Parse-only: a sink warn + a throwaway ledger, so these cells judge the VALUE and never
+ *  accidentally depend on (or pollute) the once-per-process warning state. */
+const quietTimeout = (env) => witnessModelTimeoutMs(env, () => {}, new Set());
+
 test("③ the budget parses from either knob name, newest first", () => {
-  assert.equal(witnessModelTimeoutMs({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "300000" }), 300_000);
-  assert.equal(witnessModelTimeoutMs({ CLARA_WITNESS_LLM_TIMEOUT_MS: "90000" }), 90_000, "the PR-2 name a live machine may still carry");
+  assert.equal(quietTimeout({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "300000" }), 300_000);
+  assert.equal(quietTimeout({ CLARA_WITNESS_LLM_TIMEOUT_MS: "90000" }), 90_000, "the PR-2 name a live machine may still carry");
   assert.equal(
-    witnessModelTimeoutMs({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "45000", CLARA_WITNESS_LLM_TIMEOUT_MS: "90000" }),
+    quietTimeout({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "45000", CLARA_WITNESS_LLM_TIMEOUT_MS: "90000" }),
     45_000,
     "the ratified name wins when both are set",
   );
@@ -299,13 +351,54 @@ test("③ the budget parses from either knob name, newest first", () => {
 test("③ junk NEVER switches the bound off — it falls through to the next name, then the default", () => {
   for (const junk of ["abc", "", "   ", "0", "-1", "Infinity", "NaN", undefined, null]) {
     assert.equal(
-      witnessModelTimeoutMs({ CLARA_WITNESS_MODEL_TIMEOUT_MS: junk }),
+      quietTimeout({ CLARA_WITNESS_MODEL_TIMEOUT_MS: junk }),
       180_000,
       `junk ${JSON.stringify(junk)} must not mean "no timeout"`,
     );
   }
   // A junk new name falls through to a VALID legacy name rather than skipping straight to default.
-  assert.equal(witnessModelTimeoutMs({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "abc", CLARA_WITNESS_LLM_TIMEOUT_MS: "70000" }), 70_000);
+  assert.equal(quietTimeout({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "abc", CLARA_WITNESS_LLM_TIMEOUT_MS: "70000" }), 70_000);
+});
+
+test("③ a knob that is PRESENT but unusable is SAID, not silently discarded", () => {
+  // The other failure mode of a fallback: an operator typed something deliberate and the process
+  // ignored it without a word. Absence is not a mistake and must stay quiet; a typed value that
+  // cannot be honoured must not. Each cell brings its OWN warn-once ledger so the cells are
+  // order-independent — the shared process ledger is what the next cell is actually about.
+  const said = [];
+  const warn = (m) => said.push(m);
+  assert.equal(witnessModelTimeoutMs({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "5m" }, warn, new Set()), 180_000);
+  assert.equal(said.length, 1, "exactly one line for the junk value");
+  assert.match(said[0], /CLARA_WITNESS_MODEL_TIMEOUT_MS/);
+  assert.match(said[0], /"5m"/, "it names WHAT it saw, not just that something was wrong");
+  assert.match(said[0], /IGNORED/);
+  assert.match(said[0], /180000/, "…and what is being used instead");
+});
+
+test("③ the warning is ONCE per ledger, not once per call — it is read on every model call", () => {
+  const said = [];
+  const warn = (m) => said.push(m);
+  const ledger = new Set();
+  for (let i = 0; i < 5; i++) witnessModelTimeoutMs({ CLARA_WITNESS_MODEL_TIMEOUT_MS: "5m" }, warn, ledger);
+  assert.equal(said.length, 1, "a per-call line is noise an operator learns to filter");
+});
+
+test("③ an ABSENT knob is silent — absence is not a misconfiguration", () => {
+  const said = [];
+  assert.equal(witnessModelTimeoutMs({}, (m) => said.push(m), new Set()), 180_000);
+  assert.deepEqual(said, []);
+});
+
+test("③ the deprecated PR-2 knob still BINDS, and says it is obsolete", () => {
+  // It is kept because it is the name this file read on `main` (witnessFacts.v1.services.mjs:71
+  // at d13341b, shipped by PR #265), i.e. the name any already-deployed machine would be
+  // configured under. Dropping it would revert such a deployment to the default with no signal.
+  const said = [];
+  assert.equal(witnessModelTimeoutMs({ CLARA_WITNESS_LLM_TIMEOUT_MS: "90000" }, (m) => said.push(m), new Set()), 90_000);
+  assert.equal(said.length, 1);
+  assert.match(said[0], /DEPRECATED/);
+  assert.match(said[0], /still binds \(90000ms\)/, "the operator is told their value IS in force");
+  assert.match(said[0], /CLARA_WITNESS_MODEL_TIMEOUT_MS/, "…and what to rename it to");
 });
 
 test("③ a spent budget settles TERMINALLY through the frozen taxonomy — asked of the real judge", () => {
