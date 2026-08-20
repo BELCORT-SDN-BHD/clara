@@ -88,9 +88,13 @@ synced, skipped, or blocked.**
 5. **Resumability:** kill and restart the server mid-workflow (mid-close, mid-onboarding,
    mid-bulk); resume-or-reconcile with **no double-posting and no lost context**; parked
    clarifications resume after ≥48h.
-6. **The AI-quality eval harness (GAP3-6, a real gate):** attribution precision + abstention,
-   coding accuracy by document class, must-ask recall, auto-post precision — falsifiable
-   thresholds set at Gate 3, measured before cutover readiness.
+6. ~~**The AI-quality eval harness (GAP3-6, a real gate)**~~ — **DECLINED, ADR-0071/G7.**
+   Corrected here 2026-08-20: this item read "a real gate… falsifiable thresholds set at Gate 3,
+   measured before cutover readiness", which contradicted a standing ruling in a harness-menu
+   file. **Quality's only checkpoint is the Wave-G corpus's owner-supplied golden-bar tie-out**
+   (`docs/plan/active/wave-g-e2e-corpus-design.md`). The consequence G7 states in its own words
+   is recorded rather than hidden: the monthly harness-ablation backlog item stays blocked on a
+   benchmark that now will not exist.
 7. **Structural-guard negative tests:** SELECT-wrapped writer fails; provenance mismatch
    RAISES; wake allowlist blocks; maker=checker blocked on high-stakes; revision-token
    mismatch rejects; stale context-pack token rejects; double carry-down seed RAISES; cross-FY
