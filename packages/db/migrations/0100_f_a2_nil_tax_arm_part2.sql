@@ -1,9 +1,11 @@
--- UNNUMBERED_f_a2_nil_tax_arm_part2.sql — Wave-F Track A, F-A2 opener ①, PART 2 of 2:
+-- 0100_f_a2_nil_tax_arm_part2.sql — Wave-F Track A, F-A2 opener ①, PART 2 of 2:
 -- clara.evaluate_witness_fact_state_v2 (THE THREE-LOCKS NIL-TAX ARM) + THE RESOLVER REPOINT.
 -- =====================================================================================
--- MIGRATION NUMBER IS CLAIMED AT MERGE TIME (hard constraint 10). Nothing keys on it — the
--- battery gates on the STABLE SUFFIX `_f_a2_nil_tax_arm_part2`. APPLY AFTER
--- UNNUMBERED_f_a2_nil_tax_arm.sql (alphabetical order = apply order); the two are ONE ceremony
+-- MIGRATION NUMBER CLAIMED AT MERGE TIME (hard constraint 10) — authored as
+-- UNNUMBERED_f_a2_nil_tax_arm_part2.sql and numbered in the commit that lands it. Nothing keys
+-- on the number: the battery gates on catalog facts and on the STABLE SUFFIX
+-- `_f_a2_nil_tax_arm_part2`. APPLY AFTER
+-- 0099_f_a2_nil_tax_arm.sql (alphabetical order = apply order); the two are ONE ceremony
 -- and each is self-contained, so a deploy-onto-existing run that applies only one still fails
 -- LOUD rather than half-silently. Like its part 1 this file sits past the harness's 500-line
 -- advisory, the same call 0092 made at 644 lines: a migration's prestate, its body, its freeze
@@ -602,14 +604,14 @@ begin
                  (3,'clara.evaluate_witness_identity_v1(uuid,uuid,boolean)')) m(o,s);
   insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
       closure_sha256, migration_version, deployed)
-    -- migration_version carries the FILE'S OWN NAME and is renamed in the commit that claims
-    -- the number, exactly as 0092 did (it was authored as UNNUMBERED_f_a1_predicate.sql and
-    -- re-pointed to '0092_f_a1_predicate'). Nothing keys on this value — it is provenance for a
-    -- human reading the registry — but leaving it saying UNNUMBERED after the number is claimed
-    -- would point a future reader at a file that no longer exists.
+    -- migration_version carries the FILE'S OWN NAME, re-pointed in the commit that claimed the
+    -- number, exactly as 0092 did (authored as UNNUMBERED_f_a1_predicate.sql, landed as
+    -- '0092_f_a1_predicate'). Nothing keys on this value — it is provenance for a human reading
+    -- the registry — but leaving it saying UNNUMBERED would point a future reader at a file that
+    -- no longer exists.
     values('evaluate_witness_fact_state', 2,
       'clara.evaluate_witness_fact_state_v2(uuid,uuid,uuid)', h,
-      'UNNUMBERED_f_a2_nil_tax_arm_part2', false) returning id into e;
+      '0100_f_a2_nil_tax_arm_part2', false) returning id into e;
   insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
       body_sha256, firm_id)
     select e, o, s, sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text,'UTF8')), null::uuid

@@ -1,10 +1,13 @@
--- UNNUMBERED_f_a2_nil_tax_arm.sql — Wave-F Track A, F-A2 openers ① + ②, PART 1 of 2:
+-- 0099_f_a2_nil_tax_arm.sql — Wave-F Track A, F-A2 openers ① + ②, PART 1 of 2:
 -- THE THREE LIVE-BODY RECUTS.
 -- =====================================================================================
--- MIGRATION NUMBER IS CLAIMED AT MERGE TIME (hard constraint 10; .claude/rules/db-migrations.md);
--- nothing keys on it — the battery gates on the STABLE SUFFIX `_f_a2_nil_tax_arm`. SPLIT INTO
+-- MIGRATION NUMBER CLAIMED AT MERGE TIME (hard constraint 10; .claude/rules/db-migrations.md) —
+-- authored as UNNUMBERED_f_a2_nil_tax_arm.sql and numbered in the commit that lands it, against
+-- a repo frontier of 0098. NOTHING KEYS ON THE NUMBER: the battery gates on catalog facts and on
+-- the STABLE SUFFIX `_f_a2_nil_tax_arm`, and every prestate below pins a body by SHA or an
+-- anchor by count, never by a version string. SPLIT INTO
 -- TWO FILES, applied in ALPHABETICAL order (this file, then
--- UNNUMBERED_f_a2_nil_tax_arm_part2.sql), each SELF-CONTAINED (own quiesce guard, own prestate,
+-- 0100_f_a2_nil_tax_arm_part2.sql), each SELF-CONTAINED (own quiesce guard, own prestate,
 -- own tail; no temp table crosses files, because a deploy-onto-existing run may apply only one).
 -- Part 1 (this file) RECUTS three live bodies and CREATES nothing; part 2 CREATES one evaluator
 -- and RECUTS exactly one body. The split is the 0092/0093 shape and it buys the same thing: each
