@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  seedCitedDocument, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, grantConsent, addClientIdentifier, addClientAlias,
 } from "./wave-a-fixtures.mjs";
 
@@ -47,7 +47,10 @@ async function factsDoc({ client, supplierName, supplierReg, customerName = "SOM
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   const fields = [
@@ -217,7 +220,10 @@ test("RESIDUAL v3 a supplier=client doc whose BUYER is ALSO the client via TIN-o
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   // Supplier = the client (name + registration match) => would resolve 'sales' on the

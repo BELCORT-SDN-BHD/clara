@@ -248,6 +248,12 @@ const WITNESS_F_A1_RUNTIME_FNS = [
   "record_llm_usage_event", "persist_witness_facts", "witness_citation_regions",
 ];
 const WITNESS_F_A1_COHORT = [...WITNESS_F_A1_RUNTIME_FNS];
+// F-A1 PR-3 (the cutover migration, numbered 0097 at merge -- its own cohort per the
+// "wholly present or wholly absent" rule, same reasoning as WITNESS_F_A1_COHORT above): the
+// settle verb for a running llm_witness task. Mirrors fail_invoice_facts (S6_RUNTIME_FNS) --
+// the SAME task-bound runtime-only shape -- so it is clara_runtime-only EXECUTE, no human door.
+const WITNESS_F_A1_PR3_RUNTIME_FNS = ["fail_witness_facts"];
+const WITNESS_F_A1_PR3_COHORT = [...WITNESS_F_A1_PR3_RUNTIME_FNS];
 // F-A1 PR-4 — the bank-statement witness cutover. Its OWN cohort rather than an addition to
 // BANK_0038_*, and that is not cosmetic: `cohortFailures` tolerates a WHOLLY absent cohort (a
 // chain that stops short of this wave) but fails a PARTIAL one, so folding these two names
@@ -904,6 +910,8 @@ export const ALLOWED = {
     // reachable API — usage metering, the atomic pair persist, and the citation numbering PR-2's
     // prompt builder must number against. The block where the array is declared names each verb
     // and its consumer; F-A1 grants no human EXECUTE at all
+    ...WITNESS_F_A1_PR3_RUNTIME_FNS, // F-A1 PR-3 cutover: fail_witness_facts, the running->failed
+    // settle verb for the llm_witness lane (mirrors fail_invoice_facts, S6_RUNTIME_FNS above)
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1046,6 +1054,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0079-0083 wave E render queue", RENDER_ZETA_COHORT, liveNames));
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
+  failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   return failures;
 }

@@ -41,6 +41,7 @@ let warnedInvoiceFactsEnqueueGap = false;
 let warnedLocalFactsEnqueueGap = false;
 let warnedClassifyEnqueueGap = false;
 let warnedStatementFactsEnqueueGap = false;
+let warnedWitnessFactsEnqueueGap = false;
 /** Lanes this image does not recognise at all, warned once each (see enqueueForLane). */
 const warnedUnknownLanes = new Set();
 
@@ -66,12 +67,16 @@ function documentOp(prefix, taskId) {
  *
  *  Per lane: 'ocr'/'structured_parse'/'none' ride documentIngest; 'invoice_facts' rides its
  *  own workflow (invoiceFacts_v1); 'statement_facts'/'statement_parse' ride statementFacts_v1
- *  (ONE workflow, branching on the lane inside — design §4.3); 'local_facts' rides the
- *  non-frozen MyInvois consumer (Wave A2 — no WDK workflow); 'classify' rides the non-frozen
- *  classify consumer (Wave A2.1 — its OWN leader loop discovers + drives queued tasks), so
- *  the shared reconciler has NO dispatch role for it and MUST NOT fall through to
- *  documentIngest (that would start an Azure DI OCR run for a classify task — real vendor
- *  egress — which then fails at persist_document_extraction, CLR16).
+ *  (ONE workflow, branching on the lane inside — design §4.3); 'llm_witness' rides
+ *  witnessFacts_v1 (F-A1 PR-3 cutover — the DB-side router mints this lane for every
+ *  invoice-shaped document now; an old image without this arm would warn-once and wait,
+ *  never fall through to documentIngest, which is the whole point of the allowlist below);
+ *  'local_facts' rides the non-frozen MyInvois consumer (Wave A2 — no WDK workflow);
+ *  'classify' rides the non-frozen classify consumer (Wave A2.1 — its OWN leader loop
+ *  discovers + drives queued tasks), so the shared reconciler has NO dispatch role for it and
+ *  MUST NOT fall through to documentIngest (that would start an Azure DI OCR run for a
+ *  classify task — real vendor egress — which then fails at persist_document_extraction,
+ *  CLR16).
  *
  *  Returns the injected enqueue fn, or undefined when the lane is owned elsewhere / the
  *  supervisor has not wired that lane / the lane is unknown to this image. */
@@ -79,6 +84,7 @@ function enqueueForLane(deps, lane) {
   if (lane === "ocr" || lane === "structured_parse" || lane === "none") return deps.enqueueDocumentIngest;
   if (lane === "invoice_facts") return deps.enqueueInvoiceFacts;
   if (lane === "statement_facts" || lane === "statement_parse") return deps.enqueueStatementFacts;
+  if (lane === "llm_witness") return deps.enqueueWitnessFacts;
   if (lane === "local_facts") return deps.enqueueLocalFacts;
   if (lane === "classify") return undefined; // owned by the classify leader loop, never documentIngest
   if (!warnedUnknownLanes.has(String(lane))) {
@@ -386,6 +392,10 @@ export async function reconcileDocumentTasks(client, deps) {
         if ((task.lane === "statement_facts" || task.lane === "statement_parse") && !warnedStatementFactsEnqueueGap) {
           warnedStatementFactsEnqueueGap = true;
           log("[reconcile] statement re-enqueue skipped: deps.enqueueStatementFacts not wired — a bank-statement task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed statement_extraction consent gate; supervisor must provide enqueueStatementFacts)");
+        }
+        if (task.lane === "llm_witness" && !warnedWitnessFactsEnqueueGap) {
+          warnedWitnessFactsEnqueueGap = true;
+          log("[reconcile] llm_witness re-enqueue skipped: deps.enqueueWitnessFacts not wired — a witness task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed witness_extraction consent gate; supervisor must provide enqueueWitnessFacts)");
         }
         if (task.lane === "classify" && !warnedClassifyEnqueueGap) {
           warnedClassifyEnqueueGap = true;

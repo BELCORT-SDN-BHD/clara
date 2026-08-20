@@ -38,7 +38,7 @@
 // (`statement_facts` is not M10-windowed), so they would starve intake OCR as well as
 // themselves. The order is therefore binding, and this PR is only its first step:
 //
-//   (1) the DB persist verb (this PR's UNNUMBERED_f_a1_statements migration)
+//   (1) the DB persist verb (this PR's 0098_f_a1_statements migration)
 //   (2) PR-3 merges (it owns the wb-0020-pinned `_enqueue_invoice_facts_core` body)
 //   (3) the router/consent arm migration on top of PR-3's body: the engine-literal re-aim plus
 //       the statement typed-consent lookup moving to purpose `witness_extraction`

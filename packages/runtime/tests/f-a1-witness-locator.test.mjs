@@ -149,6 +149,75 @@ test("f-a1.pr2.q1 POSITIVE — regions from the REAL producer carry a page end t
   assert.equal(identity.identity_contest, false);
 });
 
+test("f-a1.pr2.q3 D4 a page_number-only MULTI-PAGE document still sorts page by page", { skip }, async () => {
+  // `witness_citation_regions` publishes `locator->>'page'` only, so every one of these rows
+  // publishes a NULL page. Before D4 they all collapsed to "unplaceable" and sorted to the end
+  // together — reading order scrambled across pages for exactly the legacy documents that need it.
+  const s = await buildWitnessSituation("legacymultipage", { regions: [] });
+  // GEOMETRY CHOSEN SO THE CELL CANNOT PASS BY LUCK: page 2's lines sit HIGHER on their own
+  // sheet (y 0/20) than page 1's do (y 100/120). Without the page fallback every row is
+  // "unplaceable", the sort collapses to y, and page two would be emitted FIRST — deterministically
+  // wrong, not wrong-with-probability.
+  const lines = [
+    { page: 2, y: 0, text: "PAGE TWO FIRST LINE" },
+    { page: 1, y: 100, text: "PAGE ONE FIRST LINE" },
+    { page: 2, y: 20, text: "PAGE TWO SECOND LINE" },
+    { page: 1, y: 120, text: "PAGE ONE SECOND LINE" },
+  ];
+  for (const [i, l] of lines.entries()) {
+    await fx.rootQuery(
+      `insert into clara.document_regions (firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
+       values ($1,$2,'page_polygon',$3::jsonb,$4,$5,0.97)`,
+      [s.firm, s.ocrId,
+        // The pre-change producer's spelling ONLY — no `page` key anywhere.
+        JSON.stringify({ page_number: l.page, polygon: [0, l.y, 10, l.y, 10, l.y + 5, 0, l.y + 5] }),
+        `pages.${l.page}.lines.${i}`, l.text],
+    );
+  }
+  const published = await publishedNumbering(s.ocrId);
+  for (const row of published) assert.equal(row.page, null, "precondition: nothing publishes a page");
+
+  const calls = witnessMock({ text: { ...witnessWire(), citations: [] }, vision: witnessWire() });
+  await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc).catch(() => {});
+  const shown = calls[0].text.split("\n").filter((l) => /^\[\d+/.test(l)).map((l) => l.replace(/^\[\d+\] /, ""));
+  assert.deepEqual(shown, [
+    "PAGE ONE FIRST LINE", "PAGE ONE SECOND LINE", "PAGE TWO FIRST LINE", "PAGE TWO SECOND LINE",
+  ], "the SORT falls back to locator.page_number so the document still reads page by page");
+  assert.ok(!/\bp\d/.test(calls[0].text),
+    "…while the printed marker still comes from the PUBLISHED page only — an inferred page orders "
+    + "the lines, it never becomes a page number shown to the model");
+});
+
+test("f-a1.pr2.q4 D7 side-by-side columns read left-to-right, not interleaved down the page", { skip }, async () => {
+  // Real invoices put a label at x=0 and its amount at x=400 on the same printed line, and OCR
+  // almost never gives them the SAME y to the last decimal. A strict y sort therefore separates
+  // every label from its own figure — the shuffled-document defect, one level finer.
+  const s = await buildWitnessSituation("columns", { regions: [] });
+  const cells = [
+    { x: 0, y: 100.0, h: 10, text: "SUBTOTAL" },
+    { x: 400, y: 100.9, h: 10, text: "RM 94.30" },      // same line, 0.9 lower than its label
+    { x: 0, y: 120.0, h: 10, text: "SST 6%" },
+    { x: 400, y: 119.4, h: 10, text: "RM 5.66" },       // same line, slightly HIGHER
+    { x: 0, y: 140.0, h: 10, text: "TOTAL DUE" },
+    { x: 400, y: 140.2, h: 10, text: "RM 103.75" },
+  ];
+  for (const [i, c] of cells.entries()) {
+    await fx.rootQuery(
+      `insert into clara.document_regions (firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
+       values ($1,$2,'page_polygon',$3::jsonb,$4,$5,0.97)`,
+      [s.firm, s.ocrId,
+        JSON.stringify({ page: 1, polygon: [c.x, c.y, c.x + 80, c.y, c.x + 80, c.y + c.h, c.x, c.y + c.h] }),
+        `pages.1.lines.${i}`, c.text],
+    );
+  }
+  const calls = witnessMock({ text: { ...witnessWire(), citations: [] }, vision: witnessWire() });
+  await runWitnessTextRead(services(), withRuntime, s.taskId, s.claimDoc).catch(() => {});
+  const shown = calls[0].text.split("\n").filter((l) => /^\[\d+/.test(l)).map((l) => l.replace(/^\[\d+ p1\] /, ""));
+  assert.deepEqual(shown, [
+    "SUBTOTAL", "RM 94.30", "SST 6%", "RM 5.66", "TOTAL DUE", "RM 103.75",
+  ], "each label is followed by its OWN amount — banded within half a line-height, then x order");
+});
+
 test("f-a1.pr2.q2 NEGATIVE TWIN — a pre-change `page_number`-only row still publishes a NULL page and refuses identity geometry, fail-closed", { skip }, async () => {
   const s = await buildWitnessSituation("legacylocator", { regions: [] });
   for (const [i, l] of PARTY_LINES.entries()) {

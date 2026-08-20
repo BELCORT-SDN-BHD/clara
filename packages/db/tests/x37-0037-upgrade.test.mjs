@@ -59,7 +59,7 @@ import {
   firmOf, createClient, upsertPayableAccount, upsertAccountClassed, grantConsent,
   freshResolution, draftEntryV3, approveEntry, reverseEntry,
   counterpartyRows, normalize, mergeCounterparties,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  seedCitedDocument, invoiceFactsTask, mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, statedIdentityFields, agreedEnvelope, factsRegion, mintInteractive, wakeDraftEntry,
   ev, FIELD, billLines, rm,
 } from "./a21-helpers.mjs";
@@ -143,7 +143,10 @@ async function birth(sub, { client, name, kind = "vendor" }) {
 async function citedDoc(sub, { client, gross }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross), kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [

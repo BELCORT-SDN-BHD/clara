@@ -246,6 +246,30 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/autoDraft.v8.errors.ts": {
+      "sha256": "29e43c9e9941ef37a43a5ee2a94c2e6714f24dd9baf2fa620394cbb2553fd351",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v8.impl.ts": {
+      "sha256": "fa51d31c9d254a8120947c33dc725868ff43d9d40a33134f5dc824176ce621d3",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v8.infra.ts": {
+      "sha256": "c5d054a8802596c3ffb96e49fa8e68056e51b7278bb16f424a2d788258110af7",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v8.prompt.ts": {
+      "sha256": "a5564983d0e79d2f80f1cfdc576cc32695b38a2149b1bd54a871ef9c4cb56cf1",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v8.tools.ts": {
+      "sha256": "a6bdf1ad71df20d9b49e159ed3da578566d8b80d40915643c3e1b8e8aeef739d",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v8.ts": {
+      "sha256": "81d99b9f0d96f2b6fb4d0738546ba5dc3229518e4488aa300c7434ef946feec7",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.impl.ts": {
       "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
       "note": "",
@@ -310,6 +334,18 @@
       "sha256": "26b23143286182845bf5a5a0df4ef8fb650babce5f1e289e6339fc1a032b6dfe",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v12.impl.ts": {
+      "sha256": "a84b4ca3f12598d8b8971a18ee2bce17192330efbb5135f8161056d27049a370",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v12.tools.ts": {
+      "sha256": "16b1b14336b2d4c02b0b4fb6ed2b6c39215473cb638f954176d823aaf1499753",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v12.ts": {
+      "sha256": "3a944127575750d07f1e29e251127a3e37e5b347e4bf03f2b31895c93959ea22",
+      "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
@@ -713,7 +749,7 @@
       "note": ""
     },
     "packages/runtime/workflows/statementFacts.v2.ts": {
-      "sha256": "133c194ec6260737298f4d1515c413996fb0eaba500087de56455bb46261997c",
+      "sha256": "c1e917aece04f2c28fa97aea0bd5a990eb294d9c9a5a6aa05f8947d7f947b8ee",
       "note": ""
     },
     "packages/runtime/workflows/steps.ts": {
@@ -722,11 +758,11 @@
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v1.behavior.mjs": {
-      "sha256": "fcef31b5f17213a7bc84bcbcf6ec901d08f8825400f4962353d9c4ae7d41a930",
+      "sha256": "258a5e573223927bb99e964d33cbf4c95c8370c0517db85a5b0cb642ff5cada5",
       "note": "F-A1 PR-2 — the witness pair's behavioural closure: two channels, one typed egress purpose (witness_extraction) dispatched ONCE PER CHANNEL, one atomic persist. UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
     "packages/runtime/workflows/witnessFacts.v1.dispatch.mjs": {
-      "sha256": "b3e378b58e019e1f822940c54f4abe01b9911806b6ede9c9a532a1ffe044cc6c",
+      "sha256": "d4157221cf0881cd30d4412d27c0d8a6c730afa53916ea4f69b953945568a6b0",
       "note": "F-A1 PR-2 review fold — the DB-verb plumbing split out of the behaviour when it crossed the 500-line gate: authorization, the pinned reads, the reading-order citation reader (B2), metering, and the terminal settle through clara.fail_witness_facts (which ships in PR-3's migration; the ordering argument and the 42883 fallback live in the file)."
     },
     "packages/runtime/workflows/witnessFacts.v1.impl.ts": {
@@ -734,7 +770,7 @@
       "note": "F-A1 PR-2 — the four steps. Each model call is its OWN memoized step so a persist retry replays the stored envelopes instead of buying two more model calls."
     },
     "packages/runtime/workflows/witnessFacts.v1.prompts.mjs": {
-      "sha256": "940653edd32fccc3b7b6bbd6ee7bed2ebe704892d5cab63938d58960f7c9b37f",
+      "sha256": "d7cb75cbf87bc62cff4ca851fe3fa92339f0a18417cd8c1cdf3f9996fcbbee84",
       "note": "F-A1 PR-2 — the prompt closure. FROZEN BY DECISION (design M8): a prompt edit IS a body edit, so every post-deploy tweak is a witnessFacts.v2 + ceremony, and the corpus-tuning loop runs pre-freeze."
     },
     "packages/runtime/workflows/witnessFacts.v1.ts": {

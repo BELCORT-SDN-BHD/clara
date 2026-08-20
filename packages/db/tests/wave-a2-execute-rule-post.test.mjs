@@ -30,7 +30,7 @@ import {
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
   mintInteractive, wakeDraftEntry,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, factsRegion,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, factsRegion,
   AP, EXP,
 } from "./wave-a-fixtures.mjs";
 
@@ -95,7 +95,10 @@ async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amoun
   const quote = `RM ${(amount / 100).toFixed(2)}`;
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(sub, { firm, client, quote, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
@@ -448,7 +451,10 @@ async function purchaseFactsDoc({ client, typeCode = "02", gross = 50000 }) {
   // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
   const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
   const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}`, kind });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
@@ -711,7 +717,10 @@ test("FIX-2/v4 execute_rule_post REFUSES a purchase-side sst_output leg that TIE
   const firm = await firmOf(clients.A2);
   const cred = await mintInteractive(firm);
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 106.00" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   if (!task) { noteLane("no invoice_facts task for the sst-v4 executor doc — cell skipped"); return; }
   await claimTask(task.id, { egressApproved: true }).catch((e) => noteLane(`sst4e claim ${e.code}`));
@@ -797,7 +806,10 @@ test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a draft on a document 
   await grantConsent(users.alice, { firm, client: clients.A2 }).catch(() => {});
   const cred = await mintInteractive(firm);
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 500.00" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   if (!task) { noteLane("no invoice_facts task for the malformed-total doc — cell skipped"); return; }
   await claimTask(task.id, { egressApproved: true }).catch((e) => noteLane(`malformed claim ${e.code}`));

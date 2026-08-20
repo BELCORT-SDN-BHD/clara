@@ -100,12 +100,58 @@ export const resetWitnessLog = () => { logLines.length = 0; };
  * error_code = the code the runtime passed. When PR-3 lands, these cells run against the real
  * verb and any divergence in the CALL SHAPE is a finding on one side or the other.
  */
+/** The marker the stand-in carries in its own body, so `drop` can tell OUR substitute from the
+ *  real verb by reading it rather than by assuming which one is installed (review D3). */
+const STAND_IN_MARKER = "F-A1 PR-2 RIG STAND-IN -- not PR-3's body";
+/** The refusal codes PR-3's migration must add to ck_processing_task_error_code_f_a1 beside the
+ *  two witness consent codes. `wait_exhausted` is D1's; the CHECK does not admit it today. */
+const STAND_IN_CODES = ["wait_exhausted"];
+let widenedCheck = null;   // the constraint definition we replaced, for exact restoration
+
 export async function installFailWitnessFactsStandIn() {
+  // EXISTENCE-GATED (D3): once PR-3 lands, the REAL verb is present and these cells must run
+  // against it — installing over it would replace the thing under test with a scaffold, which is
+  // precisely the PR-1 assembly defect. Nothing is installed and nothing is later dropped.
+  if (await failWitnessFactsExists()) return { installed: false, reason: "real verb present" };
+
+  // The error-code CHECK does not admit `wait_exhausted` yet, so the stand-in could not store it.
+  // Widened here, captured EXACTLY so `drop` can put it back. PR-3 owes the same widening.
+  const con = await fx.rootQuery(
+    "select pg_get_constraintdef(oid) as def from pg_constraint where conname='ck_processing_task_error_code_f_a1'");
+  const def = con.rows[0]?.def ?? null;
+  // ABSENT IS A DEFECT, NOT A REASON TO CARRY ON. The first cut treated a missing constraint as
+  // "nothing to widen" and proceeded — so after an earlier run crashed between this widening's
+  // DROP and its ADD, every later run found no constraint, skipped silently, and went GREEN with
+  // the table's error-code wall simply gone. A battery that passes because the thing it would
+  // have violated no longer exists is the purest form of a probe that cannot say no.
+  if (!def) {
+    throw new Error(
+      "F-A1 rig: ck_processing_task_error_code_f_a1 is ABSENT from clara.document_processing_tasks."
+      + " The database is not in its 0090 §8 shape — most likely a previous run died between this"
+      + " fixture's DROP and ADD. Re-migrate the test database; do not run the battery against it.");
+  }
+  if (!STAND_IN_CODES.every((c) => def.includes(`'${c}'`))) {
+    // REBUILT FROM THE CATALOG'S OWN LITERALS, not by string surgery on the rendered definition —
+    // pg_get_constraintdef emits a parenthesized `= ANY (ARRAY[...::text])` form, and patching
+    // that text produced `argument of CHECK must be type boolean, not type record`. The admitted
+    // set is read out, the new codes appended, the constraint written fresh. Restoration replays
+    // the ORIGINAL rendered definition verbatim, which is valid SQL after `add constraint <name>`.
+    widenedCheck = def;
+    const all = [...new Set([...admittedCodes(def), ...STAND_IN_CODES])];
+    // ATOMIC. Postgres makes DDL transactional, so drop+add in ONE transaction can never leave
+    // the table without its error-code wall — which is exactly what the non-atomic first cut did
+    // when its ADD raised 23514.
+    await withConstraintSwap(
+      "ck_processing_task_error_code_f_a1",
+      `check (error_code is null or error_code in (${all.map((c) => `'${c}'`).join(",")}))`);
+  }
+
   await fx.rootQuery(`
-    create or replace function clara.fail_witness_facts(p_task uuid, p_reason text) returns jsonb
+    create function clara.fail_witness_facts(p_task uuid, p_reason text) returns jsonb
       language plpgsql security definer set search_path = clara, pg_temp as $fn$
     declare t record;
     begin
+      -- ${STAND_IN_MARKER}
       select * into t from clara.document_processing_tasks where id = p_task for update;
       if not found or t.lane <> 'llm_witness' then
         raise exception 'llm-witness task not found' using errcode='CLR16';
@@ -119,12 +165,95 @@ export async function installFailWitnessFactsStandIn() {
       return jsonb_build_object('task_id', p_task, 'status', 'failed', 'reason', p_reason);
     end $fn$`);
   await fx.rootQuery("grant execute on function clara.fail_witness_facts(uuid,text) to clara_runtime");
+  return { installed: true };
 }
 
-/** Remove the stand-in — the state the merged estate is ACTUALLY in, and the state the
- *  absent-verb fallback cell needs. */
+/** The `error_code` literals a constraint definition admits. */
+const admittedCodes = (def) => [...String(def ?? "").matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
+
+/** Replace one CHECK in a SINGLE transaction. Postgres makes DDL transactional, so a failure
+ *  rolls the drop back with it and the table is never left unconstrained — the defect that let a
+ *  crashed run leave `ck_processing_task_error_code_f_a1` missing and every later run pass
+ *  vacuously. */
+async function withConstraintSwap(name, definition) {
+  return fx.asRoot(async (c) => {
+    await c.query("begin");
+    try {
+      await c.query(`alter table clara.document_processing_tasks drop constraint ${name}`);
+      await c.query(`alter table clara.document_processing_tasks add constraint ${name} ${definition}`);
+      await c.query("commit");
+    } catch (e) {
+      await c.query("rollback").catch(() => {});
+      throw e;
+    }
+  });
+}
+
+/**
+ * Remove ONLY what this file installed (D3), decided by READING the committed body for our
+ * marker. A `drop function if exists` would happily delete PR-3's real verb off a rig that had it
+ * — a fixture quietly destroying the estate it was supposed to be testing against.
+ *
+ * THE RESIDUE MUST GO BEFORE THE NARROWER CHECK COMES BACK, and CI is what taught us. Re-adding
+ * a CHECK VALIDATES it against every existing row, so any task this battery settled with a
+ * not-yet-live code (`wait_exhausted`) makes the restore raise 23514 — "is violated by some
+ * row". A per-battery throwaway database hides it completely: the rows and the restore live in
+ * one short-lived DB and the residue is usually gone with it. CI runs every package against ONE
+ * SHARED database, so the residue is still there at restore time and the after-hook dies.
+ *
+ * The codes to neutralize are DERIVED by diffing the definition we captured at install against
+ * the one live now — never a hardcoded list, which would silently stop covering a code a future
+ * pass adds to STAND_IN_CODES. Rows are rewritten to 'internal' (admitted by the original CHECK)
+ * rather than deleted: llm_usage_events carries FKs onto these tasks, and a fixture that deletes
+ * rows to tidy up a constraint is a fixture that can destroy evidence.
+ *
+ * `session_replication_role = replica` is what makes the rewrite possible at all — `failed` is a
+ * TERMINAL state and `clara._tf_processing_task_update` raises CLR16 on any update to one. This
+ * is a root-only, transaction-local cleanup of a fixture's own residue on a test database; it
+ * suppresses no product behaviour under test.
+ */
 export async function dropFailWitnessFactsStandIn() {
-  await fx.rootQuery("drop function if exists clara.fail_witness_facts(uuid,text)");
+  const r = await fx.rootQuery(
+    "select position($1 in prosrc) > 0 as ours from pg_proc"
+    + " where oid = to_regprocedure('clara.fail_witness_facts(uuid,text)')", [STAND_IN_MARKER]);
+  if (r.rows[0]?.ours !== true) return { dropped: false, reason: "absent, or not ours" };
+  await fx.rootQuery("drop function clara.fail_witness_facts(uuid,text)");
+  if (!widenedCheck) return { dropped: true, restored: false };
+
+  const live = await fx.rootQuery(
+    "select pg_get_constraintdef(oid) as def from pg_constraint where conname='ck_processing_task_error_code_f_a1'");
+  const original = admittedCodes(widenedCheck);
+  const extra = admittedCodes(live.rows[0]?.def).filter((c) => !original.includes(c));
+  let neutralized = 0;
+  if (extra.length > 0) {
+    neutralized = await fx.asRoot(async (c) => {
+      await c.query("begin");
+      try {
+        await c.query("set local session_replication_role = replica");
+        const up = await c.query(
+          "update clara.document_processing_tasks set error_code='internal' where error_code = any($1)", [extra]);
+        await c.query("commit");
+        return up.rowCount ?? 0;
+      } catch (e) {
+        await c.query("rollback").catch(() => {});
+        throw e;
+      }
+    });
+  }
+
+  await withConstraintSwap("ck_processing_task_error_code_f_a1", widenedCheck);
+  // SELF-ASSERTED, so a future edit to the widening cannot leave the estate subtly re-shaped and
+  // green: the restored definition must be byte-for-byte the one captured at install.
+  const after = await fx.rootQuery(
+    "select pg_get_constraintdef(oid) as def from pg_constraint where conname='ck_processing_task_error_code_f_a1'");
+  if (after.rows[0]?.def !== widenedCheck) {
+    throw new Error(
+      "F-A1 rig: the restored error-code CHECK is not byte-identical to the captured original\n"
+      + `  captured: ${widenedCheck}\n  restored: ${after.rows[0]?.def}`);
+  }
+  const restoredDef = widenedCheck;
+  widenedCheck = null;
+  return { dropped: true, restored: true, neutralized, neutralizedCodes: extra, restoredDef };
 }
 
 export const failWitnessFactsExists = () =>

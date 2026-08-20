@@ -383,6 +383,11 @@ test("f-a1.pr2.l EQUAL prompt hashes are refused by the writer — the independe
   );
   assert.equal((await readExtractions(s.documentId)).filter((r) => r.engine_kind.startsWith("llm_")).length, 0,
     "the refusal is atomic — no half-pair is left behind");
+  // D2: a terminal raise OUT OF THE WRITER wedges a concurrency slot exactly as a refused
+  // dispatch does, so it settles through the same door rather than leaving the task claimed.
+  const task = await readTask(s.taskId);
+  assert.equal(task.status, "failed", "the persist's own structural refusal settles the task");
+  assert.equal(task.error_code, "internal", "CLR10 is not in the storable engine vocabulary; 'internal' is");
 });
 
 test("f-a1.pr2.m a model that answers NOTHING still persists whole, and the predicate refuses it", { skip }, async () => {

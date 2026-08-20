@@ -23,7 +23,7 @@ import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf,
   seedVerifiedDocument, seedCitedDocument, seedExtraction, seedRegion, addClientIdentifier, recordRuleResolution,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, invoiceFactState,
+  mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, invoiceFactState,
 } from "./wave-a-fixtures.mjs";
 
 let ready = false;
@@ -144,7 +144,10 @@ test("§3.5 the OCR empty-polygon wall STAYS: an azure facts extraction with emp
   const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A2, kind: "invoice" });
   const { grantConsent } = await import("./wave-a-fixtures.mjs");
   await grantConsent(world.users.alice, { firm, client: world.clients.A2 }).catch(() => {});
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   // An azure (OCR-source) facts total with an EMPTY polygon — the wall must hold.

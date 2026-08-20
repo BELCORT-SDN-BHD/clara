@@ -1,7 +1,8 @@
--- UNNUMBERED_f_a1_statements.sql -- Wave-F Track A, F-A1 PR-4: THE STATEMENT CUTOVER.
+-- 0098_f_a1_statements.sql -- Wave-F Track A, F-A1 PR-4: THE STATEMENT CUTOVER.
 -- The bank-statement reader pair moves onto the witness spine (design
 -- `docs/plan/active/f-a1-witness-pair-design.md` SS3.7, binding; annexes Annex A/C).
--- Numbers are claimed at MERGE time (hard constraint 10; .claude/rules/db-migrations.md).
+-- Authored UNNUMBERED against repo frontier 0095; renumbered mechanically to 0098 at
+-- merge (after PR-3's 0096/0097), no content change (hard constraint 10).
 -- =====================================================================================
 -- APPLY ORDER: after 0089 (kind-scoped supersede), 0090 (walls), 0092/0093 (predicate +
 -- dispatch) and 0095 (the witness writer). All five are prestate-asserted below.

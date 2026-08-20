@@ -32,7 +32,7 @@ import {
   rootQuery, humanQuery, roleQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, opk, ROLES,
   addClientIdentifier, upsertAccountClassed, upsertPayableAccount, grantConsent,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
+  seedCitedDocument, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   freshResolution, draftEntryV3, approveEntry, stampCodingKind, seedCorroboratingInvoiceFacts,
   proposeAutopostRule, signAutopostRule, postViaRule, counterpartyRows,
   reasonOf, mintInteractive, wakeDraftEntry, ev, factsRegion, FIELD,
@@ -83,7 +83,10 @@ async function taxSilentSalesFiling(sub, { client, firm, customerName, reg = "19
   const name = await clientName(client);
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [
@@ -122,7 +125,9 @@ async function persistTaxSilentFacts(sub, { cited, firm, client, cents = 90000, 
   const sellerName = sellerIsClient ? await clientName(client) : vendorName;
   const sellerReg = sellerIsClient ? "199901000700" : null;
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER (see taxSilentSalesFiling above): mint the invoice_facts task
+  // directly -- the real enqueue RPC no longer routes an invoice-kind document here.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   const claimed = await claimTask(task.id, { egressApproved: true });
   if (claimed?.status !== "running") throw new Error(`persistTaxSilentFacts: invoice_facts task did not reach running (got ${JSON.stringify(claimed)})`);
@@ -510,7 +515,9 @@ test("7A-R2 a direction-contradictory document never reaches 'ready' and is neve
   const firm = firmA;
   await grantConsent(users.alice, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(users.alice, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER (see taxSilentSalesFiling above): mint the invoice_facts task
+  // directly -- the real enqueue RPC no longer routes an invoice-kind document here.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   // RESIDUAL-3 shape (wave-a2-direction.test.mjs precedent): registration matches

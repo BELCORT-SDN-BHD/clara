@@ -1,7 +1,7 @@
 // F-A1 (Wave-F Track A) PR-4 — THE STATEMENT WITNESS CUTOVER battery, PART 1 of 2 (cells a-d;
 // e-j live in f-a1-statements-2.test.mjs — split purely to keep each file under the repo's
 // 500-line gate, the x38-wave-c-b-bank.test.mjs / x38-wave-c-b-match.test.mjs precedent). For
-// migrations/UNNUMBERED_f_a1_statements.sql (number claimed at merge). Design:
+// migrations/0098_f_a1_statements.sql (authored UNNUMBERED; number claimed at merge). Design:
 // docs/plan/active/f-a1-witness-pair-design.md §3.7 (binding). Cells a-d are contract-blind (▣
 // in the work order) — from the design's own prose plus a READ of the LIVE
 // `clara._persist_statement_core` (0038:1385-1864) and its two normalizers (0038:1175-1338),
@@ -48,7 +48,7 @@ let ready = false;
 
 /** THE READINESS GATE, in the f-a1-walls idiom: absent -> FAIL LOUD, never `t.skip()`. */
 function mustBeReady() {
-  assert.ok(ready, "clara.persist_statement_facts_v2(uuid,jsonb) is not applied on this database (UNNUMBERED_f_a1_statements.sql is not in the chain) — this battery must FAIL, not skip, against a pre-cutover chain");
+  assert.ok(ready, "clara.persist_statement_facts_v2(uuid,jsonb) is not applied on this database (0098_f_a1_statements.sql is not in the chain) — this battery must FAIL, not skip, against a pre-cutover chain");
 }
 
 before(async () => {

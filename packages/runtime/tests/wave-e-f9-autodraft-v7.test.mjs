@@ -413,8 +413,13 @@ test("the tool set wires the gate: read_document RECORDS the snapshot it showed,
 // 6. Registry sanity.
 // ===========================================================================
 
-test("registry.ts pins autoDraft: autoDraft_v7, and still exports the superseded autoDraft_v6 (policy (c))", () => {
-  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v7");
+// The pin moved v7 -> v8 at F-A1 PR-3a (the witness-pair consumer widening —
+// autoDraft.v8.tools.ts). This battery still owns v7's BODY, byte-untouched — v8 is a new
+// closure beside it, widening only readInvoiceFactState — so everything above stays exactly
+// as it was. Only the pin assertion moves, and v7 joins the policy (c) roster.
+test("registry.ts pins autoDraft: autoDraft_v8, and still exports the superseded autoDraft_v7/v6 (policy (c))", () => {
+  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v8");
+  assert.equal(typeof registryMod.autoDraft_v7, "function");
   assert.equal(typeof registryMod.autoDraft_v6, "function");
   assert.equal(typeof registryMod.autoDraft_v5, "function");
 });

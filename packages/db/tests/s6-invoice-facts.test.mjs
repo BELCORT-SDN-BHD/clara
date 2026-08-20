@@ -45,6 +45,7 @@ import {
   invoiceFactsExtraction,
   freshResolution,
   enqueueInvoiceFacts,
+  mintLegacyInvoiceFactsTask,
   invoiceFactsTask,
   claimTask,
   ensureClientEgress,
@@ -93,7 +94,10 @@ async function docWithFacts(sub, { client, total = "RM 5,000.00", currency = "MY
   const firm = await firmOf(client);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(sub, { firm, client, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   assert.ok(task, "an invoice_facts processing task exists after enqueue");
   await claimTask(task.id, { egressApproved: true });
@@ -154,7 +158,10 @@ test("§5 status honesty: an invoice_facts task never touches documents.extracti
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   const before = (await rootQuery("select extraction_status from clara.documents where id=$1", [cited.documentId])).rows[0].extraction_status;
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 1,200.00"), factField(FIELD.currency, "MYR")]);
@@ -162,16 +169,29 @@ test("§5 status honesty: an invoice_facts task never touches documents.extracti
   assert.equal(after, before, "documents.extraction_status is unchanged by the facts lane (C-10 status honesty)");
 });
 
-test("§5 enqueue_invoice_facts is idempotent: a second enqueue in a live state is a no-op (partial unique (document_id, lane))", async (t) => {
+test("enqueue is idempotent: a second enqueue in a live state is a no-op (partial unique (document_id, lane))", async (t) => {
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) — the STRUCTURAL idempotency this cell proves (N-F10's
+  // partial unique (document_id, lane)) survives the cutover unchanged; only the LANE the
+  // proof object lives on moved. The llm_witness enqueue is consent-gated AT ENQUEUE (0090
+  // wall 6/§7e) — unlike the retired invoice_facts path, which had no enqueue-time consent
+  // gate at all — so without a LIVE witness_extraction consent the first enqueue's own task
+  // lands 'failed'/witness_consent_inactive immediately and the live-count below would read 0
+  // for the wrong reason (a refusal, not idempotency). Granting consent first restores the
+  // intended precondition: a live, queued task both enqueues collapse onto.
+  const { consentEvidenceDoc, grantPurpose, activatePurpose } = await import("./wave-b/wb-0020-helpers.mjs");
+  const evidence = await consentEvidenceDoc(users.alice, { firm });
+  const grant = await grantPurpose(users.alice, { client: clients.A1, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+  await activatePurpose(users.alice, { client: clients.A1, purpose: "witness_extraction", consent: grant.consent_id });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so the facts gate engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   await enqueueInvoiceFacts(cited.documentId);
-  const n = (await rootQuery("select count(*)::int n from clara.document_processing_tasks where document_id=$1 and lane='invoice_facts' and status in ('queued','held_egress','running')", [cited.documentId])).rows[0].n;
-  assert.equal(n, 1, "at most ONE live invoice_facts task per document (structural idempotency, N-F10)");
+  const n = (await rootQuery("select count(*)::int n from clara.document_processing_tasks where document_id=$1 and lane='llm_witness' and status in ('queued','held_egress','running')", [cited.documentId])).rows[0].n;
+  assert.equal(n, 1, "at most ONE live llm_witness task per document (structural idempotency, N-F10)");
 });
 
 // ===========================================================================
@@ -340,7 +360,10 @@ test("W3 no geometry never corroborates (§6.6): facts with an EMPTY polygon on 
   const firm = await firmOf(clients.A1);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00", { polygon: [] }), factField(FIELD.currency, "MYR")]);
@@ -399,7 +422,10 @@ test("C-8 stale evidence: a facts completion AFTER a Tier-B draft rotates its to
   // Tier-B draft (no facts yet): payable/expense = 500000, bound to the OCR region quote.
   const draft = await wakeBill(users.alice, { client: clients.A2, cited, amount: 500000 });
   // Facts complete LATER with a CONTRADICTING total (600000) → token rotates.
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   // 0023 (X5): the late facts have to CORROBORATE for there to be a verified total that

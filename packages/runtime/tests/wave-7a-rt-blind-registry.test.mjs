@@ -18,9 +18,11 @@ const { register } = await import("tsx/esm/api");
 register();
 
 const registry = await import("../workflows/registry.ts");
+const entryAutoDraftV8 = await import("../workflows/autoDraft.v8.ts");
 const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
 const entryAutoDraftV5 = await import("../workflows/autoDraft.v5.ts");
+const entryChatTurnV12 = await import("../workflows/chatTurn.v12.ts");
 const entryChatTurnV11 = await import("../workflows/chatTurn.v11.ts");
 const entryChatTurnV10 = await import("../workflows/chatTurn.v10.ts");
 const entryChatTurnV9 = await import("../workflows/chatTurn.v9.ts");
@@ -33,19 +35,28 @@ const promptV8 = await import("../workflows/chatTurn.v8.prompt.ts");
 // Registry pin. WAVE E / F9 (2026-08-09) moved both pins one version forward —
 // autoDraft_v7 / chatTurn_v10, the cite-by-index closures (ADR-064 §3). The §7-A
 // v6/v9 assertions below did not become wrong, they became POLICY (c) assertions:
-// a superseded body must stay exported or its parked runs are stranded.
+// a superseded body must stay exported or its parked runs are stranded. F-A1 PR-3a
+// (the witness-pair consumer widening) then moved both pins one further —
+// autoDraft_v8 / chatTurn_v12 — by the same law: v7's and v11's assertions below
+// became policy (c) assertions in turn.
 // ===========================================================================
 
-test("registry pins autoDraft to the v7 export", () => {
-  assert.equal(registry.workflows.autoDraft, entryAutoDraftV7.autoDraft_v7);
+test("registry pins autoDraft to the v8 export", () => {
+  assert.equal(registry.workflows.autoDraft, entryAutoDraftV8.autoDraft_v8);
 });
 
-// WAVE E / eta (2026-08-15) moved the chatTurn pin one further, v10 -> v11: the ad-hoc
-// authoring closure (five tools, one appended prompt paragraph; the coding lane is v10's,
-// reached by import). The v10 assertion below did not become wrong, it became a POLICY (c)
-// assertion, exactly as the v9 one did at the previous cutover.
-test("registry pins chatTurn to the v11 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV11.chatTurn_v11);
+test("registry pins chatTurn to the v12 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV12.chatTurn_v12);
+});
+
+test("registry still EXPORTS autoDraft_v7 so no parked v7 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.autoDraft_v7, "function");
+  assert.equal(registry.autoDraft_v7, entryAutoDraftV7.autoDraft_v7);
+});
+
+test("registry still EXPORTS chatTurn_v11 so no parked v11 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v11, "function");
+  assert.equal(registry.chatTurn_v11, entryChatTurnV11.chatTurn_v11);
 });
 
 test("registry still EXPORTS chatTurn_v10 so no parked v10 run is stranded (Appendix A policy (c))", () => {

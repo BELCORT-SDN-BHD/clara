@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, grantConsent,
-  seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
+  seedCitedDocument, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts,
   failInvoiceFacts, factField,
 } from "./wave-a-fixtures.mjs";
 
@@ -74,7 +74,10 @@ async function factsTask(client) {
   const sub = world.users.alice;
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 2,800.00", kind: "invoice" });
-  await enqueueInvoiceFacts(cited.documentId);
+  // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
+  // invoice_facts (no dual-run, D9) -- this fixture only needs a task ON the
+  // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
+  await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   assert.ok(task, "an invoice_facts task must be minted — no task means this cell proved nothing");
   await claimTask(task.id, { egressApproved: true });

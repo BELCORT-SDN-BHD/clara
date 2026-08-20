@@ -28,7 +28,7 @@ let ready = false;
 
 /** THE READINESS GATE, in the f-a1-walls idiom: absent -> FAIL LOUD, never `t.skip()`. */
 function mustBeReady() {
-  assert.ok(ready, "clara.persist_statement_facts_v2(uuid,jsonb) is not applied on this database (UNNUMBERED_f_a1_statements.sql is not in the chain) — this battery must FAIL, not skip, against a pre-cutover chain");
+  assert.ok(ready, "clara.persist_statement_facts_v2(uuid,jsonb) is not applied on this database (0098_f_a1_statements.sql is not in the chain) — this battery must FAIL, not skip, against a pre-cutover chain");
 }
 
 before(async () => {
