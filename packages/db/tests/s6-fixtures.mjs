@@ -65,6 +65,16 @@ export async function invoiceFactsTask(document) {
  *  time, or persist_invoice_facts' clara._settle_processing_call raises CLR18 'reservation
  *  not found' the moment it tries to settle one that was never opened. */
 export async function mintLegacyInvoiceFactsTask(document) {
+  // ERA-SYMMETRIC (x37 upgrade-drill catch): inside an upgrade drill's PRE-cutover phase the
+  // era's OWN router auto-enqueues a LIVE invoice_facts task at filing time -- and reserves
+  // its page budget at enqueue, the retired router's contract -- so a second mint here trips
+  // uq_document_processing_one_live_lane (0009: one live task per (document, lane)). A live
+  // row is therefore REUSED as-is, reservation included; the direct mint below is the
+  // post-cutover frontier's shape, where no legitimate verb can produce one and none exists.
+  const live = await rootQuery(
+    "select id, version_n from clara.document_processing_tasks where document_id=$1 and lane=$2 and status in ('queued','held_egress','running') limit 1",
+    [document, INVOICE_FACTS_LANE]);
+  if (live.rows[0]) return live.rows[0];
   const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [document])).rows[0].firm_id;
   const v = await rootQuery(
     "select coalesce(max(version_n),0)+1 as v from clara.document_processing_tasks where document_id=$1 and lane=$2",
