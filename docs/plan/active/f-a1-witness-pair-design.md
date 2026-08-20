@@ -382,10 +382,10 @@ resolver dispatch, and 0017's own bodies are the pointer's only readers (verifie
 blast radius: 0017:1512, 1536, 1703, 1723 + its self-assertion battery) (M2).
 **(5)** The same-kind statement pair self-supersedes TODAY — a LIVE pre-existing
 production defect (0038:1781-1797: one transaction, same kind, default
-`extracted_at`), which kind-scoping does NOT fix; it heals at PR-4's re-kinding,
-and PR-1's prestate COUNTS and documents the existing coin-flipped rows without
-repairing them (`superseded_by` is once-only — in-place repair is impossible, and
-none is attempted) (M4).
+`extracted_at`), which kind-scoping does NOT fix. **CORRECTED 2026-08-20: it does
+NOT heal at PR-4's merge** — `0098` ships the successor UNPOINTED, so the coin flip
+is still live. It heals FORWARD-ONLY at the ACTIVATION window; the historical pairs
+NEVER heal, and PR-1's prestate COUNTS them (`superseded_by` is once-only) (M4).
 
 ## 4 · Decision register (v3)
 
@@ -491,8 +491,8 @@ live in Annex C; every "§7 cell" reference in this doc resolves there.
   automation generally — F-A9's remit.
 - **Interim architecture split** between PR-3 and PR-4 (invoice new-regime, statements
   old) — named; F-A10 judges at wave close; the witness-own concurrency window (M10)
-  prevents cross-lane starvation during the split, and the statement pair's LIVE
-  self-supersede defect (§3.9 note 5) persists until PR-4.
+  prevents cross-lane starvation, and the statement pair's LIVE self-supersede defect
+  (§3.9 note 5) persists past PR-4's merge, until the ACTIVATION window.
 - **Prompt freeze iteration cost (M8)** — prompts are frozen-closure members, so every
   post-deploy tweak is a new witnessFacts version + ceremony; the corpus-tuning loop
   runs PRE-freeze, and post-deploy tuning being ceremony-priced is the accepted trade.
