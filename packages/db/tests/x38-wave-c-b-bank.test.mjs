@@ -1,5 +1,6 @@
 // 0038 Wave C-b -- PART A: bank IDENTITY + statement INGEST (statementFacts_v1,
-// both lanes) + the typed CONSENT extension (`statement_extraction`).
+// both lanes) + the typed CONSENT extension (the purpose `PURPOSE` names below --
+// `statement_extraction` at Wave C-b, `witness_extraction` since the F-A2 Window-B activation).
 //
 // CONTRACT-BLIND, exactly the x37 discipline: written from
 // docs/plan/completed/wave-c-b-bank-design.md + wave-c-b-bank-design-part2.md (v2,
@@ -98,7 +99,21 @@ import { draftEntryV3 } from "./s6-helpers.mjs";
 // Pinned vocabulary (design SS3/SS4). LAW -- a divergence is a finding.
 // ---------------------------------------------------------------------------
 
-const PURPOSE = "statement_extraction";
+// THE PURPOSE THE STATEMENT LANES ARE GATED ON. Wave C-b built this battery against
+// `statement_extraction`; the F-A2 Window-B activation RE-KEYED the enqueue-time typed-consent
+// lookup inside `clara._enqueue_invoice_facts_core` to `witness_extraction`, and that lookup is
+// ONE branch serving BOTH statement lanes (`statement_facts` pdf/image AND `statement_parse`
+// csv/ofx) — so both lanes now answer to the witness purpose. This constant follows the GATE,
+// because a battery pinned to the retired purpose would stop testing the live system and would
+// pass by testing nothing.
+const PURPOSE = "witness_extraction";
+/** The retiring purpose. It is NOT dropped and must never be: historical authorization rows
+ *  reference it and drops are BY NAME (the 0038:5462 contract), and `GOVERNED_EGRESS_PURPOSES`
+ *  carries BOTH. Kept as a named constant so a reader can see it still exists rather than
+ *  inferring its removal from this file's silence. The negative twin — an activation for THIS
+ *  purpose alone no longer admits a statement enqueue — lives in
+ *  tests/f-a2-statement-activation.test.mjs (cell f-a2.activation.e). */
+const RETIRED_PURPOSE = "statement_extraction";
 const LANE_OCR = "statement_facts";
 const LANE_PARSE = "statement_parse";
 
@@ -182,7 +197,7 @@ before(async () => {
     await upsertAccountClassed(sub, { client, code: CONTROLCLS, name: "Trade Debtors (x38 control)", type: "asset", accountClass: "receivable", opKey: opk("cc") });
     await grantConsent(sub, { firm: await firmOf(client), client }).catch(() => {});
   }
-  // SECTION-2 ingest cells assume a LIVE statement_extraction consent for the two firm-A
+  // SECTION-2 ingest cells assume a LIVE gate-purpose consent for the two firm-A
   // clients (they test INGEST, not consent). S1 stays deliberately dark -- x38.ab needs it.
   for (const client of [world.clients.A1, world.clients.A2]) {
     await lightStatementConsent(world.users.alice, { firm: await firmOf(client), client })
@@ -349,7 +364,7 @@ async function persistExpectFailure(task, payload, code, label) {
 }
 
 // ---------------------------------------------------------------------------
-// Consent verbs -- the SAME 0020 typed machinery, purpose='statement_extraction'
+// Consent verbs -- the SAME 0020 typed machinery, pinned to PURPOSE (the gate purpose)
 // (design part1 SS4.4 / WCB-R1). Reuses the wave-a-fixtures wrappers with the
 // purpose overridden -- these are the SS9.7-promised aliases, never a parallel
 // implementation.
@@ -361,7 +376,7 @@ const deactivateStatementPurpose = (sub, o) => deactivateClientEgressPurpose(sub
 const revokeStatementPurpose = (sub, o) => revokeClientEgressPurpose(sub, { ...o, purpose: PURPOSE });
 
 /** A verified, in-firm consent-evidence document + a live, ACTIVE
- *  statement_extraction consent for `client`. Returns {consent,evidence}. */
+ *  gate-purpose consent for `client`. Returns {consent,evidence}. */
 async function lightStatementConsent(sub, { firm, client }) {
   // Idempotent: a live consent (e.g. the suite bootstrap's) is REUSED, never re-granted;
   // an already-live activation is tolerated -- cells compose instead of colliding.
@@ -1742,12 +1757,42 @@ test("x38.aa kill switch OFF holds a statement_facts claim even with an ACTIVE c
 // ===========================================================================
 
 // ===========================================================================
-// x38.ab -- consent INACTIVE at enqueue: the router's bank-statement branch
-// requires a live (consent, activation) for (firm, client, 'statement_
-// extraction'); absent -> a terminal never-claimed failed task error_code=
-// 'consent_inactive' (the skipped_kind idiom), re-enqueueable after the ceremony.
+// x38.aa2 -- THE RETIRED PURPOSE IS RE-KEYED, NEVER DROPPED. The F-A2 Window-B
+// activation moved which purpose gates the statement lanes; it did NOT remove
+// `statement_extraction` from the typed-purpose vocabulary, and it must not:
+// historical authorization rows reference it and drops are BY NAME (the
+// 0038:5462 contract). Asserted POSITIVELY off the live CHECKs, because "we
+// did not drop it" is otherwise a claim nothing in this suite would notice
+// being false.
 // ===========================================================================
-test("x38.ab a client with NO statement_extraction consent enqueues to a terminal, never-claimed failed task (consent_inactive)", async (t) => {
+test("x38.aa2 the RETIRED statement purpose is still admitted by every typed-purpose CHECK -- a re-key is not a drop", async (t) => {
+  if (skipHere(t)) return;
+  const r = await rootQuery(
+    `select count(*)::int as n from pg_constraint con
+      where con.contype='c'
+        and pg_get_constraintdef(con.oid) like '%purpose%'
+        and pg_get_constraintdef(con.oid) like $1`, [`%${RETIRED_PURPOSE}%`]);
+  assert.ok(r.rows[0].n >= 3,
+    `every typed-purpose CHECK must still admit '${RETIRED_PURPOSE}' (found ${r.rows[0].n}) — dropping it would orphan the historical authorization rows that name it`);
+  // …and the gate purpose is admitted by the SAME CHECKs, so both coexist rather than replace.
+  const g = await rootQuery(
+    `select count(*)::int as n from pg_constraint con
+      where con.contype='c'
+        and pg_get_constraintdef(con.oid) like '%purpose%'
+        and pg_get_constraintdef(con.oid) like $1
+        and pg_get_constraintdef(con.oid) like $2`, [`%${RETIRED_PURPOSE}%`, `%${PURPOSE}%`]);
+  assert.equal(g.rows[0].n, r.rows[0].n,
+    "every CHECK that admits the retired purpose admits the gate purpose too — the vocabulary GREW, it did not move");
+});
+
+// ===========================================================================
+// x38.ab -- consent INACTIVE at enqueue: the router's bank-statement branch
+// requires a live (consent, activation) for (firm, client, PURPOSE — the gate
+// purpose, `witness_extraction` since the F-A2 Window-B activation); absent ->
+// a terminal never-claimed failed task error_code='consent_inactive' (the
+// skipped_kind idiom), re-enqueueable after the ceremony.
+// ===========================================================================
+test("x38.ab a client with NO gate-purpose (witness_extraction) consent enqueues to a terminal, never-claimed failed task (consent_inactive)", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.erin; // S1's OWN owner -- alice is firm A's user
   const client = world.clients.S1; // solo firm client, untouched by other cells' consent lighting
@@ -1779,7 +1824,7 @@ test("x38.ab a client with NO statement_extraction consent enqueues to a termina
 // still refuses consent_inactive -- a grant is not an activation (0020's own
 // central claim, re-exercised for the new purpose).
 // ===========================================================================
-test("x38.ac a GRANTED-but-not-activated statement_extraction consent still refuses consent_inactive at enqueue", async (t) => {
+test("x38.ac a GRANTED-but-not-activated gate-purpose consent still refuses consent_inactive at enqueue", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A2;
@@ -1805,7 +1850,7 @@ test("x38.ac a GRANTED-but-not-activated statement_extraction consent still refu
 // x38.ad -- ACTIVATE => flows. classify + grant + activate, then enqueue
 // proceeds NORMALLY (never lands consent_inactive).
 // ===========================================================================
-test("x38.ad an ACTIVE statement_extraction consent lets a bank_statement document enqueue normally", async (t) => {
+test("x38.ad an ACTIVE gate-purpose (witness_extraction) consent lets a bank_statement document enqueue normally", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -1822,7 +1867,7 @@ test("x38.ad an ACTIVE statement_extraction consent lets a bank_statement docume
 // x38.ae -- DEACTIVATE => refuses. Deactivating the activation (the consent
 // record SURVIVES) makes a subsequent enqueue hit consent_inactive again.
 // ===========================================================================
-test("x38.ae deactivating the statement_extraction activation makes a SUBSEQUENT enqueue refuse consent_inactive again, though the consent record survives", async (t) => {
+test("x38.ae deactivating the gate-purpose activation makes a SUBSEQUENT enqueue refuse consent_inactive again, though the consent record survives", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A2;
@@ -1943,7 +1988,7 @@ test("x38.ag the sha-bound dispatch overloads: a document-A authorization presen
 // to gate -- but the typed consent gate STILL applies at enqueue (SS4.3: "still
 // consent-recorded at enqueue").
 // ===========================================================================
-test("x38.ah the structured (csv) lane still requires an ACTIVE statement_extraction consent at enqueue, but is never held by the kill switch", async (t) => {
+test("x38.ah the structured (csv) lane still requires an ACTIVE gate-purpose consent at enqueue -- ONE branch gates BOTH statement lanes, so the F-A2 re-key moved this lane too -- but is never held by the kill switch", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.erin; // S1's own owner
   const client = world.clients.S1;

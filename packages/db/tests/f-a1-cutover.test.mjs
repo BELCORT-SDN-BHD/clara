@@ -198,7 +198,7 @@ test("f-a1-cutover.c a document with a DONE witness pair -> re-fire suppressed v
   assert.equal(receipt.extraction_id, pair.textId, "the reported extraction_id is the CANONICAL text row, not the vision row");
 });
 
-test("f-a1-cutover.d a NON-invoice kind (bank_statement) still routes to its OLD lane, byte-identically", async () => {
+test("f-a1-cutover.d a NON-invoice kind (bank_statement) still routes to its OLD LANE -- PR-3 touched only the invoice-kind arm", async () => {
   mustBeReady();
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
@@ -207,7 +207,15 @@ test("f-a1-cutover.d a NON-invoice kind (bank_statement) still routes to its OLD
   assert.equal(tasks.length, 1, `exactly one task minted (got ${JSON.stringify(tasks)})`);
   const t = tasks[0];
   assert.equal(t.lane, "statement_facts", "a bank_statement pdf still routes to statement_facts -- the cutover touches ONLY the invoice-kind arm");
-  assert.equal(t.engine_id, "azure-di:prebuilt-bankStatement.us:2024-11-30", "the statement engine literal is untouched");
+  // THE ENGINE LITERAL IS NO LONGER PR-3's TO ASSERT. This cell pinned the Azure statement
+  // literal as evidence that PR-3 left the bank_statement arm alone; the F-A2 Window-B
+  // ACTIVATION has since re-aimed that arm's ENGINE (never its lane) at the witness pair, and
+  // owns that assertion in tests/f-a2-statement-activation.test.mjs. What PR-3 promised and
+  // what survives here is the LANE — asserted above. Pinning the retired literal here would
+  // assert the live body still carries text a later ratified layer deliberately replaced,
+  // exactly the trap the wb-0020 restoreMust comment names for the invoice arm's :v1 -> :v2.
+  assert.notEqual(t.engine_id, "azure-di:prebuilt-invoice:2024-11-30",
+    "whatever the statement arm stamps, it is never the INVOICE engine -- the two arms stay distinct");
 });
 
 // ===========================================================================

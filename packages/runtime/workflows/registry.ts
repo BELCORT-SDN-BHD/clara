@@ -45,9 +45,15 @@ export const workflows = {
   chatTurn: chatTurn_v12,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
-  // F-A1 PR-4: statementFacts_v2 SHIPS BUILT AND FROZEN BUT IS DELIBERATELY NOT POINTED AT
-  // YET — see the note below. The repoint is the LAST step of the cutover, not this one.
-  statementFacts: statementFacts_v1,
+  // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
+  // frozen and deliberately UNPOINTED because `statement_facts` is a LIVE lane — the registry
+  // key IS the routing, so a repoint takes live traffic the moment the image deploys. The three
+  // conditions that note named are now met: the persist verb (0098), PR-3's merge, and the
+  // router/consent arm (the F-A2 Window-B migration). THIS LINE IS THE LAST STEP, and it lands
+  // inside the SAME quiesce window as that migration, with the machine held stopped between
+  // them — a witness-stamped task claimed by the OLD v1 image has NO DB-side guard (the mirror
+  // gap does: v2 WAITS on an Azure-stamped task rather than egressing).
+  statementFacts: statementFacts_v2,
   witnessFacts: witnessFacts_v1,
   autoDraft: autoDraft_v8,
   firmInterview: firmInterview_v3,
@@ -169,6 +175,18 @@ export const workflows = {
 // THEN this key moves to statementFacts_v2. The engine literal in that router arm and the
 // snapshot in statementFacts.v2.services.mjs must STRING-EQUAL each other; that pairing carries
 // its own battery cell in the follow-up piece.)
+//
+// (F-A2 WINDOW B — THE ACTIVATION — IS THAT FOLLOW-UP, AND IT HAS NOW LANDED: the ordered
+// preconditions above are all met, so `statementFacts:` above is repointed to statementFacts_v2.
+// The router arm re-aims the statement engine literal to `llm-openai:{model}:stmt-witness-v1`
+// and re-keys the statement typed-consent lookup to `witness_extraction`; the lane stays
+// `statement_facts` (0098's own LANE DECISION). The migration and this repoint land inside ONE
+// D1 quiesce window with the runtime machine held STOPPED between them: v2 guards the
+// router-arm-AFTER-repoint direction by WAITING on an Azure-stamped task, but nothing guards the
+// reverse — a witness-stamped task claimed by the still-Azure-shaped v1 body — so that gap is
+// closed procedurally, by never letting a claim happen in between. The engine-literal pairing
+// carries its battery cell, f-a2.activation-engine-literal, which reads BOTH sides independently
+// and compares.)
 //
 // why `enqueueForLane` (lib/reconciler-documents.mjs) became an explicit allowlist in the
 // same change, so a migration-before-runtime window can never route a bank statement into a
@@ -317,12 +335,13 @@ export const workflows = {
 // repoint `statementFacts:` — see the deferred-repoint note above, near the `workflows` object,
 // for why `statement_facts` being a LIVE (not inert) lane forces that repoint to wait on the DB
 // persist verb, PR-3's merge and the router/consent arm, in that order.
+// F-A2 WINDOW B: `statementFacts:` now points at statementFacts_v2 (see the entry in the
+// `workflows` object). statementFacts_v1 stays frozen, built and EXPORTED so no parked run is
+// stranded (policy (c)) — and it is not merely a legacy pointer here: statementFacts_v2 REACHES
+// v1's own claim+process steps by IMPORT for the `statement_parse` (csv/ofx) lane, which is
+// carried over behaviourally unchanged. Only the `statement_facts` pdf/image lane moves onto the
+// witness pair. Drop this re-export only once zero non-terminal statementFacts_v1 runs remain.
 export { statementFacts_v1 };
-// F-A1 PR-4: statementFacts_v2 ships BUILT, FROZEN and REGISTERED but is deliberately NOT the
-// `statementFacts:` live pointer yet — see the deferred-repoint note above (this file, near the
-// `workflows` object). Exported here (rather than only imported) so it stays reachable and this
-// import is not flagged unused; the repoint to `statementFacts: statementFacts_v2` is the LAST
-// step of the cutover, gated on the DB persist verb, PR-3's merge, and the router/consent arm.
 export { statementFacts_v2 };
 export { firmInterview_v1 };
 export { firmInterview_v2 };
