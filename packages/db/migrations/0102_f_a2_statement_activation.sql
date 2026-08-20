@@ -1,8 +1,10 @@
--- UNNUMBERED_f_a2_statement_activation.sql -- Wave-F Track A, F-A2 WINDOW B:
--- THE BANK-STATEMENT WITNESS ACTIVATION (the DB half). Number claimed at MERGE time
--- (standing law, AGENTS.md + .claude/rules/db-migrations.md) -- this file is authored
--- UNNUMBERED and lands LAST in its train, after the F-A2 openers' own two migrations.
--- Spec of record: the F-A1 statement-witness ACTIVATION spec (SS2, SS3, SS5, SS9);
+-- 0102_f_a2_statement_activation.sql -- Wave-F Track A, F-A2 WINDOW B:
+-- THE BANK-STATEMENT WITNESS ACTIVATION (the DB half). Authored UNNUMBERED; the number was
+-- claimed at MERGE PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md),
+-- once the rest of the train had taken its own: 0099/0100 the F-A2 openers, 0101 opener 6.
+-- This file lands LAST. The renumber is mechanical and content-free -- the battery gates on
+-- the CATALOG (what the live body carries), never on this filename, so nothing moved with it.
+-- Spec of record: docs/plan/active/f-a2-statement-activation-spec.md (SS2, SS3, SS5, SS6, SS9);
 -- design `docs/plan/active/f-a1-witness-pair-design.md` SS3.7; the deferral contract is
 -- 0098_f_a1_statements.sql:141-176 ("DELIBERATELY NOT IN THIS FILE").
 --
@@ -503,7 +505,7 @@ $act_post$;
 -- TAIL CENSUS -- the evidence a reviewer reads.
 -- =====================================================================================
 do $act_tail$
-declare v_src text; v_n int; v_queued int; v_azure int;
+declare v_src text; v_n int; v_queued int; v_azure int; v_uncovered int; r record;
 begin
   select p.prosrc into v_src from pg_proc p where p.oid='clara._enqueue_invoice_facts_core(uuid)'::regprocedure;
   if position('llm-openai:gpt-5.6-terra:stmt-witness-v1' in v_src) = 0
@@ -529,10 +531,53 @@ begin
   select count(*)::int into v_azure from clara.document_processing_tasks
    where lane='statement_facts' and status='queued' and engine_id like 'azure-%';
 
+  -- THE COVERAGE READ, AND WHY IT IS A SET DIFFERENCE RATHER THAN A COUNT.
+  -- The question this apply must answer is not "does ANYONE hold witness_extraction" -- a
+  -- global count says YES the moment one client does, and stays silent about every OTHER
+  -- client who holds a live statement_extraction activation and NO witness one. Those are
+  -- exactly the clients this re-key takes BOTH statement lanes away from: after the flip
+  -- their enqueues settle terminal `consent_inactive`. A read that cannot say NO has a
+  -- meaningless YES, so the coverage question is asked PER CLIENT and answered by the rows
+  -- it returns: the uncovered set is `live statement_extraction` MINUS `live
+  -- witness_extraction`, and complete coverage is ZERO ROWS.
+  -- NOT A HARD FAILURE, deliberately: this is a DATA state, not a schema state. The ceremony
+  -- adjudicates it (grant+activate the witness purpose for the named clients, or accept that
+  -- their statement lanes pause) -- this file's job is to make it impossible to miss.
+  v_uncovered := 0;
+  for r in
+    select a.firm_id, a.client_id
+      from clara.client_egress_purpose_activations a
+      join clara.client_egress_purpose_consents c
+        on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+       and c.purpose=a.purpose
+     where a.purpose='statement_extraction'
+       and a.deactivated_at is null and c.revoked_at is null
+       and not exists (
+         select 1 from clara.client_egress_purpose_activations w
+           join clara.client_egress_purpose_consents wc
+             on wc.id=w.consent_id and wc.firm_id=w.firm_id and wc.client_id=w.client_id
+            and wc.purpose=w.purpose
+          where w.firm_id=a.firm_id and w.client_id=a.client_id
+            and w.purpose='witness_extraction'
+            and w.deactivated_at is null and wc.revoked_at is null)
+     order by a.firm_id, a.client_id
+  loop
+    v_uncovered := v_uncovered + 1;
+    raise notice 'F-A2 WINDOW B COVERAGE GAP: firm % client % holds a LIVE statement_extraction activation and NO live witness_extraction one -- after this re-key BOTH statement lanes (statement_facts pdf/image AND statement_parse csv/ofx) refuse consent_inactive for this client until witness_extraction is granted AND activated for them. Ceremony must adjudicate before the window closes.',
+      r.firm_id, r.client_id;
+  end loop;
+
   select count(*)::int into v_n from clara.client_egress_purpose_activations a
    where a.purpose='witness_extraction' and a.deactivated_at is null;
 
-  raise notice 'F-A2 WINDOW B tail: OK -- the bank_statement arm mints the witness engine identity on the UNMOVED statement_facts lane and its typed-consent lookup reads witness_extraction; the persist half (persist_statement_facts_v2) is live and still EXECUTE-granted to clara_runtime. QUEUED statement_facts backlog at apply: % task(s), of which % still carry an azure-%% stamp -- those WAIT at the repointed image''s pre-egress provenance guard rather than egressing, sharing the ocr concurrency window until they clear (registered cost, not a correctness hazard). % live (never-deactivated) witness_extraction activation row(s) are on file to answer the re-keyed lookup -- no new consent surface was created by this file. The engine literal''s runtime twin cannot be read from SQL: battery cell f-a2.activation-engine-literal reads both sides independently. No table in workflow/graphile_worker/spike touched. CEREMONY: the runtime machine stays STOPPED across BOTH this apply AND the registry-repoint deploy that follows -- a witness-stamped task claimed by the OLD image has no DB-side guard.',
-    v_queued, v_azure, v_n;
+  if v_uncovered > 0 then
+    raise notice 'F-A2 WINDOW B tail: ** COVERAGE INCOMPLETE ** -- % client(s) named above hold a live statement_extraction activation with NO live witness_extraction one and LOSE BOTH statement lanes at this flip. This apply does NOT fail on it (a data state the ceremony adjudicates, not a schema state), but it must be resolved or accepted DELIBERATELY before the window closes.',
+      v_uncovered;
+  else
+    raise notice 'F-A2 WINDOW B tail: coverage COMPLETE -- the per-client set difference (live statement_extraction MINUS live witness_extraction) returned ZERO rows, so no client loses a statement lane at this flip. This is a read that can say NO: it names every uncovered client individually and is silent only when there is genuinely nothing to name.';
+  end if;
+
+  raise notice 'F-A2 WINDOW B tail: OK -- the bank_statement arm mints the witness engine identity on the UNMOVED statement_facts lane and its typed-consent lookup reads witness_extraction; the persist half (persist_statement_facts_v2) is live and still EXECUTE-granted to clara_runtime. QUEUED statement_facts backlog at apply: % task(s), of which % still carry an azure-%% stamp -- those WAIT at the repointed image''s pre-egress provenance guard rather than egressing, sharing the ocr concurrency window until they clear (registered cost, not a correctness hazard). Consent COVERAGE: % client(s) uncovered (per-client set difference; zero = complete), against % live (never-deactivated) witness_extraction activation row(s) on file -- no new consent surface was created by this file. The engine literal''s runtime twin cannot be read from SQL: battery cell f-a2.activation-engine-literal reads both sides independently. No table in workflow/graphile_worker/spike touched. CEREMONY: the runtime machine stays STOPPED across BOTH this apply AND the registry-repoint deploy that follows -- a witness-stamped task claimed by the OLD image has no DB-side guard.',
+    v_queued, v_azure, v_uncovered, v_n;
 end
 $act_tail$;

@@ -188,7 +188,7 @@ function applyRestoreFA2Engine(member, src) {
 
 // =========================================================================
 // AMENDMENT F-A2 WINDOW B (the STATEMENT ACTIVATION,
-// UNNUMBERED_f_a2_statement_activation.sql). The SAME §6 member --
+// 0102_f_a2_statement_activation.sql). The SAME §6 member --
 // _enqueue_invoice_facts_core ("router") -- gains one more deliberately-changed layer, now the
 // OUTERMOST of all (authored latest). TWO edits, both inside the BANK-STATEMENT path and both
 // disjoint from every earlier layer's span:

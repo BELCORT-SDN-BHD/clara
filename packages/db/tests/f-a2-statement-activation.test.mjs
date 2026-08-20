@@ -1,8 +1,9 @@
 // F-A2 WINDOW B -- THE BANK-STATEMENT WITNESS ACTIVATION battery, for
-// migrations/UNNUMBERED_f_a2_statement_activation.sql (number claimed at merge). NOT
+// migrations/0102_f_a2_statement_activation.sql. THE GATE BELOW READS THE CATALOG, never this
+// filename or a schema_migrations row, so a renumber can never move what this battery asserts. NOT
 // contract-blind: this lane authored the migration, so every cell targets the ACTUAL installed
 // behaviour. Design of record: `docs/plan/active/f-a1-witness-pair-design.md` SS3.7 + the
-// F-A1 statement-witness ACTIVATION spec (SS2/SS3/SS6/SS8).
+// docs/plan/active/f-a2-statement-activation-spec.md (§2/§3/§6/§8).
 //
 // SCOPE: the router re-key (the bank_statement classification arm's engine identity, on an
 // UNMOVED statement_facts lane) and the consent re-key (the statement arm's enqueue-time typed
@@ -19,6 +20,7 @@ import { printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { ensureReady, seedVerifiedDocument, fileDocument } from "./rig-docs-fixtures.mjs";
 import { buildWorld, freshResolution } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument } from "./s6-helpers.mjs";
+import { claimTask } from "./s6-fixtures.mjs";
 import {
   grantPurpose, activatePurpose, deactivatePurpose, consentEvidenceDoc,
 } from "./wave-b/wb-0020-helpers.mjs";
@@ -384,10 +386,95 @@ test("f-a2.activation.j a PRE-window Azure-stamped statement task is still stora
   assert.equal(row.engine_id, AZURE_STATEMENT_ENGINE_ID,
     "the retiring identity is still ADMISSIBLE on statement_facts -- the pre-window backlog is not invalidated by the re-key");
   assert.equal(row.status, "queued");
+
+  // CLAIMABLE IS DRIVEN, NOT ASSERTED BY ADJECTIVE. "Storable" is what the INSERT above proves;
+  // the claim door is a different body with its own lane carve, kill-switch gate, attempt cap and
+  // concurrency belt, and a cell that stopped at the INSERT would be naming a property it never
+  // exercised. So this drives the REAL verb the runtime drives.
+  const claimed = await claimTask(taskId);
+  assert.equal(claimed.status, "running",
+    `the pre-window Azure-stamped task must still CLAIM after the re-key (got ${JSON.stringify(claimed)})`);
+  const after = (await rootQuery(
+    "select status, engine_id, workflow_run_id from clara.document_processing_tasks where id=$1", [taskId])).rows[0];
+  assert.equal(after.status, "running");
+  assert.ok(after.workflow_run_id, "the claim actually bound a workflow run id");
+  assert.equal(after.engine_id, AZURE_STATEMENT_ENGINE_ID,
+    "and the claim did NOT rewrite the stamp -- the task still carries the identity it was minted under, which is exactly what the runtime guard then refuses to egress under");
+
   // What happens NEXT is the runtime's job and is proven there: statementFacts_v2's pre-egress
   // provenance guard WAITS on this stamp rather than egressing under a receipt naming a model it
   // did not call (packages/runtime/tests/f-a2-statement-activation.test.mjs). Named here so the
   // two halves of the in-flight story are findable from either side.
+});
+
+// ===========================================================================
+// SECTION 5 -- the CEREMONY COVERAGE READ (spec §6), proven in BOTH directions.
+// ===========================================================================
+
+/** The migration tail's own coverage query, verbatim: live statement_extraction MINUS live
+ *  witness_extraction, per (firm_id, client_id). Complete coverage is ZERO ROWS. */
+async function uncoveredClients() {
+  const r = await rootQuery(`
+    select a.firm_id, a.client_id
+      from clara.client_egress_purpose_activations a
+      join clara.client_egress_purpose_consents c
+        on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+       and c.purpose=a.purpose
+     where a.purpose='statement_extraction'
+       and a.deactivated_at is null and c.revoked_at is null
+       and not exists (
+         select 1 from clara.client_egress_purpose_activations w
+           join clara.client_egress_purpose_consents wc
+             on wc.id=w.consent_id and wc.firm_id=w.firm_id and wc.client_id=w.client_id
+            and wc.purpose=w.purpose
+          where w.firm_id=a.firm_id and w.client_id=a.client_id
+            and w.purpose='witness_extraction'
+            and w.deactivated_at is null and wc.revoked_at is null)
+     order by a.firm_id, a.client_id`);
+  return r.rows;
+}
+
+test("f-a2.activation.l THE COVERAGE READ CAN SAY NO: an inverted fixture (statement-only client) is NAMED", async () => {
+  mustBeReady();
+  const { users, clients } = world;
+  const firm = await firmOf(clients.S1);
+  // THE DEFECT THIS CELL EXISTS FOR. A global "does anyone hold witness_extraction" count answers
+  // YES the moment ONE client does — and stays silent about every other client who holds a live
+  // statement_extraction activation and no witness one. Those are exactly the clients this re-key
+  // takes BOTH statement lanes from. A read that cannot say NO has a meaningless YES, so the
+  // ceremony read is a per-client set difference, and this cell proves it can return rows.
+  await liveConsent(users.erin, { firm, client: clients.S1, purpose: STATEMENT_PURPOSE });
+  const uncovered = await uncoveredClients();
+  const hit = uncovered.find((x) => x.client_id === clients.S1);
+  assert.ok(hit, `the statement-only client must be NAMED by the coverage read (got ${JSON.stringify(uncovered)})`);
+  assert.equal(hit.firm_id, firm, "…and named with its firm, so the ceremony can act on it");
+
+  // AND THE CONSEQUENCE IS REAL, not theoretical: that same client's statement enqueue refuses.
+  const doc = await filedDocument(users.erin, { firm, client: clients.S1, kind: "bank_statement" });
+  const tasks = await tasksOf(doc.documentId);
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].status, "failed",
+    `an uncovered client loses the statement lane at the flip (got ${JSON.stringify(tasks[0])})`);
+  assert.equal(tasks[0].error_code, "consent_inactive");
+});
+
+test("f-a2.activation.m …and ZERO once that client is covered -- the same query, the other verdict", async () => {
+  mustBeReady();
+  const { users, clients } = world;
+  const firm = await firmOf(clients.S1);
+  // Cover the client the previous cell exposed. The query must now be silent about it — silence
+  // that MEANS something, because the same query just proved it can speak.
+  await liveConsent(users.erin, { firm, client: clients.S1, purpose: WITNESS_PURPOSE });
+  const uncovered = await uncoveredClients();
+  assert.equal(uncovered.find((x) => x.client_id === clients.S1), undefined,
+    `a client holding BOTH purposes must drop out of the uncovered set (got ${JSON.stringify(uncovered)})`);
+
+  // …and the lane re-opens for them, which is what "covered" is supposed to mean.
+  const doc = await filedDocument(users.erin, { firm, client: clients.S1, kind: "bank_statement" });
+  const tasks = await tasksOf(doc.documentId);
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].status, "queued", `(got ${JSON.stringify(tasks[0])})`);
+  assert.equal(tasks[0].engine_id, STATEMENT_WITNESS_ENGINE_ID);
 });
 
 test("f-a2.activation.k the persist half is live and still EXECUTE-granted to the runtime", async () => {

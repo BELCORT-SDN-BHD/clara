@@ -75,8 +75,13 @@ function documentOp(prefix, taskId) {
  *  ONCE; the task simply waits for the image that owns it.
  *
  *  Per lane: 'ocr'/'structured_parse'/'none' ride documentIngest; 'invoice_facts' rides its
- *  own workflow (invoiceFacts_v1); 'statement_facts'/'statement_parse' ride statementFacts_v1
- *  (ONE workflow, branching on the lane inside — design §4.3); 'llm_witness' rides
+ *  own workflow (invoiceFacts_v1); 'statement_facts'/'statement_parse' ride whichever body the
+ *  registry's `statementFacts:` key names — ONE workflow, branching on the lane inside (design
+ *  §4.3). Since the F-A2 Window-B activation that key is statementFacts_v2: the pdf/image
+ *  `statement_facts` lane is the TEXT+VISION witness pair, while `statement_parse` (csv/ofx) is
+ *  carried over behaviourally unchanged, reached by v2 IMPORTING v1's own claim+process steps.
+ *  Both lanes answer to the `witness_extraction` typed consent from that window onward (ONE
+ *  branch in `clara._enqueue_invoice_facts_core` gates the pair); 'llm_witness' rides
  *  witnessFacts_v1 (F-A1 PR-3 cutover — the DB-side router mints this lane for every
  *  invoice-shaped document now; an old image without this arm would warn-once and wait,
  *  never fall through to documentIngest, which is the whole point of the allowlist below);
