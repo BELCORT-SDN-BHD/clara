@@ -215,7 +215,7 @@ create temp table _o6_acl(sig text primary key, acl text, owner name, vol "char"
 do $o6_pre$
 declare
   v_src text; v_res text; v_n int; v_sig text; v_fold_sel text;
-  v_legacy_arm text; v_witness_arm text; v_clock text;
+  v_legacy_arm text; v_witness_arm text; v_clock text; v_guard text; v_clockread text;
   v_estate text[] := array[
     'clara._document_facts_extraction(uuid)',
     'clara._document_direction_at(uuid,uuid,uuid)',
@@ -321,6 +321,10 @@ begin
                     '\s*([=,()<>;])\s*', '\1', 'g');
   v_witness_arm := regexp_replace('select tx.id, tx.extracted_at into v_wit, v_wit_at from clara.document_processing_tasks t join clara.document_extractions tx on tx.document_id = t.document_id and tx.engine_id = t.engine_id and tx.version_n = t.version_n and tx.engine_kind = ''llm_text_facts'' and tx.status = ''done'' where t.document_id = p_document and t.lane = ''llm_witness'' and t.status = ''done'' order by t.version_n desc, t.id desc limit 1;',
                     '\s*([=,()<>;])\s*', '\1', 'g');
+  v_guard := regexp_replace('if v_wit is not null then if v_ext is null then return',
+                    '\s*([=,()<>;])\s*', '\1', 'g');
+  v_clockread := regexp_replace('select e.extracted_at into v_ext_at from clara.document_extractions e where e.id = v_ext;',
+                    '\s*([=,()<>;])\s*', '\1', 'g');
   v_clock := regexp_replace('if v_ext_at is null or v_wit_at >= v_ext_at then',
                     '\s*([=,()<>;])\s*', '\1', 'g');
 
@@ -332,8 +336,13 @@ begin
     raise exception 'F-A2 opener 6 prestate: the witness generation arm this file lifts is NOT present verbatim in the live cross-regime resolver -- refusing to install a lookalike (review law 3)'
       using errcode='CLR10';
   end if;
-  if position(regexp_replace('if v_wit is not null then if v_ext is null then return', '\s*([=,()<>;])\s*', '\1', 'g') in v_res) = 0
-     or position(regexp_replace('select e.extracted_at into v_ext_at from clara.document_extractions e where e.id = v_ext;', '\s*([=,()<>;])\s*', '\1', 'g') in v_res) = 0
+  -- ALL THREE precedence fragments, from the SAME variables the tail re-checks and the same
+  -- ones stored below -- one source, so a fragment cannot be proven present here and then
+  -- quietly left out of the stored set. The guard and the legacy clock READ are what make the
+  -- rule a rule: a splice that dropped the clock read would still satisfy a check that only
+  -- looked for the comparison.
+  if position(v_guard in v_res) = 0
+     or position(v_clockread in v_res) = 0
      or position(v_clock in v_res) = 0 then
     raise exception 'F-A2 opener 6 prestate: the cross-regime PRECEDENCE this file lifts is NOT present verbatim in the live resolver -- the clock rule moved'
       using errcode='CLR10';
@@ -352,16 +361,31 @@ begin
   insert into _o6_pre(k,v) values ('sel_fold', v_fold_sel),
                                   ('legacy_arm', v_legacy_arm),
                                   ('witness_arm', v_witness_arm),
-                                  ('clock', v_clock);
+                                  ('clock', v_clock),
+                                  ('guard', v_guard),
+                                  ('clockread', v_clockread);
 
-  -- (0.55) THE POPULATION THE NARROWING WOULD TOUCH, MEASURED ON THIS DATABASE AND PRINTED.
-  -- The ruled pick joins document_processing_tasks; several readers' previous picks did not,
-  -- so they also admitted a done legacy extraction that no processing task ever attributed.
-  -- Whether that population EXISTS is a fact about the data, not something to reason about
-  -- from the writer's shape -- so it is counted here and printed at every apply, including
-  -- the ceremony's. Section 5 carries a continuity arm for the one body where the narrowing
-  -- would change an outcome that GRANTS A PARTY; this number is what tells a reviewer whether
-  -- that arm is load-bearing or vestigial on the estate being deployed to.
+  -- (0.55) THE TWO POPULATIONS THIS CHANGE TOUCHES, MEASURED ON THIS DATABASE AND PRINTED AT
+  -- EVERY APPLY INCLUDING THE CEREMONY'S. They are DIFFERENT questions and were once counted
+  -- as one, which told the reader the wrong thing:
+  --
+  --   (A) UN-ATTRIBUTED ROWS -- done legacy extractions that no processing task ever
+  --       attributed. This is what the ruled pick narrows away and what the section-1b region
+  --       source's wider arm exists to keep reachable. A zero here means that arm is
+  --       vestigial on this estate; a non-zero means it is load-bearing.
+  --
+  --   (B) DOCUMENTS WHOSE REGION READ SILENTLY REPOINTS -- documents where the pre-change
+  --       reader pick and the region source DISAGREE. This is the honest measure of
+  --       behavioural delta, and it is NOT a subset of (A): a document can carry a
+  --       task-attributed v1 AND a newer un-attributed v2, in which case the pre-change
+  --       readers took v2 by version order while the corroboration resolver took v1 -- a
+  --       SPLIT GENERATION INSIDE THE LEGACY REGIME, latent and pre-existing. On that shape
+  --       this file does not reproduce prior behaviour, it CORRECTS it: the region source
+  --       answers v1, the same generation the predicate judged. Proven on the rig, not
+  --       reasoned: pre-fix split true, post-fix split false.
+  --
+  -- So (B) is where a ceremony operator should look, and a non-zero (B) is not automatically
+  -- a regression -- it is this file closing latent legacy splits.
   select count(*)::int into v_n
     from clara.document_extractions e
    where e.engine_kind = 'invoice_facts' and e.status = 'done'
@@ -370,7 +394,10 @@ begin
         where t.document_id = e.document_id and t.engine_id = e.engine_id
           and t.version_n = e.version_n
           and t.lane in ('invoice_facts','local_facts') and t.status = 'done');
-  raise notice 'F-A2 opener 6 prestate: % done legacy extraction(s) on this database carry NO task-attributed generation -- the population the ruled pick narrows away, and the reason section 5 keeps a continuity arm', v_n;
+  -- (A) is countable here; (B) needs the section-1b region source, which does not exist yet,
+  -- so the tail counts it. Split across the two sections on purpose rather than deferring both:
+  -- (A) is a PRE-condition a reviewer wants before the DDL runs.
+  raise notice 'F-A2 opener 6 prestate: (A) % done legacy extraction(s) on this database carry NO task-attributed generation -- the population the section-1b wider arm keeps reachable. (B), the count of documents whose region read REPOINTS, is measured in the tail once the region source exists', v_n;
 
   -- (0.6) THE TWO DELIBERATE EXCLUSIONS EXIST AND ARE NAMED, so the tail can prove they
   -- did not move. Naming them here is how "we left them alone" becomes evidence.
@@ -480,15 +507,27 @@ $o6_sel$;
 --     question instead of falling into 0049's silent branch, and 0049 measured that branch at
 --     38 of 130 live filings. A regression there turns needs_review into a hard needs_you.
 --   * clara._document_facts_regions -- WHERE THE REGIONS COME FROM. The governing generation
---     when there is one; otherwise the legacy row no task attributed. Strictly wider, and
---     defined IN TERMS OF the ruled pick so the two can never disagree when the ruled pick has
---     an answer.
+--     when there is one; otherwise the newest done legacy row, attributed or not. Defined IN
+--     TERMS OF the ruled pick, so the two can never disagree when the ruled pick has an answer.
 --
--- IT CANNOT REINTRODUCE THE SPLIT, STRUCTURALLY. The ruled pick answers non-null whenever ANY
--- witness generation exists -- its witness arm needs no legacy task -- so the coalesce's second
--- arm is unreachable on every document carrying a witness pair. It can only ever reproduce the
--- exact pre-change behaviour for documents with no witness generation AND no task-attributed
--- legacy one. The battery proves that behaviourally rather than by reading this comment.
+-- IT CANNOT REINTRODUCE THE CROSS-REGIME SPLIT, STRUCTURALLY -- and the precise statement
+-- matters, because the loose one is FALSE. The ruled pick answers non-null whenever a witness
+-- generation exists WHOSE WITNESS TASK IS DONE; its witness arm needs no legacy task, but it
+-- does require t.status='done'. So the wider arm IS reachable on a document whose witness pair
+-- has landed while its task is still QUEUED or RUNNING. That case is safe for a reason worth
+-- naming rather than hand-waving: the wider arm selects `engine_kind='invoice_facts'` ONLY, so
+-- it can never return a witness row and the two regimes still cannot mix -- and the
+-- corroboration resolver answers its empty state for such a document, so `facts_pending` holds
+-- the lane out of ready regardless of what the regions say. The battery exercises the in-flight
+-- shape explicitly rather than leaving it to this comment.
+--
+-- "STRICTLY WIDER / EXACT PRE-CHANGE BEHAVIOUR" WOULD ALSO BE FALSE, on one population, and the
+-- difference is an improvement rather than a regression: a document carrying a task-attributed
+-- v1 AND a newer UN-attributed v2. The pre-change readers ordered by version_n and took v2
+-- while the corroboration resolver's task-joined arm took v1 -- a split generation INSIDE the
+-- legacy regime, latent and pre-existing. The region source answers v1, the generation the
+-- predicate actually judged, and closes it. Measured on the rig: pre-fix split true, post-fix
+-- split false. The tail counts this population as (B) and prints it.
 --
 -- THE MEASUREMENT THAT PUT IT HERE, stated because it is the honest provenance: routing the
 -- region readers through the ruled pick alone regressed the existing suite, and the sharpest
@@ -627,7 +666,9 @@ end
 $o6_s4$;
 
 -- =====================================================================================
--- SECTION 5 -- clara._resolve_vendor_binding. Routed through the shared selector so that
+-- SECTION 5 -- clara._resolve_vendor_binding. Routed through the section-1b REGION SOURCE (it
+-- reads this document's own regions and envelope, so it belongs where every other region
+-- reader is) so that
 -- the binding lane and the coding lane read the SAME generation. See the registered
 -- residual in this file's header: for a witness-born document this body still returns the
 -- unresolved outcome, because its next gate reads the legacy OCR producer's envelope
@@ -941,7 +982,7 @@ $o6_s12$;
 do $o6_tail$
 declare
   v_changed text; v_new text; v_src text; v_res text; v_n int; v_sig text;
-  v_drift text; v_docs int; v_split int; v_err int; v_doc uuid;
+  v_drift text; v_docs int; v_split int; v_err int; v_doc uuid; v_repoint int;
   v_estate text[] := array[
     'clara._document_facts_extraction(uuid)',
     'clara._document_direction_at(uuid,uuid,uuid)',
@@ -987,7 +1028,10 @@ begin
   select regexp_replace(regexp_replace(regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g'),
            '\s+', ' ', 'g'), '\s*([=,()<>;])\s*', '\1', 'g')
     into v_src from pg_proc p where p.oid='clara._document_facts_extraction(uuid)'::regprocedure;
-  for v_sig in select v from _o6_pre where k in ('legacy_arm','witness_arm','clock') loop
+  -- ALL FIVE precedence fragments, not three: the two returns' guard and the legacy clock READ
+  -- are what make the rule a rule. Storing only the arms and the comparison would let a splice
+  -- that DROPPED the clock read still pass this mechanical proof.
+  for v_sig in select v from _o6_pre where k in ('legacy_arm','witness_arm','clock','guard','clockread') loop
     if position(v_sig in v_src) = 0 then
       raise exception 'F-A2 opener 6 tail: a lifted arm or the clock rule is NOT present verbatim in the installed selector' using errcode='CLR10';
     end if;
@@ -1023,11 +1067,19 @@ begin
       'clara.get_draft_review(uuid,uuid)'] loop
     select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src
       from pg_proc p where p.oid = v_sig::regprocedure;
-    -- TWO bodies legitimately keep a legacy literal and are exempted BY NAME, each for its own
-    -- stated reason: the selector's is its fallback ARM, and the binding resolver's is its
-    -- continuity arm (section 5). Naming them beats a blanket allowance -- any OTHER body that
-    -- grew one back is still a hard failure here.
-    if v_sig not in ('clara._document_facts_extraction(uuid)','clara._resolve_vendor_binding(uuid,uuid,uuid)')
+    -- EXACTLY ONE body legitimately keeps a legacy literal and is exempted BY NAME: the ruled
+    -- selector, whose is its fallback ARM. Naming it beats a blanket allowance -- any OTHER
+    -- body that grew one back is a hard failure here, INCLUDING the binding resolver.
+    --
+    -- THE BINDING RESOLVER WAS EXEMPTED HERE AND IS NOT ANY MORE, which is worth stating
+    -- because the exemption was a guard weakened for nothing. An earlier draft gave that body
+    -- its own inline continuity arm; the final shape moved the continuity into the section-1b
+    -- region source, so the body now holds a single call and ZERO legacy literals. The
+    -- exemption outlived the thing it excused and would have let a future recut reintroduce a
+    -- legacy pick into the one body whose outcome GRANTS A PARTY. Measured on the post-splice
+    -- catalog before removing it: 0 occurrences of the literal, so removing the exemption
+    -- costs nothing and closes the hole.
+    if v_sig <> 'clara._document_facts_extraction(uuid)'
        and v_src ~ 'engine_kind\s*=\s*''invoice_facts''' then
       raise exception 'F-A2 opener 6 tail: % still filters on the legacy engine kind in its EXECUTABLE text', v_sig using errcode='CLR10';
     end if;
@@ -1160,8 +1212,21 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice 'F-A2 opener 6 tail: OK -- exactly 12 bodies recut and exactly 1 created (the region source); the live-selection direction entry point, execute_rule_post and persist_invoice_facts all byte-unmoved; the selector carries BOTH lifted arms and the ruled clock rule verbatim (re-proven against the live resolver post-DDL), names the TEXT half only, and keeps the within-regime ordering key once per regime; 6 reader bodies now reach the shared region source with 0 legacy kind literals in their executable text; 3 lane gates admit llm_witness and 0 keep a single-lane equality; the pinned-extraction filter admits the text half and refuses the vision half; the transition wall admits a skipped_kind retirement on the witness lane with all eight other arms verbatim; ACL/owner/volatility/definer/search_path unmoved on all 12; the frozen evaluator closure verified and intersected empty with this estate; selector-null vs resolver-empty agreed on %/% documents present on this database (% unreadable by the resolver and therefore counted as neither). No table in workflow/graphile_worker/spike touched. D1 write-quiesce taken (four audited writers plus the task-transition trigger).',
-    v_docs - v_split - v_err, v_docs, v_err;
+  -- POPULATION (B), the behavioural delta the prestate deferred to here: documents whose
+  -- region read REPOINTS -- the pre-change reader pick (extraction-only, version-ordered)
+  -- against the installed region source. Reported, never refused: a non-zero count on a
+  -- task-attributed-plus-newer-un-attributed document is this file CLOSING a latent legacy
+  -- split (measured on the rig: pre-fix party and amounts came from different generations,
+  -- post-fix they agree), and on a witness-born document it is the whole point of the change.
+  select count(*)::int into v_repoint
+    from clara.documents d
+   where clara._document_facts_regions(d.id) is distinct from (
+           select e.id from clara.document_extractions e
+            where e.document_id = d.id and e.engine_kind = 'invoice_facts' and e.status = 'done'
+            order by e.version_n desc, e.id desc limit 1);
+
+  raise notice 'F-A2 opener 6 tail: OK -- exactly 12 bodies recut and exactly 1 created (the region source); the live-selection direction entry point, execute_rule_post and persist_invoice_facts all byte-unmoved; the selector carries BOTH lifted arms and the ruled clock rule verbatim (re-proven against the live resolver post-DDL), names the TEXT half only, and keeps the within-regime ordering key once per regime; 6 reader bodies now reach the shared region source with 0 legacy kind literals in their executable text; 3 lane gates admit llm_witness and 0 keep a single-lane equality; the pinned-extraction filter admits the text half and refuses the vision half; the transition wall admits a skipped_kind retirement on the witness lane with all eight other arms verbatim; ACL/owner/volatility/definer/search_path unmoved on all 12; the frozen evaluator closure verified and intersected empty with this estate; selector-null vs resolver-empty agreed on %/% documents present on this database (% unreadable by the resolver and therefore counted as neither); population (B), documents whose region read REPOINTS under this change, is %. No table in workflow/graphile_worker/spike touched. D1 write-quiesce taken (four audited writers plus the task-transition trigger).',
+    v_docs - v_split - v_err, v_docs, v_err, v_repoint;
 end
 $o6_tail$;
 

@@ -14,9 +14,10 @@
 //   clara._document_facts_extraction — WHICH GENERATION GOVERNS. The ruled 0093 pick, task-
 //     joined. The direction chain and the coding lane's own guard ask exactly this.
 //   clara._document_facts_regions    — WHERE THE REGIONS COME FROM. The ruled pick, or, when it
-//     has nothing to say at all, the legacy row no processing task ever attributed. Strictly
-//     wider, defined in terms of the ruled pick, and its wider arm is UNREACHABLE once any
-//     witness generation exists — cell 14b proves that on the shape that would break it.
+//     has nothing to say at all, the newest done legacy row, attributed or not. Defined in
+//     terms of the ruled pick. Its wider arm is unreachable once a witness generation exists
+//     WHOSE TASK IS DONE — the task-status qualifier is load-bearing, and cell 14b exercises
+//     the in-flight shape that would falsify the loose claim.
 //
 // The design centre is not "the readers see more rows"; it is that the coin flip between the
 // two halves of a pair, and the mixing of two GENERATIONS on one document, become structurally
@@ -43,7 +44,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, firmOf, grantConsent, seedCitedDocument,
-  witnessShape, landWitnessPair, box, legacyPick, factState, setDocumentKind,
+  witnessShape, landWitnessPair, box, legacyPick, factState, factStateText, factStateAtText,
+  setDocumentKind,
 } from "./f-a1-fixtures.mjs";
 
 const SHADOW_SEL = "_o6_prefix_sel";
@@ -136,6 +138,12 @@ async function installPreFixShadow() {
     .split(CALL).join(INLINE)
     .split("if @@GUARD@@ is null then").join(`if clara.${SHADOW_SEL}(f.document_id) is null then`)
     .replace("FUNCTION clara._coding_lane_core(", `FUNCTION clara.${SHADOW_LANE}(`);
+  // GUARD and INLINE are HAND-TYPED constants, which is a real limitation and is stated rather
+  // than hidden: this shadow is only a faithful pre-fix reconstruction because migration §3
+  // asserted the SAME inline sub-select text occurs exactly 4× in the live body before splicing
+  // it out. The counts below are what tie the two together — if the live body ever stops
+  // matching these constants, the shadow fails loudly here instead of silently reconstructing
+  // something that was never the pre-fix body.
   assert.equal(body.split(INLINE).length - 1, 4, "the shadow must restore exactly four inline region sub-selects");
   await rootQuery(body);
 }
@@ -617,7 +625,12 @@ test("f-a2.o6.a re-kind retires a queued witness task at the human door, and spa
   const preFixScope = (await rootQuery(
     `select count(*)::int c from clara.document_processing_tasks
       where document_id=$1 and status='queued' and lane='invoice_facts'`, [doc.documentId])).rows[0].c;
-  assert.equal(preFixScope, 0, "the pre-fix clause scoped to lane='invoice_facts' and would have matched nothing here");
+  // This measures a STANDING GUARD, not a reproduction of the pre-fix failure: the pre-fix
+  // clause scoped to lane='invoice_facts', and there is no such queued task on this document,
+  // so that clause would have matched nothing here. It does not re-run the old body and it
+  // does not reproduce the CLR16 the widening originally caused — that collision is what
+  // section 12 exists for, and cell 19 is where it is exercised.
+  assert.equal(preFixScope, 0, "no queued invoice_facts task here — the pre-fix clause's scope would have matched nothing");
 
   // Through the HUMAN door, as a human: this verb is granted to clara_authenticated and refuses
   // an unauthenticated caller, so calling it as root would be testing a different door.
@@ -655,17 +668,20 @@ test("f-a2.o6.the binding resolver reads the governing generation, and its witne
     `select regexp_replace(p.prosrc,'--[^' || chr(10) || ']*','','g') s from pg_proc p
       where p.oid='clara._resolve_vendor_binding(uuid,uuid,uuid)'::regprocedure`)).rows[0].s;
   assert.ok(src.includes("clara._document_facts_regions"), "the binding resolver must reach the shared region source");
-  // It also keeps a CONTINUITY arm (see migration section 5) — and the ruled pick must come
-  // first, with the continuity arm behind a not-found guard. An order inversion would make the
-  // continuity arm the primary and hand the split hazard straight back.
-  const ruled = src.indexOf("e.id=clara._document_facts_regions(p_document)");
-  assert.ok(ruled >= 0, "the ruled pick must be present");
-  assert.ok(src.indexOf("if not found then") > ruled,
-    "the continuity arm must sit BEHIND the ruled pick, not in front of it");
+  // The body holds ONE extraction pick and it is the region source. An earlier draft asserted
+  // an ordering here ("the ruled pick before an `if not found` continuity arm") — but the
+  // continuity moved into §1b, so that assertion was reading the body's ORIGINAL
+  // `if not found then return unresolved` and passing for a reason that had nothing to do with
+  // what it claimed. Spelling is not identity (law 3), including in a test. What is actually
+  // true and worth pinning is the count: exactly one pick, and no legacy literal beside it.
+  assert.equal(src.split("clara._document_facts_regions(p_document)").length - 1, 1,
+    "the binding resolver must reach the region source exactly once");
+  assert.ok(!/engine_kind\s*=\s*'invoice_facts'/.test(src),
+    "the binding resolver must keep no legacy pick of its own");
 });
 
 // ---------------------------------------------------------------------------------------
-// CELL 14b — THE CONTINUITY ARM IS STRUCTURALLY UNREACHABLE ONCE A WITNESS GENERATION EXISTS.
+// CELL 14b — THE REGION SOURCE WIDER ARM AND THE EXACT SHAPE OF ITS UNREACHABILITY.
 // This is the property that lets section 5 keep a second pick at all: the selector answers
 // non-null whenever ANY witness pair is present (its witness arm needs no legacy task), so the
 // arm can only ever fire for a document that has no witness generation AND no task-attributed
@@ -673,7 +689,7 @@ test("f-a2.o6.the binding resolver reads the governing generation, and its witne
 // extraction (the arm's whole reason to exist) PLUS a witness pair. The arm must not fire, and
 // the binding resolver must therefore see the witness generation, not the legacy one.
 // ---------------------------------------------------------------------------------------
-test("f-a2.o6.the binding resolver's continuity arm cannot fire once a witness generation exists", async () => {
+test("f-a2.o6.the region source wider arm cannot fire once a witness generation is TASK-done", async () => {
   mustBeLive();
   const { client, sub, firm } = ctx;
   const doc = await seedCitedDocument(sub, { firm, client, kind: "invoice" });
@@ -693,12 +709,82 @@ test("f-a2.o6.the binding resolver's continuity arm cannot fire once a witness g
   assert.equal(await regionsOf(doc.documentId), orphan,
     "the region source's wider arm must still reach it — that is the continuity this arm exists for");
 
-  const pair = await landWitnessPair(doc.documentId, witnessShape({ fields: BASE }));
-  assert.equal(await selectorOf(doc.documentId), pair.textId,
-    "once a witness pair exists the ruled pick answers");
-  assert.equal(await regionsOf(doc.documentId), pair.textId,
+  // THE IN-FLIGHT SHAPE FIRST, because it is the counterexample to the LOOSE claim. A witness
+  // pair whose two extraction rows are done but whose TASK is still queued does NOT satisfy the
+  // ruled pick (its witness arm requires t.status='done'), so the wider arm fires even though a
+  // witness generation is present on the document. That is safe, and the cell asserts WHY
+  // rather than asserting it away: the wider arm selects the legacy kind only, so it returns
+  // the legacy row and the two regimes still cannot mix — and the corroboration resolver
+  // answers its empty state, so facts_pending holds the lane out of ready.
+  // `withTask` belongs INSIDE the one options object — landWitnessPair takes (document, opts),
+  // so a third argument is silently ignored and the helper lands its own done task, which is
+  // the opposite of the shape this cell needs.
+  const inflight = await landWitnessPair(doc.documentId,
+    { ...witnessShape({ fields: BASE }), withTask: false });
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,status)
+     values($1,$2,$3,$4,'llm_witness','queued')`,
+    [firm, doc.documentId, inflight.engineId, inflight.versionN]);
+  assert.equal(await selectorOf(doc.documentId), null,
+    "a witness pair whose TASK is still queued does not satisfy the ruled pick");
+  assert.equal(await regionsOf(doc.documentId), orphan,
+    "so the wider arm fires — and returns the LEGACY row, never the witness one: the regimes cannot mix");
+  assert.deepEqual(await factState(doc.documentId), {},
+    "…and the resolver answers its empty state, so facts_pending holds the lane out of ready");
+
+  // Now settle the task THROUGH THE LAWFUL TRANSITIONS. queued -> done is refused by the
+  // task-transition wall (CLR16) — including by the arm section 12 extends — so the cell walks
+  // queued -> running -> done exactly as a real claim/settle does. Jumping straight to done
+  // would be testing against a shape the database does not permit.
+  const run = `rig-o6-${randomUUID().slice(0, 8)}`;
+  await rootQuery(
+    `update clara.document_processing_tasks set status='running', workflow_run_id=$2, started_at=now()
+     where document_id=$1 and lane='llm_witness' and status='queued'`, [doc.documentId, run]);
+  await rootQuery(
+    `update clara.document_processing_tasks set status='done', finished_at=now()
+     where document_id=$1 and lane='llm_witness' and status='running'`, [doc.documentId]);
+  assert.equal(await selectorOf(doc.documentId), inflight.textId,
+    "once the witness TASK is done the ruled pick answers");
+  assert.equal(await regionsOf(doc.documentId), inflight.textId,
     "…so the region source returns the SAME governing generation, and its wider arm is unreachable");
   assert.notEqual(await regionsOf(doc.documentId), orphan);
+});
+
+// ---------------------------------------------------------------------------------------
+// CELL 14c — THE PICK AGREEMENT, BEHAVIOURALLY, ON A BOTH-REGIME DOCUMENT. Cell 12 proves the
+// selector's NULL and the resolver's EMPTY state are the same condition; that is an agreement
+// about absence. This is the agreement about PRESENCE, which nothing else asserts directly:
+// on a document carrying both regimes, the generation the selector picks must be the generation
+// the corroboration resolver actually judged. The resolver does not expose its pick, so the
+// identity is read where it IS observable — the corroborated state is pinned to the witness
+// text row via the 2-arg overload, and must equal the 1-arg dispatcher's answer byte for byte.
+// ---------------------------------------------------------------------------------------
+test("f-a2.o6.on a both-regime document the selector's pick IS the generation the resolver judged", async () => {
+  mustBeLive();
+  const { client, sub, firm } = ctx;
+  for (const witnessNewer of [true, false]) {
+    const doc = await seedCitedDocument(sub, { firm, client, kind: "invoice" });
+    let pair;
+    if (witnessNewer) {
+      await landLegacy(firm, doc.documentId, [region("invoice.vendor_name", `LEG ${randomUUID().slice(0, 6)}`)]);
+      pair = await landWitnessPair(doc.documentId, witnessShape({ fields: BASE }));
+    } else {
+      pair = await landWitnessPair(doc.documentId, witnessShape({ fields: BASE }));
+      await landLegacy(firm, doc.documentId, [region("invoice.vendor_name", `LEG ${randomUUID().slice(0, 6)}`)]);
+    }
+    const pick = await selectorOf(doc.documentId);
+    const legacy = await legacyPick(doc.documentId);
+    assert.equal(pick, witnessNewer ? pair.textId : legacy,
+      `${witnessNewer ? "witness" : "legacy"} newer: the selector must pick that generation`);
+    // THE AGREEMENT: the dispatcher's state must be byte-identical to the pinned state of the
+    // generation the selector chose — and NOT to the other one, or the cell would pass for a
+    // document whose two generations happened to agree.
+    assert.equal(await factStateText(doc.documentId), await factStateAtText(doc.documentId, pick),
+      "the resolver's state must be the state of the generation the selector picked");
+    const other = pick === pair.textId ? legacy : pair.textId;
+    assert.notEqual(await factStateAtText(doc.documentId, pick), await factStateAtText(doc.documentId, other),
+      "the two generations must be distinguishable, or this cell proves nothing");
+  }
 });
 
 // ---------------------------------------------------------------------------------------
@@ -759,7 +845,10 @@ test("f-a2.o6.every recut body keeps its owner, definer-ness, pinned search_path
     assert.equal(r.owner, "clara_fn_owner", `${sig} owner`);
     assert.equal(r.prosecdef, true, `${sig} must stay SECURITY DEFINER`);
     assert.equal(r.cfg, "search_path=clara, pg_temp", `${sig} pinned search_path`);
-    assert.ok(!r.acl.includes("=X/") || !r.acl.includes("PUBLIC"), `${sig} must not grant EXECUTE to PUBLIC`);
+    // A real PUBLIC grant renders with an EMPTY grantee — `=X/postgres` — so the literal
+    // "PUBLIC" never appears in an aclitem and the earlier disjunct here could NEVER fail.
+    // Read the shape production actually stores, not the word a human would write.
+    assert.ok(!/(^|\| )=X\//.test(r.acl), `${sig} grants EXECUTE to PUBLIC (empty grantee in ${r.acl})`);
   }
   const acl = async (sig) => (await rootQuery(
     `select coalesce(array_to_string(p.proacl::text[],' | '),'(null)') a from pg_proc p where p.oid=$1::regprocedure`,
@@ -809,13 +898,13 @@ test("f-a2.o6.the twelve-body roster is closed: selector reach or lane admission
       `select regexp_replace(p.prosrc,'--[^' || chr(10) || ']*','','g') s
          from pg_proc p where p.oid=$1::regprocedure`, [sig])).rows[0].s;
     assert.ok(src.includes("clara._document_facts_regions"), `${sig} does not reach the shared region source`);
-    // ONE body legitimately keeps a legacy literal and is exempted BY NAME: the binding
-    // resolver's CONTINUITY arm (migration section 5), whose ordering and unreachability are
-    // proven in cells 14 and 14b. Naming it beats a blanket allowance — any OTHER body that
-    // grew a legacy pick back is still a failure here.
-    if (sig !== "clara._resolve_vendor_binding(uuid,uuid,uuid)") {
-      assert.ok(!/engine_kind\s*=\s*'invoice_facts'/.test(src), `${sig} keeps a legacy pick of its own`);
-    }
+    // NO body in this loop is exempted. An earlier draft exempted the binding resolver BY NAME
+    // for a continuity arm it used to hold inline; the final shape moved that continuity into
+    // the section-1b region source, so the body holds a single call and ZERO legacy literals —
+    // and the exemption outlived the thing it excused, leaving a hole in the one body whose
+    // outcome GRANTS A PARTY. Measured before removing it: 0 occurrences, so the check passes
+    // without the exemption and a future recut that reintroduced a legacy pick would now fail.
+    assert.ok(!/engine_kind\s*=\s*'invoice_facts'/.test(src), `${sig} keeps a legacy pick of its own`);
   }
   for (const sig of ["clara.list_autodraft_candidates()",
     "clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)",
