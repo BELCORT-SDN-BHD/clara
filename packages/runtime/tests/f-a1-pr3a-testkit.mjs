@@ -22,7 +22,12 @@ export async function witnessReady() {
            exists(select 1 from pg_constraint
                    where conname = 'ck_document_extractions_engine_kind_f_a1'
                      and pg_get_constraintdef(oid) like '%llm\\_text\\_facts%') as kinds,
-           position('evaluate_witness_fact_state_v1' in
+           -- VERSION-BLIND, exactly as the db-package twin is. The marker this probe needs is
+           -- that the resolver dispatches to the witness predicate AT ALL; WHICH version it
+           -- names belongs to the successor. F-A2 opener ① repoints it to _v2, and a probe
+           -- pinned to _v1 would read a successfully-applied later window as a half-applied
+           -- earlier one and throw DRIFT across a whole battery for the wrong reason.
+           position('evaluate_witness_fact_state_v' in
              (select p.prosrc from pg_proc p
                where p.oid = 'clara._invoice_fact_state_at(uuid,uuid)'::regprocedure)) > 0 as dispatch`);
   const s = r.rows[0];
