@@ -23,10 +23,17 @@ import { claimTask } from "./s6-fixtures.mjs";
 import {
   grantPurpose, activatePurpose, consentEvidenceDoc,
 } from "./wave-b/wb-0020-helpers.mjs";
-import { landWitnessPair } from "./f-a1-fixtures.mjs";
+import { landWitnessPair, witnessEngineId } from "./f-a1-fixtures.mjs";
 
 const WITNESS_PURPOSE = "witness_extraction";
-const WITNESS_ENGINE_ID = "llm-openai:gpt-5.6-terra:v1";
+// READ FROM THE ROUTER'S OWN CATALOG BODY at `before()`, never re-typed. This was a hand-pinned
+// `:v1` constant until F-A2 opener ② moved the engine identity to `:v2` (witnessFacts.v2 is a
+// new frozen prompt closure and its reads need to be distinguishable rows). What these cells
+// assert is that the task a door MINTED carries the SAME literal that door mints — a question
+// only the live body answers — so pinning the version by hand would have turned every one of
+// them into a DRIFT failure the moment the ceremony ran. The SHAPE is still asserted, so an
+// unreadable or off-shape literal fails loudly and never passes silently.
+let WITNESS_ENGINE_ID = null;
 let ready = false;
 let world = null;
 
@@ -38,7 +45,11 @@ let world = null;
 async function cutoverReady() {
   const r = await rootQuery(`
     select to_regprocedure('clara.fail_witness_facts(uuid,text)') is not null as fail_verb,
-           position('v_lane:=''llm_witness''; v_engine:=''llm-openai:gpt-5.6-terra:v1''' in
+           -- VERSION-BLIND PREFIX. The cutover's marker is that the invoice arm mints
+           -- llm_witness with a witness engine literal at all; WHICH version that literal names
+           -- is F-A2's business, not this probe's, and pinning it here would report a
+           -- successfully-applied later window as a half-applied earlier one.
+           position('v_lane:=''llm_witness''; v_engine:=''llm-openai:gpt-5.6-terra:' in
              (select p.prosrc from pg_proc p
                where p.oid = 'clara._enqueue_invoice_facts_core(uuid)'::regprocedure)) > 0 as router_cut,
            position('e.engine_kind in (''invoice_facts'', ''llm_text_facts'')' in
@@ -57,6 +68,7 @@ before(async () => {
   ready = await cutoverReady();
   if (!ready) return;
   world = await buildWorld();
+  WITNESS_ENGINE_ID = await witnessEngineId();
 });
 
 after(async () => {
@@ -389,23 +401,54 @@ test("f-a1-cutover.i re-extraction: an invoice-kind document with NO prior extra
 // SECTION 4 -- the engine literal contract, read both sides and compared.
 // ===========================================================================
 
-test("f-a1-cutover.j the engine literal string-equals the runtime's WITNESS_ENGINE_SNAPSHOT.engineId -- read both sides independently, compare", async () => {
+test("f-a1-cutover.j the engine literal string-equals the runtime's WITNESS_ENGINE_SNAPSHOT.engineId -- read both sides independently, compare", async (t) => {
   mustBeReady();
-  const runtimeSrc = readFileSync(new URL("../../runtime/workflows/witnessFacts.v1.services.mjs", import.meta.url), "utf8");
-  const modelMatch = /WITNESS_MODEL_ID = process\.env\.CLARA_WITNESS_MODEL_ID \|\| "([^"]+)"/.exec(runtimeSrc);
-  const versionMatch = /WITNESS_ENGINE_VERSION = "([^"]+)"/.exec(runtimeSrc);
-  assert.ok(modelMatch, "WITNESS_MODEL_ID's default must be readable from the runtime source");
-  assert.ok(versionMatch, "WITNESS_ENGINE_VERSION must be readable from the runtime source");
-  const runtimeEngineId = `llm-openai:${modelMatch[1]}:${versionMatch[1]}`;
-  assert.equal(runtimeEngineId, WITNESS_ENGINE_ID, "the migration's hardcoded literal must string-equal the runtime's derived default");
+  // WHICH services module owns the contract follows the version the DB itself names. Before
+  // F-A2 that is witnessFacts.v1; after opener ②'s bump it is witnessFacts.v2, whose equality
+  // cell lives in f-a2-regression.test.mjs (`f-a2.engine-literal-wire`) because the file that
+  // side reads is the runtime PR's deliverable, not this one's. What stays asserted HERE
+  // unconditionally is the half this file owns: witnessFacts.v1's own snapshot is byte-untouched
+  // and still derives :v1, so every already-persisted v1-era pair keeps its provenance.
+  const version = /:(v[0-9]+)$/.exec(WITNESS_ENGINE_ID)?.[1];
+  assert.ok(version, `the DB literal must carry a version suffix, got ${WITNESS_ENGINE_ID}`);
+  const readSnapshot = (v) => {
+    const src = readFileSync(new URL(`../../runtime/workflows/witnessFacts.${v}.services.mjs`, import.meta.url), "utf8");
+    const modelMatch = /WITNESS_MODEL_ID = process\.env\.CLARA_WITNESS_MODEL_ID \|\| "([^"]+)"/.exec(src);
+    const versionMatch = /WITNESS_ENGINE_VERSION = "([^"]+)"/.exec(src);
+    assert.ok(modelMatch, `WITNESS_MODEL_ID's default must be readable from witnessFacts.${v}.services.mjs`);
+    assert.ok(versionMatch, `WITNESS_ENGINE_VERSION must be readable from witnessFacts.${v}.services.mjs`);
+    return `llm-openai:${modelMatch[1]}:${versionMatch[1]}`;
+  };
+  assert.equal(readSnapshot("v1"), "llm-openai:gpt-5.6-terra:v1",
+    "witnessFacts.v1's engine snapshot is byte-untouched — a frozen closure's identity is never rewritten under already-persisted rows");
+  if (version === "v1") {
+    assert.equal(readSnapshot("v1"), WITNESS_ENGINE_ID,
+      "the migration's hardcoded literal must string-equal the runtime's derived default");
+  } else {
+    // NOT A SILENT PASS. Once the DB names a version other than :v1, the equality above stops
+    // being this file's question — and a cell that simply skipped the branch would keep
+    // reporting green for a check it no longer performs, which is the false-green shape this
+    // battery exists to avoid. The deferral is announced and the cell SKIPS rather than passes.
+    t.diagnostic(`f-a1-cutover.j DEFERRED — the DB names engine ${WITNESS_ENGINE_ID}, not :v1.`);
+    t.diagnostic("f-a1-cutover.j DEFERRED — the equality against the OWNING services module now belongs to");
+    t.diagnostic("f-a1-cutover.j DEFERRED — f-a2-regression.test.mjs (`f-a2.engine-literal-wire`), because the");
+    t.diagnostic("f-a1-cutover.j DEFERRED — file that side reads is the runtime PR's deliverable, not this one's.");
+    t.diagnostic("f-a1-cutover.j DEFERRED — What this cell still asserted unconditionally above: witnessFacts.v1's");
+    t.diagnostic("f-a1-cutover.j DEFERRED — own snapshot is byte-untouched and still derives :v1, so every");
+    t.diagnostic("f-a1-cutover.j DEFERRED — already-persisted v1-era pair keeps its provenance.");
+    t.skip(`DEFERRED TO f-a2.engine-literal-wire — the DB literal is ${WITNESS_ENGINE_ID}; this cell owns the :v1 case only`);
+    return;
+  }
 
-  const routerSrc = (await rootQuery(
-    "select prosrc from pg_proc where oid='clara._enqueue_invoice_facts_core(uuid)'::regprocedure")).rows[0].prosrc;
-  assert.ok(routerSrc.includes(`v_engine:='${runtimeEngineId}'`), "the router's own catalog source must carry the SAME literal, read independently");
-
+  // THE TWO DOORS AGREE. WITNESS_ENGINE_ID is read from the ROUTER, so re-asserting it against
+  // the router would be circular — stated rather than left for a reader to notice. The live
+  // check is the OTHER door: request_reextraction's own body, extracted independently, must
+  // carry the identical literal, so a re-extraction and a first extraction buy the same product.
   const reextSrc = (await rootQuery(
     "select prosrc from pg_proc where oid='clara.request_reextraction(uuid,text,text)'::regprocedure")).rows[0].prosrc;
-  assert.ok(reextSrc.includes(`v_engine := '${runtimeEngineId}'`), "request_reextraction's own catalog source must carry the SAME literal, read independently");
+  const reextLiteral = /v_engine := '(llm-openai:[^']+)';/.exec(reextSrc)?.[1];
+  assert.equal(reextLiteral, WITNESS_ENGINE_ID,
+    "request_reextraction's own catalog source carries the SAME literal the router mints, read independently");
 });
 
 // ===========================================================================

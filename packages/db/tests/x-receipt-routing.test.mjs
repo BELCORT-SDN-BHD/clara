@@ -15,9 +15,11 @@ import {
   ROLES, rootQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   requestReextraction, laneTasks, grantConsent, seedCitedDocument, enqueueInvoiceFacts,
   mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, rm,
-  printLaneNotes, noteLane, holdThenContend, docKind, WITNESS_ENGINE_ID,
+  printLaneNotes, noteLane, holdThenContend, docKind, witnessEngineId,
 } from "./x1-helpers.mjs";
 
+// Read from the router's own catalog body: F-A2 opener ② moves it :v1 -> :v2, never re-typed.
+let WITNESS_ENGINE_ID = null;
 let W = null;
 let has0025 = false;
 
@@ -35,6 +37,7 @@ before(async () => {
   } catch { /* dirty tree — probe the live catalog as-is */ }
   has0025 = await has25();
   if (has0025) {
+    WITNESS_ENGINE_ID = await witnessEngineId();
     W = await buildWorld();
     // F-A1 PR-3 CUTOVER: the automatic core (and request_reextraction) now route every
     // invoice-shaped kind to llm_witness, which is consent-gated AT ENQUEUE (0090 wall
