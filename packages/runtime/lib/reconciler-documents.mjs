@@ -34,6 +34,10 @@ import { verifyCanonical } from "./storage.mjs";
 // imports THIS module, so importing back would cycle. The class must come from the SAME import
 // specifier (./relay.mjs) so `instanceof` agrees with leader.mjs:218 — see reconciler.mjs:21-26.
 import { TaxonomyHaltError } from "./relay.mjs";
+// F-A2 opener ④ — mint pacing (global + per-firm). Own module, same module-size budget that split
+// this file out of reconciler.mjs; its header carries the incident, the exact invariant delivered,
+// and the age-ordering qualification. Read it before changing the gate below.
+import { laneCapHints, laneRunningCounts, makeLaneMintBudget, runningCountsFromSnapshot } from "./reconciler-pacing.mjs";
 
 const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS || 15000);
 let warnedDocumentSelectGap = false;
@@ -281,7 +285,7 @@ async function documentRunState(getRun, runId) {
 /** Reconcile queued-unbound, held-egress, and stranded-running document tasks. */
 export async function reconcileDocumentTasks(client, deps) {
   const log = deps.log ?? (() => {});
-  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0, documentTransportless: 0 };
+  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0, documentTransportless: 0, documentPacedDeferred: 0 };
   if (typeof deps.enqueueDocumentIngest !== "function") return out;
 
   if (process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
@@ -323,6 +327,24 @@ export async function reconcileDocumentTasks(client, deps) {
   const { tasks, corruptRebuilt } = index;
   out.documentTaskIndexOk = true; // POSITIVE evidence, set only where a read actually returned
   out.documentSidecarCorruptRebuilt = corruptRebuilt;
+
+  // F-A2 opener ④: this sweep's mint budget (global + per-firm — see reconciler-pacing.mjs), built
+  // ONCE from a census taken after the release and before the first mint. `documentPacingSource`
+  // SAYS which census answered ('db' | 'snapshot'). Contained like the index read above, HALT
+  // re-checked first: a failed census costs pacing its precision, never the sweep.
+  let runningRows = [];
+  let pacingSource = "db";
+  try {
+    runningRows = await laneRunningCounts(client, deps.onlyFirm ?? null);
+  } catch (err) {
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
+    runningRows = runningCountsFromSnapshot(tasks);
+    pacingSource = "snapshot";
+    log(`[reconcile] lane running-count census unavailable — pacing from the sweep's own snapshot instead (it carries a LIMIT, so it may under-count and widen the budget toward the cap; it can never remove the cap): ${err?.message ?? err}`);
+  }
+  out.documentPacingSource = pacingSource;
+  const laneBudget = makeLaneMintBudget(runningRows, deps.laneCaps ?? laneCapHints());
+
   for (const task of tasks) {
     if (!task?.taskId) continue;
     // F4 (H2 acceptance report), the RUNTIME half of the fix. This used to rewrite EVERY
@@ -403,7 +425,17 @@ export async function reconcileDocumentTasks(client, deps) {
         }
         continue;
       }
+      // F-A2 opener ④ — THE PACING GATE, placed HERE deliberately: after every other reason this
+      // task would not be dispatched, so a slot is only spent on one the sweep really would have
+      // minted. A refusal leaves the row untouched (still `queued`), so the next sweep mints it —
+      // oldest-first on the DB snapshot path. CLR18 remains the authority on the claim itself.
+      if (!laneBudget.tryMint(task.firmId, task.lane)) {
+        out.documentPacedDeferred += 1;
+        continue;
+      }
       try {
+        // A slot spent on an enqueue that THROWS is not refunded — the run may already have
+        // started, and over-counting our spend only paces slower, where under-counting re-herds.
         const run = await enqueue(task.taskId);
         await writeTaskMeta(task.taskId, { ...task, runId: run?.runId ?? null, updatedAt: new Date().toISOString() });
         out.documentReenqueued += 1;
@@ -441,6 +473,15 @@ export async function reconcileDocumentTasks(client, deps) {
         else log(`[reconcile] document stranded requeue failed task=${task.taskId}: ${err?.message ?? err}`);
       }
     }
+  }
+
+  // ONE line per sweep, never one per task, and never de-duplicated: a deep queue that STAYS deep
+  // is what an operator most needs to keep seeing. `bound` is a POSITIVE read of the budget, not a
+  // guess from the count — a spent global cap means the POOL is the constraint (raise
+  // CLARA_RUNTIME_POOL_MAX or accept a slower drain); a full window means that firm's lane limit.
+  if (out.documentPacedDeferred > 0) {
+    const bound = laneBudget.remainingGlobal() <= 0 ? "the sweep-wide pool cap" : "their firms' lane windows";
+    log(`[reconcile] lane pacing deferred ${out.documentPacedDeferred} queued task(s) this sweep (census=${pacingSource}, bound=${bound}) — they stay queued and are minted oldest-first next sweep, rather than minting runs that could only die on CLR18 or take a pool checkout the runtime cannot absorb.`);
   }
 
   // Coarse integrity pass: verify retained canonical references, never delete.

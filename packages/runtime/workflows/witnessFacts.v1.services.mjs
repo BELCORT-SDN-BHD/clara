@@ -63,13 +63,118 @@ export const WITNESS_ENGINE_SNAPSHOT = Object.freeze({
   versionN: 1,
 });
 
-// A bounded provider call. The witness lane's own concurrency window (0090 §4's
-// llm_witness_concurrency, default 2) bounds how many run at once; this bounds how long one may
-// hang. Finite-guarded (the leader.mjs idiom): junk or non-positive falls back — a NaN here
-// would mean no timeout at all, and an un-timed-out vision call on a big PDF would hold a
-// concurrency slot indefinitely.
-const TIMEOUT_MS_ENV = Number(process.env.CLARA_WITNESS_LLM_TIMEOUT_MS);
-const TIMEOUT_MS = Number.isFinite(TIMEOUT_MS_ENV) && TIMEOUT_MS_ENV > 0 ? TIMEOUT_MS_ENV : 180_000;
+/**
+ * A BOUNDED PROVIDER CALL — the F-A2 opener ③ knob (AB-16: the timeout is vendor-shaped, so it
+ * lives out here and moves without a workflow version).
+ *
+ * The witness lane's own concurrency window (0090 §4's llm_witness_concurrency, default 2) bounds
+ * how MANY calls run at once; this bounds how LONG one may hang. On a 2-slot lane an unbounded
+ * call is not a slow document, it is half the lane's throughput held hostage — the shape the
+ * 2026-08-20 corpus run recorded (`docs/plan/completed/f-a1-corpus-measurement.md`, "The incident
+ * the run exposed" §3).
+ *
+ * DEFAULT 180_000, KEPT rather than loosened. The corpus run made 69 real calls under this exact
+ * bound with ZERO model-call failures (~405k tokens), which is positive evidence that 180s clears
+ * the real corpus with room; raising it would widen the very window this knob exists to close.
+ */
+export const WITNESS_MODEL_TIMEOUT_DEFAULT_MS = 180_000;
+
+/**
+ * The knob's names, newest first.
+ *
+ * `CLARA_WITNESS_MODEL_TIMEOUT_MS` is the name the F-A2 opener ratified.
+ * `CLARA_WITNESS_LLM_TIMEOUT_MS` is DEPRECATED but still accepted, and the reason is a fact
+ * rather than a preference: it is the name THIS FILE READ ON `main` before this change
+ * (`witnessFacts.v1.services.mjs:71` at d13341b, shipped by PR-2 / #265), so it is the name any
+ * already-deployed machine would have been configured under. Dropping it would silently revert
+ * such a deployment to the default — a config change nobody made and nobody would see. It is
+ * therefore retired the honest way: still honoured, and LOUD about being obsolete (see the
+ * warn-once below) so the surface can be removed once a deployment has actually moved.
+ */
+export const WITNESS_MODEL_TIMEOUT_ENV_NAMES = Object.freeze([
+  "CLARA_WITNESS_MODEL_TIMEOUT_MS",
+  "CLARA_WITNESS_LLM_TIMEOUT_MS",
+]);
+
+/** Warn-once state, per process. Once-per-process and not once-per-call: this is read on every
+ *  model call, and a per-call line would be noise an operator learns to filter — which is how a
+ *  misconfiguration survives. */
+const warnedTimeoutEnv = new Set();
+
+/**
+ * Resolve the budget from an environment. FINITE-GUARDED (the leader.mjs idiom) and read
+ * POSITIVELY: only a finite, strictly-positive number is accepted, and anything else — absent,
+ * empty, `abc`, `0`, `-1`, `Infinity` — falls through to the next name and finally to the
+ * default. A NaN accepted here would mean NO timeout at all, i.e. exactly the unbounded call this
+ * function exists to make impossible, so junk must never be able to switch the bound off.
+ *
+ * BUT SILENCE IS THE OTHER FAILURE. An operator who sets `CLARA_WITNESS_MODEL_TIMEOUT_MS=5m` has
+ * done something deliberate, and falling back to the default without a word means their intent
+ * is discarded invisibly — the same class of defect as a guard that cannot say NO. So a knob
+ * that is PRESENT but unusable says so, once, naming what it saw and what is being used instead.
+ * An ABSENT knob is not a mistake and stays quiet.
+ *
+ * A FUNCTION, not a module-level const, for two reasons: it is the only shape a battery can
+ * exercise without mutating the real `process.env` mid-suite, and the budget is then read at CALL
+ * time — so an operator who changes the knob does not have to reason about import order.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @param {(message: string) => void} [warn]
+ * @param {Set<string>} [seen]  the warn-once ledger. INJECTABLE rather than reachable through a
+ *   test-only reset export: "once per process" is itself behaviour worth asserting, and a battery
+ *   that had to reach into module state to test it would be testing the reset, not the rule.
+ */
+export function witnessModelTimeoutMs(env = process.env, warn = (m) => console.error(m), seen = warnedTimeoutEnv) {
+  for (const name of WITNESS_MODEL_TIMEOUT_ENV_NAMES) {
+    const raw = env?.[name];
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) {
+      if (name !== WITNESS_MODEL_TIMEOUT_ENV_NAMES[0] && !seen.has(`deprecated:${name}`)) {
+        seen.add(`deprecated:${name}`);
+        warn(`[witness] ${name} is DEPRECATED — it still binds (${n}ms), but rename it to ${WITNESS_MODEL_TIMEOUT_ENV_NAMES[0]}; the alias exists only so an already-deployed machine does not silently revert to the ${WITNESS_MODEL_TIMEOUT_DEFAULT_MS}ms default.`);
+      }
+      return n;
+    }
+    // PRESENT but unusable. Absence is not a mistake and must not be warned about; a value that
+    // was typed and cannot be honoured is.
+    if (raw !== undefined && raw !== null && String(raw).trim() !== "" && !seen.has(`junk:${name}`)) {
+      seen.add(`junk:${name}`);
+      warn(`[witness] ${name}=${JSON.stringify(String(raw))} is not a positive number of milliseconds and was IGNORED — the witness model-call budget falls back to ${WITNESS_MODEL_TIMEOUT_DEFAULT_MS}ms. A junk value must never mean "no timeout", so it is refused rather than coerced.`);
+    }
+  }
+  return WITNESS_MODEL_TIMEOUT_DEFAULT_MS;
+}
+
+/**
+ * The typed error a spent budget raises.
+ *
+ * WHY `code: "internal"` AND NOT `"timeout"`, stated plainly because it looks wrong at a glance.
+ * The frozen behaviour's taxonomy couples two decisions to one code: `"timeout"` sits in its
+ * RETRYABLE set (witnessFacts.v1.behavior.mjs's RETRYABLE), so a call classified `"timeout"` does
+ * not settle — it retries, and keeps holding the slot until the 45-minute wait budget spends. A
+ * spent model budget is not a transient the lane should re-buy at the same price; it must END the
+ * task. `"internal"` is the code the frozen taxonomy settles TERMINALLY through
+ * `clara.fail_witness_facts` — the same audited door the four live hangs went out of. The cost,
+ * named and not hidden: the metering row records outcome `"error"`, not `"timeout"`, so the spend
+ * trail cannot tell a spent budget from a vendor fault. Splitting "metered as a timeout" from
+ * "retryable" is a taxonomy change and therefore a witnessFacts.v2 + ceremony, not an adapter's
+ * call to make.
+ *
+ * It is raised EXPLICITLY rather than letting the abort escape, because today the raw abort lands
+ * on `internal` BY ACCIDENT: `AbortSignal.timeout` rejects with a DOMException whose legacy
+ * `.code` is the NUMBER 23, which `witnessFailureCode`'s allowlist does not recognise and so
+ * defaults. An accident is not a contract — one provider or runtime change that gave the abort a
+ * `.code` of `"timeout"` would silently convert every spent budget into a retry loop.
+ */
+export function witnessModelTimeoutError(budgetMs) {
+  return Object.assign(
+    new Error(
+      `witness model call exceeded its ${budgetMs}ms budget and was aborted`
+      + ` (raise ${WITNESS_MODEL_TIMEOUT_ENV_NAMES[0]} if the corpus genuinely needs longer)`,
+    ),
+    { code: "internal", witnessTimeout: true, budgetMs },
+  );
+}
 
 /** The SAME globalThis override name every other model lane uses (classify-llm.mjs:115,
  *  autoDraft.v7.infra.ts:61-63, wiki-projection.mjs:352) so ONE mock arms every lane and the
@@ -144,17 +249,30 @@ export async function callWitnessModel({ channel, system, prompt, schema, file, 
   }
   // The timeout aborts the provider REQUEST (not merely our await), and a caller-supplied signal
   // composes with it — so a shutdown cancels an in-flight call instead of waiting out the full
-  // budget. Identical composition to classify-llm.mjs:140-142.
-  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TIMEOUT_MS;
+  // budget. Identical composition to classify-llm.mjs:140-142. `abortSignal` is the AI SDK's own
+  // native cancellation surface (ai@7.0.31 forwards it to the provider fetch), not a race against
+  // a detached timer: an abandoned request that kept streaming would still hold the slot.
+  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : witnessModelTimeoutMs();
   const timer = AbortSignal.timeout(budget);
   const signal = abortSignal ? AbortSignal.any([abortSignal, timer]) : timer;
-  const result = await generateObject({
-    model: resolveModel(WITNESS_MODEL_ID),
-    schema,
-    system,
-    messages: [{ role: "user", content }],
-    abortSignal: signal,
-  });
+  let result;
+  try {
+    result = await generateObject({
+      model: resolveModel(WITNESS_MODEL_ID),
+      schema,
+      system,
+      messages: [{ role: "user", content }],
+      abortSignal: signal,
+    });
+  } catch (err) {
+    // WHICH SIGNAL FIRED, never what the error looks like. A caller-supplied abort (a shutdown)
+    // composes into the SAME signal, and the two mean opposite things: a shutdown is the operator
+    // reclaiming the process and must keep its own identity, while a spent budget is this lane's
+    // own verdict on this call. Asked of the timer directly — `timer.aborted` is the only fact
+    // that distinguishes them, and it is a POSITIVE read, not an inference from a message.
+    if (timer.aborted && abortSignal?.aborted !== true) throw witnessModelTimeoutError(budget);
+    throw err;
+  }
   return {
     object: result.object,
     usage: {

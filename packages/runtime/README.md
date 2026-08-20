@@ -132,6 +132,8 @@ bookkeeper+ authority, never a firm-wide grant.
 | `CLARA_CLAMD_MIN_BACKOFF_MS` / `CLARA_CLAMD_MAX_BACKOFF_MS` | clamd self-heal backoff (PIN-AB-2): a clamd exit is non-fatal; intake fails closed honestly (`503 scanner_unavailable`) while it restarts. |
 | `CLARA_CLAMD_HEALTHY_RUN_MS` | A clamd run lasting at least this long (default `60000`) is treated as healthy and resets the restart backoff. |
 | `CLARA_CLAMD_SCAN_DEADLINE_MS` | Scan-wide deadline (default `120000`): a connected-but-silent (wedged) scanner fails closed (`503 scanner_unavailable`) rather than hanging (W6). |
+| `CLARA_WITNESS_MODEL_TIMEOUT_MS` | **F-A2 ③** — how long ONE witness model call may hang before it is aborted and the task settles terminally through `clara.fail_witness_facts` (default `180000`, the bound the F-A1 corpus run's 69 real calls cleared with room). Lives in the NON-frozen `witnessFacts.v1.services.mjs` by AB-16, so it moves without a workflow version. `CLARA_WITNESS_LLM_TIMEOUT_MS` is the PR-2 name and is still accepted. |
+| `CLARA_LLM_WITNESS_CONCURRENCY_HINT` / `CLARA_OCR_CONCURRENCY_HINT` | **F-A2 ④** — what the reconciler BELIEVES the per-firm lane windows are, so it mints at most (free slots) runs per sweep instead of one per queued task (defaults `2`/`2`, mirroring the DB's own `coalesce(...,2)`). A pacing HINT, never the authority: `claim_document_processing_task`'s CLR18 gate still decides every claim, so a wrong hint only paces faster or slower. Raise it only where the firm's real `llm_witness_concurrency` / `ocr_concurrency` was raised. |
 
 `withWriteWakeScoped(secret, fn)` = `BEGIN` → txn-local `set_config('clara.wake_secret',…,true)`
 → (checkout already did `SET ROLE clara_wake_interactive`, NOT read-only) → write →
@@ -241,6 +243,12 @@ fly deploy --config packages/runtime/fly.toml
 (Recommended: add a repo-root `.dockerignore` excluding `.git`, `node_modules`,
 `**/.output`, `**/.env` to speed the context upload — it does not affect
 correctness, since the Dockerfile copies source selectively.)
+
+### After a HARD restart (kill / OOM / crash / forced machine replacement)
+
+The dead VM leaves its `clara_runtime_login` sessions `idle` in the session pooler and they
+starve the replacement's connects — clear them with the mandatory step in
+**`docs/ops/runtime-hard-restart.md`** §1 before treating the restart as finished.
 
 ### Rollback preflight (§4.9 — BLIND REVERT FORBIDDEN)
 
