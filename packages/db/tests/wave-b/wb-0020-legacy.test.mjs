@@ -151,6 +151,41 @@ function applyRestoreFA1PR3(member, src) {
   return src;
 }
 
+// =========================================================================
+// AMENDMENT F-A2 OPENER 2 (the engine-identity bump, UNNUMBERED_f_a2_nil_tax_arm.sql S2).
+// The SAME §6 member -- _enqueue_invoice_facts_core ("router") -- gains a FIFTH deliberately-
+// changed layer, now the OUTERMOST of all (authored latest). ONE edit: the invoice-kind mint
+// arm's engine literal moves llm-openai:gpt-5.6-terra:v1 -> :v2, carrying its comment with it,
+// because witnessFacts.v2 is a new frozen prompt closure and its reads must be distinguishable
+// rows from every v1-era read. The pair below is the EXACT INVERSE of that migration's own
+// v_frm/v_to splice literals, transcribed from them -- which is why the migration anchors the
+// whole comment block rather than the bare literal: a reversal pair that only swapped ":v2" for
+// ":v1" could not carry the comment back, and this battery compares TEXT.
+// Reversed FIRST, before F-A1 PR-3's pair, per the standing "reverse outermost-first" discipline.
+const RESTORE_FA2_ENGINE = {
+"router": [
+[
+"    elsif d.document_kind in ('invoice','credit_note','debit_note','receipt') then\n      -- F-A1 PR-3 CUTOVER (design SS3.8/D9): the invoice path now mints llm_witness\n      -- DIRECTLY -- NO DUAL-RUN. Exactly the SAME document-kind set the invoice_facts arm\n      -- served (mirrored above, never widened here). F-A2 OPENER 2: the engine identity moves\n      -- to :v2 because witnessFacts.v2 is a NEW frozen prompt closure and its reads answer\n      -- different questions -- v_engine MUST string-equal WITNESS_ENGINE_SNAPSHOT.engineId in\n      -- the witnessFacts.v2 services module -- battery cell f-a2.engine-literal reads both\n      -- sides and asserts equality.\n      v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5.6-terra:v2';",
+"    elsif d.document_kind in ('invoice','credit_note','debit_note','receipt') then\n      -- F-A1 PR-3 CUTOVER (design SS3.8/D9): the invoice path now mints llm_witness\n      -- DIRECTLY -- NO DUAL-RUN. Exactly the SAME document-kind set the invoice_facts arm\n      -- served (mirrored above, never widened here). v_engine MUST string-equal\n      -- WITNESS_ENGINE_SNAPSHOT.engineId in witnessFacts.v1.services.mjs -- battery cell\n      -- f-a1.cutover-engine-literal reads both sides and asserts equality.\n      v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5.6-terra:v1';",
+]
+]
+};
+function applyRestoreFA2Engine(member, src) {
+  for (const [frm, to] of RESTORE_FA2_ENGINE[member]) {
+    // DORMANCY vs DRIFT. On a chain where the F-A2 window has NOT been applied the router still
+    // carries the :v1 text and there is nothing to reverse -- that is a pre-F-A2 database, not a
+    // broken one, so the layer is a no-op. Anything else (the pair present twice, or a body that
+    // carries neither shape) is drift and must fail loudly rather than restore a wrong body.
+    const n = src.split(frm).length - 1;
+    if (n === 0) continue;
+    if (n !== 1) {
+      throw new Error(`F-A2 restore(${member}): the engine-bump pair appears ${n} times -- the live body drifted from the ratified F-A2 shape`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 const RESTORE_0038 = {
 "claim": [
 [
@@ -329,12 +364,13 @@ const BYTE_IDENTICAL = {
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
-    // F-A1 PR-3 is the OUTERMOST (newest) layer: reverse it FIRST (the invoice-kind mint arm
-    // + the already_completed engine_kind map, both in the earlier mime-routing block PR-1
-    // never touched), then F-A1 PR-1 (the ONE inert llm_witness elsif branch, wall 6, in the
-    // later consent-gate block PR-3 never touched), so 0038's own pairs then find the exact
-    // pre-F-A1 text.
-    restore: (src) => applyRestore0038("router", applyRestoreFA1("router", applyRestoreFA1PR3("router", src)))
+    // F-A2 is the OUTERMOST (newest) layer: reverse it FIRST (the one engine-literal + comment
+    // block), then F-A1 PR-3 (the invoice-kind mint arm + the already_completed engine_kind
+    // map, both in the earlier mime-routing block PR-1 never touched), then F-A1 PR-1 (the ONE
+    // inert llm_witness elsif branch, wall 6, in the later consent-gate block PR-3 never
+    // touched), so 0038's own pairs then find the exact pre-F-A1 text.
+    restore: (src) => applyRestore0038("router", applyRestoreFA1("router",
+      applyRestoreFA1PR3("router", applyRestoreFA2Engine("router", src))))
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",
@@ -380,8 +416,12 @@ const BYTE_IDENTICAL = {
       /witness_multi_client/,
       /witness_consent_inactive/,
       // F-A1 PR-3's own markers (the cutover): present in the live body, must be GONE after
-      // the full reversal.
-      /v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5\.6-terra:v1';/,
+      // the full reversal. THE ENGINE VERSION IS F-A2's, not PR-3's: opener ② moved the mint
+      // arm's literal :v1 -> :v2, so :v2 is what the LIVE body carries and :v1 is now an
+      // INTERMEDIATE state that exists only between the F-A2 reversal and the PR-3 one. Pinning
+      // :v1 here would assert the live body still carries a literal the newest ratified layer
+      // deliberately replaced.
+      /v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5\.6-terra:v2';/,
       /then 'llm_text_facts'/,
       /if v_task is null and v_lane='llm_witness' then/,
     ],

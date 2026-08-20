@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   has0022, fail0022, requestReextraction, extractedDoc, laneTasks, auditArgs, holdThenContend,
+  witnessEngineId,
 } from "./x1-helpers.mjs";
 import { grantPurpose, activatePurpose, consentEvidenceDoc } from "./wave-b/wb-0020-helpers.mjs";
 
@@ -28,7 +29,10 @@ import { grantPurpose, activatePurpose, consentEvidenceDoc } from "./wave-b/wb-0
 // stays on invoice_facts (it is the LEGACY population the re-extraction targets), so a cell
 // that wants "everything on this document" reads both lanes explicitly rather than relying on
 // laneTasks' invoice_facts default.
-const WITNESS_ENGINE_ID = "llm-openai:gpt-5.6-terra:v1";
+// THE ENGINE LITERAL IS READ FROM THE ROUTER'S OWN CATALOG BODY, never re-typed. F-A2 opener ②
+// moves it :v1 -> :v2, and a hand-pinned version would make every cell below fail as DRIFT the
+// moment that ceremony runs — which is not what any of them is testing.
+let WITNESS_ENGINE_ID = null;
 
 let W = null;
 let live = false;
@@ -39,7 +43,10 @@ before(async () => {
     await ensureReady();
   } catch { /* dirty tree — probe the live catalog as-is */ }
   live = await has0022();
-  if (live) W = await buildWorld();
+  if (live) {
+    W = await buildWorld();
+    WITNESS_ENGINE_ID = await witnessEngineId();
+  }
 });
 after(async () => { await endPool(); });
 
