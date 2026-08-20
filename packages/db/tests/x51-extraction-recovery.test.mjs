@@ -38,7 +38,7 @@ import assert from "node:assert/strict";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   requestReextraction, extractedDoc, failedWitnessDoc, taskRow, laneTasks, extractionsOf,
-  witnessExtractionsOf, WITNESS_ENGINE_ID,
+  witnessExtractionsOf, witnessEngineId,
   auditArgs, holdThenContend, seedCitedDocument,
   claimTask, requireRecoveryDoor,
   markSkip, noteLane, printLaneNotes, printSkipCount,
@@ -51,6 +51,8 @@ import {
 // ingest-failure exhibit) now uses failedWitnessDoc, its witness-regime sibling, and reads the
 // llm_witness lane specifically where the original read the bare (invoice_facts) default.
 
+// Read from the router's own catalog body: F-A2 opener ② moves it :v1 -> :v2, never re-typed.
+let WITNESS_ENGINE_ID = null;
 let W = null;
 let ready = false;
 let has51 = false;
@@ -70,7 +72,10 @@ before(async () => {
     ready = true;
   }
   has51 = await requireRecoveryDoor();
-  if (ready && has51) W = await buildWorld();
+  if (ready && has51) {
+    WITNESS_ENGINE_ID = await witnessEngineId();
+    W = await buildWorld();
+  }
 });
 after(async () => { printLaneNotes("x51-extraction-recovery"); printSkipCount("x51-extraction-recovery"); await endPool(); });
 
