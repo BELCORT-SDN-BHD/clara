@@ -383,17 +383,25 @@ begin
   --
   -- EVERY LOCK IS READ POSITIVELY AND FAILS CLOSED. Absence of evidence for a lock is the lock
   -- FAILING, never the lock passing. Each lock is COALESCED TO FALSE rather than left
-  -- three-valued: a NULL lock would make the conjunction NULL, and a NULL conjunction takes
-  -- NEITHER branch of the derivation below — which would leave the effective values unset and
-  -- silently refuse a document the unchanged belts would have corroborated. Absence of evidence
-  -- is FALSE here, explicitly, exactly as 0023:208-214 argues for the flag itself.
+  -- three-valued, and the reason is a PROPERTY, not a bug fix. Three-valued locks would make
+  -- v_nil_tax_arm itself three-valued, and a NULL conjunction takes NEITHER branch of the
+  -- derivation below — so the effective values would stay unset. That state is in fact
+  -- UNREACHABLE for any document v1 corroborates: v1 corroboration requires v_tax_c = 1, and
+  -- L2's `v_tax_c = 0` conjunct is then FALSE rather than NULL, which forces the whole
+  -- conjunction FALSE and the `if not` branch to fire. Stated because a reader should not have
+  -- to re-derive it, and because that derivation is exactly what the coalesce buys freedom from:
+  -- with it, "the arm did not fire => the effective values ARE the witnessed values" is an
+  -- UNCONDITIONAL property of this code, readable without a case analysis over which conjunct
+  -- went NULL — and it stays true under any later edit to a lock. Absence of evidence is FALSE
+  -- here, explicitly, exactly as 0023:208-214 argues for the flag itself.
   --
   -- EVERY READ IS RAISE-PROOF BY CONSTRUCTION, not by conjunct ORDER. SQL does not promise that
   -- AND short-circuits, so a `jsonb_typeof(...) = 'number'` guard sitting to the left of a cast
   -- cannot be relied on to fence it. Types are tested with jsonb_typeof, booleans are compared
   -- as jsonb VALUES, and the two counts are tested as bounded DIGIT STRINGS and compared to each
   -- other as jsonb — so no branch of this block can raise 22P02 or 22003 out of a STABLE
-  -- predicate that ~27 live call sites reach (0093:345-384).
+  -- predicate that 28 live call sites reach (the count §D7's census PRINTS at this frontier;
+  -- 0093:345-384 recorded 27, and 0096 added persist_witness_facts as a caller after it).
   v_cov_t := v_tenv->'witness'->'coverage';
   v_cov_v := v_venv->'witness'->'coverage';
 

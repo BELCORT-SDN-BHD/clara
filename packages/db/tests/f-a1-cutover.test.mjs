@@ -401,7 +401,7 @@ test("f-a1-cutover.i re-extraction: an invoice-kind document with NO prior extra
 // SECTION 4 -- the engine literal contract, read both sides and compared.
 // ===========================================================================
 
-test("f-a1-cutover.j the engine literal string-equals the runtime's WITNESS_ENGINE_SNAPSHOT.engineId -- read both sides independently, compare", async () => {
+test("f-a1-cutover.j the engine literal string-equals the runtime's WITNESS_ENGINE_SNAPSHOT.engineId -- read both sides independently, compare", async (t) => {
   mustBeReady();
   // WHICH services module owns the contract follows the version the DB itself names. Before
   // F-A2 that is witnessFacts.v1; after opener ②'s bump it is witnessFacts.v2, whose equality
@@ -424,6 +424,20 @@ test("f-a1-cutover.j the engine literal string-equals the runtime's WITNESS_ENGI
   if (version === "v1") {
     assert.equal(readSnapshot("v1"), WITNESS_ENGINE_ID,
       "the migration's hardcoded literal must string-equal the runtime's derived default");
+  } else {
+    // NOT A SILENT PASS. Once the DB names a version other than :v1, the equality above stops
+    // being this file's question — and a cell that simply skipped the branch would keep
+    // reporting green for a check it no longer performs, which is the false-green shape this
+    // battery exists to avoid. The deferral is announced and the cell SKIPS rather than passes.
+    t.diagnostic(`f-a1-cutover.j DEFERRED — the DB names engine ${WITNESS_ENGINE_ID}, not :v1.`);
+    t.diagnostic("f-a1-cutover.j DEFERRED — the equality against the OWNING services module now belongs to");
+    t.diagnostic("f-a1-cutover.j DEFERRED — f-a2-regression.test.mjs (`f-a2.engine-literal-wire`), because the");
+    t.diagnostic("f-a1-cutover.j DEFERRED — file that side reads is the runtime PR's deliverable, not this one's.");
+    t.diagnostic("f-a1-cutover.j DEFERRED — What this cell still asserted unconditionally above: witnessFacts.v1's");
+    t.diagnostic("f-a1-cutover.j DEFERRED — own snapshot is byte-untouched and still derives :v1, so every");
+    t.diagnostic("f-a1-cutover.j DEFERRED — already-persisted v1-era pair keeps its provenance.");
+    t.skip(`DEFERRED TO f-a2.engine-literal-wire — the DB literal is ${WITNESS_ENGINE_ID}; this cell owns the :v1 case only`);
+    return;
   }
 
   // THE TWO DOORS AGREE. WITNESS_ENGINE_ID is read from the ROUTER, so re-asserting it against

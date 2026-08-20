@@ -47,7 +47,10 @@ const gate = (t) => {
 // THE CORPUS SHAPE THE RULING TARGETS: a Malaysian non-SST service invoice printing ONE gross
 // line and nothing else. Every other belt field is `not_printed` — which is an ANSWER, not
 // silence: `witnessShape` completes the roster unless a cell deliberately drops a key.
-const NIL = { "invoice.total": 106000, "invoice.currency": "MYR", "invoice.type_code": "01" };
+// `RM`, not `MYR`, per spec cell 4: a real Malaysian invoice prints "RM 1,060.00" and never a
+// standalone MYR token, and the two-channel MYR evidence rule reduces both spellings alike — so
+// the fixture renders what the document actually prints.
+const NIL = { "invoice.total": 106000, "invoice.currency": "RM", "invoice.type_code": "01" };
 // The same document, but the net line IS printed — sub-case (a), where the six-term identity
 // stays a REAL arithmetic check rather than a construction.
 const NIL_NET = { ...NIL, "invoice.total_excl_tax": 106000 };
@@ -102,7 +105,13 @@ test("f-a2.all-three-pass ▣ a complete, single-page, gross-printed, tax-silent
   const s = await verdict(d);
   assert.equal(s.corroborated, true, "all three locks hold and the derivation is reachable");
   assert.equal(s.total_cents, 106000, "the gross is the witnessed, region-verified number");
-  assert.equal(s.currency, "MYR");
+  // `RM`, not `MYR`: the envelope's currency key is the ALPHABETIC REDUCTION of what the
+  // document printed, not a normalization to an ISO code — 0092:502-506 is explicit that a bare
+  // "RM" is a Malaysian reading and not a foreign one. Switching the fixture to the rendering a
+  // real invoice carries moved this key with it, which is the emitted value being honest about
+  // its source rather than a regression.
+  assert.equal(s.currency, "RM");
+  assert.equal(s.explicit_non_myr, false, "…and a bare RM is never read as a foreign currency");
   assert.equal(s.type_code, "01");
   assert.equal(s.regime, "witness");
   // …and v1, on the IDENTICAL pair, still refuses. This pairing IS the acceptance criterion:
@@ -252,17 +261,24 @@ test("f-a2.lock2-one-channel-speaks ▣ a tax the channels disagree about refuse
 test("f-a2.lock3-sst-printed ▣ a printed SST registration refuses; a COMPANY registration number does not — spelling is not identity", async (t) => {
   if (gate(t)) return;
 
-  // (a) Both channels read a printed SST number.
+  // (a) Both channels read a printed SST number. THE STRING IS THE CORPUS'S OWN, IN ITS OWN
+  //     CONTEXT (spec §2.5.5), not a synthetic one — and carrying it here is the point rather
+  //     than a nicety. "Nombor Pendaftaran ST" is the GST-era Malay label that BOTH spelling
+  //     regexes missed: a prompt tuned on "SST Registration No." / "SST Reg. No." / "No.
+  //     Pendaftaran SST" does not see it, the model answers `not_printed`, and lock 3 hands the
+  //     non-registrant presumption to a document that prints a registration number. Putting the
+  //     real label in a battery cell is what puts it in front of the prompt author.
+  const CORPUS_SST = "Nombor Pendaftaran ST W10-1808-31022372";
   const printed = await verdict(await armDoc({
-    v2: { sst: { text: { state: "value", raw: "SST Reg. No.: W10-1808-32000123" },
-                 vision: { state: "value", raw: "SST Reg. No.: W10-1808-32000123" } } },
+    v2: { sst: { text: { state: "value", raw: CORPUS_SST },
+                 vision: { state: "value", raw: CORPUS_SST } } },
   }));
   assert.equal(printed.corroborated, false, "an SST-registered issuer gets no non-registrant presumption");
   assert.equal(has(printed, "tax_basis"), false);
 
   // …and one channel alone is enough to hold the lock shut: the lock is a two-channel conjunction.
   const one = await verdict(await armDoc({
-    v2: { sst: { vision: { state: "value", raw: "SST No. W10-1808-32000123" } } },
+    v2: { sst: { vision: { state: "value", raw: CORPUS_SST } } },
   }));
   assert.equal(one.corroborated, false, "one channel reading an SST number is enough to refuse");
 

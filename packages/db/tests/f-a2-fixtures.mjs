@@ -81,7 +81,7 @@ export async function a2Ready() {
   const on = [s.predicate, s.repoint, s.vocabulary, s.router, s.reext];
   if (on.every((x) => !x)) return false;
   if (!on.every((x) => x)) {
-    throw new Error(`F-A2 DRIFT: a half-applied window — predicate=${s.predicate} repoint=${s.repoint} vocabulary=${s.vocabulary} router=${s.router} reext=${s.reext}. Apply UNNUMBERED_f_a2_nil_tax_arm.sql and UNNUMBERED_f_a2_nil_tax_arm_part2.sql as a pair.`);
+    throw new Error(`F-A2 DRIFT: a half-applied window — predicate=${s.predicate} repoint=${s.repoint} vocabulary=${s.vocabulary} router=${s.router} reext=${s.reext}. Apply 0099_f_a2_nil_tax_arm.sql and 0100_f_a2_nil_tax_arm_part2.sql as a pair.`);
   }
   return true;
 }
