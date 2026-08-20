@@ -20,24 +20,28 @@ trued at every clock-out)*
   **OQ-4's three exits** and **OQ-6's no-category-gate on the agent lane**, with the
   supplementary that the human lane's gate on the same categories **STANDS** · **R1 RULED** —
   a closing transfer is not turnover, Fix A goes to Track B, task #17 is unblocked · and the
-  **corpus reshaped into TWO TIERS** (an oracle tier and an open-intake reality tier), because
-  two of the three designated clients are terminal-period books for companies in strike-off and
-  can never supply a second consecutive FY. **The design set of record is
+  **corpus reshaped into TWO TIERS** (oracle + open-intake reality), because two of the three
+  designated clients are terminal-period books for companies in strike-off and can never supply
+  a second consecutive FY. **Design set of record:
   `docs/plan/active/f-a2-agentic-posting-design.md` + its three annexes (v4).**
-  **PR train state:** #270 merged (openers ③④⑤) — ③④ are **merged-UNDEPLOYED pending Window A**,
-  ⑤ is live the moment it merged because a runbook needs no deploy; ①② and ⑥ are in build.
+  **PR train:** #270 merged (③④ **merged-UNDEPLOYED pending Window A**, ⑤ live on merge — a
+  runbook needs no deploy) · **#271 merged — openers ①②'s DB HALF**
+  (`evaluate_witness_fact_state_v2` + answers vocabulary + engine `:v2`; migrations
+  **0099/0100**, repo frontier 0100, **UNAPPLIED to live**). **The runtime half — witnessFacts
+  v2's prompts, where opener ②'s type_code question lives — and ⑥ are still in build**, so no
+  opener binds on live until Window A applies and deploys them.
 
 - **THE WITNESS-PAIR CUTOVER IS LIVE (F-A1 PR-1..PR-4 ALL MERGED, ceremonied 2026-08-20).**
-  Live DB: **92 migrations, frontier `0097_f_a1_cutover`** (D1 ceremony as-run:
-  `docs/plan/completed/f-a1-pr3-ceremony-asrun.md` — 25/25 positive reads; the NEW
-  pre-quiesce tripwire ran clean and exists because the first S3 sha pin was measured wrong
-  by name-grep and caught by rig replay). Runtime **v65** (autoDraft_v8 + chatTurn_v12 +
-  witnessFacts.v1) verified live BEFORE the window. Every invoice-kind document now mints
-  `llm_witness` (engine `llm-openai:gpt-5.6-terra:v1`); the Azure invoice engine survives
-  only as the tombstone insert. PR train: **#267** (0096 + 0097; 4 real CI catches en route)
-  and **#268** (PR-4's statements persist half, ships UNPOINTED — activation is a bound
-  follow-up, ONE deploy window for the router re-key + repoint). `witness_extraction` typed
-  consents granted+activated through the audited owner verbs for RS/BEE/RPR.
+  Live DB: **92 migrations, frontier `0097_f_a1_cutover`** (as-run:
+  `docs/plan/completed/f-a1-pr3-ceremony-asrun.md` — 25/25 positive reads; the NEW pre-quiesce
+  tripwire ran clean and exists because the first S3 sha pin was measured wrong by name-grep
+  and caught by rig replay). Runtime **v65** (autoDraft_v8 + chatTurn_v12 + witnessFacts.v1)
+  verified live BEFORE the window. Every invoice-kind document now mints `llm_witness`
+  (engine `llm-openai:gpt-5.6-terra:v1`); the Azure invoice engine survives only as the
+  tombstone insert. PR train: **#267** (0096 + 0097; 4 real CI catches en route) and **#268**
+  (PR-4's statements persist half, ships UNPOINTED — activation is a bound follow-up, ONE
+  deploy window for the router re-key + repoint). `witness_extraction` typed consents
+  granted+activated through the audited owner verbs for RS/BEE/RPR.
   **The corpus is MEASURED** (`docs/plan/completed/f-a1-corpus-measurement.md`): witness
   **0/33 corroborated** vs legacy 28/92 — the NIL-TAX law on a tax-silent corpus + the
   type_code prompt-intent mismatch bind everything; field capture clean, **0 failures across
@@ -46,10 +50,9 @@ trued at every clock-out)*
   reconciler's lane-blind re-drive herd (**~46 runs/sweep against 2 lane slots** — pool
   starvation, health-check flap) · hard-restart **zombie pooler sessions** (15 stale
   `clara_runtime_login` sessions from the dead VM starved the new one) · **four model calls
-  hung 30-95 minutes** with no adapter timeout, each wedging one of the lane's two slots
-  (settled via `fail_witness_facts('internal')`). **Pilot verdict shape confirmed correct:**
-  both channels byte-agree on a real RS invoice and `corroborated=false` under the NIL-TAX
-  LAW — working as designed, which is what earned the three-locks successor its ruling.
+  hung 30-95 minutes** with no adapter timeout, each wedging one of two slots.
+  **Pilot verdict shape confirmed correct:** both channels byte-agree on a real RS invoice and
+  `corroborated=false` under the NIL-TAX LAW — as designed, which earned the successor its ruling.
 
 - **The standing law is ADR-0071 + ADR-0072.** The Agentic Charter's twelve rulings are digest
   **laws 71-76** and its Wave-F re-scope is `docs/plan/active/wave-f-contract.md`; ADR-0072
@@ -60,16 +63,14 @@ trued at every clock-out)*
 
 - **The render deployment is LIVE and WIRED (ζ's fly ceremony, 2026-08-15):** app
   `clara-render`, one hourly machine, image pinned tag-AND-digest, the `reports/` storage
-  policy pair ADDED (no UPDATE policy — x-upsert:false immutability stands), first live worker
-  run a clean drain, and the leader's dispatch half BOUND on `clara-runtime` via
-  **`fly secrets deploy`** (a plain machine restart does NOT bind staged secrets — ζ caught the
-  first "bound" claim resting on an app-level `secrets list` read), verified by a PROCESS read
-  from inside the running VM with a negative and a positive control. **The end-to-end re-render
-  DR drill is deliberately still UNRUN** — no sealed artifact exists yet, and
-  `docs/ops/DR-render.md` keeps that boundary explicit.
+  policy pair ADDED (no UPDATE policy — x-upsert:false immutability stands), first live run a
+  clean drain, and the leader's dispatch half BOUND via **`fly secrets deploy`** (a plain
+  restart does NOT bind staged secrets — ζ caught the first "bound" claim resting on an
+  app-level `secrets list` read), verified by an in-VM PROCESS read with both controls.
+  **The end-to-end re-render DR drill is deliberately still UNRUN** — no sealed artifact exists
+  yet, and `docs/ops/DR-render.md` keeps that boundary explicit.
 - **Hard constraint 12 is STRUCTURAL:** `0062` walls RS-customer enrichment in the DB
-  (fact-driven, uuid-pinned, behaviourally self-proven at apply); `0063` makes lifting it an
-  OWNER act through the audited door.
+  (fact-driven, uuid-pinned, self-proven at apply); `0063` makes lifting it an OWNER act.
 - **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5
   mechanically enforced, 44-case selftest in CI) beside pinned-ids; `.claude/rules/db-tests.md`
   + `handoffs.md`; the ci.yml Wave-E δ contract drill (closes the sweep-skip false-green shape).
@@ -85,9 +86,9 @@ trued at every clock-out)*
   3 MSIC + 1 doored entity_type).
 - **The close model is LIVE-INERT:** zero `fiscal_years` rows; activation is the first human
   `open_fiscal_year`. The snapshot registry is likewise inert (zero `reporting_periods` /
-  `period_snapshots` rows) until the first `mint_month_snapshot`.
+  `period_snapshots`) until the first `mint_month_snapshot`.
 - **CI:** the self-hosted `clara-wsl` + `clara-wsl-2` runner instances (private-repo-only law).
-  Gates: the 7-script lint family + typecheck/build + the full DB suite on throwaway
+  Gates: the 7-script lint family + typecheck/build + the full DB suite on a throwaway
   `postgres:17` + deploy-onto-existing.
 - **Hard-blocked ids** (canary `daba7f2e` · witness `d023b48c`) are hook-enforced —
   `scripts/hooks/pinned-ids-guard.mjs` via the tracked `.claude/settings.json`.
@@ -97,7 +98,7 @@ trued at every clock-out)*
 | Lane | Scope | State | PR |
 |---|---|---|---|
 | Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — the full PR train per design §6: PR-1 #263 (0089-0095, ceremonied 2026-08-19) · PR-2 #265 (witnessFacts.v1, runtime v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 writer rotation + 0097 CUTOVER — ceremonied 2026-08-20, as-run in completed/, frontier 92/`0097_f_a1_cutover`, runtime v65)** · **PR-4 #268 (statementFacts_v2 persist half, 0098, UNPOINTED — activation is a bound follow-up)**. Consents (witness_extraction) granted+activated RS/BEE/RPR through the audited verbs. **Corpus MEASURED** (`docs/plan/completed/f-a1-corpus-measurement.md`): witness 0/33 corroborated vs legacy 28/92 — two named conjuncts bind (NIL-TAX on a tax-silent corpus; the type_code prompt-intent mismatch); D12 identity gate PASSES; live posture = every invoice on the human-confirm draft lane until F-A2. **Owner-ratified F-A2 openers:** ① the three-locks nil-tax arm (`evaluate_witness_fact_state_v2` + ceremony) · ② the type_code classification prompt (witnessFacts v2 + ceremony) · ③ adapter timeout (one-line non-frozen config, AB-16) · ④ reconciler lane-aware pacing · ⑤ post-restart zombie-session sweep (runbook step minted) · then the Charter's main clause (rules-machine execution tier retires) + the statement ACTIVATION piece (after ③④⑤) | ceremonied | #263 #265 #266 #267 #268 |
-| Wave F · Track A — **F-A2** | **DESIGNED (v4, 2026-08-20), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. **Openers:** ①② (three-locks nil-tax arm · type_code prompt) in build · **③④⑤ MERGED #270 — ③④ merged-UNDEPLOYED pending Window A, ⑤ live now** (`docs/ops/runtime-hard-restart.md`) · **⑥ RATIFIED** (`_coding_lane_core` kind-blindness, rig-replay-proven). Build: PR-0..PR-4 + PR-1b, two D1 windows. **OQ-2/3/5 stay open with recommendations.** | design | #270 |
+| Wave F · Track A — **F-A2** | **DESIGNED (v4, 2026-08-20), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. **Openers:** **①② DB half MERGED #271** (`evaluate_witness_fact_state_v2` + answers vocabulary + engine `:v2`, migrations 0099/0100 — frontier 0100, UNAPPLIED to live; the runtime prompt half is still in build) · **③④⑤ MERGED #270 — ③④ merged-UNDEPLOYED pending Window A, ⑤ live now** (`docs/ops/runtime-hard-restart.md`) · **⑥ RATIFIED, in build** (`_coding_lane_core` kind-blindness, rig-replay-proven). Build: PR-0..PR-4 + PR-1b, two D1 windows. **OQ-2/3/5 stay open with recommendations.** | design | #270 #271 |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④), Fix A proceeds: both writer bodies in ONE migration, 13-cell battery, D1 on the 0085 template | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to the archive, 2026-08-18.)*
@@ -108,28 +109,27 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **WINDOW A — the F-A2 opener ceremony.** #270's riders ③④ are **merged and UNDEPLOYED**:
-   the witness adapter timeout and the reconciler's lane-aware pacing are on `main` but not
-   in a live runtime image, so a deep `llm_witness` queue can still wedge the health check
-   until the deploy. Rider ⑤ needs no deploy — `docs/ops/runtime-hard-restart.md` is live the
-   moment it merged. Window A also carries openers ①②⑥, and it is the gate the whole F-A2
-   acceptance stands behind. **Then, in this exact order: re-extract the corpus FIRST, then
-   evaluate** — a `witnessFacts.v1` row can never corroborate through the successor's nil-tax
-   arm, so measuring before re-extracting re-scores 0/33 on the wrong population. **Predicted
-   29/33** (23 via the arm + 6 plain, 4 refusing with the failing conjunct named), band 26/33,
-   and **0/33 if opener ② misses** — the `type_code='01'` conjunct gates both paths.
-   **Two ordinary re-fires ride the same window** (see Known issues: the stranded pair).
+1. **WINDOW A — the F-A2 opener ceremony.** #270's riders ③④ are **merged and UNDEPLOYED** —
+   on `main`, not in a live image, so a deep `llm_witness` queue can still wedge the health
+   check until the deploy; ⑤ needs no deploy. **#271 put openers ①②'s DB half on `main` too —
+   migrations 0099/0100, UNAPPLIED (live still reads frontier `0097`).** Window A applies them,
+   ships the runtime half and ⑥, and is the gate F-A2's acceptance stands behind.
+   **Then, in this exact order: re-extract the corpus
+   FIRST, then evaluate** — a `witnessFacts.v1` row can never corroborate through the
+   successor's nil-tax arm, so measuring first re-scores 0/33 on the wrong population.
+   **Predicted 29/33** (23 via the arm + 6 plain, 4 refusing with the conjunct named), band
+   26/33, and **0/33 if opener ② misses** — `type_code='01'` gates both paths.
+   **Two ordinary re-fires ride the same window** (Known issues: the stranded pair).
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (three dispositions, merged #249, ceremonied; **E-R14 OPEN**).
-   ~~The BEE FY2025 live close~~ — **RULED 2026-08-16, deferred WHOLESALE to the Wave-G reset
-   + full E2E rebuild** (the refusal narrative is archived; the ruling stands and ADR-0072 ⑤
-   builds on it). **BEE's golden bar, confirmed 2026-08-20 against the client's own papers:
-   FY2025 SALES RM 68,640.00 · net PROFIT RM 47,245.65 · capital B/F (65,747.97)** — and
-   FY2024's own closing `FINANCED BY` total is that same `(65,747.97)`, printed on two
-   independently-produced documents. No BEE coding sittings in Wave F. Then: the first real
-   render/seal round-trip (closes DR-render's unrun-drill boundary) → RPR historical MPERS
-   pack → RS snapshot witness; the ms/zh claim-policy copy (fail-closed until supplied); the
-   optional elevated `diskpart` VHDX compact (~50GB, runners idle).
+   ~~The BEE FY2025 live close~~ — **RULED 2026-08-16, deferred WHOLESALE to the Wave-G reset**
+   (narrative archived; ADR-0072 ⑤ builds on it). **BEE's golden bar, confirmed 2026-08-20
+   against the client's own papers: FY2025 SALES RM 68,640.00 · net PROFIT RM 47,245.65 ·
+   capital B/F (65,747.97)** — FY2024's closing `FINANCED BY` total is that same
+   `(65,747.97)`, printed on two independently-produced documents. No BEE coding sittings in
+   Wave F. Then: the first real render/seal round-trip (closes DR-render's unrun-drill
+   boundary) → RPR historical MPERS pack → RS snapshot witness; the ms/zh claim-policy copy;
+   the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
 3. **F-A2 BUILD per its design** (`docs/plan/active/f-a2-agentic-posting-design.md` + the
    three annexes, v4, DONE): PR-0 the judgement-logic + cross-model gate → PR-1 (two DB files,
    ONE D1 window) → PR-1b the pack splice → PR-2 the runtime (`autoDraft_v9`, `chatTurn_v13`,
@@ -159,25 +159,23 @@ Registered but not scheduled. Sources of record in brackets.
   real harm is PERMANENT SUPPRESSION of the 80% early-warning ladder (`0016:679`), never a
   false alarm. Blast radius stays advisory-only: a missing warning, never a wrong book.
   **The ruling (ADR-0072 ④): a closing transfer is not turnover** — the P&L→RE roll is period
-  machinery, which is what `0016`'s authors assumed at `0016:210-219` and what the exclusion
-  was written to do. **Fix A proceeds:** mark closing entries AND the B3 reopen mirrors
+  machinery, which `0016`'s authors assumed at `0016:210-219` and what the exclusion was
+  written to do. **Fix A proceeds:** mark closing entries AND the B3 reopen mirrors
   (`0085:379-386`) at birth, **BOTH writer bodies in ONE migration** — a single-body fix
-  INVERTS the defect into compounding inflation, which was the highest-value assertion the
-  review produced. **Fix B is STRUCTURALLY BLOCKED** by the evaluator freeze and would leave a
-  lie in the data. Shape: two `create or replace`, no signature change, D1 write-quiesce on
-  the `0085` template, a 13-cell battery (T6 catches Fix B's regression class; T2/T4/T8/T9
-  contract-blind), and a forward-only proof asserted fail-closed at apply. R1a (the mirror
-  inherits the marker) and R1b (a `clara_authenticated`-only DEFINER stamp does not breach the
-  human-lane-marker pin) ride as sub-confirmations. **OD-7 is discharged by the same ruling.**
-  *(task #17; the B3 PR body carries the original site cites)*
+  INVERTS the defect into compounding inflation, the review's highest-value assertion.
+  **Fix B is STRUCTURALLY BLOCKED** by the evaluator freeze and would leave a lie in the data.
+  Shape: two `create or replace`, no signature change, D1 on the `0085` template, a 13-cell
+  battery (T6 catches Fix B's regression class; T2/T4/T8/T9 contract-blind), a forward-only
+  proof asserted fail-closed at apply. R1a (mirror inherits the marker) and R1b (a
+  `clara_authenticated`-only DEFINER stamp does not breach the human-lane-marker pin) ride as
+  sub-confirmations. **OD-7 is discharged by the same ruling.** *(task #17)*
 - **Reconciler follow-ups (#255's law-1 review — all pre-existing, none blocking, each its own
   PR):** the `expired` key collision (`reconciler.mjs:633` spreads `intakeRecovery`
   unconditionally after `expiry`, always clobbering `expireClarifies`' count — unread by
   `leader.mjs` today; clarify-expiry survives the rules-machine retirement, so the Charter does
-  not touch this) · the leader render-pair try/catch (`leader.mjs:200-211`) still swallows
-  halt-class errors — unreachable today, but the one remaining halt-eating catch on the leader
-  path · `wiki-projection.mjs:333-346`/`:594-599` carry three bare `to_regprocedure` probes
-  (the absent-vs-unreadable question, on a per-event checkpoint failure model).
+  not reach it) · the leader render-pair try/catch (`leader.mjs:200-211`) still swallows
+  halt-class errors — unreachable today, but the one remaining halt-eating catch on that path ·
+  `wiki-projection.mjs:333-346`/`:594-599` carry three bare `to_regprocedure` probes.
 - **`closing_stock` producer verb** — before any real goods-trader close. **Wave G does NOT
   schedule it:** ADR-0072 ⑤ defaulted OD-2 to "not in the first pass". *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. The Wave-G corpus
@@ -185,13 +183,34 @@ Registered but not scheduled. Sources of record in brackets.
 - **δ NAMED RESIDUALS (all deliberate, each recorded in its file/PR):** F10 — a DB-level
   `transaction_timeout` on PG17 would bound the advisory-lock wait (fail-closed direction; one
   round trip if ever wanted) · the B4 sandwich — an in-one-dollar-quoted-block off/create/on
-  toggle evades both `check_function_bodies` layers (closing it is its own reviewed pass) ·
-  the 57014 cancellation receipt class is an authenticated caller's attestation by construction
-  (rollback erases server-side trace; honestly labelled `caller_reported` — an honesty label,
-  not a task) · the RS guard's two-file split carries a between-transactions lift window
-  (prestate-mitigated, named) · Supavisor headroom re-measure. **η — not δ — owns the
-  production human/OBO/wake caller**; direct wake/runtime evaluator grants and synthetic human
-  JWTs remain forbidden (a law statement, not a task; it next matters at F-A5's OBO closure).
+  toggle evades both `check_function_bodies` layers (closing it is its own reviewed pass) · the
+  57014 cancellation receipt class is an authenticated caller's attestation by construction
+  (rollback erases server-side trace; honestly labelled `caller_reported` — a label, not a task)
+  · the RS guard's two-file split carries a between-transactions lift window
+  (prestate-mitigated) · Supavisor headroom re-measure. **η — not δ — owns the production
+  human/OBO/wake caller**; direct wake/runtime evaluator grants and synthetic human JWTs stay
+  forbidden (a law statement; it next matters at F-A5's OBO closure).
+
+**Structured-format lanes (event-triggered; registered 2026-08-20 so they live here, not only in
+code comments). Both were verified at the bytes, and both differ from how the lane gets casually
+described — each disposition is what the read SAW:**
+- **OFX/QFX — the parser is BUILT and UNEXERCISED, not unbuilt.** Intake canonicalizes four
+  declared spellings to one mime (`intake.mjs:44-48`), `scan.mjs` detects both dialects by
+  signature, and intake is deliberately **STORE-ONLY** (`intake-lanes.mjs:54`). The reader is
+  real — `parseStatementOfx` (`statement-parse.mjs:331`) maps identity, currency, period,
+  `LEDGERBAL` and every `STMTTRN`, behind the same `parseStatementFile` interface as CSV, with
+  a named limitation (OFX prints no opening and no totals, so it corroborates only where
+  continuity supplies the opening — deriving it would make the chain check tautological).
+  **Missing: a runtime battery over the parser body (DB routing is tested, the body is not),
+  and a real client file. Trigger: the first client whose bank exports OFX.** *(Wave C-b §4.3)*
+- **XLSX/DOCX — parsed VALUES-ONLY; the gap is SEMANTICS, not a parser.** They route to
+  `structured_parse` (`intake-lanes.mjs:55`) and `structured-worker.mjs` does read them, but
+  every region carries **`monetary_cents: null`** and a structural `field_path` (`sheets.0.B7`),
+  never an accounting one: **no facts**, content reachable only by AI-assisted read (widens at
+  **F-A6**). **Trigger:** a client whose recurring source documents are spreadsheets (payroll
+  listings) where per-cell extraction would beat an AI read. **The design decision rides the
+  trigger and is not the parser:** unattended posting from an arbitrary spreadsheet needs **its
+  own corroboration anchor** — *which cell is the total is a judgement, not a structure.*
 
 **The VACUOUS-GREEN-GATE class (2026-08-16):** a gate that passes because it had NOTHING IN
 SCOPE is not evidence, and must be distinguished from one that measured a population and found
@@ -199,13 +218,12 @@ it clean. **The class RULE is DISCHARGED** — the Wave-G corpus §7.4 adopts it
 gate exercised in both polarities; an unexercised gate is reported BY NAME, never counted as
 passed). **The three instances STAND, and nothing schedules their repair** — they are code, so
 the Wave-G data reset does not touch them: (a) the uncoded gate blind with 21/21 filings NULL
-`financial_date` (`0056:1397`'s BETWEEN is never satisfied by NULL; `:1404-1405`'s own comment
-makes the miss permanent) · (b) drawer 2's bank gate blind with 0 registered accounts against
-RM 39,252.03 of real balance (`0056:1360-1361` enumerates only `bank_statements`) · (c) drawer
-1 returns `tie` on an EMPTY `bank_accounts` registry (`0056:962`, no zero-census branch) — one
-level below the very comment (`:969-972`) that cites the ADR-066 lesson. **(c) has a home** —
-the corpus's P-3, picked up by the F-T4 contract; **(a) and (b) do not.** The corpus exercises
-all three either way.
+`financial_date` (`0056:1397`'s BETWEEN is never satisfied by NULL; `:1404-1405` makes the miss
+permanent) · (b) drawer 2's bank gate blind with 0 registered accounts against RM 39,252.03 of
+real balance (`0056:1360-1361` enumerates only `bank_statements`) · (c) drawer 1 returns `tie`
+on an EMPTY `bank_accounts` registry (`0056:962`) — one level below the very comment
+(`:969-972`) citing the ADR-066 lesson. **(c) has a home** — the corpus's P-3, picked up by
+F-T4; **(a) and (b) do not.** The corpus exercises all three either way.
 
 > **Dispositions applied 2026-08-20** (a full audit of all 88 rows against ADR-0071, the F-A1
 > delivery and ADR-0072): 7 STALE · 8 DISCHARGED · 8 ABSORBED. Each is marked in place below;
@@ -220,68 +238,61 @@ blocked on). ~~The system-prompt investment pass~~ — **RE-HOMED to F-A2** (law
 load-bearing, and G7 removed the instrument that would have caught its absence).
 
 **The F6–F9 register (ADR-0066), trued 2026-08-20:** **C1 `failed_retry` unwitnessed live** —
-the drill is still unrun, but **the door is reachable on live data for the first time**: the
-cutover changed its population (an invoice document's `v_lane` is now `llm_witness`, and the
-corpus run left real terminally-failed witness tasks) · **the `internal` lane has no
-self-service door** — live-relevant for the same reason · admission-time envelope label ·
-mint-time-only ocr reclaim bound (both survive the cutover on the surviving OCR lane) ·
-~~the 401/403 auth-code split "(Wave F)"~~ — **its home never existed; RE-HOMED to F-T4** ·
-**F8's single-use door + two 0034 inherits + the landscape-refresh autonomy class** —
-**re-examine at F-A2**, which replaces F8's host lane · F9 no-unpark path + parked-residual
-acceptance. ~~X7's five residuals~~, ~~`in_vendor_block`/`is_vendor_name` unproven live~~ and
-~~the parked 6/6/6/85 sandbox floor + its headroom PDF~~ — **all three STALE**; the first two
-close as *retired unproven*, since the lane that would ask them is gone.
+drill still unrun, but **the door is reachable on live data for the first time** (the cutover
+changed its population: `v_lane` is now `llm_witness`, and the corpus run left real
+terminally-failed witness tasks) · **the `internal` lane has no self-service door** —
+live-relevant for the same reason · admission-time envelope label · mint-time-only ocr reclaim
+bound (both survive on the surviving OCR lane) · ~~the 401/403 split "(Wave F)"~~ — **its home
+never existed; RE-HOMED to F-T4** · **F8's single-use door + two 0034 inherits + the
+landscape-refresh autonomy class** — **re-examine at F-A2**, which replaces F8's host lane ·
+F9 no-unpark path + parked-residual acceptance. ~~X7's five residuals~~,
+~~`in_vendor_block`/`is_vendor_name` unproven live~~ and ~~the parked 6/6/6/85 floor + its
+headroom PDF~~ — **all three STALE**; the first two close as *retired unproven*, the lane that
+would ask them being gone.
 
 **Gates on the operating runway:** **Gate P** (first native-MYR SST-stated supplier bill, or
 the Wave-G reset; reminders RETIRED per ADR-0068). Restated so it is not re-derived: ADR-0066
 **measured the waiting population at seven documents**, all newest-`ocr`-task failed/`bad_type`
-with NULL `document_kind` — **F6 does NOT unblock them**, and the only two honest remedies are
-an owner re-export or the 401/403 split above. The capitalised/mixed-purchase tax-allocation
-question and the Gate D residuals ride it · **Gate S**'s real-XML leg — honestly UNSCHEDULED
-and waiting on the world; nothing in Wave F/G manufactures a genuine inbound e-invoice ·
-**FINCARE RSINV-2510/02** still needs a human coding decision, **but its recorded blocker is
-stale**: ADR-0066 pinned the cause on Azure typing no `CustomerName` region, and the witness
-pair does not depend on one — so re-ask it after the F-A2 re-extraction.
+with NULL `document_kind` — **F6 does NOT unblock them**; the only two honest remedies are an
+owner re-export or the 401/403 split above. The capitalised/mixed-purchase tax-allocation
+question and the Gate D residuals ride it · **Gate S**'s real-XML leg — honestly UNSCHEDULED,
+waiting on the world · **FINCARE RSINV-2510/02** still needs a human coding decision, **but its
+recorded blocker is stale**: ADR-0066 pinned the cause on Azure typing no `CustomerName`
+region, and the witness pair does not depend on one — re-ask after the F-A2 re-extraction.
 
 **η residuals (Wave-E close, PRs #240/#242) — all four STAND, none scheduled:**
-- **The blank-op-key idiom is whitespace-blind, estate-wide** — single-argument `btrim()`
-  trims SPACES only, so a tab-only or newline-only op key passes every blank-key refusal in
-  the estate. Not an η regression, and not reachable from the real caller (`stableOpKey`
-  normalizes first). The fix is one whitespace-class-aware expression applied at every site
-  in a **single pass** — per-lane patching would leave the estate inconsistent, which is
-  worse than one uniform blind spot. *(owner-ruled estate-wide, PR #240)*
-- **The co-effective policy seed-test wants its own fixture design** — the rig seed it needs
+- **The blank-op-key idiom is whitespace-blind, estate-wide** — single-argument `btrim()` trims
+  SPACES only, so a tab-only or newline-only op key passes every blank-key refusal in the
+  estate. Not an η regression, and not reachable from the real caller (`stableOpKey` normalizes
+  first). The fix is one whitespace-class-aware expression at every site in a **single pass** —
+  per-lane patching leaves the estate inconsistent, worse than one uniform blind spot.
+- **The co-effective policy seed-test wants its own fixture design** — the seed it needs
   carries two co-effective `eps_v1` versions, but `clara.edge_policy_sets` is append-only, so
-  such a seed cannot be torn down between runs and would change the estate every later cell
-  reads. Registered honestly rather than forced in at merge time. *(PR #240 residual)*
+  it cannot be torn down between runs and would change the estate every later cell reads.
 - **δ-family: policy resolution is window-blind on the wall side** —
   `clara._tf_metric_cell_integrity` resolves policies with NO effective-window filter, so a
-  window-filtering preview core would CLR11 every preview. η's compose core therefore matches
-  the wall term-for-term and fail-closes as an effectivity REFUSAL: **a false refusal, never
-  a false preview.** The compensating control retires when wall and writer resolve by window
-  together, on δ's own ladder — no date. *(B1 adjudication, PR #240)*
+  window-filtering preview core would CLR11 every preview. η's compose core matches the wall
+  term-for-term and fail-closes as an effectivity REFUSAL: **a false refusal, never a false
+  preview.** Retires when wall and writer resolve by window together — no date.
 - **`0084`'s out-of-tree derivation tooling is RETAINED** at `C:\ct\` — see Tooling
   follow-ups, where its machine-local-custody hazard is now priced.
 
-**CI economics overhaul (owner-requested assessment 2026-08-15).** *Registered "for Wave F" but
-the contract puts it under "Deferred / not reached (owner sittings own these)" — so no Wave-F
-item owns it. It is an OWNER-SITTING item, not scheduled build work.* The CONTENT is right and
-the docs-only classifier fence already works. **The COST problem is structural:** the monolithic
-`ci` job re-proves EVERY closed wave's drill serially (~45-60 min, growing one full-chain apply
-per wave). Registered fix, in order of leverage: **(1)** demote CLOSED-wave drills to the weekly
-sweep, keep only the CURRENT wave's per-PR (biggest cut) · **(2)** split the monolith into
-parallel jobs (dashboard/runtime/db-core/drills/DR) · **(3)** real pnpm-store + docker-layer
-caching (also kills the setup-pnpm race) · **(4)** HYBRID runners — GitHub-hosted for the cheap
-legs, self-hosted for the DB estate · **(5)** the ci.yml composite-action refactor (the same work
-as the 500-line Known issue) · **(6)** the branch-protection interplay measured on #244: required
-check `ci`, `strict: true`, `enforce_admins: true` — a docs-only PR whose `ci` leg SKIPPED merges
-fine while up-to-date, but once main moves, protection reports "Required status check 'ci' is
-expected"; the fix is `gh pr update-branch` + re-green, **never `--admin`**. Consider requiring
-`changes`+`lint` alongside `ci` when the required-check set is next reviewed. **Batch-CI-per-wave
+**CI economics overhaul (assessment 2026-08-15).** *An OWNER-SITTING item, not scheduled build
+work: it says "REGISTERED for Wave F" but the contract puts it under "Deferred / not reached",
+so no Wave-F item owns it.* The CONTENT is right and the docs-only fence works. **The COST
+problem is structural:** the monolithic `ci` job re-proves EVERY closed wave's drill serially
+(~45-60 min, growing one full-chain apply per wave). Fix, in order of leverage: **(1)** demote
+CLOSED-wave drills to the weekly sweep, keep only the CURRENT wave's per-PR (biggest cut) ·
+**(2)** split the monolith into parallel jobs · **(3)** real pnpm-store + docker-layer caching
+(also kills the setup-pnpm race) · **(4)** HYBRID runners — GitHub-hosted for the cheap legs,
+self-hosted for the DB estate · **(5)** the ci.yml composite-action refactor (same work as the
+500-line Known issue) · **(6)** the branch-protection interplay measured on #244: required check
+`ci`, `strict: true`, `enforce_admins: true` — a docs-only PR whose `ci` leg SKIPPED merges fine
+while up-to-date, but once main moves protection reports "Required status check 'ci' is
+expected"; the fix is `gh pr update-branch` + re-green, **never `--admin`**. **Batch-CI-per-wave
 was CONSIDERED AND REJECTED** — the per-PR gate caught T17 drift, a seam census gap, the
-frontier-ordering violation and the S0.9 flake in one night, defects that would have compounded
-across a batch. Scope routing, not frequency reduction. (Changing per-PR uniformity itself is
-ADR-061 territory — an owner ruling, not an optimization.)
+frontier-ordering violation and the S0.9 flake in ONE night. Scope routing, not frequency
+reduction; changing per-PR uniformity is ADR-061 territory, an owner ruling.
 
 **Wave-F planning inputs — DISPOSED by ADR-0071/contract:** #25 SUPERSEDED · E-R13 ABSORBED
 (F-A3) · FX-lite principle pre-seeded (P-FX; timing stays a sitting item) · claims (E-R10) →
@@ -324,33 +335,31 @@ fix: "a higher park index ⇒ my answer landed" is an inference, not a receipt; 
 server-authored per-(run, park, submission) receipt · **the interview e2e de-pin** — its own
 text calls it a dated tripwire "stale at the next core bump", and **F-A7b IS that bump**.
 
-**Owner/legal:** the C6 checklist (DPA · disclosure text · PDPA basis) before any vendor trace
+**Owner/legal:** the C6 checklist (DPA · disclosure · PDPA basis) before any vendor trace
 export — **now load-bearing on the corpus**: ADR-0072 ⑤ ruled full custody permission with
 tracing OFF, and the flag stays off until all three are evidenced · **the OpenAI processor
 bundle — NON-BLOCKING by the 2026-08-18 direct-release ruling; the DPA-first recommendation is
-on file as dissent (F-A1 design §5)**, and now live-relevant, because the witness pair ships
-real client documents to the processor daily · the first monthly LIGHT DR sitting (to schedule;
-WB-R26's cadence binds) · PITR (deferred, owner-tracked) · **WB-R22's target capability** (the
-scoped review-attestation capability, reviewer ≠ activator, zero standing privilege) — **now
-the only route by which B3's `distinct_checker` arm ever gets exercised on real books**, since
-ADR-0072 ⑤ ruled OD-5's second principal NOT provisioned · PRD §9 deferred product questions ·
-the old SGD-document clarify. *(~~Server-side branch protection~~ left this list 2026-08-20 —
-DISCHARGED, measured live on #244; record in the archive.)*
+on file as dissent (F-A1 design §5)**, now live-relevant because the witness pair ships real
+client documents to the processor daily · the first monthly LIGHT DR sitting (WB-R26's cadence
+binds) · PITR (deferred, owner-tracked) · **WB-R22's target capability** — **now the only route
+by which B3's `distinct_checker` arm ever gets exercised on real books**, since ADR-0072 ⑤
+ruled OD-5's second principal NOT provisioned · PRD §9 · the old SGD-document clarify.
+*(~~Server-side branch protection~~ left this list 2026-08-20 — DISCHARGED on #244's measured
+`strict`+`enforce_admins`; record in the archive.)*
 
-**Tooling follow-ups.** **RE-HOMED to the F-A2 / F-T4 fix queues by the 2026-08-20 audit —
-four items:** **(1) the ceremony DSN bridge belongs IN-REPO** (commit the pooler CA + a
-dsn-pipe successor; the 2026-08-19 ceremony ran `sslmode=no-verify` because the prior
-sessions' pinned-CA tooling was session-local and gone — the handoffs-rule failure shape,
-**twice now**, and the highest-value item on this list: every remaining Wave-F/G ceremony walks
-it) · **(2) the wiki dynamic-SQL CoR-comment gate** · **(3) `0057` §11's writer-roster
-successor** · **(4) `0007`'s firm-limits pseudo-upsert**. **Still unscheduled:** the dr-verify
-trio (UTC hashing · the STRICT canary probe's stale expectation · the AP-gate ILIKE example) ·
-the runtime boot line should name its bundle version (the positive-read law's second leg, now
-hand-assembled at four ceremonies) · Supavisor headroom re-measure (**one item registered
-twice** — the same thing as the δ residual above) · the local disposable Supabase stack (needs
-Docker) · ComplianceWatchCard `acknowledged_at` echo (UI-only) · the unreverted-admin-grant
-lint watch · **`0084`'s derivation tooling retained only at `C:\ct\`** — the migration stands
-on three in-repo proofs, so nothing breaks if the folder dies, but it is the same
+**Tooling follow-ups. RE-HOMED to the F-A2 / F-T4 fix queues by the 2026-08-20 audit — four
+items:** **(1) the ceremony DSN bridge belongs IN-REPO** (commit the pooler CA + a dsn-pipe
+successor; the 2026-08-19 ceremony ran `sslmode=no-verify` because the prior sessions'
+pinned-CA tooling was session-local and gone — the handoffs-rule failure shape **twice now**,
+and the highest-value item here: every remaining Wave-F/G ceremony walks it) · **(2) the wiki
+CoR-comment gate** · **(3) `0057` §11's writer-roster successor** · **(4) `0007`'s firm-limits
+pseudo-upsert**. **Still unscheduled:** the dr-verify trio (UTC hashing · the STRICT canary
+probe's stale expectation · the AP-gate ILIKE example) · the runtime boot line should name its
+bundle version (the positive-read law's second leg, hand-assembled at four ceremonies now) ·
+Supavisor headroom re-measure (**one item registered twice** — the δ residual above) · the
+local disposable Supabase stack (needs Docker) · ComplianceWatchCard `acknowledged_at` echo ·
+the unreverted-admin-grant lint watch · **`0084`'s derivation tooling retained only at
+`C:\ct\`** — three in-repo proofs mean nothing breaks if the folder dies, but it is the same
 machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-repo custody.
 
 ## Known issues
@@ -362,96 +371,88 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
   gate. Workaround: wording — never quote a recut statement in a CoR comment. Real fix = mask
   the block's own comments before the CREATE test + a selftest cell. Judgement logic, its own
   reviewed PR; **re-homed to the F-A2 fix queue.**
-- **F-A2 runtime riders ③④⑤ — MERGED (#270), ③④ NOT YET DEPLOYED.** *(One numbering, used
-  everywhere from 2026-08-20: they are **③ witness model-call timeout** — one line in the
-  non-frozen `witnessFacts.v1.services.mjs`, AB-16 · **④ reconciler lane-aware pacing** — pool
-  starvation · **⑤ post-restart zombie-pooler-session sweep**. They were briefly numbered ①②③
-  here and ③④⑤ in the lane row; same three pieces of work, one PR, and ①② are the nil-tax and
-  type_code openers.)* Full incident record: `docs/plan/completed/f-a1-corpus-measurement.md`.
-  **⑤ is DISCHARGED on merge** — `docs/ops/runtime-hard-restart.md` is a runbook and needs no
-  deploy. **③④ bind only when Window A ships their image**, so until then a deep `llm_witness`
-  queue can still wedge the runtime's health check.
+- **F-A2 runtime riders ③④⑤ — MERGED (#270), ③④ NOT YET DEPLOYED.** *(One numbering from
+  2026-08-20: **③** witness model-call timeout, one line in the non-frozen
+  `witnessFacts.v1.services.mjs` (AB-16) · **④** reconciler lane-aware pacing · **⑤**
+  post-restart zombie-session sweep. Briefly numbered ①②③ here and ③④⑤ in the lane row — same
+  three pieces of work, one PR; ①② are the nil-tax and type_code openers.)* **⑤ is DISCHARGED
+  on merge** — `docs/ops/runtime-hard-restart.md` needs no deploy. **③④ bind only when Window A
+  ships their image**, so a deep `llm_witness` queue can still wedge the health check until
+  then. Incident record: `docs/plan/completed/f-a1-corpus-measurement.md`.
 - **The witness corroboration rate is 0/33 on the real corpus until the openers deploy**
   (NIL-TAX + type_code prompt intent — both ruled, see the measurement report). Fail-closed:
   invoices ride the human-confirm draft lane; no data risk.
 - **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it):
   the sidecar `runId` is clobbered on the re-mint path —
-  `packages/runtime/lib/reconciler-documents.mjs:198-206` together with
-  `packages/runtime/lib/spool.mjs:124`. Registered so it is not re-derived: it is a real
-  defect with a known site pair, and it wants its own PR rather than a rider on a pacing fix.
+  `packages/runtime/lib/reconciler-documents.mjs:198-206` with
+  `packages/runtime/lib/spool.mjs:124`. A real defect with a known site pair; its own PR, not a
+  rider on a pacing fix.
 - **The `failed_retry` stranded pair — CLOSED AT 2, and it CANNOT RECUR post-cutover.**
   `0097` widened three arms of `clara.request_reextraction` but left `0051`'s `failed_retry`
   door scoped to `v_lane` alone; post-cutover `v_lane` is `llm_witness` for every
-  invoice-shaped document, so a document whose newest `invoice_facts` task is `failed` and
-  which has no `llm_witness` sibling makes that door's scalar subquery return NULL, and
-  `NULL = 'failed'` is not true. **Measured live 2026-08-20 (read-only, rolled back): the
-  population is CLOSED at 3** invoice-shaped documents with no `done` extraction in either
-  regime — **2 truly stranded** (`0cb7c1f1` openai-0008.pdf, BEE · `c597a24b`
-  RSINV-251205, ROME SECRETARY), the third rescued by the `receipt_backfill` arm.
-  **Remedy: an ordinary re-fire after Window A** — both clients hold an ACTIVE
-  `witness_extraction` activation, so the automatic backstop mints a fresh `llm_witness` task
-  with no migration needed; only the HUMAN re-extract verb refuses. **No new document can
-  enter this state** — every invoice-shaped document minted after the cutover has an
-  `llm_witness` task by construction. A residual, not a live wound.
+  invoice-shaped document, so a document whose newest `invoice_facts` task is `failed` with no
+  `llm_witness` sibling makes that door's scalar subquery return NULL, and `NULL = 'failed'`
+  is not true. **Measured live 2026-08-20 (read-only, rolled back): the population is CLOSED
+  at 3** — **2 truly stranded** (`0cb7c1f1` openai-0008.pdf, BEE · `c597a24b` RSINV-251205,
+  ROME SECRETARY), the third rescued by the `receipt_backfill` arm. **Remedy: an ordinary
+  re-fire after Window A** — both clients hold an ACTIVE `witness_extraction` activation, so
+  the automatic backstop mints a fresh task with no migration; only the HUMAN verb refuses.
+  **No new document can enter this state** — every invoice-shaped document minted after the
+  cutover has an `llm_witness` task by construction. A residual, not a live wound.
 - **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered
-  books-writer would pass silently — the roster runs only at 0057's own apply. Candidate:
-  a standing census cell. **Sharper since the cutover:** `0096` rotated the writer estate and
-  `0098` added `_persist_statement_core_v2`, so the population the roster would guard grew
-  while the roster stayed pinned to one apply. **Re-homed to the F-A2 fix queue.**
+  books-writer would pass silently — the roster runs only at 0057's own apply. Candidate: a
+  standing census cell. **Sharper since the cutover:** `0096` rotated the writer estate and
+  `0098` added `_persist_statement_core_v2`, so the guarded population grew while the roster
+  stayed pinned. **Re-homed to the F-A2 fix queue.**
 - **The WSL host is showing container instability** (observed 2026-08-20): containers exit
   **255**, including CI **service** containers, which makes a red leg indistinguishable from a
-  real failure until someone looks. Not diagnosed. **Inspect while the runners are IDLE and
-  BEFORE the next ceremony night** — a ceremony is the worst possible moment to discover the
-  host is dropping containers, and the runners must be idle for the inspection anyway.
+  real failure until someone looks. Not diagnosed. **Inspect while runners are IDLE and BEFORE
+  the next ceremony night** — the worst moment to learn the host drops containers is mid-D1.
 - **Rig recipe pin (2026-08-20):** drive the db suite with libpq `PG*` vars +
   `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL` (a21-prestate ×6 + pipeline ×1 red
   otherwise — the CI shape is ci.yml's own env). Same session: WSL **split-brain** mode
-  observed (`wsl -l -v` says Stopped while vmmem lives; every `wsl` command boots a second
-  userland; two runner copies fight one registration → session Conflict crashloop) — cure
-  is a full `wsl --shutdown` when runners are IDLE, then one keeper.
+  (`wsl -l -v` says Stopped while vmmem lives; every `wsl` command boots a second userland; two
+  runner copies fight one registration → Conflict crashloop) — cure is a full `wsl --shutdown`
+  when runners are IDLE, then one keeper.
 - **Three genuinely dangling doc paths** — `RENUMBER.md`, `algebra.md`, `INTERFACE-PINS.md`:
   authored in build worktrees, never committed. Inert: the renumber procedure's content
   survives as digest law 41 and ADR-058's body. Re-author only on a real need.
 - **Two γ post-CLEAN NITs** (PR #231, residuals 4–5): skeleton self-citation drift · S11.4c's
   `''`-vs-NULL branch. One-word fixes awaiting the next `0057`-area batch — `0096` was a writer
-  rotation, not that batch, so they did not ride it.
+  rotation, not that batch.
 - **The BEE opening-TB record discrepancy — RESOLVED 2026-08-20 by a live read** (read-only,
-  frontier 92, rolled back). **ADR-043 is current; this file's old "empty opening TB" phrasing
-  was the wrong reading.** Seed `1e60960e` is `finalized`, keyed, `as_of` 2024-12-31, and the
-  book holds **4 approved opening entries dated 2024-12-31 totalling RM 210,000.00 =
-  RM 210,000.00**, with `150-CAP` dr **RM 65,747.97** — the desk's capital B/F exactly. The
-  "empty" reading almost certainly came from an EARLIER seed `ec53ab9d`, which is **cancelled**
-  (document-tied; its parse returned `no_opening_tb_lines` across 153 regions) and was
-  recreated as the keyed seed under WB-R15. **One stored-number oddity recorded UNADJUDICATED:**
-  the four `opening_items` sum to +7,850,406 cents with no `obe_plug` item while the journal
-  balances through `190-OBE` — the reader did not know that table's sign convention and did not
-  guess. BEE's Wave-G run is brown-field from an existing seed; corpus open question 1 answered.
+  rolled back). **ADR-043 is current; this file's old "empty opening TB" phrasing was the wrong
+  reading.** Seed `1e60960e` is `finalized`, keyed, `as_of` 2024-12-31, and the book holds
+  **4 approved opening entries dated 2024-12-31 totalling RM 210,000.00 = RM 210,000.00**, with
+  `150-CAP` dr **RM 65,747.97** — the desk's capital B/F exactly. The "empty" reading almost
+  certainly came from an EARLIER seed `ec53ab9d`, **cancelled** (document-tied; its parse
+  returned `no_opening_tb_lines` across 153 regions) and recreated as the keyed seed under
+  WB-R15. **One stored-number oddity recorded UNADJUDICATED:** the four `opening_items` sum to
+  +7,850,406 cents with no `obe_plug` item while the journal balances through `190-OBE` — the
+  reader did not know that table's sign convention and did not guess. BEE's Wave-G run is
+  brown-field from an existing seed; corpus open question 1 answered.
 - **ci.yml exceeds the 500-line harness file limit** (pre-existing; a GitHub workflow cannot
   split across files) — the hook flags every edit. The composite-action refactor that fixes it
   is CI-economics item (5): one piece of work, registered twice.
-- **WSL VM/NAT operating law** (2026-08-14/15 incident; full narrative in
-  `docs/plan/completed/progress-archive-2026-08.md`): detached keeper for any
-  port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList
-  "-e","sleep","43200"` — NAT dies ~10 min after the last client detaches even with the
-  VM held); NEVER `wsl --shutdown` with runners busy (restart services via
-  `wsl -u root systemctl restart`); never diagnose VM health with a probe that cycles the VM.
+- **WSL VM/NAT operating law** (2026-08-14/15 incident; narrative archived): a detached keeper
+  for any port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList
+  "-e","sleep","43200"` — NAT dies ~10 min after the last client detaches even with the VM
+  held); NEVER `wsl --shutdown` with runners busy (restart services via `wsl -u root systemctl
+  restart`); never diagnose VM health with a probe that cycles the VM.
 - **The 0007 firm-limits pseudo-upsert trigger is column-hardcoded**
   (`_tf_firm_document_limits_upsert`): a partial-column INSERT against an existing firm row
-  silently RESETS the other limit columns to their defaults, and `0090`'s new
+  silently RESETS the other limit columns to their defaults, and `0090`'s
   `llm_witness_concurrency` is invisible to it entirely — settable only by direct UPDATE, and
-  it is exactly the knob the corpus incident made people want to turn. Its own small migration
-  + battery; **re-homed to the F-A2 fix queue**, riding the pacing work.
-- **The statement-reader pair self-supersedes by uuid coin flip TODAY** (0038:1781-1798 —
-  same kind, same transaction-scoped `extracted_at`): a live pre-existing defect the F-A1
-  kind-scoping does NOT touch (both readers share one kind); COUNTED and named at every
-  0089 apply. **CORRECTED 2026-08-20 — the recorded heal-point was WRONG.** PR-4 (#268 /
-  `0098`) merged **UNPOINTED** — `0098`'s own header says the successor ships *BUILT, FROZEN
-  and UNPOINTED* — so no live statement document reaches the two-kind writer yet and **the
-  coin flip is still live today**. It heals **FORWARD-ONLY, at the ACTIVATION window** (the
-  router re-key + repoint), and **the historical coin-flipped pairs are never repaired**:
-  `superseded_by` is once-only (CLR08), so `0098` counts and documents them rather than
-  rewriting them. Two corrections owed and taken: the heal-point, and the fact that the
-  existing population never heals. Design §3.9 note 5 is the record and carries the same fix.
+  exactly the knob the corpus incident made people want to turn. **Re-homed to the F-A2 fix
+  queue**, riding the pacing work.
+- **The statement-reader pair self-supersedes by uuid coin flip TODAY** (0038:1781-1798 — same
+  kind, same transaction-scoped `extracted_at`): a live pre-existing defect the F-A1
+  kind-scoping does NOT touch (both readers share one kind); COUNTED at every 0089 apply.
+  **CORRECTED 2026-08-20 — the recorded heal-point was WRONG.** `0098` merged **UNPOINTED** (its
+  own header: *BUILT, FROZEN and UNPOINTED*), so no live statement reaches the two-kind writer
+  yet and **the coin flip is still live**. It heals **FORWARD-ONLY at the ACTIVATION window**,
+  and **the historical pairs are never repaired** — `superseded_by` is once-only (CLR08), so
+  `0098` counts them instead. Design §3.9 note 5 carries the same fix.
 - **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** the three tracked
   long-path PDFs under `packages/runtime/test-storage/` make `git rebase --abort` fail with
   the rebase state SURVIVING, and a follow-up `git reset --hard` fails the same way — the
@@ -472,25 +473,24 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
 
 ## Session log
 
-*(Entries through 2026-08-19 — including the F-A1 build nights — are verbatim in
-`docs/plan/completed/progress-archive-2026-08.md`. F-A1's own operative records are its
-ceremony as-runs and the corpus measurement, all in `docs/plan/completed/`.)*
+*(Entries through 2026-08-19 — the F-A1 build nights included — are verbatim in
+`docs/plan/completed/progress-archive-2026-08.md`, alongside F-A1's operative records: its
+ceremony as-runs and the corpus measurement.)*
 
 - **2026-08-20 (the F-A2 opener train + the corpus sitting)** — the night after the cutover,
-  four things in parallel. **The opener train:** ①② built on their own branch; ③④⑤ merged as
-  **#270** (witness adapter timeout · reconciler lane-aware pacing · the zombie-session
-  runbook `docs/ops/runtime-hard-restart.md`); ⑥ ratified after a rig replay proved
-  `_coding_lane_core`'s kind-blindness behaviourally — **and proved the method**: the live
-  body is three `pg_get_functiondef` splices past its last static `create or replace`, so the
-  grep-the-migrations census that would have found nothing was unsound, not merely unlucky.
-  **The design ladder:** F-A2's design ran v1→v4 through an adversarial round, a delta round and
-  a final verify — the delta round REVERSED v2's durable-CHECK weakening on a reader census it
-  ran instead of promising; the verify caught a four-apostrophe SQL default that made the
-  *which-model-posted* wall always pass. **The sitting:** ADR-0072's five ruling blocks. **The
-  live reads:** three at frontier 92, each in a rolled-back read-only transaction — G-11 priced
-  at a zero client-scoped population, BEE's opening-TB discrepancy settled for ADR-043, and a
-  **closed** stranded pair found behind `failed_retry`'s un-widened door. **The catch worth
-  naming:** the roster-gate review lane found a defect on `main` itself, not in its branch.
+  four things in parallel. **The opener train:** ③④⑤ merged as **#270**, ①②'s DB half as
+  **#271**; ⑥ ratified after a rig replay proved `_coding_lane_core`'s kind-blindness
+  behaviourally — **and proved the method**: the live body is three `pg_get_functiondef`
+  splices past its last static `create or replace`, so a grep-the-migrations census would have
+  found nothing and been unsound, not merely unlucky. **The design ladder:** F-A2's design ran
+  v1→v4 through an adversarial round, a delta round and a final verify — the delta round
+  REVERSED v2's durable-CHECK weakening on a reader census it ran instead of promising; the
+  verify caught a four-apostrophe SQL default that made the *which-model-posted* wall always
+  pass. **The sitting:** ADR-0072's five ruling blocks. **The live reads:** three, each in a
+  rolled-back read-only transaction — G-11 priced at a zero client-scoped population, BEE's
+  opening-TB discrepancy settled for ADR-043, and a **closed** stranded pair found behind
+  `failed_retry`'s un-widened door. **The catch worth naming:** the roster-gate review lane
+  found a defect on `main` itself, not in its branch.
 
 ---
 
