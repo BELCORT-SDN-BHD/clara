@@ -1,6 +1,6 @@
--- UNNUMBERED_f_a2_witness_readers.sql -- Wave-F Track A, F-A2 opener (6):
+-- 0101_f_a2_witness_readers.sql -- Wave-F Track A, F-A2 opener (6):
 -- THE WITNESS-FIRST READER ESTATE. Number claimed at MERGE time (standing law,
--- AGENTS.md + .claude/rules/db-migrations.md).
+-- AGENTS.md + .claude/rules/db-migrations.md) -- claimed as 0101 once 0099/0100 landed.
 --
 -- SIZING REPORT OF RECORD: the F-A2-R1 rig-replayed verify/census/size lane
 -- ("Opener 6 -- _coding_lane_core kind-blindness"), 2026-08-20. Every claim below was
@@ -134,22 +134,30 @@
 -- =====================================================================================
 -- DEPLOY ORDER AND D1
 -- =====================================================================================
--- ORDER (BINDING): this file applies BEFORE the F-A2 openers (1)(2) pair inside the SAME
--- quiesce window. There is ZERO body overlap between the two -- that pair recuts
--- _witness_answers_ok, _enqueue_invoice_facts_core, request_reextraction and
--- _invoice_fact_state_at and mints a new frozen evaluator version; none of those four is
--- in this file's estate, and none of this file's twelve is in theirs -- so the ordering
--- is chosen for MEASUREMENT rather than forced by a collision. This file is inert on the
--- current estate (corroboration is 0/33 on the live corpus today, so a witness-born
--- filing still settles as tier_a_fails and never reaches ready, and the admission door
--- runs the lane check before any budget reservation, so a not-ready outcome reserves
--- nothing and caches nothing) and becomes load-bearing the moment (1)(2) flip
--- corroboration on. Landing it first is the only ordering under which the post-ceremony
--- corpus re-run measures the whole unattended path instead of one conjunct.
+-- ORDER: this file applies AFTER the F-A2 openers (1)(2) pair (0099 + 0100) and inside the
+-- SAME quiesce window. That is a CHANGE from what this file's first draft asserted, and it
+-- is recorded rather than quietly edited: the draft claimed the (6)-first ordering, on the
+-- ground that landing before (1)(2) is the only ordering under which the post-ceremony
+-- corpus re-run measures the whole unattended path instead of one conjunct. That argument
+-- was about which of the two gets to be measured first; it was never a dependency, and the
+-- pair merged first, so the numbers settled the other way. Both land in the same window, so
+-- the corpus re-run still measures the whole path.
 --
--- Section 0.5 reads the 0093 resolver's ONE-ARG body, which that pair does not touch, so
--- the proof holds in either order: the ordering above is a measurement contract, not a
--- hidden dependency.
+-- WHAT MAKES EITHER ORDER SAFE, and it is now DEMONSTRATED rather than argued. There is
+-- ZERO body overlap between the two: 0099/0100 recut _witness_answers_ok,
+-- _enqueue_invoice_facts_core, request_reextraction and _invoice_fact_state_at and mint the
+-- evaluate_witness_fact_state_v2 evaluator version; none of those five is in this file's
+-- estate, and none of this file's twelve is in theirs. And section 0.5 reads the 0093
+-- resolver's ONE-ARG body -- clara._invoice_fact_state(uuid) -- which that pair does not
+-- touch: it recuts the TWO-ARG pinned overload instead. This file's first rig run was
+-- against a pre-0099 chain and its second against a post-0100 one, and the section 0.5
+-- proof passes on both, which is the live test the order-robustness claim was owed.
+--
+-- INERT ON THE CURRENT ESTATE EITHER WAY: corroboration was 0/33 on the live corpus before
+-- (1)(2), so a witness-born filing still settles as tier_a_fails and never reaches ready,
+-- and the admission door runs the lane check before any budget reservation, so a not-ready
+-- outcome reserves nothing and caches nothing. This file becomes load-bearing exactly when
+-- (1)(2) flip corroboration on -- which, at this ordering, is already true when it applies.
 --
 -- D1 WRITE-QUIESCE: owed, one window. _draft_entry_core, revise_entry,
 -- classify_document and set_document_kind are audited writers, so D1 binds directly, and

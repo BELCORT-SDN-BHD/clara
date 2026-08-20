@@ -1,6 +1,7 @@
 // F-A2 opener (6) — THE WITNESS-FIRST READER ESTATE, battery for
-// migrations/UNNUMBERED_f_a2_witness_readers.sql (number claimed at merge; this file gates on
-// the stable name suffix, never on a number).
+// migrations/0101_f_a2_witness_readers.sql (number claimed at merge; this file gates on
+// CATALOG FACTS and the stable name suffix, never on the number -- the rename from
+// UNNUMBERED to 0101 cost this battery nothing, which is the property being claimed).
 //
 // WHAT IS BEING PROVEN. After the 0097 cutover every new invoice-shaped document is born as a
 // witness PAIR, but fourteen reader bodies still selected the document's governing extraction
@@ -103,7 +104,7 @@ async function readerEstateReady() {
   const s = r.rows[0];
   if (!s.selector && !s.lane && !s.sweep && !s.wall) return false;
   if (!s.selector || !s.lane || !s.sweep || !s.wall) {
-    throw new Error(`F-A2 opener 6 DRIFT: a half-applied reader estate — selector=${s.selector} lane=${s.lane} sweep=${s.sweep} wall=${s.wall} — apply UNNUMBERED_f_a2_witness_readers.sql as a whole`);
+    throw new Error(`F-A2 opener 6 DRIFT: a half-applied reader estate — selector=${s.selector} lane=${s.lane} sweep=${s.sweep} wall=${s.wall} — apply 0101_f_a2_witness_readers.sql as a whole`);
   }
   return true;
 }
@@ -200,7 +201,7 @@ after(async () => {
 });
 
 function mustBeLive() {
-  assert.ok(live, "UNNUMBERED_f_a2_witness_readers.sql is not applied on this database — this battery must FAIL, not skip, against a pre-opener-6 chain");
+  assert.ok(live, "0101_f_a2_witness_readers.sql is not applied on this database — this battery must FAIL, not skip, against a pre-opener-6 chain");
 }
 
 /** One witness-born filing whose cited vendor is already a live counterparty. */
