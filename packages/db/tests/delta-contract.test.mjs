@@ -55,20 +55,22 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       assert.equal(identity.current_user, identity.session_user,
         "the deployment ceremony uses the direct session principal");
       await db.query("update clara.evaluator_versions set deployed=true where not deployed");
-      // FOUR, not two: delta's evaluate_metric + assess_metric_cell_independent, plus F-A1's
-      // evaluate_witness_fact_state + evaluate_witness_identity. The ceremony statement is
-      // `where not deployed`, so it has always committed EVERY registered closure — the number
-      // is the roster's size, and the roster is pinned by name three lines above.
+      // FIVE, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
+      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, and F-A2's
+      // evaluate_witness_fact_state **v2** — the three-locks nil-tax arm, a NEW closure beside
+      // the frozen v1 rather than a recut of it. The ceremony statement is `where not deployed`,
+      // so it has always committed EVERY registered closure — the number is the roster's size,
+      // and the roster is pinned by name AND VERSION three lines above.
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
-      )).rows[0].n, 4);
+      )).rows[0].n, 5);
       assert.equal((await db.query(
         "select clara.verify_evaluator_freeze() r",
-      )).rows[0].r.verified_deployed, 4);
+      )).rows[0].r.verified_deployed, 5);
     });
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.evaluator_versions where deployed",
-    )).rows[0].n, 4, "the named ceremony commits every registered closure before algebra runs");
+    )).rows[0].n, 5, "the named ceremony commits every registered closure before algebra runs");
   });
   await registerPackPhase(t);
   await registerAlgebraPhase(t);

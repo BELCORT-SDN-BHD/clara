@@ -486,10 +486,13 @@ await t.test("both evaluator closures are exact, independent, and registered und
   const primarySelector = (await rootQuery("select pg_get_functiondef('clara._metric_selector_account_ids(uuid,jsonb)'::regprocedure) body")).rows[0].body.replace(/\s+/g, ""); for (const [tag, body, firm, sel] of [["primary", primarySelector, "v_firm", "p_selector"], ["independent E6", normalized, "rp.firm_id", "av.selector"]]) assert.ok(body.includes(exactness(firm, sel)), `${tag} selector carries the byte-identical explicit-element exactness predicate`);
   for (const predicate of ["ca.firm_id=rp.firm_id", "ca.client_id=p_client", "not(av.selector?'account_ids')orca.account_idin(selectjsonb_array_elements_text(av.selector->'account_ids')::uuid)", "not(av.selector?'account_codes')orca.account_codein(selectjsonb_array_elements_text(av.selector->'account_codes'))", "not(av.selector?'account_types')orca.account_typein(selectjsonb_array_elements_text(av.selector->'account_types'))", "not(av.selector?'account_classes')orca.account_classin(selectjsonb_array_elements_text(av.selector->'account_classes'))", "not(av.selector?'code_from')orca.account_code>=av.selector->>'code_from'", "not(av.selector?'code_to')orca.account_code<=av.selector->>'code_to'"])
     assert.ok(normalized.toLowerCase().includes(predicate.toLowerCase()), `E6 current-CoA selector pins ${predicate}`); assert.match(normalized, /array_agg\(m\.account_idorderbym\.ordinal\).*intofrozen_ids,actual_count,bad_count.*array_agg\(ca\.account_idorderbyca\.account_id\).*intolive_ids.*live_idsisdistinctfromfrozen_ids.*actual_count<>av\.frozen_member_count.*frozen_members_sha256/i, "E6 compares canonical live identity to actual immutable membership count, order, and hash"); assert.match(normalized, /metric_input_snapshot_(samples|contributions).*joinclara\.account_set_version_members/i, "E6 numeric measure rows join immutable frozen membership");
-  const registered = (await rootQuery("select evaluator_name,deployed,encode(closure_sha256,'hex') hash from clara.evaluator_versions order by evaluator_name,version")).rows;
+  const registered = (await rootQuery("select evaluator_name,version,deployed,encode(closure_sha256,'hex') hash from clara.evaluator_versions order by evaluator_name,version")).rows;
   // The registered roster is the SAME closed world as `expected` above — named, not counted, so
-  // a substitution cannot pass. F-A1's two closures joined it at 0091/0092.
-  assert.deepEqual(registered.map((row) => row.evaluator_name), [...expected.keys()].sort());
+  // a substitution cannot pass. F-A1's two closures joined it at 0091/0092; F-A2's
+  // evaluate_witness_fact_state v2 joined at opener ①, which is why the identity compared here
+  // is name AND VERSION: a family can carry more than one row and a name-only comparison would
+  // have read the two witness versions as a duplicate rather than as the append they are.
+  assert.deepEqual(registered.map((row) => `${row.evaluator_name}@v${row.version}`), [...expected.keys()].sort());
   assert.ok(registered.every((row) => row.deployed === false && /^[0-9a-f]{64}$/.test(row.hash)));
   assert.equal(new Set(registered.map((row) => row.hash)).size, registered.length,
     "every registered closure hashes differently — a shared aggregate would mean two rows freeze one body set");
