@@ -446,16 +446,25 @@ await t.test("both evaluator closures are exact, independent, and registered und
   // predicate's aggregate hash) and once as its own one-member closure (so
   // check-frozen-evaluators' clara.evaluate_* discovery covers its SOURCE at review time).
   const witnessSignatures = ["clara.evaluate_witness_identity_v1(uuid,uuid,boolean)"];
-  const expected = new Map([["evaluate_metric", ["clara.evaluate_metric_v1(uuid,uuid,uuid[],uuid,uuid)", "clara._metric_eval_node_v1(uuid,uuid,uuid,uuid,jsonb,boolean,text,date)", "clara.validate_metric_ast_v1(jsonb)", "clara._validate_metric_node_v1(jsonb,integer)", "clara._metric_selector_account_ids(uuid,jsonb)", "clara._metric_input_dataset_v1(uuid,uuid,uuid[])", "clara._metric_context_sha256_v1(uuid,uuid[],uuid,uuid,uuid,uuid,bytea,text)", "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)", "clara._hash(jsonb)", "clara.evaluate_fs_pack_v1(uuid,uuid[],uuid[],uuid,uuid)"]], ["assess_metric_cell_independent", independentSignatures],
-    ["evaluate_witness_fact_state", ["clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)", "clara._fact_hash(uuid,uuid,text,text,bigint)", "clara._normalize_invoice_cents(text)", ...witnessSignatures]],
-    ["evaluate_witness_identity", witnessSignatures]]);
-  const members = (await rootQuery(`select e.evaluator_name,e.deployed,m.ordinal,m.member_signature,encode(m.body_sha256,'hex') stored,encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') live,encode(e.closure_sha256,'hex') aggregate from clara.evaluator_versions e join clara.evaluator_version_members m on m.evaluator_version_id=e.id order by e.evaluator_name,m.ordinal`)).rows;
-  for (const [name, roster] of expected) {
-    const rows = members.filter((row) => row.evaluator_name === name);
-    assert.deepEqual(rows.map((row) => row.member_signature), roster, `${name} exact ordered closure`);
-    assert.ok(rows.every((row) => !row.deployed && row.stored === row.live), `${name} is exact and undeployed`);
+  // KEYED BY NAME **AND VERSION**, because a closure family can carry more than one. F-A2
+  // (opener ①) registers evaluate_witness_fact_state VERSION 2 — the three-locks nil-tax arm —
+  // beside the frozen v1, which stays registered and merely becomes unreachable. Keying on the
+  // name alone silently merged the two versions' member rows into one interleaved list, so the
+  // ordered-roster assertion compared a concatenation against a single closure and the aggregate
+  // check hashed eight rows against v1's stored digest. Both are per-VERSION facts.
+  const witnessFactStateClosure = (entrypoint) => [entrypoint,
+    "clara._fact_hash(uuid,uuid,text,text,bigint)", "clara._normalize_invoice_cents(text)", ...witnessSignatures];
+  const expected = new Map([["evaluate_metric@v1", ["clara.evaluate_metric_v1(uuid,uuid,uuid[],uuid,uuid)", "clara._metric_eval_node_v1(uuid,uuid,uuid,uuid,jsonb,boolean,text,date)", "clara.validate_metric_ast_v1(jsonb)", "clara._validate_metric_node_v1(jsonb,integer)", "clara._metric_selector_account_ids(uuid,jsonb)", "clara._metric_input_dataset_v1(uuid,uuid,uuid[])", "clara._metric_context_sha256_v1(uuid,uuid[],uuid,uuid,uuid,uuid,bytea,text)", "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)", "clara._hash(jsonb)", "clara.evaluate_fs_pack_v1(uuid,uuid[],uuid[],uuid,uuid)"]], ["assess_metric_cell_independent@v1", independentSignatures],
+    ["evaluate_witness_fact_state@v1", witnessFactStateClosure("clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)")],
+    ["evaluate_witness_fact_state@v2", witnessFactStateClosure("clara.evaluate_witness_fact_state_v2(uuid,uuid,uuid)")],
+    ["evaluate_witness_identity@v1", witnessSignatures]]);
+  const members = (await rootQuery(`select e.evaluator_name,e.version,e.deployed,m.ordinal,m.member_signature,encode(m.body_sha256,'hex') stored,encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') live,encode(e.closure_sha256,'hex') aggregate from clara.evaluator_versions e join clara.evaluator_version_members m on m.evaluator_version_id=e.id order by e.evaluator_name,e.version,m.ordinal`)).rows;
+  for (const [key, roster] of expected) {
+    const rows = members.filter((row) => `${row.evaluator_name}@v${row.version}` === key);
+    assert.deepEqual(rows.map((row) => row.member_signature), roster, `${key} exact ordered closure`);
+    assert.ok(rows.every((row) => !row.deployed && row.stored === row.live), `${key} is exact and undeployed`);
     const aggregate = (await rootQuery("select encode(sha256(convert_to(string_agg(stored,'' order by ordinal),'UTF8')),'hex') h from jsonb_to_recordset($1::jsonb) as x(ordinal int,stored text)", [JSON.stringify(rows)])).rows[0].h;
-    assert.equal(rows[0].aggregate, aggregate, `${name} aggregate equals ordered member hashes`);
+    assert.equal(rows[0].aggregate, aggregate, `${key} aggregate equals ordered member hashes`);
   }
   assert.equal(members.length, [...expected.values()].reduce((n, roster) => n + roster.length, 0));
   const primary = await exactEntrypoint("evaluate_metric_v1");
@@ -521,11 +530,13 @@ await t.test("freeze verifier positively reads registered live bodies while depl
   const result = (await rootQuery("select clara.verify_evaluator_freeze() r")).rows[0].r;
   assert.equal(result.ok ?? result.verified ?? result.valid, true, JSON.stringify(result));
   assert.equal(result.verified_deployed, 0, JSON.stringify(result));
-  // FOUR registered closures at this frontier: delta's evaluate_metric +
-  // assess_metric_cell_independent, and F-A1's evaluate_witness_fact_state +
-  // evaluate_witness_identity (0091/0092). ZERO deployed is the property this cell is really
-  // about — the verifier reads every registered closure's live bodies BEFORE any ceremony has
-  // flipped one, and that half is unchanged.
-  assert.equal(result.verified_registered, 4, JSON.stringify(result));
+  // FIVE registered closures at this frontier: delta's evaluate_metric +
+  // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
+  // evaluate_witness_identity (0091/0092), and F-A2's evaluate_witness_fact_state **v2** — the
+  // three-locks nil-tax arm, a NEW closure beside the frozen v1 rather than a recut of it, so
+  // the count moves by one and the frozen predecessor keeps its own row. ZERO deployed is the
+  // property this cell is really about — the verifier reads every registered closure's live
+  // bodies BEFORE any ceremony has flipped one, and that half is unchanged.
+  assert.equal(result.verified_registered, 5, JSON.stringify(result));
 });
 }

@@ -35,15 +35,20 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
     // CLOSED-WORLD ROSTER, extended rather than loosened: F-A1 (Wave-F Track A, migrations
     // 0091/0092) registers two further closures — clara.evaluate_witness_fact_state_v1, the
     // witness-pair corroboration predicate, and clara.evaluate_witness_identity_v1, its identity
-    // leaf carrying its own one-member closure so the source-side freeze lint discovers it. Both
-    // are BORN UNDEPLOYED like delta's, which is the property this assertion is really about.
+    // leaf carrying its own one-member closure so the source-side freeze lint discovers it.
+    // F-A2 (opener ①) then registers evaluate_witness_fact_state **version 2**, the three-locks
+    // nil-tax arm: a NEW closure beside the frozen v1, never a recut of it, which is why the
+    // family now has two rows and the VERSION has to be selected — a name-only roster would have
+    // read the two as one row and silently stopped counting. All of them are BORN UNDEPLOYED
+    // like delta's, which is the property this assertion is really about.
     assert.deepEqual((await rootQuery(
-      "select evaluator_name,deployed from clara.evaluator_versions order by evaluator_name",
+      "select evaluator_name,version,deployed from clara.evaluator_versions order by evaluator_name,version",
     )).rows, [
-      { evaluator_name: "assess_metric_cell_independent", deployed: false },
-      { evaluator_name: "evaluate_metric", deployed: false },
-      { evaluator_name: "evaluate_witness_fact_state", deployed: false },
-      { evaluator_name: "evaluate_witness_identity", deployed: false },
+      { evaluator_name: "assess_metric_cell_independent", version: 1, deployed: false },
+      { evaluator_name: "evaluate_metric", version: 1, deployed: false },
+      { evaluator_name: "evaluate_witness_fact_state", version: 1, deployed: false },
+      { evaluator_name: "evaluate_witness_fact_state", version: 2, deployed: false },
+      { evaluator_name: "evaluate_witness_identity", version: 1, deployed: false },
     ]);
     await withActor({ transaction: true }, async (db) => {
       const identity = (await db.query("select current_user,session_user")).rows[0];
