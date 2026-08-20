@@ -150,9 +150,14 @@ export const S5_25_BARE_TOKEN_RE = "\\m(now\\(\\)|current_timestamp\\M|localtime
  *  bare clock token — MEASURED from the live 0001..0041 catalog (round-8 M4), reproduced
  *  verbatim in the shipped migration's S5.25 arm (D) roster. Sorted so a diff against the live
  *  catalog's own sorted string_agg is a plain string comparison. */
-// F-A1 PR-3 (the cutover migration, numbered after 0095 at merge) joined fail_witness_facts to
-// the roster: `finished_at=now()` stamps the SAME timestamptz column its siblings
-// fail_invoice_facts/fail_statement_facts already legitimately stamp bare, no ::date suffix.
+// F-A1 PR-3's fail_witness_facts is NOT in this array — it is a LEDGER-GATED cohort further
+// down (WITNESS_F_A1_PR3_CLOCK_NAMES). It was appended here unconditionally when the cutover
+// landed, and that is the appliedStem-class defect this file's own :207-214 comment names: the
+// verb is born in the cutover migration (0097 at merge), while `db-slice-frontiers` runs this
+// battery against databases pinned at 0042-0045, where it does not exist. An unconditional
+// entry makes every one of those legs red with a one-name diff that says nothing about clock
+// discipline. Kept as a comment rather than silently moved, so the next name added here is
+// asked the frontier question first.
 export const S5_25_BARE_TOKEN_ROSTER = [
   // _adv_reversal_admission joined at the round-8 INTEGRATION: lane M3 factored the advance
   // reversal walls into one admission body carrying its parents' lawful as-of idiom
@@ -176,7 +181,7 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "consume_egress_dispatch", "create_client", "create_firm", "create_seeding_batch", "deactivate_bank_account",
   "deactivate_client_egress_purpose", "decline_coding_rule", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
   "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all", "execute_rule_post",
-  "fail_classify", "fail_invoice_facts", "fail_statement_facts", "fail_witness_facts", "finalize_document_intake", "get_bank_reconciliation",
+  "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
   "get_context_pack", "list_autopost_rules", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
   "mark_wiki_citations_stale", "match_bank_line", "merge_counterparties", "mint_wake_credential", "open_interruption",
   "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch", "propose_autopost_rule",
@@ -395,6 +400,15 @@ const WITNESS_F_A1_CLOCK_NAMES = ["persist_witness_facts"];
 // PR-4 still measures the roster it actually has.
 const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_statement_facts_v2"];
 
+// F-A1 PR-3 [the cutover, `f_a1_cutover` at whatever number merge claimed]:
+// clara.fail_witness_facts stamps `finished_at=now()` — the SAME timestamptz column its
+// siblings fail_invoice_facts / fail_statement_facts already stamp bare, no ::date suffix and
+// no DATE derived from the session clock anywhere in the verb. Lawful, and therefore rostered.
+// GATED, for the reason :207-214 states in full: the verb is born in the cutover migration, and
+// this battery also runs against databases pinned at 0042-0045 where it does not exist. Keyed
+// on the migration's STABLE STEM, never its number — numbers are claimed at merge.
+const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -415,6 +429,7 @@ export async function s5BareTokenRoster(query) {
   if (await applied("0083_%")) names.push(...RENDER_0083_CLOCK_NAMES);
   if (await appliedStem("b3_reopen_ends_on$")) names.push(...B3_REOPEN_CLOCK_NAMES);
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
+  if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   return names.sort();
 }

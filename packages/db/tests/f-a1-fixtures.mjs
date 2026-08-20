@@ -76,7 +76,12 @@ export async function witnessReady() {
            exists(select 1 from pg_constraint
                    where conname = 'ck_processing_task_lane_f_a1'
                      and pg_get_constraintdef(oid) like '%llm\\_witness%') as lane,
-           position('evaluate_witness_fact_state_v1' in
+           -- VERSION-BLIND. This probe asks "does the resolver dispatch to the witness predicate
+           -- at all", which is what every cell below depends on. WHICH version it names is the
+           -- successor's business: F-A2 repoints it to _v2, and a probe pinned to _v1 would
+           -- report a successfully-applied later window as a half-applied earlier one — a false
+           -- DRIFT that reds an entire battery for the wrong reason.
+           position('evaluate_witness_fact_state_v' in
              (select p.prosrc from pg_proc p
                where p.oid = 'clara._invoice_fact_state_at(uuid,uuid)'::regprocedure)) > 0 as dispatch`);
   const s = r.rows[0];
@@ -85,7 +90,7 @@ export async function witnessReady() {
     throw new Error("F-A1 DRIFT: the dispatch or the identity leaf is present but clara.evaluate_witness_fact_state_v1 is not — a half-applied predicate lane, not a dormant one");
   }
   if (!s.dispatch) {
-    throw new Error("F-A1 DRIFT: clara.evaluate_witness_fact_state_v1 exists but clara._invoice_fact_state_at does not dispatch to it — part 2 of the pair was not applied");
+    throw new Error("F-A1 DRIFT: clara.evaluate_witness_fact_state_v1 exists but clara._invoice_fact_state_at dispatches to NO witness predicate version — part 2 of the pair was not applied");
   }
   if (!s.kinds || !s.lane) {
     throw new Error("F-A1 DRIFT: the predicate is applied but the witness engine_kind / lane CHECKs are NOT widened (ck_*_f_a1 absent). This battery cannot insert a witness row. Apply 0090_f_a1_walls.sql first — it renames the 0038-suffixed CHECKs to the _f_a1 suffix this probe reads. (The authoring-era rig scaffold kept the old names; it was deleted at PR-1 assembly.)");

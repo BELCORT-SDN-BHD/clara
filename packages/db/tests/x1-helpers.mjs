@@ -107,11 +107,33 @@ export async function witnessExtractionsOf(document) {
   return r.rows;
 }
 
-/** The router's locked engine literal for the cutover invoice arm (must string-equal
- *  WITNESS_ENGINE_SNAPSHOT.engineId in witnessFacts.v1.services.mjs -- f-a1-cutover.test.mjs's
- *  own cell reads both sides and compares; this is the shared constant every OTHER x1 cell
- *  that needs to assert the literal reuses, rather than re-typing it). */
-export const WITNESS_ENGINE_ID = "llm-openai:gpt-5.6-terra:v1";
+/** The router's locked engine literal for the cutover invoice arm, READ FROM ITS OWN CATALOG
+ *  BODY rather than re-typed here.
+ *
+ *  It used to be a hand-typed `:v1` constant. F-A2 opener ② moves it to `:v2` (witnessFacts.v2
+ *  is a new frozen prompt closure, so its reads need a distinguishable engine identity), and a
+ *  version pinned by hand goes stale the moment that ceremony runs — at which point every cell
+ *  reusing it fails as DRIFT rather than as the behaviour it meant to test. What these cells
+ *  actually assert is "the task the door minted carries the SAME literal the door mints", and
+ *  that is a question only the live body can answer. The shape is still checked, so an
+ *  unreadable or off-shape literal is a loud failure and never a silent pass. */
+// PRECONDITION, STATED BECAUSE IT IS A FRONTIER QUESTION: this reads the mint arm the PR-3
+// CUTOVER installed, so it only answers on a post-cutover database and THROWS otherwise. Every
+// caller today is gated on cutover-ness or runs only at the full frontier, and no slice list
+// (`packages/db/tests/split-lists/`) names one of them — checked, not assumed. If one is ever
+// added to a slice list, gate it on the cutover rather than on 0022/0025: the cells that use
+// this constant are post-cutover cells whatever the literal says, and a throw here would red
+// that leg with a message about a regex instead of about the frontier — the appliedStem-class
+// mistake this file's x42 sibling already paid for once.
+export async function witnessEngineId() {
+  const r = await rootQuery(
+    "select prosrc from pg_proc where oid='clara._enqueue_invoice_facts_core(uuid)'::regprocedure");
+  const m = /v_lane:='llm_witness'; v_engine:='(llm-openai:[^']+)';/.exec(r.rows[0]?.prosrc ?? "");
+  if (!m || !/^llm-openai:gpt-5\.6-terra:v[0-9]+$/.test(m[1])) {
+    throw new Error(`F-A1/F-A2: the router's witness engine literal is unreadable or off-shape (${JSON.stringify(m?.[1] ?? null)})`);
+  }
+  return m[1];
+}
 
 export async function authoritativeExtraction(document) {
   const r = await rootQuery(
