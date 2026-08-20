@@ -7,7 +7,39 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-18, the Agentic Charter — trued at every clock-out)*
+*(as of 2026-08-20, the F-A1 cutover night — trued at every clock-out)*
+
+- **THE WITNESS-PAIR CUTOVER IS LIVE (F-A1 PR-1..PR-4 ALL MERGED, ceremonied 2026-08-20).**
+  Live DB: **92 migrations, frontier `0097_f_a1_cutover`** (D1 ceremony as-run:
+  `docs/plan/completed/f-a1-pr3-ceremony-asrun.md` — 25/25 positive reads; the NEW
+  pre-quiesce tripwire ran clean and exists because the first S3 sha pin was measured wrong
+  by name-grep and caught by rig replay). Runtime **v65** (autoDraft_v8 + chatTurn_v12 +
+  witnessFacts.v1) verified live BEFORE the window. Every invoice-kind document now mints
+  `llm_witness` (engine `llm-openai:gpt-5.6-terra:v1`); the Azure invoice engine survives
+  only as the tombstone insert. PR train: **#267** (0096 writer rotation + 0097 cutover —
+  4 real CI catches fixed en route: the wiki-gate CoR-comment misread, the S3 sha repin, the
+  e2 era-gate, the wb-0020 third restore pair + x31/x51 fixture truings) and **#268** (PR-4
+  statements persist half, merged d618f91, ships UNPOINTED — activation is a bound follow-up
+  piece, ONE deploy window for the router re-key + repoint). `witness_extraction` typed
+  consents granted+activated through the audited owner verbs for RS/BEE/RPR (standing
+  consent-declaration evidence). **The corpus is MEASURED**
+  (`docs/plan/completed/f-a1-corpus-measurement.md`): witness **0/33 corroborated** vs
+  legacy 28/92 — the NIL-TAX law on a tax-silent corpus + the type_code prompt-intent
+  mismatch bind everything; field capture clean, 69 model calls zero failures, D12 identity
+  gate PASSES; owner ratified the two F-A2 openers (three-locks nil-tax arm · type_code
+  classification prompt) and stopped the tail at N=33 (24 tasks closed through the audited
+  claim→fail door). **Live incident, controlled, F-A2 riders minted:** the batch exposed (1) the
+  reconciler's lane-blind re-drive herd (48 runs/sweep vs 2 lane slots — pool starvation,
+  health-check flap), (2) hard-restart **zombie pooler sessions** (15 stale
+  `clara_runtime_login` sessions from the dead VM starved the new one; cured by
+  `pg_terminate_backend` on idle>5min — now a ceremony/DR runbook step), (3) two
+  model-call hangs with no adapter timeout (settled via `fail_witness_facts('internal')`;
+  the timeout knob lives in the NON-frozen witnessFacts.v1.services.mjs by design, AB-16).
+  **Pilot verdict shape confirmed correct:** both channels byte-agree on a real RS invoice;
+  `corroborated=false` under the NIL-TAX LAW — working as designed; the owner then RULED the
+  three-locks successor (see the measurement report's rulings section).
+
+*(previous posture, 2026-08-18 — the Agentic Charter)*
 
 - **THE AGENTIC CHARTER IS RULED (ADR-0071, 2026-08-18; digest laws 71-76).** The owner's
   twelve-ruling grilling (structured-question record, plain-language briefing before every
@@ -29,35 +61,6 @@ file wins or it is stale — and truing it is the first thing you do.
   N5→F-T4 · N6 doc-truth staleness incl. stale `0056:57`/autodraft-header/runtime-README
   lines — Wave-F fix-queue riders).
 
-- **Live DB: 90 migrations, frontier `0095` (the F-A1 witness estate — ceremonied
-  2026-08-19 ~03:30 MYT, `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): 28/28
-  positive reads, evaluators deployed 4/4 one-way, LIVE-INERT for witness work until
-  PR-3 mints the lane. Field notes: the in-file quiesce guard (0023's mechanism,
-  carried by 0092) FIRED in a live ceremony for the first time — the recipe now waits
-  110s post-stop; the statement-pair coin-flip measured on live (15 docs/24 pairs,
-  named not repaired, heals at PR-4).** Earlier: the wording-seed
-  ceremony ran 2026-08-16 after the owner's sign-off
-  (`docs/plan/completed/masb-wording-ceremony-asrun.md`): 22 statutory-wording rows + 9
-  lexicon + 3 claim policies, byte-per-packet. **E-R14 IS OPEN: en and zh statutory packs
-  are ISSUABLE** (mpers_company rev 1 en 5/5 + zh 5/5 verified; rev 2 en 5/5 ready for
-  2027); ms stays gated at 4/5 per the sign-off (notes.title held back — fabricated
-  citation). Earlier the same day, the B3 ceremony ran
-  2026-08-16 (D1 write-quiesce; `docs/plan/completed/b3-reopen-ceremony-asrun.md`):
-  `reopen_fiscal_year` is now the `ends_on`-dated formal prior-period adjustment under the
-  target-bound M2 permit, and reversing a close is a SEGREGATED act (reopener ≠ closer at
-  ≥2 eligible; attested sole path; adoption arm for orphaned closes) — live BEFORE the
-  first real close, as ADR-068 required. The pre-B3 silent-no-op reopen defect is dead.
-  Earlier this close: three
-  ceremonies ran from merged `main` this close: 0058-0063 (2026-08-14,
-  `docs/plan/completed/wave-e-delta-ceremony-asrun.md`), 0064-0072 (2026-08-14 morning,
-  `docs/plan/completed/wave-e-theta-epsilon-ceremony-asrun.md`), and 0077-0084 (2026-08-15,
-  with a D1 write-quiesce for the writer-body swaps, the chatTurn v11 runtime deploy and the
-  freeze deploy-lock — as-run + locked `frozen-workflows.json` MERGED at 263aa2d, PR #243).
-  Every apply
-  backed up to R2 first; positive reads + pgrst NOTIFY recorded each time. **Both evaluator
-  closures are DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is
-  ARMED** (name-only fact through the audited door; the S4.5 behavioural self-proof fired on
-  live). The A30b receipt table is live and empty.
 - **The render deployment is LIVE and WIRED (ζ's fly ceremony, 2026-08-15):** app
   `clara-render`, machine `2862624f777308` (hourly schedule, restart on-failure max 3), image
   `registry.fly.io/clara-render:render-1@sha256:b25b600d…50ca6a` (four independent agreeing
@@ -122,7 +125,7 @@ file wins or it is stale — and truing it is the first thing you do.
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | the agentic core per `docs/plan/active/wave-f-contract.md` — F-A1 design doc **v3.1** (+ `f-a1-annexes.md`, split under the 500-line limit): §5 RULED in-session 2026-08-18 night (OQ-1 **OpenAI-direct** · OQ-2 **ratified** · cutover **direct-release**, dissent on file · PR-0 **re-shaped to a third NATIVE adversarial lane** — RUN same night, MERGEABLE-WITH-CONDITIONS, all 3 blockers + 15 material adjudicated & folded; Codex re-enters at future builds); 0017 consumer census DONE (§3.9 five binding notes). **PR-1 ASSEMBLED on branch f-a1/pr1: migrations 0089-0095** (0017 kind-scope · walls · identity+predicate+dispatch · usage · writer) — four builder lanes each rig-green on postgres:17; the one cross-lane defect (fixtures probing pre-rename constraint names) caught by the writer lane's true-merged-chain rig and fixed at assembly. **Verify+review round DONE (head ebcc709)**: the integration verify's 36 census reds (all EXTENDED, never weakened) + the opus fresh-context review's 2 blockers/7 material/6 nits (B1 the C2-overreach that would have zeroed corroboration on RM-printed invoices; B2 the missing queued→failed trigger arm → wall 13) ALL adjudicated, fixed PRE-FREEZE, re-proven (δ-drill 63/63 · ε 69/69 · sweep 2470/2508, 1 Windows-only environmental red) → re-review MERGEABLE → **PR #263 MERGED d8abf19** (CI 3 rounds; 2 more census catches folded) → **CEREMONIED 2026-08-19** (as-run in completed/). Next: **PR-2 the runtime half** (witnessFacts.v1 against the live verbs; AI SDK docs pulled first) → PR-3 cutover (corpus measurement gates) → PR-3a → PR-4 | building | — |
+| Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — the full PR train per design §6: PR-1 #263 (0089-0095, ceremonied 2026-08-19) · PR-2 #265 (witnessFacts.v1, runtime v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 writer rotation + 0097 CUTOVER — ceremonied 2026-08-20, as-run in completed/, frontier 92/`0097_f_a1_cutover`, runtime v65)** · **PR-4 #268 (statementFacts_v2 persist half, 0098, UNPOINTED — activation is a bound follow-up)**. Consents (witness_extraction) granted+activated RS/BEE/RPR through the audited verbs. **Corpus MEASURED** (`docs/plan/completed/f-a1-corpus-measurement.md`): witness 0/33 corroborated vs legacy 28/92 — two named conjuncts bind (NIL-TAX on a tax-silent corpus; the type_code prompt-intent mismatch); D12 identity gate PASSES; live posture = every invoice on the human-confirm draft lane until F-A2. **Owner-ratified F-A2 openers:** ① the three-locks nil-tax arm (`evaluate_witness_fact_state_v2` + ceremony) · ② the type_code classification prompt (witnessFacts v2 + ceremony) · ③ adapter timeout (one-line non-frozen config, AB-16) · ④ reconciler lane-aware pacing · ⑤ post-restart zombie-session sweep (runbook step minted) · then the Charter's main clause (rules-machine execution tier retires) + the statement ACTIVATION piece (after ③④⑤) | ceremonied | #263 #265 #266 #267 #268 |
 | Wave F · Track B | tax per the contract (F-T1..F-T4) | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to
@@ -382,6 +385,31 @@ additions · the local disposable Supabase stack (needs Docker) · ComplianceWat
 
 ## Known issues
 
+- **The wiki dynamic-SQL gate reads CoR-block comments UN-MASKED** (found 2026-08-20 on
+  0097): `parseCoRPatches` tests `CREATE_FN_RE` against a block whose `--` comments survive
+  the file-level `maskComments` (dollar-quoted interiors are skipped), so a create-function
+  phrase QUOTED IN A COMMENT reclassifies the block as a dynamic function-creator and its
+  migration-time `execute v_def` reds the gate. Workaround: wording (0097 S3's N-13 carries
+  the note). Real fix = mask the block's own comments before the CREATE test + a selftest
+  cell — judgement logic, its own reviewed PR.
+- **F-A2 runtime riders (minted by the 2026-08-20 corpus run's live incident**, full record
+  in `docs/plan/completed/f-a1-corpus-measurement.md`): ① reconciler lane-aware pacing
+  (herd = pool starvation) · ② post-restart zombie-pooler-session sweep (runbook step:
+  `pg_terminate_backend` on `clara_runtime_login` idle sessions after any hard restart) ·
+  ③ witness model-call timeout (one line in the non-frozen services.mjs, AB-16). Until ①③
+  land, a deep llm_witness queue can wedge the runtime's health check.
+- **The witness corroboration rate is 0/33 on the real corpus until F-A2** (NIL-TAX +
+  type_code prompt intent — both ruled, see the measurement report). Fail-closed: invoices
+  ride the human-confirm draft lane; no data risk.
+- **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered
+  books-writer would pass silently — the roster runs only at 0057's own apply. Candidate:
+  a standing census cell.
+- **Rig recipe pin (2026-08-20):** drive the db suite with libpq `PG*` vars +
+  `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL` (a21-prestate ×6 + pipeline ×1 red
+  otherwise — the CI shape is ci.yml's own env). Same session: WSL **split-brain** mode
+  observed (`wsl -l -v` says Stopped while vmmem lives; every `wsl` command boots a second
+  userland; two runner copies fight one registration → session Conflict crashloop) — cure
+  is a full `wsl --shutdown` when runners are IDLE, then one keeper.
 - **Three genuinely dangling doc paths** — `RENUMBER.md`, `algebra.md`, `INTERFACE-PINS.md`:
   authored in build worktrees, never committed; the renumber procedure's content survives as
   the digest's law 41 (`docs/adr/README.md` §4 · Engineering and CI law) and ADR-058's body. Recorded at the harness-v2 assembly; re-author only if a real
