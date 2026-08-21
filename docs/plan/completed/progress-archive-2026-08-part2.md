@@ -107,3 +107,17 @@ this file's "Session log (entries through 2026-08-16)" section by the same law t
   deploy flip 2→4 → NOTIFY → `/ready` 200 → `--lock-deployed` (manifest in this PR).
   Deviation recorded: `sslmode=no-verify` (CA-unpinned TLS) — the pinned-CA tooling
   gap registered under Tooling follow-ups.
+
+- **2026-08-21 (the combined Window A+B ceremony + the re-measure)** — the opener train went
+  live in one window instead of two, on the grounds that a fully-merged train makes a split
+  create a stall gap rather than separate risk. **92/`0097` → 97/`0102`, v65 → v66.** The
+  ceremony's own instruments earned their keep twice: the **positive control caught a
+  `$`-expansion bug** that had every PROCESS read returning a false "unset", and the
+  **tripwire aborted on a module-resolution error BEFORE any stop** — zero downtime, which is
+  exactly why it runs pre-quiesce. One probe red, adjudicated a **probe defect** (an assertion
+  on a re-worded comment string). The `0102` coverage probe **said NO** and named the synthetic
+  sandbox firm — accepted. **The re-measure: 12/20, against 0/20 like-for-like**, with opener ②
+  clearing the bundle's hard floor, lock 3 firing on the one genuine registrant, and 19
+  documents firing at once with zero failures on the lane that produced 7 casualties two days
+  earlier. Four prompt-side findings queued; both freeze manifests deploy-locked.
+  *(As-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`.)*
