@@ -232,3 +232,268 @@
   closures are DEPLOYED AND FROZEN** (`verify_evaluator_freeze` ok, 2/2). **ROME SECRETARY is
   ARMED** (name-only fact through the audited door; the S4.5 behavioural self-proof fired on
   live). The A30b receipt table is live and empty.
+
+
+## Posture bullet archived 2026-08-20 late (the Agentic Charter's own posture bullet; its content is now digest laws 71-76 + ADR-0071's body, and ADR-0072 re-trues its scoping)
+
+*(previous posture, 2026-08-18 — the Agentic Charter)*
+
+- **THE AGENTIC CHARTER IS RULED (ADR-0071, 2026-08-18; digest laws 71-76).** The owner's
+  twelve-ruling grilling (structured-question record, plain-language briefing before every
+  ruling) resolved the vision-alignment questions wholesale: **the agent's own judgement is
+  the unattended posting authority** (zero runtime guardrails, permanent — build dissent on
+  file); amounts are custodied by the **LLM witness pair** (same provider, text×vision
+  channels, C1-C4 gates — deterministic DB verdict to the sen, region anchoring, arithmetic
+  identities kept, stamped persisted reads); **the rules machine's execution tier retires**
+  (knowledge layer = the learning loop); close **key ① goes to the agent, keys ②③ stay
+  human**; bank **matching/adjustments go agentic, the red pen stays human**; reporting
+  splits **sandbox-free / formal-side self-approved-to-firm_approved** (canonical + wording
+  governance unchanged); **eval harness DECLINED**; **meter-never-cap**; internet is
+  **two-tier** (official feeds→effective-dated tables + open web reading under three
+  disciplines). Wave F re-scoped to TWO PARALLEL TRACKS —
+  `docs/plan/active/wave-f-contract.md` is the contract of record, and its **F-A10
+  retirement condition** guarantees two architectures never enter Wave G. Supersessions
+  enumerated exactly in the ADR; §6.1 and invariants (a)(b)(c) stand untouched. Deep-scan
+  findings **N1-N6** registered with dispositions (N1→F-A2 · N2/N3→F-A5 · N4→F-A4 ·
+  N5→F-T4 · N6 doc-truth staleness incl. stale `0056:57`/autodraft-header/runtime-README
+  lines — Wave-F fix-queue riders).
+
+## The BEE live-fire refusal, archived 2026-08-20 (moved verbatim from PROGRESS.md's Next item 2; the RULING it records is carried forward in PROGRESS, in ADR-0072 ⑤ and in `docs/plan/active/wave-g-e2e-corpus-design.md` §1)
+
+**The BEE FY2025 live close — DEFERRED ON ACCOUNTING-CORRECTNESS GROUNDS
+(2026-08-16 live-fire sitting, owner-directed "make the right choice"):** the owner's
+desk management accounts (LUXE WEALTH, proprietor-certified, TIN on file) state FY2025
+SALES RM 68,640.00 / net PROFIT RM 47,245.65 / capital B/F (65,747.97), while Clara's
+BEE book holds RM 0 income, an empty opening TB, and ~19 UNCODED ingested filings (the
+year's real receipts — Maxis RM 2,495.40, the entertainment batch, the FA invoice all
+identified against the claim folder). Finalizing would have sealed a knowingly-false
+loss on a REAL client — refused under hard constraint 1. The machinery half of E-R9
+stands PROVEN (30/30 twice on virgin rigs; every live gate read green; the auth→/close→
+/queue chain exercised end-to-end via the owner's own session); **the refusal itself is
+the live-fire's best outcome — five product signals pointed at the incompleteness before
+the desk evidence confirmed it.** The management-accounts figures are the GOLDEN
+STANDARD for the rebuild. **PATH RULED (owner, 2026-08-16): the BEE close and its
+catch-up defer WHOLESALE to the Wave-G reset + full E2E rebuild from raw documents** —
+the golden figures above are that rebuild's acceptance bar (the book must tie to
+RM 68,640 sales / RM 47,245.65 profit before the close seals). No BEE coding sittings
+in Wave F. The Lucy `ca4276a9` RM 500 draft is a VENDOR
+(subcontractor) bill — correctly coded, approval rides the catch-up sitting; the
+readiness lane's "revenue document" label was a misread, corrected here.
+
+*Note added at archiving (2026-08-20): the "empty opening TB" clause above was measured
+WRONG by a live read that night — see PROGRESS's Known issues. The rest stands.*
+
+## Two more posture bullets archived 2026-08-20 late (Wave-E closeout narrative; both wholly historical, moved verbatim)
+
+- **The post-wave tail is CLOSED OUT (2026-08-16 continuation session):** the E-R9
+  close-lifecycle battery is merged (#253, d179e04a — 30 cells, three clean proof-runs incl.
+  one at frontier `0088`; its review round hardened the machine-role census to a
+  catalog-derived whitelist, pinned the ARM-0 predicate by identity, added the
+  `revise_entry` freeze arm and made the B3 gate hard-assert instead of skip); the Wave-G
+  E2E corpus design is merged (#254, 0970062f — 11 owner-decision points + 3 proposals for
+  the sittings); the reconciler belt-isolation fix is merged (#255, 2bd7e12c — the §C
+  open-task-settle starvation gap closed with per-item wraps + assembly-level containment,
+  halt-class errors rethrown by class identity, 19-cell unit battery; **DEPLOYED 2026-08-18
+  as `clara-runtime` release v63** — see the Runtime bullet). The shared checkout is trued
+  to `main` and the codebase graph re-indexed (15,805 nodes). Each PR took an independent
+  fresh-context review + a finding→fix→re-verify round before merge; strict branch
+  protection serialized the merges exactly as the #244 note predicted (`update-branch` +
+  re-green each, never `--admin`).
+- **The δ review record:** cross-model (codex xhigh, initially NOT-MERGEABLE with 6 blockers)
+  + a native 8-dimension adversarially-verified pass → an adjudicated fix docket (fake-receipt
+  validation, in-body `check_function_bodies` double-layer refusal, owner-only RS lift floor,
+  `percent_change` dimension equality, exact-division display rounding, provenance
+  absent-key refusal, login-shell negative loops, pack-v5 consumer pins) → all ten fixes
+  codex re-verified ALL-CONFIRMED on the final bytes → 87/87 zero-skip acceptance on pristine
+  PG17 with source==staged==applied SHA-256 equality.
+
+## Tombstones archived 2026-08-20 (the outgrow law; moved verbatim from PROGRESS.md)
+
+*A 2026-08-20 read-only audit of every Backlog and Known-issues row against the newest
+alignment found five struck-through or RESOLVED lines still sitting in the state file — the
+exact drift the outgrow law exists to prevent. They are honest tombstones, not errors, so they
+are MOVED here rather than deleted. Two further rows were DISCHARGED outright and are recorded
+at the end of this section with the evidence that discharged them.*
+
+**From Backlog → Named build debts:**
+
+- ~~B3 implementation~~ — **RETIRED 2026-08-16**: live as `0085-0086` (ceremonied; the
+  S11.2 roster join discharged in-code, verified by the four-lens review). *(ADR-0068)*
+
+**From Backlog → Wave-D/C carried deferrals:**
+
+**C-c F-1 is CLOSED** — the allocation-date guard was built in `0055` and verified at the live
+apply (ADR-0067); the two RPR historical scars remain documented history.
+
+**From Backlog → Interview v3 residuals:**
+
+- **CLOSED 2026-08-14, verified against source + green runs (67/67 + 4/4):** the optimistic-bubble
+  rollback (bubble id now keys park+phase+submitId, `thread.ts:83-85`; rollback on thrown submit
+  incl. `deliverValue`), the guard follow-ups (ANNOUNCE counted file-wide + closed-set `ask`
+  reachability, `wave-b-interview-park-ordering.test.mjs:283-446`), and the 409 recovery's
+  unbounded fetches (`runtimeFetch` applies `AbortSignal.timeout(15s)` at the single chokepoint,
+  `interviewApi.ts:69-80`). PR #199's ADR-062 (6) record was accurate; the register was stale.
+
+**From Known issues:**
+
+- **Working-tree custody — RESOLVED 2026-08-15/16**; full record in the archive.
+- ~~0057's S0.9 birth self-test cluster-race flake~~ — **RESOLVED 2026-08-15 (PR #241,
+  f90e0fd5)**: the checksum-keyed REPEATABLE-READ isolation pin, measured post-BEGIN; full
+  record moved verbatim to `docs/plan/completed/progress-archive-2026-08.md` (2026-08-18).
+
+**Two rows DISCHARGED outright and removed rather than archived** (each row's own demand was
+met, so keeping it would be carrying a satisfied obligation as pending work):
+
+1. **`0017`'s kind-blind supersede** (Slice-era standing residuals). It demanded an
+   `authoritative_extraction_id` consumer census "before any migration candidate". The census
+   exists and was byte-spot-checked (`docs/plan/active/f-a1-witness-pair-design.md` §3.9 (4),
+   blast radius pinned at `0017:1512`, `:1536`, `:1703`, `:1723` plus its self-assertion
+   battery), and the migration shipped as `0089_f_a1_kind_scoped_supersede.sql`, ceremonied
+   2026-08-19 and live at frontier 92. Both halves of what the row asked for are done.
+2. **Server-side branch protection (plan upgrade)** (Owner/legal). Measured live on PR #244
+   and recorded in PROGRESS's own CI-economics item (6): the required check is `ci` with
+   `strict: true` and `enforce_admins: true`, and `--admin` is correctly refused. Server-side
+   protection is in force; the row predated the plan upgrade that put it there.
+
+## Backlog dispositions applied 2026-08-20 — the REASONING, archived (PROGRESS keeps the one-line disposition and points here)
+
+*The 2026-08-20 audit read all 88 Backlog and Known-issues rows against ADR-0071, the F-A1
+delivery, ADR-0072's rulings and the Wave-G reset. Seven came back STALE, eight DISCHARGED,
+eight ABSORBED. PROGRESS carries each disposition in one line; the argument that earned it is
+here, so the state file stays a state file. **A disposition is not a deletion** — every row
+below is still findable, and any of them can be re-opened by naming it.*
+
+**STALE — superseded; stop carrying as pending.**
+
+1. **The monthly harness-simplification ablation.** ADR-0071/G7 declined the eval harness and
+   says in the ADR's own words that this backlog item "stays blocked on a benchmark that now
+   will not exist". Its recorded prerequisite is unbuildable by ruling, so it is re-recorded
+   as a named consequence of G7 rather than an instrument awaiting a prerequisite.
+2. **X7's five residuals.** Byte-verified: `in_vendor_block`/`is_vendor_name` and the whole
+   identity/anchor family (`invoice-customer-identity.mjs`, `invoice-identity-fold.mjs`,
+   `invoice-block-geometry.mjs`, `invoice-anchor-sweep.mjs`, `invoice-party-grammar.mjs`) are
+   imported by exactly one non-test file — `workflows/invoiceFacts.v1.azure.mjs`, the
+   tombstoned engine. Since `0097` no invoice-kind document enqueues `invoice_facts`, so no
+   new document can reach any of the five. They die with the reader estate at F-A10; residual
+   (5)'s owner acceptance stays on the record as history.
+3. **`in_vendor_block` / `is_vendor_name` "unproven live".** Same superseder, sharper: these
+   two walls can now never be proven live, because the lane that would ask them is retired.
+   Closed as **retired unproven** — not carried as an open proof obligation.
+4. **The parked sandbox floor 6/6/6/85 + the pre-generated headroom PDF.** 6/6/6/85 is
+   `_ocr_sales_floor`'s autopost floor (ADR-0064 §1) — pure rules-machine execution tier — and
+   ADR-0071 retires §4.95's nine-control OCR-sales envelope with the rule lane. Headroom for a
+   floor that retires buys nothing; `SYNTHETIC-TEST-MY-INV-0023.pdf` becomes an ordinary
+   unused fixture.
+5. **Slice-4's "firm-local-time budgets".** ADR-0071/G8 narrows PRD §8's budgets clause to
+   metering-only — PRD §8 now reads "per-firm usage METERING (visible monthly spend, never a
+   cap that pauses automation)" — and `0097` already removed the invoice path from page-budget
+   reservation entirely (meter-never-cap). What survives is the engine-protective concurrency
+   floor, which is not a firm-local-time budget.
+6. **`roadmap.md` Phase-5 item 6's "a real gate".** Directly contradicted ADR-0071/G7. Fixed
+   in the file 2026-08-20.
+7. **`wave-g-e2e-corpus-design.md` §5 step 4's "standing rules earn autopost after the third
+   approval".** Contradicted digest law 73, and it sat in the run script the corpus would
+   actually be executed from. Fixed in the file 2026-08-20.
+
+**ABSORBED — folded into a named item, recorded so it is not re-derived.**
+
+- **FA carry-down's first real firing** and **one real reducing-balance asset** → the Wave-G
+  corpus §6, which puts both on the bank-volume slot: assets exist at FY1 opening, closing NBV
+  rolls to FY2 opening, "a reducing-balance asset among them".
+- **Slice-4's per-part-type field schemas → the fail-closed card catalog** → **Wave G**'s
+  design floors (`docs/design/` populates there).
+- **Slice-4's billing-grade metering** → **F-A9** (per-call usage rows + a monthly per-firm
+  rollup, visible, no cap — that is this item).
+- **Slice-6/Wave-A's task-per-ingest coding** → **F-A2**, which inverts its premise exactly:
+  S6-R10's "coding is chat-first, human-initiated" becomes one unattended coder reading every
+  ingested document. The durable-task shape is F-A2's design call.
+- **Slice-6/Wave-A's proactive notification-inbox surface** → **Wave G** (WA-R6 already
+  subsumed AB-5 into the one-queue interim; the roadmap's Wave-G first line is the real one).
+- **Slice-6/Wave-A's agent-visible attribution candidates** → **F-A7a**, whose
+  `wake_file_document` gives the agent the filing judgement on the ≥0.95 attribution wall —
+  it cannot exist while candidate visibility is withheld.
+- **E-R13's settlement-corroboration door** → **F-A3**, and **claims (E-R10)** → **F-T4**,
+  both already carried explicitly by the Wave-F contract.
+
+**RE-HOMED — the item stands; only its address changed.**
+
+- **The system-prompt investment pass** → **F-A2** (law 71 makes the agent's judgement the
+  posting authority, so prompt quality stops being polish; G7 removed the instrument that
+  would have caught its absence).
+- **The 401/403 retryable auth-code split** → **the F-T4 fix queue.** Its recorded "(Wave F)"
+  home never existed: `wave-f-contract.md` names it in neither track nor its deferred list.
+  It is not stale — the OCR vendor stays Azure post-cutover, and it is one of only two honest
+  remedies for Gate P's seven stuck documents.
+- **All three interview v3 residuals** → **F-A7b**, which re-fronts the interview with a model
+  normalizer while KEEPING the segment schema and the validate→echo→persist walk, so the
+  park/submit contract survives and the gaps survive with it. The e2e de-pin's own text calls
+  it "a dated tripwire… stale at the next core bump" — F-A7b *is* that bump, and taken at the
+  wrong moment it is a red CI leg on someone else's PR.
+- **The ceremony DSN bridge, the wiki CoR-comment gate, `0057` §11's writer-roster successor,
+  and `0007`'s firm-limits upsert** → **the F-A2 / F-T4 fix queues** (see PROGRESS for which).
+
+**Three audit observations that are not backlog rows, kept because they explain the counts.**
+
+- **The honest row count is 88 against roughly 40 visible bullets** — the reconciler
+  follow-ups (3), the δ named residuals (6), the Slice-4 residuals (7), the Slice-6/Wave-A
+  residuals (3) and the F6-F9 register (8+) each read as ONE line and are 3-8 items.
+- **WB-R2 is moot but has live code riders** the retirement PR must census: three cells in
+  `packages/db/tests/wave-b/wb-s-seeding.test.mjs`, `packages/db/tests/x42-producer.test.mjs`
+  and a load-bearing comment in `packages/runtime/lib/prior-gl-cells.mjs`. Closed-world census
+  inputs — extend-never-weaken, per the F-A1 lesson.
+- **Two of the ruler clauses the audit judged against existed only in-session** when it ran
+  (the delete-the-old-era directive and R1's ruling). Both are now repo bytes: ADR-0072.
+
+## Session-log entries archived 2026-08-20 (the outgrow law; moved verbatim from PROGRESS.md)
+
+*The F-A1 build nights, 2026-08-18 and 2026-08-19. Moved once F-A1 was DELIVERED and its
+acceptance records existed in their own files, which are the operative record now. Extends
+this file's "Session log (entries through 2026-08-16)" section by the same law that created it.*
+
+- **2026-08-18 (the Agentic Charter session)** — ADR-0071 minted (twelve rulings,
+  laws 71-76); full entry in the archive.
+- **2026-08-18 (evening, 开工)** — #255 → v63; the F-A1 design driven v1→v3 (48
+  findings, two lanes MERGEABLE); moved verbatim to the archive at the ceremony sweep.
+- **2026-08-18 (night, the F-A1 rulings + build kickoff)** — owner ruled in-session (design
+  doc §5): OQ-1 **OpenAI-direct** (Azure declined) · OQ-2 **witness_extraction RATIFIED**
+  (WB-R23) · cutover **DIRECT RELEASE** (the DPA-first recommendation filed as dissent;
+  DPA → Owner/legal, non-blocking) · PR-0 **re-shaped to a third native adversarial lane**
+  (Codex re-enters at future builds). The 0017 consumer census ran + was byte-spot-checked
+  (kind-scoping breaks no production consumer; the INSERT surface provably centralized).
+  The PR-0-native lane RAN (opus, fresh context): MERGEABLE-WITH-CONDITIONS — 3 blockers +
+  15 material + 5 nits, ALL adjudicated at the bytes and folded (B3's disposition AMENDED
+  to the polarity-free self-referential withdrawal — the review's own document_kind fix
+  was unsound); design → v3.1 + the new `f-a1-annexes.md` (estate survey / adjudication
+  register / battery sketch — the 500-line split). The 0017 builder lane (killed mid-run
+  by the usage limit) RESUMED post-reset with the M3/M4/M5 addendum. S0.9's resolved
+  record archived per the outgrow law. Docs-only PR: this truing + the v3.1 fold set.
+- **2026-08-18 (late night, PR-1 build + assembly)** — four builder lanes delivered PR-1's
+  DB estate (0089-0095), each rig-green on its own throwaway postgres:17; the 0089 pre-fix
+  census proved the cross-kind supersede defect LIVE (16/17 OCR rows) and 0/17 post-fix;
+  the filing-client join resolved FAIL-CLOSED via `document_filings` (design silence,
+  §3.3); the writer lane's TRUE-merged-chain rig caught the one cross-lane defect
+  (fixtures probing pre-rename constraint names), fixed at assembly; annex B carries the
+  full record. Two Known-issues registered (limits-upsert hazard; statement-pair coin
+  flip). Owner ruling same evening: review lanes NEVER wait for Codex.
+- **2026-08-18 (deep night, the verify+review→fix round)** — integration verify: F-A1
+  itself fully green, 36 suite reds ALL one class (closed-world censuses lawfully
+  outgrown — extended with named rosters, never weakened; incl. CI's own δ-contract
+  drill leg). The opus fresh-context review (law 1): NOT-MERGEABLE → 2 blockers
+  (B1 C2-overreach onto the two token belts — would have zeroed corroboration on every
+  RM-printed invoice, caught PRE-FREEZE; B2 the queued→failed trigger arm → wall 13) +
+  7 material (customer_taxid restored; contest validated write-side + raise-proof
+  fail-closed read; the M3 reference-value contract for the cross-regime duplicate
+  walls; token-bounded citation matching; the witness_citation_regions numbering door;
+  magnitude guards; the identity leaf renamed into the lint's discovery surface) +
+  6 nits — all adjudicated (one review disposition AMENDED, one residual RULED),
+  fixed on f-a1/pr1-fixes and re-proven; design/annex/PROGRESS trued. Next:
+  fix-diff re-review → PR.
+- **2026-08-19 (~03:30 MYT, the PR-1 merge + ceremony)** — PR #263 merged (d8abf19;
+  CI took 3 rounds — the dashboard seam ledger and a runtime pre-0089-era cell were
+  the 4th/5th closed-world catches, both extended/trued). The D1 ceremony ran (fourth
+  execution; as-run: `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): backup banked
+  → sleeper DSN bridge (reconstructed — dsn-pipe was session-local and GONE) → stop +
+  110s staleness → 7/7 applied with live prestate evidence → 28/28 positive reads →
+  deploy flip 2→4 → NOTIFY → `/ready` 200 → `--lock-deployed` (manifest in this PR).
+  Deviation recorded: `sslmode=no-verify` (CA-unpinned TLS) — the pinned-CA tooling
+  gap registered under Tooling follow-ups.

@@ -1,15 +1,17 @@
-# Wave G — the factory-reset E2E corpus: a design for the owner's sitting
+# Wave G — the factory-reset E2E corpus: the design, and the sitting's rulings
 
-> **A DESIGN FOR A SITTING, NOT A DECREE.** Every client identity, every golden figure and
-> every custody decision on this page belongs to the owner's desk; those are marked **OD-n**.
-> Everything the build proposes is marked **P-n** and carries one recommendation. **No number
-> on this page is invented** — the only figures quoted are ones already recorded in this repo,
-> each with its cite. The acceptance bar for each client comes from the owner, never from here
-> (`docs/product/PRD.md` §6.1: the DB owns every authoritative number; no model-generated
-> numeral enters a durable artifact unless a versioned deterministic evaluator reproduces it
-> from DB-owned inputs).
+> **THE SITTING HAPPENED — 2026-08-20, ADR-0072 ⑤. This file is the corpus's CONTRACT OF
+> RECORD** for what was ruled: the **two-tier reshape** (§3.0), **all eleven OD points** (§10),
+> and **§5's step-4 amendment**. It was authored 2026-08-16 as a design *for* that sitting, and
+> its unruled analysis still reads as a design — where the two differ, **§3.0 and §10 govern**,
+> and superseded prose is marked in place rather than deleted so the reasoning survives.
 >
-> Authored 2026-08-16 against `origin/main` @ `081cfdc` (83 migrations live, frontier `0088`).
+> **No number on this page is invented.** Figures are either recorded in this repo with a cite,
+> or transcribed from the printed face of an owner-supplied document (those live in the
+> companion, `wave-g-corpus-oracle-assessment.md`). **The acceptance bar for each client comes
+> from the owner, never from here** (`docs/product/PRD.md` §6.1: the DB owns every authoritative
+> number; no model-generated numeral enters a durable artifact unless a versioned deterministic
+> evaluator reproduces it from DB-owned inputs).
 
 ## 1. Purpose, and the ruling this implements
 
@@ -22,11 +24,12 @@ discharge."* On **2026-08-16** the owner ruled two things that turn that line in
    constraint 1; the owner's desk management accounts are the rebuild's acceptance bar —
    **FY2025 SALES RM 68,640.00 · net PROFIT RM 47,245.65 · capital B/F (65,747.97)**. The book
    must tie to those before its close seals.
-2. **The reset+E2E is WHOLE-PRODUCT, and BEE alone is too thin.** BEE carries no TB/GL
-   handover of the kind that exercises the brown-field path end to end. The corpus therefore
-   grows by **3–4 additional real clients at ROME PROPERTIES rigor**, each with a full
-   TB/GL/BS/P&L handover as its golden standard, **two consecutive FY closes each**, split
-   between green-field and brown-field onboarding.
+2. **The reset+E2E is WHOLE-PRODUCT, and BEE alone is too thin.** The corpus therefore grows by
+   additional real clients at ROME PROPERTIES rigor, split between green-field and brown-field
+   onboarding. *(Superseded in shape by §3.0: the "3–4 additional clients, each with a full
+   TB/GL/BS/P&L handover and **two consecutive FY closes**" formulation did not survive contact
+   with the papers — two consecutive complete FYs exist for exactly one client. The **intent**
+   — whole-product, more than BEE, at RPR rigor — stands and is what the two tiers deliver.)*
 
 This document designs that corpus. It **extends** E-R9's acceptance-corpus map
 (`docs/plan/active/wave-e-contract.md` §E-R9) rather than replacing it — that table is a
@@ -34,11 +37,11 @@ closed-wave record, cite-only. BEE's E-R9 row ("first REAL close") is unchanged 
 and simply now runs *inside* the reset. RPR's historical MPERS pack and RS's snapshot witness
 stay exactly where E-R9 put them.
 
-**Why two consecutive FYs per client is the load-bearing choice.** One close proves a close.
-Two consecutive closes are the only shape that exercises the four things Wave E built and has
-never run: B3's reopen segregation (`0085`/`0086`), cross-year carry-down (FA continuity and
-the retained-earnings roll), the `0057` period-snapshot sequence across a year boundary, and
-a per-FY statutory pack whose FY2 comparatives come from FY1's sealed receipt.
+**Why two consecutive FYs matter.** One close proves a close. Two consecutive closes are the
+only shape that exercises four things Wave E built and has never run: B3's reopen segregation
+(`0085`/`0086`), cross-year carry-down (FA continuity + the retained-earnings roll), the `0057`
+snapshot sequence across a year boundary, and a pack whose FY2 comparatives come from FY1's
+sealed receipt. **BEE carries all four** — it is the only slot that can (§3.0).
 
 ## 2. Product-scope honesty — say this first at the sitting
 
@@ -63,15 +66,47 @@ repo (hard constraint 13's four-firms law: BELCORT is the real firm — ROME PRO
 SECRETARY · BEE CREATIVE SOLUTION; ROME PUBLIC ADVISORY is the synthetic sandbox; Alara and
 Borneo are slice-era RLS fixtures; none is ever repurposed).
 
-> **OD-1 (OWNER DECISION) — which real clients fill the slots.** The identities, and the
-> confirmation that each holds two consecutive FYs of *complete* papers. **Reading the build
-> takes unless told otherwise:** new real clients are inducted under **BELCORT**, because
-> putting real books in ROME PUBLIC ADVISORY would repurpose the synthetic sandbox and break
-> constraint 13. Confirm.
+> **OD-1 — RULED 2026-08-20 (ADR-0072 ⑤), and the whole section is RESHAPED with it.**
+> See **§3.0 below**: the corpus is **two tiers**, the oracle tier is **BEE + ROME SECRETARY +
+> ROME PROPERTIES**, and the two-consecutive-FYs requirement **does not survive contact with
+> the papers**. The slot table below is kept as the design's original diversity reasoning —
+> **it is superseded on identities and FY pairs, and stands on axes and volume shapes.**
+> All inductions are under **BELCORT**, as the build's reading took.
+
+## 3.0 THE TWO-TIER RESHAPE (ruled 2026-08-20, ADR-0072 ⑤)
+
+**The single-tier premise failed on the evidence, and the sitting ruled the shape rather than
+the wish.** A read-only assessment of the owner's three designated folders found that **two
+consecutive FYs of complete papers exist for exactly ONE client**, and that the other two are
+**terminal-period books for companies in strike-off** — their own general ledgers carry the
+strike-off fees, and both companies' bank accounts are deliberately run down to `0.00`. Neither
+can ever supply a second consecutive FY. Requiring one would be requiring a period that will
+not exist.
+
+| Tier | What it is | Who is in it | What it must satisfy |
+|---|---|---|---|
+| **ORACLE** | the acceptance bar — books that must tie, to the sen, against the owner's own documents | **BEE** (two FYs) · **ROME SECRETARY** (one terminal period) · **ROME PROPERTIES** (one terminal period) | §4's seven-item package, per client per period. Gaps are named in §3.1 and **the run cannot start without them** |
+| **REALITY** | **open intake** — real papers that exercise the product without carrying an acceptance figure | open; the owner adds slots as papers arrive | nothing. A slot may prove a MECHANISM without being an oracle |
+
+**Why the second tier exists at all, said plainly:** without it, a rich fixture gets
+manufactured into a thin oracle to satisfy a table, and the acceptance number stops meaning
+anything. Naming the two roles separately is what stops that.
+
+**Consequences of the reshape, each ruled:**
+
+- **RS and RPR are SINGLE-FY, P&L-anchored oracles.** Their balance sheets are degenerate by
+  construction (both print only share capital and this-year loss, no assets and no liabilities,
+  because the companies are being wound down), so the P&L and the GL carry the tie-out and the
+  SOFP does not.
+- **A NEW TEST CLASS enters the corpus: the strike-off / terminal period** (§8, EC-14). It is
+  not a defect in the papers — it is a *different* test point from an ongoing close, and the
+  product will meet it again.
+- **RPR is an EXCELLENT payroll and volume fixture and a POOR acceptance oracle**, and the two
+  judgements are recorded separately rather than averaged.
 
 | Slot | Entity | Onboarding path | FY pair | Primary diversity axis | Volume shape |
 |---|---|---|---|---|---|
-| **BEE** (inducted) | sole prop | **brown-field** — an opening seed already exists (ADR-043) | FY2025 + FY2026 | negative-equity sole prop; the recorded golden bar | low doc count, high per-doc stakes |
+| **BEE** (inducted) | sole prop | **brown-field** — an opening seed exists (ADR-043, live-confirmed 2026-08-20) | **FY2024 + FY2025** *(CORRECTED 2026-08-20: the papers' own faces read "year ended 31 December 2024" and "…2025". The earlier FY2025+FY2026 pairing named a year with no papers.)* | negative-equity sole prop; the recorded golden bar | low doc count, high per-doc stakes |
 | **CLIENT-SST-1** | Sdn Bhd | **brown-field** — opening TB + GL handover | two consecutive, both beginning < 2027-01-01 | **SST-registered** (service tax) | medium |
 | **CLIENT-PAY-1** | Sdn Bhd | **green-field** — interview → books | two consecutive | **payroll-heavy** (document→JV flow) | medium-high, monthly cadence |
 | **CLIENT-BANK-1** | Sdn Bhd or sole prop | **brown-field** — opening TB **carrying fixed assets** | two consecutive | **bank volume** (reconciliation) | **high** statement-line count |
@@ -88,21 +123,20 @@ Borneo are slice-era RLS fixtures; none is ever repurposed).
 
 > **P-1 (PROPOSAL) — put the fixed assets on the bank-volume slot, not a fifth client.**
 > `PROGRESS.md` carries a standing deferral: *FA carry-down's first real firing needs a client
-> with assets at opening.* Requiring CLIENT-BANK-1's opening TB to carry a depreciable
-> register discharges that debt inside an existing slot instead of adding a client.
-> **Recommendation: adopt.** If no candidate has both, split it: assets go to CLIENT-SST-1.
+> with assets at opening.* Requiring that slot's opening TB to carry a depreciable register
+> discharges the debt inside an existing slot. **Recommendation: adopt.** *(BEE also satisfies
+> it — its FY2025 `OFFICE EQUIPMENT 5,092.70` would carry down into a later year.)*
 
-> **P-2 (PROPOSAL) — four additional clients, not three.** Three covers the three named axes
-> with zero redundancy: one client that turns out to have incomplete papers collapses an axis
-> mid-run. **Recommendation: induct four, run three to completion first, hold CLIENT-SP-2 as
-> the relief slot** — it is also the only slot that exercises mid-year commencement.
+> **P-2 (PROPOSAL) — carry redundancy, not exactly-enough.** A slot that turns out to have
+> incomplete papers collapses an axis mid-run. **Recommendation: hold a relief slot.** *(The
+> risk this priced is exactly what materialised — see §3.0; the reality tier is the answer.)*
 
-> **OD-2 (OWNER DECISION) — a goods trader, yes or no.** A goods-trading slot would discharge
-> two named debts at once (WD-R11's real closing-stock acceptance, and Gate P's first native
-> SST-stated supplier bill). It carries a **hard build dependency**: the `closing_stock`
-> producer verb does not exist (`PROGRESS.md` → Backlog, PR #228 residual 5), and drawer 2's
-> `closing_stock_present` gate applies to `goods_trading` clients. **Recommendation: not in
-> the first pass** — build the verb in Wave F's fix queue, add the slot after.
+> **OD-2 — DEFAULTED 2026-08-20 to the recommendation** (ADR-0072 ⑤; the owner may re-open).
+> A goods-trading slot would discharge two named debts at once (WD-R11's real closing-stock
+> acceptance, and Gate P's first native SST-stated supplier bill), but it carries a **hard build
+> dependency**: the `closing_stock` producer verb does not exist, and drawer 2's
+> `closing_stock_present` gate applies to `goods_trading` clients. **NOT in the first pass** —
+> build the verb in a fix queue, add the slot after.
 
 ## 4. The golden-standard package — what the owner hands over
 
@@ -127,17 +161,54 @@ sen, with each remaining difference named as a specific missing document
 > numbers the book must tie to before its close seals. **Only BEE's are recorded today**
 > (FY2025 sales RM 68,640.00 / profit RM 47,245.65 / capital B/F (65,747.97) — `PROGRESS.md`).
 > Every other slot's bar arrives with items 1–4 above. The build never proposes one.
+> **STILL OPEN after the 2026-08-20 sitting**, for every slot but BEE.
 
-> **OD-4 (OWNER DECISION) — document custody and PDPA for real client papers.** Item 6 puts
-> real client documents through OCR, storage and the agent's context. Three sub-questions,
-> each already half-answered elsewhere: (a) the **C6 checklist** (DPA · firm-facing disclosure
-> text · PDPA cross-border basis) is OPEN and owner/legal-owned — vendor trace export stays
-> flagged OFF under PRD §6.16 until it is evidenced, so tracing must remain off for the whole
-> corpus run; (b) whether the corpus documents are the client's originals or owner-authorized
-> copies, and where they are retained after the run; (c) whether any slot's papers carry
-> personal data (payroll almost certainly does — CLIENT-PAY-1's payslips) needing a narrower
-> handling rule. **Recommendation: run with tracing OFF (no change needed — it already is),
-> and treat CLIENT-PAY-1's payroll papers as the tightest-custody slot.**
+### 4.1 The oracle verdicts, the gaps, and the fixture sets — **`wave-g-corpus-oracle-assessment.md`**
+
+**A read-only assessment of the owner's three designated folders (2026-08-20) is the companion
+file of record**, split out under the 500-line limit. It holds the per-client verdicts against
+this section's seven-item package, **the named gaps that must close before an acceptance run
+can start**, the corpus exclusions and fixture sets, the classes that will exercise OCR hardest,
+and the personal-data inventory behind OD-4. Every figure in it was transcribed from a printed
+face; none was computed or inferred.
+
+**The four things this section needs a reader to carry away without opening it:**
+
+- **The verdicts.** BEE **ACCEPTABLE-WITH-GAPS** and the strongest of the three · ROME SECRETARY
+  **ACCEPTABLE-WITH-GAPS, one period only** · ROME PROPERTIES **INSUFFICIENT as an oracle**,
+  though the best payroll and volume fixture in the corpus.
+- **The blocking gaps.** BEE has **no GL and no TB for either FY**; RPR is missing **Feb and
+  Mar 2025** bank statements and has **no accounts at a period end**; **neither RS nor RPR names
+  a producer or certifier**, which evidence law 3 makes the gap that most directly blocks oracle
+  status. None of these is closed by this document.
+- **BEE's bar is CONFIRMED against the client's own papers**, and its bank statements tie to
+  both balance sheets **to the sen** across the FY boundary — the strongest independent
+  corroboration anywhere in the three folders.
+- **RS and RPR are genuinely GREENFIELD** — every GL account opens at a printed `0.00`, so no
+  opening seed is required and item 7 does not apply to them.
+
+<a id="rpa-collision"></a>
+
+> **The RPA NAME COLLISION — raised, and DISSOLVED by ADR-0072 ⑤.** `ROME PUBLIC ADVISORY
+> SDN BHD` is a **real entity in these papers**: it certifies BEE's FY2024 accounts and is a
+> supplier in both other clients' books (16 accounting-fee invoices across RS and RPR). In the
+> repo, hard constraint 13 designates ROME PUBLIC ADVISORY as the **synthetic sandbox tenant**.
+> The names are identical — a "spelling is not identity" trap sitting directly on a hard
+> constraint. **It dissolves rather than needing a rule to police it:** ADR-0072 ⑤ ruled the
+> factory reset a whole clean database with **the sandbox firm NOT re-created**, so after the
+> reset the name in this product refers to the real entity and nothing else. Constraint 13's
+> four-firms law is unchanged; its sandbox row is emptied, never repurposed.
+
+> **OD-4 — RULED 2026-08-20 (ADR-0072 ⑤): FULL PERMISSION**, with two carve-outs that are part
+> of the ruling rather than conditions on it — **the IC copy is EXCLUDED from ingestion
+> entirely** (a pure identity document with no accounting content: excluding it costs nothing
+> and removes the single highest-sensitivity item), and **the payroll tree is the
+> tightest-custody slot**. (a) The **C6 checklist** (DPA · firm-facing disclosure text · PDPA
+> cross-border basis) stays OPEN and owner/legal-owned, so **vendor tracing stays OFF for the
+> whole run** under PRD §6.16 — no change needed, it already is. (c) The personal-data reality
+> is **broader than the one IC image the design anticipated**: identity fields sit in the
+> machine-readable text layer of ~32 documents. The inventory, by class and location only, is in
+> `wave-g-corpus-oracle-assessment.md` §5.
 
 > **Constraint 12 rides along, unchanged:** ROME SECRETARY's customers stay **NAME-ONLY**. The
 > wall is structural (`0062`) and lifting it is an OWNER act through the audited door
@@ -157,9 +228,11 @@ changed, synced, skipped or blocked** (the Phase-5 discipline, `docs/plan/active
                    _assert_opening_tie must TIE to the owner's opening TB, to the sen
  3  INGEST FY1     upload every FY1 document -> classify (>=0.8 writes kind, else a human
                    question) -> FILE to the client -> extract. Bank statements load here.
- 4  CODE FY1       agent drafts (chat + autoDraft); human approves. Standing rules earn
-                   autopost after the third approval. Bank: match -> reconcile -> except.
-                   Payroll documents become JVs through the document flow, not an engine.
+ 4  CODE FY1       the agent READS, DECIDES and POSTS on her own judgement (F-A2); what
+                   cannot lawfully post lands as a draft or a typed open question, and a
+                   human approves those. NO standing rules, no third-approval ramp.
+                   Bank: match -> reconcile -> except. Payroll documents become JVs
+                   through the document flow, not an engine.
  5  SNAPSHOTS      mint_month_snapshot for each completed month, in order; watch the
                    staleness label move when a later post lands in a snapshotted month
  6  CLOSE FY1      open_fiscal_year -> begin_close -> get_close_plan (3 drawers)
@@ -175,47 +248,53 @@ changed, synced, skipped or blocked** (the Phase-5 discipline, `docs/plan/active
 11  TIE-OUT        by account, ACROSS ALL DATES, against the owner's TB/GL/BS/P&L per FY
 ```
 
+> **STEP-4 AMENDMENT (2026-08-20, ADR-0072; the G1 alignment ADR-0071 flagged).** Step 4 used
+> to read *"Standing rules earn autopost after the third approval."* **That wording is dead.**
+> Digest law 71 makes the agent's own judgement the unattended posting authority, and law 73
+> retires the rules machine's execution tier — so there is no rule to earn anything, and the
+> third-approval ramp is exactly the "ramp" ADR-0071/G1.3 refused. The corpus run must exercise
+> **F-A2's agent judgement**, gated by the witness pair and the rung ladder, not a rules engine
+> that will not exist by the time this script runs. The amendment matters more than a wording
+> nit: this is the script the corpus is actually executed from, so a stale line here would have
+> been executed rather than merely read.
+
 **The reopen drill (step 10), on one client:** reopen FY1 after FY2 is open. Prove the
 `ends_on`-dated formal prior-period adjustment (ADR-068 ruling 1, live since the B3 ceremony
 — `docs/plan/completed/b3-reopen-ceremony-asrun.md`), the segregation determination on the
 receipt, the re-close, and — the part only a two-FY corpus can prove — that **FY2's opening is
 re-derived from the corrected FY1 receipt and not double-counted**.
 
-> **OD-5 (OWNER DECISION) — which client carries the reopen drill, and a hazard that must be
-> settled with it.** B3's wall requires **reopener ≠ closer where ≥2 principals are eligible**;
-> where only one is eligible it takes a recorded-attestation path. ADR-043 records that
-> **BELCORT has exactly one eligible approver** (that is why the first BEE approval was refused
-> `CLR05 · SELF_ATTESTATION` and released only by a typed attestation). **If that is still
-> true at the sitting, the drill exercises the sole-attested arm and leaves `distinct_checker`
-> — the primary arm — unexercised.** **Recommendation: provision a second eligible principal
-> before the drill**, so both arms fire; otherwise record explicitly that the primary arm ships
-> unexercised on real books.
+> **OD-5 — RULED 2026-08-20 (ADR-0072 ⑤): NO second principal is provisioned.** B3's wall
+> requires **reopener ≠ closer where ≥2 principals are eligible**; with one eligible approver it
+> takes the recorded-attestation path (which is why BELCORT's first BEE approval was refused
+> `CLR05 · SELF_ATTESTATION` and released only by a typed attestation). *The build recommended
+> provisioning a second principal so both arms fire; **DECLINED**.* **The solo-attestation arm
+> IS the product path** for a one-approver firm, so exercising it on real books is the honest
+> test rather than a workaround. **The cost is accepted and recorded, never hidden: B3's
+> `distinct_checker` primary arm stays rig-proven only and ships UNEXERCISED on real books**,
+> named by that word in the acceptance record under §7.4's own rule. WB-R22's scoped
+> review-attestation capability is now the only route by which it ever gets exercised.
 
-> **OD-6 (OWNER DECISION) — the reset's blast radius.** What survives the factory reset:
-> ROME SECRETARY's book (TB pinned at **3,396,500 = 3,396,500**, re-read at every ceremony) ·
-> ROME PROPERTIES' 29 approved entries · BEE's existing keyed opening seed · the sandbox firm ·
-> the fixtures. ADR-060's data authority is DATA-scoped and expires at beta (hard constraint
-> 14), so this is squarely the owner's call, not the build's. **One consequence worth pricing:**
-> the opening-seed registry is one-shot per client (`uq_opening_seed_registry_once`) and both
-> real clients' slots are spent — a reset frees them, which is the **only** way the
-> document-tied carry-down (the K-doc door) can ever be proven on a real client. **This whole
-> survivor list is conditional on OD-10, immediately below** — it describes what a reset
-> spares only if the sitting rules the corpus runs on the live project at all.
-
-> **OD-10 (OWNER DECISION) — does the corpus run on the live project post-reset, or on a
-> separate project?** This is genuinely two-sided, not a formality. **For the live project:**
-> the reset *is* the discharge Wave G exists to prove — running the corpus in the same project
-> the frozen bytes currently occupy is the only way a reset actually retires them, and
-> `docs/ops/DR.md`'s backup/restore discipline already covers the downside; OD-6's survivor
-> list is the concrete shape of what that costs. **For a separate project:** it is the safer
-> sandbox — nothing about ROME SECRETARY's pinned TB, ROME PROPERTIES' 29 approved entries or
-> BEE's keyed opening seed is put at risk by a corpus run gone wrong — but it discharges
-> nothing: the stuck-bytes claim stays exactly as untested as it is today, and the corpus
-> proves the product without ever proving the reset. The live-project path also has no undo
-> once run: OD-6's survivor list executes against real books, and a mistake there is not a
-> sandbox mistake. **Recommendation: live project** — discharging the stuck-bytes claim is the
-> point of Wave G, not a side effect — **but the sitting should rule this with the
-> irreversibility priced in, not assumed away.**
+> **OD-6 — the reset's blast radius.
+> RULED TOGETHER WITH OD-10, 2026-08-20 (ADR-0072 ⑤): a WHOLE CLEAN PRODUCT DATABASE, ON THE
+> LIVE PROJECT.** The reset is **not** a scoped deletion with a survivor list — it is a **"new
+> unboxed product"**. **Nothing on the old survivor list is preserved:** not ROME SECRETARY's
+> book, not ROME PROPERTIES' approved entries, not BEE's existing keyed opening seed, **and not
+> the synthetic sandbox firm or the slice-era fixtures, which are NOT re-created after the
+> reset.** The one carve-out is hard constraint 15's: **the spike schemas survive the reset
+> until their own DROP** (ADR-0072 ①.4, after a cold archive is taken first).
+>
+> **Why the live project, with the cost stated rather than assumed away:** the reset *is* the
+> discharge Wave G exists to prove — running the corpus anywhere else proves the product while
+> never proving the reset, leaving the stuck-bytes claim exactly as untested as today. **There
+> is no undo.** The ruling was taken with that priced in; `docs/ops/DR.md`'s backup discipline
+> is the standing mitigation and a full backup precedes the reset.
+>
+> **Two consequences worth carrying.** The opening-seed registry is one-shot per client
+> (`uq_opening_seed_registry_once`) and both real clients' slots are spent — **a reset frees
+> them**, the only way a document-tied carry-down could ever be proven on a real client. And
+> **the RPA name collision dissolves** (§4.1's note): with the sandbox firm not re-created, the
+> name returns to the real entity it denotes in the client papers.
 
 ## 6. What each slot uniquely proves
 
@@ -224,7 +303,9 @@ have failed it.**
 
 | Mechanism (and where it lives) | Slot that proves it | The proof |
 |---|---|---|
-| **B3 reopen segregation** (`0085`/`0086`) | the OD-5 designate | both arms fire, or the unexercised arm is named |
+| **B3 reopen segregation** (`0085`/`0086`) | the OD-5 designate | **the sole-attested arm fires; `distinct_checker` is NAMED unexercised** (OD-5 ruled no second principal) |
+| **Greenfield induction from documented zero** *(2026-08-20)* | **ROME SECRETARY** | 13/13 GL accounts open at a printed `0.00`; a real first period with a GL-verified document set |
+| **The strike-off / terminal period** (EC-14) *(2026-08-20)* | **RS + RPR** | a nil balance sheet recorded as measured-and-nil, never as unmeasured; the tie-out anchors on the P&L and GL |
 | **FA carry-down / continuity roll** (WD-R14's standing deferral) | CLIENT-BANK-1 (per P-1) | assets exist at FY1 opening; closing NBV rolls to FY2 opening; a reducing-balance asset among them |
 | **RE roll + the close's P&L transfer** | every slot | FY2 opening equity reproduces FY1's profit figure from the owner's P&L |
 | **`0057` period-snapshot sequence** | CLIENT-PAY-1 (monthly cadence) | 24 months minted in order across an FY boundary; staleness fires on a late post |
@@ -236,22 +317,22 @@ have failed it.**
 | **Green-field interview → books** | CLIENT-PAY-1, CLIENT-SP-2 | a book that never had an opening seed closes correctly |
 | **The render/seal round-trip + the DR re-render drill** | the first slot to reach step 7 | closes the boundary `docs/ops/DR-render.md` keeps explicit: no sealed artifact exists yet, so the drill has never run |
 
-> **OD-7 (OWNER DECISION) — does the `closing_transfer`/SST fix gate the SST slot?** The
-> registered latent (`PROGRESS.md` → Backlog, task #17): `finalize_close`'s closing entry is
-> born `is_year_end` with `closing_transfer=false`, and approved-row immutability means it can
-> never be marked afterwards — so `0016`'s SST turnover exclusion is dead for close-model
-> clients and post-close rolling-12 turnover reads wrong. Blast radius is advisory-only (a
-> wrong warning, never a wrong book). **Recommendation: land the fix before CLIENT-SST-1's
-> FY1 close.** Running the SST slot on the known-broken predicate would produce a corpus
-> result nobody can interpret.
+> **OD-7 — DISCHARGED 2026-08-20 by ADR-0072 ④.** The registered latent (task #17):
+> `finalize_close`'s closing entry is born `is_year_end` with `closing_transfer=false`, and
+> approved-row immutability means it can never be marked afterwards — so `0016`'s SST turnover
+> exclusion is dead for close-model clients. Blast radius is advisory-only (a missing warning,
+> never a wrong book). **R1 is now ruled — a closing transfer is not turnover — so Fix A is
+> queued in Track B and task #17 is unblocked.** The gate the question asked about no longer has
+> a pending half. Running an SST slot on the known-broken predicate would still produce a corpus
+> result nobody can interpret, so the fix lands before any such slot's FY1 close.
 
-> **OD-9 (OWNER DECISION) — which locale(s) each corpus pack issues in.** `mpers_company`
-> revision 1 ships **en** and **zh** at full 5/5 wording coverage (the #43 ceremony); **ms**
-> sits at **4/5** — one clause short, gated closed by design. A corpus that only ever issues
-> **en** proves nothing about the claim gate's fail-closed path; issuing **ms** once, knowing
-> it must refuse, is the cheapest negative control in the whole run (§7.4). **Recommendation:
-> en for every pack; zh on at least one slot; ms attempted exactly once, on a slot the owner
-> names, and it must REFUSE — a PASS there is the finding, not the wording.**
+> **OD-9 — DEFAULTED 2026-08-20 to the recommendation below** (ADR-0072 ⑤; the owner may
+> re-open). `mpers_company` revision 1 ships **en** and **zh** at full 5/5 wording coverage (the
+> #43 ceremony); **ms** sits at **4/5** — one clause short, gated closed by design. A corpus that
+> only ever issues **en** proves nothing about the claim gate's fail-closed path, so: **en for
+> every pack; zh on at least one slot; ms attempted exactly once, on a slot the owner names, and
+> it MUST REFUSE — a PASS there is the finding, not the wording.** The cheapest deliberate
+> negative control in the whole run (§7.4).
 
 ## 7. The vacuous-green lesson, applied
 
@@ -302,13 +383,11 @@ lesson)."* The fix was right. **It closed the class one level down and left it o
 up:** an empty *registry* is still an unasked question, and there is no zero-census branch
 between `:962` and the return at `:1025-1027`.
 
-> **P-3 (PROPOSAL) — a registry-vs-ledger cross-check, registered not built here.** A client
-> whose trial balance carries a bank-class GL account with a non-zero balance and **zero rows
-> in `clara.bank_accounts`** should read `unknown`, not `tie`. That is one predicate, in
-> drawer 1, fail-closed in the direction the drawer already fails. **Recommendation: register
-> it as a Wave-F fix-queue candidate on its own full ladder** (it is judgement logic — house
-> review law 1 applies). It is **not** in scope for this docs-only pass, and the corpus does
-> not depend on it: CLIENT-BANK-1 exercises the gate with real accounts either way.
+> **P-3 (PROPOSAL) — a registry-vs-ledger cross-check. ADOPTED into the F-T4 fix queue.** A
+> client whose trial balance carries a bank-class GL account with a non-zero balance and **zero
+> rows in `clara.bank_accounts`** should read `unknown`, not `tie`. One predicate, in drawer 1,
+> fail-closed in the direction the drawer already fails — **judgement logic, so it takes its own
+> full ladder** (review law 1). The corpus does not depend on it either way.
 
 ### 7.4 The rule this corpus adopts
 
@@ -341,10 +420,11 @@ for; none of them is hypothetical enough to leave to discovery.
 | EC-7 | **Back-dated document arriving after close** | the closed-period wall refuses the write (`CLR19`); the only lawful route is the formal reopen | pair it with the OD-5 reopen drill — one real late document is the cleanest trigger |
 | EC-8 | **Cross-FY reversal ordering** | reversing an FY1 entry while FY2 is open must obey the reverse/re-open ordering guard | rides the reopen drill |
 | EC-9 | **The MPERS rev-2 2027 boundary** | wording revision 2 is seeded for periods beginning 2027-01-01 (**en** ready; **ms/zh** at 0/5 today) | **its own test point, in the sandbox, not on a real client.** A revision-boundary FY must never be part of an acceptance run whose bar is a real desk figure |
-| EC-10 | **Foreign-currency document** | out of scope (§2). The failure mode to avoid is a *silently mis-booked* MYR figure | if one appears in a real corpus, it must be **refused or parked**, never coded. Record which happens |
+| EC-10 | **Foreign-currency document** | out of scope (§2). The failure mode to avoid is a *silently mis-booked* MYR figure | **NO LONGER HYPOTHETICAL: ~32 USD-denominated BEE purchase invoices exist**, excluded from acceptance and retained as the FX-lite fixture set (assessment §3). Feed them deliberately: each must be **refused or parked**, never coded. Record which happens |
 | EC-11 | **Duplicate re-upload** | a benign re-upload once surfaced as a fatal `storage_error` (HTTP 400 wrapping 409) — fixed, `docs/ops/incident-2026-07-26-intake-storage.md` | re-upload one document deliberately per slot; it is free |
-| EC-12 | **Maker = checker on a one-approver firm** | `CLR05 · SELF_ATTESTATION` gates approvals, and B3's segregation gates reopens | see OD-5. Provisioning a second principal changes behaviour in *both* places — plan it once, for both |
+| EC-12 | **Maker = checker on a one-approver firm** | `CLR05 · SELF_ATTESTATION` gates approvals, and B3's segregation gates reopens | **RULED by OD-5: no second principal.** The sole-attested arm fires on real books and the distinct-checker arm is recorded UNEXERCISED — the honest outcome, not a workaround |
 | EC-13 | **A bank GL balance with no registered bank account** | §7.3 | CLIENT-BANK-1 registers accounts properly; the gap itself is P-3, registered not built |
+| **EC-14** | **The STRIKE-OFF / terminal period** *(NEW 2026-08-20 — two of the three oracle clients are one)* | a company being struck off has **no year end and no going concern**: the books stop mid-period, the balance sheet legitimately holds no assets and no liabilities, and the bank accounts are deliberately run to `0.00`. Every close gate, every continuity pin and every comparative assumes an ongoing entity that will have a NEXT period | **a first-class test point, not a defect in the papers.** RS and RPR carry it. The pack and the tie-out anchor on the **P&L and the GL**, never the degenerate SOFP; a nil balance sheet must be **recorded as measured-and-nil**, never as unmeasured — the vacuous-green rule (§7.4) applies to it directly |
 
 ## 9. Non-goals
 
@@ -361,56 +441,60 @@ Named so they cannot creep in at the sitting:
   with its evidence and takes its own ladder. This document changes no code and no gate.
 - **Inventing any golden figure.** Every acceptance bar arrives from the owner's desk.
 
-> **OD-11 (OWNER DECISION) — sequencing against Wave F.** This corpus's own run script (§5,
-> step 1: "firm setup -> client onboarding interview") presumes a **real signed-in session** —
-> signin, firm setup, the surfaces a firm actually operates through — not the hand-minted JWTs
-> every live-fire sitting has authenticated with so far. Running the corpus ahead of that floor
-> would still prove the DB and the workflow layer, but not the *product*: the thing the owner
-> and staff will actually use never gets exercised, and a defect in the UX floor itself could
-> not surface. **Recommendation: sequence the corpus's first run after the Wave-G UX floor**
-> (real session auth, signin, firm-setup) **lands, so the run is whole-product — not a
-> machinery-only run wearing a product's name.**
+> **OD-11 — RULED 2026-08-20 (ADR-0072 ⑤): THE WAVE-G UX FLOOR COMES FIRST.** Real session
+> auth, signin and firm setup — **the frontend build** — land **before** the corpus's first run.
+> This corpus's own run script (§5 step 1, "firm setup -> client onboarding interview") presumes
+> a real signed-in session, not the hand-minted JWTs every live-fire sitting has authenticated
+> with so far. A run ahead of that floor would still prove the DB and the workflow layer, **but
+> not the product** — the thing the owner and staff will actually use never gets exercised, and
+> a defect in the UX floor itself could not surface. **The corpus run is a whole-product run or
+> it is not the run.**
 
-## 10. Owner decision points, collected
+## 10. Owner decision points — THE RULINGS (2026-08-20, ADR-0072 ⑤)
 
-| | Decision | Build's recommendation |
+**The sitting happened. All eleven are decided.** Where a ruling reverses the build's
+recommendation, both are shown — a declined recommendation is recorded, never dropped.
+
+| | Decision | **RULED** |
 |---|---|---|
-| **OD-1** | Which real clients fill the slots; confirm they induct under BELCORT | BELCORT (RPA is the synthetic sandbox — constraint 13) |
-| **OD-2** | A goods-trading slot? | Not in the first pass; the `closing_stock` producer verb does not exist |
-| **OD-3** | The acceptance-bar figures, per client per FY | Owner's desk only. BEE's are on record; the rest arrive with the handover |
-| **OD-4** | Document custody / PDPA for real client papers | Tracing stays OFF (C6 open); payroll papers get the tightest handling |
-| **OD-5** | Which client carries the reopen drill — and whether a second eligible principal is provisioned | Provision the second principal, so B3's primary arm fires |
-| **OD-6** | The factory reset's blast radius: what survives | Owner's call (ADR-060 is DATA-scoped, constraint 14). Note the freed opening-seed slots |
-| **OD-7** | Does the `closing_transfer`/SST fix gate CLIENT-SST-1? | Yes — land task #17 before that slot's FY1 close |
-| **OD-8** | Does any candidate have an FYE change in the FY pair? (EC-3) | If yes, keep it — it is free coverage. If no, record it unexercised |
-| **OD-9** | Statutory-pack locale per client | **en** for every pack; **zh** on at least one; **ms** attempted exactly once as the negative control |
-| **OD-10** | Does the corpus run on the live project post-reset, or on a separate project? | Live project — the reset *is* the discharge, and DR/backup discipline already covers it. Confirm |
-| **OD-11** | Sequencing against Wave F | The corpus needs the Wave-G UX floor (real session auth, signin, firm-setup) to be a *whole-product* run rather than a hand-minted-JWT run |
+| **OD-1** | Which real clients fill the slots | **The corpus is TWO TIERS** (§3.0). Oracle = **BEE (two FYs) + ROME SECRETARY + ROME PROPERTIES (single terminal periods)**; the **reality tier is open-intake**. All under BELCORT. *The two-consecutive-FYs-per-slot requirement does not survive the papers.* |
+| **OD-2** | A goods-trading slot? | **DEFAULTED to the recommendation** — not in the first pass. Owner may re-open. |
+| **OD-3** | The acceptance-bar figures, per client per FY | **STILL OWED for every slot but BEE.** BEE's are now *confirmed against the client's own papers*, not merely recorded. The build never proposes one. |
+| **OD-4** | Document custody / PDPA | **FULL PERMISSION**, with two carve-outs that are part of the ruling: the **IC copy is EXCLUDED from ingestion**, and the **payroll tree is the tightest-custody slot**. Tracing stays OFF for the whole run (C6 open). |
+| **OD-5** | The reopen drill, and a second eligible principal | **NO second principal.** *The build recommended provisioning one; DECLINED.* The **solo-attestation arm is the product path**, so exercising it on real books is the honest test — and B3's **`distinct_checker` primary arm ships UNEXERCISED on real books**, rig-proven only, **named as such** in the acceptance record under §7.4. |
+| **OD-6** | The factory reset's blast radius | **A WHOLE CLEAN PRODUCT DATABASE — a "new unboxed product".** No survivor list: not RS's book, not RPR's approved entries, not BEE's keyed seed, **and not the sandbox firm or the slice-era fixtures, which are NOT re-created**. One carve-out: **the spike schemas survive until their own DROP** (ADR-0072 ①.4, after a cold archive). |
+| **OD-7** | Does the `closing_transfer` fix gate the SST slot? | **DISCHARGED by ADR-0072 ④** — R1 is ruled, Fix A is queued in Track B, task #17 is unblocked. |
+| **OD-8** | An FYE change in any FY pair? (EC-3) | **DEFAULTED** — keep it as free coverage if a candidate has one; record it unexercised if none does. Owner may re-open. |
+| **OD-9** | Statutory-pack locale per client | **DEFAULTED** — **en** every pack · **zh** on at least one slot · **ms** attempted exactly once and it **must REFUSE**. A PASS there is the finding, not the wording. Owner may re-open. |
+| **OD-10** | Live project, or a separate one? | **THE LIVE PROJECT**, ruled together with OD-6. The reset *is* the discharge Wave G exists to prove; the irreversibility was priced, not assumed away. |
+| **OD-11** | Sequencing against Wave F | **THE WAVE-G UX FLOOR COMES FIRST.** Real session auth, signin and firm setup — the frontend build — **precede the corpus run**. A run ahead of that floor proves the DB and the workflow layer while never exercising the product, and a defect in the floor itself could not surface. |
 
-## 11. Open questions
+## 11. Open questions — where they stand after the sitting
 
-1. **BEE's opening TB — which record is current?** `PROGRESS.md` describes BEE as holding *"an
-   empty opening TB"* at the live-fire sitting, while ADR-043 records a **finalized** keyed
-   opening seed (`1e60960e`) tying at RM 210,000.00 with capital (65,747.97) — the same figure
-   the owner's FY2025 golden bar gives as capital B/F. These may both be true of different
-   dates, or one may be stale. **The build cannot adjudicate this; the owner can.** It matters
-   because it decides whether BEE's Wave-G run is brown-field from an existing seed or from a
-   fresh one after the reset.
-2. **Is BELCORT still a one-eligible-approver firm?** ADR-043's reading is 2026-07-26. Re-read
-   at the sitting — OD-5 and EC-12 both turn on it.
-3. **How many FYs of raw documents actually exist per candidate?** Two consecutive closes need
-   two consecutive *complete* corpora. A slot with FY1 papers and a thin FY2 proves less than a
-   slot with two thin-but-complete years.
-4. **Does any slot need the K-doc door / `opening_tb.line` producer** (Phase-5, review-gated,
-   ADR-043's explicit "what Gate K does NOT close")? Only if a brown-field slot's opening is to
-   be **document-tied** rather than keyed. Worth deciding early — it is a build dependency.
-5. **Where does the eval harness sit relative to this run?** The vision audit's recommendation
-   three (`docs/plan/research/wave-f/vision-alignment-audit.md`) argues a minimal three-number
-   harness should precede the big autonomy questions. This corpus is the richest labelled
-   material the product will ever have had; running it *without* instrumenting it would waste
-   that. **Not a proposal here — a sequencing question for the owner.**
+1. ~~**BEE's opening TB — which record is current?**~~ **ANSWERED 2026-08-20 by a live read**
+   (read-only, rolled back): **ADR-043 is current.** Seed `1e60960e` is `finalized` and keyed,
+   and the book holds four approved opening entries dated 2024-12-31 totalling
+   **RM 210,000.00 = RM 210,000.00**, with capital dr **RM 65,747.97**. The "empty" reading came
+   from an earlier seed `ec53ab9d`, which is **cancelled**. **BEE's run is brown-field from the
+   existing seed.** One stored-number oddity is recorded unadjudicated in `PROGRESS.md`.
+2. ~~**Is BELCORT still a one-eligible-approver firm?**~~ **MOOT as a blocker** — OD-5 ruled that
+   no second principal is provisioned either way, so the drill exercises the sole-attested arm
+   and the primary arm is recorded unexercised. EC-12 follows the same ruling.
+3. ~~**How many FYs of raw documents exist per candidate?**~~ **MEASURED** — two consecutive FYs
+   for exactly one client (BEE, FY2024+FY2025); RS and RPR are terminal single periods and can
+   never have a second. That measurement is what produced §3.0's reshape.
+4. **Does any slot need the K-doc door / `opening_tb.line` producer?** **STILL OPEN, but no
+   longer urgent:** RS and RPR are greenfield (no seed at all) and BEE's seed is already keyed,
+   so nothing in the ruled oracle tier requires a *document-tied* opening. It becomes live again
+   only if a reality-tier slot wants one.
+5. ~~**Where does the eval harness sit relative to this run?**~~ **DISSOLVED** — ADR-0071/G7
+   DECLINED the eval harness. **This corpus's owner-supplied golden-bar tie-out IS quality's
+   checkpoint**, and there is no instrument to sequence against it.
 
 ---
 
-**Status:** DESIGN, awaiting the sitting. Nothing here is ratified. When the owner rules, the
-rulings land in an ADR and this file becomes the corpus's contract of record.
+**Status: RULED, 2026-08-20 — this file is now the corpus's CONTRACT OF RECORD** for everything
+ADR-0072 ⑤ decided (§3.0, §10's eleven rows, §5's step-4 amendment). What remains genuinely open
+is named and small: **OD-3's acceptance figures for every slot but BEE**, the oracle-tier gaps in
+`wave-g-corpus-oracle-assessment.md` §1, open question 4, and the authoritative pick between
+RPR's two overlapping statement series. **The run cannot start until the gaps close.**
