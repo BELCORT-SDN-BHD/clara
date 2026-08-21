@@ -444,56 +444,10 @@ below is still findable, and any of them can be re-opened by naming it.*
 - **Two of the ruler clauses the audit judged against existed only in-session** when it ran
   (the delete-the-old-era directive and R1's ruling). Both are now repo bytes: ADR-0072.
 
-## Session-log entries archived 2026-08-20 (the outgrow law; moved verbatim from PROGRESS.md)
 
-*The F-A1 build nights, 2026-08-18 and 2026-08-19. Moved once F-A1 was DELIVERED and its
-acceptance records existed in their own files, which are the operative record now. Extends
-this file's "Session log (entries through 2026-08-16)" section by the same law that created it.*
+---
 
-- **2026-08-18 (the Agentic Charter session)** — ADR-0071 minted (twelve rulings,
-  laws 71-76); full entry in the archive.
-- **2026-08-18 (evening, 开工)** — #255 → v63; the F-A1 design driven v1→v3 (48
-  findings, two lanes MERGEABLE); moved verbatim to the archive at the ceremony sweep.
-- **2026-08-18 (night, the F-A1 rulings + build kickoff)** — owner ruled in-session (design
-  doc §5): OQ-1 **OpenAI-direct** (Azure declined) · OQ-2 **witness_extraction RATIFIED**
-  (WB-R23) · cutover **DIRECT RELEASE** (the DPA-first recommendation filed as dissent;
-  DPA → Owner/legal, non-blocking) · PR-0 **re-shaped to a third native adversarial lane**
-  (Codex re-enters at future builds). The 0017 consumer census ran + was byte-spot-checked
-  (kind-scoping breaks no production consumer; the INSERT surface provably centralized).
-  The PR-0-native lane RAN (opus, fresh context): MERGEABLE-WITH-CONDITIONS — 3 blockers +
-  15 material + 5 nits, ALL adjudicated at the bytes and folded (B3's disposition AMENDED
-  to the polarity-free self-referential withdrawal — the review's own document_kind fix
-  was unsound); design → v3.1 + the new `f-a1-annexes.md` (estate survey / adjudication
-  register / battery sketch — the 500-line split). The 0017 builder lane (killed mid-run
-  by the usage limit) RESUMED post-reset with the M3/M4/M5 addendum. S0.9's resolved
-  record archived per the outgrow law. Docs-only PR: this truing + the v3.1 fold set.
-- **2026-08-18 (late night, PR-1 build + assembly)** — four builder lanes delivered PR-1's
-  DB estate (0089-0095), each rig-green on its own throwaway postgres:17; the 0089 pre-fix
-  census proved the cross-kind supersede defect LIVE (16/17 OCR rows) and 0/17 post-fix;
-  the filing-client join resolved FAIL-CLOSED via `document_filings` (design silence,
-  §3.3); the writer lane's TRUE-merged-chain rig caught the one cross-lane defect
-  (fixtures probing pre-rename constraint names), fixed at assembly; annex B carries the
-  full record. Two Known-issues registered (limits-upsert hazard; statement-pair coin
-  flip). Owner ruling same evening: review lanes NEVER wait for Codex.
-- **2026-08-18 (deep night, the verify+review→fix round)** — integration verify: F-A1
-  itself fully green, 36 suite reds ALL one class (closed-world censuses lawfully
-  outgrown — extended with named rosters, never weakened; incl. CI's own δ-contract
-  drill leg). The opus fresh-context review (law 1): NOT-MERGEABLE → 2 blockers
-  (B1 C2-overreach onto the two token belts — would have zeroed corroboration on every
-  RM-printed invoice, caught PRE-FREEZE; B2 the queued→failed trigger arm → wall 13) +
-  7 material (customer_taxid restored; contest validated write-side + raise-proof
-  fail-closed read; the M3 reference-value contract for the cross-regime duplicate
-  walls; token-bounded citation matching; the witness_citation_regions numbering door;
-  magnitude guards; the identity leaf renamed into the lint's discovery surface) +
-  6 nits — all adjudicated (one review disposition AMENDED, one residual RULED),
-  fixed on f-a1/pr1-fixes and re-proven; design/annex/PROGRESS trued. Next:
-  fix-diff re-review → PR.
-- **2026-08-19 (~03:30 MYT, the PR-1 merge + ceremony)** — PR #263 merged (d8abf19;
-  CI took 3 rounds — the dashboard seam ledger and a runtime pre-0089-era cell were
-  the 4th/5th closed-world catches, both extended/trued). The D1 ceremony ran (fourth
-  execution; as-run: `docs/plan/completed/f-a1-pr1-ceremony-asrun.md`): backup banked
-  → sleeper DSN bridge (reconstructed — dsn-pipe was session-local and GONE) → stop +
-  110s staleness → 7/7 applied with live prestate evidence → 28/28 positive reads →
-  deploy flip 2→4 → NOTIFY → `/ready` 200 → `--lock-deployed` (manifest in this PR).
-  Deviation recorded: `sslmode=no-verify` (CA-unpinned TLS) — the pinned-CA tooling
-  gap registered under Tooling follow-ups.
+**This archive was itself split on 2026-08-21** (the outgrow law, applied to the archive):
+everything archived after the backlog dispositions above lives in
+`progress-archive-2026-08-part2.md` — the 2026-08-20 session-log entries, the 2026-08-20
+night's own entry, and the Known issues resolved at the combined Window A+B.

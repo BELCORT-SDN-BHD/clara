@@ -123,8 +123,17 @@ test("f-a2.freeze-green verify_evaluator_freeze() passes with two witness versio
   assert.ok(v1, "v1's manifest entry survives — append-only means an entry is never removed");
   assert.equal(v1.deployed, true, "…and its deploy lock is monotonic");
   assert.ok(v2, "the v2 entry was appended to the manifest");
-  assert.notEqual(v2.deployed, true,
-    "…UNDEPLOYED until the ceremony runs --lock-deployed, exactly as v1's entry was authored");
+  // TRUED 2026-08-21: this assertion used to read `notEqual(v2.deployed, true)` — "UNDEPLOYED
+  // until the ceremony runs --lock-deployed". That ceremony HAS run (the combined Window A+B,
+  // `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`; live 97/`0102`, evaluator flip
+  // 4/4->5/5, `--lock-deployed` at its close), so the pin inverted — a dated tripwire asserting
+  // a pre-ceremony fact as though it were permanent. The cell stays load-bearing in the NEW
+  // direction: the deploy lock is MONOTONIC, so a regression to false is now the alarm, exactly
+  // as it already is for v1 two lines above. (The runtime tree learned this same lesson earlier
+  // and hardened `version-cutover-e2e.mjs` by declining to pin a ceremony-dependent flag at all;
+  // here the flag is no longer ceremony-dependent — the ceremony is done — so it is pinned true.)
+  assert.equal(v2.deployed, true,
+    "…and v2's deploy lock is monotonic too, granted at the 2026-08-21 Window A+B ceremony");
   assert.ok(/f_a2_nil_tax_arm_part2/.test(v2.migration),
     "…and it points at the migration that defines it (the battery gates on the STABLE SUFFIX, never the number)");
 });

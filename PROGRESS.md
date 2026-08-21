@@ -7,20 +7,34 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-20 late — the F-A1 cutover night and the F-A2 opener night are the SAME night;
-trued at every clock-out)*
+*(as of 2026-08-21 — the F-A2 opener train is CEREMONIED; trued at every clock-out)*
 
-- **THE F-A2 OPENER TRAIN IS COMPLETE AND MERGED — code-complete, ZERO of it live.** All five
-  PRs landed 2026-08-20: **#270 `a36044bb`** (③④⑤ — witness adapter timeout · reconciler
-  lane-aware pacing · the zombie-session runbook) · **#271 `e330f421`** (①② DB half —
-  `evaluate_witness_fact_state_v2`, the answers vocabulary, engine `:v2`; **0099/0100**) ·
-  **#273 `90073b14`** (⑥ — the witness-first reader estate, the lifted generation selector
-  across ~12 bodies; **0101**) · **#272 `c695a675`** (①② runtime half — **witnessFacts.v2**,
-  where opener ②'s type_code question actually lives) · **#274 `7f5617e0`** (the **Window-B
-  statement activation** — router re-key + `statementFacts_v2` repoint + statement-lane timeout;
-  **0102**). **Main's frontier is 0102. Live remains 92/`0097` — every one of these is
-  UNAPPLIED and UNDEPLOYED**, so nothing above changes a single live behaviour yet.
-  **Two ceremonies stand between merged and live** — see Next 1.
+- **THE F-A2 OPENER TRAIN IS LIVE — Windows A and B ran COMBINED, 2026-08-21 ~10:56-11:02 MYT**
+  (as-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). **Live DB: 97 migrations,
+  frontier `0102_f_a2_statement_activation`; runtime v66.** All five merged PRs applied and
+  deployed: #270 `a36044bb` (③④⑤) · #271 `e330f421` (①② DB, 0099/0100) · #273 `90073b14` (⑥,
+  0101) · #272 `c695a675` (①② runtime, witnessFacts.v2) · #274 `7f5617e0` (activation, 0102).
+  **The windows were combined deliberately** — a fully-merged train makes a split create a stall
+  gap rather than separate risk; both flips independently reviewed, machine STOPPED across
+  both. Evaluator flip 4/4→5/5 + NOTIFY; probe 20/21, the one red owned as a
+  **probe defect**; the **`0102` coverage probe said NO as designed**, naming the synthetic
+  sandbox firm `39008536` — **ACCEPTED** (no real counterparty, and ADR-0072 ⑤ already rules it
+  out of existence at the reset). v66 verified by in-VM bundle greps, `/ready` 200, zombie sweep
+  0, sleeper destroyed. **Both manifests fully deploy-locked** — 1 evaluator + 24 workflow
+  bodies, zero hash changes.
+
+- **THE RE-MEASURE: 12 / 20 corroborated — against 0 / 20 for the same twenty under v1**
+  (12 arm · 0 plain · 8 refusing, each with its failing conjunct named). **The denominator rule
+  travels with that number: 20 is a deliberately refusal-heavy SAMPLE of the 33, so 12/20 is NOT
+  comparable to 0/33** — 0/20 → 12/20 is the like-for-like comparison and the real result.
+  Prediction hit 14/20. **Opener ② delivered and was the bundle's hard floor** (`type_code` =
+  `'01'` ×19 and `'03'` on a genuine debit note — correct, not merely permissive); **lock 3
+  fired on the corpus's only true SST registrant**, so the false presumption did not fire;
+  **infra vindicated** — 19 documents at once, 40 calls, zero failures/timeouts/stragglers on
+  the lane that produced 7 casualties and four 30-95-minute hangs two days earlier. **The honest
+  caveat: this measures the *witness verdict*, not a posted entry. Every corroborating invoice
+  holds an unattended-eligible ticket nothing yet redeems** — F-A2 proper is unbuilt, so they
+  still route to the human-confirm draft lane.
 
 - **F-A2 IS DESIGNED, ITS AUTHORITY QUESTIONS ARE RULED, AND THE WAVE-G CORPUS SITTING IS
   CLOSED — ADR-0072.** Five ruling blocks in one in-session sitting: opener ⑥ ratified plus the
@@ -31,31 +45,17 @@ trued at every clock-out)*
   there after a cold archive, so **constraint 15's spike clause retires THEN, not now**) ·
   high-stakes **RE-CONFIRMED at any amount with no thresholds** (the build's fail-closed ceiling
   on file as dissent; the HUMAN lane and ADR-0044 untouched) · **OQ-4's three exits** and
-  **OQ-6's no-category-gate on the agent lane**, with the supplementary that the human lane's
-  gate on the same categories **STANDS** · **R1 RULED** — a closing transfer is not turnover,
-  Fix A goes to Track B, task #17 is unblocked · and the **corpus reshaped into TWO TIERS**
-  (oracle + open-intake reality), because two of the three designated clients are terminal-period
-  books for companies in strike-off and can never supply a second consecutive FY. **Design set of
-  record: `docs/plan/active/f-a2-agentic-posting-design.md` + its three annexes (v4).**
+  **OQ-6's no-category-gate on the agent lane**, the human lane's gate on the same categories
+  **STANDING** · **R1 RULED** — a closing transfer is not turnover, Fix A to Track B, task #17
+  unblocked · and the **corpus reshaped into TWO TIERS** (oracle + open-intake reality), because
+  two of the three designated clients are terminal-period books for companies in strike-off.
+  **Design set of record: `docs/plan/active/f-a2-agentic-posting-design.md` + three annexes.**
 
-- **THE WITNESS-PAIR CUTOVER IS LIVE (F-A1 PR-1..PR-4 ALL MERGED, ceremonied 2026-08-20).**
-  Live DB: **92 migrations, frontier `0097_f_a1_cutover`**; runtime **v65** (autoDraft_v8 +
-  chatTurn_v12 + witnessFacts.v1), verified live by PROCESS read BEFORE the window. Every
-  invoice-kind document now mints `llm_witness` (engine `llm-openai:gpt-5.6-terra:v1`); the
-  Azure invoice engine survives only as the tombstone insert. `0098` (PR-4's statements persist
-  half) merged **UNPOINTED** — its activation is Window B. `witness_extraction` typed consents
-  granted+activated through the audited owner verbs for RS/BEE/RPR. *(As-runs in
-  `docs/plan/completed/`.)*
-  **The corpus is MEASURED** (`docs/plan/completed/f-a1-corpus-measurement.md`): witness
-  **0/33 corroborated** vs legacy 28/92 — the NIL-TAX law on a tax-silent corpus + the
-  type_code prompt-intent mismatch bind everything; field capture clean, **0 failures across
-  69 model calls**, D12 identity gate PASSES; the tail was stopped at N=33 (24 tasks closed
-  through the audited claim→fail door). **Live incident, controlled, riders minted:** the
-  reconciler's lane-blind re-drive herd (**~46 runs/sweep against 2 lane slots**) · hard-restart
-  **zombie pooler sessions** (15 stale `clara_runtime_login` sessions starved the new VM) ·
-  **four model calls hung 30-95 minutes** with no adapter timeout, each wedging one of two slots.
-  **Pilot verdict shape confirmed correct:** both channels byte-agree on a real RS invoice and
-  `corroborated=false` under the NIL-TAX LAW — as designed, which earned the successor its ruling.
+- **THE WITNESS-PAIR CUTOVER (F-A1) IS LIVE — ceremonied 2026-08-20.** Every invoice-kind
+  document mints `llm_witness`; the Azure invoice engine survives only as the tombstone insert;
+  `witness_extraction` consents granted+activated for RS/BEE/RPR. **The F-A1 corpus measurement**
+  (`docs/plan/completed/f-a1-corpus-measurement.md`) is the 0/33 baseline the re-measure reads
+  against, and its live incident minted riders ③④⑤ — **all three now live-proven** (Known issues).
 
 - **The standing law is ADR-0071 + ADR-0072.** The Agentic Charter's twelve rulings are digest
   **laws 71-76** and its Wave-F re-scope is `docs/plan/active/wave-f-contract.md`; ADR-0072
@@ -77,11 +77,10 @@ trued at every clock-out)*
 - **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5
   mechanically enforced, 44-case selftest in CI) beside pinned-ids; `.claude/rules/db-tests.md`
   + `handoffs.md`; the ci.yml Wave-E δ contract drill (closes the sweep-skip false-green shape).
-- **Runtime:** Fly `clara-runtime`, single machine, `/ready` green — **v65**, carrying
-  autoDraft_v8 + **chatTurn_v12** + witnessFacts.v1 (#255's belt isolation rode v63, still in).
-  The three `CLARA_RENDER_FLY_*` values are bound. **NOTHING from the opener train is in this
-  image** — witnessFacts.v2 and riders ③④ ship at Window A. Dashboard: Pages
-  `app.clarabook.com`. `clara-backup` daily. `clara-render` hourly.
+- **Runtime:** Fly `clara-runtime`, single machine, `/ready` 200 — **v66 (2026-08-21)**, carrying
+  autoDraft_v8 + chatTurn_v12 + **witnessFacts.v2** + **statementFacts_v2** + riders ③④, all four
+  verified by in-VM bundle grep. The three `CLARA_RENDER_FLY_*` values are bound. Dashboard:
+  Pages `app.clarabook.com`. `clara-backup` daily. `clara-render` hourly.
 - **Books pins:** RS trial balance **3,396,500 = 3,396,500** (`trial_balance_as_of`, re-read at
   every ceremony) · RS customers **11/11 NAME-ONLY** (the enrichment trap holds; the one
   registered counterparty is a vendor, out of scope) · `client_facts` = 7 rows (3 carryover +
@@ -99,8 +98,9 @@ trued at every clock-out)*
 
 | Lane | Scope | State | PR |
 |---|---|---|---|
-| Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — the full PR train per design §6: PR-1 #263 (0089-0095, ceremonied 2026-08-19) · PR-2 #265 (witnessFacts.v1, runtime v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 writer rotation + 0097 CUTOVER — ceremonied 2026-08-20, as-run in completed/, frontier 92/`0097_f_a1_cutover`, runtime v65)** · **PR-4 #268 (statementFacts_v2 persist half, 0098, UNPOINTED — activation is a bound follow-up)**. Consents (witness_extraction) granted+activated RS/BEE/RPR through the audited verbs. **Corpus MEASURED** (`docs/plan/completed/f-a1-corpus-measurement.md`): witness 0/33 corroborated vs legacy 28/92 — two named conjuncts bind (NIL-TAX on a tax-silent corpus; the type_code prompt-intent mismatch); D12 identity gate PASSES; live posture = every invoice on the human-confirm draft lane until F-A2. **Owner-ratified F-A2 openers:** ① the three-locks nil-tax arm (`evaluate_witness_fact_state_v2` + ceremony) · ② the type_code classification prompt (witnessFacts v2 + ceremony) · ③ adapter timeout (one-line non-frozen config, AB-16) · ④ reconciler lane-aware pacing · ⑤ post-restart zombie-session sweep (runbook step minted) · then the Charter's main clause (rules-machine execution tier retires) + the statement ACTIVATION piece (after ③④⑤) | ceremonied | #263 #265 #266 #267 #268 |
-| Wave F · Track A — **F-A2** | **DESIGNED (v4, 2026-08-20), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. **Openers: ALL SIX MERGED + the Window-B activation piece — code-complete, nothing live.** ③④⑤ #270 `a36044bb` (⑤ discharged on merge — a runbook needs no deploy) · ①② DB half #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime half #272 `c695a675` (witnessFacts.v2) · Window-B activation #274 `7f5617e0` (0102). **Main frontier 0102; live 92/`0097`.** F-A2's own build (PR-0..PR-4 + PR-1b, two more D1 windows) has NOT started. **OQ-2/3/5 stay open with recommendations.** | design | #270 #271 #272 #273 #274 |
+| Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — PR-1 #263 (0089-0095) · PR-2 #265 (witnessFacts.v1, v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 + 0097 CUTOVER, ceremonied 2026-08-20)** · **PR-4 #268 (0098, shipped UNPOINTED — activated at the 2026-08-21 window)**. Consents granted+activated RS/BEE/RPR. **Corpus MEASURED**: witness 0/33 vs legacy 28/92 on two named conjuncts (NIL-TAX; the type_code prompt-intent mismatch) — **both fixed by the openers and re-measured 2026-08-21**. D12 identity gate PASSES. | ceremonied | #263 #265 #266 #267 #268 |
+| Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
+| Wave F · Track A — **F-A2 proper** | **DESIGNED (v4), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. The unattended posting lane (PR-0..PR-4 + PR-1b, two further D1 windows) has **NOT started** — every corroborating invoice holds an unattended-eligible ticket nothing yet redeems. **OQ-2/3/5 stay open with recommendations.** | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④), Fix A proceeds: both writer bodies in ONE migration, 13-cell battery, D1 on the 0085 template | design | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to the archive, 2026-08-18.)*
@@ -111,18 +111,12 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **TWO CEREMONIES, IN ORDER — the whole opener train is merged and NONE of it is live.**
-   **WINDOW A:** apply **0098 + 0099 + 0100 + 0101** and deploy the **v2 image** (witnessFacts.v2
-   + ③④'s runtime riders — until that image ships, a deep `llm_witness` queue can still wedge the
-   health check). **WINDOW B, only after A:** apply **0102** and repoint the registry, **with the
-   machine STOPPED across BOTH the apply and the repoint deploy** — the one gap `0102`'s spec
-   names as having no DB-side guard. **Then, in this exact order: re-extract FIRST, then
-   evaluate** — a `witnessFacts.v1` row can never corroborate through the successor's nil-tax
-   arm, so measuring first re-scores 0/33 on the wrong population. **The re-extraction is TWENTY
-   documents (ADR-0072 ①.2)** — all four predicted refusals plus ~16 across the predicted-pass
-   classes. **Predicted 29/33** on the full measured set (23 arm + 6 plain, 4 refusing with the
-   conjunct named), band 26/33, **0/33 if opener ② misses** — `type_code='01'` gates both paths.
-   **Two ordinary re-fires ride Window A** (Known issues: the stranded pair).
+1. ~~The two opener ceremonies~~ — **DONE 2026-08-21, run COMBINED**
+   (`docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`).
+   **What they leave for the next round**, all prompt-side and none of it frozen-evaluator work:
+   the **MYR currency-code prompt fix**, the **dash-is-not-a-value clarification**, the
+   **vision-side SST-id shape check**, and **`coverage.pages`** (see Known issues). **Still owed
+   from before the window:** two ordinary re-fires for the stranded pair.
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (three dispositions, merged #249, ceremonied; **E-R14 OPEN**).
    ~~The BEE FY2025 live close~~ — **RULED 2026-08-16, deferred WHOLESALE to the Wave-G reset**
@@ -372,33 +366,49 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
   gate. Workaround: wording — never quote a recut statement in a CoR comment. Real fix = mask
   the block's own comments before the CREATE test + a selftest cell. Judgement logic, its own
   reviewed PR; **re-homed to the F-A2 fix queue.**
-- **THE WHOLE OPENER TRAIN IS MERGED AND NONE OF IT IS LIVE — the live-vs-`main` gap is now
-  five PRs and five migrations wide** (0098-0102 unapplied; the v2 image undeployed). Every
-  merged behaviour below is therefore a *repo* fact, not a live one, until Windows A and B run.
-  **⑤ is the single exception, discharged on merge** — `docs/ops/runtime-hard-restart.md` is a
-  runbook and needs no deploy. *(Rider numbering, one scheme from 2026-08-20: **③** witness
-  model-call timeout · **④** reconciler lane-aware pacing · **⑤** post-restart zombie-session
-  sweep; ①② are the nil-tax and type_code openers, ⑥ the coding-lane reader estate.)*
-- **The witness corroboration rate is 0/33 on live until Window A deploys** (NIL-TAX +
-  type_code prompt intent — both ruled and both now FIXED in merged code, but merged is not
-  live). Fail-closed: invoices ride the human-confirm draft lane; no data risk.
+- ~~**F-A2 riders ③④⑤ / the 0-live gap**~~ — **RESOLVED 2026-08-21, LIVE-PROVEN.** ③ and ④ went
+  live in v66 and were exercised on their first outing under the heaviest load yet (19 documents
+  at once, 40 calls, zero failures) against the F-A1 run's 7 casualties and four hangs on the
+  same lane; ⑤ ran at the ceremony and returned 0.
+- ~~**The witness corroboration rate is 0/33**~~ — **RE-MEASURED 12/20** vs 0/20 like-for-like.
+  **Fail-closed posture UNCHANGED**: corroboration is achievable but F-A2 proper is unbuilt, so
+  those invoices still ride the human-confirm draft lane and nothing posts unattended.
+
+**THE NEXT-ROUND QUEUE (from the 2026-08-21 re-measure; the first four are PROMPT-side — the
+evaluator stays strict, and widening it would be a frozen-evaluator change needing its own
+version + ceremony):**
+- **MYR currency-code prompt fix — the largest measured refusal cause outside the arm, and a
+  FALSE refusal (2/20).** Both EZSEC documents answer `value("RINGGIT MALAYSIA")`; the rule
+  reduces to letters and demands `('RM','MYR')`, so `'RINGGITMALAYSIA'` lands outside and the
+  document is judged **unproven, not foreign**. Every other conjunct was read individually on
+  both and holds. **Ask for the currency CODE, not the printed rendering** (witnessFacts v3).
+  *(Two undriven EZSEC documents share the layout.)*
+- **Dash-is-not-a-value clarification.** Vision reports a bare `-` as `state:'value'`, text as
+  `not_printed`; the mismatch sets `v_agree_ok := false` unconditionally and cost **both
+  BRIGHTPATH documents**. (`509e788d` also has a rounding SIGN split: text `+0.40` vs `- 0.40`.)
+- **Vision-prompt check against the bare SST-id shape** (`[A-Z]\d{2}-\d{4}-\d{8}`). Lock 3 caught
+  the one genuine registrant on the **text** channel alone — the margin was one channel, not two.
+- **`coverage.pages` is emitted EMPTY on every text row (20/20).** Well-formed, and **no lock
+  reads it** (verified against the live evaluator body), so nothing fails closed — but a field
+  that always says `[]` cannot be promoted into a lock without being fixed first. **Fix in the
+  v2 behavior or drop it, before anything reads it.**
+- **The discount-no-net class counts 3, not 2** (`f48a8830`, `6f82065e`, `bd6d37fb` — all ROME
+  SECRETARY / D&D-family); the third came from a *changed read*, not a changed rule. **Trues the
+  number in the on-file owner trigger question** on whether sub-case (b) should admit a printed
+  discount — still the owner's, since the change would be the evaluator inventing structure.
 - **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it):
   the sidecar `runId` is clobbered on the re-mint path —
-  `packages/runtime/lib/reconciler-documents.mjs:198-206` with
-  `packages/runtime/lib/spool.mjs:124`. A real defect with a known site pair; its own PR, not a
-  rider on a pacing fix.
-- **The `failed_retry` stranded pair — CLOSED AT 2, and it CANNOT RECUR post-cutover.**
-  `0097` widened three arms of `clara.request_reextraction` but left `0051`'s `failed_retry`
-  door scoped to `v_lane` alone; post-cutover `v_lane` is `llm_witness` for every
-  invoice-shaped document, so a document whose newest `invoice_facts` task is `failed` with no
-  `llm_witness` sibling makes that door's scalar subquery return NULL, and `NULL = 'failed'`
-  is not true. **Measured live 2026-08-20 (read-only, rolled back): the population is CLOSED
-  at 3** — **2 truly stranded** (`0cb7c1f1` openai-0008.pdf, BEE · `c597a24b` RSINV-251205,
-  ROME SECRETARY), the third rescued by the `receipt_backfill` arm. **Remedy: an ordinary
-  re-fire after Window A** — both clients hold an ACTIVE `witness_extraction` activation, so
-  the automatic backstop mints a fresh task with no migration; only the HUMAN verb refuses.
-  **No new document can enter this state** — every invoice-shaped document minted after the
-  cutover has an `llm_witness` task by construction. A residual, not a live wound.
+  `packages/runtime/lib/reconciler-documents.mjs:198-206` with `packages/runtime/lib/spool.mjs:124`.
+  A real defect with a known site pair; its own PR, not a rider on a pacing fix.
+- **The `failed_retry` stranded pair — CLOSED AT 2, STILL OWED, and it cannot recur.** `0097`
+  left `0051`'s `failed_retry` door scoped to `v_lane` alone, so post-cutover a document whose
+  newest `invoice_facts` task is `failed` with no `llm_witness` sibling makes that door's
+  subquery return NULL and `NULL = 'failed'` is not true. **Measured live: the population is
+  CLOSED at 3** — 2 truly stranded (`0cb7c1f1` BEE · `c597a24b` ROME SECRETARY), the third
+  rescued by `receipt_backfill`. **Remedy: an ordinary re-fire** — both clients hold an ACTIVE
+  `witness_extraction` activation, so the backstop mints a fresh task with no migration; only
+  the HUMAN verb refuses. **Not done at the 2026-08-21 window; still owed.** No new document can
+  enter this state — every post-cutover invoice has an `llm_witness` task by construction.
 - **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered
   books-writer would pass silently — the roster runs only at 0057's own apply. Candidate: a
   standing census cell. **Sharper since the cutover:** `0096` rotated the writer estate and
@@ -420,17 +430,11 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
 - **Two γ post-CLEAN NITs** (PR #231, residuals 4–5): skeleton self-citation drift · S11.4c's
   `''`-vs-NULL branch. One-word fixes awaiting the next `0057`-area batch — `0096` was a writer
   rotation, not that batch.
-- **The BEE opening-TB record discrepancy — RESOLVED 2026-08-20 by a live read** (read-only,
-  rolled back). **ADR-043 is current; this file's old "empty opening TB" phrasing was the wrong
-  reading.** Seed `1e60960e` is `finalized`, keyed, `as_of` 2024-12-31, and the book holds
-  **4 approved opening entries dated 2024-12-31 totalling RM 210,000.00 = RM 210,000.00**, with
-  `150-CAP` dr **RM 65,747.97** — the desk's capital B/F exactly. The "empty" reading almost
-  certainly came from an EARLIER seed `ec53ab9d`, **cancelled** (document-tied; its parse
-  returned `no_opening_tb_lines` across 153 regions) and recreated as the keyed seed under
-  WB-R15. **One stored-number oddity recorded UNADJUDICATED:** the four `opening_items` sum to
+- **BEE's opening TB — RESOLVED 2026-08-20** for ADR-043 by a live read (record archived; BEE's
+  Wave-G run is brown-field from the existing keyed seed, and corpus open question 1 is
+  answered). **One stored-number oddity stays UNADJUDICATED:** the four `opening_items` sum to
   +7,850,406 cents with no `obe_plug` item while the journal balances through `190-OBE` — the
-  reader did not know that table's sign convention and did not guess. BEE's Wave-G run is
-  brown-field from an existing seed; corpus open question 1 answered.
+  reader did not know that table's sign convention and did not guess.
 - **ci.yml exceeds the 500-line harness file limit** (pre-existing; a GitHub workflow cannot
   split across files) — the hook flags every edit. The composite-action refactor that fixes it
   is CI-economics item (5): one piece of work, registered twice.
@@ -445,14 +449,11 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
   `llm_witness_concurrency` is invisible to it entirely — settable only by direct UPDATE, and
   exactly the knob the corpus incident made people want to turn. **Re-homed to the F-A2 fix
   queue**, riding the pacing work.
-- **The statement-reader pair self-supersedes by uuid coin flip TODAY** (0038:1781-1798 — same
-  kind, same transaction-scoped `extracted_at`): a live pre-existing defect the F-A1
-  kind-scoping does NOT touch (both readers share one kind); COUNTED at every 0089 apply.
-  **CORRECTED 2026-08-20 — the recorded heal-point was WRONG.** `0098` merged **UNPOINTED** (its
-  own header: *BUILT, FROZEN and UNPOINTED*), so no live statement reaches the two-kind writer
-  yet and **the coin flip is still live**. It heals **FORWARD-ONLY at the ACTIVATION window**,
-  and **the historical pairs are never repaired** — `superseded_by` is once-only (CLR08), so
-  `0098` counts them instead. Design §3.9 note 5 carries the same fix.
+- **The statement-pair coin flip — HEALED FORWARD-ONLY as of 2026-08-21**, when `0102`'s router
+  re-key and `statementFacts_v2` repoint made the ACTIVATION window real (full record archived).
+  **The residual that never closes: the historical coin-flipped pairs are NEVER repaired** —
+  `superseded_by` is once-only (CLR08), so they are counted and named, never rewritten. Design
+  §3.9 note 5 carries the same statement.
 - **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** the three tracked
   long-path PDFs under `packages/runtime/test-storage/` make `git rebase --abort` fail with
   the rebase state SURVIVING, and a follow-up `git reset --hard` fails the same way — the
@@ -477,24 +478,23 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
 `docs/plan/completed/progress-archive-2026-08.md`, alongside F-A1's operative records: its
 ceremony as-runs and the corpus measurement.)*
 
-- **2026-08-20 (the F-A2 opener train + the corpus sitting)** — the night after the cutover.
-  **The train, all five merged:** #270 ③④⑤ · #271 ①② DB · #273 ⑥ · #272 ①② runtime · #274 the
-  Window-B activation. ⑥ was ratified after a rig replay proved `_coding_lane_core`'s
-  kind-blindness behaviourally — **and proved the method**: the live body is three
-  `pg_get_functiondef` splices past its last static `create or replace`, so a
-  grep-the-migrations census would have found nothing and been unsound, not merely unlucky.
-  **The design ladder:** F-A2's design ran v1→v4 through an adversarial round, a delta round and
-  a final verify — the delta round REVERSED v2's durable-CHECK weakening on a reader census it
-  ran instead of promising; the verify caught a four-apostrophe SQL default that made the
-  *which-model-posted* wall always pass. **The sitting:** ADR-0072's five ruling blocks, plus
-  the later 20-document re-extraction ruling. **The live reads:** three, each in a rolled-back
-  read-only transaction — G-11 priced at a zero client-scoped population, BEE's opening-TB
-  discrepancy settled for ADR-043, a **closed** stranded pair behind `failed_retry`'s un-widened
-  door. **The catch worth naming:** the roster-gate review lane found a defect on `main` itself.
+- **2026-08-21 (the combined Window A+B ceremony + the re-measure)** — the opener train went
+  live in one window instead of two, on the grounds that a fully-merged train makes a split
+  create a stall gap rather than separate risk. **92/`0097` → 97/`0102`, v65 → v66.** The
+  ceremony's own instruments earned their keep twice: the **positive control caught a
+  `$`-expansion bug** that had every PROCESS read returning a false "unset", and the
+  **tripwire aborted on a module-resolution error BEFORE any stop** — zero downtime, which is
+  exactly why it runs pre-quiesce. One probe red, adjudicated a **probe defect** (an assertion
+  on a re-worded comment string). The `0102` coverage probe **said NO** and named the synthetic
+  sandbox firm — accepted. **The re-measure: 12/20, against 0/20 like-for-like**, with opener ②
+  clearing the bundle's hard floor, lock 3 firing on the one genuine registrant, and 19
+  documents firing at once with zero failures on the lane that produced 7 casualties two days
+  earlier. Four prompt-side findings queued; both freeze manifests deploy-locked.
+  *(As-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`.)*
 
 ---
 
-**Keeping this file honest.** Update it at clock-out, every session — posture first, then
-lanes, then anything that moved into or out of the backlog. It is cheap to update and
-expensive to distrust: a `PROGRESS.md` that has been wrong once gets re-verified forever
-after, which costs far more than the updates ever did.
+**Keeping this file honest.** Update it at clock-out, every session — posture first, then lanes,
+then anything that moved into or out of the backlog. It is cheap to update and expensive to
+distrust: a `PROGRESS.md` that has been wrong once gets re-verified forever after, which costs
+far more than the updates ever did.
