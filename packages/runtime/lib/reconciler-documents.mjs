@@ -20,10 +20,15 @@
 // dispatched. See reconcileDocumentTasks's own comment for why the previous env-flag
 // rewrite was the other half of the release/re-hold storm.
 //
-// WAVE C-b (design part2 §5): two MORE lanes — 'statement_facts' (pdf/image, vendor egress
-// under the typed statement_extraction consent) and 'statement_parse' (csv/ofx, a free
-// in-process parse) — both dispatched to the ONE statementFacts_v1 workflow, which branches
-// on the lane inside. The same change turns `enqueueForLane` from a fall-through into an
+// WAVE C-b (design part2 §5): two MORE lanes — 'statement_facts' (pdf/image, model egress
+// under a typed consent) and 'statement_parse' (csv/ofx, a free in-process parse) — both
+// dispatched to the ONE statementFacts workflow, which branches on the lane inside.
+// F-A2 WINDOW B trued two things this paragraph used to state: the registry now points
+// `statementFacts:` at statementFacts_v2 (the TEXT+VISION witness pair on `statement_facts`;
+// `statement_parse` is carried over behaviourally unchanged, reached by importing v1's own
+// steps), and the enqueue-time typed consent both lanes answer to is now `witness_extraction`,
+// not `statement_extraction` — ONE branch in `clara._enqueue_invoice_facts_core` gates both.
+// The Wave C-b change also turned `enqueueForLane` from a fall-through into an
 // EXPLICIT ALLOWLIST: an unrecognised lane returns undefined and warns once instead of
 // being driven into documentIngest. Read that function's own header for why the old default
 // was a live hazard rather than a tidy-up.
@@ -70,8 +75,13 @@ function documentOp(prefix, taskId) {
  *  ONCE; the task simply waits for the image that owns it.
  *
  *  Per lane: 'ocr'/'structured_parse'/'none' ride documentIngest; 'invoice_facts' rides its
- *  own workflow (invoiceFacts_v1); 'statement_facts'/'statement_parse' ride statementFacts_v1
- *  (ONE workflow, branching on the lane inside — design §4.3); 'llm_witness' rides
+ *  own workflow (invoiceFacts_v1); 'statement_facts'/'statement_parse' ride whichever body the
+ *  registry's `statementFacts:` key names — ONE workflow, branching on the lane inside (design
+ *  §4.3). Since the F-A2 Window-B activation that key is statementFacts_v2: the pdf/image
+ *  `statement_facts` lane is the TEXT+VISION witness pair, while `statement_parse` (csv/ofx) is
+ *  carried over behaviourally unchanged, reached by v2 IMPORTING v1's own claim+process steps.
+ *  Both lanes answer to the `witness_extraction` typed consent from that window onward (ONE
+ *  branch in `clara._enqueue_invoice_facts_core` gates the pair); 'llm_witness' rides
  *  witnessFacts_v1 (F-A1 PR-3 cutover — the DB-side router mints this lane for every
  *  invoice-shaped document now; an old image without this arm would warn-once and wait,
  *  never fall through to documentIngest, which is the whole point of the allowlist below);
@@ -413,7 +423,7 @@ export async function reconcileDocumentTasks(client, deps) {
         }
         if ((task.lane === "statement_facts" || task.lane === "statement_parse") && !warnedStatementFactsEnqueueGap) {
           warnedStatementFactsEnqueueGap = true;
-          log("[reconcile] statement re-enqueue skipped: deps.enqueueStatementFacts not wired — a bank-statement task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed statement_extraction consent gate; supervisor must provide enqueueStatementFacts)");
+          log("[reconcile] statement re-enqueue skipped: deps.enqueueStatementFacts not wired — a bank-statement task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed witness_extraction consent gate both statement lanes answer to since F-A2 Window B; supervisor must provide enqueueStatementFacts)");
         }
         if (task.lane === "llm_witness" && !warnedWitnessFactsEnqueueGap) {
           warnedWitnessFactsEnqueueGap = true;

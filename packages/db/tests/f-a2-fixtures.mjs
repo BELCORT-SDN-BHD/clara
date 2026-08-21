@@ -164,15 +164,33 @@ export async function answersOk(envelope, channel) {
     "select clara._witness_answers_ok($1::jsonb,$2) as ok", [JSON.stringify(envelope), channel])).rows[0].ok;
 }
 
-/** The witness engine literal each mint door actually carries, read from ITS OWN catalog body.
- *  Never re-derived from the other, and never re-typed in a test: the two doors must agree, and
- *  a shared hand-typed constant would prove only that the test file is self-consistent. */
+/** The WITNESS (llm_witness lane) engine literal each mint door actually carries, read from ITS
+ *  OWN catalog body. Never re-derived from the other, and never re-typed in a test: the two
+ *  doors must agree, and a shared hand-typed constant would prove only that the test file is
+ *  self-consistent.
+ *
+ *  ANCHORED ON THE LANE, NOT ON THE PREFIX. Until the F-A2 Window-B statement activation the
+ *  router body held exactly ONE `llm-openai:` literal, so a bare prefix match was unambiguous by
+ *  accident. It now holds TWO — the invoice arm's `llm_witness` identity and the bank_statement
+ *  arm's `statement_facts` one — and a first-match regex would pick whichever the author happened
+ *  to write first. That is order-luck, not identity (evidence law 3), and it would break silently
+ *  if the arms were ever reordered. So the anchor names the LANE ASSIGNMENT that immediately
+ *  precedes the literal, which is what actually makes it the witness one. `\s*` spans both live
+ *  spacings: the router writes `v_lane:='llm_witness'; v_engine:=...` and request_reextraction
+ *  writes `v_lane := 'llm_witness'; v_engine := ...`. */
 export async function mintEngineId(which = "router") {
   const sig = which === "router"
     ? "clara._enqueue_invoice_facts_core(uuid)"
     : "clara.request_reextraction(uuid,text,text)";
   const r = await rootQuery("select prosrc from pg_proc where oid=$1::regprocedure", [sig]);
-  const m = /v_engine\s*:=\s*'(llm-openai:[^']+)'/.exec(r.rows[0]?.prosrc ?? "");
-  if (!m) throw new Error(`F-A2: the witness engine literal is unreadable from ${sig}`);
-  return m[1];
+  const src = r.rows[0]?.prosrc ?? "";
+  const re = /v_lane\s*:=\s*'llm_witness';\s*v_engine\s*:=\s*'(llm-openai:[^']+)'/g;
+  const hits = [...src.matchAll(re)].map((m) => m[1]);
+  if (hits.length === 0) throw new Error(`F-A2: the witness engine literal is unreadable from ${sig}`);
+  // Exactly one llm_witness mint per door. More than one would mean the body grew a second
+  // witness identity this helper cannot arbitrate between — loud, never first-wins.
+  if (hits.length > 1) {
+    throw new Error(`F-A2: ${sig} carries ${hits.length} llm_witness engine literals (${hits.join(", ")}) -- ambiguous, refusing to pick one`);
+  }
+  return hits[0];
 }

@@ -154,8 +154,12 @@ export default definePlugin(() => {
         // enqueue-provenance law — a direct workflow-file import handed to start() fails CI).
         enqueueInvoiceFacts: (taskId: string) => start(workflows.invoiceFacts, [{ task_id: taskId }]),
         // Wave C-b: BOTH statement lanes ('statement_facts' pdf/image, 'statement_parse'
-        // csv/ofx) route to the ONE statementFacts_v1 workflow, which branches on the
-        // claimed task's own lane. `enqueueForLane` is now an explicit allowlist, so if this
+        // csv/ofx) route to the ONE workflow the registry's `statementFacts:` key names, which
+        // branches on the claimed task's own lane. F-A2 Window B repointed that key v1 -> v2:
+        // `statement_facts` is now the TEXT+VISION witness pair, `statement_parse` is carried
+        // over unchanged (v2 imports v1's own steps). This line does not name a version and
+        // never did — that is the point of resolving through the registry, and it is why the
+        // repoint needed no edit here. `enqueueForLane` is now an explicit allowlist, so if this
         // dep were ever missing a statement task would WAIT (warned once) rather than be
         // driven into documentIngest's consentless generic OCR pass. Resolved through the
         // registry `workflows` object (freeze-lint enqueue-provenance law — a direct
