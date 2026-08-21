@@ -272,19 +272,19 @@ region, and the witness pair does not depend on one — re-ask after the F-A2 re
 - **`0084`'s out-of-tree derivation tooling is RETAINED** at `C:\ct\` — see Tooling
   follow-ups, where its machine-local-custody hazard is now priced.
 
-**CI economics overhaul (assessment 2026-08-15).** *An OWNER-SITTING item, not scheduled build
-work: it says "REGISTERED for Wave F" but the contract puts it under "Deferred / not reached",
-so no Wave-F item owns it.* The CONTENT is right and the docs-only fence works. **The COST
+**CI economics overhaul — OWNER-APPROVED 2026-08-21 (in-session) as the NEXT session's opener,
+incl. lever (1)'s per-PR-uniformity amendment (ADR-061 territory, ruled): closed-wave drills
+demote to the weekly sweep (which already re-proves every leg); estate suite +
+deploy-onto-existing stay per-PR as backstop. The overhaul PR mints the ADR entry.** **The COST
 problem is structural:** the monolithic `ci` job re-proves EVERY closed wave's drill serially
 (~45-60 min, growing one full-chain apply per wave). Fix, in order of leverage: **(1)** demote
 CLOSED-wave drills to the weekly sweep, keep only the CURRENT wave's per-PR (biggest cut) ·
 **(2)** split the monolith into parallel jobs · **(3)** real pnpm-store + docker-layer caching
 (also kills the setup-pnpm race) · **(4)** HYBRID runners — GitHub-hosted for the cheap legs,
 self-hosted for the DB estate · **(5)** the ci.yml composite-action refactor (same work as the
-500-line Known issue) · **(6)** the branch-protection interplay measured on #244: required check
-`ci`, `strict: true`, `enforce_admins: true` — a docs-only PR whose `ci` leg SKIPPED merges fine
-while up-to-date, but once main moves protection reports "Required status check 'ci' is
-expected"; the fix is `gh pr update-branch` + re-green, **never `--admin`**. **Batch-CI-per-wave
+500-line Known issue) · **(6)** the branch-protection interplay (#244): `strict:true` +
+`enforce_admins:true` means once main moves, a stale PR needs `gh pr update-branch` +
+re-green — **never `--admin`**. **Batch-CI-per-wave
 was CONSIDERED AND REJECTED** — the per-PR gate caught T17 drift, a seam census gap, the
 frontier-ordering violation and the S0.9 flake in ONE night. Scope routing, not frequency
 reduction; changing per-PR uniformity is ADR-061 territory, an owner ruling.
