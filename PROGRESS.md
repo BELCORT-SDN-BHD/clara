@@ -74,25 +74,25 @@ file wins or it is stale — and truing it is the first thing you do.
   yet, and `docs/ops/DR-render.md` keeps that boundary explicit.
 - **Hard constraint 12 is STRUCTURAL:** `0062` walls RS-customer enrichment in the DB
   (fact-driven, uuid-pinned, self-proven at apply); `0063` makes lifting it an OWNER act.
-- **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5
-  mechanically enforced, 44-case selftest in CI) beside pinned-ids; `.claude/rules/db-tests.md`
-  + `handoffs.md`; the ci.yml Wave-E δ contract drill (closes the sweep-skip false-green shape).
+- **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5,
+  44-case selftest) beside pinned-ids; `.claude/rules/`; the Wave-E δ contract drill.
 - **Runtime:** Fly `clara-runtime`, single machine, `/ready` 200 — **v66 (2026-08-21)**, carrying
   autoDraft_v8 + chatTurn_v12 + **witnessFacts.v2** + **statementFacts_v2** + riders ③④, all four
   verified by in-VM bundle grep. The three `CLARA_RENDER_FLY_*` values are bound. Dashboard:
   Pages `app.clarabook.com`. `clara-backup` daily. `clara-render` hourly.
-- **Books pins:** RS trial balance **3,396,500 = 3,396,500** (`trial_balance_as_of`, re-read at
-  every ceremony) · RS customers **11/11 NAME-ONLY** (the enrichment trap holds; the one
-  registered counterparty is a vendor, out of scope) · `client_facts` = 7 rows (3 carryover +
-  3 MSIC + 1 doored entity_type).
+- **Books pins:** RS trial balance **3,396,500 = 3,396,500** (`trial_balance_as_of`, re-read
+  at every ceremony) · RS customers **11/11 NAME-ONLY** (the enrichment trap holds) ·
+  `client_facts` = 7 rows (3 carryover + 3 MSIC + 1 doored entity_type).
 - **The close model is LIVE-INERT:** zero `fiscal_years` rows; activation is the first human
   `open_fiscal_year`. The snapshot registry is likewise inert (zero `reporting_periods` /
   `period_snapshots`) until the first `mint_month_snapshot`.
-- **CI:** the self-hosted `clara-wsl` + `clara-wsl-2` runner instances (private-repo-only law).
-  Gates: the 7-script lint family + typecheck/build + the full DB suite on a throwaway
-  `postgres:17` + deploy-onto-existing.
-- **Hard-blocked ids** (canary `daba7f2e` · witness `d023b48c`) are hook-enforced —
-  `scripts/hooks/pinned-ids-guard.mjs` via the tracked `.claude/settings.json`.
+- **CI (ADR-0073, 2026-08-21):** self-hosted `clara-wsl` + `clara-wsl-2` (private-repo-only
+  law). Per-PR (~13 min, parallel): lint · build · estate suite + deploy-onto-existing ·
+  live e2es + DR pair · render drill · partition gate; **closed-wave drills + frontier
+  matrix on the weekly sweep + manual dispatch only**; required check `ci` = fail-closed
+  meta-gate. After any PR touching a closed drill or the pipeline: `gh workflow run ci.yml`.
+- **Hard-blocked ids** (canary `daba7f2e` · witness `d023b48c`) — hook-enforced
+  (`scripts/hooks/pinned-ids-guard.mjs`, tracked `.claude/settings.json`).
 
 ## Lanes
 
@@ -102,7 +102,7 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
 | Wave F · Track A — **F-A2 proper** | **DESIGNED (v4), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. The unattended posting lane (PR-0..PR-4 + PR-1b, two further D1 windows) has **NOT started** — every corroborating invoice holds an unattended-eligible ticket nothing yet redeems. **OQ-2/3/5 stay open with recommendations.** | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④), Fix A proceeds: both writer bodies in ONE migration, 13-cell battery, D1 on the 0085 template | design | — |
-| Harness — **the CI economics overhaul (ADR-0073)** | Owner-approved opener, built 2026-08-21: closed-wave drills → weekly sweep; monolith → parallel jobs; `ci` → fail-closed meta-gate; composites restore the 500-line limit; local pnpm store. Post-merge: one manual `gh workflow run ci.yml` proves the sweep path. | in review | — |
+| Harness — **the CI economics overhaul (ADR-0073)** | **DELIVERED 2026-08-21, proven on all three event paths same-day**: PR run green in **~13 min** (was ~42) · post-merge push green · the manual dispatch full sweep green incl. all 12 closed-wave drills + 4 frontier legs in their new sweep-only home. Reviews: 5-lens adversarial workflow (3 confirmed → fixed: `bash -e {0}` exact shells · classifier learns `.github/actions/**` · per-run dispatch concurrency group) + Codex cross-model (3 shared-host races → fixed). | merged | #278 |
 
 *(The sixteen terminal Wave-E rows moved verbatim to the archive, 2026-08-18.)*
 
@@ -172,6 +172,12 @@ Registered but not scheduled. Sources of record in brackets.
   not reach it) · the leader render-pair try/catch (`leader.mjs:200-211`) still swallows
   halt-class errors — unreachable today, but the one remaining halt-eating catch on that path ·
   `wiki-projection.mjs:333-346`/`:594-599` carry three bare `to_regprocedure` probes.
+- **`high_stakes_amount_cents` has no governed self-serve verb** (found by the 2026-08-21
+  client-naming audit): the RM100k threshold was set by a one-time hand-run deploy script
+  (ADR-0044's ceremony); a future SaaS firm cannot configure its own threshold through an
+  audited door. Not a defect today (the column and its `is_high_stakes` reader are fully
+  generic and per-firm); a **Wave-G OS-surface item** — the governed verb ships with the
+  firm-setup flow. *(audit record: session log 2026-08-21)*
 - **`closing_stock` producer verb** — before any real goods-trader close. **Wave G does NOT
   schedule it:** ADR-0072 ⑤ defaulted OD-2 to "not in the first pass". *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. The Wave-G corpus
@@ -472,23 +478,19 @@ version + ceremony):**
 
 ## Session log
 
-*(Entries through 2026-08-19 — the F-A1 build nights included — are verbatim in
-`docs/plan/completed/progress-archive-2026-08.md`, alongside F-A1's operative records: its
-ceremony as-runs and the corpus measurement.)*
+*(Entries through the 2026-08-21 Window A+B ceremony are verbatim in
+`docs/plan/completed/progress-archive-2026-08.md` + `-part2.md`, alongside F-A1's operative
+records: its ceremony as-runs and the corpus measurement.)*
 
-- **2026-08-21 (the combined Window A+B ceremony + the re-measure)** — the opener train went
-  live in one window instead of two, on the grounds that a fully-merged train makes a split
-  create a stall gap rather than separate risk. **92/`0097` → 97/`0102`, v65 → v66.** The
-  ceremony's own instruments earned their keep twice: the **positive control caught a
-  `$`-expansion bug** that had every PROCESS read returning a false "unset", and the
-  **tripwire aborted on a module-resolution error BEFORE any stop** — zero downtime, which is
-  exactly why it runs pre-quiesce. One probe red, adjudicated a **probe defect** (an assertion
-  on a re-worded comment string). The `0102` coverage probe **said NO** and named the synthetic
-  sandbox firm — accepted. **The re-measure: 12/20, against 0/20 like-for-like**, with opener ②
-  clearing the bundle's hard floor, lock 3 firing on the one genuine registrant, and 19
-  documents firing at once with zero failures on the lane that produced 7 casualties two days
-  earlier. Four prompt-side findings queued; both freeze manifests deploy-locked.
-  *(As-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`.)*
+- **2026-08-21 (the CI-economics session)** — **ADR-0073 delivered and proven on all three
+  event paths same-day** (#278): per-PR ~13 min (was ~42) · post-merge push green · manual
+  dispatch sweep green incl. all 12 closed-wave drills + 4 frontier legs. Reviews: 5-lens
+  adversarial workflow + Codex cross-model; 6 confirmed findings, all fixed pre-merge (the
+  `shell: bash` pipefail injection the headline). **Owner rulings:** the test-bed/data stays
+  until the Wave-G reset (re-confirms ADR-0072 ⑤), answered by the **client-naming audit** —
+  152 refs swept, adversarially verified, **0 confirmed hard-coded client logic** (the two
+  raw flags: a one-time ADR-0044 hand-run data script; the pinned-ids safety net). One
+  forward gap registered: the `high_stakes_amount_cents` governed-verb item (Backlog).
 
 ---
 
