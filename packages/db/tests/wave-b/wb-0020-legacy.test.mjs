@@ -186,6 +186,54 @@ function applyRestoreFA2Engine(member, src) {
   return src;
 }
 
+// =========================================================================
+// AMENDMENT F-A2 WINDOW B (the STATEMENT ACTIVATION,
+// 0102_f_a2_statement_activation.sql). The SAME §6 member --
+// _enqueue_invoice_facts_core ("router") -- gains one more deliberately-changed layer, now the
+// OUTERMOST of all (authored latest). TWO edits, both inside the BANK-STATEMENT path and both
+// disjoint from every earlier layer's span:
+//   (1) the bank_statement classification arm re-aims its ENGINE literal from the retiring
+//       Azure prebuilt-bankStatement read to the witness pair's snapshot,
+//       llm-openai:gpt-5.6-terra:stmt-witness-v1. `v_lane` is NOT touched -- it stays
+//       statement_facts (0098's own LANE DECISION), which is why this pair's two sides differ
+//       in the engine literal and the comment alone;
+//   (2) the statement arm's enqueue-time typed-consent lookup re-keys its purpose literal from
+//       statement_extraction to witness_extraction, keeping this arm's OWN refusal codes.
+// Both pairs are MACHINE-DERIVED: transcribed from that migration's own $f1$/$t1$ and
+// $f2$/$t2$ splice literals by reading the file, never retyped by eye -- which is also why the
+// migration anchors WHOLE BLOCKS, comment included: a reversal pair that swapped only the
+// literal could not carry the comment back, and this battery compares TEXT.
+// Reversed FIRST, before the F-A2 engine-bump layer, per the standing
+// "reverse outermost-first" discipline.
+const RESTORE_FA2_ACTIVATION = {
+"router": [
+[
+"    elsif d.document_kind='bank_statement' then\n      -- 0038 arm 1 closed the bank_statement -> skipped_kind dead end 0026:392-410 left\n      -- behind, on the vendor OCR read. F-A2 WINDOW B (the ACTIVATION, design SS3.7) re-aims\n      -- it at the WITNESS PAIR: the same lane, a different engine identity.\n      -- THE LANE DOES NOT MOVE, and that is 0098's own LANE DECISION (0098:120-138), not an\n      -- omission: _invoice_fact_state keys the witness regime on lane llm_witness, so a\n      -- statement pair there would be resolved as an INVOICE corroboration, and the invoice\n      -- witness workflow claims that lane BY LANE ALONE and would read a statement with\n      -- invoice prompts. Staying on statement_facts also keeps this task inside the\n      -- enqueue-time page-budget reservation set (0098:114-118).\n      -- v_engine MUST string-equal STATEMENT_WITNESS_ENGINE_SNAPSHOT.engineId in the\n      -- statementFacts.v2 services module: the workflow compares the task's stamp against its\n      -- own snapshot BEFORE any egress and WAITS on a mismatch rather than sending bytes under\n      -- a receipt naming a model it did not call (0098:154-159), so a drifted literal STALLS\n      -- the lane instead of mis-stamping it. Battery cell f-a2.activation-engine-literal reads\n      -- both sides independently and asserts equality.\n      v_lane:='statement_facts'; v_engine:='llm-openai:gpt-5.6-terra:stmt-witness-v1';",
+"    elsif d.document_kind='bank_statement' then\n      -- 0038 arm 1: the statementFacts_v1 OCR lane. This is the arm that closes the\n      -- bank_statement -> skipped_kind dead end 0026:392-410 left behind.\n      -- as-built ladder fix 2026-07-31, Codex wave: the stamp names `prebuilt-bankStatement.us`,\n      -- which is the model the runtime ACTUALLY invokes. Provenance must name the engine that\n      -- received the egress -- a stamp naming a model nobody called is a false receipt, and the\n      -- \".us\" suffix is the whole model identity here, not a regional decoration.\n      v_lane:='statement_facts'; v_engine:='azure-di:prebuilt-bankStatement.us:2024-11-30';",
+],
+[
+"      v_stmt_client:=v_stmt_clients[1];\n      -- F-A2 WINDOW B (the ACTIVATION): the statement lane's typed consent is now keyed on the\n      -- purpose the witness pair actually egresses under, not on the retiring vendor-OCR one.\n      -- NO NEW CONSENT SURFACE IS NEEDED: the activation relation is keyed on\n      -- (firm_id, client_id, purpose) ALONE -- no lane, no document_kind, no engine column\n      -- (0038:5981-5987) -- so the activations already on file for the invoice witness pair\n      -- answer this lookup unchanged. THIS ARM'S OWN REFUSAL VOCABULARY IS UNCHANGED\n      -- (statement_multi_client / consent_inactive, 0098:161-165) and so is its\n      -- document.statement_facts_failed emit; only the purpose literal moves. The retiring\n      -- purpose STAYS REGISTERED in the purpose CHECKs -- historical authorization rows\n      -- reference it and drops are BY NAME (the 0038:5462 contract).\n      if not exists(select 1 from clara.client_egress_purpose_activations a\n          join clara.client_egress_purpose_consents c\n            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id\n              and c.purpose=a.purpose\n          where a.firm_id=d.firm_id and a.client_id=v_stmt_client\n            and a.purpose='witness_extraction'\n            and a.deactivated_at is null and c.revoked_at is null) then\n        v_gate:='consent_inactive';\n      end if;",
+"      v_stmt_client:=v_stmt_clients[1];\n      if not exists(select 1 from clara.client_egress_purpose_activations a\n          join clara.client_egress_purpose_consents c\n            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id\n              and c.purpose=a.purpose\n          where a.firm_id=d.firm_id and a.client_id=v_stmt_client\n            and a.purpose='statement_extraction'\n            and a.deactivated_at is null and c.revoked_at is null) then\n        v_gate:='consent_inactive';\n      end if;",
+]
+]
+};
+function applyRestoreFA2Activation(member, src) {
+  for (const [frm, to] of RESTORE_FA2_ACTIVATION[member]) {
+    // DORMANCY vs DRIFT, the same discipline every F-A2 layer here uses. On a chain where the
+    // Window-B migration has NOT been applied the router still carries the pre-activation text
+    // and there is nothing to reverse -- that is a pre-activation database, not a broken one,
+    // so the layer is a no-op. Anything else (the pair present twice) is drift and must fail
+    // loudly rather than restore a wrong body.
+    const n = src.split(frm).length - 1;
+    if (n === 0) continue;
+    if (n !== 1) {
+      throw new Error(`F-A2 activation restore(${member}): the pair appears ${n} times -- the live body drifted from the ratified F-A2 Window-B shape: ${frm.slice(0, 100)}`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 const RESTORE_0038 = {
 "claim": [
 [
@@ -364,13 +412,22 @@ const BYTE_IDENTICAL = {
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
-    // F-A2 is the OUTERMOST (newest) layer: reverse it FIRST (the one engine-literal + comment
-    // block), then F-A1 PR-3 (the invoice-kind mint arm + the already_completed engine_kind
-    // map, both in the earlier mime-routing block PR-1 never touched), then F-A1 PR-1 (the ONE
-    // inert llm_witness elsif branch, wall 6, in the later consent-gate block PR-3 never
-    // touched), so 0038's own pairs then find the exact pre-F-A1 text.
+    // FIVE F-A-era layers now sit on this body, and they are reversed OUTERMOST-FIRST:
+    //   1. F-A2 WINDOW B (the statement activation, newest) -- the bank_statement arm's engine
+    //      literal + the statement consent lookup's purpose literal. Its two edits sit in spans
+    //      0038 itself later reverses wholesale (the bank_statement arm; the statement
+    //      consent-gate block), which is exactly why it must be undone before them;
+    //   2. F-A2 opener 2 -- the invoice-kind mint arm's :v1 -> :v2 engine bump;
+    //   3. F-A1 PR-3 -- the invoice-kind mint arm + the already_completed engine_kind map, both
+    //      in the earlier mime-routing block PR-1 never touched;
+    //   4. F-A1 PR-1 -- the ONE inert llm_witness elsif branch, wall 6, in the later
+    //      consent-gate block PR-3 never touched;
+    //   5. 0038's own pairs, which then find the exact pre-F-A1 text.
+    // Layers 1 and 2 touch DISJOINT arms (statement vs invoice), so their relative order is
+    // safe either way; "reverse newest first" stays the stated discipline regardless.
     restore: (src) => applyRestore0038("router", applyRestoreFA1("router",
-      applyRestoreFA1PR3("router", applyRestoreFA2Engine("router", src))))
+      applyRestoreFA1PR3("router", applyRestoreFA2Engine("router",
+        applyRestoreFA2Activation("router", src)))))
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",
@@ -424,6 +481,13 @@ const BYTE_IDENTICAL = {
       /v_lane:='llm_witness'; v_engine:='llm-openai:gpt-5\.6-terra:v2';/,
       /then 'llm_text_facts'/,
       /if v_task is null and v_lane='llm_witness' then/,
+      // F-A2 WINDOW B's own markers (the statement activation), one per edit: present in the
+      // live body, and BOTH must be gone after the full reversal. Edit 2's marker is written
+      // long enough to reach this arm's OWN consent_inactive verdict, because the llm_witness
+      // branch carries a byte-identical lookup that differs only in the code it assigns — a
+      // bare purpose regex would not distinguish the two.
+      /v_lane:='statement_facts'; v_engine:='llm-openai:gpt-5\.6-terra:stmt-witness-v1';/,
+      /and a\.purpose='witness_extraction'\n {12}and a\.deactivated_at is null and c\.revoked_at is null\) then\n {8}v_gate:='consent_inactive';/,
     ],
   },
   // AMENDMENTS A6→A7 (ratified 2026-07-25, contract v1.4 §5.6/§5.7). This is the ONE member of

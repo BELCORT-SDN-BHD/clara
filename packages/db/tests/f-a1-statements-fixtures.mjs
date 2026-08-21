@@ -147,22 +147,67 @@ export async function filedStatementDoc(sub, client) {
   return filedDocument(sub, { firm, client, kind: "bank_statement" });
 }
 
-/** A direct-inserted 'running' statement_facts task PLUS its processing-call reservation
+/** A 'running' statement_facts task PLUS its processing-call reservation
  *  (`_settle_processing_call` requires one unconditionally in v2 — the ONE piece of harness
  *  plumbing the test file's header calls out explicitly). Mirrors f-a1-writer.test.mjs's
- *  `runningTask` for the llm_witness lane, adapted to `statement_facts` + the reservation. */
-export async function statementWitnessTask(firm, documentId, { engineId = `llm-openai:gpt-witness:${randomUUID().slice(0, 8)}`, versionN = 1, pagesReserved = 5 } = {}) {
-  const r = await rootQuery(
-    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,
-       status,workflow_run_id,started_at)
-     values($1,$2,$3,$4,'statement_facts','running',$5,now()) returning id`,
-    [firm, documentId, engineId, versionN, `rig-stmtwit-${randomUUID().slice(0, 8)}`]);
-  const taskId = r.rows[0].id;
+ *  `runningTask` for the llm_witness lane, adapted to `statement_facts` + the reservation.
+ *
+ *  ADOPT-OR-INSERT, and the reason is the F-A2 Window-B activation rather than a style choice.
+ *  Before the activation, filing a `bank_statement` for a client with no `statement_extraction`
+ *  activation minted a TERMINAL failed receipt, so a hand-inserted live task never collided.
+ *  After it, the router's statement arm reads `witness_extraction` — which these batteries DO
+ *  light, because the dispatch cells need it — so the same filing now mints a genuinely LIVE
+ *  queued task, and a second live row on the lane trips `uq_document_processing_one_live_lane`.
+ *  A fixture that inserted anyway would be modelling a state production cannot reach. So when a
+ *  non-terminal task already exists on this document's `statement_facts` lane, this helper
+ *  ADOPTS it (the claim production would perform), and inserts only when there is none. */
+export async function statementWitnessTask(firm, documentId, opts = {}) {
+  const { versionN = 1, pagesReserved = 5 } = opts;
+  const wantedEngine = opts.engineId;
+  const engineId = wantedEngine ?? `llm-openai:gpt-witness:${randomUUID().slice(0, 8)}`;
+  const runId = `rig-stmtwit-${randomUUID().slice(0, 8)}`;
+  const live = await rootQuery(
+    `select id, engine_id, version_n from clara.document_processing_tasks
+      where document_id=$1 and lane='statement_facts'
+        and status in ('queued','held_egress','running')
+      order by version_n desc limit 1`, [documentId]);
+  let taskId;
+  let landedEngine = engineId;
+  let landedVersion = versionN;
+  if (live.rowCount === 1) {
+    // THE STAMP IS IMMUTABLE, and that is a wall this fixture must not go around: the
+    // identity/config trigger refuses an engine_id change on an existing task. So adoption
+    // CLAIMS the row and keeps the router's own stamp, and the stamp it kept is what this helper
+    // reports back — the caller then builds its payload against the task's real provenance,
+    // which is exactly the production shape. A caller that asked for a SPECIFIC engine_id and
+    // met a live row carrying a different one is a collision, not an adoption: fail loudly.
+    if (wantedEngine !== undefined && live.rows[0].engine_id !== wantedEngine) {
+      throw new Error(
+        `statementWitnessTask: document ${documentId} already carries a LIVE statement_facts task stamped `
+        + `'${live.rows[0].engine_id}', but this cell asked for '${wantedEngine}'. The stamp is immutable, so `
+        + "the cell must re-version (pass versionN above the live one after settling it) rather than adopt.");
+    }
+    const adopted = await rootQuery(
+      `update clara.document_processing_tasks
+          set status='running', workflow_run_id=$2, started_at=now()
+        where id=$1 returning id, engine_id, version_n`,
+      [live.rows[0].id, runId]);
+    taskId = adopted.rows[0].id;
+    landedEngine = adopted.rows[0].engine_id;
+    landedVersion = adopted.rows[0].version_n;
+  } else {
+    const r = await rootQuery(
+      `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,
+         status,workflow_run_id,started_at)
+       values($1,$2,$3,$4,'statement_facts','running',$5,now()) returning id`,
+      [firm, documentId, engineId, versionN, runId]);
+    taskId = r.rows[0].id;
+  }
   await rootQuery(
     `insert into clara.processing_call_reservations(firm_id, task_id, state, pages_reserved)
-     values($1,$2,'reserved',$3)`,
+     values($1,$2,'reserved',$3) on conflict do nothing`,
     [firm, taskId, pagesReserved]);
-  return { taskId, engineId, versionN };
+  return { taskId, engineId: landedEngine, versionN: landedVersion };
 }
 
 /** A direct-inserted 'running' task on an ARBITRARY lane, with NO processing-call reservation —

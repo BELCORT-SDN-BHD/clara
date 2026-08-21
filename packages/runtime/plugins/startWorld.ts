@@ -25,6 +25,7 @@ import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
 import { makeStatementWitnessServices } from "../workflows/statementFacts.v2.services.mjs";
 import { makeWitnessFactsServices } from "../workflows/witnessFacts.v1.services.mjs";
+import { makeWitnessFactsServicesV2 } from "../workflows/witnessFacts.v2.services.mjs";
 import { stopIntakeIngress } from "../lib/spool.mjs";
 import { startManagedScanner } from "../lib/scan.mjs";
 
@@ -88,6 +89,13 @@ export default definePlugin(() => {
   // nothing mints `llm_witness` tasks yet: the image must be able to run the lane BEFORE PR-3's
   // router recut turns it on, which is the whole point of the deploy order (positive-read law).
   (globalThis as unknown as { __claraWitnessFactsServices?: unknown }).__claraWitnessFactsServices = makeWitnessFactsServices();
+  // F-A2 openers ①②: witnessFacts_v2's OWN bundle, injected ADDITIVELY beside v1's and never in
+  // place of it. The bundle carries the ENGINE SNAPSHOT and the contract version lives inside the
+  // engine id, so the two must not share a slot: v1's keeps stamping `:v1` for any run still
+  // resuming into the frozen v1 prompt body, and v2's stamps `:v2` for everything the repointed
+  // registry mints. Both present simultaneously, each version reading its own — the
+  // __claraStatementFactsServices / __claraStatementWitnessServices precedent, unchanged.
+  (globalThis as unknown as { __claraWitnessFactsServicesV2?: unknown }).__claraWitnessFactsServicesV2 = makeWitnessFactsServicesV2();
   // The MyInvois local_facts consumer reuses the document services (temp-file lifecycle +
   // canonical download); the UBL facts parse runs in its own worker thread.
   const localFactsServices = makeDocumentServices();
@@ -146,8 +154,12 @@ export default definePlugin(() => {
         // enqueue-provenance law — a direct workflow-file import handed to start() fails CI).
         enqueueInvoiceFacts: (taskId: string) => start(workflows.invoiceFacts, [{ task_id: taskId }]),
         // Wave C-b: BOTH statement lanes ('statement_facts' pdf/image, 'statement_parse'
-        // csv/ofx) route to the ONE statementFacts_v1 workflow, which branches on the
-        // claimed task's own lane. `enqueueForLane` is now an explicit allowlist, so if this
+        // csv/ofx) route to the ONE workflow the registry's `statementFacts:` key names, which
+        // branches on the claimed task's own lane. F-A2 Window B repointed that key v1 -> v2:
+        // `statement_facts` is now the TEXT+VISION witness pair, `statement_parse` is carried
+        // over unchanged (v2 imports v1's own steps). This line does not name a version and
+        // never did — that is the point of resolving through the registry, and it is why the
+        // repoint needed no edit here. `enqueueForLane` is now an explicit allowlist, so if this
         // dep were ever missing a statement task would WAIT (warned once) rather than be
         // driven into documentIngest's consentless generic OCR pass. Resolved through the
         // registry `workflows` object (freeze-lint enqueue-provenance law — a direct

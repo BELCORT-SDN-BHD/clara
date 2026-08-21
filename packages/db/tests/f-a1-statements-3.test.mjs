@@ -37,10 +37,16 @@ import {
 
 const CLR10 = "CLR10";
 const CLR16 = "CLR16";
-/** The legacy statement engine literal the router stamps TODAY, verbatim (0038:6231-6238). It
- *  is what a pre-cutover `statement_facts` task actually carries, which is the whole point of
- *  gate (2): section 2 of the migration keeps `azure-%` admissible on this lane forever. */
+/** The legacy statement engine literal, verbatim (0038:6231-6238). Since the F-A2 Window-B
+ *  activation the router no longer MINTS it — this is what a PRE-WINDOW `statement_facts` task
+ *  carries, which is the whole point of gate (2): section 2 of the 0098 migration keeps
+ *  `azure-%` admissible on this lane forever, so that backlog stays storable and refusable. */
 const AZURE_STATEMENT_ENGINE = "azure-di:prebuilt-bankStatement.us:2024-11-30";
+
+/** What the router stamps on this lane AFTER the F-A2 Window-B activation. Held as its own
+ *  constant so the cell below reads the router's stamp POSITIVELY rather than only asserting
+ *  the absence of the legacy one. */
+const WITNESS_STATEMENT_ENGINE = "llm-openai:gpt-5.6-terra:stmt-witness-v1";
 
 let world = null;
 let ready = false;
@@ -173,24 +179,30 @@ test("f-a1s.k(4) the LIVE router's own azure-stamped statement_facts task refuse
   mustBeReady();
   const { firm, ch, h, doc } = await provenanceSetup(7);
 
-  // THE PREMISE IS READ, NOT TYPED. Filing a `bank_statement` document mints a statement_facts
-  // task through the live router TODAY, stamped with the legacy Azure literal — so this cell
-  // drives the real pre-cutover row rather than a synthetic stand-in, and the constant above is
-  // checked AGAINST the router instead of standing in for it. (The auto-mint is easy to miss: a
-  // synthetic task inserted here under the same literal collides 23505 on the
-  // (document, engine, version, lane) unique key, which is how it announces itself.)
+  // THE PREMISE IS READ, NOT TYPED — and the F-A2 Window-B activation MOVED it, exactly as the
+  // earlier cut of this comment predicted it would ("if this ever fails, the router arm has
+  // landed and THIS cell's premise, not the gate, is what moved"). The router's bank_statement
+  // arm now stamps the WITNESS literal, so the live router no longer produces the azure-stamped
+  // row this gate exists for. What still produces one is the PRE-WINDOW BACKLOG: a task minted
+  // before the activation window and still on the lane afterwards. Lane `statement_facts` keeps
+  // `azure-%` admissible precisely so that population stays storable, so the cell drives that
+  // row — read the router's own stamp first (positive evidence that the arm re-keyed), then
+  // build the backlog shape it is really about.
   const minted = (await rootQuery(
     `select id, lane, engine_id, version_n, status from clara.document_processing_tasks
       where document_id=$1 and lane='statement_facts'`, [doc.documentId])).rows;
   assert.equal(minted.length, 1, `filing a bank_statement document must mint exactly one statement_facts task (found ${minted.length})`);
-  assert.equal(minted[0].engine_id, AZURE_STATEMENT_ENGINE,
-    `the live router still stamps the legacy Azure literal on this lane — if this ever fails, the router arm has landed and THIS cell's premise, not the gate, is what moved (got ${minted[0].engine_id})`);
+  assert.equal(minted[0].engine_id, WITNESS_STATEMENT_ENGINE,
+    `post-activation the router stamps the witness statement literal on this lane (got ${minted[0].engine_id})`);
+  assert.notEqual(minted[0].engine_id, AZURE_STATEMENT_ENGINE,
+    "the retiring vendor literal must never be minted again — no NEW task can reach this gate, only the pre-window backlog can");
 
-  // …and that minted row is TERMINAL (it settled for want of a consent grant) and immutable —
-  // re-arming it raises CLR16 'terminal document processing task is immutable', which is the
-  // right answer and not a wall this cell may go around. So the cell drives a RE-VERSIONED task
-  // carrying the SAME router literal: version_n 2 clears the (document, engine, version, lane)
-  // unique key, and a re-versioned attempt on a statement is an ordinary thing for this lane.
+  // …and that minted row is TERMINAL (it settled for want of a witness consent grant) and
+  // immutable — re-arming it raises CLR16 'terminal document processing task is immutable',
+  // which is the right answer and not a wall this cell may go around. So the cell drives a
+  // RE-VERSIONED task carrying the AZURE literal: version_n 2 clears the
+  // (document, engine, version, lane) unique key, and a re-versioned attempt on a statement is
+  // an ordinary thing for this lane.
   assert.ok(["failed", "done"].includes(minted[0].status),
     `the router-minted task is expected terminal on a rig with no consent grant (got ${minted[0].status})`);
   const reVersioned = await statementWitnessTask(firm, doc.documentId, {
