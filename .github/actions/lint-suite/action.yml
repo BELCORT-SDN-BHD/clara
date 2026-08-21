@@ -1,0 +1,199 @@
+name: Lint + secrets + boundary gates
+description: >-
+  The full lint family — freeze-lint, leak-scan, the wiki gates, the vendor-binding
+  post-control gate, harness-links + the hook self-tests, the evaluator freeze family,
+  the render package drill, and the pinned gitleaks scan. Every step is moved from
+  ci.yml's lint job verbatim in every EXECUTABLE respect (ADR-0073 lever 5), with ONE
+  documented delta: the gitleaks binary is cached version-keyed under $HOME/.cache so
+  the release tarball is not re-downloaded on every run (lever 3).
+runs:
+  using: composite
+  steps:
+    - name: Lint (freeze-lint + leak-scan + eslint code-lint)
+      shell: bash -e {0}
+      run: pnpm lint
+
+    # Called out explicitly for visibility even though `pnpm lint` runs them:
+    - name: Freeze-lint (workflow versioning policy — ARCHITECTURE Appendix A)
+      shell: bash -e {0}
+      run: node scripts/check-frozen-workflows.mjs
+
+    - name: Leak-scan (no committed credentials)
+      shell: bash -e {0}
+      run: node scripts/check-leaks.mjs
+
+    # The 0019 §9 wiki-authority boundary — the repo half of the defence the DB tail
+    # structurally cannot provide, plus its fixture-driven self-test (ratchet R1
+    # finding 3: signature-keyed definitions + change-of-record patch analysis).
+    - name: Wiki dynamic-SQL gate + self-test (0019 §9 · WB-R21)
+      shell: bash -e {0}
+      run: |
+        node scripts/check-wiki-dynamic-sql.mjs
+        node scripts/check-wiki-dynamic-sql.selftest.mjs
+
+    # The 0029 Slot-C durable interlock: the current migration-tree definition
+    # of execute_rule_post must retain the binding live/unexpired gate.
+    - name: Vendor-binding post-control gate (0029 Slot C)
+      shell: bash -e {0}
+      run: node scripts/check-binding-post-control.mjs
+
+    # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
+    # (AGENTS.md, PROGRESS.md, docs/adr/README.md, docs/plan/index.md) has its markdown
+    # links + backtick paths validated against disk, one hop into referenced docs/*.md
+    # files, plus docs/adr/'s own bidirectional index check. STRICT=true since assembly:
+    # all four entries exist, so a missing one is a hard failure, as is any broken
+    # reference inside a file that exists.
+    #
+    # The pinned-ids self-test rides here too. The guard itself is a PreToolUse hook, not
+    # a CI step — CI can never exercise it in situ — so this run is the only thing standing
+    # between a refactor and a silently dead safety pin (AGENTS.md hard constraint 11).
+    - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids + dispatch-model guards)
+      shell: bash -e {0}
+      run: |
+        node scripts/check-harness-links.mjs
+        node scripts/check-harness-links.selftest.mjs
+        node scripts/hooks/pinned-ids-guard.selftest.mjs
+        # Same deal for the dispatch-model guard (AGENTS.md hard constraint 5).
+        node scripts/hooks/dispatch-model-guard.selftest.mjs
+
+    # The .sql half of the freeze family (§4.2). check-frozen-workflows.mjs reads the TS
+    # workflow bodies; a deterministic EVALUATOR lives in a migration, so nothing above can
+    # see it. The self-test rides along for the same reason the guards' do: this checker's
+    # own CLI guard once exited 0 having checked nothing, and only an end-to-end run against
+    # a mutated body catches that class.
+    - name: Evaluator freeze-lint + self-test (§4.2 · the .sql half the workflow lint cannot reach)
+      shell: bash -e {0}
+      run: |
+        node scripts/check-frozen-evaluators.mjs
+        node scripts/check-frozen-evaluators.selftest.mjs
+
+    # Lane ζ's render package is NOT a pnpm workspace member (pnpm-workspace.yaml says why),
+    # so `pnpm -r` cannot see it and it would otherwise reach main with no CI at all. It is
+    # driven here by explicit steps, in the UNCONDITIONAL lint job, with no skip-allowing
+    # variable: a missing or broken module FAILS here rather than skipping quietly.
+    #
+    # `pnpm --dir` on purpose, and this is load-bearing rather than stylistic: it runs the
+    # package's own scripts with the REPO'S PINNED eslint resolved from the root install,
+    # whereas `npx eslint` inside a non-member package resolves nothing locally and would
+    # DOWNLOAD an unpinned eslint from the registry onto the self-hosted runner on every PR.
+    # No install step is needed: `check` is `node --check` (syntax only) and the unit battery
+    # imports nothing outside the package — `pg` is reached only by lib/db.mjs, which the
+    # tests never load, and which the image installs from the package's own manifest.
+    - name: Render package drill (lane ζ · check + lint + the judgement battery)
+      shell: bash -e {0}
+      run: |
+        pnpm --dir packages/reporting-render run check
+        pnpm --dir packages/reporting-render run lint
+        pnpm --dir packages/reporting-render run test
+
+    # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
+    # "backed by gitleaks in CI" claim true). Version-pinned to a released
+    # gitleaks binary (not a mutable action tag); config + allowlist in
+    # .gitleaks.toml (same config, both contexts below).
+    #
+    # PUSH: full history, unchanged in SCOPE — but see MERGE-DIFF COVERAGE below,
+    # which applies to this branch too. This stays the only place a leak already
+    # sitting in history is ever re-caught.
+    #
+    # PULL_REQUEST: scoped to `origin/main..HEAD` — this PR's own history plus
+    # the synthetic merge commit GitHub checks out as HEAD (refs/pull/N/merge).
+    # Unscoped, HEAD's full ancestry is the entire base-branch history too, so
+    # one bad commit already on main reds every unrelated PR opened after it
+    # (the 2026-08-05 archive-branch incident: an evidence branch's unmarked
+    # UUIDs would have red ALL CI). DOUBLE-dot, not triple. `origin/main..HEAD`
+    # is "commits reachable from HEAD, minus commits reachable from CURRENT
+    # origin/main" — a commit that exists only on the PR side can never be
+    # reachable from origin/main (main never contains not-yet-merged PR work),
+    # so double-dot can never exclude one. Triple-dot is the *symmetric*
+    # difference: it ALSO pulls in whatever is reachable from current origin/main
+    # but not from HEAD — i.e. whatever landed on main after this PR's merge-ref
+    # was last computed (the ordinary case for any PR left open a while, not an
+    # edge case) — and scans that as if it were "the PR's own", reopening the
+    # exact hole this scoping exists to close. (Correction from an earlier draft
+    # of this comment: origin/main is NOT "always an ancestor of HEAD" once main
+    # has advanced past the merge-ref's own base-parent snapshot — the double-dot
+    # conclusion holds regardless, for the reachability reason above, not because
+    # of an ancestry guarantee that doesn't actually hold.) `origin/main` is
+    # already fetched above for the append-only checks; "main is PR-only"
+    # (AGENTS.md) makes it the only legal PR base — asserted below rather than
+    # assumed, so a stacked-PR base fails closed instead of silently scoping
+    # against the wrong branch.
+    #
+    # MERGE-DIFF COVERAGE (both branches — this gap predates this PR and is not
+    # PR-scoping-specific). `git log`'s default `-p` output shows NO diff at all
+    # for a merge commit, so content that exists ONLY in a merge's own conflict
+    # resolution — never on either parent's own line — is invisible to gitleaks
+    # in EITHER context today. Fix: `--diff-merges=first-parent`, which diffs the
+    # merge result against its first parent like an ordinary commit. Measured,
+    # not assumed: `--diff-merges=cc` (dense combined — the tighter option,
+    # showing only content that differs from ALL parents) looks appealing but
+    # DOES NOT WORK WITH GITLEAKS — its `diff --cc <path>` header and `++`-style
+    # multi-parent line prefixes never match gitleaks' `diff --git a/<path>
+    # b/<path>` parser, so a merge scanned under `cc` silently contributes ZERO
+    # commits and ZERO findings regardless of content (confirmed directly: a
+    # secret present verbatim in `git log -p --diff-merges=cc` text is still
+    # reported as "no leaks found" by gitleaks). `first-parent` uses the ordinary
+    # single-file unified-diff format gitleaks already parses, and is confirmed
+    # to catch it. The cost is real but bounded and measured: on this repo,
+    # `--diff-merges=first-parent --all` re-scans each of the 72 existing real
+    # merge commits' full first-parent diff (already-covered content, since each
+    # PR's own commits are separately in history too) — commit count 436 -> 524,
+    # scan time +25%, same 9 pre-existing findings (nothing lost, nothing new).
+    # PUSH context takes NO --log-opts today, which — also measured, not assumed
+    # — turns out to itself be load-bearing: gitleaks' no-flag default already
+    # behaves like `--all` (candidate confirms: with `--diff-merges=cc --all`,
+    # commit/finding counts exactly match today's baseline, 436/9). Passing
+    # `--log-opts` AT ALL replaces that default rather than extending it, so the
+    # push-context flag below explicitly carries `--all` alongside
+    # `--diff-merges=first-parent` — dropping `--all` here would silently shrink
+    # today's every-local/fetched-ref coverage down to HEAD's own ancestry only.
+    #
+    # $GITHUB_EVENT_NAME / $GITHUB_BASE_REF are the runner's own default env
+    # vars (GitHub sets these for every step) — read as shell data, never
+    # spliced in via `${{ }}` templating, so nothing about this step's branch
+    # naming can inject into the script (the same discipline the libpq-vars
+    # comment in ci.yml already applies to connection strings).
+    #
+    # [ADR-0073 lever 3 — the ONE executable delta in this file] The pinned binary is
+    # cached at $HOME/.cache/gitleaks-<version> on the self-hosted host, version-keyed
+    # so a version bump re-downloads and an existing binary is reused byte-identical.
+    # Scan scope, config and flags are UNCHANGED.
+    - name: Gitleaks (maintained secret scan, version-pinned)
+      shell: bash -e {0}
+      env:
+        GITLEAKS_VERSION: "8.18.4"
+      run: |
+        GL="$HOME/.cache/gitleaks-${GITLEAKS_VERSION}"
+        if [ ! -x "$GL" ]; then
+          mkdir -p "$HOME/.cache"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o $RUNNER_TEMP/gitleaks.tgz
+          tar -xzf $RUNNER_TEMP/gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
+          mv "$RUNNER_TEMP/gitleaks" "$GL"
+        fi
+        "$GL" version
+        if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          if [ "$GITHUB_BASE_REF" != "main" ]; then
+            echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (AGENTS.md); refusing to guess a scan scope." >&2
+            exit 1
+          fi
+          if git rev-parse --verify -q origin/main >/dev/null; then
+            # A failed diff falls to the STRONGER arm (review R2 MINOR: absence must never
+            # select the weaker scan -- the round-1 polarity rule, applied to this probe).
+            CHANGED="$(git diff --name-only origin/main...HEAD)" || CHANGED=".gitleaks.toml"
+            if echo "$CHANGED" | grep -qxF ".gitleaks.toml"; then
+              # Review R1 MN-3: a PR that TIGHTENS the ruleset must exercise it against full
+              # history BEFORE merge, or a newly-flagged historical secret surfaces only after.
+              echo "PR context: .gitleaks.toml changed in this PR — running the FULL-history scan pre-merge"
+              "$GL" detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+            else
+              echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
+              "$GL" detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+            fi
+          else
+            echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
+            "$GL" detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+          fi
+        else
+          echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
+          "$GL" detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+        fi

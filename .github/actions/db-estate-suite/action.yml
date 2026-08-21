@@ -1,0 +1,59 @@
+name: DB estate suite (deploy-onto-existing + migrate/seed/all-package tests)
+description: >-
+  The two per-PR backstop legs the owner's 2026-08-21 ruling names as staying per-PR
+  (ADR-0073): the deploy-onto-existing check and the full estate suite. Both step
+  bodies are moved verbatim from ci.yml's former monolithic `ci` job (lever 5).
+  Requires: repo checked out with origin/main fetched, workspace installed, libpq env
+  (PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE=clara_ci) pointing at the job's
+  throwaway postgres:17 service.
+runs:
+  using: composite
+  steps:
+    # DEPLOY-ONTO-EXISTING (finding F4 / finding 3): a real deploy applies HEAD's
+    # migrations onto a DB that ALREADY has main's migrations. CI starting from an
+    # empty DB would false-green an edited historical migration. So: apply
+    # origin/main's migrations first, THEN HEAD's — migrate.mjs's checksum-drift
+    # guard aborts if a previously-applied migration was edited/renamed/deleted.
+    #
+    # Do NOT overlay-checkout main's migrations onto the working tree: a
+    # `git checkout main -- dir` then `git checkout HEAD -- dir` leaves a file
+    # that HEAD DELETED still on disk, so a PR deleting a historical migration
+    # would escape the drift guard. Instead export main's migrations to a TEMP dir
+    # and apply them via CLARA_MIGRATIONS_DIR, then apply HEAD from the UNTOUCHED
+    # working tree — migrate.mjs then correctly sees a HEAD-deleted applied
+    # migration as missing and aborts.
+    - name: Deploy-onto-existing check (main migrations, then HEAD)
+      shell: bash -e {0}
+      run: |
+        if git rev-parse --verify origin/main >/dev/null 2>&1 \
+           && git ls-tree -r --name-only origin/main -- packages/db/migrations | grep -q '\.sql$'; then
+          BASE_MIG="$(mktemp -d)"
+          git archive origin/main -- packages/db/migrations | tar -x -C "$BASE_MIG"
+          echo "--- applying origin/main migrations (baseline) from a temp export (working tree untouched) ---"
+          CLARA_MIGRATIONS_DIR="$BASE_MIG/packages/db/migrations" pnpm db:migrate
+          echo "--- applying HEAD migrations onto the baseline (drift guard active) ---"
+          pnpm db:migrate
+        else
+          echo "origin/main has no packages/db/migrations yet — first introduction; nothing to layer onto."
+        fi
+
+    # `pnpm -r --if-present test` runs EVERY package's test (not just @clara/db)
+    # so a test added to @clara/runtime or @clara/dashboard can't silently skip
+    # CI. Runs after seed because the db smoke test asserts against the migrated
+    # + seeded schema. Folds in the former `--filter @clara/db test` step.
+    #
+    # NO BUILD STEP HERE, measured not assumed (ADR-0073): the only estate test that
+    # touches `.output` is worker-path.test.mjs, which stages its OWN fixture bundle —
+    # the e2es that import the real built server live in the db-live-gates job, which
+    # builds the runtime itself.
+    - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
+      shell: bash -e {0}
+      env:
+        # Un-skips the rig-gated suites (the dashboard queue-kind parity probe +
+        # the runtime interview plan-db tests) against the shared migrated DB —
+        # they are pollution-proof by construction (they stage their own fixtures).
+        CLARA_RIG_DB: "1"
+      run: |
+        pnpm db:migrate
+        pnpm db:seed
+        pnpm -r --if-present test

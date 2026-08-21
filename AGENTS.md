@@ -150,8 +150,7 @@ Law 1 is the floor, not the ceiling.
 **Clock out** — before the session ends, and before any compaction:
 
 1. Update `PROGRESS.md`: posture, lanes, backlog.
-2. Harness-sync sweep and refresh: anything stale in a harness menu file(## The Harness menu — what you need, where the truth lives) gets trued, or flagged under Known
-   issues if truing it needs a decision.
+2. Harness-sync sweep and refresh: anything stale in a harness menu file(## The Harness menu — what you need, where the truth lives) gets trued, or flagged under Known issues if truing it needs a decision.
 3. Grill the owner on any ambiguity or foreign change you found and could not resolve.
 4. Refresh memory — lessons and preferences only.
 5. Re-index the codebase graph (`codebase-memory-mcp` · `index_repository`) if code changed
@@ -168,11 +167,16 @@ never lets one silently pass.
 
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
 leak-scan, gitleaks, the wiki dynamic-SQL gates, the vendor-binding post-control gate,
-harness-links, eslint. A diff that touches code additionally gets typecheck, build, the
-deploy-onto-existing check, and the full DB suite (migrate → seed → tests → the historical
-upgrade drills → the DR round-trip) against a throwaway `postgres:17` service container. A
-docs-only diff skips the code and DB legs by classifier, and a weekly scheduled sweep
-re-proves every leg regardless.
+harness-links, eslint. A diff that touches code additionally gets, in parallel jobs
+(ADR-0073): typecheck/build + the worker-path gate, the deploy-onto-existing check + the
+estate suite (migrate → seed → every package's tests), the live-behavior e2es + the DR
+round-trip, and the render drill — all against throwaway `postgres:17` service containers.
+**The closed-wave upgrade/contract drills and the D-b frontier matrix run on the weekly
+sweep + manual dispatch only** (ADR-0073; after merging a PR that touches a closed drill or
+the pipeline itself, run `gh workflow run ci.yml` by hand). A docs-only diff skips the code
+and DB legs by classifier, the weekly sweep re-proves every leg regardless, and the
+required check `ci` is a fail-closed meta-gate over every job — a red lint blocks merge on
+every PR, docs-only included.
 
 **Ceremonies run from merged `main`, never from a branch.** A migration that replaces a live
 writer's body needs a D1 write-quiesce window; the recipes live in `docs/ops/`.
