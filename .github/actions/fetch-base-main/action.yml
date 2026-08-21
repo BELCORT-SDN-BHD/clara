@@ -1,0 +1,22 @@
+name: Fetch base ref (origin/main) for append-only checks
+description: >-
+  Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the append-only
+  freeze-lint + migration-history gates MUST have it — a fetch failure can no longer
+  masquerade as success. Only a genuine first-introduction (origin/main absent) may
+  pass without a base. Moved verbatim from ci.yml (ADR-0073 lever 5).
+runs:
+  using: composite
+  steps:
+    - name: Fetch base ref (origin/main) for append-only checks
+      shell: bash
+      run: |
+        # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
+        # append-only freeze-lint + migration-history gates MUST have it — a
+        # fetch failure can no longer masquerade as success. Only a genuine
+        # first-introduction (origin/main absent) may pass without a base.
+        if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+          echo "origin/main exists — fetching it for the append-only base checks"
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+        else
+          echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
+        fi

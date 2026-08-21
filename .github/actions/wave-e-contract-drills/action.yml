@@ -1,0 +1,175 @@
+name: Wave-E contract drills (δ · θ · ε · η)
+description: >-
+  The four Wave-E focused contract drills the owner's 2026-08-21 ruling demotes to the
+  weekly sweep (ADR-0073 lever 1) — Wave E is closed, and each drill migrates + seeds
+  a fresh full chain into its own database, the serially-growing cost shape. Every step
+  body is moved verbatim from ci.yml's former monolithic `ci` job (lever 5). The
+  hazard each guards (the package sweep's preintegration gates setting
+  CLARA_ALLOW_MISSING_WAVE_E_* for every file) is unchanged, as is every drill's
+  fail-never-skip presence-guard polarity. Requires: workspace installed, PG17 client
+  present, libpq env pointing at the job's throwaway postgres:17 service.
+runs:
+  using: composite
+  steps:
+    # Wave-E δ contract drill (the same anti-misleading-green wiring as the upgrade drills,
+    # for a NEW hazard shape the review named: the package sweep preloads the wave gate
+    # (--import tests/delta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_DELTA
+    # for every file in the sweep — so if a numbering/merge accident ever left the δ migrations
+    # off the chain, the ENTIRE δ battery would skip loudly-but-green in the only leg that runs
+    # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain, then
+    # the ordered δ contract run FOCUSED with the variable explicitly UNSET — on a pre-δ chain
+    # it FAILS by design (the gate's stated focused-run polarity), and post-δ it must be green
+    # with ZERO skips. The δ contract is a ONE-WAY ceremony (it deploys the evaluator closures
+    # and asserts a pristine metric_cells), which is the other reason it gets its own database:
+    # the estate sweep's run consumes the shared clara_ci copy, and a consumed database is not
+    # valid evidence for this contract.
+    #
+    # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
+    # the ε R1 finding (an exit-0 guard makes "the migration went missing" indistinguishable
+    # from "the migration hasn't landed yet", the exact shape ε's round-3 fix got a second
+    # codex finding for). RE-TRUED: this step's "pre-merge branches without δ stay green"
+    # rationale no longer holds and is retired here — δ's ci.yml step shipped in the SAME PR
+    # as its migrations, so no honest checkout ever has this step without them; the only
+    # worlds where the guard fires are deletion, rename-out-of-glob, or a merge accident, and
+    # every one of those deserves red, post-merge, forever. δ is long since merged (main
+    # carries the wave_e_delta_metrics migration), so flipping this to fail-closed costs
+    # nothing today and closes the same hole θ's and ε's drills close.
+    - name: Wave-E δ contract drill (isolated DB, focused, allow-missing UNSET)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_delta_metrics.sql 2>/dev/null | head -1)"
+        if [ -z "$m" ]; then
+          echo "no numbered wave_e_delta_metrics migration on disk (missing or misnumbered) -- δ is merged on main, so absence here is a regression; FAILING rather than skipping (guard-polarity ruling 2026-08-14)."
+          exit 1
+        fi
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
+        PGDATABASE=clara_delta_contract_ci pnpm migrate
+        PGDATABASE=clara_delta_contract_ci pnpm seed
+        unset CLARA_ALLOW_MISSING_WAVE_E_DELTA
+        PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
+          node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
+
+    # Wave-E θ contract drill (the same anti-misleading-green wiring as the δ drill above,
+    # the identical hazard shape: the package sweep preloads the wave gate (--import
+    # tests/theta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_THETA for
+    # every file in the sweep — so if a numbering/merge accident ever left 0064 off the
+    # chain, theta-close-plan.test.mjs would skip loudly-but-green in the only leg that runs
+    # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain,
+    # then the theta contract run FOCUSED with the variable explicitly UNSET — on a pre-θ
+    # chain it FAILS by design (the gate's stated focused-run polarity), and post-θ it must
+    # be green with ZERO skips. get_close_plan is a read (not a one-way ceremony like δ's
+    # evaluator deploy), so its own database is not load-bearing for correctness the way
+    # δ's is — it's here for the same reason every other wave drill gets one: isolation from
+    # the concurrent all-packages sweep's shared clara_ci database, so this leg's result is
+    # never confounded by what else that sweep did to it.
+    #
+    # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
+    # the ε R1 finding: a drill and its lane's migration travel in the SAME commit, so no
+    # honest checkout ever has the drill without the migration — the only worlds where this
+    # guard fires are deletion, rename-out-of-glob, or a merge accident, and every one of
+    # those deserves red, post-merge, forever. Pre-merge branches without θ also lack this
+    # step itself (it lands in the same PR as 0064), so exit-1 cannot hurt them. Keyed on
+    # 0064 directly, the one file whose absence would matter (theta ships a single
+    # migration, unlike δ/ε's multi-file waves).
+    - name: Wave-E θ contract drill (isolated DB, focused, allow-missing UNSET)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_theta_close_plan.sql 2>/dev/null | head -1)"
+        if [ -z "$m" ]; then
+          echo "0064_wave_e_theta_close_plan.sql is not on disk (missing or misnumbered) -- theta merged in this PR, so absence here is a regression, not a pre-merge state; FAILING rather than skipping (the exit-0 anti-pattern ε's round-3 fix was caught on)."
+          exit 1
+        fi
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_theta_contract_ci'
+        PGDATABASE=clara_theta_contract_ci pnpm migrate
+        PGDATABASE=clara_theta_contract_ci pnpm seed
+        unset CLARA_ALLOW_MISSING_WAVE_E_THETA
+        PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
+          node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
+
+    # Wave-E ε contract drill — the δ drill's shape, for the same hazard on the reporting lane.
+    # The package sweep preloads tests/epsilon-preintegration-gate.mjs, which sets
+    # CLARA_ALLOW_MISSING_WAVE_E_EPSILON for every file in the sweep; so if a numbering or merge
+    # accident ever left the ε migrations off the chain, the ENTIRE ε battery would skip
+    # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
+    # database, the full on-disk chain, then the ε contract FOCUSED with the variable explicitly
+    # UNSET — on a pre-ε chain that FAILS by design (the gate's stated focused-run polarity),
+    # and post-ε it must be green with ZERO skips.
+    #
+    # It gets its OWN database for a reason of its own: the ε battery seals artifacts and issues
+    # a run, and an issued run is one-way. The estate sweep's copy has already been through that,
+    # and a consumed database is not valid evidence for a contract about sealing.
+    #
+    # ABSENCE FAILS. The first cut of this step exited 0 when the migration was missing, copying
+    # δ's pre-merge courtesy — which put a skip-green branch inside the very step whose reason to
+    # exist is that a skip-green branch elsewhere hides a missing lane. Once ε is on main the
+    # migrations are never legitimately absent, so absence means a numbering or merge accident:
+    # exactly the accident this drill is the last line of defence against. It fails loudly.
+    #
+    # Guarded on the LAST file of the set, not the first: a partial merge that dropped the
+    # security half would satisfy a first-file guard and then drill a chain that cannot enforce
+    # anything.
+    - name: Wave-E ε contract drill (isolated DB, focused, allow-missing UNSET)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql 2>/dev/null | head -1)"
+        if [ -z "$m" ]; then
+          echo "::error::no numbered wave_e_epsilon_reporting_security_seal_artifacts_issue migration on disk."
+          echo "The ε lane is merged, so its migrations cannot be legitimately absent — this is a"
+          echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
+          exit 1
+        fi
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
+        PGDATABASE=clara_epsilon_contract_ci pnpm migrate
+        PGDATABASE=clara_epsilon_contract_ci pnpm seed
+        unset CLARA_ALLOW_MISSING_WAVE_E_EPSILON
+        PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
+          node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
+
+    # Wave-E η contract drill — the ε drill's shape, for the same hazard on the authoring lane.
+    # The package sweep preloads tests/eta-preintegration-gate.mjs, which sets
+    # CLARA_ALLOW_MISSING_WAVE_E_ETA for every file in the sweep; so if a numbering or merge
+    # accident ever left the η migrations off the chain, the ENTIRE η battery would skip
+    # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
+    # database, the full on-disk chain, then the η contract FOCUSED with the variable explicitly
+    # UNSET — on a pre-η chain that FAILS by design (the gate's stated focused-run polarity),
+    # and post-η it must be green with ZERO skips.
+    #
+    # ABSENCE FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with ε's R1
+    # finding. Once η is on main its migrations are never legitimately absent, so absence means a
+    # numbering or merge accident: exactly the accident this drill is the last line of defence
+    # against. It fails loudly.
+    #
+    # GUARDED ON part2, THE LAST FILE OF THE SET — and for η that matters more than it does for
+    # the siblings, because part 1 alone is a legitimate-LOOKING state BY CONSTRUCTION. Part 1
+    # creates the three cores and grants nothing; that is η's own documented fail-safe residue
+    # between the halves. So a first-file guard would be satisfied by a partial merge that
+    # dropped the GRANTED half, and would then drill a chain with no wrappers, no EXECUTE grants
+    # and no allowlist rows — the entire surface this contract exists to measure.
+    #
+    # Its own database, because η's cells are whole-catalog CENSUSES: the four app-executable
+    # definition writers, and the three cores being reachable by no application role. Any other
+    # battery that adds a clara function carrying definition DML, or widens a grant, moves those
+    # numbers — so a shared, already-consumed database is not valid evidence for a census.
+    # (`pnpm seed` is here for uniformity with the sibling drills; every η assertion reads the
+    # catalog and needs no seed data.)
+    - name: Wave-E η contract drill (isolated DB, focused, allow-missing UNSET)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_eta_wake_wrappers_part2.sql 2>/dev/null | head -1)"
+        if [ -z "$m" ]; then
+          echo "::error::no numbered wave_e_eta_wake_wrappers_part2 migration on disk."
+          echo "The η lane is merged, so its migrations cannot be legitimately absent — this is a"
+          echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
+          echo "part2 is the GRANTED half: without it there are no wrappers, no EXECUTE grants and no allowlist rows."
+          exit 1
+        fi
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_eta_contract_ci'
+        PGDATABASE=clara_eta_contract_ci pnpm migrate
+        PGDATABASE=clara_eta_contract_ci pnpm seed
+        unset CLARA_ALLOW_MISSING_WAVE_E_ETA
+        PGDATABASE=clara_eta_contract_ci CLARA_RIG_DB=1 \
+          node --test --test-concurrency=1 tests/eta-contract.test.mjs

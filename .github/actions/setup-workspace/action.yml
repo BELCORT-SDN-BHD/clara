@@ -1,0 +1,25 @@
+name: Setup workspace (pnpm + node + install)
+description: >-
+  Pinned pnpm + node toolchain and a frozen-lockfile install, shared by every job.
+  ADR-0073 lever (3): the install uses a LOCAL persistent pnpm store on the self-hosted
+  host ($HOME/.pnpm-store) instead of actions/setup-node's `cache: pnpm` — that cache
+  rides GitHub's REMOTE cache service, which on self-hosted hardware means a network
+  zip/unzip round-trip per job, multiplied by the job split. The local store is
+  content-addressed and lock-protected, so the two runner instances share it safely,
+  and a warm store makes the frozen install seconds instead of minutes. The pinned
+  pnpm/action-setup stops downloading once the version is in each runner instance's own
+  tool cache (each instance has its own _work/_tool — no cross-instance race).
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      with:
+        version: 10.33.0
+
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 20.19.5
+
+    - name: Install
+      shell: bash
+      run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"

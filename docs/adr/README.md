@@ -109,6 +109,7 @@ These conventions governed the append-only log and still govern this directory:
 | [0070](0070-the-wave-e-night-run.md) | The Wave E night run: δ + the RS guard land LIVE; the whole-wave authorization | 2026-08-13/15 | standing · *narrative* | Thirteen rulings: the night run's nine (seal-currency, the numeral wall, machine-sealer attribution, the owner-only RS lift, η's deferred OBO chain, the op-key interpretation, same-family freeze imports, consumer-driven core splits, explicit effective dates) + the wave-close supplement's four — **guard polarity/ARM-0** (NULL principal is its own first arm; `is not distinct from`), **adoption semantics** (orphaned proposals approve only through the attestation door; maker/checker measures the DIRECTING human), **the isolation pin** (checksum-keyed per-migration, measured post-BEGIN; blanket raise refused), **requeue re-derives + immediate reap**. Field laws: guarded SUSET pin, session-pin nonce, CONFLICTING-silent-no-run, MAX_PATH staging, the wave presence-gate shape, number-migrations-IN-REPO, a-probe-that-cannot-say-NO. |
 | [0071](0071-the-agentic-charter.md) | THE AGENTIC CHARTER: judgement becomes the posting authority; the LLM witness pair; the rules machine retires | 2026-08-18 | standing | Twelve rulings + one dissolution + two principles from the owner's vision grilling. Supersedes (exactly enumerated in-file): ADR-015's never-signs clause · ADR-025/laws 5+12 · law 4's agentic-lane reach + WCA-R7 · law 8's judgement half · ADR-047's roster + #25 · law 14's reader half · WB-R2 + 0064's anti-circular (moot) · E-R5/E-R18 · E-R11 key ① · the bank zero-grant law · PRD §8 budgets · ARCH §4.1 no-web. §6.1 and invariants (a)(b)(c) stand. Wave F re-scoped (`docs/plan/active/wave-f-contract.md`); laws 71-76 fold below. |
 | [0072](0072-the-f-a2-rulings-and-the-corpus-sitting.md) | THE F-A2 RULINGS AND THE WAVE-G CORPUS SITTING: the old era is deleted; any-amount authority re-confirmed; the corpus splits into two tiers | 2026-08-20 | standing | Five ruling blocks. ① opener ⑥ ratified + **delete the old era** (execution tier retires inside Wave F · **the post-Window-A re-extraction is TWENTY documents, superseding the full-64 backfill** — so the legacy fallback arms' trigger falls through its own "whichever lands first" clause to the Wave-G reset, and F-A10 closes there · legacy DATA dies at that reset · the spike schemas DROP there too after a cold archive, so constraint 15's spike clause retires THEN, not now). ② high-stakes RE-CONFIRMED at any amount, no thresholds (ADR-0071/G1; the build's fail-closed ceiling on file as dissent; the HUMAN lane and ADR-0044 untouched). ③ **OQ-4 three exits** + **OQ-6 no category gate on the agent lane**, with the human lane's gate STANDING — mechanism of record is `docs/plan/active/f-a2-agentic-posting-design.md` §3.3.3/§4. ④ **R1 RULED** — a closing transfer is not turnover; Fix A to Track B, task #17 unblocked, OD-7 discharged. ⑤ the corpus sitting: two tiers (oracle + open-intake reality), OD-1 BEE two FYs + RS/RPR terminal single periods, OD-4 full permission (IC copy excluded · payroll tightest), OD-5 no second principal (B3's distinct-checker arm ships unexercised, named), OD-6/10 a WHOLE CLEAN DB on the live project (sandbox + fixtures not re-created — the RPA name collision dissolves), OD-11 the UX floor precedes the run, OD-2/8/9 defaulted. No standing law changes; 0071's scoping re-confirmed. |
+| [0073](0073-ci-economics-overhaul.md) | THE CI ECONOMICS OVERHAUL: closed-wave drills demote to the weekly sweep; the monolith splits; the required check `ci` becomes a fail-closed meta-gate | 2026-08-21 | standing | Owner-ruled lever (1): per-PR CI *scope* amended — estate suite + deploy-onto-existing stay per-PR as backstop, a current wave's drill rides per-PR until its wave closes; ADR-061's uniform review ladder untouched. Closes two pre-existing fail-open shapes (lint never required; skipped-satisfies-protection on classifier failure). Hybrid runners DECLINED ($0 preference). Mechanism: `.github/workflows/ci.yml` + `.github/actions/*`. |
 
 **Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
@@ -145,6 +146,11 @@ governs.
 > fixes only WHEN the machinery it governed retires. Hard constraint 15's spike clause is
 > superseded **prospectively** — at the Wave-G reset, after a cold archive — and is not
 > lifted here; `AGENTS.md` stands unchanged until that ceremony.
+> **RE-TRUED 2026-08-21 (ADR-0073, the CI economics overhaul):** law 77 folds below
+> (§10). No existing law changes: law 26 (uniform review intensity) is expressly
+> untouched — 0073 amends per-PR **CI scope**, not review scope — and law 39's named
+> legs (deploy-onto-existing · freeze-lint · leak-scan · the DR round-trip) all stay
+> per-PR. Law 77 enters the ratified set at the owner's next digest sign-off.
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -451,3 +457,16 @@ governs.
     visible; no budget ever pauses automation. PRD §8's interim guardrail narrows to
     metering (engine-protective concurrency floors stand — they protect the durable
     engine, not spend). *(0071/G8)*
+
+## 10 · The CI-economics supplement (folded 2026-08-21; source ADR-0073)
+
+77. **Per-PR CI scope is current-wave + backstop; closed-wave drills live on the
+    weekly sweep.** Per-PR: lint (every event, docs-only included) · typecheck/build +
+    the worker-path gate · the estate suite + deploy-onto-existing (the ruled
+    backstop) · the live-behavior e2es + the DR pair · the render drill · the
+    partition gate · the CURRENT wave's drill while its wave is open. Sweep +
+    manual dispatch only: every closed wave's upgrade/contract drill and the D-b
+    frontier matrix. The required check `ci` is a fail-closed meta-gate over every
+    job — success or lawfully-skipped, both directions asserted. After merging a PR
+    that touches a closed drill or the pipeline itself, run the sweep by hand
+    (`gh workflow run ci.yml`). Review intensity (law 26) is unaffected. *(0073)*

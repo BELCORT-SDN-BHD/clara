@@ -5,34 +5,40 @@ name: CI
 # applies the REAL migrations, builds the REAL packages, and runs the smoke +
 # DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
 # project. See docs/ARCHITECTURE.md §9 and the repo README.
-
-# THE CI DIET (2026-08-11, owner-ruled after the quota exhaustion; reviewed on its own PR).
-# Three structural wastes removed, ZERO gate semantics changed when a gate runs:
-#   1. Every branch push used to trigger BOTH a push run and a pull_request run of the whole
-#      matrix (different refs -> concurrency never deduped them): 2x everything. Now: PRs run
-#      on the pull_request event only; push runs only on main (the post-merge confirmation,
-#      and the one context that keeps the FULL-history gitleaks sweep per merge).
-#   2. A docs-only change used to run the full DB matrix (~10 jobs x ~40 min) although it
-#      cannot change any fact a DB job proves. Now: the `changes` job classifies the diff
-#      (FAIL-CLOSED — any uncertainty, any non-docs path, any self-change of this file =>
-#      everything runs) and the heavy jobs skip when their subject cannot have changed.
-#      A SKIP under this rule is a POSITIVE statement, not a hole: the job's entire input
-#      surface is untouched by the diff, and the weekly scheduled full sweep re-proves every
-#      gate regardless (the "forever honest" promise of the frontier legs, kept on a cadence
-#      that does not bill 40 minutes to a typo fix).
-#   3. lint (freeze-lint, leak/secret scans, the wiki gates) is extracted into its own fast
-#      job so EVERY change — docs included — still gets the full secrets + boundary sweep,
-#      with feedback in minutes instead of after the DB matrix.
-# Deliberately NOT taken here (a later, separate decision): baseline-caching the migration
-# chain — it touches what the deploy-onto-existing and drill steps PROVE, so it needs its own
-# review, not a ride-along.
+#
+# THE CI DIET (2026-08-11, owner-ruled after the quota exhaustion): PRs run on the
+# pull_request event only; push runs only on main; a docs-only diff (the `changes`
+# classifier, FAIL-CLOSED) skips the code/DB legs; lint runs unconditionally on every
+# event. A SKIP under the classifier is a POSITIVE statement — the job's entire input
+# surface is untouched by the diff — and the weekly scheduled full sweep re-proves
+# every gate regardless.
+#
+# THE CI ECONOMICS OVERHAUL (2026-08-21, owner-ruled — ADR-0073). Three structural
+# changes, ZERO gate-content changes (every step body moved verbatim into
+# .github/actions/* composites — lever 5, restoring the 500-line harness limit):
+#   1. CLOSED-WAVE DRILLS DEMOTE TO THE WEEKLY SWEEP (lever 1, the owner's per-PR-
+#      uniformity amendment): the eight closed-wave upgrade drills, the four Wave-E
+#      contract drills and the D-b frontier matrix — each a full-chain apply, the
+#      serially-growing bulk of the former ~45-60 min monolith — run on
+#      schedule/workflow_dispatch ONLY. The ruled per-PR backstop stays: estate suite
+#      + deploy-onto-existing (plus lint, build, the live-behavior e2es, the DR pair,
+#      the render drill). A CURRENT-wave drill rides per-PR and demotes at wave close.
+#      Residual, stated: a closed-wave drill regression surfaces at the next sweep,
+#      not the PR — after a PR touching a closed drill or this pipeline, run the
+#      sweep by hand: `gh workflow run ci.yml`.
+#   2. THE MONOLITH SPLITS into parallel jobs (lever 2) so the two runner instances
+#      run 2-wide per PR: build · db-estate · db-live-gates · render-drill.
+#   3. THE REQUIRED CHECK `ci` BECOMES A FAIL-CLOSED META-GATE (the terminal job
+#      below). Closes two pre-existing fail-OPEN shapes: a red lint never blocked a
+#      merge (lint was not a required check), and a failed classifier skipped every
+#      downstream job while a SKIPPED required check still satisfies protection.
 on:
   pull_request:
   push:
     branches: [main]
   schedule:
-    # Weekly full sweep (Thu 03:23 MYT): every job runs regardless of the last diff, so the
-    # historical frontier legs and drills stay proven on a cadence even through docs-only weeks.
+    # Weekly full sweep (Thu 03:23 MYT): every job runs regardless of the last diff —
+    # including the ADR-0073-demoted closed-wave drills — even through docs-only weeks.
     - cron: "23 19 * * 3"
   workflow_dispatch:
 
@@ -65,9 +71,9 @@ jobs:
   #               FIRST match, and `*` matches `/`, so `.claude/*` covers the subtree.
   #               (Owner call, 2026-08-12; recorded on ADR-0069 ruling 2.)
   #   db=true     when anything under packages/db/**, this workflow file, or a root
-  #               manifest/lockfile changed — the ENTIRE input surface of the frontier
-  #               legs and the partition gate (they read packages/db only; their runner
-  #               is defined here; installs read the root manifests).
+  #               manifest/lockfile changed — the input surface of the per-PR partition
+  #               gate. The sweep-only DB legs (ADR-0073) no longer read this output;
+  #               on schedule/workflow_dispatch everything defaults true anyway.
   # $GITHUB_* values are read as shell env, never spliced via ${{ }} (the house
   # anti-injection discipline this file already applies elsewhere); EV_BEFORE is a SHA.
   # =========================================================================
@@ -121,245 +127,34 @@ jobs:
           echo "db=$DB" >> "$GITHUB_OUTPUT"
 
   # =========================================================================
-  # LINT + SECRETS + BOUNDARY GATES — extracted from the `ci` job (the diet, item 3).
-  # Runs on EVERY event unconditionally, docs-only diffs included: a docs commit can leak a
-  # credential or violate the wiki boundary exactly as code can, and the standing law
-  # ("scan any branch with CI's own pinned gitleaks config") keeps its per-PR teeth here.
-  # Every step below is moved from the `ci` job verbatim in every EXECUTABLE respect — same
-  # commands, same pinned versions, same order (review R1 verified mechanically); the
-  # checkout rationale comment is condensed for this job's context. No DB service: none of
-  # these read one.
+  # LINT + SECRETS + BOUNDARY GATES — EVERY event unconditionally, docs-only included:
+  # a docs commit can leak a credential or violate the wiki boundary exactly as code
+  # can. Step bodies moved verbatim into the lint-suite composite (ADR-0073 lever 5);
+  # via the `ci` meta-gate a red here now BLOCKS merge — which the old required-check
+  # wiring never actually enforced. No DB service: none of these read one.
   # =========================================================================
   lint:
-    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
-    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
-    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
-    # an offline runner makes jobs QUEUE visibly, never silently pass.
     runs-on: [self-hosted, linux, clara]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Full history: the freeze-lint compares against origin/main, and the push-to-main /
-          # scheduled gitleaks context scans full history (same reasons as the ci job's checkout).
+          # Full history: freeze-lint compares against origin/main; push/scheduled
+          # gitleaks scans full history.
           fetch-depth: 0
-
-      - name: Fetch base ref (origin/main) for append-only checks
-        run: |
-          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
-          # append-only freeze-lint + migration-history gates MUST have it — a
-          # fetch failure can no longer masquerade as success. Only a genuine
-          # first-introduction (origin/main absent) may pass without a base.
-          if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
-            echo "origin/main exists — fetching it for the append-only base checks"
-            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          else
-            echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
-          fi
-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 10.33.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20.19.5
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint (freeze-lint + leak-scan + eslint code-lint)
-        run: pnpm lint
-
-      # Called out explicitly for visibility even though `pnpm lint` runs them:
-      - name: Freeze-lint (workflow versioning policy — ARCHITECTURE Appendix A)
-        run: node scripts/check-frozen-workflows.mjs
-
-      - name: Leak-scan (no committed credentials)
-        run: node scripts/check-leaks.mjs
-
-      # The 0019 §9 wiki-authority boundary — the repo half of the defence the DB tail
-      # structurally cannot provide, plus its fixture-driven self-test (ratchet R1
-      # finding 3: signature-keyed definitions + change-of-record patch analysis).
-      - name: Wiki dynamic-SQL gate + self-test (0019 §9 · WB-R21)
-        run: |
-          node scripts/check-wiki-dynamic-sql.mjs
-          node scripts/check-wiki-dynamic-sql.selftest.mjs
-
-      # The 0029 Slot-C durable interlock: the current migration-tree definition
-      # of execute_rule_post must retain the binding live/unexpired gate.
-      - name: Vendor-binding post-control gate (0029 Slot C)
-        run: node scripts/check-binding-post-control.mjs
-
-      # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
-      # (AGENTS.md, PROGRESS.md, docs/adr/README.md, docs/plan/index.md) has its markdown
-      # links + backtick paths validated against disk, one hop into referenced docs/*.md
-      # files, plus docs/adr/'s own bidirectional index check. STRICT=true since assembly:
-      # all four entries exist, so a missing one is a hard failure, as is any broken
-      # reference inside a file that exists.
-      #
-      # The pinned-ids self-test rides here too. The guard itself is a PreToolUse hook, not
-      # a CI step — CI can never exercise it in situ — so this run is the only thing standing
-      # between a refactor and a silently dead safety pin (AGENTS.md hard constraint 11).
-      - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids + dispatch-model guards)
-        run: |
-          node scripts/check-harness-links.mjs
-          node scripts/check-harness-links.selftest.mjs
-          node scripts/hooks/pinned-ids-guard.selftest.mjs
-          # Same deal for the dispatch-model guard (AGENTS.md hard constraint 5).
-          node scripts/hooks/dispatch-model-guard.selftest.mjs
-
-      # The .sql half of the freeze family (§4.2). check-frozen-workflows.mjs reads the TS
-      # workflow bodies; a deterministic EVALUATOR lives in a migration, so nothing above can
-      # see it. The self-test rides along for the same reason the guards' do: this checker's
-      # own CLI guard once exited 0 having checked nothing, and only an end-to-end run against
-      # a mutated body catches that class.
-      - name: Evaluator freeze-lint + self-test (§4.2 · the .sql half the workflow lint cannot reach)
-        run: |
-          node scripts/check-frozen-evaluators.mjs
-          node scripts/check-frozen-evaluators.selftest.mjs
-
-      # Lane ζ's render package is NOT a pnpm workspace member (pnpm-workspace.yaml says why),
-      # so `pnpm -r` cannot see it and it would otherwise reach main with no CI at all. It is
-      # driven here by explicit steps, in the UNCONDITIONAL lint job, with no skip-allowing
-      # variable: a missing or broken module FAILS here rather than skipping quietly.
-      #
-      # `pnpm --dir` on purpose, and this is load-bearing rather than stylistic: it runs the
-      # package's own scripts with the REPO'S PINNED eslint resolved from the root install,
-      # whereas `npx eslint` inside a non-member package resolves nothing locally and would
-      # DOWNLOAD an unpinned eslint from the registry onto the self-hosted runner on every PR.
-      # No install step is needed: `check` is `node --check` (syntax only) and the unit battery
-      # imports nothing outside the package — `pg` is reached only by lib/db.mjs, which the
-      # tests never load, and which the image installs from the package's own manifest.
-      - name: Render package drill (lane ζ · check + lint + the judgement battery)
-        run: |
-          pnpm --dir packages/reporting-render run check
-          pnpm --dir packages/reporting-render run lint
-          pnpm --dir packages/reporting-render run test
-
-      # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
-      # "backed by gitleaks in CI" claim true). Version-pinned to a released
-      # gitleaks binary (not a mutable action tag); config + allowlist in
-      # .gitleaks.toml (same config, both contexts below).
-      #
-      # PUSH: full history, unchanged in SCOPE — but see MERGE-DIFF COVERAGE below,
-      # which applies to this branch too. This stays the only place a leak already
-      # sitting in history is ever re-caught.
-      #
-      # PULL_REQUEST: scoped to `origin/main..HEAD` — this PR's own history plus
-      # the synthetic merge commit GitHub checks out as HEAD (refs/pull/N/merge).
-      # Unscoped, HEAD's full ancestry is the entire base-branch history too, so
-      # one bad commit already on main reds every unrelated PR opened after it
-      # (the 2026-08-05 archive-branch incident: an evidence branch's unmarked
-      # UUIDs would have red ALL CI). DOUBLE-dot, not triple. `origin/main..HEAD`
-      # is "commits reachable from HEAD, minus commits reachable from CURRENT
-      # origin/main" — a commit that exists only on the PR side can never be
-      # reachable from origin/main (main never contains not-yet-merged PR work),
-      # so double-dot can never exclude one. Triple-dot is the *symmetric*
-      # difference: it ALSO pulls in whatever is reachable from current origin/main
-      # but not from HEAD — i.e. whatever landed on main after this PR's merge-ref
-      # was last computed (the ordinary case for any PR left open a while, not an
-      # edge case) — and scans that as if it were "the PR's own", reopening the
-      # exact hole this scoping exists to close. (Correction from an earlier draft
-      # of this comment: origin/main is NOT "always an ancestor of HEAD" once main
-      # has advanced past the merge-ref's own base-parent snapshot — the double-dot
-      # conclusion holds regardless, for the reachability reason above, not because
-      # of an ancestry guarantee that doesn't actually hold.) `origin/main` is
-      # already fetched above for the append-only checks; "main is PR-only"
-      # (AGENTS.md) makes it the only legal PR base — asserted below rather than
-      # assumed, so a stacked-PR base fails closed instead of silently scoping
-      # against the wrong branch.
-      #
-      # MERGE-DIFF COVERAGE (both branches — this gap predates this PR and is not
-      # PR-scoping-specific). `git log`'s default `-p` output shows NO diff at all
-      # for a merge commit, so content that exists ONLY in a merge's own conflict
-      # resolution — never on either parent's own line — is invisible to gitleaks
-      # in EITHER context today. Fix: `--diff-merges=first-parent`, which diffs the
-      # merge result against its first parent like an ordinary commit. Measured,
-      # not assumed: `--diff-merges=cc` (dense combined — the tighter option,
-      # showing only content that differs from ALL parents) looks appealing but
-      # DOES NOT WORK WITH GITLEAKS — its `diff --cc <path>` header and `++`-style
-      # multi-parent line prefixes never match gitleaks' `diff --git a/<path>
-      # b/<path>` parser, so a merge scanned under `cc` silently contributes ZERO
-      # commits and ZERO findings regardless of content (confirmed directly: a
-      # secret present verbatim in `git log -p --diff-merges=cc` text is still
-      # reported as "no leaks found" by gitleaks). `first-parent` uses the ordinary
-      # single-file unified-diff format gitleaks already parses, and is confirmed
-      # to catch it. The cost is real but bounded and measured: on this repo,
-      # `--diff-merges=first-parent --all` re-scans each of the 72 existing real
-      # merge commits' full first-parent diff (already-covered content, since each
-      # PR's own commits are separately in history too) — commit count 436 -> 524,
-      # scan time +25%, same 9 pre-existing findings (nothing lost, nothing new).
-      # PUSH context takes NO --log-opts today, which — also measured, not assumed
-      # — turns out to itself be load-bearing: gitleaks' no-flag default already
-      # behaves like `--all` (candidate confirms: with `--diff-merges=cc --all`,
-      # commit/finding counts exactly match today's baseline, 436/9). Passing
-      # `--log-opts` AT ALL replaces that default rather than extending it, so the
-      # push-context flag below explicitly carries `--all` alongside
-      # `--diff-merges=first-parent` — dropping `--all` here would silently shrink
-      # today's every-local/fetched-ref coverage down to HEAD's own ancestry only.
-      #
-      # $GITHUB_EVENT_NAME / $GITHUB_BASE_REF are the runner's own default env
-      # vars (GitHub sets these for every step) — read as shell data, never
-      # spliced in via `${{ }}` templating, so nothing about this step's branch
-      # naming can inject into the script (the same discipline the libpq-vars
-      # comment at the top of this file already applies to connection strings).
-      - name: Gitleaks (maintained secret scan, version-pinned)
-        env:
-          GITLEAKS_VERSION: "8.18.4"
-        run: |
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o $RUNNER_TEMP/gitleaks.tgz
-          tar -xzf $RUNNER_TEMP/gitleaks.tgz -C "$RUNNER_TEMP" gitleaks
-          $RUNNER_TEMP/gitleaks version
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            if [ "$GITHUB_BASE_REF" != "main" ]; then
-              echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (AGENTS.md); refusing to guess a scan scope." >&2
-              exit 1
-            fi
-            if git rev-parse --verify -q origin/main >/dev/null; then
-              # A failed diff falls to the STRONGER arm (review R2 MINOR: absence must never
-              # select the weaker scan -- the round-1 polarity rule, applied to this probe).
-              CHANGED="$(git diff --name-only origin/main...HEAD)" || CHANGED=".gitleaks.toml"
-              if echo "$CHANGED" | grep -qxF ".gitleaks.toml"; then
-                # Review R1 MN-3: a PR that TIGHTENS the ruleset must exercise it against full
-                # history BEFORE merge, or a newly-flagged historical secret surfaces only after.
-                echo "PR context: .gitleaks.toml changed in this PR — running the FULL-history scan pre-merge"
-                $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
-              else
-                echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
-                $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
-              fi
-            else
-              echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
-              $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
-            fi
-          else
-            echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
-            $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
-          fi
+      - uses: ./.github/actions/fetch-base-main
+      - uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/lint-suite
 
   # =========================================================================
   # THE DOUBLE-RENDER BYTE-EQUALITY GATE (Wave E lane ζ; design part2 §9/§10).
-  #
-  # docs/ops/DR-render.md states that every PR performs this drill — so the pipeline performs it.
-  # A document claiming a gate the pipeline does not run is worse than no claim, because it is
-  # read as evidence.
-  #
-  # ALL THREE ARMS ARE ASSERTED BY THE SCRIPT: two renders of identical inputs must MATCH; a third
-  # under a changed SOURCE_DATE_EPOCH must ALSO match (the document pins its date from the
-  # reporting period, so the environment's clock is not an input to a real render and must not move
-  # the artifact); and a fourth built from a changed PINNED INPUT must DIFFER. Byte-equality proves
-  # nothing unless the output is capable of varying, and a run where the fourth arm MATCHED is a
-  # worse finding than a mismatch — it means the manifest is wired to nothing and the first arm was
-  # vacuous.
-  #
-  # AND IT COMPILES THE PRODUCT'S OWN PREAMBLE, not only a fixture. A hand-written fixture cannot
-  # see an engine-version mismatch in what assemble() actually emits — the round-2 finding that
-  # cost a whole render path — so the script renders assemble()'s real output against the pinned
-  # engine as its first arm.
-  #
-  # Its own job because it builds an image; fail-closed on the classifier in the same != 'false'
-  # polarity as `ci` (an absent or garbled output RUNS the job rather than skipping it green).
+  # docs/ops/DR-render.md states that every PR performs this drill — so the pipeline
+  # performs it, per-PR, NOT demoted (ADR-0073): a document claiming a gate the pipeline
+  # does not run is worse than no claim, because it is read as evidence. All FOUR arms
+  # are asserted by the script (match · match under changed SOURCE_DATE_EPOCH · a changed
+  # pinned input must DIFFER — else the manifest is wired to nothing — · the product's own
+  # assemble() preamble, not only a fixture). Its own job because it builds an image;
+  # fail-closed classifier polarity (!= 'false'); the docker layer cache on the shared
+  # self-hosted daemon persists across runs (lever 3 — no cache plumbing needed).
   # =========================================================================
   render-drill:
     needs: changes
@@ -380,23 +175,45 @@ jobs:
       - name: Double-render drill — determinism, the control arm, and the real preamble
         run: node packages/reporting-render/scripts/double-render-drill.mjs --image clara-render:ci
 
-  ci:
+  # =========================================================================
+  # BUILD LEG (ADR-0073 lever 2 — split from the former monolith): typecheck, the real
+  # build, and the post-build worker-path gate. No DB service — the monolith always ran
+  # these against an EMPTY clara_ci, so nothing here ever read a schema.
+  # =========================================================================
+  build:
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
+    runs-on: [self-hosted, linux, clara]
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/setup-workspace
+      - name: Typecheck (tsc across TS packages)
+        run: pnpm typecheck
+      - name: Build (nitro runtime + next dashboard)
+        run: pnpm build
+      # MUST run after Build: the image-layout half reads .output/server/index.mjs. The
+      # structured/XML lane was dead in every deployed image because nitro inlines the
+      # worker-spawning modules and the sibling URL then resolves beside the bundle, where
+      # nothing is copied (Gate S, 2026-07-28). Typecheck/lint/tests all read the SOURCE
+      # layout — the one layout that worked — so only a post-build check can see this.
+      - name: Worker-path gate (spawn sites + built-image layout)
+        run: node scripts/check-worker-paths.mjs
+
+  # =========================================================================
+  # DB ESTATE LEG (ADR-0073 lever 2): the two per-PR backstops the owner's ruling
+  # names — deploy-onto-existing + the full estate suite — against a throwaway
+  # postgres:17 (never the frozen project). Also where a CURRENT wave's drill rides
+  # per-PR while its wave is open (none today: Wave F is proven per-PR by these two
+  # legs; F-A2 PR-1 ships the next drill).
+  # =========================================================================
+  db-estate:
     needs: changes
     # FAIL-CLOSED AT THIS LAYER TOO (review R1 MAJOR): != 'false', never == 'true' --
     # an absent/garbled output must RUN the job, not skip it green.
     if: needs.changes.outputs.code != 'false'
-    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
-    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
-    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
-    # an offline runner makes jobs QUEUE visibly, never silently pass.
     runs-on: [self-hosted, linux, clara]
-
-    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
-    # it ends. This is the ONLY database CI touches. It is not the frozen project.
-    # `postgres_b` is a SECOND, INDEPENDENT cluster (different port) used only by the
-    # DR full-profile round-trip so cluster-role recovery is genuinely cross-cluster
-    # (Codex HIGH-5: two databases in ONE cluster share pg_authid, making role parity a
-    # tautology; restoring into a separate cluster exercises real role/membership creation).
     services:
       postgres:
         image: postgres:17
@@ -405,9 +222,59 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: clara_ci
         ports:
-          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides the
-          # moment two jobs share one Docker host — hosted runners never see this, one
-          # VM per job. Steps read the mapped port via the wire-ports step below.
+          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides when
+          # two jobs share one Docker host. Steps read the mapped port via wire-ports.
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # libpq vars — the db scripts read these (no DSN in code/argv). PGPORT is wired
+      # per-run by the wire-ports step (job.services is not a job-env context).
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
+      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
+      # still refuses any non-ephemeral target even with this set.
+      CLARA_ALLOW_DESTRUCTIVE: "1"
+    steps:
+      - name: Wire service ports (ephemeral host ports -> env)
+        run: |
+          echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history so deploy-onto-existing + migration-history compare against
+          # origin/main (append-only-vs-base is the ONLY real protection).
+          fetch-depth: 0
+      - uses: ./.github/actions/fetch-base-main
+      - uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/pg17-client
+      - uses: ./.github/actions/db-estate-suite
+
+  # =========================================================================
+  # LIVE-BEHAVIOR GATES (ADR-0073 lever 2): the runtime e2es + the DR pair, per-PR —
+  # NOT demoted: they exercise LIVE code paths the current wave keeps changing, and the
+  # DR round-trip is law-39 standing material (ADR-012/0020). `postgres_b` is a SECOND,
+  # INDEPENDENT cluster used only by the DR round-trip so cluster-role recovery is
+  # genuinely cross-cluster (Codex HIGH-5: one cluster's shared pg_authid makes role
+  # parity a tautology).
+  # =========================================================================
+  db-live-gates:
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
+    runs-on: [self-hosted, linux, clara]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
           - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
@@ -427,643 +294,71 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
-
     env:
-      # libpq vars — the db scripts read these (no DSN in code/argv). PGPORT is wired
-      # per-run by the wire-ports step (job.services is not a job-env context).
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: clara_ci
-      NEXT_TELEMETRY_DISABLED: "1"
-      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
-      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
-      # still refuses any non-ephemeral target even with this set.
       CLARA_ALLOW_DESTRUCTIVE: "1"
-
     steps:
       - name: Wire service ports (ephemeral host ports -> env)
         run: |
           echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
           echo "PGB_PORT=${{ job.services.postgres_b.ports['5432'] }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          # Full history so the freeze-lint + migration-history checks can compare
-          # against origin/main (append-only-vs-base is the ONLY real protection —
-          # free-tier branch protection is not platform-enforced).
-          fetch-depth: 0
+      - uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/pg17-client
+      - uses: ./.github/actions/db-live-gates
 
-      - name: Fetch base ref (origin/main) for append-only checks
-        run: |
-          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
-          # append-only freeze-lint + migration-history gates MUST have it — a
-          # fetch failure can no longer masquerade as success. Only a genuine
-          # first-introduction (origin/main absent) may pass without a base.
-          if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
-            echo "origin/main exists — fetching it for the append-only base checks"
-            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          else
-            echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
-          fi
-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 10.33.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20.19.5
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck (tsc across TS packages)
-        run: pnpm typecheck
-
-      - name: Build (nitro runtime + next dashboard)
-        run: pnpm build
-
-      # MUST run after Build: the image-layout half reads .output/server/index.mjs. The
-      # structured/XML lane was dead in every deployed image because nitro inlines the
-      # worker-spawning modules and the sibling URL then resolves beside the bundle, where
-      # nothing is copied (Gate S, 2026-07-28). Typecheck/lint/tests all read the SOURCE
-      # layout — the one layout that worked — so only a post-build check can see this.
-      - name: Worker-path gate (spawn sites + built-image layout)
-        run: node scripts/check-worker-paths.mjs
-
-      # Install the v17 client so pg_dump matches the server (the wrapper picks
-      # the highest installed version). ubuntu-latest ships v16, which refuses a
-      # v17 server.
-      - name: Install PostgreSQL 17 client (for DR pg_dump)
-        run: |
-          # IDEMPOTENT + HOST-LOCKED (self-hosted hardening): parallel jobs on one host
-          # raced the keyring/sources writes and the dpkg lock; flock serializes the
-          # install and the version guard makes every later run a no-op.
-          sudo flock /var/lock/clara-pgdg.lock bash -ec '
-            if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
-            echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
-            apt-get update -o DPkg::Lock::Timeout=180
-            apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
-          pg_dump --version
-
-      # DEPLOY-ONTO-EXISTING (finding F4 / finding 3): a real deploy applies HEAD's
-      # migrations onto a DB that ALREADY has main's migrations. CI starting from an
-      # empty DB would false-green an edited historical migration. So: apply
-      # origin/main's migrations first, THEN HEAD's — migrate.mjs's checksum-drift
-      # guard aborts if a previously-applied migration was edited/renamed/deleted.
-      #
-      # Do NOT overlay-checkout main's migrations onto the working tree: a
-      # `git checkout main -- dir` then `git checkout HEAD -- dir` leaves a file
-      # that HEAD DELETED still on disk, so a PR deleting a historical migration
-      # would escape the drift guard. Instead export main's migrations to a TEMP dir
-      # and apply them via CLARA_MIGRATIONS_DIR, then apply HEAD from the UNTOUCHED
-      # working tree — migrate.mjs then correctly sees a HEAD-deleted applied
-      # migration as missing and aborts.
-      - name: Deploy-onto-existing check (main migrations, then HEAD)
-        run: |
-          if git rev-parse --verify origin/main >/dev/null 2>&1 \
-             && git ls-tree -r --name-only origin/main -- packages/db/migrations | grep -q '\.sql$'; then
-            BASE_MIG="$(mktemp -d)"
-            git archive origin/main -- packages/db/migrations | tar -x -C "$BASE_MIG"
-            echo "--- applying origin/main migrations (baseline) from a temp export (working tree untouched) ---"
-            CLARA_MIGRATIONS_DIR="$BASE_MIG/packages/db/migrations" pnpm db:migrate
-            echo "--- applying HEAD migrations onto the baseline (drift guard active) ---"
-            pnpm db:migrate
-          else
-            echo "origin/main has no packages/db/migrations yet — first introduction; nothing to layer onto."
-          fi
-
-      # `pnpm -r --if-present test` runs EVERY package's test (not just @clara/db)
-      # so a test added to @clara/runtime or @clara/dashboard can't silently skip
-      # CI. Runs after seed because the db smoke test asserts against the migrated
-      # + seeded schema. Folds in the former `--filter @clara/db test` step.
-      - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
+  # =========================================================================
+  # CLOSED-WAVE DRILLS — WEEKLY SWEEP + MANUAL DISPATCH ONLY (ADR-0073 lever 1): the
+  # eight closed-wave upgrade drills (C9 · Slice-5 · Slice-6 · WB-0020 · x37 · x40 ·
+  # x41 · the D-b split frontier-on-disk drill) and the four Wave-E contract drills
+  # (δ · θ · ε · η). Content unchanged, cadence weekly; the `ci` meta-gate asserts this
+  # job is SKIPPED on pull_request/push and SUCCESS on the sweep — either drift fails.
+  # =========================================================================
+  closed-wave-drills:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, clara]
+    services:
+      postgres:
+        image: postgres:17
         env:
-          # Un-skips the rig-gated suites (the dashboard queue-kind parity probe +
-          # the runtime interview plan-db tests) against the shared migrated DB —
-          # they are pollution-proof by construction (they stage their own fixtures).
-          CLARA_RIG_DB: "1"
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      CLARA_ALLOW_DESTRUCTIVE: "1"
+    steps:
+      - name: Wire service ports (ephemeral host ports -> env)
         run: |
-          pnpm db:migrate
-          pnpm db:seed
-          pnpm -r --if-present test
-
-      # C9 baseline path (X8): the populated-upgrade / cutover test RESETS the schema,
-      # so rig-events-upgrade.test.mjs SKIPS in the shared-DB "Migrate + seed + tests"
-      # run above (CLARA_RIG_ALLOW_RESET is unset there — a mid-run schema drop would
-      # nuke the other concurrent test files). Run it FOR REAL here, ALONE, in its OWN
-      # throwaway database (clara_upgrade_ci — matches the guard's *_ci ephemeral
-      # pattern), so the C9 deploy-onto-existing baseline can never silently regress to
-      # a skipped (false-green) state. psql is on PATH from the "Install PostgreSQL 17
-      # client" step; PGHOST/PGPORT/PGUSER/PGPASSWORD come from the job env.
-      - name: Populated-upgrade cutover test (isolated DB, C9)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_upgrade_ci'
-          # The test's first act is reset() on this BRAND-NEW database — which also
-          # regression-guards reset.mjs's never-existed-schema short-circuit (its
-          # preflight once threw 3F000 there). The test then applies 0001-0004,
-          # builds data through the writers, and applies 0005 itself.
-          PGDATABASE=clara_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            node --test tests/rig-events-upgrade.test.mjs
-
-      # Slice-5 §3.0.2/§3.11 drill (same false-green protection as the C9 step
-      # above): the filing_id backfill (clean + ambiguous-citation atomic ABORT),
-      # the legacy claim-only upgrade branch, and the taxonomy-v2 cutover residual
-      # sweep — reset-gated (drops schema clara mid-run), so it runs ALONE in its
-      # OWN throwaway database, never inside the concurrent all-packages sweep.
-      - name: Slice-5 document-pipeline upgrade drill (isolated DB)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_docs_upgrade_ci'
-          PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            node --test tests/rig-docs-upgrade.test.mjs
-
-      # Slice-6 coding-floor upgrade drill (same false-green protection as the two
-      # steps above): the contract-blind §11 probe-1 battery — fresh 0001→0009
-      # compile + the pg_proc ACL/overload tail, deploy-onto-existing
-      # 0001→0008→0009 incl. the one-open-draft partial unique, and the
-      # two-open-drafts-on-one-filing pre-flight ABORT (atomic rollback) —
-      # reset-gated, so it runs ALONE in its OWN throwaway database, never inside
-      # the concurrent all-packages sweep.
-      - name: Slice-6 coding-floor upgrade drill (isolated DB)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_s6_upgrade_ci'
-          PGDATABASE=clara_s6_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            node --test tests/s6-upgrade.test.mjs
-
-      # Wave-B migration-0020 A7/A8 upgrade drill (ratchet R4 F2 — the anti-misleading-green
-      # wiring). wb-0020-upgrade.test.mjs is the ONLY proof of the 19→20 path: that the apply is
-      # fail-closed on a corpus whose exempt-page bytes are not canonical, that A7's ROWS-ONLY
-      # remediation is REFUSED because it leaves the append-only reconstruction spine stale,
-      # that the SHIPPED audited preflight (packages/db/deploy/wave-b-0020-a7-*.sql) corrects
-      # both and is idempotent, and that the index rebuilds CANONICAL from domain_events alone.
-      # [R5] It is also the only proof of the PROBE the owner reads before deciding whether to
-      # remediate: that it REFUSES an RLS-blinded read instead of reporting an all-zero
-      # false-clean, that it reports all FIVE bridge directions (a direction-1 violation read
-      # CLEAN before), and that the A8-R1 completeness gap §11 promises is actually surfaced.
-      # It is reset-gated (drops schema clara mid-run) so it SKIPS in the concurrent
-      # all-packages sweep above — which is exactly how a bridge or remediation regression could
-      # have merged with the advertised suite green. Run it FOR REAL here, ALONE, in its OWN
-      # throwaway database, like the three drills above.
-      - name: Wave-B 0020 A7/A8 upgrade drill (isolated DB)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wb20_upgrade_ci'
-          PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
-
-      # Wave-C-a migration-0037 subledger upgrade drill (the same anti-misleading-green
-      # wiring as the four drills above). x37-0037-upgrade.test.mjs is the ONLY proof that
-      # 0037's §0 live probes, its §J backfill (including the reversal-unwind pass), and its
-      # D1/D2 tail asserts have ever run against DATA: the in-suite battery
-      # (x37-wave-c-a-subledger.test.mjs) runs on a database where 0037 was applied to an
-      # EMPTY schema, so every backfill row count there is zero and every tail assert is
-      # vacuous. This drill applies 0001→0036, builds a real book through the audited verbs
-      # (typed bill · sales invoice · sales credit note · multi-counterparty JV · opening
-      # incl. a K6 supersede and a withdrawn opening draft · an approved reversal pair · a
-      # counterparty MERGED after approval), THEN applies 0037 onto it and asserts the
-      # decomposition, the created_in_migration provenance, the non-vacuous tie, and the
-      # backfill's idempotency on re-run. It also drives the §0 probe ABORT (a violating
-      # corpus must refuse the migration and roll back atomically). Reset-gated (it drops
-      # schema clara), so it SKIPS in the concurrent all-packages sweep above — which is
-      # exactly how a backfill regression could otherwise merge with the suite green. Run it
-      # FOR REAL here, ALONE, in its OWN throwaway database.
-      - name: Wave-C-a 0037 subledger upgrade drill (isolated DB)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x37_upgrade_ci'
-          PGDATABASE=clara_x37_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            CLARA_RIG_DB=1 node --test tests/x37-0037-upgrade.test.mjs
-
-      # Wave-C-c migration-0040 effective_date backfill upgrade drill (fix-wave E2 — the same
-      # anti-misleading-green wiring as the x37-0037-upgrade drill above). x40-0040-upgrade.
-      # test.mjs is the ONLY proof that 0040's clara.open_item_allocations.effective_date
-      # backfill has ever run against DATA: the in-suite battery (x40-wave-c-c-tieout.test.mjs)
-      # runs on a database where 0040 was applied before any of ITS OWN fixtures existed, so the
-      # backfill's own risk — the migration's own header names it "the ONE statement in this
-      # migration that will touch 36 rows of live money-adjacent data inside a quiesce window" —
-      # is structurally untested by every other battery. This drill applies 0001→0039, builds a
-      # real subledger book through the audited C-a composites (allocate_payment,
-      # apply_open_items, unallocate_group), THEN applies 0040 onto it and asserts the
-      # backfilled effective_date per the producer law (0040 FIX WAVE C4): 'allocate' rows =
-      # the settlement entry's own posting_date; 'apply'/'unallocate' rows = the row's own
-      # created_at::date — plus that the LIVE producer going forward answers the identical rule
-      # (no deploy-timing-dependent split). It also drives the backfill's hard-safety-net ABORT
-      # (an allocation row orphaned from any item_kind='settlement' member must refuse the
-      # migration and roll back atomically). Reset-gated (it drops schema clara), so it SKIPS in
-      # the concurrent all-packages sweep above — which is exactly how a backfill regression
-      # could otherwise merge with the suite green. Run it FOR REAL here, ALONE, in its OWN
-      # throwaway database.
-      - name: Wave-C-c 0040 effective_date backfill upgrade drill (isolated DB)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x40_upgrade_ci'
-          PGDATABASE=clara_x40_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            CLARA_RIG_DB=1 node --test tests/x40-0040-upgrade.test.mjs
-
-      # Wave-D-a migration-0041 FA-register deploy-onto-existing drill (the same
-      # anti-misleading-green wiring as the drills above). x41-0041-upgrade.test.mjs is the
-      # ONLY proof that 0041 lands safely on a database that ALREADY has a book: the in-suite
-      # x41 battery applies 0041 to a schema carrying only what its own cells build afterwards,
-      # so every register-touching claim it makes is a claim about rows 0041 has already seen.
-      # 0041's real risk is the ceremony — a shared database with four live firms, a K-seeded
-      # fixed-asset register, ordinary approved history on accounts about to be enrolled, and a
-      # `_draft_opening_item_core` / `_assert_fa_baseline` pair that must keep working. This
-      # drill applies 0001→0040, builds that book through the audited verbs (a carry-down
-      # fixed asset with its whole opening set approved, cost/accum/expense history, a reversal
-      # pair), THEN applies 0041 onto it and asserts: nothing births retroactively · the
-      # carried baseline and the GL are untouched · the enrolment watermark keeps PRE-enrolment
-      # history reversible while the belt refuses POST-enrolment hand journals · the K6
-      # correction door still opens · the widened method CHECK and the carry-down recut accept
-      # reducing_balance and none. Reset-gated (it drops schema clara), so it SKIPS in the
-      # concurrent all-packages sweep above — which is exactly how a deploy regression could
-      # otherwise merge with the suite green. Run it FOR REAL here, ALONE, in its OWN
-      # throwaway database.
-      - name: Wave-D-a 0041 FA-register upgrade drill (isolated DB)
-        working-directory: packages/db
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x41_upgrade_ci'
-          PGDATABASE=clara_x41_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            CLARA_RIG_DB=1 node --test tests/x41-0041-upgrade.test.mjs
-
-      # Wave-D-b migration-0042 deploy-onto-existing drill (the same anti-misleading-green
-      # wiring as the drills above). x42-0042-upgrade.test.mjs is the ONLY proof that 0042
-      # lands safely on a database that ALREADY has a book: the in-suite x42 battery applies
-      # 0042 to a schema carrying only what its own cells build afterwards, so every claim it
-      # makes about pre-existing rows is a claim about rows 0042 has already seen. 0042's real
-      # risk is the ceremony — a shared database with four live firms, a populated fixed-asset
-      # register the SS6.3 `cost_cents SET NOT NULL` alter is about to constrain, and 74 live
-      # clara.bank_matches rows the SS4 alters widen with pending_resolution +
-      # resolution_exception_id. This drill applies 0001→0041, builds that book through the
-      # audited verbs (FA lineage, a live depreciation authority, bank statements carrying
-      # both pending and live matches with exceptions, posted history), THEN applies 0042 onto
-      # it and asserts: the SS6.3 NULL-cost prestate probe fires its NAMED remedy rather than a
-      # bare constraint error · all seven new relations land with FORCE RLS and their belts ·
-      # both hot-loop partial indexes exist with their exact WHERE clauses · both new event
-      # types register with taxonomy coverage · every pre-existing bank match is untouched
-      # (both new columns NULL) · the ea1955 reference seed is present · and the pre-0042
-      # surfaces (a depreciation run, an ordinary bank settle) still work. Reset-gated (it
-      # drops schema clara), so it SKIPS in the concurrent all-packages sweep above — which is
-      # exactly how a deploy regression could otherwise merge with the suite green. Run it FOR
-      # REAL here, ALONE, in its OWN throwaway database.
-      # [WAVE D-b SPLIT] The whole-unit x42-0042-upgrade drill is GONE — census §6 adjudicated
-      # ONE DRILL PER SLICE, four drills, because each slice's deploy risk is different and each
-      # slice's frontier is different. THIS job applies every migration on disk, so the drill that
-      # is TRUE here is the one belonging to the HIGHEST D-b slice actually in the tree: D-b0's on
-      # the first PR, then D-b1's, then D-b3's, and finally D-b2's whole-chain drill (0001..0041,
-      # book built through the audited verbs, then the WHOLE 0042→0043→0044→0045 chain applied onto
-      # it with every slice's post-state re-asserted as a regression floor).
-      #
-      # DERIVED, NEVER PINNED. Naming one drill file here would make this step red for the whole
-      # multi-day rollout — the D-b2 drill only arrives in the LAST PR. The three EARLIER frontiers
-      # need a slice-shaped migrations directory and therefore stay in the `db-slice-frontiers`
-      # matrix job below, which is the only place they remain provable once the later slices land.
-      #
-      # SELECTED BY STABLE NAME, NEVER BY NUMBER [light re-confirm RC2/LENS-1]. This step used to
-      # read the highest migration number on disk and treat EVERY number ≤ it as a D-b slice.
-      # That is wrong twice over, and both are deploy blockers: (1) a lawful HOTFIX claiming 0043
-      # after D-b0 lands as 0042 made CI demand tests/x42-0043-b1-upgrade.test.mjs — a file that
-      # does not exist yet — and reject the hotfix; (2) a D-b0 renumbered to 0043 by such a
-      # hotfix collided with D-b1's still-template 0043 candidate. Migration NUMBERS are claimed
-      # at merge time (RENUMBER.md); the slice NAME never moves. So the loop keys on the name,
-      # takes the number FROM THE FILE IT FOUND, and the candidate list never needs renumbering.
-      - name: Wave-D-b split upgrade drill at the frontier ON DISK (isolated DB)
-        working-directory: packages/db
-        run: |
-          DRILL=""; DRILL_N=""
-          for tag in b0:wave_d_b0_shared_authorities b1:wave_d_b1_staff_advances \
-                     b3:wave_d_b3_af2_composite b2:wave_d_b2_recurring_adjustments; do
-            bn="${tag%%:*}"; nm="${tag##*:}"
-            m="$(ls migrations/[0-9][0-9][0-9][0-9]_${nm}.sql 2>/dev/null | head -1)"
-            [ -n "$m" ] || continue
-            n="$(basename "$m" | cut -c1-4)"
-            f="x42-${n}-${bn}-upgrade"
-            # Every D-b slice ships its migration AND its drill in the same PR, and a renumbered
-            # slice RENAMES its drill to match (RENUMBER.md §2(4)). A slice migration on disk
-            # without the drill that carries its number is a broken PR — say so, rather than
-            # silently running an EARLIER slice's drill against a LATER frontier (which fails on
-            # the leak probe, loudly but confusingly).
-            if [ ! -f "tests/$f.test.mjs" ]; then
-              echo "$(basename "$m") is on disk but tests/$f.test.mjs is not — every Wave D-b slice ships with its own drill, and a renumbered slice renames the drill to its new number (RENUMBER.md §2(4))"; exit 1
-            fi
-            # highest number wins, whatever order the names were declared in
-            if [ -z "$DRILL_N" ] || [ "$n" -gt "$DRILL_N" ]; then DRILL="$f"; DRILL_N="$n"; fi
-          done
-          if [ -z "$DRILL" ]; then
-            echo "no Wave-D-b slice migration on disk yet (matched by name, not by number) — nothing to drill"; exit 0
-          fi
-          echo "--- highest Wave-D-b slice on disk: $DRILL_N · drill: $DRILL ---"
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
-          PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-            CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"
-
-      # Wave-E δ contract drill (the same anti-misleading-green wiring as the drills above,
-      # for a NEW hazard shape the review named: the package sweep preloads the wave gate
-      # (--import tests/delta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_DELTA
-      # for every file in the sweep — so if a numbering/merge accident ever left the δ migrations
-      # off the chain, the ENTIRE δ battery would skip loudly-but-green in the only leg that runs
-      # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain, then
-      # the ordered δ contract run FOCUSED with the variable explicitly UNSET — on a pre-δ chain
-      # it FAILS by design (the gate's stated focused-run polarity), and post-δ it must be green
-      # with ZERO skips. The δ contract is a ONE-WAY ceremony (it deploys the evaluator closures
-      # and asserts a pristine metric_cells), which is the other reason it gets its own database:
-      # the sweep's run consumes the shared clara_ci copy, and a consumed database is not valid
-      # evidence for this contract.
-      #
-      # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
-      # the ε R1 finding (an exit-0 guard makes "the migration went missing" indistinguishable
-      # from "the migration hasn't landed yet", the exact shape ε's round-3 fix got a second
-      # codex finding for). RE-TRUED: this step's "pre-merge branches without δ stay green"
-      # rationale no longer holds and is retired here — δ's ci.yml step shipped in the SAME PR
-      # as its migrations, so no honest checkout ever has this step without them; the only
-      # worlds where the guard fires are deletion, rename-out-of-glob, or a merge accident, and
-      # every one of those deserves red, post-merge, forever. δ is long since merged (main
-      # carries the wave_e_delta_metrics migration), so flipping this to fail-closed costs
-      # nothing today and closes the same hole θ's and ε's drills close.
-      - name: Wave-E δ contract drill (isolated DB, focused, allow-missing UNSET)
-        working-directory: packages/db
-        run: |
-          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_delta_metrics.sql 2>/dev/null | head -1)"
-          if [ -z "$m" ]; then
-            echo "no numbered wave_e_delta_metrics migration on disk (missing or misnumbered) -- δ is merged on main, so absence here is a regression; FAILING rather than skipping (guard-polarity ruling 2026-08-14)."
-            exit 1
-          fi
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
-          PGDATABASE=clara_delta_contract_ci pnpm migrate
-          PGDATABASE=clara_delta_contract_ci pnpm seed
-          unset CLARA_ALLOW_MISSING_WAVE_E_DELTA
-          PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
-            node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
-
-      # Wave-E θ contract drill (the same anti-misleading-green wiring as the δ drill above,
-      # the identical hazard shape: the package sweep preloads the wave gate (--import
-      # tests/theta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_THETA for
-      # every file in the sweep — so if a numbering/merge accident ever left 0064 off the
-      # chain, theta-close-plan.test.mjs would skip loudly-but-green in the only leg that runs
-      # it. This step is the leg that cannot skip: a fresh database, the full on-disk chain,
-      # then the theta contract run FOCUSED with the variable explicitly UNSET — on a pre-θ
-      # chain it FAILS by design (the gate's stated focused-run polarity), and post-θ it must
-      # be green with ZERO skips. get_close_plan is a read (not a one-way ceremony like δ's
-      # evaluator deploy), so its own database is not load-bearing for correctness the way
-      # δ's is — it's here for the same reason every other wave drill gets one: isolation from
-      # the concurrent all-packages sweep's shared clara_ci database, so this leg's result is
-      # never confounded by what else that sweep did to it.
-      #
-      # PRESENCE GUARD FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with
-      # the ε R1 finding: a drill and its lane's migration travel in the SAME commit, so no
-      # honest checkout ever has the drill without the migration — the only worlds where this
-      # guard fires are deletion, rename-out-of-glob, or a merge accident, and every one of
-      # those deserves red, post-merge, forever. Pre-merge branches without θ also lack this
-      # step itself (it lands in the same PR as 0064), so exit-1 cannot hurt them. Keyed on
-      # 0064 directly, the one file whose absence would matter (theta ships a single
-      # migration, unlike δ/ε's multi-file waves).
-      - name: Wave-E θ contract drill (isolated DB, focused, allow-missing UNSET)
-        working-directory: packages/db
-        run: |
-          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_theta_close_plan.sql 2>/dev/null | head -1)"
-          if [ -z "$m" ]; then
-            echo "0064_wave_e_theta_close_plan.sql is not on disk (missing or misnumbered) -- theta merged in this PR, so absence here is a regression, not a pre-merge state; FAILING rather than skipping (the exit-0 anti-pattern ε's round-3 fix was caught on)."
-            exit 1
-          fi
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_theta_contract_ci'
-          PGDATABASE=clara_theta_contract_ci pnpm migrate
-          PGDATABASE=clara_theta_contract_ci pnpm seed
-          unset CLARA_ALLOW_MISSING_WAVE_E_THETA
-          PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
-            node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
-
-      # Wave-E ε contract drill — the δ drill's shape, for the same hazard on the reporting lane.
-      # The package sweep preloads tests/epsilon-preintegration-gate.mjs, which sets
-      # CLARA_ALLOW_MISSING_WAVE_E_EPSILON for every file in the sweep; so if a numbering or merge
-      # accident ever left the ε migrations off the chain, the ENTIRE ε battery would skip
-      # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
-      # database, the full on-disk chain, then the ε contract FOCUSED with the variable explicitly
-      # UNSET — on a pre-ε chain that FAILS by design (the gate's stated focused-run polarity),
-      # and post-ε it must be green with ZERO skips.
-      #
-      # It gets its OWN database for a reason of its own: the ε battery seals artifacts and issues
-      # a run, and an issued run is one-way. The sweep's copy has already been through that, and a
-      # consumed database is not valid evidence for a contract about sealing.
-      #
-      # ABSENCE FAILS. The first cut of this step exited 0 when the migration was missing, copying
-      # δ's pre-merge courtesy — which put a skip-green branch inside the very step whose reason to
-      # exist is that a skip-green branch elsewhere hides a missing lane. Once ε is on main the
-      # migrations are never legitimately absent, so absence means a numbering or merge accident:
-      # exactly the accident this drill is the last line of defence against. It fails loudly.
-      #
-      # Guarded on the LAST file of the set, not the first: a partial merge that dropped the
-      # security half would satisfy a first-file guard and then drill a chain that cannot enforce
-      # anything.
-      - name: Wave-E ε contract drill (isolated DB, focused, allow-missing UNSET)
-        working-directory: packages/db
-        run: |
-          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql 2>/dev/null | head -1)"
-          if [ -z "$m" ]; then
-            echo "::error::no numbered wave_e_epsilon_reporting_security_seal_artifacts_issue migration on disk."
-            echo "The ε lane is merged, so its migrations cannot be legitimately absent — this is a"
-            echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
-            exit 1
-          fi
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
-          PGDATABASE=clara_epsilon_contract_ci pnpm migrate
-          PGDATABASE=clara_epsilon_contract_ci pnpm seed
-          unset CLARA_ALLOW_MISSING_WAVE_E_EPSILON
-          PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
-            node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
-
-      # Wave-E η contract drill — the ε drill's shape, for the same hazard on the authoring lane.
-      # The package sweep preloads tests/eta-preintegration-gate.mjs, which sets
-      # CLARA_ALLOW_MISSING_WAVE_E_ETA for every file in the sweep; so if a numbering or merge
-      # accident ever left the η migrations off the chain, the ENTIRE η battery would skip
-      # loudly-but-green in the only leg that runs it. This is the leg that cannot skip: a fresh
-      # database, the full on-disk chain, then the η contract FOCUSED with the variable explicitly
-      # UNSET — on a pre-η chain that FAILS by design (the gate's stated focused-run polarity),
-      # and post-η it must be green with ZERO skips.
-      #
-      # ABSENCE FAILS, NEVER SKIPS — guard-polarity ruling 2026-08-14, uniformity with ε's R1
-      # finding. Once η is on main its migrations are never legitimately absent, so absence means a
-      # numbering or merge accident: exactly the accident this drill is the last line of defence
-      # against. It fails loudly.
-      #
-      # GUARDED ON part2, THE LAST FILE OF THE SET — and for η that matters more than it does for
-      # the siblings, because part 1 alone is a legitimate-LOOKING state BY CONSTRUCTION. Part 1
-      # creates the three cores and grants nothing; that is η's own documented fail-safe residue
-      # between the halves. So a first-file guard would be satisfied by a partial merge that
-      # dropped the GRANTED half, and would then drill a chain with no wrappers, no EXECUTE grants
-      # and no allowlist rows — the entire surface this contract exists to measure.
-      #
-      # Its own database, because η's cells are whole-catalog CENSUSES: the four app-executable
-      # definition writers, and the three cores being reachable by no application role. Any other
-      # battery that adds a clara function carrying definition DML, or widens a grant, moves those
-      # numbers — so a shared, already-consumed database is not valid evidence for a census.
-      # (`pnpm seed` is here for uniformity with the sibling drills; every η assertion reads the
-      # catalog and needs no seed data.)
-      - name: Wave-E η contract drill (isolated DB, focused, allow-missing UNSET)
-        working-directory: packages/db
-        run: |
-          m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_eta_wake_wrappers_part2.sql 2>/dev/null | head -1)"
-          if [ -z "$m" ]; then
-            echo "::error::no numbered wave_e_eta_wake_wrappers_part2 migration on disk."
-            echo "The η lane is merged, so its migrations cannot be legitimately absent — this is a"
-            echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
-            echo "part2 is the GRANTED half: without it there are no wrappers, no EXECUTE grants and no allowlist rows."
-            exit 1
-          fi
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_eta_contract_ci'
-          PGDATABASE=clara_eta_contract_ci pnpm migrate
-          PGDATABASE=clara_eta_contract_ci pnpm seed
-          unset CLARA_ALLOW_MISSING_WAVE_E_ETA
-          PGDATABASE=clara_eta_contract_ci CLARA_RIG_DB=1 \
-            node --test --test-concurrency=1 tests/eta-contract.test.mjs
-
-      # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
-      # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
-      # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
-      # (WO-G G1b, proven): the documented idempotent `bootstrap` bin (the SAME one
-      # the S4-V3 runbook runs against prod, README §engine-bootstrap) creates the
-      # workflow/graphile_worker schemas first. Ephemeral clara_intake_ci only —
-      # never the shared project; the URL omits the password (pg falls back to the
-      # job-env PGPASSWORD for the throwaway service container).
-      - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_intake_ci'
-          PGDATABASE=clara_intake_ci pnpm db:migrate
-          PGDATABASE=clara_intake_ci pnpm db:seed
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
-            pnpm --filter @clara/runtime exec bootstrap
-          cd packages/runtime
-          PGDATABASE=clara_intake_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_intake_ci" \
-            node tests/intake-e2e.mjs
-
-      # Wave-B rig-confined fault gates (§4 of the contract): the three STANDALONE runtime e2es
-      # (NOT collected by `node --test`, so wired explicitly like intake-e2e above). Gate 3 —
-      # interview cancel/kill/complete through the REAL WDK engine (interview-e2e.mjs boots the
-      # world in-process; interview-kill-resume-e2e.mjs SPAWNS scripts/serve.mjs so the engine
-      # can be SIGKILLed mid-park and respawned on the same DB). Gate 7 — the v25 chatTurn_v6→v7
-      # cutover with parked runs + the executable rollback preflight. Own throwaway DB
-      # clara_wave_b_ci (matches the guard's *_ci ephemeral pattern) with the WDK world bootstrap
-      # (the SAME idempotent `bootstrap` bin the intake-e2e step runs); PGHOST/PGPORT/PGPASSWORD
-      # come from the job env. Each e2e owns its lifecycle and exits.
-      - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7, isolated DB + world bootstrap)
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
-          PGDATABASE=clara_wave_b_ci pnpm db:migrate
-          PGDATABASE=clara_wave_b_ci pnpm db:seed
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
-            pnpm --filter @clara/runtime exec bootstrap
-          cd packages/runtime
-          PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
-            node tests/interview-e2e.mjs
-          PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
-            node tests/interview-kill-resume-e2e.mjs
-          PGDATABASE=clara_wave_b_ci \
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
-            node tests/version-cutover-e2e.mjs
-
-      - name: DR backup/restore self-test (ephemeral postgres:17)
-        run: pnpm --filter @clara/db dr:selftest
-
-      # FULL-PROFILE DR ROUND-TRIP (hardening interlude): prove the full-fidelity
-      # backup -> restore -> verify sequence end-to-end ACROSS TWO CLUSTERS. drci_source
-      # lives on the primary service (5432): migrate + seed + the WDK world bootstrap (the
-      # SAME idempotent `bootstrap` bin the intake-e2e step runs — it creates workflow /
-      # workflow_drizzle / graphile_worker). The FULL profile backup captures all four
-      # schemas WITH owners + the GRANT/REVOKE/RLS matrix. The target drci_target is on the
-      # SEPARATE postgres_b cluster (5433) whose pg_authid starts EMPTY, so
-      # deploy/roles-bootstrap.sql GENUINELY creates the clara roles + memberships (Codex
-      # HIGH-5 — not a same-cluster tautology). restore-full runs roles-bootstrap + the
-      # single-transaction restore; dr-verify diffs source(5432)<->target(5433) across every
-      # fidelity category and REFUSES a self-comparison. Both clusters are PG17 so no
-      # cross-version dump GUC issue arises. Canary + AP auto-SKIP (no live data). Any
-      # battery FAIL fails CI. Additive. pg_dump/psql are v17; the localhost targets are
-      # ephemeral so CLARA_ALLOW_DESTRUCTIVE=1 (job env) authorizes them. PGPASSWORD (job
-      # env) is the fallback password for BOTH services (same POSTGRES_PASSWORD).
-      - name: DR full-profile round-trip (two clusters, backup->restore->verify)
-        run: |
-          # SOURCE on cluster A (5432)
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_source'
-          PGDATABASE=drci_source pnpm db:migrate
-          PGDATABASE=drci_source pnpm db:seed
-          # roles-bootstrap the SOURCE too: the migrations create only the 9 clara group/login
-          # roles — clara_storage_docs comes from storage-provision.sql / roles-bootstrap, NOT a
-          # migration. Running it here gives cluster A the SAME 10-role census cluster B gets, so
-          # role/membership parity is genuine and not a deterministic clara_storage_docs mismatch
-          # (Codex re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
-          # fresh-target-only preflight cannot abort here.
-          PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
-            pnpm --filter @clara/runtime exec bootstrap
-          PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out $RUNNER_TEMP/drci-full.sql
-          # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid
-          PGPORT=$PGB_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
-          PGPORT=$PGB_PORT PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-          PGPORT=$PGB_PORT PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file $RUNNER_TEMP/drci-full.sql
-          CLARA_DR_SOURCE_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
-          CLARA_DR_TARGET_URL="postgres://postgres@localhost:$PGB_PORT/drci_target" \
-            node packages/db/scripts/dr-verify.mjs
+          echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/pg17-client
+      - uses: ./.github/actions/closed-wave-upgrade-drills
+      - uses: ./.github/actions/wave-e-contract-drills
 
   # ===========================================================================
-  # [WAVE D-b SPLIT] PER-SLICE FRONTIER JOB.
-  #
-  # THE PROBLEM THIS EXISTS FOR. Once 0045 is on main, nothing in the pipeline above ever
-  # proves again that 0042 ALONE is deployable — the `ci` job only ever applies every migration
-  # on disk. But the split's whole promise is that each slice ships on its own, days apart, onto
-  # a live database. A regression that makes 0043 depend on something 0044 ships would be
-  # invisible until the deploy. This job keeps every intermediate frontier honest, forever.
-  #
-  # IT LANDS AT THE FIRST SLICE'S PR, FULLY POPULATED, AND THAT IS SAFE. Step (0) is a PRESENCE
-  # GATE: a leg whose slice is not in the tree yet SKIPS — green, loud, and named — instead of
-  # failing red for the days between slices. The gate is also what stops the d-b2 leg silently
-  # degrading to "whatever is on disk" while 0045 is held: no D-b2 migration, no leg.
-  #
-  # NONE-OR-ALL, NOT ALL-OR-SKIP [light re-confirm RC5]. The gate used to skip whenever ANY of
-  # the three artifacts was missing, which made a PARTIAL landing — migration + drill, list
-  # forgotten — pass GREEN with the leg never running. A slice is present or it is not: the gate
-  # now skips only when NONE of its three artifacts is on disk, and FAILS BY NAME on any
-  # in-between, listing what is there and what is missing.
-  #
-  # AND IT KEYS ON THE SLICE NAME, NEVER ON A PINNED NUMBER [light re-confirm RC2/RC4]. The
-  # frontier and the drill filename are DERIVED from the migration file the leg finds, so a
-  # merge-time renumber (RENUMBER.md) needs no edit here at all — which is the whole point,
-  # since a stale `frontier:` pin would silently run a leg at a frontier nobody declared.
-  #
-  # Each matrix leg gets its OWN runner and therefore its OWN ephemeral postgres:17 service —
-  # genuinely isolated, never a shared database. Each ready leg:
-  #   1. materialises a SLICE-SHAPED migrations directory (0001..<that slice's frontier>) and
-  #      asserts the top of that chain really IS the declared frontier;
-  #   2. migrates a fresh clara_ci from it;
-  #   3. runs that slice's test list with CLARA_MIGRATIONS_DIR pointed at that copy —
-  #      E17 IS BINDING: several tests call the rig's ensureReady(), which re-runs migrate()
-  #      and fails a migration-history integrity check ("applied migration X is MISSING from
-  #      disk") when an applied version has no file in the directory it is given. Getting this
-  #      wrong costs exactly one cell (x42-s5c-awcc) and looks like a real regression — and then
-  #      asserts the list's OWN declared cell floor, so a DELETED cell inside a still-listed file
-  #      can no longer pass the file-granular totality gate unnoticed;
-  #   4. runs that slice's reset-gated upgrade drill ALONE, in its own throwaway DB.
-  #
-  # The lists are data, not code: packages/db/tests/split-lists/test-list-d-bN.txt, one file
-  # per line, `#` comments ignored, plus two machine-readable `#!` directives the gates read
-  # (`#!cells-floor:` and `#!floor-rerun:`). A file added to the corpus and to no list fails
-  # the separate db-split-partition-total job below.
-  #
-  # DB NAMES USE `dbtag`, NEVER `slice`: d-b0 is not a legal bare SQL identifier.
+  # [WAVE D-b SPLIT] PER-SLICE FRONTIER MATRIX — WEEKLY SWEEP + MANUAL DISPATCH ONLY
+  # (ADR-0073 lever 1: a closed wave's four frontier legs, the same growing cost). The
+  # leg logic — presence gate, NONE-OR-ALL, name-not-number, E17, cell floors, the
+  # contracts roster, the isolated drill — is unchanged in .github/actions/frontier-leg.
+  # Each matrix leg gets its OWN runner and its OWN ephemeral postgres:17 service.
+  # ===========================================================================
   db-slice-frontiers:
-    # The diet: this matrix reads packages/db/** and nothing else (its own gate/list/drill
-    # logic included) — it runs when that surface (or this file, or a root manifest) changed,
-    # and on every scheduled weekly sweep. FAIL-CLOSED via the classifier's defaults.
-    needs: changes
-    if: needs.changes.outputs.db != 'false'
-    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
-    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
-    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
-    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, linux, clara]
     strategy:
       fail-fast: false
@@ -1083,7 +378,6 @@ jobs:
           - slice: d-b2
             dbtag: b2
             migname: wave_d_b2_recurring_adjustments
-
     services:
       postgres:
         image: postgres:17
@@ -1092,355 +386,115 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: clara_ci
         ports:
-          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides the
-          # moment two jobs share one Docker host — hosted runners never see this, one
-          # VM per job. Steps read the mapped port via the wire-ports step below.
           - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
-
     env:
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: clara_ci
       CLARA_ALLOW_DESTRUCTIVE: "1"
-
     steps:
       - name: Wire service ports (ephemeral host ports -> env)
         run: |
           echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      # (0) THE PRESENCE GATE — NONE-OR-ALL. The four slices land days apart; this job is fully
-      # populated from the first PR. A leg whose slice is nowhere in the tree SKIPS; a leg whose
-      # slice is HALF in the tree FAILS. Nothing in between passes silently.
-      #
-      # EACH ARTIFACT IS LOOKED FOR ON ITS OWN [merge-gate SF3]. The drill used to be searched
-      # for by a name DERIVED from the migration — so with no migration on disk there was no
-      # name to look for, the drill counted as absent, `have` stayed 0 and a DRILL-ONLY landing
-      # skipped GREEN. Nothing else would have caught it: the normal DB suite reset-skips the
-      # drill, the `ci` job's derived drill step keys on migrations, and the totality gate
-      # excludes drills from the corpus by design. The drill is therefore globbed by `dbtag`
-      # alone — number-agnostic, exactly like the totality gate's own drill pattern — so an
-      # orphan drill is COUNTED, lands in the partial-landing branch, and fails BY NAME.
-      - name: Is the ${{ matrix.slice }} slice in the tree yet?
-        id: gate
-        run: |
-          MIG="$(ls packages/db/migrations/[0-9][0-9][0-9][0-9]_${{ matrix.migname }}.sql 2>/dev/null | head -1)"
-          LIST="packages/db/tests/split-lists/test-list-${{ matrix.slice }}.txt"
-          DRILLGLOB="packages/db/tests/x42-[0-9][0-9][0-9][0-9]-${{ matrix.dbtag }}-upgrade.test.mjs"
-          # `| head -1` / `| wc -l` keep the pipeline's status 0 when the glob matches nothing,
-          # so a no-match cannot trip the runner's `set -e`.
-          NDRILL="$(ls $DRILLGLOB 2>/dev/null | wc -l)"
-          DRILLFILE="$(ls $DRILLGLOB 2>/dev/null | head -1)"
-          if [ "$NDRILL" -gt 1 ]; then
-            echo "AMBIGUOUS DRILL: the ${{ matrix.slice }} slice has $NDRILL numbered upgrade drills on disk:"
-            ls $DRILLGLOB | sed 's/^/  · /'
-            echo "A slice has exactly ONE drill, and a renumber RENAMES it (RENUMBER.md §2(4)) rather"
-            echo "than leaving the old number behind. Two is a stale file, and this leg cannot pick."
-            exit 1
-          fi
-          have=0; miss=""; got=""
-          if [ -n "$MIG" ]; then have=$((have+1)); got="$got $MIG"; else miss="$miss packages/db/migrations/NNNN_${{ matrix.migname }}.sql"; fi
-          if [ -f "$LIST" ]; then have=$((have+1)); got="$got $LIST"; else miss="$miss $LIST"; fi
-          if [ -n "$DRILLFILE" ]; then have=$((have+1)); got="$got $DRILLFILE"; else miss="$miss packages/db/tests/x42-NNNN-${{ matrix.dbtag }}-upgrade.test.mjs"; fi
-          if [ "$have" = "0" ]; then
-            echo "${{ matrix.slice }} has NOT landed yet (none of its three artifacts is on disk) — this leg skips (green, by design)."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$have" != "3" ]; then
-            # RC5: a PARTIAL landing used to skip GREEN. It is a broken PR, not an absent slice.
-            # SF3: a drill-only landing is one of those partial shapes, and now reaches here.
-            echo "PARTIAL LANDING: the ${{ matrix.slice }} slice has $have of its 3 artifacts on disk."
-            echo "present:"; for g in $got; do echo "  · $g"; done
-            echo "missing:"; for m in $miss; do echo "  · $m"; done
-            echo "A Wave D-b slice ships its migration, its test list and its upgrade drill in ONE PR."
-            echo "Skipping this leg would leave the slice's whole frontier unproven — failing instead."
-            exit 1
-          fi
-          # All three are here, so the drill's NUMBER must be the migration's number. A drill
-          # left behind at an old number after a merge-time renumber is a broken PR, not a
-          # licence to run an EARLIER slice's drill against a LATER frontier.
-          N="$(basename "$MIG" | cut -c1-4)"
-          DRILL="x42-${N}-${{ matrix.dbtag }}-upgrade"
-          if [ "$(basename "$DRILLFILE")" != "$DRILL.test.mjs" ]; then
-            echo "NUMBER MISMATCH: the ${{ matrix.slice }} migration is $(basename "$MIG") but its drill on disk is"
-            echo "  $(basename "$DRILLFILE") — expected $DRILL.test.mjs."
-            echo "A renumbered slice renames its drill to its new number (RENUMBER.md §2(4))."
-            exit 1
-          fi
-          echo "frontier=$N" >> "$GITHUB_OUTPUT"
-          echo "drill=$DRILL" >> "$GITHUB_OUTPUT"
-          echo "migfile=$(basename "$MIG")" >> "$GITHUB_OUTPUT"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
-          echo "${{ matrix.slice }} IS in the tree as $(basename "$MIG") — running its frontier leg with drill $DRILL."
-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        if: steps.gate.outputs.ready == 'true'
+      - uses: ./.github/actions/frontier-leg
         with:
-          version: 10.33.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: steps.gate.outputs.ready == 'true'
-        with:
-          node-version: 20.19.5
-          cache: pnpm
-
-      - name: Install
-        if: steps.gate.outputs.ready == 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Install PostgreSQL 17 client
-        if: steps.gate.outputs.ready == 'true'
-        run: |
-          # IDEMPOTENT + HOST-LOCKED (self-hosted hardening) — same recipe as the ci job.
-          sudo flock /var/lock/clara-pgdg.lock bash -ec '
-            if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
-            echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-            curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
-            apt-get update -o DPkg::Lock::Timeout=180
-            apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
-          psql --version
-
-      # (1) the slice-shaped migrations copy: every migration numbered at or below THIS SLICE'S
-      # OWN migration, whatever number that turned out to be. A numeric compare rather than a
-      # glob, so a new migration cannot silently join an EARLIER slice's chain. The top of the
-      # copied chain is then asserted to BE this slice's own file — by NAME, not by number — so
-      # a leg can never run at a frontier that is not the one it is named for.
-      - name: Materialise the ${{ matrix.slice }} migrations chain (0001..${{ steps.gate.outputs.frontier }})
-        id: chain
-        if: steps.gate.outputs.ready == 'true'
-        run: |
-          FRONTIER="${{ steps.gate.outputs.frontier }}"
-          SLICE_MIG="$(mktemp -d)"
-          for f in packages/db/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
-            n="$(basename "$f" | cut -c1-4)"
-            if [ "$n" -le "$FRONTIER" ]; then cp "$f" "$SLICE_MIG/"; fi
-          done
-          TOP="$(ls "$SLICE_MIG" | tail -1)"
-          test "$TOP" = "${{ steps.gate.outputs.migfile }}" || {
-            echo "the ${{ matrix.slice }} chain tops out at $TOP, not this slice's own ${{ steps.gate.outputs.migfile }}"; exit 1; }
-          echo "dir=$SLICE_MIG" >> "$GITHUB_OUTPUT"
-          echo "--- ${{ matrix.slice }} chain: $(ls "$SLICE_MIG" | wc -l) migrations, frontier $TOP ---"
-          ls "$SLICE_MIG" | tail -3
-
-      # (2) migrate the fresh service DB from that copy ONLY.
-      - name: Migrate clara_ci at the ${{ matrix.slice }} frontier
-        if: steps.gate.outputs.ready == 'true'
-        working-directory: packages/db
-        env:
-          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
-        run: |
-          node scripts/migrate.mjs
-          psql -tAc "select count(*) || ' migrations applied, frontier ' || max(version) from clara.schema_migrations"
-
-      # (3) the slice's list. E17: CLARA_MIGRATIONS_DIR must name the copy the DB was built
-      # from, or the rig's ensureReady() re-migrate fails its history-integrity check.
-      - name: Run the ${{ matrix.slice }} test list
-        if: steps.gate.outputs.ready == 'true'
-        working-directory: packages/db
-        env:
-          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
-        run: |
-          set -o pipefail
-          LIST="tests/split-lists/test-list-${{ matrix.slice }}.txt"
-          test -f "$LIST" || { echo "missing $LIST"; exit 1; }
-          FILES=""
-          # `|| [ -n "$f" ]`: a list whose last line lost its newline must not lose its last file.
-          while read -r f || [ -n "$f" ]; do
-            case "$f" in ''|'#'*) continue;; esac
-            test -f "tests/$f" || { echo "list names a file that does not exist: tests/$f"; exit 1; }
-            FILES="$FILES tests/$f"
-          done < "$LIST"
-          echo "--- ${{ matrix.slice }}: $(echo $FILES | wc -w) test files ---"
-          # CLARA_RIG_ALLOW_RESET is deliberately NOT set here: the reset-gated drill must SKIP in
-          # this sweep and run ALONE in (4). CLARA_ALLOW_DESTRUCTIVE *is* set, at job level, because
-          # the rig battery needs it — every reset gate keys on CLARA_RIG_ALLOW_RESET, never on it.
-          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/list-run.txt
-          # (3b) THE CELL FLOOR. The totality gate below is FILE-granular: a DELETED cell inside a
-          # still-listed file passes it. Each list therefore declares its own measured floor and the
-          # run must meet it. Raise the floor in the list when you add cells; never lower it to go
-          # green.
-          FLOOR="$(grep -E '^#!cells-floor:' "$LIST" | head -1 | awk '{print $2}')"
-          test -n "$FLOOR" || { echo "$LIST declares no '#!cells-floor:' — every list must"; exit 1; }
-          PASS="$(grep -E '^# pass ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
-          FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
-          echo "--- ${{ matrix.slice }}: $PASS pass / $FAIL fail · declared floor $FLOOR ---"
-          test "$FAIL" = "0" || { echo "the ${{ matrix.slice }} list is not green"; exit 1; }
-          test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
-            echo "CELL FLOOR BREACHED: the ${{ matrix.slice }} list passed ${PASS:-?} cells, floor $FLOOR — a cell was deleted or silently skipped"; exit 1; }
-
-      # (3c) THE CROSS-SLICE CONTRACTS, from their OWN roster [merge-gate SF4]. The x42x-*
-      # contracts are excluded from the file-granular totality gate below (each appears in
-      # SEVERAL slice lists on purpose), which left them covered by nothing but each slice
-      # list's goodwill: a later slice could simply omit them and pass, even though every one
-      # of them asserts what is true AT EVERY FRONTIER and is only a contract if it runs at
-      # all of them. They now have a dedicated roster — tests/split-lists/test-list-contracts.txt
-      # — which the totality job asserts is TOTAL against the x42x files on disk, and which
-      # every leg runs here. Coverage no longer depends on any per-slice list.
-      #
-      # SAFE AT EVERY FRONTIER, AND SAFE TWICE: each contract is rig-gated and frontier-aware
-      # (it skips the arm that is not live yet) and stages its own uniquely-tagged world, so a
-      # slice list that ALSO names one simply runs it twice. That overlap is deliberate — the
-      # lists carry MEASURED cell floors and are not re-measured to accommodate this gate.
-      - name: Run the cross-slice contract roster at the ${{ matrix.slice }} frontier
-        if: steps.gate.outputs.ready == 'true'
-        working-directory: packages/db
-        env:
-          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
-        run: |
-          set -o pipefail
-          ROSTER="tests/split-lists/test-list-contracts.txt"
-          test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional"; exit 1; }
-          FILES=""
-          while read -r f || [ -n "$f" ]; do
-            case "$f" in ''|'#'*) continue;; esac
-            test -f "tests/$f" || { echo "the contract roster names a file that does not exist: tests/$f"; exit 1; }
-            FILES="$FILES tests/$f"
-          done < "$ROSTER"
-          test -n "$FILES" || { echo "$ROSTER lists no contracts"; exit 1; }
-          echo "--- ${{ matrix.slice }} frontier: $(echo $FILES | wc -w) cross-slice contract(s) ---"
-          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/contracts-run.txt
-          FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
-          PASS="$(grep -E '^# pass ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
-          echo "--- contracts at the ${{ matrix.slice }} frontier: $PASS pass / $FAIL fail ---"
-          test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ matrix.slice }} frontier"; exit 1; }
-
-      # (4) the slice's OWN deploy drill, alone, in its own throwaway database.
-      # DB NAME FROM `dbtag`: `clara_d-b0_upgrade_ci` is not a legal identifier.
-      - name: ${{ matrix.slice }} upgrade drill (isolated DB)
-        if: steps.gate.outputs.ready == 'true'
-        working-directory: packages/db
-        env:
-          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
-        run: |
-          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_${{ matrix.dbtag }}_upgrade_ci'
-          PGDATABASE=clara_x42_${{ matrix.dbtag }}_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
-            CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 \
-            node --test tests/${{ steps.gate.outputs.drill }}.test.mjs
+          slice: ${{ matrix.slice }}
+          dbtag: ${{ matrix.dbtag }}
+          migname: ${{ matrix.migname }}
 
   # ===========================================================================
-  # [WAVE D-b SPLIT] THE PARTITION IS TOTAL — a standing, DATABASE-FREE gate.
-  #
-  # Every x41/x42 test file in the corpus must appear in EXACTLY ONE slice list (helpers, the
-  # cross-slice contracts and the four reset-gated drills excepted). A file that joins the corpus
-  # and no list would otherwise never run again under the split — the silent-coverage-loss shape
-  # the whole split has to be defended against.
-  #
-  # ITS OWN JOB, NOT THE d-b2 LEG. The frontier matrix skips a leg whose slice has not landed;
-  # hanging this gate off the d-b2 leg would hold the corpus unguarded until 0045 lands, which is
-  # exactly the multi-day window it exists to police. It needs no database and no node.
-  #
-  # ONE DECLARED EXCEPTION TO "EXACTLY ONE": a list may re-run an EARLIER slice's file as a
-  # regression floor by declaring `#!floor-rerun: <file>` in its header. The gate then allows
-  # exactly one extra listing of that file and no more — an undeclared duplicate still fails, and
-  # a stale declaration (the file is no longer double-listed) fails too.
-  #
-  # AND THE CROSS-SLICE CONTRACTS GET THEIR OWN TOTALITY [merge-gate SF4]. x42x-* files are
-  # excluded from the partition above because each belongs in SEVERAL lists, which used to mean
-  # they were guarded by nothing: a later slice could omit both and pass. They now have a
-  # dedicated roster — tests/split-lists/test-list-contracts.txt — asserted TOTAL against the
-  # x42x files on disk here, and RUN by every frontier leg above. A new contract that joins the
-  # corpus and not the roster fails this job by name.
+  # [WAVE D-b SPLIT] THE PARTITION IS TOTAL — standing, DATABASE-FREE. STAYS PER-PR
+  # (ADR-0073): it costs seconds and catches the PR-authoring mistake (a file joining
+  # the x41/x42 corpus and no list) at the PR; the frontier legs it feeds run at the sweep.
+  # ===========================================================================
   db-split-partition-total:
-    # Same input surface as the frontier legs (packages/db/tests + split-lists + migrations),
-    # same diet condition, same weekly sweep.
     needs: changes
     if: needs.changes.outputs.db != 'false'
-    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
-    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
-    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
-    # an offline runner makes jobs QUEUE visibly, never silently pass.
     runs-on: [self-hosted, linux, clara]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/partition-total
 
-      - name: Assert the slice lists partition the x41/x42 corpus exactly once
-        working-directory: packages/db
+  # ===========================================================================
+  # THE REQUIRED-CHECK META-GATE. Branch protection requires exactly one context —
+  # `ci` — and this job IS it now. `if: always()`, then every leg must be success or
+  # LAWFULLY skipped: changes + lint success unconditionally; code-/db-gated legs
+  # success whenever their classifier output != 'false' (fail-closed polarity),
+  # skipped-or-success only on a classified docs-only/non-db diff; sweep-only legs
+  # success on schedule/workflow_dispatch and skipped on pull_request/push — drift in
+  # EITHER direction fails. A cancelled leg fails the gate. The needs contexts and
+  # $GITHUB_EVENT_NAME are read as env, never spliced — the house anti-injection
+  # discipline.
+  # ===========================================================================
+  ci:
+    needs:
+      - changes
+      - lint
+      - render-drill
+      - build
+      - db-estate
+      - db-live-gates
+      - closed-wave-drills
+      - db-slice-frontiers
+      - db-split-partition-total
+    if: always()
+    runs-on: [self-hosted, linux, clara]
+    steps:
+      - name: Gate — every leg green or lawfully skipped
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_LINT: ${{ needs.lint.result }}
+          R_RENDER: ${{ needs['render-drill'].result }}
+          R_BUILD: ${{ needs.build.result }}
+          R_ESTATE: ${{ needs['db-estate'].result }}
+          R_LIVE: ${{ needs['db-live-gates'].result }}
+          R_DRILLS: ${{ needs['closed-wave-drills'].result }}
+          R_FRONTIERS: ${{ needs['db-slice-frontiers'].result }}
+          R_PARTITION: ${{ needs['db-split-partition-total'].result }}
+          OUT_CODE: ${{ needs.changes.outputs.code }}
+          OUT_DB: ${{ needs.changes.outputs.db }}
         run: |
-          # WHICH D-b SLICES ARE ON DISK — by stable NAME, so a renumber cannot hide one
-          # [light re-confirm RC2/RC4].
-          DBMIG=""
-          for nm in wave_d_b0_shared_authorities wave_d_b1_staff_advances \
-                    wave_d_b3_af2_composite wave_d_b2_recurring_adjustments; do
-            # `| head -1` keeps the pipeline's status 0 when nothing matches, and the test is a
-            # full `if` rather than `&&` so a no-match cannot trip the runner's `set -e`.
-            m="$(ls migrations/[0-9][0-9][0-9][0-9]_${nm}.sql 2>/dev/null | head -1)"
-            if [ -n "$m" ]; then DBMIG="$DBMIG $(basename "$m")"; fi
-          done
-          if [ ! -d tests/split-lists ]; then
-            # RC5: this used to exit GREEN unconditionally — so a PR that landed a slice
-            # migration and forgot tests/split-lists/ left the corpus completely unguarded and
-            # said nothing. The directory is optional only while NO slice has landed.
-            if [ -n "$DBMIG" ]; then
-              echo "tests/split-lists/ is MISSING, but Wave D-b slice migrations ARE on disk:$DBMIG"
-              echo "This gate is the only thing standing between a test file joining the corpus and"
-              echo "never running again under the split. It is not optional once a slice has landed."
-              exit 1
+          fail=0
+          say() { echo "::error::$1"; fail=1; }
+          # The classifier and lint are unconditional: only success passes. A failed
+          # classifier used to skip everything downstream and still satisfy the required
+          # check — the exact fail-open shape this gate exists to close.
+          [ "$R_CHANGES" = "success" ] || say "changes: expected success, got '$R_CHANGES' — no classifier verdict, nothing downstream is trustworthy"
+          [ "$R_LINT" = "success" ] || say "lint: expected success, got '$R_LINT' — lint runs on EVERY event, docs-only included"
+          # Code-gated legs: when code != 'false' they MUST have succeeded; on a classified
+          # docs-only diff (code == 'false') skipped is the lawful state.
+          code_gated() {
+            if [ "$OUT_CODE" != "false" ]; then
+              [ "$2" = "success" ] || say "$1: must run and pass on a code diff (code='$OUT_CODE'), got '$2'"
+            else
+              case "$2" in success|skipped) : ;; *) say "$1: got '$2' on a docs-only diff" ;; esac
             fi
-            echo "no tests/split-lists/ and no Wave D-b slice migration — the split has not landed; nothing to check"; exit 0
+          }
+          code_gated "build" "$R_BUILD"
+          code_gated "db-estate" "$R_ESTATE"
+          code_gated "db-live-gates" "$R_LIVE"
+          code_gated "render-drill" "$R_RENDER"
+          # DB-gated leg, same polarity against the db output.
+          if [ "$OUT_DB" != "false" ]; then
+            [ "$R_PARTITION" = "success" ] || say "db-split-partition-total: must run and pass (db='$OUT_DB'), got '$R_PARTITION'"
+          else
+            case "$R_PARTITION" in success|skipped) : ;; *) say "db-split-partition-total: got '$R_PARTITION' on a non-db diff" ;; esac
           fi
-          # And the converse, stated rather than assumed: lists without any slice migration is a
-          # half-landed PR too — the lists name files that no frontier leg will ever run.
-          if [ -z "$DBMIG" ]; then
-            echo "tests/split-lists/ exists but NO Wave D-b slice migration is on disk — a partial landing."
-            echo "The lists are the split's coverage contract; they land with the slice they describe."
-            exit 1
+          # Sweep-only legs (ADR-0073): both directions asserted, so a silently-dead sweep
+          # leg and a drill running per-PR are BOTH visible failures, never quiet drift.
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            [ "$R_DRILLS" = "success" ] || say "closed-wave-drills: the sweep must run them, got '$R_DRILLS'"
+            [ "$R_FRONTIERS" = "success" ] || say "db-slice-frontiers: the sweep must run them, got '$R_FRONTIERS'"
+          else
+            [ "$R_DRILLS" = "skipped" ] || say "closed-wave-drills: expected skipped on $GITHUB_EVENT_NAME, got '$R_DRILLS' — event wiring drifted"
+            [ "$R_FRONTIERS" = "skipped" ] || say "db-slice-frontiers: expected skipped on $GITHUB_EVENT_NAME, got '$R_FRONTIERS' — event wiring drifted"
           fi
-          echo "--- Wave D-b slice migrations on disk:$DBMIG ---"
-          # THE CROSS-SLICE CONTRACT ROSTER IS TOTAL [SF4]. Checked FIRST, and unconditionally:
-          # every x42x-*.test.mjs on disk must be on the roster (or it runs at no frontier), and
-          # every roster line must be on disk (or every frontier leg dies on a missing file).
-          # The roster is a separate file from the slice lists ON PURPOSE — it is not a partition
-          # of anything, it is the set of files that run EVERYWHERE.
-          ROSTER="tests/split-lists/test-list-contracts.txt"
-          test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional once the split has landed"; exit 1; }
-          ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > $RUNNER_TEMP/contracts-disk.txt
-          grep -v '^#' "$ROSTER" | grep -v '^$' | sort > $RUNNER_TEMP/contracts-roster.txt
-          if ! diff -u $RUNNER_TEMP/contracts-disk.txt $RUNNER_TEMP/contracts-roster.txt; then
-            echo "the cross-slice contract roster ($ROSTER) is not the set of x42x-*.test.mjs on disk."
-            echo "  a '-' line is a contract on disk that NO frontier leg runs — add it to the roster;"
-            echo "  a '+' line is a roster entry with no file — every frontier leg would fail on it."
-            exit 1
-          fi
-          test "$(sort $RUNNER_TEMP/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
-          echo "contract roster OK: $(wc -l < $RUNNER_TEMP/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
-          # EXCLUDED from the partition below, both by design: x42x-* are the cross-slice contracts
-          # (covered by the roster above — they run at every frontier, so they partition nothing),
-          # and x42-<NNNN>-bN-upgrade are the four reset-gated deploy drills (each runs ALONE in the
-          # frontier job, never in a list). The drill pattern is number-AGNOSTIC on purpose:
-          # migration numbers are claimed at MERGE time (slices/forks/RENUMBER.md), so a slice
-          # landing as 0050 must not rejoin the corpus.
-          ls tests/x41-*.test.mjs tests/x42-*.test.mjs tests/x41b*.test.mjs tests/x42b*.test.mjs 2>/dev/null \
-            | xargs -n1 basename | grep -v '^x42x-' \
-            | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > $RUNNER_TEMP/corpus.txt
-          # THE SLICE LISTS ARE test-list-d-bN.txt, NEVER test-list-*.txt: the contract roster
-          # lives in the same directory and is not a slice list — it declares no cell floor and
-          # partitions nothing.
-          cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > $RUNNER_TEMP/listed.txt
-          # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
-          for L in tests/split-lists/test-list-d-b*.txt; do
-            grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
-          done
-          # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
-          # the strict checks, which still fail on any undeclared duplicate.
-          cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > $RUNNER_TEMP/floorruns.txt
-          while read -r fr || [ -n "$fr" ]; do
-            [ -n "$fr" ] || continue
-            grep -qxF "$fr" $RUNNER_TEMP/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
-            awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' $RUNNER_TEMP/listed.txt > $RUNNER_TEMP/listed.tmp
-            mv $RUNNER_TEMP/listed.tmp $RUNNER_TEMP/listed.txt
-            grep -qxF "$fr" $RUNNER_TEMP/listed.txt || {
-              echo "stale allowance: $fr is declared a floor re-run but is listed only once"; exit 1; }
-            echo "floor re-run allowed: $fr (one extra listing)"
-          done < $RUNNER_TEMP/floorruns.txt
-          if ! diff -u $RUNNER_TEMP/corpus.txt $RUNNER_TEMP/listed.txt; then
-            echo "the slice lists do not partition the x41/x42 corpus exactly once"; exit 1
-          fi
-          test "$(sort $RUNNER_TEMP/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
-          echo "partition OK: $(wc -l < $RUNNER_TEMP/corpus.txt) files, each in exactly one list"
+          if [ "$fail" != "0" ]; then exit 1; fi
+          echo "gate: every leg green or lawfully skipped (event=$GITHUB_EVENT_NAME code=$OUT_CODE db=$OUT_DB)"

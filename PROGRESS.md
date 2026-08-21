@@ -102,6 +102,7 @@ file wins or it is stale — and truing it is the first thing you do.
 | Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
 | Wave F · Track A — **F-A2 proper** | **DESIGNED (v4), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. The unattended posting lane (PR-0..PR-4 + PR-1b, two further D1 windows) has **NOT started** — every corroborating invoice holds an unattended-eligible ticket nothing yet redeems. **OQ-2/3/5 stay open with recommendations.** | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④), Fix A proceeds: both writer bodies in ONE migration, 13-cell battery, D1 on the 0085 template | design | — |
+| Harness — **the CI economics overhaul (ADR-0073)** | Owner-approved opener, built 2026-08-21: closed-wave drills → weekly sweep; monolith → parallel jobs; `ci` → fail-closed meta-gate; composites restore the 500-line limit; local pnpm store. Post-merge: one manual `gh workflow run ci.yml` proves the sweep path. | in review | — |
 
 *(The sixteen terminal Wave-E rows moved verbatim to the archive, 2026-08-18.)*
 
@@ -272,22 +273,17 @@ region, and the witness pair does not depend on one — re-ask after the F-A2 re
 - **`0084`'s out-of-tree derivation tooling is RETAINED** at `C:\ct\` — see Tooling
   follow-ups, where its machine-local-custody hazard is now priced.
 
-**CI economics overhaul — OWNER-APPROVED 2026-08-21 (in-session) as the NEXT session's opener,
-incl. lever (1)'s per-PR-uniformity amendment (ADR-061 territory, ruled): closed-wave drills
-demote to the weekly sweep (which already re-proves every leg); estate suite +
-deploy-onto-existing stay per-PR as backstop. The overhaul PR mints the ADR entry.** **The COST
-problem is structural:** the monolithic `ci` job re-proves EVERY closed wave's drill serially
-(~45-60 min, growing one full-chain apply per wave). Fix, in order of leverage: **(1)** demote
-CLOSED-wave drills to the weekly sweep, keep only the CURRENT wave's per-PR (biggest cut) ·
-**(2)** split the monolith into parallel jobs · **(3)** real pnpm-store + docker-layer caching
-(also kills the setup-pnpm race) · **(4)** HYBRID runners — GitHub-hosted for the cheap legs,
-self-hosted for the DB estate · **(5)** the ci.yml composite-action refactor (same work as the
-500-line Known issue) · **(6)** the branch-protection interplay (#244): `strict:true` +
-`enforce_admins:true` means once main moves, a stale PR needs `gh pr update-branch` +
-re-green — **never `--admin`**. **Batch-CI-per-wave
-was CONSIDERED AND REJECTED** — the per-PR gate caught T17 drift, a seam census gap, the
-frontier-ordering violation and the S0.9 flake in ONE night. Scope routing, not frequency
-reduction; changing per-PR uniformity is ADR-061 territory, an owner ruling.
+**CI economics overhaul — BUILT 2026-08-21, ADR-0073** (levers 1+2+3+5; the ADR is the record).
+Closed-wave drills + the D-b frontier matrix run on the weekly sweep + `workflow_dispatch`
+only; per-PR runs lint · build · db-estate · db-live-gates · render-drill · partition gate in
+parallel (~42 → ~20-25 min expected); the required check `ci` is a fail-closed meta-gate (also
+closes two pre-existing fail-open shapes: lint was never required, and a failed classifier's
+skip satisfied protection). **Surviving residuals:** lever (4) HYBRID runners **DECLINED** ($0
+preference) · **the operating practice: after any PR touching a closed drill or the pipeline,
+run `gh workflow run ci.yml` by hand** (recorded in `docs/ops/ci-runner.md`) · item (6)
+branch-protection interplay stays as recorded (#277): a stale PR needs `gh pr update-branch` +
+re-green — **never `--admin`**. Batch-CI-per-wave stays REJECTED (scope routing, not frequency
+reduction).
 
 **Wave-F planning inputs — DISPOSED by ADR-0071/contract:** #25 SUPERSEDED · E-R13 ABSORBED
 (F-A3) · FX-lite principle pre-seeded (P-FX; timing stays a sitting item) · claims (E-R10) →
@@ -308,8 +304,10 @@ wedge remedy · the real-PG dead-letter battery, declined) · C-c F-3 documented
 - **Always-run role/membership reconciliation** — deferred: poisoning needs SUPERUSER, outside the threat model. *(Slice-2 HIGH 6/7)*
 - **Supabase non-superuser deploy-role CI** — PARTIALLY discharged by #234's non-superuser
   owner-login rehearsal plus two live ceremonies exercising the guarded SUSET branch.
-  REMAINING: the standing per-PR CI job under that role — **schedule it WITH the CI-economics
-  overhaul**, since it collides with the same cost problem. *(Slice-2 HIGH 8/9)*
+  REMAINING: the standing CI leg under that role — **DESIGNATED to the weekly sweep by
+  ADR-0073, its own PR** (candidate design on file in the ADR: harden the
+  deploy-onto-existing leg's role posture on the sweep first; promote to per-PR only if
+  measured cheap). *(Slice-2 HIGH 8/9)*
 - **Opaque/HMAC pack tokens** — declined; recorded, not pending work. *(Slice-3 C12)*
 - **`activate_taxonomy_version(v)` + the predicate-dimension taxonomy schema** — event-triggered: ships when a second taxonomy version first exists. *(Slice-3 C8/C16)*
 - **Slice-4 residuals** *(ADR-017)* — audited owner compliance export + a visibility-aware
@@ -435,9 +433,9 @@ version + ceremony):**
   answered). **One stored-number oddity stays UNADJUDICATED:** the four `opening_items` sum to
   +7,850,406 cents with no `obe_plug` item while the journal balances through `190-OBE` — the
   reader did not know that table's sign convention and did not guess.
-- **ci.yml exceeds the 500-line harness file limit** (pre-existing; a GitHub workflow cannot
-  split across files) — the hook flags every edit. The composite-action refactor that fixes it
-  is CI-economics item (5): one piece of work, registered twice.
+- ~~**ci.yml exceeds the 500-line harness file limit**~~ — **RESOLVED 2026-08-21 by
+  ADR-0073's composite-action refactor** (lever 5): ci.yml is 500 lines exactly; step bodies
+  live verbatim in `.github/actions/*`, each file under the limit.
 - **WSL VM/NAT operating law** (2026-08-14/15 incident; narrative archived): a detached keeper
   for any port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList
   "-e","sleep","43200"` — NAT dies ~10 min after the last client detaches even with the VM

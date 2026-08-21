@@ -1,0 +1,215 @@
+name: Wave D-b frontier leg
+description: >-
+  One leg of the [WAVE D-b SPLIT] per-slice frontier matrix, moved verbatim from
+  ci.yml's db-slice-frontiers job (ADR-0073 lever 5) with the mechanical transform
+  `matrix.*` → `inputs.*` and the toolchain steps replaced by the shared
+  setup-workspace / pg17-client composites. The presence gate, the NONE-OR-ALL rule,
+  the name-not-number selection, the E17 CLARA_MIGRATIONS_DIR discipline, the cell
+  floor, the contracts roster and the isolated drill are all unchanged. Requires:
+  repo checked out, libpq env pointing at the job's throwaway postgres:17 service.
+inputs:
+  slice:
+    description: Slice id (d-b0 · d-b1 · d-b3 · d-b2)
+    required: true
+  dbtag:
+    description: Legal-SQL-identifier tag (b0 · b1 · b3 · b2)
+    required: true
+  migname:
+    description: The slice's STABLE migration suffix (survives merge-time renumbers)
+    required: true
+runs:
+  using: composite
+  steps:
+    # (0) THE PRESENCE GATE — NONE-OR-ALL. The four slices land days apart; this job is fully
+    # populated from the first PR. A leg whose slice is nowhere in the tree SKIPS; a leg whose
+    # slice is HALF in the tree FAILS. Nothing in between passes silently.
+    #
+    # EACH ARTIFACT IS LOOKED FOR ON ITS OWN [merge-gate SF3]. The drill used to be searched
+    # for by a name DERIVED from the migration — so with no migration on disk there was no
+    # name to look for, the drill counted as absent, `have` stayed 0 and a DRILL-ONLY landing
+    # skipped GREEN. Nothing else would have caught it: the normal DB suite reset-skips the
+    # drill, the closed-wave job's derived drill step keys on migrations, and the totality gate
+    # excludes drills from the corpus by design. The drill is therefore globbed by `dbtag`
+    # alone — number-agnostic, exactly like the totality gate's own drill pattern — so an
+    # orphan drill is COUNTED, lands in the partial-landing branch, and fails BY NAME.
+    - name: Is the ${{ inputs.slice }} slice in the tree yet?
+      id: gate
+      shell: bash
+      run: |
+        MIG="$(ls packages/db/migrations/[0-9][0-9][0-9][0-9]_${{ inputs.migname }}.sql 2>/dev/null | head -1)"
+        LIST="packages/db/tests/split-lists/test-list-${{ inputs.slice }}.txt"
+        DRILLGLOB="packages/db/tests/x42-[0-9][0-9][0-9][0-9]-${{ inputs.dbtag }}-upgrade.test.mjs"
+        # `| head -1` / `| wc -l` keep the pipeline's status 0 when the glob matches nothing,
+        # so a no-match cannot trip the runner's `set -e`.
+        NDRILL="$(ls $DRILLGLOB 2>/dev/null | wc -l)"
+        DRILLFILE="$(ls $DRILLGLOB 2>/dev/null | head -1)"
+        if [ "$NDRILL" -gt 1 ]; then
+          echo "AMBIGUOUS DRILL: the ${{ inputs.slice }} slice has $NDRILL numbered upgrade drills on disk:"
+          ls $DRILLGLOB | sed 's/^/  · /'
+          echo "A slice has exactly ONE drill, and a renumber RENAMES it (RENUMBER.md §2(4)) rather"
+          echo "than leaving the old number behind. Two is a stale file, and this leg cannot pick."
+          exit 1
+        fi
+        have=0; miss=""; got=""
+        if [ -n "$MIG" ]; then have=$((have+1)); got="$got $MIG"; else miss="$miss packages/db/migrations/NNNN_${{ inputs.migname }}.sql"; fi
+        if [ -f "$LIST" ]; then have=$((have+1)); got="$got $LIST"; else miss="$miss $LIST"; fi
+        if [ -n "$DRILLFILE" ]; then have=$((have+1)); got="$got $DRILLFILE"; else miss="$miss packages/db/tests/x42-NNNN-${{ inputs.dbtag }}-upgrade.test.mjs"; fi
+        if [ "$have" = "0" ]; then
+          echo "${{ inputs.slice }} has NOT landed yet (none of its three artifacts is on disk) — this leg skips (green, by design)."
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "$have" != "3" ]; then
+          # RC5: a PARTIAL landing used to skip GREEN. It is a broken PR, not an absent slice.
+          # SF3: a drill-only landing is one of those partial shapes, and now reaches here.
+          echo "PARTIAL LANDING: the ${{ inputs.slice }} slice has $have of its 3 artifacts on disk."
+          echo "present:"; for g in $got; do echo "  · $g"; done
+          echo "missing:"; for m in $miss; do echo "  · $m"; done
+          echo "A Wave D-b slice ships its migration, its test list and its upgrade drill in ONE PR."
+          echo "Skipping this leg would leave the slice's whole frontier unproven — failing instead."
+          exit 1
+        fi
+        # All three are here, so the drill's NUMBER must be the migration's number. A drill
+        # left behind at an old number after a merge-time renumber is a broken PR, not a
+        # licence to run an EARLIER slice's drill against a LATER frontier.
+        N="$(basename "$MIG" | cut -c1-4)"
+        DRILL="x42-${N}-${{ inputs.dbtag }}-upgrade"
+        if [ "$(basename "$DRILLFILE")" != "$DRILL.test.mjs" ]; then
+          echo "NUMBER MISMATCH: the ${{ inputs.slice }} migration is $(basename "$MIG") but its drill on disk is"
+          echo "  $(basename "$DRILLFILE") — expected $DRILL.test.mjs."
+          echo "A renumbered slice renames its drill to its new number (RENUMBER.md §2(4))."
+          exit 1
+        fi
+        echo "frontier=$N" >> "$GITHUB_OUTPUT"
+        echo "drill=$DRILL" >> "$GITHUB_OUTPUT"
+        echo "migfile=$(basename "$MIG")" >> "$GITHUB_OUTPUT"
+        echo "ready=true" >> "$GITHUB_OUTPUT"
+        echo "${{ inputs.slice }} IS in the tree as $(basename "$MIG") — running its frontier leg with drill $DRILL."
+
+    - uses: ./.github/actions/setup-workspace
+      if: steps.gate.outputs.ready == 'true'
+
+    - uses: ./.github/actions/pg17-client
+      if: steps.gate.outputs.ready == 'true'
+
+    # (1) the slice-shaped migrations copy: every migration numbered at or below THIS SLICE'S
+    # OWN migration, whatever number that turned out to be. A numeric compare rather than a
+    # glob, so a new migration cannot silently join an EARLIER slice's chain. The top of the
+    # copied chain is then asserted to BE this slice's own file — by NAME, not by number — so
+    # a leg can never run at a frontier that is not the one it is named for.
+    - name: Materialise the ${{ inputs.slice }} migrations chain (0001..${{ steps.gate.outputs.frontier }})
+      id: chain
+      if: steps.gate.outputs.ready == 'true'
+      shell: bash
+      run: |
+        FRONTIER="${{ steps.gate.outputs.frontier }}"
+        SLICE_MIG="$(mktemp -d)"
+        for f in packages/db/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
+          n="$(basename "$f" | cut -c1-4)"
+          if [ "$n" -le "$FRONTIER" ]; then cp "$f" "$SLICE_MIG/"; fi
+        done
+        TOP="$(ls "$SLICE_MIG" | tail -1)"
+        test "$TOP" = "${{ steps.gate.outputs.migfile }}" || {
+          echo "the ${{ inputs.slice }} chain tops out at $TOP, not this slice's own ${{ steps.gate.outputs.migfile }}"; exit 1; }
+        echo "dir=$SLICE_MIG" >> "$GITHUB_OUTPUT"
+        echo "--- ${{ inputs.slice }} chain: $(ls "$SLICE_MIG" | wc -l) migrations, frontier $TOP ---"
+        ls "$SLICE_MIG" | tail -3
+
+    # (2) migrate the fresh service DB from that copy ONLY.
+    - name: Migrate clara_ci at the ${{ inputs.slice }} frontier
+      if: steps.gate.outputs.ready == 'true'
+      working-directory: packages/db
+      shell: bash
+      env:
+        CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+      run: |
+        node scripts/migrate.mjs
+        psql -tAc "select count(*) || ' migrations applied, frontier ' || max(version) from clara.schema_migrations"
+
+    # (3) the slice's list. E17: CLARA_MIGRATIONS_DIR must name the copy the DB was built
+    # from, or the rig's ensureReady() re-migrate fails its history-integrity check.
+    - name: Run the ${{ inputs.slice }} test list
+      if: steps.gate.outputs.ready == 'true'
+      working-directory: packages/db
+      shell: bash
+      env:
+        CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+      run: |
+        set -o pipefail
+        LIST="tests/split-lists/test-list-${{ inputs.slice }}.txt"
+        test -f "$LIST" || { echo "missing $LIST"; exit 1; }
+        FILES=""
+        # `|| [ -n "$f" ]`: a list whose last line lost its newline must not lose its last file.
+        while read -r f || [ -n "$f" ]; do
+          case "$f" in ''|'#'*) continue;; esac
+          test -f "tests/$f" || { echo "list names a file that does not exist: tests/$f"; exit 1; }
+          FILES="$FILES tests/$f"
+        done < "$LIST"
+        echo "--- ${{ inputs.slice }}: $(echo $FILES | wc -w) test files ---"
+        # CLARA_RIG_ALLOW_RESET is deliberately NOT set here: the reset-gated drill must SKIP in
+        # this sweep and run ALONE in (4). CLARA_ALLOW_DESTRUCTIVE *is* set, at job level, because
+        # the rig battery needs it — every reset gate keys on CLARA_RIG_ALLOW_RESET, never on it.
+        CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/list-run.txt
+        # (3b) THE CELL FLOOR. The totality gate is FILE-granular: a DELETED cell inside a
+        # still-listed file passes it. Each list therefore declares its own measured floor and the
+        # run must meet it. Raise the floor in the list when you add cells; never lower it to go
+        # green.
+        FLOOR="$(grep -E '^#!cells-floor:' "$LIST" | head -1 | awk '{print $2}')"
+        test -n "$FLOOR" || { echo "$LIST declares no '#!cells-floor:' — every list must"; exit 1; }
+        PASS="$(grep -E '^# pass ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
+        FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/list-run.txt | tail -1 | awk '{print $3}')"
+        echo "--- ${{ inputs.slice }}: $PASS pass / $FAIL fail · declared floor $FLOOR ---"
+        test "$FAIL" = "0" || { echo "the ${{ inputs.slice }} list is not green"; exit 1; }
+        test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
+          echo "CELL FLOOR BREACHED: the ${{ inputs.slice }} list passed ${PASS:-?} cells, floor $FLOOR — a cell was deleted or silently skipped"; exit 1; }
+
+    # (3c) THE CROSS-SLICE CONTRACTS, from their OWN roster [merge-gate SF4]. The x42x-*
+    # contracts are excluded from the file-granular totality gate (each appears in
+    # SEVERAL slice lists on purpose), which left them covered by nothing but each slice
+    # list's goodwill: a later slice could simply omit them and pass, even though every one
+    # of them asserts what is true AT EVERY FRONTIER and is only a contract if it runs at
+    # all of them. They now have a dedicated roster — tests/split-lists/test-list-contracts.txt
+    # — which the totality job asserts is TOTAL against the x42x files on disk, and which
+    # every leg runs here. Coverage no longer depends on any per-slice list.
+    #
+    # SAFE AT EVERY FRONTIER, AND SAFE TWICE: each contract is rig-gated and frontier-aware
+    # (it skips the arm that is not live yet) and stages its own uniquely-tagged world, so a
+    # slice list that ALSO names one simply runs it twice. That overlap is deliberate — the
+    # lists carry MEASURED cell floors and are not re-measured to accommodate this gate.
+    - name: Run the cross-slice contract roster at the ${{ inputs.slice }} frontier
+      if: steps.gate.outputs.ready == 'true'
+      working-directory: packages/db
+      shell: bash
+      env:
+        CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+      run: |
+        set -o pipefail
+        ROSTER="tests/split-lists/test-list-contracts.txt"
+        test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional"; exit 1; }
+        FILES=""
+        while read -r f || [ -n "$f" ]; do
+          case "$f" in ''|'#'*) continue;; esac
+          test -f "tests/$f" || { echo "the contract roster names a file that does not exist: tests/$f"; exit 1; }
+          FILES="$FILES tests/$f"
+        done < "$ROSTER"
+        test -n "$FILES" || { echo "$ROSTER lists no contracts"; exit 1; }
+        echo "--- ${{ inputs.slice }} frontier: $(echo $FILES | wc -w) cross-slice contract(s) ---"
+        CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee $RUNNER_TEMP/contracts-run.txt
+        FAIL="$(grep -E '^# fail ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
+        PASS="$(grep -E '^# pass ' $RUNNER_TEMP/contracts-run.txt | tail -1 | awk '{print $3}')"
+        echo "--- contracts at the ${{ inputs.slice }} frontier: $PASS pass / $FAIL fail ---"
+        test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ inputs.slice }} frontier"; exit 1; }
+
+    # (4) the slice's OWN deploy drill, alone, in its own throwaway database.
+    # DB NAME FROM `dbtag`: `clara_d-b0_upgrade_ci` is not a legal identifier.
+    - name: ${{ inputs.slice }} upgrade drill (isolated DB)
+      if: steps.gate.outputs.ready == 'true'
+      working-directory: packages/db
+      shell: bash
+      env:
+        CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_${{ inputs.dbtag }}_upgrade_ci'
+        PGDATABASE=clara_x42_${{ inputs.dbtag }}_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
+          CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 \
+          node --test tests/${{ steps.gate.outputs.drill }}.test.mjs

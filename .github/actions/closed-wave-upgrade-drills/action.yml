@@ -1,0 +1,210 @@
+name: Closed-wave upgrade drills (C9 → Wave D-b)
+description: >-
+  The eight closed-wave deploy/upgrade drills the owner's 2026-08-21 ruling demotes to
+  the weekly sweep (ADR-0073 lever 1): each applies a full (or frontier-shaped)
+  migration chain into its own throwaway database — the serially-growing cost the
+  per-PR gate no longer pays. Every step body is moved verbatim from ci.yml's former
+  monolithic `ci` job (lever 5). Requires: workspace installed, PG17 client present,
+  libpq env pointing at the job's throwaway postgres:17 service. Every drill creates
+  its OWN *_ci database; none touches the service's default clara_ci.
+runs:
+  using: composite
+  steps:
+    # C9 baseline path (X8): the populated-upgrade / cutover test RESETS the schema,
+    # so rig-events-upgrade.test.mjs SKIPS in the shared-DB "Migrate + seed + tests"
+    # estate run (CLARA_RIG_ALLOW_RESET is unset there — a mid-run schema drop would
+    # nuke the other concurrent test files). Run it FOR REAL here, ALONE, in its OWN
+    # throwaway database (clara_upgrade_ci — matches the guard's *_ci ephemeral
+    # pattern), so the C9 deploy-onto-existing baseline can never silently regress to
+    # a skipped (false-green) state. psql is on PATH from the PG17 client step;
+    # PGHOST/PGPORT/PGUSER/PGPASSWORD come from the job env.
+    - name: Populated-upgrade cutover test (isolated DB, C9)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_upgrade_ci'
+        # The test's first act is reset() on this BRAND-NEW database — which also
+        # regression-guards reset.mjs's never-existed-schema short-circuit (its
+        # preflight once threw 3F000 there). The test then applies 0001-0004,
+        # builds data through the writers, and applies 0005 itself.
+        PGDATABASE=clara_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          node --test tests/rig-events-upgrade.test.mjs
+
+    # Slice-5 §3.0.2/§3.11 drill (same false-green protection as the C9 step
+    # above): the filing_id backfill (clean + ambiguous-citation atomic ABORT),
+    # the legacy claim-only upgrade branch, and the taxonomy-v2 cutover residual
+    # sweep — reset-gated (drops schema clara mid-run), so it runs ALONE in its
+    # OWN throwaway database, never inside the concurrent all-packages sweep.
+    - name: Slice-5 document-pipeline upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_docs_upgrade_ci'
+        PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          node --test tests/rig-docs-upgrade.test.mjs
+
+    # Slice-6 coding-floor upgrade drill (same false-green protection as the two
+    # steps above): the contract-blind §11 probe-1 battery — fresh 0001→0009
+    # compile + the pg_proc ACL/overload tail, deploy-onto-existing
+    # 0001→0008→0009 incl. the one-open-draft partial unique, and the
+    # two-open-drafts-on-one-filing pre-flight ABORT (atomic rollback) —
+    # reset-gated, so it runs ALONE in its OWN throwaway database, never inside
+    # the concurrent all-packages sweep.
+    - name: Slice-6 coding-floor upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_s6_upgrade_ci'
+        PGDATABASE=clara_s6_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          node --test tests/s6-upgrade.test.mjs
+
+    # Wave-B migration-0020 A7/A8 upgrade drill (ratchet R4 F2 — the anti-misleading-green
+    # wiring). wb-0020-upgrade.test.mjs is the ONLY proof of the 19→20 path: that the apply is
+    # fail-closed on a corpus whose exempt-page bytes are not canonical, that A7's ROWS-ONLY
+    # remediation is REFUSED because it leaves the append-only reconstruction spine stale,
+    # that the SHIPPED audited preflight (packages/db/deploy/wave-b-0020-a7-*.sql) corrects
+    # both and is idempotent, and that the index rebuilds CANONICAL from domain_events alone.
+    # [R5] It is also the only proof of the PROBE the owner reads before deciding whether to
+    # remediate: that it REFUSES an RLS-blinded read instead of reporting an all-zero
+    # false-clean, that it reports all FIVE bridge directions (a direction-1 violation read
+    # CLEAN before), and that the A8-R1 completeness gap §11 promises is actually surfaced.
+    # It is reset-gated (drops schema clara mid-run) so it SKIPS in the concurrent
+    # all-packages sweep — which is exactly how a bridge or remediation regression could
+    # have merged with the advertised suite green. Run it FOR REAL here, ALONE, in its OWN
+    # throwaway database, like the three drills above.
+    - name: Wave-B 0020 A7/A8 upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wb20_upgrade_ci'
+        PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
+
+    # Wave-C-a migration-0037 subledger upgrade drill (the same anti-misleading-green
+    # wiring as the four drills above). x37-0037-upgrade.test.mjs is the ONLY proof that
+    # 0037's §0 live probes, its §J backfill (including the reversal-unwind pass), and its
+    # D1/D2 tail asserts have ever run against DATA: the in-suite battery
+    # (x37-wave-c-a-subledger.test.mjs) runs on a database where 0037 was applied to an
+    # EMPTY schema, so every backfill row count there is zero and every tail assert is
+    # vacuous. This drill applies 0001→0036, builds a real book through the audited verbs
+    # (typed bill · sales invoice · sales credit note · multi-counterparty JV · opening
+    # incl. a K6 supersede and a withdrawn opening draft · an approved reversal pair · a
+    # counterparty MERGED after approval), THEN applies 0037 onto it and asserts the
+    # decomposition, the created_in_migration provenance, the non-vacuous tie, and the
+    # backfill's idempotency on re-run. It also drives the §0 probe ABORT (a violating
+    # corpus must refuse the migration and roll back atomically). Reset-gated (it drops
+    # schema clara), so it SKIPS in the concurrent all-packages sweep — which is
+    # exactly how a backfill regression could otherwise merge with the suite green. Run it
+    # FOR REAL here, ALONE, in its OWN throwaway database.
+    - name: Wave-C-a 0037 subledger upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x37_upgrade_ci'
+        PGDATABASE=clara_x37_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          CLARA_RIG_DB=1 node --test tests/x37-0037-upgrade.test.mjs
+
+    # Wave-C-c migration-0040 effective_date backfill upgrade drill (fix-wave E2 — the same
+    # anti-misleading-green wiring as the x37-0037-upgrade drill above). x40-0040-upgrade.
+    # test.mjs is the ONLY proof that 0040's clara.open_item_allocations.effective_date
+    # backfill has ever run against DATA: the in-suite battery (x40-wave-c-c-tieout.test.mjs)
+    # runs on a database where 0040 was applied before any of ITS OWN fixtures existed, so the
+    # backfill's own risk — the migration's own header names it "the ONE statement in this
+    # migration that will touch 36 rows of live money-adjacent data inside a quiesce window" —
+    # is structurally untested by every other battery. This drill applies 0001→0039, builds a
+    # real subledger book through the audited C-a composites (allocate_payment,
+    # apply_open_items, unallocate_group), THEN applies 0040 onto it and asserts the
+    # backfilled effective_date per the producer law (0040 FIX WAVE C4): 'allocate' rows =
+    # the settlement entry's own posting_date; 'apply'/'unallocate' rows = the row's own
+    # created_at::date — plus that the LIVE producer going forward answers the identical rule
+    # (no deploy-timing-dependent split). It also drives the backfill's hard-safety-net ABORT
+    # (an allocation row orphaned from any item_kind='settlement' member must refuse the
+    # migration and roll back atomically). Reset-gated (it drops schema clara), so it SKIPS in
+    # the concurrent all-packages sweep — which is exactly how a backfill regression
+    # could otherwise merge with the suite green. Run it FOR REAL here, ALONE, in its OWN
+    # throwaway database.
+    - name: Wave-C-c 0040 effective_date backfill upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x40_upgrade_ci'
+        PGDATABASE=clara_x40_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          CLARA_RIG_DB=1 node --test tests/x40-0040-upgrade.test.mjs
+
+    # Wave-D-a migration-0041 FA-register deploy-onto-existing drill (the same
+    # anti-misleading-green wiring as the drills above). x41-0041-upgrade.test.mjs is the
+    # ONLY proof that 0041 lands safely on a database that ALREADY has a book: the in-suite
+    # x41 battery applies 0041 to a schema carrying only what its own cells build afterwards,
+    # so every register-touching claim it makes is a claim about rows 0041 has already seen.
+    # 0041's real risk is the ceremony — a shared database with four live firms, a K-seeded
+    # fixed-asset register, ordinary approved history on accounts about to be enrolled, and a
+    # `_draft_opening_item_core` / `_assert_fa_baseline` pair that must keep working. This
+    # drill applies 0001→0040, builds that book through the audited verbs (a carry-down
+    # fixed asset with its whole opening set approved, cost/accum/expense history, a reversal
+    # pair), THEN applies 0041 onto it and asserts: nothing births retroactively · the
+    # carried baseline and the GL are untouched · the enrolment watermark keeps PRE-enrolment
+    # history reversible while the belt refuses POST-enrolment hand journals · the K6
+    # correction door still opens · the widened method CHECK and the carry-down recut accept
+    # reducing_balance and none. Reset-gated (it drops schema clara), so it SKIPS in the
+    # concurrent all-packages sweep — which is exactly how a deploy regression could
+    # otherwise merge with the suite green. Run it FOR REAL here, ALONE, in its OWN
+    # throwaway database.
+    - name: Wave-D-a 0041 FA-register upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x41_upgrade_ci'
+        PGDATABASE=clara_x41_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          CLARA_RIG_DB=1 node --test tests/x41-0041-upgrade.test.mjs
+
+    # [WAVE D-b SPLIT] The whole-unit x42-0042-upgrade drill is GONE — census §6 adjudicated
+    # ONE DRILL PER SLICE, four drills, because each slice's deploy risk is different and each
+    # slice's frontier is different. THIS job applies every migration on disk, so the drill that
+    # is TRUE here is the one belonging to the HIGHEST D-b slice actually in the tree: D-b0's on
+    # the first PR, then D-b1's, then D-b3's, and finally D-b2's whole-chain drill (0001..0041,
+    # book built through the audited verbs, then the WHOLE 0042→0043→0044→0045 chain applied onto
+    # it with every slice's post-state re-asserted as a regression floor).
+    #
+    # DERIVED, NEVER PINNED. Naming one drill file here would make this step red for the whole
+    # multi-day rollout — the D-b2 drill only arrives in the LAST PR. The three EARLIER frontiers
+    # need a slice-shaped migrations directory and therefore stay in the `db-slice-frontiers`
+    # matrix job, which is the only place they remain provable once the later slices land.
+    #
+    # SELECTED BY STABLE NAME, NEVER BY NUMBER [light re-confirm RC2/LENS-1]. This step used to
+    # read the highest migration number on disk and treat EVERY number ≤ it as a D-b slice.
+    # That is wrong twice over, and both are deploy blockers: (1) a lawful HOTFIX claiming 0043
+    # after D-b0 lands as 0042 made CI demand tests/x42-0043-b1-upgrade.test.mjs — a file that
+    # does not exist yet — and reject the hotfix; (2) a D-b0 renumbered to 0043 by such a
+    # hotfix collided with D-b1's still-template 0043 candidate. Migration NUMBERS are claimed
+    # at merge time (RENUMBER.md); the slice NAME never moves. So the loop keys on the name,
+    # takes the number FROM THE FILE IT FOUND, and the candidate list never needs renumbering.
+    - name: Wave-D-b split upgrade drill at the frontier ON DISK (isolated DB)
+      working-directory: packages/db
+      shell: bash
+      run: |
+        DRILL=""; DRILL_N=""
+        for tag in b0:wave_d_b0_shared_authorities b1:wave_d_b1_staff_advances \
+                   b3:wave_d_b3_af2_composite b2:wave_d_b2_recurring_adjustments; do
+          bn="${tag%%:*}"; nm="${tag##*:}"
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_${nm}.sql 2>/dev/null | head -1)"
+          [ -n "$m" ] || continue
+          n="$(basename "$m" | cut -c1-4)"
+          f="x42-${n}-${bn}-upgrade"
+          # Every D-b slice ships its migration AND its drill in the same PR, and a renumbered
+          # slice RENAMES its drill to match (RENUMBER.md §2(4)). A slice migration on disk
+          # without the drill that carries its number is a broken PR — say so, rather than
+          # silently running an EARLIER slice's drill against a LATER frontier (which fails on
+          # the leak probe, loudly but confusingly).
+          if [ ! -f "tests/$f.test.mjs" ]; then
+            echo "$(basename "$m") is on disk but tests/$f.test.mjs is not — every Wave D-b slice ships with its own drill, and a renumbered slice renames the drill to its new number (RENUMBER.md §2(4))"; exit 1
+          fi
+          # highest number wins, whatever order the names were declared in
+          if [ -z "$DRILL_N" ] || [ "$n" -gt "$DRILL_N" ]; then DRILL="$f"; DRILL_N="$n"; fi
+        done
+        if [ -z "$DRILL" ]; then
+          echo "no Wave-D-b slice migration on disk yet (matched by name, not by number) — nothing to drill"; exit 0
+        fi
+        echo "--- highest Wave-D-b slice on disk: $DRILL_N · drill: $DRILL ---"
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
+        PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"

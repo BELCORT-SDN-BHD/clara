@@ -1,0 +1,95 @@
+name: The Wave D-b partition is total
+description: >-
+  The standing, DATABASE-FREE coverage gate — every x41/x42 test file in exactly one
+  slice list, the cross-slice contract roster total against disk. Step body moved
+  verbatim from ci.yml's db-split-partition-total job (ADR-0073 lever 5). Stays
+  per-PR: it costs seconds and catches PR-authoring mistakes (a file joining the
+  corpus and no list) at the PR, not at the sweep.
+runs:
+  using: composite
+  steps:
+    - name: Assert the slice lists partition the x41/x42 corpus exactly once
+      working-directory: packages/db
+      shell: bash
+      run: |
+        # WHICH D-b SLICES ARE ON DISK — by stable NAME, so a renumber cannot hide one
+        # [light re-confirm RC2/RC4].
+        DBMIG=""
+        for nm in wave_d_b0_shared_authorities wave_d_b1_staff_advances \
+                  wave_d_b3_af2_composite wave_d_b2_recurring_adjustments; do
+          # `| head -1` keeps the pipeline's status 0 when nothing matches, and the test is a
+          # full `if` rather than `&&` so a no-match cannot trip the runner's `set -e`.
+          m="$(ls migrations/[0-9][0-9][0-9][0-9]_${nm}.sql 2>/dev/null | head -1)"
+          if [ -n "$m" ]; then DBMIG="$DBMIG $(basename "$m")"; fi
+        done
+        if [ ! -d tests/split-lists ]; then
+          # RC5: this used to exit GREEN unconditionally — so a PR that landed a slice
+          # migration and forgot tests/split-lists/ left the corpus completely unguarded and
+          # said nothing. The directory is optional only while NO slice has landed.
+          if [ -n "$DBMIG" ]; then
+            echo "tests/split-lists/ is MISSING, but Wave D-b slice migrations ARE on disk:$DBMIG"
+            echo "This gate is the only thing standing between a test file joining the corpus and"
+            echo "never running again under the split. It is not optional once a slice has landed."
+            exit 1
+          fi
+          echo "no tests/split-lists/ and no Wave D-b slice migration — the split has not landed; nothing to check"; exit 0
+        fi
+        # And the converse, stated rather than assumed: lists without any slice migration is a
+        # half-landed PR too — the lists name files that no frontier leg will ever run.
+        if [ -z "$DBMIG" ]; then
+          echo "tests/split-lists/ exists but NO Wave D-b slice migration is on disk — a partial landing."
+          echo "The lists are the split's coverage contract; they land with the slice they describe."
+          exit 1
+        fi
+        echo "--- Wave D-b slice migrations on disk:$DBMIG ---"
+        # THE CROSS-SLICE CONTRACT ROSTER IS TOTAL [SF4]. Checked FIRST, and unconditionally:
+        # every x42x-*.test.mjs on disk must be on the roster (or it runs at no frontier), and
+        # every roster line must be on disk (or every frontier leg dies on a missing file).
+        # The roster is a separate file from the slice lists ON PURPOSE — it is not a partition
+        # of anything, it is the set of files that run EVERYWHERE.
+        ROSTER="tests/split-lists/test-list-contracts.txt"
+        test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional once the split has landed"; exit 1; }
+        ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > $RUNNER_TEMP/contracts-disk.txt
+        grep -v '^#' "$ROSTER" | grep -v '^$' | sort > $RUNNER_TEMP/contracts-roster.txt
+        if ! diff -u $RUNNER_TEMP/contracts-disk.txt $RUNNER_TEMP/contracts-roster.txt; then
+          echo "the cross-slice contract roster ($ROSTER) is not the set of x42x-*.test.mjs on disk."
+          echo "  a '-' line is a contract on disk that NO frontier leg runs — add it to the roster;"
+          echo "  a '+' line is a roster entry with no file — every frontier leg would fail on it."
+          exit 1
+        fi
+        test "$(sort $RUNNER_TEMP/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
+        echo "contract roster OK: $(wc -l < $RUNNER_TEMP/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
+        # EXCLUDED from the partition below, both by design: x42x-* are the cross-slice contracts
+        # (covered by the roster above — they run at every frontier, so they partition nothing),
+        # and x42-<NNNN>-bN-upgrade are the four reset-gated deploy drills (each runs ALONE in the
+        # frontier job, never in a list). The drill pattern is number-AGNOSTIC on purpose:
+        # migration numbers are claimed at MERGE time (slices/forks/RENUMBER.md), so a slice
+        # landing as 0050 must not rejoin the corpus.
+        ls tests/x41-*.test.mjs tests/x42-*.test.mjs tests/x41b*.test.mjs tests/x42b*.test.mjs 2>/dev/null \
+          | xargs -n1 basename | grep -v '^x42x-' \
+          | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > $RUNNER_TEMP/corpus.txt
+        # THE SLICE LISTS ARE test-list-d-bN.txt, NEVER test-list-*.txt: the contract roster
+        # lives in the same directory and is not a slice list — it declares no cell floor and
+        # partitions nothing.
+        cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > $RUNNER_TEMP/listed.txt
+        # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
+        for L in tests/split-lists/test-list-d-b*.txt; do
+          grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
+        done
+        # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
+        # the strict checks, which still fail on any undeclared duplicate.
+        cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > $RUNNER_TEMP/floorruns.txt
+        while read -r fr || [ -n "$fr" ]; do
+          [ -n "$fr" ] || continue
+          grep -qxF "$fr" $RUNNER_TEMP/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
+          awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' $RUNNER_TEMP/listed.txt > $RUNNER_TEMP/listed.tmp
+          mv $RUNNER_TEMP/listed.tmp $RUNNER_TEMP/listed.txt
+          grep -qxF "$fr" $RUNNER_TEMP/listed.txt || {
+            echo "stale allowance: $fr is declared a floor re-run but is listed only once"; exit 1; }
+          echo "floor re-run allowed: $fr (one extra listing)"
+        done < $RUNNER_TEMP/floorruns.txt
+        if ! diff -u $RUNNER_TEMP/corpus.txt $RUNNER_TEMP/listed.txt; then
+          echo "the slice lists do not partition the x41/x42 corpus exactly once"; exit 1
+        fi
+        test "$(sort $RUNNER_TEMP/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
+        echo "partition OK: $(wc -l < $RUNNER_TEMP/corpus.txt) files, each in exactly one list"

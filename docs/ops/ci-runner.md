@@ -69,3 +69,24 @@ preferred $0), making the repo public (**hard no — client confidentiality**: r
 names, ledger figures and counterparties live throughout `docs/`). The ci-diet
 (pull_request-only triggers + docs-only classifier + weekly sweep) rides the same PR as
 this runbook and cuts future load independently.
+
+## The CI economics overhaul (ADR-0073, 2026-08-21)
+
+The former ~42-min monolithic `ci` job is split into parallel jobs (build · db-estate ·
+db-live-gates · render-drill) so the two runner instances run 2-wide per PR, and **the
+closed-wave upgrade/contract drills + the D-b frontier matrix run on the weekly sweep and
+`workflow_dispatch` ONLY** (owner-ruled lever 1; the estate suite + deploy-onto-existing
+stay per-PR as backstop). The required check `ci` is now a fail-closed meta-gate over
+every job. Step bodies live verbatim in `.github/actions/*` composites.
+
+**Operating practice:** after merging a PR that touches a closed-wave drill, a
+split-list, or the pipeline itself, trigger the full sweep by hand rather than waiting
+for Thursday:
+
+```sh
+gh workflow run ci.yml    # runs EVERY leg, closed-wave drills included
+```
+
+Installs use a shared local pnpm store at `~/.pnpm-store` (content-addressed, lock-safe
+across the two instances); the pinned gitleaks binary caches at `~/.cache/`. Hybrid
+GitHub-hosted runners were considered and DECLINED — the $0 preference above stands.
