@@ -17,7 +17,7 @@ runs:
     # keeping the leg self-contained without artifact plumbing from the build job — the
     # full `pnpm build` + worker-path gate still run per-PR in the build job.
     - name: Build the runtime bundle the e2es import (nitro only)
-      shell: bash
+      shell: bash -e {0}
       run: pnpm --filter @clara/runtime build
 
     # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
@@ -29,7 +29,7 @@ runs:
     # never the shared project; the URL omits the password (pg falls back to the
     # job-env PGPASSWORD for the throwaway service container).
     - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_intake_ci'
         PGDATABASE=clara_intake_ci pnpm db:migrate
@@ -51,7 +51,7 @@ runs:
     # (the SAME idempotent `bootstrap` bin the intake-e2e step runs); PGHOST/PGPORT/PGPASSWORD
     # come from the job env. Each e2e owns its lifecycle and exits.
     - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7, isolated DB + world bootstrap)
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
         PGDATABASE=clara_wave_b_ci pnpm db:migrate
@@ -70,7 +70,7 @@ runs:
           node tests/version-cutover-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
-      shell: bash
+      shell: bash -e {0}
       run: pnpm --filter @clara/db dr:selftest
 
     # FULL-PROFILE DR ROUND-TRIP (hardening interlude): prove the full-fidelity
@@ -89,7 +89,7 @@ runs:
     # ephemeral so CLARA_ALLOW_DESTRUCTIVE=1 (job env) authorizes them. PGPASSWORD (job
     # env) is the fallback password for BOTH services (same POSTGRES_PASSWORD).
     - name: DR full-profile round-trip (two clusters, backup->restore->verify)
-      shell: bash
+      shell: bash -e {0}
       run: |
         # SOURCE on cluster A (5432)
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_source'

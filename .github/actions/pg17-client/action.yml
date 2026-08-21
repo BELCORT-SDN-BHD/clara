@@ -7,7 +7,7 @@ runs:
   using: composite
   steps:
     - name: Install PostgreSQL 17 client (for DR pg_dump)
-      shell: bash
+      shell: bash -e {0}
       run: |
         # IDEMPOTENT + HOST-LOCKED (self-hosted hardening): parallel jobs on one host
         # raced the keyring/sources writes and the dpkg lock; flock serializes the

@@ -1,87 +1,77 @@
 name: CI
 
 # The anti-"misleading-green" gate. The OLD build's CI tested a decommissioned
-# schema (defect GAP1-5) — a green check that proved nothing. This pipeline
-# applies the REAL migrations, builds the REAL packages, and runs the smoke +
-# DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
-# project. See docs/ARCHITECTURE.md §9 and the repo README.
+# schema (defect GAP1-5) — a green check that proved nothing. This pipeline applies
+# the REAL migrations, builds the REAL packages, and runs the smoke + DR round-trip
+# against a THROWAWAY postgres:17 — NEVER a live project (ARCHITECTURE §9, README).
 #
 # THE CI DIET (2026-08-11, owner-ruled after the quota exhaustion): PRs run on the
 # pull_request event only; push runs only on main; a docs-only diff (the `changes`
-# classifier, FAIL-CLOSED) skips the code/DB legs; lint runs unconditionally on every
-# event. A SKIP under the classifier is a POSITIVE statement — the job's entire input
-# surface is untouched by the diff — and the weekly scheduled full sweep re-proves
-# every gate regardless.
+# classifier, FAIL-CLOSED) skips the code/DB legs; lint runs unconditionally. A SKIP
+# is a POSITIVE statement — the job's entire input surface is untouched by the diff —
+# and the weekly scheduled full sweep re-proves every gate regardless.
 #
-# THE CI ECONOMICS OVERHAUL (2026-08-21, owner-ruled — ADR-0073). Three structural
-# changes, ZERO gate-content changes (every step body moved verbatim into
+# THE CI ECONOMICS OVERHAUL (2026-08-21, owner-ruled — ADR-0073, the record). Three
+# structural changes, ZERO gate-content changes (step bodies moved verbatim into
 # .github/actions/* composites — lever 5, restoring the 500-line harness limit):
-#   1. CLOSED-WAVE DRILLS DEMOTE TO THE WEEKLY SWEEP (lever 1, the owner's per-PR-
-#      uniformity amendment): the eight closed-wave upgrade drills, the four Wave-E
-#      contract drills and the D-b frontier matrix — each a full-chain apply, the
-#      serially-growing bulk of the former ~45-60 min monolith — run on
-#      schedule/workflow_dispatch ONLY. The ruled per-PR backstop stays: estate suite
-#      + deploy-onto-existing (plus lint, build, the live-behavior e2es, the DR pair,
-#      the render drill). A CURRENT-wave drill rides per-PR and demotes at wave close.
-#      Residual, stated: a closed-wave drill regression surfaces at the next sweep,
-#      not the PR — after a PR touching a closed drill or this pipeline, run the
-#      sweep by hand: `gh workflow run ci.yml`.
-#   2. THE MONOLITH SPLITS into parallel jobs (lever 2) so the two runner instances
-#      run 2-wide per PR: build · db-estate · db-live-gates · render-drill.
-#   3. THE REQUIRED CHECK `ci` BECOMES A FAIL-CLOSED META-GATE (the terminal job
-#      below). Closes two pre-existing fail-OPEN shapes: a red lint never blocked a
-#      merge (lint was not a required check), and a failed classifier skipped every
-#      downstream job while a SKIPPED required check still satisfies protection.
+#   1. CLOSED-WAVE DRILLS DEMOTE TO THE WEEKLY SWEEP (lever 1): the 8 closed-wave
+#      upgrade drills + 4 Wave-E contract drills + the D-b frontier matrix run on
+#      schedule/workflow_dispatch ONLY; the ruled per-PR backstop stays (estate suite
+#      + deploy-onto-existing, plus lint, build, e2es + DR, render drill). A CURRENT-
+#      wave drill rides per-PR and demotes at wave close. Residual: a closed-drill
+#      regression surfaces at the next sweep — after a PR touching a closed drill or
+#      this pipeline, run the sweep by hand: `gh workflow run ci.yml`.
+#   2. THE MONOLITH SPLITS into parallel jobs (lever 2): build · db-estate ·
+#      db-live-gates · render-drill run 2-wide across the runner instances.
+#   3. THE REQUIRED CHECK `ci` BECOMES A FAIL-CLOSED META-GATE (terminal job below),
+#      closing two pre-existing fail-open shapes: lint was never a required check,
+#      and a failed classifier's skip satisfied protection.
 on:
   pull_request:
   push:
     branches: [main]
   schedule:
-    # Weekly full sweep (Thu 03:23 MYT): every job runs regardless of the last diff —
-    # including the ADR-0073-demoted closed-wave drills — even through docs-only weeks.
+    # Weekly full sweep (Thu 03:23 MYT): every job runs — the ADR-0073-demoted
+    # closed-wave drills included — even through docs-only weeks.
     - cron: "23 19 * * 3"
   workflow_dispatch:
 
 concurrency:
-  # THE WEEKLY SWEEP GETS ITS OWN GROUP (review R2 MAJOR): cancel-in-progress is read from
-  # the NEWLY-QUEUED run, so no cancellation policy on the sweep itself can protect it while
-  # it shares a group with push-to-main runs -- a merge landing mid-sweep would cancel the
-  # one compensating control every skip in this file leans on, silently. Group isolation is
-  # the only mechanism that actually delivers "a scheduled run is never cancelled": nothing
-  # shares the sweep's group, so nothing can cancel it.
-  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.ref }}
+  # THE WEEKLY SWEEP GETS ITS OWN GROUP (review R2 MAJOR): cancel-in-progress is read
+  # from the NEWLY-QUEUED run, so only group isolation delivers "a scheduled run is
+  # never cancelled" — a merge landing mid-sweep would otherwise silently cancel the one
+  # compensating control every skip leans on. workflow_dispatch gets a PER-RUN group
+  # (5-lens review, 2026-08-21): ADR-0073 makes manual dispatch the closed-wave proof
+  # path, and in the ref group the next push-to-main would cancel it mid-drill.
+  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
 jobs:
   # =========================================================================
-  # THE DIFF CLASSIFIER — plain git, no third-party action, FAIL-CLOSED.
-  # Outputs default to true (run everything) and are narrowed ONLY when the diff is
-  # confidently computed and every changed path is provably outside a job's input surface.
-  # schedule / workflow_dispatch / a zero-SHA push / any git failure => everything runs.
+  # THE DIFF CLASSIFIER — plain git, no third-party action, FAIL-CLOSED. Outputs
+  # default to true and are narrowed ONLY when the diff is confidently computed and
+  # every changed path is provably outside a job's input surface. schedule /
+  # workflow_dispatch / a zero-SHA push / any git failure => everything runs.
   #   code=false  ONLY when every changed file is in ADR-0069 ruling 2's ENUMERATED
   #               docs-only set, matched LITERALLY: docs/**, AGENTS.md, CLAUDE.md,
-  #               PROGRESS.md. Nothing else. Ruling 2 is a narrow carve-out FROM the
-  #               uniform ladder, so the default for anything unlisted is the full
-  #               ladder — and markdown outside the set is not automatically low-risk
-  #               (a package README can document a deploy or security step). Better an
-  #               occasional README-only PR takes the full ladder than a code-adjacent
-  #               doc slips through single-lane. `.claude/**` is matched FIRST and forced
-  #               to CODE: a rules file or a skill is markdown, and it changes how agents
-  #               behave on CODE work. Arm order is load-bearing — shell `case` takes the
-  #               FIRST match, and `*` matches `/`, so `.claude/*` covers the subtree.
+  #               PROGRESS.md. Nothing else — markdown outside the set is not
+  #               automatically low-risk (a package README can document a deploy step);
+  #               better an occasional README-only PR takes the full ladder than a
+  #               code-adjacent doc slips through single-lane. `.claude/**` is matched
+  #               FIRST and forced to CODE (a rules file changes how agents behave on
+  #               CODE work). Arm order is load-bearing — shell `case` takes the FIRST
+  #               match, and `*` matches `/`, so `.claude/*` covers the subtree.
   #               (Owner call, 2026-08-12; recorded on ADR-0069 ruling 2.)
-  #   db=true     when anything under packages/db/**, this workflow file, or a root
-  #               manifest/lockfile changed — the input surface of the per-PR partition
-  #               gate. The sweep-only DB legs (ADR-0073) no longer read this output;
-  #               on schedule/workflow_dispatch everything defaults true anyway.
-  # $GITHUB_* values are read as shell env, never spliced via ${{ }} (the house
-  # anti-injection discipline this file already applies elsewhere); EV_BEFORE is a SHA.
+  #   db=true     when anything under packages/db/**, this workflow file, the
+  #               .github/actions/** composites (step bodies live there now — 5-lens
+  #               review fix), or a root manifest/lockfile changed — the per-PR
+  #               partition gate's input surface. Sweep-only DB legs no longer read
+  #               this output; on schedule/dispatch everything defaults true anyway.
+  # $GITHUB_* values are read as shell env, never spliced via ${{ }}; EV_BEFORE is a SHA.
   # =========================================================================
   changes:
-    # Self-hosted (owner-ruled 2026-08-11): the SAME CI, the same binding green-check
-    # gate, on our own hardware -- the free-tier minute exhaustion killed hosted runs.
-    # The 'clara' label pins jobs to the registered runner (docs/ops/ci-runner.md);
-    # an offline runner makes jobs QUEUE visibly, never silently pass.
+    # Self-hosted (owner-ruled 2026-08-11; docs/ops/ci-runner.md): the 'clara' label pins
+    # jobs to our runners; an offline runner makes jobs QUEUE visibly, never pass.
     runs-on: [self-hosted, linux, clara]
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -117,7 +107,7 @@ jobs:
                   *) CODE=true ;;
                 esac
                 case "$f" in
-                  packages/db/*|.github/workflows/ci.yml|pnpm-lock.yaml|package.json|pnpm-workspace.yaml|.npmrc) DB=true ;;
+                  packages/db/*|.github/workflows/ci.yml|.github/actions/*|pnpm-lock.yaml|package.json|pnpm-workspace.yaml|.npmrc) DB=true ;;
                 esac
               done <<< "$FILES"
             fi
@@ -127,11 +117,10 @@ jobs:
           echo "db=$DB" >> "$GITHUB_OUTPUT"
 
   # =========================================================================
-  # LINT + SECRETS + BOUNDARY GATES — EVERY event unconditionally, docs-only included:
-  # a docs commit can leak a credential or violate the wiki boundary exactly as code
-  # can. Step bodies moved verbatim into the lint-suite composite (ADR-0073 lever 5);
-  # via the `ci` meta-gate a red here now BLOCKS merge — which the old required-check
-  # wiring never actually enforced. No DB service: none of these read one.
+  # LINT + SECRETS + BOUNDARY GATES — EVERY event unconditionally, docs-only included
+  # (a docs commit can leak a credential or violate the wiki boundary exactly as code
+  # can). Bodies verbatim in the lint-suite composite; via the `ci` meta-gate a red
+  # here now BLOCKS merge — which the old required-check wiring never enforced.
   # =========================================================================
   lint:
     runs-on: [self-hosted, linux, clara]
@@ -147,14 +136,12 @@ jobs:
 
   # =========================================================================
   # THE DOUBLE-RENDER BYTE-EQUALITY GATE (Wave E lane ζ; design part2 §9/§10).
-  # docs/ops/DR-render.md states that every PR performs this drill — so the pipeline
-  # performs it, per-PR, NOT demoted (ADR-0073): a document claiming a gate the pipeline
-  # does not run is worse than no claim, because it is read as evidence. All FOUR arms
-  # are asserted by the script (match · match under changed SOURCE_DATE_EPOCH · a changed
-  # pinned input must DIFFER — else the manifest is wired to nothing — · the product's own
-  # assemble() preamble, not only a fixture). Its own job because it builds an image;
-  # fail-closed classifier polarity (!= 'false'); the docker layer cache on the shared
-  # self-hosted daemon persists across runs (lever 3 — no cache plumbing needed).
+  # docs/ops/DR-render.md states every PR performs this drill — so the pipeline does,
+  # per-PR, NOT demoted (ADR-0073): a claimed-but-unrun gate is read as evidence. All
+  # FOUR arms asserted by the script (match · match under changed SOURCE_DATE_EPOCH ·
+  # changed pinned input must DIFFER · the product's own assemble() preamble). Its own
+  # job because it builds an image; fail-closed classifier polarity (!= 'false'); the
+  # shared daemon's BuildKit cache persists across runs (lever 3 — no plumbing needed).
   # =========================================================================
   render-drill:
     needs: changes
@@ -165,15 +152,28 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20.19.5
-      # The fixture is typeset with a content-addressed font MOUNTED at run time, exactly as
-      # production supplies them — the image ships no font directory at all, so a drill that
-      # found one would not be testing what ships.
+      # The fixture is typeset with a content-addressed font MOUNTED at run time, exactly
+      # as production supplies them — the image ships no font directory, so a drill that
+      # found one would not test what ships. HOST-LOCKED like the PG17 client install
+      # (Codex review 2026-08-21): an unlocked apt-get races the locked install on the
+      # other runner instance — same lock, same idempotence guard.
       - name: Ensure a drill font is present
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+        run: |
+          sudo flock /var/lock/clara-pgdg.lock bash -ec '
+            if dpkg -s fonts-dejavu-core >/dev/null 2>&1; then exit 0; fi
+            apt-get update -o DPkg::Lock::Timeout=180
+            apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=180 fonts-dejavu-core'
+      # RUN-SCOPED image tag (Codex review 2026-08-21, HIGH): the runner instances share
+      # ONE Docker daemon — a fixed tag lets a concurrent run RETAG between this run's
+      # build and its drill (a broken commit passing on another commit's image). Env vars,
+      # never ${{ }} splicing; BuildKit's cache is tag-independent, so cleanup is free.
       - name: Build the renderer image (pinned engine + pinned extractor)
-        run: docker build -f packages/reporting-render/Dockerfile -t clara-render:ci .
+        run: docker build -f packages/reporting-render/Dockerfile -t "clara-render:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" .
       - name: Double-render drill — determinism, the control arm, and the real preamble
-        run: node packages/reporting-render/scripts/double-render-drill.mjs --image clara-render:ci
+        run: node packages/reporting-render/scripts/double-render-drill.mjs --image "clara-render:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+      - name: Remove the run-scoped image tag
+        if: always()
+        run: docker rmi -f "clara-render:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 2>/dev/null || true
 
   # =========================================================================
   # BUILD LEG (ADR-0073 lever 2 — split from the former monolith): typecheck, the real

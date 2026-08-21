@@ -10,23 +10,23 @@ runs:
   using: composite
   steps:
     - name: Lint (freeze-lint + leak-scan + eslint code-lint)
-      shell: bash
+      shell: bash -e {0}
       run: pnpm lint
 
     # Called out explicitly for visibility even though `pnpm lint` runs them:
     - name: Freeze-lint (workflow versioning policy — ARCHITECTURE Appendix A)
-      shell: bash
+      shell: bash -e {0}
       run: node scripts/check-frozen-workflows.mjs
 
     - name: Leak-scan (no committed credentials)
-      shell: bash
+      shell: bash -e {0}
       run: node scripts/check-leaks.mjs
 
     # The 0019 §9 wiki-authority boundary — the repo half of the defence the DB tail
     # structurally cannot provide, plus its fixture-driven self-test (ratchet R1
     # finding 3: signature-keyed definitions + change-of-record patch analysis).
     - name: Wiki dynamic-SQL gate + self-test (0019 §9 · WB-R21)
-      shell: bash
+      shell: bash -e {0}
       run: |
         node scripts/check-wiki-dynamic-sql.mjs
         node scripts/check-wiki-dynamic-sql.selftest.mjs
@@ -34,7 +34,7 @@ runs:
     # The 0029 Slot-C durable interlock: the current migration-tree definition
     # of execute_rule_post must retain the binding live/unexpired gate.
     - name: Vendor-binding post-control gate (0029 Slot C)
-      shell: bash
+      shell: bash -e {0}
       run: node scripts/check-binding-post-control.mjs
 
     # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
@@ -48,7 +48,7 @@ runs:
     # a CI step — CI can never exercise it in situ — so this run is the only thing standing
     # between a refactor and a silently dead safety pin (AGENTS.md hard constraint 11).
     - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids + dispatch-model guards)
-      shell: bash
+      shell: bash -e {0}
       run: |
         node scripts/check-harness-links.mjs
         node scripts/check-harness-links.selftest.mjs
@@ -62,7 +62,7 @@ runs:
     # own CLI guard once exited 0 having checked nothing, and only an end-to-end run against
     # a mutated body catches that class.
     - name: Evaluator freeze-lint + self-test (§4.2 · the .sql half the workflow lint cannot reach)
-      shell: bash
+      shell: bash -e {0}
       run: |
         node scripts/check-frozen-evaluators.mjs
         node scripts/check-frozen-evaluators.selftest.mjs
@@ -80,7 +80,7 @@ runs:
     # imports nothing outside the package — `pg` is reached only by lib/db.mjs, which the
     # tests never load, and which the image installs from the package's own manifest.
     - name: Render package drill (lane ζ · check + lint + the judgement battery)
-      shell: bash
+      shell: bash -e {0}
       run: |
         pnpm --dir packages/reporting-render run check
         pnpm --dir packages/reporting-render run lint
@@ -159,7 +159,7 @@ runs:
     # so a version bump re-downloads and an existing binary is reused byte-identical.
     # Scan scope, config and flags are UNCHANGED.
     - name: Gitleaks (maintained secret scan, version-pinned)
-      shell: bash
+      shell: bash -e {0}
       env:
         GITLEAKS_VERSION: "8.18.4"
       run: |

@@ -36,7 +36,7 @@ runs:
     # nothing today and closes the same hole θ's and ε's drills close.
     - name: Wave-E δ contract drill (isolated DB, focused, allow-missing UNSET)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_delta_metrics.sql 2>/dev/null | head -1)"
         if [ -z "$m" ]; then
@@ -74,7 +74,7 @@ runs:
     # migration, unlike δ/ε's multi-file waves).
     - name: Wave-E θ contract drill (isolated DB, focused, allow-missing UNSET)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_theta_close_plan.sql 2>/dev/null | head -1)"
         if [ -z "$m" ]; then
@@ -112,7 +112,7 @@ runs:
     # anything.
     - name: Wave-E ε contract drill (isolated DB, focused, allow-missing UNSET)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_epsilon_reporting_security_seal_artifacts_issue.sql 2>/dev/null | head -1)"
         if [ -z "$m" ]; then
@@ -157,7 +157,7 @@ runs:
     # catalog and needs no seed data.)
     - name: Wave-E η contract drill (isolated DB, focused, allow-missing UNSET)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         m="$(ls migrations/[0-9][0-9][0-9][0-9]_wave_e_eta_wake_wrappers_part2.sql 2>/dev/null | head -1)"
         if [ -z "$m" ]; then

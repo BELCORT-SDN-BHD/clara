@@ -10,7 +10,7 @@ runs:
   steps:
     - name: Assert the slice lists partition the x41/x42 corpus exactly once
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         # WHICH D-b SLICES ARE ON DISK — by stable NAME, so a renumber cannot hide one
         # [light re-confirm RC2/RC4].

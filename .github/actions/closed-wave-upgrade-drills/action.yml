@@ -20,7 +20,7 @@ runs:
     # PGHOST/PGPORT/PGUSER/PGPASSWORD come from the job env.
     - name: Populated-upgrade cutover test (isolated DB, C9)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_upgrade_ci'
         # The test's first act is reset() on this BRAND-NEW database — which also
@@ -37,7 +37,7 @@ runs:
     # OWN throwaway database, never inside the concurrent all-packages sweep.
     - name: Slice-5 document-pipeline upgrade drill (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_docs_upgrade_ci'
         PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
@@ -52,7 +52,7 @@ runs:
     # the concurrent all-packages sweep.
     - name: Slice-6 coding-floor upgrade drill (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_s6_upgrade_ci'
         PGDATABASE=clara_s6_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
@@ -74,7 +74,7 @@ runs:
     # throwaway database, like the three drills above.
     - name: Wave-B 0020 A7/A8 upgrade drill (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wb20_upgrade_ci'
         PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
@@ -98,7 +98,7 @@ runs:
     # FOR REAL here, ALONE, in its OWN throwaway database.
     - name: Wave-C-a 0037 subledger upgrade drill (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x37_upgrade_ci'
         PGDATABASE=clara_x37_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
@@ -125,7 +125,7 @@ runs:
     # throwaway database.
     - name: Wave-C-c 0040 effective_date backfill upgrade drill (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x40_upgrade_ci'
         PGDATABASE=clara_x40_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
@@ -151,7 +151,7 @@ runs:
     # throwaway database.
     - name: Wave-D-a 0041 FA-register upgrade drill (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x41_upgrade_ci'
         PGDATABASE=clara_x41_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
@@ -180,7 +180,7 @@ runs:
     # takes the number FROM THE FILE IT FOUND, and the candidate list never needs renumbering.
     - name: Wave-D-b split upgrade drill at the frontier ON DISK (isolated DB)
       working-directory: packages/db
-      shell: bash
+      shell: bash -e {0}
       run: |
         DRILL=""; DRILL_N=""
         for tag in b0:wave_d_b0_shared_authorities b1:wave_d_b1_staff_advances \

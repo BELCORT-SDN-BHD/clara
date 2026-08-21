@@ -100,6 +100,44 @@ Found while measuring, closed by the same mechanism — both predate this PR:
   full build + worker-path gate still run per-PR in `build`). `ci.yml` is back under
   the 500-line harness limit (500 exactly; was 1447).
 
+## The 5-lens adversarial review's three fixes (2026-08-21; 21 agents, adversarially verified)
+
+1. **MAJOR — the composite `shell: bash` keyword injects `-o pipefail`.** The old
+   monolith never specified `shell:`, so every body ran under GitHub's default
+   `bash -e {0}` — no pipefail — and several guards were AUTHORED against that
+   (`ls <glob> | head -1` designed to survive an empty glob; the frontier green-skip;
+   partition-total's floor-rerun grep). The builtin `bash` keyword means
+   `bash --noprofile --norc -eo pipefail {0}`, an unenumerated executable delta that
+   turned designed green paths into latent exit-2 reds. Fix: every composite step uses
+   the custom-shell form **`shell: bash -e {0}`** — byte-identical semantics to the old
+   default; the two bodies that WANT pipefail still set it explicitly in-body.
+2. **The classifier's `db` arm learns `.github/actions/**`** — the composites are now
+   part of the DB legs' input surface, and a composite-only PR must set `db=true`
+   (it already hit `code=true` via the catch-all). The one deliberate semantic edit to
+   the classifier body, forced by the surface genuinely growing.
+3. **`workflow_dispatch` runs get a PER-RUN concurrency group** — in the old ref-keyed
+   group, the next push-to-main would cancel a manual full run mid-drill; ADR-0073
+   makes that manual run the closed-wave proof path, so it must be as uncancellable as
+   the scheduled sweep (pre-existing bytes, amplified by the new practice).
+
+## The cross-model review's three shared-host race fixes (Codex gpt-5.6-sol, 2026-08-21)
+
+All three pre-existing, all amplified by the split's added parallelism, all fixed in
+the same PR (three further enumerated deltas):
+
+1. **HIGH — the render image tag is now RUN-SCOPED** (`clara-render:ci-<run_id>-<attempt>`,
+   cleaned `if: always()`): the two runner instances share ONE Docker daemon, so the old
+   fixed `clara-render:ci` tag let a concurrent run retag between a run's build and its
+   drill — a broken commit could pass on another commit's image. BuildKit's cache is
+   tag-independent, so the cleanup costs no layer reuse.
+2. **MEDIUM — `pnpm/action-setup` gets an explicit per-instance `dest`**
+   (`runner.tool_cache/setup-pnpm`): its default is the SHARED `~/setup-pnpm`, which it
+   recursively deletes before reinstalling — the mechanism behind the recorded
+   "setup-pnpm race" (confirmed against the pinned action's own source).
+3. **MEDIUM — the render-drill font install now takes the same host flock + idempotence
+   guard as the PG17 client install**: its unlocked `apt-get` raced the locked install
+   on the other instance for the dpkg lock.
+
 ## Scheduled WITH this overhaul (per the 2026-08-20 audit note)
 
 **The Supabase non-superuser deploy-role CI leg** (Slice-2 HIGH 8/9 remainder) is

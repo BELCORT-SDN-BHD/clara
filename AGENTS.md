@@ -150,8 +150,7 @@ Law 1 is the floor, not the ceiling.
 **Clock out** — before the session ends, and before any compaction:
 
 1. Update `PROGRESS.md`: posture, lanes, backlog.
-2. Harness-sync sweep and refresh: anything stale in a harness menu file(## The Harness menu — what you need, where the truth lives) gets trued, or flagged under Known
-   issues if truing it needs a decision.
+2. Harness-sync sweep and refresh: anything stale in a harness menu file(## The Harness menu — what you need, where the truth lives) gets trued, or flagged under Known issues if truing it needs a decision.
 3. Grill the owner on any ambiguity or foreign change you found and could not resolve.
 4. Refresh memory — lessons and preferences only.
 5. Re-index the codebase graph (`codebase-memory-mcp` · `index_repository`) if code changed

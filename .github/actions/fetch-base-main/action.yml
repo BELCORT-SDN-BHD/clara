@@ -8,7 +8,7 @@ runs:
   using: composite
   steps:
     - name: Fetch base ref (origin/main) for append-only checks
-      shell: bash
+      shell: bash -e {0}
       run: |
         # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
         # append-only freeze-lint + migration-history gates MUST have it — a

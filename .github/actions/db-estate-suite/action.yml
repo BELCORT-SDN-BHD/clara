@@ -23,7 +23,7 @@ runs:
     # working tree — migrate.mjs then correctly sees a HEAD-deleted applied
     # migration as missing and aborts.
     - name: Deploy-onto-existing check (main migrations, then HEAD)
-      shell: bash
+      shell: bash -e {0}
       run: |
         if git rev-parse --verify origin/main >/dev/null 2>&1 \
            && git ls-tree -r --name-only origin/main -- packages/db/migrations | grep -q '\.sql$'; then
@@ -47,7 +47,7 @@ runs:
     # the e2es that import the real built server live in the db-live-gates job, which
     # builds the runtime itself.
     - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
-      shell: bash
+      shell: bash -e {0}
       env:
         # Un-skips the rig-gated suites (the dashboard queue-kind parity probe +
         # the runtime interview plan-db tests) against the shared migrated DB —
