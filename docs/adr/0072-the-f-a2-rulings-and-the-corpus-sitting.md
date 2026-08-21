@@ -30,9 +30,24 @@ be allowed to coexist by inertia. Four consequences, each with its own moment:
 1. **The rules machine's EXECUTION TIER retires inside Wave F**, at F-A2's own retirement PR
    — not deferred to a later wave. ADR-0071/G1.4 ruled that it retires; this ruling fixes
    *when*. History rows stay as knowledge fuel; the verbs and the writes go.
-2. **The full-64 re-extraction backfill is a RETIREMENT PRECONDITION.** It runs after the
-   first F-A2 ceremony window, the legacy fallback arms die in the retirement PR, and until
-   it completes **F-A10's terminal check cannot close**.
+2. **The post-Window-A re-extraction is TWENTY DOCUMENTS — the full-64 backfill is
+   SUPERSEDED.** *(Ruled later the same night, after the openers' predicted-outcome table
+   existed; it replaces this directive's own first formulation, which was a full-population
+   backfill.)* The set is drawn from the 33 already measured: **all four predicted refusals**
+   — `5174df8a` (the corpus's only genuine SST registrant, and the only live test of the
+   lock-3 wording), the two RM 2,300 discount invoices, and `aaf31fd6` — **plus roughly
+   sixteen spread across the predicted-pass classes**, so the re-measure carries both the
+   arm-fired and plain-path populations and is not a refusals-only sample. The reasoning is
+   the corpus's own: the four refusals are where a prediction can be *falsified*, and a
+   spread across the passing classes is what stops a green re-measure from being vacuous.
+   **The honest consequence, recorded rather than discovered later:** the legacy fallback
+   arms' retirement trigger reads *"the post-ceremony **full-population** re-extraction plus
+   the F-A2 retirement PR, **or the Wave-G factory reset, whichever lands first**"*
+   (`0101_f_a2_witness_readers.sql:465-467`). A twenty-document re-extraction **cannot
+   satisfy the first branch**, so the trigger falls through — by its own wording, not by a
+   new decision — to **the Wave-G factory reset**. The fallback arms therefore live longer
+   than the directive first implied, and **F-A10's terminal check closes on the reset**, not
+   on a backfill. That is the cost of the smaller re-extraction, and it is accepted knowingly.
 3. **Legacy DATA rows die at the Wave-G factory reset**, not before. Retiring a reader estate
    and deleting the rows it wrote are two different acts with two different blast radii, and
    only the second needs the reset.

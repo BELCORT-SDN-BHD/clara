@@ -272,12 +272,20 @@ class as `x37:1951`. Same treatment: an inverted twin in **C.8**. Its `:335` `no
 records the carve-out half as vacuous in this build, so only the control half is live evidence — and
 the control half is exactly what the excision deletes.
 
-### B.8 · The retirement precondition (owner directive)
+### B.8 · The retirement precondition (owner directive, AMENDED 2026-08-20)
 
-**The full-64 re-extraction backfill runs after Window A**, and the **legacy fallback arms die in
-the retirement PR**. Until the backfill completes, legacy-regime documents still resolve through
-the fallback, so **F-A10's terminal check cannot close**. Named here so the dependency is not
-discovered at the check.
+**The post-Window-A re-extraction is TWENTY documents, not the full 64** — ADR-0072 ①.2, ruled
+after the openers' predicted-outcome table existed: all four predicted refusals plus ~16 across
+the predicted-pass classes, so the re-measure covers both the arm-fired and plain-path populations.
+
+**The consequence for retirement, stated rather than left to be discovered at the check.** The
+fallback arms' own retirement trigger reads *"the post-ceremony **full-population** re-extraction
+plus the F-A2 retirement PR, **or the Wave-G factory reset, whichever lands first**"*
+(`0101_f_a2_witness_readers.sql:465-467`). A twenty-document re-extraction **cannot satisfy the
+first branch**, so the trigger falls through — by its own wording, not by a new decision — to the
+**Wave-G factory reset**. Until then, legacy-regime documents still resolve through the fallback,
+and **F-A10's terminal check closes at that reset** rather than on a backfill. The arms therefore
+live longer than the directive first implied; that is the priced cost of the smaller re-extraction.
 
 ### B.9 · PR-1's two files, by content (design §5 step 2)
 

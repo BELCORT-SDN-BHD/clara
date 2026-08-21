@@ -382,12 +382,14 @@ disagreement between the two is itself a finding.**
 **Retirement's four decisions.** **(1)** The **false-green CI gate retires in the drop PR**, with its
 selftest, the `ci.yml` step and both `package.json` entries. **(2)** Two helpers **fail SOFT and are
 deleted, not left** (`x1-helpers.mjs:368-370`; `x37-wave-c-a-subledger.test.mjs:1684-1693`).
-**(3)** The **full-64 re-extraction backfill is a RETIREMENT PRECONDITION**: it runs after Window A,
-the legacy fallback arms die in the retirement PR, and until it completes **F-A10's terminal check
-cannot close.** **(4)** The **WB-R2 assertion sites are re-pointed or re-worded, never silently
-deleted** — six sites in Annex B, **two of which go VACUOUS rather than red** three lines apart in
-one test — **and the census follows the retired VERBS across every fixture surface, never the law's
-NAME**, since a name-keyed sweep missed the sixth site, the second head, and an entire test file.
+**(3)** The post-Window-A re-extraction is **TWENTY documents (ADR-0072 ①.2)**, not the full 64 —
+too few to satisfy the fallback arms' *full-population* retirement trigger (`0101:465-467`), so by
+its own **"whichever lands first"** clause the arms retire at **the Wave-G reset**, where F-A10
+closes. **(4)** The **WB-R2 assertion
+sites are re-pointed or re-worded, never silently deleted** — six sites in Annex B, **two of which
+go VACUOUS rather than red** three lines apart in one test — **and the census follows the retired
+VERBS across every fixture surface, never the law's NAME**, since a name-keyed sweep missed the
+sixth site, the second head, and an entire test file.
 
 ## 4 · Owner questions
 
@@ -421,8 +423,8 @@ per-firm **governance dial**. **The charter's "human lane unchanged" scoping is 
 
 **Hard prerequisite the contract's sequencing line does not state.** Openers **①②⑥** are inside the
 F-A1→F-A2 chain and are a hard **acceptance** prerequisite (§6): at 0/33 corroboration this ladder
-posts nothing — safe, and indistinguishable from a broken build. **Opener ⑥ is owner-ratified and in
-build**; PR-1 is authored against its output. The train:
+posts nothing — safe, and indistinguishable from a broken build. **All six openers are MERGED
+(2026-08-20); PR-1 is authored against opener ⑥'s output (`0101`).** The train:
 
 1. **PR-0 (gate).** Independent judgement-logic review (law 1) **plus** a cross-model adversarial
    pass (law 28). **Named emphases: B4-sales and B4-generic (Annex I), the Tier-C pair set, the
@@ -442,8 +444,8 @@ build**; PR-1 is authored against its output. The train:
 5. **PR-3 (cutover + retirement), only after PR-2's image is verified live.** The drops, the consumer
    file, the roster edits, the `apps/dashboard/app/rules/` retirement (**relocate
    `AdjustmentTemplatePanel.tsx`**), the parts catalog, the CI gate, the WB-R2 re-pointings. **D1.**
-6. **PR-4 (acceptance, zero code).** The corpus re-measure as-run, `PROGRESS.md`, and **F-A10's
-   terminal check — which cannot close before the backfill.**
+6. **PR-4 (acceptance, zero code).** The re-measure as-run, `PROGRESS.md`, and **F-A10's terminal
+   check — which now closes at the Wave-G reset (ADR-0072 ①.2), not on a backfill.**
 
 **Two ceremony windows**, both from merged `main`. Standing runbook hazards: the DSN bridge + a
 **110s** quiesce, `fly.exe`'s non-zero exit after a successful non-tty `ssh -C`, the post-restart
@@ -451,46 +453,43 @@ zombie pooler sweep, `PG*` vars for rig runs, the reconciler herd against two la
 
 ## 6 · Test battery (Annex C) and acceptance
 
-**Every blocker gets a cell:** the Tier-D replay census · a CLR25 conversion naming the *right* wall ·
-a settlement post refusing at B1 · the FA, advance and generic-control-leg rungs · A8's revised-draft
-cell **and OQ-4's two exits** · the write contract's three per-tier zero-row cells · a chat
-`wake_open_question` round trip **plus the extend-only regression cells** · the `posted` chain · T3's
-human-lane byte-identity **and its must-fail accessor cell** · **C.8's breeding cells fixtured as
-AGENT posts**, since a human fixture proves only the human case.
+**Every blocker gets a cell:** the Tier-D replay census · a CLR25 conversion naming the *right* wall
+· a settlement post refusing at B1 · the FA, advance and generic-control-leg rungs · A8's
+revised-draft cell **and OQ-4's two exits** · the write contract's three per-tier zero-row cells · a
+chat `wake_open_question` round trip **plus the extend-only regression cells** · the `posted` chain ·
+T3's human-lane byte-identity **and its must-fail accessor cell** · **C.8's breeding cells fixtured
+as AGENT posts**, since a human fixture proves only the human case.
 
 **Law 29 governs.** (1) **Openers ①②⑥ live** are a hard prerequisite — without them B2's positive
 cell has no corroborated document. (2) **The forced order: ceremony → re-extract FIRST → then
 evaluate** (`f-a1-corpus-measurement.md`'s obligation) — a `witnessFacts.v1` row holds no SST answer
 and no coverage receipt, so it can never satisfy the successor nil-tax arm, and evaluating first
-re-scores 0/33 on the wrong population. (3) **Publish FOUR numbers over the same 33-document
-population** — opener ①'s three plus **POSTED**, with **the full failing-rung vector** per
-non-posting document, from `op_receipts` for those and `entry_post_receipts` for posts.
+re-scores on the wrong population. (3) **Publish FOUR numbers — opener ①'s three plus POSTED — over
+the TWENTY re-extracted documents** (ADR-0072 ①.2), with **the full failing-rung vector** per
+non-posting document, from `op_receipts` for those and `entry_post_receipts` for posts. **State the
+denominator every time:** twenty is a *sample* of the measured 33 carrying all four predicted
+refusals plus the passing classes, so a rate off it is not comparable to 0/33 unless it says so.
 (4) **A live post on real books** with its receipt read back and its `entry.posted` event carrying
 obo + wake kind — **ROME PUBLIC ADVISORY** first, then a BELCORT client; constraints 12 and 13 stand
 throughout (**ROME SECRETARY's customers are NAME-ONLY**). (5) **F-A10's terminal check** — one
 architecture, executor gone *(by rig replay)*, no writer breeds, the CI gate retired, frozen bodies
-reachable, history rows present, **backfill complete**. (6) **OQ-5's populations are reported.**
+reachable, history rows present. **It closes at the Wave-G reset**, since twenty documents cannot
+trip the fallback arms' full-population trigger. (6) **OQ-5's populations are reported.**
 
 ## 7 · Registered risks and named non-goals
 
-- **G-11 — MEASURED, 2026-08-20** (a rolled-back read-only live read at frontier 92/`0097`). The
-  blocking scopes are `client` **or** the same `document` **or** the same canonical `vendor`
-  (`0012:87-108`). Live: **client-scoped = 0 open across 0 clients, 0 all-status — none has ever
-  existed**; vendor-scoped open = **2**, both `origin='rule_proposal'`, **which
-  `_open_question_blocks` EXCLUDES at `0012:100`**, so neither blocks; the mass is **document-scoped:
-  8 open, all BEE**, per-document self-blocking and the designed behaviour. **The honest pricing
-  line: client-scope blocking is real machinery with a zero population today — it costs nothing now,
-  the cost arrives with scale, and the receipt names the blocker when it does.**
-- **The generic lane is the thinnest-walled shape in the estate**; B4-generic, B12, B13 and B14 are
-  the only walls it does not share with the coded kinds.
+- **G-11 — MEASURED, 2026-08-20** (rolled-back read-only live read, frontier 92/`0097`). Blocking
+  scopes: `client` **or** same `document` **or** same canonical `vendor` (`0012:87-108`). Live:
+  **client-scoped = 0 open, 0 all-status — none has ever existed**; vendor-scoped open = **2**, both
+  `origin='rule_proposal'`, which `_open_question_blocks` **EXCLUDES** (`0012:100`); the mass is
+  **document-scoped: 8 open, all BEE** — self-blocking by design. **Honest pricing: real machinery
+  with a zero population today; the cost arrives with scale, and the receipt names the blocker.**
+- **The generic lane is the thinnest-walled shape in the estate** — B4-generic, B12, B13 and B14 are its only unshared walls.
 - **OQ-6's residue, as a risk rather than buried in the ruling:** a wrong `is_year_end` or
-  `tax_affecting` entry is caught **downstream**, at a close key or at e-filing, making the
-  correction a **reversal** rather than a click. The ruling accepts that cost knowingly.
-- **Two architectures exist between PR-1 and PR-3**, and legacy fallback arms live until the
-  backfill; F-A10 judges at wave close.
-- **PR-1 is large** — eight D1 bodies plus an ACCESS EXCLUSIVE `ALTER TABLE`, two new B4 formulas,
-  two belt extractions, the new wake kind across four roster surfaces, and a new frozen `_vN` infra
-  file in PR-2. If PR-0 judges it too wide, the severable pieces are **chat parity** then **B12/B13**.
+  `tax_affecting` entry is caught **downstream** — the correction is a **reversal**, not a click.
+- **Two architectures exist between PR-1 and PR-3**, and the legacy fallback arms now live to the
+  **Wave-G reset** (ADR-0072 ①.2), where F-A10 judges them.
+- **PR-1 is large** — eight D1 bodies, an ACCESS EXCLUSIVE `ALTER TABLE`, two new B4 formulas, two belt extractions, a new wake kind across four rosters, plus PR-2's frozen `_vN` infra file. If PR-0 judges it too wide, sever **chat parity**, then **B12/B13**.
 - **C-3's census is a standing warning, not just a fixed finding.** `coding_lane` (`0011:1570`) has
   **no is-not-null guard** on `w.client_id`, so any future change to what a credential's client
   binding means changes a **frozen** workflow's answers with no byte change anywhere.
