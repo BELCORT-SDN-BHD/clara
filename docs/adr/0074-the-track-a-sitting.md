@@ -11,7 +11,7 @@ declined build recommendation is recorded as declined, and the orchestrator's tw
 are on file below with their cost arguments in full — dissent-then-execute.**
 
 **FOUR CONSTITUTIONAL AMENDMENTS FALL OUT OF THIS SITTING. RATIFIED 2026-08-22 (owner).** Drafted below
-as proposed wording and enter the ratified set at **the owner's next digest sign-off**, as laws 68-77 did:
+as proposed wording and entered the ratified set at **the owner's digest sign-off**, as laws 68-77 did:
 (i) law 71's *exactly*-enumerated human roster becomes an OPEN REGISTER (TA-P1); (ii) invariant (a), client
 attribution, becomes the agent's judgement under structural walls (TA-P7) — amending PRD §6.2(a) **LAW**,
 ARCHITECTURE §0.1 and digest law 2; (iii) law 21 narrows to periodic POSTING belts (TA-P5); (iv) law 76

@@ -149,7 +149,7 @@ governs.
 > **RE-TRUED 2026-08-21 (ADR-0073, the CI economics overhaul):** law 77 folds below (§10). No existing law
 > changes: law 26 (uniform review intensity) is expressly untouched — 0073 amends per-PR **CI scope**, not
 > review scope — and law 39's named legs (deploy-onto-existing · freeze-lint · leak-scan · the DR round-trip)
-> all stay per-PR. Law 77 enters the ratified set at the owner's next digest sign-off.
+> all stay per-PR. **Law 77 RATIFIED by the owner 2026-08-22 (digest sign-off).**
 > **RE-TRUED 2026-08-22 (ADR-0074, the Track-A sitting):** laws 78-81 fold below (§11) and laws 2 (invariant
 > (a)), 21, 71 and 76 are amended in place — **all eight RATIFIED 2026-08-22 (owner), with law 78 carrying the
 > rider R-TA-P1-walls.** The three CONSTITUTIONAL ones are ratified as LAW here; their product-text homes
