@@ -865,7 +865,7 @@ test("R4-5 (R3#5): a reused op_key with widened bounds is a request-hash MISMATC
   assert.equal(widened.rows[0].n, 0, "no widened rule row exists anywhere for the client");
 });
 
-test("R5-1 (R4 must-1): a FACTS-ABSENT document skips facts_missing BEFORE direction — the post never proceeds unpinned", async (t) => {
+test("R5-1 (R4 must-1, RETITLED): a FACTS-ABSENT document cannot become a coded agent draft at all, and the refusal is NAMED — the executor's facts_missing skip is unreachable for it", async (t) => {
   if (skipHere(t)) return;
   const client = world.clients.A1;
   const sub = world.users.alice;
@@ -889,9 +889,16 @@ test("R5-1 (R4 must-1): a FACTS-ABSENT document skips facts_missing BEFORE direc
   assert.ok(draftErr, "a facts-absent document cannot become a coded agent draft at all");
   assert.equal(reasonOf(draftErr), "direction_family_mismatch",
     `the refusal is NAMED, never an unpinned pass-through (got ${reasonOf(draftErr)}: ${draftErr.message})`);
+  // LAW 31, RECORDED: this zero head is now VACUOUS. The draft was refused above, so no entry
+  // exists on this document at all and the count is trivially 0 whatever the approve path does.
+  // It is kept because it is the CLAIM in its most direct form and it would still catch an entry
+  // arriving by some other door — but it no longer DISCRIMINATES, and a reader must not mistake
+  // it for the cell's evidence. The live evidence is the named refusal asserted immediately
+  // above it.
   assert.equal((await rootQuery(
     "select count(*)::int as n from clara.journal_entries where document_id=$1 and status='approved'",
     [cited.documentId])).rows[0].n, 0, "a facts-absent document NEVER reaches an approved entry");
+  noteLane("R5-1: the approved-count head is VACUOUS after D11 — the draft never exists, so the count is trivially zero. The discriminating assertion is the NAMED direction_family_mismatch refusal above it (law 31: a zero-count head that stops discriminating is recorded, not quietly kept as proof)");
   // The core's rule-driven pin requirement is structural.
   const stripSql = (s) => s.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(stripSql(await fnSource("_approve_entry_core")).includes("unpinned_rule_post"),
