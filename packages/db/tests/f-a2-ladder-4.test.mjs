@@ -123,10 +123,32 @@ test("f-a2.c4.currency (CLR25, currency_unsupported) converts", async (t) => {
     entry: d.entry_id, expectedRevision: (await entryRow(d.entry_id))?.revision_token ?? d.revision_token,
     client: A1(), booksVersion: await booksVersion(A1()),
   });
-  if (r?.refusal?.tier === "C") assertConverted(r, "currency_unsupported", "c4.currency");
-  else noteLane(`c4.currency: the ladder refused before the delegate (${JSON.stringify(r?.refusal)}) — the currency wall was pre-empted by a Tier-B rung, which is a finding about ORDER, not about the pair`);
+  // THE CONVERSION IS UNREACHABLE FROM THIS LANE, and that is a FINDING about E.2's pair set
+  // rather than a fixture that needs more work. It is DECLARED here with its ground asserted
+  // positively (law 31), never noted-and-passed: `noteLane` writes to stderr and node counts the
+  // cell PASSED, so the old else-branch turned "the pair never fired" into a green.
+  //
+  //   THE GROUND. Reaching the delegate at all requires EVERY Tier-B rung to admit, and B2
+  //   requires the fact state to be CORROBORATED. The witness predicate refuses corroboration on
+  //   any page whose currency is not MYR (the `v_tmyr = 'myr' and v_vmyr = 'myr'` conjunct), so a
+  //   document that could trigger `(CLR25, currency_unsupported)` in the delegate can never get
+  //   past B2 to be handed to it. The two conditions are mutually exclusive by construction.
+  //
+  // WHAT IS PROVABLE IS FORCED: the post does not happen, and it refuses with a TYPED Tier-B
+  // token rather than a raise. Both asserted unconditionally.
+  assert.equal(r?.posted, false, "c4.currency: an SGD successor generation never posts");
+  assert.equal(r?.refusal?.tier, "B",
+    `c4.currency: …and it is a typed Tier-B admission verdict, not a raise (got ${JSON.stringify(r?.refusal)})`);
+  assert.equal(r?.refusal?.reason, "not_corroborated",
+    `c4.currency: …specifically B2 — the rung that makes the currency pair unreachable (got ${JSON.stringify(r?.refusal)})`);
+  // THE GROUND, MEASURED rather than argued: this document really does fail to corroborate, and
+  // it is the CURRENCY that stops it.
+  const st = (await rootQuery("select clara._invoice_fact_state($1) as s", [cited.documentId])).rows[0].s;
+  assert.equal(st?.corroborated, false, "c4.currency ground: the SGD generation does not corroborate");
+  assert.equal(st?.explicit_non_myr, true, "c4.currency ground: …because its currency is explicitly not MYR");
   assert.equal(await postReceiptCount(d.entry_id), 0,
-    "c4.currency: a Tier-C conversion leaves ZERO entry_post_receipts rows — the insert rolls back with the delegate (C.7b)");
+    "c4.currency: and ZERO entry_post_receipts rows behind the refusal (C.7b)");
+  noteLane("c4.currency: `(CLR25, currency_unsupported)` is DECLARED UNREACHABLE from the posting lane — B2 requires corroboration and the witness predicate refuses corroboration on a non-MYR page, so the delegate's currency wall can never be asked. Law 31 says a wall that cannot be asked leaves the pair set; E.2 still lists it. REPORTED to the lead as a design question, not decided here.");
 });
 
 test("f-a2.c4.money-wall a corroboration-bound contradiction is NEVER reported as a currency refusal", async (t) => {
@@ -150,7 +172,20 @@ test("f-a2.c4.money-wall a corroboration-bound contradiction is NEVER reported a
   assert.equal(r?.posted, false, "c4.money-wall: a contradicted anchor never posts");
   assert.notEqual(r?.refusal?.reason, "currency_unsupported",
     `c4.money-wall: the money wall is NOT reported as a currency refusal (got ${JSON.stringify(r?.refusal)})`);
-  if (r?.refusal?.tier === "C") assertConverted(r, "corroboration_contradicted", "c4.money-wall");
+  // …AND THE CONVERSION IS UNREACHABLE HERE TOO, for the sibling reason, declared with its
+  // ground rather than noted: the delegate's contradiction check asks whether the newer machine
+  // facts contradict the draft's bound evidence — which is exactly what B3
+  // (`_corroboration_bound`) asks one tier earlier, on the same STABLE resolver in the same
+  // snapshot. B3 therefore pre-empts it structurally, and no fixture can put the delegate's copy
+  // of the question first.
+  //
+  // THE CELL'S OWN CLAIM SURVIVES INTACT and is what stays forced: the money wall is NEVER
+  // reported as a currency refusal. That is asserted above, unconditionally.
+  assert.equal(r?.refusal?.tier, "B",
+    `c4.money-wall: the contradiction is caught one tier EARLIER, as a typed Tier-B verdict (got ${JSON.stringify(r?.refusal)})`);
+  assert.ok(["not_corroborated", "anchor_unbound"].includes(r?.refusal?.reason),
+    `c4.money-wall: …at B2 or B3, the two rungs that read the moved generation (got ${JSON.stringify(r?.refusal)})`);
+  noteLane("c4.money-wall: `(CLR25, corroboration_contradicted)` is DECLARED UNREACHABLE from the posting lane — B3 asks the delegate's own question one tier earlier, off the same STABLE resolver in the same snapshot. The cell's load-bearing claim (never reported as a currency refusal) is forced above. REPORTED to the lead with c4.currency.");
 });
 
 // ===========================================================================
@@ -191,8 +226,9 @@ test("f-a2.c4.registration-conflict (CLR23, registration_conflict) converts, and
   assert.equal(r?.posted, false, "c4.registration-conflict: a registration collision never posts");
   assert.notEqual(r?.refusal?.reason, "counterparty_landscape_moved",
     `c4.registration-conflict: it is NOT reported as the landscape having moved (got ${JSON.stringify(r?.refusal)})`);
-  if (r?.refusal?.tier === "C") assertConverted(r, "registration_conflict", "c4.registration-conflict");
-  else noteLane(`c4.registration-conflict: settled as ${JSON.stringify(r?.refusal)} rather than a typed Tier-C refusal — GM-5's exact defect if it is a task failure`);
+  // FORCED: GM-5's whole finding is that this settles as a TASK FAILURE instead of a typed
+  // refusal. A cell that noted that outcome and passed would be reporting the defect as normal.
+  assertConverted(r, "registration_conflict", "c4.registration-conflict");
 });
 
 test("f-a2.c4.landscape-moved (CLR23, counterparty_landscape_moved) converts", async (t) => {
@@ -220,8 +256,10 @@ test("f-a2.c4.landscape-moved (CLR23, counterparty_landscape_moved) converts", a
     `c4.landscape-moved: mandatory setup -- the birthing post lands (${JSON.stringify(r1?.refusal)})`);
   const r = await post(p, { booksVersion: await booksVersion(A2()) });
   assert.equal(r?.posted, false, "c4.landscape-moved: a moved counterparty landscape never posts silently");
-  if (r?.refusal?.tier === "C") assertConverted(r, "counterparty_landscape_moved", "c4.landscape-moved");
-  else noteLane(`c4.landscape-moved: refused as ${JSON.stringify(r?.refusal)} — recorded, not asserted, because the merge fixture may not reproduce the live race`);
+  // FORCED. The old note blamed "the merge fixture may not reproduce the live race" — and the
+  // fixture no longer uses a merge at all: a `birth` fingerprint that becomes a NAME MATCH is
+  // deterministic, so there is nothing left to excuse.
+  assertConverted(r, "counterparty_landscape_moved", "c4.landscape-moved");
 });
 
 test("f-a2.c4.birth-race (CLR23, counterparty_birth_race) converts — two sessions birthing one counterparty", async (t) => {
@@ -391,9 +429,12 @@ test("f-a2.c4.clr26 the two-session race on ALL THREE Tier-A locks — the post 
 
 test("f-a2.c4.dup-bill / c4.dup-sales both duplicate pairs convert", async (t) => {
   if (await gateCore(t)) return;
-  for (const [kind, reason, lines] of [
-    ["supplier_bill", "duplicate_bill", null],
-    ["sales_invoice", "duplicate_sales", null],
+  // THE SALES ARM STATES ITS COMPONENTS. B4-sales reports `not_evaluable` where the fact side
+  // withholds net and tax (0100:553-554), so a sales fixture that states neither never posts and
+  // the duplicate it is supposed to be the first half of never exists. Measured, first run.
+  for (const [kind, reason, lines, parts] of [
+    ["supplier_bill", "duplicate_bill", null, {}],
+    ["sales_invoice", "duplicate_sales", salesLines(440000, 440000, 0, 0), { net: 440000, tax: 0 }],
   ]) {
     // THE GRAIN IS (client, counterparty, INVOICE NUMBER), and the invoice number has to be
     // STATED on both pages for the wall to see one invoice twice. Both walls read
@@ -401,18 +442,20 @@ test("f-a2.c4.dup-bill / c4.dup-sales both duplicate pairs convert", async (t) =
     // what every `witnessedFiling` produced before: the first cut of this cell built two
     // documents that stated no number at all, so the duplicate simply posted.
     const invoiceId = `DUP-${kind}-${Date.now().toString(36)}`;
-    const first = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines, invoiceId });
+    const first = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines, invoiceId, ...parts });
     const r1 = await post(first);
-    if (r1?.posted !== true) { noteLane(`c4.${reason}: the first ${kind} did not post (${JSON.stringify(r1?.refusal)}) — the duplicate's precondition is unbuilt`); continue; }
+    assert.equal(r1?.posted, true,
+      `c4.${reason}: mandatory setup — the FIRST ${kind} posts, or there is no duplicate to detect (${JSON.stringify(r1?.refusal)})`);
     // A second entry against the SAME (client, counterparty, invoice_id) tuple.
-    const second = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines, invoiceId });
+    const second = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines, invoiceId, ...parts });
     assert.equal(
       (await rootQuery("select clara._invoice_fact_state($1)->>'invoice_id' as v", [second.cited.documentId])).rows[0].v,
       invoiceId, `c4.${reason}: mandatory setup — the second document STATES the same invoice number the first did`);
     const r2 = await post(second, { booksVersion: await booksVersion(A2()) });
     assert.equal(r2?.posted, false, `c4.${reason}: the duplicate does not post`);
-    if (r2?.refusal?.tier === "C") assertConverted(r2, reason, `c4.${reason}`);
-    else noteLane(`c4.${reason}: refused as ${JSON.stringify(r2?.refusal)} — the duplicate grain the fixture built may differ from the wall's`);
+    // FORCED. The cell asserts above that the second document states the SAME invoice number,
+    // so "the grain the fixture built may differ from the wall's" is no longer a live doubt.
+    assertConverted(r2, reason, `c4.${reason}`);
   }
 });
 
@@ -436,10 +479,8 @@ test("f-a2.c4.closed-period (CLR19, write_into_closed_period) converts via the N
         '2026-01-01','2026-12-31',1,'closed','asserted',
         (select user_id from clara.firm_memberships fm
           join clara.clients cl on cl.firm_id=fm.firm_id and cl.id=$1 limit 1))`, [A2()]));
-  if (closed.error) {
-    noteLane(`c4.closed-period: could not close a fiscal year on the rig (${closed.error.code}: ${closed.error.message}) — the behavioural half is unproven; the pair's membership is asserted by c4.set`);
-    return;
-  }
+  assert.ok(!closed.error,
+    `c4.closed-period: mandatory setup — the fiscal year is CLOSED (${closed.error?.code}: ${closed.error?.message}). Without it the pair is unproven, and a note here would green exactly that`);
   const r = await post(p);
   assertConverted(r, "write_into_closed_period", "c4.closed-period");
 });
@@ -486,10 +527,8 @@ test("f-a2.c4.bare-clr23 a bare CLR23 from inside _assert_supplier_bill_shape_at
     { account_code: CHART.payable, debit_cents: 500000, credit_cents: 0, description: "c4 bare ap-dr" },
     { account_code: CHART.expense, debit_cents: 0, credit_cents: 500000, description: "c4 bare exp-cr" },
   ]);
-  if (!doctored.ok) {
-    noteLane(`c4.bare-clr23: the draft's lines could not be doctored (${doctored.code}: ${doctored.message}) — the entry guards refuse it, so the BEHAVIOURAL half is unbuildable and only the catalog half above stands`);
-    return;
-  }
+  assert.equal(doctored.ok, true,
+    `c4.bare-clr23: mandatory setup — the draft's lines are doctored into the mis-shaped form (${doctored.code}: ${doctored.message}); the behavioural half is the half that matters here`);
   const r = await post(p).catch((e) => ({ raised: e.code, detail: e.detail }));
   assert.notEqual(r?.refusal?.tier, "C",
     `c4.bare-clr23: a bare CLR23 is NOT converted into a Tier-C receipt (got ${JSON.stringify(r)})`);
