@@ -91,6 +91,11 @@
 --       here, as it does in the delegate, rather than sitting after the revision-token gate
 --       where §3.2's Tier-A list prints it. All three locks are still held before B9, which is
 --       what GM-7 is about; only the order among them follows the live estate.
+--       AMENDED (R5-B3): matching the order is necessary and NOT sufficient. The human lane
+--       holds no advisory at all and serializes inside `uq_counterparties_identity`, so two
+--       transactions BIRTHING the same counterparty still closed an ABBA cycle and returned a
+--       raw 40P01. §E now takes the client advisory inside the delegate's birth branch, before
+--       the insert — see the reasoning and the one deliberate inversion there.
 --   (5) §D — B7's "amount-bearing evidence" is read as `field_path='invoice.total'`. That is the
 --       only field 0009:460-466 can ever tier `verified`, and it is the same field
 --       `_corroboration_bound` reads, so B3 and B7 cannot drift; a wider reading (any monetary
@@ -837,9 +842,21 @@ revoke all on function clara._assert_supplier_bill_shape_at_projected(uuid,uuid,
 --
 -- LOCK ORDER (judgement call 2, above). The delegate takes filing FOR SHARE, then the entry FOR
 -- UPDATE, then the vendor advisory 203005003, then the client advisory 203005004. This body
--- takes exactly that order, so a concurrent human approve can never deadlock against it, and
--- ALL THREE are held before B9 reads `_open_question_blocks` — which is what closes the
--- check-then-act window GM-7 found and makes CLR26 provably unreachable from this lane (E.2).
+-- takes exactly that order, and ALL THREE are held before B9 reads `_open_question_blocks` —
+-- which is what closes the check-then-act window GM-7 found and makes CLR26 provably unreachable
+-- from this lane (E.2).
+--
+-- MATCHING THE ORDER WAS NOT SUFFICIENT, AND AN EARLIER CUT OF THIS PARAGRAPH SAID IT WAS. It
+-- claimed "a concurrent human approve can never deadlock against it". That is false on the BIRTH
+-- path, and the claim was load-bearing — it was the whole justification for the order chosen.
+-- The human lane holds NO advisory at all; it serializes on `uq_counterparties_identity` inside
+-- its insert while holding row locks this body needs. Two transactions birthing the same new
+-- counterparty therefore closed a cycle — one waiting on the client key, the other on the unique
+-- index — and Postgres returned a RAW 40P01 to whichever it chose. The wake lane has no arm for
+-- a raw deadlock, so it surfaced as an untyped failure rather than a refusal.
+-- §E now takes 203005004 inside the delegate's own birth branch, BEFORE the insert, which makes
+-- the unique-index wait unreachable and fixes every caller of the delegate rather than this lane
+-- alone. The invariant that actually holds is stated there, with its one deliberate inversion.
 --
 -- THE RECEIPT'S WRITE CONTRACT IS AN INVARIANT (D24): written ONLY on a successful post, AFTER
 -- the delegate returns, in the SAME transaction, INSIDE the Tier-C-protected region — so a
@@ -1417,13 +1434,45 @@ begin
   v_post_receipt_id:=nullif(p_ctx->>''post_receipt_id'','''')::uuid;');
 
   -- (4) the five Tier-C detail reasons.
+  -- R5-B3: THE BIRTH IS SERIALIZED UNDER THE CLIENT ADVISORY, emitted by the SAME replacement
+  -- that types the reason above, because §0.3 already counts this anchor and a second splice on
+  -- the same string would fire twice.
+  --
+  -- THE CYCLE THIS CLOSES. The agent lane takes vendor(203005003) then client(203005004) before
+  -- entering the delegate. A concurrent HUMAN approve of a draft birthing the SAME new
+  -- counterparty holds no advisory at all and blocks inside `uq_counterparties_identity` while
+  -- holding row locks the agent needs -- so the agent waits on the client key, the human waits
+  -- on the unique index, and 40P01 comes back RAW to whichever side Postgres picks. A raw
+  -- deadlock is not a typed refusal, and the wake lane has no arm for one.
+  --
+  -- Serializing the birth means the only transaction that can be inserting a new counterparty
+  -- for this client is the one already holding 203005004, so the unique-index wait that closed
+  -- the cycle is unreachable. No new lock id, no new function, and it fixes EVERY caller of the
+  -- delegate at once -- human `approve_entry`, `execute_rule_post`, the retiring executor --
+  -- not just the agent lane. (A new shared birth-lock id was the alternative and is declined:
+  -- `create_counterparty` at 0021:103-108 inserts holding no advisory at all, so a new id would
+  -- have to be threaded through every birth door -- 0021, 0029, 0035, 0037, 0062 -- or it just
+  -- relocates the same ABBA.)
+  --
+  -- THE ONE INVERSION, AND WHY IT IS SAFE. On the birth path the order becomes
+  -- client(203005004) -> vendor(203005003), against the estate's vendor-then-client convention.
+  -- It is uncontended BY CONSTRUCTION: the vendor key on a birth is `client||'':''||v_counterparty`
+  -- where `v_counterparty` is the uuid THIS transaction just minted (0037:1866-1869), so no
+  -- other session can hold or request it. Every non-birth path keeps vendor->client untouched,
+  -- and a birthing transaction never waits on an existing counterparty's vendor key, so no new
+  -- cycle is introduced against a vendor->client writer.
   v_new := replace(v_new,
     '        using errcode=''CLR23'';
     end if;
     if v_fingerprint->>''decision''=''birth'' then',
     '        using errcode=''CLR23'',detail=''{"reason":"counterparty_landscape_moved"}'';
     end if;
-    if v_fingerprint->>''decision''=''birth'' then');
+    if v_fingerprint->>''decision''=''birth'' then
+      -- R5-B3: serialize the BIRTH under the client advisory, before the insert. Any other
+      -- session birthing for this client now waits HERE, on a lock, instead of inside the
+      -- unique index while holding row locks we need -- the edge that closed the ABBA cycle
+      -- and returned a RAW 40P01 to a lane with no arm for it.
+      perform pg_advisory_xact_lock(203005004, hashtext(e.client_id::text));');
   v_new := replace(v_new,
     '''counterparty birth raced with a changed match landscape''
             using errcode=''CLR23'';',
@@ -2132,6 +2181,19 @@ begin
   if position(') = 2;' in v_src) <> 0 then
     raise exception 'F-A2 tail: the both-kinds test survives in the resolver' using errcode='CLR10';
   end if;
+  -- (J.3f) R5-B3: the birth lock is taken BEFORE the insert it protects. Presence alone is not
+  -- the invariant -- a lock taken after the insert protects nothing -- so the ORDER is what is
+  -- asserted, and it is read off the INSTALLED body, not the file.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure;
+  if position('pg_advisory_xact_lock(203005004, hashtext(e.client_id::text))' in v_src) = 0 then
+    raise exception 'F-A2 tail: the ninth body does not serialize the counterparty BIRTH under the client advisory (R5-B3)' using errcode='CLR10';
+  end if;
+  if position('pg_advisory_xact_lock(203005004, hashtext(e.client_id::text))' in v_src)
+     > position('insert into clara.counterparties' in v_src) then
+    raise exception 'F-A2 tail: the birth advisory is taken AFTER the counterparty insert it must serialize (R5-B3)' using errcode='CLR10';
+  end if;
+
   select p.prosrc into v_src from pg_proc p
    where p.oid='clara._direction_class(uuid,uuid,uuid)'::regprocedure;
   if position('''untestable''' in v_src) = 0 then

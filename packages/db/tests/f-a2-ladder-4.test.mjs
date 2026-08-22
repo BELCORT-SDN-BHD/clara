@@ -19,7 +19,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, entryRow, counterpartyRows, postingCoreReady, holdThenContend, withTxnOrNull,
+  booksVersion, opk, entryRow, counterpartyRows, postingCoreReady, holdThenContend, sawDeadlock,
+  concurrentTwoSession, withTxnOrNull,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, postReceiptCount, supplierLines, bodyOfName, fnPresent,
   TIER_C_PAIRS, TIER_C_EXCLUDED, MODEL, RATIONALE,
@@ -284,6 +285,81 @@ test("f-a2.c4.birth-race (CLR23, counterparty_birth_race) converts — two sessi
   for (const x of receipts.filter((y) => y?.posted === false)) {
     assert.ok(typeof x?.refusal?.tier === "string" && x.refusal.tier.length > 0,
       `c4.birth-race: every non-posting side carries a TYPED refusal, not a bare exception (got ${JSON.stringify(x?.refusal)})`);
+  }
+});
+
+test("f-a2.c4.birth-race-human a HUMAN approve racing an agent post on ONE new counterparty (R5-B3)", async (t) => {
+  if (await gateCore(t)) return;
+  // WHAT THE §E BIRTH LOCK IS FOR. Both sides of `c4.birth-race` are agent posts, and both take
+  // vendor(203005003) then client(203005004) before entering the delegate — a consistent order,
+  // so they serialize. The HUMAN lane takes NEITHER advisory: `approve_entry` goes straight into
+  // the delegate and serializes inside `uq_counterparties_identity` while holding row locks the
+  // agent side needs. §E now takes 203005004 INSIDE the delegate's birth branch, before the
+  // insert, so every caller of the delegate is serialized rather than this lane's own two.
+  //
+  // WHAT THIS CELL CAN AND CANNOT PROVE — MEASURED, NOT ASSUMED, because the difference is the
+  // whole value of the cell. A mutation probe on the rig stripped the advisory from the
+  // INSTALLED ninth body and re-ran this race twelve times in both orderings: ZERO deadlocks,
+  // with the lock and without it, and the agent side refused CLR12 every single time. The reason
+  // is asserted below rather than described: `assert_books_current` (0005:493-516) is a TIER-A
+  // gate, so it fires before the agent lane takes any advisory at all, and the human side's
+  // commit moves the books token first. This pairing therefore CANNOT exhibit the cycle on this
+  // branch, and a cell claiming otherwise would be green for a reason unrelated to the fix.
+  //
+  // So the deadlock arm is DECLARED with its ground asserted positively (law 31), the durable
+  // protection is §J's order guard on the installed body — the advisory must appear BEFORE the
+  // insert it serializes — and what this cell forces is everything that IS reachable: no raw
+  // 40P01, exactly one birth, and a typed outcome on each side.
+  const name = `BIRTHRACEH ${Date.now().toString(36)} SDN BHD`;
+  const agent = await agentPostable(OWNER(), { client: A2(), amount: 421000, vendor: { new: { name } } });
+  const human = await agentPostable(OWNER(), { client: A2(), amount: 421500, vendor: { new: { name } } });
+
+  const humanSide = {
+    role: ROLES.authenticated, jwtSub: OWNER(),
+    run: (c) => c.query(
+      "select clara.approve_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+      + "p_attestation => $3::text, p_op_key => $4::text) as r",
+      [human.args.entry, human.args.expectedRevision, "rig", opk("c4rhH")]).then((x) => x.rows[0].r),
+  };
+  const agentSide = {
+    role: ROLES.wakeInteractive, wakeSecret: agent.cred.secret,
+    run: (c) => c.query(
+      "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+      + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+      + "p_model => $6::jsonb, p_op_key => $7::text) as r",
+      [agent.args.entry, agent.args.expectedRevision, A2(), agent.args.booksVersion,
+        RATIONALE, JSON.stringify(MODEL), opk("c4rhA")]).then((x) => x.rows[0].r),
+  };
+
+  // THE DRIVER IS THE CONCURRENT ONE. `holdThenContend` runs side A to completion before B is
+  // fired, so A never waits on B and the schedule cannot produce a cycle at all — `sawDeadlock`
+  // under it is a question with one possible answer. `concurrentTwoSession` opens both
+  // transactions and fires both statements, which is the only shape an ABBA can appear in.
+  const out = await concurrentTwoSession({ a: humanSide, b: agentSide });
+  assert.equal(sawDeadlock(out), false,
+    `c4.birth-race-human: NEITHER side observes 40P01/40001 — a raw deadlock is not a refusal, and the wake lane has no arm for one (a=${JSON.stringify(out.a)}, b=${JSON.stringify(out.b)})`);
+
+  // THE GROUND FOR THE DECLARATION, ASSERTED. If the agent side ever stops being pre-empted here
+  // — a reordering that moved the freshness gate below the locks, say — this assertion goes RED
+  // and the declaration above has to be revisited rather than quietly outliving its reason.
+  assert.equal(out.b?.ok, false,
+    `c4.birth-race-human: the agent side does not complete against a concurrent human approve (got ${JSON.stringify(out.b)})`);
+  assert.equal(out.b?.code, "CLR12",
+    `c4.birth-race-human: …and it is the TIER-A books-freshness gate that stops it, BEFORE any advisory is taken — which is why this pairing cannot reach the birth contention (got ${out.b?.code}: ${out.b?.message})`);
+
+  // EXACTLY ONE BIRTH, which is the outcome the serialization exists to produce.
+  const born = await rootQuery(
+    `select count(*)::int as n from clara.counterparties
+      where client_id=$1 and name_normalized=lower(regexp_replace($2,'[^a-zA-Z0-9]','','g'))`,
+    [A2(), name]);
+  assert.equal(born.rows[0].n, 1,
+    `c4.birth-race-human: exactly ONE counterparty was born for the contested name (got ${born.rows[0].n})`);
+
+  // AND THE HUMAN SIDE ANSWERS IN ITS OWN VOCABULARY — completed, or a typed CLR. "Some untyped
+  // error" is the outcome this cell exists to forbid, so it is named rather than tolerated.
+  if (out.a?.ok === false) {
+    assert.match(String(out.a.code ?? ""), /^CLR\d\d$/,
+      `c4.birth-race-human: the HUMAN side's failure is a typed CLR (got ${out.a.code}: ${out.a.message})`);
   }
 });
 
