@@ -101,7 +101,7 @@ every clock-out)*
 |---|---|---|---|
 | Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — PR-1 #263 (0089-0095) · PR-2 #265 (witnessFacts.v1, v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 + 0097 CUTOVER, ceremonied 2026-08-20)** · **PR-4 #268 (0098, shipped UNPOINTED — activated at the 2026-08-21 window)**. Consents granted+activated RS/BEE/RPR. **Corpus MEASURED**: witness 0/33 vs legacy 28/92 on two named conjuncts (NIL-TAX; the type_code prompt-intent mismatch) — **both fixed by the openers and re-measured 2026-08-21**. D12 identity gate PASSES. | ceremonied | #263 #265 #266 #267 #268 |
 | Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
-| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design folding to v5.** Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole · B10/B11's pre-stamp counterparty raise that would kill the sales lane · the unbuildable-as-written `interactive_client` limb) + **11 materials** (headline: B4-sales derived against a body superseded at `0022`, wrong on every rounding invoice — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width RULED at the gate: chat parity leaves the train (own follow-on PR) · B12/B13 CUT on correctness grounds (Tier-D fallback stands) · PR-1 = THREE files, one D1 window** (posted-chain as its own file). Authority rulings unchanged (ADR-0072); OQ-2/3/5 open. Build NOT started. | design | — |
+| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design at v6.** Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole → **B15** · B10/B11's pre-stamp counterparty raise → projected-state predicate · the unbuildable-as-written `interactive_client` limb → corrected, both CHECKs extend) + **11 materials** (headline: B4-sales derived against a body superseded at `0022` — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width: B12/B13 CUT on correctness grounds · PR-1 = THREE files, one D1 window · chat parity RIDES THE TRAIN — owner-ruled 2026-08-22 (方案二, D34), overriding the gate's severance; orchestrator's dissent on file.** **OQ-2/3/5 RULED 2026-08-22** (owner, per recommendations: stop-write-keep-table + drop the permanently-false `rule_backed` column · preview verb retires + the seeding tick re-points to the knowledge layer · B4-generic adopted with both costs priced and MEASURED at PR-4). Build NOT started — PR-1 authoring is next. | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④), Fix A proceeds: both writer bodies in ONE migration, 13-cell battery, D1 on the 0085 template | design | — |
 | Harness — **the CI economics overhaul (ADR-0073)** | **DELIVERED 2026-08-21, proven on all three event paths same-day**: PR run green in **~13 min** (was ~42) · post-merge push green · the manual dispatch full sweep green incl. all 12 closed-wave drills + 4 frontier legs in their new sweep-only home. Reviews: 5-lens adversarial workflow (3 confirmed → fixed: `bash -e {0}` exact shells · classifier learns `.github/actions/**` · per-run dispatch concurrency group) + Codex cross-model (3 shared-host races → fixed). | merged | #278 |
 
@@ -136,8 +136,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    windows, from merged `main`.** Track B runs in parallel; **task #17 is unblocked** (ADR-0072 ④).
 4. **The remaining owner-sitting items.** ~~R1~~ and ~~the Wave-G corpus decisions~~ are
    **RULED — ADR-0072** (④ and ⑤). Still open: **the CI economics overhaul** · **FX-lite build
-   timing** (ADR-0071/P-FX; law 18 MYR-only stands) · **F-A2's OQ-2 / OQ-3 / OQ-5** (design §4,
-   each with a recommendation) · **the corpus's oracle-tier gaps** (BEE's GL + TB for both FYs
+   timing** (ADR-0071/P-FX; law 18 MYR-only stands) · ~~F-A2's OQ-2/OQ-3/OQ-5~~ — **RULED
+   2026-08-22** (lane row) · **the corpus's oracle-tier gaps** (BEE's GL + TB for both FYs
    and the full FY2025 document · RPR's Feb/Mar-2025 statements or a written statement that none
    exist · a named producer/certifier for RS and RPR · which RPR statement series is
    authoritative) · **OD-3's acceptance-bar figures for every slot but BEE**.
@@ -475,7 +475,9 @@ records: its ceremony as-runs and the corpus measurement.)*
   materials, width severance ruled — record `docs/plan/active/f-a2-pr0-gate-record.md`, design
   folded to v5. **The stranded pair re-fired and settled** (archive part2 has the record).
   **WSL exit-255 diagnosed benign** (VM-teardown marking, not container flake). Known-issues
-  archive sweep (4 resolved rows → part2).
+  archive sweep (4 resolved rows → part2). **Owner sitting (2026-08-22): 方案二 ruled — chat
+  parity back IN-TRAIN (D34, gate severance overridden in part, dissent on file) · OQ-2/3/5
+  all RULED per recommendations (D35-D37) · design → v6.**
 - **2026-08-21 (the CI-economics session)** — **ADR-0073 delivered and proven on all three
   event paths same-day** (#278): per-PR ~13 min (was ~42) · post-merge push green · manual
   dispatch sweep green incl. all 12 closed-wave drills + 4 frontier legs. Reviews: 5-lens
