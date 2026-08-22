@@ -7,7 +7,8 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-21 — the F-A2 opener train is CEREMONIED; trued at every clock-out)*
+*(as of 2026-08-22 — the opener train is CEREMONIED and F-A2's PR-0 gate has RUN; trued at
+every clock-out)*
 
 - **THE F-A2 OPENER TRAIN IS LIVE — Windows A and B ran COMBINED, 2026-08-21 ~10:56-11:02 MYT**
   (as-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). **Live DB: 97 migrations,
@@ -100,7 +101,7 @@ file wins or it is stale — and truing it is the first thing you do.
 |---|---|---|---|
 | Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — PR-1 #263 (0089-0095) · PR-2 #265 (witnessFacts.v1, v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 + 0097 CUTOVER, ceremonied 2026-08-20)** · **PR-4 #268 (0098, shipped UNPOINTED — activated at the 2026-08-21 window)**. Consents granted+activated RS/BEE/RPR. **Corpus MEASURED**: witness 0/33 vs legacy 28/92 on two named conjuncts (NIL-TAX; the type_code prompt-intent mismatch) — **both fixed by the openers and re-measured 2026-08-21**. D12 identity gate PASSES. | ceremonied | #263 #265 #266 #267 #268 |
 | Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
-| Wave F · Track A — **F-A2 proper** | **DESIGNED (v4), RULED, NOT YET BUILT.** Design of record `docs/plan/active/f-a2-agentic-posting-design.md` + `f-a2-annexes-{1-estate,2-mechanics,3-record}.md`, driven v1→v4 through an adversarial round, a delta round and a final verify (the delta round REVERSED v2's durable-CHECK weakening on its own reader census; the verify caught a four-apostrophe SQL default that made the which-model-posted wall always pass). **Authority RULED — ADR-0072:** any amount/no thresholds · OQ-4 three exits · OQ-6 no category gate on the agent lane, human lane's gate STANDS. The unattended posting lane (PR-0..PR-4 + PR-1b, two further D1 windows) has **NOT started** — every corroborating invoice holds an unattended-eligible ticket nothing yet redeems. **OQ-2/3/5 stay open with recommendations.** | design | — |
+| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design folding to v5.** Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole · B10/B11's pre-stamp counterparty raise that would kill the sales lane · the unbuildable-as-written `interactive_client` limb) + **11 materials** (headline: B4-sales derived against a body superseded at `0022`, wrong on every rounding invoice — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width RULED at the gate: chat parity leaves the train (own follow-on PR) · B12/B13 CUT on correctness grounds (Tier-D fallback stands) · PR-1 = THREE files, one D1 window** (posted-chain as its own file). Authority rulings unchanged (ADR-0072); OQ-2/3/5 open. Build NOT started. | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④), Fix A proceeds: both writer bodies in ONE migration, 13-cell battery, D1 on the 0085 template | design | — |
 | Harness — **the CI economics overhaul (ADR-0073)** | **DELIVERED 2026-08-21, proven on all three event paths same-day**: PR run green in **~13 min** (was ~42) · post-merge push green · the manual dispatch full sweep green incl. all 12 closed-wave drills + 4 frontier legs in their new sweep-only home. Reviews: 5-lens adversarial workflow (3 confirmed → fixed: `bash -e {0}` exact shells · classifier learns `.github/actions/**` · per-run dispatch concurrency group) + Codex cross-model (3 shared-host races → fixed). | merged | #278 |
 
@@ -116,8 +117,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    (`docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`).
    **What they leave for the next round**, all prompt-side and none of it frozen-evaluator work:
    the **MYR currency-code prompt fix**, the **dash-is-not-a-value clarification**, the
-   **vision-side SST-id shape check**, and **`coverage.pages`** (see Known issues). **Still owed
-   from before the window:** two ordinary re-fires for the stranded pair.
+   **vision-side SST-id shape check**, and **`coverage.pages`** (see Known issues).
+   ~~The stranded-pair re-fires~~ — **DONE 2026-08-21** (Known issues).
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (three dispositions, merged #249, ceremonied; **E-R14 OPEN**).
    ~~The BEE FY2025 live close~~ — **RULED 2026-08-16, deferred WHOLESALE to the Wave-G reset**
@@ -370,13 +371,9 @@ machine-local-custody shape that bit the DSN bridge twice; worth pricing for in-
   gate. Workaround: wording — never quote a recut statement in a CoR comment. Real fix = mask
   the block's own comments before the CREATE test + a selftest cell. Judgement logic, its own
   reviewed PR; **re-homed to the F-A2 fix queue.**
-- ~~**F-A2 riders ③④⑤ / the 0-live gap**~~ — **RESOLVED 2026-08-21, LIVE-PROVEN.** ③ and ④ went
-  live in v66 and were exercised on their first outing under the heaviest load yet (19 documents
-  at once, 40 calls, zero failures) against the F-A1 run's 7 casualties and four hangs on the
-  same lane; ⑤ ran at the ceremony and returned 0.
-- ~~**The witness corroboration rate is 0/33**~~ — **RE-MEASURED 12/20** vs 0/20 like-for-like.
-  **Fail-closed posture UNCHANGED**: corroboration is achievable but F-A2 proper is unbuilt, so
-  those invoices still ride the human-confirm draft lane and nothing posts unattended.
+- ~~Riders ③④⑤ 0-live~~ · ~~corroboration 0/33~~ · ~~ci.yml over 500~~ · ~~the stranded pair~~ —
+  **all four RESOLVED and ARCHIVED 2026-08-22** (records in
+  `docs/plan/completed/progress-archive-2026-08-part2.md`; re-measure 12/20 stands in posture).
 
 **THE NEXT-ROUND QUEUE (from the 2026-08-21 re-measure; the first four are PROMPT-side — the
 evaluator stays strict, and widening it would be a frozen-evaluator change needing its own
@@ -404,24 +401,18 @@ version + ceremony):**
   the sidecar `runId` is clobbered on the re-mint path —
   `packages/runtime/lib/reconciler-documents.mjs:198-206` with `packages/runtime/lib/spool.mjs:124`.
   A real defect with a known site pair; its own PR, not a rider on a pacing fix.
-- **The `failed_retry` stranded pair — CLOSED AT 2, STILL OWED, and it cannot recur.** `0097`
-  left `0051`'s `failed_retry` door scoped to `v_lane` alone, so post-cutover a document whose
-  newest `invoice_facts` task is `failed` with no `llm_witness` sibling makes that door's
-  subquery return NULL and `NULL = 'failed'` is not true. **Measured live: the population is
-  CLOSED at 3** — 2 truly stranded (`0cb7c1f1` BEE · `c597a24b` ROME SECRETARY), the third
-  rescued by `receipt_backfill`. **Remedy: an ordinary re-fire** — both clients hold an ACTIVE
-  `witness_extraction` activation, so the backstop mints a fresh task with no migration; only
-  the HUMAN verb refuses. **Not done at the 2026-08-21 window; still owed.** No new document can
-  enter this state — every post-cutover invoice has an `llm_witness` task by construction.
+- *(The stranded-pair row is in the archived batch above; the `0051` door's `v_lane` defect
+  stays unrepaired by design — no new member can mint post-cutover.)*
 - **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered
   books-writer would pass silently — the roster runs only at 0057's own apply. Candidate: a
   standing census cell. **Sharper since the cutover:** `0096` rotated the writer estate and
   `0098` added `_persist_statement_core_v2`, so the guarded population grew while the roster
   stayed pinned. **Re-homed to the F-A2 fix queue.**
-- **The WSL host is showing container instability** (observed 2026-08-20): containers exit
-  **255**, including CI **service** containers, which makes a red leg indistinguishable from a
-  real failure until someone looks. Not diagnosed. **Inspect while runners are IDLE and BEFORE
-  the next ceremony night** — the worst moment to learn the host drops containers is mid-D1.
+- **WSL exit-255 containers — DIAGNOSED 2026-08-21, benign:** docker marks still-running
+  containers `Exited (255)` when the WSL VM is torn down under them; all seven on the host
+  correlate exactly with VM restarts (8/15 · 8/19 · 8/21), dockerd clean, disk/memory ample.
+  A red CI leg with exit-255 services means a VM teardown happened mid-run — the standing
+  no-`wsl --shutdown`-with-busy-runners law already forbids the cause.
 - **Rig recipe pin (2026-08-20):** drive the db suite with libpq `PG*` vars +
   `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL` (a21-prestate ×6 + pipeline ×1 red
   otherwise — the CI shape is ci.yml's own env). Same session: WSL **split-brain** mode
@@ -439,9 +430,6 @@ version + ceremony):**
   answered). **One stored-number oddity stays UNADJUDICATED:** the four `opening_items` sum to
   +7,850,406 cents with no `obe_plug` item while the journal balances through `190-OBE` — the
   reader did not know that table's sign convention and did not guess.
-- ~~**ci.yml exceeds the 500-line harness file limit**~~ — **RESOLVED 2026-08-21 by
-  ADR-0073's composite-action refactor** (lever 5): ci.yml is 500 lines exactly; step bodies
-  live verbatim in `.github/actions/*`, each file under the limit.
 - **WSL VM/NAT operating law** (2026-08-14/15 incident; narrative archived): a detached keeper
   for any port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList
   "-e","sleep","43200"` — NAT dies ~10 min after the last client detaches even with the VM
@@ -482,6 +470,12 @@ version + ceremony):**
 `docs/plan/completed/progress-archive-2026-08.md` + `-part2.md`, alongside F-A1's operative
 records: its ceremony as-runs and the corpus measurement.)*
 
+- **2026-08-21/22 (the PR-0 gate + housekeeping session)** — **F-A2's PR-0 gate ran both legs**
+  (8-lens native review workflow + Codex cross-model, ~60 verified lanes): 3 blockers, 11
+  materials, width severance ruled — record `docs/plan/active/f-a2-pr0-gate-record.md`, design
+  folded to v5. **The stranded pair re-fired and settled** (archive part2 has the record).
+  **WSL exit-255 diagnosed benign** (VM-teardown marking, not container flake). Known-issues
+  archive sweep (4 resolved rows → part2).
 - **2026-08-21 (the CI-economics session)** — **ADR-0073 delivered and proven on all three
   event paths same-day** (#278): per-PR ~13 min (was ~42) · post-merge push green · manual
   dispatch sweep green incl. all 12 closed-wave drills + 4 frontier legs. Reviews: 5-lens

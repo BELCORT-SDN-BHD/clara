@@ -121,3 +121,28 @@ this file's "Session log (entries through 2026-08-16)" section by the same law t
   documents firing at once with zero failures on the lane that produced 7 casualties two days
   earlier. Four prompt-side findings queued; both freeze manifests deploy-locked.
   *(As-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`.)*
+
+## Known-issues rows archived at the 2026-08-22 sweep (each resolved; moved with their records)
+
+- **F-A2 riders ③④⑤ / the 0-live gap — RESOLVED 2026-08-21, LIVE-PROVEN.** ③ and ④ went live
+  in v66 and were exercised on their first outing under the heaviest load yet (19 documents at
+  once, 40 calls, zero failures) against the F-A1 run's 7 casualties and four hangs on the same
+  lane; ⑤ ran at the ceremony and returned 0.
+- **The witness corroboration rate 0/33 — RE-MEASURED 12/20** vs 0/20 like-for-like (denominator
+  rule binds). Fail-closed posture unchanged at the time of archiving: F-A2 proper unbuilt, so
+  corroborating invoices still rode the human-confirm draft lane.
+- **ci.yml over the 500-line harness limit — RESOLVED 2026-08-21 by ADR-0073's composite-action
+  refactor** (lever 5): ci.yml 500 lines exactly; step bodies verbatim in `.github/actions/*`.
+- **The `failed_retry` stranded pair — RE-FIRED AND SETTLED 2026-08-21 (the full record).**
+  `0097` left `0051`'s `failed_retry` door scoped to `v_lane` alone; the stranded population
+  measured CLOSED at 3 (2 truly stranded — `0cb7c1f1` BEE · `c597a24b` ROME SECRETARY — 1
+  rescued by `receipt_backfill`). Both re-fired through the ordinary backstop
+  `clara.enqueue_invoice_facts` as `clara_runtime`: read-only pre-confirm first (each document's
+  only extraction attempt a `failed` legacy-lane task; all three `witness_extraction`
+  activations ACTIVE), both calls returned `queued` (tasks `1d23b9d7…` · `d352338a…`), both
+  settled `done` within minutes, and each document now carries `llm_text_facts` +
+  `llm_vision_facts` both `done`. DSN captured env-to-env from a `clara-backup` sleeper (one
+  recreate needed: `fly machine run` takes the command as split argv — a quoted `"sleep 5400"`
+  becomes a single argv-0 and the machine flaps exit-1), never printed; sleeper destroyed at
+  close. The `0051` door defect itself is unrepaired by design (per-document remedy; no new
+  member can mint post-cutover).
