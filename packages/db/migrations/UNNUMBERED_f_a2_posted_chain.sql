@@ -111,7 +111,8 @@ begin
     foreach v_key in array array[
         '     or p_outcome not in (''drafted'',''skipped_lane'',''noop_existing'',''failed'')',
         '  if p_outcome=''drafted'' and (p_entry is null or not exists(',
-        '             or (e.status=''approved'' and e.checked_via_rule_id is not null)))) then',
+        '        and (e.status=''draft''
+             or (e.status=''approved'' and e.checked_via_rule_id is not null)))) then',
         '      last_refusal=case when p_outcome=''drafted'' then null else p_refusal end where id=a.id;',
         '    v_item_outcome:=case p_outcome when ''drafted'' then ''drafted''
       when ''noop_existing'' then ''noop_existing'' else ''skipped_lane'' end;',
@@ -219,9 +220,33 @@ begin
     v_new := replace(v_new,
       '  if p_outcome=''drafted'' and (p_entry is null or not exists(',
       '  if p_outcome in (''drafted'',''posted'') and (p_entry is null or not exists(');
+    -- THE PARTITION, NOT AN APPENDED DISJUNCT (C4). The first cut widened the OUTER gate to
+    -- `p_outcome in ('drafted','posted')` and APPENDED a receipt disjunct — but left
+    -- `e.status='draft'` and the approved-with-rule-id arm UNCONDITIONAL inside the exists. So a
+    -- Tier-B-REFUSED draft (status draft, no receipt) settled with p_outcome='posted' was
+    -- ADMITTED, and then everything downstream believed it: `last_refusal` cleared, the item
+    -- recorded `posted` with an entry_id, `posted_count` incremented, and the task landed
+    -- 'completed' — after which `admit` answers `already_done` forever and the filing is
+    -- silently abandoned with its draft still sitting there. A wrong number is not required for
+    -- this to be the worst class of bug in the file: an ABANDONED filing is.
+    --
+    -- The anchor is therefore WIDENED to both live lines so the whole condition can be
+    -- partitioned by outcome: `drafted` keeps its admitted set BYTE-IDENTICAL, and `posted`
+    -- demands approved AND a receipt. Four closers in, five out.
+    --
+    -- POST-FIX, a posted settle naming a draft falls to ARM 3 and raises CLR11 'draft settlement
+    -- entry not found' — parity with the drafted arm. It is NOT routed to skipped_lane: that
+    -- would record false data about what happened, which is the same class of defect as the
+    -- fabricated CLR29 two sites below.
+    --
+    -- INHERITED HAZARD, NOTED NOT FIXED: a raise leaves the task 'running' (the 0047 wedge).
+    -- PR-2's producer must settle only AFTER the post commits.
     v_new := replace(v_new,
-      '             or (e.status=''approved'' and e.checked_via_rule_id is not null)))) then',
-      '             or (e.status=''approved'' and e.checked_via_rule_id is not null)
+      '        and (e.status=''draft''
+             or (e.status=''approved'' and e.checked_via_rule_id is not null)))) then',
+      '        and ((p_outcome=''drafted''
+              and (e.status=''draft''
+                   or (e.status=''approved'' and e.checked_via_rule_id is not null)))
              or (p_outcome=''posted'' and e.status=''approved''
                  and exists(select 1 from clara.entry_post_receipts pr where pr.entry_id=e.id))))) then');
 
@@ -332,7 +357,9 @@ begin
     raise exception 'F-A2 part3 tail: an existing run gained a non-zero posted_count' using errcode='CLR10';
   end if;
 
-  -- Layers 2 and 3 + the four sites, in BOTH overloads.
+  -- Layers 2 and 3 + the four sites, in BOTH overloads. These are SPLICE-LANDED reads: they say
+  -- the text this file meant to write is present, which is what an anchor-driven splice can
+  -- honestly assert. Behaviour is proven by C.9 on the rig.
   foreach v_sig in array array['clara.settle_autodraft_task(uuid,text,bigint,uuid,jsonb,text)',
       'clara.settle_autodraft_task(uuid,text,bigint,uuid,jsonb)'] loop
     select p.prosrc into v_src from pg_proc p where p.oid=v_sig::regprocedure;
@@ -340,6 +367,11 @@ begin
         '''failed'',''posted'')',
         'if p_outcome in (''drafted'',''posted'') and (p_entry is null',
         'exists(select 1 from clara.entry_post_receipts pr where pr.entry_id=e.id)',
+        -- C4: the draft arm is FENCED on p_outcome='drafted'. Read positively, because the
+        -- defect was an appended disjunct beside an unconditional one — a check for the new
+        -- disjunct alone passed happily while the hole stayed open.
+        '(p_outcome=''drafted''
+              and (e.status=''draft''',
         'last_refusal=case when p_outcome in (''drafted'',''posted'') then null',
         'when ''posted'' then ''posted''',
         'case when v_item_outcome in (''drafted'',''posted'') then p_entry end',
@@ -348,6 +380,21 @@ begin
         raise exception 'F-A2 part3 tail: % is missing %', v_sig, left(v_key,50) using errcode='CLR10';
       end if;
     end loop;
+    -- C4, AND WHAT IS *NOT* CHECKED HERE, stated because the first cut of this tail tried it and
+    -- it was the "spelling is not identity" defect (review law 3). A tripwire on the SUBSTRING
+    -- `and (e.status='draft'` cannot decide this question at all: after the partition that text
+    -- legitimately appears INSIDE the `(p_outcome='drafted' and (…))` arm, so its presence
+    -- proves nothing and its absence would prove nothing either. A substring of a validator is a
+    -- projection of the validator, not the validator.
+    --
+    -- THE BEHAVIOURAL PROOF THEREFORE LIVES IN THE BATTERY (C.9's three must-fail cells), where a
+    -- real prestate exists: an admitted task whose entry is left DRAFT with no receipt, settled
+    -- 'posted', must be REFUSED; the same entry under 'drafted' must be admitted; and an
+    -- APPROVED entry with a receipt must be admitted under 'posted'. Building that prestate here
+    -- would mean writing a filing and a journal_entries row inside a ceremony migration, firing
+    -- that table's own trigger set at apply time on a live database — a worse thing to ship than
+    -- the check is worth. The reads in this loop are SPLICE-LANDED reads, and are described as
+    -- such rather than as behavioural evidence.
     -- EXTEND-NEVER-WEAKEN, read off the body: every arm that is not about `posted` survives.
     foreach v_key in array array['task_superseded','registry_superseded','registry_released',
         'run_superseded','superseded_by_human','refused_attempts',
