@@ -114,7 +114,33 @@ async function draftSales({ client, cited, lines, codingKind = "sales_invoice" }
       evidence: [ev(region?.id, region?.text_content ?? rm(0), "invoice.total")],
       codingKind, opKey: `sales:${cited.filingId}:${cited.documentId}`,
     });
-  } catch (e) { noteLane(`draftSales(${codingKind}) raised ${e.code}: ${e.message} — sales draft path shape assumption`); return null; }
+  } catch (e) {
+    noteLane(`draftSales(${codingKind}) raised ${e.code}: ${e.message} — sales draft path shape assumption`);
+    // F-A2 PR-1 (N1): the refusal is RETURNED, not swallowed into null. The sales shape floor
+    // now runs at the DRAFT door on the agent lane, so a deliberately mis-shaped fixture is
+    // refused a door earlier and the cells below have to be able to SEE which family refused.
+    // Callers that only test `d?.entry_id` are unaffected -- an error object has none.
+    return { error: e };
+  }
+}
+
+/** F-A2 PR-1 (N1, design 3.4): THE SHAPE FLOORS RUN AT THE DRAFT DOOR on the agent lane now,
+ *  so a deliberately mis-shaped coded sales draft is refused before it becomes a draft. It is
+ *  the SAME floor raising the SAME family it raised at approve -- only the door moved, and a
+ *  coded sales_invoice has no other lane to be born on (clara.draft_entry takes no
+ *  p_coding_kind).
+ *
+ *  A cell whose claim is "this shape never approves" is SATISFIED by that refusal and says so
+ *  here; it does not get to skip quietly, because an unexpected errcode still fails. Mirrors
+ *  `n1DraftRefusal` in wave-a2-execute-rule-post.test.mjs, which is the same disposition on the
+ *  purchase side. */
+function n1SalesDraftRefusal(maybe, label, codes = ["CLR23", "CLR21"]) {
+  const e = maybe?.error;
+  if (!e) return false;
+  assert.ok(codes.includes(e.code),
+    `${label}: the draft-door refusal rides the same family the approve door used to raise (got ${e.code}: ${e.message})`);
+  noteLane(`${label}: refused at the DRAFT door (N1) with ${e.code} -- the approve-door assertions below are satisfied one door earlier`);
+  return true;
 }
 
 before(async () => {
@@ -324,6 +350,7 @@ test("FIX-1 a sales invoice with an EXTRA payable-control leg is REFUSED (no lau
     { account_code: AP4, debit_cents: 0, credit_cents: 10500, description: "launder-into-payable" },
   ];
   const d = await draftSales({ client, cited: f.cited, lines });
+  if (n1SalesDraftRefusal(d, "FIX-1 control-account laundering")) return;
   assert.ok(d?.entry_id, "the laundering draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aplaunder") }); }
@@ -342,6 +369,7 @@ test("FIX-2 a type-02 (credit note) document coded as a sales_invoice is REFUSED
   assert.ok(f, "the type-02 facts filing was built (mandatory setup)");
   await upsertAccountClassed(world.users.alice, { client, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sstT") }).catch(() => {});
   const d = await draftSales({ client, cited: f.cited, lines: salesLines(10600, 10000, 600), codingKind: "sales_invoice" });
+  if (n1SalesDraftRefusal(d, "FIX-2 type/polarity mismatch")) return;
   assert.ok(d?.entry_id, "the type-mismatch draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aptype") }); }
@@ -380,6 +408,7 @@ test("RESIDUAL-1 a sales invoice laundering a material amount into a ROUNDING le
     { account_code: SRND, debit_cents: 0, credit_cents: 10500, description: "launder-into-rounding" },
   ];
   const d = await draftSales({ client, cited: f.cited, lines });
+  if (n1SalesDraftRefusal(d, "RESIDUAL-1 rounding-leg laundering")) return;
   assert.ok(d?.entry_id, "the rounding-laundering sales draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("apsrnd") }); }

@@ -202,11 +202,48 @@ test("W1 amount exception (SUPERSEDES the draft-time amount_conflict refusal, §
   if (unready(t)) return;
   if (!(await s6FixReady())) { t.skip("fix-batch surface (revise_entry p_amount_override) absent — W1 lands in the post-Codex fix batch"); return; }
   const { users, clients } = world;
+  // F-A2 PR-1 (N1, design 3.4) -- THE DOOR MOVED, AND THIS CELL MEASURES BOTH HALVES.
+  //
+  // WHAT CHANGED, at the bytes. The deferred shape floors now run at DRAFT on the AGENT lane,
+  // immediately after the amount_exception stamp ("so the floors judge the finished draft").
+  // `_assert_supplier_bill_shape_at_projected`'s verified-total tie (0036:837-846) is escaped
+  // ONLY by `amount_override`, so an agent supplier_bill whose payable/expense sum differs from
+  // the corroborated gross is now stamped and then REFUSED CLR23 in the same transaction. The
+  // draft-time half of W1 is therefore closed on the only lane that could ever open it: the
+  // stamp is `p_coding_kind='supplier_bill'`-gated and no human draft verb carries a coding kind.
+  //
+  // WHAT SURVIVES, and it is the whole governance mechanism. `revise_entry` STRIPS AND RE-STAMPS
+  // `amount_exception` (0016:4909-4913, measured on the rig) and is a HUMAN verb, which N1
+  // deliberately does not touch -- so a human editing an agent's numbers to a non-tying figure
+  // still parks the exception on an open draft, approve still refuses CLR21 amount_conflict, and
+  // the governed override still resolves it HIGH-STAKES. Every assertion below is the original's;
+  // only the door that mints the exception moved, from the agent draft to the human revise.
+  //
+  // (a) THE NEW DRAFT-DOOR REFUSAL, forced on its OWN document so it cannot collide with the
+  //     op key or the double-coding wall. Same floor, same family, one door earlier.
+  const doorDoc = (await docWithFacts(users.alice, { client: clients.A1, total: "RM 5,000.00" })).cited;
+  const doorReg = await factsRegion(doorDoc.documentId, FIELD.total);
+  await assertRaises("CLR23",
+    () => wakeBill(users.alice, { client: clients.A1, cited: doorDoc, amount: 400000, evidence: [ev(doorReg.id, doorReg.text_content, FIELD.total)] }),
+    "N1: a non-tying AGENT supplier bill is now refused at the DRAFT door by the same supplier floor that used to refuse it at approve");
+  assert.equal(
+    (await rootQuery("select count(*)::int as n from clara.journal_entries where document_id=$1", [doorDoc.documentId])).rows[0].n,
+    0, "...and no entry is left behind -- the whole draft transaction rolled back");
+
+  // (b) THE SURVIVING DOOR, carrying the rest of W1 verbatim.
   const { cited } = await docWithFacts(users.alice, { client: clients.A1, total: "RM 5,000.00" }); // corroborated 500000
   const freg = await factsRegion(cited.documentId, FIELD.total);
-  // Propose 400000 against a corroborated 500000 total → the draft PERSISTS (no draft refusal).
-  const draft = await wakeBill(users.alice, { client: clients.A1, cited, amount: 400000, evidence: [ev(freg.id, freg.text_content, FIELD.total)] });
-  assert.ok(draft.entry_id, "the mismatch draft PERSISTS (W1 supersedes the §6.5 draft-time refusal)");
+  const conforming = await wakeBill(users.alice, { client: clients.A1, cited, amount: 500000, evidence: [ev(freg.id, freg.text_content, FIELD.total)] });
+  assert.ok(conforming.entry_id, "a TYING agent draft is born normally (mandatory setup)");
+  assert.ok(!(await entryRow(conforming.entry_id)).flags?.amount_exception, "...and carries no exception yet");
+  // The HUMAN revise to a non-tying 400000 -- no override -- re-stamps the exception.
+  await reviseEntry(users.bob, {
+    entry: conforming.entry_id, lines: billLines(EXP, AP, 400000),
+    vendor: { new: { name: "OVERRIDECO SDN BHD", registration_no: "201801000411" } },
+    evidence: [ev(freg.id, freg.text_content, FIELD.total)], expectedRevision: conforming.revision_token,
+  });
+  const draft = { entry_id: conforming.entry_id };
+  assert.ok(draft.entry_id, "the mismatch draft PERSISTS (W1's exception survives N1, on the human revise door)");
   const row = await entryRow(draft.entry_id);
   assert.ok(row.flags?.amount_exception, "the draft carries flags.amount_exception");
   assert.ok((await evidenceRows(draft.entry_id)).length >= 1, "evidence was still written in the draft transaction");
@@ -236,7 +273,14 @@ test("W1 a CONFORMING revise clears the amount_exception (no override needed)", 
   const { users, clients } = world;
   const { cited } = await docWithFacts(users.alice, { client: clients.A2, total: "RM 5,000.00" });
   const freg = await factsRegion(cited.documentId, FIELD.total);
-  const draft = await wakeBill(users.alice, { client: clients.A2, cited, amount: 400000, evidence: [ev(freg.id, freg.text_content, FIELD.total)] });
+  // F-A2 PR-1 (N1): the exception is minted by the HUMAN revise, not by the agent draft -- see
+  // the sibling W1 cell's header for the door that moved and the one that survived.
+  const draft = await wakeBill(users.alice, { client: clients.A2, cited, amount: 500000, evidence: [ev(freg.id, freg.text_content, FIELD.total)] });
+  await reviseEntry(users.bob, {
+    entry: draft.entry_id, lines: billLines(EXP, AP, 400000),
+    vendor: { new: { name: "MISMATCHCO SDN BHD", registration_no: "201801000413" } },
+    evidence: [ev(freg.id, freg.text_content, FIELD.total)], expectedRevision: draft.revision_token,
+  });
   assert.ok((await entryRow(draft.entry_id)).flags?.amount_exception, "the mismatch draft carries the exception");
   // Revise to the CONFORMING total (500000) → exception clears; approve succeeds.
   const rev = await reviseEntry(users.bob, { entry: draft.entry_id, lines: billLines(EXP, AP, 500000), vendor: { new: { name: "CONFORMCO SDN BHD", registration_no: "201801000412" } }, evidence: [ev(freg.id, freg.text_content, FIELD.total)], expectedRevision: (await entryRow(draft.entry_id)).revision_token });
@@ -270,7 +314,11 @@ test("vendor_malformed: a supplier bill proposing a blank-name vendor → CLR21 
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // F-A2 PR-1 (D11): the page states its supplier, so the document has a readable DIRECTION.
+  // Without it the direction-family arm -- which now binds every agent-lane coded draft, not
+  // only the autodraft wake kind -- refuses `direction_family_mismatch` one check before the
+  // discriminant this cell exists to force.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, direction: "purchase" });
   await assertRaisesReason(CLR21, REASON.vendorMalformed,
     () => wakeBill(users.alice, { client: clients.A1, cited, amount: ROUTINE_CENTS, vendor: { new: { name: "   " } } }),
     "blank vendor name → CLR21 vendor_malformed");
@@ -280,7 +328,9 @@ test("evidence_invalid: a document-bound bill citing a region that does not belo
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // D11: a stated direction, so the refusal forced below is the EVIDENCE discriminant and not
+  // a direction-family mismatch raised one check earlier.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, direction: "purchase" });
   const cred = await mintInteractive(firm);
   const res = await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId });
   const { randomUUID } = await import("node:crypto");
@@ -388,7 +438,10 @@ test("W5 explicit non-MYR currency in a SUBMITTED evidence row → CLR21 currenc
   if (!(await s6FixReady())) { t.skip("fix-batch surface absent — W5 evidence-row currency check lands post-fix"); return; }
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 }); // Tier B (no facts)
+  // D11: a stated direction (still Tier B -- the direction seed states an identity, never the
+  // arithmetic, so the document does not corroborate). Without it the direction-family arm
+  // refuses before the CURRENCY discriminant this cell forces.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, direction: "purchase" }); // Tier B (no corroboration)
   const cred = await mintInteractive(firm);
   const res = await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId });
   const usdEvidence = [ev(cited.regionId, "USD", FIELD.currency), ev(cited.regionId, cited.quote, FIELD.total)];
@@ -426,8 +479,11 @@ test("C-8 stale evidence: a facts completion AFTER a Tier-B draft rotates its to
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 5,000.00", kind: "invoice" });
-  // Tier-B draft (no facts yet): payable/expense = 500000, bound to the OCR region quote.
+  // D11: the page states its supplier so the coded agent draft below is lawful. The direction
+  // seed states an IDENTITY and never the arithmetic, so the document still does not
+  // corroborate and the draft is still Tier B -- which is this cell's whole premise.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 5,000.00", kind: "invoice", direction: "purchase" });
+  // Tier-B draft (not corroborated yet): payable/expense = 500000, bound to the OCR region quote.
   const draft = await wakeBill(users.alice, { client: clients.A2, cited, amount: 500000 });
   // Facts complete LATER with a CONTRADICTING total (600000) → token rotates.
   // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never

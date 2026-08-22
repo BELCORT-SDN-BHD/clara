@@ -149,7 +149,17 @@ after(async () => {
  * READ, not the writer: seeding through persist_invoice_facts would drag its whole
  * corroboration contract into a test about an ordinal.
  */
-async function multiRegionDoc(sub, client) {
+// F-A2 PR-1 (D11): `direction` — a PER-CELL variant, and it is per-cell for a measured reason.
+// The draft core's direction-family arm now binds every agent-lane coded draft rather than only
+// the autodraft wake kind, so the two cells here that DRAFT a `supplier_bill` need the document
+// to state whose page it is. Seeding that the ordinary way (s6-helpers' `seedCitedDocument
+// ({direction})`) mints a WHOLE EXTRA invoice_facts generation with three more regions, which
+// renumbers this file's entire ordinal arithmetic — the thing every other cell measures. So the
+// variant states the supplier IN PLACE OF the currency region on the extraction this fixture
+// already builds, and adds only the missing invoice_facts TASK row (a task carries no regions)
+// so clara._document_facts_extraction can resolve it. Region COUNT and ordering key are
+// untouched; the ordinal cells never pass the flag and are byte-identical either way.
+async function multiRegionDoc(sub, client, { direction = false } = {}) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
   // Two more regions on the SAME (ocr) extraction.
@@ -169,13 +179,29 @@ async function multiRegionDoc(sub, client) {
      values($1,$2,$3,'clara-fixture:x54','invoice_facts',1,'done',1)`,
     [ext2, firm, cited.documentId],
   );
-  for (const [path, text] of [["invoice.total", "RM 5,000.00"], ["invoice.currency", "MYR"]]) {
+  // The SECOND region is the currency by default and the SUPPLIER IDENTITY under `direction`
+  // — one region either way. A third-party name with NO stated registration is the resolver's
+  // (P2) arm, which answers `purchase`: the direction a supplier_bill lawfully sits on.
+  const second = direction
+    ? ["invoice.vendor_name", "X54 SUPPLIES SDN BHD"] : ["invoice.currency", "MYR"];
+  for (const [path, text] of [["invoice.total", "RM 5,000.00"], second]) {
     const r = await rootQuery(
       `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
        values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0) returning id`,
       [firm, ext2, path, text],
     );
     extra.push(r.rows[0].id);
+  }
+  // The task the SELECTOR joins on. clara._document_facts_extraction resolves a legacy
+  // generation through document_processing_tasks (lane invoice_facts/local_facts, status done)
+  // matched on (document, engine_id, version_n) — without it this fixture's invoice_facts rows
+  // are invisible to the resolver, `_document_direction` raises CLR30 and the tri-state answers
+  // `unresolved`. A task row carries NO regions, so nothing renumbers.
+  if (direction) {
+    await rootQuery(
+      `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,version_n,lane,status,workflow_run_id,started_at,finished_at)
+       values($1,$2,'clara-fixture:x54','{}'::jsonb,1,'invoice_facts','done','rig-x54-direction',now(),now())`,
+      [firm, cited.documentId]);
   }
   return { ...cited, firm, extractionId2: ext2, extraRegionIds: extra };
 }
@@ -299,7 +325,9 @@ test("x54.e STABILITY under a DIFFERENT char budget: a smaller p_max_chars trunc
 test("x54.f the region an idx names is genuinely citable: taking (id, text) at a chosen idx and drafting through the real evidence wall succeeds — 0054 did not drift the ordinal off the ids clara._write_entry_evidence reads", async (t) => {
   if (skipHere(t)) return;
   const { users, clients } = world;
-  const doc = await multiRegionDoc(users.alice, clients.A1);
+  // `direction: true` — this cell DRAFTS a supplier_bill, so the page must say whose it is
+  // (D11). See multiRegionDoc's header: the variant adds no region and no extraction.
+  const doc = await multiRegionDoc(users.alice, clients.A1, { direction: true });
   const regions = regionsOf(await getDocumentExtract(users.alice, { document: doc.documentId, client: clients.A1 }));
   // Pick a region by ORDINAL, exactly as the runtime resolution does, and cite the id it
   // names. Deliberately NOT regions[0]: an off-by-one or a positional resolver would pass
@@ -403,7 +431,16 @@ test("x54.h THE SILENT DRIFT, witnessed: an extraction landing between two reads
     client: clients.A1, resolution: res, lines: billLines(EXP, AP, 500000),
     document: doc.documentId, sha256: doc.sha256, vendor: VENDOR,
     evidence: [ev(nowAt.id, meant.text_content, nowAt.field_path)],
-    codingKind: CODING_KIND, opKey: opk("x54drift"),
+    // F-A2 PR-1 (D11): THE GENERIC LANE, and it is forced rather than chosen. This cell's
+    // premise is a document whose ONLY done extraction is the `ocr` one (see ocrOnlyDoc's
+    // header -- a pre-existing invoice_facts pass makes the drift stop renumbering, measured),
+    // so the document has NO fact generation and its direction is `unresolved` by construction.
+    // The direction-family arm now binds every agent-lane draft whose coding kind is
+    // directional, so a supplier_bill here would be refused one door before the EVIDENCE wall
+    // this cell exists to witness. `codingKind: null` is the lawful shape for a
+    // direction-unresolved document, and the wall under test -- clara._bind_evidence -- is
+    // kind-blind, so the claim is untouched.
+    codingKind: null, opKey: opk("x54drift"),
   });
   assert.ok(draft.entry_id, "the wall accepts a drifted-but-text-compatible citation — it has no way to know which list the index came from");
   const rows = await rootQuery("select region_id from clara.entry_evidence where entry_id=$1", [draft.entry_id]);
@@ -434,7 +471,10 @@ test("x54.i THE LOUD CONTRAST: when the drifted region's text does NOT contain t
       client: clients.A1, resolution: res, lines: billLines(EXP, AP, 500000),
       document: doc.documentId, sha256: doc.sha256, vendor: VENDOR,
       evidence: [ev(nowAt.id, meant.text_content, nowAt.field_path)],
-      codingKind: CODING_KIND, opKey: opk("x54drift2"),
+      // D11: the generic lane, for the reason x54.h states -- this document deliberately has no
+      // fact generation, so no directional coding kind is lawful on it, and the refusal this
+      // cell forces must be the EVIDENCE wall's rather than a direction-family mismatch.
+      codingKind: null, opKey: opk("x54drift2"),
     });
   } catch (e) {
     raised = e;
@@ -484,7 +524,9 @@ test("x54.k the SECOND-APPLY refusal is real, not merely present in the file: re
 test("x54.g the wall is UNCHANGED by 0054: an id that names no region of this document is still refused, and this file must never be the reason that stops being true", async (t) => {
   if (skipHere(t)) return;
   const { users, clients } = world;
-  const doc = await multiRegionDoc(users.alice, clients.A1);
+  // `direction: true` for the same reason as x54.f: the refusal this cell forces must be the
+  // EVIDENCE wall's, and a direction-family refusal one door earlier would mask it (D11).
+  const doc = await multiRegionDoc(users.alice, clients.A1, { direction: true });
   const cred = await mintInteractive(doc.firm);
   const res = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: doc.documentId });
   let raised = null;
