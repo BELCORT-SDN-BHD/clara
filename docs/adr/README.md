@@ -152,8 +152,8 @@ governs.
 > all stay per-PR. **Law 77 RATIFIED by the owner 2026-08-22 (digest sign-off).**
 > **RE-TRUED 2026-08-22 (ADR-0074, the Track-A sitting):** laws 78-81 fold below (§11) and laws 2 (invariant
 > (a)), 21, 71 and 76 are amended in place — **all eight RATIFIED 2026-08-22 (owner), with law 78 carrying the
-> rider R-TA-P1-walls.** The three CONSTITUTIONAL ones are ratified as LAW here; their product-text homes
-> (PRD §6.2(a) · ARCHITECTURE §0.1) still carry the pre-amendment wording and are a **named follow-up** — this
+> rider R-TA-P1-walls.** The three CONSTITUTIONAL ones are ratified as LAW here; the product-text homes
+> (PRD §6.2(a) · ARCHITECTURE §0.1) were **amended to match in #287**, `AGENTS.md` stays FLAGGED — this
 > digest governs. TA-P2 routes AROUND law 1; constraints 12/13 re-confirmed.
 
 ## 1 · Product law (the cardinal invariants)
@@ -170,7 +170,7 @@ governs.
    write authorization (structural read-only agent role). *(0002; realized 0015. Invariant (d)
    amended by 0071: the agent's READ path stays structurally read-only; a wake-scoped, allowlisted
    agentic WRITE lane now exists. **Invariant (a) AMENDED by 0074/TA-P7 — law 79 — RATIFIED 2026-08-22
-   (owner); PRD §6.2(a) / ARCH §0.1 still unedited, a named follow-up.** (b)(c) untouched.)*
+   (owner); PRD §6.2(a) / ARCH §0.1 AMENDED to match in #287.** (b)(c) untouched.)*
 3. **Write authorization is lane-split by GRANT, never detected at runtime.** *(0015 —
    the lane-split-by-GRANT principle stands and is the mechanism of 0071's new verbs.
    The "agent-never-signs is the ABSENCE of an entry point" clause is SUPERSEDED by
