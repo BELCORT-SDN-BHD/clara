@@ -6,7 +6,7 @@
 --
 -- WHAT THIS FILE SHIPS, AND WHAT IT DELIBERATELY DOES NOT. It ships the machinery and grants
 -- NOTHING: the post verb's core, the receipt table, the two structural walls, the projected-state
--- predicate, the eighth `_approve_entry_core` body, the draft-core recut, T3's two trigger
+-- predicate, the ninth `_approve_entry_core` body, the draft-core recut, T3's two trigger
 -- recuts, the `interactive_client` limb's durable half, and the two event kinds. The GRANTED
 -- surface — `clara.wake_post_entry`, its single EXECUTE grant, the allowlist rows and the census
 -- that proves them — is part 2 (`UNNUMBERED_f_a2_posting_grants.sql`); the `posted`-outcome chain
@@ -21,7 +21,7 @@
 --   §B  clara._tf_assert_agent_post_receipt + t_je_agent_post_receipt (deferred, ARM-0 first)
 --   §C  GB-2's projected-state predicate + the supplier floor split (D31)
 --   §D  clara._agent_post_entry_core — Tier A, the thirteen Tier-B rungs, Tier C (D4/D6/D7)
---   §E  the EIGHTH clara._approve_entry_core body (breeding excision, ctx identity, the agent
+--   §E  the NINTH clara._approve_entry_core body (breeding excision, ctx identity, the agent
 --       arm, the Tier-C detail reasons) — D1
 --   §F  clara._draft_entry_core, next body (D35's write stop, N1's draft copies, the
 --       direction-family re-cut) — D1
@@ -231,7 +231,7 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- (0.2) THE 0040 MARKER DISPOSITIONS FOR THE EIGHTH BODY (Annex B.10). The 0040:7148-7159
+  -- (0.2) THE 0040 MARKER DISPOSITIONS FOR THE NINTH BODY (Annex B.10). The 0040:7148-7159
   -- anti-revert postcheck pins ELEVEN markers at exact counts. A copy-the-0040-idiom prestate
   -- that did not state a disposition per marker refuses at apply, so each is stated here: eight
   -- CARRY at count 1, three RETIRE (5 occurrences) inside the deleted 0037:2046-2100 block, and
@@ -262,7 +262,7 @@ begin
     raise exception 'F-A2 part1 prestate: bank_rule_suggested occurs % times (expected 2 — 0040:7123-7127''s own postcheck; this file takes it to 0, not 1)', v_n using errcode='CLR10';
   end if;
 
-  -- (0.3) EVERY SPLICE ANCHOR IN THE EIGHTH BODY, COUNTED. `replace()` is global: an anchor
+  -- (0.3) EVERY SPLICE ANCHOR IN THE NINTH BODY, COUNTED. `replace()` is global: an anchor
   -- occurring twice would be spliced twice, one occurring zero times splices nothing while the
   -- file reports success. Counted, never assumed.
   foreach v_key in array array[
@@ -1230,10 +1230,19 @@ revoke all on function clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uui
 reset role;
 
 -- =====================================================================================
--- §E  THE EIGHTH clara._approve_entry_core BODY (design §3.5, D1 row 1).
+-- §E  THE NINTH clara._approve_entry_core BODY (design §3.5, D1 row 1).
 --
 -- Lineage: 0015:1247 -> 0016:1220 -> the 0017 dynamic splice -> 0029:27 -> 0035:140 ->
--- 0037:1750 -> the 0040:7026-7174 S5 splice = the SEVENTH. This is the EIGHTH.
+-- 0037:1750 -> the 0040:7026-7174 S5 splice = the SEVENTH -> 0053's SPLICE B (section 2,
+-- `execute v_def` at 0053:994, which recuts the CLR23 remedy to name the real re-admission
+-- doors) = the EIGHTH. This is the NINTH.
+--
+-- THE COUNT WAS OFF BY ONE and the correction is recorded rather than quietly applied: the
+-- lineage stopped at 0040 and never picked up 0053's recut, so this file called the live tip
+-- "the seventh" and itself "the eighth". Nothing behavioural moves -- the prestate pin is a
+-- prosrc SHA of whatever body is actually live, never a generation NUMBER, which is precisely
+-- why the wrong number could sit here undetected. Annex B.9's own "8th body" wording is trued
+-- separately with the design.
 --
 -- FOUR CHANGES, EACH SPLICED AT A COUNTED ANCHOR:
 --   (1) BREEDING EXCISION. The whole 0037:2046-2100 block goes — both rule_sightings inserts and
@@ -1243,7 +1252,7 @@ reset role;
 --       disposition is 2 -> 0, not 2 -> 1. The TABLES stay (KEEP-AS-HISTORY): only the WRITES go.
 --   (2) CTX IDENTITY PASS-THROUGH. The body hard-coded null for on_behalf_of and via_wake_kind in
 --       _audit and passed an empty payload to _append_event, while _draft_entry_core passed both
---       through — three dropped identity channels (E.3). The eighth body reads them from p_ctx.
+--       through — three dropped identity channels (E.3). The ninth body reads them from p_ctx.
 --   (3) THE AGENT ARM (§3.3.1, D10). The maker/checker family's three CLR05 arms cannot honestly
 --       receive an agent post: arm 1 would demand an attestation the DB does not validate, and
 --       distinct_checker is unreachable because an agent is not an eligible checker. So the
@@ -1385,7 +1394,7 @@ begin
 ');
 
   if v_new = v_src then
-    raise exception 'F-A2 §E: the eighth body is byte-identical to the seventh — no splice landed' using errcode='CLR10';
+    raise exception 'F-A2 §E: the ninth body is byte-identical to the eighth — no splice landed' using errcode='CLR10';
   end if;
   set role clara_fn_owner;
   execute replace(v_def, v_src, v_new);
@@ -1827,7 +1836,7 @@ begin
     raise exception 'F-A2 tail: a null-identity counterparty.created emit survives in the approve body' using errcode='CLR10';
   end if;
 
-  -- (J.4) The eighth approve body: the RETIRE markers gone at their stated counts, the eight
+  -- (J.4) The ninth approve body: the RETIRE markers gone at their stated counts, the eight
   -- CARRY markers surviving at 1, bank_rule_suggested at 0, the five Tier-C reasons present, and
   -- the human maker/checker lane byte-untouched.
   select p.prosrc into v_src from pg_proc p where p.oid='clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure;
@@ -1836,7 +1845,7 @@ begin
       'insert into clara.coding_rules','kb_rule.proposed'] loop
     v_n := (length(v_src) - length(replace(v_src, v_key, ''))) / length(v_key);
     if v_n <> 0 then
-      raise exception 'F-A2 tail: RETIRED marker % still occurs % times in the eighth body', v_key, v_n using errcode='CLR10';
+      raise exception 'F-A2 tail: RETIRED marker % still occurs % times in the ninth body', v_key, v_n using errcode='CLR10';
     end if;
   end loop;
   foreach v_key in array array[
@@ -1846,7 +1855,7 @@ begin
       'attestation_required','distinct_checker','self_attestation'] loop
     v_n := (length(v_src) - length(replace(v_src, v_key, ''))) / length(v_key);
     if v_n <> 1 then
-      raise exception 'F-A2 tail: CARRY marker % occurs % times in the eighth body (expected 1)', v_key, v_n using errcode='CLR10';
+      raise exception 'F-A2 tail: CARRY marker % occurs % times in the ninth body (expected 1)', v_key, v_n using errcode='CLR10';
     end if;
   end loop;
   foreach v_key in array array['"reason":"counterparty_landscape_moved"','"reason":"currency_unsupported"',
@@ -1863,7 +1872,7 @@ begin
   if position('and not coalesce(v_is_agent,false) then' in v_src) = 0
      or position('v_obo,v_via_wake_kind,''approve_entry''' in v_src) = 0
      or position('''post_receipt_id'',v_post_receipt_id' in v_src) = 0 then
-    raise exception 'F-A2 tail: the eighth body is missing the agent arm or an identity channel' using errcode='CLR10';
+    raise exception 'F-A2 tail: the ninth body is missing the agent arm or an identity channel' using errcode='CLR10';
   end if;
   -- LAW 73, PROVED ON THIS BODY RATHER THAN PROMISED. 0019's wiki-capability scan reads prosrc
   -- for call-edge NAMES, so a body that merely MENTIONS a pack or wiki verb — in a comment as
@@ -1876,7 +1885,7 @@ begin
       'run_client_lint','run_lint_all','mark_wiki_citations_stale',
       '_assert_filing_wiki_unreferenced','wiki_pages','wiki_page_versions'] loop
     if position(v_key in v_src) <> 0 then
-      raise exception 'F-A2 tail: the eighth _approve_entry_core body names the wiki-capability token % — a gate, bound or floor may never read wiki or the pack (law 73), and 0019''s scan reads this body''s TEXT', v_key
+      raise exception 'F-A2 tail: the ninth _approve_entry_core body names the wiki-capability token % — a gate, bound or floor may never read wiki or the pack (law 73), and 0019''s scan reads this body''s TEXT', v_key
         using errcode='CLR10';
     end if;
   end loop;
@@ -2000,7 +2009,7 @@ begin
    where n.nspname in ('workflow','graphile_worker','spike') and c.relkind='r';
   insert into _fa2p1_pre(k,v) values ('frozen_relations', v_n::text);
 
-  raise notice 'F-A2 part1 tail: OK -- clara.entry_post_receipts created (14 columns, forced RLS, owner+read policy pair, append-only + no-truncate, ZERO DML to any app role) and walled by the DEFERRED t_je_agent_post_receipt (ARM-0 first, live arm fenced on is_agent AND a null rule id; % existing approved entr(y/ies) sit in that fence, unchanged across this apply); journal_entries now carries 17 triggers, 12 of them deferred. The ladder, the extracted control-leg predicate, the projected supplier floor and the counterparty projection are created and reachable by NO application role and no PUBLIC grant -- part 2 is the only door. The EIGHTH _approve_entry_core body carries 0 breeding markers (3 names / 5 occurrences retired, bank_rule_suggested 2 -> 0), all 8 CARRY markers at 1, the three human CLR05 arms verbatim, the agent arm behind `not v_is_agent`, both identity channels and 5 Tier-C detail reasons; registration_conflict and customer_identity_name_only were ALREADY typed and cost zero body edits. The draft core writes no rule_decisions (D35), carries N1''s three projected-state copies and a direction-family arm keyed on p_is_human alone (D11); rule_decisions, rule_sightings and coding_rules keep every row. Both 1-arity shape delegates and the sales floor are BYTE-UNMOVED (sha-compared), and T3''s two trigger functions are receipt-keyed. The wake limb ships in GB-3''s corrected form: BOTH CHECKs extended over % live credential(s) with the original disjuncts intact, BOTH mint gates extended, wake_open_question re-keyed onto the client pin; _agent_read_admitted and coding_lane are untouched. No table in workflow/graphile_worker/spike touched (% relations, read-only census).',
+  raise notice 'F-A2 part1 tail: OK -- clara.entry_post_receipts created (14 columns, forced RLS, owner+read policy pair, append-only + no-truncate, ZERO DML to any app role) and walled by the DEFERRED t_je_agent_post_receipt (ARM-0 first, live arm keyed on is_agent ALONE, with no rule-id exemption (E.3); % existing approved entr(y/ies) sit in that arm, unchanged across this apply); journal_entries now carries 17 triggers, 12 of them deferred. The ladder, the extracted control-leg predicate, the projected supplier floor and the counterparty projection are created and reachable by NO application role and no PUBLIC grant -- part 2 is the only door. The NINTH _approve_entry_core body carries 0 breeding markers (3 names / 5 occurrences retired, bank_rule_suggested 2 -> 0), all 8 CARRY markers at 1, the three human CLR05 arms verbatim, the agent arm behind `not v_is_agent`, both identity channels and 5 Tier-C detail reasons; registration_conflict and customer_identity_name_only were ALREADY typed and cost zero body edits. The draft core writes no rule_decisions (D35), carries N1''s three projected-state copies and a direction-family arm keyed on p_is_human alone (D11); rule_decisions, rule_sightings and coding_rules keep every row. Both 1-arity shape delegates and the sales floor are BYTE-UNMOVED (sha-compared), and T3''s two trigger functions are receipt-keyed. The wake limb ships in GB-3''s corrected form: BOTH CHECKs extended over % live credential(s) with the original disjuncts intact, BOTH mint gates extended, wake_open_question re-keyed onto the client pin; _agent_read_admitted and coding_lane are untouched. No table in workflow/graphile_worker/spike touched (% relations, read-only census).',
     v_inert, (select v from _fa2p1_pre where k='live_credentials'), v_n;
 end
 $fa2_tail$;
