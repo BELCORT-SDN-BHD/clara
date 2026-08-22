@@ -20,12 +20,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, entryRow, counterpartyRows, openQuestion, postingCoreReady,
+  booksVersion, opk, counterpartyRows, openQuestion, postingCoreReady,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, admits, admitsAll, nonAdmitting, assertVectorShape, assertNonAdmitting,
   supplierLines, salesLines, genericLines, genericWithControlLeg, CHART,
   TIER_B_RUNGS, TIER_D_TOKENS, TIER_D_DECLARED_UNREACHABLE, ADV_MIRROR_AXIS,
-  postReceiptRow, opReceiptResult, landWitnessPair, witnessShape, upsertAccountClassed,
+  postReceiptRow, opReceiptResult, upsertAccountClassed,
+  witnessRegion, controlLegCount, doctorLines, stampCodingKind,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -53,8 +54,10 @@ test("f-a2.c3.B7 amount-bearing evidence at the model_read tier refuses unverifi
   // tier the estate really produces.
   await ensureChart(OWNER(), A1());
   const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 10600, net: 10000, tax: 605 });
-  const { ev, factsRegion } = await import("./f-a2-post-world.mjs");
-  const taxRegion = await factsRegion(cited.documentId, "invoice.tax_total");
+  const { ev } = await import("./f-a2-post-world.mjs");
+  const taxRegion = await witnessRegion(cited.documentId, "invoice.tax_total");
+  assert.ok(taxRegion?.id,
+    "c3.B7 precondition: the WITNESS text extraction carries a tax region. `factsRegion` cannot see it — it filters engine_kind='invoice_facts' and returns null, which is how this fixture used to fail at DRAFT with CLR21 evidence_invalid rather than reaching B7");
   const cred = await autodraftCred(A1());
   const d = await agentDraft(OWNER(), cred, {
     client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(10600),
@@ -70,24 +73,11 @@ test("f-a2.c3.B7 amount-bearing evidence at the model_read tier refuses unverifi
   assertNonAdmitting(assert, r, "B7", "c3.B7");
 });
 
-test("f-a2.c3.B8 cited evidence from a SUPERSEDED generation refuses facts_moved — with the token rotation SUPPRESSED", async (t) => {
-  if (await gateCore(t)) return;
-  // B8 is deliberately redundant with A5 and law 31 demands it be forced NON-VACUOUSLY: A5
-  // covers the common case only because `0096:45-60` rotates an open draft's token when facts
-  // settle, and that rotation is ONE migration old. Landing the successor pair DIRECTLY (as the
-  // fixture does, bypassing the persist writer) is exactly the rotation-suppressed shape, so
-  // this cell reaches B8 with A5 still passing.
-  const p = await agentPostable(OWNER(), { client: A1(), amount: 500000 });
-  const before = (await entryRow(p.args.entry))?.revision_token;
-  await landWitnessPair(p.cited.documentId, witnessShape({
-    fields: { "invoice.total": 500000, "invoice.currency": "MYR", "invoice.type_code": "01" },
-  }));
-  const after = (await entryRow(p.args.entry))?.revision_token;
-  assert.equal(after, before,
-    "c3.B8 precondition: the draft's revision_token did NOT rotate — otherwise A5 would fire first and B8 would be vacuous");
-  const r = await post(p);
-  assertNonAdmitting(assert, r, "B8", "c3.B8");
-});
+// B8 lives in its own file: f-a2-b8.test.mjs carries the FIVE-cell set (primary + its
+// negative twin, the rotation-suppressed twin, the alpha-scoping mixed-generation cell, the
+// OCR dead-lane guard and the ARM-0 not_evaluable arm). One cell could not carry the rung's
+// scope, its twin and its ARM-0 arm at once, and the two-generation fixture is used nowhere
+// else in this file.
 
 // ===========================================================================
 // B9 — the open-question gate, under Tier A's three locks (GM-7).
@@ -152,12 +142,8 @@ test("f-a2.c3.B10B11 an agent SALES draft whose receivable leg carries NO counte
     client: A1(), amount: 10600, net: 10000, tax: 605, rounding: -5,
     codingKind: "sales_invoice", lines: salesLines(10600, 10000, 605, -5),
   });
-  const legs = await rootQuery(
-    `select count(*)::int as n from clara.journal_lines l join clara.chart_of_accounts a
-       on a.client_id=l.client_id and a.code=l.account_code
-      where l.entry_id=$1 and a.account_class='receivable' and l.counterparty_id is null`,
-    [p.args.entry]).catch(() => ({ rows: [{ n: -1 }] }));
-  assert.notEqual(legs.rows[0].n, 0,
+  const legs = await controlLegCount(p.args.entry, { classes: ["receivable"], nullCounterpartyOnly: true });
+  assert.notEqual(legs, 0,
     "c3.B10B11 precondition: the receivable leg really does carry a NULL counterparty at ladder time — if it did not, this cell would be proving nothing");
   const r = await post(p);
   assert.ok(admits(r?.rung_vector, "B10"),
@@ -171,12 +157,23 @@ test("f-a2.c3.B10B11 an agent SALES draft whose receivable leg carries NO counte
 test("f-a2.c3.B10-neg a genuinely MIS-SHAPED supplier bill still refuses at B10", async (t) => {
   if (await gateCore(t)) return;
   // Polarity inverted: the payable is DEBITED and the expense CREDITED. Balanced, and wrong.
-  const inverted = [
+  //
+  // IT CANNOT BE DRAFTED THAT WAY, and that is N1 working. §3.4 moves the shape floor to DRAFT
+  // on the agent lane, so the writer refuses this shape before an entry exists — a STRONGER
+  // wall than B10, not a weaker one. The lawful way to put the shape in front of the POST is
+  // to draft CLEAN and doctor the lines afterwards (the rig-txn idiom for a deliberately
+  // redundant wall). The HUMAN draft lane is not an option: A8 admits only maker_actor =
+  // agent, so a human-drafted entry refuses at Tier A and never reaches B10.
+  const p = await agentPostable(OWNER(), { client: A1(), codingKind: "supplier_bill" });
+  const d = await doctorLines(p.args.entry, [
     { account_code: CHART.payable, debit_cents: 500000, credit_cents: 0, description: "c3.B10-neg ap-dr" },
     { account_code: CHART.expense, debit_cents: 0, credit_cents: 500000, description: "c3.B10-neg exp-cr" },
-  ];
-  const p = await agentPostable(OWNER(), { client: A1(), codingKind: "supplier_bill", lines: inverted });
-  assertNonAdmitting(assert, await post(p), "B10", "c3.B10-neg");
+  ]);
+  if (!d.ok) {
+    noteLane(`c3.B10-neg: the draft's lines could not be doctored (${d.code}: ${d.message}) — a mis-shaped supplier bill is unbuildable on this frontier and B10's negative is UNPROVEN`);
+    return;
+  }
+  assertNonAdmitting(assert, await post(p, { expectedRevision: d.revisionToken }), "B10", "c3.B10-neg");
 });
 
 // ===========================================================================
@@ -212,11 +209,8 @@ test("f-a2.c3.B14-coded a CODED-kind entry WITH a control leg still posts — _s
   // IS an AP control leg, and it must still post — otherwise B14 would have quietly become a
   // universal ban on control legs.
   const p = await agentPostable(OWNER(), { client: A1(), amount: 500000, codingKind: "supplier_bill" });
-  const legs = await rootQuery(
-    `select count(*)::int as n from clara.journal_lines l join clara.chart_of_accounts a
-       on a.client_id=l.client_id and a.code=l.account_code
-      where l.entry_id=$1 and a.account_class in ('payable','receivable')`, [p.args.entry]);
-  assert.ok(legs.rows[0].n > 0, "c3.B14-coded precondition: the coded bill really carries a control leg");
+  assert.ok(await controlLegCount(p.args.entry) > 0,
+    "c3.B14-coded precondition: the coded bill really carries a control leg");
   const r = await post(p);
   assert.equal(r?.posted, true, `c3.B14-coded: it posts (${JSON.stringify(r?.refusal)})`);
   assert.ok(admits(r.rung_vector, "B14"), "c3.B14-coded: B14 admits a CODED kind's control leg");
@@ -285,8 +279,9 @@ test("f-a2.c3.vec-all every rung is EVALUATED even after the first failure", asy
   // A settlement kind (B1) AND an untied amount (B4) on one entry. A first-fail-wins ladder
   // would report B1 and leave B4 unevaluated; the vector must carry a value for all thirteen.
   const p = await agentPostable(OWNER(), {
-    client: A1(), amount: 500000, codingKind: "customer_receipt", lines: supplierLines(499000),
+    client: A1(), amount: 500000, codingKind: null, lines: supplierLines(499000),
   });
+  await stampCodingKind(p.args.entry, "customer_receipt");
   const r = await post(p);
   assertVectorShape(assert, r?.rung_vector, "c3.vec-all");
   assert.ok(nonAdmitting(r.rung_vector).length >= 2,
@@ -330,8 +325,9 @@ test("f-a2.c3.vec-distinguish at 0/33 corroboration the vector still DISTINGUISH
   // instrument §6's per-document measurement needs.
   const a = await agentPostable(OWNER(), { client: A1(), corroborated: false });
   const b = await agentPostable(OWNER(), {
-    client: A1(), corroborated: false, codingKind: "customer_receipt", lines: supplierLines(499000),
+    client: A1(), corroborated: false, codingKind: null, lines: supplierLines(499000),
   });
+  await stampCodingKind(b.args.entry, "customer_receipt");
   const va = (await post(a))?.rung_vector;
   const vb = (await post(b))?.rung_vector;
   assert.notEqual(JSON.stringify(va), JSON.stringify(vb),

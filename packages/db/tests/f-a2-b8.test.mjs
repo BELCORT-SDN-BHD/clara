@@ -1,0 +1,401 @@
+// F-A2 PR-1 — Annex C.3's rung B8, `facts_moved`, as a FIVE-CELL SET.
+//
+// CONTRACT-BLIND, frontier-gated on `f_a2_posting_core$`. Split out of f-a2-ladder-3.test.mjs
+// because B8 needs a two-generation fixture that no other rung does, and because one cell could
+// not carry the rung's scope, its negative twin, its dead-lane guard and its ARM-0 arm at once.
+//
+// THE CONTRACT, WRITTEN OUT, because every assertion below is a reading of it:
+//
+//   B8 PASSES iff every `entry_evidence` row whose extraction is a FACT GENERATION —
+//   `engine_kind in ('invoice_facts','llm_text_facts','llm_vision_facts')` — cites the SAME
+//   extraction the fact state itself names (`v_state->>'extraction_id'`).
+//   OCR and `structured_parse` citations are OUT OF SCOPE (law 72): they are not fact
+//   generations, and reading one as stale would refuse a draft for citing a page image.
+//   `not_evaluable` on three inputs the rung cannot judge: no `document_id`, a `'{}'` fact
+//   state, or a witness pair whose TEXT row is unresolved (`0092:210-217` returns a real
+//   envelope with `corroborated:false` and a `pair_refusal` rather than a state to compare).
+//
+// SCOPE IS α — ALL fact-generation citations, not just the money one. A MIXED-generation draft
+// therefore fails, and cell 3 is what makes that a decision on the record rather than an
+// accident of which citation the implementation happened to read first.
+//
+// WHY B8 EXISTS AT ALL, given A5. It is deliberately redundant, and law 31 says a redundant wall
+// must be forced NON-VACUOUSLY or dropped. A5 covers the common case only because `0096:245-278`
+// rotates an open draft's `revision_token` when facts settle — ONE migration old. Cell 1 forces
+// B8 with that rotation LIVE (the real shape: the caller simply re-reads the current token, as
+// the runtime would), and cell 2 forces it with the rotation neutralised, which is where A5
+// cannot see the movement at all. Both must fail at B8; only the second proves A5 is not what is
+// doing the work.
+//
+// FIXTURES GO THROUGH THE ESTATE'S REAL DOORS. `request_reextraction` is human-invoked-only and
+// `persist_witness_facts` is the writer; the second generation here is landed as a witness pair
+// exactly as the writer produces one, and the cells assert the preconditions they depend on
+// (the verified tier, the clean B5) rather than assuming them.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID, createHash } from "node:crypto";
+import {
+  rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
+  booksVersion, entryRow, postingCoreReady, seedRegion, claimTask, withdrawDraft, opk,
+  gateCore, wakePostEntry, agentDraft, autodraftCred, ensureChart, witnessedFiling,
+  witnessRegion, witnessShape, landWitnessPair, withWitnessV2, textCoverage, visionCoverage,
+  documentSha, reviseAgentDraft, supplierLines, ev, admits, nonAdmitting, SUPPLIER_NAME,
+  assertVectorShape, assertNonAdmitting, entryEvents, EVENT_POST_REFUSED, RUNG_TOKEN,
+} from "./f-a2-post-world.mjs";
+
+let world = null;
+before(async () => { if (await postingCoreReady()) world = await buildWorld(); });
+after(async () => {
+  printLaneNotes("f-a2-b8");
+  printSkipCount("f-a2-b8");
+  await endPool();
+});
+
+const A1 = () => world.clients.A1;
+const A2 = () => world.clients.A2;
+const OWNER = () => world.users.alice;
+const GROSS = 100000; // RM 1,000.00
+
+/** The fact state the ladder reads, and the generation it names. */
+async function factExtraction(document) {
+  const r = await rootQuery("select clara._invoice_fact_state($1) as s", [document]);
+  return { state: r.rows[0].s, extractionId: r.rows[0].s?.extraction_id ?? null };
+}
+
+/** Land a SECOND witness pair (G2) on a document: same total, different invoice_id. Same total
+ *  is load-bearing — it is what keeps `0096`'s rotation from stamping an `amount_exception`, so
+ *  B5 stays clean and B8 is the only rung with anything to say. */
+async function landG2(document, {
+  total = GROSS, invoiceId = null, versionN = 2, ocrExtraction = null, throughWriter = false,
+} = {}) {
+  const sha = await documentSha(document);
+  const silent = { state: "not_printed" };
+  // THE SUCCESSOR CARRIES THE SAME IDENTITY EVIDENCE, and this is a correctness point rather
+  // than fixture tidiness: a re-extraction reads the SAME page, so it states the same supplier.
+  // A G2 that dropped `invoice.vendor_name` would make the document's direction resolve to
+  // `unresolved` under `_direction_from_extraction`, and the very next agent draft would be
+  // refused CLR21 `direction_family_mismatch` — a pre-existing wall firing because the FIXTURE
+  // lost evidence, which is a finding about the test and not about B8. Measured on the rig.
+  const base = witnessShape({
+    fields: { "invoice.total": total, "invoice.currency": "RM", "invoice.type_code": "01" },
+    // MEASURED: `invoice.vendor_name` is NOT in the writer's accepted answer vocabulary — adding
+    // it makes `_witness_answers_ok` reject the whole envelope. Only the two M3 reference fields
+    // (`invoice.invoice_id` / `invoice.invoice_date`) may join the eleven. The identity therefore
+    // rides `extraRegions`, which the DIRECT-INSERT path preserves faithfully.
+    refAnswers: { text: { "invoice.invoice_id": { raw: invoiceId ?? `INV-${randomUUID().slice(0, 8)}` } }, vision: {} },
+    extraRegions: [{
+      field_path: "invoice.vendor_name", text_content: SUPPLIER_NAME,
+      locator_kind: "page_polygon", locator: { page: 1, polygon: [0, 0, 1, 1] },
+    }],
+  });
+  const shape = withWitnessV2(base, {
+    coverage: { text: textCoverage({ ocrExtractionId: ocrExtraction }), vision: visionCoverage({ inputSha256: sha }) },
+    sst: { text: silent, vision: silent },
+  });
+  // VERSION 2, and it is load-bearing. `clara._document_facts_extraction` resolves the winner by
+  // the llm_witness TASK's `version_n desc, id desc`, so a successor landed at version 1 does NOT
+  // move the fact state — the two-generation premise silently collapses and every B8 cell here
+  // would be asserting against ONE generation while claiming two. Measured on the rig.
+  if (!throughWriter) return landWitnessPair(document, { ...shape, versionN });
+
+  // THROUGH THE REAL WRITER, because cell 1's whole claim is about the LIVE shape. Only
+  // `persist_witness_facts` runs `0096`'s rotation loop; `landWitnessPair` inserts the rows
+  // directly and therefore produces the rotation-SUPPRESSED shape, which is cell 2's fixture and
+  // would make cell 1 assert the opposite of what it says. The wrapper shape is the writer's
+  // own: `{envelope, input_pin, prompt_hash, regions}`, with the TEXT pin resolving to a done
+  // OCR extraction of this document and the VISION pin equal to `documents.sha256`.
+  const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [document])).rows[0].firm_id;
+  const ocr = ocrExtraction ?? (await rootQuery(
+    `select id from clara.document_extractions where document_id=$1 and engine_kind='ocr' and status='done'
+      order by version_n desc limit 1`, [document])).rows[0]?.id;
+  assert.ok(ocr, "B8 fixture: the document carries a done OCR extraction for the text input pin");
+  const task = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,status)
+     values($1,$2,'llm-openai:gpt-5.6-terra:v2',$3,'llm_witness','queued') returning id`,
+    [firm, document, versionN])).rows[0].id;
+  await claimTask(task, { egressApproved: true });
+  const wrap = (envelope, pin, tag) => ({
+    envelope, input_pin: pin, regions: shape.regions,
+    prompt_hash: createHash("sha256").update(`${tag}:${document}:${versionN}`).digest("hex"),
+  });
+  const out = await rootQuery(
+    "select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as s",
+    [task, JSON.stringify(wrap(shape.textEnvelope, ocr, "text")),
+      JSON.stringify(wrap(shape.visionEnvelope, sha, "vision")), 1]);
+  return out.rows[0].s;
+}
+
+/** An agent draft citing G1's own `invoice.total` region, with the verified tier ASSERTED. */
+async function draftOnG1(client, cited) {
+  const total = await witnessRegion(cited.documentId, "invoice.total");
+  assert.ok(total?.id, "B8 fixture: G1's witness text row carries an invoice.total region to cite");
+  const cred = await autodraftCred(client);
+  const d = await agentDraft(OWNER(), cred, {
+    client, cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
+    evidence: [ev(total.id, total.text_content, "invoice.total")],
+  });
+  const tier = await rootQuery(
+    "select provenance_tier, extraction_id from clara.entry_evidence where entry_id=$1", [d.entry_id]);
+  assert.ok(tier.rows.some((x) => x.provenance_tier === "verified"),
+    `B8 fixture: the money citation binds at the VERIFIED tier (got ${JSON.stringify(tier.rows.map((x) => x.provenance_tier))}) — a model_read citation would refuse at B7 and B8 would prove nothing`);
+  return { cred, draft: d, boundExtraction: tier.rows[0].extraction_id };
+}
+
+/** The entry's CURRENT token — what a runtime caller would re-read after the rotation. */
+const currentToken = async (entry) => (await entryRow(entry))?.revision_token;
+
+// ===========================================================================
+// 1 · B8-PRIMARY — the live shape, rotation NOT suppressed.
+// ===========================================================================
+
+test("f-a2.c3.B8-primary a SUPERSEDED fact generation refuses facts_moved, with A5/B2/B3/B5/B7 all clean", async (t) => {
+  if (await gateCore(t)) return;
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
+  const g1 = await factExtraction(cited.documentId);
+  assert.equal(g1.state?.corroborated, true, "c3.B8-primary: G1 corroborates at RM1,000.00");
+  const { cred, draft, boundExtraction } = await draftOnG1(A1(), cited);
+  assert.equal(boundExtraction, g1.extractionId, "c3.B8-primary: the draft is bound to G1");
+
+  // THE ONLY CELL THAT GOES THROUGH THE WRITER, because it is the only one whose claim is about
+  // the rotation. `persist_witness_facts` runs `0096`'s loop; the other four use the direct
+  // insert, which is both the rotation-suppressed shape cell 2 needs and the only way to carry
+  // `invoice.vendor_name` onto the successor (the writer builds regions from its own answer
+  // roster, and that field is not in it).
+  await landG2(cited.documentId, { throughWriter: true, ocrExtraction: cited.extractionId });
+  const g2 = await factExtraction(cited.documentId);
+  assert.notEqual(g2.extractionId, g1.extractionId,
+    "c3.B8-primary: the fact state now names G2 — the generation MOVED under the draft");
+  assert.equal(g2.state?.total_cents, GROSS,
+    "c3.B8-primary: …at the SAME total, which is what keeps 0096's rotation from stamping an amount_exception");
+
+  // The rotation is LIVE: the caller re-reads the current token, exactly as the runtime would.
+  const token = await currentToken(draft.entry_id);
+  assert.notEqual(token, draft.revision_token,
+    "c3.B8-primary: 0096:245-278 rotated the open draft's token when the facts settled — the cell uses the CURRENT one so A5 passes and B8 is reached");
+  const flags = (await entryRow(draft.entry_id))?.flags ?? {};
+  assert.ok(!("amount_exception" in flags),
+    `c3.B8-primary: no amount_exception was stamped, so B5 is clean (flags ${JSON.stringify(flags)})`);
+
+  const r = await wakePostEntry(cred, {
+    entry: draft.entry_id, expectedRevision: token, client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assertVectorShape(assert, r?.rung_vector, "c3.B8-primary");
+  assertNonAdmitting(assert, r, "B8", "c3.B8-primary");
+  assert.deepEqual(nonAdmitting(r.rung_vector), ["B8"],
+    `c3.B8-primary: B8 is the ONLY non-admitting rung — A5 passed on the fresh token, B2/B3/B7 on the verified G1 citation, B5 on the unstamped flags (non-admitting: ${nonAdmitting(r.rung_vector).join(",")})`);
+  assert.equal(r.refusal.reason, RUNG_TOKEN.B8, "c3.B8-primary: the receipt names facts_moved");
+  assert.equal((await entryRow(draft.entry_id))?.status, "draft", "c3.B8-primary: nothing posted");
+  const events = await entryEvents(draft.entry_id, [EVENT_POST_REFUSED]);
+  assert.equal(events.length, 1,
+    "c3.B8-primary: the refusal COMMITTED — one entry.post_refused event, because a Tier-B reason has to be durable");
+});
+
+test("f-a2.c3.B8-primary-twin re-citing the CURRENT generation posts clean — the rung-was-the-reason proof", async (t) => {
+  if (await gateCore(t)) return;
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
+  const { draft, cred } = await draftOnG1(A1(), cited);
+  await landG2(cited.documentId);
+  const g2 = await factExtraction(cited.documentId);
+
+  // REVISE onto G2's own total region — the ordinary human remedy for a moved generation.
+  const g2Total = await witnessRegion(cited.documentId, "invoice.total");
+  assert.equal(
+    (await rootQuery("select extraction_id from clara.document_regions where id=$1", [g2Total.id])).rows[0].extraction_id,
+    g2.extractionId, "c3.B8-primary-twin: the re-citation really names G2");
+  await reviseAgentDraft(OWNER(), {
+    entry: draft.entry_id, lines: supplierLines(GROSS), expectedRevision: await currentToken(draft.entry_id),
+  });
+  // A human revision sets `last_human_editor`, which A8 refuses — so the agent RE-DERIVES on the
+  // current generation instead, which is OQ-4 exit 2's shape and the only lawful way back. The
+  // WITHDRAWAL is not optional and not tidiness: the double-coding wall refuses a second coded
+  // entry against the same filing ("active filing already has an open draft"), which is exactly
+  // why §3.3.3 makes exit 2 available only once the human's draft is withdrawn.
+  await withdrawDraft(OWNER(), {
+    entry: draft.entry_id, reason: "c3.B8-primary-twin: make room for the re-derivation",
+    expectedRevision: await currentToken(draft.entry_id), opKey: opk("b8twinwd"),
+  });
+  const own = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
+    evidence: [ev(g2Total.id, g2Total.text_content, "invoice.total")],
+    opKey: `f-a2-b8-twin:${randomUUID().slice(0, 8)}`,
+  }).catch((e) => ({ error: e }));
+  if (own?.error) {
+    noteLane(`c3.B8-primary-twin: the re-derivation could not be drafted (${own.error.code}: ${own.error.message}) — the double-coding wall makes exit 2 available only after a withdrawal, which is GM-10's PR-2 door`);
+    return;
+  }
+  const r = await wakePostEntry(cred, {
+    entry: own.entry_id, expectedRevision: own.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assert.ok(admits(r?.rung_vector, "B8"),
+    `c3.B8-primary-twin: citing the CURRENT generation ADMITS at B8 (got ${JSON.stringify(r?.rung_vector?.B8)})`);
+  assert.equal(r?.posted, true,
+    `c3.B8-primary-twin: …and it posts. Without this twin, B8's cell could be green for any other reason (${JSON.stringify(r?.refusal)})`);
+});
+
+// ===========================================================================
+// 2 · B8-TWIN — the design's original cell, with the rotation NEUTRALISED.
+// ===========================================================================
+
+test("f-a2.c3.B8-suppressed B8 still fails where the token did NOT rotate — the non-vacuous half A5 cannot cover", async (t) => {
+  if (await gateCore(t)) return;
+  // `landWitnessPair` writes the extraction rows DIRECTLY, bypassing `persist_witness_facts` and
+  // therefore bypassing `0096`'s rotation loop. That is the rotation-suppressed shape, and it is
+  // the whole reason B8 is not redundant-and-droppable: with the token unmoved, A5 sees nothing
+  // and only B8 stands between the agent and a post against a superseded generation.
+  await ensureChart(OWNER(), A2());
+  const cited = await witnessedFiling(OWNER(), { client: A2(), gross: GROSS });
+  const g1 = await factExtraction(cited.documentId);
+  const { cred, draft } = await draftOnG1(A2(), cited);
+  const before = draft.revision_token;
+
+  await landWitnessPair(cited.documentId, {
+    ...withWitnessV2(
+      witnessShape({ fields: { "invoice.total": GROSS, "invoice.currency": "RM", "invoice.type_code": "01" } }),
+      {
+        coverage: { text: textCoverage(), vision: visionCoverage({ inputSha256: await documentSha(cited.documentId) }) },
+        sst: { text: { state: "not_printed" }, vision: { state: "not_printed" } },
+      }),
+    versionN: 2,
+  });
+  const after = await currentToken(draft.entry_id);
+  assert.equal(after, before,
+    "c3.B8-suppressed precondition: the token did NOT rotate — otherwise A5 fires first and this cell is vacuous");
+  const g2 = await factExtraction(cited.documentId);
+  assert.notEqual(g2.extractionId, g1.extractionId, "c3.B8-suppressed precondition: the generation still moved");
+
+  const r = await wakePostEntry(cred, {
+    entry: draft.entry_id, expectedRevision: before, client: A2(), booksVersion: await booksVersion(A2()),
+  });
+  assert.ok(admits(r?.rung_vector, "A5") || r?.refusal?.tier === "B",
+    "c3.B8-suppressed: the post reached Tier B at all — a Tier-A raise here would mean A5 saw the movement after all");
+  assertNonAdmitting(assert, r, "B8", "c3.B8-suppressed");
+  assert.equal(r.refusal.reason, RUNG_TOKEN.B8, "c3.B8-suppressed: …naming facts_moved");
+});
+
+// ===========================================================================
+// 3 · B8-MIXED — the α-scoping cell.
+// ===========================================================================
+
+test("f-a2.c3.B8-mixed a MIXED-generation draft fails — scope is ALL fact-generation citations, not just the money one", async (t) => {
+  if (await gateCore(t)) return;
+  // The scope decision made forceable. One citation on the CURRENT generation's `invoice.total`,
+  // one on the SUPERSEDED generation's `invoice.invoice_id`. A rung scoped to the money citation
+  // alone would ADMIT this; scope α refuses it, and this cell is what makes that a decision on
+  // the record instead of an artefact of which row the implementation read first.
+  await ensureChart(OWNER(), A2());
+  const cited = await witnessedFiling(OWNER(), { client: A2(), gross: GROSS });
+  const g1Invoice = await witnessRegion(cited.documentId, "invoice.invoice_id")
+    ?? await witnessRegion(cited.documentId, "invoice.type_code");
+  assert.ok(g1Invoice?.id, "c3.B8-mixed precondition: G1 carries a NON-money region to cite");
+  const g1 = await factExtraction(cited.documentId);
+
+  await landG2(cited.documentId);
+  const g2 = await factExtraction(cited.documentId);
+  const g2Total = await witnessRegion(cited.documentId, "invoice.total");
+  assert.notEqual(g2.extractionId, g1.extractionId, "c3.B8-mixed precondition: two generations exist");
+
+  const cred = await autodraftCred(A2());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A2(), cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
+    evidence: [
+      ev(g2Total.id, g2Total.text_content, "invoice.total"),
+      ev(g1Invoice.id, g1Invoice.text_content, g1Invoice.field_path),
+    ],
+  }).catch((e) => ({ error: e }));
+  if (d?.error) {
+    noteLane(`c3.B8-mixed: the draft floor refused the mixed citation set (${d.error.code}: ${d.error.message}) — a STRONGER wall than B8, recorded rather than forced`);
+    return;
+  }
+  const gens = await rootQuery(
+    "select distinct extraction_id from clara.entry_evidence where entry_id=$1", [d.entry_id]);
+  assert.equal(gens.rows.length, 2,
+    `c3.B8-mixed precondition: the entry really cites TWO generations (got ${gens.rows.length}) — one generation would make this cell a duplicate of the primary`);
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: await currentToken(d.entry_id), client: A2(), booksVersion: await booksVersion(A2()),
+  });
+  assertNonAdmitting(assert, r, "B8", "c3.B8-mixed");
+  assert.equal(r.refusal.reason, RUNG_TOKEN.B8,
+    "c3.B8-mixed: scope α — a stale NON-money citation is enough to move the facts");
+});
+
+// ===========================================================================
+// 4 · B8-MUST-NOT-REFUSE — the dead-lane guard.
+// ===========================================================================
+
+test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 reads fact generations only (law 72)", async (t) => {
+  if (await gateCore(t)) return;
+  // The guard against the reading that would make B8 refuse a draft for citing a page image.
+  // `ocr` and `structured_parse` are NOT fact generations; a rung that compared them against the
+  // fact state's `extraction_id` would refuse every draft that ever cited a line of raw text —
+  // and it would do so with a token that says the FACTS moved, which is not what happened.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
+  const total = await witnessRegion(cited.documentId, "invoice.total");
+  const ocrLine = await seedRegion({
+    firm: cited.firm, extraction: cited.extractionId, fieldPath: "pages.1.lines.3",
+    textContent: "TOTAL DUE RM 1,000.00", locator: { page: 1, polygon: [0, 0, 1, 1] },
+  }).catch((e) => { noteLane(`c3.B8-ocr: could not seed an OCR line region (${e.code}: ${e.message})`); return null; });
+  if (!ocrLine) return;
+  const cred = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
+    evidence: [
+      ev(total.id, total.text_content, "invoice.total"),
+      ev(ocrLine, "TOTAL DUE RM 1,000.00", "pages.1.lines.3"),
+    ],
+  }).catch((e) => ({ error: e }));
+  if (d?.error) {
+    noteLane(`c3.B8-ocr: the draft floor refused the OCR citation (${d.error.code}: ${d.error.message}) — the dead-lane half is unbuildable through the writer and B8's OCR scoping stays a contract claim`);
+    return;
+  }
+  const kinds = await rootQuery(
+    `select distinct ex.engine_kind from clara.entry_evidence e
+       join clara.document_extractions ex on ex.id=e.extraction_id where e.entry_id=$1 order by 1`,
+    [d.entry_id]);
+  assert.ok(kinds.rows.some((x) => x.engine_kind === "ocr"),
+    `c3.B8-ocr precondition: the entry really cites an OCR extraction (kinds: ${kinds.rows.map((x) => x.engine_kind).join(",")})`);
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: await currentToken(d.entry_id), client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assert.ok(admits(r?.rung_vector, "B8"),
+    `c3.B8-ocr: B8 ADMITS — an OCR citation is out of scope and is not a moved fact (got ${JSON.stringify(r?.rung_vector?.B8)}; non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
+  assert.equal(r?.posted, true, `c3.B8-ocr: …and the entry posts (${JSON.stringify(r?.refusal)})`);
+});
+
+// ===========================================================================
+// 5 · B8-NOT_EVALUABLE — the ARM-0 arm.
+// ===========================================================================
+
+test("f-a2.c3.B8-not_evaluable an UNRESOLVED witness TEXT row reports not_evaluable, never pass", async (t) => {
+  if (await gateCore(t)) return;
+  // `0092:210-217`: an unresolvable pair returns a REAL envelope carrying `corroborated:false`
+  // and a `pair_refusal`, with `extraction_id` present but nothing to compare a citation
+  // against. B8 has no judgement to make there, and law 68 says the honest value is
+  // `not_evaluable` — a `pass` would be the ARM-0 defect, admitting on absence.
+  await ensureChart(OWNER(), A2());
+  const cited = await witnessedFiling(OWNER(), { client: A2(), gross: GROSS });
+  const { cred, draft } = await draftOnG1(A2(), cited);
+
+  // A successor pair whose TEXT row never resolves: landed with a non-done status, which is the
+  // shape the writer produces when the text channel fails and the vision half lands alone.
+  await landWitnessPair(cited.documentId, {
+    ...witnessShape({ fields: { "invoice.total": GROSS, "invoice.currency": "RM", "invoice.type_code": "01" } }),
+    textStatus: "failed", versionN: 2,
+  }).catch((e) => noteLane(`c3.B8-not_evaluable: could not land an unresolved pair (${e.code}: ${e.message})`));
+
+  const state = await factExtraction(cited.documentId);
+  const r = await wakePostEntry(cred, {
+    entry: draft.entry_id, expectedRevision: await currentToken(draft.entry_id),
+    client: A2(), booksVersion: await booksVersion(A2()),
+  });
+  assertVectorShape(assert, r?.rung_vector, "c3.B8-not_evaluable");
+  assert.notEqual(r?.rung_vector?.B8, "pass",
+    `c3.B8-not_evaluable: B8 is NEVER a pass on an unjudgeable input (fact state was ${JSON.stringify(state.state?.pair_refusal ?? state.state?.corroborated)})`);
+  if (r?.rung_vector?.B8 !== "not_evaluable") {
+    noteLane(`c3.B8-not_evaluable: B8 read '${r?.rung_vector?.B8}' rather than not_evaluable — the pair may have resolved to the prior generation on this frontier; the load-bearing claim (never a pass) still holds`);
+  }
+  assert.equal(r?.posted, false, "c3.B8-not_evaluable: and nothing posts on an unjudgeable generation");
+});

@@ -19,7 +19,7 @@ import {
   booksVersion, opk, entryRow, hasColumn, truncateGuardError, withTxnOrNull,
   postingCoreReady, gateCore, wakePostEntry, agentPostable, agentDraft, ensureChart,
   witnessedFiling, interactiveCred, postReceiptRow, postReceiptCount, entryEvents,
-  supplierLines, bodyOf, MODEL, RATIONALE, APPROVAL_ARM_AGENT, RECEIPT_WAKE_KINDS,
+  supplierLines, bodyOfName, MODEL, RATIONALE, APPROVAL_ARM_AGENT, RECEIPT_WAKE_KINDS,
   EVENT_POSTED, AGENT_USER_ID, admitsAll, assertVectorShape,
 } from "./f-a2-post-world.mjs";
 
@@ -124,9 +124,12 @@ test("f-a2.c6.human-arms the human lane's THREE CLR05 arms are byte-untouched", 
   // arm 1 demands an attestation the DB does not validate, `distinct_checker` is unreachable for
   // an agent (eligible_checker_count's `u.is_agent = false`), and `self_attestation` is the solo
   // firm's live-proven door. All three are asserted by their own reason tokens.
-  const src = await bodyOf("clara._approve_entry_core(jsonb,uuid,text,text)")
-    ?? await bodyOf("clara._approve_entry_core(jsonb,uuid,uuid,text,text)");
-  if (!src) { noteLane("c6.human-arms: _approve_entry_core did not resolve at either pinned signature — an arity finding"); return; }
+  // BY NAME. The live core is FIVE-arity — `(p_ctx jsonb, p_entry uuid, p_expected_revision
+  // uuid, p_attestation text, p_op_key text)` — and a cell that guessed four got a NULL body and
+  // reported "did not resolve" when the TEST was what was wrong.
+  const { src, args } = await bodyOfName("_approve_entry_core");
+  assert.ok(src, "c6.human-arms: the shared approve core resolves");
+  noteLane(`c6.human-arms: live approve core = clara._approve_entry_core(${args})`);
   for (const reason of ["attestation_required", "distinct_checker", "self_attestation"]) {
     assert.ok(src.includes(`"reason":"${reason}"`),
       `c6.human-arms: the CLR05 arm '${reason}' survives the 8th body verbatim`);
@@ -166,13 +169,15 @@ test("f-a2.c6.channels _audit AND entry.posted both carry obo and wake kind — 
     entry: d.entry_id, expectedRevision: d.revision_token, client: A2(), booksVersion: await booksVersion(A2()),
   });
   if (wire?.posted !== true) { noteLane(`c6.channels: the chat post refused (${JSON.stringify(wire?.refusal)}) — a NULL obo would be indistinguishable from the dropped channel, so the cell declines to assert`); return; }
+  // `audit_log` keys on `entry_id` and names the verb in `fn` — there is no `subject_id` and
+  // no `action` column. Measured, not assumed.
   const audit = await rootQuery(
     `select to_jsonb(a) as row from clara.audit_log a
-      where a.subject_id=$1 order by a.at desc limit 5`, [d.entry_id]);
-  const approveRow = audit.rows.map((x) => x.row).find((x) => /approve|post/i.test(x.action ?? ""));
+      where a.entry_id=$1 order by a.at desc limit 5`, [d.entry_id]);
+  const approveRow = audit.rows.map((x) => x.row).find((x) => /approve|post/i.test(x.fn ?? ""));
   assert.ok(approveRow, "c6.channels: the post wrote an audit row");
   assert.equal(approveRow.on_behalf_of, BOB(), "c6.channels: _audit carries the director — channel 1 re-opened");
-  assert.equal(approveRow.wake_kind ?? approveRow.via_wake_kind, "interactive", "c6.channels: …and the wake kind — channel 2");
+  assert.equal(approveRow.via_wake_kind, "interactive", "c6.channels: …and the wake kind — channel 2");
   const events = await entryEvents(d.entry_id, [EVENT_POSTED]);
   assert.equal(events.length, 1, "c6.channels: exactly one entry.posted event");
   assert.equal(events[0].on_behalf_of ?? events[0].payload?.on_behalf_of, BOB(),

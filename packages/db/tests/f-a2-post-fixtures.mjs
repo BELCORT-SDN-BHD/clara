@@ -290,9 +290,16 @@ export async function wakePostEntry(cred, {
   rationale = RATIONALE, model = MODEL, opKey = null,
   role = ROLES.wakeInteractive, secret = undefined,
 } = {}) {
+  // EVERY ARGUMENT IS CAST, and `p_expected_revision` is the one that matters. The estate's
+  // revision tokens are UUID everywhere — `journal_entries.revision_token` is
+  // `gen_random_uuid()` (`0016:4909-4913`), `approve_entry` and `_approve_entry_core` both
+  // declare `p_expected_revision uuid` — so a bare `$2` (which the driver sends as unknown and
+  // the planner resolves to text) misses the function by SIGNATURE and comes back 42883
+  // "function does not exist". That reads like an absent verb and is really a wrong call.
   const sql =
-    "select clara.wake_post_entry(p_entry => $1, p_expected_revision => $2, p_client => $3, "
-    + "p_books_version => $4::bigint, p_rationale => $5, p_model => $6::jsonb, p_op_key => $7) as r";
+    "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+    + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+    + "p_model => $6::jsonb, p_op_key => $7::text) as r";
   const params = [
     entry, expectedRevision, client, bv,
     rationale,
@@ -334,6 +341,25 @@ export async function withTxnOrNull(fn) {
   }
 }
 
+/**
+ * Merge `flags` onto a DRAFT entry as root, and hand back the new token.
+ *
+ * B6 is the reason this exists. Every LAWFUL override arrives through `revise_entry`, which also
+ * stamps `last_human_editor` — and A8 refuses on that BEFORE the ladder reaches B6, so a
+ * revise-built fixture proves A8 twice and B6 never. Doctoring puts the override on an
+ * otherwise-untouched agent draft, which is the only shape that isolates the rung. The draft
+ * writer will not do it either: `p_flags` is not a passthrough, and the core computes
+ * `amount_exception` itself from the leg divergence (`0009:1361-1367`).
+ */
+export async function doctorFlags(entry, flags) {
+  const out = await withTxnOrNull((c) => c.query(
+    "update clara.journal_entries set flags = coalesce(flags,'{}'::jsonb) || $2::jsonb where id=$1",
+    [entry, JSON.stringify(flags)]));
+  if (out.error) return { ok: false, code: out.error.code, message: out.error.message };
+  const r = await rootQuery("select flags, revision_token from clara.journal_entries where id=$1", [entry]);
+  return { ok: true, flags: r.rows[0]?.flags, revisionToken: r.rows[0]?.revision_token };
+}
+
 /** The post receipt row for an entry (root readback; no role holds DML on it). */
 export async function postReceiptRow(entry) {
   const r = await rootQuery(
@@ -363,7 +389,7 @@ export async function opReceiptText(firm, opKey, fn = "wake_post_entry") {
 export async function entryEvents(entry, types = [EVENT_POSTED, EVENT_POST_REFUSED]) {
   const r = await rootQuery(
     `select to_jsonb(d) as row from clara.domain_events d
-      where d.event_type = any($2) and (d.subject_id = $1 or d.payload->>'entry_id' = $1::text)
+      where d.event_type = any($2) and (d.entry_id = $1 or d.payload->>'entry_id' = $1::text)
       order by d.seq`, [entry, types]);
   return r.rows.map((x) => x.row);
 }
