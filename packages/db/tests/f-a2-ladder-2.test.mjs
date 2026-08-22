@@ -355,8 +355,14 @@ test("f-a2.c3.B4-creditnote a credit note may NOT tie by absolute value — the 
   assert.equal(flip.ok, true, `c3.B4-cn: the un-mirroring doctor landed (${flip.code}: ${flip.message})`);
   const r = await post(unmirrored, { expectedRevision: flip.revisionToken });
   assert.equal(r?.posted, false, "c3.B4-cn: an un-mirrored credit note does not post");
-  assert.ok(!admits(r?.rung_vector, "B4") || !admits(r?.rung_vector, "B11"),
-    `c3.B4-cn: and it does not admit at the tie or at the sales floor — the sign mirror is what keeps a credit note from tying by absolute value (${JSON.stringify(r?.rung_vector)})`);
+  // B4 SPECIFICALLY. The disjunction `!admits(B4) || !admits(B11)` was satisfied by B11 alone,
+  // and B11 is the sales FLOOR — a different wall with a different reason. Annex I's claim under
+  // test here is the TIE's sign mirror, so the tie is what must be asserted; B11 is asserted
+  // beside it rather than instead of it.
+  assert.ok(!admits(r?.rung_vector, "B4"),
+    `c3.B4-cn: B4 — the TIE — does not admit. That is Annex I's claim: the sign mirror is what keeps a credit note from tying by absolute value (${JSON.stringify(r?.rung_vector)})`);
+  assert.ok(!admits(r?.rung_vector, "B11"),
+    `c3.B4-cn: …and the live sales floor agrees, so the tie and the floor cannot disagree on this entry either (${JSON.stringify(r?.rung_vector)})`);
   noteLane("c3.B4-cn: the POSITIVE half (a sign-mirrored CN admitting at B4) needs a corroborating type_code='02' page, which the current witness predicate does not produce on the rig — it is carried by §6's corpus run instead. `creditNoteLines` stays exported for that run");
 });
 
