@@ -36,6 +36,7 @@ import {
   gateCore, wakePostEntry, agentDraft, interactiveCred, ensureChart, witnessedFiling,
   postReceiptRow, supplierLines, genericLines, admits, admitsAll, assertVectorShape,
   TIER_B_RUNGS, CHAT_PARITY_PENDING, PR2_PENDING, mintWake5,
+  wakeQuery, filedDocument, retireDocumentFiling, opk,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -270,19 +271,64 @@ test("f-a2.c13.reg-plain a PLAIN interactive credential still cannot carry a cli
   noteLane(`c13.reg-plain: refused with ${raised.code}: ${raised.message}`);
 });
 
-test("f-a2.c13.reg-unassigned list_unassigned_documents still admits a plain interactive credential on a p_client => null call", async (t) => {
+test("f-a2.c13.reg-unassigned list_unassigned_documents still ADMITS a plain interactive credential, and still returns rows", async (t) => {
   if (gateWaveA(t)) return;
-  // Census finding 1. `_agent_read_admitted` refuses ANY client-pinned credential on a
-  // `p_client => null` call, so a weakening would have REGRESSED this reader. It must keep
-  // working, and this cell is what says so afterwards as well as before.
+  // Census finding 1, rebuilt. `clara._agent_read_admitted` refuses ANY client-pinned credential
+  // on a `p_client => null` call, so extending the credential CHECKs could have regressed this
+  // reader — and the first cut of this cell could not have noticed:
+  //   (a) it asserted `!error || error.code !== 'CLR03'`, which passes on success AND on every
+  //       other error, including "relation does not exist";
+  //   (b) it never looked at what came back, so an ADMITTED-but-empty reader read as a pass;
+  //   (c) it set the wake secret with `set_config(..., false)` in ONE pooled roleQuery and then
+  //       issued the read in a SECOND one — a different connection — so the call it measured
+  //       most likely carried no credential at all.
+  // MEASURED WHILE REBUILDING IT, and it is the sharpest of the three: `clara
+  // .list_unassigned_documents` HAS NO `p_client` PARAMETER. Its only argument is `p_limit`; the
+  // "p_client => null" in the census wording is the second argument of the reader's INTERNAL
+  // `_agent_read_admitted('list_unassigned_documents', null)` call, not a parameter a caller can
+  // pass. So the old cell issued a call that did not resolve at all (42883), the `.catch`
+  // swallowed it, and `!error || error.code !== 'CLR03'` read function-not-found as a pass. It
+  // had been green against a call the server never accepted.
+  // The lawful instrument is `wakeQuery`, which sets the secret txn-locally on the SAME
+  // connection, and the reader is asked for a document it must actually find.
   const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [A1()])).rows[0].firm_id;
+
+  // AN UNASSIGNED DOCUMENT, built through the estate's own doors: the reader's population is
+  // "documents with no live filing", so a filed document has its filing RETIRED.
+  const doc = await filedDocument(OWNER(), { firm, client: A1(), kind: "invoice" });
+  const filingRow = await rootQuery(
+    "select id, revision_token from clara.document_filings where document_id=$1 and retired_at is null",
+    [doc.documentId]);
+  assert.equal(filingRow.rows.length, 1, "c13.reg-unassigned: mandatory setup — the document is filed exactly once");
+  await retireDocumentFiling(OWNER(), {
+    filing: filingRow.rows[0].id, reason: "c13.reg-unassigned: make the document unassigned",
+    expectedRevision: filingRow.rows[0].revision_token, opKey: opk("c13unassign"),
+  });
+  assert.equal(
+    (await rootQuery(
+      "select count(*)::int as n from clara.document_filings where document_id=$1 and retired_at is null",
+      [doc.documentId])).rows[0].n,
+    0, "c13.reg-unassigned: mandatory setup — it now has NO live filing, which is the reader's own population");
+
+  const read = async (secret) => {
+    const r = await wakeQuery(ROLES.agentRo, secret,
+      "select coalesce(jsonb_agg(x.r), '[]'::jsonb) as rows from clara.list_unassigned_documents(p_limit => 500) x(r)");
+    return r.rows[0].rows;
+  };
+
+  // (a) THE PLAIN, CLIENT-LESS INTERACTIVE CREDENTIAL — admitted, and it SEES the document.
   const plain = await mintWake5({ kind: "interactive", firm, onBehalfOf: BOB(), client: null });
-  const out = await roleQuery(ROLES.wakeInteractive,
-    "select set_config('clara.wake_secret',$1,false) as s", [plain.secret]).then(() =>
-    roleQuery(ROLES.wakeInteractive, "select clara.list_unassigned_documents(p_client => null) as r"))
-    .catch((e) => ({ error: e }));
-  assert.ok(!out?.error || out.error.code !== "CLR03",
-    `c13.reg-unassigned: the reader still ADMITS the plain credential (got ${out?.error?.code}: ${out?.error?.message})`);
+  const seen = await read(plain.secret);
+  assert.ok(Array.isArray(seen), `c13.reg-unassigned: the reader answered a list (got ${JSON.stringify(seen)?.slice(0, 120)})`);
+  assert.ok(seen.some((x) => x?.id === doc.documentId),
+    `c13.reg-unassigned: …and the unassigned document is IN it (${seen.length} row(s)) — an admitted-but-empty reader is the shape the old assertion could not tell from a working one`);
+
+  // (b) THE PINNED CREDENTIAL — still refused by the admission gate, which is what makes (a) a
+  // measurement of the ADMISSION rather than of a reader that admits everybody.
+  const pinned = await mintWake5({ kind: NEW_KIND, firm, onBehalfOf: BOB(), client: A1() });
+  const blocked = await read(pinned.secret).catch((e) => ({ error: e }));
+  assert.ok(Array.isArray(blocked) ? blocked.length === 0 : !!blocked.error,
+    `c13.reg-unassigned CONTROL: a CLIENT-PINNED credential gets nothing from a p_client => null call — _agent_read_admitted refuses it (got ${JSON.stringify(blocked)?.slice(0, 160)})`);
 });
 
 test("f-a2.c13.reg-coding-lane coding_lane returns EXACTLY what it returns today for a plain interactive credential", async (t) => {
