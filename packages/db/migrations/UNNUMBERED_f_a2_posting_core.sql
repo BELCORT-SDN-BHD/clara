@@ -1618,7 +1618,7 @@ join inserted_types i on i.name = x.name cross join clara.taxonomy_active a;
 do $fa2_tail$
 declare
   v_src text; v_n int; v_key text; v_role text; v_sig text; v_def text; v_grantees text[];
-  v_receipt_cols int; v_inert int;
+  v_receipt_cols int; v_inert int; v_bad text;
 begin
   -- (J.1) The receipt table: forced RLS, the policy pair, append-only, no-truncate, NO DML.
   if not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
@@ -1647,11 +1647,35 @@ begin
     raise exception 'F-A2 tail: entry_post_receipts has % columns, expected Annex E.1''s 14', v_receipt_cols using errcode='CLR10';
   end if;
   -- R-3's wall, re-read: the model conjunct must compare against a TWO-apostrophe default. A
-  -- four-apostrophe default makes it always-true, on the wall that records WHICH MODEL posted.
+  -- four-apostrophe default (`coalesce(model_snapshot->>'model','''')`) makes the conjunct
+  -- ALWAYS-TRUE, on the wall that records WHICH MODEL posted.
+  --
+  -- THE FIRST CUT OF THIS GUARD COULD NOT FAIL, and that is worth writing down because the guard
+  -- exists BECAUSE of a silent pass. It searched for the empty-string literal as a SUBSTRING —
+  -- but the four-apostrophe rendering CONTAINS that substring (its last two apostrophes plus the
+  -- cast), so the bad shape satisfied the guard as comfortably as the good one. Measured on the
+  -- rig against both texts before this was rewritten.
+  --
+  -- THE PREDICATE NOW READS THE THING ITSELF: a rendered constraint whose defaults and
+  -- comparands are all empty strings can never contain three consecutive apostrophes, and any
+  -- non-empty literal renders as four. So the wall is "no run of 3+ apostrophes", plus the
+  -- positive presence read the first cut already made.
   select pg_get_constraintdef(c.oid) into v_def from pg_constraint c
    where c.conrelid='clara.entry_post_receipts'::regclass and pg_get_constraintdef(c.oid) like '%model_snapshot%';
   if v_def is null or position('''''::text' in v_def) = 0 then
     raise exception 'F-A2 tail: the model_snapshot CHECK does not compare against an empty-string default: %', v_def using errcode='CLR10';
+  end if;
+  -- THE GUARD IS SHOWN TO SAY NO, on a constructed instance of the exact shape it exists to
+  -- catch. A guard that has only ever been observed passing is not evidence (review law 2).
+  v_bad := 'CHECK (btrim(COALESCE((model_snapshot ->> ''model''::text), ''''''''::text)) <> ''''::text)';
+  if not (v_bad ~ '''{3,}') then
+    raise exception 'F-A2 tail: the R-3 guard cannot see a four-apostrophe default — the guard itself is inert: %', v_bad using errcode='CLR10';
+  end if;
+  if position('''''::text' in v_bad) = 0 then
+    raise exception 'F-A2 tail: the R-3 negative control is malformed — it must satisfy the OLD substring read, or it does not reproduce the silent pass' using errcode='CLR10';
+  end if;
+  if v_def ~ '''{3,}' then
+    raise exception 'F-A2 tail: the model_snapshot CHECK carries a NON-EMPTY literal — the model conjunct is always-true: %', v_def using errcode='CLR10';
   end if;
 
   -- (J.2) The receipt wall: deferred, initially deferred, on the draft->approved transition.
