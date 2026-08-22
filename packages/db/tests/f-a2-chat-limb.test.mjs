@@ -35,7 +35,7 @@ import {
   ROLES, roleQuery, booksVersion, fnPresent,
   gateCore, wakePostEntry, agentDraft, interactiveCred, ensureChart, witnessedFiling,
   postReceiptRow, supplierLines, genericLines, admits, admitsAll, assertVectorShape,
-  TIER_B_RUNGS, CHAT_PARITY_PENDING, PR2_PENDING, mintWake5,
+  TIER_B_RUNGS, CHAT_PARITY_PENDING, PR2_PENDING, mintWake5, gateGrants,
   wakeQuery, filedDocument, retireDocumentFiling, opk,
 } from "./f-a2-post-world.mjs";
 
@@ -61,7 +61,14 @@ const gateWaveA = (t) => (waveA ? false : skipHere(t, "the Wave-A wake surface (
 
 /** Has the follow-on PR landed? Probed by the ONE thing that cannot be true without it — the
  *  durable CHECKs admitting the new kind. Probed, never assumed: a gate keyed on a migration
- *  stem this lane does not own would be a guess about someone else's file name. */
+ *  stem this lane does not own would be a guess about someone else's file name.
+ *
+ *  AND IT PROBES PART 1 ONLY. The CHECK swap ships in the posting CORE; `clara.wake_post_entry`
+ *  and its allowlist rows ship in the GRANTS file. Three cells here POST — c13.kind, c13.rungs
+ *  and c13.generic — and they were gated on the core stem alone, so at a frontier carrying part
+ *  1 without part 2 they would have failed 42883 instead of skipping. They now carry
+ *  `gateGrants` as well. (Measured by mapping every cell in this file to its gate and to whether
+ *  it calls the post verb: three, not two.) */
 async function chatParityLive() {
   const r = await rootQuery(
     `select count(*)::int as n from pg_constraint c join pg_class t on t.oid=c.conrelid
@@ -95,6 +102,7 @@ async function chatDraft(client, {
 
 test("f-a2.c13.kind a CHAT POST lands with via_wake_kind='interactive' — the post keeps the PLAIN kind", async (t) => {
   if (await gateCore(t)) return;
+  if (await gateGrants(t)) return;   // the post verb ships in PART 2
   const c = await chatDraft(A1());
   const wire = await wakePostEntry(c.cred, c.args);
   assert.equal(wire?.posted, true, `c13.kind: the chat post lands (${JSON.stringify(wire?.refusal)})`);
@@ -106,6 +114,7 @@ test("f-a2.c13.kind a CHAT POST lands with via_wake_kind='interactive' — the p
 
 test("f-a2.c13.rungs every Tier-B rung is RE-PROVEN on the chat lane — B15 included", async (t) => {
   if (await gateCore(t)) return;
+  if (await gateGrants(t)) return;   // the post verb ships in PART 2
   // Chat is DIRECTION-BLIND today (`chatTurn.v12.tools.ts:292`), and the `0046:2687-2688` arm was
   // autodraft-gated, so the generic hole GB-1 found is WIDER on this lane, not narrower. B15
   // lives in the LADDER precisely so it covers both lanes rather than in the autodraft toolface.
@@ -130,6 +139,7 @@ test("f-a2.c13.rungs every Tier-B rung is RE-PROVEN on the chat lane — B15 inc
 
 test("f-a2.c13.generic a chat post of a journal_entry GENERIC lands when it is lawfully generic", async (t) => {
   if (await gateCore(t)) return;
+  if (await gateGrants(t)) return;   // the post verb ships in PART 2
   const c = await chatDraft(A2(), {
     amount: 813000, codingKind: null, lines: genericLines(813000), direction: "unresolved",
   });
