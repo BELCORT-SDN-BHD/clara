@@ -135,10 +135,22 @@ async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amoun
  *  it does not get to skip quietly, because an unexpected errcode still fails. A cell whose
  *  claim is about the EXECUTOR's own skip reason needs the draft to exist, and those cells keep
  *  their `assert.ok(draft?.entry_id, …)` — which now fails loudly if N1 ever swallows one. */
-function n1DraftRefusal(assert, maybeError, label, codes = ["CLR23", "CLR21"]) {
+function n1DraftRefusal(assert, maybeError, label, expect, codes = ["CLR23", "CLR21"]) {
   if (!(maybeError instanceof Error)) return false;
   assert.ok(codes.includes(maybeError.code),
     `${label}: the draft-door refusal rides the same family the approve door used to raise (got ${maybeError.code}: ${maybeError.message})`);
+  // THE DISCRIMINANT IS REQUIRED, not the errcode alone. CLR21/CLR23 are carried by many walls
+  // — the direction-family arm raises CLR21 and eight bare raises inside the supplier floor
+  // raise CLR23 — so a two-code union accepts refusals from walls that have nothing to do with
+  // the shape the cell is about. Measured while adding this: three sibling call sites in
+  // wave-a2-sales-shape were passing on `direction_family_mismatch`, a different wall entirely.
+  // Most of the floor's raises are BARE (no detail), which is the whole anti-wildcard point, so
+  // the discriminant is `detail.reason` where there is one and the raise's own MESSAGE where
+  // there is not.
+  assert.ok(expect instanceof RegExp, `${label}: the call site states which wall it expects`);
+  const seen = `${maybeError.detail ?? ""} ${maybeError.message ?? ""}`;
+  assert.match(seen, expect,
+    `${label}: …and it is THAT wall answering, not merely a member of the code union (got ${maybeError.code}: ${seen.trim()})`);
   return true;
 }
 
@@ -370,7 +382,7 @@ test("FIX-1 execute_rule_post REFUSES an EXTRA control leg (a receivable leg on 
       { account_code: AP, debit_cents: 0, credit_cents: 45000, description: "ap" },
     ],
   }).catch((e) => e);
-  if (n1DraftRefusal(assert, draft, "FIX-1 extra control leg")) return;
+  if (n1DraftRefusal(assert, draft, "FIX-1 extra control leg", /admits no receivable-class leg/)) return;
   assert.ok(draft?.entry_id, "the extra-control-leg supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a purchase bill with an extra receivable control leg is NOT auto-posted (control-shape refusal)");
@@ -546,7 +558,7 @@ test("RESIDUAL-1 execute_rule_post REFUSES a caller-supplied ROUNDING leg carryi
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
   }).catch((e) => e);
-  if (n1DraftRefusal(assert, draft, "RESIDUAL-1 material rounding leg")) return;
+  if (n1DraftRefusal(assert, draft, "RESIDUAL-1 material rounding leg", /no material amount in a rounding leg/)) return;
   assert.ok(draft?.entry_id, "the rounding-laundering supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a bill with a MATERIAL rounding leg is NOT auto-posted (the expected-account-set laundering bound)");
@@ -603,7 +615,7 @@ test("RESIDUAL-1 the supplier-bill shape floor REFUSES a material rounding leg a
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
   }).catch((e) => e);
-  if (n1DraftRefusal(assert, draft, "RESIDUAL-1 floor, material rounding leg")) return;
+  if (n1DraftRefusal(assert, draft, "RESIDUAL-1 floor, material rounding leg", /no material amount in a rounding leg/)) return;
   assert.ok(draft?.entry_id, "the rounding-laundering supplier-bill draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("aprnd") }); }
@@ -690,7 +702,7 @@ test("FIX-7/v3 execute_rule_post REFUSES an UNTIED sst_output leg (Dr expense 1�
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
   }).catch((e) => e);
-  if (n1DraftRefusal(assert, draft, "FIX-7 untied sst_output leg (executor)")) return;
+  if (n1DraftRefusal(assert, draft, "FIX-7 untied sst_output leg (executor)", /admits no sst_output leg/)) return;
   assert.ok(draft?.entry_id, "the sst-laundering supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a bill with an UNTIED sst_output leg (no tax fact) is NOT auto-posted (the tied-sst gate)");
@@ -714,7 +726,7 @@ test("FIX-7/v3 the supplier-bill shape floor REFUSES an UNTIED sst_output leg at
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
   }).catch((e) => e);
-  if (n1DraftRefusal(assert, draft, "FIX-7 untied sst_output leg (floor)")) return;
+  if (n1DraftRefusal(assert, draft, "FIX-7 untied sst_output leg (floor)", /admits no sst_output leg/)) return;
   assert.ok(draft?.entry_id, "the untied-sst supplier-bill draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("apsst") }); }
@@ -753,7 +765,7 @@ test("FIX-2/v4 the supplier-bill floor REFUSES ANY sst_output leg on a PURCHASE 
       { account_code: AP, debit_cents: 0, credit_cents: 10600, description: "ap (gross)" },
     ],
   }).catch((e) => e);
-  if (n1DraftRefusal(assert, draft, "FIX-2 any sst_output leg on a purchase")) return;
+  if (n1DraftRefusal(assert, draft, "FIX-2 any sst_output leg on a purchase", /admits no sst_output leg/)) return;
   assert.ok(draft?.entry_id, "the sst-leg supplier-bill draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("apsst4") }); }

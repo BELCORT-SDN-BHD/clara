@@ -134,14 +134,33 @@ async function draftSales({ client, cited, lines, codingKind = "sales_invoice" }
  *  here; it does not get to skip quietly, because an unexpected errcode still fails. Mirrors
  *  `n1DraftRefusal` in wave-a2-execute-rule-post.test.mjs, which is the same disposition on the
  *  purchase side. */
-function n1SalesDraftRefusal(maybe, label, codes = ["CLR23", "CLR21"]) {
+function n1SalesDraftRefusal(maybe, label, expect, codes = ["CLR23", "CLR21"]) {
   const e = maybe?.error;
   if (!e) return false;
   assert.ok(codes.includes(e.code),
     `${label}: the draft-door refusal rides the same family the approve door used to raise (got ${e.code}: ${e.message})`);
-  noteLane(`${label}: refused at the DRAFT door (N1) with ${e.code} -- the approve-door assertions below are satisfied one door earlier`);
+  assert.ok(expect instanceof RegExp, `${label}: the call site states which wall it expects`);
+  const seen = `${e.detail ?? ""} ${e.message ?? ""}`;
+  assert.match(seen, expect,
+    `${label}: ...and it is THAT wall answering, not merely a member of the code union (got ${e.code}: ${seen.trim()})`);
+  noteLane(`${label}: refused at the DRAFT door (N1) with ${e.code} ${seen.trim()}`);
   return true;
 }
+
+// THE THREE SALES SITES BELOW DO NOT REACH THE SALES FLOOR TODAY, and the discriminant they are
+// pinned to says so out loud instead of pretending otherwise. MEASURED: each refuses CLR21
+// `direction_family_mismatch` — a DIFFERENT wall from the one the cell is about. The cause is
+// the 0049 defect C6 fixes: `clara._document_direction` will only TEST a stated supplier
+// registration when the client holds BOTH a tin and an ssm, so this fixture — which states the
+// client's own name AND registration — still resolves `unresolved`, and the direction-family arm
+// answers before the shape floor is ever asked.
+//
+// PINNING THE TRUE DISCRIMINANT IS DELIBERATELY SELF-FORCING: once C6 lands, these documents
+// RESOLVE, the sales floor answers instead, and these three sites go RED — which is exactly the
+// prompt to re-pin them to the floor's own message. A permissive two-code union would have let
+// that transition happen silently, which is how the cells came to be passing on the wrong wall
+// in the first place.
+const C6_PENDING_DIRECTION = /direction_family_mismatch/;
 
 before(async () => {
   ready = await waveAEnsureReady();
@@ -350,7 +369,7 @@ test("FIX-1 a sales invoice with an EXTRA payable-control leg is REFUSED (no lau
     { account_code: AP4, debit_cents: 0, credit_cents: 10500, description: "launder-into-payable" },
   ];
   const d = await draftSales({ client, cited: f.cited, lines });
-  if (n1SalesDraftRefusal(d, "FIX-1 control-account laundering")) return;
+  if (n1SalesDraftRefusal(d, "FIX-1 control-account laundering", C6_PENDING_DIRECTION)) return;
   assert.ok(d?.entry_id, "the laundering draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aplaunder") }); }
@@ -369,7 +388,7 @@ test("FIX-2 a type-02 (credit note) document coded as a sales_invoice is REFUSED
   assert.ok(f, "the type-02 facts filing was built (mandatory setup)");
   await upsertAccountClassed(world.users.alice, { client, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sstT") }).catch(() => {});
   const d = await draftSales({ client, cited: f.cited, lines: salesLines(10600, 10000, 600), codingKind: "sales_invoice" });
-  if (n1SalesDraftRefusal(d, "FIX-2 type/polarity mismatch")) return;
+  if (n1SalesDraftRefusal(d, "FIX-2 type/polarity mismatch", C6_PENDING_DIRECTION)) return;
   assert.ok(d?.entry_id, "the type-mismatch draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aptype") }); }
@@ -408,7 +427,7 @@ test("RESIDUAL-1 a sales invoice laundering a material amount into a ROUNDING le
     { account_code: SRND, debit_cents: 0, credit_cents: 10500, description: "launder-into-rounding" },
   ];
   const d = await draftSales({ client, cited: f.cited, lines });
-  if (n1SalesDraftRefusal(d, "RESIDUAL-1 rounding-leg laundering")) return;
+  if (n1SalesDraftRefusal(d, "RESIDUAL-1 rounding-leg laundering", C6_PENDING_DIRECTION)) return;
   assert.ok(d?.entry_id, "the rounding-laundering sales draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("apsrnd") }); }
