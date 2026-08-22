@@ -180,20 +180,24 @@ test("f-a2.c4.landscape-moved (CLR23, counterparty_landscape_moved) converts", a
   // (`0037:1884-1888`), which is the same fact GB-2's projected-state predicate exists for. So a
   // draft on its own leaves nothing to move, and the fixture APPROVES a first bill for the vendor
   // to bring it into being before drafting the second one whose landscape then shifts.
-  const first = await agentPostable(OWNER(), { client: A2(), amount: 409000, vendor: { new: { name: "LANDSCAPE SDN BHD" } } });
-  await approveEntry(OWNER(), { entry: first.args.entry, expectedRevision: first.args.expectedRevision, opKey: opk("c4lsborn") })
-    .catch((e) => noteLane(`c4.landscape-moved: the counterparty-birthing approve refused (${e.code}: ${e.message})`));
-  const p = await agentPostable(OWNER(), { client: A2(), amount: 410000, vendor: { new: { name: "LANDSCAPE SDN BHD" } } });
-  const cps = await counterpartyRows(A2());
-  const target = cps.find((c) => /LANDSCAPE/i.test(c.name_display ?? c.name ?? ""));
-  if (!target) { noteLane("c4.landscape-moved: no counterparty was born even after an approve — fixture gap, wall unproven"); return; }
-  const { mergeCounterparties } = await import("./f-a2-post-world.mjs");
-  const survivor = cps.find((c) => c.id !== target.id);
-  if (survivor) {
-    await mergeCounterparties(OWNER(), { client: A2(), survivor: survivor.id, merged: target.id, reason: "c4 move the landscape", opKey: opk("c4move") })
-      .catch((e) => noteLane(`c4.landscape-moved: merge refused (${e.code}: ${e.message})`));
-  }
-  const r = await post(p);
+  //
+  // THE ORDER IS THE FIXTURE, and the first cut had it backwards. The wall compares the
+  // fingerprint `_resolve_counterparty` returns AT APPROVE against the `match_fingerprint`
+  // stored AT DRAFT, so the landscape has to move BETWEEN those two moments. Birthing the
+  // counterparty first and then drafting produces the SAME fingerprint on both sides
+  // (`name_match_unregistered` twice) and the entry posts -- which is what this cell reported.
+  // A merge is not needed at all: a `birth` fingerprint that becomes a NAME MATCH is exactly a
+  // landscape that moved, it is the commonest live shape, and it is deterministic.
+  const name = `LANDSCAPE ${Date.now().toString(36)} SDN BHD`;
+  const p = await agentPostable(OWNER(), { client: A2(), amount: 410000, vendor: { new: { name } } });
+  assert.equal((await entryRow(p.args.entry))?.match_fingerprint?.decision, "birth",
+    "c4.landscape-moved: mandatory setup -- the draft's stored fingerprint is a BIRTH, which is the value the landscape then moves away from");
+  // A SECOND entry births the counterparty under that name, through the ordinary door.
+  const first = await agentPostable(OWNER(), { client: A2(), amount: 409000, vendor: { new: { name } } });
+  const r1 = await post(first);
+  assert.equal(r1?.posted, true,
+    `c4.landscape-moved: mandatory setup -- the birthing post lands (${JSON.stringify(r1?.refusal)})`);
+  const r = await post(p, { booksVersion: await booksVersion(A2()) });
   assert.equal(r?.posted, false, "c4.landscape-moved: a moved counterparty landscape never posts silently");
   if (r?.refusal?.tier === "C") assertConverted(r, "counterparty_landscape_moved", "c4.landscape-moved");
   else noteLane(`c4.landscape-moved: refused as ${JSON.stringify(r?.refusal)} — recorded, not asserted, because the merge fixture may not reproduce the live race`);
