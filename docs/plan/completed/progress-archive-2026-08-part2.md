@@ -214,3 +214,99 @@ this file's "Session log (entries through 2026-08-16)" section by the same law t
   becomes a single argv-0 and the machine flaps exit-1), never printed; sleeper destroyed at
   close. The `0051` door defect itself is unrepaired by design (per-document remedy; no new
   member can mint post-cutover).
+
+## Session-log entry archived 2026-08-22 (the Track-A v2 design-landing sweep; moved verbatim)
+
+*The sitting itself is minuted in `docs/adr/0074-the-track-a-sitting.md`, which GOVERNS; the
+three sitting-record files `docs/plan/active/track-a-sitting-1.md` (`-2`, `-3`) carry the member
+tables. This entry is the PROGRESS.md narrative, moved once the seven Track-A design sets it
+authorized had themselves landed at v2.*
+
+- **2026-08-22 (the TRACK-A SITTING)** — **fourteen principle rulings, TA-P1 … TA-P14, closing
+  every Track-A authority question for F-A3…F-A9 in one sitting; ADR-0074 is the record.** Each
+  option was briefed with its cost stated in advance and a fail-closed silence default; the
+  orchestrator's two dissents (TA-P1's two-question rule, TA-P7's DB-judged corroboration) are
+  on file, dissent-then-execute. **Four CONSTITUTIONAL AMENDMENTS fall out and are NOT yet
+  ratified** — they enter the set at the owner's next digest sign-off, and no product text was
+  edited: law 71's roster → an OPEN REGISTER · **invariant (a) → attribution is the agent's
+  JUDGEMENT under structural walls** (PRD §6.2(a) LAW · ARCH §0.1 · digest law 2; the
+  `AGENTS.md` home is FLAGGED, not drafted — its constraint 2 does not state invariant (a) at
+  all) · law 21 → periodic POSTING belts only · law 76's "LLM" drift trued. **Ruled ahead of
+  PR-1, deliberately:** TA-P11's one-architecture test retires the bank rules machine whole
+  (superseding **WCC-R5**'s bank arm) and RECORDS 7A-R3 + E-R13 as dissolved with it —
+  ADR-0072① forbids a law lapsing by inertia. Also minted: three number-origins + a governed
+  policy-table door relaxing `0016` (TA-P2) · one purpose per processing class, C6 to critical
+  path (TA-P3) · mechanically-bound receipts + a DEFINER read wrapper (TA-P4) · the calendar
+  wake source (TA-P5) · walls re-aim at the DIRECTING human (TA-P6) · learned identifiers are
+  context, never keys, plus a promotion door (TA-P8) · the DECIDED read surface closing audit
+  GAP5-5 (TA-P9) · byte-burned watermarks + the covered-recipient export test (TA-P10) · the
+  brake census, three gates REMOVED (TA-P12) · ONE metering ledger with `client_id` added now
+  or never (TA-P13) · closed-loop DONE (TA-P14). **Delegation recorded:** on TEST DATA the
+  agent may perform law-71 human acts as the owner's delegate through the real audited doors,
+  ledgered — **e-filing excluded by its nature**; real client data stays the owner's. **Same
+  day, after the sitting: R-OWNER RULED — B15's second door, option C into PR-1** (Known issues).
+
+## Known-issues rows archived at the 2026-08-22 landing sweep (resolved or converted; moved with their records)
+
+*Neither row is a gap any more: the first became a named PR-1 build obligation, the second is a
+standing operating law whose one-sentence form stays in PROGRESS.md. Full text verbatim.*
+
+- **R-OWNER — B15's SECOND DOOR: RULED 2026-08-22, option C, INTO PR-1** (raised by the F-1
+  verifier after the sitting closed; now a **PR-1 build obligation, not a gap**). A supplier
+  bill **STATING a registration** that is **untestable** because the client file holds neither
+  TIN nor SSM resolved to `none` (`0049:986-988`) — and `0049:975-979` records that real
+  Malaysian clients typically hold an SSM and no TIN — so the generic arm PASSED and **GB-1's
+  phantom-payment shape landed through D18's door.** **The root fix rides PR-1:**
+  `_document_direction`'s testability is recut so **ONE held hard id suffices** (compare the
+  stated registration against every id the client holds; a stated id of a kind the client has
+  not recorded → a NEW evidence class **`untestable`**), joining **PR-1's D1 list with a
+  `prosrc`-SHA pin**. **Orchestrator rider, ledgered (walls validate, fail-closed): B15 ALSO
+  refuses `generic_registration_untestable` when a registration is STATED but untestable** —
+  **D18 now stands for direction-SILENT documents only.** Record: ADR-0074 R-OWNER +
+  `docs/plan/active/f-a2-annexes-4-build.md` J.4 (which names PR-1's four build consequences).
+- **Rig recipe pin (2026-08-20):** drive the db suite with libpq `PG*` vars +
+  `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL` (a21-prestate ×6 + pipeline ×1 red
+  otherwise — the CI shape is ci.yml's own env). Same session: WSL **split-brain** mode
+  (`wsl -l -v` says Stopped while vmmem lives; every `wsl` command boots a second userland; two
+  runner copies fight one registration → Conflict crashloop) — cure is a full `wsl --shutdown`
+  when runners are IDLE, then one keeper.
+
+## Backlog blocks archived at the 2026-08-22 landing sweep (the ARGUMENT moved; PROGRESS.md keeps the state)
+
+*Same law as the 2026-08-20 disposition sweep: a disposition is not a deletion, and the reasoning
+that earned it lives here so PROGRESS.md can stay a state file. Both blocks below have a governing
+record of their own — ADR-0072 ④ for the first, ADR-0073 for the second.*
+
+- **The `closing_transfer`/SST-turnover latent (0056) — R1 RULED 2026-08-20, task #17 IS
+  UNBLOCKED, and it builds in Track B's fix queue.** The defect: `finalize_close`'s closing
+  entry is born `is_year_end` with `closing_transfer=false`, and approved-row immutability
+  means it can never be marked afterwards, so `0016`'s SST turnover exclusion is DEAD for
+  close-model clients. Direction, corrected during analysis: income closing lines are DEBITS
+  and `0016:582-588` sums credit−debit, so the defect **DEFLATES** rolling-12 turnover — the
+  real harm is PERMANENT SUPPRESSION of the 80% early-warning ladder (`0016:679`), never a
+  false alarm. Blast radius stays advisory-only: a missing warning, never a wrong book.
+  **The ruling (ADR-0072 ④): a closing transfer is not turnover** — the P&L→RE roll is period
+  machinery, which `0016`'s authors assumed at `0016:210-219` and what the exclusion was
+  written to do. **Fix A proceeds:** mark closing entries AND the B3 reopen mirrors
+  (`0085:379-386`) at birth, **BOTH writer bodies in ONE migration** — a single-body fix
+  INVERTS the defect into compounding inflation, the review's highest-value assertion.
+  **Fix B is STRUCTURALLY BLOCKED** by the evaluator freeze and would leave a lie in the data.
+  Shape: two `create or replace`, no signature change, D1 on the `0085` template, a 13-cell
+  battery (T6 catches Fix B's regression class; T2/T4/T8/T9 contract-blind), a forward-only
+  proof asserted fail-closed at apply. R1a (mirror inherits the marker) and R1b (a
+  `clara_authenticated`-only DEFINER stamp does not breach the human-lane-marker pin) ride as
+  sub-confirmations. **OD-7 is discharged by the same ruling.** *(task #17)*
+  *(Archiving note, 2026-08-22: the SINGLE OWNER of Fix A is now ruled — **F-A4 PR-1b**, per
+  R-L9/GM-7, with Track B's 13-cell battery riding it. Both design sets say so; PROGRESS.md and
+  `wave-f-contract.md`'s F-T4 row were trued to match in the same commit.)*
+- **CI economics overhaul — BUILT 2026-08-21, ADR-0073** (levers 1+2+3+5; the ADR is the record).
+  Closed-wave drills + the D-b frontier matrix run on the weekly sweep + `workflow_dispatch`
+  only; per-PR runs lint · build · db-estate · db-live-gates · render-drill · partition gate in
+  parallel (~42 → ~20-25 min expected); the required check `ci` is a fail-closed meta-gate (also
+  closes two pre-existing fail-open shapes: lint was never required, and a failed classifier's
+  skip satisfied protection). **Surviving residuals:** lever (4) HYBRID runners **DECLINED** ($0
+  preference) · **the operating practice: after any PR touching a closed drill or the pipeline,
+  run `gh workflow run ci.yml` by hand** (recorded in `docs/ops/ci-runner.md`) · item (6)
+  branch-protection interplay stays as recorded (#277): a stale PR needs `gh pr update-branch` +
+  re-green — **never `--admin`**. Batch-CI-per-wave stays REJECTED (scope routing, not frequency
+  reduction).
