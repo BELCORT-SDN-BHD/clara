@@ -142,15 +142,31 @@ test("f-a2.c4.registration-conflict (CLR23, registration_conflict) converts, and
   // `0037:1853`, so it fires FIRST — v4 listed only the site above it, and an ordinary business
   // refusal therefore settled as a task FAILURE. The cell forces it and refuses to accept
   // `counterparty_landscape_moved` as the answer.
-  const reg = "201801009999";
-  const first = await agentPostable(OWNER(), {
-    client: A2(), amount: 400000, vendor: { new: { name: "CONFLICT ALPHA SDN BHD", registration_no: reg } },
-  });
-  await post(first);
+  //
+  // THE COLLISION IS THE OTHER WAY ROUND, and it took a rig read of `_resolve_counterparty` to
+  // see it. `registration_conflict` fires when a stated registration finds NO registration match
+  // and a counterparty with the SAME NAME (or alias) already holds a DIFFERENT registration. The
+  // first cut of this fixture presented the SAME registration under a different name, which is a
+  // `registration_match` -- the resolver's happy path -- so the second bill posted cleanly and
+  // the cell reported the wall missing when the fixture had simply asked the other question.
+  //
+  // AND THE COLLIDING DRAFT IS BORN FIRST. `_resolve_counterparty` runs at DRAFT too (it is how
+  // the stored `match_fingerprint` is computed), so a fixture that births the registered
+  // counterparty before drafting is refused CLR23 at the DRAFT door and never reaches the
+  // conversion this cell is about. Drafting first leaves a clean `birth` fingerprint; the
+  // landscape then moves under it, and the POST is where the resolver meets the collision --
+  // which is also what makes the PRE-EMPTION claim real, since the fingerprint moved too.
+  const name = `CONFLICT CO ${Date.now().toString(36)} SDN BHD`;
   const second = await agentPostable(OWNER(), {
-    client: A2(), amount: 400000, vendor: { new: { name: "CONFLICT BETA SDN BHD", registration_no: reg } },
+    client: A2(), amount: 400000, vendor: { new: { name, registration_no: "201801009902" } },
   });
-  const r = await post(second);
+  const first = await agentPostable(OWNER(), {
+    client: A2(), amount: 400000, vendor: { new: { name, registration_no: "201801009901" } },
+  });
+  const r1 = await post(first);
+  assert.equal(r1?.posted, true,
+    `c4.registration-conflict: mandatory setup -- the first bill posts and BIRTHS the counterparty under registration ...9901 (${JSON.stringify(r1?.refusal)})`);
+  const r = await post(second, { booksVersion: await booksVersion(A2()) });
   assert.equal(r?.posted, false, "c4.registration-conflict: a registration collision never posts");
   assert.notEqual(r?.refusal?.reason, "counterparty_landscape_moved",
     `c4.registration-conflict: it is NOT reported as the landscape having moved (got ${JSON.stringify(r?.refusal)})`);
