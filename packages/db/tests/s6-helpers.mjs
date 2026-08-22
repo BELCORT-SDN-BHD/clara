@@ -319,14 +319,14 @@ export async function seedCitedDocument(sub, { firm, client, quote = "RM 5,000.0
   const doc = await filedDocument(sub, { firm, client, kind: kind ?? (direction ? "invoice" : null) });
   const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
   const regionId = await seedRegion({ firm, extraction: extractionId, fieldPath, textContent: quote, locator: { page: 1, polygon: [0, 0, 1, 1] } });
-  if (direction) await seedPurchaseDirection(sub, { firm, client, document: doc.documentId, quote, direction });
+  if (direction) await seedPurchaseDirection(sub, { client, document: doc.documentId, quote, direction });
   return { ...doc, extractionId, regionId, quote };
 }
 
 /** The facts extraction that makes a document's direction READABLE as a purchase (D11).
  *  Legacy `invoice_facts` lane on purpose: it is the arm clara._document_facts_extraction
  *  falls back to, and it needs no witness pair to be believable. */
-export async function seedPurchaseDirection(sub, { firm, client, document, quote = "RM 5,000.00", direction = "purchase" }) {
+export async function seedPurchaseDirection(sub, { client, document, quote = "RM 5,000.00", direction = "purchase" }) {
   const { mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts, factField, ensureClientEgress } =
     await import("./s6-fixtures.mjs");
   // THE SALES ARM states the client's OWN registered name as the supplier — the resolver's (S)
