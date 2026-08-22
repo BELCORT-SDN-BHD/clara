@@ -167,7 +167,10 @@ test("f-a2.c7.t3-agent the agent post's trigger and its pinned caller judge the 
     `c7.t3-agent: gate_verdicts carries extraction_id FLATTENED at the TOP level and non-blank (got ${JSON.stringify(flat)}). A nested accessor read from inside the trigger yields NULL — which IS today's unpinned behaviour, and it would pass silently`);
   assert.equal(flat, bound.rows[0].extraction_id,
     "c7.t3-agent: …and the pin IS the generation the entry's evidence is bound to, not the document's newest");
-  assert.notEqual(flat, later ?? " ", "c7.t3-agent: specifically NOT the later generation");
+  if (later) {
+    assert.notEqual(flat, later,
+      "c7.t3-agent: specifically NOT the later generation — a NULL pin would send the floor at whatever the document read most recently");
+  }
 });
 
 test("f-a2.c7.t3-sales the SALES arm carries the identical chain", async (t) => {
