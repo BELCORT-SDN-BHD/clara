@@ -32,7 +32,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane, skipHere,
-  ROLES, roleQuery, booksVersion, fnPresent,
+  ROLES, booksVersion, fnPresent,
   gateCore, wakePostEntry, agentDraft, interactiveCred, ensureChart, witnessedFiling,
   postReceiptRow, supplierLines, genericLines, admits, admitsAll, assertVectorShape,
   TIER_B_RUNGS, CHAT_PARITY_PENDING, PR2_PENDING, mintWake5, gateGrants,

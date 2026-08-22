@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
   opk, entryRow, approveEntry, draftEntryV3, freshResolution, ev, factsRegion,
-  seedExtraction, seedRegion, postingCoreReady, gateCore, wakePostEntry, agentPostable,
+  seedExtraction, postingCoreReady, gateCore, wakePostEntry, agentPostable,
   agentDraft, autodraftCred, interactiveCred, ensureChart, witnessedFiling, postReceiptRow,
   postReceiptCount, supplierLines, salesLines, bodyOf, bodyOfName, CHART, proactiveCred,
   landWitnessPair, witnessShape, withTxnOrNull, MODEL, RATIONALE,

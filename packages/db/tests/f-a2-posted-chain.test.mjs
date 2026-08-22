@@ -23,8 +23,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  firmOf, postingCoreReady, postedChainReady,
+  rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount,
+  postingCoreReady, postedChainReady,
   gateChain, gateCore, wakePostEntry, agentPostable, postReceiptCount,
   admitAutodraft, beginAutodraft, settleAutodraft, settleAutodraft6, openSweepRun, reconcileSweepRuns,
   sweepItemRow, sweepRunRow, lastRefusalOf, withTxnOrNull,
