@@ -12,10 +12,10 @@
 > judgement logic** (review law 1), and **law 28's cross-model adversarial pass on the injection
 > surface is a NAMED pre-merge obligation the contract itself imposes** — not a review option.
 >
-> **Two rulings are CONSTITUTIONAL AMENDMENTS pending the owner's digest sign-off** (TA-P1's open
-> register; TA-P7's attribution-is-judgement); this design is written under them and **the BUILD
-> does not start until that sign-off lands** — TA-P1 C is what makes "default-on, no per-firm
-> signature gate" (TA-P9 A(4)) lawful here.
+> **Two rulings were CONSTITUTIONAL AMENDMENTS pending the owner's digest sign-off** (TA-P1's open register;
+> TA-P7's attribution-is-judgement); this design is written under them, and **that PREREQUISITE IS SATISFIED —
+> 2026-08-22, the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls**, so the build is unblocked on this
+> axis. TA-P1 C is what makes "default-on, no per-firm signature gate" (TA-P9 A(4)) lawful here.
 >
 > **Companions.** `freeform-read-survey.md` — the estate at the bytes (findings **F1-F7**, censuses
 > **C1-C11**, predictions **P-1..P-9**) · `freeform-read-annexes-1-mechanics.md` (**A** the

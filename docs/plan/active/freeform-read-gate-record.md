@@ -308,9 +308,11 @@ stays under 500 lines with the annex map current.
 4. **OQ-A remains the lead's** — whether F-A2's R-1 ("`interactive_client` minted for
    `wake_open_question` ALONE") is closed to additions. *Fail-closed default if declined:*
    HOME-only, no client pin.
-5. **The two constitutional amendments** (TA-P1 C's open register, TA-P7 C's attribution) are
-   **build-blocking** until the owner's digest sign-off. Unchanged by this gate; restated because
-   TA-P1 C is what makes "default-on, no per-firm signature gate" lawful for this verb.
+5. ~~**The two constitutional amendments** (TA-P1 C's open register, TA-P7 C's attribution) are
+   **build-blocking** until the owner's digest sign-off.~~ **SATISFIED 2026-08-22 — the owner RATIFIED
+   laws 78-81 + the rider R-TA-P1-walls.** Restated because TA-P1 C is what makes "default-on, no
+   per-firm signature gate" lawful for this verb, and that authority now stands. F-A6's own remaining
+   pre-merge obligation is unchanged: the law-28 cross-model pass on the read surface.
 
 **Cross-item SEQUENCING obligations — named, owned, not decided here** (design §8 carries the same
 list): **(a) F-A4's B13 oracle admission** — `_assert_due_read_ctx` admits a JWT session or

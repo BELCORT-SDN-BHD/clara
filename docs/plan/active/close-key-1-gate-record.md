@@ -238,6 +238,9 @@ unsigned.
 load-bearing; §5's hard prerequisites add TA-P5's law-21 narrowing to the same digest re-sign, and
 state that its *ruling* is final while its *digest wording* is not. Item (iv) (law 76, TA-P13) is
 named out of scope.
+**PREREQUISITE SATISFIED 2026-08-22:** the owner RATIFIED laws 78-81 plus the rider R-TA-P1-walls,
+so the digest wording is signed and GM-10 is closed. The remaining hard prerequisite for F-A4's
+PR-1 is unchanged and still open — **F-A2's PR-1 MERGED** (the post-F-A2 wake-kind text, C9).
 
 **GM-11 (derived at fold, from GM-1's census re-derivation) · A new `agent_tasks.kind` is
 unbornable and unexecutable on the CHECK alone — and the `wake` lifecycle cannot run a clocked

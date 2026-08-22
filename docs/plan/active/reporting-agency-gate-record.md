@@ -243,7 +243,8 @@ converge on the shape and neither asked for the item to leave.
    **bounded re-cuts with a known-correct shape already in the estate** — η's node-level idiom,
    `0071`'s core+delegate, `0084`'s arms, `0069`'s WRAPPER+CORE rule. The survey behind them was
    judged the best-grounded of the Track-A set. v2 is this document's fold list; PR-1 may start when
-   v2 lands and the digest is re-signed.
+   v2 lands and the digest is re-signed. **PREREQUISITE SATISFIED 2026-08-22: the owner RATIFIED laws
+   78-81 + the rider R-TA-P1-walls, and v2 landed the same day — PR-1 may start on this axis.**
 2. **The sandbox export path LEAVES** — `wake_export_sandbox_view` + `_sandbox_export_core`,
    `clara.sandbox_exports`, the recipient-coverage check, the second render entrance, the
    `sandbox_watermark` rows, and OQ-3. It is a **different maturity** (GM-7: an undefined object, an

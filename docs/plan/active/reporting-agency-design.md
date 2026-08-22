@@ -21,10 +21,10 @@
 > **1, 2, 4, 6, 22, 26, 27, 28, 29, 31, 34, 36, 40, 41, 45, 68, 69, 70, 74**. Every build PR takes
 > the uniform ADR-061 ladder; **§3.3, §3.4 and §3.5 are judgement logic end to end** (review law 1).
 >
-> **THE BUILD WAITS ON A SIGNATURE.** TA-P1 (open register) and TA-P7 (attribution) are
-> **constitutional amendments pending the owner's digest re-sign**. §3.5 (definition
-> self-promotion), §3.7 (self-run) and half of §3.1's verb set exist only under TA-P1 C. **PR-0 may
-> be reviewed; no F-A5 PR may merge before the digest is re-signed.**
+> ~~**THE BUILD WAITS ON A SIGNATURE.**~~ **SIGNED — prerequisite SATISFIED 2026-08-22 (the owner RATIFIED
+> laws 78-81 + the rider R-TA-P1-walls).** TA-P1 (open register) and TA-P7 (attribution) were constitutional
+> amendments pending the digest re-sign; §3.5 (definition self-promotion), §3.7 (self-run) and half of §3.1's
+> verb set exist only under TA-P1 C, and that authority now stands. F-A5 PRs are unblocked on this axis.
 
 ---
 
@@ -450,7 +450,7 @@ itself **extend-only after F-A2's D34 swap**.
 - **PR-0 — the gate.** Design + survey take the judgement-logic ladder. **Gate 2 ran 2026-08-22 and
   FAILED with three blockers** — record: `reporting-agency-gate-record.md`; this is v2. The law-28
   cross-model pass **goes with the severed sandbox item**, the surface it was written for. PR-0 also
-  runs Annex E's **rig replays**. **Gate condition: the owner's digest re-sign of TA-P1.**
+  runs Annex E's **rig replays**. ~~**Gate condition: the owner's digest re-sign of TA-P1.**~~ **SATISFIED 2026-08-22.**
 - **PR-1 — ungranted machinery (DB, no grants).** The six extracted cores, the agent orchestrator +
   its appended closure row and undeployed-row gate, the two new relations, the lifecycle-trigger arm
   + the re-aimed maker/checker arms, the two CHECK swaps, the columns, the narrative-authority wall.

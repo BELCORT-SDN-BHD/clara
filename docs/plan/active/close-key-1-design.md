@@ -15,9 +15,9 @@
 > **1 · 2 · 4 · 6 · 7 · 22 · 27 · 28 · 29 · 31 · 34 · 68 · 69**. Every build PR takes the uniform
 > ADR-061 ladder; **every rung of §3.2 and every branch of §3.9 is judgement logic** (law 27(1)).
 >
-> **THREE digest items are pending the owner's sign-off** (the session-local PR-1 ledger's
-> sitting-closing list
-> (i)(ii)(iii)) **and this design is written under them**: **TA-P1** — load-bearing, without it the
+> **THREE digest items were pending the owner's sign-off** (the session-local PR-1 ledger's sitting-closing
+> list (i)(ii)(iii)) **and this design is written under them** — **PREREQUISITE SATISFIED 2026-08-22: the
+> owner RATIFIED laws 78-81 + the rider R-TA-P1-walls.** **TA-P1** — load-bearing, without it the
 > four agent-side write verbs have no authority to exist · **TA-P5's narrowing of law 21 to
 > "periodic POSTING belts"** — load-bearing for §3.3; the RULING is final, only its digest WORDING
 > is unsigned (gate GM-10) · **TA-P7** — not load-bearing here. Item (iv) (law 76) is out of scope.
@@ -421,9 +421,9 @@ ruling would change. Grounds and the cost of each alternative: **Annex G.2**.
 
 ## 5 · Build sequence
 
-**Hard prerequisites.** (i) **The owner's digest re-sign** covering **TA-P1** (without it the
-agent-side close verbs have no authority) **and TA-P5's law-21 narrowing** (§3.3's clock is built
-on it; the ruling is final, the digest wording unsigned — gate GM-10). (ii) **F-A2's PR-1 MERGED**
+**Hard prerequisites.** (i) ~~**The owner's digest re-sign**~~ — **SATISFIED 2026-08-22 (owner ratified laws
+78-81 + the rider R-TA-P1-walls)**; it covered **TA-P1** (without it the agent-side close verbs have no
+authority) **and TA-P5's law-21 narrowing** (§3.3's clock is built on it) — gate GM-10 closed. (ii) **F-A2's PR-1 MERGED**
 — F-A4 authors against the post-F-A2 wake-kind text (C9) and F-A2's posting lane remediates
 drawer-2 items. (iii) **a chatTurn `_vN` for the directed close ask queues behind F-A2's PR-2**,
 which claims that chain first (gate record §7). (iv) F-A3 is an **acceptance** dependency (§6).

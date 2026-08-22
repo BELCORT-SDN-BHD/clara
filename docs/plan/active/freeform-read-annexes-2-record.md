@@ -275,10 +275,11 @@ migration/runtime/dashboard estate recorded in `freeform-read-survey.md`.
 (design §8) beyond a recommendation and a fail-closed default — under the standing delegation the
 build proceeds on the recommendation unless a law or a ruling would change. It does not assert any
 Postgres behaviour it could not read in this repo — nine such claims are carried as predictions
-(Annex I) and the PR-0 gate is the instrument. And it does not start: **the build waits on the
+(Annex I) and the PR-0 gate is the instrument. And it did not start: **the build waited on the
 owner's digest sign-off of the two constitutional amendments** (TA-P1 C's open register; TA-P7 C's
 attribution-is-judgement), because TA-P1 C is what makes "default-on, no per-firm signature gate"
-lawful for this verb.
+lawful for this verb. **PREREQUISITE SATISFIED 2026-08-22 — the owner RATIFIED laws 78-81 + the
+rider R-TA-P1-walls; the build is unblocked on this axis.**
 
 ---
 
