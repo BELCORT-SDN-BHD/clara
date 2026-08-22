@@ -294,6 +294,33 @@ record now (`docs/plan/active/`, one gate record per item), which is why the nar
   Every v2's prerequisite line is annotated SATISFIED in place; the remaining PR-1 prerequisite is
   **F-A2's PR-1 merged**; the PRD/ARCHITECTURE product-text edits landed in #287.
 
+## Backlog block archived 2026-08-23 — the SLICE-ERA STANDING RESIDUALS, in full (moved verbatim; PROGRESS.md keeps a pointer)
+
+*None has a PR; every row is deferred, declined, event-triggered or absorbed, and each names its
+disposition. Moved at the split-pass sweep so PROGRESS.md could stay under its ceiling.*
+
+**Slice-era standing residuals** (carried from the retired PART 2 register; none has a PR).
+*(The `0017` kind-blind-supersede row is GONE 2026-08-20 — DISCHARGED whole; record in the archive.)*
+- **Always-run role/membership reconciliation** — deferred: poisoning needs SUPERUSER, outside the threat model. *(Slice-2 HIGH 6/7)*
+- **Supabase non-superuser deploy-role CI** — PARTIALLY discharged by #234's non-superuser
+  owner-login rehearsal plus two live ceremonies exercising the guarded SUSET branch.
+  REMAINING: the standing CI leg under that role — **DESIGNATED to the weekly sweep by
+  ADR-0073, its own PR** (candidate design on file in the ADR: harden the
+  deploy-onto-existing leg's role posture on the sweep first; promote to per-PR only if
+  measured cheap). *(Slice-2 HIGH 8/9)*
+- **Opaque/HMAC pack tokens** — declined; recorded, not pending work. *(Slice-3 C12)*
+- **`activate_taxonomy_version(v)` + the predicate-dimension taxonomy schema** — event-triggered: ships when a second taxonomy version first exists. *(Slice-3 C8/C16)*
+- **Slice-4 residuals** *(ADR-017)* — audited owner compliance export + a visibility-aware
+  trace-debug surface · per-firm chat-visibility toggle + un-share · S4-V2
+  engine-hook-lifetime ≥14d (the canary watch — a *watch* precisely because `daba7f2e` is
+  hard-blocked from ever being answered) · job-level engine liveness. ~~Per-part-type field
+  schemas → the fail-closed card catalog~~ **ABSORBED → Wave G** · ~~firm-local-time
+  budgets~~ **STALE** (G8 narrowed §8 to metering-only) · ~~billing-grade metering~~
+  **ABSORBED → F-A9**.
+- **Slice-6 / Wave-A residuals — ALL THREE ABSORBED** *(ADR-019/023)*: task-per-ingest coding
+  → **F-A2** (which inverts its premise exactly) · the proactive notification-inbox surface →
+  **Wave G** · agent-visible attribution candidates → **F-A7a**.
+
 ## Backlog blocks archived at the 2026-08-22 landing sweep (the ARGUMENT moved; PROGRESS.md keeps the state)
 
 *Same law as the 2026-08-20 disposition sweep: a disposition is not a deletion, and the reasoning

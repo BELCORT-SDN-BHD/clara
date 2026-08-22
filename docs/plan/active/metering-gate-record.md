@@ -248,11 +248,14 @@ Ships first because every downstream lane's recording obligation waits on this d
 **PR-1C** — the dashboard rename surface. *No D1.*
 **PR-1D** — price table + proposals + propose/reject + the evaluator + the rollup.
 *No D1*; all brand-new objects.
-**PR-1E** — **the approval door alone**, gated on the owner's ruling (§7).
+~~**PR-1E** — **the approval door alone**, gated on the owner's ruling (§7).~~ **DROPPED 2026-08-23 (owner,
+R-L19): price rows are developer-seeded migration data — no proposal, no door. PR-1D's table ships with its
+first effective-dated seed.**
 
-**Why PR-1E is its own limb rather than a note inside PR-1D:** it is the one part of this
-design that was *not yet designed to a buildable point* — GM-5 showed the recommended
-grant unreachable and the open question ("which firm's owner") unanswered. Bundled, it
+**Why PR-1E was its own limb rather than a note inside PR-1D** *(kept as the record; R-L19 has since dropped
+the limb entirely)***:** it is the one part of this design that was *not yet designed to a buildable point* —
+GM-5 showed the recommended grant unreachable and the open question ("which firm's owner") unanswered. The
+severance is what made dropping it cheap when the owner dissolved the question. Bundled, it
 would have let an unresolved owner question and a defective grant hold a write-quiesce
 window hostage. Severed, PR-1D ships a price table with no rows: the evaluator returns
 `spend_cents IS NULL` and the rollup publishes an *unpriced* count — the correct visible
@@ -337,13 +340,13 @@ the `0011` cites both lenses quote.
    executed for six of eight gates.
    **Fail-closed default the design proceeds on: both gates stay LIVE, byte-unchanged,
    and PR-3's acceptance says "six of eight classified, two pending" — never "complete".**
-2. **WHICH human may approve a firm-agnostic price row?** (GM-5; D17; §4.) The mechanism
-   is now the estate's own body-enforced owner floor; what is unruled is whose ownership
-   counts for a cross-tenant fact — any firm owner, one named platform firm, or a new
-   platform-level rank.
-   **Fail-closed default: PR-1E does not ship. `approve_llm_price_proposal` does not
-   exist, no price row can be created, the evaluator returns NULL and the rollup shows an
-   unpriced count. Nothing downstream is blocked.**
+2. ~~**WHICH human may approve a firm-agnostic price row?**~~ (GM-5; D17; §4.)
+   **RULED 2026-08-23 (owner, R-L19) — DISSOLVED, not answered: price rows are DEVELOPER-SEEDED
+   platform data**, a versioned effective-dated migration seed through the full PR ladder; **a
+   price change is a ticket and a PR.** So **PR-1E (`approve_llm_price_proposal` + D17's owner
+   floor) is DROPPED, not deferred**, the **"Clara drafts a price proposal" limb is dropped with
+   it**, the **evaluator prices from the seeded rows**, and the **unpriced-count rollup STAYS as
+   the tripwire**. There is no approver, so there is no "whose ownership counts" question left.
 3. **Notice, not a ruling request — the backfill pacing cost.** Removing the 15/day sales
    cap also removes the only per-day pacing on an already-open backfill batch
    (`0046:472-482`); an open batch is then bounded only by `batch_size` (1-500). This is
