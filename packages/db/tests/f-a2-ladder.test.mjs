@@ -345,18 +345,26 @@ test("f-a2.c2.A8a a HUMAN's draft refuses at A8 — maker_actor is not the agent
 test("f-a2.c2.A8b an AGENT draft a human REVISED refuses AT A8 — the cell that must fail with the second conjunct removed", async (t) => {
   if (await gateCore(t)) return;
   const p = await agentPostable(OWNER(), { client: A1() });
-  // A PLAIN RENUMBERING: revise_entry sets last_human_editor and rotates the token, but writes
-  // only `duplicate_override` into flags — so B6 CANNOT see it. That is the whole finding
-  // (C-1): without A8's second conjunct the agent posts a human's numbers unattended, and the
-  // rung that is supposed to catch overrides is blind to this one.
+  // THE OLD PREMISE WAS FALSE, and it mattered. The cell revised WITH `duplicateOverride: true`
+  // and then claimed "B6 CANNOT see it" — but B6 is `(flags ? 'amount_override') or (flags ?
+  // 'duplicate_override')`, so B6 sees a duplicate override exactly as well as an amount one.
+  // The fixture was therefore breaking TWO walls at once and attributing the refusal to A8, on
+  // a stated reason that was simply wrong about the rung it named.
+  //
+  // THE RE-CUT: revise the LINES ONLY. `revise_entry` stamps `last_human_editor` and rotates the
+  // token on any revision, and writes an override flag only when one is asked for — so this
+  // shape trips A8's second conjunct with NO override present anywhere, and B6 would admit it.
   const revised = await reviseAgentDraft(OWNER(), {
     entry: p.args.entry, lines: supplierLines(500000), expectedRevision: p.args.expectedRevision,
-    duplicateOverride: true, opKey: opk("c2A8b"),
+    opKey: opk("c2A8b"),
   });
   const row = await entryRow(p.args.entry);
   assert.ok(row?.last_human_editor, "c2.A8b precondition: revise_entry stamped last_human_editor");
-  assert.ok(!("amount_override" in (row?.flags ?? {})),
-    "c2.A8b precondition: the plain renumbering wrote NO amount_override — B6 is blind to it, which is why A8 must catch it");
+  assert.ok(!("amount_override" in (row?.flags ?? {})) && !("duplicate_override" in (row?.flags ?? {})),
+    `c2.A8b precondition: NEITHER override flag is present, so B6 would ADMIT this entry and the refusal can only be A8's (flags ${JSON.stringify(row?.flags)})`);
+  // A8 is TIER A: it RAISES. A Tier-B refusal would carry a rung vector; a raise carries none.
+  // So the refusal being a raise is itself the proof that the ladder never reached B6 — the rung
+  // ORDER is what makes the attribution sound, and it is asserted rather than assumed.
   await assertTierARaise(() => wakePostEntry(p.cred, {
     ...p.args, expectedRevision: revised?.revision_token ?? row.revision_token,
   }), { entry: p.args.entry, label: "c2.A8b human-revised agent draft" });
