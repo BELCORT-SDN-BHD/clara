@@ -428,6 +428,79 @@ test("f-a2.c14.rl21-both-kinds-still-resolve a BOTH-KINDS client tests a letter-
     "c14.rl21-both-kinds-still-resolve: …and an unheld letter-leading value is TESTED, misses, and resolves 'purchase' — ambiguity only blocks a one-kind client");
 });
 
+// ===========================================================================
+// R5-B2 — THE UNRECOGNISED-EVIDENCE DEFAULT. `_direction_class` used to map every CLR30 detail
+// it could not read onto 'absent', which is the ONE class B15 admits. A blank payload, a
+// malformed one, a missing key, a JSON null, or an `evidence` value minted after this file was
+// written all became "nobody is identified" — the admitting answer — on a read that SAW nothing.
+// That is D26 backwards and law 2 ignored, and it was a forward-compat trapdoor: the next
+// evidence value anyone adds would post until somebody remembered to come back.
+// ===========================================================================
+
+const DIRECTION_AT = "clara._document_direction_at(uuid,uuid,uuid)";
+
+/** Replace `_document_direction_at` with a body that raises CLR30 carrying `detailSql`, run
+ *  `fn`, then put the SHIPPED definition back — unconditionally, in a finally, and verified.
+ *
+ *  THIS WINDOW COMMITS. `create or replace function` is DDL on a shared body: if the restore is
+ *  skipped the doctored body stays live and every later cell in the run measures it. So the
+ *  shipped definition is captured FIRST, restored in `finally`, and the restoration is then
+ *  asserted byte-for-byte — the same discipline T7 landed on for the trigger-body doctoring.
+ *
+ *  There is no live producer for these payloads: every CLR30 the estate raises today carries one
+ *  of the three named values. The branch is forward-compat fail-closure, and the only way to ask
+ *  it a question is to manufacture the answer it is meant to survive. */
+async function withDoctoredDetail(detailSql, fn) {
+  const shipped = (await rootQuery("select pg_get_functiondef($1::regprocedure) as d", [DIRECTION_AT])).rows[0].d;
+  try {
+    await rootQuery(`create or replace function clara._document_direction_at(p_document uuid, p_client uuid, p_extraction uuid)
+      returns text language plpgsql stable security definer set search_path = clara, pg_temp as $doc$
+      begin raise exception 'doctored direction' using errcode='CLR30', detail=${detailSql}; end $doc$;`);
+    return await fn();
+  } finally {
+    await rootQuery(shipped);
+    const back = (await rootQuery("select pg_get_functiondef($1::regprocedure) as d", [DIRECTION_AT])).rows[0].d;
+    assert.equal(back, shipped, "withDoctoredDetail: the SHIPPED resolver is back in place — this window COMMITS, so a missed restore would poison every later cell");
+  }
+}
+
+test("f-a2.c14.b2-unreadable an unrecognised CLR30 detail is NON-admitting, not 'absent'", async (t) => {
+  if (await gateCore(t)) return;
+  const client = A2();
+  const p = await agentPostable(OWNER(), {
+    client, amount: 316000, codingKind: null, direction: "unresolved", lines: genericLines(316000),
+  });
+  const classOf = async () => (await rootQuery(
+    "select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v;
+
+  // FIVE SHAPES, one per way the payload can fail to say `evidence:"none"`. Each is asserted
+  // separately: a loop that stopped at the first would leave the rest unproven, and they are
+  // different code paths (the jsonb cast throws for two of them and succeeds for three).
+  const SHAPES = [
+    ["a blank detail", "''"],
+    ["malformed JSON", "'{not json at all'"],
+    ["a missing evidence key", `'{"reason":"direction_unresolved"}'`],
+    ["a JSON-null evidence", `'{"reason":"direction_unresolved","evidence":null}'`],
+    ["an evidence value minted later", `'{"reason":"direction_unresolved","evidence":"some_future_class"}'`],
+  ];
+  for (const [label, detailSql] of SHAPES) {
+    const got = await withDoctoredDetail(detailSql, classOf);
+    assert.equal(got, "unreadable",
+      `c14.b2-unreadable: ${label} classes as 'unreadable' — the pre-R5 body answered 'absent', which is the class that POSTS (got '${got}')`);
+  }
+
+  // AND THE CONSEQUENCE, END TO END, because a class nobody acts on is not a wall. B15 needs no
+  // edit for this — `absent` passes and everything else fails — so this half proves the mapping
+  // is actually wired to the refusal rather than merely computed.
+  const bv = await booksVersion(client);
+  const r = await withDoctoredDetail(`'{"reason":"direction_unresolved","evidence":"some_future_class"}'`,
+    () => post(p, { booksVersion: bv }));
+  assert.ok(!admits(r?.rung_vector, "B15"),
+    `c14.b2-unreadable: …and B15 REFUSES it (got ${JSON.stringify(r?.rung_vector?.B15)})`);
+  assert.equal(r?.posted, false,
+    `c14.b2-unreadable: …so the generic JV does not post on a direction nobody could read (${JSON.stringify(r?.refusal)})`);
+});
+
 test("f-a2.c14.silent-posts C6's CONTROL — a page that prints NO registration is still SILENT, and still posts", async (t) => {
   if (await gateCore(t)) return;
   // THE BOUNDARY C6 MUST NOT CROSS. C6 narrows D18: a stated identity that cannot be checked now

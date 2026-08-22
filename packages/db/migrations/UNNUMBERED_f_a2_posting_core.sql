@@ -749,18 +749,34 @@ $fa2_floor$;
 -- the generation the receipt stamps, which is what every other rung does; passing NULL falls
 -- back to the document-wide read, which is the pre-F-A2 behaviour and not what B15 wants.
 --
--- THE CLASSES: 'sales' | 'purchase' | 'contradiction' | 'untestable' | 'absent'. Absent is the
--- ONLY one B15 admits. An unreadable detail payload degrades to 'absent' rather than raising, because this
--- helper runs inside a STABLE read path and a malformed detail must not detonate a post — but
--- the degrade is toward the class B15 ADMITS, so it is stated here rather than hidden: a CLR30
--- whose detail cannot be read is indistinguishable from "nobody is identified", and treating it
--- as a contradiction would refuse lawful generic posts on a parse failure.
+-- THE CLASSES: 'sales' | 'purchase' | 'contradiction' | 'untestable' | 'unreadable' | 'absent'.
+-- ABSENT IS THE ONLY ONE B15 ADMITS, AND IT IS REACHED ONLY BY THE EXACT `evidence:"none"`.
+--
+-- AN EARLIER CUT OF THIS HELPER DEGRADED EVERY UNRECOGNISED DETAIL TO 'absent' — the ADMITTING
+-- class — and argued that a CLR30 whose detail cannot be read is indistinguishable from "nobody
+-- is identified". That argument is D26 read backwards. A missing or unreadable key is
+-- NON-ADMITTING everywhere else in this estate, and law 2 says an absence is never positive
+-- evidence: "the payload did not parse" is not a read that SAW "nobody is identified". Worse, it
+-- was a forward-compat trapdoor — the next `evidence` value anyone mints would default straight
+-- into the admitting class until somebody remembered to come back here.
+--
+-- So the mapping is now exhaustive-by-construction: the three named classes map to themselves,
+-- the exact string `none` maps to 'absent', and EVERYTHING ELSE — blank detail, malformed JSON,
+-- missing key, JSON null, an unknown value, and a non-CLR30 path that yields no direction —
+-- maps to 'unreadable'. Still no raise: this helper runs inside a STABLE read path and a
+-- malformed detail must not detonate a post. It yields a Tier-B refusal RECEIPT instead, which
+-- is durable and legible, and that is the difference between degrading safely and degrading
+-- open. B15 needs no edit: `case when v_class = 'absent' then 'pass' else 'fail' end` already
+-- refuses anything else, so Annex E's closed refusal vocabulary does not change either.
 -- =====================================================================================
 create function clara._direction_class(p_document uuid, p_client uuid, p_extraction uuid)
   returns text language plpgsql stable security definer set search_path = clara, pg_temp as $dircls$
 declare v_dir text; v_detail text; v_evidence text;
 begin
-  if p_document is null or p_client is null then return 'absent'; end if;
+  -- Dead in practice -- B15 pre-guards `e.document_id is null or v_bound is null` into
+  -- not_evaluable one rung earlier -- but non-admitting is the honest answer for "I was handed
+  -- nothing to look at", and it costs nothing to say so.
+  if p_document is null or p_client is null then return 'unreadable'; end if;
   begin
     v_dir := clara._document_direction_at(p_document, p_client, p_extraction);
   exception when sqlstate 'CLR30' then
@@ -775,10 +791,15 @@ begin
     -- of that kind, so the claim could not be checked. That is not "the page said nothing", and
     -- collapsing the two is the same mistake C1 fixed one class over.
     if v_evidence = 'untestable' then return 'untestable'; end if;
-    return 'absent';
+    -- ONLY THE EXACT STRING REACHES THE ADMITTING CLASS. Everything else -- blank, malformed,
+    -- missing key, JSON null, or a value minted after this file was written -- is unreadable,
+    -- and unreadable is non-admitting. The default must never be the class that posts.
+    if v_evidence = 'none' then return 'absent'; end if;
+    return 'unreadable';
   end;
   if v_dir in ('sales','purchase') then return v_dir; end if;
-  return 'absent';
+  -- No raise and no direction: the resolver answered something this helper does not model.
+  return 'unreadable';
 end $dircls$;
 revoke all on function clara._direction_class(uuid,uuid,uuid) from public;
 
@@ -2115,6 +2136,17 @@ begin
    where p.oid='clara._direction_class(uuid,uuid,uuid)'::regprocedure;
   if position('''untestable''' in v_src) = 0 then
     raise exception 'F-A2 tail: _direction_class does not carry the untestable class (C6-rider)' using errcode='CLR10';
+  end if;
+  -- R5-B2: the unrecognised-evidence default must be the NON-ADMITTING class. This branch has no
+  -- live producer today -- every CLR30 the estate raises carries one of the three named values --
+  -- so there is nothing behavioural to force here (law 31), and the literal IS the guard: if a
+  -- later recut drops it, the default silently becomes 'absent' again, which is the admitting
+  -- class and the exact fail-open this line exists to prevent.
+  if position('return ''unreadable''' in v_src) = 0 then
+    raise exception 'F-A2 tail: _direction_class no longer defaults unrecognised evidence to the NON-admitting class (R5-B2)' using errcode='CLR10';
+  end if;
+  if position('if v_evidence = ''none'' then return ''absent''' in v_src) = 0 then
+    raise exception 'F-A2 tail: _direction_class reaches the admitting class other than by the exact evidence:"none" (R5-B2)' using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p
    where p.oid='clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)'::regprocedure;
