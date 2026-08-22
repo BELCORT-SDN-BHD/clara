@@ -366,7 +366,15 @@ test("W3 no geometry never corroborates (§6.6): facts with an EMPTY polygon on 
   await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
-  await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00", { polygon: [] }), factField(FIELD.currency, "MYR")]);
+  // F-A2 PR-1 (D11): the vendor name states the DIRECTION so the coded agent draft below reaches
+  // the geometry claim this cell is about. It carries its own polygon deliberately — the empty
+  // polygon under test belongs to the TOTAL, and giving the supplier name one keeps the cell's
+  // variable to exactly the field it names.
+  await persistInvoiceFacts(task.id, [
+    factField(FIELD.total, "RM 5,000.00", { polygon: [] }),
+    factField(FIELD.currency, "MYR"),
+    factField("invoice.vendor_name", "RIG DIRECTION SUPPLIER SDN BHD"),
+  ]);
   const fs = await invoiceFactState(cited.documentId);
   assert.equal(fs?.corroborated, false, "an empty-polygon total region never corroborates (W3)");
   // A mismatching amount then drafts normally (Tier B — no corroborated total to conflict).
@@ -403,7 +411,7 @@ test("C-9 evidence congruence: a valid supplier bill writes entry_evidence rows 
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, direction: "purchase" });
   const draft = await wakeBill(users.alice, { client: clients.A1, cited, amount: ROUTINE_CENTS });
   const rows = await evidenceRows(draft.entry_id);
   assert.ok(rows.length >= 1, "the draft persisted at least one entry_evidence row");

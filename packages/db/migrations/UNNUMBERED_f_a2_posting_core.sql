@@ -721,7 +721,7 @@ declare
   v_verdict jsonb; v_receipt_id uuid; v_result jsonb; v_maker_active boolean;
   v_total bigint; v_tax_fact bigint; v_round bigint; v_is_cn boolean;
   v_a bigint; v_b bigint; v_c bigint; v_evid int; v_moved int;
-  v_sub text; v_reason text; v_code text; v_detail text; v_pair boolean;
+  v_sub text; v_reason text; v_code text; v_detail text; v_pair boolean; v_b8_gen uuid;
   v_rungs text[] := array['B1','B2','B3','B4','B5','B6','B7','B8','B9','B10','B11','B14','B15'];
   v_tokens jsonb := jsonb_build_object(
     'B1','settlement_kind_human','B2','not_corroborated','B3','anchor_unbound',
@@ -921,38 +921,60 @@ begin
     end if;
     v_vector := v_vector || jsonb_build_object('B7', v_val);
 
-    -- B8: the cited evidence is the GENERATION the fact state names. Deliberately redundant with
-    -- the revision-token gate and it must be forced non-vacuously (law 31): the token gate covers
-    -- the common case only because 0096:45-60 rotates an open draft's token when facts settle,
-    -- one migration old.
+    -- B8: NO CITATION NAMES A SUPERSEDED FACT GENERATION.
     --
-    -- ==== STOP ITEM — THIS RUNG IS UNDER-DETERMINED AND, AS WRITTEN, 0% FUNCTIONAL ====
-    -- The design gives B8 one line — "cited evidence is the generation the fact state names"
-    -- (§3.2) — plus a pointer to opener ⑥ §2.3, which says the text-witness must CITE THE REGION
-    -- IT READ and defines no extraction-identity rule. The only reading those words support is
-    -- the one implemented below: every entry_evidence row must cite the extraction the resolver
-    -- names. MEASURED ON THE RIG against the F-A2 battery's own world (2026-08-22): 206 of 206
-    -- evidence rows cite an `ocr` extraction while 205 of 205 fact states name an
-    -- `llm_text_facts` extraction — different BY CONSTRUCTION in the witness regime, because
-    -- regions come from the layout pass and the fact state from the witness pair. So this rung
-    -- refuses EVERY corroborated post, which is the GB-2 defect one rung over, and it is why the
-    -- battery's control cells refuse at B8 rather than posting.
+    -- THE SCOPE IS THE FACT GENERATIONS, NAMED POSITIVELY. Only citations whose extraction is a
+    -- FACT generation are in scope — `invoice_facts`, `llm_text_facts`, `llm_vision_facts` —
+    -- listed as an inclusion, never as `not in ('ocr','structured_parse')`, so a fact kind
+    -- invented later defaults to BEING CHECKED rather than to being skipped. Each such citation
+    -- must name the generation this ladder is judging, which is the SAME fact-state jsonb B2, B3
+    -- and B4 already read: one resolver call, one answer, no second read that could disagree
+    -- with itself between rungs.
     --
-    -- IT IS LEFT AS BUILT, AND IT IS FAIL-CLOSED: it refuses posts, it never admits one. Two
-    -- readings would make it functional and they are NOT equivalent — (a) the cited extraction
-    -- must not be SUPERSEDED by a newer done extraction of the same engine_kind, or (b) each
-    -- cited region must still hash to the fact_hash the evidence recorded. Choosing between them
-    -- is a wall's semantics, not an implementation detail, so it goes to the owner/design rather
-    -- than being invented here (the build order's own instruction: stop on an item the design
-    -- does not determine, and report it). PR-1 MUST NOT MERGE with this unresolved.
-    -- ================================================================================
-    select count(*)::int into v_evid from clara.entry_evidence ev where ev.entry_id=p_entry;
-    if v_evid = 0 or v_bound is null then
+    -- WHY OCR AND structured_parse ARE OUT OF SCOPE, and it is law 72 rather than convenience.
+    -- An OCR region cannot carry `field_path='invoice.total'` at all — the egress writer emits
+    -- `pages.{n}.lines.{i}` / `tables.{i}.cells.{j}` (packages/runtime/lib/egress.mjs:146,163) —
+    -- and `0009:462-466` grants `provenance_tier='verified'` ONLY to `invoice.total` on a
+    -- corroborated state whose cents tie. So the amount anchor of any entry that reaches B8 is
+    -- necessarily a FACT-generation citation, and an OCR citation alongside it is a lawful
+    -- `model_read` reference to the page image, not a claim about the numbers.
+    --
+    -- SCOPE α — EVERY fact-generation citation, not merely the verified `invoice.total` one. A
+    -- MIXED-GENERATION draft (the total cited off G2 while the invoice_id is still cited off G1)
+    -- FAILS, which is the split-generation hazard `0101:44-49` closes by construction.
+    --
+    -- TWO NAMED NON-MEMBERS, each excluded on evidence rather than by omission:
+    --   (1) NO OCR-LINEAGE CONJUNCT. A re-OCR supersedes within its own kind (`0089:267-284`)
+    --       while the witness's `input_pin` still names the older layout pass, so demanding OCR
+    --       currency would refuse states that are lawfully fresh.
+    --   (2) NO `superseded_by` READ. Governance of which generation wins is the cross-regime
+    --       `extracted_at` clock (`0101:479-489`); a second rule reading a second column would
+    --       drift from it (`0101:57-64`), and two rules for one question is how a wall starts
+    --       lying.
+    --
+    -- B7 AND B8 ARE DIFFERENT QUESTIONS AND ARE EVALUATED INDEPENDENTLY: B7 makes the anchor
+    -- VERIFIED, B8 makes it CURRENT.
+    --
+    -- WHY IT IS NOT REDUNDANT WITH THE REVISION-TOKEN GATE (law 31, forced non-vacuously). A5's
+    -- input is CALLER-SUPPLIED: `0096:249-278` rotates the token when facts settle, so a caller
+    -- that simply re-reads the entry posts with the fresh token and A5 is silent. B8 reads DB
+    -- state against DB state, and the only way to satisfy it is to RE-CITE.
+    v_b8_gen := nullif(v_state->>'extraction_id','')::uuid;
+    if e.document_id is null or v_b8_gen is null then
+      -- ARM-0: no document, a '{}' fact state, or a witness pair whose TEXT row is unresolved
+      -- (`0092:210-217` emits a json null there). Absent input is never a pass (law 68).
       v_val := 'not_evaluable';
     else
-      select count(*)::int into v_moved from clara.entry_evidence ev
-        where ev.entry_id=p_entry and ev.extraction_id is distinct from v_bound;
-      v_val := case when v_moved = 0 then 'pass' else 'fail' end;
+      select count(*)::int into v_moved
+        from clara.entry_evidence ev
+        join clara.document_extractions x
+          on x.id = ev.extraction_id and x.firm_id = ev.firm_id and x.document_id = ev.document_id
+       where ev.entry_id = p_entry
+         and x.engine_kind in ('invoice_facts','llm_text_facts','llm_vision_facts')
+         and ev.extraction_id <> v_b8_gen;
+      -- The join is on the FK TRIPLE (`0009:889`, `:901-902`), so it cannot silently lose a row
+      -- and turn a stale citation into a pass — the count is over exactly the rows that exist.
+      v_val := case when v_moved > 0 then 'fail' else 'pass' end;
     end if;
     v_vector := v_vector || jsonb_build_object('B8', v_val);
 

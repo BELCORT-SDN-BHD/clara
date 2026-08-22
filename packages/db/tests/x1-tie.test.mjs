@@ -32,7 +32,7 @@ import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, reasonOf, assertRaises,
   upsertAccountClassed, seedCitedDocument, mintLegacyInvoiceFactsTask, claimTask,
   persistInvoiceFacts, failInvoiceFacts, factsRegion, grantConsent, freshResolution, ev, approveEntry,
-  mintInteractive, wakeDraftEntry, addClientIdentifier,
+  mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias,
   has0022, fail0022, componentFields, LAI_LOU_MEI, COMPONENT, factField,
 } from "./x1-helpers.mjs";
 
@@ -62,6 +62,16 @@ before(async () => {
   const sub = W.users.alice;
   await addClientIdentifier(sub, { client: CLIENT, kind: "ssm", value: CLIENT_REG }).catch(() => {});
   await addClientIdentifier(sub, { client: CLIENT, kind: "tin", value: CLIENT_REG }).catch(() => {});
+  // F-A2 PR-1 (D11): THE FIXTURE'S OWN IDENTITY HAD TO BECOME CONSISTENT. salesDoc states this
+  // client as the SUPPLIER — CLIENT_REG as the registration and CLIENT_NAME as the name — and
+  // the registration is registered above, but CLIENT_NAME was only ever a display label: the
+  // world's client carries a different clara.clients.name and no alias. The direction resolver
+  // reads exactly that pair and REFUSES the mismatch as a contradiction ("supplier registration
+  // matches the client but its stated name names a different entity"), which is the wall doing
+  // its job on a self-contradicting page. Before D11 the arm was autodraft-only so nothing on
+  // this lane ever asked; now it does. Registering the alias makes the fixture's two statements
+  // agree — it does not weaken the arm, and the contradiction branch stays forced elsewhere.
+  await addClientAlias(sub, { client: CLIENT, alias: CLIENT_NAME.toLowerCase().replace(/[^a-z0-9]/g, "") }).catch(() => {});
   await upsertAccountClassed(sub, { client: CLIENT, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("rec") });
   await upsertAccountClassed(sub, { client: CLIENT, code: REV, name: "Service Revenue", type: "income", opKey: opk("rev") });
   await upsertAccountClassed(sub, { client: CLIENT, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sst") });
@@ -70,6 +80,8 @@ before(async () => {
 after(async () => { await endPool(); });
 
 const gate = () => fail0022(live);
+
+const salesFields = (components) => componentFields(components);
 
 /** A filed sales document whose facts state the given components. The supplier identity is
  *  the CLIENT (so the direction resolves to sales) and the buyer is the rig customer. */
@@ -81,7 +93,7 @@ async function salesDoc(components) {
   // enqueue path no longer produces invoice_facts for an invoice-kind document.
   const task = await mintLegacyInvoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
-  const fields = componentFields(components);
+  const fields = salesFields(components);
   fields.push(factField("invoice.vendor_name", CLIENT_NAME));
   fields.push(factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }));
   fields.push(factField("invoice.customer_name", CUSTOMER));
@@ -106,14 +118,27 @@ async function draftSales(cited, lines, codingKind = "sales_invoice") {
 }
 
 /** Draft then approve; returns null on success or the raised error. */
+/** Draft then approve, returning the refusal from WHICHEVER DOOR RAISES IT.
+ *
+ *  F-A2 PR-1 (N1, design §3.4): the sales shape floor now runs at DRAFT for `not p_is_human`,
+ *  not only at approve, so a deliberately non-tying document is refused one door earlier. The
+ *  refusal is the SAME floor's — same CLR21, same tax_tie_failed / same CLR23 — so every cell
+ *  below keeps its assertions verbatim; only the door moved. Catching the draft here rather than
+ *  re-pointing five cells keeps that fact in ONE place, and a cell that wanted the draft to
+ *  survive would still see `error` and fail, which is the property that keeps this honest. */
 async function approveSales(cited, lines) {
-  const d = await draftSales(cited, lines);
+  let d = null;
+  try {
+    d = await draftSales(cited, lines);
+  } catch (e) {
+    return { entry: null, error: e, refusedAt: "draft" };
+  }
   try {
     await approveEntry(W.users.alice, {
       entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x1ap") });
-    return { entry: d.entry_id, error: null };
+    return { entry: d.entry_id, error: null, refusedAt: null };
   } catch (e) {
-    return { entry: d.entry_id, error: e };
+    return { entry: d.entry_id, error: e, refusedAt: "approve" };
   }
 }
 
@@ -272,7 +297,7 @@ test("[X3/sign] a NEGATIVE component is refused at the write boundary — the co
     ["a negative service charge", COMPONENT.serviceCharge, "-3.77"],
     ["a negative delivery charge", COMPONENT.delivery, "-15.00"],
   ]) {
-    const fields = componentFields({ gross: 11100, net: 10000, tax: 600 });
+    const fields = salesFields({ gross: 11100, net: 10000, tax: 600 });
     fields.push(factField(path, raw, { polygon: [], confidence: 0.9 }));
     const task = await mk();
     const err = await assertRaises("CLR10", () => persistInvoiceFacts(task, fields), label);
@@ -286,7 +311,7 @@ test("[X3/sign] a NEGATIVE component is refused at the write boundary — the co
   }
   // A ZERO component is not negative and stays acceptable — the guard is a sign check, not
   // a "must be material" check.
-  const zero = componentFields({ gross: 10600, net: 10000, tax: 600, discount: 0 });
+  const zero = salesFields({ gross: 10600, net: 10000, tax: 600, discount: 0 });
   const ok = await persistInvoiceFacts(await mk(), zero);
   assert.equal(ok.status, "done", "a stated ZERO discount still persists");
 });
@@ -323,9 +348,19 @@ test("[X3/sign] the BELT holds at the floor's read site, whatever wrote the regi
   // standing between this document and a RM111.00 post.
   assert.match(res.error.message, /component is negative/,
     "…and it is the SIGN BELT that refused, not an unrelated floor");
-  assert.equal(
-    (await rootQuery("select status from clara.journal_entries where id=$1", [res.entry])).rows[0].status,
-    "draft", "…and RM111.00 was not posted for a RM101.00 document");
+  // F-A2 PR-1 (N1): the belt now fires at the DRAFT door on the agent lane, so there is no
+  // entry left behind to inspect — a strictly stronger outcome than a surviving draft. Assert
+  // the outcome that holds at EITHER door: nothing of this document is approved.
+  if (res.entry) {
+    assert.equal(
+      (await rootQuery("select status from clara.journal_entries where id=$1", [res.entry])).rows[0].status,
+      "draft", "…and RM111.00 was not posted for a RM101.00 document");
+  } else {
+    assert.equal(res.refusedAt, "draft", "the belt refused at the draft door (N1)");
+  }
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.journal_entries where document_id=$1 and status='approved'",
+    [cited.documentId])).rows[0].n, 0, "…and RM111.00 was not posted for a RM101.00 document");
 });
 
 test("[X3] the WRITE boundary guards the new components exactly as it guards the old ones", async () => {
@@ -340,7 +375,7 @@ test("[X3] the WRITE boundary guards the new components exactly as it guards the
     await claimTask(task.id, { egressApproved: true });
     return task.id;
   };
-  const base = () => componentFields({ gross: 10375, net: 9430, tax: 566, rounding: 2, serviceCharge: 377 });
+  const base = () => salesFields({ gross: 10375, net: 9430, tax: 566, rounding: 2, serviceCharge: 377 });
   // A refused persist leaves its task RUNNING (the refusal rolls the statement back, not the
   // claim), and the claim lane caps concurrent running tasks per firm — so each refusal case
   // settles its own task as failed before the next one claims.
@@ -358,7 +393,7 @@ test("[X3] the WRITE boundary guards the new components exactly as it guards the
 
   // (b) a component that is PRESENT but unparseable is a data error, not a silent zero —
   //     a zero would make a wrong identity balance.
-  const bad = componentFields({ gross: 10375, net: 9430, tax: 566, rounding: 2 });
+  const bad = salesFields({ gross: 10375, net: 9430, tax: 566, rounding: 2 });
   bad.push(factField(COMPONENT.delivery, "N/A", { polygon: [], confidence: 0.9 }));
   await refuses(bad, "an extraction stating an unreadable delivery charge");
 

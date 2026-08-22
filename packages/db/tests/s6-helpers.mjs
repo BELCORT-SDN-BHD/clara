@@ -293,12 +293,65 @@ export async function mintInteractive(firm, onBehalfOf = null) {
 // 0016 (pin P3/WA21-R7): `kind` pass-through — the classify-first facts gate sends a
 // NULL-kind pdf to `classify`; facts-lane fixtures seed kind:'invoice' (source-stamped
 // corpus) so invoice_facts engages directly (the classify loop is proven in a21-classifier-gate).
-export async function seedCitedDocument(sub, { firm, client, quote = "RM 5,000.00", fieldPath = FIELD.total, kind = null } = {}) {
+// F-A2 PR-1 (D11): `direction` — MINT A FACTS EXTRACTION THAT STATES ITS SUPPLIER, so the
+// document has a testable direction. Default null keeps every existing caller byte-identical.
+//
+// WHY A FIXTURE NEEDS THIS NOW. The draft core's direction-family arm used to fire only for
+// `p_wake_kind='autodraft'`; D11 re-cuts it to `not p_is_human`, so EVERY agent-lane coded draft
+// is now held to the document's direction — the chat lane included, which is the point (chat is
+// direction-blind today). A document carrying only an `ocr` extraction has no facts extraction
+// at all, so clara._document_facts_extraction returns NULL, clara._document_direction raises
+// CLR30 and the tri-state answers 'unresolved' — the honest answer, and a refusal. A fixture
+// that wants a coded agent draft must therefore state what a real supplier bill states.
+//
+// It states the MINIMUM: a total and a third-party vendor name. That reaches the resolver's (P2)
+// arm — a stated supplier identity that is not this client, on a name-only page — and answers
+// 'purchase'. It deliberately does NOT state the arithmetic (`statedIdentityFields`) and carries
+// no agreement envelope, so the document does NOT corroborate: direction and corroboration are
+// different questions, and a fixture that wants only the first must not accidentally buy the
+// second.
+export async function seedCitedDocument(sub, { firm, client, quote = "RM 5,000.00", fieldPath = FIELD.total, kind = null, direction = null } = {}) {
   const { seedExtraction, seedRegion } = await import("./rig-docs-fixtures.mjs");
-  const doc = await filedDocument(sub, { firm, client, kind });
+  // A document whose DIRECTION the fixture wants stated is an invoice-kind document: 0016's
+  // classify-first gate only lets the facts lane engage on a kind-stamped doc, and without a
+  // facts task there is no facts extraction for the resolver to read. An explicit `kind` still
+  // wins — this only supplies the one the direction evidence implies.
+  const doc = await filedDocument(sub, { firm, client, kind: kind ?? (direction ? "invoice" : null) });
   const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
   const regionId = await seedRegion({ firm, extraction: extractionId, fieldPath, textContent: quote, locator: { page: 1, polygon: [0, 0, 1, 1] } });
+  if (direction) await seedPurchaseDirection(sub, { firm, client, document: doc.documentId, quote, direction });
   return { ...doc, extractionId, regionId, quote };
+}
+
+/** The facts extraction that makes a document's direction READABLE as a purchase (D11).
+ *  Legacy `invoice_facts` lane on purpose: it is the arm clara._document_facts_extraction
+ *  falls back to, and it needs no witness pair to be believable. */
+export async function seedPurchaseDirection(sub, { firm, client, document, quote = "RM 5,000.00", direction = "purchase" }) {
+  const { mintLegacyInvoiceFactsTask, claimTask, persistInvoiceFacts, factField, ensureClientEgress } =
+    await import("./s6-fixtures.mjs");
+  // THE SALES ARM states the client's OWN registered name as the supplier — the resolver's (S)
+  // arm, which reads a supplier identity that IS this client and answers 'sales'. It is the same
+  // one-field statement as the purchase arm, pointed the other way, and it is why a sales fixture
+  // does not need a customer identity at all.
+  const vendorName = direction === "sales"
+    ? (await rootQuery("select name from clara.clients where id=$1", [client])).rows[0]?.name
+    : "RIG DIRECTION SUPPLIER SDN BHD";
+  // The claim runs through the EGRESS gate, so a client with no standing consent parks the task
+  // at held_egress and the persist below refuses CLR16 'task is not running'. Best-effort: a
+  // client that already holds a live consent raises CLR28, which this helper absorbs.
+  await ensureClientEgress(sub, { client }).catch(() => {});
+  // Use the row the mint RETURNS rather than re-resolving by document: the resolver would hand
+  // back whichever task it finds, including a done one from an earlier fixture on the same doc.
+  const task = await mintLegacyInvoiceFactsTask(document);
+  await claimTask(task.id, { egressApproved: true });
+  await persistInvoiceFacts(task.id, [
+    factField(FIELD.total, quote),
+    factField("invoice.currency", "MYR"),
+    // Purchase: a third party, never this client — the (P2) arm's own condition.
+    // Sales: this client's own registered name — the (S) arm's.
+    factField("invoice.vendor_name", vendorName),
+  ]);
+  return task;
 }
 
 /**

@@ -33,6 +33,7 @@ import {
   mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, factsRegion,
   AP, EXP,
 } from "./wave-a-fixtures.mjs";
+import { addClientIdentifier } from "./rig-docs-fixtures.mjs";
 
 const EXP2 = "500-A02";
 let ready = false;
@@ -67,10 +68,13 @@ async function makeVendor(sub, { client, name, reg }) {
  *  proposal — i.e. the AGENT/wake lane (the human draft_entry forces coding_kind=NULL,
  *  which the executor rejects as not_eligible_shape). `lines` overrides the default
  *  Dr expense / Cr payable pair. Returns {entry_id, revision_token}. */
-async function draftBill(sub, { client, cp, accountCode = EXP, amount = 50000, lines = null }) {
+async function draftBill(sub, { client, cp, accountCode = EXP, amount = 50000, lines = null, direction = "purchase" }) {
   const firm = await firmOf(client);
   const cred = await mintInteractive(firm);
-  const cited = await seedCitedDocument(sub, { firm, client, quote: `RM ${(amount / 100).toFixed(2)}` });
+  // F-A2 PR-1 (D11): a coded AGENT draft is now held to the document's direction on every wake
+  // kind, so this fixture states its supplier. It still states no arithmetic — these cells want
+  // an UNCORROBORATED bill, and direction is a different question from corroboration.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: `RM ${(amount / 100).toFixed(2)}`, direction });
   return wakeDraftEntry(cred, {
     client,
     resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
@@ -122,11 +126,49 @@ async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amoun
   });
 }
 
-/** Generate ≥3 human-approved sightings for (cp, accountCode) — the proposal gaming guard. */
+/** F-A2 PR-1 (N1, design §3.4): THE SHAPE FLOORS RUN AT THE DRAFT DOOR on the agent lane now,
+ *  so a deliberately MIS-SHAPED coded bill is refused before it becomes a draft. It is the SAME
+ *  floor raising the SAME family it raised at approve — only the door moved, and a coded
+ *  supplier_bill has no other lane to be born on (clara.draft_entry takes no p_coding_kind).
+ *
+ *  A cell whose claim is "this shape never posts" is SATISFIED by that refusal and says so here;
+ *  it does not get to skip quietly, because an unexpected errcode still fails. A cell whose
+ *  claim is about the EXECUTOR's own skip reason needs the draft to exist, and those cells keep
+ *  their `assert.ok(draft?.entry_id, …)` — which now fails loudly if N1 ever swallows one. */
+function n1DraftRefusal(assert, maybeError, label, codes = ["CLR23", "CLR21"]) {
+  if (!(maybeError instanceof Error)) return false;
+  assert.ok(codes.includes(maybeError.code),
+    `${label}: the draft-door refusal rides the same family the approve door used to raise (got ${maybeError.code}: ${maybeError.message})`);
+  return true;
+}
+
+/** Generate ≥3 human-approved sightings for (cp, accountCode) — the proposal gaming guard.
+ *
+ *  F-A2 PR-1: THE POOL IS NOW STATED, NOT BRED. The eighth clara._approve_entry_core body
+ *  excises the breeding block, so approving a bill no longer writes a clara.rule_sightings row
+ *  and this fixture's pool would be empty — `sign_autopost_rule` would refuse CLR27 and every
+ *  executor cell below would take its `if (!rule) return;` early exit and pass VACUOUSLY, which
+ *  is worse than failing: a green cell that exercises nothing.
+ *
+ *  The claim of every cell in this file is about the EXECUTOR's behaviour, not about breeding,
+ *  so per the PR-1 claim rule the cells stay (they retire with the verb in PR-3) and only their
+ *  fixture changes: the sightings are inserted directly. The table survives KEEP-AS-HISTORY, the
+ *  rows are the same shape the retired writer wrote, and the entries they cite are the real
+ *  approved bills — so the pool is honest evidence, just no longer a side effect of approving.
+ *  What is NO LONGER asserted here is that approval breeds; that claim moved to C.8's inverted
+ *  twins, which assert the opposite. */
 async function seedSightings(sub, { client, cp, accountCode = EXP, n = 3 }) {
+  const firm = await firmOf(client);
   for (let i = 0; i < n; i++) {
     const d = await draftBill(sub, { client, cp, accountCode });
-    if (d?.entry_id) await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("sight") }).catch(() => {});
+    if (!d?.entry_id) continue;
+    await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("sight") }).catch(() => {});
+    await rootQuery(
+      `insert into clara.rule_sightings(firm_id, client_id, counterparty_id, account_code, entry_id, side)
+         values ($1, $2, $3, $4, $5, 'debit')
+         on conflict on constraint uq_rule_sightings_mapping do nothing`,
+      [firm, client, cp, accountCode, d.entry_id],
+    );
   }
 }
 
@@ -327,7 +369,8 @@ test("FIX-1 execute_rule_post REFUSES an EXTRA control leg (a receivable leg on 
       { account_code: REC, debit_cents: 5000, credit_cents: 0, description: "launder-into-receivable" },
       { account_code: AP, debit_cents: 0, credit_cents: 45000, description: "ap" },
     ],
-  }).catch((e) => { noteLane(`control-leg draft raised ${e.code}`); return null; });
+  }).catch((e) => e);
+  if (n1DraftRefusal(assert, draft, "FIX-1 extra control leg")) return;
   assert.ok(draft?.entry_id, "the extra-control-leg supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a purchase bill with an extra receivable control leg is NOT auto-posted (control-shape refusal)");
@@ -448,6 +491,15 @@ test("P12 two concurrent posts on ONE rule at window_max=1 post EXACTLY ONE — 
 async function purchaseFactsDoc({ client, typeCode = "02", gross = 50000 }) {
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
+  // F-A2 PR-1 (D11): THE CLIENT NEEDS ITS OWN HARD IDENTIFIERS for this page to have a testable
+  // direction. The document states a supplier REGISTRATION, and the resolver only treats a
+  // stated registration as a miss "when there was something to miss against, in every kind it
+  // could have been" — with no tin/ssm on file the (P2) limb cannot fire, the supplier is not
+  // yet a known vendor either (this fixture births it during the draft), and the honest answer
+  // is unresolved. The resolver's own comment names the remedy: record the client's TIN. A real
+  // client has both; the fixture now says so instead of relying on an arm that never ran.
+  await addClientIdentifier(world.users.alice, { client, kind: "ssm", value: "199801000099" }).catch(() => {});
+  await addClientIdentifier(world.users.alice, { client, kind: "tin", value: "199801000099" }).catch(() => {});
   // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
   const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
   const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}`, kind });
@@ -463,7 +515,11 @@ async function purchaseFactsDoc({ client, typeCode = "02", gross = 50000 }) {
     factField("invoice.vendor_name", "THIRDPARTY SUPPLIER SDN BHD"),
     factField("invoice.vendor_registration", "201899123456", { polygon: [], confidence: 0.9 }),
     factField("invoice.type_code", typeCode, { polygon: [], confidence: 0.9 }),
-  ]).catch((e) => noteLane(`purchase facts persist ${e.code}: ${e.message}`));
+  // NO FAIL-SOFT HERE. This persist is what gives the document its stated supplier identity and
+  // therefore its readable DIRECTION; swallowing its failure used to be invisible, and under
+  // D11 it is the difference between the cell's own wall firing and the direction arm refusing
+  // the draft first. A fixture that cannot state its facts must say so.
+  ]);
   return cited;
 }
 
@@ -489,7 +545,8 @@ test("RESIDUAL-1 execute_rule_post REFUSES a caller-supplied ROUNDING leg carryi
       { account_code: RND, debit_cents: 9999, credit_cents: 0, description: "launder-into-rounding" },
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
-  }).catch((e) => { noteLane(`rounding-launder draft raised ${e.code}`); return null; });
+  }).catch((e) => e);
+  if (n1DraftRefusal(assert, draft, "RESIDUAL-1 material rounding leg")) return;
   assert.ok(draft?.entry_id, "the rounding-laundering supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a bill with a MATERIAL rounding leg is NOT auto-posted (the expected-account-set laundering bound)");
@@ -524,10 +581,13 @@ test("RESIDUAL-1/v5 a ≤5-sen rounding-leg bill is SKIPPED not_corroborated (a 
   await postViaRule(draft.entry_id).catch((e) => noteLane(`≤5-sen rounding post raised ${e.code}`));
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a ≤5-sen rounding-leg bill is NOT auto-posted under v5 (inherently non-corroborated)");
   const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
-  // 0016 ADV-R4#1 (integration lane): a NO-FACTS document is now refused by the
-  // EARLIER named skip 'facts_missing' — before direction, never an unpinned
-  // pass-through. The protected property is identical (never auto-posts).
-  assert.equal(skip, "facts_missing", `the ≤5-sen rounding bill (no facts) is skipped facts_missing (got '${skip}')`);
+  // 0016 ADV-R4#1 moved this skip to the earlier named 'facts_missing'. F-A2 PR-1 (D11) moves
+  // it once more, and for a stated reason: a coded AGENT draft is now held to the document's
+  // DIRECTION, so this fixture's document must state its supplier — which means it states facts.
+  // They are uncorroborated facts (no arithmetic, no agreement envelope), so the executor's
+  // named skip is 'not_corroborated' rather than 'facts_missing'. The PROTECTED PROPERTY is
+  // identical and still asserted above: a ≤5-sen rounding-leg bill NEVER auto-posts.
+  assert.equal(skip, "not_corroborated", `the ≤5-sen rounding bill is skipped not_corroborated (got '${skip}')`);
 });
 
 test("RESIDUAL-1 the supplier-bill shape floor REFUSES a material rounding leg at APPROVE (defense-in-depth, human path)", async (t) => {
@@ -542,7 +602,8 @@ test("RESIDUAL-1 the supplier-bill shape floor REFUSES a material rounding leg a
       { account_code: RND, debit_cents: 9999, credit_cents: 0, description: "launder-into-rounding" },
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
-  }).catch((e) => { noteLane(`floor-rounding draft raised ${e.code}`); return null; });
+  }).catch((e) => e);
+  if (n1DraftRefusal(assert, draft, "RESIDUAL-1 floor, material rounding leg")) return;
   assert.ok(draft?.entry_id, "the rounding-laundering supplier-bill draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("aprnd") }); }
@@ -628,7 +689,8 @@ test("FIX-7/v3 execute_rule_post REFUSES an UNTIED sst_output leg (Dr expense 1�
       { account_code: SST, debit_cents: 9999, credit_cents: 0, description: "launder-into-sst" },
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
-  }).catch((e) => { noteLane(`sst-launder draft raised ${e.code}`); return null; });
+  }).catch((e) => e);
+  if (n1DraftRefusal(assert, draft, "FIX-7 untied sst_output leg (executor)")) return;
   assert.ok(draft?.entry_id, "the sst-laundering supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a bill with an UNTIED sst_output leg (no tax fact) is NOT auto-posted (the tied-sst gate)");
@@ -651,7 +713,8 @@ test("FIX-7/v3 the supplier-bill shape floor REFUSES an UNTIED sst_output leg at
       { account_code: SST, debit_cents: 9999, credit_cents: 0, description: "launder-into-sst" },
       { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
     ],
-  }).catch((e) => { noteLane(`floor-sst draft raised ${e.code}`); return null; });
+  }).catch((e) => e);
+  if (n1DraftRefusal(assert, draft, "FIX-7 untied sst_output leg (floor)")) return;
   assert.ok(draft?.entry_id, "the untied-sst supplier-bill draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("apsst") }); }
@@ -689,7 +752,8 @@ test("FIX-2/v4 the supplier-bill floor REFUSES ANY sst_output leg on a PURCHASE 
       { account_code: SST, debit_cents: 600, credit_cents: 0, description: "purchase-sst (would-tie)" },
       { account_code: AP, debit_cents: 0, credit_cents: 10600, description: "ap (gross)" },
     ],
-  }).catch((e) => { noteLane(`sst-v4 floor draft raised ${e.code}`); return null; });
+  }).catch((e) => e);
+  if (n1DraftRefusal(assert, draft, "FIX-2 any sst_output leg on a purchase")) return;
   assert.ok(draft?.entry_id, "the sst-leg supplier-bill draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("apsst4") }); }
@@ -784,9 +848,13 @@ test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a CLEAN draft on a NO-
   await postViaRule(draft.entry_id).catch((e) => noteLane(`no-facts post raised ${e.code}: ${e.message}`));
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a non-corroborated (no-facts) draft is NOT auto-posted (pre-v5 it posted)");
   const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
-  // 0016 ADV-R4#1 (integration lane): the no-facts refusal moved EARLIER to the
-  // named 'facts_missing' skip (before direction). Same property, refused sooner.
-  assert.equal(skip, "facts_missing", `a no-facts draft is skipped facts_missing (got '${skip}')`);
+  // 0016 ADV-R4#1 moved this to the named 'facts_missing' skip. F-A2 PR-1 (D11) moves it again:
+  // a coded agent draft is now held to the document's DIRECTION, so the fixture states a
+  // supplier and the document therefore states facts — uncorroborated ones, with no arithmetic
+  // and no agreement envelope. The executor's named skip is 'not_corroborated', which is the
+  // honest reason for THIS document, and the protected property asserted above is unchanged:
+  // a non-corroborated draft is never auto-posted.
+  assert.equal(skip, "not_corroborated", `a non-corroborated draft is skipped not_corroborated (got '${skip}')`);
 });
 
 test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a draft on a document whose total is MALFORMED ('N/A' persists non-corroborated) with an ARBITRARY amount", async (t) => {

@@ -80,6 +80,27 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
   // header for why that is the sanctioned transition and not a back door.
   await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("advsa") });
+  // F-A2 PR-1: THE SIGHTING IS NOW STATED, NOT BRED. The eighth clara._approve_entry_core body
+  // excises the breeding block, so approving this sales entry no longer writes the income-CREDIT
+  // rule_sightings row the OCR-sales floor counts — every rule this world builds would refuse
+  // CLR27 and every cell below would fail at its own setup. The CLAIM of these cells is the OCR
+  // sales floor's arithmetic, never that approval breeds, so per the PR-1 claim rule the cells
+  // stay and only their fixture changes: the row is inserted directly, in the shape the retired
+  // writer wrote (side='credit' on the income leg), citing the real approved entry. The claim
+  // that approval BREEDS moved to C.8's inverted twins, which assert the opposite.
+  const cpId = cp ?? (await rootQuery(
+    `select clara._canonical_counterparty($1, min(l.counterparty_id::text)::uuid) as id
+       from clara.journal_lines l join clara.coa_accounts a
+         on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=$2 and a.account_class='receivable' and l.counterparty_id is not null`,
+    [client, d.entry_id])).rows[0]?.id;
+  if (cpId) {
+    await rootQuery(
+      `insert into clara.rule_sightings(firm_id, client_id, counterparty_id, account_code, entry_id, side)
+         values ($1, $2, $3, $4, $5, 'credit')
+         on conflict on constraint uq_rule_sightings_mapping do nothing`,
+      [firm, client, cpId, REV, d.entry_id]);
+  }
   return { entryId: d.entry_id, documentId: cited.documentId };
 }
 
@@ -852,11 +873,25 @@ test("R5-1 (R4 must-1): a FACTS-ABSENT document skips facts_missing BEFORE direc
   const firm = await firmOf(client);
   // A cited doc with ZERO done facts lanes (layout OCR only — no invoice_facts).
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
-  const draft = await ocrSalesDraft(client, cited, { cp });
-  assert.ok(draft?.entry_id, "the facts-less draft exists (mandatory setup)");
-  await postViaRule(draft.entry_id).catch((e) => noteLane(`r5-1 post raised ${e.code}`));
-  assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "a facts-absent draft NEVER posts");
-  assert.equal(await lastSkipReason(draft.entry_id), "facts_missing", "the skip is NAMED facts_missing (before direction — never an unpinned pass-through)");
+  // F-A2 PR-1 (D11): THE WALL MOVED TO THE DRAFT DOOR, and this cell moves with it. A document
+  // with no facts lane has no readable DIRECTION (clara._document_facts_extraction returns NULL,
+  // so clara._document_direction raises CLR30), and the draft core's direction-family arm now
+  // binds every agent-lane coded draft rather than only the autodraft wake kind. So the
+  // facts-absent shape can no longer BECOME a draft, and the executor's facts_missing skip is
+  // unreachable for it: there is nothing left to skip. The claim this cell exists to defend is
+  // unchanged and still forced — a facts-absent document NEVER reaches an approved entry, and
+  // the refusal is NAMED rather than a silent pass-through — but it is now proven one door
+  // earlier, which is strictly sooner and strictly louder.
+  let draftErr = null;
+  try {
+    await ocrSalesDraft(client, cited, { cp });
+  } catch (e) { draftErr = e; }
+  assert.ok(draftErr, "a facts-absent document cannot become a coded agent draft at all");
+  assert.equal(reasonOf(draftErr), "direction_family_mismatch",
+    `the refusal is NAMED, never an unpinned pass-through (got ${reasonOf(draftErr)}: ${draftErr.message})`);
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.journal_entries where document_id=$1 and status='approved'",
+    [cited.documentId])).rows[0].n, 0, "a facts-absent document NEVER reaches an approved entry");
   // The core's rule-driven pin requirement is structural.
   const stripSql = (s) => s.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(stripSql(await fnSource("_approve_entry_core")).includes("unpinned_rule_post"),

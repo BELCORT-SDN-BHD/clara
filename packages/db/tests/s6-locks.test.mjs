@@ -100,7 +100,9 @@ let lockVendorSeq = 0;
 async function billWithClaimedFacts(sub, { client, amount = 500000 }) {
   const firm = await firmOf(client);
   // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
-  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00", kind: "invoice" });
+  // F-A2 PR-1 (D11): the direction-family arm now binds every agent-lane coded draft, so this
+  // shared fixture states its supplier. Direction only — no arithmetic, so nothing corroborates.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00", kind: "invoice", direction: "purchase" });
   const cred = await mintInteractive(firm);
   const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
   const seq = lockVendorSeq++;
