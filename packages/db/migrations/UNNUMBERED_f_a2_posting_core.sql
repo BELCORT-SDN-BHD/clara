@@ -708,6 +708,61 @@ $fa2_floor$;
 -- of its callers (_approve_entry_core, approve_wrong_client_correction, reverse_entry, the
 -- 1-arity delegate and the shape trigger) keep byte-identical behaviour, because a NULL
 -- projection is exactly what the prologue evaluated before it moved.
+-- =====================================================================================
+-- clara._direction_class — B15's OWN reader, and the whole of C1's fix.
+--
+-- THE HOLE IT CLOSES. `_autodraft_direction_tri` swallows EVERY CLR30 into the single string
+-- 'unresolved' (0049:1063-1066), and B15 passed everything that was not literally 'sales' or
+-- 'purchase'. But 0049 raises CLR30 for two ENTIRELY DIFFERENT reasons: "nobody is identified on
+-- this page" (`evidence:"none"`) and "the parties on this page CONTRADICT each other"
+-- (`evidence:"contradiction"` — 0049:924 a supplier registration that IS the client under a name
+-- that is not, :932 a name match whose registration disagrees, :946 both parties resolving to the
+-- client). Collapsed together, a corroborated document with contradictory parties posted as a
+-- generic JV: `Dr Expense / Cr Bank` — the client's OWN sales invoice booked as an expense plus
+-- a phantom payment. And nothing else in the ladder would catch it: corroboration carries NO
+-- identity term (0092:484-486), the Tier-C identity pairs fire only off a model-PROPOSED
+-- counterparty a generic entry does not supply, and the re-cut direction-family arm is
+-- kind-gated. The :924 case is the ORDINARY un-aliased client -- "Rome Properties" against
+-- "Rome Properties Sdn Bhd".
+--
+-- WHY A SIBLING AND NOT A WIDENING. `_autodraft_direction_tri` is on this file's own
+-- required-upstream prestate list and `_draft_entry_core` reads it; widening its answer set
+-- would change a body several other callers depend on to answer exactly three strings. This
+-- helper has ONE caller — B15 — and says so.
+--
+-- IT READS THE PINNED GENERATION. `_document_direction_at(document, client, extraction)` judges
+-- the generation the receipt stamps, which is what every other rung does; passing NULL falls
+-- back to the document-wide read, which is the pre-F-A2 behaviour and not what B15 wants.
+--
+-- THE CLASSES: 'sales' | 'purchase' | 'contradiction' | 'absent'. Absent is the ONLY one B15
+-- admits. An unreadable detail payload degrades to 'absent' rather than raising, because this
+-- helper runs inside a STABLE read path and a malformed detail must not detonate a post — but
+-- the degrade is toward the class B15 ADMITS, so it is stated here rather than hidden: a CLR30
+-- whose detail cannot be read is indistinguishable from "nobody is identified", and treating it
+-- as a contradiction would refuse lawful generic posts on a parse failure.
+-- =====================================================================================
+create function clara._direction_class(p_document uuid, p_client uuid, p_extraction uuid)
+  returns text language plpgsql stable security definer set search_path = clara, pg_temp as $dircls$
+declare v_dir text; v_detail text; v_evidence text;
+begin
+  if p_document is null or p_client is null then return 'absent'; end if;
+  begin
+    v_dir := clara._document_direction_at(p_document, p_client, p_extraction);
+  exception when sqlstate 'CLR30' then
+    get stacked diagnostics v_detail = pg_exception_detail;
+    begin
+      v_evidence := (nullif(btrim(coalesce(v_detail,'')),'')::jsonb)->>'evidence';
+    exception when others then
+      v_evidence := null;
+    end;
+    if v_evidence = 'contradiction' then return 'contradiction'; end if;
+    return 'absent';
+  end;
+  if v_dir in ('sales','purchase') then return v_dir; end if;
+  return 'absent';
+end $dircls$;
+revoke all on function clara._direction_class(uuid,uuid,uuid) from public;
+
 create or replace function clara._assert_supplier_bill_shape_at(p_entry uuid, p_extraction uuid)
   returns void language plpgsql security definer set search_path = clara, pg_temp as $$
 begin
@@ -765,6 +820,7 @@ declare
   v_a bigint; v_b bigint; v_c bigint; v_evid int; v_moved int;
   v_sub text; v_reason text; v_code text; v_detail text; v_pair boolean; v_b8_gen uuid;
   v_rungs text[] := array['B1','B2','B3','B4','B5','B6','B7','B8','B9','B10','B11','B14','B15'];
+  v_class text;   -- C1: B15's direction CLASS, from clara._direction_class
   v_tokens jsonb := jsonb_build_object(
     'B1','settlement_kind_human','B2','not_corroborated','B3','anchor_unbound',
     'B4','anchor_untied','B5','amount_conflict','B6','human_override_present',
@@ -1089,11 +1145,19 @@ begin
     -- passed all fourteen of v4's rungs — a phantom payment with the payable suppressed. B15
     -- lives in the ladder so it covers BOTH lanes. D18 survives: a genuinely
     -- direction-unresolved generic document still posts when it ties.
-    if e.coding_kind is not null or e.document_id is null then
-      v_val := 'pass';
+    --
+    -- C1: B15 READS THE CLASS, NOT THE TRI-STATE. The tri-state collapses a direction
+    -- CONTRADICTION into the same 'unresolved' string a silent page produces, and B15 passed
+    -- everything that was not 'sales' or 'purchase' -- so a corroborated document whose parties
+    -- contradict each other posted as a generic JV. 'absent' is the ONLY admitting class now,
+    -- and the read is against v_bound so B15 judges the generation the receipt stamps.
+    if e.coding_kind is not null then
+      v_val := 'pass';                      -- B15 binds the GENERIC lane only
+    elsif e.document_id is null or v_bound is null then
+      v_val := 'not_evaluable';             -- nothing to classify; never a pass (law 68)
     else
-      v_tri := clara._autodraft_direction_tri(e.document_id, e.client_id);
-      v_val := case when v_tri in ('sales','purchase') then 'fail' else 'pass' end;
+      v_class := clara._direction_class(e.document_id, e.client_id, v_bound);
+      v_val := case when v_class = 'absent' then 'pass' else 'fail' end;
     end if;
     v_vector := v_vector || jsonb_build_object('B15', v_val);
 
@@ -1770,6 +1834,7 @@ begin
     'clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)',
     'clara._assert_control_leg_counterparty_at(uuid,uuid)',
     'clara._assert_supplier_bill_shape_at_projected(uuid,uuid,uuid)',
+    'clara._direction_class(uuid,uuid,uuid)',
     'clara._post_counterparty_projection(uuid)'] loop
     if to_regprocedure(v_sig) is null then
       raise exception 'F-A2 tail: % was not created', v_sig using errcode='CLR10';
@@ -1821,6 +1886,28 @@ begin
    where coalesce(('{"B1":"pass","B2":"pass"}'::jsonb)->>r,'') <> 'pass';
   if v_n <> 0 then
     raise exception 'F-A2 tail: POSITIVE CONTROL -- the admission predicate refuses a complete passing vector' using errcode='CLR10';
+  end if;
+
+  -- (J.3c) C1: B15 reads the CLASS, and `_direction_class` has exactly ONE caller. The sibling
+  -- exists precisely so `_autodraft_direction_tri` does not have to widen; a second caller would
+  -- mean the widening happened anyway, one function along.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)'::regprocedure;
+  if position('clara._direction_class(e.document_id, e.client_id, v_bound)' in v_src) = 0 then
+    raise exception 'F-A2 tail: B15 does not read the direction CLASS against the bound generation (C1)' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p
+   where p.pronamespace='clara'::regnamespace
+     and p.prosrc like '%clara._direction_class(%'
+     and p.proname <> '_direction_class';
+  if v_n <> 1 then
+    raise exception 'F-A2 tail: clara._direction_class has % callers, expected exactly 1 (B15)', v_n using errcode='CLR10';
+  end if;
+  -- ...and the tri-state it deliberately does NOT widen is byte-unmoved on its own answer set.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._autodraft_direction_tri(uuid,uuid)'::regprocedure;
+  if position('return ''unresolved''' in v_src) = 0 then
+    raise exception 'F-A2 tail: _autodraft_direction_tri no longer answers unresolved -- C1 widened the wrong body' using errcode='CLR10';
   end if;
 
   -- (J.4a) E.3's THREE identity channels, all three. The first cut trued `_audit` and

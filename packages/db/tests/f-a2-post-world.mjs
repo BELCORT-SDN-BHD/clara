@@ -150,6 +150,18 @@ export const SUPPLIER_NAME = "F-A2 SUPPLIER SDN BHD";
  */
 async function directionRegions(client, direction, vendorName) {
   if (direction === "unresolved") return [];
+  // 'contradiction' — C1's fixture, and it is the ORDINARY un-aliased client, not an exotic one:
+  // the page states a supplier REGISTRATION that IS this client's, under a NAME that is not
+  // (0049:924). `_document_direction` raises CLR30 with `evidence:"contradiction"`, which
+  // `_autodraft_direction_tri` flattens into the same 'unresolved' a silent page produces — the
+  // collapse B15 used to admit.
+  if (direction === "contradiction") {
+    const reg = (await rootQuery(
+      `select value_normalized from clara.client_identifiers
+        where client_id=$1 and kind='ssm' order by added_at limit 1`, [client])).rows[0]?.value_normalized;
+    if (!reg) throw new Error("directionRegions('contradiction'): the client holds no ssm identifier to contradict");
+    return [idRegion("invoice.vendor_name", vendorName), idRegion("invoice.vendor_registration", reg)];
+  }
   if (direction === "sales") {
     const r = await rootQuery("select name from clara.clients where id=$1", [client]);
     return [idRegion("invoice.vendor_name", r.rows[0].name), idRegion("invoice.customer_name", BUYER_NAME)];

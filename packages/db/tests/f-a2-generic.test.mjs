@@ -33,7 +33,7 @@ import {
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   unwitnessedFiling, admits, nonAdmitting, assertNonAdmitting, assertVectorShape,
   genericLines, suppressedPayableLines, genericWithControlLeg, CHART,
-  RUNG_TOKEN, TIER_D_TOKENS, PR2_PENDING,
+  RUNG_TOKEN, TIER_D_TOKENS, PR2_PENDING, rootQuery, addClientIdentifier,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -170,6 +170,50 @@ test("f-a2.c14.gb1-suppressed the SUPPRESSED-PAYABLE fixture refuses at B15 — 
   assert.equal(r.refusal.reason, RUNG_TOKEN.B15,
     "c14.gb1-suppressed: and the receipt names generic_on_directional_document — the operator is told the KIND was wrong, not that some number failed");
   assert.equal((await entryRow(p.args.entry))?.status, "draft", "c14.gb1-suppressed: the phantom payment did not land");
+});
+
+test("f-a2.c14.gb1-contradiction a document whose PARTIES CONTRADICT refuses at B15 — the second door GB-1 left open", async (t) => {
+  if (await gateCore(t)) return;
+  // C1, and it is the same class of hole as the suppressed payable one cell above. 0049 raises
+  // CLR30 for two entirely different reasons — "nobody is identified" (`evidence:"none"`) and
+  // "the parties CONTRADICT each other" (`evidence:"contradiction"`) — and
+  // `_autodraft_direction_tri` flattens both into the single string 'unresolved'. B15 passed
+  // everything that was not 'sales' or 'purchase', so a CORROBORATED document with contradictory
+  // parties posted as `Dr Expense / Cr Bank`: the client's own sales invoice booked as an
+  // expense, plus a phantom payment. Nothing else in the ladder reads identity — corroboration
+  // carries no identity term, the Tier-C identity pairs need a model-PROPOSED counterparty a
+  // generic entry does not supply, and the direction-family arm is kind-gated.
+  //
+  // THE FIXTURE IS THE ORDINARY CASE, not an exotic one: 0049:924 is a page stating a supplier
+  // REGISTRATION that IS this client's under a NAME that is not — "Rome Properties" against
+  // "Rome Properties Sdn Bhd".
+  await ensureChart(OWNER(), A2());
+  await addClientIdentifier(OWNER(), { client: A2(), kind: "ssm", value: "200301000924" }).catch(() => {});
+  await addClientIdentifier(OWNER(), { client: A2(), kind: "tin", value: "200301000924" }).catch(() => {});
+  const p = await agentPostable(OWNER(), {
+    client: A2(), amount: 300000, codingKind: null, lines: suppressedPayableLines(300000),
+    direction: "contradiction",
+  });
+  const r = await post(p);
+
+  // THE COLLAPSE IS THE CAUSE, asserted rather than described: the tri-state STILL answers
+  // 'unresolved' on this very document. Without this half the cell cannot say that B15's old
+  // reading was what let it through.
+  const tri = (await rootQuery(
+    "select clara._autodraft_direction_tri($1,$2) as v", [p.cited.documentId, A2()])).rows[0].v;
+  assert.equal(tri, "unresolved",
+    "c14.gb1-contradiction: _autodraft_direction_tri STILL flattens the contradiction to 'unresolved' — that collapse is exactly what B15 used to admit, and it is unchanged by this fix");
+  const klass = (await rootQuery(
+    "select clara._direction_class($1,$2,null) as v", [p.cited.documentId, A2()])).rows[0].v;
+  assert.equal(klass, "contradiction",
+    "c14.gb1-contradiction: …while the CLASS B15 now reads says 'contradiction' — the two readers disagree, and that difference is the whole fix");
+
+  assert.equal(r?.posted, false,
+    `c14.gb1-contradiction: a contradicted document NEVER posts as a generic JV (${JSON.stringify(r?.refusal)})`);
+  assert.ok(!admits(r?.rung_vector, "B15"),
+    `c14.gb1-contradiction: …and B15 is the rung that refuses it (vector ${JSON.stringify(r?.rung_vector)})`);
+  assert.equal(r?.refusal?.reason, RUNG_TOKEN.B15,
+    `c14.gb1-contradiction: …naming Annex E.2's B15 token (got ${JSON.stringify(r?.refusal)})`);
 });
 
 test("f-a2.c14.gb1-twin the DIRECTION-UNRESOLVED twin still POSTS when tied — D18 survives its own new wall", async (t) => {

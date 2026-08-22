@@ -335,7 +335,7 @@ export async function seedPurchaseDirection(sub, { client, document, quote = "RM
   // does not need a customer identity at all.
   const vendorName = direction === "sales"
     ? (await rootQuery("select name from clara.clients where id=$1", [client])).rows[0]?.name
-    : "RIG DIRECTION SUPPLIER SDN BHD";
+    : "RIG DIRECTION SUPPLIER SDN BHD";   // also the contradiction arm's third-party NAME
   // The claim runs through the EGRESS gate, so a client with no standing consent parks the task
   // at held_egress and the persist below refuses CLR16 'task is not running'. Best-effort: a
   // client that already holds a live consent raises CLR28, which this helper absorbs.
@@ -344,12 +344,25 @@ export async function seedPurchaseDirection(sub, { client, document, quote = "RM
   // back whichever task it finds, including a done one from an earlier fixture on the same doc.
   const task = await mintLegacyInvoiceFactsTask(document);
   await claimTask(task.id, { egressApproved: true });
+  // CONTRADICTION (C1): a third-party NAME beside this client's OWN registration. 0049:924 reads
+  // exactly that pair and raises CLR30 `evidence:"contradiction"` -- the class the tri-state
+  // flattens into 'unresolved' and B15 used to admit. The registration is read from the client's
+  // own identifiers, never invented, so the contradiction is real rather than a typo.
+  const extra = [];
+  if (direction === "contradiction") {
+    const reg = (await rootQuery(
+      `select value_normalized from clara.client_identifiers
+        where client_id=$1 and kind='ssm' order by added_at limit 1`, [client])).rows[0]?.value_normalized;
+    if (!reg) throw new Error("seedPurchaseDirection('contradiction'): the client holds no ssm identifier to contradict");
+    extra.push(factField("invoice.vendor_registration", reg, { polygon: [], confidence: 0.9 }));
+  }
   await persistInvoiceFacts(task.id, [
     factField(FIELD.total, quote),
     factField("invoice.currency", "MYR"),
     // Purchase: a third party, never this client — the (P2) arm's own condition.
     // Sales: this client's own registered name — the (S) arm's.
     factField("invoice.vendor_name", vendorName),
+    ...extra,
   ]);
   return task;
 }
