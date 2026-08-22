@@ -473,16 +473,28 @@ test("f-a2.c4.clr26 the two-session race on ALL THREE Tier-A locks — the post 
       },
     });
     const post_ = out.a;
-    // THE CONTENDER MUST HAVE RUN. A question that refused is not a race, and a cell that
-    // accepted one would be reporting the absence of a CLR26 it never gave the lane a chance to
-    // raise — which is the whole shape law 31's exclusion must not rest on.
-    assert.ok(out.b?.ok !== false || out.b?.code === undefined,
-      `c4.clr26 ${scope}: the contending question really ran (got ${JSON.stringify(out.b)}) — an unbuilt contender proves nothing about ${lock}`);
-    assert.ok(post_?.ok || post_?.code !== "CLR26",
-      `c4.clr26 ${scope}: the post never surfaces a bare CLR26 while contending on ${lock} (got ${JSON.stringify(post_)}). If it ever does, the fallback pair (CLR26, open_question_race) becomes REQUIRED and E.2's disposition must be reopened`);
-    if (post_?.ok && post_.receipt?.posted === false) {
-      assert.notEqual(post_.receipt.refusal?.reason, undefined,
-        `c4.clr26 ${scope}: a losing post is a TYPED refusal — B9's token if the question won the race`);
+    // THE SERIALISATION IS THE CLAIM, SO IT IS ASSERTED. `holdThenContend` already computes
+    // `provedBlocked` from `pg_blocking_pids` — the first cut simply never read it, and that one
+    // omission is what let all three lock-deletion mutations through: with any of the three
+    // acquisitions removed the contender stops blocking, the race stops being a race, and every
+    // remaining assertion below is still satisfied by a post that never contended with anything.
+    assert.equal(out.provedBlocked, true,
+      `c4.clr26 ${scope}: the contender BLOCKED on ${lock} — proven from pg_blocking_pids, not inferred from the outcome (got ${JSON.stringify(out)})`);
+    // THE CONTENDER MUST HAVE RUN, AND SUCCEEDED. "Did not fail with a code" also accepts a
+    // contender that never produced a receipt at all; the question's own success is the premise
+    // that makes this a race, so it is required outright.
+    assert.equal(out.b?.ok, true,
+      `c4.clr26 ${scope}: the contending question really ran and SUCCEEDED (got ${JSON.stringify(out.b)}) — an unbuilt contender proves nothing about ${lock}`);
+    // AND THE POST'S OUTCOME IS PINNED, NOT MERELY “not CLR26”. `post_?.ok || post_?.code !==
+    // "CLR26"` is satisfied by ANY other failure — a CLR12, a timeout, a raw error — so the lane
+    // could stop working entirely and this cell would still be green while reporting the absence
+    // of a CLR26 nobody was in a position to raise.
+    assert.equal(post_?.ok, true,
+      `c4.clr26 ${scope}: the post COMPLETES while contending on ${lock} — any failure here, CLR26 or not, means the cell measured something other than the race (got ${JSON.stringify(post_)})`);
+    const rec = post_.receipt;
+    if (rec?.posted !== true) {
+      assert.equal(rec?.refusal?.reason, "open_question_blocks",
+        `c4.clr26 ${scope}: a non-posting outcome is B9's OWN token — the question won the race — and never a bare CLR26 (got ${JSON.stringify(rec?.refusal)}). If a bare CLR26 ever appears, the fallback pair (CLR26, open_question_race) becomes REQUIRED and E.2's disposition must be reopened`);
     }
     noteLane(`c4.clr26 ${scope}: contended on ${lock} — post ${post_?.ok ? JSON.stringify(post_.receipt?.posted === true ? "posted" : post_.receipt?.refusal?.reason) : post_?.code}`);
     // THE CONTENDER IS CLEANED UP, and this is not tidiness. A CLIENT-scope question left open
