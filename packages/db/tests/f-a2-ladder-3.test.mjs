@@ -26,7 +26,7 @@ import {
   supplierLines, salesLines, genericLines, genericWithControlLeg, CHART,
   TIER_B_RUNGS, TIER_D_TOKENS, TIER_D_DECLARED_UNREACHABLE, ADV_MIRROR_AXIS,
   postReceiptRow, opReceiptResult, upsertAccountClassed,
-  witnessRegion, controlLegCount, doctorLines, stampCodingKind,
+  controlLegCount, doctorLines, stampCodingKind,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
