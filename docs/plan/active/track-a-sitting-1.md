@@ -8,7 +8,8 @@
 >
 > **The rulings themselves are minuted in `docs/adr/0074-the-track-a-sitting.md`** — grounds,
 > riders, the two orchestrator dissents, the exact supersessions and the four constitutional
-> amendments awaiting the owner's digest sign-off. That ADR governs on any divergence. This file
+> amendments, **RATIFIED by the owner 2026-08-22** (laws 78-81 + the rider R-TA-P1-walls on law
+> 78). That ADR governs on any divergence. This file
 > is kept because the **member tables are the consequence map** the F-A3…F-A9 designs will read:
 > each row says what a given option turns a specific question into, and the ruled column is now
 > the design's starting point. The "若您不作声" (silence default) paragraphs are HISTORICAL — every

@@ -62,7 +62,8 @@ Track-A design sets are at GATED v2**; trued at every clock-out)*
 
 - **The standing law is ADR-0071 + ADR-0072 + ADR-0074.** The Charter's twelve rulings are digest
   **laws 71-76**; 0072 re-trues its scoping without changing a law; **0074 folds laws 78-81 (§11)
-  and annotates laws 2, 21, 71 and 76 as AMENDED-PENDING-SIGN-OFF.** **Deep-scan findings N1-N6**
+  and amends laws 2, 21, 71 and 76 in place — ALL RATIFIED by the owner 2026-08-22, law 78
+  carrying the rider R-TA-P1-walls.** **Deep-scan findings N1-N6**
   keep their dispositions (N1→F-A2 · N2/N3→F-A5 · N4→F-A4 · N5→F-T4 · N6 doc-truth staleness) —
   and **N2/N4 are now treated as LOST records** (TA-P14 clause 6): re-scanned at their items'
   design stage, rediscoveries registered anew, the old ids retired.
