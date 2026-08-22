@@ -38,7 +38,8 @@ import { randomUUID, createHash } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
   booksVersion, entryRow, postingCoreReady, seedRegion, claimTask, withdrawDraft, opk,
-  gateCore, wakePostEntry, agentDraft, autodraftCred, ensureChart, witnessedFiling,
+  gateCore, wakePostEntry, agentDraft, autodraftCred, ensureChart, witnessedFiling, unwitnessedFiling,
+  genericLines,
   witnessRegion, witnessShape, landWitnessPair, withWitnessV2, textCoverage, visionCoverage,
   documentSha, reviseAgentDraft, supplierLines, ev, admits, nonAdmitting, SUPPLIER_NAME,
   assertVectorShape, assertNonAdmitting, entryEvents, EVENT_POST_REFUSED, RUNG_TOKEN,
@@ -404,36 +405,96 @@ test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 read
 });
 
 // ===========================================================================
-// 5 · B8-NOT_EVALUABLE — the ARM-0 arm.
+// 5 · B8-NOT_EVALUABLE — the ARM-0 arm, FORCED on the reachable input and DECLARED
+//     UNREACHABLE on the third one, with the ground.
 // ===========================================================================
 
-test("f-a2.c3.B8-not_evaluable an UNRESOLVED witness TEXT row reports not_evaluable, never pass", async (t) => {
+test("f-a2.c3.B8-not_evaluable an UNJUDGEABLE generation reports not_evaluable, never pass — and the unresolved-TEXT input is DECLARED UNREACHABLE", async (t) => {
   if (await gateCore(t)) return;
-  // `0092:210-217`: an unresolvable pair returns a REAL envelope carrying `corroborated:false`
-  // and a `pair_refusal`, with `extraction_id` present but nothing to compare a citation
-  // against. B8 has no judgement to make there, and law 68 says the honest value is
-  // `not_evaluable` — a `pass` would be the ARM-0 defect, admitting on absence.
+  // THE RUNG'S CONTRACT HAS THREE ARM-0 INPUTS (Annex E.2): no `document_id`, a `'{}'` fact
+  // state, and a witness pair whose TEXT row resolves to no generation (`0092:210-217`). The
+  // load-bearing claim is one claim over all three — B8 is NEVER a pass on an input it cannot
+  // judge — and it is forced below on an input that a real door produces.
+  //
+  // THE THIRD INPUT IS UNREACHABLE FROM THIS LANE, and it is DECLARED rather than faked
+  // (law 31; the manifest's own wording asked for the unresolved-TEXT shape, and the honest
+  // answer is that no door on this lane can produce it).
+  //
+  //   THE GROUND, asserted positively from the live catalog below rather than argued.
+  //   `_agent_post_entry_core` reads its state through the ONE-ARITY `clara._invoice_fact_state
+  //   (uuid)`, whose witness arm selects a TEXT row with `engine_kind='llm_text_facts' AND
+  //   status='done'` and hands THAT id to `_invoice_fact_state_at`, which re-resolves both
+  //   halves of the pair with `status='done'` again. `witness_text_row_unresolved` — the ONLY
+  //   arm of `0092:210-217` that emits a NULL `extraction_id`, and therefore the only one that
+  //   makes B8 unjudgeable — requires the pinned TEXT row NOT to be a done text row, which that
+  //   pair of filters forbids by construction. It is reachable only through the TWO-ARITY pinned
+  //   overload called with a VISION id, and no call on this lane makes one.
+  //
+  //   MEASURED, so the record says what the estate does instead of what it cannot do:
+  //     · a successor pair whose TEXT row is `failed`, over a good G1 -> the resolver FALLS
+  //       BACK to G1 and answers a corroborated state (asserted below);
+  //     · a document whose ONLY pair has a `failed` TEXT row -> `'{}'`, which is ARM-0's
+  //       SECOND input, not the refusal envelope (asserted below);
+  //     · a pair whose VISION row is `failed` -> a real `pair_refusal` envelope, but with
+  //       `extraction_id` PRESENT, so B8 is evaluable and correctly judges it.
   await ensureChart(OWNER(), A2());
-  const cited = await witnessedFiling(OWNER(), { client: A2(), gross: GROSS });
-  const { cred, draft } = await draftOnG1(A2(), cited);
 
-  // A successor pair whose TEXT row never resolves: landed with a non-done status, which is the
-  // shape the writer produces when the text channel fails and the vision half lands alone.
-  await landWitnessPair(cited.documentId, {
+  // (1) THE GROUND, from the catalog.
+  const one = (await rootQuery(
+    `select prosrc from pg_proc where proname='_invoice_fact_state' and pronargs=1
+       and pronamespace='clara'::regnamespace`)).rows[0]?.prosrc ?? "";
+  assert.ok(one.includes("engine_kind = 'llm_text_facts'") && one.includes("tx.status = 'done'"),
+    "c3.B8-not_evaluable ground: the 1-arity resolver the ladder calls pins a DONE llm_text_facts row");
+  const at = (await rootQuery(
+    `select prosrc from pg_proc where proname='_invoice_fact_state_at'
+       and pronamespace='clara'::regnamespace`)).rows[0]?.prosrc ?? "";
+  assert.ok((at.match(/status\s*=\s*'done'/g) ?? []).length >= 3,
+    "c3.B8-not_evaluable ground: the pinned overload re-resolves both halves of the pair with status='done'");
+
+  // (2) THE TWO FALL-THROUGHS, measured rather than assumed.
+  const withG1 = await witnessedFiling(OWNER(), { client: A2(), gross: GROSS });
+  await landWitnessPair(withG1.documentId, {
     ...witnessShape({ fields: { "invoice.total": GROSS, "invoice.currency": "RM", "invoice.type_code": "01" } }),
     textStatus: "failed", versionN: 2,
-  }).catch((e) => noteLane(`c3.B8-not_evaluable: could not land an unresolved pair (${e.code}: ${e.message})`));
+  });
+  const fellBack = await factExtraction(withG1.documentId);
+  assert.equal(fellBack.state?.pair_refusal ?? null, null,
+    `c3.B8-not_evaluable: a failed-TEXT successor produces NO pair refusal — the resolver simply falls back (got ${JSON.stringify(fellBack.state)})`);
+  assert.equal(fellBack.extractionId, (await rootQuery(
+    `select id from clara.document_extractions where document_id=$1 and engine_kind='llm_text_facts'
+       and status='done' order by version_n desc limit 1`, [withG1.documentId])).rows[0].id,
+  "…to the newest DONE text generation, which is G1");
 
-  const state = await factExtraction(cited.documentId);
+  const onlyFailed = await unwitnessedFiling(OWNER(), { client: A2(), gross: GROSS });
+  await landWitnessPair(onlyFailed.documentId, {
+    ...witnessShape({ fields: { "invoice.total": GROSS, "invoice.currency": "RM", "invoice.type_code": "01" } }),
+    textStatus: "failed", versionN: 1,
+  });
+  assert.deepEqual(await (async () => (await factExtraction(onlyFailed.documentId)).state)(), {},
+    "c3.B8-not_evaluable: a document whose ONLY pair has a failed TEXT row answers '{}' — ARM-0's SECOND input, not 0092:210-217's refusal envelope");
+
+  // (3) THE RUNG IS STILL FORCED, on the input a real door produces. A GENERIC entry, because
+  // that is the lawful coding kind for a document with no fact generation: the draft core's
+  // direction-family arm binds every agent-lane DIRECTIONAL kind (D11), and a document with no
+  // facts resolves `unresolved`. B14/B15 both admit this shape, so B8 is measured, not masked.
+  // Its OWN document, with no extraction rows but the seeded OCR one: citing a region that
+  // belongs to a FAILED text row is refused by the evidence wall (CLR21), which would mask the
+  // rung under a fixture defect. The fact state is the same `'{}'`.
+  const bare = await unwitnessedFiling(OWNER(), { client: A2(), gross: GROSS });
+  assert.deepEqual((await factExtraction(bare.documentId)).state, {},
+    "c3.B8-not_evaluable: the forcing fixture's fact state really is '{}'");
+  const cred = await autodraftCred(A2());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A2(), cited: bare, codingKind: null, lines: genericLines(GROSS),
+  });
   const r = await wakePostEntry(cred, {
-    entry: draft.entry_id, expectedRevision: await currentToken(draft.entry_id),
-    client: A2(), booksVersion: await booksVersion(A2()),
+    entry: d.entry_id, expectedRevision: d.revision_token, client: A2(), booksVersion: await booksVersion(A2()),
   });
   assertVectorShape(assert, r?.rung_vector, "c3.B8-not_evaluable");
   assert.notEqual(r?.rung_vector?.B8, "pass",
-    `c3.B8-not_evaluable: B8 is NEVER a pass on an unjudgeable input (fact state was ${JSON.stringify(state.state?.pair_refusal ?? state.state?.corroborated)})`);
-  if (r?.rung_vector?.B8 !== "not_evaluable") {
-    noteLane(`c3.B8-not_evaluable: B8 read '${r?.rung_vector?.B8}' rather than not_evaluable — the pair may have resolved to the prior generation on this frontier; the load-bearing claim (never a pass) still holds`);
-  }
+    `c3.B8-not_evaluable: B8 is NEVER a pass on an unjudgeable input (vector ${JSON.stringify(r?.rung_vector)})`);
+  assert.equal(r?.rung_vector?.B8, "not_evaluable",
+    `c3.B8-not_evaluable: …and it is reported DISTINCTLY as not_evaluable rather than lumped into fail (vector ${JSON.stringify(r?.rung_vector)})`);
   assert.equal(r?.posted, false, "c3.B8-not_evaluable: and nothing posts on an unjudgeable generation");
+  noteLane("c3.B8-not_evaluable: the unresolved-TEXT input (0092:210-217's `witness_text_row_unresolved`) is a DECLARED-UNREACHABLE row, not a forced cell — ground: the 1-arity resolver the ladder calls pins a DONE llm_text_facts row and the pinned overload re-resolves both halves done-filtered, so the only arm that emits a NULL extraction_id cannot be produced from this lane. Measured fall-throughs: failed-TEXT successor -> falls back to G1; only-failed-TEXT pair -> '{}' (ARM-0 input 2); failed-VISION pair -> a pair_refusal envelope whose extraction_id is PRESENT and therefore judgeable.");
 });
