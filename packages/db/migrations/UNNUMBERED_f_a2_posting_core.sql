@@ -821,6 +821,7 @@ declare
   v_sub text; v_reason text; v_code text; v_detail text; v_pair boolean; v_b8_gen uuid;
   v_rungs text[] := array['B1','B2','B3','B4','B5','B6','B7','B8','B9','B10','B11','B14','B15'];
   v_class text;   -- C1: B15's direction CLASS, from clara._direction_class
+  v_current int;  -- C2: B8's IN-SCOPE citation count; zero is not_evaluable, never a pass
   v_tokens jsonb := jsonb_build_object(
     'B1','settlement_kind_human','B2','not_corroborated','B3','anchor_unbound',
     'B4','anchor_untied','B5','amount_conflict','B6','human_override_present',
@@ -1021,21 +1022,30 @@ begin
 
     -- B8: NO CITATION NAMES A SUPERSEDED FACT GENERATION.
     --
-    -- THE SCOPE IS THE FACT GENERATIONS, NAMED POSITIVELY. Only citations whose extraction is a
-    -- FACT generation are in scope — `invoice_facts`, `llm_text_facts`, `llm_vision_facts` —
-    -- listed as an inclusion, never as `not in ('ocr','structured_parse')`, so a fact kind
-    -- invented later defaults to BEING CHECKED rather than to being skipped. Each such citation
-    -- must name the generation this ladder is judging, which is the SAME fact-state jsonb B2, B3
-    -- and B4 already read: one resolver call, one answer, no second read that could disagree
-    -- with itself between rungs.
+    -- THE SCOPE IS AN EXCLUSION, AND THE FIRST CUT HAD IT BACKWARDS IN BOTH HALVES (C2).
     --
-    -- WHY OCR AND structured_parse ARE OUT OF SCOPE, and it is law 72 rather than convenience.
-    -- An OCR region cannot carry `field_path='invoice.total'` at all — the egress writer emits
-    -- `pages.{n}.lines.{i}` / `tables.{i}.cells.{j}` (packages/runtime/lib/egress.mjs:146,163) —
-    -- and `0009:462-466` grants `provenance_tier='verified'` ONLY to `invoice.total` on a
-    -- corroborated state whose cents tie. So the amount anchor of any entry that reaches B8 is
-    -- necessarily a FACT-generation citation, and an OCR citation alongside it is a lawful
-    -- `model_read` reference to the page image, not a claim about the numbers.
+    -- (1) IT PASSED ON ZERO IN-SCOPE CITATIONS. The rung counted only citations that MOVED; an
+    --     entry whose every citation was dropped by the `in (...)` filter counted zero moved
+    --     and read `pass`. That is admission on absence — the ARM-0 defect — on the rung whose
+    --     whole job is to prove the anchor is CURRENT. So the count is now two-sided: how many
+    --     citations name the judged generation, and how many in-scope ones name another. Zero
+    --     of the first is `not_evaluable`, never a pass.
+    --
+    -- (2) THE COMMENT'S JUSTIFICATION WAS FALSE ABOUT THIS DATABASE. It said an OCR region
+    --     "cannot carry `field_path='invoice.total'` at all". Nothing prevents that:
+    --     `document_regions.field_path` is plain text (`0007:210`), the structured_parse guard
+    --     (`0026:559-569`) refuses only tin/ssm/brn/account paths, and the estate's own standard
+    --     fixture `seedCitedDocument` CREATES exactly that shape. `_write_entry_evidence` then
+    --     stamps `verified` with no engine term at all (`0009:462-466`) and
+    --     `_corroboration_bound` keys on tier + field + cents + hash (`0009:211-224`) — so an
+    --     OCR-anchored entry passes B3 and B7 and reaches B8 with, under the old positive list,
+    --     nothing in scope.
+    --
+    -- SO THE FILTER IS AN EXCLUSION, BY NAME, ON ITS TWO REAL GROUNDS: `ocr` and
+    -- `structured_parse` are not fact GENERATIONS (law 72), and reading one as stale would
+    -- refuse a draft for citing a page image. Everything else — including a fact kind invented
+    -- later — is IN SCOPE by default, which is the fail-closed direction. The positive list was
+    -- fail-OPEN for exactly the future writer it claimed to protect against.
     --
     -- SCOPE α — EVERY fact-generation citation, not merely the verified `invoice.total` one. A
     -- MIXED-GENERATION draft (the total cited off G2 while the invoice_id is still cited off G1)
@@ -1063,16 +1073,22 @@ begin
       -- (`0092:210-217` emits a json null there). Absent input is never a pass (law 68).
       v_val := 'not_evaluable';
     else
-      select count(*)::int into v_moved
+      -- TWO COUNTS, ONE PASS. `v_current` needs no kind filter: `v_b8_gen` IS a fact generation
+      -- by construction, so any citation equal to it is in scope by identity. `v_moved` is the
+      -- EXCLUSION — a citation naming some OTHER extraction that is not a page image.
+      select count(*) filter (where ev.extraction_id = v_b8_gen),
+             count(*) filter (where ev.extraction_id <> v_b8_gen
+                                and x.engine_kind not in ('ocr','structured_parse'))
+        into v_current, v_moved
         from clara.entry_evidence ev
         join clara.document_extractions x
           on x.id = ev.extraction_id and x.firm_id = ev.firm_id and x.document_id = ev.document_id
-       where ev.entry_id = p_entry
-         and x.engine_kind in ('invoice_facts','llm_text_facts','llm_vision_facts')
-         and ev.extraction_id <> v_b8_gen;
+       where ev.entry_id = p_entry;
       -- The join is on the FK TRIPLE (`0009:889`, `:901-902`), so it cannot silently lose a row
       -- and turn a stale citation into a pass — the count is over exactly the rows that exist.
-      v_val := case when v_moved > 0 then 'fail' else 'pass' end;
+      v_val := case when v_moved > 0 then 'fail'
+                    when v_current = 0 then 'not_evaluable'
+                    else 'pass' end;
     end if;
     v_vector := v_vector || jsonb_build_object('B8', v_val);
 
@@ -1886,6 +1902,21 @@ begin
    where coalesce(('{"B1":"pass","B2":"pass"}'::jsonb)->>r,'') <> 'pass';
   if v_n <> 0 then
     raise exception 'F-A2 tail: POSITIVE CONTROL -- the admission predicate refuses a complete passing vector' using errcode='CLR10';
+  end if;
+
+  -- (J.3d) C2: B8's scope is an EXCLUSION and its zero-in-scope arm exists. Read positively off
+  -- the shipped body: the positive kind list was fail-OPEN for a future writer kind AND passed
+  -- on zero in-scope citations, and both halves have to be gone, not just one.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)'::regprocedure;
+  if position('x.engine_kind not in (''ocr'',''structured_parse'')' in v_src) = 0 then
+    raise exception 'F-A2 tail: B8 does not scope by EXCLUSION -- a fact kind invented later would be skipped (C2)' using errcode='CLR10';
+  end if;
+  if position('x.engine_kind in (''invoice_facts'',''llm_text_facts'',''llm_vision_facts'')' in v_src) <> 0 then
+    raise exception 'F-A2 tail: B8 still carries the positive kind list' using errcode='CLR10';
+  end if;
+  if position('when v_current = 0 then ''not_evaluable''' in v_src) = 0 then
+    raise exception 'F-A2 tail: B8 does not report not_evaluable on ZERO in-scope citations -- it would ADMIT on absence' using errcode='CLR10';
   end if;
 
   -- (J.3c) C1: B15 reads the CLASS, and `_direction_class` has exactly ONE caller. The sibling

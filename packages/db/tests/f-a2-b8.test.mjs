@@ -409,6 +409,80 @@ test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 read
 });
 
 // ===========================================================================
+// 4b · B8-OCR-ANCHOR — C2's pair: the ZERO-IN-SCOPE hole, and its positive twin.
+// ===========================================================================
+
+test("f-a2.c3.B8-ocr-anchor an entry anchored ONLY on an OCR invoice.total does not ADMIT at B8 — zero in-scope citations is not a pass", async (t) => {
+  if (await gateCore(t)) return;
+  // C2. The old rung counted only citations that MOVED, over a POSITIVE kind list. An entry
+  // whose every citation was dropped by that filter counted zero moved and read `pass` —
+  // admission on absence, on the rung whose whole job is to prove the anchor is CURRENT.
+  //
+  // AND THE SHAPE IS NOT HYPOTHETICAL, which is the part the old comment got wrong. Nothing in
+  // this database stops an `ocr` extraction carrying `field_path='invoice.total'`:
+  // `document_regions.field_path` is plain text (0007:210) and the structured_parse guard
+  // (0026:559-569) refuses only tin/ssm/brn/account paths. The estate's OWN standard fixture
+  // creates exactly that region — asserted below, from the catalog, not assumed —
+  // `_write_entry_evidence` stamps `verified` with no engine term (0009:462-466), and
+  // `_corroboration_bound` keys on tier + field + cents + hash (0009:211-224). So the entry
+  // sails through B3 and B7 and arrives at B8 with nothing the old filter could see.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
+  const ocrKind = await rootQuery(
+    "select engine_kind from clara.document_extractions where id=$1", [cited.extractionId]);
+  assert.equal(ocrKind.rows[0]?.engine_kind, "ocr",
+    "c3.B8-ocr-anchor precondition: the seeded citation region really belongs to an OCR extraction");
+  const ocrTotal = await rootQuery(
+    `select id, text_content from clara.document_regions
+      where extraction_id=$1 and field_path='invoice.total' limit 1`, [cited.extractionId]);
+  assert.ok(ocrTotal.rows[0]?.id,
+    "c3.B8-ocr-anchor precondition: …and it carries an `invoice.total` field_path — the shape the old comment said the DB prevents");
+
+  const cred = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
+    evidence: [ev(ocrTotal.rows[0].id, ocrTotal.rows[0].text_content, "invoice.total")],
+  });
+  const tiers = await rootQuery(
+    `select ev.provenance_tier, x.engine_kind from clara.entry_evidence ev
+       join clara.document_extractions x on x.id=ev.extraction_id where ev.entry_id=$1`, [d.entry_id]);
+  assert.ok(tiers.rows.some((r) => r.provenance_tier === "verified" && r.engine_kind === "ocr"),
+    `c3.B8-ocr-anchor precondition: the OCR citation really binds at the VERIFIED tier (got ${JSON.stringify(tiers.rows)}) — that is what carries it past B3 and B7`);
+  assert.ok(!tiers.rows.some((r) => ["invoice_facts", "llm_text_facts", "llm_vision_facts"].includes(r.engine_kind)),
+    "c3.B8-ocr-anchor precondition: …and the entry cites NO fact generation at all, which is the zero-in-scope shape");
+
+  // The generation then MOVES under it: same total, different stated identity.
+  await landG2(cited.documentId, { total: GROSS });
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: await currentToken(d.entry_id),
+    client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assert.ok(!admits(r?.rung_vector, "B8"),
+    `c3.B8-ocr-anchor: B8 does NOT admit — zero in-scope citations is not evidence that the anchor is current (vector ${JSON.stringify(r?.rung_vector)})`);
+  assert.equal(r?.rung_vector?.B8, "not_evaluable",
+    `c3.B8-ocr-anchor: …and it says so DISTINCTLY rather than failing for a reason it cannot support (got ${JSON.stringify(r?.rung_vector?.B8)})`);
+  assert.equal(r?.posted, false,
+    `c3.B8-ocr-anchor: and nothing posts — a stale-identity post whose receipt stamps the NEW generation is exactly what this closes (${JSON.stringify(r?.refusal)})`);
+});
+
+test("f-a2.c3.B8-current-anchor citing the CURRENT generation's verified total still POSTS — the rung was the reason", async (t) => {
+  if (await gateCore(t)) return;
+  // Without this twin, "zero in-scope does not admit" is indistinguishable from "B8 stopped
+  // admitting anything". The ordinary shape — one citation, on the generation the state names —
+  // must still be a pass.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
+  const { cred, draft } = await draftOnG1(A1(), cited);
+  const r = await wakePostEntry(cred, {
+    entry: draft.entry_id, expectedRevision: await currentToken(draft.entry_id),
+    client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assert.ok(admits(r?.rung_vector, "B8"),
+    `c3.B8-current-anchor: B8 ADMITS a citation on the CURRENT generation (got ${JSON.stringify(r?.rung_vector?.B8)}; non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
+  assert.equal(r?.posted, true, `c3.B8-current-anchor: …and it posts (${JSON.stringify(r?.refusal)})`);
+});
+
+// ===========================================================================
 // 5 · B8-NOT_EVALUABLE — the ARM-0 arm, FORCED on the reachable input and DECLARED
 //     UNREACHABLE on the third one, with the ground.
 // ===========================================================================
