@@ -120,7 +120,10 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
       noteLane(`c3.B9 ${scope}: open_question refused (${e.code}: ${e.message}) — the scope's input shape differs from the fixture's`);
       continue;
     }
-    const r = await post(p);
+    // THE BOOKS VERSION IS RE-READ, and it is not tidiness: `open_question` is itself a write,
+    // so the token `agentPostable` captured before it is stale and Tier A refuses CLR12 before
+    // any rung is evaluated — the cell would then be measuring the books guard, not B9.
+    const r = await post(p, { booksVersion: await booksVersion(A2()) });
     assertNonAdmitting(assert, r, "B9", `c3.B9 ${scope}`);
     const qid = q?.question_id ?? q?.id ?? q;
     assert.ok(JSON.stringify(r).includes(String(qid)),
