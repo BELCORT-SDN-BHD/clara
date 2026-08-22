@@ -329,7 +329,8 @@ the renderer" was answered:* seal → render → issue, with a seven-year byte-i
 #### The constitutional amendments — PROPOSED WORDING, RATIFIED 2026-08-22 (owner)
 
 **No product text is edited by this entry.** These four entered the ratified set at the owner's digest
-sign-off of **2026-08-22**; the `PRD.md` / `ARCHITECTURE.md` edits landed in #287, `AGENTS.md` stays FLAGGED.
+sign-off of **2026-08-22**; the `PRD.md` / `ARCHITECTURE.md` edits landed in #287. **`AGENTS.md`: DECIDED (b)
+2026-08-23 — PRD §6 is the single home for invariant (a); no duplicate clause is added.**
 
 **(i) Law 71's human roster becomes an OPEN REGISTER (TA-P1).** Proposed digest wording replacing law 71's
 closing sentence: *"The surviving HUMAN acts are these seven, and the enumeration is now a RESERVATION, not a
@@ -354,7 +355,8 @@ door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** (Verbatim in dige
 - **ARCHITECTURE §0 point 1** — `assert_client_resolved` and its no-write-path-skips-it property are
   unchanged; what changes is the admissible ORIGIN of the resolution it reads, and the ≥0.95 numeral leaves
   with the judgement it described.
-- **`AGENTS.md`** — **FLAGGED, NOT DRAFTED.** The sitting record names "constraint 2" as invariant (a)'s third
+- **`AGENTS.md`** — **FLAGGED, NOT DRAFTED** *(as minuted 2026-08-22; **DECIDED (b) by the owner 2026-08-23 —
+  no duplicate clause, PRD §6 is the single home**)*. The sitting record names "constraint 2" as invariant (a)'s third
   home, but constraint 2 is the DB-owns-every-authoritative-number law and its text **does not state invariant
   (a) at all**; no hard constraint does. The amendment there is either a no-op (the harness menu already
   points at PRD §6 for the invariants) or a new clause the owner wants. **His call at sign-off** — nothing
