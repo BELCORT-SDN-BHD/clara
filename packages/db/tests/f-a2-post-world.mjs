@@ -182,7 +182,7 @@ async function directionRegions(client, direction, vendorName) {
 export async function witnessedFiling(sub, {
   client, gross, net = null, tax = null, rounding = null, typeCode = "01",
   kind = "invoice", vendorName = SUPPLIER_NAME, corroborated = true, dropFields = [],
-  direction = "purchase", currency = "RM",
+  direction = "purchase", currency = "RM", invoiceId = null,
 }) {
   const firm = await firmOf(client);
   await grantConsent(sub, { firm, client }).catch(() => {});
@@ -199,7 +199,13 @@ export async function witnessedFiling(sub, {
   const base = witnessShape({
     fields,
     noRegions: corroborated ? [] : Object.keys(fields),
-    extraRegions: await directionRegions(client, direction, vendorName),
+    extraRegions: [
+      ...await directionRegions(client, direction, vendorName),
+      // An `invoice.invoice_id` REGION, when a cell needs one to cite. `witnessShape` builds
+      // regions from the BELT loop only, so a `refAnswers` entry adds an ANSWER and no region —
+      // and a citation naming a path with no region behind it is CLR21 `evidence_invalid`.
+      ...(invoiceId ? [idRegion("invoice.invoice_id", invoiceId)] : []),
+    ],
   });
   const silent = { state: "not_printed" };
   const shape = withWitnessV2(base, {

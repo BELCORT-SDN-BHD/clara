@@ -286,10 +286,15 @@ test("f-a2.c3.B8-mixed a MIXED-generation draft fails — scope is ALL fact-gene
   // alone would ADMIT this; scope α refuses it, and this cell is what makes that a decision on
   // the record instead of an artefact of which row the implementation read first.
   await ensureChart(OWNER(), A2());
-  const cited = await witnessedFiling(OWNER(), { client: A2(), gross: GROSS });
-  const g1Invoice = await witnessRegion(cited.documentId, "invoice.invoice_id")
-    ?? await witnessRegion(cited.documentId, "invoice.type_code");
-  assert.ok(g1Invoice?.id, "c3.B8-mixed precondition: G1 carries a NON-money region to cite");
+  // G1 is seeded WITH an `invoice.invoice_id` region, because that is the exact pair v6.1's
+  // manifest names: "the total off G2 and `invoice_id` off G1". Falling back to some other
+  // non-money field would still exercise scope α, but it would not be the cell on the record.
+  const cited = await witnessedFiling(OWNER(), {
+    client: A2(), gross: GROSS, invoiceId: `INV-G1-${randomUUID().slice(0, 8)}`,
+  });
+  const g1Invoice = await witnessRegion(cited.documentId, "invoice.invoice_id");
+  assert.ok(g1Invoice?.id,
+    "c3.B8-mixed precondition: G1 carries the `invoice.invoice_id` region the manifest's pair names");
   const g1 = await factExtraction(cited.documentId);
 
   await landG2(cited.documentId);
@@ -331,6 +336,15 @@ test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 read
   // `ocr` and `structured_parse` are NOT fact generations; a rung that compared them against the
   // fact state's `extraction_id` would refuse every draft that ever cited a line of raw text —
   // and it would do so with a token that says the FACTS moved, which is not what happened.
+  //
+  // ONE DIVERGENCE FROM THE MANIFEST, stated rather than quietly taken. v6.1 words this cell as a
+  // draft citing "only OCR `pages.*` regions". Measured on the rig, that entry cannot post at
+  // all — and not because of B8: `_bind_evidence` stamps `verified` ONLY on a corroborated
+  // `invoice.total` citation whose cents match the anchor (`0009:462-466`), so an OCR-only draft
+  // has no verified row, and B3 (`_corroboration_bound`) and B7 both refuse it before B8 is even
+  // asked. A cell built that way would be green on the wrong rungs. So the fixture cites the
+  // verified total AND an OCR `pages.*` region: the OCR citation is present, B8 must still admit,
+  // and "posts clean" stays a real claim instead of an unreachable one.
   await ensureChart(OWNER(), A1());
   const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
   const total = await witnessRegion(cited.documentId, "invoice.total");

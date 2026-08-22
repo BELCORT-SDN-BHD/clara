@@ -19,7 +19,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, entryRow, counterpartyRows, postingCoreReady, holdThenContend,
+  booksVersion, opk, entryRow, counterpartyRows, postingCoreReady, holdThenContend, approveEntry, withTxnOrNull,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, postReceiptCount, supplierLines, bodyOfName, fnPresent,
   TIER_C_PAIRS, TIER_C_EXCLUDED, MODEL, RATIONALE,
@@ -160,10 +160,17 @@ test("f-a2.c4.registration-conflict (CLR23, registration_conflict) converts, and
 
 test("f-a2.c4.landscape-moved (CLR23, counterparty_landscape_moved) converts", async (t) => {
   if (await gateCore(t)) return;
+  // A COUNTERPARTY IS BORN AT APPROVE, NOT AT DRAFT — it is stamped inside the delegate
+  // (`0037:1884-1888`), which is the same fact GB-2's projected-state predicate exists for. So a
+  // draft on its own leaves nothing to move, and the fixture APPROVES a first bill for the vendor
+  // to bring it into being before drafting the second one whose landscape then shifts.
+  const first = await agentPostable(OWNER(), { client: A2(), amount: 409000, vendor: { new: { name: "LANDSCAPE SDN BHD" } } });
+  await approveEntry(OWNER(), { entry: first.args.entry, expectedRevision: first.args.expectedRevision, opKey: opk("c4lsborn") })
+    .catch((e) => noteLane(`c4.landscape-moved: the counterparty-birthing approve refused (${e.code}: ${e.message})`));
   const p = await agentPostable(OWNER(), { client: A2(), amount: 410000, vendor: { new: { name: "LANDSCAPE SDN BHD" } } });
   const cps = await counterpartyRows(A2());
   const target = cps.find((c) => /LANDSCAPE/i.test(c.name_display ?? c.name ?? ""));
-  if (!target) { noteLane("c4.landscape-moved: the draft bore no counterparty to move — fixture gap, wall unproven"); return; }
+  if (!target) { noteLane("c4.landscape-moved: no counterparty was born even after an approve — fixture gap, wall unproven"); return; }
   const { mergeCounterparties } = await import("./f-a2-post-world.mjs");
   const survivor = cps.find((c) => c.id !== target.id);
   if (survivor) {
@@ -284,15 +291,22 @@ test("f-a2.c4.closed-period (CLR19, write_into_closed_period) converts via the N
     `select tgdeferrable from pg_trigger where tgrelid='clara.journal_entries'::regclass and tgname='t_period_wall'`);
   assert.equal(census.rows[0]?.tgdeferrable, false,
     "c4.closed-period precondition: t_period_wall is NOT deferred — if it ever becomes deferred this pair moves to Tier D");
+  // THE WALL READS `clara.fiscal_years.status`, not a `reporting_periods.state` column — there is
+  // no such column, and a cell that invented one reported "could not close a period" when it had
+  // simply written to the wrong relation. `_tf_period_wall` selects the FY containing the row's
+  // posting_date and refuses the approved-class touch when its status is 'closing' or 'closed'.
   const p = await agentPostable(OWNER(), { client: A2(), amount: 450000 });
-  const closed = await rootQuery(
-    `update clara.reporting_periods set state='closed'
-      where client_id=$1 and $2::date between period_start and period_end returning id`,
-    [A2(), "2026-03-15"]).catch((e) => {
-    noteLane(`c4.closed-period: could not close a period on the rig (${e.code}: ${e.message}) — the behavioural half is unproven; the pair's membership is asserted by c4.set`);
-    return { rowCount: 0 };
-  });
-  if (!closed.rowCount) return;
+  const closed = await withTxnOrNull((c) => c.query(
+    `insert into clara.fiscal_years(firm_id,client_id,label,starts_on,ends_on,ordinal,status,
+        fy_end_source,opened_by)
+     values((select firm_id from clara.clients where id=$1),$1,'c4 closed FY',
+        '2026-01-01','2026-12-31',1,'closed','asserted',
+        (select user_id from clara.firm_memberships fm
+          join clara.clients cl on cl.firm_id=fm.firm_id and cl.id=$1 limit 1))`, [A2()]));
+  if (closed.error) {
+    noteLane(`c4.closed-period: could not close a fiscal year on the rig (${closed.error.code}: ${closed.error.message}) — the behavioural half is unproven; the pair's membership is asserted by c4.set`);
+    return;
+  }
   const r = await post(p);
   assertConverted(r, "write_into_closed_period", "c4.closed-period");
 });
