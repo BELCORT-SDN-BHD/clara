@@ -28,8 +28,9 @@ import {
   salesLines, supplierLines, genericLines,
   unwitnessedFiling, ensureChart, autodraftCred, agentDraft, ev, witnessedFiling,
   stampCodingKind, doctorFlags,
-  witnessRegion, rootQuery, doctorLines, creditNoteLines,
+  witnessRegion, rootQuery, doctorLines, creditNoteLines, witnessShape, withWitnessV2, textCoverage, visionCoverage, documentSha, seedRegion, claimTask, money,
 } from "./f-a2-post-world.mjs";
+import { createHash, randomUUID } from "node:crypto";
 
 let world = null;
 before(async () => { if (await postingCoreReady()) world = await buildWorld(); });
@@ -43,6 +44,63 @@ const A1 = () => world.clients.A1;
 const A2 = () => world.clients.A2;
 const OWNER = () => world.users.alice;
 const post = (p, over = {}) => wakePostEntry(p.cred, { ...p.args, ...over });
+
+/**
+ * Land a CORROBORATING successor generation at a DIFFERENT total, THROUGH THE REAL WRITER.
+ *
+ * WHY A CELL EVER NEEDS THIS (F-A2 PR-1, N1). `amount_exception` is EARNED, never asked for --
+ * the estate computes it and writes its own structured value. It has exactly two writers, and
+ * N1 closed one of them for this battery's purposes: `_draft_entry_core` stamps it and then the
+ * draft-door supplier floor refuses the very shape it just stamped (the verified-total tie is
+ * escaped only by `amount_override`), so no agent draft can be BORN carrying one. The other
+ * writer is `persist_witness_facts`, which on a settled pair re-stamps `amount_exception` on
+ * every OPEN draft bound to the document and rotates its `revision_token` (0096:255-278) -- with
+ * NO human editor, so A8 stays clean and the rung under test is the one that answers.
+ *
+ * THE CITATION IS THE LOAD-BEARING PART, measured at integration: the writer builds each fact
+ * region's geometry from the OCR region it verified the quote against, and an UNCITED answer
+ * lands with an empty polygon, which fails the corroboration belt's W3 term. So the successor's
+ * new total is first seeded as a real OCR line carrying that printed amount, and the witness
+ * cites it by `region_idx` (`row_number() over (order by id)`), resolved from the catalog.
+ */
+async function rotateFactsTo(cited, cents, { versionN = 2 } = {}) {
+  const raw = money(cents);
+  await seedRegion({
+    firm: cited.firm, extraction: cited.extractionId, fieldPath: "pages.1.lines.9",
+    textContent: `REVISED TOTAL ${raw}`, locator: { page: 1, polygon: [0, 0, 1, 1] },
+  });
+  const idx = (await rootQuery(
+    `select (row_number() over (order by id))::int as idx, text_content
+       from clara.document_regions where extraction_id=$1`, [cited.extractionId])).rows;
+  const cite = idx.find((r) => String(r.text_content).includes(raw))?.idx;
+  assert.ok(cite, `rotateFactsTo: the OCR extraction carries a region printing ${raw} to cite`);
+  const sha = await documentSha(cited.documentId);
+  const silent = { state: "not_printed" };
+  const shape = withWitnessV2(
+    witnessShape({ fields: { "invoice.total": cents, "invoice.currency": "RM", "invoice.type_code": "01" } }),
+    {
+      coverage: { text: textCoverage({ ocrExtractionId: cited.extractionId }), vision: visionCoverage({ inputSha256: sha }) },
+      sst: { text: silent, vision: silent },
+    });
+  const task = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,status)
+     values($1,$2,$3,$4,'llm_witness','queued') returning id`,
+    [cited.firm, cited.documentId, `llm-openai:gpt-rot:${randomUUID().slice(0, 8)}`, versionN])).rows[0].id;
+  await claimTask(task, { egressApproved: true });
+  const wrap = (envelope, pin, tag, withCitations) => ({
+    envelope, input_pin: pin,
+    prompt_hash: createHash("sha256").update(`${tag}:${cited.documentId}:${versionN}`).digest("hex"),
+    ...(withCitations ? { citations: [{ field_path: "invoice.total", region_idx: cite }] } : {}),
+  });
+  await rootQuery("select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as s",
+    [task, JSON.stringify(wrap(shape.textEnvelope, cited.extractionId, "text", true)),
+      JSON.stringify(wrap(shape.visionEnvelope, sha, "vision", false)), 1]);
+  const st = (await rootQuery("select clara._invoice_fact_state($1) as s", [cited.documentId])).rows[0].s;
+  assert.equal(st?.corroborated, true,
+    `rotateFactsTo: the successor generation CORROBORATES at ${raw} (state ${JSON.stringify(st)}) -- an uncorroborated one cannot re-stamp the exception`);
+  assert.equal(Number(st.total_cents), cents, "rotateFactsTo: ...at the new total");
+  return st;
+}
 
 // ===========================================================================
 // B1 — settlement kinds are HUMAN until F-A3 (WCA-R6; finding 6).
@@ -309,18 +367,35 @@ test("f-a2.c3.B4-creditnote a credit note may NOT tie by absolute value — the 
 test("f-a2.c3.B5 an amount_exception WITHOUT an amount_override refuses amount_conflict", async (t) => {
   if (await gateCore(t)) return;
   // THE STAMP IS EARNED, NOT ASKED FOR. Passing `flags: {amount_exception: true}` to the
-  // draft writer does nothing — the core COMPUTES the exception when the proposed legs diverge
-  // from the machine-corroborated total (`0009:1361-1367`) and writes its own structured
-  // value. So the fixture diverges the legs and lets the estate stamp it. B4 is unavoidably
-  // non-admitting too, which is why this cell uses the LOOSE assertion.
-  const p = await agentPostable(OWNER(), {
-    client: A1(), amount: 500000, codingKind: "supplier_bill", lines: supplierLines(499000),
-  });
+  // draft writer does nothing — the estate COMPUTES the exception when the drafted legs diverge
+  // from the machine-corroborated total and writes its own structured value.
+  //
+  // AND IT IS EARNED THROUGH THE DOOR THAT STILL OPENS (F-A2 PR-1, N1). The draft core stamps
+  // it too, but N1 puts the supplier floor's verified-total tie immediately after that stamp and
+  // the tie is escaped only by `amount_override` — so an agent draft can no longer be BORN
+  // carrying an exception: it is stamped and refused CLR23 in the same transaction. The second
+  // writer is untouched: `persist_witness_facts` re-stamps `amount_exception` on every OPEN
+  // draft bound to the document when a pair settles, and rotates the token (0096:255-278). That
+  // door writes NO `last_human_editor`, so A8 stays clean and B5 is the rung that answers —
+  // which is exactly the shape §3.2 says A5 is silent on. B4 and B8 are unavoidably
+  // non-admitting too (the facts moved under the draft), which is why this cell keeps the LOOSE
+  // assertion it already had.
+  const p = await agentPostable(OWNER(), { client: A1(), amount: 500000, codingKind: "supplier_bill" });
+  assert.ok(!("amount_exception" in ((await entryRow(p.args.entry))?.flags ?? {})),
+    "c3.B5 precondition: the TYING draft carries no exception yet");
+  await rotateFactsTo(p.cited, 499000);
   const row = await entryRow(p.args.entry);
   assert.ok(row?.flags && "amount_exception" in row.flags,
-    `c3.B5 precondition: the core stamped amount_exception (flags were ${JSON.stringify(row?.flags)})`);
+    `c3.B5 precondition: the settled pair stamped amount_exception on the open draft (flags were ${JSON.stringify(row?.flags)})`);
   assert.ok(!("amount_override" in (row.flags ?? {})), "c3.B5 precondition: …and no amount_override");
-  assertNonAdmitting(assert, await post(p), "B5", "c3.B5");
+  assert.equal(row.last_human_editor ?? null, null,
+    "c3.B5 precondition: …and NO human editor, so A8 admits and Tier B is reached at all");
+  // BOTH pinned inputs are re-read after the rotation: the token rotated (0096) AND the books
+  // version moved (the settle writes), and a stale `p_books_version` refuses CLR12 at Tier A
+  // before any rung is evaluated.
+  assertNonAdmitting(assert, await post(p, {
+    expectedRevision: row.revision_token, booksVersion: await booksVersion(A1()),
+  }), "B5", "c3.B5");
 });
 
 test("f-a2.c3.B6 BOTH override flags refuse human_override_present — the twins", async (t) => {
