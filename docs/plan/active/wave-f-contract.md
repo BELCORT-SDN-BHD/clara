@@ -258,6 +258,14 @@ geometry library, two entrances, checked against this test at review.
   AI-assisted read here — registered in `PROGRESS.md`, restated so the design does not
   rediscover it.
 
+**[TA-2026-08-22] the XLSX/DOCX clause above is DEFERRED to F-A6 v2 (R-L18) — an
+owner-visibility item, shown rather than inferred.** The clause is not withdrawn; it is not met
+in F-A6 v1. Ground at the bytes: `document_extractions` and `document_regions` carry **no
+`client_id`**, so a client pin on the freeform read surface cannot be enforced over them and a
+scoped read would be able to return a SIBLING client's document body. `get_document_extract`
+stays the door for that content in v1, and the deferred half is registered as lane **F-A6 v2**
+alongside the cross-client named read (R-L17). The owner sees this deviation at the next sitting.
+
 ### F-A7 · The filing verb + the interview model layer
 
 - **F-A7a** `wake_file_document`: the agent assigns a document to a client on her own
@@ -393,6 +401,15 @@ geometry library, two entrances, checked against this test at review.
   P-3 bank registry-vs-ledger zero-census · N5 `fix`-field backfill to the coding
   lane's refusal mapper · the claims accounting class's account-convention design
   (E-R10 — the generic lane posts it unattended now; only the convention needs ruling).
+
+**[TA-2026-08-22] F-T4's first two items each get a single named owner (R-L9 / GM-7).** The
+clause above stands as written; this note says who builds each. **(1) task #17 `closing_transfer`
+Fix A is owned by F-A4 PR-1b**, not by Track B — the design gate found the item claimed by BOTH,
+and F-A4 already holds the `finalize_close` D1 window that Fix A's two writer bodies need
+(close-key-1 D-23). **Track B's 13-cell battery rides F-A4 PR-1b**; the fix's shape is unchanged.
+**(2) the P-3 registry-vs-ledger predicate is ONE body owned by F-A3** (the bank side produces the
+measured fact) with **two call sites** — drawer-2's new `no_registered_account` arm, and
+drawer-1's P-3 census, which stays here as a **CONSUMER**. No double claim, no duplicate body.
 
 ## Sequencing + dependencies
 

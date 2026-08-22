@@ -10,12 +10,12 @@ points at it. Every option carried its cost stated in advance and a fail-closed 
 declined build recommendation is recorded as declined, and the orchestrator's two dissents (TA-P1, TA-P7)
 are on file below with their cost arguments in full — dissent-then-execute.**
 
-**FOUR CONSTITUTIONAL AMENDMENTS FALL OUT OF THIS SITTING AND ARE NOT YET RATIFIED.** They are drafted below
+**FOUR CONSTITUTIONAL AMENDMENTS FALL OUT OF THIS SITTING. RATIFIED 2026-08-22 (owner).** Drafted below
 as proposed wording and enter the ratified set at **the owner's next digest sign-off**, as laws 68-77 did:
 (i) law 71's *exactly*-enumerated human roster becomes an OPEN REGISTER (TA-P1); (ii) invariant (a), client
 attribution, becomes the agent's judgement under structural walls (TA-P7) — amending PRD §6.2(a) **LAW**,
 ARCHITECTURE §0.1 and digest law 2; (iii) law 21 narrows to periodic POSTING belts (TA-P5); (iv) law 76
-drops the drifted "LLM" qualifier (TA-P13). **No product text is edited by this entry** — sign-off is the gate.
+drops the drifted "LLM" qualifier (TA-P13). **No product text is edited by this entry** — that stays true.
 
 ---
 
@@ -84,8 +84,7 @@ exists. **F-A8-M5** — Tier-1 CLOSES to `fx_rates` + the SST rate table + the S
 bands, capital allowances, EPF/SOCSO/EIS, stamp duty and MTD are out until their own consumers land.
 
 **(TA-P3) Egress governance for a new class of model processing — RULED: A.** *The question:* to decide
-WHOSE document this is she must read it, but the rule is that the client must be known and consented BEFORE
-the read.
+WHOSE document this is she must read it, but the rule is that the client must be known and consented BEFORE the read.
 
 **RULED: one processing class = one NAMED purpose.** Every client signs **ONCE at onboarding**, purpose list
 complete, and the product activates every listed purpose from that document. For the two **structurally
@@ -107,8 +106,7 @@ material out at the moment governance is weakest; each new client gains one owne
 existing clients need one supplementary line.
 
 **(TA-P4) Receipts, and the strength of a human nod — RULED: A.** *The question:* law 71 wrote receipt
-discipline for POSTING only, and where a receipt exists at all the field naming *why* is a sentence the model
-wrote about itself.
+discipline for POSTING only, and where a receipt exists at all the field naming *why* is a sentence the model wrote about itself.
 
 **RULED: receipts bind mechanically, and a human can read them.** **(1)** Law 71's discipline **extends to
 every agent judgement act** — freeze, report run, read, web fetch, drafted statement — carrying model +
@@ -177,8 +175,7 @@ and F-A7a cannot exist without a third.
 
 **RULED: option C.** In the owner's words — *"as long as the agentic LLM can browse the right DB/context,
 that is enough."* Attribution becomes **the agent's judgement under structural walls, and she clarifies when
-unsure** — the posture G1 gave posting. **THIS IS A CONSTITUTIONAL AMENDMENT**; the wording for all three
-homes is in the block below and takes effect only when the owner signs the digest.
+unsure** — the posture G1 gave posting. **A CONSTITUTIONAL AMENDMENT, RATIFIED 2026-08-22**; wording below.
 
 *Walls-validate riders* (fail-closed, under the standing delegation; none narrows the ruling): **(1)** a
 **hard-number CONTRADICTION wall** — a printed registration mapping to a DIFFERENT client refuses and asks;
@@ -341,17 +338,20 @@ the renderer" was answered:* seal → render → issue, with a seven-year byte-i
 
 ---
 
-#### The constitutional amendments — PROPOSED WORDING, pending the owner's signature
+#### The constitutional amendments — PROPOSED WORDING, RATIFIED 2026-08-22 (owner)
 
-**No product text is edited by this entry.** These four enter the ratified set at the owner's next digest
-sign-off, and only then do `PRD.md` / `ARCHITECTURE.md` / `AGENTS.md` change.
+**No product text is edited by this entry.** These four entered the ratified set at the owner's digest
+sign-off of **2026-08-22**; the `PRD.md` / `ARCHITECTURE.md` / `AGENTS.md` edits are a named follow-up.
 
 **(i) Law 71's human roster becomes an OPEN REGISTER (TA-P1).** Proposed digest wording replacing law 71's
 closing sentence: *"The surviving HUMAN acts are these seven, and the enumeration is now a RESERVATION, not a
 census: close keys ②③ · `except_bank_line` · opening-seed approval · statutory wording · `canonical`
 definitions · capability grants · e-filing. **Any act this list does not reserve is the agent's**
 (ADR-0074/TA-P1); adding a reservation is an owner ruling, and new agent authority arrives as a wake sibling
-verb, never as a rewrite of a live human body."*
+verb, never as a rewrite of a live human body."* **Ratified 2026-08-22 WITH the rider R-TA-P1-walls: the open
+register ships WALLED — a run with a live `close_attestations` row cannot be abandoned by Clara (B6), a
+re-freeze refuses while a reopen's correction is in flight (B14), and every entrance's wall stays at its own
+door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** (Verbatim in digest §11, law 78.)
 
 **(ii) Invariant (a) — attribution becomes judgement under walls (TA-P7).** Three homes, drafted:
 
@@ -496,5 +496,5 @@ surface and DEFINER wrapper · F-A7's attribution-as-judgement and the promotion
 `docs/plan/active/` as `track-a-sitting-1.md` / `-2.md` / `-3.md`, annotated per principle. F-A2's two
 consequences — TA-P11's 7A-R3 record and TA-P12's unattended gate — plus R-OWNER's ruled root fix are
 recorded in `docs/plan/active/f-a2-annexes-4-build.md` Annex J. `PROGRESS.md` carries the state.
-**The digest is re-trued: laws 78-81 fold as §11, four laws are annotated in place, and all four
-constitutional amendments wait on the owner's signature.**
+**The digest is re-trued: laws 78-81 fold as §11 and four laws are annotated in place — all RATIFIED
+2026-08-22 by the owner, law 78 carrying the rider R-TA-P1-walls (B6 · B14 · the §3.1 entrance seam).**

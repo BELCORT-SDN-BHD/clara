@@ -92,6 +92,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/`(make sure the files are arranged correctly ) |
 | Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
+| Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
 | The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
