@@ -111,6 +111,19 @@ export async function settleAutodraft({ task, outcome, tokens, entry = null, ref
     [task, outcome, tokens, entry, j(refusal)]);
   return r.rows[0].r;
 }
+/** settle_autodraft_task's SIX-arity overload (…, p_workflow_run_id text) — the one the
+ *  producer actually calls. It carries its OWN copy of every guard, so a widening proven only
+ *  against the 5-arity form is proven on the wrong body. */
+export async function settleAutodraft6({ task, outcome, tokens, entry = null, refusal = null, workflowRunId = null }) {
+  const r = await roleQuery(
+    ROLES.runtime,
+    "select clara.settle_autodraft_task(p_task => $1, p_outcome => $2, p_tokens => $3::bigint, "
+    + "p_entry => $4, p_refusal => $5::jsonb, p_workflow_run_id => $6) as r",
+    [task, outcome, tokens, entry, j(refusal), workflowRunId ?? `rig-settle6-${randomUUID().slice(0, 8)}`],
+  );
+  return r.rows[0].r;
+}
+
 export async function openSweepRun({ firm, expected }) {
   const r = await roleQuery(ROLES.runtime, "select clara.open_sweep_run(p_firm => $1, p_expected => $2) as r", [firm, expected]);
   return r.rows[0].r;
