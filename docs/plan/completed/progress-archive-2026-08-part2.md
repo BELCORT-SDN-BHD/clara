@@ -271,6 +271,29 @@ standing operating law whose one-sentence form stays in PROGRESS.md. Full text v
   runner copies fight one registration → Conflict crashloop) — cure is a full `wsl --shutdown`
   when runners are IDLE, then one keeper.
 
+## Session-log entry archived 2026-08-23 (the Track-A v2 landing, closed by its own merge; moved verbatim)
+
+*Landed as PRs #284/#285/#286/#287, all merged. The design sets themselves are the operative
+record now (`docs/plan/active/`, one gate record per item), which is why the narrative moves here.*
+
+- **2026-08-22 (the TRACK-A v2 DESIGN LANDING)** — **all seven Track-A design sets reached v2 and
+  landed in one docs-only PR**: F-A3 bank agency · F-A4 close key ① · F-A5 reporting agency
+  (renamed `fa5-agency-*` → `reporting-agency-*` at landing) · F-A6 audited freeform read ·
+  F-A7 filing + interview · F-A8 internet lane · F-A9 metering — **36 files, every one gated
+  2026-08-22, each with its own PR-0 gate record.** Design gates 1 (F-A3/A7/A8/A9, 87 lanes) and
+  2 (F-A4/A5/A6, 53 lanes) ran two lenses each with per-finding adversarial verification, and both
+  fold batches are folded. **Eight orchestrator rulings under the standing delegation, R-L11…R-L18**
+  (mechanism and sequencing only, no law touched): B13's ADJ oracle admission satisfied additively ·
+  the TA-P1 walled-wide shape ships as the named rider **R-TA-P1-walls** · the undated-document
+  question stays off-digest · F-A5's solo-attestation default · **two new lanes registered — F-A5b
+  sandbox export and F-A6 v2 cross-client named read** · F-A6's GB-1 obligation re-worded to its
+  intent (unforgeable receipt, unmoved privilege set) · XLSX/DOCX structured-parse deferred to
+  F-A6 v2. **C6 legal pack drafted + citation-verified** (`docs/ops/legal/`). **The hard
+  prerequisite every v2 named for its PR-1 — the owner's digest re-sign — was GIVEN THE SAME DAY:
+  laws 78-81 + the four amendments RATIFIED 2026-08-22, law 78 carrying the rider R-TA-P1-walls.**
+  Every v2's prerequisite line is annotated SATISFIED in place; the remaining PR-1 prerequisite is
+  **F-A2's PR-1 merged**; the PRD/ARCHITECTURE product-text edits landed in #287.
+
 ## Backlog blocks archived at the 2026-08-22 landing sweep (the ARGUMENT moved; PROGRESS.md keeps the state)
 
 *Same law as the 2026-08-20 disposition sweep: a disposition is not a deletion, and the reasoning

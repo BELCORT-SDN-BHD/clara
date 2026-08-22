@@ -493,8 +493,7 @@ are **spliced into existence by 0038 at apply time** and exist in no file; autho
 migration text silently deletes live safety properties (annexes-2 §G).
 
 **Non-goals, named so nobody re-opens them mid-build.** Firm-setup interview automation (OQ-A7-7 A)
-· dual attribution (OQ-A7-e) · extending constraint 12's DB wall beyond RS (TA-P8: the general rule
-generalizes, the wall does not) · admitting `method='agent'` (survey finding 2) · a model-supplied
+· dual attribution (OQ-A7-e) · extending the name-only DB wall beyond RS (TA-P8: the general rule generalizes, the wall does not; **[ADR-0075 2026-08-23]** was "constraint 12's DB wall" — retired as a *named* constraint, `0062`/`0063` untouched) · admitting `method='agent'` (survey finding 2) · a model-supplied
 confidence anywhere in the wall · web-found identity facts entering the knowledge base (TA-P8's
 F-A8-M4 A) · carrying client identity onto the open web (F-A8-OQ-2 A) · any per-firm capability
 dial (TA-P1 C: capabilities are default-on).

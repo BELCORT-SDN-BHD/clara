@@ -67,8 +67,8 @@
   exact-match key only through (i) human confirmation or (ii) a printed identifier both witness
   channels read identically. The **promotion door** is a typed proposal + one human click — and at
   v2 the PROPOSING half is built and the CONFIRMING half is scoped to the one case the estate can
-  key today (gate blocker **B5**, §3.9). Constraint 12 (ROME SECRETARY name-only) is untouched and
-  unextended.
+  key today (gate blocker **B5**, §3.9). The name-only wall is untouched and unextended.
+  **[ADR-0075 2026-08-23]** Was "Constraint 12 (ROME SECRETARY name-only)" — retired as a *named* constraint; the GENERIC wall (`0062`/`0063`) is unchanged, so this clause binds as written.
 - **TA-P7 C — attribution is her judgement**, with the walls-validate riders: a printed identifier
   that maps to a DIFFERENT counterparty **refuses and asks**; a name-family collision (the ROME
   family) **must clarify**; a wrong call has a correction path.
@@ -417,7 +417,7 @@ audited path `add_bank_account` already uses (`0038:2743-2751`), which exists **
 is itself a client of the same firm**; for every other payer the proposal is raised and shown and the
 door reports `promotion_target_unavailable` with the proposal left OPEN. The estate has no
 counterparty-bank-account identifier relation, and inventing one on a design lane would put a new
-identity surface next to constraint 12. `record_client_fact` **stays un-allowlisted**
+identity surface next to the name-only wall. **[ADR-0075 2026-08-23]** Throughout this design set (and its annexes and gate record), a reference to "constraint 12" now means the GENERIC name-only wall — `0062`/`0063`, untouched; the harness clause that named ROME SECRETARY is retired, the mechanism is not. `record_client_fact` **stays un-allowlisted**
 (`0055:895-897`) — the promotion is a human act through the human door, and the receipt records the
 confirmer.
 

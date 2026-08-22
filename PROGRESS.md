@@ -7,8 +7,24 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-22 — the opener train is CEREMONIED, F-A2's PR-0 gate has RUN, and **all seven
-Track-A design sets are at GATED v2**; trued at every clock-out)*
+*(as of 2026-08-23 — the opener train is CEREMONIED, F-A2's PR-0 gate has RUN, **all seven
+Track-A design sets are at GATED v2**, and the test-data authority is WIDENED; trued at every
+clock-out)*
+
+- **THE TEST-DATA AUTHORITY IS WIDENED — ADR-0075, owner-ruled 2026-08-23.** **No real client
+  exists before go-live:** every client in the estate is TEST DATA authorised by its owner and
+  factory-reset at the Wave-G e2e. **DATA is free** — delete, reseed, reverse, re-run any
+  client's data, documents, consents and close state, **live DB included**, without asking; the
+  corpus is the owner's three folders and no oracle exists beyond them. **GATES are walked by the
+  agent as the owner's DELEGATE** through the REAL audited doors, receipted (law-71 acts, consent
+  signatures, capability grants, password-bearing acts with secrets env-to-env and never printed;
+  **e-filing excluded by nature**). **MECHANISMS NEVER MOVE** — RLS, the attribution walls,
+  receipts, roles/grants and the generic name-only wall are the product under test, and that
+  clause is the operative one on any collision. **Hard constraint 12 is RETIRED as a named
+  constraint** (the GENERIC name-only wall stays; `0062`/`0063` untouched), **13 is REWRITTEN**
+  (BELCORT is the operator firm, everything else a resettable fixture), **14's beta expiry
+  STANDS**. Digest **law 82** (§12). Every wave still validates in full — a Known-issues or
+  Backlog row is the only lawful home for a deferral.
 
 - **THE F-A2 OPENER TRAIN IS LIVE — Windows A and B ran COMBINED, 2026-08-21 ~10:56-11:02 MYT**
   (as-run: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). **Live DB: 97 migrations,
@@ -60,7 +76,7 @@ Track-A design sets are at GATED v2**; trued at every clock-out)*
   (`docs/plan/completed/f-a1-corpus-measurement.md`) is the 0/33 baseline the re-measure reads
   against, and its live incident minted riders ③④⑤ — **all three now live-proven** (Known issues).
 
-- **The standing law is ADR-0071 + ADR-0072 + ADR-0074.** The Charter's twelve rulings are digest
+- **The standing law is ADR-0071 + ADR-0072 + ADR-0074 + ADR-0075.** The Charter's twelve rulings are digest
   **laws 71-76**; 0072 re-trues its scoping without changing a law; **0074 folds laws 78-81 (§11)
   and amends laws 2, 21, 71 and 76 in place — ALL RATIFIED by the owner 2026-08-22, law 78
   carrying the rider R-TA-P1-walls.** **Deep-scan findings N1-N6**
@@ -211,22 +227,20 @@ Registered but not scheduled. Sources of record in brackets.
 **Structured-format lanes (event-triggered; registered 2026-08-20 so they live here, not only in
 code comments). Both were verified at the bytes, and both differ from how the lane gets casually
 described — each disposition is what the read SAW:**
-- **OFX/QFX — the parser is BUILT and UNEXERCISED, not unbuilt.** Intake canonicalizes four
-  spellings to one mime (`intake.mjs:44-48`), `scan.mjs` detects both dialects, intake is
-  deliberately **STORE-ONLY** (`intake-lanes.mjs:54`), and `parseStatementOfx`
-  (`statement-parse.mjs:331`) maps identity, currency, period, `LEDGERBAL` and every `STMTTRN`
-  behind the same interface as CSV — with a named limitation (OFX prints no opening and no
-  totals, so it corroborates only where continuity supplies the opening). **Missing: a runtime
-  battery over the parser body, and a real client file. Trigger: the first client whose bank
-  exports OFX.** *(Wave C-b §4.3)*
+- **OFX/QFX — the parser is BUILT and UNEXERCISED, not unbuilt.** Intake canonicalizes four spellings
+  to one mime (`intake.mjs:44-48`), `scan.mjs` detects both dialects, intake is deliberately
+  **STORE-ONLY** (`intake-lanes.mjs:54`), and `parseStatementOfx` (`statement-parse.mjs:331`) maps
+  identity, currency, period, `LEDGERBAL` and every `STMTTRN` behind the same interface as CSV — with a
+  named limitation (OFX prints no opening and no totals, so it corroborates only where continuity
+  supplies the opening). **Missing: a runtime battery over the parser body, and a real client file.
+  Trigger: the first client whose bank exports OFX.** *(Wave C-b §4.3)*
 - **XLSX/DOCX — parsed VALUES-ONLY; the gap is SEMANTICS, not a parser.** They route to
-  `structured_parse` (`intake-lanes.mjs:55`) and `structured-worker.mjs` reads them, but every
-  region carries **`monetary_cents: null`** and a structural `field_path` (`sheets.0.B7`), never
-  an accounting one: **no facts**, content reachable only by AI-assisted read — **which is
-  exactly what F-A6's decided read surface opens (TA-P9).** **Trigger:** a client whose
-  recurring sources are spreadsheets. **The design decision is not the parser:** unattended
-  posting from a spreadsheet needs its **own corroboration anchor** — *which cell is the total
-  is a judgement, not a structure.*
+  `structured_parse` (`intake-lanes.mjs:55`) and `structured-worker.mjs` reads them, but every region
+  carries **`monetary_cents: null`** and a structural `field_path` (`sheets.0.B7`), never an accounting
+  one: **no facts**, content reachable only by AI-assisted read. **NOW OWNED by lane F-A6 v2** (R-L18 —
+  excluded from F-A6 v1 because `document_extractions`/`document_regions` carry no `client_id`).
+  **The design decision is not the parser:** unattended posting from a spreadsheet needs its **own
+  corroboration anchor** — *which cell is the total is a judgement, not a structure.*
 
 **The VACUOUS-GREEN-GATE class (2026-08-16) — ALL THREE INSTANCES NOW HAVE HOMES (TA-P14,
 2026-08-22).** The class RULE was already DISCHARGED (Wave-G corpus §7.4 adopts it verbatim).
@@ -246,8 +260,7 @@ currently-green clients red — accepted at the sitting.
 
 **Beta-boundary instruments (ADR-0069):** a quality-score document, A–D per domain/layer · the
 doc-gardening recurring agent · a tool/interface-design pass over the custom MCP surfaces.
-~~The monthly harness ablation~~ **STALE** (G7 declined its benchmark); ~~the system-prompt
-investment pass~~ **RE-HOMED to F-A2**.
+~~The monthly harness ablation~~ **STALE** (G7 declined its benchmark); ~~the system-prompt investment pass~~ **RE-HOMED to F-A2**.
 
 **The F6–F9 register (ADR-0066), trued 2026-08-20:** **C1 `failed_retry` unwitnessed live** —
 drill unrun, but **the door is reachable on live data for the first time** (`v_lane` is now
@@ -462,23 +475,22 @@ records: its ceremony as-runs and the corpus measurement.)*
   constitutional amendments, R-OWNER ruled the same day. **Entry ARCHIVED VERBATIM 2026-08-22** to
   `docs/plan/completed/progress-archive-2026-08-part2.md`; the governing minute is
   `docs/adr/0074-the-track-a-sitting.md`; the member tables are `track-a-sitting-1.md` (`-2`, `-3`).
-- **2026-08-22 (the TRACK-A v2 DESIGN LANDING)** — **all seven Track-A design sets reached v2 and
-  landed in one docs-only PR**: F-A3 bank agency · F-A4 close key ① · F-A5 reporting agency
-  (renamed `fa5-agency-*` → `reporting-agency-*` at landing) · F-A6 audited freeform read ·
-  F-A7 filing + interview · F-A8 internet lane · F-A9 metering — **36 files, every one gated
-  2026-08-22, each with its own PR-0 gate record.** Design gates 1 (F-A3/A7/A8/A9, 87 lanes) and
-  2 (F-A4/A5/A6, 53 lanes) ran two lenses each with per-finding adversarial verification, and both
-  fold batches are folded. **Eight orchestrator rulings under the standing delegation, R-L11…R-L18**
-  (mechanism and sequencing only, no law touched): B13's ADJ oracle admission satisfied additively ·
-  the TA-P1 walled-wide shape ships as the named rider **R-TA-P1-walls** · the undated-document
-  question stays off-digest · F-A5's solo-attestation default · **two new lanes registered — F-A5b
-  sandbox export and F-A6 v2 cross-client named read** · F-A6's GB-1 obligation re-worded to its
-  intent (unforgeable receipt, unmoved privilege set) · XLSX/DOCX structured-parse deferred to
-  F-A6 v2. **C6 legal pack drafted + citation-verified** (`docs/ops/legal/`). **The hard
-  prerequisite every v2 named for its PR-1 — the owner's digest re-sign — was GIVEN THE SAME DAY:
-  laws 78-81 + the four amendments RATIFIED 2026-08-22, law 78 carrying the rider R-TA-P1-walls.**
-  Every v2's prerequisite line is annotated SATISFIED in place; the remaining PR-1 prerequisite is
-  **F-A2's PR-1 merged**; the PRD/ARCHITECTURE product-text edits landed in #287.
+- **2026-08-22 (the TRACK-A v2 DESIGN LANDING)** — all seven design sets to gated v2 (36 files),
+  rulings R-L11…R-L18, the C6 pack, and the owner's ratification the same day. **Entry ARCHIVED
+  VERBATIM 2026-08-23** to `docs/plan/completed/progress-archive-2026-08-part2.md`; the design sets
+  in `docs/plan/active/` are the operative record. Merged as #284/#285/#286/#287.
+- **2026-08-23 (the ALIGNMENT GRILL — ADR-0075)** — **the owner widened the test-data authority.**
+  No real client exists before go-live: the whole estate is TEST DATA, factory-reset at the Wave-G
+  e2e. **DATA is free** (delete/reseed/reverse/re-run, live DB included, no asking; the corpus is
+  the owner's three folders and no oracle exists beyond them). **GATES are walked by the agent as
+  the owner's DELEGATE** through the REAL audited doors, receipted — widened to consent signatures,
+  capability grants and password-bearing acts (secrets env-to-env, never printed); **e-filing
+  excluded by nature**. **MECHANISMS NEVER MOVE** — the NARROW reading, owner-confirmed, and the
+  operative clause on any collision. **No client-specific mechanism or docs for a test client:**
+  hard constraint **12 RETIRED as a named constraint** (the generic name-only wall stays;
+  `0062`/`0063` untouched), **13 REWRITTEN** (BELCORT operator, everything else a resettable
+  fixture), **14's beta expiry STANDS**. Digest **law 82** (§12). Same session: the numbers law
+  re-confirmed with Clara authoring rules/evaluators through the TA-P8 promotion door.
 
 ---
 
