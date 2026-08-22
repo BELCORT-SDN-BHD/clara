@@ -10,10 +10,12 @@
 > TA-P14).** Fourteen principle rulings scope F-A3 … F-A9 and widen F-A10's completion
 > criterion. Amendments are marked in place as `[TA-2026-08-22]` blocks under the item they
 > change — **appended, never a silent rewrite**: the pre-amendment text stands above each block
-> so the delta is readable. Four of the sitting's rulings are **constitutional amendments
-> pending the owner's next digest sign-off** (ADR-0074's own preamble names them); the items
-> below are scoped as ruled, and a design may not start on the unratified half of TA-P7 before
-> that signature. The full agenda with its member tables — the consequence map for each item's
+> so the delta is readable. Four of the sitting's rulings were **constitutional amendments
+> pending the owner's digest sign-off** (ADR-0074's own preamble names them) — **RATIFIED
+> 2026-08-22 as digest laws 78-81, law 78 carrying the rider R-TA-P1-walls**, so TA-P7's
+> judgement half is no longer signature-gated and the items below are scoped as ruled. The
+> PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits remain a named follow-up.
+> The full agenda with its member tables — the consequence map for each item's
 > design — is `track-a-sitting-1.md` / `-2.md` / `-3.md`.
 
 ## The one completion condition that outranks the item list
