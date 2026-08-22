@@ -26,7 +26,7 @@ import {
   supplierLines, salesLines, genericLines, genericWithControlLeg, CHART,
   TIER_B_RUNGS, TIER_D_TOKENS, TIER_D_DECLARED_UNREACHABLE, ADV_MIRROR_AXIS,
   postReceiptRow, opReceiptResult, upsertAccountClassed,
-  controlLegCount, doctorLines, stampCodingKind,
+  controlLegCount, doctorLines, stampCodingKind, bodyOfName,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -392,6 +392,44 @@ test("f-a2.c3.vec-homes the vector is durable in BOTH homes — op_receipts for 
 // These two cells test THIS BATTERY's reading of a vector. They are the cells that break if
 // anyone ever writes `vector[r] === 'fail'`.
 // ===========================================================================
+
+test("f-a2.c3.vec-producer the PRODUCER obeys D26 too: a missing or json-null rung slot does NOT admit", async (t) => {
+  if (await gateCore(t)) return;
+  // M-4 EXTENDED TO THE PRODUCER, and it was a real fail-open. The core's admission count read
+  // `jsonb_each_text(v_vector) where v <> 'pass'`, which is blind twice: a MISSING key is not a
+  // row at all, and a JSON-null value yields SQL NULL, so `NULL <> 'pass'` is NULL and the row is
+  // not counted. Either shape would have POSTED — the exact defect the consumer contract exists
+  // to forbid, on the side that MINTS the vector.
+  //
+  // WHY THIS CELL MEASURES THE PREDICATE RATHER THAN FORCING THE SHAPE END TO END, stated
+  // instead of quietly narrowed: every rung's `case` carries an `else`, so no reachable input
+  // makes the ladder emit a missing or null slot — which is exactly why the count must be
+  // roster-driven by construction and cannot be proven by driving the door. So the cell does the
+  // two things that ARE provable: it reads the shipped body and asserts the count walks the
+  // closed roster, and it EXECUTES the shipped predicate against both fail-open shapes on the
+  // live database, with a positive control so a green cannot come from a predicate that counts
+  // everything.
+  const src = await bodyOfName("_agent_post_entry_core");
+  assert.ok(src?.src, "c3.vec-producer: the ungranted core resolves");
+  assert.ok(src.src.includes("unnest(v_rungs) r where coalesce(v_vector->>r"),
+    "c3.vec-producer: the Tier-B admission count walks the CLOSED rung roster, so an absent key is counted");
+  assert.ok(!src.src.includes("jsonb_each_text(v_vector)"),
+    "c3.vec-producer: …and the key-driven form is GONE — it could not see an absent key at all");
+  const count = async (vector) => (await rootQuery(
+    `select count(*)::int as n from unnest($1::text[]) r
+      where coalesce(($2::jsonb)->>r,'') <> 'pass'`,
+    [TIER_B_RUNGS, JSON.stringify(vector)])).rows[0].n;
+  const all = Object.fromEntries(TIER_B_RUNGS.map((r) => [r, "pass"]));
+  assert.equal(await count(all), 0,
+    "c3.vec-producer POSITIVE CONTROL: a complete all-pass vector counts ZERO failing rungs — otherwise every assertion below is vacuous");
+  const missing = { ...all }; delete missing.B7;
+  assert.equal(await count(missing), 1,
+    "c3.vec-producer: a MISSING rung slot counts as failing — the producer cannot admit what it never evaluated");
+  assert.equal(await count({ ...all, B7: null }), 1,
+    "c3.vec-producer: a JSON-NULL rung slot counts as failing — `NULL <> 'pass'` is NULL, and the coalesce is what stops that reading as an admission");
+  assert.equal(await count({ ...all, B7: "maybe" }), 1,
+    "c3.vec-producer: an UNKNOWN value counts as failing — the same law M-4 binds the consumer to");
+});
 
 test("f-a2.c3.vec-doctored a doctored vector carrying an UNKNOWN value does not admit (M-4)", () => {
   const base = Object.fromEntries(TIER_B_RUNGS.map((r) => [r, "pass"]));

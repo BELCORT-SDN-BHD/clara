@@ -1062,7 +1062,23 @@ begin
       'total_fact_hash', nullif(v_state->>'total_fact_hash',''),
       'type_code', nullif(v_state->>'type_code',''));
 
-    select count(*)::int into v_failing from jsonb_each_text(v_vector) t(k,v) where t.v <> 'pass';
+    -- THE ADMISSION COUNT IS ROSTER-DRIVEN, NOT KEY-DRIVEN, AND THAT IS THE WHOLE OF D26.
+    --
+    -- The first cut expanded the vector into rows and counted the ones whose value was not
+    -- 'pass'. That is FAIL-OPEN twice over: a MISSING key produces no row at all, and a
+    -- JSON-null value produces SQL NULL, so the `<> 'pass'` test is NULL and the row is not
+    -- counted either. Both shapes would have POSTED. The consumer contract (design 3.2) already
+    -- says a missing key and an unknown value are non-admitting; the PRODUCER has to obey the
+    -- same law, and this statement is what makes it obey -- it walks the CLOSED roster
+    -- `v_rungs`, the same array the first-failure loop below walks, so the two can never
+    -- disagree about what was evaluated.
+    --
+    -- THE RETIRED EXPANSION IS NAMED IN PROSE, NEVER VERBATIM, and that is the estate's own
+    -- discipline rather than shyness: §J's postcheck below asserts the retired form is ABSENT
+    -- from this body, and a comment quoting it would make the guard read its own explanation as
+    -- the defect. §E's excision block records the same rule for the 0040 markers.
+    select count(*)::int into v_failing
+      from unnest(v_rungs) r where coalesce(v_vector->>r, '') <> 'pass';
     if v_failing > 0 then
       -- ---- A TIER-B REFUSAL. No raise: the transaction COMMITS so the reason is durable, and
       -- NO receipt row is written at any tier but a successful post.
@@ -1673,6 +1689,35 @@ begin
       end if;
     end loop;
   end loop;
+
+  -- (J.3b) D26 AT THE PRODUCER, proven rather than asserted. The consumer contract says a
+  -- MISSING key and an unknown value are non-admitting; the producer's own admission count has
+  -- to obey the same law, and the first cut did not: expanding the vector into rows sees no row
+  -- for an absent key, and a JSON-null value yields SQL NULL, so the inequality counted neither.
+  -- Both shapes would have POSTED. The shape check below is paired with an EXECUTED probe
+  -- on both fail-open shapes plus a healthy control, because a guard that has never been shown
+  -- to say NO is not evidence (the same discipline §J applies to the R-3 wall).
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)'::regprocedure;
+  if position('unnest(v_rungs) r where coalesce(v_vector->>r' in v_src) = 0
+     or position('jsonb_each_text(v_vector)' in v_src) <> 0 then
+    raise exception 'F-A2 tail: the Tier-B admission count is not roster-driven -- a missing or json-null rung slot would ADMIT (D26)' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from unnest(array['B1','B2']) r
+   where coalesce(('{"B1":"pass"}'::jsonb)->>r,'') <> 'pass';
+  if v_n <> 1 then
+    raise exception 'F-A2 tail: the admission predicate ADMITS a missing rung slot' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from unnest(array['B1','B2']) r
+   where coalesce(('{"B1":"pass","B2":null}'::jsonb)->>r,'') <> 'pass';
+  if v_n <> 1 then
+    raise exception 'F-A2 tail: the admission predicate ADMITS a json-null rung slot' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from unnest(array['B1','B2']) r
+   where coalesce(('{"B1":"pass","B2":"pass"}'::jsonb)->>r,'') <> 'pass';
+  if v_n <> 0 then
+    raise exception 'F-A2 tail: POSITIVE CONTROL -- the admission predicate refuses a complete passing vector' using errcode='CLR10';
+  end if;
 
   -- (J.4) The eighth approve body: the RETIRE markers gone at their stated counts, the eight
   -- CARRY markers surviving at 1, bank_rule_suggested at 0, the five Tier-C reasons present, and
