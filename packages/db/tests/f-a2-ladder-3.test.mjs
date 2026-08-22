@@ -359,8 +359,11 @@ test("f-a2.c3.vec-distinguish at 0/33 corroboration the vector still DISTINGUISH
     client: A1(), corroborated: false, codingKind: null, lines: supplierLines(499000),
   });
   await stampCodingKind(b.args.entry, "customer_receipt");
-  const va = (await post(a))?.rung_vector;
-  const vb = (await post(b))?.rung_vector;
+  // BOTH books versions are re-read at post time. Building fixture `b` is a write, so the token
+  // `a` captured before it is stale and `a`'s post refuses CLR12 at Tier A — no vector at all,
+  // and the cell would fail on the books guard rather than compare two vectors.
+  const va = (await post(a, { booksVersion: await booksVersion(A1()) }))?.rung_vector;
+  const vb = (await post(b, { booksVersion: await booksVersion(A1()) }))?.rung_vector;
   assert.notEqual(JSON.stringify(va), JSON.stringify(vb),
     `c3.vec-distinguish: two uncorroborated documents with different defects produce DIFFERENT vectors (${JSON.stringify(va)} vs ${JSON.stringify(vb)})`);
 });
