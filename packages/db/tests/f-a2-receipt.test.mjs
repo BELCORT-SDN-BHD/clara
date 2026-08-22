@@ -83,10 +83,14 @@ test("f-a2.c6.obo on_behalf_of is NULL on an autodraft post and NON-NULL on a ch
   const wire = await wakePostEntry(chat, {
     entry: d.entry_id, expectedRevision: d.revision_token, client: A2(), booksVersion: await booksVersion(A2()),
   });
-  if (wire?.posted !== true) {
-    noteLane(`c6.obo: the chat-lane post refused (${JSON.stringify(wire?.refusal)}) — the paired half is unproven this run`);
-    return;
-  }
+  // C3: FORCED. `noteLane` writes to stderr and node counts the cell PASSED, so a note plus an
+  // early return is never a skip — it is a green recorded for the one outcome that leaves the
+  // claim unproven.
+  // The PAIR is the claim: a NULL obo on autodraft means nothing without a NON-NULL one beside
+  // it, so "the paired half is unproven this run" was a green for exactly the run that proves
+  // nothing.
+  assert.equal(wire?.posted, true,
+    `c6.obo: the chat-lane post LANDS — the non-NULL half is what makes the autodraft NULL structural (${JSON.stringify(wire?.refusal)})`);
   const row = await postReceiptRow(d.entry_id);
   assert.equal(row?.on_behalf_of, BOB(),
     "c6.obo: the SAME column carries the director on the lane where one exists — which is what proves the autodraft NULL is structural and not a dropped write");
@@ -168,7 +172,10 @@ test("f-a2.c6.channels _audit AND entry.posted both carry obo and wake kind — 
   const wire = await wakePostEntry(chat, {
     entry: d.entry_id, expectedRevision: d.revision_token, client: A2(), booksVersion: await booksVersion(A2()),
   });
-  if (wire?.posted !== true) { noteLane(`c6.channels: the chat post refused (${JSON.stringify(wire?.refusal)}) — a NULL obo would be indistinguishable from the dropped channel, so the cell declines to assert`); return; }
+  // C3: FORCED. "The cell declines to assert" is a pass recorded for the one outcome in which
+  // the three identity channels go unmeasured.
+  assert.equal(wire?.posted, true,
+    `c6.channels: the chat post LANDS, so the three identity channels can be read at all (${JSON.stringify(wire?.refusal)})`);
   // `audit_log` keys on `entry_id` and names the verb in `fn` — there is no `subject_id` and
   // no `action` column. Measured, not assumed.
   const audit = await rootQuery(

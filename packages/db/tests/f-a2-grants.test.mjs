@@ -156,7 +156,11 @@ test("f-a2.c12.approve-core-pin _approve_entry_core's zero-grant pin still holds
   // go wrong is for the recreate to drop the REVOKE and leave the default PUBLIC grant standing.
   // A cell gated on F-A2 could not tell "the pin held" from "F-A2 is not applied".
   const sigs = await overloadsOf("_approve_entry_core");
-  if (!sigs.length) { noteLane("c12.approve-core-pin: _approve_entry_core is absent at this frontier"); return; }
+  // C3: FORCED. `_approve_entry_core` is on this file's own prestate required-upstream list —
+  // it cannot be absent at any frontier this battery runs on, and a note here would green the
+  // zero-grant pin on the SHARED approve core.
+  assert.ok(sigs.length,
+    "c12.approve-core-pin: _approve_entry_core resolves — it is required upstream, so its absence is a finding, not a frontier");
   for (const sig of sigs) {
     assert.equal(await publicHas(sig), false, `c12.approve-core-pin: PUBLIC holds nothing on ${sig}`);
     const who = (await executors(sig)).filter((x) => x !== "clara_fn_owner");

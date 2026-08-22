@@ -27,6 +27,7 @@ import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane, ROLES, roleQuery,
   opk, approveEntry, entryRow, counterpartyRows, postingCoreReady,
   gateCore, wakePostEntry, agentPostable, bodyOfName, countFor,
+  booksVersion,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -127,12 +128,20 @@ test("f-a2.c8.inv-employee three employee claims no longer breed a vendor_accoun
   if (await gateCore(t)) return;
   // The inversion of `x37-wave-c-a-subledger.test.mjs:1951`. Three approved entries against the
   // SAME counterparty+account used to cross the ≥3-distinct-entry threshold and mint a proposal.
+  // C3: FORCED. `noteLane` writes to stderr and node counts the cell PASSED, so a note plus an
+  // early return is never a skip — it is a green recorded for the one outcome that leaves the
+  // claim unproven.
+  // Three claims that DID NOT POST breed nothing for the boring reason, so the inversion has to
+  // assert each one landed — otherwise `after === before` is a tautology.
   const before = await countFor("coding_rules", A2());
+  assert.notEqual(before, null,
+    "c8.inv-employee: the coding_rules count is a real read, not an absent relation read as zero (review law 2)");
   const vendor = { new: { name: `C8 CLAIMANT ${Date.now().toString(36)} SDN BHD` } };
   for (let i = 0; i < 3; i++) {
     const p = await agentPostable(OWNER(), { client: A2(), amount: 120000 + i, vendor });
-    const wire = await wakePostEntry(p.cred, p.args);
-    if (wire?.posted !== true) noteLane(`c8.inv-employee: claim ${i + 1} did not post (${JSON.stringify(wire?.refusal)})`);
+    const wire = await wakePostEntry(p.cred, { ...p.args, booksVersion: await booksVersion(A2()) });
+    assert.equal(wire?.posted, true,
+      `c8.inv-employee: claim ${i + 1} POSTED — three claims that never landed would breed nothing for the boring reason (${JSON.stringify(wire?.refusal)})`);
   }
   const after = await countFor("coding_rules", A2());
   assert.equal(after, before,
@@ -160,7 +169,12 @@ test("f-a2.c8.zero-heads BOTH re-pointed zero-count heads: an agent post AND a h
   const before = await countFor("rule_sightings", A1());
   assert.notEqual(before, null, "c8.zero-heads: the count is a real read, not a fail-soft empty string");
   const agentSide = await agentPostable(OWNER(), { client: A1(), amount: 141000 });
-  await wakePostEntry(agentSide.cred, agentSide.args);
+  const agentWire = await wakePostEntry(agentSide.cred, agentSide.args);
+  // C3: the POST must have happened. Head 1 measures what an agent post does to the counter, and
+  // a post that never landed leaves it unchanged for a reason that has nothing to do with the
+  // excision.
+  assert.equal(agentWire?.posted, true,
+    `c8.zero-heads: head 1's agent post LANDED (${JSON.stringify(agentWire?.refusal)})`);
   const mid = await countFor("rule_sightings", A1());
   assert.equal(mid, before, `c8.zero-heads: head 1 — the AGENT POST left it unchanged (${before} -> ${mid})`);
   const humanSide = await agentPostable(OWNER(), { client: A1(), amount: 142000 });
@@ -176,10 +190,12 @@ test("f-a2.c8.rule-decisions _draft_entry_core writes no rule_decisions row (OQ-
   assert.equal(await countFor("rule_decisions", A1()), before,
     `c8.rule-decisions: the coding_rules FOR SHARE read and the rule_decisions insert are both gone from the draft core (${before})`);
   const { src } = await bodyOfName("_draft_entry_core");
-  if (src) {
-    assert.ok(!/insert\s+into\s+clara\.rule_decisions/i.test(src.replace(/--[^\n]*/g, " ")),
-      "c8.rule-decisions: …and the body carries no such insert");
-  }
+  // C3: the body read is FORCED. `if (src)` made the strongest half of this cell optional — and
+  // it is the half that survives a table that has simply stopped being written to for some other
+  // reason.
+  assert.ok(src, "c8.rule-decisions: the draft core resolves by name");
+  assert.ok(!/insert\s+into\s+clara\.rule_decisions/i.test(src.replace(/--[^\n]*/g, " ")),
+    "c8.rule-decisions: …and the body carries no such insert");
   noteLane("c8.rule-decisions: OQ-2's recommendation is STOP THE WRITE, KEEP THE TABLE — a live FK (0011:898) from journal_entry_revisions.rule_decision_id forbids dropping it");
 });
 

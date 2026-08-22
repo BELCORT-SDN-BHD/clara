@@ -401,9 +401,17 @@ export async function entryEvents(entry, types = [EVENT_POSTED, EVENT_POST_REFUS
   return r.rows.map((x) => x.row);
 }
 
-/** `agent_tasks.last_refusal` — where a Tier-D abort's `(errcode, reason)` must land. */
+/** `clara.autodraft_attempts.last_refusal` — where a Tier-D abort's `(errcode, reason)` lands.
+ *
+ *  THE RELATION IS MEASURED, NOT REMEMBERED. This helper read `clara.agent_tasks`, which does
+ *  not exist: every call raised 42P01, and the only cell that used it returned early before ever
+ *  reaching the read, so nothing ever said so. The column lives on `autodraft_attempts` — one
+ *  row per attempt, keyed by task — which is the catalog's own answer (information_schema, not a
+ *  guess at a plausible name). */
 export async function lastRefusalOf(task) {
-  const r = await rootQuery("select last_refusal from clara.agent_tasks where id=$1", [task]);
+  const r = await rootQuery(
+    `select last_refusal from clara.autodraft_attempts
+      where task_id=$1 order by created_at desc nulls last, id desc limit 1`, [task]);
   return r.rows[0]?.last_refusal ?? null;
 }
 

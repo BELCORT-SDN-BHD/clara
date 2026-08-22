@@ -25,6 +25,7 @@ import {
   gateCore, wakePostEntry, agentPostable, postReceiptCount, postReceiptRow,
   jeTriggerCensus, D1_TRIGGER_PREDICTION, F_A2_NEW_JE_TRIGGER,
   TIER_D_TOKENS, lastRefusalOf, admitsAll, PR2_PENDING, bodyOfName, AGENT_USER_ID, CHART,
+  booksVersion, ensureChart, witnessedFiling,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -136,18 +137,29 @@ test("f-a2.c5.no-exemption the wall demands a receipt on EVERY agent-approved tr
   // The behavioural half: an agent-identity approval carrying a REAL rule id and no receipt.
   // The status flip is doctored as root — the same forgery idiom the estate's own belt cells use
   // — because no lawful door can produce this shape any more, which is the point.
+  // A LIVE CANONICAL VENDOR FIRST. `coding_rules` refuses a vendor_account row without one
+  // (CLR27, measured), and the rule id has to be REAL: the FK is what makes the forged approval
+  // below the shape the removed exemption used to wave past.
+  const seed = await agentPostable(OWNER(), { client: A1(), amount: 470500, vendor: { new: { name: `C5 NOEXEMPT ${Date.now().toString(36)} SDN BHD` } } });
+  const seeded = await wakePostEntry(seed.cred, { ...seed.args, booksVersion: await booksVersion(A1()) });
+  assert.equal(seeded?.posted, true,
+    `c5.no-exemption: mandatory setup — the vendor-birthing post lands (${JSON.stringify(seeded?.refusal)})`);
+  // `counterparties` carries `name_normalized`, not `name_display` — read from the catalog.
+  const cp = (await rootQuery(
+    `select id from clara.counterparties where client_id=$1 and name_normalized like 'c5noexempt%'
+      and merged_into is null and retired_at is null order by id desc limit 1`, [A1()])).rows[0]?.id;
+  assert.ok(cp, "c5.no-exemption: mandatory setup — the canonical vendor exists");
   const p = await agentPostable(OWNER(), { client: A1() });
   const firm = p.cited.firm;
   const rule = await rootQuery(
-    `insert into clara.coding_rules(firm_id,client_id,rule_type,account_code,status,pinned,origin,
+    `insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,account_code,status,pinned,origin,
         content_hash,created_by)
-     values($1,$2,'vendor_account',$3,'proposed',false,'authored',
-        encode(sha256(convert_to($4,'UTF8')),'hex'),$5) returning id`,
-    [firm, A1(), CHART.expense, `c5-noexempt-${Date.now()}`, OWNER()]).catch((e) => ({ error: e }));
-  if (rule?.error) {
-    noteLane(`c5.no-exemption: a coding_rules row could not be minted (${rule.error.code}: ${rule.error.message}) — the behavioural half is unbuildable, the shape half above stands`);
-    return;
-  }
+     values($1,$2,'vendor_account',$3,$4,'proposed',false,'authored',
+        encode(sha256(convert_to($5,'UTF8')),'hex'),$6) returning id`,
+    [firm, A1(), cp, CHART.expense, `c5-noexempt-${Date.now()}`, OWNER()]).catch((e) => ({ error: e }));
+  // C3: FORCED — the behavioural half is the half that proves the exemption is gone.
+  assert.ok(!rule?.error,
+    `c5.no-exemption: the coding_rules row mints, so the forged approval can carry a REAL rule id (${rule?.error?.code}: ${rule?.error?.message})`);
   const out = await withTxnOrNull((c) => c.query(
     `update clara.journal_entries
         set status='approved', checker_actor=$2, approved_at=now(), checked_via_rule_id=$3
@@ -205,19 +217,37 @@ test("f-a2.c5.abort a Tier-D abort settles the task FAILED, and the commit error
   // The DB half is PR-1's: the abort must carry a NAMED (errcode, reason) out of the commit.
   // The SETTLE half is PR-2's Tier-D capture, so this cell drives the settle itself and asserts
   // the shape the runtime must produce — it does not claim PR-2 is built.
-  const { admitAutodraft, settleAutodraft } = await import("./f-a2-post-world.mjs");
-  const p = await agentPostable(OWNER(), { client: A1(), amount: 470000 });
-  let task = null;
-  try {
-    const adm = await admitAutodraft({ filing: p.cited.filingId });
-    task = adm?.task_id ?? adm?.task ?? adm?.id ?? null;
-  } catch (e) {
-    noteLane(`c5.abort: could not admit an autodraft task (${e.code}: ${e.message}) — the settle half is exercised on the verb's own contract below`);
-  }
-  if (!task) return;
+  const { admitAutodraft, beginAutodraft, settleAutodraft } = await import("./f-a2-post-world.mjs");
+  // THE ADMIT COMES FIRST, and the order is the fix. `agentPostable` DRAFTS on the filing, and
+  // `_coding_lane_core` then appends `already_coded` — so admitting afterwards answers
+  // `lane_changed` with NO task_id, the fixture read null, and the early return greened the
+  // whole cell. Measured. Admitting a lane-ready filing BEFORE any entry exists is the real
+  // producer order.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 470000 });
+  let adm = null;
+  try { adm = await admitAutodraft({ filing: cited.filingId }); }
+  catch (e) { adm = { error: e }; }
+  assert.ok(adm && !adm.error,
+    `c5.abort: the admit call itself succeeds (${adm?.error?.code}: ${adm?.error?.message})`);
+  assert.ok(["admitted", "re_admitted"].includes(adm?.outcome),
+    `c5.abort: …and it ADMITS the filing rather than answering a lane change (got ${JSON.stringify(adm)})`);
+  const task = adm?.task_id ?? adm?.task ?? adm?.id ?? null;
+  // C3: FORCED. Without a task there is nothing to settle, and the "verb's own contract below"
+  // was never reached — the early return skipped it too.
+  assert.ok(task,
+    `c5.abort: …and hands back a task id, so the Tier-D abort has something to settle (got ${JSON.stringify(adm)})`);
+  // AND THE TASK MUST BE RUNNING. `settle_autodraft_task` refuses CLR13 on a task that was
+  // admitted but never begun — measured — so the producer's own begin step is part of the
+  // sequence rather than an optimisation the fixture can skip.
+  const begun = await beginAutodraft({ task }).catch((e) => ({ error: e }));
+  assert.ok(!begun?.error,
+    `c5.abort: the admitted task BEGINS, which is what makes it settleable (${begun?.error?.code}: ${begun?.error?.message})`);
   const refusal = { clr: "CLR40", reason: TIER_D_TOKENS[0] };
-  await settleAutodraft({ task, outcome: "failed", tokens: 0, entry: null, refusal })
-    .catch((e) => noteLane(`c5.abort: settle_autodraft_task('failed') raised ${e.code}: ${e.message}`));
+  const settled = await settleAutodraft({ task, outcome: "failed", tokens: 0, entry: null, refusal })
+    .catch((e) => ({ error: e }));
+  assert.ok(!settled?.error,
+    `c5.abort: the 'failed' settle is ACCEPTED — a raise here would leave last_refusal unwritten and the assertions below vacuous (${settled?.error?.code}: ${settled?.error?.message})`);
   const lr = await lastRefusalOf(task);
   assert.ok(lr, "c5.abort: a failed Tier-D settle records a last_refusal — an abort with no recorded reason names nothing");
   assert.equal(lr.reason, TIER_D_TOKENS[0],

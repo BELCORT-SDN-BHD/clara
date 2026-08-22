@@ -285,17 +285,19 @@ test("f-a2.c7.t3-sales the SALES arm carries the identical chain", async (t) => 
     codingKind: "sales_invoice", lines: salesLines(10600, 10000, 605, -5),
   });
   const wire = await wakePostEntry(p.cred, p.args);
-  if (wire?.posted !== true) { noteLane(`c7.t3-sales: the sales post refused (${JSON.stringify(wire?.refusal)})`); return; }
+  // C3: FORCED — the sales arm exists to prove T3 closed the divergence on BOTH arms, and a
+  // post that never landed proves it on neither.
+  assert.equal(wire?.posted, true,
+    `c7.t3-sales: the sales post LANDS (${JSON.stringify(wire?.refusal)})`);
   const row = await postReceiptRow(p.args.entry);
   assert.ok(String(row?.gate_verdicts?.extraction_id ?? "").trim().length > 0,
     "c7.t3-sales: the sales post's receipt carries the same flattened pin");
   const { src } = await bodyOfName("_tf_assert_sales_invoice_shape");
-  if (src) {
-    assert.match(src, /entry_post_receipts/,
-      "c7.t3-sales: the sales TRIGGER FUNCTION resolves its pin from the entry's own post receipt — the same recut as the supplier arm");
-  } else {
-    noteLane("c7.t3-sales: the sales trigger function did not resolve by name — record its live identity at integration");
-  }
+  // C3: FORCED. "Record its live identity at integration" is integration, and the recut is the
+  // claim — an unresolvable trigger function is a finding, not a note.
+  assert.ok(src, "c7.t3-sales: the sales trigger function resolves by name");
+  assert.match(src, /entry_post_receipts/,
+    "c7.t3-sales: the sales TRIGGER FUNCTION resolves its pin from the entry's own post receipt — the same recut as the supplier arm");
 });
 
 test("f-a2.c7.chat-direction the direction-family arm now fires on the CHAT lane too", async (t) => {

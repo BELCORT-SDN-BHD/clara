@@ -107,8 +107,11 @@ test("f-a2.c14.tier-d a generic JV on an ENROLLED FA or advance account ABORTS a
   const { upsertFaProfile } = await import("./x41-fa-fixtures.mjs");
   const enrolled = await upsertFaProfile(OWNER(), { client: A2(), assetAccount: cost, opKey: opk("c14faprof") })
     .then(() => true)
-    .catch((e) => { noteLane(`c14.tier-d: FA enrolment refused (${e.code}: ${e.message}) — the belt's precondition is unbuilt, so the abort cannot be forced this run`); return false; });
-  if (!enrolled) return;
+    .catch((e) => ({ error: e }));
+  // C3: FORCED. "The abort cannot be forced this run" was a green for the run that forces
+  // nothing — and this cell is the only place the FA belt's Tier-D abort is exercised.
+  assert.equal(enrolled, true,
+    `c14.tier-d: the FA enrolment lands, so the belt has something to refuse (${enrolled?.error?.code}: ${enrolled?.error?.message})`);
   // A movement the register never held: a CREDIT to the enrolled cost account with no disposal
   // behind it. The lawful acquisition DEBIT is the shape that must POST (c3.D-fa proves that);
   // this is the genuinely unregistered one.
@@ -121,10 +124,10 @@ test("f-a2.c14.tier-d a generic JV on an ENROLLED FA or advance account ABORTS a
   });
   let raised = null; let receipt = null;
   try { receipt = await post(p); } catch (e) { raised = e; }
-  if (receipt?.posted === true) {
-    noteLane("c14.tier-d: the movement posted — the register may already account for it, in which case this fixture is not the unregistered shape the belt refuses");
-    return;
-  }
+  // C3: FORCED. A movement that POSTED is precisely the failure this cell exists to catch —
+  // recording it as "the register may already account for it" greens the belt being absent.
+  assert.notEqual(receipt?.posted, true,
+    `c14.tier-d: the unregistered movement did NOT post. If the register already accounts for it the FIXTURE is wrong, and that is a finding, not a pass (${JSON.stringify(receipt?.refusal)})`);
   assert.ok(raised || receipt?.posted === false, "c14.tier-d: the unregistered movement did not post");
   if (raised) {
     assert.equal(raised.code, "CLR40",

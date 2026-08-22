@@ -144,11 +144,12 @@ test("f-a2.c3.B9-neg an origin='rule_proposal' question does NOT block (0012:100
         opener_kind,question_text,opened_at)
      values((select firm_id from clara.clients where id=$1),$1,'client',$1,'open','rule_proposal',
         'wake',$2,now())
-     returning id`, [A2(), "c3.B9-neg advisory proposal"]).catch((e) => {
-    noteLane(`c3.B9-neg: could not seed a rule_proposal question (${e.code}: ${e.message}) — the column set differs from the fixture's`);
-    return null;
-  });
-  if (!q) return;
+     returning id`, [A2(), "c3.B9-neg advisory proposal"]).catch((e) => ({ error: e }));
+  // C3: FORCED. Without the seeded proposal there is no `origin='rule_proposal'` question for
+  // B9 to admit, so the assertion below would be measuring an empty gate — and `noteLane` is not
+  // a skip: node counts the cell PASSED.
+  assert.ok(q && !q.error,
+    `c3.B9-neg: the rule_proposal question seeds (${q?.error?.code}: ${q?.error?.message}) — B9's negative needs one to admit`);
   const r = await post(p);
   assert.ok(admits(r?.rung_vector, "B9"),
     `c3.B9-neg: a proposal is ADVISORY, never a gate — B9 must admit (got ${JSON.stringify(r?.rung_vector?.B9)})`);
@@ -195,10 +196,9 @@ test("f-a2.c3.B10-neg a genuinely MIS-SHAPED supplier bill still refuses at B10"
     { account_code: CHART.payable, debit_cents: 500000, credit_cents: 0, description: "c3.B10-neg ap-dr" },
     { account_code: CHART.expense, debit_cents: 0, credit_cents: 500000, description: "c3.B10-neg exp-cr" },
   ]);
-  if (!d.ok) {
-    noteLane(`c3.B10-neg: the draft's lines could not be doctored (${d.code}: ${d.message}) — a mis-shaped supplier bill is unbuildable on this frontier and B10's negative is UNPROVEN`);
-    return;
-  }
+  // C3: FORCED. "B10's negative is UNPROVEN" was recorded as a PASS.
+  assert.equal(d.ok, true,
+    `c3.B10-neg: the draft's lines are doctored into the mis-shaped form (${d.code}: ${d.message})`);
   assertNonAdmitting(assert, await post(p, { expectedRevision: d.revisionToken }), "B10", "c3.B10-neg");
 });
 

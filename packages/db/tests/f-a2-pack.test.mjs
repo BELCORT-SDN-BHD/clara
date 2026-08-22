@@ -83,7 +83,10 @@ test("f-a2.c10.recomputed the block is computed from approved+unreversed, and MO
   // the reversed entry's contribution forever, because nothing ever goes back to unlearn it.
   const p = await agentPostable(OWNER(), { client: A1(), amount: 720000 });
   const wire = await wakePostEntry(p.cred, p.args);
-  if (wire?.posted !== true) { noteLane(`c10.recomputed: the entry did not post (${JSON.stringify(wire?.refusal)})`); return; }
+  // C3: FORCED — the pack block is measured against an APPROVED population, so an entry that
+  // never posted leaves the cell comparing an empty set with an empty set.
+  assert.equal(wire?.posted, true,
+    `c10.recomputed: the entry POSTS, so there is an approved population for the block to recompute over (${JSON.stringify(wire?.refusal)})`);
   const before = blockOf(await pack(A1()));
   await reverseEntry(OWNER(), { entry: p.args.entry, reason: "c10 reversal", opKey: opk("c10rev") })
     .catch((e) => noteLane(`c10.recomputed: reverse_entry raised ${e.code}: ${e.message}`));
