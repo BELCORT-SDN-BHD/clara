@@ -239,11 +239,16 @@ test("f-a2.c4.name-only (CLR10, customer_identity_name_only) — hard constraint
        join pg_namespace ns on ns.oid=c.relnamespace
       where ns.nspname='clara' and c.relname='counterparties' and not t.tgisinternal`);
   assert.ok(wall.rows[0].n > 0, "c4.name-only: the counterparties BEFORE-row wall exists in the catalog");
+  // THE CODING KIND FOLLOWS THE COUNTERPARTY KIND. A `customer` counterparty on a
+  // `supplier_bill` is refused at the draft door outright ("a supplier_bill entry cannot carry a
+  // customer counterparty"), one wall before the constraint-12 trigger this cell is aiming at --
+  // so the identifier-bearing customer birth rides a SALES entry, which is also the shape a
+  // ROME-SECRETARY-style invoice really has.
   const p = await agentPostable(OWNER(), {
-    client: A2(), amount: 430000,
+    client: A2(), amount: 430000, codingKind: "sales_invoice",
     vendor: { new: { name: "NAME ONLY BUYER SDN BHD", registration_no: "201901000123" }, kind: "customer" },
   });
-  const r = await post(p);
+  const r = await post(p, { booksVersion: await booksVersion(A2()) });
   if (r?.refusal?.reason === "customer_identity_name_only") {
     assertConverted(r, "customer_identity_name_only", "c4.name-only");
   } else {
