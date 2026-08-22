@@ -49,6 +49,7 @@ after(async () => {
 });
 
 const A1 = () => world.clients.A1;
+const A2 = () => world.clients.A2;
 const OWNER = () => world.users.alice;
 
 /**
@@ -203,6 +204,49 @@ test("f-a2.c1.10 a NEW op key re-attempts after a refusal, and gets a FRESH verd
   assert.equal(r2?.posted, false, "c1.10: the re-attempt is evaluated afresh, and refuses on the same unfixed term");
   assert.ok(await opReceiptText(p.cited.firm, k2),
     "c1.10: the re-attempt COMMITTED its own op receipt — a Tier-B refusal is durable, not a rollback");
+});
+
+test("f-a2.c1.client-pin an autodraft credential minted for client A cannot post client B's entry", async (t) => {
+  if (await gateCore(t)) return;
+  // THE PIN NOTHING COMPARED. The wrapper checked that `p_client` belonged to the credential's
+  // FIRM — a strictly WIDER boundary than the one the lane advertises — while the core's own
+  // refusal text said the credential's client pin was what stopped a cross-client post. No
+  // statement anywhere compared the two, and every wall downstream reads the ENTRY's client
+  // rather than the credential's, so each of them would have agreed with the post.
+  //
+  // ONE FIRM, TWO CLIENTS, and that is the whole point: a cross-FIRM attempt was already refused
+  // by the check above it (c2.A2 forces that one) and would prove nothing about this.
+  await ensureChart(OWNER(), A1());
+  await ensureChart(OWNER(), A2());
+  const victim = await agentPostable(OWNER(), { client: A2() });
+  const attacker = await autodraftCred(A1());
+  assert.notEqual(A1(), A2(), "c1.client-pin: the two clients are distinct (mandatory setup)");
+  assert.equal(
+    (await rootQuery("select firm_id from clara.clients where id=$1", [A1()])).rows[0].firm_id,
+    (await rootQuery("select firm_id from clara.clients where id=$1", [A2()])).rows[0].firm_id,
+    "c1.client-pin: …and they share ONE firm, so the firm boundary cannot be what answers");
+
+  let raised = null;
+  try {
+    await wakePostEntry(attacker, {
+      entry: victim.args.entry, expectedRevision: victim.args.expectedRevision,
+      client: A2(), booksVersion: victim.args.booksVersion,
+    });
+  } catch (e) { raised = e; }
+  assert.ok(raised,
+    "c1.client-pin: a credential pinned to A is REFUSED when it names B — the pin is an authority boundary, not a label");
+  assert.equal(raised.code, "CLR11",
+    `c1.client-pin: …with CLR11, the same class the firm boundary answers with (got ${raised.code}: ${raised.message})`);
+  assert.equal((await entryRow(victim.args.entry))?.status, "draft",
+    "c1.client-pin: and B's entry is untouched");
+  assert.equal(await postReceiptCount(victim.args.entry), 0, "c1.client-pin: …with no receipt row");
+
+  // THE POSITIVE CONTROL. Without it the refusal above is indistinguishable from a credential
+  // that cannot post at all.
+  const own = await agentPostable(OWNER(), { client: A1() });
+  const ok = await wakePostEntry(own.cred, { ...own.args, booksVersion: await booksVersion(A1()) });
+  assert.equal(ok?.posted, true,
+    `c1.client-pin POSITIVE CONTROL: the SAME kind of credential posts its OWN client's entry (${JSON.stringify(ok?.refusal)})`);
 });
 
 // ===========================================================================

@@ -109,6 +109,24 @@ begin
   -- here and again inside the core, which reads the entry's own firm rather than trusting this.
   perform 1 from clara.clients where id = p_client and firm_id = w.firm_id;
   if not found then raise exception 'client not found in your firm' using errcode='CLR11'; end if;
+  -- ...AND THE CREDENTIAL'S OWN CLIENT PIN, WHICH NOTHING COMPARED. The firm check above is a
+  -- WIDER boundary than the one the lane advertises: an autodraft credential is minted FOR a
+  -- client (0011's mint takes p_client, and the wake context carries it), the core's own refusal
+  -- text says the pin is what stops a cross-client post, and yet no statement anywhere compared
+  -- the two. So credential-for-client-A could post client-B's entry all day inside one firm,
+  -- and every wall downstream would agree with it because every wall downstream reads the
+  -- ENTRY's client, not the credential's.
+  --
+  -- FAIL-CLOSED, AND NARROW. Only a credential that IS pinned is held to its pin: a plain
+  -- `interactive` credential is client-less by construction (`ck_wake_credentials_client_0011`,
+  -- the standing fact C-3 refused to weaken), so it is not silently locked out of a lane it was
+  -- always allowed to serve. A pinned credential aimed anywhere else is CLR11 -- the same code
+  -- the firm boundary uses, because it is the same class of answer: this identity has no
+  -- authority over that client.
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',
+      detail='{"reason":"credential_client_pin"}';
+  end if;
   -- Never optional. The caller's key is DETERMINISTIC (task + tool + canonical input), which is
   -- what makes a replayed durable step reuse the reservation instead of posting twice; minting
   -- one here would defeat that, so a blank key is refused rather than invented.
@@ -218,6 +236,15 @@ begin
   if lower((select f.prosrc from pg_proc f where f.oid=v_wrapper::regprocedure))
        ~ '(insert\s+into|update\s+clara|delete\s+from|merge\s+into)' then
     raise exception 'F-A2 part2 tail: the post wrapper carries DML text' using errcode='CLR10';
+  end if;
+  -- ...AND IT COMPARES THE CREDENTIAL'S CLIENT PIN TO THE CLIENT IT WAS ASKED TO POST FOR. The
+  -- first cut checked only that p_client belonged to the credential's FIRM -- a wider boundary
+  -- than the lane advertises -- while the core's own refusal text claimed the pin was enforced.
+  -- Read positively off the shipped source, because the failure mode was a comparison that was
+  -- never written rather than one that was written wrong.
+  if position('w.client_id is not null and p_client is distinct from w.client_id'
+       in (select f.prosrc from pg_proc f where f.oid=v_wrapper::regprocedure)) = 0 then
+    raise exception 'F-A2 part2 tail: the post wrapper does not enforce the credential''s client pin' using errcode='CLR10';
   end if;
 
   -- (2) Every core — part 1's included, and the shared approve core (0015:3592-3596's
