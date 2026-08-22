@@ -35,6 +35,7 @@ import {
   opk,
   persistInvoiceFacts,
   resolveOpenQuestion,
+  restateSightings,
   rootQuery,
   seedCitedDocument,
   statedIdentityFields,
@@ -213,6 +214,12 @@ async function seedAutopostAuthority(counterparty) {
       expectedRevision: draft.revision_token,
       opKey: opk(`q-sighting-approve-${i}`),
     });
+    // F-A2 PR-1 (D39): the eighth _approve_entry_core body no longer breeds, so the pool this
+    // fixture needs is RESTATED from the approved entry rather than accrued as a side effect.
+    // Every cell in this file claims something about the EXECUTOR, never about breeding — the
+    // breeding claim moved to C.8's inverted twins. Without the restatement
+    // propose_autopost_rule refuses CLR27 and all eight cells here pass VACUOUSLY.
+    await restateSightings(draft.entry_id, { counterparty });
   }
 
   // The third human sighting proposes a vendor_account question. Resolve that

@@ -404,4 +404,63 @@ export async function primeReadyFiling(sub, { client, amount = 500000, vendorNam
   return { ...rf, counterpartyId: cp?.id ?? null, firstEntry: d1.entry_id };
 }
 
+/**
+ * F-A2 PR-1 (D39, the claim split) — RESTATE the `rule_sightings` rows the retired breeding
+ * block used to write, for ONE already-approved entry.
+ *
+ * WHY THIS EXISTS. The eighth `clara._approve_entry_core` body excises `0037:2046-2100` whole,
+ * so approving a bill no longer accrues a sighting. Dozens of cells across this rig depend on a
+ * sighting POOL as a *precondition* — their claim is about the autopost floors, the executor,
+ * the sales lift or the preview, never about breeding — and with the pool empty those cells
+ * either refuse CLR27 or take an `if (!rule) return;` exit and pass VACUOUSLY, which is worse
+ * than failing. Per the claim-split ruling their fixtures change and their assertions do not;
+ * the breeding CLAIM itself moved to C.8's inverted twins, which assert the opposite.
+ *
+ * IT IS A RESTATEMENT, NOT AN INVENTION. The two inserts below are `0037:2049-2061` verbatim in
+ * shape — same columns, same `distinct`, same `is_active` join, same income-only credit arm,
+ * same `on conflict on constraint uq_rule_sightings_mapping do nothing` — and the writer's own
+ * gate is re-checked here (approved, not a reversal, no `checked_via_rule_id`, not a settlement
+ * kind) so this helper can never manufacture a row the retired writer would have withheld. The
+ * `rule_sightings` table survives KEEP-AS-HISTORY, and the entries these rows cite are the real
+ * approved entries, so the pool stays honest evidence — it is simply no longer a side effect.
+ *
+ * Returns the number of rows written (0 when the writer's own gate would have withheld them).
+ */
+export async function restateSightings(entry, { counterparty = null } = {}) {
+  const e = (await rootQuery(
+    `select id, firm_id, client_id, coding_kind, status, reversal_of, checked_via_rule_id
+       from clara.journal_entries where id=$1`, [entry])).rows[0];
+  if (!e) return 0;
+  // The retired writer's own conjunction (0037:2046-2048), re-checked rather than assumed.
+  if (e.status !== "approved" || e.reversal_of !== null || e.checked_via_rule_id !== null) return 0;
+  if (e.coding_kind === "customer_receipt" || e.coding_kind === "supplier_payment") return 0;
+  let cp = counterparty;
+  if (!cp) {
+    const legs = await rootQuery(
+      "select distinct counterparty_id from clara.journal_lines where entry_id=$1 and counterparty_id is not null",
+      [entry]);
+    if (legs.rows.length !== 1) return 0;   // no counterparty => v_counterparty is null => no breeding
+    cp = legs.rows[0].counterparty_id;
+  }
+  const canon = (await rootQuery(
+    "select clara._canonical_counterparty($1,$2) as c", [e.client_id, cp])).rows[0].c ?? cp;
+  const debit = await rootQuery(
+    `insert into clara.rule_sightings(firm_id,client_id,counterparty_id,account_code,entry_id,side)
+       select distinct $1::uuid,$2::uuid,$3::uuid,l.account_code,$4::uuid,'debit'
+       from clara.journal_lines l join clara.coa_accounts a
+         on a.client_id=l.client_id and a.account_code=l.account_code
+       where l.entry_id=$4::uuid and l.debit_cents>0 and a.is_active
+       on conflict on constraint uq_rule_sightings_mapping do nothing`,
+    [e.firm_id, e.client_id, canon, entry]);
+  const credit = await rootQuery(
+    `insert into clara.rule_sightings(firm_id,client_id,counterparty_id,account_code,entry_id,side)
+       select distinct $1::uuid,$2::uuid,$3::uuid,l.account_code,$4::uuid,'credit'
+       from clara.journal_lines l join clara.coa_accounts a
+         on a.client_id=l.client_id and a.account_code=l.account_code
+       where l.entry_id=$4::uuid and l.credit_cents>0 and a.is_active and a.account_type='income'
+       on conflict on constraint uq_rule_sightings_mapping do nothing`,
+    [e.firm_id, e.client_id, canon, entry]);
+  return (debit.rowCount ?? 0) + (credit.rowCount ?? 0);
+}
+
 export { AP, EXP };

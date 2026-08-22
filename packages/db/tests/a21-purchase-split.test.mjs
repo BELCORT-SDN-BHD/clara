@@ -22,7 +22,7 @@ import {
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows,
   mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, agreedEnvelope, factsRegion,
-  mintInteractive, wakeDraftEntry, checkDefs, rm,
+  mintInteractive, wakeDraftEntry, checkDefs, rm, restateSightings,
   AP, EXP,
 } from "./a21-helpers.mjs";
 
@@ -44,7 +44,13 @@ async function makeVendor(sub, { client, name, reg }) {
   });
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("va") });
   const norm = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
+  const cp = (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
+  // F-A2 PR-1 (D39): the birth approval is the first of the three sightings the executor cell's
+  // autopost rule needs, and the eighth _approve_entry_core body no longer breeds it. It is
+  // RESTATED from the real approved entry (0037:2049-2061 replayed). This file's claims are
+  // about the SST purchase split and the executor, never about breeding.
+  if (cp) await restateSightings(d.entry_id, { counterparty: cp });
+  return cp;
 }
 
 /** A purchase facts doc stating total gross (+ optionally net/tax). */
@@ -244,6 +250,7 @@ test("§4 the EXECUTOR grants the split NO sanction: a purchase draft carrying a
       vendor: { existing_id: cp }, evidence: [ev(c2.regionId, c2.quote, FIELD.total)], opKey: opk("sgt"),
     });
     await approveEntry(sub, { entry: d2.entry_id, expectedRevision: d2.revision_token, opKey: opk("sgta") });
+    await restateSightings(d2.entry_id, { counterparty: cp });   // D39: restated, not bred
   }
   const prop = await proposeAutopostRule(sub, { client, cp, accountCode: EXP, direction: "purchase", cap: 200000, windowMax: 3 });
   assert.ok(!prop.error, `the purchase rule proposal is admitted (mandatory setup — got ${prop.error?.code})`);
