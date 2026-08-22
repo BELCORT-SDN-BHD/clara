@@ -1641,6 +1641,27 @@ set role clara_fn_owner;
 -- PLACEMENT: the untestable raise sits AFTER (P3), so a supplier the books already know stays a
 -- purchase on positive evidence. Only a genuinely unknown supplier with an untestable stated
 -- registration raises it.
+--
+-- WHAT 0049's OWN TAIL SAYS ABOUT THIS, ANSWERED HERE RATHER THAN LEFT AS A CONTRADICTION IN THE
+-- RECORD. 0049 tail 5 asserts the both-kinds derivation as a LITERAL of this body and refuses
+-- the alternative BY NAME: "the coarse form is a real, previously-shipped alternative that
+-- satisfies every other arm here, so it is refused by name: `invoice.vendor_registration`
+-- carries a BRN or a TIN and never says which, so a client holding only one of the two kinds
+-- cannot test a stated registration." That objection is CORRECT and is not being overruled -- it
+-- is being ANSWERED. The coarse form 0049 refused was "holds ANY hard identifier, therefore
+-- testable", which would score an unreadable registration as a MISS and invent a purchase. What
+-- ships here is kind-COVERAGE decided per stated value: the one case 0049 named -- a one-kind
+-- client facing a registration of the other kind -- is exactly the case that now raises
+-- `untestable` instead of resolving. The rule is narrower than the coarse form 0049 refused and
+-- wider than the both-kinds form it shipped, and the widening is confined to the case where the
+-- comparison genuinely can be made.
+--
+-- NO PIN IS BROKEN AND NO HISTORY IS EDITED. 0049 tail 5 runs inside 0049's own apply, against
+-- the body 0049 itself had just created; this file replaces that body later in the sequence, so
+-- a fresh migrate and a deploy-onto-existing both stay green (both are run on the rig). A census
+-- of the estate found no OTHER reader of the both-kinds shape -- no prosrc SHA pin over
+-- `_direction_from_extraction` exists anywhere in 0001-0102, and no test asserted the literal.
+-- 0049's tail comment is therefore SUPERSEDED PROSE, flagged to the lead rather than rewritten.
 -- =====================================================================================
 do $fa2_dir$
 declare v_src text; v_new text; v_def text;
