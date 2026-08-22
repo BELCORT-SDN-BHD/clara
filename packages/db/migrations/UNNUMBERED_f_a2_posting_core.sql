@@ -63,6 +63,15 @@
 -- body is the one this file was authored against (0093:62-63). The SHAs below were measured by
 -- rig replay at frontier 0102 on 2026-08-22.
 --
+-- C6 — GB-1's SECOND DOOR, CLOSED BY OWNER RULING (Tao, 2026-08-22). `_document_direction`'s
+-- testability rule required the client to hold BOTH a tin and an ssm before a stated supplier
+-- registration could be tested, so on the ordinary Malaysian client (ssm, no TIN) it did not
+-- fire and a stated identity fell out as `evidence:"none"` — which B15 admitted. The rule is now
+-- "at least one held kind, and the stated kind is one of them", with a stated registration of an
+-- unrecorded kind raising the NEW evidence class `untestable`. B15 refuses that class under its
+-- own reason, `generic_registration_untestable`. A document that prints no registration at all
+-- is still 'absent' and still posts when tied — D18 is narrowed, not reversed.
+--
 -- FOUR PLACES WHERE THE DESIGN WAS UNDER-DETERMINED AND THIS FILE MADE A CALL. Each is flagged
 -- again at its site and carried into PR-1's review:
 --   (1) §C — "make `_assert_supplier_bill_shape_at` a thin delegate passing NULL" needs a WIDER
@@ -136,6 +145,10 @@ declare
      'f6284109d6a78bea0daf5a910a2989c08138a779c7b319e83c201e9d0585cfc4'],
     ['clara._tf_assert_sales_invoice_shape()',
      'b85c99f6692456d2fc92c90296cd492f30fb3965e52c96d3764230557e2d7b7d'],
+    -- C6 (owner-ruled 2026-08-22, "C 塞进 PR-1"): the direction resolver joins the D1 list,
+    -- because this file now replaces its body too. Sha replayed on the rig at frontier 0102.
+    ['clara._direction_from_extraction(uuid,uuid)',
+     'dd2c9e0561cac582378aaebf024ae5e2ab52b5d7c83ee37dfa285cb33dc979d9'],
     ['clara._assert_supplier_bill_shape_at(uuid,uuid)',
      'a511d2f9675d2fe1b3491b757d9011e1e8af6784161fe2a80a786903f4e7ff9c'],
     ['clara.mint_wake_credential(text,uuid,uuid,interval,uuid)',
@@ -734,8 +747,8 @@ $fa2_floor$;
 -- the generation the receipt stamps, which is what every other rung does; passing NULL falls
 -- back to the document-wide read, which is the pre-F-A2 behaviour and not what B15 wants.
 --
--- THE CLASSES: 'sales' | 'purchase' | 'contradiction' | 'absent'. Absent is the ONLY one B15
--- admits. An unreadable detail payload degrades to 'absent' rather than raising, because this
+-- THE CLASSES: 'sales' | 'purchase' | 'contradiction' | 'untestable' | 'absent'. Absent is the
+-- ONLY one B15 admits. An unreadable detail payload degrades to 'absent' rather than raising, because this
 -- helper runs inside a STABLE read path and a malformed detail must not detonate a post — but
 -- the degrade is toward the class B15 ADMITS, so it is stated here rather than hidden: a CLR30
 -- whose detail cannot be read is indistinguishable from "nobody is identified", and treating it
@@ -756,6 +769,10 @@ begin
       v_evidence := null;
     end;
     if v_evidence = 'contradiction' then return 'contradiction'; end if;
+    -- C6-rider: the page STATED a supplier registration and this client records no identifier
+    -- of that kind, so the claim could not be checked. That is not "the page said nothing", and
+    -- collapsing the two is the same mistake C1 fixed one class over.
+    if v_evidence = 'untestable' then return 'untestable'; end if;
     return 'absent';
   end;
   if v_dir in ('sales','purchase') then return v_dir; end if;
@@ -1174,6 +1191,15 @@ begin
     else
       v_class := clara._direction_class(e.document_id, e.client_id, v_bound);
       v_val := case when v_class = 'absent' then 'pass' else 'fail' end;
+      -- C6-rider (fail-closed, owner's standing delegation): an UNTESTABLE stated identity gets
+      -- its OWN reason. "This document is directional" and "this document states an identity
+      -- nobody could check" are different findings, and an operator reading the receipt has to
+      -- be able to tell them apart -- the second is fixed by recording the client's other
+      -- identifier, the first is not. D18 still stands for a genuinely SILENT document: a page
+      -- that prints no registration at all is 'absent' and still posts when tied.
+      if v_class = 'untestable' then
+        v_tokens := v_tokens || jsonb_build_object('B15','generic_registration_untestable');
+      end if;
     end if;
     v_vector := v_vector || jsonb_build_object('B15', v_val);
 
@@ -1582,6 +1608,107 @@ $fa2_draft$;
 set role clara_fn_owner;
 
 -- =====================================================================================
+-- §F2  C6 — clara._direction_from_extraction's TESTABILITY RULE (owner ruling, 2026-08-22).
+--
+-- THE SECOND DOOR GB-1 LEFT OPEN, and it is the ordinary Malaysian client rather than an edge.
+-- `v_hard_id` demanded the client hold BOTH a `tin` AND an `ssm` before a stated supplier
+-- registration counted as testable. 0049's own comment concedes the consequence: "a real
+-- Malaysian client typically has its ssm recorded and no LHDN TIN, so this limb will usually NOT
+-- fire". When it does not fire, a stated registration falls past (P2), past (P3) if the supplier
+-- is not already a known vendor, and out through the `evidence:"none"` raise — the tri-state
+-- flattens that to 'unresolved', B15 admits 'absent', and the GB-1 phantom-payment generic shape
+-- lands through D18's door. C1 closed the CONTRADICTION half of that collapse; this closes the
+-- half where the page states an identity nobody could test.
+--
+-- THE NEW RULE, and it is the MINIMUM change:
+--   * testable when the client holds AT LEAST ONE hard id (was: both kinds);
+--   * the comparison itself is unchanged — `v_reg_hit` already tests the stated registration
+--     against EVERY held identifier of either kind, so a one-kind client already matches
+--     correctly when the page states that kind;
+--   * no match against any held id -> 'purchase', exactly as today's (P2) decides;
+--   * a stated registration whose KIND the client has not recorded is neither a match nor a
+--     miss: it is UNTESTABLE, and it gets its own evidence class rather than borrowing "none".
+--
+-- THE KIND TEST, AND ITS HONEST LIMIT. The page cannot say which kind it printed —
+-- `invoice.vendor_registration` carries either, by construction (0049's own reading of
+-- myinvois.mjs:165 and invoice-vendor-identity.mjs:427). So the kind is inferred from SHAPE: a
+-- Malaysian LHDN TIN is alphanumeric with a leading letter (C/IG/SG/OG/D...), an SSM/BRN
+-- registration is all digits. The inference can be wrong, so the DIRECTION it can be wrong in is
+-- what matters, and it is fail-closed on the lane this ruling is about: a misread that says
+-- UNTESTABLE only makes B15 refuse a generic post it would otherwise have admitted. It never
+-- manufactures a direction.
+--
+-- PLACEMENT: the untestable raise sits AFTER (P3), so a supplier the books already know stays a
+-- purchase on positive evidence. Only a genuinely unknown supplier with an untestable stated
+-- registration raises it.
+-- =====================================================================================
+do $fa2_dir$
+declare v_src text; v_new text; v_def text;
+begin
+  select p.prosrc, pg_get_functiondef(p.oid) into v_src, v_def
+    from pg_proc p where p.oid='clara._direction_from_extraction(uuid,uuid)'::regprocedure;
+  v_new := v_src;
+
+  -- (1) testability = at least one held kind AND the stated kind is one of them.
+  v_new := replace(v_new,
+    '      v_hard_id:=(select count(distinct ci.kind) from clara.client_identifiers ci
+        where ci.client_id=p_client and ci.kind in (''tin'',''ssm'')) = 2;',
+    '      -- C6 (owner ruling, 2026-08-22): AT LEAST ONE held kind makes the comparison real,
+      -- and the comparison above already tests the stated value against EVERY held identifier
+      -- of either kind. What a one-kind client cannot test is a registration of the OTHER
+      -- kind, so that case is separated out below as its own evidence class instead of being
+      -- scored as a miss (which would invent a direction) or as "none" (which admitted the
+      -- generic lane).
+      select coalesce(array_agg(distinct ci.kind), ''{}''::text[]) into v_held_kinds
+        from clara.client_identifiers ci
+       where ci.client_id=p_client and ci.kind in (''tin'',''ssm'');
+      -- SHAPE, because the page cannot say which kind it printed: a Malaysian LHDN TIN leads
+      -- with a letter, an SSM/BRN registration is all digits. A misread can only make the
+      -- answer UNTESTABLE, which refuses; it can never manufacture a direction.
+      v_stated_kind := case when v_sup_reg ~ ''^[a-z]'' then ''tin'' else ''ssm'' end;
+      v_hard_id := coalesce(array_length(v_held_kinds,1),0) >= 1
+                   and v_stated_kind = any(v_held_kinds);');
+
+  -- (2) the untestable raise, after (P3).
+  v_new := replace(v_new,
+    '            and ca.alias_normalized=v_sup_name)) then
+      return ''purchase'';
+    end if;
+  end if;',
+    '            and ca.alias_normalized=v_sup_name)) then
+      return ''purchase'';
+    end if;
+    -- C6: A STATED IDENTITY NOBODY COULD TEST. The page names a supplier registration, this
+    -- client records no identifier of that kind, and the supplier is not already in its books.
+    -- That is not "no evidence" -- there IS evidence, and it is unreadable here. It gets its
+    -- own class so a consumer can tell "the page said nothing" from "the page said something we
+    -- cannot check", which is precisely the distinction B15 needs.
+    if v_sup_reg is not null and not v_hard_id then
+      raise exception ''document direction is unresolved (the page states a supplier registration of a kind this client has not recorded, so it cannot be tested)''
+        using errcode=''CLR30'',detail=''{"reason":"direction_unresolved","evidence":"untestable"}'';
+    end if;
+  end if;');
+
+  -- (3) the two new locals, on the resolver's OWN last declare line so the anchor is unique.
+  v_new := replace(v_new,
+    '  v_hard_id boolean:=false;',
+    '  v_hard_id boolean:=false;
+  v_held_kinds text[]; v_stated_kind text;   -- C6');
+
+  if v_new = v_src then
+    raise exception 'F-A2 §F2: the direction recut did not splice' using errcode='CLR10';
+  end if;
+  if position('v_stated_kind = any(v_held_kinds)' in v_new) = 0
+     or position('"evidence":"untestable"' in v_new) = 0 then
+    raise exception 'F-A2 §F2: the recut is incomplete' using errcode='CLR10';
+  end if;
+  set role clara_fn_owner;
+  execute replace(v_def, v_src, v_new);
+  reset role;
+end
+$fa2_dir$;
+
+-- =====================================================================================
 -- §G  T3 — the two TRIGGER FUNCTIONS are recut, not the delegates (D12).
 --
 -- BL-5's implied remedy — recut the 1-arity delegate — is DECLINED: it reaches the draft floor,
@@ -1917,6 +2044,31 @@ begin
   end if;
   if position('when v_current = 0 then ''not_evaluable''' in v_src) = 0 then
     raise exception 'F-A2 tail: B8 does not report not_evaluable on ZERO in-scope citations -- it would ADMIT on absence' using errcode='CLR10';
+  end if;
+
+  -- (J.3e) C6 + its rider: the resolver's testability rule moved, and B15 has a reason for the
+  -- class it created. Read positively on BOTH bodies -- a recut that landed the evidence class
+  -- without a consumer, or a consumer without the class, is half a fix.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._direction_from_extraction(uuid,uuid)'::regprocedure;
+  if position('v_stated_kind = any(v_held_kinds)' in v_src) = 0 then
+    raise exception 'F-A2 tail: the direction resolver still demands BOTH hard id kinds (C6)' using errcode='CLR10';
+  end if;
+  if position('"evidence":"untestable"' in v_src) = 0 then
+    raise exception 'F-A2 tail: the resolver emits no untestable evidence class (C6)' using errcode='CLR10';
+  end if;
+  if position(') = 2;' in v_src) <> 0 then
+    raise exception 'F-A2 tail: the both-kinds test survives in the resolver' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._direction_class(uuid,uuid,uuid)'::regprocedure;
+  if position('''untestable''' in v_src) = 0 then
+    raise exception 'F-A2 tail: _direction_class does not carry the untestable class (C6-rider)' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)'::regprocedure;
+  if position('generic_registration_untestable' in v_src) = 0 then
+    raise exception 'F-A2 tail: B15 has no reason for the untestable class (C6-rider)' using errcode='CLR10';
   end if;
 
   -- (J.3c) C1: B15 reads the CLASS, and `_direction_class` has exactly ONE caller. The sibling

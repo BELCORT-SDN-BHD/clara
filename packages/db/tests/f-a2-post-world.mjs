@@ -155,6 +155,24 @@ async function directionRegions(client, direction, vendorName) {
   // (0049:924). `_document_direction` raises CLR30 with `evidence:"contradiction"`, which
   // `_autodraft_direction_tri` flattens into the same 'unresolved' a silent page produces — the
   // collapse B15 used to admit.
+  // C6's arms. 'ssm-sales' states the client's OWN ssm as the supplier registration with a
+  // MATCHING name -- under C6 an ssm-only client can now test that, so it resolves 'sales'.
+  // 'ssm-purchase' states a third party's ssm-shaped registration: testable, no match, purchase.
+  // 'untestable' states a TIN-SHAPED registration (leading letter) that no held kind can check.
+  if (direction === "ssm-sales" || direction === "ssm-purchase" || direction === "untestable") {
+    const own = (await rootQuery("select name from clara.clients where id=$1", [client])).rows[0]?.name;
+    const reg = (await rootQuery(
+      `select value_normalized from clara.client_identifiers
+        where client_id=$1 and kind='ssm' order by added_at limit 1`, [client])).rows[0]?.value_normalized;
+    if (direction === "ssm-sales") {
+      if (!reg) throw new Error("directionRegions('ssm-sales'): the client holds no ssm identifier");
+      return [idRegion("invoice.vendor_name", own), idRegion("invoice.vendor_registration", reg)];
+    }
+    if (direction === "ssm-purchase") {
+      return [idRegion("invoice.vendor_name", vendorName), idRegion("invoice.vendor_registration", "200901009999")];
+    }
+    return [idRegion("invoice.vendor_name", vendorName), idRegion("invoice.vendor_registration", "C24680135790")];
+  }
   if (direction === "contradiction") {
     const reg = (await rootQuery(
       `select value_normalized from clara.client_identifiers

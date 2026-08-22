@@ -175,6 +175,81 @@ test("f-a2.c14.gb1-suppressed the SUPPRESSED-PAYABLE fixture refuses at B15 — 
   assert.equal((await entryRow(p.args.entry))?.status, "draft", "c14.gb1-suppressed: the phantom payment did not land");
 });
 
+test("f-a2.c14.ssm-only-resolves an SSM-ONLY client's stated registration is now TESTABLE, both ways — and neither posts generic", async (t) => {
+  if (await gateCore(t)) return;
+  // C6 (owner ruling, 2026-08-22). `_document_direction`'s testability rule demanded the client
+  // hold BOTH a tin and an ssm before a stated supplier registration counted — and 0049's own
+  // comment concedes "a real Malaysian client typically has its ssm recorded and no LHDN TIN, so
+  // this limb will usually NOT fire". When it did not fire, a stated identity fell out as
+  // `evidence:"none"`, the tri-state flattened it to 'unresolved', and B15 admitted the generic
+  // lane. This cell is RED against that body in BOTH directions.
+  const client = A1();
+  await ensureChart(OWNER(), client);
+  // SSM ONLY — and the absence of the tin is ASSERTED, because it is the whole premise.
+  await addClientIdentifier(OWNER(), { client, kind: "ssm", value: "200501006001" }).catch(() => {});
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.deepEqual(kinds, ["ssm"],
+    `c14.ssm-only-resolves: the client holds SSM and no TIN — the exact shape the old both-kinds rule could not test (got ${JSON.stringify(kinds)})`);
+
+  // (a) THE CLIENT'S OWN SSM, with a matching name -> sales.
+  const sales = await agentPostable(OWNER(), {
+    client, amount: 310000, codingKind: null, lines: suppressedPayableLines(310000),
+    direction: "ssm-sales",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [sales.cited.documentId, client])).rows[0].v,
+    "sales", "c14.ssm-only-resolves: an SSM-only client CAN now test its own registration — the page resolves 'sales'");
+  const rs = await post(sales);
+  assert.equal(rs?.posted, false, `c14.ssm-only-resolves: …and a generic JV on it does not post (${JSON.stringify(rs?.refusal)})`);
+  assert.ok(!admits(rs?.rung_vector, "B15"), "c14.ssm-only-resolves: …refused at B15");
+
+  // (b) A THIRD PARTY's ssm-shaped registration -> testable, no match, purchase.
+  const purchase = await agentPostable(OWNER(), {
+    client, amount: 311000, codingKind: null, lines: suppressedPayableLines(311000),
+    direction: "ssm-purchase",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [purchase.cited.documentId, client])).rows[0].v,
+    "purchase", "c14.ssm-only-resolves: a third-party ssm is TESTED and misses — the page resolves 'purchase'");
+  const rp = await post(purchase, { booksVersion: await booksVersion(client) });
+  assert.equal(rp?.posted, false, `c14.ssm-only-resolves: …and that generic JV does not post either (${JSON.stringify(rp?.refusal)})`);
+  assert.ok(!admits(rp?.rung_vector, "B15"), "c14.ssm-only-resolves: …refused at B15");
+});
+
+test("f-a2.c14.untestable-refuses a stated registration of a kind the client has NOT recorded refuses generic_registration_untestable", async (t) => {
+  if (await gateCore(t)) return;
+  // C6-rider, fail-closed. The page states a TIN-SHAPED registration; the client records only an
+  // ssm, so the claim is neither a match nor a miss — it cannot be CHECKED. Under the old rule
+  // that fell out as `evidence:"none"` and B15 admitted it. It now has its own evidence class and
+  // its own refusal reason, because "this document is directional" and "this document states an
+  // identity nobody could check" are different findings with different remedies: the second is
+  // fixed by recording the client's TIN.
+  const client = A2();
+  await ensureChart(OWNER(), client);
+  await addClientIdentifier(OWNER(), { client, kind: "ssm", value: "200501006002" }).catch(() => {});
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.ok(kinds.includes("ssm") && !kinds.includes("tin"),
+    `c14.untestable-refuses: the client records an ssm and NO tin (got ${JSON.stringify(kinds)})`);
+
+  const p = await agentPostable(OWNER(), {
+    client, amount: 312000, codingKind: null, lines: suppressedPayableLines(312000),
+    direction: "untestable",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v,
+    "untestable",
+    "c14.untestable-refuses: the class is UNTESTABLE — distinct from 'absent', which is the whole point");
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.equal(r?.posted, false, `c14.untestable-refuses: it does not post (${JSON.stringify(r?.refusal)})`);
+  assert.ok(!admits(r?.rung_vector, "B15"), "c14.untestable-refuses: …refused at B15");
+  assert.equal(r?.refusal?.reason, "generic_registration_untestable",
+    `c14.untestable-refuses: …under its OWN reason, not the directional one — an operator has to be able to tell them apart (got ${JSON.stringify(r?.refusal)})`);
+});
+
 test("f-a2.c14.gb1-contradiction a document whose PARTIES CONTRADICT refuses at B15 — the second door GB-1 left open", async (t) => {
   if (await gateCore(t)) return;
   // C1, and it is the same class of hole as the suppressed payable one cell above. 0049 raises

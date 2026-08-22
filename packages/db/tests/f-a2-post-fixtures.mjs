@@ -148,7 +148,12 @@ export const RUNG_TOKEN = {
   B14: "generic_control_leg",
   B15: "generic_on_directional_document",
 };
-export const TIER_B_TOKENS = TIER_B_RUNGS.map((r) => RUNG_TOKEN[r]);
+/** C6-rider: B15 carries a SECOND Annex E.2 reason. `generic_on_directional_document` says the
+ *  document has a direction; `generic_registration_untestable` says it STATES an identity this
+ *  client cannot check. Different findings, different remedies (record the other identifier), so
+ *  different reasons — and both are Tier-B members. */
+export const B15_UNTESTABLE = "generic_registration_untestable";
+export const TIER_B_TOKENS = [...TIER_B_RUNGS.map((r) => RUNG_TOKEN[r]), B15_UNTESTABLE];
 
 /** Tier-D vocabulary (Annex E.2) — recorded in `last_refusal`, NEVER a receipt. The six left
  *  Tier B when B12/B13 were cut on correctness grounds. */
