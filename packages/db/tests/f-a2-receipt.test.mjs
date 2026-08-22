@@ -20,7 +20,7 @@ import {
   postingCoreReady, gateCore, wakePostEntry, agentPostable, agentDraft, ensureChart,
   witnessedFiling, interactiveCred, postReceiptRow, postReceiptCount, entryEvents,
   supplierLines, bodyOfName, MODEL, RATIONALE, APPROVAL_ARM_AGENT, RECEIPT_WAKE_KINDS,
-  EVENT_POSTED, AGENT_USER_ID, admitsAll, assertVectorShape,
+  EVENT_POSTED, AGENT_USER_ID, admitsAll, assertVectorShape, autodraftCred,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -183,6 +183,55 @@ test("f-a2.c6.channels _audit AND entry.posted both carry obo and wake kind — 
   assert.equal(events[0].on_behalf_of ?? events[0].payload?.on_behalf_of, BOB(),
     "c6.channels: entry.posted carries the director — channel 3");
   assert.ok(events[0].payload?.post_receipt_id, "c6.channels: …and the event names the post_receipt_id");
+});
+
+test("f-a2.c6.birth-identity counterparty.created carries obo + wake kind — E.3's THIRD channel, on the emitter between the other two", async (t) => {
+  if (await gateCore(t)) return;
+  // THE CHANNEL THE FIRST CUT MISSED. E.3 names three dropped identity channels; the splice
+  // trued `_audit` and `entry.approved` and left the counterparty-birth emitter — ONE statement
+  // between them, in the same agent transaction — hard-coding `null,null`. So the one event that
+  // says a NEW PARTY entered this client's books was the one event that could not say which lane
+  // put it there. Both arms are asserted, because the NULL half is what makes the non-NULL half
+  // structural rather than incidental (the same pairing c6.obo uses for the receipt).
+  const born = async (cred, client, name) => {
+    const cited = await witnessedFiling(OWNER(), { client, gross: 560000, vendorName: name });
+    const d = await agentDraft(OWNER(), cred, {
+      client, cited, codingKind: "supplier_bill", lines: supplierLines(560000),
+      vendor: { new: { name } },
+    });
+    const r = await wakePostEntry(cred, {
+      entry: d.entry_id, expectedRevision: d.revision_token, client, booksVersion: await booksVersion(client),
+    });
+    return { r, cited };
+  };
+  // The event relation is `clara.domain_events`, ordered by `seq` -- read from the catalog the
+  // battery's own `entryEvents` helper reads, never guessed.
+  const evt = async (client, since) => (await rootQuery(
+    `select to_jsonb(d) as row from clara.domain_events d
+      where d.client_id=$1 and d.event_type='counterparty.created' and d.seq > $2
+      order by d.seq desc limit 1`, [client, since])).rows[0]?.row ?? null;
+  const high = async (client) => (await rootQuery(
+    "select coalesce(max(seq),0)::bigint as v from clara.domain_events where client_id=$1", [client])).rows[0].v;
+
+  // (a) AUTODRAFT — obo is structurally NULL there, and the wake kind must still be stated.
+  const markA = await high(A1());
+  const auto = await born(await autodraftCred(A1()), A1(), `C6 BIRTH AUTO ${Date.now().toString(36)} SDN BHD`);
+  assert.equal(auto.r?.posted, true, `c6.birth-identity: mandatory setup — the autodraft post lands (${JSON.stringify(auto.r?.refusal)})`);
+  const ea = await evt(A1(), markA);
+  assert.ok(ea, "c6.birth-identity: the autodraft post BIRTHED a counterparty and emitted counterparty.created");
+  assert.equal(ea.on_behalf_of, null,
+    "c6.birth-identity: on_behalf_of is NULL on the autodraft lane — structural, exactly as it is on the receipt");
+  assert.equal(ea.via_wake_kind, "autodraft",
+    `c6.birth-identity: …and the wake kind IS stated, which is the half a hard-coded null,null could never produce (got ${JSON.stringify(ea.via_wake_kind)})`);
+
+  // (b) CHAT — the director is named. Without this arm the NULL above proves nothing.
+  const markB = await high(A2());
+  const chat = await born(await interactiveCred(A2(), BOB()), A2(), `C6 BIRTH CHAT ${Date.now().toString(36)} SDN BHD`);
+  assert.equal(chat.r?.posted, true, `c6.birth-identity: mandatory setup — the chat post lands (${JSON.stringify(chat.r?.refusal)})`);
+  const eb = await evt(A2(), markB);
+  assert.ok(eb, "c6.birth-identity: the chat post birthed a counterparty too");
+  assert.equal(eb.on_behalf_of, BOB(), "c6.birth-identity: …and names the DIRECTOR — E.3 channel 3, on the birth emitter");
+  assert.equal(eb.via_wake_kind, "interactive", "c6.birth-identity: …with the plain chat wake kind");
 });
 
 test("f-a2.c6.unique unique(entry_id) — one receipt per entry, structurally", async (t) => {

@@ -1279,6 +1279,18 @@ begin
   v_new := replace(v_new,
     '  perform clara._audit(c.firm,c.actor,null,null,''approve_entry'',p_entry,',
     '  perform clara._audit(c.firm,c.actor,v_obo,v_via_wake_kind,''approve_entry'',p_entry,');
+  -- (2c-iii) THE COUNTERPARTY BIRTH EMITTER, one statement earlier in the SAME agent
+  -- transaction. E.3 names three dropped identity channels and the first cut trued only two of
+  -- them (_audit and entry.approved); `counterparty.created` kept hard-coded nulls, so a
+  -- counterparty born INSIDE an agent post appeared in the event log as an actor with no
+  -- on_behalf_of and no wake kind — the one event that says a new party entered the books,
+  -- unattributable to the lane that created it. The anchor is unique in this body (the 0029 and
+  -- 0035 emitters live in other functions).
+  v_new := replace(v_new,
+    '    perform clara._append_event(c.firm,''counterparty.created'',e.client_id,c.actor,null,null,
+      null,null,null,jsonb_build_object(''counterparty_id'',v_counterparty));',
+    '    perform clara._append_event(c.firm,''counterparty.created'',e.client_id,c.actor,v_obo,v_via_wake_kind,
+      null,null,null,jsonb_build_object(''counterparty_id'',v_counterparty));');
   v_new := replace(v_new,
     '  perform clara._append_event(c.firm,''entry.approved'',e.client_id,c.actor,null,null,
     p_entry,e.document_id,null,''{}''::jsonb);',
@@ -1717,6 +1729,19 @@ begin
    where coalesce(('{"B1":"pass","B2":"pass"}'::jsonb)->>r,'') <> 'pass';
   if v_n <> 0 then
     raise exception 'F-A2 tail: POSITIVE CONTROL -- the admission predicate refuses a complete passing vector' using errcode='CLR10';
+  end if;
+
+  -- (J.4a) E.3's THREE identity channels, all three. The first cut trued `_audit` and
+  -- `entry.approved` and missed the counterparty-birth emitter between them, so the check is
+  -- written as a closed census of the null-identity emit shape rather than as three spot reads:
+  -- ANY `_append_event` in this body still passing a literal `null,null` where obo and wake kind
+  -- belong is a finding, whichever event it names.
+  select p.prosrc into v_src from pg_proc p where p.oid='clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure;
+  if position('''counterparty.created'',e.client_id,c.actor,v_obo,v_via_wake_kind' in v_src) = 0 then
+    raise exception 'F-A2 tail: the counterparty.created emitter does not carry the ctx identity (E.3 channel 3)' using errcode='CLR10';
+  end if;
+  if position('''counterparty.created'',e.client_id,c.actor,null,null' in v_src) <> 0 then
+    raise exception 'F-A2 tail: a null-identity counterparty.created emit survives in the approve body' using errcode='CLR10';
   end if;
 
   -- (J.4) The eighth approve body: the RETIRE markers gone at their stated counts, the eight
