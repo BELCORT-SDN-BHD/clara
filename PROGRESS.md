@@ -447,6 +447,14 @@ version + ceremony):**
 - **MAX_PATH breaks git's RECOVERY verbs too** — archived (verbatim) in `-part2.md`; standing
   practice: `git rebase --quit` → MIXED `git reset <sha>` → `git symbolic-ref`, never
   abort→hard-reset; prefer fresh short-path clones for conflict-bearing operations.
+- **2026-08-23: two shared-tree branch incidents in one night — every git-active lane runs in its own
+  worktree (no docs-only exception).** Both times a sibling lane checked out its branch in the SHARED
+  main tree while another lane had uncommitted edits and an expectation of its own branch; the second
+  time a landing commit went to LOCAL `main` (caught before any push to `origin/main`, repaired by
+  moving refs, nothing lost). **The lane's own care is not the control** — it cannot see another
+  lane's checkout. The control is isolation. Practices that follow: cut every branch inside your
+  worktree · print `git branch --show-current` INSIDE the commit command, not before it · after any
+  surprise, resolve state against `git show origin/<branch>:<file>`, never against a working tree.
 - **Local-only test-isolation flake in the db package** (pre-existing, NOT functional):
   `a21-prestate.test.mjs` leaks `PGDATABASE` into the shared Node process, so reused-DB
   full-suite runs inflate failures (13 vs the true 7; `pipeline.test.mjs` self-diagnoses the
