@@ -49,10 +49,10 @@
   stop sharing the `refused_budget` string — history rows stay, read surfaces explain
   the two spellings.
 - **TA-P2 = A+ — calculations are automatic.** "Model spend = tokens × a versioned price
-  table" is the worked example of TA-P2's CALCULATION origin: Clara fetches official
-  pricing sources and DRAFTS a price row; it lands through an **audited owner one-click
-  door** (not a PR) with two mechanical checks (two independently-cited values agree;
-  the value sits within a plausibility band against the prior row). Rows are immutable +
+  table" is the worked example of TA-P2's CALCULATION origin. ~~Clara fetches official pricing sources and
+  DRAFTS a price row; it lands through an **audited owner one-click door** (not a PR) with two mechanical
+  checks.~~ **RULED 2026-08-23 (R-L19): price rows are DEVELOPER-SEEDED — a versioned, effective-dated
+  migration seed through the full PR ladder; a price change is a ticket/PR.** Rows are immutable +
   supersede; a missing row for the day REFUSES, never carries forward. Monthly per-firm
   AND per-client visibility; meter never cap (law 76, "per-call usage", no LLM
   qualifier).
@@ -256,8 +256,9 @@ the five things gate 1 changed about it:
 **The door itself is the audited verb, not a screen** (TA-P2's "one-click" as this
 estate uses the term — the same shape TA-P8 ships for the counterparty key, and law 61's
 audited ceremony, which is screen-less by design). `propose_llm_price` returns the
-proposal's uuid so Clara can hand the owner the exact id to approve. **What is NOT
-settled is who may execute approve at the DB layer — §4, and PR-1E is severed for it.**
+proposal's uuid so Clara can hand the owner the exact id to approve. ~~**What is NOT settled is who may
+execute approve at the DB layer — §4, and PR-1E is severed for it.**~~ **RULED 2026-08-23 (R-L19): the whole
+propose/approve limb is DROPPED — price rows are developer-seeded migration data (§4).**
 
 **Missing-day discipline (TA-P2, a wall, not a convention):** the evaluator (§3.6) never
 carries a price past its `effective_to`; a call landing in a gap computes NULL spend,
@@ -407,31 +408,18 @@ PR-1:
 
 ## 4 · Owner questions not settled here (recommendation + fail-closed default)
 
-- **WHICH human may approve a price proposal, and how is that gated at the DB layer?**
-  A model's price is firm-agnostic, so `firm_capability_grants` (E-R11's per-FIRM shape)
-  has no natural "which firm's owner" answer — that half of the question is genuinely
-  open and is the owner's to rule. **The v1 recommendation is WITHDRAWN at gate 1
-  (GM-5).** It proposed EXECUTE granted to a named role (`clara_price_approver`) filled
-  by an ops ceremony — but **no human session ever holds a role other than
-  `clara_authenticated`**: PostgREST's single `authenticator` login SETs ROLE from the
-  JWT claim (`0006:72`, `deploy/storage-provision.sql:57-58`) and
-  `clara_authenticated` does not inherit (`0002:112`). A role-gated verb is therefore a
-  psql ceremony, not the owner's door — the "NOT a PR" shape TA-P2 chose, one
-  substitution removed — and battery cell C.17 would have proved only that nobody can
-  approve. **Revised recommendation**: the estate's own owner-door idiom —
-  `clara.grant_firm_capability` (`0056:1130-1176`) and the RS name-only lift
-  (`0063:24-33`): EXECUTE granted coarsely to `clara_authenticated`, with the REAL floor
-  a positive `firm_memberships` read for `role='owner' and status='active'` inside the
-  SECURITY DEFINER body, plus `_reserve_op` idempotency and an `_audit` row.
-  `rig-meta.mjs:63` states the rule: "coarse grant to `clara_authenticated`; role floors
-  are body-enforced". **The narrow question left for the owner**: an owner of WHICH firm
-  may approve a cross-tenant fact — any firm owner, one named platform firm, or a new
-  platform-level rank? (The role dodge did not answer this either; it hid it.)
-  **Fail-closed default while the ruling is pending**: **PR-1E is severed and does not
-  ship** (§5). `approve_llm_price_proposal` does not exist, no price row can be created,
-  the evaluator returns `spend_cents IS NULL` and the rollup publishes an *unpriced*
-  count — visible, never a guess. Nothing downstream is blocked; the money column simply
-  stays honestly empty.
+- ~~**WHICH human may approve a price proposal, and how is that gated at the DB layer?**~~
+  **RULED 2026-08-23 (owner) — R-L19. The question is DISSOLVED, not answered: price rows are
+  DEVELOPER-SEEDED PLATFORM DATA.** A price is a versioned, effective-dated **migration seed**
+  that lands through the **full PR ladder**; **a price change is a ticket and a PR**, reviewed
+  like any other migration. Consequences: **PR-1E (`approve_llm_price_proposal` + D17's owner
+  floor) is DROPPED, not deferred**, and **the "Clara drafts a price proposal" limb is dropped
+  with it** — with no proposal there is no approval door, and the cross-tenant "owner of WHICH
+  firm" question disappears rather than being settled. The **evaluator prices from the seeded
+  rows**, and the **unpriced-count rollup STAYS as the tripwire**: a call whose day has no
+  effective row still publishes as *unpriced*, never a guess. The withdrawn v1 recommendation
+  and GM-5's role-dodge finding are recorded in `metering-annexes.md` Annex A (D17) — the
+  reason the door was designed and then never built.
 - **Do TA-P12's REMOVE classes reach the document/processing lane's per-UTC-day doc and
   page budgets?** (§3.3 gates 6-7, new at gate 1.) The ruling enumerated three gates and
   opened with "at least three", so it reads as a floor, not an exhaustive list — and
@@ -482,16 +470,16 @@ review as a policy-table schema.
 | **PR-1B** | the brake census's DB half (§3.3 gates 3-5, §3.4) + the eight-file test repair + the roster edits | **yes — the ONE window in this item** | PR-0 landed; judgement logic, independent review (law 1) |
 | **PR-1C** | dashboard rename surface (§3.3): `reviewCardTypes.ts`, `SweepReceiptCard.tsx` | no | lands with or immediately after PR-1B |
 | **PR-1D** | price table + proposals + `propose_llm_price` + `reject_llm_price_proposal` + the priced view + the rollup read (§3.5-§3.7) | no | independent of PR-1B; needs no ruling |
-| **PR-1E** | **the approval door alone** — `approve_llm_price_proposal` and its grant/floor shape | no | **the owner's ruling on §4's first question (D17)**. Severed because it is the one limb not yet designed to a buildable point |
+| ~~**PR-1E**~~ | ~~the approval door alone — `approve_llm_price_proposal` and its grant/floor shape~~ | — | **DROPPED, not deferred — RULED 2026-08-23 (owner, R-L19): price rows are developer-seeded migration data, so there is no proposal and no approval door. The "Clara drafts a price proposal" limb is dropped with it; PR-1D's price table is populated by an effective-dated seed through the PR ladder.** |
 | **PR-2** | the chat retrofit, a new `chatTurn_vN` (§3.8) | no | **F-A2's PR-2 claims `chatTurn_v13` first** (Annex B) |
 | **PR-3** | acceptance on real BELCORT usage (constraint 13); the "unpriced calls" count published, not hidden; §3.9's three gate conditions recorded met-or-not | no | PR-1A…PR-2 |
 | **PR-4** | schema retirement — drops `firm_usage_daily`/`task_usage` and their write sites | **yes**, its own reviewed migration | §3.9's three conditions; deliberately undated |
 
-PR-1D ships a price table with no rows — the correct visible state, not a gap: the
-evaluator returns `spend_cents IS NULL` and the rollup publishes an *unpriced* count
-until the owner's first approval. The battery's price cells stage rows as the table
-owner in the rig (exactly what the FORCE-RLS owner policy allows), so no cell depends
-on PR-1E to be runnable.
+PR-1D ships the price table **with its first effective-dated seed** (R-L19). A day with no effective row is
+still the correct visible state, not a gap: the evaluator returns `spend_cents IS NULL` and the rollup
+publishes an *unpriced* count — the tripwire the ruling explicitly keeps. The battery's price cells stage rows
+as the table owner in the rig (exactly what the FORCE-RLS owner policy allows), so no cell ever depended on
+the dropped approval door to be runnable.
 
 ## 6 · Annex map
 

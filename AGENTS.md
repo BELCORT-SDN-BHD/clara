@@ -94,7 +94,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Product law: what/why/scope, and the invariants that bind every feature | `docs/product/PRD.md` (**§6 is LAW**) |
 | The bar the work is judged against, before you call something done | `docs/product/EVALUATION_RUBRIC.md` |
 | Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
-| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` — **read the digest first**; drill to the ADR only if the digest is thin |
+| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
 | A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/`(make sure the files are arranged correctly ) |
 | Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
