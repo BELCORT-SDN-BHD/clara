@@ -30,8 +30,15 @@ import {
   sweepItemRow, sweepRunRow, lastRefusalOf, withTxnOrNull,
   OUTCOME_POSTED, SWEEP_OUTCOMES_PRE_F_A2,
   ensureChart, witnessedFiling, autodraftCred, agentDraft, supplierLines, booksVersion,
-  entryRow, skipHere, CHART,
+  entryRow, CHART,   // `skipHere` is gone with the last skip: C.9 now has none
+  approveEntry, opk, grantConsent, mintLegacyInvoiceFactsTask, invoiceFactsTask, claimTask,
+  persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, FIELD,
 } from "./f-a2-post-world.mjs";
+// THE RULE-POST LANE'S OWN VERBS. `f-a2-post-world` re-exports the whole wave-A fixture tree
+// (approveEntry, the invoice_facts helpers, grantConsent, opk...), but not these three -- they
+// live with the A2.1 rule battery, and c9.posted-needs-receipt-B needs the REAL producer of an
+// `approved` + `checked_via_rule_id` entry rather than a hand-written one.
+import { proposeAutopostRule, signAutopostRule, postViaRule } from "./a21-helpers.mjs";
 
 let world = null;
 before(async () => { if ((await postedChainReady()) || (await postingCoreReady())) world = await buildWorld(); });
@@ -107,10 +114,35 @@ async function primedVendor(client) {
   return name;
 }
 
-async function postedSweep(client, amount, { post = true } = {}) {
+/**
+ * ATTACH AN `invoice_facts` EXTRACTION TO A WITNESSED FILING.
+ *
+ * `execute_rule_post` pins its evidence to a DONE extraction on the `invoice_facts` /
+ * `local_facts` lane and skips `facts_missing` when there is none -- MEASURED, and it is a skip
+ * rather than a raise, so a fixture that ignored it would look like it had posted and quietly
+ * have done nothing. `witnessedFiling` lands an llm_witness PAIR (the F-A1 PR-3 cutover), which
+ * is a different lane, so the two coexist and `v_lane_n` stays 1.
+ */
+async function withInvoiceFacts(cited, client, amount, vendorName) {
+  await grantConsent(OWNER(), { firm: cited.firm, client }).catch(() => {});
+  await mintLegacyInvoiceFactsTask(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  if (!task?.id) throw new Error("withInvoiceFacts: no invoice_facts task was minted");
+  await claimTask(task.id, { egressApproved: true });
+  await persistInvoiceFacts(task.id, [
+    factField(FIELD.total, `RM ${(amount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`),
+    factField(FIELD.currency, "MYR"),
+    factField(FIELD.vendorName, vendorName),
+    factField(FIELD.invoiceId, `INV-${Math.random().toString(36).slice(2, 10)}`),
+    ...statedIdentityFields(amount),
+  ], { envelope: agreedEnvelope() });
+}
+
+async function postedSweep(client, amount, { post = true, facts = false } = {}) {
   await ensureChart(OWNER(), client);
   const vendorName = await primedVendor(client);
   const cited = await witnessedFiling(OWNER(), { client, gross: amount, vendorName });
+  if (facts) await withInvoiceFacts(cited, client, amount, vendorName);
   const run = await openSweepRun({ firm: cited.firm, expected: 1 });
 
   // ONE TOKEN PER ADMIT. The daily reserve budget is real and this file opens a dozen sweeps:
@@ -141,11 +173,64 @@ async function postedSweep(client, amount, { post = true } = {}) {
     entry: draft.entry_id, expectedRevision: draft.revision_token,
     client, booksVersion: await booksVersion(client),
   };
-  if (!post) return { p: { cited, cred, args }, cited, cred, draft, args, wire: null, run, task, workflowRunId };
+  if (!post) return { p: { cited, cred, args }, cited, cred, draft, args, wire: null, run, task, workflowRunId, vendorName };
 
   const wire = await wakePostEntry(cred, args);
   if (wire?.posted !== true) throw new Error(`postedSweep: the entry did not post (${JSON.stringify(wire?.refusal)})`);
   return { p: { cited, cred, args }, cited, cred, draft, args, wire, run, task, workflowRunId };
+}
+
+const RULE = new Map();
+
+/**
+ * A LIVE AUTOPOST RULE FOR THE PRIMED VENDOR, built through `propose_autopost_rule` +
+ * `sign_autopost_rule` -- the only door that produces one.
+ *
+ * MEASURED, each of these cost a probe round:
+ *   * the proposer REFUSES `insufficient_evidence` under three congruent human-approved
+ *     sightings, so three are earned first: three real agent drafts on this vendor, each
+ *     approved through the HUMAN door (which is what makes the sighting congruent) and each
+ *     recorded as a sighting. The sightings are scaffolding for a rule this file needs to
+ *     exist; nothing here asserts anything about them.
+ *   * `window_max_posts > 3` is refused `bounds_exceeded` -- the bound is NOT caller-widenable
+ *     (ADV-6), so 3 is the ceiling and the fixture uses it.
+ *   * the cap is in RINGGIT in the proposal and the entry it must admit is RM400, so RM2000 is
+ *     comfortably in-bounds without approaching any limit the rule battery owns.
+ * Memoised per client: three sightings per call would triple this file's runtime for a rule
+ * that is identical every time.
+ */
+async function liveAutopostRule(client) {
+  if (RULE.has(client)) return RULE.get(client);
+  const vendorName = await primedVendor(client);
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0]?.firm_id;
+  const cp = (await rootQuery(
+    `select id from clara.counterparties where client_id=$1 and merged_into is null
+       and retired_at is null order by id desc limit 1`, [client])).rows[0]?.id;
+  assert.ok(cp, "liveAutopostRule: mandatory setup — the primed vendor is a live counterparty");
+  for (let i = 0; i < 3; i++) {
+    const sighting = await postedSweep(client, 30000 + i, { post: false });
+    await approveEntry(OWNER(), {
+      entry: sighting.args.entry, expectedRevision: sighting.args.expectedRevision,
+      attestation: "x", opKey: opk("c9sight"),
+    });
+    await rootQuery(
+      `insert into clara.rule_sightings(firm_id, client_id, counterparty_id, account_code, entry_id, side)
+         values ($1,$2,$3,$4,$5,'debit')
+         on conflict on constraint uq_rule_sightings_mapping do nothing`,
+      [firm, client, cp, CHART.expense, sighting.args.entry]);
+  }
+  const proposed = await proposeAutopostRule(OWNER(), {
+    client, cp, accountCode: CHART.expense, cap: 200000, windowMax: 3,
+  });
+  assert.ok(proposed?.id,
+    `liveAutopostRule: the autopost rule was PROPOSED (${proposed?.error?.code}: ${proposed?.error?.message})`);
+  await signAutopostRule(OWNER(), { rule: proposed.id });
+  const row = (await rootQuery(
+    "select status, rule_type from clara.coding_rules where id=$1", [proposed.id])).rows[0];
+  assert.equal(row?.status, "live",
+    `liveAutopostRule: …and SIGNED live, which is what execute_rule_post looks for (got ${JSON.stringify(row)})`);
+  RULE.set(client, { rule: proposed.id, cp, vendorName });
+  return RULE.get(client);
 }
 
 // ===========================================================================
@@ -344,41 +429,47 @@ test("f-a2.c9.posted-needs-receipt-B an APPROVED entry with a rule id and NO rec
   // C4's must-fail B. The other unconditional arm: `e.status='approved' and checked_via_rule_id
   // is not null` is the RULE-POST shape, lawful for a `drafted` settle and never evidence of a
   // post. Under the partition it must not satisfy the posted arm.
-  const s = await postedSweep(A1(), 690000, { post: false });
-  // A REAL rule id: the column is FK-bound, so the shape needs a live vendor_account rule, and
-  // that in turn needs a live canonical vendor (CLR27 otherwise). The sweep's own primed vendor
-  // is exactly one.
-  const cpRow = await rootQuery(
-    `select id from clara.counterparties where client_id=$1 and merged_into is null
-       and retired_at is null order by id desc limit 1`, [A1()]);
-  const cp = cpRow.rows[0]?.id;
-  const rule = cp ? await rootQuery(
-    `insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,account_code,status,
-        pinned,origin,content_hash,created_by)
-     values($1,$2,'vendor_account',$3,$4,'proposed',false,'authored',
-        encode(sha256(convert_to($5,'UTF8')),'hex'),$6) returning id`,
-    [s.cited.firm, A1(), cp, CHART.expense, `c9-ruleid-${Date.now()}`, OWNER()]).catch((e) => ({ error: e })) : null;
-  const ruleId = rule?.rows?.[0]?.id ?? null;
-  const forged = ruleId ? await withTxnOrNull((c) => c.query(
-    `update clara.journal_entries set status='approved', checker_actor=$2, approved_at=now(),
-        checked_via_rule_id=$3 where id=$1`,
-    [s.args.entry, OWNER(), ruleId])) : { error: rule?.error ?? new Error("no counterparty") };
-  if (forged?.error) {
-    // A precondition that genuinely cannot be met exits through t.skip with the obligation
-    // NAMED — never a passing note (C3).
-    skipHere(t, `c9.posted-needs-receipt-B: an approved+rule-id entry could not be constructed (${forged.error.code}: ${forged.error.message}) — the C4 arm for that shape is UNPROVEN and must be re-attempted`);
-    return;
-  }
+  // BUILT THROUGH THE REAL PRODUCER, NOT FORGED. The first attempt at this cell UPDATEd the row
+  // to `approved` with a rule id and was refused CLR10 -- "does not tie to its open items (1
+  // divergent grain row)" -- because a raw UPDATE skips the approve path that MATERIALISES the
+  // subledger. Approving through the human door first and stamping the rule id afterwards does
+  // not work either: an approved entry is immutable except for its reversal linkage (measured,
+  // CLR08 "approved entries permit only a complete reversal-linkage pair"), so the rule id can
+  // only be set BY the approve that sets it. That producer is `execute_rule_post`, and this is
+  // the shape it makes: approved, rule-stamped, subledger materialised, and NO post receipt --
+  // because a rule post is not the agentic post lane.
+  const { rule } = await liveAutopostRule(A1());
+  const s = await postedSweep(A1(), 40000, { post: false, facts: true });
+  const posted = await postViaRule(s.args.entry);
+  // THE EXECUTOR SKIPS RATHER THAN RAISING when a precondition is unmet (`facts_missing`,
+  // `no_live_rule`, `not_corroborated`, ...), so a fixture that ignored its receipt would sail
+  // on with an ordinary DRAFT and prove c9.posted-needs-receipt-A a second time instead.
+  assert.equal(posted?.status, "posted",
+    `c9.posted-needs-receipt-B: mandatory setup — the rule really POSTED it (${JSON.stringify(posted)})`);
+  assert.equal(posted?.rule_id, rule,
+    "c9.posted-needs-receipt-B: …through the rule this cell built");
+
+  // THE PREMISE, ASSERTED IN FULL. Every clause is load-bearing: an entry that is merely a
+  // draft would refuse for c9-A's reason, and one carrying a receipt would be a genuine post.
+  const row = await entryRow(s.args.entry);
+  assert.equal(row?.status, "approved", "c9.posted-needs-receipt-B: the entry is APPROVED");
+  assert.equal(row?.checked_via_rule_id, rule,
+    "c9.posted-needs-receipt-B: …and carries the rule id — the exact disjunct the un-partitioned validator accepted");
   assert.equal(await postReceiptCount(s.args.entry), 0,
-    "c9.posted-needs-receipt-B: the forged approval carries NO receipt");
+    "c9.posted-needs-receipt-B: …and NO post receipt, because a rule post is not the agentic post lane");
+
   let raised = null;
   try {
     await settleAutodraft({ task: s.task, outcome: OUTCOME_POSTED, tokens: 10, entry: s.args.entry, refusal: null });
   } catch (e) { raised = e; }
   assert.ok(raised,
     "c9.posted-needs-receipt-B: a rule-posted approval is not a POST — the posted arm demands the receipt");
+  assert.equal(raised.code, "CLR11",
+    `c9.posted-needs-receipt-B: …and it falls to ARM 3 exactly as the drafted arm does (got ${raised.code}: ${raised.message})`);
   assert.equal(await sweepItemRow(s.run, s.cited.filingId), null,
     "c9.posted-needs-receipt-B: …and nothing was recorded for it");
+  assert.equal((await sweepRunRow(s.run))?.posted_count ?? 0, 0,
+    "c9.posted-needs-receipt-B: …and posted_count never moved");
 });
 
 test("f-a2.c9.posted-drafted-unmoved the DRAFTED arm's admitted set is byte-identical — the partition extends, never narrows (C4)", async (t) => {
