@@ -52,16 +52,27 @@ test("f-a2.c3.B7 amount-bearing evidence at the model_read tier refuses unverifi
   // field is `invoice.total` AND the cited cents equal the anchor. Citing the TAX region instead
   // yields the other tier through the writer's own door — no doctoring, so the cell measures the
   // tier the estate really produces.
+  //
+  // RE-CUT AT INTEGRATION (F-A2 PR-1, N1 + the rung's own token). The old fixture cited the TAX
+  // region on a CORROBORATED bill, and after N1 that cannot be drafted at all: the draft core
+  // raises CLR21 `evidence_invalid` when a corroborated supplier bill does not bind its own
+  // total, and the draft-door supplier floor raises CLR21 `tax_leg_missing` on a document
+  // stating a nonzero tax. It would ALSO have proved the wrong thing — with no
+  // `invoice.total` evidence row at all, B7 reads `not_evaluable`, not the `unverified_evidence`
+  // this cell's title claims.
+  //
+  // THE SHAPE THAT PRODUCES THE TOKEN: an UNCORROBORATED document, with the entry citing its
+  // `invoice.total` region. `_bind_evidence` grants `verified` only on a CORROBORATED state
+  // (0009:462-466), so the amount-bearing row lands at `model_read` through the writer's own
+  // door — no doctoring — and B7 has an amount-bearing row to judge and judges it FAIL. B2 is
+  // unavoidably non-admitting too, which is why the cell keeps the LOOSE assertion.
   await ensureChart(OWNER(), A1());
-  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 10600, net: 10000, tax: 605 });
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 10600, corroborated: false });
   const { ev } = await import("./f-a2-post-world.mjs");
-  const taxRegion = await witnessRegion(cited.documentId, "invoice.tax_total");
-  assert.ok(taxRegion?.id,
-    "c3.B7 precondition: the WITNESS text extraction carries a tax region. `factsRegion` cannot see it — it filters engine_kind='invoice_facts' and returns null, which is how this fixture used to fail at DRAFT with CLR21 evidence_invalid rather than reaching B7");
   const cred = await autodraftCred(A1());
   const d = await agentDraft(OWNER(), cred, {
     client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(10600),
-    evidence: [ev(taxRegion?.id, taxRegion?.text_content, "invoice.tax_total")],
+    evidence: [ev(cited.regionId, cited.quote, "invoice.total")],
   });
   const tiers = await rootQuery(
     "select distinct provenance_tier from clara.entry_evidence where entry_id=$1", [d.entry_id]);
@@ -71,6 +82,12 @@ test("f-a2.c3.B7 amount-bearing evidence at the model_read tier refuses unverifi
     entry: d.entry_id, expectedRevision: d.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
   });
   assertNonAdmitting(assert, r, "B7", "c3.B7");
+  // THE RUNG JUDGED, rather than falling to ARM-0. Written as a NOT-not_evaluable check, never
+  // as a test for the forbidden literal: design 3.2's consumer contract says no consumer may
+  // test vector[r] for the failing value, and c3.vec-consumer's scan enforces it on this very
+  // file. What matters here is that the entry HAD an amount-bearing citation to judge.
+  assert.notEqual(r?.rung_vector?.B7, "not_evaluable",
+    `c3.B7: B7 had an amount-bearing citation and JUDGED its tier — an ARM-0 read here would mean the fixture never bound one (vector ${JSON.stringify(r?.rung_vector)})`);
 });
 
 // B8 lives in its own file: f-a2-b8.test.mjs carries the FIVE-cell set (primary + its
