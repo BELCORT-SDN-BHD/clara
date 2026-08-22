@@ -26,8 +26,9 @@ import {
   gateCore, wakePostEntry, agentPostable, admits, admitsAll, nonAdmitting,
   assertVectorShape, assertNonAdmitting,
   salesLines, supplierLines, genericLines,
-  unwitnessedFiling, ensureChart, autodraftCred, agentDraft, ev, factsRegion, witnessedFiling,
-  stampCodingKind,
+  unwitnessedFiling, ensureChart, autodraftCred, agentDraft, ev, witnessedFiling,
+  stampCodingKind, doctorFlags,
+  witnessRegion, rootQuery,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -118,35 +119,37 @@ test("f-a2.c3.B2-absent a '{}'-shaped or ABSENT fact state refuses — absence I
 
 test("f-a2.c3.B3 an UNBOUND anchor refuses anchor_unbound", async (t) => {
   if (await gateCore(t)) return;
+  // THE FIXTURE IS THE FINDING. The obvious construction — cite a region on a DIFFERENT
+  // document — cannot be built: `_bind_evidence` resolves the cited region with
+  // `de.document_id = p_document` and refuses CLR21 `evidence_invalid` when it does not match
+  // (`0009:441-450`). The draft floor is a STRONGER wall than B3 there, not a weaker one, and a
+  // cell that swallowed that raise in a try/catch would be reporting a fixture gap as a rung.
+  //
+  // The lawful input is an entry whose evidence BINDS but whose bound rows carry no VERIFIED
+  // total: `_bind_evidence` stamps `verified` only when the state is corroborated AND the field
+  // is `invoice.total` AND the cited cents equal the anchor (`0009:462-466`), so citing the TAX
+  // region binds real evidence and leaves `_corroboration_bound(entry, total_cents)` with
+  // nothing to find. B3 and B7 share that fixture, which is why both cells use the LOOSE
+  // non-admission assertion rather than claiming rung isolation they do not have.
   await ensureChart(OWNER(), A1());
-  const target = await witnessedFiling(OWNER(), { client: A1(), gross: 500000 });
-  // The evidence cites a region on a DIFFERENT document, so `_corroboration_bound(entry,
-  // total_cents)` has nothing tying this entry's amount to THIS document's anchor.
-  const other = await witnessedFiling(OWNER(), { client: A1(), gross: 700000 });
-  const foreignRegion = await factsRegion(other.documentId, "invoice.total");
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 10600, net: 10000, tax: 605 });
+  const tax = await witnessRegion(cited.documentId, "invoice.tax_total");
+  assert.ok(tax?.id, "c3.B3 precondition: the witness text extraction carries a tax region to cite");
   const cred = await autodraftCred(A1());
-  let d = null;
-  try {
-    d = await agentDraft(OWNER(), cred, {
-      client: A1(), cited: target, codingKind: "supplier_bill", lines: supplierLines(500000),
-      evidence: [ev(foreignRegion?.id ?? other.regionId, foreignRegion?.text_content ?? other.quote, "invoice.total")],
-    });
-  } catch (e) {
-    // The DRAFT floor may already refuse a cross-document citation. That is a stronger wall than
-    // B3, not a weaker one — record it and let the cell say so rather than reporting a pass.
-    noteLane(`c3.B3: the draft floor refused the cross-document citation (${e.code}: ${e.message}) — B3's input cannot be built through the writer, so the rung is exercised by the region-less twin below`);
-  }
-  if (d) {
-    const r = await wakePostEntry(cred, {
-      entry: d.entry_id, expectedRevision: d.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
-    });
-    assertNonAdmitting(assert, r, "B3", "c3.B3 cross-document citation");
-  } else {
-    const p = await agentPostable(OWNER(), { client: A1(), corroborated: false });
-    const r = await post(p);
-    assert.ok(!admits(r?.rung_vector, "B3"),
-      "c3.B3: with no bound citation the anchor rung does not admit");
-  }
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(10600),
+    evidence: [ev(tax.id, tax.text_content, "invoice.tax_total")],
+  });
+  const bound = await rootQuery(
+    "select count(*)::int as n from clara.entry_evidence where entry_id=$1 and provenance_tier='verified'",
+    [d.entry_id]);
+  assert.equal(bound.rows[0].n, 0,
+    "c3.B3 precondition: the entry binds evidence but NO verified total row — which is exactly what _corroboration_bound reads");
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: d.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assertNonAdmitting(assert, r, "B3", "c3.B3 unbound anchor");
+  assert.ok(!admits(r?.rung_vector, "B3"), "c3.B3: the anchor rung does not admit");
 });
 
 // ===========================================================================
@@ -271,20 +274,35 @@ test("f-a2.c3.B4-creditnote a credit note may NOT tie by absolute value — the 
 
 test("f-a2.c3.B5 an amount_exception WITHOUT an amount_override refuses amount_conflict", async (t) => {
   if (await gateCore(t)) return;
-  const p = await agentPostable(OWNER(), { client: A1(), flags: { amount_exception: true } });
+  // THE STAMP IS EARNED, NOT ASKED FOR. Passing `flags: {amount_exception: true}` to the
+  // draft writer does nothing — the core COMPUTES the exception when the proposed legs diverge
+  // from the machine-corroborated total (`0009:1361-1367`) and writes its own structured
+  // value. So the fixture diverges the legs and lets the estate stamp it. B4 is unavoidably
+  // non-admitting too, which is why this cell uses the LOOSE assertion.
+  const p = await agentPostable(OWNER(), {
+    client: A1(), amount: 500000, codingKind: "supplier_bill", lines: supplierLines(499000),
+  });
   const row = await entryRow(p.args.entry);
   assert.ok(row?.flags && "amount_exception" in row.flags,
-    `c3.B5 precondition: the draft carries amount_exception (flags were ${JSON.stringify(row?.flags)})`);
+    `c3.B5 precondition: the core stamped amount_exception (flags were ${JSON.stringify(row?.flags)})`);
   assert.ok(!("amount_override" in (row.flags ?? {})), "c3.B5 precondition: …and no amount_override");
   assertNonAdmitting(assert, await post(p), "B5", "c3.B5");
 });
 
 test("f-a2.c3.B6 BOTH override flags refuse human_override_present — the twins", async (t) => {
   if (await gateCore(t)) return;
+  // THE OVERRIDE HAS TO ARRIVE WITHOUT A HUMAN EDITOR, and that is the whole reason this cell
+  // doctors the flags instead of calling `revise_entry`. Every lawful override comes through
+  // that writer, which ALSO stamps `last_human_editor` — and A8 refuses on that first, so a
+  // revise-built fixture would prove A8 twice and B6 never. Doctoring isolates the one rung.
   for (const flag of ["amount_override", "duplicate_override"]) {
-    const p = await agentPostable(OWNER(), { client: A2(), flags: { [flag]: true } });
+    const p = await agentPostable(OWNER(), { client: A2() });
+    const d = await doctorFlags(p.args.entry, { [flag]: { reason: `c3.B6 rig ${flag}` } });
+    assert.ok(d.ok, `c3.B6 (${flag}): the flag was stamped (${d.code}: ${d.message})`);
     const row = await entryRow(p.args.entry);
     assert.ok(row?.flags && flag in row.flags, `c3.B6 precondition (${flag}): the draft carries it`);
+    assert.equal(row?.last_human_editor, null,
+      `c3.B6 precondition (${flag}): …and NO human editor, so A8 cannot be what refuses`);
     assertNonAdmitting(assert, await post(p), "B6", `c3.B6 ${flag}`);
   }
   // …and the agent lane's own drafts pass `'{}'` flags, so the clean control still admits.

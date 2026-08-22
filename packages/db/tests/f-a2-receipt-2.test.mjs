@@ -26,7 +26,8 @@ import {
   opk, entryRow, approveEntry, draftEntryV3, freshResolution, ev, factsRegion,
   seedExtraction, seedRegion, postingCoreReady, gateCore, wakePostEntry, agentPostable,
   agentDraft, autodraftCred, interactiveCred, ensureChart, witnessedFiling, postReceiptRow,
-  postReceiptCount, supplierLines, salesLines, bodyOf, CHART, proactiveCred,
+  postReceiptCount, supplierLines, salesLines, bodyOf, bodyOfName, CHART, proactiveCred,
+  landWitnessPair, witnessShape,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -186,7 +187,7 @@ test("f-a2.c7.t3-sales the SALES arm carries the identical chain", async (t) => 
   const row = await postReceiptRow(p.args.entry);
   assert.ok(String(row?.gate_verdicts?.extraction_id ?? "").trim().length > 0,
     "c7.t3-sales: the sales post's receipt carries the same flattened pin");
-  const src = await bodyOf("clara._tf_assert_sales_invoice_shape()");
+  const { src } = await bodyOfName("_tf_assert_sales_invoice_shape");
   if (src) {
     assert.match(src, /entry_post_receipts/,
       "c7.t3-sales: the sales TRIGGER FUNCTION resolves its pin from the entry's own post receipt — the same recut as the supplier arm");
@@ -201,8 +202,8 @@ test("f-a2.c7.chat-direction the direction-family arm now fires on the CHAT lane
   // The RE-CUT is to `not p_is_human` — the narrow verified claim. v1's estate-wide "law"
   // phrasing is WITHDRAWN, and every other wake-kind-keyed wall carries its own disposition in
   // §D.5, so this cell asserts the ONE arm and nothing wider.
-  const src = await bodyOf("clara._draft_entry_core(uuid,uuid,uuid,text,boolean,uuid,uuid,date,text,jsonb,uuid,text,jsonb,text,bigint,jsonb,jsonb,jsonb,text)");
-  if (!src) { noteLane("c7.chat-direction: _draft_entry_core did not resolve at the pinned arity — an interface finding for integration"); return; }
+  const { src } = await bodyOfName("_draft_entry_core");
+  assert.ok(src, "c7.chat-direction: the draft core resolves");
   const bare = src.replace(/--[^\n]*/g, " ");
   assert.ok(!/p_wake_kind\s*=\s*'autodraft'/.test(bare),
     "c7.chat-direction: the direction-family arm no longer keys on the autodraft wake kind — it keys on `not p_is_human`, so chat is covered");
@@ -254,11 +255,17 @@ test("f-a2.c7b.tierB a TIER-B refusal leaves ZERO rows — even though the trans
 
 test("f-a2.c7b.tierC a TIER-C conversion leaves ZERO rows — the insert rolls back with the delegate", async (t) => {
   if (await gateCore(t)) return;
+  // Contradict the bound anchor by LANDING A SUCCESSOR PAIR — clara.document_regions is
+  // append-only, so patching the bound row raises CLR08 instead of moving the anchor.
   const p = await agentPostable(OWNER(), { client: A1(), amount: 500000 });
-  await rootQuery(
-    `update clara.document_regions set text_content='RM 6,000.00', monetary_cents=600000
-      where extraction_id=$1 and field_path='invoice.total'`, [p.cited.pair.textId])
-    .catch((e) => noteLane(`c7b.tierC: could not contradict the bound anchor (${e.code}: ${e.message})`));
+  await landWitnessPair(p.cited.documentId, {
+    ...witnessShape({
+      fields: { "invoice.total": 600000, "invoice.currency": "RM", "invoice.type_code": "01" },
+    }),
+    // version_n 2, or `_document_facts_extraction` keeps resolving G1 and the anchor never
+    // moves — it orders by the llm_witness TASK's version_n desc, id desc.
+    versionN: 2,
+  });
   const wire = await wakePostEntry(p.cred, p.args);
   assert.equal(wire?.posted, false, "c7b.tierC: no post");
   assert.equal(await postReceiptCount(p.args.entry), 0,

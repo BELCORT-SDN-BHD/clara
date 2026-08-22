@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane, ROLES, roleQuery,
   opk, approveEntry, entryRow, counterpartyRows, postingCoreReady,
-  gateCore, wakePostEntry, agentPostable, bodyOf, countFor,
+  gateCore, wakePostEntry, agentPostable, bodyOfName, countFor,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -55,17 +55,11 @@ async function breedCensus(client) {
   };
 }
 
-const APPROVE_CORE = [
-  "clara._approve_entry_core(jsonb,uuid,text,text)",
-  "clara._approve_entry_core(jsonb,uuid,uuid,text,text)",
-];
-async function approveCoreBody() {
-  for (const sig of APPROVE_CORE) {
-    const src = await bodyOf(sig);
-    if (src) return src;
-  }
-  return null;
-}
+/** The 8th body, resolved BY NAME. The live core is FIVE-arity — `(p_ctx jsonb, p_entry uuid,
+ *  p_expected_revision uuid, p_attestation text, p_op_key text)` — and a cell that hardcoded four
+ *  got a NULL body back and reported it as "the core did not resolve", which is the test being
+ *  wrong wearing the costume of a build finding. */
+const approveCoreBody = async () => (await bodyOfName("_approve_entry_core")).src;
 
 // ===========================================================================
 // The four zero-breed cells, all on an AGENT POST.
@@ -181,7 +175,7 @@ test("f-a2.c8.rule-decisions _draft_entry_core writes no rule_decisions row (OQ-
   await agentPostable(OWNER(), { client: A1(), amount: 151000 });
   assert.equal(await countFor("rule_decisions", A1()), before,
     `c8.rule-decisions: the coding_rules FOR SHARE read and the rule_decisions insert are both gone from the draft core (${before})`);
-  const src = await bodyOf("clara._draft_entry_core(uuid,uuid,uuid,text,boolean,uuid,uuid,date,text,jsonb,uuid,text,jsonb,text,bigint,jsonb,jsonb,jsonb,text)");
+  const { src } = await bodyOfName("_draft_entry_core");
   if (src) {
     assert.ok(!/insert\s+into\s+clara\.rule_decisions/i.test(src.replace(/--[^\n]*/g, " ")),
       "c8.rule-decisions: …and the body carries no such insert");
@@ -207,14 +201,14 @@ test("f-a2.c8.human-identical the human approve path is otherwise BYTE-IDENTICAL
     `c8.human-identical: the HUMAN receipt gained no agent-lane key (keys: ${keys.join(",")})`);
   assert.ok(!keys.includes("rung_vector"), "c8.human-identical: …and no rung vector");
   const audit = await rootQuery(
-    "select action, on_behalf_of, wake_kind from clara.audit_log where subject_id=$1 order by at desc limit 1",
+    "select fn, on_behalf_of, via_wake_kind from clara.audit_log where entry_id=$1 order by at desc limit 1",
     [p.args.entry]).catch(() => ({ rows: [] }));
   if (audit.rows.length) {
     assert.equal(audit.rows[0].on_behalf_of, null, "c8.human-identical: a human approval carries no on_behalf_of");
-    assert.equal(audit.rows[0].wake_kind, null, "c8.human-identical: …and no wake kind");
+    assert.equal(audit.rows[0].via_wake_kind, null, "c8.human-identical: …and no wake kind");
   }
   const events = await rootQuery(
-    "select event_type from clara.domain_events where subject_id=$1 order by seq", [p.args.entry]);
+    "select event_type from clara.domain_events where entry_id=$1 order by seq", [p.args.entry]);
   const types = events.rows.map((x) => x.event_type);
   assert.ok(!types.includes("entry.posted"),
     `c8.human-identical: a HUMAN approval emits entry.approved, never entry.posted (${types.join(",")})`);

@@ -24,7 +24,7 @@ import {
   opk, entryRow, approveEntry, postingCoreReady, withTxnOrNull,
   gateCore, wakePostEntry, agentPostable, postReceiptCount, postReceiptRow,
   jeTriggerCensus, D1_TRIGGER_PREDICTION, F_A2_NEW_JE_TRIGGER,
-  TIER_D_TOKENS, lastRefusalOf, admitsAll, PR2_PENDING, bodyOf,
+  TIER_D_TOKENS, lastRefusalOf, admitsAll, PR2_PENDING, bodyOfName,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -100,8 +100,9 @@ test("f-a2.c5.suppressed a SUPPRESSED entry_post_receipts row trips t_je_agent_p
     await c.query("set role clara_wake_interactive");
     await c.query("select set_config('clara.wake_secret',$1,true)", [p.cred.secret]);
     await c.query(
-      "select clara.wake_post_entry(p_entry => $1, p_expected_revision => $2, p_client => $3, "
-      + "p_books_version => $4::bigint, p_rationale => $5, p_model => $6::jsonb, p_op_key => $7)",
+      "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+      + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+      + "p_model => $6::jsonb, p_op_key => $7::text)",
       [p.args.entry, p.args.expectedRevision, A1(), p.args.booksVersion,
         "c5.suppressed", JSON.stringify({ provider: "anthropic", model: "claude-opus-5", version: "2026-08-01" }), opk("c5supp")]);
     await c.query("reset role");
@@ -140,7 +141,7 @@ test("f-a2.c5.arm0 ARM-0 is DECLARED unreachable-by-FK, with the reason recorded
       where table_schema='clara' and table_name='journal_entries' and column_name='checker_actor'`);
   assert.ok(fk.rows[0].n > 0 || notnull.rows[0]?.is_nullable === "NO",
     "c5.arm0: checker_actor is FK-bound (0003:117) — an unresolvable checker cannot be stored");
-  const src = await bodyOf("clara._tf_assert_agent_post_receipt()");
+  const { src } = await bodyOfName("_tf_assert_agent_post_receipt");
   assert.ok(src, "c5.arm0: the trigger function resolves");
   const firstArm = (src.replace(/--[^\n]*/g, " ").match(/\bif\b[\s\S]{0,240}/i) ?? [""])[0];
   assert.match(firstArm, /checker_actor/i,

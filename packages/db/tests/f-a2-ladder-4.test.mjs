@@ -21,8 +21,9 @@ import {
   ROLES, rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
   booksVersion, opk, entryRow, counterpartyRows, postingCoreReady, holdThenContend,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
-  witnessedFiling, postReceiptCount, supplierLines, bodyOf, fnPresent,
+  witnessedFiling, postReceiptCount, supplierLines, bodyOfName, fnPresent,
   TIER_C_PAIRS, TIER_C_EXCLUDED, MODEL, RATIONALE,
+  landWitnessPair, witnessShape, doctorLines, CHART,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -53,9 +54,11 @@ function assertConverted(receipt, reason, label) {
 
 test("f-a2.c4.set the Tier-C pair set is EXACT in both directions — no wildcard, no errcode-only member", async (t) => {
   if (await gateCore(t)) return;
-  const src = await bodyOf("clara._agent_post_entry_core(uuid,text,uuid,bigint,text,jsonb,text)")
-    ?? await bodyOf("clara._agent_post_entry_core(uuid,text,uuid,bigint,text,jsonb,text,uuid)");
-  assert.ok(src, "c4.set: the core resolves at a pinned signature — a divergence here is an interface finding");
+  // BY NAME. The core carries acting identity through the ctx bag (§3.1), so its arity is the
+  // wrapper's PLUS the ctx — which is exactly the kind of thing a test must READ, not assume.
+  const { src, args } = await bodyOfName("_agent_post_entry_core");
+  assert.ok(src, "c4.set: the ungranted core resolves");
+  noteLane(`c4.set: live core signature = clara._agent_post_entry_core(${args})`);
   const bare = src.replace(/--[^\n]*/g, " ");
   for (const [clr, reason] of TIER_C_PAIRS) {
     assert.ok(bare.includes(reason),
@@ -81,15 +84,23 @@ test("f-a2.c4.set the Tier-C pair set is EXACT in both directions — no wildcar
 test("f-a2.c4.currency (CLR25, currency_unsupported) converts", async (t) => {
   if (await gateCore(t)) return;
   await ensureChart(OWNER(), A1());
+  // THE CURRENCY MOVES AFTER THE DRAFT, and it has to. Drafting straight onto an SGD page is
+  // refused by the DRAFT floor (CLR21, "explicit non-MYR currency is unsupported") — a
+  // PRE-EXISTING wall, stronger than the Tier-C conversion under test. And the landed region
+  // cannot be patched: clara.document_regions is append-only (CLR08). So the draft binds a
+  // lawful MYR generation and an SGD SUCCESSOR pair is landed on top of it.
   const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 500000 });
-  await rootQuery(
-    `update clara.document_regions set text_content='SGD'
-      where extraction_id=$1 and field_path='invoice.currency'`, [cited.pair.textId])
-    .catch((e) => noteLane(`c4.currency: could not restate the currency region (${e.code}: ${e.message})`));
   const cred = await autodraftCred(A1());
   const d = await agentDraft(OWNER(), cred, { client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(500000) });
+  await landWitnessPair(cited.documentId, {
+    ...witnessShape({
+      fields: { "invoice.total": 500000, "invoice.currency": "SGD", "invoice.type_code": "01" },
+    }),
+    versionN: 2,
+  });
   const r = await wakePostEntry(cred, {
-    entry: d.entry_id, expectedRevision: d.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
+    entry: d.entry_id, expectedRevision: (await entryRow(d.entry_id))?.revision_token ?? d.revision_token,
+    client: A1(), booksVersion: await booksVersion(A1()),
   });
   if (r?.refusal?.tier === "C") assertConverted(r, "currency_unsupported", "c4.currency");
   else noteLane(`c4.currency: the ladder refused before the delegate (${JSON.stringify(r?.refusal)}) — the currency wall was pre-empted by a Tier-B rung, which is a finding about ORDER, not about the pair`);
@@ -103,11 +114,17 @@ test("f-a2.c4.money-wall a corroboration-bound contradiction is NEVER reported a
   // and `(CLR25, corroboration_contradicted)` share an errcode, and the second is the MONEY
   // wall. An errcode-only classifier would swallow it and tell an operator the currency was
   // wrong — a wrong number wearing a plausible label.
+  // The anchor moves by LANDING A SUCCESSOR PAIR, never by rewriting the bound one:
+  // clara.document_regions is append-only, and a witness row is not a scratchpad.
   const p = await agentPostable(OWNER(), { client: A1(), amount: 500000 });
-  await rootQuery(
-    `update clara.document_regions set text_content='RM 6,000.00', monetary_cents=600000
-      where extraction_id=$1 and field_path='invoice.total'`, [p.cited.pair.textId])
-    .catch((e) => noteLane(`c4.money-wall: could not move the bound anchor (${e.code}: ${e.message})`));
+  await landWitnessPair(p.cited.documentId, {
+    ...witnessShape({
+      fields: { "invoice.total": 600000, "invoice.currency": "RM", "invoice.type_code": "01" },
+    }),
+    // version_n 2, or `_document_facts_extraction` keeps resolving G1 and the anchor never
+    // moves — it orders by the llm_witness TASK's version_n desc, id desc.
+    versionN: 2,
+  });
   const r = await post(p);
   assert.equal(r?.posted, false, "c4.money-wall: a contradicted anchor never posts");
   assert.notEqual(r?.refusal?.reason, "currency_unsupported",
@@ -165,8 +182,9 @@ test("f-a2.c4.birth-race (CLR23, counterparty_birth_race) converts — two sessi
   const a = await agentPostable(OWNER(), { client: A2(), amount: 420000, vendor: { new: { name } } });
   const b = await agentPostable(OWNER(), { client: A2(), amount: 420000, vendor: { new: { name } } });
   const sql =
-    "select clara.wake_post_entry(p_entry => $1, p_expected_revision => $2, p_client => $3, "
-    + "p_books_version => $4::bigint, p_rationale => $5, p_model => $6::jsonb, p_op_key => $7) as r";
+    "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+    + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+    + "p_model => $6::jsonb, p_op_key => $7::text) as r";
   const side = (p, key) => ({
     role: ROLES.wakeInteractive, wakeSecret: p.cred.secret,
     run: (c) => c.query(sql, [p.args.entry, p.args.expectedRevision, A2(), p.args.booksVersion,
@@ -215,8 +233,9 @@ test("f-a2.c4.clr26 the two-session race — the post WAITS or refuses at B9, an
   // ever DOES surface, the named fallback pair is required — and this cell is what says so.
   const p = await agentPostable(OWNER(), { client: A1() });
   const sql =
-    "select clara.wake_post_entry(p_entry => $1, p_expected_revision => $2, p_client => $3, "
-    + "p_books_version => $4::bigint, p_rationale => $5, p_model => $6::jsonb, p_op_key => $7) as r";
+    "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+    + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+    + "p_model => $6::jsonb, p_op_key => $7::text) as r";
   const out = await holdThenContend({
     a: {
       role: ROLES.wakeInteractive, wakeSecret: p.cred.secret,
@@ -287,19 +306,43 @@ test("f-a2.c4.bare-clr23 a bare CLR23 from inside _assert_supplier_bill_shape_at
   // The anti-wildcard cell. Eight bare CLR23 raises live in that body (0036:625, 654, 657, 660,
   // 675, 692, 710, 845) plus the sales analog. Converting them would give one defect two settle
   // outcomes decided by nothing an operator can see.
-  assert.ok(await fnPresent("_assert_supplier_bill_shape_at"),
-    "c4.bare-clr23 precondition: the callable predicate exists");
-  const src = await bodyOf("clara._assert_supplier_bill_shape_at(uuid,uuid)");
-  const bare = (src ?? "").replace(/--[^\n]*/g, " ");
-  const raises = [...bare.matchAll(/errcode\s*=\s*'CLR23'/g)].length;
-  const detailed = [...bare.matchAll(/errcode\s*=\s*'CLR23'[^;]*detail/g)].length;
-  assert.ok(raises > detailed,
-    `c4.bare-clr23: the body still holds BARE CLR23 raises (${raises} total, ${detailed} carrying a detail) — if every one grew a reason, the anti-wildcard cell would be testing nothing`);
-  const inverted = [
-    { account_code: "400-000", debit_cents: 500000, credit_cents: 0, description: "c4 bare ap-dr" },
-    { account_code: "500-A01", debit_cents: 0, credit_cents: 500000, description: "c4 bare exp-cr" },
-  ];
-  const p = await agentPostable(OWNER(), { client: A1(), codingKind: "supplier_bill", lines: inverted });
+  //
+  // WHERE THE BODY LIVES IS ITSELF A MOVING TARGET, so the cell FINDS it rather than naming it.
+  // D31 splits the supplier floor: the prologue becomes the callable projected-state predicate
+  // and the body moves into an `_at_projected` function, leaving the public `_at` a thin
+  // delegate. A cell pinned to `_at` would then scan a two-line delegate, count ZERO bare raises,
+  // and pass — the vacuous-green shape this whole battery exists to refuse. So it walks the
+  // candidates newest-first and asserts it found a body with real raises in it.
+  const CANDIDATES = ["_assert_supplier_bill_shape_at_projected", "_assert_supplier_bill_shape_at"];
+  let floor = null;
+  for (const name of CANDIDATES) {
+    if (!(await fnPresent(name))) continue;
+    const { src, sig } = await bodyOfName(name);
+    const bare = (src ?? "").replace(/--[^\n]*/g, " ");
+    const raises = [...bare.matchAll(/errcode\s*=\s*'CLR23'/g)].length;
+    if (raises > 0) { floor = { name, sig, bare, raises }; break; }
+  }
+  assert.ok(floor,
+    `c4.bare-clr23: the supplier floor's REAL body was found among ${CANDIDATES.join(" / ")} — a delegate with no raises in it means the scan is looking at the wrong function`);
+  const detailed = [...floor.bare.matchAll(/errcode\s*=\s*'CLR23'[^;]*detail/g)].length;
+  assert.ok(floor.raises > detailed,
+    `c4.bare-clr23: ${floor.sig} still holds BARE CLR23 raises (${floor.raises} total, ${detailed} carrying a detail) — if every one grew a reason, the anti-wildcard cell would be testing nothing`);
+  noteLane(`c4.bare-clr23: scanned ${floor.sig} — ${floor.raises} CLR23 raise(s), ${detailed} detailed`);
+
+  // The BEHAVIOURAL half needs a mis-shaped entry that reached `draft`. N1 moves the shape floor
+  // to draft ON THE AGENT LANE, so an agent draft of this shape is refused before it exists —
+  // which is a stronger wall, not a weaker one. The lawful way to put the shape in front of the
+  // POST is therefore to draft it CLEAN and doctor the lines afterwards, the rig-txn idiom for
+  // forcing a deliberately-redundant wall.
+  const p = await agentPostable(OWNER(), { client: A1(), codingKind: "supplier_bill" });
+  const doctored = await doctorLines(p.args.entry, [
+    { account_code: CHART.payable, debit_cents: 500000, credit_cents: 0, description: "c4 bare ap-dr" },
+    { account_code: CHART.expense, debit_cents: 0, credit_cents: 500000, description: "c4 bare exp-cr" },
+  ]);
+  if (!doctored.ok) {
+    noteLane(`c4.bare-clr23: the draft's lines could not be doctored (${doctored.code}: ${doctored.message}) — the entry guards refuse it, so the BEHAVIOURAL half is unbuildable and only the catalog half above stands`);
+    return;
+  }
   const r = await post(p).catch((e) => ({ raised: e.code, detail: e.detail }));
   assert.notEqual(r?.refusal?.tier, "C",
     `c4.bare-clr23: a bare CLR23 is NOT converted into a Tier-C receipt (got ${JSON.stringify(r)})`);
@@ -307,9 +350,9 @@ test("f-a2.c4.bare-clr23 a bare CLR23 from inside _assert_supplier_bill_shape_at
 
 test("f-a2.c4.unlisted an UNLISTED (errcode, reason) propagates as a task FAILURE", async (t) => {
   if (await gateCore(t)) return;
-  const src = await bodyOf("clara._agent_post_entry_core(uuid,text,uuid,bigint,text,jsonb,text)")
-    ?? await bodyOf("clara._agent_post_entry_core(uuid,text,uuid,bigint,text,jsonb,text,uuid)");
-  const bare = (src ?? "").replace(/--[^\n]*/g, " ");
+  const { src } = await bodyOfName("_agent_post_entry_core");
+  assert.ok(src, "c4.unlisted: the ungranted core resolves");
+  const bare = src.replace(/--[^\n]*/g, " ");
   assert.ok(/raise\b/i.test(bare),
     "c4.unlisted: the conversion block RE-RAISES on an unknown pair rather than falling through to a default receipt");
   assert.ok(!/when\s+others\s+then\s+return/i.test(bare),

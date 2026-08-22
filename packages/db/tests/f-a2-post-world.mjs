@@ -19,7 +19,7 @@ import {
   opk, noteLane, firmOf, freshResolution, seedCitedDocument, grantConsent, ev, billLines,
   wakeDraftEntry, mintWake5, factsRegion, upsertAccountClassed, booksVersion,
   witnessShape, landWitnessPair, money, rootQuery,
-  withWitnessV2, textCoverage, visionCoverage, documentSha,
+  withWitnessV2, textCoverage, visionCoverage, documentSha, withTxnOrNull,
 } from "./f-a2-post-fixtures.mjs";
 
 export * from "./f-a2-post-fixtures.mjs";
@@ -57,6 +57,71 @@ export async function ensureChart(sub, client) {
 // ---------------------------------------------------------------------------
 // Corroborated documents — B2's positive input, and C.17(1)'s hard prerequisite.
 // ---------------------------------------------------------------------------
+
+/**
+ * A region on the WITNESS TEXT extraction, by field path.
+ *
+ * WHY NOT `factsRegion`: that helper filters `ex.engine_kind='invoice_facts'` — the LEGACY lane
+ * — and a witness pair lands as `llm_text_facts`, so it returns NULL for every fixture here. A
+ * cell that built `ev(null, null, …)` from it got CLR21 `evidence_invalid` at DRAFT, which reads
+ * like a citation bug and is really a wrong-lane read. Measured on the rig.
+ */
+export async function witnessRegion(document, fieldPath = "invoice.total") {
+  const r = await rootQuery(
+    // `field_path` is RETURNED, not assumed by the caller: `_bind_evidence` refuses CLR21
+    // "evidence field_path does not match its region" when a citation names a path the region
+    // does not carry, and a caller that fell back to a guessed path hit exactly that.
+    `select rg.id, rg.text_content, rg.field_path, rg.extraction_id from clara.document_regions rg
+       join clara.document_extractions ex on ex.id=rg.extraction_id
+      where ex.document_id=$1 and ex.engine_kind='llm_text_facts' and rg.field_path=$2
+      order by ex.version_n desc, ex.extracted_at desc limit 1`, [document, fieldPath]);
+  return r.rows[0] ?? null;
+}
+
+/**
+ * `revise_entry` on a CODED kind demands BOTH a counterparty proposal and a cited evidence array
+ * — `coded entry requires a counterparty proposal` (CLR21 `vendor_malformed`, `0016:4817-4819`)
+ * and `coded entry requires a cited evidence array`. Every A8 / OQ-4 / excision cell revises a
+ * supplier_bill draft, so each must supply both; omitting either fails INSIDE `revise_entry` and
+ * reads like the POST refusing. The citation is re-derived from the document's own WITNESS text
+ * row, so the revision cites the generation the draft did. */
+export async function reviseAgentDraft(sub, {
+  entry, lines, expectedRevision, vendorName = SUPPLIER_NAME, document = null,
+  amountOverride = undefined, duplicateOverride = undefined, opKey = null,
+}) {
+  const { reviseEntry } = await import("./f-a2-post-fixtures.mjs");
+  const doc = document ?? (await rootQuery(
+    "select document_id from clara.journal_entries where id=$1", [entry])).rows[0]?.document_id ?? null;
+  let evidence = null;
+  if (doc) {
+    const total = (await witnessRegion(doc, "invoice.total")) ?? (await factsRegion(doc, "invoice.total"));
+    if (total?.id) evidence = [ev(total.id, total.text_content, "invoice.total")];
+  }
+  // The override args are OBJECTS carrying a reason, not booleans: `revise_entry` refuses a bare
+  // `true` with CLR10 "duplicate override is malformed (reason required)". A human override is a
+  // JUDGEMENT, and the writer will not record one without the human's stated ground — which is
+  // the same reasoning A8 and B6 rest on, enforced one layer down.
+  const asOverride = (v, why) => (v === undefined ? undefined : (v === true ? { reason: why } : v));
+  return reviseEntry(sub, {
+    entry, lines, expectedRevision, vendor: { new: { name: vendorName } }, evidence,
+    amountOverride: asOverride(amountOverride, "f-a2 rig: the human accepts this amount"),
+    duplicateOverride: asOverride(duplicateOverride, "f-a2 rig: the human accepts this as not a duplicate"),
+    opKey: opKey ?? opk("f-a2-revise"),
+  });
+}
+
+/** Stamp `closing_transfer` on an existing DRAFT. It cannot be set AT draft on the agent lane —
+ *  the writer raises CLR03 "closing_transfer is a human-lane marker", a PRE-EXISTING wall
+ *  stronger than the rung under test — so the marker goes on after a clean draft. It is a
+ *  BOOLEAN column; there is no `entry_kind` column, and a cell that invented one got 42703. */
+export async function stampClosingTransfer(entry) {
+  const out = await withTxnOrNull((c) =>
+    c.query("update clara.journal_entries set closing_transfer=true where id=$1", [entry]));
+  if (out.error) return { ok: false, code: out.error.code, message: out.error.message };
+  const r = await rootQuery(
+    "select closing_transfer, revision_token from clara.journal_entries where id=$1", [entry]);
+  return { ok: true, value: r.rows[0]?.closing_transfer, revisionToken: r.rows[0]?.revision_token };
+}
 
 /** A page-polygon identity region on the witness TEXT row. */
 const idRegion = (fieldPath, text) => ({
@@ -117,13 +182,16 @@ async function directionRegions(client, direction, vendorName) {
 export async function witnessedFiling(sub, {
   client, gross, net = null, tax = null, rounding = null, typeCode = "01",
   kind = "invoice", vendorName = SUPPLIER_NAME, corroborated = true, dropFields = [],
-  direction = "purchase",
+  direction = "purchase", currency = "RM",
 }) {
   const firm = await firmOf(client);
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(sub, { firm, client, quote: money(gross), kind });
   const sha = await documentSha(cited.documentId);
-  const fields = { "invoice.total": gross, "invoice.currency": "RM", "invoice.type_code": typeCode };
+  // The currency is stated AT LAND TIME, never patched afterwards: `document_regions` is
+  // append-only (CLR08), so a cell that tried to rewrite a landed region to force the currency
+  // wall got the append-only guard instead of the wall it was aiming at.
+  const fields = { "invoice.total": gross, "invoice.currency": currency, "invoice.type_code": typeCode };
   if (net != null) fields["invoice.total_excl_tax"] = net;
   if (tax != null) fields["invoice.tax_total"] = tax;
   if (rounding != null) fields["invoice.rounding"] = rounding;
@@ -237,7 +305,12 @@ export async function agentDraft(sub, cred, {
   client, cited, lines, codingKind, vendor = undefined, evidence = undefined,
   flags = {}, opKey = null, memo = "f-a2 agent draft", postingDate = "2026-03-15",
 }) {
-  const region = evidence === undefined ? await factsRegion(cited.documentId, "invoice.total") : null;
+  // WITNESS lane first, legacy second, the seeded OCR region last. The order matters: a witness
+  // pair's regions are `llm_text_facts`, which `factsRegion` cannot see at all.
+  const region = evidence === undefined
+    ? (await witnessRegion(cited.documentId, "invoice.total"))
+      ?? (await factsRegion(cited.documentId, "invoice.total"))
+    : null;
   return wakeDraftEntry(cred, {
     client,
     resolution: freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
@@ -319,6 +392,102 @@ export async function countFor(table, client) {
 export async function bodyOf(signature) {
   const r = await rootQuery("select prosrc from pg_proc where oid=$1::regprocedure", [signature]);
   return r.rows[0]?.prosrc ?? null;
+}
+
+/**
+ * EVERY LIVE SIGNATURE of a clara function, resolved BY CATALOG PROBE.
+ *
+ * WHY THIS EXISTS, and it cost the first integration read to learn. Hardcoding a regprocedure
+ * identity into a cell is a GUESS about someone else's arity, and it fails in the one direction
+ * that teaches nothing: `bodyOf('clara._approve_entry_core(jsonb,uuid,text,text)')` returns NULL
+ * against the live 5-arity body (`p_ctx, p_entry, p_expected_revision uuid, p_attestation,
+ * p_op_key`), so the cell reports "the body did not resolve" when what actually happened is that
+ * the TEST was wrong. A probe cannot make that mistake, and when a name really is ambiguous it
+ * says so loudly instead of picking the first row.
+ *
+ * Returns `[{ sig, args, nargs }]` ordered by arity — never throws on absence, because absence is
+ * a legitimate frontier answer that the caller's gate is responsible for.
+ */
+export async function signaturesOf(name) {
+  const r = await rootQuery(
+    `select p.oid::regprocedure::text as sig,
+            pg_get_function_identity_arguments(p.oid) as args,
+            p.pronargs as nargs
+       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname=$1
+      order by p.pronargs, p.oid::regprocedure::text`, [name]);
+  return r.rows.map((x) => ({ sig: x.sig, args: x.args, nargs: x.nargs }));
+}
+
+/**
+ * The live body of a clara function resolved BY NAME. Ambiguity is LOUD, never first-wins: a
+ * second overload of a body under test means the estate grew a door this cell cannot arbitrate
+ * between, which is a finding about the estate and not something to silently pick past (the
+ * `mintEngineId` idiom, one wave up).
+ *
+ * Returns `{ src, sig, args }`, or `{ src: null, sig: null, overloads }` when the name resolves
+ * to nothing — so a caller can distinguish "absent at this frontier" from "present and empty".
+ */
+export async function bodyOfName(name, { allowOverloads = false } = {}) {
+  const sigs = await signaturesOf(name);
+  if (sigs.length === 0) return { src: null, sig: null, args: null, overloads: 0 };
+  if (sigs.length > 1 && !allowOverloads) {
+    throw new Error(
+      `f-a2: clara.${name} carries ${sigs.length} overloads (${sigs.map((s) => s.args).join(" | ")}) `
+      + "— ambiguous, refusing to pick one. A cell that reads a body must name WHICH body.");
+  }
+  const pick = sigs[sigs.length - 1];
+  return { src: await bodyOf(pick.sig), sig: pick.sig, args: pick.args, overloads: sigs.length };
+}
+
+/**
+ * The estate's own control-leg join, spelled the way the live floor spells it (`0036:619-626`):
+ * `clara.coa_accounts`, keyed on `(client_id, account_code)`. The relation is NOT
+ * `chart_of_accounts` and the column is NOT `code`. */
+export async function controlLegCount(entry, { classes = ["payable", "receivable"], nullCounterpartyOnly = false } = {}) {
+  const r = await rootQuery(
+    `select count(*)::int as n
+       from clara.journal_lines l
+       join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=$1 and a.account_class = any($2)
+        and ($3 = false or l.counterparty_id is null)`, [entry, classes, nullCounterpartyOnly]);
+  return r.rows[0].n;
+}
+
+/**
+ * Replace a DRAFT entry's lines as root, and hand back the entry's NEW revision token.
+ *
+ * WHY A CELL EVER NEEDS THIS. N1 moves the shape floors to DRAFT on the agent lane, so a
+ * deliberately mis-shaped agent draft cannot be created at all — the writer refuses it, which is
+ * a stronger wall than the rung under test and not a weaker one. The only lawful way to put a
+ * mis-shaped entry in front of the POST is therefore to draft it CLEAN and doctor it afterwards,
+ * which is exactly what `rig-txn.mjs`'s `commitRawUnbalanced` / `commitRawMovedLine` family does
+ * for the other deliberately-redundant walls. Using the HUMAN draft lane instead would not work
+ * here: A8 admits only `maker_actor = agent`, so a human-drafted entry refuses at Tier A and
+ * never reaches the rung.
+ *
+ * THE TOKEN IS THE TRAP, and it is returned rather than left for the caller to rediscover:
+ * `t_jl_rotate_token` rotates the entry's `revision_token` on any line change, so a caller that
+ * reused the pre-doctoring token would refuse at A5 (CLR06) and report a revision failure where
+ * it meant to test a shape. Measured on the rig, not assumed.
+ *
+ * Returns `{ ok, revisionToken }` or `{ ok: false, code, message }`. */
+export async function doctorLines(entry, lines) {
+  const out = await withTxnOrNull(async (c) => {
+    await c.query("delete from clara.journal_lines where entry_id=$1", [entry]);
+    let n = 0;
+    for (const l of lines) {
+      n += 1;
+      await c.query(
+        `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description)
+         values($1,$2,$3,$4,$5,$6)`,
+        [entry, n, l.account_code, l.debit_cents, l.credit_cents, l.description ?? "doctored"]);
+    }
+    return n;
+  });
+  if (out.error) return { ok: false, code: out.error.code, message: out.error.message };
+  const r = await rootQuery("select revision_token, status from clara.journal_entries where id=$1", [entry]);
+  return { ok: true, revisionToken: r.rows[0]?.revision_token ?? null, status: r.rows[0]?.status ?? null };
 }
 
 /** Does clara.<name> exist at all, at any arity? */

@@ -25,13 +25,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   ROLES, rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, approveEntry, reviseEntry, withdrawDraft, entryRow,
+  booksVersion, opk, approveEntry, withdrawDraft, entryRow,
   holdThenContend, mintWake5, postingCoreReady, retireDocumentFiling,
   draftEntryV3, freshResolution, ev, factsRegion,
   gateCore, wakePostEntry, postReceiptCount, postReceiptRow, opReceiptText,
   agentPostable, agentDraft, autodraftCred, proactiveCred, ensureChart, witnessedFiling,
   supplierLines, MODEL, RATIONALE, APPROVAL_ARM_AGENT, admitsAll, assertVectorShape,
-  bodyOf, AGENT_USER_ID,
+  bodyOfName, AGENT_USER_ID,
+  reviseAgentDraft, stampClosingTransfer, withTxnOrNull,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -108,7 +109,7 @@ test("f-a2.c1.3 the refused proactive attempt leaves NOTHING behind — no recei
   const row = await entryRow(p.args.entry);
   assert.equal(row?.revision_token, before, "c1.3: the revision token did not rotate — the raise rolled the whole attempt back");
   const ev = await rootQuery(
-    "select count(*)::int as n from clara.domain_events where event_type in ('entry.posted','entry.post_refused') and subject_id=$1",
+    "select count(*)::int as n from clara.domain_events where event_type in ('entry.posted','entry.post_refused') and entry_id=$1",
     [p.args.entry]);
   assert.equal(ev.rows[0].n, 0, "c1.3: a Tier-A raise emits neither entry.posted nor entry.post_refused");
 });
@@ -156,8 +157,9 @@ test("f-a2.c1.7 a null books_version refuses", async (t) => {
 
 test("f-a2.c1.8 the wrapper carries NO DML — a catalog cell over its live body", async (t) => {
   if (await gateCore(t)) return;
-  const src = await bodyOf("clara.wake_post_entry(uuid,text,uuid,bigint,text,jsonb,text)");
-  assert.ok(src, "c1.8: the wrapper resolves at the pinned signature (design §3.1)");
+  const { src, args } = await bodyOfName("wake_post_entry");
+  assert.ok(src, "c1.8: the wrapper resolves — BY NAME, because a hardcoded regprocedure identity is a guess about someone else's arity and fails as a NULL body rather than as a wrong test");
+  noteLane(`c1.8: live wrapper signature = clara.wake_post_entry(${args})`);
   // Comments stripped before the scan — a DML token inside a `-- …` line is prose, and a census
   // that flagged it would train the next author to write worse comments.
   const bare = src.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
@@ -227,13 +229,33 @@ test("f-a2.c2.A5 a stale revision_token -> CLR06", async (t) => {
 
 test("f-a2.c2.A6 a filing that MOVED under the draft -> CLR02", async (t) => {
   if (await gateCore(t)) return;
+  // THE AUDITED DOOR CANNOT BUILD THIS FIXTURE, and the reason is itself a wall worth naming:
+  // `retire_document_filing` refuses while a LIVE DRAFT cites the filing ("filing has live
+  // citation blockers"), which is exactly the state this cell needs. Withdrawing the draft first
+  // would leave nothing to post. So the filing is retired by a root UPDATE — the same doctoring
+  // idiom `doctorLines` and `doctorFlags` use for the other deliberately-redundant walls — and
+  // the audited refusal is asserted FIRST, so the cell records the estate's real behaviour
+  // instead of quietly routing around it.
   const p = await agentPostable(OWNER(), { client: A1() });
   const filing = await rootQuery(
     "select id, revision_token from clara.document_filings where id=$1", [p.cited.filingId]);
-  await retireDocumentFiling(OWNER(), {
-    filing: p.cited.filingId, reason: "c2.A6 move the filing under the draft",
-    expectedRevision: filing.rows[0]?.revision_token, opKey: opk("c2A6"),
-  });
+  let doorRefused = null;
+  try {
+    await retireDocumentFiling(OWNER(), {
+      filing: p.cited.filingId, reason: "c2.A6 move the filing under the draft",
+      expectedRevision: filing.rows[0]?.revision_token, opKey: opk("c2A6"),
+    });
+  } catch (e) { doorRefused = e; }
+  if (doorRefused) {
+    assert.match(doorRefused.message, /citation blocker/i,
+      `c2.A6: the audited retire door refuses while a live draft cites the filing (got ${doorRefused.code}: ${doorRefused.message})`);
+    const forced = await withTxnOrNull((c) => c.query(
+      "update clara.document_filings set retired_at=now(), retirement_reason=$2 where id=$1",
+      [p.cited.filingId, "c2.A6 rig: forced retirement, the audited door refuses on a live draft"]));
+    assert.ok(!forced.error, `c2.A6: the filing was moved by root doctoring (${forced.error?.code}: ${forced.error?.message})`);
+  }
+  assert.ok((await rootQuery("select retired_at from clara.document_filings where id=$1", [p.cited.filingId]))
+    .rows[0]?.retired_at, "c2.A6 precondition: the filing really is retired under the draft");
   await assertTierARaise(() => wakePostEntry(p.cred, p.args),
     { code: "CLR02", entry: p.args.entry, label: "c2.A6 filing moved" });
 });
@@ -271,8 +293,8 @@ test("f-a2.c2.A8b an AGENT draft a human REVISED refuses AT A8 — the cell that
   // only `duplicate_override` into flags — so B6 CANNOT see it. That is the whole finding
   // (C-1): without A8's second conjunct the agent posts a human's numbers unattended, and the
   // rung that is supposed to catch overrides is blind to this one.
-  const revised = await reviseEntry(OWNER(), {
-    entry: p.args.entry, lines: supplierLines(499900), expectedRevision: p.args.expectedRevision,
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: p.args.entry, lines: supplierLines(500000), expectedRevision: p.args.expectedRevision,
     duplicateOverride: true, opKey: opk("c2A8b"),
   });
   const row = await entryRow(p.args.entry);
@@ -287,8 +309,8 @@ test("f-a2.c2.A8b an AGENT draft a human REVISED refuses AT A8 — the cell that
 test("f-a2.c2.A8-exit1 OQ-4 exit 1 — the revised draft POSTS through the HUMAN lane, under human identity", async (t) => {
   if (await gateCore(t)) return;
   const p = await agentPostable(OWNER(), { client: A1() });
-  const revised = await reviseEntry(OWNER(), {
-    entry: p.args.entry, lines: supplierLines(499900), expectedRevision: p.args.expectedRevision,
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: p.args.entry, lines: supplierLines(500000), expectedRevision: p.args.expectedRevision,
     duplicateOverride: true, opKey: opk("c2exit1r"),
   });
   const tok = revised?.revision_token ?? (await entryRow(p.args.entry)).revision_token;
@@ -302,8 +324,8 @@ test("f-a2.c2.A8-exit1 OQ-4 exit 1 — the revised draft POSTS through the HUMAN
 test("f-a2.c2.A8-exit2 OQ-4 exit 2 — after the human draft is WITHDRAWN the agent re-derives and posts her own, under agent identity", async (t) => {
   if (await gateCore(t)) return;
   const p = await agentPostable(OWNER(), { client: A1() });
-  const revised = await reviseEntry(OWNER(), {
-    entry: p.args.entry, lines: supplierLines(499900), expectedRevision: p.args.expectedRevision,
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: p.args.entry, lines: supplierLines(500000), expectedRevision: p.args.expectedRevision,
     duplicateOverride: true, opKey: opk("c2exit2r"),
   });
   const tok = revised?.revision_token ?? (await entryRow(p.args.entry)).revision_token;
@@ -331,10 +353,15 @@ test("f-a2.c2.A8-exit2 OQ-4 exit 2 — after the human draft is WITHDRAWN the ag
 
 test("f-a2.c2.A9 a closing_transfer entry refuses -> CLR03", async (t) => {
   if (await gateCore(t)) return;
+  // The marker goes on AFTER a clean draft. It cannot be set at draft on this lane at all —
+  // the writer already raises CLR03 `closing_transfer is a human-lane marker`, a
+  // PRE-EXISTING wall stronger than the rung under test — and it is a BOOLEAN column, not an
+  // `entry_kind` enum. There is no such column; a cell that invented one got 42703.
   const p = await agentPostable(OWNER(), { client: A1() });
-  await rootQuery("update clara.journal_entries set entry_kind='closing_transfer' where id=$1", [p.args.entry])
-    .catch((e) => noteLane(`c2.A9: could not stamp closing_transfer (${e.code}: ${e.message}) — the immutability guard may forbid the doctoring, in which case the cell's premise moves`));
-  await assertTierARaise(() => wakePostEntry(p.cred, p.args),
+  const stamped = await stampClosingTransfer(p.args.entry);
+  assert.ok(stamped.ok, `c2.A9 precondition: closing_transfer stamped (${stamped.code}: ${stamped.message})`);
+  assert.equal(stamped.value, true, "c2.A9 precondition: …and the entry really carries it");
+  await assertTierARaise(() => wakePostEntry(p.cred, { ...p.args, expectedRevision: stamped.revisionToken ?? p.args.expectedRevision }),
     { code: "CLR03", entry: p.args.entry, label: "c2.A9 closing_transfer" });
 });
 
@@ -342,8 +369,9 @@ test("f-a2.c2.lock the row lock precedes every ladder read — two concurrent po
   if (await gateCore(t)) return;
   const p = await agentPostable(OWNER(), { client: A1() });
   const sql =
-    "select clara.wake_post_entry(p_entry => $1, p_expected_revision => $2, p_client => $3, "
-    + "p_books_version => $4::bigint, p_rationale => $5, p_model => $6::jsonb, p_op_key => $7) as r";
+    "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+    + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+    + "p_model => $6::jsonb, p_op_key => $7::text) as r";
   const side = (key) => ({
     role: ROLES.wakeInteractive, wakeSecret: p.cred.secret,
     run: (c) => c.query(sql, [p.args.entry, p.args.expectedRevision, A1(), p.args.booksVersion,

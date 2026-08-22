@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane, ROLES, roleQuery,
   opk, reverseEntry, postingCoreReady, packSpliceReady,
-  gatePack, gateCore, wakePostEntry, agentPostable, bodyOf,
+  gatePack, gateCore, wakePostEntry, agentPostable, bodyOfName,
   F_A2_POST_VERBS, PR2_PENDING,
 } from "./f-a2-post-world.mjs";
 import { WB_AUTHORITY_FNS, WB_WIKI_WHITELIST, WB_WIKI_RELATIONS } from "./wave-b/wb-helpers.mjs";
@@ -94,7 +94,7 @@ test("f-a2.c10.recomputed the block is computed from approved+unreversed, and MO
 
 test("f-a2.c10.no-sightings the block reads NO rule_sightings / coding_rules row", async (t) => {
   if (await gatePack(t)) return;
-  const src = await bodyOf("clara.get_context_pack(uuid,text)");
+  const src = (await bodyOfName("get_context_pack")).src;
   assert.ok(src, "c10.no-sightings: the pack body resolves");
   const bare = src.replace(/--[^\n]*/g, " ");
   for (const rel of ["rule_sightings", "coding_rules"]) {
@@ -110,7 +110,7 @@ test("f-a2.c10.markers all FIVE prior splice markers survive the fifth splice", 
   // `0036:1826-1850`'s tail asserts that EVERY post-0016 surgery marker survived. F-A2's splice
   // adds its own to that list and RE-ASSERTS the prior five — a splice that quietly dropped one
   // is the exact failure the tail exists to catch.
-  const src = await bodyOf("clara.get_context_pack(uuid,text)");
+  const src = (await bodyOfName("get_context_pack")).src;
   assert.ok(src, "c10.markers: the pack body resolves");
   const PRIOR = ["sst_registration_watch", "'wiki'", "bound_scope_", "stale_at", "has_stale_sources"];
   for (const m of PRIOR) {
@@ -126,7 +126,7 @@ test("f-a2.c10.anchor the splice anchor matched EXACTLY ONCE and the result CHAN
   // The estate's anchoring rule (0018:452-461, 0019:1019-1032). A splice that matched TWICE, or
   // that matched and changed NOTHING, is the failure mode the discipline exists to catch — and
   // both are invisible to a migration that only checks it applied cleanly.
-  const src = await bodyOf("clara.get_context_pack(uuid,text)");
+  const src = (await bodyOfName("get_context_pack")).src;
   assert.ok(src, "c10.anchor: the pack body resolves");
   const n = src.split(PACK_BLOCK).length - 1;
   assert.ok(n >= 1, `c10.anchor: the block name appears in the live body (found ${n}) — the splice CHANGED the result`);
@@ -137,7 +137,7 @@ test("f-a2.c10.anchor the splice anchor matched EXACTLY ONCE and the result CHAN
 
 test("f-a2.c10.wiki-gate the wiki block still gates on purpose + pack_consumer", async (t) => {
   if (await gatePack(t)) return;
-  const src = await bodyOf("clara.get_context_pack(uuid,text)");
+  const src = (await bodyOfName("get_context_pack")).src;
   assert.ok(src, "c10.wiki-gate: the pack body resolves");
   assert.match(src, /pack_consumer/,
     "c10.wiki-gate: the pack_consumer capability token still gates the wiki block — the fifth splice is a pure ADDITION and moves no existing gate");
