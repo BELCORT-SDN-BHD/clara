@@ -23,11 +23,32 @@ import {
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, postReceiptCount, supplierLines, bodyOfName, fnPresent,
   TIER_C_PAIRS, TIER_C_EXCLUDED, MODEL, RATIONALE,
-  landWitnessPair, witnessShape, doctorLines, CHART, resolveOpenQuestion,
+  landWitnessPair, witnessShape, doctorLines, CHART, resolveOpenQuestion, salesLines,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
-before(async () => { if (await postingCoreReady()) world = await buildWorld(); });
+let nameOnlyClient = null;
+before(async () => {
+  if (!(await postingCoreReady())) return;
+  world = await buildWorld();
+  // A THIRD CLIENT, ARMED UNDER HARD CONSTRAINT 12'S POLICY, THROUGH THE AUDITED DOOR.
+  // `0062`'s wall is a BEFORE-row trigger on `clara.counterparties` that fires only for a client
+  // whose `customer_identity_policy` fact says `name_only` — uuid-pinned to ROME SECRETARY in
+  // production, and settable on any client through `record_client_fact`, which is the one
+  // audited door 0063 leaves open. Without this the c4.name-only cell had NO behavioural proof
+  // at all: it recorded a lane note and fell back to asserting that a constant appeared in a
+  // constant, which is a tautology, not evidence — on the ONE wall that enforces a hard
+  // constraint.
+  const { createClient } = await import("./f-a2-post-world.mjs");
+  const { recordPolicy } = await import("./name-only-guard-fixtures.mjs");
+  nameOnlyClient = await createClient(world.users.alice, {
+    name: `F-A2 NAMEONLY ${Date.now().toString(36)}`, opKey: opk("c4nameonlycli"),
+  });
+  await recordPolicy(world.users.alice, {
+    client: nameOnlyClient, value: "name_only",
+    basis: "f-a2 c4.name-only: constraint 12's wall needs a client under the policy to fire at all",
+  });
+});
 after(async () => {
   printLaneNotes("f-a2-ladder-4");
   printSkipCount("f-a2-ladder-4");
@@ -230,32 +251,58 @@ test("f-a2.c4.birth-race (CLR23, counterparty_birth_race) converts — two sessi
 
 test("f-a2.c4.name-only (CLR10, customer_identity_name_only) — hard constraint 12's own wall, ZERO body edits", async (t) => {
   if (await gateCore(t)) return;
-  // GM-6. Live population is ~0 (ROME SECRETARY invoices print no buyer registration — the
-  // constraint's own basis), which is exactly WHY the cell and not the data is the evidence: a
-  // constraint-12 refusal settling `failed` is the wrong evidentiary shape precisely where
-  // evidence matters most. The wall already carries `detail.reason`, so PR-1 edits no body.
+  // GM-6, FORCED. The wall already carries `detail.reason`, so PR-1 edits no body — but "edits
+  // no body" is not the same as "works", and the first cut of this cell proved neither: it
+  // recorded a lane note when the refusal was not Tier C and fell back to asserting that
+  // `customer_identity_name_only` appears in `TIER_C_PAIRS`, a constant this file also declares.
+  // That is a tautology. On the one wall that enforces a HARD CONSTRAINT, the behavioural proof
+  // is the whole point, so the client is now ARMED under the policy in before() and the pair is
+  // asserted unconditionally.
+  assert.ok(nameOnlyClient, "c4.name-only: the policy-armed client exists (mandatory setup)");
+  const policy = await rootQuery(
+    `select fact_value from clara.client_facts
+      where client_id=$1 and fact_key='customer_identity_policy'
+      order by recorded_at desc limit 1`, [nameOnlyClient]).catch(() => ({ rows: [] }));
+  assert.match(JSON.stringify(policy.rows[0]?.fact_value ?? null), /name_only/,
+    "c4.name-only: …and it really carries the policy, read back from the fact the trigger reads");
+
   const wall = await rootQuery(
     `select count(*)::int as n from pg_trigger t join pg_class c on c.oid=t.tgrelid
        join pg_namespace ns on ns.oid=c.relnamespace
       where ns.nspname='clara' and c.relname='counterparties' and not t.tgisinternal`);
   assert.ok(wall.rows[0].n > 0, "c4.name-only: the counterparties BEFORE-row wall exists in the catalog");
-  // THE CODING KIND FOLLOWS THE COUNTERPARTY KIND. A `customer` counterparty on a
-  // `supplier_bill` is refused at the draft door outright ("a supplier_bill entry cannot carry a
-  // customer counterparty"), one wall before the constraint-12 trigger this cell is aiming at --
-  // so the identifier-bearing customer birth rides a SALES entry, which is also the shape a
-  // ROME-SECRETARY-style invoice really has.
+
+  // An identifier-bearing CUSTOMER birth on a client whose customers are NAME-ONLY. The coding
+  // kind follows the counterparty kind: a customer on a supplier_bill is refused at the draft
+  // door, one wall before the trigger this cell is aiming at.
+  await ensureChart(OWNER(), nameOnlyClient);
+  // The document STATES its net and its (zero) tax: B4-sales reports `not_evaluable` where the
+  // components are withheld, and a Tier-B refusal never reaches the delegate the pair lives in.
   const p = await agentPostable(OWNER(), {
-    client: A2(), amount: 430000, codingKind: "sales_invoice",
+    client: nameOnlyClient, amount: 430000, net: 430000, tax: 0, codingKind: "sales_invoice",
+    lines: salesLines(430000, 430000, 0, 0),
     vendor: { new: { name: "NAME ONLY BUYER SDN BHD", registration_no: "201901000123" }, kind: "customer" },
   });
-  const r = await post(p, { booksVersion: await booksVersion(A2()) });
-  if (r?.refusal?.reason === "customer_identity_name_only") {
-    assertConverted(r, "customer_identity_name_only", "c4.name-only");
-  } else {
-    noteLane(`c4.name-only: the rig client is not under the 0062 name-only wall (uuid-pinned to ROME SECRETARY in production), so the behavioural half is unproven here; got ${JSON.stringify(r?.refusal)}. The PAIR's membership is asserted structurally by c4.set`);
-    assert.ok(TIER_C_PAIRS.some(([, x]) => x === "customer_identity_name_only"),
-      "c4.name-only: the pair is a member of the closed set");
-  }
+  const r = await post(p, { booksVersion: await booksVersion(nameOnlyClient) });
+  assertConverted(r, "customer_identity_name_only", "c4.name-only");
+  assert.equal(await postReceiptCount(p.args.entry), 0,
+    "c4.name-only: a Tier-C conversion leaves ZERO entry_post_receipts rows (C.7b)");
+  assert.equal(
+    (await rootQuery(
+      "select count(*)::int as n from clara.counterparties where client_id=$1 and registration_normalized is not null",
+      [nameOnlyClient])).rows[0].n,
+    0, "c4.name-only: …and NO identifier-bearing counterparty survived the attempt — constraint 12 holds at the row, not just at the receipt");
+
+  // THE CONTROL. Without it the refusal is indistinguishable from a client that cannot post at
+  // all: the SAME shape, minus the identifier, posts.
+  const clean = await agentPostable(OWNER(), {
+    client: nameOnlyClient, amount: 431000, net: 431000, tax: 0, codingKind: "sales_invoice",
+    lines: salesLines(431000, 431000, 0, 0),
+    vendor: { new: { name: "NAME ONLY BUYER TWO SDN BHD" }, kind: "customer" },
+  });
+  const ok = await post(clean, { booksVersion: await booksVersion(nameOnlyClient) });
+  assert.equal(ok?.posted, true,
+    `c4.name-only CONTROL: a NAME-ONLY customer on the same client posts — the wall refuses the ENRICHMENT, never the customer (${JSON.stringify(ok?.refusal)})`);
 });
 
 test("f-a2.c4.clr26 the two-session race on ALL THREE Tier-A locks — the post WAITS or refuses at B9, and never reaches the delegate's CLR26 re-check", async (t) => {
