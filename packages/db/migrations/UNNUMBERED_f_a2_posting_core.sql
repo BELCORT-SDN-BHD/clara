@@ -418,13 +418,29 @@ begin
   end if;
 
   -- (0.9) INERTNESS OF THE RECEIPT WALL, MEASURED ON THIS DATABASE (E.3). The live arm keys on
-  -- "the checker is the agent AND no rule id" — the retiring executor always sets a rule id, and
-  -- every other approve caller passes a human actor. This counts the rows that WOULD violate the
-  -- new deferred trigger if they were approved again; a non-zero answer names them.
+  -- "the checker is the agent" — full stop — and every other approve caller passes a human
+  -- actor. This counts the rows that WOULD violate the new deferred trigger if they were
+  -- approved again; a non-zero answer names them.
   select count(*)::int into v_n from clara.journal_entries e
    join clara.users u on u.id = e.checker_actor
    where e.status='approved' and u.is_agent and e.checked_via_rule_id is null;
   insert into _fa2p1_pre(k,v) values ('agent_checked_no_rule_entries', v_n::text);
+
+  -- ...AND THE HALF THE WALL ALSO COVERS, measured rather than assumed. The first cut fenced the
+  -- wall with `checked_via_rule_id is null` on the belief that the retiring executor approves
+  -- under the AGENT identity with a rule id. E.3 authorises no such exemption, so the fence is
+  -- gone -- and this census is what makes removing it safe rather than hopeful: if this database
+  -- holds even ONE agent-checked approval carrying a rule id, the belief is TRUE here and the
+  -- wall would strand that writer, so the file REFUSES to apply and names the population instead
+  -- of discovering it at the next post.
+  select count(*)::int into v_n from clara.journal_entries e
+   join clara.users u on u.id = e.checker_actor
+   where e.status='approved' and u.is_agent and e.checked_via_rule_id is not null;
+  insert into _fa2p1_pre(k,v) values ('agent_checked_with_rule_entries', v_n::text);
+  if v_n > 0 then
+    raise exception 'F-A2 part1 prestate: % approved entr(y/ies) on this database are agent-checked WITH a rule id. The receipt wall covers EVERY agent-approved transition (E.3), so applying here would strand that writer -- retire it, or re-open the exemption as an owner ruling, before applying', v_n
+      using errcode='CLR10';
+  end if;
 
   raise notice 'F-A2 part1 prestate: clean -- 8 bodies pinned by prosrc sha at frontier 0102 (the SEVEN this file replaces plus the sales floor, which is pinned so a drift is caught but is byte-unmoved and is NOT a D1 term), the 0040 marker set is 8 CARRY / 3 RETIRE (5 occurrences) / bank_rule_suggested at 2, every splice anchor occurs exactly once, the pg_trigger census matches D.1 in both directions (11 deferred, 5 not), both wake_credentials CHECKs are the closed-world enumerations GB-3 found over % live credential(s), registration_conflict and customer_identity_name_only are ALREADY typed (zero body edits), and % existing approved entr(y/ies) are agent-checked without a rule id.',
     (select v from _fa2p1_pre where k='live_credentials'),
@@ -505,9 +521,10 @@ create trigger t_entry_post_receipts_no_truncate before truncate on clara.entry_
 -- so it refuses instead of falling through.
 --
 -- THE LIVE ARM READS THE RECORDED FACT, NOT A NAME (review law 3): `clara.users.is_agent`, not a
--- comparison against a hardcoded uuid. It is fenced by `checked_via_rule_id is null` because the
--- retiring executor approves under the agent identity WITH a rule id — the census in §0.9
--- measures how many rows on THIS database sit in the fenced set.
+-- comparison against a hardcoded uuid. And that is the ENTIRE condition Annex E.3 authorises —
+-- EVERY agent-approved transition owes a receipt. §0.9 measures both halves of the population
+-- this covers and REFUSES to apply where the rule-id half is non-empty, so the wall never lands
+-- somewhere it would strand a live writer.
 -- =====================================================================================
 create function clara._tf_assert_agent_post_receipt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -523,8 +540,19 @@ begin
     raise exception 'the approving identity % is unresolvable; the agent-post receipt wall refuses rather than assuming a human', new.checker_actor
       using errcode='CLR08', detail='{"reason":"agent_post_receipt_arm0_unresolvable_checker"}';
   end if;
-  -- A human approval writes no receipt, and neither does the retiring rule-post executor.
-  if not v_is_agent or new.checked_via_rule_id is not null then
+  -- A human approval writes no receipt. THAT IS THE WHOLE CONDITION (Annex E.3).
+  --
+  -- THE RULE-ID DISJUNCT IS GONE -- named in PROSE, because §J's postcheck below asserts that
+  -- column name is ABSENT from this body and a comment quoting it would make the guard read its
+  -- own explanation as the defect (the same discipline §E applies to the 0040 markers).
+  -- E.3 authorises no such exemption, and it carved
+  -- a hole through the one wall that makes the receipt structural: any approve reaching this
+  -- trigger under the AGENT identity while carrying a rule id was waved past with no receipt at
+  -- all. It was justified as an accommodation for the retiring executor -- but 0.9 MEASURES that
+  -- population and REFUSES to apply where it is non-empty, so the accommodation is provably not
+  -- needed on any database this file lands on, and the executor retires in PR-3 regardless. A
+  -- wall with an unaudited exemption is a wall whose exemption outlives its reason.
+  if not v_is_agent then
     return null;
   end if;
   select count(*)::int into v_n from clara.entry_post_receipts r where r.entry_id = new.id;
@@ -1702,13 +1730,30 @@ begin
   if v_n <> 17 then
     raise exception 'F-A2 tail: journal_entries now carries % triggers, expected 16 + t_je_agent_post_receipt', v_n using errcode='CLR10';
   end if;
-  -- INERTNESS, MEASURED not asserted: the count of already-approved entries that sit inside the
-  -- new wall's live arm is unchanged from the prestate, and every one of them is a rule post.
+  -- INERTNESS, MEASURED not asserted: BOTH halves of the population the wall's live arm covers
+  -- are unchanged from the prestate. Two reads, because the wall covers every agent-approved
+  -- transition and a single rule-id-filtered read is exactly what let the unauthorised exemption
+  -- hide in the first place.
   select count(*)::int into v_inert from clara.journal_entries e
    join clara.users u on u.id = e.checker_actor
    where e.status='approved' and u.is_agent and e.checked_via_rule_id is null;
   if v_inert::text is distinct from (select v from _fa2p1_pre where k='agent_checked_no_rule_entries') then
-    raise exception 'F-A2 tail: the receipt wall''s fenced population moved during this migration' using errcode='CLR10';
+    raise exception 'F-A2 tail: the receipt wall''s live population moved during this migration' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_inert from clara.journal_entries e
+   join clara.users u on u.id = e.checker_actor
+   where e.status='approved' and u.is_agent and e.checked_via_rule_id is not null;
+  if v_inert::text is distinct from (select v from _fa2p1_pre where k='agent_checked_with_rule_entries') then
+    raise exception 'F-A2 tail: the rule-id half of the receipt wall''s population moved during this migration' using errcode='CLR10';
+  end if;
+  -- ...and the unauthorised exemption is GONE from the shipped body, read positively.
+  select p.prosrc into v_src from pg_proc p where p.proname='_tf_assert_agent_post_receipt'
+    and p.pronamespace='clara'::regnamespace;
+  if position('checked_via_rule_id' in v_src) <> 0 then
+    raise exception 'F-A2 tail: the receipt wall still carries a checked_via_rule_id exemption -- E.3 authorises none' using errcode='CLR10';
+  end if;
+  if position('if not v_is_agent then' in v_src) = 0 then
+    raise exception 'F-A2 tail: the receipt wall''s live arm is not keyed on is_agent alone' using errcode='CLR10';
   end if;
 
   -- (J.3) The ladder and the predicates: created, ungranted, definer, pinned path, one overload.

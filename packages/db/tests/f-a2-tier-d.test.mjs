@@ -24,7 +24,7 @@ import {
   opk, entryRow, approveEntry, postingCoreReady, withTxnOrNull,
   gateCore, wakePostEntry, agentPostable, postReceiptCount, postReceiptRow,
   jeTriggerCensus, D1_TRIGGER_PREDICTION, F_A2_NEW_JE_TRIGGER,
-  TIER_D_TOKENS, lastRefusalOf, admitsAll, PR2_PENDING, bodyOfName,
+  TIER_D_TOKENS, lastRefusalOf, admitsAll, PR2_PENDING, bodyOfName, AGENT_USER_ID, CHART,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -114,6 +114,53 @@ test("f-a2.c5.suppressed a SUPPRESSED entry_post_receipts row trips t_je_agent_p
     `c5.suppressed: …with CLR08 (got ${out.error.code}: ${out.error.message}). Both doors that can answer here raise CLR08 — the append-only guard and the receipt wall`);
   assert.equal((await entryRow(p.args.entry))?.status, "draft",
     "c5.suppressed: and the entry never reached approved — a commit-time abort rolls back the whole post attempt");
+});
+
+test("f-a2.c5.no-exemption the wall demands a receipt on EVERY agent-approved transition — a rule id is not an exemption", async (t) => {
+  if (await gateCore(t)) return;
+  // THE UNAUTHORISED EXEMPTION, forced. The wall's first cut carried a second disjunct — "…or
+  // this approval names a coding rule" — which Annex E.3 never authorised. Any transition
+  // reaching the trigger under the AGENT identity while carrying a rule id was waved past with
+  // NO receipt: a hole through the one wall that makes the receipt structural rather than a
+  // convention the writer is trusted to keep.
+  //
+  // BOTH HALVES, because the shape read alone would be spelling and the behavioural read alone
+  // would not say WHY it refused.
+  const { src } = await bodyOfName("_tf_assert_agent_post_receipt");
+  assert.ok(src, "c5.no-exemption: the wall's trigger function resolves");
+  assert.ok(!src.includes("checked_via_rule_id"),
+    "c5.no-exemption: the rule-id exemption is GONE from the body — E.3 authorises none");
+  assert.ok(src.includes("if not v_is_agent then"),
+    "c5.no-exemption: …and the live arm is keyed on the recorded is_agent fact ALONE");
+
+  // The behavioural half: an agent-identity approval carrying a REAL rule id and no receipt.
+  // The status flip is doctored as root — the same forgery idiom the estate's own belt cells use
+  // — because no lawful door can produce this shape any more, which is the point.
+  const p = await agentPostable(OWNER(), { client: A1() });
+  const firm = p.cited.firm;
+  const rule = await rootQuery(
+    `insert into clara.coding_rules(firm_id,client_id,rule_type,account_code,status,pinned,origin,
+        content_hash,created_by)
+     values($1,$2,'vendor_account',$3,'proposed',false,'authored',
+        encode(sha256(convert_to($4,'UTF8')),'hex'),$5) returning id`,
+    [firm, A1(), CHART.expense, `c5-noexempt-${Date.now()}`, OWNER()]).catch((e) => ({ error: e }));
+  if (rule?.error) {
+    noteLane(`c5.no-exemption: a coding_rules row could not be minted (${rule.error.code}: ${rule.error.message}) — the behavioural half is unbuildable, the shape half above stands`);
+    return;
+  }
+  const out = await withTxnOrNull((c) => c.query(
+    `update clara.journal_entries
+        set status='approved', checker_actor=$2, approved_at=now(), checked_via_rule_id=$3
+      where id=$1`,
+    [p.args.entry, AGENT_USER_ID, rule.rows[0].id]));
+  assert.ok(out?.error,
+    `c5.no-exemption: an AGENT approval carrying a rule id and NO receipt is refused at COMMIT — got ${JSON.stringify(out)}`);
+  assert.equal(out.error.code, "CLR08",
+    `c5.no-exemption: …with CLR08, the receipt wall's own code (got ${out.error.code}: ${out.error.message})`);
+  assert.match(String(out.error.detail ?? out.error.message), /agent_post_receipt_missing|post receipt/i,
+    "c5.no-exemption: …and it is the RECEIPT wall answering, not some other CLR08 guard");
+  assert.equal((await entryRow(p.args.entry))?.status, "draft",
+    "c5.no-exemption: and the forged approval rolled back whole");
 });
 
 test("f-a2.c5.human-inert a HUMAN approval needs no receipt — the trigger is inert on that lane", async (t) => {
