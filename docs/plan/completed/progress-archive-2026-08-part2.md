@@ -8,6 +8,74 @@
 >
 > Read part 1 first: `progress-archive-2026-08.md`.
 
+## Session-log entries archived 2026-08-22 (the Track-A sitting's clock-out sweep; moved verbatim)
+
+- **2026-08-21/22 (the PR-0 gate + housekeeping session)** — **F-A2's PR-0 gate ran both legs**
+  (8-lens native review workflow + Codex cross-model, ~60 verified lanes): 3 blockers, 11
+  materials, width severance ruled — record `docs/plan/active/f-a2-pr0-gate-record.md`, design
+  folded to v5. **The stranded pair re-fired and settled** (archive part2 has the record).
+  **WSL exit-255 diagnosed benign** (VM-teardown marking, not container flake). Known-issues
+  archive sweep (4 resolved rows → part2). **Owner sitting (2026-08-22): 方案二 ruled — chat
+  parity back IN-TRAIN (D34, gate severance overridden in part, dissent on file) · OQ-2/3/5
+  all RULED per recommendations (D35-D37) · design → v6.**
+- **2026-08-21 (the CI-economics session)** — **ADR-0073 delivered and proven on all three
+  event paths same-day** (#278): per-PR ~13 min (was ~42) · post-merge push green · manual
+  dispatch sweep green incl. all 12 closed-wave drills + 4 frontier legs. Reviews: 5-lens
+  adversarial workflow + Codex cross-model; 6 confirmed findings, all fixed pre-merge (the
+  `shell: bash` pipefail injection the headline). **Owner rulings:** the test-bed/data stays
+  until the Wave-G reset (re-confirms ADR-0072 ⑤), answered by the **client-naming audit** —
+  152 refs swept, adversarially verified, **0 confirmed hard-coded client logic** (the two
+  raw flags: a one-time ADR-0044 hand-run data script; the pinned-ids safety net). One
+  forward gap registered: the `high_stakes_amount_cents` governed-verb item (Backlog).
+
+## Backlog block archived 2026-08-22 — the δ NAMED RESIDUALS, in full (moved verbatim; PROGRESS.md keeps a pointer)
+
+- **δ NAMED RESIDUALS (all deliberate, each recorded in its file/PR):** F10 — a DB-level
+  `transaction_timeout` on PG17 would bound the advisory-lock wait (fail-closed direction; one
+  round trip if ever wanted) · the B4 sandwich — an in-one-dollar-quoted-block off/create/on
+  toggle evades both `check_function_bodies` layers (closing it is its own reviewed pass) · the
+  57014 cancellation receipt class is an authenticated caller's attestation by construction
+  (rollback erases server-side trace; honestly labelled `caller_reported` — a label, not a task)
+  · the RS guard's two-file split carries a between-transactions lift window
+  (prestate-mitigated) · Supavisor headroom re-measure. **η — not δ — owns the production
+  human/OBO/wake caller**; direct wake/runtime evaluator grants and synthetic human JWTs stay
+  forbidden (a law statement; it next matters at F-A5's OBO closure).
+
+## Backlog block archived 2026-08-22 — the η residuals, in full (moved verbatim; PROGRESS.md keeps a pointer)
+
+**η residuals (Wave-E close, PRs #240/#242) — all four STAND, none scheduled:**
+- **The blank-op-key idiom is whitespace-blind, estate-wide** — single-argument `btrim()` trims
+  SPACES only, so a tab-only or newline-only op key passes every blank-key refusal in the
+  estate. Not an η regression, and not reachable from the real caller (`stableOpKey` normalizes
+  first). The fix is one whitespace-class-aware expression at every site in a **single pass** —
+  per-lane patching leaves the estate inconsistent, worse than one uniform blind spot.
+- **The co-effective policy seed-test wants its own fixture design** — the seed it needs
+  carries two co-effective `eps_v1` versions, but `clara.edge_policy_sets` is append-only, so
+  it cannot be torn down between runs and would change the estate every later cell reads.
+- **δ-family: policy resolution is window-blind on the wall side** —
+  `clara._tf_metric_cell_integrity` resolves policies with NO effective-window filter, so a
+  window-filtering preview core would CLR11 every preview. η's compose core matches the wall
+  term-for-term and fail-closes as an effectivity REFUSAL: **a false refusal, never a false
+  preview.** Retires when wall and writer resolve by window together — no date.
+- **`0084`'s out-of-tree derivation tooling is RETAINED** at `C:\ct\` — see Tooling
+  follow-ups, where its machine-local-custody hazard is now priced.
+
+## Known issues archived 2026-08-22 (both DIAGNOSED and carried as standing operating law; moved verbatim)
+
+- **WSL exit-255 containers — DIAGNOSED 2026-08-21, benign:** docker marks still-running
+  containers `Exited (255)` when the WSL VM is torn down under them; all seven on the host
+  correlate exactly with VM restarts (8/15 · 8/19 · 8/21), dockerd clean, disk/memory ample.
+  A red CI leg with exit-255 services means a VM teardown happened mid-run — the standing
+  no-`wsl --shutdown`-with-busy-runners law already forbids the cause.
+- **MAX_PATH breaks git's RECOVERY verbs too (2026-08-14, fleet lesson):** the three tracked
+  long-path PDFs under `packages/runtime/test-storage/` make `git rebase --abort` fail with
+  the rebase state SURVIVING, and a follow-up `git reset --hard` fails the same way — the
+  instinctive abort→hard-reset pair leaves the clone MORE stuck at each step. **The escape:**
+  `git rebase --quit`, then a MIXED `git reset <sha>` (index-only, no long-path writes), then
+  `git symbolic-ref HEAD refs/heads/<branch>` — verify the target sha is an ancestor of origin
+  BEFORE resetting, so the recovery is free by construction. Prefer fresh short-path clones
+  (`core.longpaths true`) for any conflict-bearing operation.
+
 ## Session-log entry archived 2026-08-21 (the 2026-08-20 night, closed by the next day's ceremony; moved verbatim)
 
 - **2026-08-20 (the F-A2 opener train + the corpus sitting)** — the night after the cutover.
