@@ -409,6 +409,30 @@ const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_s
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// F-A2 PR-1 [the agentic posting lane, `f_a2_posting_core` at whatever number merge claimed]:
+// the SEAT for the posting lane's bare-clock cohort, wired and DELIBERATELY EMPTY.
+//
+// WHY EMPTY RATHER THAN ABSENT, and why empty rather than populated. This roster is compared
+// EXACTLY against the live catalog in both directions, so a name listed here that does not flag
+// reds the suite just as loudly as a name missing. The battery that ships beside this edit is
+// CONTRACT-BLIND — it is written from the design, not from PR-1's migration source — so the one
+// thing it must not do is GUESS which of PR-1's new bodies carry a bare clock token. Predicting
+// from the design alone: the receipt's `created_at` is a column DEFAULT (which lives in the table
+// definition, not a pg_proc body, and correctly does not flag — the 0081/0082 block states the
+// same rule), the op-key receipts go through `_finish_op`, and `_approve_entry_core` is ALREADY
+// on the base roster and stays there through its 8th body. That predicts ZERO new names.
+//
+// THE OBLIGATION THIS SEAT CARRIES, so it is not mistaken for a finished edit: at integration,
+// re-run arm (D)'s own detector (`S5_25_BARE_TOKEN_RE`, comments stripped) over PR-1's THREE
+// files' new bodies and fill this array with whatever it flags, each with its stated lawful
+// reason in the shape every block above uses. A flagged name that lands with no reason is a
+// finding about the body, not about the roster.
+//
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason :207-214 states in full. Wiring the
+// gate now — rather than leaving it to be remembered later — is what makes the integration step a
+// one-line fill instead of a re-derivation.
+const POSTING_F_A2_PR1_CLOCK_NAMES = [];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -431,6 +455,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
   return names.sort();
 }
 
