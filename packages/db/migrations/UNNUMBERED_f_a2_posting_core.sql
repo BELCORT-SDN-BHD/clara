@@ -67,8 +67,10 @@
 -- testability rule required the client to hold BOTH a tin and an ssm before a stated supplier
 -- registration could be tested, so on the ordinary Malaysian client (ssm, no TIN) it did not
 -- fire and a stated identity fell out as `evidence:"none"` — which B15 admitted. The rule is now
--- "at least one held kind, and the stated kind is one of them", with a stated registration of an
--- unrecorded kind raising the NEW evidence class `untestable`. B15 refuses that class under its
+-- "the stated kind is one the client holds", with a stated registration of an unrecorded kind
+-- raising the NEW evidence class `untestable`. Only a DIGIT-LEADING value has a determinable
+-- kind (ssm); a letter-leading one is ambiguous on the estate's own grammar and needs BOTH kinds
+-- held before it counts as tested (R-L21). B15 refuses that class under its
 -- own reason, `generic_registration_untestable`. A document that prints no registration at all
 -- is still 'absent' and still posts when tied — D18 is narrowed, not reversed.
 --
@@ -1631,12 +1633,32 @@ set role clara_fn_owner;
 --
 -- THE KIND TEST, AND ITS HONEST LIMIT. The page cannot say which kind it printed —
 -- `invoice.vendor_registration` carries either, by construction (0049's own reading of
--- myinvois.mjs:165 and invoice-vendor-identity.mjs:427). So the kind is inferred from SHAPE: a
--- Malaysian LHDN TIN is alphanumeric with a leading letter (C/IG/SG/OG/D...), an SSM/BRN
--- registration is all digits. The inference can be wrong, so the DIRECTION it can be wrong in is
--- what matters, and it is fail-closed on the lane this ruling is about: a misread that says
--- UNTESTABLE only makes B15 refuse a generic post it would otherwise have admitted. It never
--- manufactures a direction.
+-- myinvois.mjs:165 and invoice-vendor-identity.mjs:427). So the kind is inferred from SHAPE, and
+-- ONLY IN THE DIRECTION THE SHAPE CAN PROVE. Every LHDN TIN carries a leading alphabetic prefix
+-- (C/CS/D/E/F/IG/SG/OG/PT/TA/TR...), so a DIGIT-LEADING value cannot be a TIN. That half is
+-- sound, and it is the only half used.
+--
+-- THE CONVERSE IS FALSE, AND AN EARLIER DRAFT OF THIS FILE ASSERTED IT. "A leading letter means
+-- a TIN" is wrong on the estate's own grammar: `packages/runtime/lib/malaysian-registration.mjs`
+-- enumerates the state-prefixed ROB (`SA1234567-X`, :105) and the LLP/PLT (`LLP0012345-LGN`,
+-- :108) as SSM/BRN families that LEAD WITH LETTERS. Reading one of those as a TIN for a TIN-ONLY
+-- client marks it testable against a kind the page never printed; the comparison then misses,
+-- and (P2) answers `purchase` on the client's OWN sales invoice. That is a manufactured
+-- direction — so this paragraph's earlier claim, "it never manufactures a direction", was FALSE,
+-- and it was the load-bearing safety argument for the whole rule. It is deleted, not softened.
+--
+-- SO, R-L21: digit-leading is `ssm` and is testable against a held ssm; LETTER-LEADING IS
+-- AMBIGUOUS and is testable only when the client holds BOTH kinds, because only then did the
+-- comparison cover the value whatever kind it was. An ambiguous value on a one-kind client falls
+-- to the untestable raise — the class this ruling minted for exactly this situation, so the rule
+-- closes its own hole instead of needing a new one.
+--
+-- THE OWNER'S RULING IS PRESERVED. The motivating case — the ordinary ssm-only Malaysian client
+-- — is untouched: a digit-leading registration is what such a page prints, and it still resolves.
+-- The named cost is narrower than the rule it replaces: a TIN-ONLY client facing a letter-leading
+-- value that really IS a third party's TIN now refuses instead of resolving purchase. (P3) still
+-- resolves it when the supplier is already a known vendor, and the operator's remedy — record the
+-- client's SSM — is named on the refusal.
 --
 -- PLACEMENT: the untestable raise sits AFTER (P3), so a supplier the books already know stays a
 -- purchase on positive evidence. Only a genuinely unknown supplier with an untestable stated
@@ -1683,12 +1705,20 @@ begin
       select coalesce(array_agg(distinct ci.kind), ''{}''::text[]) into v_held_kinds
         from clara.client_identifiers ci
        where ci.client_id=p_client and ci.kind in (''tin'',''ssm'');
-      -- SHAPE, because the page cannot say which kind it printed: a Malaysian LHDN TIN leads
-      -- with a letter, an SSM/BRN registration is all digits. A misread can only make the
-      -- answer UNTESTABLE, which refuses; it can never manufacture a direction.
-      v_stated_kind := case when v_sup_reg ~ ''^[a-z]'' then ''tin'' else ''ssm'' end;
-      v_hard_id := coalesce(array_length(v_held_kinds,1),0) >= 1
-                   and v_stated_kind = any(v_held_kinds);');
+      -- SHAPE, AND ONLY IN THE DIRECTION SHAPE CAN PROVE (R-L21). Every LHDN TIN carries a
+      -- leading alphabetic prefix, so a DIGIT-LEADING value cannot be a TIN -- that half is
+      -- sound and it is the only half used. The CONVERSE IS FALSE: the estate''s own grammar
+      -- (packages/runtime/lib/malaysian-registration.mjs:105,108) enumerates two LETTER-LEADING
+      -- SSM/BRN families, the state-prefixed ROB (SA1234567-X) and the LLP/PLT
+      -- (LLP0012345-LGN). Calling one of those a TIN for a tin-only client would mark it
+      -- testable against a kind the page never printed, the comparison would miss, and (P2)
+      -- would answer ''purchase'' on the client''s OWN sales invoice. So a leading-letter value
+      -- is AMBIGUOUS, and an ambiguous value counts as tested only when the client holds BOTH
+      -- kinds -- then the comparison above covered it whatever it was. Otherwise it falls to
+      -- the untestable raise below, which is the class this ruling minted for precisely this.
+      v_stated_kind := case when v_sup_reg ~ ''^[0-9]'' then ''ssm'' else null end;
+      v_hard_id := coalesce(array_length(v_held_kinds,1),0) >= 2
+                   or (v_stated_kind is not null and v_stated_kind = any(v_held_kinds));');
 
   -- (2) the untestable raise, after (P3).
   v_new := replace(v_new,

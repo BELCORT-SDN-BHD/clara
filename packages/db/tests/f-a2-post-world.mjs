@@ -130,6 +130,24 @@ const idRegion = (fieldPath, text) => ({
 });
 
 export const BUYER_NAME = "F-A2 BUYER SDN BHD";
+/** R-L21 fixtures. Both are LETTER-LEADING and both are SSM/BRN families, not TINs: `SA…-X` is
+ *  the state-prefixed ROB and `LLP…-LGN` is the LLP/PLT — `packages/runtime/lib/
+ *  malaysian-registration.mjs:105,108` is the estate's own grammar for them. They are named
+ *  constants rather than inline literals because the cells' whole claim is about their SHAPE. */
+export const LETTER_THIRD_PARTY = "SA1234567-X";
+export const LETTER_OWN_UNRECORDED = "LLP0012345-LGN";
+/** …and the same LLP registration printed WITHOUT its punctuation, for the one arm that needs
+ *  the client to actually HOLD it.
+ *
+ *  MEASURED ASYMMETRY, worth knowing before you reuse these: `add_client_identifier` stores
+ *  `value_normalized` with punctuation intact (`LLP0012345-LGN` -> `llp0012345-lgn`), while
+ *  `_direction_from_extraction` strips every non-alphanumeric from the PAGE value before
+ *  comparing (0049:889). So a stored identifier containing a dash can never equal a stated one,
+ *  and the registration arm cannot hit for it — the resolver then sees name-match plus
+ *  registration-miss and raises `contradiction`. A dash-free value is the only shape that can
+ *  exercise the held-registration path today. This is an estate-level mismatch, not something
+ *  this PR introduces or fixes; it is REPORTED. */
+export const LETTER_HELD_SSM = "LLP0012345LGN";
 export const SUPPLIER_NAME = "F-A2 SUPPLIER SDN BHD";
 
 /**
@@ -172,6 +190,31 @@ async function directionRegions(client, direction, vendorName) {
       return [idRegion("invoice.vendor_name", vendorName), idRegion("invoice.vendor_registration", "200901009999")];
     }
     return [idRegion("invoice.vendor_name", vendorName), idRegion("invoice.vendor_registration", "C24680135790")];
+  }
+  // R-L21's arms. The three above all print DIGIT-leading registrations (or a `C`-prefixed TIN);
+  // these print the LETTER-LEADING values the estate's own grammar says are SSM/BRN families --
+  // the state-prefixed ROB and the LLP/PLT (malaysian-registration.mjs:105,108). A rule that
+  // reads "leads with a letter" as "is a TIN" mis-tests every one of them.
+  //   'letter-3p'          a third party's letter-leading value, held by nobody.
+  //   'letter-own-unnamed' the CLIENT'S OWN registration, printed under a trading name the
+  //                        estate has not recorded -- so the name arm misses and the page falls
+  //                        through to the testability limb. This is the damage shape: the
+  //                        client's own SALES invoice, and the broken rule called it a purchase.
+  //   'letter-own-held'    the client's own letter-leading ssm, RECORDED, with a matching name.
+  if (direction === "letter-3p") {
+    return [idRegion("invoice.vendor_name", vendorName), idRegion("invoice.vendor_registration", LETTER_THIRD_PARTY)];
+  }
+  if (direction === "letter-own-unnamed") {
+    return [idRegion("invoice.vendor_name", "SEBERANG TRADING (A DIVISION)"),
+            idRegion("invoice.vendor_registration", LETTER_OWN_UNRECORDED)];
+  }
+  if (direction === "letter-own-held") {
+    const own = (await rootQuery("select name from clara.clients where id=$1", [client])).rows[0]?.name;
+    const reg = (await rootQuery(
+      `select value_normalized from clara.client_identifiers
+        where client_id=$1 and kind='ssm' order by added_at limit 1`, [client])).rows[0]?.value_normalized;
+    if (!reg) throw new Error("directionRegions('letter-own-held'): the client holds no ssm identifier");
+    return [idRegion("invoice.vendor_name", own), idRegion("invoice.vendor_registration", reg)];
   }
   if (direction === "contradiction") {
     const reg = (await rootQuery(

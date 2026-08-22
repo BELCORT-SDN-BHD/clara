@@ -34,6 +34,7 @@ import {
   unwitnessedFiling, admits, nonAdmitting, assertNonAdmitting, assertVectorShape,
   genericLines, suppressedPayableLines, genericWithControlLeg, CHART,
   RUNG_TOKEN, TIER_D_TOKENS, PR2_PENDING, rootQuery, addClientIdentifier,
+  createClient, TIER_B_TOKENS, LETTER_THIRD_PARTY, LETTER_HELD_SSM,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -305,6 +306,126 @@ test("f-a2.c14.gb1-twin the DIRECTION-UNRESOLVED twin still POSTS when tied — 
     `c14.gb1-twin: B15 admits where the document's direction resolves to NEITHER sales nor purchase (got ${JSON.stringify(r?.rung_vector?.B15)})`);
   assert.equal(r?.posted, true,
     `c14.gb1-twin: and it POSTS. Without this twin, "B15 works" would be indistinguishable from "generic no longer posts at all" (${JSON.stringify(r?.refusal)}, non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
+});
+
+// ===========================================================================
+// R-L21 — THE POLARITY C6's FIRST CUT WAS MISSING. C6 inferred "leads with a letter ⇒ TIN".
+// The estate's own grammar says otherwise: `SA1234567-X` (state-prefixed ROB) and
+// `LLP0012345-LGN` (LLP/PLT) are SSM/BRN families that lead with letters
+// (packages/runtime/lib/malaysian-registration.mjs:105,108). Under the first cut a TIN-ONLY
+// client marked those TESTABLE against a kind the page never printed, the comparison missed,
+// and (P2) answered `purchase` — on the client's OWN sales invoice. These cells are the
+// missing half of annexes-4-build.md:118-121's both-polarities demand, and the first two are
+// RED against that body. The three ssm-only cells above are byte-unchanged.
+// ===========================================================================
+
+/** `ensureChart` + the bank leg. The five accounts `ensureChart` builds are the ones the SHAPE
+ *  floors need; `CHART.bank` is seeded by `buildWorld`'s own `buildCoa`, which these
+ *  freshly-minted clients never went through — and a generic JV with a suppressed payable
+ *  credits exactly that account. */
+async function rl21Chart(client) {
+  await ensureChart(OWNER(), client);
+  await upsertAccountClassed(OWNER(), {
+    client, code: CHART.bank, name: "Bank", type: "asset", opKey: opk("rl21bank"),
+  }).catch((e) => noteLane(`rl21Chart(bank) raised ${e.code}: ${e.message}`));
+}
+
+/** A client that records a TIN and NO ssm. Minted fresh rather than borrowed: every client in
+ *  `buildWorld` either holds nothing or is given an ssm by a cell above, and the premise here
+ *  is the ABSENCE of the ssm. */
+async function tinOnlyClient(tag) {
+  const client = await createClient(OWNER(), { name: `rl21_${tag}_${Math.random().toString(36).slice(2, 8)}`, opKey: opk(`rl21${tag}`) });
+  await rl21Chart(client);
+  await addClientIdentifier(OWNER(), { client, kind: "tin", value: `C${Math.floor(1e11 + Math.random() * 8e11)}` });
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.deepEqual(kinds, ["tin"],
+    `rl21: the client records a TIN and NO ssm — the absence is the premise (got ${JSON.stringify(kinds)})`);
+  return client;
+}
+
+test("f-a2.c14.rl21-ambiguous-refuses a LETTER-LEADING registration is AMBIGUOUS, so a TIN-only client cannot test it", async (t) => {
+  if (await gateCore(t)) return;
+  const client = await tinOnlyClient("amb");
+  const p = await agentPostable(OWNER(), {
+    client, amount: 312000, codingKind: null, lines: suppressedPayableLines(312000),
+    direction: "letter-3p",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v,
+    "untestable",
+    `c14.rl21-ambiguous-refuses: '${LETTER_THIRD_PARTY}' is an SSM family, not a TIN, so a tin-only client has tested NOTHING — it is untestable, not a miss. The pre-R-L21 body answers 'purchase' here`);
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.equal(r?.posted, false, `c14.rl21-ambiguous-refuses: …and the generic JV does not post (${JSON.stringify(r?.refusal)})`);
+  assert.equal(r?.rung_vector?.tokens?.B15 ?? r?.refusal?.tokens?.B15, TIER_B_TOKENS.B15_UNTESTABLE,
+    `c14.rl21-ambiguous-refuses: …under the untestable reason C6 minted (vector ${JSON.stringify(r?.rung_vector?.B15)})`);
+});
+
+test("f-a2.c14.rl21-own-sale-not-a-bill the client's OWN sales invoice is never coded as a supplier bill (the coded lane)", async (t) => {
+  if (await gateCore(t)) return;
+  // THE DAMAGE, ON THE LANE WHERE IT COSTS MONEY. The generic cell above proves the refusal;
+  // this one proves what the refusal PREVENTS. The page is the client's own sales invoice: it
+  // prints the client's real LLP registration — which the client has not recorded, because it
+  // records only a TIN — under a trading name the estate does not know. Name arm misses,
+  // registration arm misses, and the pre-R-L21 body called the value a TIN, found the client
+  // holds a TIN, declared the comparison real, and returned `purchase`. A supplier_bill coded
+  // on that page books the client's own SALE as a purchase: a wrong number in a client's books.
+  const client = await tinOnlyClient("own");
+  const p = await agentPostable(OWNER(), {
+    client, amount: 313000, codingKind: "supplier_bill", kind: "invoice", typeCode: "01",
+    direction: "letter-own-unnamed",
+  }).catch((e) => ({ error: e }));
+  if (p?.error) {
+    // The coded DRAFT door is where N1 moved the direction-family arm, so the refusal may
+    // arrive here rather than at the post. Either door is the wall; a THIRD outcome is not.
+    assert.equal(p.error.code, "CLR21",
+      `c14.rl21-own-sale-not-a-bill: the coded draft is refused by the direction family (got ${p.error.code}: ${p.error.message})`);
+    assert.match(`${p.error.detail ?? ""} ${p.error.message ?? ""}`, /direction_family_mismatch|direction/,
+      "c14.rl21-own-sale-not-a-bill: …and it is the DIRECTION arm answering");
+    return;
+  }
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.equal(r?.posted, false,
+    `c14.rl21-own-sale-not-a-bill: a supplier_bill on the client's own sales invoice NEVER posts (${JSON.stringify(r?.refusal)})`);
+});
+
+test("f-a2.c14.rl21-both-kinds-still-resolve a BOTH-KINDS client tests a letter-leading value both ways — R-L21 did not over-tighten", async (t) => {
+  if (await gateCore(t)) return;
+  // THE POSITIVE CONTROL, and it is load-bearing: without it the `>= 2` disjunct could be dead
+  // and every letter-leading page would simply refuse, which would look identical in the two
+  // cells above while quietly closing a lane the owner never closed.
+  const client = await createClient(OWNER(), { name: `rl21_both_${Math.random().toString(36).slice(2, 8)}`, opKey: opk("rl21both") });
+  await rl21Chart(client);
+  // The dash-free form: `value_normalized` keeps punctuation but the resolver strips it from the
+  // page, so a dashed identifier can never reg-hit (see LETTER_HELD_SSM's note).
+  await addClientIdentifier(OWNER(), { client, kind: "ssm", value: LETTER_HELD_SSM });
+  await addClientIdentifier(OWNER(), { client, kind: "tin", value: `C${Math.floor(1e11 + Math.random() * 8e11)}` });
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.deepEqual(kinds, ["ssm", "tin"],
+    `c14.rl21-both-kinds-still-resolve: the client records BOTH kinds, and its ssm is itself letter-leading (got ${JSON.stringify(kinds)})`);
+
+  // (a) its OWN registration, under its own name -> the registration arm hits -> sales.
+  const own = await agentPostable(OWNER(), {
+    client, amount: 314000, codingKind: null, lines: suppressedPayableLines(314000),
+    direction: "letter-own-held",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [own.cited.documentId, client])).rows[0].v,
+    "sales", "c14.rl21-both-kinds-still-resolve: a held letter-leading registration still resolves 'sales'");
+
+  // (b) a third party's letter-leading value -> BOTH kinds are held, so the comparison covered
+  //     it whatever kind it was; it misses, and the answer is a TESTED purchase.
+  const third = await agentPostable(OWNER(), {
+    client, amount: 315000, codingKind: null, lines: suppressedPayableLines(315000),
+    direction: "letter-3p",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [third.cited.documentId, client])).rows[0].v,
+    "purchase",
+    "c14.rl21-both-kinds-still-resolve: …and an unheld letter-leading value is TESTED, misses, and resolves 'purchase' — ambiguity only blocks a one-kind client");
 });
 
 test("f-a2.c14.silent-posts C6's CONTROL — a page that prints NO registration is still SILENT, and still posts", async (t) => {
