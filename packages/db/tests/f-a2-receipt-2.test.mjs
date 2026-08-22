@@ -27,7 +27,7 @@ import {
   seedExtraction, seedRegion, postingCoreReady, gateCore, wakePostEntry, agentPostable,
   agentDraft, autodraftCred, interactiveCred, ensureChart, witnessedFiling, postReceiptRow,
   postReceiptCount, supplierLines, salesLines, bodyOf, bodyOfName, CHART, proactiveCred,
-  landWitnessPair, witnessShape,
+  landWitnessPair, witnessShape, withTxnOrNull, MODEL, RATIONALE,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -142,36 +142,138 @@ test("f-a2.c7.t3-human a HUMAN approval on a two-generation document still succe
   assert.equal(await postReceiptCount(d.entry_id), 0, "c7.t3-human: and there is no receipt to pin from");
 });
 
+/**
+ * ONE POST + ONE LATE GENERATION, IN A SINGLE TRANSACTION, so the DEFERRED trigger is what
+ * answers. `wake_post_entry` writes the receipt and flips the status; landing a corroborating
+ * successor AFTERWARDS but BEFORE COMMIT means the shape trigger fires with a document whose
+ * newest generation disagrees with the one the receipt pinned. That gap is the entire T3
+ * hazard, and it is the only arrangement in which a wrong accessor is OBSERVABLE.
+ *
+ * `nested` swaps the trigger function for one whose accessor is NESTED — the mistake T3 exists
+ * to remove, which yields NULL and therefore today's UNPINNED behaviour. DDL is transactional,
+ * so the swap dies with the transaction either way and nothing leaks.
+ *
+ * Returns the transaction's outcome: `{ error }` when the commit was refused.
+ */
+async function t3Window(p, { nested }) {
+  return withTxnOrNull(async (c) => {
+    if (nested) {
+      const def = (await c.query(
+        "select pg_get_functiondef('clara._tf_assert_supplier_bill_shape()'::regprocedure) as d")).rows[0].d;
+      // THE NESTED LEVEL THAT ACTUALLY YIELDS NULL, and choosing it is a measured correction to
+      // D24's own wording. The obvious nested mistake — `gate_verdicts->'verdict'->>
+      // 'extraction_id'` — does NOT yield NULL here: the verdict block carries the same
+      // `extraction_id` the top level does, so that particular slip is harmless and a cell built
+      // on it is vacuous (measured: the doctored trigger committed exactly as the shipped one
+      // did). `->'rung_vector'->>'extraction_id'` is the nested read at a wrong level that DOES
+      // resolve to NULL, which IS the unpinned behaviour T3 removes. The asymmetry is asserted
+      // below rather than left as a comment.
+      const doctored = def.replace("r.gate_verdicts->>'extraction_id'", "r.gate_verdicts->'rung_vector'->>'extraction_id'");
+      assert.notEqual(doctored, def, "c7.t3-agent: the nested-accessor swap really changed the body");
+      await c.query("set role clara_fn_owner");
+      await c.query(doctored);
+      await c.query("reset role");
+    }
+    await c.query("set role clara_wake_interactive");
+    await c.query("select set_config('clara.wake_secret',$1,true)", [p.cred.secret]);
+    await c.query(
+      "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
+      + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
+      + "p_model => $6::jsonb, p_op_key => $7::text)",
+      [p.args.entry, p.args.expectedRevision, p.args.client, p.args.booksVersion,
+        RATIONALE, JSON.stringify(MODEL), opk(nested ? "t3nest" : "t3flat")]);
+    await c.query("reset role");
+    // THE LATE GENERATION, AND IT MUST BE A GENERATION. The pin only reaches the floor through
+    // `_invoice_fact_state_at(document, pin)` versus the document-wide read, so the difference
+    // has to live in a DIFFERENT generation — a region added to the PINNED extraction is visible
+    // to both reads and proves nothing (measured: the first cut did exactly that, and the
+    // shipped accessor refused too). A whole v2 witness PAIR is landed instead, stating a
+    // nonzero tax where the pinned generation states none: the tax-leg conjunct is the one that
+    // reads the pin, so a nil-tax pin leaves it inert while the document-wide answer demands a
+    // tied sst_purchase_cost leg this entry does not carry.
+    const eid = `llm-openai:gpt-t3:${Date.now().toString(36)}`;
+    await c.query(
+      `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,version_n,lane,
+         status,workflow_run_id,started_at,finished_at)
+       values($1,$2,$3,2,'llm_witness','done',$4,now(),now())`,
+      [p.cited.firm, p.cited.documentId, eid, `rig-t3-${Date.now()}`]);
+    const ins = async (kind) => (await c.query(
+      `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,
+         status,page_count,envelope,extracted_at)
+       values($1,$2,$3,$4,2,'done',1,$5::jsonb,clock_timestamp()) returning id`,
+      [p.cited.firm, p.cited.documentId, eid, kind,
+        JSON.stringify({ witness: { channel: kind === "llm_text_facts" ? "text" : "vision", answers: {} } })])).rows[0].id;
+    await ins("llm_vision_facts");
+    const textId = await ins("llm_text_facts");
+    for (const [path, raw, cents] of [["invoice.total", "RM 5,000.00", 500000], ["invoice.tax_total", "RM 600.00", 60000]]) {
+      await c.query(
+        `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,
+           text_content,monetary_raw,monetary_cents)
+         values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,$4,$5)`,
+        [p.cited.firm, textId, path, raw, cents]);
+    }
+    return "committed";
+  });
+}
+
 test("f-a2.c7.t3-agent the agent post's trigger and its pinned caller judge the SAME generation — MUST FAIL on a wrong gate_verdicts accessor", async (t) => {
   if (await gateCore(t)) return;
+  // THE FIRST CUT COULD NOT FAIL ON THE THING IT NAMES. Every assertion read the RECEIPT —
+  // `gate_verdicts.extraction_id` is flat, non-blank, equals the bound generation — and the
+  // receipt is written by the CORE. A wrong accessor lives in the TRIGGER, reads that same
+  // receipt, and yields NULL: every one of those assertions would still have passed while the
+  // deferred floor judged the wrong generation. The cell asserted the pin EXISTS, never that the
+  // trigger USES it.
+  //
+  // So the cell now runs the same window TWICE and compares the two OUTCOMES. That is what makes
+  // it a must-fail cell rather than a claim about a column.
   const p = await agentPostable(OWNER(), { client: A1(), amount: 500000 });
   const bound = await rootQuery(
     "select distinct extraction_id from clara.entry_evidence where entry_id=$1", [p.args.entry]);
   assert.equal(bound.rows.length, 1, "c7.t3-agent precondition: the draft is bound to exactly one extraction generation");
-  // A LATER generation whose numbers disagree. The fact state still names the witness pair, so
-  // B8 admits; a NULL pin would send the shape floor at whatever the document's newest
-  // generation says instead of the one the entry cites.
-  const later = await seedExtraction({ firm: p.cited.firm, document: p.cited.documentId, engineKind: "ocr", status: "done", versionN: 3 })
-    .catch((e) => { noteLane(`c7.t3-agent: second generation unbuilt (${e.code}: ${e.message})`); return null; });
-  if (later) {
-    await seedRegion({
-      firm: p.cited.firm, extraction: later, fieldPath: "invoice.total",
-      textContent: "RM 6,000.00", locator: { page: 1, polygon: [0, 0, 1, 1] },
-    }).catch((e) => noteLane(`c7.t3-agent: second-generation region unbuilt (${e.code}: ${e.message})`));
-  }
-  const wire = await wakePostEntry(p.cred, p.args);
-  assert.equal(wire?.posted, true,
-    `c7.t3-agent: the post judges the generation the RECEIPT names, so it lands (${JSON.stringify(wire?.refusal)}). Against an unpinned floor this is where the later generation would win`);
+
+  // (1) THE SHIPPED BODY: the trigger reads the receipt's pin, judges the generation the entry
+  //     cites, and the window COMMITS.
+  const flatRun = await t3Window(p, { nested: false });
+  assert.ok(!flatRun?.error,
+    `c7.t3-agent: with the SHIPPED accessor the deferred floor judges the PINNED generation and the window commits (${flatRun?.error?.code}: ${flatRun?.error?.message})`);
   const row = await postReceiptRow(p.args.entry);
   const flat = row?.gate_verdicts?.extraction_id;
   assert.ok(typeof flat === "string" && flat.trim().length > 0,
-    `c7.t3-agent: gate_verdicts carries extraction_id FLATTENED at the TOP level and non-blank (got ${JSON.stringify(flat)}). A nested accessor read from inside the trigger yields NULL — which IS today's unpinned behaviour, and it would pass silently`);
+    `c7.t3-agent: gate_verdicts carries extraction_id FLATTENED at the TOP level and non-blank (got ${JSON.stringify(flat)})`);
   assert.equal(flat, bound.rows[0].extraction_id,
     "c7.t3-agent: …and the pin IS the generation the entry's evidence is bound to, not the document's newest");
-  if (later) {
-    assert.notEqual(flat, later,
-      "c7.t3-agent: specifically NOT the later generation — a NULL pin would send the floor at whatever the document read most recently");
-  }
+
+  // (2) THE NESTED ACCESSOR: the same window, on a fresh entry, must be REFUSED at COMMIT —
+  //     because a nested read yields NULL and the floor falls back to the document-wide state.
+  const q = await agentPostable(OWNER(), { client: A1(), amount: 500000 });
+  // THE SHIPPED DEFINITION IS CAPTURED FIRST AND RE-APPLIED UNCONDITIONALLY. DDL is
+  // transactional, so a REFUSED window takes the swap with it — but if the window ever COMMITS
+  // (which is this arm's failure mode) the doctored body would SURVIVE and poison every later
+  // cell on this database. Measured the hard way: it did.
+  const shipped = (await rootQuery(
+    "select pg_get_functiondef('clara._tf_assert_supplier_bill_shape()'::regprocedure) as d")).rows[0].d;
+  const nestedRun = await t3Window(q, { nested: true });
+  await rootQuery(shipped);
+  assert.ok(nestedRun?.error,
+    "c7.t3-agent MUST-FAIL: with a NESTED gate_verdicts accessor the deferred floor judges the WRONG generation and the commit is refused. If this passes, the pin is decorative and T3 closed nothing");
+  assert.match(String(nestedRun.error.detail ?? nestedRun.error.message), /tax_leg_missing|sst_purchase_cost/i,
+    `c7.t3-agent MUST-FAIL: …and it is the SHAPE FLOOR answering on the unpinned generation (got ${nestedRun.error.code}: ${nestedRun.error.message})`);
+  assert.equal((await entryRow(q.args.entry))?.status, "draft",
+    "c7.t3-agent: the refused window rolled back whole — entry, receipt and the doctored function with it");
+  const restored = await bodyOfName("_tf_assert_supplier_bill_shape");
+  assert.ok(restored.src.includes("gate_verdicts->>'extraction_id'"),
+    "c7.t3-agent: and the SHIPPED trigger body is back — DDL is transactional, so the swap died with the transaction");
+
+  // D24'S HAZARD, MEASURED AND NARROWED. Its wording says "a nested accessor there yields NULL".
+  // That is true of a wrong LEVEL, and it is what the must-fail arm above uses — but it is NOT
+  // true of the obvious slip, because `gate_verdicts` carries a `verdict` block that repeats the
+  // same `extraction_id`. Recorded as an assertion so the next reader does not build a vacuous
+  // must-fail cell on the harmless one, the way the first attempt at this cell did.
+  assert.equal(row?.gate_verdicts?.verdict?.extraction_id, flat,
+    "c7.t3-agent: `gate_verdicts.verdict.extraction_id` REPEATS the flattened pin — so that particular nested slip is harmless, and D24's hazard is specifically about reading a level that has no such key");
+  assert.equal(row?.gate_verdicts?.rung_vector?.extraction_id, undefined,
+    "c7.t3-agent: …while `rung_vector` carries none, which is why THAT nested read reproduces the unpinned behaviour");
 });
 
 test("f-a2.c7.t3-sales the SALES arm carries the identical chain", async (t) => {
