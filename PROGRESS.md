@@ -36,8 +36,8 @@ Track-A design sets are at GATED v2**; trued at every clock-out)*
   71's roster becomes an **OPEN REGISTER** (any act it does not reserve is the agent's, and it
   ships WALLED — B6 · B14 · the entrance seam) · **invariant (a) becomes the agent's JUDGEMENT
   under structural walls** · law 21 narrows to periodic POSTING belts · law 76's "LLM" drift is
-  trued. **The digest governs; the PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits are a NAMED
-  FOLLOW-UP, still unmade, and the `AGENTS.md` home stays FLAGGED** (see Known issues). **Ruled ahead of PR-1 on
+  trued. **The PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits LANDED (#287); the `AGENTS.md`
+  home for invariant (a) stays FLAGGED for the owner** (see Known issues). **Ruled ahead of PR-1 on
   purpose:** the one-architecture TEST retires the **bank rules machine whole** (superseding
   **WCC-R5**'s bank arm) and RECORDS **7A-R3 + E-R13 as dissolved** with it. Orchestrator
   dissents on file: TA-P1, TA-P7. Mechanism of record: `docs/plan/active/wave-f-contract.md`
@@ -157,9 +157,9 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    unscheduled (**F-A5b** sandbox export, **F-A6 v2** cross-client named read).
 5. ~~**THE OWNER'S DIGEST SIGN-OFF is the next constitutional gate.**~~ **GIVEN 2026-08-22 — laws
    78-81 and the four annotated laws (2, 21, 71, 76) are RATIFIED, law 78 carrying the rider
-   R-TA-P1-walls; F-A7a's judgement half is unblocked.** **Two follow-ups the signature did NOT
-   do: the PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits, and the `AGENTS.md` home question
-   for invariant (a)** — both still open, and the digest governs meanwhile. ~~R1~~, ~~the corpus
+   R-TA-P1-walls; F-A7a's judgement half is unblocked.** The two follow-ups the signature did not
+   itself do: ~~the PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits~~ **LANDED (#287)**, and the
+   **`AGENTS.md` home question for invariant (a) — still OPEN, the owner's call.** ~~R1~~, ~~the corpus
    decisions~~, ~~the CI overhaul~~, ~~F-A2's
    OQ-2/3/5~~ and ~~R-OWNER~~ are all RULED. Still open: **FX-lite build timing** · **the
    corpus's oracle-tier gaps** (BEE's GL + TB for both FYs and the full FY2025 document · RPR's
@@ -478,7 +478,7 @@ records: its ceremony as-runs and the corpus measurement.)*
   prerequisite every v2 named for its PR-1 — the owner's digest re-sign — was GIVEN THE SAME DAY:
   laws 78-81 + the four amendments RATIFIED 2026-08-22, law 78 carrying the rider R-TA-P1-walls.**
   Every v2's prerequisite line is annotated SATISFIED in place; the remaining PR-1 prerequisite is
-  **F-A2's PR-1 merged**, and the PRD/ARCHITECTURE product-text edits stay a named follow-up.
+  **F-A2's PR-1 merged**; the PRD/ARCHITECTURE product-text edits landed in #287.
 
 ---
 

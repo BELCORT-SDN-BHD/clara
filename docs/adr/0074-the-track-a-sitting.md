@@ -341,7 +341,7 @@ the renderer" was answered:* seal → render → issue, with a seven-year byte-i
 #### The constitutional amendments — PROPOSED WORDING, RATIFIED 2026-08-22 (owner)
 
 **No product text is edited by this entry.** These four entered the ratified set at the owner's digest
-sign-off of **2026-08-22**; the `PRD.md` / `ARCHITECTURE.md` / `AGENTS.md` edits are a named follow-up.
+sign-off of **2026-08-22**; the `PRD.md` / `ARCHITECTURE.md` edits landed in #287, `AGENTS.md` stays FLAGGED.
 
 **(i) Law 71's human roster becomes an OPEN REGISTER (TA-P1).** Proposed digest wording replacing law 71's
 closing sentence: *"The surviving HUMAN acts are these seven, and the enumeration is now a RESERVATION, not a
