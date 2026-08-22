@@ -247,10 +247,12 @@ test("f-a2.c3.B8-primary-twin re-citing the CURRENT generation posts clean — t
     evidence: [ev(g2Total.id, g2Total.text_content, "invoice.total")],
     opKey: `f-a2-b8-twin:${randomUUID().slice(0, 8)}`,
   }).catch((e) => ({ error: e }));
-  if (own?.error) {
-    noteLane(`c3.B8-primary-twin: the re-derivation could not be drafted (${own.error.code}: ${own.error.message}) — the double-coding wall makes exit 2 available only after a withdrawal, which is GM-10's PR-2 door`);
-    return;
-  }
+  // FORCED. A `noteLane` + `return` is not a skip — node counts the cell PASSED — so this arm
+  // used to green the twin whenever the re-derivation could not be built, which is precisely
+  // when the twin proves nothing. The withdrawal above is what makes exit 2 available, so if the
+  // draft is still refused that is a finding about the door, not a fixture excuse.
+  assert.ok(!own?.error,
+    `c3.B8-primary-twin: the re-derivation drafts after the withdrawal (got ${own?.error?.code}: ${own?.error?.message}) — exit 2 is OQ-4's own remedy and this twin is what proves B8 was the reason the primary refused`);
   const r = await wakePostEntry(cred, {
     entry: own.entry_id, expectedRevision: own.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
   });
@@ -335,10 +337,11 @@ test("f-a2.c3.B8-mixed a MIXED-generation draft fails — scope is ALL fact-gene
       ev(g1Invoice.id, g1Invoice.text_content, g1Invoice.field_path),
     ],
   }).catch((e) => ({ error: e }));
-  if (d?.error) {
-    noteLane(`c3.B8-mixed: the draft floor refused the mixed citation set (${d.error.code}: ${d.error.message}) — a STRONGER wall than B8, recorded rather than forced`);
-    return;
-  }
+  // FORCED. The old arm greened the cell whenever the draft floor refused the mixed citation
+  // set — which is exactly the case where scope α goes untested. If a stronger wall really does
+  // stand in front of B8 here, that is a finding to adjudicate, not a pass to record.
+  assert.ok(!d?.error,
+    `c3.B8-mixed: the mixed-generation draft is accepted by the draft floor (got ${d?.error?.code}: ${d?.error?.message}) — scope α is only a decision on the record if this citation set can reach B8`);
   const gens = await rootQuery(
     "select distinct extraction_id from clara.entry_evidence where entry_id=$1", [d.entry_id]);
   assert.equal(gens.rows.length, 2,
@@ -376,8 +379,9 @@ test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 read
   const ocrLine = await seedRegion({
     firm: cited.firm, extraction: cited.extractionId, fieldPath: "pages.1.lines.3",
     textContent: "TOTAL DUE RM 1,000.00", locator: { page: 1, polygon: [0, 0, 1, 1] },
-  }).catch((e) => { noteLane(`c3.B8-ocr: could not seed an OCR line region (${e.code}: ${e.message})`); return null; });
-  if (!ocrLine) return;
+  }).catch((e) => ({ error: e }));
+  assert.ok(ocrLine && !ocrLine.error,
+    `c3.B8-ocr: the OCR line region seeds (got ${ocrLine?.error?.code}: ${ocrLine?.error?.message}) — without it the dead-lane guard has no out-of-scope citation to guard`);
   const cred = await autodraftCred(A1());
   const d = await agentDraft(OWNER(), cred, {
     client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
@@ -386,10 +390,10 @@ test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 read
       ev(ocrLine, "TOTAL DUE RM 1,000.00", "pages.1.lines.3"),
     ],
   }).catch((e) => ({ error: e }));
-  if (d?.error) {
-    noteLane(`c3.B8-ocr: the draft floor refused the OCR citation (${d.error.code}: ${d.error.message}) — the dead-lane half is unbuildable through the writer and B8's OCR scoping stays a contract claim`);
-    return;
-  }
+  // FORCED. "The dead-lane half is unbuildable, so the scoping stays a contract claim" was a
+  // green recorded for the one outcome that leaves law 72's scoping untested end to end.
+  assert.ok(!d?.error,
+    `c3.B8-ocr: a draft citing the verified total AND an OCR page region is accepted (got ${d?.error?.code}: ${d?.error?.message}) — B8's OCR scoping is only proven if such a draft can reach the rung`);
   const kinds = await rootQuery(
     `select distinct ex.engine_kind from clara.entry_evidence e
        join clara.document_extractions ex on ex.id=e.extraction_id where e.entry_id=$1 order by 1`,
