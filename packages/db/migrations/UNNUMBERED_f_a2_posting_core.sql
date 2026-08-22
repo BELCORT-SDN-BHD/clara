@@ -32,13 +32,27 @@
 --
 -- D1 WRITE-QUIESCE OBLIGATION (packages/db/README.md "Deploy contract"). PostgreSQL runs an
 -- in-flight PL/pgSQL call to completion on the body it STARTED with, so a call spanning this
--- migration silently runs the OLD body. This file replaces EIGHT live bodies
--- (`_approve_entry_core`, `_draft_entry_core`, both `_tf_assert_*_shape` trigger functions,
--- `_assert_supplier_bill_shape_at`, `mint_wake_credential`, `wake_open_question`) and swaps a
--- CHECK pair on `clara.wake_credentials` under ACCESS EXCLUSIVE. Parts 2 and 3 ride the SAME
--- window (Annex B.9's list: TEN CoR'd bodies, one CREATE TABLE, two constraint swaps). The guard
--- below refuses to apply while a runtime heartbeat is fresh, because a ceremony step that lives
--- only in prose is one somebody skips.
+-- migration silently runs the OLD body. This file replaces SEVEN live bodies, and the count is
+-- its own list rather than a remembered number: `_approve_entry_core` · `_draft_entry_core` ·
+-- `_tf_assert_supplier_bill_shape` · `_tf_assert_sales_invoice_shape` ·
+-- `_assert_supplier_bill_shape_at` · `mint_wake_credential` · `wake_open_question`. The SALES
+-- FLOOR `_assert_sales_invoice_shape_at` is NOT among them: it is prestate-sha-pinned so a drift
+-- is caught, but it is byte-unmoved, and counting a pin as a replacement is how a quiesce
+-- inventory starts overstating itself. (The file also CREATES six objects — the receipt table,
+-- the ladder, the two extracted predicates, the projection and the receipt trigger function —
+-- but a CREATE has no in-flight body to strand, so it is not a D1 term.)
+--
+-- THE WHOLE-WINDOW INVENTORY, corrected. Parts 2 and 3 ride the SAME window: TEN CoR'd bodies
+-- (this file's seven, part 2's none, part 3's `settle_autodraft_task` ×2 overloads +
+-- `reconcile_sweep_runs`), one CREATE TABLE, and — on EXISTING live tables, all under ACCESS
+-- EXCLUSIVE — FOUR constraint swaps across TWO tables (`clara.wake_credentials`: the kind and
+-- client CHECK pairs, here; `clara.sweep_run_items`: `sweep_run_items_outcome_check` and
+-- `ck_sweep_run_items_shape`, part 3) PLUS a THIRD table: **`alter table clara.sweep_runs add
+-- column posted_count integer not null default 0`** (part 3). That ADD COLUMN is the term the
+-- first inventory named nowhere — it is metadata-only on PG 11+, so it is brief, but it still
+-- takes ACCESS EXCLUSIVE on a live table and a D1 window that does not list a lock is a window
+-- an operator cannot plan. The guard below refuses to apply while a runtime heartbeat is fresh,
+-- because a ceremony step that lives only in prose is one somebody skips.
 --
 -- THE SPLICE DISCIPLINE, AND WHY IT IS NOT TRANSCRIPTION (the 0017:1553 / 0093 idiom). No recut
 -- below retypes a live body. Each reads `prosrc` off the LIVE catalog, asserts every anchor
@@ -97,7 +111,7 @@ begin
   select h.component, h.beat_at into v_component, v_beat from clara.runtime_heartbeats h
    where h.beat_at > now() - interval '90 seconds' order by h.beat_at desc limit 1;
   if v_component is not null then
-    raise exception 'F-A2 QUIESCE GUARD: a runtime heartbeat is fresh (component %, beat_at %) — this file replaces EIGHT live bodies incl. clara._approve_entry_core and clara._draft_entry_core, and an in-flight call finishes on the OLD body (D1); stop clara-runtime, wait for staleness (>90s), and re-apply',
+    raise exception 'F-A2 QUIESCE GUARD: a runtime heartbeat is fresh (component %, beat_at %) — this file replaces SEVEN live bodies incl. clara._approve_entry_core and clara._draft_entry_core, and an in-flight call finishes on the OLD body (D1); stop clara-runtime, wait for staleness (>90s), and re-apply',
       v_component, v_beat;
   end if;
 end
@@ -412,7 +426,7 @@ begin
    where e.status='approved' and u.is_agent and e.checked_via_rule_id is null;
   insert into _fa2p1_pre(k,v) values ('agent_checked_no_rule_entries', v_n::text);
 
-  raise notice 'F-A2 part1 prestate: clean -- 8 bodies pinned by prosrc sha at frontier 0102, the 0040 marker set is 8 CARRY / 3 RETIRE (5 occurrences) / bank_rule_suggested at 2, every splice anchor occurs exactly once, the pg_trigger census matches D.1 in both directions (11 deferred, 5 not), both wake_credentials CHECKs are the closed-world enumerations GB-3 found over % live credential(s), registration_conflict and customer_identity_name_only are ALREADY typed (zero body edits), and % existing approved entr(y/ies) are agent-checked without a rule id.',
+  raise notice 'F-A2 part1 prestate: clean -- 8 bodies pinned by prosrc sha at frontier 0102 (the SEVEN this file replaces plus the sales floor, which is pinned so a drift is caught but is byte-unmoved and is NOT a D1 term), the 0040 marker set is 8 CARRY / 3 RETIRE (5 occurrences) / bank_rule_suggested at 2, every splice anchor occurs exactly once, the pg_trigger census matches D.1 in both directions (11 deferred, 5 not), both wake_credentials CHECKs are the closed-world enumerations GB-3 found over % live credential(s), registration_conflict and customer_identity_name_only are ALREADY typed (zero body edits), and % existing approved entr(y/ies) are agent-checked without a rule id.',
     (select v from _fa2p1_pre where k='live_credentials'),
     (select v from _fa2p1_pre where k='agent_checked_no_rule_entries');
 end
