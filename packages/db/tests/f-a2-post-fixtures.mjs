@@ -316,12 +316,19 @@ export async function wakePostEntry(cred, {
 }
 
 /**
- * Run `fn(client)` inside an explicit transaction on a DEDICATED pooled client and ALWAYS roll
- * back. Returns `{ value }` on success or `{ error }` on the first raise — including a raise
- * that only happens at COMMIT, which is the entire point: a deferred constraint trigger fires
- * there and nowhere earlier, so a helper that swallowed the commit would make every Tier-D cell
- * green for the wrong reason. The client is reset (rollback → reset role → reset all) before it
- * goes back to the pool, per the rig's own hygiene rule.
+ * Run `fn(client)` inside an explicit transaction on a DEDICATED pooled client and COMMIT it.
+ *
+ * IT COMMITS ON SUCCESS — the doc comment used to say "ALWAYS roll back", which is the opposite
+ * of what the body does, and callers depend on the commit: `doctorLines`, `doctorFlags` and the
+ * period/fiscal-year fixtures all expect their writes to be there afterwards. A reader who
+ * believed the comment would build a fixture whose setup silently vanished.
+ *
+ * Returns `{ value }` on success or `{ error }` on the first raise — including a raise that only
+ * happens at COMMIT, which is the entire point: a deferred constraint trigger fires there and
+ * nowhere earlier, so a helper that swallowed the commit would make every Tier-D cell green for
+ * the wrong reason. On any error the transaction is rolled back whole. The client is reset
+ * (rollback → reset role → reset all) before it goes back to the pool, per the rig's own hygiene
+ * rule — which is also why DDL doctored inside a FAILED window cannot leak.
  */
 export async function withTxnOrNull(fn) {
   const { getPool } = await import("./rig-helpers.mjs");
