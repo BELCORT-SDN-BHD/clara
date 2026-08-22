@@ -115,9 +115,15 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
 test("f-a2.c3.B9-neg an origin='rule_proposal' question does NOT block (0012:100)", async (t) => {
   if (await gateCore(t)) return;
   const p = await agentPostable(OWNER(), { client: A2() });
+  // COLUMN NAMES FROM THE CATALOG: the text column is `question_text`, and the shape CHECK pins
+  // `scope_id = client_id` on a client-scoped row with both document_id and counterparty_id NULL.
+  // `opener_kind` is NOT NULL and admits only 'human'|'wake'. A raw insert is used deliberately — `open_question` mints
+  // origin='human', and `rule_proposal` is precisely the origin this cell needs.
   const q = await rootQuery(
-    `insert into clara.open_questions(firm_id,client_id,scope_kind,status,origin,question,opened_at)
-     values((select firm_id from clara.clients where id=$1),$1,'client','open','rule_proposal',$2,now())
+    `insert into clara.open_questions(firm_id,client_id,scope_kind,scope_id,status,origin,
+        opener_kind,question_text,opened_at)
+     values((select firm_id from clara.clients where id=$1),$1,'client',$1,'open','rule_proposal',
+        'wake',$2,now())
      returning id`, [A2(), "c3.B9-neg advisory proposal"]).catch((e) => {
     noteLane(`c3.B9-neg: could not seed a rule_proposal question (${e.code}: ${e.message}) — the column set differs from the fixture's`);
     return null;

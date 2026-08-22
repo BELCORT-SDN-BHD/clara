@@ -233,3 +233,41 @@ test("f-a2.c12.allowlist the posting allowlist rows are exactly the posting wake
   }
   noteLane(`c12.allowlist: wake_post_entry allowlist kinds = ${kinds.join(", ")}. Any live test mirroring 0011:4170-4175's "exactly 6 autodraft rows" count must be TRUED when this row joins (§D.5)`);
 });
+
+test("f-a2.c12.relations every relation the battery asserts against is NAMED FROM THE CATALOG", async () => {
+  // v6.1's C.12 addition, and it is on the record because this battery got it wrong: two cells
+  // joined `clara.chart_of_accounts` on a column `code`. Neither exists. The accounts relation is
+  // `clara.coa_accounts`, keyed `(client_id, account_code)`, which is how the live supplier floor
+  // spells it (`0036:621`) — and a 42P01/42703 raised by a TEST reads like a fixture problem when
+  // it is really the test asserting against a table that was never there.
+  //
+  // UNGATED, because the point is to hold at EVERY frontier: a relation the battery invents is
+  // wrong before F-A2 lands as well as after. Names resolve through `to_regclass`, the instrument
+  // the server itself uses, and the ABSENT names are asserted absent too — otherwise this cell
+  // could pass by naming nothing.
+  const MUST_EXIST = [
+    "clara.coa_accounts", "clara.journal_entries", "clara.journal_lines", "clara.entry_evidence",
+    "clara.document_regions", "clara.document_extractions", "clara.document_processing_tasks",
+    "clara.document_filings", "clara.documents", "clara.counterparties", "clara.open_questions",
+    "clara.sweep_run_items", "clara.sweep_runs", "clara.agent_tasks", "clara.op_receipts",
+    "clara.domain_events", "clara.audit_log", "clara.wake_credentials", "clara.wake_fn_allowlist",
+    "clara.rule_sightings", "clara.coding_rules", "clara.rule_decisions", "clara.schema_migrations",
+  ];
+  for (const rel of MUST_EXIST) {
+    const r = await rootQuery("select to_regclass($1) as rel", [rel]);
+    assert.ok(r.rows[0].rel, `c12.relations: ${rel} EXISTS — the battery asserts against it`);
+  }
+  // The NEGATIVE half: names this battery must never reach for again.
+  for (const ghost of ["clara.chart_of_accounts", "clara.accounts", "clara.entry_post_receipt"]) {
+    const r = await rootQuery("select to_regclass($1) as rel", [ghost]);
+    assert.equal(r.rows[0].rel, null,
+      `c12.relations: ${ghost} does NOT exist — a name a test invented fails as a fixture bug, never as a finding`);
+  }
+  // The COLUMN half, because the relation name alone was only half the mistake.
+  const col = await rootQuery(
+    `select count(*)::int as n from information_schema.columns
+      where table_schema='clara' and table_name='coa_accounts' and column_name = any($1)`,
+    [["account_code", "account_class", "account_type", "special_acc_type"]]);
+  assert.equal(col.rows[0].n, 4,
+    "c12.relations: coa_accounts carries account_code / account_class / account_type / special_acc_type — there is no bare `code` column");
+});
