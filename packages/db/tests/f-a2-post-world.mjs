@@ -206,6 +206,14 @@ export async function witnessedFiling(sub, {
       // and a citation naming a path with no region behind it is CLR21 `evidence_invalid`.
       ...(invoiceId ? [idRegion("invoice.invoice_id", invoiceId)] : []),
     ],
+    // …AND THE ANSWER, which is the half the PREDICATE reads. Measured at integration: the
+    // witness envelope's `invoice_id` comes from the M3 reference ANSWER, not from the region —
+    // a region-only `invoiceId` left `_invoice_fact_state(...)->>'invoice_id'` NULL, and the
+    // duplicate walls key on exactly that value, so a duplicate fixture built from regions alone
+    // produced two documents the wall could not see as the same invoice.
+    refAnswers: invoiceId
+      ? { text: { "invoice.invoice_id": { raw: invoiceId } }, vision: {} }
+      : { text: {}, vision: {} },
   });
   const silent = { state: "not_printed" };
   const shape = withWitnessV2(base, {
@@ -347,12 +355,13 @@ export async function agentPostable(sub, {
   client, amount = 500000, codingKind = "supplier_bill", lines = null,
   net = null, tax = null, rounding = null, typeCode = "01", kind = "invoice",
   vendor = undefined, evidence = undefined, flags = {}, corroborated = true, dropFields = [],
-  direction = undefined,
+  direction = undefined, invoiceId = null,
 }) {
   await ensureChart(sub, client);
   const dir = direction ?? defaultDirection(codingKind);
   const cited = await witnessedFiling(sub, {
     client, gross: amount, net, tax, rounding, typeCode, kind, corroborated, dropFields, direction: dir,
+    invoiceId,
   });
   const cred = await autodraftCred(client);
   // On the SALES side the counterparty is the BUYER, not the client — a fixture that birthed the

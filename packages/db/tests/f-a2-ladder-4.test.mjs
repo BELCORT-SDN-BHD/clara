@@ -296,12 +296,21 @@ test("f-a2.c4.dup-bill / c4.dup-sales both duplicate pairs convert", async (t) =
     ["supplier_bill", "duplicate_bill", null],
     ["sales_invoice", "duplicate_sales", null],
   ]) {
-    const first = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines });
+    // THE GRAIN IS (client, counterparty, INVOICE NUMBER), and the invoice number has to be
+    // STATED on both pages for the wall to see one invoice twice. Both walls read
+    // `_invoice_fact_state(document)->>'invoice_id'` and skip entirely when it is null, which is
+    // what every `witnessedFiling` produced before: the first cut of this cell built two
+    // documents that stated no number at all, so the duplicate simply posted.
+    const invoiceId = `DUP-${kind}-${Date.now().toString(36)}`;
+    const first = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines, invoiceId });
     const r1 = await post(first);
     if (r1?.posted !== true) { noteLane(`c4.${reason}: the first ${kind} did not post (${JSON.stringify(r1?.refusal)}) — the duplicate's precondition is unbuilt`); continue; }
     // A second entry against the SAME (client, counterparty, invoice_id) tuple.
-    const second = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines });
-    const r2 = await post(second);
+    const second = await agentPostable(OWNER(), { client: A2(), amount: 440000, codingKind: kind, lines, invoiceId });
+    assert.equal(
+      (await rootQuery("select clara._invoice_fact_state($1)->>'invoice_id' as v", [second.cited.documentId])).rows[0].v,
+      invoiceId, `c4.${reason}: mandatory setup — the second document STATES the same invoice number the first did`);
+    const r2 = await post(second, { booksVersion: await booksVersion(A2()) });
     assert.equal(r2?.posted, false, `c4.${reason}: the duplicate does not post`);
     if (r2?.refusal?.tier === "C") assertConverted(r2, reason, `c4.${reason}`);
     else noteLane(`c4.${reason}: refused as ${JSON.stringify(r2?.refusal)} — the duplicate grain the fixture built may differ from the wall's`);
