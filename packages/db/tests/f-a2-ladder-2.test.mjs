@@ -28,7 +28,7 @@ import {
   salesLines, supplierLines, genericLines,
   unwitnessedFiling, ensureChart, autodraftCred, agentDraft, ev, witnessedFiling,
   stampCodingKind, doctorFlags,
-  witnessRegion, rootQuery,
+  witnessRegion, rootQuery, doctorLines,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -245,10 +245,17 @@ test("f-a2.c3.B4-supplier the supplier tie is payable credit = expense debit = t
   if (await gateCore(t)) return;
   const ok = await agentPostable(OWNER(), { client: A1(), amount: 500000, codingKind: "supplier_bill" });
   assert.ok(admits((await post(ok))?.rung_vector, "B4"), "c3.B4-supplier: the tying bill admits");
-  const bad = await agentPostable(OWNER(), {
-    client: A1(), amount: 500000, codingKind: "supplier_bill", lines: supplierLines(499000),
-  });
-  assertNonAdmitting(assert, await post(bad), "B4", "c3.B4-supplier untied");
+  // THE UNTIED HALF IS DOCTORED, and N1 is why (F-A2 PR-1, design 3.4). The shape floors run at
+  // the DRAFT door on the agent lane now, and the supplier floor's verified-total tie refuses a
+  // non-tying bill CLR23 before it can become a draft -- a STRONGER wall than B4, and one that
+  // would leave this cell with no entry to post. So the bill is drafted TYING and doctored
+  // afterwards, which is `doctorLines`' whole reason for existing. The token it returns is not
+  // optional: `t_jl_rotate_token` rotates on any line change, and reusing the pre-doctoring one
+  // would refuse at A5 and report a revision failure where the cell meant to test a tie.
+  const bad = await agentPostable(OWNER(), { client: A1(), amount: 500000, codingKind: "supplier_bill" });
+  const doctored = await doctorLines(bad.args.entry, supplierLines(499000));
+  assert.equal(doctored.ok, true, `c3.B4-supplier: the untying doctor landed (${doctored.code}: ${doctored.message})`);
+  assertNonAdmitting(assert, await post(bad, { expectedRevision: doctored.revisionToken }), "B4", "c3.B4-supplier untied");
 });
 
 test("f-a2.c3.B4-generic the generic tie is sum(debit_cents) = total_cents — the weakest honest anchor", async (t) => {
