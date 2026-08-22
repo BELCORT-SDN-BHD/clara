@@ -65,18 +65,25 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
     `scripts/hooks/pinned-ids-guard.mjs`, registered in `.claude/settings.json`. It is a
     **mistake-net for verbatim-id write shapes**, not containment: the ids' primary protection
     is this constraint plus the DB walls, and deliberate obfuscation is out of scope by design.
-12. **ROME SECRETARY's customers are NAME-ONLY — never enrich them** with a registration
-    number or a TIN. (STRUCTURAL since 2026-08-14: `0062` walls it in the DB — fact-driven,
-    uuid-pinned, behaviourally self-proven at apply — and `0063` makes lifting it an
-    OWNER-only act through the audited door. The constraint stays here as the law the wall
-    enforces.)
-13. **Four firms, and they are not interchangeable:** **BELCORT** is the real, high-stakes
-    firm (ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION — its sole proprietor is
-    not an employee, his account is EQUITY) · **ROME PUBLIC ADVISORY** is the synthetic
-    sandbox · **Alara** and **Borneo** are slice-era RLS fixtures. Never repurpose one.
-14. **ADR-060's data authority is DATA-scoped and expires at beta.** Test data may be
-    deleted, reseeded and re-run freely; the product's security mechanisms are the thing
-    under test and are never weakened or bypassed for testing convenience.
+12. **A client may be flagged NAME-ONLY, and a name-only client's counterparties are NEVER
+    enriched** by inference — no registration number, no TIN. This is a GENERIC product
+    mechanism, not a rule about one client: `0062` walls it in the DB (fact-driven,
+    uuid-pinned, behaviourally self-proven at apply) and `0063` makes lifting it an
+    OWNER-only act through the audited door. (ADR-0075 retired the former client-specific
+    wording; the wall and its door are untouched.)
+13. **BELCORT is the OPERATOR firm; every other firm and client in the estate is a
+    RESETTABLE TEST FIXTURE** — ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION
+    (whose sole proprietor is not an employee: his account is EQUITY) · the synthetic
+    **ROME PUBLIC ADVISORY** · the slice-era RLS fixtures **Alara** and **Borneo**. All of
+    it is factory-reset and re-run at the Wave-G e2e. **Never repurpose the synthetic
+    sandbox as a real firm.** (ADR-0075.)
+14. **The data authority is DATA-scoped and expires at beta** (ADR-060, widened by
+    **ADR-0075**). Test data — every client's, the live DB included — may be deleted,
+    reseeded, reversed and re-run freely without asking, and the agent walks law-71's gates
+    as the owner's DELEGATE through the REAL audited doors, receipted (e-filing excluded by
+    nature; secrets env-to-env, never printed). **The product's security mechanisms are the
+    thing under test and are NEVER weakened or bypassed for testing convenience** — that
+    clause is the operative one on any collision.
 15. **Never disturb the frozen prior build or the Slice-0 spike's parked run** (the
     `workflow` / `graphile_worker` / `spike` schemas).
 

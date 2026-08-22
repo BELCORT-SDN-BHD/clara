@@ -139,6 +139,9 @@ geometry library, two entrances, checked against this test at review.
 - **Identifiers (TA-P8 B):** a payer account number Clara learns by judgement is knowledge-layer
   CONTEXT, never an exact-match key. Hard constraint 12 is NOT widened; RS bank matching runs
   on amount + date until a human confirms, or Clara's promotion proposal is one-click accepted.
+  **[ADR-0075 2026-08-23]** Constraint 12 is RETIRED as a *named* constraint; the GENERIC
+  name-only wall it referenced is unchanged (`0062`/`0063` untouched) and so is this clause's
+  substance — read "the name-only wall is not widened".
 
 ### F-A4 · Close key ①
 
@@ -313,6 +316,9 @@ alongside the cross-client named read (R-L17). The owner sees this deviation at 
   "promote to hard fact" as a typed card (seen N times, judgement stable); **one human click**
   writes it through the audited counterparty door (`0063`'s shape) and the receipt records the
   confirmer. Hard constraint 12 stays RS-pinned and is NOT widened.
+  **[ADR-0075 2026-08-23]** Constraint 12 is RETIRED as a *named* constraint and the wall is now
+  the GENERIC one (a client may be flagged name-only; its counterparties are never enriched).
+  `0062`'s uuid pin and `0063`'s owner-only door are untouched, so nothing here widens.
 - **F-A7b scope (TA-P14):** the **CLIENT onboarding interview only** — the firm's own first-run
   setup interview is a named follow-on. Interview-v3's three residuals clear here, above all
   the **runtime-contract receipt gap** (a server-authored per-`(run, park, submission)` receipt
