@@ -23,7 +23,7 @@ import {
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, postReceiptCount, supplierLines, bodyOfName, fnPresent,
   TIER_C_PAIRS, TIER_C_EXCLUDED, MODEL, RATIONALE,
-  landWitnessPair, witnessShape, doctorLines, CHART,
+  landWitnessPair, witnessShape, doctorLines, CHART, resolveOpenQuestion,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -324,6 +324,21 @@ test("f-a2.c4.clr26 the two-session race on ALL THREE Tier-A locks — the post 
         `c4.clr26 ${scope}: a losing post is a TYPED refusal — B9's token if the question won the race`);
     }
     noteLane(`c4.clr26 ${scope}: contended on ${lock} — post ${post_?.ok ? JSON.stringify(post_.receipt?.posted === true ? "posted" : post_.receipt?.refusal?.reason) : post_?.code}`);
+    // THE CONTENDER IS CLEANED UP, and this is not tidiness. A CLIENT-scope question left open
+    // blocks B9 for EVERY later post on this client — in this file and in every file that shares
+    // the database — so a cell that opened one and walked away would turn its own evidence into
+    // the next cell's unexplained refusal. (Measured: it did exactly that.) The x37 idiom.
+    // `holdThenContend` returns `{ ok, receipt }`; the question verb answers its own id.
+    const raw = out.b?.receipt;
+    const qid = typeof raw === "string" ? raw : (raw?.question_id ?? raw?.id ?? null);
+    assert.ok(qid,
+      `c4.clr26 ${scope}: the contending question returned an id to clean up (got ${JSON.stringify(raw)})`);
+    await resolveOpenQuestion(OWNER(), {
+      question: qid, resolution: `c4.clr26 ${scope}: the race is over`, opKey: opk(`c4clr26r-${scope}`),
+    });
+    assert.equal(
+      (await rootQuery("select status from clara.open_questions where id=$1", [qid])).rows[0]?.status,
+      "resolved", `c4.clr26 ${scope}: …and it really is closed, so it cannot block the next cell's B9`);
   }
 });
 
@@ -447,30 +462,69 @@ test("f-a2.c4.unlisted an UNLISTED (errcode, reason) propagates as a task FAILUR
 
 test("f-a2.c4.subtxn the subtransaction rolls back the delegate's partial writes — no orphaned counterparty birth", async (t) => {
   if (await gateCore(t)) return;
-  // THE CLIENT IS A1, and it is not arbitrary: `c4.closed-period` above CLOSES A2's 2026
-  // fiscal year, and every fixture in this file posts into 2026-03-15. A later A2 draft is
-  // therefore refused by the period wall at the LINE insert ("its lines may not change"), which
-  // is a stronger wall than the one this cell measures and left it with no entry at all.
-  const name = `ORPHAN ${Date.now().toString(36)} SDN BHD`;
+  // THE FIRST CUT COULD NOT REACH A CONVERSION AT ALL, so its only live assertion was the
+  // else-branch note. It leaned on `(CLR23, registration_conflict)` — which raises inside
+  // `_resolve_counterparty`, BEFORE any birth — so there was never a partial write to roll back
+  // and the cell proved nothing about the subtransaction.
+  //
+  // THE PAIR HAS TO FIRE **AFTER** THE BIRTH, and which pairs do is a measurement, not a guess.
+  // Read off the live approve body by position: the birth sits at ~7.5k, the corroboration
+  // contradiction at ~10.7k, the duplicate walls at ~12.1k and the approve UPDATE — where the
+  // non-deferred `t_period_wall` fires — at ~15.3k. Of those, only the period wall is reachable
+  // DETERMINISTICALLY behind a birth: the duplicate walls key on a counterparty that must
+  // already hold an approved bill (a freshly born one holds none, by definition), and the
+  // corroboration contradiction is re-read from the same STABLE resolver B3 already passed on,
+  // in the same snapshot, so it cannot disagree with B3 inside one transaction.
+  //
+  // THE FISCAL YEAR IS 2027 AND THE CLIENT IS A1, deliberately. `c4.closed-period` above closes
+  // A2's 2026, and every other fixture in the estate posts into 2026 — closing a year anything
+  // else uses would make this cell a landmine for whatever runs next on the same database. 2027
+  // is a year no other fixture touches, and the FY row does not exist until after the draft.
+  // ORDINAL 1, because the estate enforces predecessor continuity ("fiscal year ordinal 2
+  // requires its predecessor named") and A1 holds no fiscal year at all — measured, not assumed.
   const before = (await counterpartyRows(A1())).length;
-  // A post that births a counterparty inside the delegate and THEN hits a converted wall: the
-  // birth must not survive the conversion. An exception block opens a subtransaction, so the
-  // partial writes inside it are gone — this cell proves it rather than trusting the semantics.
-  const p = await agentPostable(OWNER(), {
-    client: A1(), amount: 460000, codingKind: "supplier_bill",
-    vendor: { new: { name, registration_no: "201801009999" } },
+  const name = `ORPHAN ${Date.now().toString(36)} SDN BHD`;
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 460000 });
+  const cred = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(460000),
+    vendor: { new: { name } }, postingDate: "2027-03-15",
   });
-  const r = await post(p);
+  assert.ok(d?.entry_id, "c4.subtxn: mandatory setup — the draft naming a NEW vendor exists");
+  assert.equal((await counterpartyRows(A1())).length, before,
+    "c4.subtxn: mandatory setup — DRAFTING births nothing; the birth is the delegate's own write (0037:1884-1888)");
+
+  const closed = await withTxnOrNull((c) => c.query(
+    `insert into clara.fiscal_years(firm_id,client_id,label,starts_on,ends_on,ordinal,status,
+        fy_end_source,opened_by)
+     values((select firm_id from clara.clients where id=$1),$1,'c4 subtxn closed FY',
+        '2027-01-01','2027-12-31',1,'closed','asserted',
+        (select user_id from clara.firm_memberships fm
+          join clara.clients cl on cl.firm_id=fm.firm_id and cl.id=$1 limit 1))`, [A1()]));
+  assert.ok(!closed.error,
+    `c4.subtxn: mandatory setup — the 2027 fiscal year is CLOSED (${closed.error?.code}: ${closed.error?.message})`);
+
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: (await entryRow(d.entry_id))?.revision_token ?? d.revision_token,
+    client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assertConverted(r, "write_into_closed_period", "c4.subtxn");
   const after = await counterpartyRows(A1());
-  if (r?.posted === false && r?.refusal?.tier === "C") {
-    assert.equal(after.length, before,
-      `c4.subtxn: a converted refusal left NO new counterparty (before=${before}, after=${after.length})`);
-    assert.ok(!after.some((c) => (c.name_display ?? c.name ?? "").includes(name.split(" ")[1])),
-      "c4.subtxn: …and specifically not the one the delegate started to birth");
-    assert.equal(await postReceiptCount(p.args.entry), 0, "c4.subtxn: and ZERO post-receipt rows (C.7b)");
-  } else {
-    noteLane(`c4.subtxn: the fixture did not reach a Tier-C conversion (${JSON.stringify(r?.refusal ?? r?.posted)}) — the rollback half is unproven this run`);
-    assert.equal((await entryRow(p.args.entry))?.status === "approved", r?.posted === true,
-      "c4.subtxn: whatever happened, the entry's status agrees with the receipt");
-  }
+  assert.equal(after.length, before,
+    `c4.subtxn: a converted refusal left NO new counterparty (before=${before}, after=${after.length}) — the exception block's subtransaction took the delegate's partial writes with it`);
+  assert.ok(!after.some((c) => (c.name_display ?? c.name ?? "").includes(name.split(" ")[1])),
+    "c4.subtxn: …and specifically not the one the delegate had started to birth");
+  assert.equal(await postReceiptCount(d.entry_id), 0, "c4.subtxn: and ZERO post-receipt rows (C.7b)");
+  assert.equal((await entryRow(d.entry_id))?.status, "draft", "c4.subtxn: the entry is still a draft");
+
+  // THE CONTROL OF THE CONTROL. Without it, "no counterparty was born" is indistinguishable from
+  // a fixture whose vendor would never have been born in the first place — the absence-as-
+  // evidence shape. The SAME vendor name, on a period nobody closed, must birth it.
+  const ok = await agentPostable(OWNER(), { client: A1(), amount: 461000, vendor: { new: { name } } });
+  const posted = await post(ok, { booksVersion: await booksVersion(A1()) });
+  assert.equal(posted?.posted, true,
+    `c4.subtxn CONTROL: the same vendor name posts cleanly outside the closed year (${JSON.stringify(posted?.refusal)})`);
+  assert.ok((await counterpartyRows(A1())).some((c) => (c.name_display ?? c.name ?? "").includes(name.split(" ")[1])),
+    "c4.subtxn CONTROL: …and THEN the counterparty exists — so the rollback above really did undo a birth that was otherwise going to happen");
 });
