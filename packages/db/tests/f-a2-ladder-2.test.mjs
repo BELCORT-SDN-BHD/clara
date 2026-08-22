@@ -99,11 +99,19 @@ test("f-a2.c3.B2-absent a '{}'-shaped or ABSENT fact state refuses — absence I
   if (await gateCore(t)) return;
   // No witness pair at all. Law 2 in its structural form: an absent fact state must fall through
   // to the fail-closed branch, never be read as "nothing contradicted, therefore corroborated".
+  //
+  // THE CODING KIND IS THE GENERIC LANE, and it is forced rather than chosen (F-A2 PR-1, D11).
+  // A document with NO fact generation has no readable direction -- `_document_direction` raises
+  // CLR30 and the tri-state answers `unresolved` -- and the draft core's direction-family arm,
+  // re-cut to bind every agent lane rather than only the autodraft wake kind, refuses a
+  // DIRECTIONAL coding kind on it one door before the ladder. `unresolved` is precisely the
+  // shape B15 ADMITS, so the generic lane is the lawful way to put an absent fact state in
+  // front of B2 -- and B2 is kind-blind, so the claim is untouched.
   await ensureChart(OWNER(), A1());
   const cited = await unwitnessedFiling(OWNER(), { client: A1(), gross: 500000 });
   const cred = await autodraftCred(A1());
   const d = await agentDraft(OWNER(), cred, {
-    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(500000),
+    client: A1(), cited, codingKind: null, lines: genericLines(500000),
   });
   const r = await wakePostEntry(cred, {
     entry: d.entry_id, expectedRevision: d.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
