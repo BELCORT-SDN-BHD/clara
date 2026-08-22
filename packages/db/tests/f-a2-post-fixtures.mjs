@@ -408,11 +408,15 @@ export async function entryEvents(entry, types = [EVENT_POSTED, EVENT_POST_REFUS
 
 /** `clara.autodraft_attempts.last_refusal` — where a Tier-D abort's `(errcode, reason)` lands.
  *
- *  THE RELATION IS MEASURED, NOT REMEMBERED. This helper read `clara.agent_tasks`, which does
- *  not exist: every call raised 42P01, and the only cell that used it returned early before ever
- *  reaching the read, so nothing ever said so. The column lives on `autodraft_attempts` — one
- *  row per attempt, keyed by task — which is the catalog's own answer (information_schema, not a
- *  guess at a plausible name). */
+ *  THE RELATION IS MEASURED, NOT REMEMBERED. This helper read `clara.agent_tasks.last_refusal`.
+ *  The TABLE is real; the COLUMN is not — so the read raised 42703 (undefined_column), not the
+ *  42P01 an absent relation would have given. The distinction matters, and getting it wrong here
+ *  once is the reason it is spelled out: "the name resolves" is not "the thing I want is there",
+ *  which is review law 3 arriving one level down from where it is usually quoted. The only cell
+ *  that called this returned early before ever reaching the read, so nothing ever said so either
+ *  way. `last_refusal` lives on `clara.autodraft_attempts` — one row per attempt, keyed by task —
+ *  and that is the catalog's own answer (information_schema over both candidates, not a guess at
+ *  a plausible name). */
 export async function lastRefusalOf(task) {
   const r = await rootQuery(
     `select last_refusal from clara.autodraft_attempts
