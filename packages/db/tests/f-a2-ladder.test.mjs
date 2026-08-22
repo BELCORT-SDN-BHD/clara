@@ -193,7 +193,13 @@ test("f-a2.c1.10 a NEW op key re-attempts after a refusal, and gets a FRESH verd
   const k2 = `f-a2-attempt-2:${randomUUID().slice(0, 8)}`;
   const r1 = await wakePostEntry(p.cred, { ...p.args, opKey: k1 });
   assert.equal(r1?.posted, false, "c1.10: the first attempt refuses");
-  const r2 = await wakePostEntry(p.cred, { ...p.args, opKey: k2 });
+  // THE BOOKS VERSION MOVED, and that is a fact about the FIRST refusal rather than fixture
+  // noise: a Tier-B refusal COMMITS -- its receipt and its `entry.post_refused` event are the
+  // whole point of the tier -- so the books token the caller held before it is stale, and a
+  // re-attempt carrying the old one is refused CLR12 at Tier A without ever reaching a rung.
+  // Re-reading it is what a real caller does, and it is the only way this cell can measure the
+  // FRESH VERDICT it claims.
+  const r2 = await wakePostEntry(p.cred, { ...p.args, opKey: k2, booksVersion: await booksVersion(A1()) });
   assert.equal(r2?.posted, false, "c1.10: the re-attempt is evaluated afresh, and refuses on the same unfixed term");
   assert.ok(await opReceiptText(p.cited.firm, k2),
     "c1.10: the re-attempt COMMITTED its own op receipt — a Tier-B refusal is durable, not a rollback");
