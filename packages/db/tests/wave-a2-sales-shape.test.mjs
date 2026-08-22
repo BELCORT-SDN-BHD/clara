@@ -147,19 +147,29 @@ function n1SalesDraftRefusal(maybe, label, expect, codes = ["CLR23", "CLR21"]) {
   return true;
 }
 
-// THE THREE SALES SITES BELOW DO NOT REACH THE SALES FLOOR TODAY, and the discriminant they are
+// THE THREE SALES SITES BELOW DO NOT REACH THE SALES FLOOR, and the discriminant they are
 // pinned to says so out loud instead of pretending otherwise. MEASURED: each refuses CLR21
-// `direction_family_mismatch` — a DIFFERENT wall from the one the cell is about. The cause is
-// the 0049 defect C6 fixes: `clara._document_direction` will only TEST a stated supplier
-// registration when the client holds BOTH a tin and an ssm, so this fixture — which states the
-// client's own name AND registration — still resolves `unresolved`, and the direction-family arm
-// answers before the shape floor is ever asked.
+// `direction_family_mismatch` — a DIFFERENT wall from the one the cell is about.
 //
-// PINNING THE TRUE DISCRIMINANT IS DELIBERATELY SELF-FORCING: once C6 lands, these documents
-// RESOLVE, the sales floor answers instead, and these three sites go RED — which is exactly the
-// prompt to re-pin them to the floor's own message. A permissive two-code union would have let
-// that transition happen silently, which is how the cells came to be passing on the wrong wall
-// in the first place.
+// THE CAUSE, RE-MEASURED AFTER C6 LANDED, IS NOT THE ONE THIS NOTE FIRST NAMED. T10 attributed
+// it to 0049's both-kinds testability rule and predicted these sites would go RED once C6
+// relaxed it. C6 landed; they did not move; the prediction was wrong because the diagnosis was.
+// Read off the rig at frontier 0105:
+//   * `before()` DOES land both identifiers — kind='ssm' AND kind='tin', both `199901000001`,
+//     on this client (the `desired field 'value'` lane note is the adaptive caller reporting an
+//     unused EXTRA field, not a failed write). So `v_hard_id` was already true under the OLD
+//     rule, and C6 changes nothing here;
+//   * the page states vendor_name `ROME PROPERTIES SDN BHD` — the CLIENT_NAME constant — while
+//     the rig client is actually named `rig_<run>_A1`. So the NAME arm misses while the
+//     REGISTRATION arm hits, which is 0049:924's CONTRADICTION shape, and `_document_direction`
+//     raises CLR30 `evidence:"contradiction"` however testable the registration is.
+//
+// SO THE FIXTURE DOES NOT BUILD ITS OWN STATED INTENT ("supplier = the client ⇒ sales"), and no
+// change to the direction RULE can make it. Fixing it means sourcing the vendor name from the
+// client row rather than from a hardcoded constant — which would resolve 'sales', let the sales
+// floor answer, and change which wall ~6 cells in this file hit. That is a fixture change with
+// its own blast radius, so it is REPORTED rather than folded into C6's truing, and the
+// discriminant below stays pinned to the wall that genuinely answers today.
 const C6_PENDING_DIRECTION = /direction_family_mismatch/;
 
 before(async () => {

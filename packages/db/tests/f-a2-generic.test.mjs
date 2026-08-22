@@ -307,6 +307,40 @@ test("f-a2.c14.gb1-twin the DIRECTION-UNRESOLVED twin still POSTS when tied — 
     `c14.gb1-twin: and it POSTS. Without this twin, "B15 works" would be indistinguishable from "generic no longer posts at all" (${JSON.stringify(r?.refusal)}, non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
 });
 
+test("f-a2.c14.silent-posts C6's CONTROL — a page that prints NO registration is still SILENT, and still posts", async (t) => {
+  if (await gateCore(t)) return;
+  // THE BOUNDARY C6 MUST NOT CROSS. C6 narrows D18: a stated identity that cannot be checked now
+  // refuses. D18 itself stands — a document that says nothing about who supplied it is still
+  // 'absent', and a tied generic JV on it still posts. Without this control, "C6 works" would be
+  // indistinguishable from "the generic lane is closed", which is a different (and unruled)
+  // change. `c14.gb1-twin` posts on the same silence; this cell exists to assert the PREMISE the
+  // twin leaves implicit, so a fixture drift that starts printing a registration turns this red
+  // instead of quietly retargeting both cells at some other shape.
+  const client = A2();
+  const p = await agentPostable(OWNER(), {
+    client, amount: 507000, codingKind: null, direction: "unresolved", lines: genericLines(507000),
+  });
+  // THE PREMISE IS READ THROUGH THE RESOLVER'S OWN PROJECTION — the same `document_regions`
+  // rows, reached through the same `_document_facts_extraction` selector 0049 uses — rather
+  // than through some other table that merely sounds like the one it reads (law 3).
+  const stated = await rootQuery(
+    `select coalesce(array_agg(distinct r.field_path order by r.field_path), '{}') as f
+       from clara.document_regions r
+      where r.extraction_id = clara._document_facts_extraction($1)
+        and r.field_path in ('invoice.vendor_registration','invoice.vendor_name')`, [p.cited.documentId]);
+  assert.deepEqual(stated.rows[0].f, [],
+    `c14.silent-posts: the page states NO vendor identity at all — that is the premise, and it is asserted, not assumed (got ${JSON.stringify(stated.rows[0].f)})`);
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v,
+    "absent",
+    "c14.silent-posts: silence classes as ABSENT — not 'untestable', which is what C6 added and what a page with nothing to test must never be given");
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.ok(admits(r?.rung_vector, "B15"),
+    `c14.silent-posts: B15 admits it (got ${JSON.stringify(r?.rung_vector?.B15)})`);
+  assert.equal(r?.posted, true,
+    `c14.silent-posts: and it POSTS — D18 is narrowed by C6, not reversed (${JSON.stringify(r?.refusal)}, non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
+});
+
 test("f-a2.c14.b14-interlock B14 and B15 are COHERENT — a directional invoice needs a control leg, and generic may carry none", async (t) => {
   if (await gateCore(t)) return;
   // "Both narrow the generic lane, and OQ-5 says so." B15 makes B14 coherent: a directional
