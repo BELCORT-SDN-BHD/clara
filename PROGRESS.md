@@ -151,14 +151,13 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    Fix A · TA-P4's receipt columns · TA-P6's `segregation_mode`).
 5. **THE OWNER'S DIGEST SIGN-OFF is the next constitutional gate.** Laws 78-81 and the four
    annotated laws (2, 21, 71, 76) are ruled-but-unratified until it happens; **F-A7a's
-   judgement half may not build before it.** At the same sitting the owner should settle
-   **R-OWNER — B15's second door** (Known issues) and the **`AGENTS.md` home question** for
-   invariant (a). ~~R1~~, ~~the corpus decisions~~, ~~the CI economics overhaul~~ and ~~F-A2's
-   OQ-2/3/5~~ are all RULED. Still open: **FX-lite build timing** · **the corpus's oracle-tier
-   gaps** (BEE's GL + TB for both FYs and the full FY2025 document · RPR's Feb/Mar-2025
-   statements or a written statement that none exist · a named producer/certifier for RS and
-   RPR · which RPR statement series is authoritative) · **OD-3's bar figures for every slot but
-   BEE** · **the C6 checklist, now CRITICAL PATH ahead of F-A7's narrow purpose (TA-P3)**.
+   judgement half may not build before it.** The **`AGENTS.md` home question** for invariant (a)
+   rides the same signature. ~~R1~~, ~~the corpus decisions~~, ~~the CI overhaul~~, ~~F-A2's
+   OQ-2/3/5~~ and ~~R-OWNER~~ are all RULED. Still open: **FX-lite build timing** · **the
+   corpus's oracle-tier gaps** (BEE's GL + TB for both FYs and the full FY2025 document · RPR's
+   Feb/Mar-2025 statements or a written statement that none exist · a named producer/certifier
+   for RS and RPR · which RPR statement series is authoritative) · **OD-3's bar figures for
+   every slot but BEE** · **the C6 checklist, CRITICAL PATH ahead of F-A7's narrow purpose**.
 
 ## Backlog
 
@@ -356,21 +355,23 @@ the machine-local-custody shape that bit the DSN bridge twice; worth pricing for
 
 ## Known issues
 
-- **R-OWNER — B15's SECOND DOOR is OPEN and the owner has not answered** (raised by the F-1
-  verifier after the 2026-08-22 sitting closed, so it is NOT one of the fourteen rulings). A
-  supplier bill that **STATES a registration** which is **untestable** because the client file
-  holds neither TIN nor SSM resolves to `none` (`0049:986-988`) — and `0049:975-979` records
-  that real Malaysian clients typically hold an SSM and no TIN, so this is the common case —
-  the generic arm then PASSES and **GB-1's phantom-payment shape lands through D18's door.**
-  Options, unranked: **A** B15 also refuses when a registration is stated but unresolvable (the
-  fail-closed default) · **B** keep D18 and measure the population under D37 · **C** fix the
-  root, SSM alone suffices, on its own reviewed migration. **No build lane may assume any of
-  the three.** Record: ADR-0074 R-OWNER + `docs/plan/active/f-a2-annexes-4-build.md` J.4.
+- **R-OWNER — B15's SECOND DOOR: RULED 2026-08-22, option C, INTO PR-1** (raised by the F-1
+  verifier after the sitting closed; now a **PR-1 build obligation, not a gap**). A supplier
+  bill **STATING a registration** that is **untestable** because the client file holds neither
+  TIN nor SSM resolved to `none` (`0049:986-988`) — and `0049:975-979` records that real
+  Malaysian clients typically hold an SSM and no TIN — so the generic arm PASSED and **GB-1's
+  phantom-payment shape landed through D18's door.** **The root fix rides PR-1:**
+  `_document_direction`'s testability is recut so **ONE held hard id suffices** (compare the
+  stated registration against every id the client holds; a stated id of a kind the client has
+  not recorded → a NEW evidence class **`untestable`**), joining **PR-1's D1 list with a
+  `prosrc`-SHA pin**. **Orchestrator rider, ledgered (walls validate, fail-closed): B15 ALSO
+  refuses `generic_registration_untestable` when a registration is STATED but untestable** —
+  **D18 now stands for direction-SILENT documents only.** Record: ADR-0074 R-OWNER +
+  `docs/plan/active/f-a2-annexes-4-build.md` J.4 (which names PR-1's four build consequences).
 - **The `AGENTS.md` home for invariant (a) is FLAGGED, not drafted** (ADR-0074/TA-P7). The
   sitting record names "constraint 2" as the third home, but constraint 2 is the
   DB-owns-every-authoritative-number law and **no hard constraint states invariant (a) at all**
-  — so the amendment there is either a no-op or a new clause the owner wants. Owner's call at
-  the digest sign-off; nothing was written into `AGENTS.md` on a guess.
+  — so it is either a no-op or a new clause. Owner's call at sign-off; nothing was guessed in.
 - **The wiki dynamic-SQL gate reads CoR-block comments UN-MASKED** (found 2026-08-20 on 0097):
   `parseCoRPatches` tests `CREATE_FN_RE` against a block whose `--` comments survive the
   file-level `maskComments` (dollar-quoted interiors are skipped), so a create-function phrase
@@ -422,8 +423,8 @@ version + ceremony):**
   runner copies fight one registration → Conflict crashloop) — cure is a full `wsl --shutdown`
   when runners are IDLE, then one keeper.
 - **Three genuinely dangling doc paths** — `RENUMBER.md`, `algebra.md`, `INTERFACE-PINS.md`:
-  authored in build worktrees, never committed. Inert (the renumber procedure survives as digest
-  law 41 and ADR-058's body); re-author only on a real need.
+  authored in build worktrees, never committed. Inert (digest law 41 + ADR-058 carry the
+  renumber procedure); re-author only on a real need.
 - **Two γ post-CLEAN NITs** (PR #231, residuals 4–5): skeleton self-citation drift · S11.4c's
   `''`-vs-NULL branch. One-word fixes awaiting the next `0057`-area batch.
 - **BEE's opening TB — RESOLVED 2026-08-20** for ADR-043 by a live read (record archived; BEE's
@@ -488,8 +489,8 @@ records: its ceremony as-runs and the corpus measurement.)*
   brake census, three gates REMOVED (TA-P12) · ONE metering ledger with `client_id` added now
   or never (TA-P13) · closed-loop DONE (TA-P14). **Delegation recorded:** on TEST DATA the
   agent may perform law-71 human acts as the owner's delegate through the real audited doors,
-  ledgered — **e-filing excluded by its nature**; real client data stays the owner's.
-  **Still OPEN — R-OWNER:** B15's second door (below).
+  ledgered — **e-filing excluded by its nature**; real client data stays the owner's. **Same
+  day, after the sitting: R-OWNER RULED — B15's second door, option C into PR-1** (Known issues).
 
 ---
 

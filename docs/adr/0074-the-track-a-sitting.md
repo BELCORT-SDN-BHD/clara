@@ -425,10 +425,10 @@ employee counterparty · **hard constraint 12** — ROME SECRETARY's customers s
 untouched, `0063`'s owner-only door the only lift (TA-P8 declined to widen it) · hard constraint 13's four
 firms · law 34's printed exemption line (TA-P9 uses it) · law 59's enrichment trap · law 69's adoption
 semantics and directing-human measurement (TA-P6 applies them; TA-P5 carves self-run report packs out of
-`0084`'s orphan-adoption rule only) · law 74's structural unreachability of the seal chain from the sandbox
-(TA-P10 lets bytes leave, never into the chain) · law 75's three internet disciplines · ADR-0072②'s refusal
-of a per-firm dial · ADR-060's DATA-scoped authority and its beta expiry · ADR-061's uniform ladder and
-ADR-0069's docs-only lane · law 28's cross-model adversarial pass, which F-A6 must take.
+`0084`'s orphan-adoption rule only) · law 74's unreachability of the seal chain from the sandbox (TA-P10 lets
+bytes leave, never into the chain) · law 75's three internet disciplines · ADR-0072②'s refusal of a per-firm
+dial · ADR-060's DATA-scoped authority and its beta expiry · ADR-061's uniform ladder and ADR-0069's
+docs-only lane · law 28's cross-model adversarial pass, which F-A6 must take.
 
 #### The 2026-08-22 human-act delegation on test data
 
@@ -444,13 +444,11 @@ the hands on them change, and only on test data.
 **R-A — the one standalone question no principle settles: the 60-day figure.** TA-P1 settled WHO may pull the
 stale-open-item waiver; no principle derives whether the threshold is 60, 90 or 45. The code calls it "an
 engineering default, for the owner to tune later", and once reconciliation certification runs unattended it
-stops being a nudge to the person at the screen and becomes **automation's parking line** — it decides how
-often unattended reconciliation stops. **Disposition: both lanes run 60 for now; F-A3's acceptance battery
-records the real stopping frequency; the owner tunes it once, on data.** It blocks nothing. *(Five further
-half-settled items are design-layer and sit in the sitting record's R-A table: WCA-R6's replacement wall set;
-TA-P7's exact predicate conjuncts; TA-P12's census page — F-A9 design's first deliverable, returning for one
-owner signature; Tier-1's exact membership, confirmed as three rows in-session; the renderer image-retention
-repository, an ops choice.)*
+stops nudging the person at the screen and becomes **automation's parking line** — it decides how often
+unattended reconciliation stops. **Disposition: both lanes run 60 for now; F-A3's battery records the real
+stopping frequency; the owner tunes it once, on data.** It blocks nothing. *(Five further half-settled items
+are design-layer and sit in the sitting record's R-A table: WCA-R6's replacement wall set; TA-P7's predicate
+conjuncts; TA-P12's census page; Tier-1's membership, confirmed as three rows; renderer image retention.)*
 
 **R-D — the seven questions the independent review REFUSED. They do not come back.** `OQ-A4-1` (should
 `begin_close` ramp — ruled by G2; law 21 is a posting doctrine and `begin_close` posts nothing) · `F5-OQ-1`
@@ -458,8 +456,7 @@ repository, an ops choice.)*
 preview-cell mechanism) · `F5-OQ-11` (must F-A5 wait for F-A6 — a train-width judgement, the orchestrator's
 under D29) · `F-A6-OQ-3` (bare SQL or a restricted DSL — ADR-0071 adopted the audit's recommendation *with its
 shape*) · `OQ-A7-10` (which field is the "answerer" — law 69 measures the directing human) · `F-A8-OQ-4`
-(build `fx_rates` now — G9 names BNM FX as Tier-1's first example) · `F-A8-OQ-3` (search-API fees metered —
-yes; the finding was TA-P13's drift).
+(build `fx_rates` now — G9 names BNM FX as Tier-1's first example) · `F-A8-OQ-3` (search-API fees metered).
 
 **R-F — the five places two collections disagreed, and the cuts.** **(1)** One vacuously-green gate claimed
 twice; **cut by who produces the fact being measured** — bank measurement origin to F-A3, uncoded vouchers to
@@ -470,21 +467,25 @@ where structurally no client exists, no consent where nothing client-identifying
 **(4)** Bare parameterised SQL versus TA-P4's atomicity — **not in conflict; a DEFINER wrapper takes SQL text
 as a parameter**. **(5)** Metering's reach — the source says "per-call usage" unqualified (TA-P13).
 
-**R-OWNER — one item raised AFTER the sitting by the F-1 verifier, PENDING the owner's answer. Not a ruling.**
-**B15's second door.** A supplier bill that STATES a registration which is untestable because the client file
-carries neither TIN nor SSM resolves to `none` (`0049:986-988`) — and `0049:975-979` records that real
-Malaysian clients typically hold an SSM and no TIN — so the generic arm PASSES and **the GB-1 phantom-payment
-shape lands through D18's door.** Options as put: **A** B15 also refuses when a registration is stated but
-unresolvable (the fail-closed default) · **B** keep D18 and measure the population under D37 · **C** fix the
-root — SSM alone suffices for resolution, on its own reviewed migration. **Open; the owner has not answered.**
+**R-OWNER — raised AFTER the sitting by the F-1 verifier; RULED 2026-08-22, option C, INTO PR-1.**
+**B15's second door.** A supplier bill STATING a registration that is untestable because the client file holds
+neither TIN nor SSM resolved to `none` (`0049:986-988`) — and `0049:975-979` records that real Malaysian
+clients typically hold an SSM and no TIN, so this was the common case — the generic arm PASSED and **GB-1's
+phantom-payment shape landed through D18's door.** **RULED: the ROOT fix, and it rides PR-1** (not a later
+migration): **`_document_direction`'s testability is recut so ONE held hard id suffices** — the stated
+registration is compared against **every** id the client holds, and a stated id of a kind the client has not
+recorded yields a NEW evidence class, **`untestable`**. It joins **PR-1's D1 list with a `prosrc`-SHA pin.**
+**Orchestrator rider under the standing delegation (walls validate, fail-closed): B15 ALSO refuses
+`generic_registration_untestable` when a supplier registration is STATED but untestable** — a client holding
+no hard id at all, or the new `untestable` class. **D18 now stands for direction-SILENT documents only.**
 
 #### Not reached (honest boundary — open for their own sittings)
 
 *(R-B's 71 design-layer questions, R-C's per-project human-act lists, R-E and R-G ride the sitting record and
 the harness sweep respectively; none is a ruling.)* FX-lite build timing (P-FX pre-seeded; law 18 stands) · the
 C6 checklist's execution and the OpenAI processor bundle · PITR · PRD §9 · the corpus's oracle-tier gaps and
-OD-3's bar figures · the interview layer's FIRM-side setup interview (TA-P14 scoped F-A7b to the CLIENT
-onboarding interview) · the old usage ledger's ROWS at retirement, left to TA-P13's own migration design.
+OD-3's bar figures · F-A7b's FIRM-side setup interview · the old usage ledger's ROWS at retirement, left to
+TA-P13's own migration design.
 
 #### Consequences
 
@@ -492,9 +493,8 @@ onboarding interview) · the old usage ledger's ROWS at retirement, left to TA-P
 F-A4's calendar wake source and minimal human doors · F-A5's open→evaluate→seal→render · F-A6's decided read
 surface and DEFINER wrapper · F-A7's attribution-as-judgement and the promotion door · F-A8's F-T1 dependency
 · F-A9's one ledger and the brake census · F-A10's widened one-architecture criterion). The agenda enters
-`docs/plan/active/` as `track-a-sitting-1.md` / `-2.md` / `-3.md`, annotated per principle, because the member
-tables are the consequence map builders will read. F-A2's two consequences — TA-P11's 7A-R3 record and
-TA-P12's unattended gate — plus R-OWNER are recorded in `docs/plan/active/f-a2-annexes-4-build.md` Annex J,
-the F-A2 design set being at its line ceiling and under separate review. `PROGRESS.md` carries the state.
+`docs/plan/active/` as `track-a-sitting-1.md` / `-2.md` / `-3.md`, annotated per principle. F-A2's two
+consequences — TA-P11's 7A-R3 record and TA-P12's unattended gate — plus R-OWNER's ruled root fix are
+recorded in `docs/plan/active/f-a2-annexes-4-build.md` Annex J. `PROGRESS.md` carries the state.
 **The digest is re-trued: laws 78-81 fold as §11, four laws are annotated in place, and all four
 constitutional amendments wait on the owner's signature.**

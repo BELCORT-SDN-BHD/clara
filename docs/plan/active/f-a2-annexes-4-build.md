@@ -6,7 +6,7 @@
 > recorded HERE rather than folded into it. **Nothing in this annex changes the F-A2 design's
 > ruled shape** — D1-D43 stand exactly as `-3-record.md` §H carries them. Two items are
 > RECORDS of a law that changed under F-A2's feet, one is a build obligation with a date, and
-> one is an OPEN OWNER QUESTION that F-A2's own verifier raised.
+> one is a ROOT FIX the owner ruled INTO PR-1 after F-A2's own verifier raised it (J.4).
 >
 > **Source of record for every ruling cited here: `docs/adr/0074-the-track-a-sitting.md`**
 > (TA-P1 … TA-P14), with the agenda and member tables at `track-a-sitting-1.md` / `-2.md` /
@@ -83,28 +83,39 @@ G8's own carve-out.
   verbs arrive as wake SIBLING verbs** — the same authoring pattern PR-1 uses, so the estate
   idiom F-A2 establishes is the one F-A3 will copy.
 
-## J.4 — R-OWNER: B15's second door — **OPEN, awaiting the owner's answer**
+## J.4 — R-OWNER: B15's second door — **RULED 2026-08-22 (owner: C, into PR-1)**
 
 Raised by the **F-1 verifier AFTER the sitting closed**, so it is not one of the fourteen
-rulings and **nothing here is decided.** It is recorded in both places a reader might look:
-here, and in `docs/adr/0074-the-track-a-sitting.md`'s residue.
+principle rulings — but the owner ruled it the same day. **This is a PR-1 build obligation, not
+a registered gap.** Also recorded in `docs/adr/0074-the-track-a-sitting.md`'s residue.
 
-**The shape.** A supplier bill that **STATES a registration number** which is **untestable**
-because the client file carries **neither a TIN nor an SSM** resolves to `none`
-(`0049:986-988`). `0049:975-979` records that real Malaysian clients typically hold an **SSM
-and no TIN** — so this is the common case, not an edge. With the registration resolving to
-`none`, **B15's generic arm PASSES**, and **the GB-1 phantom-payment shape lands through D18's
-door.** B15 was minted at the PR-0 gate to close the generic-on-directional hole; this is its
-*second* door, and it is open.
+**The shape that was ruled on.** A supplier bill that **STATES a registration number** which is
+**untestable** because the client file carries **neither a TIN nor an SSM** resolved to `none`
+(`0049:986-988`). `0049:975-979` records that real Malaysian clients typically hold an **SSM and
+no TIN** — so this was the common case, not an edge. With the registration resolving to `none`,
+**B15's generic arm PASSED**, and **GB-1's phantom-payment shape landed through D18's door.**
+B15 was minted at the PR-0 gate to close the generic-on-directional hole; this was its *second*
+door, and it is now closed at the root.
 
-**The options as put, unranked:**
+**THE RULING — option C, and it rides PR-1.** `_document_direction`'s **testability is recut so
+that ONE held hard id suffices**: the stated registration is compared against **every** id the
+client holds, and **a stated id of a kind the client has not recorded yields a NEW evidence
+class, `untestable`** — distinct from `none`, so the difference between "no registration
+printed" and "a registration printed that we cannot test" stops collapsing into one value.
+**It joins PR-1's D1 list with a `prosrc`-SHA pin**, like every other body PR-1 replaces.
 
-| | Option | What it costs |
-|---|---|---|
-| **A** | **B15 also REFUSES when a registration is stated but unresolvable** — the fail-closed default | Bills from clients with no SSM/TIN on file stop at a draft until the file is completed; the safest reading, and the one the house default picks in silence |
-| **B** | **Keep D18 and MEASURE the population under D37** | Nothing stops today; the exposure is quantified before it is closed, at the price of running the known shape live while the count comes in |
-| **C** | **Fix the root — SSM alone suffices for resolution** | The correct long answer, but it changes identity resolution and needs **its own reviewed migration**, so it cannot ride PR-1 |
+**THE ORCHESTRATOR'S RIDER, attached under the standing delegation** (walls validate,
+fail-closed, narrowing nothing the owner ruled): **B15 ALSO refuses
+`generic_registration_untestable` when a supplier registration is STATED but untestable** —
+whether because the client holds no hard id at all, or because the recut yields the new
+`untestable` class. **D18 therefore stands for direction-SILENT documents only**: a document
+that prints no registration keeps its existing path, and a document that prints one we cannot
+test no longer borrows it. Ledgered here as an orchestrator act, not an owner ruling.
 
-**Status: open.** The owner has not answered. Until he does, **no build lane may assume any of
-the three** — a builder who needs the answer raises it rather than picking the convenient one,
-and review law 2 applies: the absence of an answer is not an answer.
+**Build consequences for PR-1, named so the builder does not have to re-derive them:** the
+recut body joins the D1 list and its sha pin · the new `untestable` evidence value extends its
+closed world **only-widening**, never by re-cutting an existing arm · B15's refusal vocabulary
+gains `generic_registration_untestable` (Annex E's closed refusal list) · the battery needs
+both polarities — a stated-and-testable registration that must NOT refuse, and a
+stated-but-untestable one that MUST — because a refusal arm nobody asked is not a wall
+(digest law 31).

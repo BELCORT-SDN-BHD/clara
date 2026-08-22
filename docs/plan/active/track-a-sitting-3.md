@@ -10,7 +10,7 @@
 > questions and R-F's five conflict adjudications are carried into the ADR; R-B (design-layer
 > questions per project), R-C (the human-act lists, including **the 2026-08-22 test-data
 > delegation**), R-E and R-G stay here as the working register the F-A3…F-A9 designs read. One
-> item was raised AFTER the sitting and is **still open** — see `R-OWNER` at the end.
+> item was raised AFTER the sitting and the owner ruled it the same day — `R-OWNER` at the end.
 >
 > Body in Chinese, as briefed.
 
@@ -337,12 +337,21 @@ OD-11 UX 底板先行）· 法 66（四家事务所不可互换）· P19 契约�
 - `wave-f-contract.md` 排期段「Track B 独立」在 SST 税率表这一张上不成立——**已按 TA-P2
   补上 F-A8 → F-T1 的先后依赖**。
 
-## R-OWNER · 坐席之后新提出、**仍待 owner 回答**的一条（不是裁定）
+## R-OWNER · 坐席之后新提出的一条 —— **RULED 2026-08-22（owner：选 C，塞进 PR-1）**
 
 **B15 的第二道门。** 一张**声称**有供应商注册号、但因为客户档案里既没有 TIN 也没有 SSM 而
 **无法验证**的单据，会解析成 `none`（`0049:986-988`；而 `0049:975-979` 记着真实马来西亚客户
-通常只有 SSM、没有 TIN），于是 generic 臂放行，**GB-1 的幽灵付款形状就从 D18 那道门进来**。
-选项：**A** B15 在「声称了注册号但无法解析」时也拒绝（fail-closed 默认）· **B** 保留 D18，
-在 D37 下测量这个人口 · **C** 修根因：单有 SSM 即足以解析，走它自己的评审迁移。
-**尚未裁定；记录在 `docs/adr/0074-the-track-a-sitting.md` 的 R-OWNER 与
-`docs/plan/active/f-a2-annexes-4-build.md` Annex J。**
+通常只有 SSM、没有 TIN，所以这是常态不是边角），于是 generic 臂放行，**GB-1 的幽灵付款形状
+就从 D18 那道门进来**。选项曾是：**A** B15 在「声称了但无法解析」时也拒绝 · **B** 保留 D18、
+在 D37 下测量人口 · **C** 修根因。
+
+**裁定：C，而且塞进 PR-1（不另开迁移）。** `_document_direction` 的可验证性重切成
+**只要客户手上有一个硬 id 就够**——把声称的注册号拿去跟客户持有的**每一个** id 比对；声称了
+一类客户根本没登记过的 id，产出一个**新的证据类别 `untestable`**（与 `none` 分开，"没印"和
+"印了但验不了"不再塌成同一个值）。它**进 PR-1 的 D1 名单，带 `prosrc` SHA 钉**。
+
+**Orchestrator rider（标准委托下，walls validate、fail-closed，已入帐）：声称了注册号但
+无法验证时，B15 也拒绝 `generic_registration_untestable`**——不论是客户一个硬 id 都没有，
+还是落进新的 `untestable` 类。**D18 从此只管「方向沉默」的单据。**
+记录：`docs/adr/0074-the-track-a-sitting.md` 的 R-OWNER 与
+`docs/plan/active/f-a2-annexes-4-build.md` J.4（后者写明 PR-1 的四项建造后果）。

@@ -423,9 +423,12 @@ timing (principle pre-seeded, law 18 stands) · the WD-R5/R8 calendar-belt doctr
 were ruled at ADR-0072 / ADR-0073. **The WD-R5/R8 calendar-belt doctrine is now REACHED** —
 TA-P5 narrows law 21 to periodic POSTING belts and mints the clock; it leaves this list. Still
 deferred: FX-lite build timing · the C6 checklist's own execution and the OpenAI processor
-bundle · beta-boundary instruments. **Newly open and owner-facing:** the four constitutional
-amendments awaiting the digest sign-off, and **R-OWNER — B15's second door** (a stated but
-unresolvable supplier registration resolving to `none`, so the generic arm passes and GB-1's
-phantom-payment shape lands through D18; options A/B/C in ADR-0074's residue and in
-`docs/plan/active/f-a2-annexes-4-build.md` Annex J). The 60-day figure runs at 60 until F-A3's
-battery gives the owner data to tune it on.
+bundle · beta-boundary instruments. **Newly open and owner-facing: only the four constitutional
+amendments awaiting the digest sign-off.** **R-OWNER — B15's second door — was RULED 2026-08-22
+(owner: option C, INTO PR-1)** and has LEFT this list: `_document_direction`'s testability is
+recut so **one held hard id suffices**, a stated id of an unrecorded kind yielding the new
+`untestable` evidence class, on **PR-1's D1 list with a `prosrc`-SHA pin**; the orchestrator's
+ledgered rider makes **B15 also refuse `generic_registration_untestable`** when a registration
+is stated but untestable, leaving **D18 for direction-SILENT documents only** (ADR-0074 R-OWNER
+· `docs/plan/active/f-a2-annexes-4-build.md` J.4, which names PR-1's build consequences). The
+60-day figure runs at 60 until F-A3's battery gives the owner data to tune it on.
