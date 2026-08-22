@@ -1,6 +1,6 @@
 # F-A2 annexes 1 — the estate and the retirement checklist
 
-> Companion to `f-a2-agentic-posting-design.md` (**v4, 2026-08-20**). **Annex A** the estate
+> Companion to `f-a2-agentic-posting-design.md` (**v5, 2026-08-22**). **Annex A** the estate
 > as-found and the seven binding findings at the bytes · **Annex B** the retirement checklist.
 > Siblings: `f-a2-annexes-2-mechanics.md` (C, D) and `f-a2-annexes-3-record.md` (E-I).
 >
@@ -59,9 +59,11 @@ bank-matching family, they **survive**, and they are F-A3's (`wave-f-contract.md
 7. **The wake director.** `mint_wake_credential` (`0011:1178-1186`): for `p_wake_kind='autodraft'`
    it raises unless `p_client` is a firm-congruent active client **and `p_on_behalf_of` is null**
    (*"autodraft wake requires a firm-congruent active client and no on_behalf_of"*); otherwise a
-   non-null `p_client` raises *"legacy wake kinds do not accept a client binding"*. The durable half
-   is `ck_wake_credentials_client_0011` (**`0011:625-628`**), which **v4 leaves untouched** — the
-   KIND CHECK (`0011:623-624`) is extended instead (§D.2).
+   non-null `p_client` raises *"legacy wake kinds do not accept a client binding"*. The durable half is
+   `ck_wake_credentials_client_0011` (**`0011:625-628`**). **v4 ruled it untouched and the KIND CHECK
+   (`0011:623-624`) extended instead — GB-3 showed that cannot be built, because the client CHECK is
+   itself a closed-world enumeration over the three existing kinds. The whole limb is SEVERED to the
+   chat-parity follow-on PR (§D.2c); nothing in PR-1 touches either CHECK.**
 
 ---
 
@@ -88,6 +90,15 @@ missed** (§B.5) and **one roster miscount corrected** (§B.2).
 | `_ocr_sales_floor` / `_ocr_sales_floor_pop` | `0046:616` / `0046:568` | ungranted | read `rule_sightings` |
 | `preview_ocr_sales_evidence` | `0046:2010` | `0046:2081` | `reviewApi.ts:110`, `AutopostRulePanel.tsx:13` — **OQ-3** |
 
+**A RETIRING WALL THAT NEEDS A NAMED SUCCESSOR (GM-2).** The executor's own rungs die with it, and one
+was doing real work: **`account_mismatch` (`0046:1092`)** is the only estate wall that ever refused a
+*fabricated* `sst_output` leg tied against a lumped total. **Its successor is B4-sales' component tie**
+(Annex I) — which is exactly why that tie must evaluate **`not_evaluable`, never `pass`**, wherever the
+nil-tax witness arm withholds `total_excl_tax_cents` / `tax_total_cents` (`0100:553-554`): a lumped B4
+with no component tie would let a fabricated output-SST credit tie perfectly, the shape
+`account_mismatch` caught. **Disposition: RETIRE with the executor, successor named, C.3 cells them
+both.**
+
 **KEEP-AS-HISTORY (stop the writes; keep the relations).** `rule_post_runs` (`0015:315`) ·
 `rule_post_skips` (`0015:337`) · `coding_rules` (`0011:753`) · `rule_sightings` (`0011:843`) ·
 `rule_decisions` (`0011:864`, **OQ-2**) · `journal_entries.checked_via_rule_id` (`0015:222-223`) ·
@@ -111,7 +122,7 @@ and emits `kb_rule.signed` — **OQ-3**.
 
 | # | Site | Enumerates | Edit |
 |---|---|---|---|
-| 1 | **`packages/db/tests/x42-s5-helpers.mjs:156-195`** (`S5_25_BARE_TOKEN_ROSTER`) | ~150 fn names compared **EXACTLY** against the live catalog | **remove ELEVEN, not ten** — `_ocr_sales_floor` (**line 164, missed by v1**), `acknowledge_rule_posts`, `decline_coding_rule`, `execute_rule_post`, `list_autopost_rules`, `propose_autopost_rule`, `reconcile_autopost_rules`, `retire_autopost_rule`, `retire_coding_rule`, `sign_autopost_rule`, `sign_coding_rule`. **AND ADD the three new post-path verbs as an `appliedStem`-GATED COHORT** — see §B.3 |
+| 1 | **`packages/db/tests/x42-s5-helpers.mjs:161-203`** (`S5_25_BARE_TOKEN_ROSTER`) | ~150 fn names compared **EXACTLY** against the live catalog | **remove ELEVEN, not ten** — `_ocr_sales_floor` (**line 169, missed by v1**), `acknowledge_rule_posts`, `decline_coding_rule`, `execute_rule_post`, `list_autopost_rules`, `propose_autopost_rule`, `reconcile_autopost_rules`, `retire_autopost_rule`, `retire_coding_rule`, `sign_autopost_rule`, `sign_coding_rule`. **AND ADD the three new post-path verbs as an `appliedStem`-GATED COHORT** — see §B.3 |
 | 2 | `packages/db/tests/rig-meta.mjs` | `:43-51` · `:65-68` · `:72` `WAVE_A2_RUNTIME_FNS` | trim all three; consumed by `rig-docs-meta.mjs:23,74`, `rig-runtime-meta.mjs:10,50` |
 | 3 | `packages/db/tests/wave-a-helpers.mjs` | `:70-80` · `:83` · `:86-96` · `:103-114` · `:122-159` | trim; drives `wave-a-shape.test.mjs` |
 | 4 | `packages/db/tests/wave-b/wb-helpers.mjs:212-226` `WB_AUTHORITY_FNS` | the WB-R6 no-wiki roster | trim retired names **AND ADD `wake_post_entry`, `_agent_post_entry_core`, `_tf_assert_agent_post_receipt`** (D17) |
@@ -123,12 +134,13 @@ and emits `kb_rule.signed` — **OQ-3**.
 
 ### B.3 · The gated-cohort obligation — the easiest thing here to get wrong
 
-`x42-s5-helpers.mjs` does **not** compare a flat list. At `:407` it builds the comparison set as
-`[...S5_25_BARE_TOKEN_ROSTER]` and then **conditionally pushes later cohorts gated on the migration
-ledger**. **F-A2's cohort must gate on `appliedStem` (`:403`), the F-A1 idiom —
-`appliedStem("f_a1_writer$")` at `:417`, `appliedStem("f_a1_statements$")` at `:418` — and NEVER
-`applied("00NN_%")`, because migration numbers are claimed at MERGE, so a number-keyed gate is a
-guess that silently never fires.** Its own header (`:208-214`) says why the gating exists at all:
+`x42-s5-helpers.mjs` does **not** compare a flat list. At **`:420`** it builds the comparison set as
+`[...S5_25_BARE_TOKEN_ROSTER]` (declared `:161`) and then **conditionally pushes later cohorts gated on
+the migration ledger**. **F-A2's cohort must gate on `appliedStem` — declared at `:417`, the F-A1 idiom
+being `appliedStem("f_a1_writer$")` at `:431` and `appliedStem("f_a1_statements$")` at `:433` — and NEVER
+`applied("00NN_%")`, because migration numbers are claimed at MERGE, so a number-keyed gate is a guess
+that silently never fires.** *(All five cites re-trued against the current file at the gate; v4's
+`:403`/`:407`/`:417`/`:418` were stale.)* Its own header (`:208-214`) says why the gating exists at all:
 the roster is compared **exactly against the live catalog**, and `db-slice-frontiers` runs this
 battery against databases pinned at **earlier frontiers** (d-b0..b3 stop at 0042-0045) *"where
 these three functions do not exist. An unconditional entry turns every one of those legs red while
@@ -177,6 +189,12 @@ Removing the eleven retired names is likewise exact in **both** directions.
 > missed a sixth in the same file, a second zero-count head three lines from the first, and
 > `x42-producer-role.test.mjs` entirely. **Before the `#!cells-floor:` number is set, sweep the
 > whole `test-list-d-b2.txt` membership for retired-verb fixtures** — the floor is list-wide.
+>
+> **PR-0 re-ran this census independently and found it exact but for TWO gaps.** The first is
+> **GM-11's `kb_rule_proposal` part-type surface**, folded below. The second is labelled **N-9** in the
+> gate record §1 and is **not expanded there**, so it is carried here as an obligation rather than a
+> fixed item: **PR-3 re-runs the verbs-not-names sweep over the whole list membership and resolves N-9
+> before the floor number is set.** An unresolved N-9 blocks the floor, not the merge.
 
 **UNCONDITIONAL breakage found by the delta review, in addition to the lists below:**
 `wb-s-seeding.test.mjs:217` (calls `proposeCodingRule` `:225` and `signCodingRule` `:230`; its
@@ -188,15 +206,15 @@ Removing the eleven retired names is likewise exact in **both** directions.
 witness) · `a21-prestate` · `a21-ocr-envelope` · `a21-sightings-lift` · `a21-reconcile` ·
 `x1-anchor` · `x36-vendor-binding-executor` · `x36-q-round-regressions`.
 **Helper/roster surgery (10):** `a21-helpers.mjs` · `rig-meta.mjs` · `wave-a-fixtures.mjs:152-171`
-· `wave-a-helpers.mjs` · `wave-a-reads.mjs:62-65,106-114` · `x1-helpers.mjs:368-370` ·
+· `wave-a-helpers.mjs` · `wave-a-reads.mjs:62-65,106-114` · `x1-helpers.mjs:390-392` ·
 `wave-b/wb-calls.mjs:355-367` · `wave-b/wb-helpers.mjs:212-226` · `x42-af2-world.mjs:101-105` ·
-`x42-s5-helpers.mjs:156-195`.
+`x42-s5-helpers.mjs:161-203`.
 **~55 named tests inside surviving files.** Heaviest: `a21-adversarial` (13) · `wave-a-shape` (7)
 · `x46-blind-contract` (7) · `wb-s-seeding.test.mjs` (6 — the seeding↔`coding_rules` coupling,
 OQ-3) · `x46-wave-7a-sales-lane` (5) · `x37-wave-c-a-subledger` (4; **`:1951`** — *"three
 employee claims STILL breed a vendor_account proposal"* — whose **inversion is a C.8 cell**).
 
-**TWO HELPERS THAT FAIL SOFT — delete, never leave.** `x1-helpers.mjs:368-370` returns
+**TWO HELPERS THAT FAIL SOFT — delete, never leave.** `x1-helpers.mjs:390-392` returns
 `(await fnSource("execute_rule_post")).includes("X4 DARK GUARD")` → **`false` silently** once the
 function is gone. Same shape at `x37-wave-c-a-subledger.test.mjs:1684-1693` (`caught()` →
 `noteLane()` → early return). **Both stop proving their own claim without going red.**
@@ -213,6 +231,14 @@ a Wave-D surface: RELOCATE, do not delete.** Parts catalog: `shared/parts.ts:77,
 `chat/partCatalog.ts:117-120` · `chat/parts.tsx:17,239-241` ·
 `apps/dashboard/app/shared/cards/RulePostReceiptCard.tsx`
 · `chat/partCatalog.test.tsx:80-87` (**test at `:83` breaks**).
+
+**THE `kb_rule_proposal` PART TYPE — the census's first gap (GM-11), and it follows the verbs.** It is a
+**live dashboard consumer of three retiring verbs** — `get_coding_rule`, `sign_coding_rule`,
+`decline_coding_rule` — so by this section's own method header it retires *with* them, across all three
+of its surfaces: the **parts catalog** entry, the **card** that renders it, and its **tests**. The verbs
+are already on §B.1's RETIRE list and their `reviewApi.ts` call sites on the list above; what v4 missed
+is that a part type outlives its verbs silently — the catalog keeps accepting the type, the card keeps
+mounting, and the only symptom is a card that can never act. **Retire the type, not just the calls.**
 `apps/dashboard/app/shared/reviewApi.ts`:
 `:55,78,83,110,116-121,137,141,171,226,235,242` retire; `:34` and `:67` **survive but change
 shape**. Types + census: `apps/dashboard/app/shared/reviewCardTypes.ts` ·
@@ -287,28 +313,60 @@ first branch**, so the trigger falls through — by its own wording, not by a ne
 and **F-A10's terminal check closes at that reset** rather than on a backfill. The arms therefore
 live longer than the directive first implied; that is the priced cost of the smaller re-extraction.
 
-### B.9 · PR-1's two files, by content (design §5 step 2)
+### B.9 · PR-1's THREE files, by content, and the numbered D1 list (design §5 step 2)
 
-The `0077`/`0078` split: part 1 ships ungranted machinery and grants nothing, part 2 adds the
-granted surface plus the census that proves it, and the residue between halves is fail-safe (cores
-reachable by no role).
+**Severed at PR-0 (gate record §4).** Chat parity leaves the train (GB-3), B12/B13 are cut (GM-3), and
+the `posted` chain becomes its **own file inside the same window**. The `0077`/`0078` split still
+governs the first two: part 1 ships ungranted machinery and grants nothing, part 2 adds the granted
+surface plus the census that proves it, and the residue between halves is fail-safe (cores reachable by
+no role). Part 3 is behaviourally inert until PR-2 emits `posted`, and provable in isolation via C.9.
 
 - **Part 1 (ungranted):** `clara.entry_post_receipts` + its `_tf_append_only`/no-truncate triggers ·
-  `t_je_agent_post_receipt` · `clara._agent_post_entry_core` · the **8th `_approve_entry_core`
-  body** (breeding excision + ctx identity + the agent arm + the Tier-C `detail` reasons) · the
-  `_draft_entry_core` CoR (OQ-2 limb, N1 draft copies, direction-family re-cut, generic widening) ·
-  **T3's two trigger-function recuts** · **the B12/B13 belt-predicate extractions** · **the
-  `interactive_client` kind: the `ck_wake_credentials_kind_0011` extension, the
-  `mint_wake_credential` arm, and `wake_open_question`'s re-key onto the client pin** *(the durable
-  client CHECK is NOT touched — §D.2)* · the `posted` outcome across all four layers and the six
-  further sites (Annex F) · the two new event kinds with their taxonomy pairs.
-- **Part 2 (granted + proved):** `clara.wake_post_entry` · `revoke all on function … from public`
-  plus a single `grant execute … to clara_wake_interactive` · the two `wake_fn_allowlist` rows
-  (`'autodraft'`, `'interactive'`; never `'proactive'`, and **never `'interactive_client'` — that
-  kind posts nothing**) · the `_approve_entry_core` zero-grant re-pin (`0015:3592-3596`) · the
-  `WB_AUTHORITY_FNS` extension and the **`appliedStem`-gated** `x42-s5` cohort (§B.3) · the tail
-  census asserting the new core is ungranted and that no granted surface gained DML against
-  `journal_entries`.
+  `t_je_agent_post_receipt` · `clara._agent_post_entry_core` — the ladder **B1–B11, B14, B15** and
+  **Tier A's three lock acquisitions** (§D.7) · **`clara._assert_control_leg_counterparty_at`, GB-2's
+  extracted projected-state predicate** (§D.6), with `_assert_supplier_bill_shape_at` re-cut as a thin
+  delegate passing NULL · the **8th `_approve_entry_core` body** (breeding excision + ctx identity + the
+  agent arm + the Tier-C `detail` reasons, **now including `registration_conflict`** — GM-5) · the
+  `_draft_entry_core` CoR (OQ-2 limb, N1's draft copies **on the projected state**, direction-family
+  re-cut, generic widening) · **T3's two trigger-function recuts** · the two new event kinds with their
+  taxonomy pairs.
+- **Part 2 (granted + proved):** `clara.wake_post_entry` · `revoke all on function … from public` plus a
+  single `grant execute … to clara_wake_interactive` · the two `wake_fn_allowlist` rows (`'autodraft'`,
+  `'interactive'`; never `'proactive'`) · the `_approve_entry_core` zero-grant re-pin
+  (`0015:3592-3596`) · the `WB_AUTHORITY_FNS` extension and the **`appliedStem`-gated** `x42-s5` cohort
+  (§B.3) · the tail census asserting the new core is ungranted and that no granted surface gained DML
+  against `journal_entries`.
+- **Part 3 (the `posted` chain, inert on arrival):** Annex F's **five** layers and six further sites.
+- **NOT in PR-1 any more, and named so nobody re-adds them:** the **B12/B13 belt-predicate extractions**
+  (CUT on correctness grounds, GM-3) · the whole **`interactive_client` limb** — the kind-CHECK
+  extension, the `mint_wake_credential` arm and `wake_open_question`'s re-key (SEVERED, GB-3 / §D.2c).
+  **`(CLR10, customer_identity_name_only)` costs no body edit at all** (GM-6): `0062:196-243` already
+  raises with `detail.reason`, so PR-1 only lists the pair.
+
+**The D1 write-quiesce list, recounted AFTER the severance — EIGHT CoR'd live bodies and one
+`ALTER TABLE`.** GM-9: §3.5's old *"eight bodies and one ALTER TABLE"* label was enumerated nowhere and
+B.9's v4 contents needed ≥11. This table is the enumeration, and **the count design §3.5 cites is this
+list's count — PR-1's rig replay confirms or corrects it** (gate §7). Two of the eight are new since
+the gate's own arithmetic: GB-2 puts the supplier floor on the list, and the `posted` chain's finalize
+body is a third function, not a second overload.
+
+| # | body | why it is on the list |
+|---|---|---|
+| 1 | `clara._approve_entry_core` | the 8th body — breeding excision, ctx identity, the agent arm, the Tier-C `detail` reasons |
+| 2 | `clara._draft_entry_core` | the OQ-2 limb, N1's draft copies, the direction-family re-cut, the generic widening |
+| 3 | `clara._tf_assert_supplier_bill_shape()` (`0009:524`) | T3's receipt-keyed pin |
+| 4 | `clara._tf_assert_sales_invoice_shape()` (`0015:1027`) | T3's receipt-keyed pin, sales twin |
+| 5 | `clara._assert_supplier_bill_shape_at` (live tip `0036:601`) | **GB-2** — the `0036:619-626` prologue moves out into the new predicate and the floor becomes a thin delegate passing NULL |
+| 6 | `clara.settle_autodraft_task`, 6-arity (`0036:856`) | the `posted` outcome: the guard, the entry-exists validation, the `v_item_outcome` mapping, `last_refusal`, `entry_id`, the CLR29 fabrication |
+| 7 | `clara.settle_autodraft_task`, 5-arity (`0011:2642`) | the other overload's own copy of the guard (`0011:2642-2652`) |
+| 8 | `clara.reconcile_sweep_runs()` (`0011:2709`) | the finalize bucketing (`0011:2754-2762`), which counts a `posted` row in none of its three counters |
+| + | **`ALTER TABLE clara.sweep_run_items`** | the `outcome` CHECK (`0011:734-735`) **and `ck_sweep_run_items_shape`** (GM-8) — **ACCESS EXCLUSIVE**, hence the window |
+
+**Not on the list, and each for a stated reason.** The **1-arity shape delegates** (`0016:3957-3961`,
+`0016:2115-2119`) are byte-unmoved — that is T3's whole point. `clara._agent_post_entry_core`,
+`clara._assert_control_leg_counterparty_at`, `clara.wake_post_entry`, `clara.entry_post_receipts` and
+`t_je_agent_post_receipt` are **new objects**, not CoRs of live bodies, so they add nothing to the
+quiesce surface beyond the window they arrive in.
 
 ### B.10 · The 0040 marker dispositions for the 8th `_approve_entry_core` body (design §3.5)
 
