@@ -28,7 +28,7 @@ import {
   salesLines, supplierLines, genericLines,
   unwitnessedFiling, ensureChart, autodraftCred, agentDraft, ev, witnessedFiling,
   stampCodingKind, doctorFlags,
-  witnessRegion, rootQuery, doctorLines,
+  witnessRegion, rootQuery, doctorLines, creditNoteLines,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -283,11 +283,19 @@ test("f-a2.c3.B4-creditnote a credit note may NOT tie by absolute value — the 
   // load-bearing half of Annex I's sentence — is the NEGATIVE: an un-mirrored entry, which ties
   // only by absolute value, must not admit. A cell that asserted the positive half against an
   // uncorroborated fixture would be green on B2's refusal and say nothing about B4.
+  //
+  // AND THE UN-MIRRORED SHAPE IS NOW DOCTORED IN, for the N1 reason (design 3.4): the sales
+  // floor runs at the DRAFT door on the agent lane, and it refuses invoice polarity on a credit
+  // note outright ("a sales entry requires exactly one direction-correct receivable control
+  // leg") -- one door before B4. That refusal is a stronger wall, not a weaker one, so the cell
+  // drafts the LAWFUL mirror and doctors it to the un-mirrored legs the claim is about.
   const unmirrored = await agentPostable(OWNER(), {
     client: A1(), amount: 10600, net: 10000, tax: 605, rounding: -5, typeCode: "02", kind: "credit_note",
-    codingKind: "sales_credit_note", lines: salesLines(10600, 10000, 605, -5),
+    codingKind: "sales_credit_note", lines: creditNoteLines(10600, 10000, 605, -5),
   });
-  const r = await post(unmirrored);
+  const flip = await doctorLines(unmirrored.args.entry, salesLines(10600, 10000, 605, -5));
+  assert.equal(flip.ok, true, `c3.B4-cn: the un-mirroring doctor landed (${flip.code}: ${flip.message})`);
+  const r = await post(unmirrored, { expectedRevision: flip.revisionToken });
   assert.equal(r?.posted, false, "c3.B4-cn: an un-mirrored credit note does not post");
   assert.ok(!admits(r?.rung_vector, "B4") || !admits(r?.rung_vector, "B11"),
     `c3.B4-cn: and it does not admit at the tie or at the sales floor — the sign mirror is what keeps a credit note from tying by absolute value (${JSON.stringify(r?.rung_vector)})`);
