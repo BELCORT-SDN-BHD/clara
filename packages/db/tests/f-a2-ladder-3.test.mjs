@@ -316,9 +316,14 @@ test("f-a2.c3.vec-all every rung is EVALUATED even after the first failure", asy
 
 test("f-a2.c3.vec-ne a rung whose INPUTS are absent reports not_evaluable, never pass — the ARM-0 shape", async (t) => {
   if (await gateCore(t)) return;
+  // THE ENTRY TIES, and it has to: B4-sales reports `not_evaluable` only when the LUMPED tie
+  // holds and the fact side states no tax (0100:553-554's withheld components). With
+  // `income + sst = 10605` against a total of 10600 the lumped tie FAILS first and B4 reports
+  // `fail`, which is a different verdict from the one this cell exists to force — the arithmetic
+  // was a fixture defect, not a rung finding.
   const p = await agentPostable(OWNER(), {
     client: A1(), amount: 10600, net: null, tax: null, rounding: null,
-    codingKind: "sales_invoice", lines: salesLines(10600, 10000, 605, 0),
+    codingKind: "sales_invoice", lines: salesLines(10600, 10000, 600, 0),
     dropFields: ["invoice.total_excl_tax", "invoice.tax_total"],
   });
   const r = await post(p);
