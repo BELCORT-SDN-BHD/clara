@@ -139,13 +139,24 @@ test("f-a2.c3.B3 an UNBOUND anchor refuses anchor_unbound", async (t) => {
   // region binds real evidence and leaves `_corroboration_bound(entry, total_cents)` with
   // nothing to find. B3 and B7 share that fixture, which is why both cells use the LOOSE
   // non-admission assertion rather than claiming rung isolation they do not have.
+  //
+  // AND THE LANE IS GENERIC, forced by N1 (F-A2 PR-1, design 3.4). The shape floors now run at
+  // the DRAFT door on the agent lane, and a CORROBORATED `supplier_bill` cannot be drafted
+  // without citing its own total: `_draft_entry_core` raises CLR21 `evidence_invalid`
+  // ("corroborated total is not bound by evidence") on exactly the shape this cell needs, and
+  // the supplier floor's tax-leg rule raises CLR21 `tax_leg_missing` on a document stating a
+  // nonzero tax. Both are STRONGER walls than B3, and both would mask it. A NULL coding kind
+  // skips both -- `_corroboration_bound` is what B3 reads and it is kind-blind -- so the fixture
+  // keeps its whole shape (a corroborated document, evidence that BINDS, no verified total row)
+  // and changes only the kind. B15 is unavoidably non-admitting on a generic entry anchored to
+  // a directional document, which is why this cell keeps the LOOSE assertion it already had.
   await ensureChart(OWNER(), A1());
   const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 10600, net: 10000, tax: 605 });
   const tax = await witnessRegion(cited.documentId, "invoice.tax_total");
   assert.ok(tax?.id, "c3.B3 precondition: the witness text extraction carries a tax region to cite");
   const cred = await autodraftCred(A1());
   const d = await agentDraft(OWNER(), cred, {
-    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(10600),
+    client: A1(), cited, codingKind: null, lines: genericLines(10600),
     evidence: [ev(tax.id, tax.text_content, "invoice.tax_total")],
   });
   const bound = await rootQuery(
