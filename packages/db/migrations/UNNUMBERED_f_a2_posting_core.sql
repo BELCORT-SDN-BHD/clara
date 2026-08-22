@@ -62,7 +62,15 @@
 --       UPDATE, vendor advisory 203005003, client advisory 203005004). §D.7 says "the client
 --       advisory immediately after the entry FOR UPDATE"; taken literally that inverts the
 --       delegate's vendor-then-client order and opens an ABBA deadlock against every concurrent
---       human approve. All three are still held before B9, which is what GM-7 is about.
+--       human approve. For the same reason the filing FOR SHARE precedes the entry FOR UPDATE
+--       here, as it does in the delegate, rather than sitting after the revision-token gate
+--       where §3.2's Tier-A list prints it. All three locks are still held before B9, which is
+--       what GM-7 is about; only the order among them follows the live estate.
+--   (5) §D — B7's "amount-bearing evidence" is read as `field_path='invoice.total'`. That is the
+--       only field 0009:460-466 can ever tier `verified`, and it is the same field
+--       `_corroboration_bound` reads, so B3 and B7 cannot drift; a wider reading (any monetary
+--       region) would refuse every draft that cites a tax or subtotal region, which no rung is
+--       supposed to do.
 --   (3) §E — `(CLR23, registration_conflict)` costs ZERO body edits: `_resolve_counterparty`
 --       ALREADY raises it with `detail.reason` on both its arms (measured on the rig). The
 --       design's "bare — PR-1 adds it" is false at the bytes, so the pair is listed and nothing
@@ -804,6 +812,14 @@ begin
     -- B1: settlement kinds are HUMAN judgement until F-A3 (WCA-R6). Which of three open bills a
     -- RM5,000 payment settles is a JUDGEMENT, not a document fact. B1 is an interlock, not a new
     -- restriction, and it makes two deferred shape floors unreachable.
+    --
+    -- ITS LIVE POPULATION, STATED HONESTLY (law 31). Measured on the rig: `_draft_entry_core` —
+    -- the body `wake_draft_entry` passes p_coding_kind straight through to — already refuses any
+    -- kind outside {supplier_bill, sales_invoice, sales_credit_note} with CLR10 'unsupported
+    -- coding kind', so NO settlement-kind draft can be born through the agent writer today. The
+    -- draft-time CLR10 is the first wall and B1 is the second: it exists for the drafts the
+    -- writer did not make — a historical row, a kind stamped directly, or a future writer that
+    -- widens the enum — and a battery cell must manufacture that shape rather than draft it.
     v_vector := v_vector || jsonb_build_object('B1',
       case when e.coding_kind is null or e.coding_kind not in ('customer_receipt','supplier_payment')
            then 'pass' else 'fail' end);
@@ -859,6 +875,12 @@ begin
         -- `account_mismatch` rung caught. The component tie is this rung's successor, and where
         -- the fact side states no tax it evaluates not_evaluable, NEVER pass. A lumped pass here
         -- would be the ARM-0 defect wearing an accounting hat.
+        --
+        -- AND THIS ARM IS THE ONLY not_evaluable ARM OF B4-SALES. An ABSENT `rounding_cents` is
+        -- EVALUABLE, not unknown: Annex I's formula says `coalesce(rounding_cents, 0)` in its own
+        -- text, so a document that printed no rounding line has a rounding of zero and the tie
+        -- above judges it. Only the nil-tax arm's WITHHELD components (0100:553-554) make the
+        -- split unknowable, and only that is reported not_evaluable (D32).
         v_val := 'not_evaluable';
       elsif v_c <> v_tax_fact then
         v_val := 'fail';
@@ -903,6 +925,27 @@ begin
     -- the revision-token gate and it must be forced non-vacuously (law 31): the token gate covers
     -- the common case only because 0096:45-60 rotates an open draft's token when facts settle,
     -- one migration old.
+    --
+    -- ==== STOP ITEM — THIS RUNG IS UNDER-DETERMINED AND, AS WRITTEN, 0% FUNCTIONAL ====
+    -- The design gives B8 one line — "cited evidence is the generation the fact state names"
+    -- (§3.2) — plus a pointer to opener ⑥ §2.3, which says the text-witness must CITE THE REGION
+    -- IT READ and defines no extraction-identity rule. The only reading those words support is
+    -- the one implemented below: every entry_evidence row must cite the extraction the resolver
+    -- names. MEASURED ON THE RIG against the F-A2 battery's own world (2026-08-22): 206 of 206
+    -- evidence rows cite an `ocr` extraction while 205 of 205 fact states name an
+    -- `llm_text_facts` extraction — different BY CONSTRUCTION in the witness regime, because
+    -- regions come from the layout pass and the fact state from the witness pair. So this rung
+    -- refuses EVERY corroborated post, which is the GB-2 defect one rung over, and it is why the
+    -- battery's control cells refuse at B8 rather than posting.
+    --
+    -- IT IS LEFT AS BUILT, AND IT IS FAIL-CLOSED: it refuses posts, it never admits one. Two
+    -- readings would make it functional and they are NOT equivalent — (a) the cited extraction
+    -- must not be SUPERSEDED by a newer done extraction of the same engine_kind, or (b) each
+    -- cited region must still hash to the fact_hash the evidence recorded. Choosing between them
+    -- is a wall's semantics, not an implementation detail, so it goes to the owner/design rather
+    -- than being invented here (the build order's own instruction: stop on an item the design
+    -- does not determine, and report it). PR-1 MUST NOT MERGE with this unresolved.
+    -- ================================================================================
     select count(*)::int into v_evid from clara.entry_evidence ev where ev.entry_id=p_entry;
     if v_evid = 0 or v_bound is null then
       v_val := 'not_evaluable';
@@ -1241,9 +1284,12 @@ begin
   -- postcheck counts the strings themselves. The TABLES survive as history:
   -- clara.rule_sightings, clara.coding_rules and clara.open_questions keep every row they hold
   -- and every reader they have. What ends is the WRITE — the aggregate this bred from is
-  -- recomputed on read by get_context_pack''s approved_coding_patterns block (PR-1b, D16), so it
+  -- recomputed on read by the context pack''s approved-coding-patterns block (PR-1b, D16), so it
   -- cannot drift from the books, and the "no sighting recorded" advisory warning above still
-  -- names the counterparty-less approval it always named.
+  -- names the counterparty-less approval it always named. (That block''s READER is named in
+  -- prose deliberately: 0019''s wiki-capability scan reads this body''s prosrc for call-edge
+  -- NAMES, so writing the verb here would make an approve core look like a wiki reader — law 73
+  -- says a gate may not read the pack, and the scan is how the estate proves it.)
 ');
 
   if v_new = v_src then
@@ -1485,12 +1531,36 @@ end
 $fa2_wake$;
 
 -- =====================================================================================
--- §I  The two new event kinds. Both carry on_behalf_of and via_wake_kind on every emit.
--- =====================================================================================
-insert into clara.event_types(name, client_scoped, description) values
-  ('entry.posted', true, 'A journal entry was POSTED unattended by the agent (F-A2); the receipt is clara.entry_post_receipts'),
-  ('entry.post_refused', true, 'An unattended agent post was refused at Tier B or Tier C; the payload carries the full rung vector')
-on conflict (name) do nothing;
+-- §I  The two new event kinds, EACH WITH ITS TAXONOMY PAIR. Both carry on_behalf_of and
+-- via_wake_kind on every emit.
+--
+-- THE PAIR IS NOT OPTIONAL, and the 0015:388-395 idiom is copied rather than invented: the
+-- estate holds a FULL-COVERAGE LAW — every row of clara.event_types must be mapped by the
+-- ACTIVE clara.trigger_taxonomy version — so an event type registered without its decision is
+-- an event the runtime cannot route, and the rig says so (rig-docs-events.test.mjs:79).
+--
+-- THE TWO DECISIONS, and why they differ. `entry.posted` routes 'notification': it is the
+-- successor to `entry.rule_posted`, which routes the same way, and a post that happened while
+-- nobody was watching is precisely the thing a human is entitled to be told about.
+-- `entry.post_refused` routes 'background_review': at 0/33 corroboration the ladder refuses
+-- everything, so notifying per refusal would bury the notification channel on day one — the
+-- refusal's durable home is the op receipt and the review queue, which is what a background
+-- review reads.
+with added(name, client_scoped, description, decision, note) as (values
+  ('entry.posted', true,
+   'A journal entry was POSTED unattended by the agent (F-A2); the receipt is clara.entry_post_receipts',
+   'notification', null::text),
+  ('entry.post_refused', true,
+   'An unattended agent post was refused at Tier B or Tier C; the payload carries the full rung vector',
+   'background_review', null::text)
+), inserted_types as (
+  insert into clara.event_types(name, client_scoped, description)
+  select name, client_scoped, description from added
+  on conflict (name) do nothing returning name
+)
+insert into clara.trigger_taxonomy(version, event_type, decision, note)
+select a.version, x.name, x.decision, x.note from added x
+join inserted_types i on i.name = x.name cross join clara.taxonomy_active a;
 
 -- =====================================================================================
 -- §J  TAIL CENSUS. Re-read the committed catalog and say what it found.
@@ -1620,6 +1690,21 @@ begin
      or position('''post_receipt_id'',v_post_receipt_id' in v_src) = 0 then
     raise exception 'F-A2 tail: the eighth body is missing the agent arm or an identity channel' using errcode='CLR10';
   end if;
+  -- LAW 73, PROVED ON THIS BODY RATHER THAN PROMISED. 0019's wiki-capability scan reads prosrc
+  -- for call-edge NAMES, so a body that merely MENTIONS a pack or wiki verb — in a comment as
+  -- readily as in code — reads as an authority that can see the pack. An approve core may not.
+  -- This tail is the same instrument, run here, so the next recut of this body fails at APPLY
+  -- instead of in the wave-b tail three files away.
+  foreach v_key in array array['publish_wiki_page_version','_publish_wiki_page_version_core',
+      'record_wiki_source_ingest','retire_wiki_page','set_wiki_synthesis_hold',
+      'clear_wiki_synthesis_hold','get_wiki_page','list_wiki_pages','get_context_pack',
+      'run_client_lint','run_lint_all','mark_wiki_citations_stale',
+      '_assert_filing_wiki_unreferenced','wiki_pages','wiki_page_versions'] loop
+    if position(v_key in v_src) <> 0 then
+      raise exception 'F-A2 tail: the eighth _approve_entry_core body names the wiki-capability token % — a gate, bound or floor may never read wiki or the pack (law 73), and 0019''s scan reads this body''s TEXT', v_key
+        using errcode='CLR10';
+    end if;
+  end loop;
 
   -- (J.5) The draft core: the write is gone, N1 landed, the arm is re-cut.
   select p.prosrc into v_src from pg_proc p
@@ -1716,9 +1801,25 @@ begin
     end if;
   end loop;
 
-  -- (J.9) The event kinds, and the frozen schemas.
+  -- (J.9) The event kinds AND their taxonomy pairs, and the frozen schemas. The pair half is
+  -- asserted against the ACTIVE version, which is the full-coverage law's own instrument.
   if (select count(*) from clara.event_types where name in ('entry.posted','entry.post_refused')) <> 2 then
     raise exception 'F-A2 tail: the two new event kinds are not both registered' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from clara.trigger_taxonomy t
+    join clara.taxonomy_active a on a.version = t.version and a.singleton
+   where t.event_type in ('entry.posted','entry.post_refused');
+  if v_n <> 2 then
+    raise exception 'F-A2 tail: % of 2 new event kinds are mapped by the ACTIVE taxonomy — the full-coverage law refuses an unrouted type', v_n using errcode='CLR10';
+  end if;
+  -- And the law itself, re-read whole rather than sampled on this file's own two rows.
+  select count(*)::int into v_n from clara.event_types et
+   where et.name not like 'rig.%'
+     and not exists(select 1 from clara.trigger_taxonomy t
+       join clara.taxonomy_active a on a.version = t.version and a.singleton
+      where t.event_type = et.name);
+  if v_n <> 0 then
+    raise exception 'F-A2 tail: % event type(s) are unmapped by the active taxonomy', v_n using errcode='CLR10';
   end if;
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
    where n.nspname in ('workflow','graphile_worker','spike') and c.relkind='r';
