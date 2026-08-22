@@ -115,14 +115,32 @@ async function landG2(document, {
      values($1,$2,'llm-openai:gpt-5.6-terra:v2',$3,'llm_witness','queued') returning id`,
     [firm, document, versionN])).rows[0].id;
   await claimTask(task, { egressApproved: true });
-  const wrap = (envelope, pin, tag) => ({
-    envelope, input_pin: pin, regions: shape.regions,
-    prompt_hash: createHash("sha256").update(`${tag}:${document}:${versionN}`).digest("hex"),
+  // THE WRAPPER KEY IS `citations`, AND IT IS LOAD-BEARING RATHER THAN COSMETIC. Measured at
+  // integration: `persist_witness_facts` does not take region ROWS at all -- it takes
+  // `[{field_path, region_idx}]` citations onto the document's OCR regions and BUILDS each fact
+  // region's geometry from the OCR region it verified against (`page` + `polygon` +
+  // `source_region_id`). An uncited answer persists with `locator = {"polygon": []}`, and an
+  // EMPTY polygon fails the corroboration belt's W3 term (0023:305) -- so a pair landed through
+  // the writer with a `regions` key the writer never reads is a real pair carrying no geometry,
+  // and it reads `corroborated:false` however well-formed its envelope is. That is exactly what
+  // made this cell see B2 fail beside B8. The OCR region seeded by `seedCitedDocument` carries
+  // the printed total and a real polygon, and `region_idx` is `row_number() over (order by id)`
+  // across that extraction's regions -- resolved from the catalog here rather than assumed.
+  const idx = (await rootQuery(
+    `select (row_number() over (order by id))::int as idx, field_path
+       from clara.document_regions where extraction_id=$1`, [ocr])).rows;
+  const totalIdx = idx.find((r) => r.field_path === "invoice.total")?.idx;
+  assert.ok(totalIdx,
+    `B8 fixture: the document's OCR extraction carries an invoice.total region to cite (got ${JSON.stringify(idx.map((r) => r.field_path))}) -- without a verified citation the writer persists the fact geometry-less and G2 can never corroborate`);
+  const citations = [{ field_path: "invoice.total", region_idx: totalIdx }];
+  const wrap = (envelope, pin, tag, cite) => ({
+    envelope, input_pin: pin, prompt_hash: createHash("sha256").update(`${tag}:${document}:${versionN}`).digest("hex"),
+    ...(cite ? { citations } : {}),
   });
   const out = await rootQuery(
     "select clara.persist_witness_facts($1,$2::jsonb,$3::jsonb,$4) as s",
-    [task, JSON.stringify(wrap(shape.textEnvelope, ocr, "text")),
-      JSON.stringify(wrap(shape.visionEnvelope, sha, "vision")), 1]);
+    [task, JSON.stringify(wrap(shape.textEnvelope, ocr, "text", true)),
+      JSON.stringify(wrap(shape.visionEnvelope, sha, "vision", false)), 1]);
   return out.rows[0].s;
 }
 
@@ -169,6 +187,12 @@ test("f-a2.c3.B8-primary a SUPERSEDED fact generation refuses facts_moved, with 
     "c3.B8-primary: the fact state now names G2 — the generation MOVED under the draft");
   assert.equal(g2.state?.total_cents, GROSS,
     "c3.B8-primary: …at the SAME total, which is what keeps 0096's rotation from stamping an amount_exception");
+  // AND G2 ITSELF CORROBORATES. Stated as a premise rather than left to surface as a B2 failure:
+  // this cell's claim is that B8 is the ONLY non-admitting rung, which is a claim about a
+  // successor generation that is every bit as good as the one it replaced. A G2 that did not
+  // corroborate would fail B2 as well and the cell would be measuring the fixture.
+  assert.equal(g2.state?.corroborated, true,
+    `c3.B8-primary: the successor generation corroborates too (state ${JSON.stringify(g2.state)})`);
 
   // The rotation is LIVE: the caller re-reads the current token, exactly as the runtime would.
   const token = await currentToken(draft.entry_id);
