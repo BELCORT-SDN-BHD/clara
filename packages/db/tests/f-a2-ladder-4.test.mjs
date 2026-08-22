@@ -258,35 +258,72 @@ test("f-a2.c4.name-only (CLR10, customer_identity_name_only) — hard constraint
   }
 });
 
-test("f-a2.c4.clr26 the two-session race — the post WAITS or refuses at B9, and never reaches the delegate's CLR26 re-check", async (t) => {
+test("f-a2.c4.clr26 the two-session race on ALL THREE Tier-A locks — the post WAITS or refuses at B9, and never reaches the delegate's CLR26 re-check", async (t) => {
   if (await gateCore(t)) return;
-  // GM-7. Tier A takes the filing FOR SHARE plus advisories 203005003 / 203005004 BEFORE B9, so
-  // CLR26 is provably unreachable from this lane and law 31 excludes it from the pair set. If it
-  // ever DOES surface, the named fallback pair is required — and this cell is what says so.
-  const p = await agentPostable(OWNER(), { client: A1() });
+  // GM-7. Tier A takes THREE acquisitions before B9 — the filing `FOR SHARE`, the vendor
+  // advisory 203005003 and the client advisory 203005004 — and it is all three together that
+  // make the delegate's CLR26 re-check provably unreachable, which is why law 31 excludes the
+  // pair. D40 is the evidence for that exclusion.
+  //
+  // THE FIRST CUT RACED ONE LOCK. Its contender was a DOCUMENT-scope question, which serialises
+  // on the filing row and says nothing about either advisory — so two thirds of the claim was
+  // resting on a cell that could not have observed them. `_open_question_blocks` takes all three
+  // scope kinds, and each one contends against a DIFFERENT acquisition, so the cell now runs all
+  // three contenders and asserts the same property of each.
   const sql =
     "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
     + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
     + "p_model => $6::jsonb, p_op_key => $7::text) as r";
-  const out = await holdThenContend({
-    a: {
-      role: ROLES.wakeInteractive, wakeSecret: p.cred.secret,
-      run: (c) => c.query(sql, [p.args.entry, p.args.expectedRevision, A1(), p.args.booksVersion,
-        RATIONALE, JSON.stringify(MODEL), opk("c4clr26post")]).then((x) => x.rows[0].r),
-    },
-    b: {
-      role: ROLES.authenticated, jwtSub: OWNER(),
-      run: (c) => c.query(
-        "select clara.open_question(p_client => $1, p_scope_kind => 'document', p_scope_id => $2, p_question => $3, p_op_key => $4) as r",
-        [A1(), p.cited.documentId, "c4.clr26 racing question", opk("c4clr26q")]).then((x) => x.rows[0].r),
-    },
-  });
-  const post_ = out.a;
-  assert.ok(post_?.ok || post_?.code !== "CLR26",
-    `c4.clr26: the post never surfaces a bare CLR26 (got ${JSON.stringify(post_)}). If it ever does, the fallback pair (CLR26, open_question_race) becomes REQUIRED and E.2's disposition must be reopened`);
-  if (post_?.ok && post_.receipt?.posted === false) {
-    assert.notEqual(post_.receipt.refusal?.reason, undefined,
-      "c4.clr26: a losing post is a TYPED refusal — B9's token if the question won the race");
+
+  // The VENDOR contender needs a counterparty that already EXISTS, so it is born through the
+  // ordinary door first and the racing draft is then pointed at it explicitly — otherwise the
+  // projection resolves `birth`, the advisory is taken on a sentinel, and the contender would be
+  // racing a lock nobody else holds.
+  const seedName = `C4 CLR26 VENDOR ${Date.now().toString(36)} SDN BHD`;
+  const seed = await agentPostable(OWNER(), { client: A1(), vendor: { new: { name: seedName } } });
+  const seeded = await post(seed);
+  assert.equal(seeded?.posted, true,
+    `c4.clr26: mandatory setup — the vendor-birthing post lands (${JSON.stringify(seeded?.refusal)})`);
+  const cps = await counterpartyRows(A1());
+  const vendorId = cps.find((c) => (c.name_display ?? c.name ?? "").includes("C4 CLR26 VENDOR"))?.id ?? null;
+  assert.ok(vendorId, "c4.clr26: mandatory setup — the racing vendor exists");
+
+  const scopes = [
+    ["document", (pp) => pp.cited.documentId, "the filing row taken FOR SHARE", undefined],
+    ["client", () => A1(), "the client advisory 203005004", undefined],
+    ["vendor", () => vendorId, "the vendor advisory 203005003", { existing_id: vendorId }],
+  ];
+  for (const [scope, scopeId, lock, vendor] of scopes) {
+    const p = await agentPostable(OWNER(), { client: A1(), ...(vendor ? { vendor } : {}) });
+    // Read BEFORE the race: the contending session is a write, and a stale books token would
+    // refuse CLR12 at Tier A before any lock is taken at all.
+    const bv = await booksVersion(A1());
+    const out = await holdThenContend({
+      a: {
+        role: ROLES.wakeInteractive, wakeSecret: p.cred.secret,
+        run: (c) => c.query(sql, [p.args.entry, p.args.expectedRevision, A1(), bv,
+          RATIONALE, JSON.stringify(MODEL), opk(`c4clr26post-${scope}`)]).then((x) => x.rows[0].r),
+      },
+      b: {
+        role: ROLES.authenticated, jwtSub: OWNER(),
+        run: (c) => c.query(
+          "select clara.open_question(p_client => $1, p_scope_kind => $2, p_scope_id => $3, p_question => $4, p_op_key => $5) as r",
+          [A1(), scope, scopeId(p), `c4.clr26 racing ${scope} question`, opk(`c4clr26q-${scope}`)]).then((x) => x.rows[0].r),
+      },
+    });
+    const post_ = out.a;
+    // THE CONTENDER MUST HAVE RUN. A question that refused is not a race, and a cell that
+    // accepted one would be reporting the absence of a CLR26 it never gave the lane a chance to
+    // raise — which is the whole shape law 31's exclusion must not rest on.
+    assert.ok(out.b?.ok !== false || out.b?.code === undefined,
+      `c4.clr26 ${scope}: the contending question really ran (got ${JSON.stringify(out.b)}) — an unbuilt contender proves nothing about ${lock}`);
+    assert.ok(post_?.ok || post_?.code !== "CLR26",
+      `c4.clr26 ${scope}: the post never surfaces a bare CLR26 while contending on ${lock} (got ${JSON.stringify(post_)}). If it ever does, the fallback pair (CLR26, open_question_race) becomes REQUIRED and E.2's disposition must be reopened`);
+    if (post_?.ok && post_.receipt?.posted === false) {
+      assert.notEqual(post_.receipt.refusal?.reason, undefined,
+        `c4.clr26 ${scope}: a losing post is a TYPED refusal — B9's token if the question won the race`);
+    }
+    noteLane(`c4.clr26 ${scope}: contended on ${lock} — post ${post_?.ok ? JSON.stringify(post_.receipt?.posted === true ? "posted" : post_.receipt?.refusal?.reason) : post_?.code}`);
   }
 });
 
