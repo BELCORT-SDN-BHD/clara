@@ -410,17 +410,21 @@ test("f-a2.c4.unlisted an UNLISTED (errcode, reason) propagates as a task FAILUR
 
 test("f-a2.c4.subtxn the subtransaction rolls back the delegate's partial writes — no orphaned counterparty birth", async (t) => {
   if (await gateCore(t)) return;
+  // THE CLIENT IS A1, and it is not arbitrary: `c4.closed-period` above CLOSES A2's 2026
+  // fiscal year, and every fixture in this file posts into 2026-03-15. A later A2 draft is
+  // therefore refused by the period wall at the LINE insert ("its lines may not change"), which
+  // is a stronger wall than the one this cell measures and left it with no entry at all.
   const name = `ORPHAN ${Date.now().toString(36)} SDN BHD`;
-  const before = (await counterpartyRows(A2())).length;
+  const before = (await counterpartyRows(A1())).length;
   // A post that births a counterparty inside the delegate and THEN hits a converted wall: the
   // birth must not survive the conversion. An exception block opens a subtransaction, so the
   // partial writes inside it are gone — this cell proves it rather than trusting the semantics.
   const p = await agentPostable(OWNER(), {
-    client: A2(), amount: 460000, codingKind: "supplier_bill",
+    client: A1(), amount: 460000, codingKind: "supplier_bill",
     vendor: { new: { name, registration_no: "201801009999" } },
   });
   const r = await post(p);
-  const after = await counterpartyRows(A2());
+  const after = await counterpartyRows(A1());
   if (r?.posted === false && r?.refusal?.tier === "C") {
     assert.equal(after.length, before,
       `c4.subtxn: a converted refusal left NO new counterparty (before=${before}, after=${after.length})`);
