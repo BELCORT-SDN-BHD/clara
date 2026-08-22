@@ -228,6 +228,18 @@ catalog + card + tests), following the verbs, per B.6's own method header.
 D1) → PR-4 (acceptance) → **then** chat parity (its own PR + PR-2-class runtime change),
 and B12/B13 extraction only if a future need re-opens it.
 
+> **AMENDED 2026-08-22 — OWNER RULING (Tao, in-session, after a plain-language briefing
+> of GB-3 and both options with costs stated): the chat-severance half of this ruling is
+> OVERRIDDEN — chat parity RIDES THE MAIN TRAIN.** PR-1 carries the `interactive_client`
+> limb **corrected per GB-3** (both `wake_credentials` CHECKs extended — the client CHECK
+> gains a NEW enumeration row, the existing three rows byte-identical in meaning,
+> extend-never-weaken stated against C-3's record — plus `mint_wake_credential`'s BOTH
+> gates, `wake_open_question`'s re-key, all six roster surfaces, and the exactly-one-
+> allowlist-row cell); PR-2 carries the frozen infra `_vN` (R-1 unchanged). **The
+> B12/B13 cut (correctness grounds) and the three-file/one-window shape STAND.** The
+> orchestrator's severance recommendation is on file above as dissent. Design fold: v6,
+> Annex G F51 / Annex H D34.
+
 ## 5 · Nits (cite/battery trues — folded without argument)
 
 `(CLR10, already_reversed)` ×2 leaves the pair set (dead member, law 31 — the design's

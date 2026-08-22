@@ -1,6 +1,6 @@
 # F-A2 annexes 1 — the estate and the retirement checklist
 
-> Companion to `f-a2-agentic-posting-design.md` (**v5, 2026-08-22**). **Annex A** the estate
+> Companion to `f-a2-agentic-posting-design.md` (**v6, 2026-08-22**). **Annex A** the estate
 > as-found and the seven binding findings at the bytes · **Annex B** the retirement checklist.
 > Siblings: `f-a2-annexes-2-mechanics.md` (C, D) and `f-a2-annexes-3-record.md` (E-I).
 >
@@ -60,10 +60,14 @@ bank-matching family, they **survive**, and they are F-A3's (`wave-f-contract.md
    it raises unless `p_client` is a firm-congruent active client **and `p_on_behalf_of` is null**
    (*"autodraft wake requires a firm-congruent active client and no on_behalf_of"*); otherwise a
    non-null `p_client` raises *"legacy wake kinds do not accept a client binding"*. The durable half is
-   `ck_wake_credentials_client_0011` (**`0011:625-628`**). **v4 ruled it untouched and the KIND CHECK
-   (`0011:623-624`) extended instead — GB-3 showed that cannot be built, because the client CHECK is
-   itself a closed-world enumeration over the three existing kinds. The whole limb is SEVERED to the
-   chat-parity follow-on PR (§D.2c); nothing in PR-1 touches either CHECK.**
+   `ck_wake_credentials_client_0011` (**`0011:625-628`**), whose body is
+   `(wake_kind='autodraft' and client_id is not null) or (wake_kind in ('interactive','proactive') and
+   client_id is null)`. **v4 ruled it permanently untouched and extended only the KIND CHECK
+   (`0011:623-624`) — GB-3 showed that cannot be built, because the client CHECK is itself a closed-world
+   enumeration over the three existing kinds. Under the owner's D34 the limb stays in the train and PR-1
+   extends BOTH: the kind CHECK gains the name, and the client CHECK gains a THIRD disjunct
+   `or (wake_kind='interactive_client' and client_id is not null)`. The three existing disjuncts are
+   byte-identical — extend-never-weaken, and no plain `interactive` credential gains a client (§D.2c).**
 
 ---
 
@@ -88,7 +92,7 @@ missed** (§B.5) and **one roster miscount corrected** (§B.2).
 | `acknowledge_rule_posts` / `get_rule_post_run` | `0015:2801` / `0015:2831` | `0015:3560/3561` | `reviewApi.ts:171`, `:78` |
 | `reconcile_autopost_rules()` | `0015:2759-2795`; drift pin `0017:410-434` | **`0015:3566-3568` → `clara_runtime` (the GROUP)** — a *different* posture from the executor's login-direct; do not conflate | `lib/leader.mjs:79,177,185,191` → `lib/reconciler.mjs:622,472,475` |
 | `_ocr_sales_floor` / `_ocr_sales_floor_pop` | `0046:616` / `0046:568` | ungranted | read `rule_sightings` |
-| `preview_ocr_sales_evidence` | `0046:2010` | `0046:2081` | `reviewApi.ts:110`, `AutopostRulePanel.tsx:13` — **OQ-3** |
+| `preview_ocr_sales_evidence` | `0046:2010` | `0046:2081` | `reviewApi.ts:110`, `AutopostRulePanel.tsx:13` — **OQ-3 RULED, D36: retires with the floor** |
 
 **A RETIRING WALL THAT NEEDS A NAMED SUCCESSOR (GM-2).** The executor's own rungs die with it, and one
 was doing real work: **`account_mismatch` (`0046:1092`)** is the only estate wall that ever refused a
@@ -101,7 +105,7 @@ both.**
 
 **KEEP-AS-HISTORY (stop the writes; keep the relations).** `rule_post_runs` (`0015:315`) ·
 `rule_post_skips` (`0015:337`) · `coding_rules` (`0011:753`) · `rule_sightings` (`0011:843`) ·
-`rule_decisions` (`0011:864`, **OQ-2**) · `journal_entries.checked_via_rule_id` (`0015:222-223`) ·
+`rule_decisions` (`0011:864` — **OQ-2 RULED, D35: the WRITE stops, the table and its rows stay**) · `journal_entries.checked_via_rule_id` (`0015:222-223`) ·
 `entry.rule_posted` (`0015:388`, taxonomy `0015:3877-3880`) · `kb_rule.*` (`0011:3887-3889`) ·
 `relay_checkpoints`/`relay_dead_letters` rows with `consumer='rule_post'` — **audit rows, kept**.
 
@@ -110,7 +114,10 @@ both.**
 (`0031:470-472`); `journal_entry_revisions.rule_decision_id` is a live FK to `rule_decisions`
 (`0011:898`). **The largest non-obvious blast radius outside the posting lane:**
 `clara.tick_seeding_proposal` (`0017:4525`) writes its output **as a signed `coding_rules` row**
-and emits `kb_rule.signed` — **OQ-3**.
+and emits `kb_rule.signed` — **OQ-3 RULED (D36): it re-points to a knowledge-layer artifact inside
+F-A2.** No more signed-rule minting; the admin's tick judgement lands as **context-pack food** (law 73),
+and the seeding UX is unchanged. Without the re-point, "the rules machine is retired" would be untrue
+*in the data* — a live writer would still be minting signed rules nothing executes.
 
 **Confirmed clean — do not over-scope.** `get_context_pack` · `get_draft_review` (`0016:4358`) ·
 `get_doc_entry_diff` (`0015:2496`) · `_resolve_counterparty` (`0015:1128`) ·
@@ -198,7 +205,8 @@ Removing the eleven retired names is likewise exact in **both** directions.
 
 **UNCONDITIONAL breakage found by the delta review, in addition to the lists below:**
 `wb-s-seeding.test.mjs:217` (calls `proposeCodingRule` `:225` and `signCodingRule` `:230`; its
-`:221-222` comment marks the route **MUST-FAIL with no fallback**, so it breaks whatever OQ-3 rules)
+`:221-222` comment marks the route **MUST-FAIL with no fallback**, so it breaks regardless — **OQ-3's
+ruling (D36) settles what the replacement IS, not whether the cell breaks**)
 · **`x42-producer-role.test.mjs`** (list line 48; `signedCodingRule` at `:79`, `:83`, `:149`).
 
 **DB rig, 38 files. Whole-file retire (10):** `wave-a2-execute-rule-post.test.mjs` ·
@@ -211,7 +219,7 @@ witness) · `a21-prestate` · `a21-ocr-envelope` · `a21-sightings-lift` · `a21
 `x42-s5-helpers.mjs:161-203`.
 **~55 named tests inside surviving files.** Heaviest: `a21-adversarial` (13) · `wave-a-shape` (7)
 · `x46-blind-contract` (7) · `wb-s-seeding.test.mjs` (6 — the seeding↔`coding_rules` coupling,
-OQ-3) · `x46-wave-7a-sales-lane` (5) · `x37-wave-c-a-subledger` (4; **`:1951`** — *"three
+**OQ-3 RULED, D36**) · `x46-wave-7a-sales-lane` (5) · `x37-wave-c-a-subledger` (4; **`:1951`** — *"three
 employee claims STILL breed a vendor_account proposal"* — whose **inversion is a C.8 cell**).
 
 **TWO HELPERS THAT FAIL SOFT — delete, never leave.** `x1-helpers.mjs:390-392` returns
@@ -231,6 +239,28 @@ a Wave-D surface: RELOCATE, do not delete.** Parts catalog: `shared/parts.ts:77,
 `chat/partCatalog.ts:117-120` · `chat/parts.tsx:17,239-241` ·
 `apps/dashboard/app/shared/cards/RulePostReceiptCard.tsx`
 · `chat/partCatalog.test.tsx:80-87` (**test at `:83` breaks**).
+
+**THE `rule_backed` COLUMN — OQ-2's ruled dashboard removal (D35), a PR-3 surface.** With
+`_draft_entry_core`'s `rule_decisions` write stopped, no entry F-A2 posts can ever be rule-backed, so the
+queue's `rule` badge becomes a **permanently-false column** and law 27(2) says remove it rather than render
+it. The sites, measured with `grep -n` on the current tree: **`shared/reviewTypes.ts:52`** (the
+`rule_backed: boolean` field) and **`:137`** (its coercion) · **`shared/reviewCardTypes.ts:298`** (the
+human-readable reason string) · **`queue/QueueRowView.tsx:61`** (the badge itself) ·
+**`shared/queueKindCatalog.ts:62`** (the fixture default) · and four test fixtures carrying the key —
+`queue/model.test.ts:19`, `queue/QueueRowView.test.tsx:21`,
+`shared/cards/ComplianceWatchCard.test.tsx:25`, `shared/cards/LintFindingCard.test.tsx:43`. **PR-3 sweeps
+for the key rather than trusting this list** (§B.6's method header), since a fixture object literal is
+exactly the shape a name-keyed sweep of the *verb* would miss.
+
+**Two things the ruling does NOT reach, stated so PR-3 does not widen into them.** **(1) The DB
+projection stays.** `list_review_queue` computes `rule_backed` at `0011:3788` (and `:3806`, `:3821`,
+`:3831`, published at `:3872`) as a read over `rule_decisions`, which is **KEPT as history** — historical
+entries keep their true value and the read stays honest. Only the dashboard stops rendering it.
+**(2) The lane-REASON `rule_backed` is computation, not display, and is out of scope** —
+`0011:1531` appends it to `v_reasons` and `0011:1553` treats *"rule_backed is the only remaining reason"*
+as `lane:='ready'` (CoR'd at `0013:299`/`:321` and `0015:2462`/`:2484`). With the write stopped no NEW
+entry can carry that reason, so **PR-3 must state whether any lane classification shifts and record the
+answer**, rather than discovering it at cutover. This is a named sweep item, not a change F-A2 makes.
 
 **THE `kb_rule_proposal` PART TYPE — the census's first gap (GM-11), and it follows the verbs.** It is a
 **live dashboard consumer of three retiring verbs** — `get_coding_rule`, `sign_coding_rule`,
@@ -277,19 +307,24 @@ new metric columns, NO candidate tier"*). It holds **two zero-count heads, three
 - **`:205` `!tickSrc.includes("autopost")` is a SECOND head, and v2 cleared it in error.**
   `fnSource` (`a21-helpers.mjs:609-613`) ends `return r.rows[0].src ?? ""` — a **fail-soft empty
   string**. If `tick_seeding_proposal` ever stops existing, the assertion passes on `""`. It is a
-  **prosrc-shape assertion on a body OQ-3 proposes to rewrite, read through a helper that cannot say
+  **prosrc-shape assertion on a body OQ-3's ruling (D36) now REQUIRES rewritten, read through a helper that cannot say
   NO**, and it gets the same disposition as `:202-203` rather than a clean bill. *(`:207`'s `pdef`
   check reads a CHECK constraint, not a function body, and does survive.)*
 - `:208-215` the `coding_rules` metric-column and candidate-tier negatives — **survive**, because
   the table survives KEEP-AS-HISTORY.
 
-**`:217` breaks UNCONDITIONALLY, and v2's "rides OQ-3" disposition was wrong.** The cell *"S5/Gate
+**`:217` breaks UNCONDITIONALLY, and v2's "rides OQ-3" disposition was wrong** — a point D36 confirms
+rather than removes. The cell *"S5/Gate
 R2: the ticked rule is INDISTINGUISHABLE from a hand-signed rule on the rule row"* builds its
 comparator by calling **`proposeCodingRule` (`:225`) and `signCodingRule` (`:230`)** — both on the
 retire list — and its own comment at `:221-222` marks the route **MUST-FAIL with no fallback**:
 *"[R1-F13d] the hand-signed comparator is REQUIRED — no fallback. A refusal on this fixture route is
 a MUST-FAIL that forces the N-2 adjudication."* **It moves to §B.6's unconditional list with that
-note attached.** OQ-3 changes what the RIGHT replacement is, not whether it breaks.
+note attached — and that note stands as its own text demands:** *"[R1-F13d] the hand-signed comparator
+is REQUIRED — no fallback. A refusal on this fixture route is a MUST-FAIL that forces the N-2
+adjudication."* **D36 settles what the RIGHT replacement is** — the comparator must be rebuilt against
+the knowledge-layer artifact `tick_seeding_proposal` now writes, not against a signed `coding_rules`
+row — **but it does not excuse the cell from breaking, and the N-2 adjudication is still forced.**
 
 **`x42.prod-23` gets an inverted twin too.** Its header (`:296-307`) says *"The CONTROL is the point
 of the cell: the same counterparty and the same account, approved through an ORDINARY draft, MUST
@@ -327,46 +362,59 @@ no role). Part 3 is behaviourally inert until PR-2 emits `posted`, and provable 
   extracted projected-state predicate** (§D.6), with `_assert_supplier_bill_shape_at` re-cut as a thin
   delegate passing NULL · the **8th `_approve_entry_core` body** (breeding excision + ctx identity + the
   agent arm + the Tier-C `detail` reasons, **now including `registration_conflict`** — GM-5) · the
-  `_draft_entry_core` CoR (OQ-2 limb, N1's draft copies **on the projected state**, direction-family
-  re-cut, generic widening) · **T3's two trigger-function recuts** · the two new event kinds with their
-  taxonomy pairs.
+  `_draft_entry_core` CoR (**the OQ-2 limb — RULED, D35: the `rule_decisions` write stops**, N1's draft
+  copies **on the projected state**, direction-family re-cut, generic widening) · **T3's two trigger-function recuts** · the two new event kinds with their
+  taxonomy pairs · **the `interactive_client` limb, back in the train on the owner's D34 and in GB-3's
+  CORRECTED form:** the `ck_wake_credentials_kind_0011` swap (the enum gains the name), the
+  `ck_wake_credentials_client_0011` swap (a THIRD disjunct — `interactive_client ⇒ client_id NOT NULL`,
+  `on_behalf_of` kept; the three existing disjuncts byte-identical), **BOTH `mint_wake_credential` gates**
+  (the early kind gate at `0011:1163-1165` **and** a new per-kind arm beside `0011:1178-1186`), and
+  `wake_open_question`'s re-key onto the client pin. **Both constraint swaps are drop+add and validate
+  trivially over existing rows** — every live row's kind is one of the old three and already satisfies the
+  new enumeration — **which PR-1 proves on the rig rather than asserting** (§D.2c).
 - **Part 2 (granted + proved):** `clara.wake_post_entry` · `revoke all on function … from public` plus a
-  single `grant execute … to clara_wake_interactive` · the two `wake_fn_allowlist` rows (`'autodraft'`,
-  `'interactive'`; never `'proactive'`) · the `_approve_entry_core` zero-grant re-pin
-  (`0015:3592-3596`) · the `WB_AUTHORITY_FNS` extension and the **`appliedStem`-gated** `x42-s5` cohort
-  (§B.3) · the tail census asserting the new core is ungranted and that no granted surface gained DML
-  against `journal_entries`.
+  single `grant execute … to clara_wake_interactive` · **the two `wake_fn_allowlist` rows for the post verb —
+  `'autodraft'` and `'interactive'`, never `'proactive'` and NEVER `'interactive_client'`, which posts
+  nothing** · the `_approve_entry_core` zero-grant re-pin (`0015:3592-3596`) · **the SIX roster/census
+  surfaces the new kind touches** (§D.2) · **the closed-world cell that `interactive_client` holds EXACTLY
+  ONE allowlist row** — the `wake_open_question` row and no other · the `WB_AUTHORITY_FNS` extension and the
+  **`appliedStem`-gated** `x42-s5` cohort (§B.3) · the tail census asserting the new core is ungranted and
+  that no granted surface gained DML against `journal_entries`.
 - **Part 3 (the `posted` chain, inert on arrival):** Annex F's **five** layers and six further sites.
-- **NOT in PR-1 any more, and named so nobody re-adds them:** the **B12/B13 belt-predicate extractions**
-  (CUT on correctness grounds, GM-3) · the whole **`interactive_client` limb** — the kind-CHECK
-  extension, the `mint_wake_credential` arm and `wake_open_question`'s re-key (SEVERED, GB-3 / §D.2c).
-  **`(CLR10, customer_identity_name_only)` costs no body edit at all** (GM-6): `0062:196-243` already
-  raises with `detail.reason`, so PR-1 only lists the pair.
+- **The ONE thing still outside the train:** the **B12/B13 belt-predicate extractions**, CUT on correctness
+  grounds (GM-3) and untouched by D34. **`(CLR10, customer_identity_name_only)` costs no body edit at all**
+  (GM-6): `0062:196-243` already raises with `detail.reason`, so PR-1 only lists the pair.
 
-**The D1 write-quiesce list, recounted AFTER the severance — EIGHT CoR'd live bodies and one
-`ALTER TABLE`.** GM-9: §3.5's old *"eight bodies and one ALTER TABLE"* label was enumerated nowhere and
-B.9's v4 contents needed ≥11. This table is the enumeration, and **the count design §3.5 cites is this
-list's count — PR-1's rig replay confirms or corrects it** (gate §7). Two of the eight are new since
-the gate's own arithmetic: GB-2 puts the supplier floor on the list, and the `posted` chain's finalize
-body is a third function, not a second overload.
+**The D1 write-quiesce list, recounted after the gate's severance and AGAIN after D34 folded chat parity
+back — TEN CoR'd live bodies, one `CREATE TABLE`, and TWO ACCESS EXCLUSIVE constraint swaps.** GM-9:
+§3.5's old *"eight bodies and one ALTER TABLE"* label was enumerated nowhere and B.9's v4 contents needed
+≥11. This table is the enumeration, and **the count design §3.5 cites is this list's count — PR-1's rig
+replay confirms or corrects it** (gate §7). Three entries are newer than the gate's own arithmetic: GB-2
+puts the supplier floor on the list, the `posted` chain's finalize body is a third function rather than a
+second overload, and **D34 returns rows 9 and 10.**
 
 | # | body | why it is on the list |
 |---|---|---|
 | 1 | `clara._approve_entry_core` | the 8th body — breeding excision, ctx identity, the agent arm, the Tier-C `detail` reasons |
-| 2 | `clara._draft_entry_core` | the OQ-2 limb, N1's draft copies, the direction-family re-cut, the generic widening |
+| 2 | `clara._draft_entry_core` | the OQ-2 limb (**RULED, D35** — the `rule_decisions` write stops, the table stays), N1's draft copies, the direction-family re-cut, the generic widening |
 | 3 | `clara._tf_assert_supplier_bill_shape()` (`0009:524`) | T3's receipt-keyed pin |
 | 4 | `clara._tf_assert_sales_invoice_shape()` (`0015:1027`) | T3's receipt-keyed pin, sales twin |
 | 5 | `clara._assert_supplier_bill_shape_at` (live tip `0036:601`) | **GB-2** — the `0036:619-626` prologue moves out into the new predicate and the floor becomes a thin delegate passing NULL |
 | 6 | `clara.settle_autodraft_task`, 6-arity (`0036:856`) | the `posted` outcome: the guard, the entry-exists validation, the `v_item_outcome` mapping, `last_refusal`, `entry_id`, the CLR29 fabrication |
 | 7 | `clara.settle_autodraft_task`, 5-arity (`0011:2642`) | the other overload's own copy of the guard (`0011:2642-2652`) |
 | 8 | `clara.reconcile_sweep_runs()` (`0011:2709`) | the finalize bucketing (`0011:2754-2762`), which counts a `posted` row in none of its three counters |
-| + | **`ALTER TABLE clara.sweep_run_items`** | the `outcome` CHECK (`0011:734-735`) **and `ck_sweep_run_items_shape`** (GM-8) — **ACCESS EXCLUSIVE**, hence the window |
+| 9 | `clara.mint_wake_credential` (`0011:1155`) | **D34** — BOTH gates: the early kind gate (`0011:1163-1165`) and a new per-kind arm beside the autodraft/legacy arms (`0011:1178-1186`), requiring a firm-congruent active client while KEEPING `on_behalf_of` |
+| 10 | `clara.wake_open_question` (`0011:1984`) | **D34** — the kind arm re-keys onto the CLIENT PIN, not the kind name (law 27(3)), so it admits `autodraft` and `interactive_client` alike and still refuses anything unpinned |
+| DDL 1 | **`CREATE TABLE clara.entry_post_receipts`** + its append-only / no-truncate triggers | a new relation, so no existing writer is displaced — it is in the window because the bodies above are |
+| DDL 2 | **`ALTER TABLE clara.sweep_run_items`, CHECK pair** | the `outcome` CHECK (`0011:734-735`) **and `ck_sweep_run_items_shape`** (GM-8) — **ACCESS EXCLUSIVE** |
+| DDL 3 | **`ALTER TABLE clara.wake_credentials`, CHECK pair** | `ck_wake_credentials_kind_0011` and `ck_wake_credentials_client_0011` (`0011:623-628`), each drop+add — **ACCESS EXCLUSIVE**. Both **validate trivially over existing rows**: every live row's kind is one of the old three and already satisfies the extended enumeration, which the rig proves rather than the file asserting |
 
 **Not on the list, and each for a stated reason.** The **1-arity shape delegates** (`0016:3957-3961`,
 `0016:2115-2119`) are byte-unmoved — that is T3's whole point. `clara._agent_post_entry_core`,
-`clara._assert_control_leg_counterparty_at`, `clara.wake_post_entry`, `clara.entry_post_receipts` and
-`t_je_agent_post_receipt` are **new objects**, not CoRs of live bodies, so they add nothing to the
-quiesce surface beyond the window they arrive in.
+`clara._assert_control_leg_counterparty_at`, `clara.wake_post_entry` and `t_je_agent_post_receipt` are **new
+objects**, not CoRs of live bodies, so they add nothing to the quiesce surface beyond the window they arrive
+in. **`clara._agent_read_admitted` and `clara.coding_lane` are NOT touched** — R-1 keeps the pinned kind off
+every scoped read, which is exactly why §D.2's census findings 1-3 do not fire.
 
 ### B.10 · The 0040 marker dispositions for the 8th `_approve_entry_core` body (design §3.5)
 
