@@ -1,8 +1,10 @@
-# F-A2 annexes 1 — the estate and the retirement checklist
+# F-A2 annexes 1 — the estate, the retirement checklist, and B4's formulas
 
-> Companion to `f-a2-agentic-posting-design.md` (**v6, 2026-08-22**). **Annex A** the estate
-> as-found and the seven binding findings at the bytes · **Annex B** the retirement checklist.
-> Siblings: `f-a2-annexes-2-mechanics.md` (C, D) and `f-a2-annexes-3-record.md` (E-I).
+> Companion to `f-a2-agentic-posting-design.md` (**v6.1, 2026-08-22**). **Annex A** the estate
+> as-found and the seven binding findings at the bytes · **Annex B** the retirement checklist ·
+> **Annex I** B4's three formulas, **relocated here at v6.1** for the file ceiling, its label unchanged
+> so every "Annex I" citation still resolves.
+> Siblings: `f-a2-annexes-2-mechanics.md` (C, D) and `f-a2-annexes-3-record.md` (E-H).
 >
 > **Standing caveat.** Everything read from migration *source* is a **prediction about the live
 > catalog**, not a measurement of it. Three classes defeat source reading: `base + dynamic splice`
@@ -203,6 +205,14 @@ Removing the eleven retired names is likewise exact in **both** directions.
 > fixed item: **PR-3 re-runs the verbs-not-names sweep over the whole list membership and resolves N-9
 > before the floor number is set.** An unresolved N-9 blocks the floor, not the merge.
 
+**THE CLAIM SPLIT (R-L1, orchestrator-ruled 2026-08-22 — D39).** This section scheduled every retirement
+breakage for PR-3, but the **breeding excision lands in PR-1** with the 8th body — so the ~40 tests whose
+CLAIM is breeding behaviour (sighting inserts, `vendor_account` proposals, the ≥3 loop, `sign_autopost_rule`
+on a starved pool / CLR27) **retire or re-point IN PR-1, with the excision**: C.8's inverted twins replace
+them, §B.7's per-site dispositions apply verbatim, nothing is silently deleted. **Tests whose claim is verb
+EXISTENCE stay PR-3**, where the verbs drop. PR-1 also owns the test work the build surfaced — the **~46 D11
+chat-fixture trues** and the **~8 N1 fixture re-routes** — while the battery-construction trues ride C.4/C.12.
+
 **UNCONDITIONAL breakage found by the delta review, in addition to the lists below:**
 `wb-s-seeding.test.mjs:217` (calls `proposeCodingRule` `:225` and `signCodingRule` `:230`; its
 `:221-222` comment marks the route **MUST-FAIL with no fallback**, so it breaks regardless — **OQ-3's
@@ -359,8 +369,9 @@ no role). Part 3 is behaviourally inert until PR-2 emits `posted`, and provable 
 - **Part 1 (ungranted):** `clara.entry_post_receipts` + its `_tf_append_only`/no-truncate triggers ·
   `t_je_agent_post_receipt` · `clara._agent_post_entry_core` — the ladder **B1–B11, B14, B15** and
   **Tier A's three lock acquisitions** (§D.7) · **`clara._assert_control_leg_counterparty_at`, GB-2's
-  extracted projected-state predicate** (§D.6), with `_assert_supplier_bill_shape_at` re-cut as a thin
-  delegate passing NULL · the **8th `_approve_entry_core` body** (breeding excision + ctx identity + the
+  extracted projected-state predicate** (§D.6), with the supplier floor's **body moved into
+  `clara._assert_supplier_bill_shape_at_projected(p_entry, p_projected)`** (R-L3, the estate idiom) and the
+  public `_assert_supplier_bill_shape_at` left a thin delegate passing NULL · the **8th `_approve_entry_core` body** (breeding excision + ctx identity + the
   agent arm + the Tier-C `detail` reasons, **now including `registration_conflict`** — GM-5) · the
   `_draft_entry_core` CoR (**the OQ-2 limb — RULED, D35: the `rule_decisions` write stops**, N1's draft
   copies **on the projected state**, direction-family re-cut, generic widening) · **T3's two trigger-function recuts** · the two new event kinds with their
@@ -391,7 +402,9 @@ back — TEN CoR'd live bodies, one `CREATE TABLE`, and TWO ACCESS EXCLUSIVE con
 ≥11. This table is the enumeration, and **the count design §3.5 cites is this list's count — PR-1's rig
 replay confirms or corrects it** (gate §7). Three entries are newer than the gate's own arithmetic: GB-2
 puts the supplier floor on the list, the `posted` chain's finalize body is a third function rather than a
-second overload, and **D34 returns rows 9 and 10.**
+second overload, and **D34 returns rows 9 and 10.** **The PR-1 build confirms TEN and adds nothing (R-L3,
+D41):** `(CLR23, registration_conflict)` and `(CLR10, customer_identity_name_only)` are **already typed at
+their raise sites**, so the two pairs GM-5/GM-6 added cost no extra CoR.
 
 | # | body | why it is on the list |
 |---|---|---|
@@ -399,7 +412,7 @@ second overload, and **D34 returns rows 9 and 10.**
 | 2 | `clara._draft_entry_core` | the OQ-2 limb (**RULED, D35** — the `rule_decisions` write stops, the table stays), N1's draft copies, the direction-family re-cut, the generic widening |
 | 3 | `clara._tf_assert_supplier_bill_shape()` (`0009:524`) | T3's receipt-keyed pin |
 | 4 | `clara._tf_assert_sales_invoice_shape()` (`0015:1027`) | T3's receipt-keyed pin, sales twin |
-| 5 | `clara._assert_supplier_bill_shape_at` (live tip `0036:601`) | **GB-2** — the `0036:619-626` prologue moves out into the new predicate and the floor becomes a thin delegate passing NULL |
+| 5 | `clara._assert_supplier_bill_shape_at` (live tip `0036:601`) | **GB-2** — the `0036:619-626` prologue moves out into the new predicate; **the remaining body moves into `clara._assert_supplier_bill_shape_at_projected` (R-L3)** and the public name is left a thin delegate passing NULL |
 | 6 | `clara.settle_autodraft_task`, 6-arity (`0036:856`) | the `posted` outcome: the guard, the entry-exists validation, the `v_item_outcome` mapping, `last_refusal`, `entry_id`, the CLR29 fabrication |
 | 7 | `clara.settle_autodraft_task`, 5-arity (`0011:2642`) | the other overload's own copy of the guard (`0011:2642-2652`) |
 | 8 | `clara.reconcile_sweep_runs()` (`0011:2709`) | the finalize bucketing (`0011:2754-2762`), which counts a `posted` row in none of its three counters |
@@ -443,3 +456,42 @@ prestate must state a disposition for each, or a copy-the-0040-idiom prestate re
   **PR-1's prestate states 0**. The splice is **inert on arrival by its own admission**
   (`0040:7109-7112`: *"INERT ON ARRIVAL, ON PURPOSE: no writer stamps this key yet … Do not read the
   absence of writers as evidence this is dead code"*), so nothing behavioural is lost.
+
+---
+
+## Annex I · B4's three formulas and their derivations (design §3.7.1)
+
+**"No wall is re-implemented" was false for three kinds of four.** `0016:4137-4151` and `0037:1928-1938` are
+**supplier_bill-only**, so two of these three are **new walls with new formulas**, and law 1 gives each its own
+independent pass.
+
+**GM-1 — the sales row is RE-DERIVED, and this is the correction the gate attested four times.** v4 derived it against
+**`0016:2100-2111`, a body superseded seventy migrations ago**. The live `_assert_sales_invoice_shape_at` is
+**`0022:714-930`** (CoR of `0016:1958`), whose ties sit at **`:867-872`**, **`:897-900`** and **`:913-925`**, and whose
+income tie **subtracts the rounding leg**. v4's `income + tax = total_cents` therefore differed from the live floor by
+exactly that leg **in both signs**, so B4 and B11 contradicted on one entry with **no journal satisfying both** — the
+precise disagreement v4 claimed was impossible. Rounding is structurally sanctioned estate-wide (`0009:304-314`
+auto-appends ≤5-sen legs; the witness predicate certifies |rounding| ≤ 99 sen as a first-class fact, `0092:463`,
+`:473-475`, published as `rounding_cents` at `0092:510`) and is **tax-independent** (`0022:919-924`), so a nil-tax cash
+invoice breaks the old formula identically.
+
+| kind | formula | status and derivation |
+|---|---|---|
+| `supplier_bill` | payable credit = expense debit = `total_cents` | **Faithful relocation.** The tie already exists at `0016:4137-4151` (as a FLAG) and `0036:831-847` (as the verified-total floor); B4 promotes the flag to a refusal and changes nothing else. **It does NOT share GM-1's defect**, and the asymmetry is worth stating: the supplier aggregate is `account_type`-based, so it **swallows the expense-typed rounding leg** into the expense side and still ties — where the sales tie, which names income and tax separately, cannot. |
+| `sales_invoice` / `sales_credit_note` | **receivable (direction-correct) = `total_cents`**, and **income + tax = `total_cents` − `coalesce(rounding_cents, 0)`**; the credit-note arm **mirrors sign** on every term | **NEW, and RE-DERIVED against the live floor `0022:714-930`** (ties `:867-872`, `:897-900`, `:913-925`) so the rung and the shape floor cannot disagree — B11 calls that floor. **`rounding_cents` is the FACT-side value** (`0092`/`0100`), **never the entry's own rounding leg**: an entry may not supply its own slack, or the tie becomes self-certifying. The sign mirror is what keeps a credit note from tying by absolute value. |
+| `journal_entry` generic | `sum(debit_cents) = total_cents` | **NEW, and the weakest honest anchor available.** No coding kind, so no direction arm, no coded-kind preconditions (`0016:4020-4034` is skipped) and no shape floor. The document total is the only DB-owned figure the entry can be held to. **Paired with B14** (no AR/AP control leg) **and B15** (no directional anchor), which is what keeps the subledger belt unreachable and the suppressed-payable shape out. |
+
+**GM-2 — where the components are absent, the tie is `not_evaluable`, never `pass`.** The nil-tax witness arm deliberately
+withholds `total_excl_tax_cents` / `tax_total_cents` (`0100:553-554`), so ties 2/3/4 of the live floor skip. A **lumped**
+B4 would then let a **fabricated `sst_output` credit** tie perfectly — exactly the shape `0046:1092`'s `account_mismatch`
+rung caught, and that rung retires with the executor (B.1 names B4's component tie as its successor). So the component tie
+evaluates **`not_evaluable`** on that arm (law 68), which fails admission and is reported distinctly. **A lumped pass
+there would be the ARM-0 defect wearing an accounting hat.**
+
+**The named cost, and OQ-5's question.** A generic JV whose amount is *not* the document total — a payslip split across
+several entries, a partial accrual — **cannot tie and lands as a draft**. The alternative is no anchor at all, which is
+precisely what `0046:1128-1140` wrote against itself: *"could … carry an ARBITRARY under-cap balanced amount, and be
+auto-posted with no verified anchor."* Together with B14 and B15 this narrows the unattended generic lane to
+**document-anchored, non-control-leg, direction-unresolved journals**, and §6 measures how large that residue is rather
+than assuming it.
+

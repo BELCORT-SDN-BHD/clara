@@ -1,10 +1,11 @@
 # F-A2 annexes 3 — vocabulary, chains, and the record
 
-> Companion to `f-a2-agentic-posting-design.md` (**v6, 2026-08-22**). **E** the refusal
+> Companion to `f-a2-agentic-posting-design.md` (**v6.1, 2026-08-22**). **E** the refusal
 > vocabulary, receipt shape and columns · **F** the `posted` chain · **G** the change log ·
-> **H** the decision register **and the owner-question closure (H.2)** · **I** B4's formulas and
-> derivations. Siblings:
-> `f-a2-annexes-1-estate.md` (A, B) and `f-a2-annexes-2-mechanics.md` (C, D).
+> **H** the decision register **and the owner-question closure (H.2)**. **Annex I** (B4's formulas)
+> **moved to `f-a2-annexes-1-estate.md` at v6.1** for the 500-line ceiling — its label is unchanged, so
+> every "Annex I" citation still resolves. Siblings: `f-a2-annexes-1-estate.md` (A, B, I) and
+> `f-a2-annexes-2-mechanics.md` (C, D).
 
 ---
 
@@ -86,6 +87,16 @@ trigger makes its absence fatal.
 · `open_question_blocks` · `supplier_leg_shape` · `sales_leg_shape` · `generic_control_leg` ·
 **`generic_on_directional_document`** (B15, GB-1).
 
+**`facts_moved` (B8) — the SCOPE, and the two conjuncts it deliberately does NOT carry (R-L6).** Scoped to
+**fact-generation citations, named POSITIVELY**: every `entry_evidence` row whose extraction is an `invoice_facts` ·
+`llm_text_facts` · `llm_vision_facts` generation must equal `v_state->>'extraction_id'`. **`ocr` and
+`structured_parse` are NOT members** (law 72) — an OCR region can never carry `field_path='invoice.total'`
+(`egress.mjs:146,163`), so scoping to every citation row is a dead lane, not a wall. **No OCR-lineage conjunct:** a
+re-OCR supersedes within its own kind (`0089:267-284`) while the witness `input_pin` still names the old one, so
+lineage would refuse lawful posts. **No `superseded_by` read:** governance is the `extracted_at` clock
+(`0101:479-489`); two rules for one question drift (`0101:57-64`). **`not_evaluable`** — no `document_id`, a `'{}'`
+fact state, or a cited TEXT row resolving to no generation (`0092:210-217`) — never `pass`.
+
 **Tier-D vocabulary — recorded in `last_refusal`, NEVER a receipt (GM-3).** The six belt tokens left Tier B when B12/B13
 were cut on correctness grounds: `fa_belt_unregistered_movement` · `fa_cost_adjustment_deferred` ·
 `fa_k_gl_balance_on_enrolled` (`0041:2717-2736`) · **`advance_mirror_unregistered`** · `advance_movement_unregistered` ·
@@ -118,7 +129,9 @@ walls — that argument is kept in design §3.2's table, on the `customer_identi
 vendor advisory `203005003` and the client advisory `203005004` before B9 reads `_open_question_blocks`, the delegate's
 CLR26 re-check (`0037:1909-1920`) cannot fire from this lane, so law 31 excludes it. **The disposition is recorded here
 rather than left as an absence**, and the named fallback if the vendor-lock extraction is dropped is to **admit `(CLR26,
-open_question_race)` as a pair**, which costs a `reason` added at `0037:1918` (§D.7).
+open_question_race)` as a pair**, which costs a `reason` added at `0037:1918` (§D.7). That is a real behavioural
+difference — a race becomes a typed refusal instead of being impossible — so it is a decision, not an implementation
+detail, and **C.4 carries the two-session race cell either way**.
 
 **`(CLR23, *)`** — the wildcard is **deleted**: **eight** bare CLR23 raises inside `_assert_supplier_bill_shape_at`
 (`0036:625, 654, 657, 660, 675, 692, 710, 845`) plus the sales analog are reachable through the delegate, and converting
@@ -163,7 +176,7 @@ fix at any one layer alone either lies or raises.
 | 1 | `sweep_run_items.outcome` CHECK, `0011:734-735` | 5 values, **no `failed`** | CHECK violation — loud, and the only honest failure in the chain |
 | 2 | `settle_autodraft_task` guard, `0036:864-868` (**not a CHECK**; an IF/RAISE) | 4 values, **includes `failed`** | CLR10 unless widened |
 | 3 | `v_item_outcome` mapping, `0036:979-980` | `case p_outcome when 'drafted' … when 'noop_existing' … else 'skipped_lane' end` | **silently buckets `posted` → `skipped_lane`** |
-| 4 | `sweep_runs` finalize bucketing inside `clara.reconcile_sweep_runs()` (`0011:2709`), at **`0011:2754-2762`** *(not `0036:2755-2759` — P4; single occurrence, never CoR'd)* | counts `drafted` / `skipped_lane`+`noop_existing` / `refused_budget`+`refused_attempts` | a `posted` row is counted in **none** of the three; the run summary under-totals against `expected_count` |
+| 4 | `sweep_runs` finalize bucketing inside `clara.reconcile_sweep_runs()` (`0011:2709`), at **`0011:2754-2762`** *(not `0036:2755-2759` — P4; single occurrence, never CoR'd)* | counts `drafted` / `skipped_lane`+`noop_existing` / `refused_budget`+`refused_attempts` | a `posted` row is counted in **none** of the three; the run summary under-totals against `expected_count`. **PR-1's fix is a FOURTH counter — `sweep_runs.posted_count`, never a fold into `drafted_count` (R-L5)** — so finalize reads **drafted + skipped + refused + posted = expected** |
 | 5 | **`ck_sweep_run_items_shape`** *(GM-8 — the layer v4 missed)* | forbids a non-`'drafted'` outcome from carrying an `entry_id` | **widening only the outcome CHECK and writing `entry_id` for a posted row is a CONSTRAINT VIOLATION.** The row cannot both record its entry and satisfy the shape until this layer moves too — which is why C.9 forces a posted settle *with* its `entry_id` and keeps a must-fail half against the un-widened constraint |
 
 **Six further `posted`-sensitive sites, four of them found by the v2 re-derivation:**
@@ -180,44 +193,6 @@ fix at any one layer alone either lies or raises.
 **Why §6 does not read this chain for its POSTED count.** It reads `clara.entry_post_receipts` — one row per posted entry,
 `unique(entry_id)`, written inside the posting transaction — and **cross-checks** it against
 `sweep_run_items.outcome='posted'`. **A disagreement between the two is itself a finding**; C.9 asserts they agree.
-
----
-
-## Annex I · B4's three formulas and their derivations (design §3.7.1)
-
-**"No wall is re-implemented" was false for three kinds of four.** `0016:4137-4151` and `0037:1928-1938` are
-**supplier_bill-only**, so two of these three are **new walls with new formulas**, and law 1 gives each its own
-independent pass.
-
-**GM-1 — the sales row is RE-DERIVED, and this is the correction the gate attested four times.** v4 derived it against
-**`0016:2100-2111`, a body superseded seventy migrations ago**. The live `_assert_sales_invoice_shape_at` is
-**`0022:714-930`** (CoR of `0016:1958`), whose ties sit at **`:867-872`**, **`:897-900`** and **`:913-925`**, and whose
-income tie **subtracts the rounding leg**. v4's `income + tax = total_cents` therefore differed from the live floor by
-exactly that leg **in both signs**, so B4 and B11 contradicted on one entry with **no journal satisfying both** — the
-precise disagreement v4 claimed was impossible. Rounding is structurally sanctioned estate-wide (`0009:304-314`
-auto-appends ≤5-sen legs; the witness predicate certifies |rounding| ≤ 99 sen as a first-class fact, `0092:463`,
-`:473-475`, published as `rounding_cents` at `0092:510`) and is **tax-independent** (`0022:919-924`), so a nil-tax cash
-invoice breaks the old formula identically.
-
-| kind | formula | status and derivation |
-|---|---|---|
-| `supplier_bill` | payable credit = expense debit = `total_cents` | **Faithful relocation.** The tie already exists at `0016:4137-4151` (as a FLAG) and `0036:831-847` (as the verified-total floor); B4 promotes the flag to a refusal and changes nothing else. **It does NOT share GM-1's defect**, and the asymmetry is worth stating: the supplier aggregate is `account_type`-based, so it **swallows the expense-typed rounding leg** into the expense side and still ties — where the sales tie, which names income and tax separately, cannot. |
-| `sales_invoice` / `sales_credit_note` | **receivable (direction-correct) = `total_cents`**, and **income + tax = `total_cents` − `coalesce(rounding_cents, 0)`**; the credit-note arm **mirrors sign** on every term | **NEW, and RE-DERIVED against the live floor `0022:714-930`** (ties `:867-872`, `:897-900`, `:913-925`) so the rung and the shape floor cannot disagree — B11 calls that floor. **`rounding_cents` is the FACT-side value** (`0092`/`0100`), **never the entry's own rounding leg**: an entry may not supply its own slack, or the tie becomes self-certifying. The sign mirror is what keeps a credit note from tying by absolute value. |
-| `journal_entry` generic | `sum(debit_cents) = total_cents` | **NEW, and the weakest honest anchor available.** No coding kind, so no direction arm, no coded-kind preconditions (`0016:4020-4034` is skipped) and no shape floor. The document total is the only DB-owned figure the entry can be held to. **Paired with B14** (no AR/AP control leg) **and B15** (no directional anchor), which is what keeps the subledger belt unreachable and the suppressed-payable shape out. |
-
-**GM-2 — where the components are absent, the tie is `not_evaluable`, never `pass`.** The nil-tax witness arm deliberately
-withholds `total_excl_tax_cents` / `tax_total_cents` (`0100:553-554`), so ties 2/3/4 of the live floor skip. A **lumped**
-B4 would then let a **fabricated `sst_output` credit** tie perfectly — exactly the shape `0046:1092`'s `account_mismatch`
-rung caught, and that rung retires with the executor (B.1 names B4's component tie as its successor). So the component tie
-evaluates **`not_evaluable`** on that arm (law 68), which fails admission and is reported distinctly. **A lumped pass
-there would be the ARM-0 defect wearing an accounting hat.**
-
-**The named cost, and OQ-5's question.** A generic JV whose amount is *not* the document total — a payslip split across
-several entries, a partial accrual — **cannot tie and lands as a draft**. The alternative is no anchor at all, which is
-precisely what `0046:1128-1140` wrote against itself: *"could … carry an ARBITRARY under-cap balanced amount, and be
-auto-posted with no verified anchor."* Together with B14 and B15 this narrows the unattended generic lane to
-**document-anchored, non-control-leg, direction-unresolved journals**, and §6 measures how large that residue is rather
-than assuming it.
 
 ---
 
@@ -446,6 +421,26 @@ adjudication. **OQ-5 → D37:** B4-generic adopted as the gate reshaped it, **bo
 the measured size of both refused populations is published by §6/PR-4 — that measurement is part of the ruling**, kept
 explicit in §6 and C.17.
 
+### v6 → v6.1 (PR-1 build trues, 2026-08-22 — six orchestrator rulings under the owner's standing delegation, R-L1..R-L6, ledgered as D38-D43 for clock-out review; none reopens a law or an owner ruling)
+
+**F53 (R-L6) — B8 RESOLVED from the sources: *"no citation names a SUPERSEDED fact generation."*** Scope =
+fact-generation citations only, named positively, compared to `v_state->>'extraction_id'`; OCR/`structured_parse` out
+of scope (law 72). **α scoping over β**, so a mixed-generation draft refuses — stricter, fail-closed — and non-vacuous
+against A5, whose input is caller-supplied where B8's is not. §3.2's row + redundancy paragraph · E.2's scope note ·
+C.3's five-cell set. *(The builder's 206/206 was the wrong population — lawful `model_read` OCR citations.)* **D38.**
+
+**F54 (R-L1)** the retirement **claim split** — breeding-claim tests retire/re-point **in PR-1 with the excision**
+(C.8's twins replace them, B.7's dispositions verbatim), verb-existence tests stay PR-3, and PR-1 owns the ~46 D11
+chat-fixture trues and ~8 N1 re-routes (B.6). **F55 (R-L2)** lock order = the **delegate's own** — filing `FOR SHARE`
+→ entry row → vendor `203005003` → client `203005004`; v6's order deadlocks ABBA against a concurrent human approve
+(§D.7, D33). **F56 (R-L3)** the D1 list stays **TEN**, and the supplier floor's **body moves into
+`_assert_supplier_bill_shape_at_projected`**, the public name a NULL-passing delegate (B.9, §D.6, D31). **F57 (R-L4)**
+B7's amount-bearing evidence = `field_path='invoice.total'` (`0009:462-466`). **F58 (R-L5)** `posted_count` is a
+**FOURTH** counter (§3.8, Annex F). **F59** ceiling relocations: **Annex I moves whole to
+`f-a2-annexes-1-estate.md`** (label unchanged) · §D.7's fallback cost detail merges into E.2's CLR26 exclusion ·
+§D.1's A3 sentence points at E.2's token list · battery trues in B.6/C.4/C.12 (`c4.bare-clr23` → the projected body ·
+catalog-probed signatures · **`coa_accounts`**).
+
 ---
 
 ## Annex H · Decision register — the register of record
@@ -482,13 +477,19 @@ explicit in §6 and C.17.
 | **D28** | **OQ-6 option A: no category gate ON THE AGENT LANE.** `is_year_end` and `tax_affecting` post unattended, on the grounds that both carry mandatory downstream human checkpoints. **Supplementary ruling: the HUMAN lane's distinct-checker gate on the same categories STANDS unchanged** — three asymmetries (automatic vs manufactured second party · segregation-of-duties threat model · one click vs broken flow) in Annex G's F33, which also registers it as a future per-firm **governance dial**, not built here. | **owner-ruled 2026-08-20** |
 | **D29** | **The PR-0 width ruling: PR-1 is SEVERED into three files in ONE D1 window.** **The chat half is OVERRIDDEN by D34 (owner, 2026-08-22) — chat parity is back in the train.** The other two halves STAND: **B12/B13 are cut** (D4, a correctness ruling the owner's decision does not reach) and **the `posted`-outcome chain becomes its own migration file** — reviewed and provable in isolation via C.9, inert until PR-2 emits `posted`. **A separate earlier ceremony was weighed and DECLINED:** a third window buys review isolation the file split already buys, at the price of another stop/start night with its reconciler-herd and zombie-pooler hazards. The train is design §5. | **orchestrator-ruled at PR-0; chat half overridden by D34** |
 | **D30** | **B15 — a NULL-`coding_kind` entry may not anchor to a DIRECTIONAL document** (token `generic_on_directional_document`). `coding_kind` is a model-supplied input, so the kind SELECTS which walls bind; without B15 a generic-coded supplier invoice posts `Dr Expense / Cr Bank` past all fourteen of v4's rungs with the payable suppressed. **It lives in the ladder so it covers both lanes**, D18 survives, and PR-2's enum widening must extend `allowedCodingKindsForDirection` deliberately. | **derived (GB-1)** |
-| **D31** | **B10/B11 evaluate the deferred shape floors on the PROJECTED state**, via a new callable `clara._assert_control_leg_counterparty_at(p_entry, p_projected)` extracted from the supplier floor's prologue, with the floor left as a thin delegate passing NULL. Without it the pre-checks refuse **100% of agent sales posts, with the SUPPLIER token**. Fallback: drop the pre-checks — the floors still run in the delegate, so the cost is evidentiary, not safety (§D.6). | **derived (GB-2)** |
+| **D31** | **B10/B11 evaluate the deferred shape floors on the PROJECTED state**, via a new callable `clara._assert_control_leg_counterparty_at(p_entry, p_projected)` extracted from the supplier floor's prologue — **and (R-L3, D41) the floor's own body moved into `clara._assert_supplier_bill_shape_at_projected(p_entry, p_projected)`, the public `_assert_supplier_bill_shape_at` left a thin delegate passing NULL** (the estate idiom). Without it the pre-checks refuse **100% of agent sales posts, with the SUPPLIER token**. Fallback: drop the pre-checks — the floors still run in the delegate, so the cost is evidentiary, not safety (§D.6). | **derived (GB-2)** |
 | **D32** | **B4-sales ties against the LIVE floor `0022:714-930`, not the superseded `0016:2100-2111`:** receivable = `total_cents`; **income + tax = `total_cents` − `coalesce(rounding_cents, 0)`**, `rounding_cents` taken from the FACT side and never from the entry's own leg; the credit-note arm mirrors sign. Where the nil-tax arm withholds components the tie is **`not_evaluable`, never `pass`** (law 68), and it is the named successor to the retiring `account_mismatch` rung. | **corrected (GM-1/GM-2)** |
-| **D33** | **The B9 check-then-act window is closed by LOCK ORDERING, not by a typed pair.** Tier A acquires the filing `FOR SHARE` and advisories `203005003`/`203005004` before B9, the three the estate already uses; CLR26 then becomes provably unreachable from this lane and **law 31 forbids listing it**, with the disposition recorded in E.2 rather than left an absence. Named fallback if the vendor-lock extraction widens PR-1: admit `(CLR26, open_question_race)` as a pair, at the cost of a `reason` added at `0037:1918` (§D.7). | **derived (GM-7)** |
+| **D33** | **The B9 check-then-act window is closed by LOCK ORDERING, not by a typed pair.** Tier A acquires the filing `FOR SHARE` and advisories `203005003`/`203005004` before B9, the three the estate already uses — **in the DELEGATE'S OWN order (R-L2, D40): filing → entry row → vendor `203005003` → client `203005004`, since the filing → client → vendor order v6 wrote inverts it and deadlocks ABBA against a concurrent human approve**; CLR26 then becomes provably unreachable from this lane and **law 31 forbids listing it**, with the disposition recorded in E.2 rather than left an absence. Named fallback if the vendor-lock extraction widens PR-1: admit `(CLR26, open_question_race)` as a pair, at the cost of a `reason` added at `0037:1918` (§D.7). | **derived (GM-7)** |
 | **D34** | **Chat parity rides the main train (owner-ruled 2026-08-22, overriding D29's chat half).** PR-1 carries the `interactive_client` limb **CORRECTED per GB-3**: BOTH `wake_credentials` CHECKs extended — the kind CHECK gains the name, and the client-binding CHECK gains a NEW enumeration row *`interactive_client` ⇒ client NOT NULL, `on_behalf_of` kept*, with the three existing rows' semantics **byte-identical** (extend-never-weaken, stated in the PR against C-3's record) — plus **BOTH `mint_wake_credential` gates** (the early kind gate AND the new per-kind arm), `wake_open_question`'s re-key onto the client pin, **all SIX** roster/census surfaces, and the closed-world cell that `interactive_client` holds **EXACTLY ONE** allowlist row. PR-2 carries the new frozen `chatTurn.v10.infra` `_vN` minting the pinned kind for `wake_open_question` **ALONE** (R-1 unchanged). **The orchestrator's severance recommendation is on file as dissent** (Annex G, F51). | **owner-ruled 2026-08-22** |
 | **D35** | **OQ-2 RULED (owner, 2026-08-22) — recommendation A.** `_draft_entry_core` **stops writing `rule_decisions`**; the table and its historical rows are **KEPT** (a live FK at `0011:898`, and knowledge fuel per KEEP-AS-HISTORY). **`list_review_queue.rule_backed` is REMOVED from the dashboard** rather than rendered permanently false (law 27(2)) — with the write stopped, no entry F-A2 posts can be rule-backed. The measured removal surface, and the two things the ruling does NOT reach (the DB projection, a read over kept history; the lane-REASON `rule_backed`, which is computation and takes a named PR-3 sweep), are in **B.6**. | **owner-ruled 2026-08-22** |
 | **D36** | **OQ-3 RULED (owner, 2026-08-22) — recommendation A.** `preview_ocr_sales_evidence` (`0046:2010`) **retires with the floor**, and `tick_seeding_proposal` (`0017:4525`) **re-points its output to a knowledge-layer artifact**: no more signed-`coding_rules` minting, no `kb_rule.signed`; the admin's tick judgement lands as **context-pack food** (law 73) and the seeding UX is unchanged. Ground: leaving a live writer minting signed rules nothing executes would make *"the rules machine is retired"* **untrue in the data**. B.6/B.7's "rides OQ-3" dispositions resolve against this; **`wb-s-seeding.test.mjs:217` still breaks unconditionally** and its own MUST-FAIL text still forces the N-2 adjudication. | **owner-ruled 2026-08-22** |
 | **D37** | **OQ-5 RULED (owner, 2026-08-22) — recommendation A.** **B4-generic is adopted as the gate reshaped it**: `sum(debit_cents)` = the verified `total_cents`, paired with **B14** (no AR/AP control leg) and **B15** (no directional anchor). **Both priced costs are accepted knowingly** — multi-entry / split-amount documents land as drafts, and a generic entry produces no AR/AP consequence. **The measurement is part of the ruling, not an optional extra:** §6 and C.17 bind PR-4 to publish **the measured size of both refused populations**, so the accepted cost is checked against reality instead of left an estimate. | **owner-ruled 2026-08-22** |
+| **D38** | **B8 RESOLVED from the sources (R-L6) — *"no citation names a SUPERSEDED fact generation."*** Every `entry_evidence` citation whose extraction is a fact generation (`invoice_facts`·`llm_text_facts`·`llm_vision_facts`) must equal `v_state->>'extraction_id'`; OCR/`structured_parse` are out of scope (law 72). **α scoping is chosen over β** (verified-anchor-only): **every** fact-generation citation must name the current generation, so a **mixed-generation draft refuses**. **The accounting consequence, stated:** a re-extraction that keeps the total but moves the identity, the date or the invoice number can never post behind a stale citation — bought at the price of refusing a draft whose non-amount citations are merely older, which lands as a draft and re-cites. Non-vacuous against A5 because **A5's input is caller-supplied and B8's is not**. §3.2 · E.2's scope note · C.3's five cells. | orchestrator-ruled under the owner's standing delegation, 2026-08-22 — ledgered for clock-out review |
+| **D39** | **The retirement CLAIM SPLIT (R-L1).** B.6 scheduled every retirement breakage for PR-3, but the breeding excision lands in PR-1 with the 8th body — so the ~40 tests whose CLAIM is breeding behaviour **retire or re-point IN PR-1, with the excision** (C.8's inverted twins replace them, B.7's per-site dispositions verbatim, nothing silently deleted), while tests whose claim is verb EXISTENCE stay PR-3. PR-1 also owns the ~46 D11 chat-fixture trues and the ~8 N1 fixture re-routes. Fail-closed; no law touched. | orchestrator-ruled under the owner's standing delegation, 2026-08-22 — ledgered for clock-out review |
+| **D40** | **Lock order = the DELEGATE'S OWN order (R-L2):** filing `FOR SHARE` → the entry row → vendor advisory `203005003` → client advisory `203005004`. v6's §D.7 wrote filing → client → vendor, which **inverts the delegate's order and opens an ABBA deadlock** against a concurrent human approve holding the vendor lock and waiting on the client one. Taking the estate's own order makes the two lanes queue instead of deadlocking. §D.7 · D33. | orchestrator-ruled under the owner's standing delegation, 2026-08-22 — ledgered for clock-out review |
+| **D41** | **The D1 list stays TEN, and the supplier floor's BODY moves (R-L3).** `(CLR23, registration_conflict)` and `(CLR10, customer_identity_name_only)` were **already typed at their raise sites**, so the two pairs GM-5/GM-6 added cost no extra CoR. Separately, the floor's body moves into `clara._assert_supplier_bill_shape_at_projected(p_entry, p_projected)` with the public `_assert_supplier_bill_shape_at` left a **thin delegate passing NULL** (the estate idiom), beside the new `clara._assert_control_leg_counterparty_at`. B.9 · §D.6 · D31. | orchestrator-ruled under the owner's standing delegation, 2026-08-22 — ledgered for clock-out review |
+| **D42** | **B7's "amount-bearing evidence" is `field_path='invoice.total'` (R-L4)** — the only field `_write_entry_evidence` grants `provenance_tier='verified'` (`0009:462-466`), so the rung reads that row and no other. Review obligation carried into PR-1: confirm no second amount-bearing path exists on the supplier or sales shapes. §3.2's B7 row. | orchestrator-ruled under the owner's standing delegation, 2026-08-22 — ledgered for clock-out review |
+| **D43** | **`sweep_runs.posted_count` is a FOURTH counter, not a fold into `drafted_count` (R-L5).** The finalize identity becomes **drafted + skipped + refused + posted = expected**; folding posts into drafted would make a posted run indistinguishable from a drafted one in the only summary §6 reads. §3.8 · Annex F row 4 · C.9. | orchestrator-ruled under the owner's standing delegation, 2026-08-22 — ledgered for clock-out review |
 
 ### H.2 · The owner questions — ALL RULED (closure note for §4)
 

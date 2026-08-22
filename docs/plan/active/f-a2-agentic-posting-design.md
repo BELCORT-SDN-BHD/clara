@@ -1,20 +1,20 @@
 # F-A2 — the agentic posting lane: design
 
 > **Design doc of record for Wave-F Track A item F-A2** (`docs/plan/active/wave-f-contract.md`
-> §F-A2, lines 47-64), carrying **F-A10's retirement clause**. **v6, 2026-08-22 — owner ruling D34 folds
-> chat parity back into the train (gate severance overridden in part); PR-0 gate conditions all folded**
-> (gate record: `f-a2-pr0-gate-record.md`) — three blockers, eleven materials, the width ruling as
-> amended, and the nits. v4 folded the final verify
+> §F-A2, lines 47-64), carrying **F-A10's retirement clause**. **v6.1, 2026-08-22 — the PR-1 build trues: six
+> orchestrator rulings R-L1..R-L6 (Annex H, D38-D43), B8 RESOLVED from the sources.** v6 folded owner ruling D34
+> (chat parity back into the train) over the PR-0 gate conditions (record: `f-a2-pr0-gate-record.md`) — three
+> blockers, eleven materials, the width ruling as amended, and the nits. v4 folded the final verify
 > (R-1..R-3) plus the **OQ-4/OQ-6 owner rulings**; v3 folded the delta review (which **reversed C-3**
 > and **refuted P5**); v2 the R1 review. **Change log: Annex G.** Binds under ADR-0071
 > G1.2/G1.3/G1.4; digest **laws 71-76**, **27**, **68**, **69**, **28**, **29**, **31**. Every build
 > PR takes the uniform ADR-061 ladder; **every rung of §3.2 is judgement logic** (review law 1).
 >
 > **Annexes**, split three ways to stay under the 500-line file limit: `f-a2-annexes-1-estate.md`
-> (**A** findings at the bytes · **B** retirement) · `f-a2-annexes-2-mechanics.md` (**C** battery ·
-> **D** the tier, wake-kind and C-3 censuses, T3's mechanism, **GB-2's predicate**, **GM-7's locks**) ·
-> `f-a2-annexes-3-record.md` (**E** refusal vocabulary and receipt shape · **F** the `posted` chain ·
-> **G** change log · **H** decision register and open questions · **I** B4's formulas). **Three method
+> (**A** findings at the bytes · **B** retirement · **I** B4's formulas, relocated there at v6.1) ·
+> `f-a2-annexes-2-mechanics.md` (**C** battery · **D** the tier, wake-kind and C-3 censuses, T3's mechanism,
+> **GB-2's predicate**, **GM-7's locks**) · `f-a2-annexes-3-record.md` (**E** refusal vocabulary and receipt
+> shape · **F** the `posted` chain · **G** change log · **H** decision register). **Three method
 > lessons, each of which cost a finding** (Annex G): an unsettleable claim is carried as a **PREDICTION
 > the PR-1 rig replay must confirm** · **line numbers come from the instrument that prints them** · **a
 > body's live tip is found by CoR lineage**, never the migration that created it (GM-1's seventy-
@@ -117,8 +117,8 @@ requires an empty vector.** *(B12/B13 were cut at the gate — their numbers are
 | B4 | the entry's amount ties (per kind — **Annex I**) | `0016:4137-4151` + **two new formulas** | `anchor_untied` |
 | B5 | no `amount_exception` without `amount_override` | `0037:1934-1937` | `amount_conflict` |
 | B6 | no human override flag present | new | `human_override_present` |
-| B7 | amount-bearing evidence is `provenance_tier='verified'` | `0009:460-466` | `unverified_evidence` |
-| B8 | cited evidence is the generation the fact state names | opener ⑥ §2.3 | `facts_moved` |
+| B7 | **amount-bearing evidence** — the `entry_evidence` row with `field_path='invoice.total'`, the ONLY field `_write_entry_evidence` grants `verified` (R-L4) — is `provenance_tier='verified'` | `0009:460-466`, the grant at `0009:462-466` | `unverified_evidence` |
+| B8 | **no citation names a SUPERSEDED fact generation** — every `entry_evidence` row whose extraction is a fact generation (`invoice_facts`·`llm_text_facts`·`llm_vision_facts`) equals `v_state->>'extraction_id'`; OCR/`structured_parse` citations are out of scope (law 72) | `0009:889` + `0009:191`/`0092:497`; generation `0101:443-491` | `facts_moved` |
 | B9 | `_open_question_blocks` returns nothing — **under Tier A's locks** | `0012:87-108` | `open_question_blocks` |
 | B10 | `_assert_supplier_bill_shape_at(entry, v_bound)` **on the PROJECTED state** | `0037:1989` + §D.6 | `supplier_leg_shape` |
 | B11 | **`_assert_sales_invoice_shape_at(entry, v_bound)`** **on the PROJECTED state** | `0037:1990` + §D.6 | `sales_leg_shape` |
@@ -160,8 +160,13 @@ judgement human until F-A3**. **B15 makes B14 coherent:** a directional invoice 
 generic entries from carrying one, so generic-on-directional was always a contradiction. **Both narrow the generic
 lane and OQ-5 says so.**
 
-**B8 is deliberately redundant with A5 and must be forced non-vacuously (law 31)** — A5 covers the common case only
-because `0096:45-60` rotates an open draft's token when facts settle, **one migration old**. **The vector is
+**B8 is deliberately redundant with A5 and must be forced non-vacuously (law 31)** — and the redundancy is not a
+duplicate, because **A5's input is caller-supplied and B8's is not**: `0096:249-278` rotates an open draft's token
+when facts settle, but an agent that re-reads the draft simply posts with the rotated token, so A5 is silent on
+exactly the case that matters — a re-extraction that keeps the total and moves the identity, the date or the number.
+B8 compares `entry_evidence.extraction_id` against the generation the fact state **names** (`0009:191`/`0092:497`),
+reads nothing the caller supplies, and depends on no writer side effect — the same 'identity rather than
+coincidence' move `0101:29-35` makes for 0049's guard. **The vector is
 three-valued (law 68):** an absent-input rung is **`not_evaluable` — it fails admission but is REPORTED DISTINCTLY**,
 since `pass` there is the ARM-0 defect. **B4-sales is the sharpest instance:** where the nil-tax witness arm withholds
 the components (`0100:553-554`), B4's component tie evaluates **`not_evaluable`, never `pass`** (GM-2; Annex I).
@@ -367,7 +372,9 @@ on file as dissent.)*
 `ck_sweep_run_items_shape` forbids a non-`'drafted'` outcome from carrying an `entry_id`, so widening only the outcome
 CHECK yields a constraint violation). **A fix at any one layer alone either lies or raises:** two layers silently
 mis-bucket a posted row (`0036:979-980`, `0011:2754-2762`) and `0036:987` writes a **fabricated `CLR29` refusal
-token** onto it. **§6's POSTED count therefore reads a surface that cannot silently bucket** — `entry_post_receipts`,
+token** onto it. **The finalize fix is a FOURTH counter, never a fold (R-L5):** `sweep_runs.posted_count` joins
+drafted/skipped/refused, so the identity is **drafted + skipped + refused + posted = expected** and a posted run
+stays distinguishable in the only summary §6 reads (Annex F row 4). **§6's POSTED count therefore reads a surface that cannot silently bucket** — `entry_post_receipts`,
 cross-checked against `sweep_run_items.outcome='posted'`, **a disagreement being itself a finding.** The chain ships
 as PR-1's **third migration file**, provable in isolation via C.9 and inert until PR-2 emits `posted`.
 
