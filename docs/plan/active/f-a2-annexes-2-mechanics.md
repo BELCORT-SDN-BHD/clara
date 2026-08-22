@@ -1,6 +1,6 @@
 # F-A2 annexes 2 — battery and censuses
 
-> Companion to `f-a2-agentic-posting-design.md` (**v6, 2026-08-22**). **Annex C** the battery ·
+> Companion to `f-a2-agentic-posting-design.md` (**v6.1, 2026-08-22**). **Annex C** the battery ·
 > **Annex D** the tier census, the wake-kind sweep, T3's mechanism, the C-3 decision record and
 > **GB-3's corrected build recipe (§D.2c)**, **GB-2's projected-state predicate (§D.6)** and **GM-7's
 > lock ordering (§D.7)**.
@@ -42,8 +42,13 @@ rounding twin**, proving the tie is tax-independent (`0022:919-924`) ▣ · (c) 
 `rounding_cents` on the fact side — where the component tie reports **`not_evaluable`, never `pass`** (GM-2)
 and the fabricated `sst_output` shape `0046:1092`'s retiring `account_mismatch` caught is **refused, not
 admitted** ▣ · plus the supplier and generic kinds against Annex I ▣ · B5 `amount_exception` without override
-▣ · B6 `amount_override` and `duplicate_override` twins ▣ · B7 `model_read` tier ▣ · **B8 forced with
-`revision_token` rotation suppressed** ▣ · B9 ×3 scope kinds, receipt naming the `question_id` ▣ · B9
+▣ · B6 `amount_override` and `duplicate_override` twins ▣ · B7 `model_read` tier ▣ · **B8 ×5 (R-L6, D38); the PRIMARY is re-read-and-retry with NO suppression** — a
+G1 draft cites G1's verified `invoice.total`, G2 settles with the SAME total and a different `invoice_id`, the
+post carries the CURRENT token, so A5/B2/B3/B7 all pass and **B8 alone fails** ▣, while the negative twin
+re-cited onto G2 **posts** ▣ · the **`revision_token`-rotation-suppressed** twin ▣ · **mixed-generation (α):**
+the total off G2 and `invoice_id` off G1 **fails** ▣ *(the cell β scoping would have admitted)* ·
+**must-not-refuse:** a draft citing only OCR `pages.*` regions **posts clean** ▣ · **not_evaluable:** an
+unresolved TEXT evidence row never reads `pass` ▣ · B9 ×3 scope kinds, receipt naming the `question_id` ▣ · B9
 negative: `origin='rule_proposal'` does not block (`0012:100`) ▣ · **B10/B11 on the PROJECTED state (GB-2): an
 agent sales draft whose receivable leg carries NO counterparty POSTS** ▣ *(the cell that goes RED against v4's
 form, which refused 100% of sales posts with the supplier token)*, while a genuinely mis-shaped supplier bill
@@ -77,8 +82,9 @@ waits or refuses at B9 and never reaches the delegate's CLR26 re-check** ▣ *(G
 fallback pair is required and this cell says so)* · **`(CLR10, already_reversed)` is a DECLARED-DEAD row, not
 a forced cell** — it left the pair set at the gate on law 31, and E.2 carries the ground · `(CLR21,
 duplicate_bill)` ▣ · `(CLR21, duplicate_sales)` ▣ · `(CLR19, write_into_closed_period)` via the
-**non-deferred** `t_period_wall` ▣ · **a bare CLR23 from inside `_assert_supplier_bill_shape_at` does NOT
-convert — it propagates** ▣ *(the anti-wildcard cell)* · **an unlisted `(errcode, reason)` propagates as a
+**non-deferred** `t_period_wall` ▣ · **a bare CLR23 from inside `_assert_supplier_bill_shape_at_projected`
+does NOT convert — it propagates** ▣ *(the anti-wildcard cell; `c4.bare-clr23` re-points onto the projected
+body, which carries the raises after R-L3, and probes its signature from the CATALOG, never hardcoded)* · **an unlisted `(errcode, reason)` propagates as a
 task FAILURE** ▣ · the subtransaction rolls back the delegate's partial writes (no orphaned counterparty
 birth) ▣.
 
@@ -150,7 +156,7 @@ post-path verb is added without joining it** ▣ · no §3.2 wall references a w
 **C.12 · Grants and census.** `wake_post_entry` executable by `clara_wake_interactive` and nothing else ▣ ·
 `clara_agent_ro` holds nothing in the lane ▣ · the core is ungranted ▣ · `_approve_entry_core`'s zero-grant
 pin holds (`0015:3592-3596`) ▣ · the app-executable-DML census against `journal_entries` did not grow ▣ ·
-PUBLIC=0 and one-overload on every touched function ▣.
+PUBLIC=0 and one-overload on every touched function ▣ · every relation the battery asserts against is named from the catalog — the accounts relation is **`clara.coa_accounts`**, never `chart_of_accounts` ▣.
 
 **C.13 · Chat parity and its fail-closed path — IN THIS BATTERY, on the owner's D34** (C-3's shape, R-1's
 narrowing, GB-3's corrected build recipe). **A chat post lands with `via_wake_kind='interactive'`** ▣ *(the
@@ -260,10 +266,9 @@ the advance belt's own header (`0043:3149-3152`) states the doctrine — the tes
 so the belt, the hook and the tie cannot drift into two readings of one window"*. **What GM-3 adds:**
 extracting a predicate is not enough if the predicate reads state the approve hook has not yet written. The FA
 and advance belts fail that test; GB-2's counterparty prologue passes it, because a *projection* of the
-missing input can be supplied by the caller. **A3 stands as vocabulary, now Tier-D vocabulary (E.2):** both
-belts raise `CLR40` with `detail = jsonb_build_object('reason', …)` — `fa_belt_unregistered_movement` ·
-`fa_cost_adjustment_deferred` · `fa_k_gl_balance_on_enrolled` (`0041:2717-2736`) ·
-`advance_movement_unregistered` · `advance_application_missing` (`0043:3146-3172`).
+missing input can be supplied by the caller. **A3 stands as vocabulary, now Tier-D vocabulary:** both belts
+raise `CLR40` with `detail = jsonb_build_object('reason', …)`, and **E.2 carries the six-token list with its
+cites** (`0041:2717-2736`, `0043:3146-3172`).
 
 ### D.2 · The chat fail-closed path — the C-3 decision record
 
@@ -453,9 +458,10 @@ would regress today's working draft path.**
 
 **The fix, in the estate's own idiom.** Extract the prologue into a callable projected-state predicate —
 `clara._assert_control_leg_counterparty_at(p_entry uuid, p_projected uuid)`, evaluating
-`coalesce(l.counterparty_id, p_projected)` over the control-class lines — and make
-`_assert_supplier_bill_shape_at` a **thin delegate passing NULL**, reproducing today's behaviour byte-for-byte
-(the `0016:3957-3961` pattern PR-1 already uses twice). **The ladder resolves the projection from
+`coalesce(l.counterparty_id, p_projected)` over the control-class lines. **The floor splits the same way
+(R-L3, D41):** its body moves into `clara._assert_supplier_bill_shape_at_projected(p_entry, p_projected)` and
+the public `_assert_supplier_bill_shape_at` is left a **thin delegate passing NULL**, reproducing today's
+behaviour byte-for-byte (the `0016:3957-3961` pattern PR-1 already uses twice). **The ladder resolves the projection from
 `proposed_counterparty` the same way the delegate will**, so B10/B11 judge the state the post is about to
 create rather than the state it starts from; §3.4's draft copies get it free, since `v_fingerprint` is already
 in hand at `0028:1310-1316`. **B12/B13 do NOT share this defect** (neither belt reads line counterparty) —
@@ -475,17 +481,18 @@ delegate's own CLR26 re-check (`0037:1909-1920`) would then fire on a race and l
 carrying `question_id` and `scope` but **no `reason`** — so it could not be a Tier-C pair without a body edit
 anyway.
 
-**The fold is lock ordering, not a typed pair.** Tier A acquires all three before B9: the filing lock through
-the **LOCKING overload** of `_active_document_filing` (`0007:982`), the **client advisory immediately after
-the entry `FOR UPDATE`**, and the **vendor advisory** through a callable extraction of the delegate's
-canonical-counterparty derivation. With them held **CLR26 is provably unreachable from this lane**, and law 31
-forbids listing a wall that can never be asked — E.2 records that disposition explicitly rather than leaving
-it an absence.
+**The fold is lock ordering, not a typed pair — and the order is the DELEGATE'S OWN (R-L2, D40):** the filing
+`FOR SHARE` through the **LOCKING overload** of `_active_document_filing` (`0007:982`) → the **entry row `FOR
+UPDATE`** → the **vendor advisory `203005003`**, through a callable extraction of the delegate's
+canonical-counterparty derivation → the **client advisory `203005004`**. **Order is not free:** v6's filing →
+client → vendor inverts the delegate's own sequence, so a concurrent human approve holding vendor and waiting
+on client **deadlocks ABBA** against an agent post holding client and waiting on vendor; the estate's order
+makes the two lanes queue instead. With the three held **CLR26 is provably unreachable from this lane**, and
+law 31 forbids listing a wall that can never be asked — E.2 records that disposition explicitly rather than
+leaving it an absence.
 
 **The named fallback, if the vendor-lock extraction widens PR-1 too far:** take the filing and client locks
-only and list **`(CLR26, open_question_race)`** as a Tier-C pair, which costs a `reason` added to the raise at
-`0037:1918`. That is a real behavioural difference — a race becomes a typed refusal instead of being
-impossible — so it is a decision, not an implementation detail. **C.4 carries the two-session race cell either
-way**, and **PR-1's replay must confirm the three locks suffice** (gate §7). *(Review honesty: one verifier
-refuted this on population grounds and was outvoted by two byte-grounded confirmations. Rarity is not
-unreachability.)*
+only and list **`(CLR26, open_question_race)`** as a Tier-C pair, costing a `reason` at the `0037:1918` raise;
+**E.2 carries its cost and C.4 the two-session race cell either way**, and **PR-1's replay must confirm the
+three locks suffice** (gate §7). *(Review honesty: one verifier refuted this on population grounds and was
+outvoted by two byte-grounded confirmations. Rarity is not unreachability.)*
