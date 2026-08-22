@@ -255,9 +255,15 @@ test("f-a2.c2.A6 a filing that MOVED under the draft -> CLR02", async (t) => {
   if (doorRefused) {
     assert.match(doorRefused.message, /citation blocker/i,
       `c2.A6: the audited retire door refuses while a live draft cites the filing (got ${doorRefused.code}: ${doorRefused.message})`);
+    // THE DOCTORING CARRIES AN ACTOR, because the transition guard demands one and says so:
+    // `t_filing_transition` refuses CLR17 "filing may only transition active->retired with actor
+    // and reason" on a retirement that names no `retired_by`. That guard is NOT the wall this
+    // cell is measuring, and a fixture that trips it reports "the filing was moved by root
+    // doctoring" when the filing in fact never moved -- so the doctor states both halves the
+    // guard asks for, exactly as the audited door would.
     const forced = await withTxnOrNull((c) => c.query(
-      "update clara.document_filings set retired_at=now(), retirement_reason=$2 where id=$1",
-      [p.cited.filingId, "c2.A6 rig: forced retirement, the audited door refuses on a live draft"]));
+      "update clara.document_filings set retired_at=now(), retired_by=$3, retirement_reason=$2 where id=$1",
+      [p.cited.filingId, "c2.A6 rig: forced retirement, the audited door refuses on a live draft", OWNER()]));
     assert.ok(!forced.error, `c2.A6: the filing was moved by root doctoring (${forced.error?.code}: ${forced.error?.message})`);
   }
   assert.ok((await rootQuery("select retired_at from clara.document_filings where id=$1", [p.cited.filingId]))
