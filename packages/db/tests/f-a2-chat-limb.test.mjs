@@ -236,15 +236,20 @@ test("f-a2.c13.woq wake_open_question succeeds from the pinned kind, and still R
   const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [A1()])).rows[0].firm_id;
   const pinned = await mintWake5({ kind: NEW_KIND, firm, onBehalfOf: BOB(), client: A1() });
   const { wakeOpenQuestion } = await import("./f-a2-post-world.mjs");
+  // THE SCOPE ID IS THE CLIENT, and it is required rather than optional: `_open_question_core`
+  // refuses CLR10 `open question is malformed` on a NULL `p_scope_id` for every scope kind, so
+  // a client-scoped question names the client. Passing null refused before the pin was ever
+  // consulted, which made the positive half of this cell measure the payload validator instead
+  // of the re-key.
   const ok = await wakeOpenQuestion(ROLES.wakeInteractive, pinned.secret, {
-    client: A1(), scopeKind: "client", scopeId: null, question: "c13 pinned question",
+    client: A1(), scopeKind: "client", scopeId: A1(), question: "c13 pinned question",
   });
   assert.ok(ok, "c13.woq: the pinned credential opens a question");
   const plain = await mintWake5({ kind: "interactive", firm, onBehalfOf: BOB(), client: null });
   let raised = null;
   try {
     await wakeOpenQuestion(ROLES.wakeInteractive, plain.secret, {
-      client: A1(), scopeKind: "client", scopeId: null, question: "c13 unpinned question",
+      client: A1(), scopeKind: "client", scopeId: A1(), question: "c13 unpinned question",
     });
   } catch (e) { raised = e; }
   assert.ok(raised, "c13.woq: an UNPINNED credential is still refused — the re-key is onto the pin, not onto the kind name");
