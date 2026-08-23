@@ -11,7 +11,11 @@ lifecycle (onboarding → ongoing close → tax → reporting) under professiona
 an RLS-isolated Postgres. **The DB owns every authoritative number; the agent orchestrates.**
 The dashboard is not a form UI — it is the agent's body language.
 
-**The fifteen hard constraints come before the menu — read them before your first write.**
+**The fourteen hard constraints come before the menu — read them before your first write.**
+*(Number 12 is vacant: it retired on 2026-08-23 with the owner's ruling on ADR-0075 — the
+name-only wall is a PRODUCT INVARIANT, `docs/product/PRD.md` §6 invariant 2(b), not an agent
+constraint; `0062`/`0063` are untouched. The other numbers did NOT shift, so every citation of
+"constraint 13/14/15" written before or after that date still resolves.)*
 Nothing else in this repo outranks them.
 
 ## Run / verify
@@ -65,12 +69,6 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
     `scripts/hooks/pinned-ids-guard.mjs`, registered in `.claude/settings.json`. It is a
     **mistake-net for verbatim-id write shapes**, not containment: the ids' primary protection
     is this constraint plus the DB walls, and deliberate obfuscation is out of scope by design.
-12. **A client may be flagged NAME-ONLY, and a name-only client's counterparties are NEVER
-    enriched** by inference — no registration number, no TIN. This is a GENERIC product
-    mechanism, not a rule about one client: `0062` walls it in the DB (fact-driven,
-    uuid-pinned, behaviourally self-proven at apply) and `0063` makes lifting it an
-    OWNER-only act through the audited door. (ADR-0075 retired the former client-specific
-    wording; the wall and its door are untouched.)
 13. **BELCORT is the OPERATOR firm; every other firm and client in the estate is a
     RESETTABLE TEST FIXTURE** — ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION
     (whose sole proprietor is not an employee: his account is EQUITY) · the synthetic
