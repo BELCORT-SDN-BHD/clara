@@ -141,7 +141,7 @@ test("A23 fy_end_source is honest: a client with NO fy_end set reads 'default_12
 const CLOSE_VERBS = [
   "clara.begin_close(uuid,text)",
   "clara.finalize_close(uuid,text,text)",
-  "clara.attest_close_exception(uuid,text,text,text,text)",
+  "clara.attest_close_exception(uuid,text,text,text,text,uuid)",
   "clara.abandon_close(uuid,text,text)",
   "clara.open_fiscal_year(uuid,text,date,date,text,text)",
   "clara.grant_firm_capability(uuid,text,text,text)",

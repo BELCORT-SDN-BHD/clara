@@ -421,7 +421,7 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
     "clara.propose_fiscal_year(uuid,date)",
     "clara.open_fiscal_year(uuid,text,date,date,text,text)",
     "clara.begin_close(uuid,text)",
-    "clara.attest_close_exception(uuid,text,text,text,text)",
+    "clara.attest_close_exception(uuid,text,text,text,text,uuid)",
     "clara.abandon_close(uuid,text,text)",
     "clara.finalize_close(uuid,text,text)",
     "clara.verify_close(uuid)",

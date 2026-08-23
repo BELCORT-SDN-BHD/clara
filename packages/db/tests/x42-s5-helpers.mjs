@@ -235,6 +235,15 @@ const CLOSE_MODEL_0056_CLOCK_NAMES = [
   "grant_firm_capability", "revoke_firm_capability",
 ];
 
+// F-A4 PR-1b [close-key-1 Window B, `f_a4_pr_1b_close_lifecycle` at whatever number merge
+// claims]: the entrance-seam body-move (design D-15, Annex A.8) relocates abandon_close's own
+// `ended_at = now()` stamp into the shared core it now delegates to -- clara._abandon_close_core.
+// abandon_close's OWN prosrc no longer calls now() directly (it is a thin _human_ctx + capability
+// delegate), so this is a SWAP, not an addition: the name moves, the lawful class (a timestamptz
+// audit stamp, never a derived DATE) does not. begin_close's own body never called now() directly
+// either before or after its matching body-move, so it names nothing here in both shapes.
+const F_A4_PR1B_CLOCK_NAMES = ["_abandon_close_core"];
+
 // 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps
 // `'verified_at', now()` on the jsonb payload it RETURNS — a display timestamptz that says
 // when the recomputation ran, and it lands in no column and in no date-typed accounting
@@ -431,6 +440,12 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a4_pr_1b_close_lifecycle$")) {
+    // A SWAP, not an addition -- see F_A4_PR1B_CLOCK_NAMES's own header note.
+    const i = names.indexOf("abandon_close");
+    if (i !== -1) names.splice(i, 1);
+    names.push(...F_A4_PR1B_CLOCK_NAMES);
+  }
   return names.sort();
 }
 

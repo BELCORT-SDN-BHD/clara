@@ -241,14 +241,21 @@ testCase("an `execute` inside a comment or a string literal is not dynamic SQL",
 });
 
 testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
-  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. Exactly one
-  // entry stands today — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226,
-  // full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
+  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. Two entries
+  // stand today — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226, full
+  // ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
   // pg_get_functiondef re-count outside the census grammar plus 'execute' as a privilege-name
   // literal and one raise-message word — nothing dynamic constructed or run; why + the full
-  // declared target set live in wiki-lint-checks.mjs. A SECOND entry must trip this pin and
-  // earn its own reviewed justification, exactly as the first did.
-  const expectedKeys = ["apply_open_items(uuid,jsonb,text,text)"];
+  // declared target set live in wiki-lint-checks.mjs. THE SECOND (F-A4 PR-1b): attest_close_
+  // exception's p_from_proposal arm reads clara.close_proposals (a PR-1c table, forward-
+  // referenced) via `execute` because the migration runner refuses to disable
+  // check_function_bodies — a genuinely dynamic, genuinely non-wiki statement, its one
+  // declared relation carrying no wiki content and no wiki-touch call behind it. A THIRD
+  // entry must trip this pin and earn its own reviewed justification, exactly as the first two did.
+  const expectedKeys = [
+    "apply_open_items(uuid,jsonb,text,text)",
+    "attest_close_exception(uuid,text,text,text,text,uuid)",
+  ];
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
     throw new Error(`the allowlist is pinned to exactly ${JSON.stringify(expectedKeys)}; it now carries ${JSON.stringify(actualKeys)} — each entry needs its own reviewed justification`);
