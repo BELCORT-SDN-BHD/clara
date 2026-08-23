@@ -58,7 +58,7 @@ beta **[W2]** → the rest; acceptance PRs last, each behind its item's ceremony
 
 ## 3 · Rulings minted in this sprint (the durable record is the ADRs/gate records; these are the pointers)
 
-Owner: SST deferral = **(a) GL-carried** (two accounts `sst_output_deferred` / payable; F-T1's PR CoRs
+Owner: SST deferral = **GL-carried** — key this ruling on the SUBSTANCE, never a letter: the orchestrator's card lettered GL-carried (a) and F-T1's Annex D lettered it (b); it covers the WHOLE payment-basis path, not only the s.11(2) edge (two accounts `sst_output_deferred` / payable; F-T1's PR CoRs
 `_assert_sales_invoice_shape_at` after F-A2 PR-1 merges; B4-sales moves as a new generation in that PR) ·
 training-share toggle OFF · Q1 numbers law A · Q2 `apps/web` in-repo + crude doors kept · Q3 narrow
 test-data reading (ADR-0075) · Q4 Cloudflare Workers/OpenNext + invite-only + no-PII email · Q5 metering
