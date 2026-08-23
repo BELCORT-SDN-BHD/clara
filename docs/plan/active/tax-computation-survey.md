@@ -157,9 +157,14 @@ Inherited from the F-A5/F-A4 survey lane, byte-cited, not re-derived here.
 `metric_cell_periods`. Inputs are snapshotted through `metric_input_snapshots` (`0058:483-485`, a
 second frozen closure of 15 members).
 
-**A new evaluator is a migration.** New `_vN` function + an **appended, undeployed**
-`evaluator_versions` row whose `deployed` flip is a ceremony act (`_tf_evaluator_deploy_once`,
-`0060:93-100`). F-T3 cannot ship a tax number any other way.
+**A new evaluator is a migration.** New `_vN` function + an appended `evaluator_versions` row whose
+`deployed` flip is a ceremony act (`_tf_evaluator_deploy_once`, `0060:93-100`). F-T3 cannot ship a
+tax number any other way. **[v1.2 correction, conductor 2026-08-23: `deployed:false` is NOT a
+staging period.** `verify_evaluator_freeze()` iterates `evaluator_versions` with **no
+`where deployed`** and hashes the **full** `pg_get_functiondef`, so registration freezes the body
+immediately and a later ACL/owner/`search_path` change raises at *that* lane's apply. This is why the
+design registers **one** member, not twelve — `tax-computation-design.md` §3, **D-16**, re-measured
+at PR-0 as **P-10**.]
 
 **3.2 The sealed artifact.** `report_runs` (`0065:369-401`, state `drafting → dataset_sealed →
 issued`, with `issue_mode`); `report_claim_assessments` (`0066:126`); `report_datasets` /

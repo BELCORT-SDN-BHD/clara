@@ -1,10 +1,15 @@
-# F-T3 — the draft tax computation: annexes (v1.1)
+# F-T3 — the draft tax computation: annexes (v1.2)
 
 > Annexes to `tax-computation-design.md`, on `tax-computation-survey.md`.
-> **A** mechanics and a worked ladder · **B** decision register D-1..D-15 · **C** predictions to
+> **A** mechanics and a worked ladder · **B** decision register D-1..D-17 · **C** predictions to
 > discharge at PR-0's rig replay · **D** the question register — **three RULED, three carded for the
 > owner's sitting, three lane-open** · **E** the standing maintenance duty the `law_review_due` belt
 > watches. Design stage: **no code authored, no rig run**.
+>
+> **v1.2, 2026-08-23 — conductor's measured corrections.** **D-16** the frozen closure collapses to
+> ONE evaluator member (twelve would freeze twelve bodies estate-wide; `deployed:false` buys
+> nothing) · **D-17** the `client_fact_keys` name-only-wall scoping obligation, its own seed block,
+> and battery cell **C15** · P-10 added to Annex C.
 >
 > **v1.1, 2026-08-23 — the ruling trues.** OQ-6 → **R-L25** (developer-seeded law tables, **D-15**) ·
 > OQ-4 → **REFUSE** · OQ-5 → **the pack, form version pinned** (D-8 extended, D-14 amended) ·
@@ -176,6 +181,8 @@ tool-boundary mechanism here exactly as TA-P4 made it for the fetch tool.
 | **D-12** | **Instalment rounding: `floor(estimate/n)` with the whole remainder on the FIRST instalment.** | *Remainder on the last.* Both sum exactly; the first-instalment convention means a mid-year revision never has to reconcile a stray sen in a month that has not happened yet. |
 | **D-13** | **A treatment code's citation is bound ONCE, by the owner's signature — never re-picked per run.** | *Cite per computation from the model's reasoning.* This is the exact error class the survey found in the prior research (§6.4a — depreciation cited to s.39(1)(b)). Bind once, and it is wrong at most once, visibly, before it ships. |
 | **D-14** | **Integer cents throughout; the exact rational is stored in `metric_cells`; per-field whole-ringgit truncation is declared in the field-pack definition** — and, per the OQ-5 ruling, it is a property of the **pinned form version**, not a global convention. | *Round the computation to whole ringgit because the form does.* Then the computation statement and the pack disagree, and the reviewer cannot tie them. |
+| **D-16** *(conductor, measured, 2026-08-23)* | **The frozen closure is ONE member**, `evaluate_tax_computation_v1`, self-contained and calling only built-ins. | *Twelve members, one per rung* (v1.1). **`verify_evaluator_freeze()` iterates `evaluator_versions` with no `where deployed` and hashes the FULL `pg_get_functiondef`** — so registration freezes immediately (**`deployed:false` buys nothing**, which v1.1's "appended undeployed" wording obscured), and a later ACL/owner/`search_path` change to any member raises **at that later lane's apply, pointing at F-T3**. Twelve members = twelve bodies frozen estate-wide. Also rejected: *three members* (ladder/CA/CP204) — the SME predicate is needed by all three, so it becomes a shared fourth frozen body or gets inlined three times (two mutually-unaware paths, law 81). |
+| **D-17** *(conductor, 2026-08-23)* | **F-T3's `client_fact_keys` describe the CLIENT, and say so in their own description text.** Each key's description scopes it explicitly — "the CLIENT's own TIN; nothing to do with a counterparty's" — citing the generic name-only wall (`0062`/`0063`). **The ladder reads no counterparty `tin` or `registration_no` anywhere** (battery C15); if it ever needs one — related-party disclosure, withholding — **stop and escalate**, because lifting that wall is an OWNER-only act through `0063`'s audited door. F-T3 also takes its **own** seed block, never shared with F-A7's. | *Registering `tin`/`ssm_registration` with a bare description.* `0055`'s culture is that the description carries the law (see `customer_identity_policy`'s), and this catalog is one table away from the wall that keeps a name-only client's counterparties unenriched. A later reader or agent must not mistake it for a place to record a customer's identifier. **Note on framing:** ADR-0075 §(5) **retired hard constraint 12 as a named constraint** while leaving `0062`/`0063` untouched — so the obligation attaches to the **generic wall**, and the description text must cite the wall and ADR-0075, not the retired constraint number. |
 | **D-15** *(from R-L25, 2026-08-23)* | **The law tables are DEVELOPER-SEEDED, not governed-door tables.** `tax_rate_bands`, `capital_allowance_rates`, `tax_thresholds` and `tax_authorities` land as versioned, effective-dated migration rows through the full PR ladder, each cited with its fetch date, immutable + supersede, `valid_through` on every row, a missing row refusing by name. A rate change is a ticket and a PR. | *TA-P2's owner one-click door* (the v1 design's choice). Two governed-row mechanisms for one job is two architectures (law 81); the D17/R-L19 precedent already settled the identical question for price rows, and the same reasoning applies — a rate is platform data, not client data, and no human session holds a role that makes a one-click approval meaningfully different from a PR. The F-A8 fetch can attach later without changing how a row lands. |
 
 ---
@@ -196,6 +203,7 @@ discharged.
 | **P-7** | `publish_report_template_version` refuses `report_class='statutory'` from the agent principal and accepts it from the human admin verb. | exercise both arms — a refusal that cannot say NO has a meaningless YES |
 | **P-8** | `fixed_assets.ca_class` has no CHECK domain restricting it to the classes the CA rate table will key on. | `pg_get_constraintdef`; if it does, PR-1's rate-table keys must match it exactly |
 | **P-9** | `evaluator_versions.deployed` cannot be flipped by a plain UPDATE — `_tf_evaluator_deploy_once` (`0060:93-100`) is the only door. | attempt the plain UPDATE on the rig |
+| **P-10** | D-16's two load-bearing properties hold as reported: `verify_evaluator_freeze()` covers **undeployed** rows, and its hash moves when only a member's **ACL / owner / `search_path`** changes (body untouched). | Reported measured by the conductor (L19-verified) — **F-T3 still re-measures both** on its own rig, because a design that collapsed twelve members to one on the strength of these two facts may not hold them on hearsay. Register an undeployed row → confirm it freezes; then `alter function … owner to` / `set search_path` → confirm the checker raises. |
 
 ---
 
