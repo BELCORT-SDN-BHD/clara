@@ -227,6 +227,37 @@ PR-1 is authored, not merely before it is scheduled. *Fail-closed default if und
 client-pinned pin-inclusion apparatus does not ship in PR-1; the sibling verb ships HOME-only-callable
 until OQ-A resolves.
 
+**Owner ruling 2026-08-23 (the sitting) — Cards 1-4 (B0, M2, M6, M10/OQ-A) are ALL RULED.** Each
+card's text above stands as written; these are the dispositions.
+
+- **Card 1 (B0) + Card 2 (M2) → RULED TOGETHER: ALL SEVEN live `engine_kind` values are admitted**
+  to the v2 read surface — `ocr`, `structured_parse`, `invoice_facts`, `doc_classify`,
+  `statement_facts`, `llm_text_facts`, `llm_vision_facts` — wider than Card 1's own narrower
+  recommendation. **Every row carries its `engine_kind` as a visible provenance label**, so a
+  reader always sees which engine produced what is on screen. **The hostile-content adversarial
+  pass (law 28) stays a MANDATORY PR-2 gate** — admitting the full set does not relax it; if
+  anything it widens the pass's own surface. Card 2's enforcement answer is adopted as written:
+  **the row-level predicate admits the full closed set as an explicit `engine_kind = any(...)`
+  conjunct inside S-2e/S-2r's own `USING` clause** (never the relation-exclusion list, which
+  cannot express a row-value filter) — **extend-only with the CHECK**, so a future eighth kind
+  needs its own ruling before it is reachable. **PR-1's document-surface widening unblocks.**
+- **Card 3 (M6) → RULED: v2 re-binds to a named typed egress purpose, mechanically checked at
+  dispatch** — v1's apparatus (the closed-purpose-world CHECK plus the dispatch-time bind),
+  reused with zero new invention, discharges the missing-purpose-basis gap Card 3 found. **Identity
+  documents are NOT excluded — owner-ruled**, contrary to TA-P3 A's closed-list/IC-passport-
+  refusal discipline elsewhere on this content class. **The conductor's dissent is on file**:
+  recommended IC/passport exclusion, matching TA-P3 A's treatment of the same underlying content;
+  declined by the owner as operational friction; revisit path = a future ticket. **PR-1's
+  document-body admission unblocks** on the named-purpose bind landing.
+- **Card 4 (M10/OQ-A) → RULED-BY-LEAD: already ruled by the conductor under the owner's standing
+  delegation (mechanism/sequencing only; no law touched) — not a new decision at this sitting,
+  formalized here.** **R-1 EXTENDS**: `interactive_client` may be minted beyond
+  `wake_open_question` alone; **the receipt-bound arm state is the wall** that keeps the widening
+  safe (every mint stays tied to a receipted act, never a bare session). v2's client-pinned
+  pin-inclusion apparatus (§3.1 rung 4, §3.3, C-3, battery cells B1.5/B1.6/B2.2/B2.3, F.3
+  acceptance items 1-2) **ships as designed** — the HOME-only fail-closed default does not apply.
+  **PR-1's client-pinned mechanism unblocks.**
+
 ---
 
 ## 6 · Refuted register — a recorded gap, not a list

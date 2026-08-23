@@ -496,3 +496,5 @@ HEAD, the same limitation R1 records for the design itself, and the first build 
 threshold-table collision is **current at HEAD** (it is OQ-14, not a risk), and C-9's "no AR-side field
 carries a service-performed date" is now **byte-confirmed** — which is what makes GM-9 an owner card rather
 than a schema note.
+
+**Owner ruling 2026-08-23 — §6's four cards ALL RULED**; dispositions in `sst-engine-gate-record-part2.md`.

@@ -344,6 +344,7 @@ alongside the cross-client named read (R-L17). The owner sees this deviation at 
 - **Tier-1 CLOSES to three tables** for Wave F: `fx_rates` + the SST rate table + the SST
   threshold table. Income-tax bands, capital allowances, EPF/SOCSO/EIS, stamp duty and MTD are
   explicitly out until their own consumers land (F-T2/F-T3).
+- **[TB-2026-08-23] OQ-14 RULED — F-T1 also authors the `sst_threshold_schedule` ALTER** (not F-A8/PR-3, which is re-cut to consume-not-author; `internet-lane-design.md`'s PR-3 row carries the matching dated note).
 
 **[TB-2026-08-23] R-L25 — the closure re-opens for F-T3's two tables, as SEEDED FACT TABLES not a
 second governed door.** The owner's 2026-08-23 ALL-IN ruling landed **F-T3 inside Wave F**, so the

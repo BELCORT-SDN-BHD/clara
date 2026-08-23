@@ -268,6 +268,15 @@ both, and a client's own OCR text is exactly as legitimate as its own spreadshee
 a widening, priced, and put to the owner as question 3**; the fail-closed default is
 `structured_parse` alone.
 
+**Owner ruling 2026-08-23 (gate-record Cards 1+2) — RULED wider still: ALL SEVEN live
+`engine_kind` values ship** (`ocr`, `structured_parse`, `invoice_facts`, `doc_classify`,
+`statement_facts`, `llm_text_facts`, `llm_vision_facts`), not the two named above. **S-2e/S-2r gain
+an explicit `and engine_kind = any(array[…])` conjunct inside each `USING` clause** (never a
+relation-exclusion entry, which cannot express a row-value filter) — extend-only with the
+`0090_f_a1_walls.sql:236-238` CHECK, so an eighth kind needs its own ruling. **Every row surfaces
+its `engine_kind`** in the read result as a visible provenance label. Law 28's hostile-content
+adversarial pass (PR-2) stays mandatory over the now-wider surface, not relaxed by the admission.
+
 **A named hazard: the payload's SEMANTICS are not the same as the payload's SCOPE.** Scoping decides
 WHICH rows a query may see; it says nothing about whether summing or comparing across them is
 meaningful. Three semantic traps sit on this exact surface, and none is new to v2 — v2 is only the

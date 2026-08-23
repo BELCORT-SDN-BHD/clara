@@ -120,6 +120,33 @@ The design proceeds on the stated fail-closed default in the meantime.
 | **OC-6** | *(carried, unchanged from v1)* **OQ-1 through OQ-8** — staff allowances, the Form E grace month, CP21/22 family, CP58 (folds into OC-3), the payroll-JV account-role convention, the HRD Corp 15th-vs-last-day conflict, the weekend rule/BELCORT practice (folds into OC-4), and a fourth Tier-1 rate table. Full text: `payroll-calendar-annexes.md` Annex D. | Per-question defaults stated in Annex D. | As stated per question |
 | **OC-7** | **Whether the eleven folded corrections (§3 above) themselves need a second independent read** before PR-1 opens, given three of them (D-21, D-23, D-25) touch judgement logic under review law 1. | **This fold stands as PR-0's own correction pass**; a second cross-model read is recommended, not required, before PR-1. | PR-1 |
 
+**Owner ruling 2026-08-23 (the sitting) — OC-1 through OC-5 (B1/B14, M3, M5/M21, M10, B12) are
+ALL RULED.** Each card's text above stands as written; these are the dispositions.
+
+- **OC-1 (B1/B14) → RULED: the coverage predicate RE-ANCHORS on the payroll JV recognition fact
+  (the books), not on a filed `payroll_summary` document.** `documents.financial_date` stays
+  undated by design — `covered` becomes reachable off the ledger's own recognition event instead
+  of off a document-dating authority §3.9 was right to refuse minting. §3.3/D-06/R-4/battery
+  cell 4/§6 re-cut to the JV anchor. **PR-2's coverage predicate unblocks.** Also REGISTERED —
+  `PROGRESS.md` Backlog: payroll document ingestion as a first-class product capability (its own
+  purpose class + sensitivity walls) — owner decision, future scope.
+- **OC-2 (M3) → RULED: F-A4's clock spine OWNS period generation.** The four obligations'
+  per-regulator period definitions (PCB deduction month, EPF wage month, SOCSO/EIS payment
+  month) live as DATA in the `statutory_deadlines` rows F-T2 contributes, not as a second
+  period-generation mechanism — one architecture, one clock. **PR-1's seed migration unblocks.**
+- **OC-3 (M5/M21) → RULED: mint a `pays_agent_incentives` client fact.** The onboarding
+  interview asks it; Clara records the answer with provenance; CP58's matrix gates the verdict
+  on it. **Unanswered → the CP58 row shows `unknown`, never a verdict** — OQ-4's provisional
+  "applies unconditionally" default retires in favour of the fact-gated read. **PR-2's chase
+  producer unblocks.**
+- **OC-4 (M10) → RULED: the LEGAL due date follows the Interpretation Acts' forward roll**, plus
+  R-L24's per-regulator holiday rules; `effective_due` — the earlier INTERNAL working target —
+  is a second, distinctly labelled field. **Both dates display, distinctly labelled**; neither is
+  silently dropped. Feeds OQ-7's answer. **PR-1's `holiday_rule` seed values unblock.**
+- **OC-5 (B12) → RULED (already standing): routes through F-A7's registered
+  `wake_open_question` widening.** F-T2 CONSUMES the door F-A7 mints; it does not build its own.
+  **PR-2's rung B2 unblocks** once F-A7's widening lands.
+
 ---
 
 ## 5 · Refuted register
