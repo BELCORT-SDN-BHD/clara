@@ -270,6 +270,24 @@ const STATEMENT_F_A1_PR4_UNGRANTED_FNS = ["_persist_statement_core_v2"];
 export const STATEMENT_F_A1_PR4_COHORT = [
   ...STATEMENT_F_A1_PR4_RUNTIME_FNS, ...STATEMENT_F_A1_PR4_UNGRANTED_FNS,
 ];
+// F-A3 PR-1a — THE NINE PURE CORE EXTRACTIONS (survey census rows C1/C2/C3, "extend with the new
+// ungranted cores; no name leaves"). Its OWN cohort rather than additions to BANK_0038_*,
+// TIEOUT_0040_* and AF2_0044_*, for exactly the reason the PR-4 block above records: a fold-in
+// would report a PARTIAL cohort on every database that has 0038/0040/0044 but not yet PR-1a — a
+// false failure on a chain that is simply short of this wave. The three parent cohorts keep
+// their names unchanged, which is the "no name leaves" half.
+//
+// All nine are UNGRANTED internal delegates (the one-ungranted-core law, 0004:6-12). Declaring
+// them here is what turns a future accidental grant into a FAILURE instead of a silent pass, and
+// it is the compensating assertion for the extraction: the public verbs kept their ACLs, so the
+// only way this factoring could widen the surface is a grant landing on a core.
+const EXTRACTION_F_A3_PR1A_UNGRANTED_FNS = [
+  "_match_bank_line_core", "_unmatch_bank_match_core", "_complete_bank_reconciliation_core",
+  "_void_bank_reconciliation_core", "_resolve_bank_line_exception_core",
+  "_resolve_and_book_bank_line_core", "_void_bank_statement_core", "_add_bank_account_core",
+  "_upsert_account_core",
+];
+export const EXTRACTION_F_A3_PR1A_COHORT = [...EXTRACTION_F_A3_PR1A_UNGRANTED_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -1055,6 +1073,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
+  failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   return failures;
 }

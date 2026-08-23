@@ -176,6 +176,36 @@ Plus the **prosrc-pin re-points** (material M2 — test files, not DB objects): 
 | DDL 6 | **`t_bank_agent_proposal_accept`** on `clara.bank_line_exceptions` | **NEW at v2 (B4)** — ACCESS EXCLUSIVE; **declared judgement logic** |
 | DDL 7 | the granted wrappers' single EXECUTE grant + the `bank_agent` allowlist rows | new objects |
 
+**BUILD OBLIGATION J.2-a — the composite's three internal calls (recorded 2026-08-23 by the PR-1a
+lane, measured on the rig at frontier 0102).** `clara.resolve_and_book_bank_line`'s body calls the
+**PUBLIC** `clara.resolve_bank_line_exception` twice and the **PUBLIC** `clara.match_bank_line`
+once. PR-1a deliberately left all three alone — repointing them would drop an inner floor re-check
+and PR-1a's whole claim is that nothing changed — so after PR-1a they land on the new thin
+wrappers, which re-derive `_human_ctx`. That is exactly today's behaviour for a human caller (the
+composite's `owner` floor dominates the inner `bookkeeper` one), and it is **fatal for the agent
+lane**: `_agent_resolve_and_book_core` → `_resolve_and_book_bank_line_core` → a public wrapper →
+`_human_ctx` → **CLR04 `no authenticated actor`, two levels down**, for a wake caller with no JWT.
+The agent composite is *unreachable*, not merely mis-attributed. **PR-1b MUST repoint those three
+call sites** at `clara._resolve_bank_line_exception_core` / `clara._match_bank_line_core`, threading
+the caller's `p_ctx`, as part of body 17/18's re-cut — and its battery needs the cell that a
+`bank_agent` credential can actually reach the composite, because a catalog assertion cannot see
+this.
+
+**BUILD OBLIGATION X-1 — arm (4) as designed is VACUOUS ON ITS OWN TARGET POPULATION (recorded
+2026-08-23; conductor's ruling).** Design §3.11(4) defines the new `no_registered_account` fail as
+*"a bank-class COA account with movement but NO registered `bank_accounts` row"* (`bank-agency-
+design.md:459-462`). At the bytes, and re-measured on a rig at frontier 0102, `coa_accounts.
+is_bank_account` has exactly **two** writers — `add_bank_account` (`0038:2731`, now
+`_add_bank_account_core`) and `remap_bank_account_coa` (`0038:2987`) — so **the flag is minted BY
+REGISTRATION**. A zero-registry client therefore carries zero flagged accounts, and arm (4)'s
+predicate returns the empty set **exactly on the population it exists to catch** — the same
+empty-registry defect repairs (1) and (2) already have, one level down. Prediction **P-4′** cannot
+hold as written. **F-T4's design §2.2** (`docs/plan/active/fix-queue-design.md`, on branch
+`track-b/ft4-fixqueue-design` until its docs PR lands) enumerates three surviving arms that do not
+key on the registration-minted flag; **PR-1b adopts one** and proves it with a **zero-registry
+fixture that MUST fire** (a cell that cannot fail proves nothing — law 31). *This lane recorded the
+finding and did not design the fix.*
+
 ### J.3 · PR-1c — FIVE re-cut bodies + FOUR CHECK swaps (the egress purpose)
 
 | # | body / object | at |
@@ -221,7 +251,7 @@ a correction is a design amendment, not a bug.
 | **P-13** | `t_je_agent_post_receipt` fires for a bank-match adjustment — i.e. its `is_agent` arm reads the acting identity the adjustment path supplies. **v2 extends it to the SETTLE path**: it fires for an agent settlement's `customer_receipt` entry too |
 | **P-14** | **NEW at v2 (B3/A32).** F-A2's merged `_approve_entry_core` (the NINTH generation) accepts the bank ctx keys as-is, so **no TENTH body is needed**. If it does not, body 14 is real and PR-1b's count is 24 |
 | **P-15** | **NEW at v2 (B2).** No consumer of `agent_tasks(kind='wake')` or `wakes_outbox` exists anywhere in `packages/runtime` — the catalog/grep census re-run at the rig, both directions |
-| **P-16** | **NEW at v2 (M2).** The five prosrc/overload pins are the COMPLETE set that reads an extracted public body — a `pg_proc`-wide census of test-side `fnSource`/`prosrc` reads before PR-1a is authored |
+| **P-16** | ~~**NEW at v2 (M2).** The five prosrc/overload pins are the COMPLETE set that reads an extracted public body.~~ **CORRECTED 2026-08-23 by the PR-1a lane's census — the set is SIX, and one of the five was vacuous.** (i) **A sixth site exists**: `x42-r8-seam.test.mjs:406-412` reads `resolve_and_book_bank_line`'s prosrc by proname and regexes `clara._hash(jsonb_build_object(…))` for `'ack'`; after the extraction the public body computes no hash at all, so the cell goes RED. Moved to the core with its wrapper twin; census row **C17** now lists six sites. (ii) **`x38-match:1483` was measuring nothing**: `fnSource` concatenates `match_bank_line`'s /6 and /7 overloads and PR-1a extracts /6 ONLY (/7 drops in PR-3), so the pin stayed GREEN off the still-fat rule arity — a vacuous pass, exactly the failure M2 exists to prevent. Every wrapper pin is now **per-oid**, the settle precedent at `x38-match:1496-1538`. Negative controls that correctly said nothing: `wb-g-opkeys`' granted-writer-without-`_reserve_op` law (`WB_FN_FAMILY_RE` is the 0017 family), `eta-contract:236`'s `_human_ctx` catalog census (the PUBLIC names keep the call), the wb-0019/0020 wiki whitelists, `epsilon` statutory, `delta` metric-curated and `x42v.g4`'s staff-advance writer lists |
 | **P-17** | **NEW at v2 (M4).** No live login role is a member of more than one group (the two-login law N10 holds estate-wide), so `clara_wake_bank_login` is the only way to reach `clara_wake_bank` |
 
 ---

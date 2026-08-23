@@ -403,12 +403,34 @@ test("x42.r8s-k2 the acknowledgement is IN the request hash, and it never manufa
   // in clara.match_bank_line's audit payload and in this verb's). A hash that omitted it
   // would serve an ack=true replay the ack=false call's receipt on any verb whose dedup IS
   // reachable — which is the defect clara.match_bank_line's own header records.
-  const src = (await rootQuery(
-    `select p.prosrc as s from pg_proc p
-      where p.pronamespace='clara'::regnamespace and p.proname='resolve_and_book_bank_line'`)).rows[0].s;
+  //
+  // F-A3 PR-1a (design §4, Annex A.2 / material M2) factored the composite into
+  // clara._resolve_and_book_bank_line_core, so the request hash moved with the body and this pin
+  // moves with it. THIS SITE WAS NOT ON THE DESIGN'S M2 LIST — it is a sixth prosrc pin on an
+  // extracted public body, found by re-running the census the design's P-16 predicted was
+  // complete, and the correction is recorded in the annexes. Read per-oid rather than by
+  // proname: the delegating public twin must not be able to satisfy a claim about the body.
+  const coreSig = "clara._resolve_and_book_bank_line_core";
+  const cores = (await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.prosrc as s from pg_proc p
+      where p.pronamespace='clara'::regnamespace and p.proname='_resolve_and_book_bank_line_core'`)).rows;
+  assert.equal(cores.length, 1, `${coreSig} exists exactly once (the extracted body the hash now lives in)`);
+  const src = cores[0].s;
   const hashArgs = /clara\._hash\(jsonb_build_object\(([\s\S]*?)\)\)\)/.exec(src)?.[1] ?? "";
   assert.match(hashArgs, /'ack'/,
     "the composite's request hash must carry the acknowledgement");
+  // THE WRAPPER TWIN: the public verb keeps its owner floor and delegates, and reserves NOTHING
+  // of its own — so the hash pin above is measuring the only body that computes one. Written as
+  // its own assertion because a moved pin with no wrapper twin is how a re-inlined body walks
+  // out from under the pin that was supposed to cover it (Annex C / M2).
+  const publicSrc = (await rootQuery(
+    `select p.prosrc as s from pg_proc p
+      where p.pronamespace='clara'::regnamespace and p.proname='resolve_and_book_bank_line'`)).rows[0].s;
+  assert.ok(publicSrc.includes("clara._human_ctx(clara.role_rank('owner'))")
+    && publicSrc.includes("clara._resolve_and_book_bank_line_core("),
+  "clara.resolve_and_book_bank_line keeps its owner floor and delegates to the core");
+  assert.ok(!publicSrc.includes("clara._hash(") && !publicSrc.includes("clara._reserve_op("),
+    "clara.resolve_and_book_bank_line computes NO request hash and takes NO reservation of its own — the composite's op-key discipline lives entirely in the core");
 
   // …and the AUDIT records the caller's answer, which is the other half of that law.
   const audit = (await rootQuery(
