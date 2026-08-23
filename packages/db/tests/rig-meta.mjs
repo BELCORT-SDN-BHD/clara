@@ -877,6 +877,11 @@ export const ALLOWED = {
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
     ...RENDER_ZETA_HUMAN_FNS,
+    // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
+    // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
+    // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
+    // something the agent lane can flip on itself).
+    "set_bank_agency_hold",
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

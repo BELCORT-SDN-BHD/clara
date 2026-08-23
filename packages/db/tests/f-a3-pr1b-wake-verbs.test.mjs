@@ -1,0 +1,495 @@
+// F-A3 PR-1b -- the thirteen WAKE SIBLING VERBS battery (the granted-wrapper layer §K/§L build).
+//
+// CONTRACT-BLIND: written from docs/plan/active/bank-agency-design.md v2 + annexes-1..3 (Annex
+// A.1 signatures, Annex B the full ladder, Annex H the battery), never from the migration's own
+// SQL text. Companion to f-a3-pr1b-agent-limb.test.mjs (the ten CoR'd bodies + seven DDL groups,
+// called by hand-built ctx); THIS file calls the real wake_* wrappers through a REAL minted
+// credential (wakeQuery, rig-helpers.mjs's own Slice-2 impersonation primitive), so a wrapper
+// argument-name mismatch or a missing grant is a finding here, not smoothed over by a direct
+// core call.
+//
+// Cells, in file order: Tier-A (H.2) a-g -- no credential, wrong-kind credential, blank shape,
+// cross-firm client, the hold, the ACL cell (a non-bank wake role cannot execute a bank wrapper --
+// material M4, genuinely differentiated: a live 42501, not app logic), replay idempotency;
+// Tier-B (H.3) h-n -- M14 (unmatch), M15 (void_bank_statement), M3/M4/M4-negative/M5/M6 (the four
+// genuinely novel rungs, no precedent anywhere in the estate -- see the migration's own §K.5
+// header for the documented minimal-implementation disclosure); H.7 catalog o.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import {
+  rootQuery, humanQuery, opk,
+  endPool, printLaneNotes, printSkipCount, noteLane, markSkip,
+  a21EnsureReady, buildWorld, firmOf,
+  upsertAccountClassed, upsertPayableAccount, grantConsent,
+  idOf,
+} from "./a21-helpers.mjs";
+import {
+  BANKCOA1, AR1, AP1, EXPN, REVN,
+  hasBankMatching, caught,
+  addBankAccount, enterStatement, matchBankLine,
+} from "./x38-match-fixtures.mjs";
+import { wakeQuery, roleQuery, ROLES } from "./rig-helpers.mjs";
+import { WAKE_ROLE, RATIONALE, MODEL, mintCred, callWrapper, approvedEntry } from "./f-a3-pr1b-wake-fixtures.mjs";
+
+let ready38 = false;
+let hasWakeVerbs = false;
+let hasPurpose = false;
+let world = null;
+let bankAcct = null;
+
+function skipHere(t) {
+  if (!ready38 || !hasWakeVerbs) {
+    markSkip();
+    t.skip("F-A3 PR-1b wake-verb wrapper surface not present -- dormant");
+    return true;
+  }
+  return false;
+}
+
+/** MANDATORY PRE-PR GATE (carried in every settle-event since it was found): PR-1c is what
+ *  widens client_egress_purpose_consents/_activations' `purpose` CHECK (and CoRs the four purpose
+ *  verbs) to admit 'bank_matching' -- today's CHECK admits only {wiki_synthesis,
+ *  statement_extraction, witness_extraction}. Until PR-1c lands, _agent_bank_tier_a's own
+ *  purpose_unconsented rung refuses EVERY bank_agent call before it can reach any Tier-B logic,
+ *  so every cell below that needs a real consent+activation SKIPS here, named and counted --
+ *  never a fabricated stand-in for PR-1c's real shape, mirroring the wake_credentials
+ *  close_prep gate's exact discipline. Re-run this file once PR-1c is merged: hasPurpose flips
+ *  true and every skipPurpose() cell un-skips with no code change. */
+function skipPurpose(t) {
+  if (skipHere(t)) return true;
+  if (!hasPurpose) {
+    markSkip();
+    t.skip("PRE-PR GATE: PR-1c has not widened the egress-purpose CHECK/verbs to admit 'bank_matching' yet -- every bank_agent call refuses purpose_unconsented before reaching Tier-B; named, counted skip (mirrors the close_prep gate)");
+    return true;
+  }
+  return false;
+}
+
+before(async () => {
+  const ready = await a21EnsureReady();
+  ready38 = Boolean(ready.base && ready.has16 && (await hasBankMatching()));
+  if (!ready38) { noteLane("bank matching surface absent -- f-a3-pr1b wake-verbs suite dormant"); return; }
+  const r = await rootQuery(
+    `select (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+       where n.nspname='clara' and p.proname='wake_unmatch_bank_match' limit 1) as fn,
+     (select 1 from pg_roles where rolname='clara_wake_bank_login') as login`);
+  hasWakeVerbs = r.rows[0]?.fn != null && r.rows[0]?.login != null;
+  if (!hasWakeVerbs) { noteLane("F-A3 PR-1b wake-verb wrapper surface absent -- suite dormant"); return; }
+  world = await buildWorld();
+  bankAcct = {};
+  for (const key of ["A1"]) {
+    const client = world.clients[key];
+    const sub = world.users.alice;
+    await upsertAccountClassed(sub, { client, code: BANKCOA1, name: "Maybank current (f31w)", type: "asset", opKey: opk("f31w-bcoa1") });
+    await upsertAccountClassed(sub, { client, code: AR1, name: "Trade Debtors (f31w)", type: "asset", accountClass: "receivable", opKey: opk("f31w-ar1") });
+    await upsertPayableAccount(sub, { client, code: AP1, name: "Trade Creditors (f31w)", opKey: opk("f31w-ap1") });
+    await upsertAccountClassed(sub, { client, code: EXPN, name: "Prof Fees (f31w)", type: "expense", opKey: opk("f31w-exp") });
+    await upsertAccountClassed(sub, { client, code: REVN, name: "Revenue (f31w)", type: "income", opKey: opk("f31w-rev") });
+    await grantConsent(sub, { firm: await firmOf(client), client }).catch(() => {});
+    const a = await addBankAccount(sub, { client, coaAccountCode: BANKCOA1, accountNumber: `1099${key}${randomUUID().slice(0, 6)}` });
+    bankAcct[key] = { primary: idOf(a, "bank_account_id", "id") };
+  }
+  // hasPurpose: does the LIVE CHECK admit 'bank_matching' yet (PR-1c)? If so, grant+activate it
+  // for A1 via a raw INSERT -- deliberately NOT through clara.grant_client_egress_purpose/
+  // activate_client_egress_purpose, which each carry their OWN in-body enum raise (`unknown
+  // egress purpose`) independent of the table CHECK and are PR-1c's own CoR, not this file's to
+  // pre-empt; a raw insert (the same test-fixture-shortcut precedent as f31b.l's direct
+  // bank_matches row) reaches only the TABLE the widened CHECK governs.
+  const purposeCheck = await rootQuery(
+    `select pg_get_constraintdef(oid) as def from pg_constraint
+       where conrelid='clara.client_egress_purpose_consents'::regclass and contype='c'
+         and pg_get_constraintdef(oid) like '%purpose = ANY%'`);
+  hasPurpose = Boolean(purposeCheck.rows[0]?.def?.includes("bank_matching"));
+  if (hasPurpose) {
+    const firm = await firmOf(world.clients.A1);
+    const { consentEvidenceDoc } = await import("./wave-b/wb-0020-helpers.mjs");
+    const evidence = await consentEvidenceDoc(world.users.alice, { firm });
+    const consent = await rootQuery(
+      `insert into clara.client_egress_purpose_consents(firm_id, client_id, purpose, scope_note, evidence_document_id, granted_by)
+         values ($1,$2,'bank_matching','f31w test consent',$3,$4) returning id`,
+      [firm, world.clients.A1, evidence.documentId, world.users.alice]);
+    await rootQuery(
+      `insert into clara.client_egress_purpose_activations(firm_id, client_id, purpose, consent_id, activated_by)
+         values ($1,$2,'bank_matching',$3,$4)`,
+      [firm, world.clients.A1, consent.rows[0].id, world.users.alice]);
+  } else {
+    noteLane("PRE-PR GATE: 'bank_matching' is not yet an admitted egress purpose (PR-1c) -- purpose-dependent cells will skip, named and counted");
+  }
+});
+
+after(async () => {
+  printLaneNotes("f-a3-pr1b-wake-verbs");
+  printSkipCount("f-a3-pr1b-wake-verbs");
+  await endPool();
+});
+
+// ===========================================================================
+// Tier A (H.2)
+// ===========================================================================
+test("f31w.a no credential -> CLR03", async (t) => {
+  if (skipHere(t)) return;
+  const err = await caught(() => roleQuery(WAKE_ROLE,
+    callWrapper("wake_unmatch_bank_match", [
+      { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-a")]));
+  assert.ok(err, "no credential is refused");
+  assert.equal(err?.code, "CLR03", `expected CLR03, got ${err?.code}: ${err?.message}`);
+});
+
+test("f31w.b a credential of a kind without the allowlist row -> CLR03", async (t) => {
+  if (skipHere(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("interactive_client", firm, world.clients.A1);
+  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_unmatch_bank_match", [
+      { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-b")]));
+  assert.ok(err, "interactive_client cannot call a bank wrapper");
+  assert.equal(err?.code, "CLR03", `expected CLR03, got ${err?.code}: ${err?.message}`);
+});
+
+test("f31w.c blank op_key / rationale / model -> typed CLR10", async (t) => {
+  if (skipHere(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+    { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const noOpKey = await caught(() => wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_unmatch_bank_match", specs),
+    [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", ""]));
+  assert.equal(noOpKey?.code, "CLR10", "blank op_key -> CLR10");
+  const noRationale = await caught(() => wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_unmatch_bank_match", specs),
+    [world.clients.A1, randomUUID(), "r", "", JSON.stringify(MODEL), "d", opk("f31w-c2")]));
+  assert.equal(noRationale?.code, "CLR10", "blank rationale -> CLR10");
+});
+
+test("f31w.d cross-firm client -> CLR11", async (t) => {
+  if (skipHere(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const foreignClient = await rootQuery(
+    `insert into clara.clients(id, firm_id, name, status) values (gen_random_uuid(),
+       (select id from clara.firms where id <> $1 limit 1), 'F31W Foreign', 'active') returning id, firm_id`,
+    [firm]).catch(() => null);
+  if (!foreignClient?.rows?.length) { noteLane("f31w.d: no second firm on this rig -- structural skip"); return; }
+  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_unmatch_bank_match", [
+      { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [foreignClient.rows[0].id, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-d")]));
+  assert.ok(err, "a credential pinned to A1 refuses a foreign client");
+  assert.equal(err?.code, "CLR11", `expected CLR11, got ${err?.code}: ${err?.message}`);
+});
+
+test("f31w.e the hold: set_bank_agency_hold(on=true) then a bank wrapper refuses bank_agency_held", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  await humanQuery(world.users.alice,
+    "select clara.set_bank_agency_hold($1,true,'f31w.e testing the brake',$2)",
+    [world.clients.A1, opk("f31w-e-hold-on")]);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_unmatch_bank_match", [
+      { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-e")]));
+  assert.ok(err, "the held lane refuses");
+  noteLane(`f31w.e held refusal: ${err?.code} ${err?.message}`);
+  await humanQuery(world.users.alice,
+    "select clara.set_bank_agency_hold($1,false,'f31w.e releasing the brake',$2)",
+    [world.clients.A1, opk("f31w-e-hold-off")]);
+});
+
+test("f31w.f the ACL cell (material M4): clara_wake_interactive cannot EXECUTE a bank wrapper at all", async (t) => {
+  if (skipHere(t)) return;
+  const err = await caught(() => roleQuery(ROLES.wakeInteractive,
+    callWrapper("wake_unmatch_bank_match", [
+      { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-f")]));
+  assert.ok(err, "clara_wake_interactive cannot execute a bank wrapper");
+  assert.equal(err?.code, "42501", `expected 42501 insufficient_privilege, got ${err?.code}: ${err?.message}`);
+});
+
+test("f31w.g replay: the same op_key returns the stored receipt byte-identically", async (t) => {
+  if (skipPurpose(t)) return;
+  // A genuinely ADMITTED first call is required -- a refused-with-no-typed-reason call never
+  // reaches _reserve_op's dedupe write at all (the whole attempt rolls back), so the SAME raise
+  // fires twice rather than a replayed receipt. A clean statement voiding is the cheapest
+  // guaranteed-admitted bank_agent act available.
+  const firm = await firmOf(world.clients.A1);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-20", amountCents: 100, description: "f31w.g clean" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const key = opk("f31w-g-replay");
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_statement", cast: "uuid" }, { name: "p_reason" },
+    { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const vals = [world.clients.A1, stmt.statementId, "f31w.g void", RATIONALE, JSON.stringify(MODEL), "d", key];
+  const first = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs), vals);
+  assert.notEqual(first.rows[0].r.status, "refused", `the first call must be admitted: ${JSON.stringify(first.rows[0].r)}`);
+  const second = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs), vals);
+  assert.deepEqual(second.rows[0].r, first.rows[0].r, "the replayed op_key returns byte-identical stored receipt");
+});
+
+// ===========================================================================
+// Tier B (H.3) -- M14, M15, and the four genuinely novel rungs
+// ===========================================================================
+test("f31w.h M14: an unmatch that a LATER complete reconciliation depends on refuses", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-01", amountCents: 6600, description: "f31w.h deposit" }],
+  });
+  const line = stmt.lines[0].id;
+  const entryId = await approvedEntry({
+    client: world.clients.A1, actor: world.users.alice, postingDate: "2026-07-01",
+    memo: "f31w.h entry", bankCoa: BANKCOA1, otherCoa: REVN, cents: 6600,
+  });
+  const match = await matchBankLine(world.users.alice, {
+    client: world.clients.A1, lines: [line], entries: [{ entry_id: entryId, matched_cents: 6600 }],
+  });
+  // A synthetic LATER complete reconciliation on the SAME bank account (direct insert, root --
+  // mirrors f31b.l's precedent of fabricating one FACT to test a wall in isolation). UNLIKE
+  // f31b.l's target, `_tf_bank_recon_belt` re-derives and byte-compares the WHOLE canonical
+  // snapshot at INSERT (belt clause 7) -- rig-replay-caught by this file's own battery, f31w.h --
+  // so the row must carry clara._bank_recon_terms' OWN output verbatim, never hand-picked values.
+  // laterStmt carries ZERO lines and opens at exactly `stmt`'s own closing (6600) -- a no-movement
+  // statement that introduces nothing new to reconcile, so gl'/outstanding/excepted all land at
+  // the SAME totals the already-matched 6600 already ties to (chainLines: 0 specs -> closing ==
+  // opening, satisfying bank_statements' own `line_count=0 OR opening=closing` CHECK).
+  const laterStmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 6600, specs: [],
+  });
+  await rootQuery(
+    `with cutoff as (select now() as ts), terms as (
+       select clara._bank_recon_terms($4, cutoff.ts) as t from cutoff
+     )
+     insert into clara.bank_reconciliations(firm_id, client_id, bank_account_id, statement_id,
+         coa_account_code, period_start, period_end, status,
+         opening_cents, opening_anchor_cents, gl_balance_cents, closing_cents,
+         outstanding_cents, excepted_cents, completed_by, completed_at, snapshot)
+     select $1,$2,$3,$4,$5, st.period_start, st.period_end, 'complete',
+       st.opening_cents, (terms.t->>'opening_anchor_cents')::bigint,
+       (terms.t->>'gl_prime_cents')::bigint, st.closing_cents,
+       (terms.t->>'outstanding_cents')::bigint, (terms.t->>'excepted_cents')::bigint,
+       $6, cutoff.ts, (terms.t->'snapshot')
+     from terms, cutoff, clara.bank_statements st where st.id = $4`,
+    [firm, world.clients.A1, bankAcct.A1.primary, laterStmt.statementId, BANKCOA1, world.users.alice]);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const r = await wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_unmatch_bank_match", [
+      { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, match.match_id, "f31w.h unmatch", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-h")]);
+  const res = r.rows[0].r;
+  assert.equal(res.status, "refused", "M14 refuses the unmatch");
+  assert.equal(res.reason, "later_reconciliation_depends", "the receipt names later_reconciliation_depends");
+});
+
+test("f31w.i M15: voiding a statement carrying a live match refuses; a clean statement she did not file voids", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-05", amountCents: 4400, description: "f31w.i deposit" }],
+  });
+  const line = stmt.lines[0].id;
+  const entryId = await approvedEntry({
+    client: world.clients.A1, actor: world.users.alice, postingDate: "2026-07-05",
+    memo: "f31w.i entry", bankCoa: BANKCOA1, otherCoa: REVN, cents: 4400,
+  });
+  await matchBankLine(world.users.alice, {
+    client: world.clients.A1, lines: [line], entries: [{ entry_id: entryId, matched_cents: 4400 }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_statement", cast: "uuid" }, { name: "p_reason" },
+    { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const r1 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs),
+    [world.clients.A1, stmt.statementId, "f31w.i void", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-i1")]);
+  assert.equal(r1.rows[0].r.status, "refused", "M15 refuses voiding a statement with a live match");
+  assert.equal(r1.rows[0].r.reason, "statement_has_live_matches");
+  // The negative twin -- a clean statement (no match at all) voids, even one she did not file
+  // (M15's own "never who acted" shape, §3.2's non-goal).
+  const cleanStmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-06", amountCents: 100, description: "f31w.i clean" }],
+  });
+  const r2 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs),
+    [world.clients.A1, cleanStmt.statementId, "f31w.i clean void", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-i2")]);
+  assert.notEqual(r2.rows[0].r.status, "refused", `a clean statement voids: ${JSON.stringify(r2.rows[0].r)}`);
+});
+
+test("f31w.j M3 (NEW): a second candidate entry tying the SAME amount refuses same_amount_ambiguous", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-10", amountCents: 9900, description: "f31w.j deposit" }],
+  });
+  const line = stmt.lines[0].id;
+  const chosenId = await approvedEntry({
+    client: world.clients.A1, actor: world.users.alice, postingDate: "2026-07-10",
+    memo: "f31w.j chosen", bankCoa: BANKCOA1, otherCoa: REVN, cents: 9900,
+  });
+  await approvedEntry({
+    client: world.clients.A1, actor: world.users.alice, postingDate: "2026-07-10",
+    memo: "f31w.j rival", bankCoa: BANKCOA1, otherCoa: REVN, cents: 9900,
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const r = await wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_match_bank_line", [
+      { name: "p_client", cast: "uuid" }, { name: "p_lines", cast: "jsonb" }, { name: "p_entries", cast: "jsonb" },
+      { name: "p_adjustments", cast: "jsonb" }, { name: "p_ack_period_exceptions" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, JSON.stringify([line]), JSON.stringify([{ entry_id: chosenId, matched_cents: 9900 }]),
+     null, false, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-j")]);
+  const res = r.rows[0].r;
+  assert.equal(res.status, "refused", "M3 refuses when a second candidate ties equally");
+  assert.equal(res.rung_vector?.same_amount_ambiguous, "fail", "the vector names same_amount_ambiguous");
+});
+
+test("f31w.k/l M4 (NEW): a printed identifier for a DIFFERENT counterparty refuses; no identifier at all is not_evaluable", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const chosenCp = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','F31W Chosen Payer','f31wchosenpayer',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, tin, created_by)
+       values ($1,$2,'customer','F31W Other Payer','f31wotherpayer','201599887766',$3)`,
+    [firm, world.clients.A1, world.users.alice]);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-12", amountCents: 5500, description: "REF TIN 201599887766" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
+    { name: "p_allocations", cast: "jsonb" }, { name: "p_memo" }, { name: "p_posting_date", cast: "date" },
+    { name: "p_charge_cents", cast: "bigint" }, { name: "p_charge_account" }, { name: "p_adjustments", cast: "jsonb" },
+    { name: "p_control_account" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+    { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const r1 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", specs),
+    [world.clients.A1, stmt.lines[0].id, chosenCp.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 5500 }]),
+     "f31w.k memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-k")]);
+  assert.equal(r1.rows[0].r.status, "refused", "M4 refuses a contradicting printed identifier");
+  assert.equal(r1.rows[0].r.rung_vector?.payer_identifier_contradiction, "fail");
+
+  const stmt2 = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-13", amountCents: 3300, description: "SALARY TRANSFER" }],
+  });
+  const r2 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", specs),
+    [world.clients.A1, stmt2.lines[0].id, chosenCp.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 3300 }]),
+     "f31w.l memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-l")]);
+  assert.equal(r2.rows[0].r.status, "refused", "with no identifier at all the vector is still non-empty");
+  assert.equal(r2.rows[0].r.rung_vector?.payer_identifier_contradiction, "not_evaluable", "ARM-0: not_evaluable, never pass");
+});
+
+test("f31w.m M5 (NEW): a name-family collision (two ROME-like counterparties) refuses counterparty_collision", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cpA = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','ROME PROPERTIES SDN BHD','romepropertiessdnbhd',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','ROME SECRETARY SDN BHD','romesecretarysdnbhd',$3)`,
+    [firm, world.clients.A1, world.users.alice]);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-14", amountCents: 2200, description: "TRF ROME PAYMENT" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const r = await wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_settle_from_bank_line", [
+      { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
+      { name: "p_allocations", cast: "jsonb" }, { name: "p_memo" }, { name: "p_posting_date", cast: "date" },
+      { name: "p_charge_cents", cast: "bigint" }, { name: "p_charge_account" }, { name: "p_adjustments", cast: "jsonb" },
+      { name: "p_control_account" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+      { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    [world.clients.A1, stmt.lines[0].id, cpA.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 2200 }]),
+     "f31w.m memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-m")]);
+  assert.equal(r.rows[0].r.status, "refused", "M5 refuses on a name-family collision");
+  assert.equal(r.rows[0].r.rung_vector?.counterparty_collision, "fail");
+});
+
+test("f31w.n M6 (NEW): an AR inflow with NO open item absorbing it refuses unexplained_inflow", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cp = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','F31W M6 Customer','f31wm6customer',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-16", amountCents: 6600, description: "UNKNOWN INFLOW" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const r = await wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_settle_from_bank_line", [
+      { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
+      { name: "p_allocations", cast: "jsonb" }, { name: "p_memo" }, { name: "p_posting_date", cast: "date" },
+      { name: "p_charge_cents", cast: "bigint" }, { name: "p_charge_account" }, { name: "p_adjustments", cast: "jsonb" },
+      { name: "p_control_account" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+      { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+    // p_allocations = [] -- no open item absorbs the inflow.
+    [world.clients.A1, stmt.lines[0].id, cp.rows[0].id, "[]",
+     "f31w.n memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-n")]);
+  assert.equal(r.rows[0].r.status, "refused", "M6 refuses an unabsorbed AR inflow");
+  assert.equal(r.rows[0].r.rung_vector?.unexplained_inflow, "fail");
+});
+
+// ===========================================================================
+// H.7 catalog
+// ===========================================================================
+test("f31w.o clara_wake_bank holds EXACTLY the 13-verb allowlist for bank_agent (closed-world)", async (t) => {
+  if (skipHere(t)) return;
+  const rows = await rootQuery(
+    "select function_name from clara.wake_fn_allowlist where wake_kind='bank_agent' order by 1");
+  assert.equal(rows.rowCount, 13, `expected 13 allowlist rows, found ${rows.rowCount}`);
+  const names = rows.rows.map((r) => r.function_name);
+  for (const n of [
+    "wake_match_bank_line", "wake_unmatch_bank_match", "wake_settle_from_bank_line",
+    "wake_complete_bank_reconciliation", "wake_void_bank_reconciliation",
+    "wake_resolve_bank_line_exception", "wake_resolve_and_book_bank_line",
+    "wake_propose_bank_line_exception", "wake_propose_identifier_promotion",
+    "wake_add_bank_account", "wake_upsert_account", "wake_void_bank_statement",
+    "wake_get_bank_pack",
+  ]) {
+    assert.ok(names.includes(n), `allowlist is missing ${n}`);
+  }
+});
+
+// THE WALL, FORCED (conductor's ruling): B.4 is a closed list -- a typed reason it does NOT
+// enumerate must re-raise (return NULL) out of the converter, not silently become a receipt.
+// _agent_bank_tier_c_reason is ungranted; called directly via rootQuery (superuser bypasses ACL).
+test("f31w.p the Tier-C wall: an unlisted-but-typed reason re-raises out of the converter", async (t) => {
+  if (skipHere(t)) return;
+  const listed = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR10", '{"reason":"already_matched"}']);
+  assert.equal(listed.rows[0].r, "already_matched", "a B.4-listed pair converts");
+  // settlement_amount_invalid is a REAL, typed, live raise (_settle_from_bank_line_core's own
+  // body) that B.4 never enumerates -- the wall's own proof case.
+  const unlisted = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR10", '{"reason":"settlement_amount_invalid"}']);
+  assert.equal(unlisted.rows[0].r, null, "an unlisted-but-typed reason returns NULL (the caller re-raises)");
+  const wrongCode = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR11", '{"reason":"already_matched"}']);
+  assert.equal(wrongCode.rows[0].r, null, "a listed reason under the WRONG errcode still re-raises (pairs, not bare reasons)");
+});
