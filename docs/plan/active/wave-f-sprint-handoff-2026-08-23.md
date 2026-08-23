@@ -121,12 +121,22 @@ reviews of our own product, and substitute a native fresh-context lane when it s
 
 ## 6 · Resume path (commands)
 
-1. `git fetch origin && git log --oneline -3 origin/main`; `gh pr list --state open`; merge the green
-   docs PRs in order after #291; `gh pr update-branch 293` then let auto-merge fire; `gh workflow run ci.yml`.
+**Step 1 is DONE — do not redo it.** Every PR that was open at the pause has merged: the four Track-B /
+severed design sets, this handoff, the harness audit and its truings, the dependency bump, and the
+session-artifact landing. `origin/main` carries them all and the ADR-0073 sweep was dispatched after the
+bump. The PR queue was empty at the close. Start at step 2.
+
 2. Read `PROGRESS.md`, `docs/adr/README.md` §11-§12, this file, then the branch list in §2: for each
    branch, `git log --oneline origin/<branch> -5` and the item's design/gate record tell you the step.
-3. Re-open lanes per branch (one worktree each; explicit `model`), give each its rig port from §2 and
-   the rules in §5; the conductor's duties (shared-surface ledger, numbering at merge, PR mechanics) are
-   re-minted from §2's train order.
-4. Restart WSL at a quiet point to take `memory=24GB`, then open Tier B.
+   **Every build branch in §2 is pushed and intact**; none of them merged, so every lane resumes where
+   its table row says, not from scratch.
+3. Re-open lanes per branch (one worktree each; **explicit `model` per §5b — sonnet for the mechanical
+   lanes, Codex for testable implementation and the cross-model leg, opus only where judgement
+   dominates**), give each its rig port from §2 and the rules in `wave-f-lane-brief.md`; the conductor's
+   duties (shared-surface ledger, numbering at merge, PR mechanics) are re-minted from §2's train order.
+   **First lane to settle is F-A2/PR-1's integrator — its merge is T0 and opens ceremony window W1.**
+4. Restart WSL at a quiet point (no live rigs, no CI job) to take `memory=24GB`, then open Tier B.
 5. Owner sitting on §4; then the Track-B PR-0 gate workflow over the six design sets.
+6. **Two small items the pause added, neither blocking:** the `/ready` storage write probe (Known issues,
+   measured 2026-08-23 — recommended before the frontend merge), and the standing rule that an unruled
+   OQ gets a Backlog line the day its gate record lands.

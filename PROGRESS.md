@@ -366,6 +366,8 @@ twice; worth pricing for in-repo custody.
   lands, not the day it is finally ruled** — a gate record is a minute, not a work queue. The audit's §A table is
   the list to work through; each item is closed by ruling it or by giving it a row.
 
+- **`/ready` carries NO storage check at all — MEASURED 2026-08-23, not inferred.** `checkReadiness()` (`packages/runtime/lib/health.mjs:86-130`) probes DB reachability, the world and control heartbeats, the taxonomy pointer and relay health; **storage is absent from the check set entirely.** So the 2026-07-26 intake-storage incident's headline failure mode is unchanged: during that outage `/ready` reported `ready:true` for ~12h, and today it would again — the incident report called this "a read-only check", but the measurement says there is no storage probe of any kind. Its three named follow-ups (`docs/ops/incident-2026-07-26-intake-storage.md:249-261`) are therefore ALL still open: (a) a storage **write** probe on `/ready`, (b) a permanent CI battery over the storage-grant surface — **also measured absent**: no storage test exists in either `packages/db/tests/` or `packages/runtime/tests/`, and the grant surface is not in any migration (it is applied Supabase-side by ceremony, which is precisely why the battery was asked for), and (c) the storage-role re-examination. **A factory reset does not touch any of the three** — they are code and infrastructure, not data — and their cost lands hardest in beta, when a silent storage failure means a real client's uploads fail while the service reports healthy. **Recommendation: (a) ships before the frontend merge** (it is small — write, read back, delete, folded into the existing readiness set); (b) and (c) can follow beta. Recorded here under the standing rule this file learned the same day: a measured obligation gets a row, not a mention in a runbook.
+
 ## Known issues
 
 - ~~**R-OWNER — B15's second door**~~ — **RULED 2026-08-22 (owner, option C), now a PR-1 BUILD OBLIGATION,
@@ -403,12 +405,11 @@ version + ceremony):**
   SECRETARY / D&D-family); the third came from a *changed read*, not a changed rule. **Trues the
   number in the on-file owner trigger question** on whether sub-case (b) should admit a printed
   discount — still the owner's, since the change would be the evaluator inventing structure.
-- **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it): the sidecar
-  `runId` is clobbered on the re-mint path — `packages/runtime/lib/reconciler-documents.mjs:450` with
-  `packages/runtime/lib/spool.mjs:124`. *(Cite TRUED 2026-08-23: `:198-206` is `documentTaskSnapshot`, a
-  SELECT — the clobber is the re-enqueue's `writeTaskMeta(task.taskId, { ...task, runId: … })` full
-  overwrite at `:450`, where the merging `patchTaskMeta` was wanted.)* A real defect with a known site pair;
-  its own PR, not a rider on a pacing fix.
+- **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it): the sidecar `runId` is
+  clobbered on the re-mint path — `packages/runtime/lib/reconciler-documents.mjs:450` with
+  `packages/runtime/lib/spool.mjs:124`. *(Cite TRUED 2026-08-23: `:198-206` is `documentTaskSnapshot`, a SELECT — the
+  clobber is the re-enqueue's `writeTaskMeta(task.taskId, { ...task, runId: … })` full overwrite at `:450`, where the
+  merging `patchTaskMeta` was wanted.)* A real defect with a known site pair; its own PR, not a rider on a pacing fix.
 - *(The stranded-pair row is in the archived batch above; the `0051` door's `v_lane` defect
   stays unrepaired by design — no new member can mint post-cutover.)*
 - **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered books-writer would pass
@@ -433,10 +434,9 @@ version + ceremony):**
   ~10 min after the last client detaches even with the VM held); NEVER `wsl --shutdown` with runners busy (restart
   services via `wsl -u root systemctl restart`); never diagnose VM health with a probe that cycles the VM.
 - **The 0007 firm-limits pseudo-upsert trigger is column-hardcoded** (`_tf_firm_document_limits_upsert`): a
-  partial-column INSERT against an existing firm row silently RESETS the other limit columns to their
-  defaults, and `0090`'s `llm_witness_concurrency` is invisible to it entirely — settable only by direct
-  UPDATE, and exactly the knob the corpus incident made people want to turn. **Re-homed to the F-A2 fix
-  queue**, riding the pacing work.
+  partial-column INSERT against an existing firm row silently RESETS the other limit columns to their defaults, and
+  `0090`'s `llm_witness_concurrency` is invisible to it entirely — settable only by direct UPDATE, and exactly the
+  knob the corpus incident made people want to turn. **Re-homed to the F-A2 fix queue**, riding the pacing work.
 - ~~**The statement-pair coin flip**~~ — **HEALED FORWARD-ONLY as of 2026-08-21** (`0102`'s router
   re-key + the `statementFacts_v2` repoint); record archived in `-part2.md`. **The residual that
   never closes: the historical coin-flipped pairs are NEVER repaired** — `superseded_by` is
