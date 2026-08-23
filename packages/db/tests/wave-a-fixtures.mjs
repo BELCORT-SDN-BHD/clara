@@ -158,30 +158,8 @@ export async function autodraftDraftEntry(sub, { task, rf, firm, client, vendorN
   return draft.entry_id ?? draft.entryId ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Coding rules (human, bookkeeper+) — companion §7.
-// ---------------------------------------------------------------------------
-
-export async function proposeCodingRule(sub, { client, counterparty, accountCode, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.propose_coding_rule(p_client => $1, p_counterparty => $2, p_account_code => $3, p_op_key => $4) as r",
-    [client, counterparty, accountCode, opKey ?? opk("proprule")]);
-  return r.rows[0].r;
-}
-export async function signCodingRule(sub, { rule, opKey = null }) {
-  const r = await humanQuery(sub, "select clara.sign_coding_rule(p_rule => $1, p_op_key => $2) as r", [rule, opKey ?? opk("signrule")]);
-  return r.rows[0].r;
-}
-export async function declineCodingRule(sub, { rule, reason = "rig decline", opKey = null }) {
-  const r = await humanQuery(sub, "select clara.decline_coding_rule(p_rule => $1, p_reason => $2, p_op_key => $3) as r", [rule, reason, opKey ?? opk("declrule")]);
-  return r.rows[0].r;
-}
-export async function retireCodingRule(sub, { rule, reason = "rig retire", conflictQuestion = null, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.retire_coding_rule(p_rule => $1, p_reason => $2, p_conflict_question => $3, p_op_key => $4) as r",
-    [rule, reason, conflictQuestion, opKey ?? opk("retrule")]);
-  return r.rows[0].r;
-}
+// proposeCodingRule/signCodingRule/declineCodingRule/retireCodingRule (companion §7)
+// RETIRED with F-A2 PR-3 (Annex B.1) — all four DB verbs are dropped.
 
 // ---------------------------------------------------------------------------
 // Open questions — split lanes (companion §8).

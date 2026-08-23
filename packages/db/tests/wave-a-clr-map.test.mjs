@@ -12,7 +12,7 @@ import {
   ROLES, roleQuery, opk, endPool, printLaneNotes, noteLane, printSkipCount, skipUnready,
   waveAEnsureReady, buildWorld, firmOf, upsertPayableAccount, upsertAccountClassed,
   filedDocument, grantClientEgress, revokeClientEgress, openSweepRun, acknowledgeSweepRun, getEntryDiff,
-  proposeCodingRule, signCodingRule, counterpartyRows, grantConsent, humanPersona, CLR29, CLR27,
+  counterpartyRows, grantConsent, humanPersona, CLR29, CLR27,
 } from "./wave-a-fixtures.mjs";
 import { EXP } from "./wave-a-fixtures.mjs";
 
@@ -100,9 +100,12 @@ test("acknowledge_sweep_run structurally refuses a non-human (agent/runtime) ide
 
 test("multi-gate precedence: a wake/agent identity calling a human-only writer is refused on IDENTITY first (CLR03/ACL), never the downstream business code", async (t) => {
   if (skipUnready(t, ready)) return;
-  // sign_coding_rule is human-only; an agent_ro role calling it → 42501 (identity/ACL),
-  // never a business (CLR27) code — identity precedence.
-  const err = await codeOf(() => roleQuery(ROLES.agentRo, "select clara.sign_coding_rule(p_rule => $1, p_op_key => $2)", ["00000000-0000-4000-8000-0000000051c0", opk("s")]));
+  // sign_bank_rule is human-only (sign_coding_rule, the original illustration, RETIRED
+  // with F-A2 PR-3 — this cell's claim is generic identity precedence, not this specific
+  // verb, so it re-points to another human-only writer with the same p_rule/p_op_key
+  // shape); an agent_ro role calling it → 42501 (identity/ACL), never a business
+  // (CLR27) code — identity precedence.
+  const err = await codeOf(() => roleQuery(ROLES.agentRo, "select clara.sign_bank_rule(p_rule => $1, p_op_key => $2)", ["00000000-0000-4000-8000-0000000051c0", opk("s")]));
   // (the bogus uuid is malformed; the point is the ACL/identity refusal precedes any body work)
   assert.ok(err, "the agent call to a human-only writer refused");
   assert.notEqual(err.code, CLR27, "an identity-refused call never reaches the business (CLR27) layer");
@@ -117,11 +120,10 @@ test("no raw SQLSTATE leakage: a battery of new-surface refusals all raise CLR* 
   const { users, clients } = world;
   const cp = (await counterpartyRows(clients.A1))[0]?.id ?? null;
   const errs = [];
-  // duplicate live rule → CLR27
-  if (cp) {
-    const p1 = await proposeCodingRule(users.alice, { client: clients.A1, counterparty: cp, accountCode: EXP }).catch(() => null);
-    if (p1) { await signCodingRule(users.alice, { rule: p1.rule_id ?? p1.id ?? p1 }).catch(() => {}); const p2 = await proposeCodingRule(users.alice, { client: clients.A1, counterparty: cp, accountCode: EXP }).catch((e) => { errs.push(e); return null; }); if (p2) { await signCodingRule(users.alice, { rule: p2.rule_id ?? p2.id ?? p2 }).catch((e) => errs.push(e)); } }
-  }
+  // duplicate live rule -> CLR27 (via propose_coding_rule/sign_coding_rule) RETIRED with
+  // F-A2 PR-3 (Annex B.1) -- both verbs are dropped, so this probe is removed rather than
+  // left calling a function that no longer exists. The malformed-alias probe below still
+  // exercises the battery's claim (every refusal is CLR-typed, never a raw SQLSTATE).
   // malformed alias (empty) → CLR10/CLR23
   errs.push(await codeOf(() => import("./wave-a-fixtures.mjs").then((m) => m.addAlias(users.alice, { client: clients.A1, counterparty: cp, alias: "" }))));
   const raised = errs.filter(Boolean);

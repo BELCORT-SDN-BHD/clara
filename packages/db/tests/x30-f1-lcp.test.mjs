@@ -404,7 +404,11 @@ test("x30.2a a non-prefix current fragment is unresolved at Slot A", async (t) =
   );
 });
 
-test("x30.2b a non-prefix post-time fragment refuses and never approves", async (t) => {
+// RETIRED (F-A2 PR-3, Annex B.1): this cell's post() helper calls execute_rule_post, and
+// seedAutopostRule mints a live rule via propose_autopost_rule/sign_autopost_rule — all
+// three are dropped whole. The F1/LCP vendor-identity resolution this file otherwise
+// tests at DRAFT time (the other seven cells) is untouched by this PR.
+test("x30.2b a non-prefix post-time fragment refuses and never approves", { skip: "execute_rule_post + the autopost-rule tier retired with F-A2 PR-3 — this cell's post-time fixture has no producer left" }, async (t) => {
   if (requireReady(t)) return;
   assert.ok(ezCp && ezBinding, "x30.1 must establish the live EZSEC binding");
   await seedAutopostRule(ezCp);
@@ -458,7 +462,9 @@ test("x30.2c a genuine suffix extension of the stored F1 resolves bound at Slot 
   assert.equal(result.binding_id, ezBinding.binding_id);
 });
 
-test("x30.2d a genuine suffix extension of the stored F1 posts successfully at post-time", async (t) => {
+// RETIRED (F-A2 PR-3, Annex B.1): this cell's post() helper calls execute_rule_post,
+// dropped whole along with the autopost-rule tier its fixture (x30.2b) relies on.
+test("x30.2d a genuine suffix extension of the stored F1 posts successfully at post-time", { skip: "execute_rule_post retired with F-A2 PR-3 — this cell's post-time fixture has no producer left" }, async (t) => {
   if (requireReady(t)) return;
   assert.ok(ezCp && ezBinding, "x30.1 must establish the live EZSEC binding");
   // Reuses the live autopost rule x30.2b already established for ezCp -- a second

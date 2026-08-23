@@ -234,8 +234,11 @@ test("§4 sst_output on a PURCHASE still refuses (sales-only in all three pinned
   assert.ok(["CLR21", "CLR23"].includes(err.code), `the sst_output-on-purchase refusal is structural CLR21/CLR23 (got ${err.code})`);
 });
 
-test("§4 the EXECUTOR grants the split NO sanction: a purchase draft carrying a TIED sst_purchase_cost leg skips purchase_sst_not_autopostable; its 2-leg sibling posts", async (t) => {
-  if (skipHere(t)) return;
+test("§4 the EXECUTOR grants the split NO sanction: a purchase draft carrying a TIED sst_purchase_cost leg skips purchase_sst_not_autopostable; its 2-leg sibling posts", { skip: "the rule-post executor + autopost-rule tier retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): this cell's own title names its subject — "the
+  // EXECUTOR" — execute_rule_post (via postViaRule) and propose_autopost_rule/
+  // sign_autopost_rule are all dropped whole. The sst_purchase_cost tie/CHECK mechanism
+  // this file otherwise tests (the other seven cells, all green) is untouched by this PR.
   const client = world.clients.A1;
   const sub = world.users.alice;
   const cp = await makeVendor(sub, { client, name: `SPLITEXEC ${randomUUID().slice(0, 6)}`, reg: "201801050006" });
