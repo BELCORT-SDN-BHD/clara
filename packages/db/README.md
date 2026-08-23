@@ -12,9 +12,14 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger (as of 2026-08-09).** The repo carries **53 migrations,
-> `0001`–`0054`** (the sequence skips `0032`, which never existed — 53 files, not 54),
-> and **live Supabase is applied through the frontier `0054`**. The most recent arrivals
+> **Migration ledger — TRUED 2026-08-23 (counted, not remembered).** The repo carries **97
+> migration files, `0001`–`0102`** (the sequence skips `0032`, which never existed, and the
+> `0055`-era gaps), and **live is applied through the frontier `0102_f_a2_statement_activation`**
+> — matching `PROGRESS.md`'s posture line. *(Was: "53 migrations, `0001`–`0054`, frontier `0054`,
+> as of 2026-08-09" — stale by 44 files and 48 numbers.)* The paragraph below is the **2026-08-09
+> arrivals note**, kept as the record of that batch rather than rewritten:
+>
+> The most recent arrivals
 > are the **F6–F9 batch** (ADR-066, applied 2026-08-08 23:24Z in ONE D1-quiesced ceremony):
 > `0051_extraction_recovery_door.sql` (F6 — both failed populations get a lawful retry) ·
 > `0052_customer_identity_facts.sql` (F7 — `invoice.contact_person` joins the CLR10
