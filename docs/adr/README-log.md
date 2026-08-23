@@ -62,3 +62,12 @@ re-reading find?"
 > retired as a *named* constraint with the GENERIC name-only wall kept, 13 rewritten to
 > operator-firm/resettable-fixture, 14 widened and still expiring at beta); the `0062`/`0063` migrations are
 > untouched. Same session: this log was split out of `README.md` at its 500-line ceiling.
+
+> **RE-TRUED 2026-08-23 (the harness-truing batch — no law changes, two records closed).** Law 79 gains a
+> one-sentence **as-built caveat**: the live `assert_client_resolved` body still enforces
+> `method in ('human','rule')` and `confidence >= 0.95` (`0018_gate_k_domain.sql:57,62`) until F-A7a recuts
+> it, so the law and the shipped function are not read as agreeing before they do. And the **`AGENTS.md`
+> home question for invariant (a) is DECIDED (b) by the owner: PRD §6 is the single home; `AGENTS.md`
+> points at §6 and gains no duplicate clause.** That closes the last open item from the 2026-08-22
+> ratification. The 2026-08-22 minute above still reads "`AGENTS.md` stays FLAGGED" — correct on its date,
+> superseded here rather than rewritten.
