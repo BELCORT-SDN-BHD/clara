@@ -409,6 +409,26 @@ const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_s
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// F-A8 PR-1 [Wave-F Track A, the internet lane, v3]: MEASURED (not assumed) against the four
+// F-A8 bodies whose OWN text carries a bare token, distinct from the five other new verbs/cores
+// that only call one of these through a plain SQL delegation (a callee's literal text is not
+// the caller's — pg_get_functiondef scans each oid's own body):
+//   * `wake_submit_policy_draft` stamps the single-use proactive credential with
+//     `consumed_at = statement_timestamp()`, the SAME idiom the pre-existing wake doors use.
+//   * `decide_policy_draft` stamps `decided_at = now()` on the reject arm and reads `now()`
+//     against `expires_at` for the staleness gate — both bare, no ::date cast, no DATE derived
+//     from the session clock.
+//   * `_policy_draft_submit_core` computes `expires_at = now() + max_age` for the draft's
+//     revalidation window.
+//   * `_policy_draft_commit_core` stamps `decided_at = now()` on the approve/override arm
+//     (the SAME column decide_policy_draft's own reject arm stamps, shared by the "one core,
+//     two callers" shape) and `superseded_at = now()` on the predecessor row.
+// `override_policy_draft` is NOT here: its own body only delegates to _policy_draft_commit_core
+// and carries no bare token of its own. GATED on the migration's stable stem — numbers are
+// claimed at merge.
+const POLICY_DRAFT_F_A8_CLOCK_NAMES = ["_policy_draft_commit_core", "_policy_draft_submit_core",
+  "decide_policy_draft", "wake_submit_policy_draft"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -431,6 +451,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a8_tier1_evidence_substrate$")) names.push(...POLICY_DRAFT_F_A8_CLOCK_NAMES);
   return names.sort();
 }
 

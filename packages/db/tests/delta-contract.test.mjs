@@ -39,13 +39,16 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
     // F-A2 (opener ①) then registers evaluate_witness_fact_state **version 2**, the three-locks
     // nil-tax arm: a NEW closure beside the frozen v1, never a recut of it, which is why the
     // family now has two rows and the VERSION has to be selected — a name-only roster would have
-    // read the two as one row and silently stopped counting. All of them are BORN UNDEPLOYED
-    // like delta's, which is the property this assertion is really about.
+    // read the two as one row and silently stopped counting. F-A8 PR-1 (Wave-F Track A, the
+    // internet lane, v3/IL-D20) then registers evaluate_policy_source_value_v1, the Tier-1
+    // artifact-locator extractor — a self-contained one-member closure, same idiom. All of them
+    // are BORN UNDEPLOYED like delta's, which is the property this assertion is really about.
     assert.deepEqual((await rootQuery(
       "select evaluator_name,version,deployed from clara.evaluator_versions order by evaluator_name,version",
     )).rows, [
       { evaluator_name: "assess_metric_cell_independent", version: 1, deployed: false },
       { evaluator_name: "evaluate_metric", version: 1, deployed: false },
+      { evaluator_name: "evaluate_policy_source_value", version: 1, deployed: false },
       { evaluator_name: "evaluate_witness_fact_state", version: 1, deployed: false },
       { evaluator_name: "evaluate_witness_fact_state", version: 2, deployed: false },
       { evaluator_name: "evaluate_witness_identity", version: 1, deployed: false },
@@ -55,22 +58,23 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       assert.equal(identity.current_user, identity.session_user,
         "the deployment ceremony uses the direct session principal");
       await db.query("update clara.evaluator_versions set deployed=true where not deployed");
-      // FIVE, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
-      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, and F-A2's
+      // SIX, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
+      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, F-A2's
       // evaluate_witness_fact_state **v2** — the three-locks nil-tax arm, a NEW closure beside
-      // the frozen v1 rather than a recut of it. The ceremony statement is `where not deployed`,
-      // so it has always committed EVERY registered closure — the number is the roster's size,
-      // and the roster is pinned by name AND VERSION three lines above.
+      // the frozen v1 rather than a recut of it — and F-A8 PR-1's evaluate_policy_source_value.
+      // The ceremony statement is `where not deployed`, so it has always committed EVERY
+      // registered closure — the number is the roster's size, and the roster is pinned by name
+      // AND VERSION three lines above.
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
-      )).rows[0].n, 5);
+      )).rows[0].n, 6);
       assert.equal((await db.query(
         "select clara.verify_evaluator_freeze() r",
-      )).rows[0].r.verified_deployed, 5);
+      )).rows[0].r.verified_deployed, 6);
     });
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.evaluator_versions where deployed",
-    )).rows[0].n, 5, "the named ceremony commits every registered closure before algebra runs");
+    )).rows[0].n, 6, "the named ceremony commits every registered closure before algebra runs");
   });
   await registerPackPhase(t);
   await registerAlgebraPhase(t);
