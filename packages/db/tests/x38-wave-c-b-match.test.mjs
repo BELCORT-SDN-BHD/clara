@@ -1539,11 +1539,18 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
 
   // void_bank_statement: 004 -> 203005006 (the NEW per-account chain rung) ->
   // line rows FOR UPDATE -> the live-member probe (the void-vs-match race).
-  ordered(await fnSource("void_bank_statement"), [
+  // F-A3 PR-1a MOVED this pin (Annex C: "MOVE the pin to the extracted core and ADD the
+  // wrapper pin") -- void_bank_statement is now a thin delegator; the ladder lives in
+  // _void_bank_statement_core. Re-derived at the tail, not merely asserted (x38.aj's sibling
+  // shape, x38-wave-c-b-bank.test.mjs).
+  const voidStmtSrc = await fnSource("void_bank_statement");
+  assert.ok(voidStmtSrc.includes("_void_bank_statement_core"), "void_bank_statement routes through _void_bank_statement_core");
+  assert.ok(!voidStmtSrc.includes("pg_advisory_xact_lock"), "void_bank_statement's own thin-delegator body acquires NOTHING");
+  ordered(await fnSource("_void_bank_statement_core"), [
     "pg_advisory_xact_lock(203005004",
     "pg_advisory_xact_lock(203005006",
     "for update",
-  ], "void_bank_statement lock order");
+  ], "_void_bank_statement_core lock order");
 
   // The 203005006 rung is genuinely NEW in this wave -- no earlier migration's
   // function catalog names it (verified once, structurally, against the whole

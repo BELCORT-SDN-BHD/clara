@@ -2079,16 +2079,23 @@ test("x38.aj the SS4.9 statement-chain lock (203005006) is acquired by persist_s
     assert.ok(src && src.length > 0, `clara.${label} exists`);
     assert.ok(src.includes("_persist_statement_core"), `${label} routes through _persist_statement_core (the lock + the shared ladder)`);
   }
-  assert.ok(src3 && src3.includes("203005006"), "void_bank_statement acquires the chain lock 203005006 directly");
-  // void_bank_statement's stated order: 004 -> 203005006 -> line rows FOR UPDATE
-  // -> the live-member probe (the void-vs-match race).
-  const at = (s, n) => src3.indexOf(n);
-  const a4 = at(src3, "pg_advisory_xact_lock(203005004");
-  const a6 = at(src3, "203005006");
+  // F-A3 PR-1a MOVED this pin (Annex C: "MOVE the pin to the extracted core and ADD the
+  // wrapper pin", the x38-match:1496-1538 precedent's own shape) -- void_bank_statement is now
+  // a thin delegator (its own comment says so verbatim), so the wrapper acquires NOTHING and
+  // the pin moves to _void_bank_statement_core. Re-derived at the tail, not merely asserted.
+  const src3Core = await fnSource("_void_bank_statement_core");
+  assert.ok(src3 && src3.includes("_void_bank_statement_core"), "void_bank_statement routes through _void_bank_statement_core");
+  assert.ok(src3 && !src3.includes("203005006"), "void_bank_statement's own thin-delegator body acquires NOTHING (the lock moved with the body)");
+  assert.ok(src3Core && src3Core.includes("203005006"), "_void_bank_statement_core acquires the chain lock 203005006 directly");
+  // The core's stated order: 004 -> 203005006 -> line rows FOR UPDATE -> the live-member probe
+  // (the void-vs-match race).
+  const at = (s, n) => s.indexOf(n);
+  const a4 = at(src3Core, "pg_advisory_xact_lock(203005004");
+  const a6 = at(src3Core, "203005006");
   if (a4 >= 0 && a6 >= 0) {
-    assert.ok(a4 < a6, "void_bank_statement takes advisory 004 BEFORE the chain lock 203005006 (SS4.9's stated order)");
+    assert.ok(a4 < a6, "_void_bank_statement_core takes advisory 004 BEFORE the chain lock 203005006 (SS4.9's stated order)");
   } else {
-    noteLane(`x38.aj void_bank_statement lock-order probe: 004 at ${a4}, 203005006 at ${a6} -- one or both rungs not found by literal match; inspect prosrc directly`);
+    noteLane(`x38.aj _void_bank_statement_core lock-order probe: 004 at ${a4}, 203005006 at ${a6} -- one or both rungs not found by literal match; inspect prosrc directly`);
   }
 });
 

@@ -3073,30 +3073,46 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
       assert.ok(at[i - 1] < at[i], `${label}: "${needles[i - 1]}" must be acquired BEFORE "${needles[i]}" (got ${at[i - 1]} vs ${at[i]}) -- the total lock order is inverted`);
     }
   };
+  // F-A3 PR-1a MOVED three of these four pins (Annex C: "MOVE the pin to the extracted core
+  // and ADD the wrapper pin") -- complete_bank_reconciliation, void_bank_reconciliation and
+  // resolve_bank_line_exception are now thin delegators; the ladders live in their extracted
+  // cores. except_bank_line is the ONE verb of the four this design explicitly did NOT touch
+  // ("except_bank_line stays byte-untouched... no CoR issued against it") and still holds its
+  // own locks directly. Re-derived at the tail, not merely asserted (x38.aj's sibling shape).
   const completeSrc = await fnSource("complete_bank_reconciliation");
+  assert.ok(completeSrc.includes("_complete_bank_reconciliation_core"), "complete_bank_reconciliation routes through _complete_bank_reconciliation_core");
+  assert.ok(!completeSrc.includes("pg_advisory_xact_lock"), "complete_bank_reconciliation's own thin-delegator body acquires NOTHING");
+  const completeCoreSrc = await fnSource("_complete_bank_reconciliation_core");
   // INTEGRATION FIX (assembly, contract-blind law -- the DESIGN pinned this and
   // the cell mis-guessed): design S5 says "line rows `FOR SHARE` in id order,
   // THEN the statement". A completion READS the lines; it never writes one, so
   // FOR SHARE is the correct strength and FOR UPDATE would needlessly serialise
   // completion against every concurrent match on the same statement.
-  ordered(completeSrc, [
+  ordered(completeCoreSrc, [
     "pg_advisory_xact_lock(203005004",
     "pg_advisory_xact_lock(203005006",
     "order by l.id for share",
-  ], "complete_bank_reconciliation lock order");
-  assert.ok(completeSrc.includes("for share") && /bank_accounts/i.test(completeSrc), "complete_bank_reconciliation takes the bank_accounts row FOR SHARE (S5)");
+  ], "_complete_bank_reconciliation_core lock order");
+  assert.ok(completeCoreSrc.includes("for share") && /bank_accounts/i.test(completeCoreSrc), "_complete_bank_reconciliation_core takes the bank_accounts row FOR SHARE (S5)");
 
   const voidRSrc = await fnSource("void_bank_reconciliation");
-  ordered(voidRSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006"], "void_bank_reconciliation lock order");
+  assert.ok(voidRSrc.includes("_void_bank_reconciliation_core"), "void_bank_reconciliation routes through _void_bank_reconciliation_core");
+  assert.ok(!voidRSrc.includes("pg_advisory_xact_lock"), "void_bank_reconciliation's own thin-delegator body acquires NOTHING");
+  const voidRCoreSrc = await fnSource("_void_bank_reconciliation_core");
+  ordered(voidRCoreSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006"], "_void_bank_reconciliation_core lock order");
 
   const exceptSrc = await fnSource("except_bank_line");
   ordered(exceptSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "except_bank_line lock order");
+
   const resolveSrc = await fnSource("resolve_bank_line_exception");
-  ordered(resolveSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "resolve_bank_line_exception lock order");
+  assert.ok(resolveSrc.includes("_resolve_bank_line_exception_core"), "resolve_bank_line_exception routes through _resolve_bank_line_exception_core");
+  assert.ok(!resolveSrc.includes("pg_advisory_xact_lock"), "resolve_bank_line_exception's own thin-delegator body acquires NOTHING");
+  const resolveCoreSrc = await fnSource("_resolve_bank_line_exception_core");
+  ordered(resolveCoreSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "_resolve_bank_line_exception_core lock order");
 
   // NO pre-existing journal_entries row is ever locked by these five verbs
   // (the C-a partial order stays untouched, S5).
-  for (const [label, src] of [["complete_bank_reconciliation", completeSrc], ["void_bank_reconciliation", voidRSrc], ["except_bank_line", exceptSrc], ["resolve_bank_line_exception", resolveSrc]]) {
+  for (const [label, src] of [["_complete_bank_reconciliation_core", completeCoreSrc], ["_void_bank_reconciliation_core", voidRCoreSrc], ["except_bank_line", exceptSrc], ["_resolve_bank_line_exception_core", resolveCoreSrc]]) {
     assert.ok(!/journal_entries[\s\S]{0,40}for update/i.test(src), `${label}: never locks a pre-existing journal_entries row`);
   }
 });
