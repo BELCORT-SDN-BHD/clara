@@ -2,8 +2,20 @@
 
 > **Design of record for Wave-F Track-B item F-T3.** Reads on `tax-computation-survey.md` (the
 > estate + the law, both re-fetched 2026-08-23) and `tax-computation-annexes.md` (mechanics,
-> decision register D-1..D-14, predictions, owner questions OQ-1..OQ-8). Contract:
+> decision register D-1..D-15, predictions, owner questions). Contract:
 > `wave-f-contract.md:406-408`. Owner ruling 2026-08-23: **ALL-IN in Wave F**, not slipped to v1.1.
+>
+> **v1.1, 2026-08-23 — three of the design's nine questions are RULED** (orchestrator, standing
+> delegation), and the folds are in place, each marked **[RULED 2026-08-23]** where it bites:
+> **OQ-6 → R-L25** — the Wave-F Tier-1 closure re-opens for F-T3's two tables, and they land as
+> **developer-seeded versioned effective-dated fact tables** on the D17/R-L19 pattern, **not** on
+> TA-P2's owner one-click door (§4, §11; the contract note is `wave-f-contract.md`'s
+> `[TB-2026-08-23]` block). **OQ-4 → REFUSE** — an unknown SME status is a question to the human,
+> never a fall-back to 24% (§6). **OQ-5 → the field-addressed PACK**, with the **form version
+> pinned**, never a form replica (§8). Also granted: **OQ-8's product half is designed now** — every
+> seeded law row carries `valid_through` and a `law_review_due` belt raises a typed question to the
+> firm's tax lead before expiry (§4.6, a consumer of F-A4's clock, R-L22). **OQ-1 / OQ-7 / OQ-8's
+> governance half go to the owner's sitting as one-question cards** (annexes, Annex D).
 >
 > **Design-stage only. No code was authored and no rig was run.** Every DB cite is source-read; the
 > replay is PR-0's.
@@ -110,27 +122,39 @@ This is F-T3's answer to survey §3.4: **neither** F-A8's `web_fetch_citations` 
 `basis_citations` is the right home for a *statutory* citation, because both are per-run artefacts of
 a fetch, and a statutory reference is standing law that must not be re-fetched (and re-risked) on
 every computation. `tax_authorities` rows are seeded by migration for the provisions this design
-names, and a *new* authority arrives through the same TA-P2 governed door as a Tier-1 rate row: Clara
-drafts it from a fetch, two independent official sources agree, the owner one-clicks. A
+names, and a *new* authority **arrives the same way its rate row does — seeded by migration, cited,
+through the PR ladder** (R-L25; the v1 text routed this through TA-P2's one-click door and is
+superseded). Clara drafts the row's content from a fetch and cites it; the row lands by PR. A
 `report_agent_receipt`'s `basis_citations` then carries `tax_authorities.id` values — so F-A5's
 carrier is still used, as a pointer, not as the store. **(D-5)**
 
 **(2) `tax_treatment_codes`** — §2. Seeded per the survey's verified law; each row owner-signed once.
 
-**(3) `tax_rate_bands`** — Tier-1, effective-dated, immutable + supersede.
-`(regime, ya, band_lower_cents, band_upper_cents NULL, rate_bp, authority_id, revision,
-superseded_by, actor)`. Regimes: `company_msmc`, `company_standard`, `individual_resident`,
-`individual_non_resident`. **A missing row for the YA refuses by name and stops in the open** — never
-carries the previous year forward (TA-P2's rule, and it is the correct rule: a band that silently
-persists past a Budget is a wrong number in a client's books).
+**How (3), (4) and (5) land — [RULED 2026-08-23, OQ-6 → R-L25].** They are **developer-seeded fact
+tables on the D17/R-L19 pattern**, not TA-P2 governed-door tables: **versioned, effective-dated rows
+seeded by migration through the full PR ladder**, each row cited to LHDN or the AGC gazette with its
+fetch date via `authority_id`, immutable + supersede, and **a missing row for the YA refuses by name
+and stops in the open** — never carried forward from the previous year. A rate change is a ticket and
+a PR. This is the **same** mechanism as the F-A9 price rows and the deadline tables — one seeding
+architecture, not two (digest law 81) — and the F-A8 scheduled fetch may attach to these tables later
+without changing how a row lands. The Wave-F Tier-1 closure re-opens for **exactly these two rate
+tables**; EPF/SOCSO/EIS, stamp duty and MTD stay out. Contract note: `wave-f-contract.md`'s
+`[TB-2026-08-23]` block. **(D-15.)**
 
-**(4) `capital_allowance_rates`** — `(ya_from, ya_to, ca_class, ia_bp, aa_bp, authority_id, …)`.
-Seeded from PR 12/2014's three categories and PR 3/2018's IBA. **The ICT 40/20 row (P.U.(A) 328/2024)
-is NOT seeded** — survey §6.3 U1: the gazette text could not be read at an official source today, and
-a rate on secondary evidence fails TA-P2's two-official-sources check. An asset whose `ca_class`
-resolves to ICT therefore returns `rate_row_missing_for_ya`. That is the design working, not failing.
+**(3) `tax_rate_bands`** — `(regime, ya, band_lower_cents, band_upper_cents NULL, rate_bp,
+authority_id, valid_through, revision, superseded_by, seeded_in_migration)`. Regimes:
+`company_msmc`, `company_standard`, `individual_resident`, `individual_non_resident`. A band that
+silently persists past a Budget is a wrong number in a client's books — hence the refusal, and hence
+`valid_through` (§4.6).
 
-**(5) `tax_thresholds`** — `(ya, key, value_cents | value_bp, authority_id, …)`. Keys:
+**(4) `capital_allowance_rates`** — `(ya_from, ya_to, ca_class, ia_bp, aa_bp, authority_id,
+valid_through, …)`. Seeded from PR 12/2014's three categories and PR 3/2018's IBA. **The ICT 40/20
+row (P.U.(A) 328/2024) is NOT seeded** — survey §6.3 U1: the gazette text could not be read at an
+official source on 2026-08-23, and a rate on professional-firm secondaries is not a cited official
+row. An asset whose `ca_class` resolves to ICT therefore returns `rate_row_missing_for_ya`. **R-L25
+names this posture as the model for the whole family**: that is the design working, not failing.
+
+**(5) `tax_thresholds`** — `(ya, key, value_cents | value_bp, authority_id, valid_through, …)`. Keys:
 `msmc_paid_up_max` (RM2,500,000) · `msmc_gross_income_max` (RM50,000,000) · `msmc_foreign_holding_max_bp`
 (2000) · `related_company_paid_up_min` (RM2,500,000) · `sva_asset_max` (RM2,000) ·
 `sva_annual_cap` (RM20,000) · `mv_qe_cap_default` (RM50,000) · `mv_qe_cap_new` (RM100,000) ·
@@ -149,6 +173,38 @@ a zero.
 `paid_up_ordinary_capital_cents` (as-at-dated), `foreign_or_noncitizen_holding_bp` (as-at-dated),
 `related_company_paid_up_cents`, `commenced_operations_on`. **No column is added to `clara.clients`**
 (survey §2.5). **(D-3)**
+
+### 4.6 · `valid_through` and the law-review belt — [GRANTED 2026-08-23, OQ-8's product half]
+
+A refusal is the right behaviour when a rate row is missing, and it is a **terrible first warning**:
+the firm discovers it in January, mid-filing, on a client's return. The seeded law tables therefore
+carry their own expiry, and something wakes before it.
+
+**Every row in `tax_rate_bands`, `capital_allowance_rates`, `tax_thresholds` and `tax_authorities`
+carries `valid_through`** — the last date on which the row is known-current, set at seed time from
+the source's own scope (a YA-scoped rate expires with its YA; a Public Ruling's citation expires when
+a reasonable re-read is due). It is **not** an automatic invalidation: past `valid_through` the row
+still computes, and the belt has already raised the question.
+
+**`law_review_due`** is a periodic belt, a **consumer of F-A4's clock** (digest law 80 — a clock may
+wake her; the WORK still triggers on data, R-L22's shape). Each run reads the seeded tables and, for
+every row whose `valid_through` falls inside the horizon, raises **one typed question to the firm's
+tax lead**, naming the table, the row, its authority, its `accessed_at`, and what refuses if it is
+not trued. Properties that make it a belt rather than a reminder:
+
+- **It triggers on data, never on the calendar alone.** No expiring row, no question — a quiet
+  January is a measured fact, not a missed run.
+- **It is idempotent per row per horizon.** One open question per row; re-running does not multiply.
+- **It resolves only by a seeded successor**, never by dismissal: the question closes when a
+  migration lands a superseding row, so "acknowledged" cannot silently become "handled."
+- **It never edits a rate.** Clara drafts the successor row's *content* and cites it; the row lands
+  by PR (R-L25). The belt's whole output is a question with a name on it.
+- **The recipient is a role, not a person** — the firm's tax lead, who is the same professional
+  answerable for a treatment code's signature (OQ-7). If no tax lead is designated, the belt raises
+  to the firm owner and says that it did.
+
+This is the product half of the standing maintenance duty in the annexes' Annex E. The **governance**
+half — who is contractually on the hook each Finance Act — stays an owner question (OQ-8's card).
 
 ---
 
@@ -216,7 +272,13 @@ inherit that. A rate applied on an unproven premise is a fabricated number in a 
 (hard constraint 2), it is the *wrong* number in the client's favour-or-not depending on which way
 the fact lands, and a banner is a prompt-level mitigation for a structural problem. The refusal
 `sme_facts_missing` names the exact missing fact, and Clara chases it — which is the product's whole
-shape. **(D-6; OQ-5 puts the ruling in front of the owner because it changes what the human sees.)**
+shape. **(D-6.)**
+
+**[RULED 2026-08-23 — OQ-4 → REFUSE.]** The design's recommendation is now the standing answer: **an
+unknown SME status is a question to the human, never a rate.** The refusal is not a dead end on
+screen — `sme_facts_missing` names the exact missing fact, so what the human sees is a chase, which
+is the thing they would have had to do anyway before signing. Nothing in the design changes; the
+question closes.
 
 ---
 
@@ -266,7 +328,20 @@ table, so a human keys MyTax without re-deriving anything. **Not a replica of th
 `publish_report_template_version` refuses a `report_class='statutory'` template from anything but the
 human admin verb (`0069:121`), `statutory_wording` has zero seeded rows, and fixed-layout boxed-form
 rendering is unbuilt — the Typst engine carries a chart/line AST only (survey §3.3). Attempting a
-pixel replica in v1 would mean either building a form renderer or faking one. **(D-8; OQ-4.)**
+pixel replica in v1 would mean either building a form renderer or faking one. **(D-8.)**
+
+**[RULED 2026-08-23 — OQ-5 → the PACK, and the form version is PINNED.]** The pack is the shipped
+shape; the human e-files. The ruling adds one requirement the design did not carry: **the pack maps
+to the form's own field ids and pins the form version it was mapped against.** So the pack's
+definition is `(form_code, form_version, field_id, label, value_cell_id, whole_ringgit boolean)` —
+`form_version` being LHDN's own edition marker for that YA's form, recorded at mapping time with its
+source URL and fetch date in `tax_authorities`. Three things follow. **(a)** A pack rendered against
+a superseded form version is a **named refusal**, `form_version_superseded`, not a silent
+mismatch — a field id that moved between editions is exactly how a correct number lands in the wrong
+box. **(b)** The per-field whole-ringgit truncation rule (annexes A.2, D-14) is a property of the
+*mapped version*, not a global convention. **(c)** The field map is itself statutory content, so it is
+published by the human admin verb alongside the template, and re-mapping a new edition is a human act
+with a diff. **(D-8 extended.)**
 
 **(3) The transparent-entity worksheet.** For `entity_type ∈ {sole_prop, partnership}` there is **no
 entity tax charge and no CP204** — the entity is transparent, and the computation stops at adjusted
@@ -306,7 +381,8 @@ The refusal vocabulary, each string printable and each one a battery cell:
 `close_not_sealed` · `basis_period_undetermined` · `account_untreated` · `treatment_unapproved` ·
 `treatment_code_unsigned` · `rate_row_missing_for_ya` · `ca_class_unassigned` ·
 `disposal_proceeds_unavailable` · `sme_facts_missing` · `entity_transparent_no_entity_charge` ·
-`prior_estimate_unknown` · `citation_missing` · `mixed_account_needs_split`.
+`prior_estimate_unknown` · `citation_missing` · `mixed_account_needs_split` ·
+`form_version_superseded` (§8, added by the OQ-5 ruling).
 
 **`account_untreated` is the important one.** An account with a non-zero sealed balance and no
 approved treatment makes the computation `not_evaluable` and names the account. **An untreated
@@ -358,17 +434,22 @@ reasoning).
 | PR | Content | Judgement? | D1 window |
 |---|---|---|---|
 | **PR-0** | gate record; rig replay at the frontier; the `prosrc`-SHA prestate pins; discharge the survey's [PREDICTION] tags; the shared-surface note to `conductor` (Tier-1 family, `client_fact_keys`, `evaluator_versions`) | — | — |
-| **PR-1** | `tax_authorities` · `tax_treatment_codes` · `tax_rate_bands` · `capital_allowance_rates` · `tax_thresholds`; the TA-P2 governed door; owner-signature requirement; the seeded law from survey §6.2 | **yes** (the door's refusal branches) | no |
+| **PR-1** | `tax_authorities` · `tax_treatment_codes` · `tax_rate_bands` · `capital_allowance_rates` · `tax_thresholds`, all **developer-seeded** per R-L25 (**no governed door is built** — that limb is dropped, not deferred, on the D17/R-L19 precedent); `valid_through` on every row; the owner-signature requirement on treatment codes; the seeded law from survey §6.2, the ICT row deliberately absent | **yes** (the refusal branches: missing row, superseded row, unsigned code) | no |
 | **PR-2** | new `client_fact_keys`; the basis-period model (D-1); `sme_rate_eligibility_v1` | **yes** | no |
 | **PR-3** | `disposal_value_cents` on `fixed_assets` + the `dispose_fixed_asset` body replacement; `ca_asset_years` + the CA evaluator | partial | **yes** (one live writer) |
 | **PR-4** | `tax_account_treatments`; Clara's proposal verb; the human one-click approve door; the citation binding | **yes** + cross-model | no |
 | **PR-5** | the ladder evaluator R1-R10 as one `evaluator_version`; the refusal vocabulary | **yes** | no |
 | **PR-6** | `cp204_filings`; R11-R12; the per-entry treatment override | partial | no |
-| **PR-7** | the report definitions; the statutory-class template publication (a **human** act); the field packs; the `report_run` wiring | — | rides F-A5's |
+| **PR-7** | the report definitions; the statutory-class template publication (a **human** act); the field packs **with `form_version` pinned** + the `form_version_superseded` refusal; the `report_run` wiring | partial | rides F-A5's |
+| **PR-8** | the `law_review_due` belt (§4.6) — a consumer of F-A4's clock, idempotent per row per horizon, resolving only by a seeded successor | partial | no |
 
 **PR-3's D1 window** is F-T3's only one and it is small (one verb body). It must **not** be merged
 into F-A4/F-A5's `finalize_close` window — different body, different lane, and combining them widens
 a quiesce for no gain. The conductor owns the ordering.
+
+**PR-8 depends on F-A4's clock**, so it lands after F-A4 whatever else moves. It is the one PR that
+may ship late without holding the rest: until it exists, a rate expiry is discovered by a refusal
+instead of announced by a question — worse, but not wrong.
 
 ---
 
@@ -378,14 +459,16 @@ a quiesce for no gain. The conductor owns the ordering.
 `close_receipts` row — the chain has never run). F-T3's evaluators can be *authored* against a
 rig-seeded close, but F-T3 cannot be *accepted* until a real one exists.
 
-**And two open items that are not F-T3's to settle:**
+**One item was open and is now closed; one remains.**
 
-1. **The Tier-1 closure collides with the ALL-IN ruling** (survey §7). The contract closes Tier-1 to
-   three tables for Wave F and puts income-tax bands and capital allowances out "until their own
-   consumers land (F-T2/F-T3)"; the owner then landed F-T3 *in* Wave F. Either Tier-1 re-opens for
-   `tax_rate_bands` + `capital_allowance_rates`, or F-T3 builds a second governed-row mechanism —
-   which is two architectures for one job (digest law 81). **OQ-6**; it is a contract amendment.
-2. **There is no acceptance oracle in the corpus** (survey §5, F2). **OQ-1.**
+1. ~~**The Tier-1 closure collides with the ALL-IN ruling.**~~ **RULED 2026-08-23 (R-L25):** the
+   closure re-opens for `tax_rate_bands` + `capital_allowance_rates`, and they land as
+   **developer-seeded** versioned effective-dated fact tables on the D17/R-L19 pattern — **not** a
+   second governed-row door, so law 81 is satisfied by having one seeding architecture rather than
+   two. The contract carries the amendment as `wave-f-contract.md`'s `[TB-2026-08-23]` block. **PR-1
+   is unblocked on this axis** and no longer builds an approval door.
+2. **There is no acceptance oracle in the corpus** (survey §5, F2) — **OQ-1**, an owner-sitting card.
+   It does not block authoring; it blocks *accepting*.
 
 ---
 
@@ -394,7 +477,7 @@ rig-seeded close, but F-T3 cannot be *accepted* until a real one exists.
 | Not built | Why |
 |---|---|
 | **s.6D rebate** (new MSMC, up to RM20,000/YA for 3 YAs — PR 8/2025 §6.5) | needs the incorporation date, an "operating expenditure" definition and a three-YA window; mis-claiming it carries a penalty. Wants its own design pass. |
-| **ICT accelerated CA** (IA 40% / AA 20%) | the gazette (P.U.(A) 328/2024) could not be read at an official source on 2026-08-23; a rate on secondary evidence fails TA-P2's two-source check (survey §6.3 U1) |
+| **ICT accelerated CA** (IA 40% / AA 20%) | the gazette (P.U.(A) 328/2024) could not be read at an official source on 2026-08-23, so there is no citable official row to seed (survey §6.3 U1). R-L25 names this posture as the model: **the row is absent and the class refuses**, rather than landing on professional-firm secondaries. It seeds the day the gazette is readable. |
 | Group relief (s.44A), carry-back (s.44B) | multi-entity; no consumer in the estate |
 | Incentives — pioneer status, ITA, reinvestment allowance | each is its own regime and its own ruling |
 | Transfer pricing, s.140C interest limitation, CbCR | out of the firm's client profile |

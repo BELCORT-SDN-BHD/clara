@@ -1,10 +1,16 @@
-# F-T3 — the draft tax computation: estate + law survey (v1)
+# F-T3 — the draft tax computation: estate + law survey (v1.1)
 
 > **Survey of record for Wave-F Track-B item F-T3** (`docs/plan/active/wave-f-contract.md` §"Track B",
 > lines 406-408), read against the standing laws digest (**71, 74, 75, 78, 80, 82**, and **2, 26, 31,
 > 34**), hard constraints **2** (the DB owns every authoritative number) and **3**, and the owner's
 > **2026-08-23 ALL-IN ruling** — F-T3 is *not* slipped to v1.1. Companions:
 > `tax-computation-design.md`, `tax-computation-annexes.md`.
+>
+> **v1.1, 2026-08-23 — one survey finding is RULED and re-cut in place.** §7's Tier-1 collision is
+> settled as **R-L25**: the closure re-opens for two tables and they land **developer-seeded**, not
+> through TA-P2's governed door — so **S6 stops being a door dependency**, and the U1/ICT posture
+> (§6.3) is named by the ruling as the model for the whole seeded-law family. Nothing measured
+> changed; no cite moved.
 >
 > **Every rate, threshold and rule below was re-fetched from LHDN and the Income Tax Act 1967 on
 > 2026-08-23** and is cited with URL + fetch date in §6. `docs/phase2-research/accounting-practice-map.md`
@@ -401,7 +407,7 @@ is a Tier-1 row that cannot land until it is (§7, D-4):
 
 | # | Item | Status today |
 |---|---|---|
-| U1 | **P.U.(A) 328/2024** — ICT equipment & customised software ACA at IA **40%** / AA **20%** from YA2024 | gazette text not readable (AGC portals down); confirmed only by professional-firm secondaries (PwC TaXavvy 32/2024, Moore, EY). **Not landable as a Tier-1 row on this evidence.** |
+| U1 | **P.U.(A) 328/2024** — ICT equipment & customised software ACA at IA **40%** / AA **20%** from YA2024 | gazette text not readable (AGC portals down); confirmed only by professional-firm secondaries (PwC TaXavvy 32/2024, Moore, EY). **Not seedable on this evidence — the row is absent and the ICT class refuses by name. R-L25 names this posture as the model for the whole seeded-law family.** It seeds the day the gazette is readable. |
 | U2 | PR No. 3/2021 *Special Allowance for Small Value Assets* | referenced by L1 §6.3.5; not fetched |
 | U3 | PR No. 4/2015 *Entertainment Expense* (the s.39(1)(l) provisos in operational form) | not fetched |
 | U4 | PR No. 4/2019 *Trade / doubtful debts* (specific vs general provision) | not fetched |
@@ -446,16 +452,27 @@ Design decision **D-6**; owner question **OQ-5**.
 | S3 | F-A5's statutory-template + `statutory_wording` human acts | Form C / CP204 templates are statutory-class | hard for the *artifact*, not for the evaluator |
 | S4 | A citation carrier (F-A5 `basis_citations` or F-A8 `web_fetch_citations`) | every add-back judgement must be cited | **hard** — D-5 chooses |
 | S5 | Wave D's FA register | exists; needs no change except D-7's disposal proceeds | soft |
-| S6 | **TA-P2's governed Tier-1 door** | the rate/CA/threshold tables must land through it | **hard** — and it collides (below) |
+| S6 | ~~**TA-P2's governed Tier-1 door**~~ → **the developer-seeded law tables** | the rate/CA/threshold rows must exist for the YA | **RULED — R-L25** (below); no longer a door dependency |
 
-**The Tier-1 collision, named.** The contract's F-A8 section says *"Tier-1 **CLOSES to three tables**
-for Wave F: `fx_rates` + the SST rate table + the SST threshold table. **Income-tax bands, capital
-allowances**, EPF/SOCSO/EIS, stamp duty and MTD are explicitly **out until their own consumers land
-(F-T2/F-T3)**"* (`wave-f-contract.md:342-344`). The owner's 2026-08-23 ALL-IN ruling lands F-T3 *in
-Wave F* — so its consumer has landed, inside the wave the closure was scoped to. Either Tier-1
-re-opens for two more tables in Wave F, or F-T3 carries its own policy tables outside the TA-P2 door.
-The second option is worse (two governed-row mechanisms is two architectures — digest law 81). This
-is **OQ-6**, and it is a contract amendment, not a build choice.
+**The Tier-1 collision — named here, RULED 2026-08-23 as R-L25.** The contract's F-A8 section says
+*"Tier-1 **CLOSES to three tables** for Wave F: `fx_rates` + the SST rate table + the SST threshold
+table. **Income-tax bands, capital allowances**, EPF/SOCSO/EIS, stamp duty and MTD are explicitly
+**out until their own consumers land (F-T2/F-T3)**"* (`wave-f-contract.md:342-344`). The owner's
+2026-08-23 ALL-IN ruling lands F-T3 *in* Wave F — so its consumer arrived inside the wave the closure
+was scoped to.
+
+**The ruling (orchestrator, standing delegation, 2026-08-23).** The closure **re-opens for exactly
+two more tables** — the income-tax rate bands and the capital-allowance rate schedule — and they land
+as **developer-seeded versioned effective-dated fact tables on the D17/R-L19 pattern**, *not* through
+TA-P2's owner one-click door: migration rows through the full PR ladder, each cited to LHDN or the
+AGC gazette with its fetch date, immutable + supersede, and **a missing row for the YA refuses by
+name**. Same mechanism as the F-A9 price rows and the deadline tables, so this is **one seeding
+architecture rather than two** (digest law 81) — which is what the collision was really about. The
+F-A8 scheduled fetch may attach to these tables later without changing how a row lands. EPF/SOCSO/EIS,
+stamp duty and MTD stay out. Contract note: `wave-f-contract.md`'s `[TB-2026-08-23]` block; design
+fold: `tax-computation-design.md` §4 and §11 (PR-1 builds **no** approval door); decision: **D-15**.
+**The lane's own recommendation was wrong on the mechanism** — it proposed re-opening the *governed
+door*, and the price-row precedent had already settled the question the other way.
 
 ---
 
