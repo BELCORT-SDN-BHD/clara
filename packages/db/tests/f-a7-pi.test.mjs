@@ -19,7 +19,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, roleQuery, endPool, buildWorld, opk, sha, ROLES,
+  rootQuery, humanQuery, endPool, buildWorld, opk, sha, ROLES,
   ingestDocument, assertRaises, getPool,
 } from "./rig-fixtures.mjs";
 
@@ -195,7 +195,10 @@ test("pi-A5 · the checker refuses an UNREGISTERED surface and an ABSENT one", a
 test("pi-A6 · the union REACHES a wired member, and the census sees the wiring via pg_depend",
   async (t) => {
     if (gate(t)) return;
-    const cols = await contract();
+    // Called for its assertions, not its value: `scope` is last and non-nullable. The projection
+    // below is written out BY HAND on purpose — generating it from the contract would make this
+    // cell agree with itself, and the whole point is that a member hand-writes its own.
+    await contract();
     await inRolledBackTx(async (client) => {
       // A stand-in member receipt table: this is what F-A2's own PR will do for real, minus the
       // receipt semantics. It exercises the union, the two floors and the census in one go.

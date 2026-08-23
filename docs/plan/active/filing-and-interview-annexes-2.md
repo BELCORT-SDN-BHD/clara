@@ -223,7 +223,7 @@ new columns.
 ### I.5 · π AS BUILT (PR-1, 2026-08-23) — this section GOVERNS the receipt surface
 
 Everything below is measured on a rig replay at frontier 0102 and re-proven by the migration's
-own tail plus `packages/db/tests/f-a7-pi.test.mjs` (20 cells). Where it differs from §3.4 or §I.1,
+own tail plus `packages/db/tests/f-a7-pi.test.mjs` (22 cells). Where it differs from §3.4 or §I.1,
 **this section is what exists.**
 
 **1 · The contract is a PROJECTION contract, not a physical-column one.** §3.4's ten names are not
@@ -329,6 +329,20 @@ spaces too and turns 'ROME PROPERTIES' into 'romeproperties' — no leading toke
 "strip non-alphanumerics … then take the leading token set" cannot be read both ways at once; the
 build takes the reading that produces tokens, and P-3 is confirmed on a fixture with the ruled
 cardinalities (ROME = 2 clients + 1 counterparty, ambiguous; BEE = 1, not ambiguous).
+
+**8 · Registered non-goal: no firm-independent arm (what `filing-and-interview-design.md` §9's
+non-goal line points at).** `agent_receipts_visible`'s WHERE clause, measured live, is exactly
+item 4's two closed scope arms ANDed with the bookkeeper+ role floor — no third disjunct, no
+role rank above bookkeeper that shortcuts the scope check, no arm that reads a firm's rows
+without `scope='firm' and firm_id = jwt_firm()` holding. A firm-independent read (one principal
+seeing every firm's firm-scoped receipts regardless of `scope`) was proposed nowhere in this
+build and none was coded — it would be the exact escalation R-L26's two-closed-arms shape was
+tightened to refuse, so it is registered here as a non-goal rather than left undocumented. The
+census in item 5 is the mechanism that would catch a future attempt to add one: a member's shim
+still has to pass through `_assert_receipt_surface_conforms` and the union's WHERE clause is
+created once, here, and never re-cut by anybody — a member cannot open this channel from its own
+migration, only a CoR of this file could, and that CoR is exactly what the eighth-item cost in
+item 5 already prices.
 
 ---
 
