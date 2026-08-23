@@ -1,11 +1,15 @@
-# F-A6 v2 — cross-client named read: the estate as found (SURVEY v1)
+# F-A6 v2 — cross-client named read: the estate as found (SURVEY v2)
 
 > **Survey of record for Wave-F Track-A lane F-A6 v2 "cross-client named read"** — the limb severed
 > out of F-A6 v1 by the gate-2 width ruling and **registered as its own lane by orchestrator ruling
 > R-L17 (2026-08-22)**: `freeform-read-gate-record.md:210-224, 267-277`; `PROGRESS.md:129`.
+> **v2, 2026-08-23 — PR-0 gate folded (record: `freeform-read-v2-gate-record.md`): Y5 and Y6's
+> citations are trued below (both pointed at superseded bodies); U3 is re-aimed to what the citation
+> fix actually implies for v1.**
 > Companions: `freeform-read-v2-design.md` (the design of record) ·
 > `freeform-read-v2-annexes.md` (**A** surface · **B** battery · **C** decisions · **D** predictions
-> · **E** owner questions · **F** risks, non-goals, acceptance).
+> · **E** owner questions · **F** risks, non-goals, acceptance) · `freeform-read-v2-gate-record.md`
+> (the PR-0 gate record).
 >
 > **What this lane owns, in the severance's own words** (`freeform-read-gate-record.md:216-218`,
 > `:250`): the **cross-client sibling verb**, `p_scope`, the **third allowlist row**, the
@@ -119,35 +123,63 @@ correct** — each of those clients is a filing party. R-L18's leak is the *othe
 *unfiled* document, not the multi-filed one. A design that "fixed" multi-filing would break the
 three walls above, which exist precisely because it is real.
 
-### Y5 · `retired_at` is the whole of the correction story, and `documents.client_id` is NOT
+### Y5 · `retired_at` is the whole of the correction story, and `documents.client_id` does not exist — a gate-fold correction, both to the mechanism AND the failure mode
+
+**Gate-fold correction (2026-08-23).** This finding originally cited `documents.client_id` as
+"frozen at ingest" by the identity trigger at `0003:402-406`. That trigger body is superseded: the
+column itself was DROPPED, in full, at `0007_document_pipeline.sql:1102-1106` (`drop index
+clara.ix_documents_client_recent; alter table clara.documents drop constraint
+documents_client_id_fkey; alter table clara.documents drop column client_id;`), and the identity
+trigger was recut in the SAME migration (`:923-933`) to an identity conjunct of only `id`/`sha256`/
+`firm_id` — client_id is gone from the trigger too. `0040_wave_c_c_tieout.sql:168-174` carries a
+live tripwire (probe 9b) that raises if the column ever reappears. No later migration re-adds it.
 
 The refile path (`0009:2521-2530`) **retires** the source filing (`set retired_at=now(), retired_by,
 retirement_reason, correction_id`) and inserts the destination filing. It does **not** touch
-`clara.documents`.
+`clara.documents` — and it could not, even if it tried: the column that "would need moving" has not
+existed since `0007`. `file_document` (`0009:2336-2340`) writes only `document_filings`; the column
+was backfilled INTO filings once, at `0007:825-826` (*"from clara.documents d where d.client_id is
+not null"*), then dropped from `documents` ~280 lines later in the same file (`:1105-1106`) — reading
+only the backfill and stopping there, without reading to the drop, is exactly how the original
+mis-citation happened.
 
-It cannot: `documents.client_id` is **frozen at ingest** by the identity trigger at `0003:402-406` —
-`if new.id ... or new.client_id is distinct from old.client_id then raise 'document
-identity/attribution is immutable' using errcode='CLR08'`. And `file_document` (`0009:2336-2340`)
-writes only `document_filings`; the column was backfilled INTO filings once, at `0007:825-826`
-(*"from clara.documents d where d.client_id is not null"*), and has been legacy since.
+**This is a finding about v1, not only about v2 — and what it says about v1 changed.** v1's A.1 puts
+`documents` in band "documents as filed" under **arm S-1**, which scopes by
+`client_id = _freeform_scope_client()`. Since `documents.client_id` does not exist at the live
+schema at all, `create policy … using (client_id = …)` on `clara.documents` fails DDL outright —
+`42703`, undefined column. **So v1's PR-1, as currently documented, cannot apply — not "ships a
+leak."** The leak narrative this finding originally told (A still sees a reattributed document, B
+cannot see its own) requires a column that was never there to leak through. Confirming the actual
+live policy: `clara.documents`' real, currently-live RLS (`0003_books_core.sql:511-515`) is
+firm-scoped only (`using (firm_id = clara.jwt_firm())`) — client attribution for document reads has
+lived on `clara.document_filings.client_id` since `0007`, not on `documents` at all.
 
-**This is a finding about v1, not only about v2.** v1's A.1 puts `documents` in band "documents as
-filed" under **arm S-1**, which scopes by `client_id = _freeform_scope_client()` — i.e. by the frozen
-legacy column. After a filing correction A→B:
+**Two prior instances of this exact mistake are already on record in this repo** — direct evidence
+of institutional memory the survey should have consulted: `0055_client_facts_trio.sql:546-548`
+("the CLIENT relation is read from FILINGS, not from documents: 0007:1105 DROPPED
+documents.client_id (this door's first cut read the dropped column from 0003's file text — the x55
+battery caught it; file text is not the live schema...)") and
+`0091_f_a1_identity_helper.sql:86-88` ("`documents.client_id` existed at 0003:67 and is GONE at the
+frontier — Slice-5 moved client attribution onto clara.document_filings.").
 
-- client **A**'s pinned session still sees the `documents` row (`documents.client_id` is still A);
-- client **B**'s pinned session does **not** see its own document;
-- and under v2's filings-based S-2′, B sees the document's **extraction bodies** while being unable
-  to see the `documents` row they belong to.
-
-**Two defects and an incoherence, all from one column.** The design's §3.4 re-cuts `documents` onto
-the filings join for that reason; **the first two are v1's to know about today** (§5 U3 routes it).
+**The design's §3.4 re-cuts `documents` onto the filings join regardless** — a join through
+`document_filings` is the only way to scope a table with no `client_id` column at all, so the fix is
+unchanged even though the premise was wrong. **What v1 needs to know today (§5 U3) is re-aimed: not
+"your S-1 arm on `documents` leaks," but "your S-1 arm on `documents`, as currently documented,
+cannot be created."**
 
 ### Y6 · The typed door admits the UNASSIGNED document — a divergence v2 must decide, not inherit
 
-`clara.get_document_extract` (`0011:3232-3270`) computes
-`not exists(... f.document_id=d.id and f.retired_at is null) as unassigned` (`:3263-3264`) and then
-admits `d.unassigned or exists(... f.client_id=p_client and f.retired_at is null)` (`:3266-3269`).
+**Gate-fold correction (2026-08-23):** `clara.get_document_extract` was recut with `create or
+replace` twice past `0011` — once at `0054_region_ordinal.sql:203`, and again at the current LIVE
+body, `0090_f_a1_walls.sql:1558-1684` (closed by `alter function … owner to clara_fn_owner` at
+`:1684`; no later recut exists). The `unassigned` disjunct's TEXT is byte-identical across all three
+generations — only its absolute line number moved, from `0011:3263-3269` to the live
+`0090:1587-1593`, as the surrounding function grew (0054 added region-ordinal machinery, 0090 added
+the M14 witness-kind envelope exclusion and the M7 `extracted_at` read-seam widening). The live body
+computes `not exists(... f.document_id=d.id and f.retired_at is null) as unassigned` (`0090:1587`)
+and then admits `d.unassigned or exists(... f.client_id=p_client and f.retired_at is null)`
+(`0090:1591-1593`) — same shape, live location.
 
 So the typed door lets **any** client pin read an **unfiled** document's extract. That is defensible
 there: the door takes `p_document` — one named document, one row — and the caller must already know
@@ -223,7 +255,7 @@ kind; v2 extends, never re-cuts"*).
 | # | prediction | how it is settled |
 |---|---|---|
 | **Q-1** | `_freeform_scope_clients()` (STABLE, no args) is evaluated **once per statement**, not per row, with a `uuid[]` return | `EXPLAIN (ANALYZE)` on the pinned image over `journal_lines`; v1's P-6 with an array return |
-| **Q-2** | The two-hop regions EXISTS uses `ix_document_regions_extraction`'s PK side and `uq_document_filing_active`, and does **not** degrade to a seq scan over `document_filings` per region row | measured on a rig with ≥100k regions; **if it does, the cost is real and priced, not absorbed** |
+| **Q-2** | The two-hop regions EXISTS uses `ix_document_regions_extraction`'s PK side and `uq_document_filing_active`, and does **not** degrade to a seq scan over `document_filings` per region row | measured on a rig seeded to **≥100k `document_regions` rows via a NAMED bulk fixture** — a `generate_series`-based bulk-insert helper, owned by PR-1, added to `packages/db/tests/rig-docs-fixtures.mjs` alongside its existing single-row `seedRegion` and invoked by a dedicated scale-measurement pass, distinct from the ordinary pristine-rig estate suite (which seeds zero `document_regions` rows by design and would otherwise close this acceptance item vacuously); **if it degrades, the cost is real and priced, not absorbed** |
 | **Q-3** | `= any(<uuid[]>)` inside an RLS `USING` clause does not defeat index use on `client_id` for the S-1 relations | measured; the fallback is `IN`-list expansion or a `VALUES` join, both worse |
 | **Q-4** | The `scope`/`verb` CHECK swaps validate on a populated `freeform_read_log` without a long ACCESS EXCLUSIVE hold | `lock_timeout` + bounded retry, v1's P-15 shape |
 | **Q-5** | A payload calling the shared core directly cannot commit — it aborts on `double_settle` | forced cell (B.5); this is v1's R-L16 structure re-proven on the new surface |
@@ -244,10 +276,14 @@ after.
 still the closed world of Y1 at c8e9b65. The sibling verb's `interactive_client` allowlist row and
 every client-pinned cell depend on it.
 
-**U3 · `documents`' scoping defect (Y5) is a v1 finding this survey produced, not a v1 decision.**
-It is UNVERIFIED whether F-A6 v1 intends `documents` to be scoped by `documents.client_id`; A.1's
-band assignment (S-1) says so, but no F-A6 document discusses the frozen column. **Routed to the
-lead as a cross-item item, not folded unilaterally** — it is v1's design, not this lane's.
+**U3 · `documents`' scoping defect (Y5) is a v1 finding this survey produced, not a v1 decision —
+re-aimed by the 2026-08-23 gate fold.** It is UNVERIFIED whether F-A6 v1 intends `documents` to be
+scoped by `documents.client_id`; A.1's band assignment (S-1) says so, but no F-A6 document discusses
+that the column does not exist at the live schema (Y5). **The routed fact changed with Y5's
+citation fix:** it is not "v1's `documents` arm leaks after a filing correction" — it is "v1's
+`documents` arm, scoped by `client_id = _freeform_scope_client()` as currently documented, cannot be
+created at all (`42703`, undefined column)." **Routed to the lead as a cross-item item, not folded
+unilaterally** — it is v1's design, not this lane's.
 
 **U4 · The owner's 2026-08-23 confirmation** that v1 waits for v2 is recorded in this lane's work
 order and is **not present** in `PROGRESS.md:124/129`, `docs/adr/README.md` or ADR-0074 at c8e9b65,

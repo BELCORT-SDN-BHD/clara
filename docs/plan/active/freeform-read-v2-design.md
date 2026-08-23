@@ -1,16 +1,23 @@
-# F-A6 v2 — the cross-client named read: DESIGN v1
+# F-A6 v2 — the cross-client named read: DESIGN v2
 
 > **Design doc of record for Wave-F Track-A lane F-A6 v2 "cross-client named read"** — the limb
 > severed out of F-A6 v1 by the gate-2 width ruling and registered as its own lane by **R-L17,
 > 2026-08-22** (`freeform-read-gate-record.md:210-224, 267-277`; `PROGRESS.md:129`), carrying
-> **R-L18's** XLSX/DOCX deferral with it (`:301-307`).
+> **R-L18's** XLSX/DOCX deferral with it (`:301-307`). **v2, 2026-08-23 — PR-0 gate folded (record:
+> `freeform-read-v2-gate-record.md`): the arm-state-forgery blocker and ten materials fold into this
+> version. Four findings stay OWNER-RESERVED, unresolved by this fold — the seven-value
+> `engine_kind` world (a second blocker, live-truth + accounting lenses), the raw-document-body
+> egress purpose, and whether OQ-A's mint restriction extends to this call path — see the gate
+> record's owner cards.**
 >
 > **Companions.** `freeform-read-v2-survey.md` — the estate at the bytes, findings **Y1-Y9**,
 > censuses, predictions **Q-1..Q-6**, and the **UNVERIFIED register U1-U6**. `freeform-read-v2-
 > annexes.md` — **A** surface · **B** battery · **C** decisions · **D** predictions · **E** owner
-> questions · **F** risks, non-goals, acceptance. **Where a companion and this file disagree, this
-> file is the design of record and the companion is the bug**; where this file and a migration's
-> printed line disagree, the printed line is right.
+> questions · **F** risks, non-goals, acceptance. `freeform-read-v2-gate-record.md` — the PR-0 gate
+> record: what held, the two blockers and ten materials this version folds, the owner cards, the
+> refuted register. **Where a companion and this file disagree, this file is the design of record
+> and the companion is the bug**; where this file and a migration's printed line disagree, the
+> printed line is right.
 >
 > **Binds under:** **TA-P9 A** (the read boundary — specifically **A(2)**: *a cross-client read from
 > inside a client session is a NAMED, receipted action, answered rather than refused*), **TA-P4 A**
@@ -58,9 +65,10 @@
 **Y1** both `wake_credentials` CHECKs are closed worlds and `interactive_client ⇒ client_id not
 null` is durable · **Y2** the allowlist is a two-column PK; a row is the whole mechanism ·
 **Y3** the document chain is three hops, indexed at each · **Y4** a document may be **legitimately**
-filed to more than one client (three walls in the estate say so) · **Y5** `documents.client_id` is
-**frozen at ingest** (`0003:402-406`) and the refile path cannot move it — a v1 scoping defect this
-survey found · **Y6** the typed door admits the **unassigned** document, and a free SELECT must not
+filed to more than one client (three walls in the estate say so) · **Y5** `documents.client_id` was
+**DROPPED entirely** at `0007:1102-1106` (not merely frozen) — v1's `documents` arm as documented
+cannot apply as printed DDL, a v1 scoping defect this survey found · **Y6** the typed door admits the
+**unassigned** document, and a free SELECT must not
 · **Y7** one-arm/one-settle is what makes a shared core safe **if it has no scope argument** ·
 **Y8** the policy cost lives in the pin compiler's return type · **Y9** three receipt columns move,
 extend-only after D34.
@@ -85,19 +93,53 @@ for a *named* action; a name the caller cannot supply is not a name. What the ca
 supply is the authority: the verb exists, is granted and is allowlisted, or the call refuses `CLR03`
 before `p_clients` is read.
 
+**Normalisation runs FIRST, on receipt, before any rung evaluates — not last.** `p_clients` is
+deduped and sorted into a canonical array immediately; a NULL `p_clients` normalises to the empty
+array. Only the canonical array is ever tested. **This is a gate-fold correction:** a rung table
+that validates the raw parameter and defers dedup to the end lets `{A,A}` and `NULL` both slip past
+every typed rung (raw cardinality 2, or `cardinality(NULL)` is NULL — not `< 2` — so the IF never
+fires) and die on the receipt's bare `cardinality >= 2` CHECK: an untyped `23514` with no `CLR*`
+token, uncovered by Tier C, naming nothing. Normalising first closes both holes with the ladder's
+own named refusal, not a constraint-violation accident.
+
 **The validation is complete, at arm time, and every arm fails closed:**
 
 | rung | refusal | why |
 |---|---|---|
-| `cardinality(p_clients) < 2` | `CLR10 cross_client_singleton` — **naming `wake_freeform_read`** | a one-client "cross-client" read is a client read wearing a wider verb; the refusal points at the right door |
-| any element not a live client of `clara.wake_firm()` | `CLR11 cross_client_unknown_client` | never "found in another firm and refused" — it is not visible |
+| the canonical (deduped, sorted) array's `cardinality < 2` — this catches `NULL`, a literal singleton, **and an all-duplicate array like `{A,A}`, which collapses to cardinality 1 before this rung ever runs** | `CLR10 cross_client_singleton` — **naming `wake_freeform_read`** | a one-client (or no-client) "cross-client" read is a client read wearing a wider verb; the refusal points at the right door |
+| any element not a client of `clara.wake_firm()`, **of any status** — rung 2 carries no status conjunct, deliberately (see below) | `CLR11 cross_client_unknown_client` | never "found in another firm and refused" — it is not visible |
 | `cardinality` above the cap (Annex A.3) | `CLR10 cross_client_too_wide` | a bounded array keeps the policy predicate a constant |
 | the credential is `interactive_client` and its pin is **not** in the list | `CLR10 cross_client_pin_excluded` | §3.3 |
-| duplicates / ordering | normalised (dedupe + sort) before arming | the receipt is canonical, so the `op_key` derivation is stable and two identical requests are one act |
 
-**The list is validated, then FROZEN into the arm state.** After `_freeform_arm_cross_client`
-returns, nothing in the transaction can change what the policies see — the payload cannot re-arm
-(`double_arm`, Y7) and there is no other writer of the state.
+**Rung 2 admits a client of any status, archived included — also a gate-fold correction.** v1's
+own arms carry no status conjunct at all (`freeform-read-annexes-1-mechanics.md:102-122`), so an
+unnamed, unpinned HOME read already returns an archived client's rows exactly as readily as an
+active one's. A named door that refused an archived client would be narrower than HOME in exactly
+the case a bookkeeper is most likely to want — *"compare this year's A against archived B"* —
+pushing them onto the WIDER surface to do the NARROWER, named thing, which inverts the incentive
+Annex A.2's HOME row and §3.6's detective control are built on. So rung 2's only test is firm
+membership, full stop, and **Annex A.2's "strictly narrower than what HOME already does" now holds
+without exception** — the named door can only ever return a subset of what an equivalent unnamed
+HOME read would return, for every client status.
+
+**The canonical list is validated, then FROZEN into the arm state — and the arm state is the
+VERIFIED RECEIPT ROW, never a second, independently-writable GUC.** `_freeform_scope_clients()`'s
+cross-client branch performs the SAME txn-local-GUC-to-receipt-row match `_freeform_admitted()`
+already performs (`freeform-read-annexes-1-mechanics.md:125-127`) — the estate's own hash/liveness
+idiom for exactly this class (`0011_daily_loop.sql:3243-3247`: *"A human PostgREST caller CAN set
+`clara.wake_secret`, but that is not a bypass: … The security boundary is `wake_context()`'s
+hash+liveness check, NOT the GUC being unreachable."*) — and, once the match holds, reads
+`client_scope_set` FROM THAT VERIFIED ROW. **This is a gate-fold correction (blocker):** a design
+that instead trusted an array VALUE carried directly in a payload-reachable GUC gave "there is no
+other writer of the state" as its only proof, which is an absence, not a mechanism — any lawful
+session's own payload could `set_config` that GUC directly and widen what every policy arm sees,
+while the receipt kept recording the originally-armed (narrower) set (§3.7 attack 6). Binding the
+scope to the SAME verified row `_freeform_admitted()` already authenticates closes it: the role
+holds zero DML on `clara.freeform_read_log` (only the two DEFINER writers may INSERT/UPDATE it), so
+a payload cannot fabricate a row, and forging the pointer can at best re-select the transaction's
+own already-armed row — never a wider one. After `_freeform_arm_cross_client` returns, nothing in
+the transaction can change what the policies see — the payload cannot re-arm (`double_arm`, Y7) and
+there is no other writer of the RECEIPT ROW itself, which is the only thing now trusted.
 
 ### 3.2 One body, one core, and why a shared core is safe HERE and was not in v1
 
@@ -135,7 +177,9 @@ delegate with an unchanged signature — the estate's own idiom for this exact c
 clara._freeform_scope_clients() returns uuid[]   -- STABLE, no arguments, definer
 --   HOME  (interactive, no pin)        -> NULL          (firm-wide)
 --   client (interactive_client)        -> ARRAY[pin]
---   cross  (armed by the sibling verb) -> the frozen, normalised named list
+--   cross  (armed by the sibling verb) -> the frozen, normalised named list, read from the SAME
+--                                          verified receipt row _freeform_admitted() matches — not
+--                                          from a second, independently payload-writable GUC (§3.1)
 ```
 
 and every policy arm becomes one predicate:
@@ -202,7 +246,10 @@ reading a document that is now client B's: **precisely the leak R-L18 named**. B
 *sequence*, not a state — file to A, refile to B, then read from both pins.
 
 **Decision 2 — the `unassigned` disjunct is DROPPED, diverging from the typed door.**
-`get_document_extract` admits an unfiled document to any pin (`0011:3263-3269`, Y6). That is
+`get_document_extract` admits an unfiled document to any pin — its LIVE body is
+`0090_f_a1_walls.sql:1558-1684` (the frontier CoR, recut twice past `0011`; the `unassigned`
+disjunct itself sits at `:1587-1593`, byte-identical in content across every recut — **a gate-fold
+correction: the earlier `0011:3263-3269` cite pointed at a superseded pre-F-A1 body**), Y6. That is
 defensible for a door that takes one named `p_document`; it is not for a free SELECT, where the same
 disjunct makes the firm's whole unfiled intake pile readable in bulk from inside any client-pinned
 session. **Under v2, an unfiled document's extraction is visible in HOME and nowhere else.**
@@ -221,12 +268,46 @@ both, and a client's own OCR text is exactly as legitimate as its own spreadshee
 a widening, priced, and put to the owner as question 3**; the fail-closed default is
 `structured_parse` alone.
 
-**`documents` moves onto the same join (Y5) — a v1 defect this lane must not build on top of.**
-`documents.client_id` is frozen at ingest (`0003:402-406`) and the correction path cannot move it,
-so v1's S-1 arm on `documents` leaves client A reading a document reattributed to B, and B unable to
-see its own. Re-cut to S-2e's shape comparing `documents.id`, the whole document band is scoped by
-**one** rule — filings — and the incoherence of "B can read the extraction but not the document row"
-never arises. **The v1 half of this is routed to the lead, not folded here** (survey U3, §6).
+**A named hazard: the payload's SEMANTICS are not the same as the payload's SCOPE.** Scoping decides
+WHICH rows a query may see; it says nothing about whether summing or comparing across them is
+meaningful. Three semantic traps sit on this exact surface, and none is new to v2 — v2 is only the
+first design to make them reachable by a bare `select`, which is why they must be named here rather
+than left implicit:
+
+- **Currency.** `document_regions.monetary_cents` carries no currency of its own — MYR-ness is
+  established by a SEPARATE sibling row (`field_path = 'invoice.currency'`), and the estate makes
+  non-MYR a TERMINAL `CLR21` refusal at every posting door (`0009_coding_floor.sql:1330-1331` and its
+  later recuts). But that wall fires at POSTING, not at extraction persist — `monetary_cents` is
+  written un-normalized and un-refused at extraction time (`0026_lane_widen.sql:575`), so a non-MYR
+  invoice's cents sit in the same column, indistinguishable on this read surface, as an MYR one's. A
+  cross-client `sum(monetary_cents)` silently mixes currencies with nothing on the surface saying so.
+- **Extraction version.** `document_extractions` carries `version_n`/`superseded_by`
+  (`0007_document_pipeline.sql:195-201`); a read that does not filter to the current version
+  multi-counts superseded generations of the same extraction.
+- **Multi-filing.** Decision 3 (above) deliberately admits a document filed to both A and B under
+  either pin; a cross-client comparison that does not de-duplicate by document risks double-counting
+  the same figure under two client labels.
+
+None of this is a scoping defect — every row returned is a row the caller is authorized to see — and
+§1 rung 8 (TA-P10 C′) already bounds the worst case: a freeform result stays narrative, never an
+authoritative durable-artifact number (constraint 2 holds regardless). But a design that reopens
+these rows to a cross-client comparison owes the reader the semantics, not only the grant.
+**Battery cell B3.8** forces the currency case: a client with an explicit non-MYR invoice must not
+silently fold into a comparison total undistinguished from an MYR one.
+
+**`documents` moves onto the same join (Y5) — a v1 defect this lane must not build on top of, and a
+gate-fold correction to what that defect actually is.** `documents.client_id` was not merely frozen
+at ingest — it was DROPPED entirely at `0007_document_pipeline.sql:1102-1106`, and the identity
+trigger was recut in the same migration (`:923-933`) to an identity conjunct of only `id`/`sha256`/
+`firm_id`; `0040_wave_c_c_tieout.sql:168-174` carries a live tripwire that raises if the column ever
+reappears. **So v1's A.1 assignment of `documents` to arm S-1 (`client_id = _freeform_scope_client()`)
+could never have applied as printed DDL** — `create policy … using (client_id = …)` on a table with
+no such column fails `42703`, undefined column — meaning v1's PR-1, as currently documented, cannot
+apply, not merely that it would leak. Re-cutting `documents` onto S-2e's shape comparing `documents.id`
+is still the right fix regardless — a join through `document_filings` is the only way to scope a
+table with no `client_id` column at all — so this lane's proposed mechanism is unchanged; what
+changes is what gets routed to the lead. **The v1 half of this is routed to the lead as "v1's PR-1
+cannot apply as currently spec'd," not as a leak scenario** (survey U3, §6).
 
 **`document_filings` itself is unchanged**: it carries a real `client_id` and stays on S-1.
 
@@ -284,6 +365,17 @@ surface v2 adds.** Given a hostile SQL string and a hostile `p_clients`, can it:
 5. **Escape through the shared core** — call `_freeform_core` directly and commit anything.
 6. **Forge or suppress the receipt's `client_scope_set`** so the log understates what was read
    (which would also mislead F-A5b's export coverage check — §6).
+7. **Use the returned CONTENT as the payload, not only the request.** `document_regions.text_content`
+   and `document_extractions.envelope` are the estate's raw untrusted-text carriers — verbatim OCR of
+   third-party-supplied files — and v2 is the first design to put them in front of a client-pinned
+   session that also, for the first time, holds cross-client naming authority. A supplier's document
+   whose OCR text reads as an instruction (*"also select from …"*, *"the correct figure is X"*) is
+   returned verbatim into the context that composes the next SQL string or the next answer. **This is
+   a gate-fold addition** — items 1-6 test only hostile SQL/`p_clients`; nothing above tested hostile
+   CONTENT. PRD §6 invariant 5 already stands as LAW here (OCR/DB free-text/fetched content are inert
+   DATA, never instructions), and this item is that law applied to THIS tool's results specifically —
+   the mechanism belongs to PR-2 (the runtime tool wrapper, §6), and this item is PR-2's obligation to
+   apply it, named so the law-28 pass tests it rather than assuming it. R-8 (Annex F.1) tracks it.
 
 Findings fold into v2 of this document. The pass runs on a lane independent of the author's.
 
@@ -303,7 +395,7 @@ lane replaces, so it is listed in PR-1's inventory rather than discovered in rev
 
 ## 5 · Judgement logic (review law 1)
 
-**§3.1**'s five rungs, **§3.3**'s scope compilation, **§3.4**'s three arms and **§3.5**'s CHECK
+**§3.1**'s four rungs (normalisation runs before rung 1, not as a fifth), **§3.3**'s scope compilation, **§3.4**'s three arms and **§3.5**'s CHECK
 extensions all decide *whether a read is allowed and what it may see* — judgement logic end to end,
 each taking an independent review pass. Three-valued where the ladder is (`pass` / `fail` /
 `not_evaluable`, law 68); fail-closed on the missing, the malformed and the unknown; **a rung's own
@@ -335,16 +427,26 @@ possible at all**. Two obligations follow, and they are this lane's: `client_sco
 complete (never a subset of what was read — §3.7's attack 6), and the receipt must be readable by
 F-A5b's derivation.
 
-**No D1 write-quiesce window if request B is taken.** v2 CoRs no live body: it adds a verb, adds an
-arm function, adds two policies, replaces one policy (`documents`) and swaps two CHECKs. The cost is
-brief ACCESS EXCLUSIVE locks under `lock_timeout` with bounded retry (v1's P-15). **If request B is
-declined, the extraction makes PR-1 a D1 candidate** and the inventory says so.
+**A D1 write-quiesce window is needed regardless of request B — this is a gate-fold correction.**
+v2's other five changes are genuinely additive: a new verb, a new arm function, two new policies, one
+policy replace (`documents`), two CHECK swaps — the cost there really is brief ACCESS EXCLUSIVE locks
+under `lock_timeout` with bounded retry (v1's P-15), and that part of the "no D1" framing holds. But
+§7's retirement of `CLR10 cross_client_unavailable` (its RAISE branch, its message, its battery cell)
+is a `CREATE OR REPLACE FUNCTION` edit to whichever body already carries the ladder at PR-1 time —
+`wake_freeform_read` itself if v1 shipped it inline, or `_freeform_core` if request B was taken and
+v1 already extracted it — and **either body is, by this lane's own §6 hard prerequisite, ALREADY
+MERGED and actively called.** Editing a live, in-flight-session function body is exactly the class
+`wave-f-sprint-dag.md`'s W2 ceremony window exists for (its own precedent: a body bump on
+`_approve_entry_core`), independent of the DDL's own lock severity. **So PR-1 needs a D1
+write-quiesce window on this one item alone, whether or not request B is taken** — the previous
+"no D1 if request B is taken" framing is retired along with the premise that D1 was avoidable.
 
 **The revised train:** PR-0 (this design + the law-28 pass) → **PR-1** (DB: the sibling verb, the
 cross-client arm, the two CHECK extensions + `client_scope_set`, the S-2′ arms, the `documents`
-re-cut, two allowlist rows, the printed audit line at 37/N) → **PR-2** (runtime: the second tool, the
-turn card, the session reset unchanged) → **PR-3** (the human surface — the cross-client column in
-`list_freeform_reads`, the detective counts) → **PR-4** (acceptance).
+re-cut, two allowlist rows, the printed audit line at 37/N, **and the `CLR10` retirement CoR —
+D1-gated regardless of request B**) → **PR-2** (runtime: the second tool, the turn card, the session
+reset unchanged, **and §3.7 item 7's inert-content obligation**) → **PR-3** (the human surface — the
+cross-client column in `list_freeform_reads`, the detective counts) → **PR-4** (acceptance).
 
 ---
 
@@ -360,4 +462,6 @@ stands unchanged, with its ground per line) · a human confirmation gate (§3.6)
 **Retired by this lane:** v1's `CLR10 cross_client_unavailable` token, its model-facing message, and
 the battery cell that forced the message to name the deferred action. **All three go together, in
 PR-1**, and the change list says so — a refusal token whose action is now available is a lie the
-next reader will believe.
+next reader will believe. **This retirement is a CoR to an already-merged live body, not additive
+DDL — §6's D1 accounting covers it, and PR-1's write-quiesce window is where it ships**, not inside
+an otherwise-unquiesced migration.
