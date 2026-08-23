@@ -102,6 +102,23 @@ absent from `gh pr checks` until it starts · a grep of main answers "not on mai
 exist" · Codex's cyber filter refuses attack-worded design reviews — phrase as control reviews or use a
 native fresh-context lane · never pass a prompt with backticks inline to `codex exec`.
 
+## 5b · Lane MODEL policy (owner directive 2026-08-23 — the sprint's first run got this wrong)
+
+Every lane in the first run was dispatched `claude-opus-5`. That was an orchestrator error: it
+burned the weekly budget in a night and bought nothing on the mechanical lanes. The policy for the
+restart, at equal quality:
+
+| Work | Model | Why |
+|---|---|---|
+| DB migration + battery authoring, rig replays, doc trues, the conductor, landing/PR mechanics | **claude-sonnet-5, effort xhigh** | Mechanical against a written design; the design already carries the judgement |
+| Executable implementation, debugging, contract-blind test batteries, the cross-model review leg | **Codex `gpt-5.6-sol`, effort xhigh**, direct `codex exec` (the companion queue stalls) | Objectively testable work; a second vendor's eyes where review law 1 wants them |
+| Evaluator semantics, accounting/tax judgement, security design review (law 28), a design fold that re-cuts a ruling, any lane whose failure is a wrong number | **claude-opus-5, effort xhigh** | Judgement-dominant; this is what the escalation is for |
+| Orchestrator | Fable (this session) | Plans, rules, synthesizes; does not build |
+
+Every dispatch pins `model` explicitly (hard constraint 5) — omission silently inherits Fable.
+Codex refuses attack-worded security prompts under its cyber filter: phrase law-28 passes as control
+reviews of our own product, and substitute a native fresh-context lane when it still refuses.
+
 ## 6 · Resume path (commands)
 
 1. `git fetch origin && git log --oneline -3 origin/main`; `gh pr list --state open`; merge the green
