@@ -299,9 +299,19 @@ end $oq_tail$;
 -- or NULL). So a bank-origin row with no extraction_id is inert to both readers by construction —
 -- exactly the same "coding_kind gate makes an absent field harmless" shape N2 already established.
 -- Both CHECKs are extend-only ACCESS EXCLUSIVE swaps; the invoice domain's existing behaviour is
--- untouched (extraction_id, when present, still satisfies the gate_verdicts CHECK exactly as
--- before — this file only ORs in a second, disjoint, bank-domain-shaped satisfaction path keyed on
--- `op_key`, which every body in this file already refuses to proceed without).
+-- untouched (extraction_id is STILL REQUIRED, unconditionally, on every non-bank_agent row --
+-- see M8 below). This file only adds a second, disjoint, bank-domain-shaped satisfaction path
+-- keyed on `op_key`, which every body in this file already refuses to proceed without.
+--
+-- M8 (cross-model review, HEAD d5e5dc6): the FIRST cut of this CHECK read
+-- `(extraction_id present OR op_key present)` with no via_wake_kind condition at all -- a bare
+-- OR, not the domain-disjoint pair the note above always claimed. That would have let an
+-- INVOICE-domain row (via_wake_kind IN ('autodraft','interactive')) satisfy the CHECK on op_key
+-- ALONE, with no extraction_id -- a real widening of the invoice domain's own floor, not the
+-- "byte-identical to before" this file's own tail notice asserted. Recut so each domain's arm is
+-- gated on ITS OWN via_wake_kind: the invoice domain keeps its extraction_id pin
+-- UNCONDITIONALLY (exactly the pre-this-file shape, for every row that is not bank_agent), and
+-- the op_key arm is reachable ONLY for via_wake_kind='bank_agent'.
 -- ================================================================================================
 alter table clara.entry_post_receipts
   drop constraint entry_post_receipts_via_wake_kind_check,
@@ -312,12 +322,14 @@ alter table clara.entry_post_receipts
   drop constraint entry_post_receipts_gate_verdicts_check,
   add constraint entry_post_receipts_gate_verdicts_check check (
     jsonb_typeof(gate_verdicts)='object' and (
-      nullif(btrim(coalesce(gate_verdicts->>'extraction_id','')),'') is not null
-      or nullif(btrim(coalesce(gate_verdicts->>'op_key','')),'') is not null));
+      (via_wake_kind <> 'bank_agent'
+        and nullif(btrim(coalesce(gate_verdicts->>'extraction_id','')),'') is not null)
+      or (via_wake_kind = 'bank_agent'
+        and nullif(btrim(coalesce(gate_verdicts->>'op_key','')),'') is not null)));
 
 do $epr_tail$
 begin
-  raise notice 'DDL 1b (NEW finding, rig-replay-caught): entry_post_receipts'' via_wake_kind CHECK now admits bank_agent alongside autodraft/interactive; its gate_verdicts CHECK now admits EITHER a non-blank extraction_id (the invoice-domain path, byte-identical to before) OR a non-blank op_key (the new bank-domain path) — the two readers of extraction_id (_tf_assert_sales_invoice_shape, _tf_assert_supplier_bill_shape) are both coding_kind-gated away from every bank-origin row, so the widening is inert to them by construction.';
+  raise notice 'DDL 1b (NEW finding, rig-replay-caught): entry_post_receipts'' via_wake_kind CHECK now admits bank_agent alongside autodraft/interactive; its gate_verdicts CHECK is DOMAIN-DISJOINT (M8 recut) -- via_wake_kind<>bank_agent still requires a non-blank extraction_id UNCONDITIONALLY (byte-identical to the pre-this-file floor), via_wake_kind=bank_agent requires a non-blank op_key instead, and neither domain can satisfy the other''s arm. The two readers of extraction_id (_tf_assert_sales_invoice_shape, _tf_assert_supplier_bill_shape) are both coding_kind-gated away from every bank-origin row, so the new arm stays inert to them by construction.';
 end $epr_tail$;
 
 -- ================================================================================================
@@ -2957,6 +2969,11 @@ begin
           join clara.journal_lines jl on jl.entry_id = je.id
           join clara.coa_accounts a on a.client_id = v_client and a.account_code = jl.account_code
           where je.client_id = v_client and je.firm_id = c.firm
+            and je.id <> v_ack_id -- H4 (cross-model review, HEAD d5e5dc6): when the acknowledged
+            -- item is itself an entry-side outstanding item, je ranges over the SAME entries
+            -- table v_ack_id was drawn from and trivially matches its own counterparty/amount/
+            -- date -- without this exclusion a lone, twinless entry-side ack always finds
+            -- "itself" as the duplicate and M11 vacuously refuses every entry-side waiver.
             and je.status = 'approved' and je.reversed_by is null and je.reversal_of is null
             and a.account_class in ('receivable','payable')
             and clara._canonical_counterparty(v_client, jl.counterparty_id) is not distinct from v_ack_cp
@@ -3207,7 +3224,7 @@ declare
   -- pre-resolved so its rung can be taken in the house order (see the derivation below).
   v_fp jsonb; v_top_cp uuid;
   v_pre_entries uuid[] := '{}'::uuid[];
-  v_resolution uuid; v_entry uuid; v_rev uuid;
+  v_resolution uuid; v_entry uuid; v_rev uuid; v_receipt_id uuid;
   v_res jsonb; v_match uuid; v_match_status text; v_branch text;
   v_adj_n int;
   -- 0042 (as-built ladder round 3): the prior-booking wall + the counterparty-landscape
@@ -3716,9 +3733,30 @@ begin
     -- F-A3 (obligation J.2-a): the FULL p_ctx threaded through — the pinned body's fresh
     -- `jsonb_build_object('actor','firm','receipt_preheld',true)` discarded is_agent/
     -- on_behalf_of/wake_kind/rationale/model.
+    --
+    -- C1-ADJACENT (this lane's own verification pass, caught only once the draft leg was
+    -- actually run to COMMIT through a real wake credential): receipt_preheld=true tells
+    -- _approve_entry_core NOT to write F-A2's entry_post_receipts row itself, on the promise
+    -- that THIS caller will -- exactly _bank_match_adjustment_entry's own convention (D-1,
+    -- above). The promise was never kept: no insert followed, so an agent-checked draft-leg
+    -- entry approved zero receipts and t_je_agent_post_receipt (F-A2's OWN deferred wall,
+    -- unrelated to this file's bank-domain walls) aborted every successful draft-leg
+    -- resolve-and-book at commit. Kept now, on the SAME v_is_agent gate D-1 uses.
+    v_receipt_id := gen_random_uuid();
     perform clara._approve_entry_core(
-      p_ctx || jsonb_build_object('receipt_preheld', true),
+      p_ctx || jsonb_build_object('receipt_preheld', true, 'post_receipt_id', v_receipt_id),
       v_entry, v_rev, p_attestation, p_op_key || ':draft:approve');
+    if v_is_agent then
+      insert into clara.entry_post_receipts(id, firm_id, client_id, entry_id, acting_actor,
+          on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+          maker_active_at_approval, op_key)
+        values (v_receipt_id, c.firm, p_client, v_entry, c.actor,
+          v_obo, coalesce(v_wake_kind, 'bank_agent'),
+          coalesce(p_ctx->'model', '{}'::jsonb),
+          coalesce(nullif(btrim(p_ctx->>'rationale'),''), 'Resolve-and-book hand-draft (agent)'),
+          jsonb_build_object('op_key', p_op_key || ':draft:approve'), 'agent_unattended', null,
+          p_op_key || ':draft:approve');
+    end if;
 
     -- RESOLVE, THEN MATCH. The order is the whole reason match_bank_line needs no recut: its
     -- `line_excepted` wall re-asks the question under the line lock and, by then, the answer
@@ -4459,7 +4497,7 @@ create function clara._agent_bank_receipt(
     p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text,
     p_gate_verdicts jsonb, p_retry_after timestamptz default null
   ) returns uuid language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_id uuid;
+declare v_id uuid; v_digest text; v_existing record;
 begin
   if p_rationale is null or btrim(p_rationale) = '' then
     raise exception 'an unattended bank act must state its rationale' using errcode='CLR10',
@@ -4473,6 +4511,7 @@ begin
       using errcode='CLR10',
         detail='{"reason":"invalid_request","class":"model_snapshot","constraint":"provider+model+version"}';
   end if;
+  v_digest := coalesce(nullif(btrim(p_inputs_digest),''), p_op_key);
   -- REPLAY (v2, material M6/Annex A.3): op_key is UNIQUE for exactly this reason -- a delegate's
   -- OWN _reserve_op dedupe can return a cached result without re-executing on a replayed op_key,
   -- and a caller that then unconditionally inserted a SECOND receipt row would hit this table's
@@ -4484,16 +4523,61 @@ begin
       inputs_digest, gate_verdicts, approval_arm, op_key)
     values (p_firm, p_client, p_act_kind, p_outcome, p_subject, p_retry_after,
       clara.agent_user_id(), null, 'bank_agent', p_model,
-      p_rationale, coalesce(nullif(btrim(p_inputs_digest),''), p_op_key),
+      p_rationale, v_digest,
       p_gate_verdicts, 'agent_unattended', p_op_key)
     on conflict (op_key) do nothing
     returning id into v_id;
   if v_id is null then
-    select id into v_id from clara.bank_agent_receipts where op_key = p_op_key;
+    -- H6 (cross-model review, HEAD d5e5dc6): op_key is table-wide unique, so a bare read-back
+    -- keyed on op_key ALONE would hand back another act's receipt to a caller who merely
+    -- happened to reuse (or collide on) the same key string -- review law 3, spelling is not
+    -- identity: the op_key names an act only if the act it actually belongs to is THIS one.
+    -- Every dimension a genuine replay must agree on is checked; any mismatch means the key was
+    -- claimed by a different act, and that is refused rather than silently handed back.
+    select id, firm_id, client_id, act_kind, subject_id, inputs_digest into v_existing
+      from clara.bank_agent_receipts where op_key = p_op_key;
+    if v_existing.firm_id is distinct from p_firm or v_existing.client_id is distinct from p_client
+       or v_existing.act_kind is distinct from p_act_kind or v_existing.subject_id is distinct from p_subject
+       or v_existing.inputs_digest is distinct from v_digest then
+      raise exception 'op_key % is already claimed by a different act; a replayed op_key must never return a receipt for another firm/client/act/subject/digest', p_op_key
+        using errcode='CLR10', detail='{"reason":"op_key_identity_mismatch"}';
+    end if;
+    v_id := v_existing.id;
   end if;
   return v_id;
 end $$;
 revoke all on function clara._agent_bank_receipt(uuid,uuid,text,text,uuid,text,jsonb,text,text,jsonb,timestamptz) from public;
+
+-- §K.2b — H2 (cross-model review, HEAD d5e5dc6): p_inputs_digest was caller-asserted with no
+-- verification anywhere -- _agent_bank_receipt even substituted p_op_key for a blank digest, so
+-- an unattended act's receipt could claim to be grounded in a pack the agent never actually
+-- read. Design §3.4 names inputs_digest "the pack sha the judgement was made on" -- this makes
+-- that literal: the digest must match a REAL, PRIOR clara._agent_get_bank_pack_core read for
+-- THIS CLIENT (its own bank_agent_receipts row, act_kind='pack_read'), or the call refuses
+-- before any judgement logic runs. CLIENT-scoped, not bank-account-scoped: a client with
+-- several accounts may read one pack and act on candidates it names across the client's own
+-- bank surface, and sha256 collision-resistance is what makes "some real pack, this client's
+-- own" already the load-bearing guarantee -- nothing can forge a digest that happens to equal a
+-- genuine pack's hash without having actually read that genuine pack. Not called from
+-- _agent_get_bank_pack_core itself (that verb PRODUCES the digest, verifying it against itself
+-- would be circular) or from _agent_bank_receipt (verifying AFTER the write is too late; every
+-- consuming core calls this BEFORE its own judgement logic runs).
+create function clara._agent_verify_inputs_digest(p_client uuid, p_digest text) returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  if nullif(btrim(coalesce(p_digest,'')),'') is null then
+    raise exception 'an unattended bank act must name the pack digest its judgement was made on'
+      using errcode='CLR10', detail='{"reason":"inputs_digest_unverified"}';
+  end if;
+  if not exists (
+    select 1 from clara.bank_agent_receipts r
+     where r.client_id = p_client and r.act_kind = 'pack_read' and r.inputs_digest = p_digest
+  ) then
+    raise exception 'the named inputs digest matches no bank pack this client ever actually read'
+      using errcode='CLR10', detail='{"reason":"inputs_digest_unverified"}';
+  end if;
+end $$;
+revoke all on function clara._agent_verify_inputs_digest(uuid, text) from public;
 
 -- §K.3 — Tier C, THE CLOSED LIST (F-A2 D6's law: (errcode,reason) PAIRS ONLY, unknown re-raises;
 -- conductor's ruling, this lane's session: B.4 IS the wall, not a starting point -- a reason
@@ -4510,9 +4594,22 @@ revoke all on function clara._agent_bank_receipt(uuid,uuid,text,text,uuid,text,j
 --   adjustment_account_invalid · tenancy_incongruent (CLR11) · adjustment_key_collision ·
 --   approve_key_collision
 -- `(CLR16, draft_anchor_moved)` -- B.4's own text: "PR-1b types" this one, already a member.
--- `recon_*` -- B.4's own row is written "(CLR10, recon_*) — the nine reconciliation reasons",
--- a NAMED prefix family in the annex's own notation (not a general wildcard escape: every OTHER
--- row is an exact string). Implemented as a literal prefix match on `recon_`, CLR10 only.
+-- `recon_*` -- H5 (cross-model review, HEAD d5e5dc6): B.4's own row reads "(CLR10, recon_*) —
+-- the nine reconciliation reasons", but B.4 does not itself spell those nine literals, and its
+-- top line is unambiguous -- "Only PAIRS; no wildcards, no errcode-only members" -- so a LIKE
+-- match on the bare prefix was never a legitimate transcription of a PAIRS-only annex, whatever
+-- count its own prose claims. Measured instead, directly against the live source it cites
+-- (0040:1587-2057, clara._complete_bank_reconciliation_core's own body, every CLR10 raise
+-- carrying a `recon_` reason): ELEVEN distinct literals, not nine -- B.4's prose undercounts,
+-- and even the file's own header comment at 0040:1538-1569 (ten items) omits
+-- `recon_terms_underivable`, a real, live raise the header simply does not mention. Review law 2
+-- (absence is not evidence): a design annex's count is not itself evidence of the code's actual
+-- shape; only a read of the live raise sites is. The eleven, transcribed verbatim as exact
+-- strings, closed-list, no prefix match:
+--   recon_already_complete · recon_coa_shared · recon_period_gap · recon_prior_missing ·
+--   recon_line_reserved · recon_line_unsettled · recon_uncleared_off_account ·
+--   recon_terms_underivable · recon_opening_mismatch · recon_outstanding_stale ·
+--   recon_difference_nonzero
 -- `(CLR10, stale_waiver_duplicate_risk)` -- M11's OWN new pair (Annex B.3's mechanism, built by
 -- THIS PR): B.4's own precedent for `draft_anchor_moved` is that a PR minting a new typed raise
 -- ADDS it to this list rather than leaving it unconvertible; M11's design text (§3.3) explicitly
@@ -4536,8 +4633,12 @@ begin
        v_reason in ('already_matched','wrong_account','wrong_period','amount_beyond_tolerance',
          'reversed_entry','reversal_mirror','line_excepted','orphaned_reservation_draft',
          'bank_account_unmapped','adjustment_account_invalid','adjustment_key_collision',
-         'approve_key_collision','stale_waiver_duplicate_risk')
-       or v_reason like 'recon\_%'
+         'approve_key_collision','stale_waiver_duplicate_risk',
+         -- H5: the eleven measured recon_ literals, exact strings, no prefix match.
+         'recon_already_complete','recon_coa_shared','recon_period_gap','recon_prior_missing',
+         'recon_line_reserved','recon_line_unsettled','recon_uncleared_off_account',
+         'recon_terms_underivable','recon_opening_mismatch','recon_outstanding_stale',
+         'recon_difference_nonzero')
      ) then
     return v_reason;
   end if;
@@ -4573,6 +4674,7 @@ begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
 
   select (not (g.status = 'pending' and g.pending_resolution is not null
                and g.resolution_exception_id is not null))
@@ -4654,6 +4756,7 @@ begin
   select firm_id, client_id into v_firm, v_client from clara.bank_reconciliations where id = p_recon;
   if v_firm is null then raise exception 'reconciliation not found' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(v_client, v_firm);
+  perform clara._agent_verify_inputs_digest(v_client, p_inputs_digest); -- H2
 
   select exists (
       select 1 from clara.bank_reconciliations later
@@ -4723,6 +4826,7 @@ begin
   select e.firm_id, e.client_id into v_firm, v_client from clara.bank_line_exceptions e where e.id = p_exception;
   if v_firm is null then raise exception 'bank line exception not found' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(v_client, v_firm);
+  perform clara._agent_verify_inputs_digest(v_client, p_inputs_digest); -- H2
   begin
     v_res := clara._resolve_bank_line_exception_core(
       jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
@@ -4784,6 +4888,7 @@ begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
   begin
     v_res := clara._add_bank_account_core(
       jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
@@ -4838,6 +4943,7 @@ begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
   -- coa_accounts carries no independent uuid identity column suitable as a receipt subject;
   -- the receipt keys on a deterministic md5-derived uuid of (client, code), stable across
   -- replays (the standard Postgres deterministic-uuid idiom; md5 always returns exactly 32
@@ -4898,6 +5004,7 @@ begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
 
   select exists (
       select 1 from clara.bank_match_line_members m
@@ -4967,6 +5074,7 @@ begin
   select l.firm_id, l.client_id into v_firm, v_client from clara.bank_statement_lines l where l.id = p_line;
   if v_firm is null then raise exception 'statement line not found' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(v_client, v_firm);
+  perform clara._agent_verify_inputs_digest(v_client, p_inputs_digest); -- H2
   if p_kind is null or p_kind not in ('bank_error','disputed') then
     raise exception 'a proposed exception kind must be bank_error or disputed'
       using errcode='CLR10',detail='{"reason":"kind_malformed"}';
@@ -5024,6 +5132,7 @@ begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
   if p_identifier_kind is null or p_identifier_kind not in ('tin','ssm','bank_account') then
     raise exception 'identifier_kind must be one of tin/ssm/bank_account (the client_identifiers catalog)'
       using errcode='CLR10',detail='{"reason":"identifier_kind_malformed"}';
@@ -5087,11 +5196,27 @@ grant execute on function clara.wake_propose_identifier_promotion(uuid,uuid,text
 -- shape, and inventing one is a judgement call this file does not make) — both report
 -- `"not_implemented": true` rather than a fabricated or silently empty value. Lines/candidates/
 -- open items/open proposals are real reads through the estate's own surfaces.
+--
+-- H2 VERIFICATION FINDING (this lane, same session as the cross-model round, caught only once
+-- this verb was actually EXERCISED through a real wake credential -- no prior cell in this file's
+-- own battery had ever called it for real): the lines/candidates reads below used to go through
+-- the PUBLIC clara.list_unmatched_lines / clara.list_bank_match_candidates -- both call
+-- `clara._human_ctx()` internally (0038/0040's own bookkeeper-floor gate), which a wake-credential
+-- session has no JWT for, so this verb raised CLR04 "no authenticated actor" on every real call
+-- and could never actually be reached by the agent lane it exists for. The SAME public-call
+-- hazard class (J.2-a) already fixed on nine other bodies elsewhere in this file. Neither public
+-- read has a `_core` split to repoint to (unlike the extracted write verbs), so the equivalent
+-- SELECTs are inlined here instead, scoped by v_firm/p_client/p_bank_account this core already
+-- holds -- same predicates, same shape, byte-identical business logic, just without the human
+-- gate. list_unmatched_lines's own filter also gets a real bank_account_id scope in the process:
+-- the original three-way OR (`... or (to_jsonb(x) ? 'bank_account_id') is false`) never matched
+-- anything meaningful once list_unmatched_lines' own single jsonb array return was iterated as
+-- ONE row, not many -- measured, not assumed, while rewriting this block.
 create function clara._agent_get_bank_pack_core(p_client uuid, p_bank_account uuid,
     p_rationale text, p_model jsonb, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  v_firm uuid; v_acct jsonb; v_stmt jsonb; v_lines jsonb; v_cands jsonb;
+  v_firm uuid; v_acct jsonb; v_stmt jsonb; v_lines jsonb; v_cands jsonb; v_coa text;
   v_items jsonb; v_proposals jsonb; v_digest text; v_pack jsonb;
 begin
   select firm_id into v_firm from clara.clients where id = p_client;
@@ -5100,15 +5225,68 @@ begin
   select to_jsonb(a) into v_acct from clara.bank_accounts a
     where a.id = p_bank_account and a.client_id = p_client and a.firm_id = v_firm;
   if v_acct is null then raise exception 'bank account not found for this client' using errcode='CLR11'; end if;
+  v_coa := v_acct->>'coa_account_code';
   select to_jsonb(s) into v_stmt from clara.bank_statements s
     where s.bank_account_id = p_bank_account and s.status = 'live'
     order by s.period_end desc limit 1;
-  select coalesce(jsonb_agg(x), '[]'::jsonb) into v_lines
-    from clara.list_unmatched_lines(p_client) x
-    where (to_jsonb(x)->>'bank_account_id')::uuid = p_bank_account
-       or (to_jsonb(x) ? 'bank_account_id') is false;
-  select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) into v_cands
-    from clara.list_bank_match_candidates(p_client, p_bank_account) x;
+  -- list_unmatched_lines' own body, verbatim predicates, scoped additionally to p_bank_account.
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'line_id', l.id, 'statement_id', l.statement_id, 'bank_account_id', l.bank_account_id,
+      'bank_account_display', ba.bank_name_display || ' ' || ba.account_number,
+      'line_no', l.line_no, 'entry_date', l.entry_date, 'value_date', l.value_date,
+      'description', l.description, 'amount_cents', l.amount_cents,
+      'class_hint', clara._bank_line_class_hint(l.description))
+      order by l.entry_date, l.id), '[]'::jsonb) into v_lines
+    from clara.bank_statement_lines l
+    join clara.bank_statements s on s.id = l.statement_id
+    join clara.bank_accounts ba on ba.id = l.bank_account_id
+    where l.firm_id = v_firm and l.client_id = p_client and l.bank_account_id = p_bank_account
+      and s.status = 'live'
+      and not exists (select 1 from clara.bank_match_line_members m
+        where m.line_id = l.id and m.group_status in ('pending', 'live'))
+      and not coalesce((select (e.status = 'open'
+                                or e.resolution_disposition = 'bank_corrective_line')
+                          from clara.bank_line_exceptions e
+                         where e.line_id = l.id
+                         order by (e.status = 'open') desc, e.created_at desc, e.id desc
+                         limit 1), false);
+  -- list_bank_match_candidates' own body, verbatim predicates.
+  select coalesce(jsonb_agg(t.row_j order by t.posting_date desc), '[]'::jsonb) into v_cands
+    from (
+      select je.posting_date, jsonb_build_object(
+        'entry_id', je.id, 'posting_date', je.posting_date, 'memo', je.memo,
+        'coding_kind', je.coding_kind,
+        'counterparty_id', (select min(jl2.counterparty_id::text)::uuid from clara.journal_lines jl2
+           where jl2.entry_id = je.id and jl2.counterparty_id is not null),
+        'high_stakes', false,
+        'debit_remaining_cents', greatest(0,
+          (select coalesce(sum(jl.debit_cents), 0) from clara.journal_lines jl
+            where jl.entry_id = je.id and jl.account_code = v_coa)
+          - (select coalesce(sum(em.matched_cents), 0)
+             from clara.bank_match_entry_members em
+             join clara.bank_matches bm on bm.id = em.match_id
+             join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+             where em.entry_id = je.id and em.matched_cents > 0
+               and bm.status in ('pending','live')
+               and ba2.coa_account_code = v_coa and ba2.client_id = p_client)),
+        'credit_remaining_cents', greatest(0,
+          (select coalesce(sum(jl.credit_cents), 0) from clara.journal_lines jl
+            where jl.entry_id = je.id and jl.account_code = v_coa)
+          - (select coalesce(sum(-em.matched_cents), 0)
+             from clara.bank_match_entry_members em
+             join clara.bank_matches bm on bm.id = em.match_id
+             join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+             where em.entry_id = je.id and em.matched_cents < 0
+               and bm.status in ('pending','live')
+               and ba2.coa_account_code = v_coa and ba2.client_id = p_client))) as row_j
+      from clara.journal_entries je
+      where je.firm_id = v_firm and je.client_id = p_client
+        and je.status = 'approved' and je.reversed_by is null and je.reversal_of is null
+        and exists (select 1 from clara.journal_lines jl
+          where jl.entry_id = je.id and jl.account_code = v_coa
+            and (jl.debit_cents <> 0 or jl.credit_cents <> 0))
+    ) t where (t.row_j->>'debit_remaining_cents')::bigint > 0
+           or (t.row_j->>'credit_remaining_cents')::bigint > 0;
   select coalesce(jsonb_agg(to_jsonb(i) order by i.item_date), '[]'::jsonb) into v_items
     from clara.open_items i where i.client_id = p_client;
   select coalesce(jsonb_agg(jsonb_build_object('id', pr.id, 'kind', pr.kind,
@@ -5194,6 +5372,7 @@ begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
 
   select array_agg(distinct x.lid) into v_line_ids
     from (select (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end)::uuid as lid
@@ -5239,8 +5418,15 @@ begin
       v_vec := v_vec || jsonb_build_object('tie_nonzero','pass');
     end if;
 
-    if v_coa is not null then
-      if exists (
+    -- M7 (cross-model review, HEAD d5e5dc6): an adjustment-only match names NO candidate entry
+    -- at all, so v_entry_cents is a vacuous 0 -- the EXISTS probe below can never fire on it
+    -- (0 is neither >0 nor <0), so it silently reported 'pass' having verified nothing. ARM-0
+    -- (law 68): the absence of a proposed entry is not evidence of no ambiguity.
+    if v_coa is null then
+      v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','not_evaluable'); v_admit := false;
+    elsif v_entry_ids is null or array_length(v_entry_ids, 1) is null then
+      v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','not_evaluable'); v_admit := false;
+    elsif exists (
         select 1 from clara.journal_entries je
           cross join lateral clara._bank_entry_side_capacity(je.id, v_coa) cap2
          where je.client_id = p_client and je.firm_id = v_firm and je.status = 'approved'
@@ -5249,12 +5435,9 @@ begin
            and ((v_entry_cents > 0 and cap2.dr_cents = v_entry_cents)
                 or (v_entry_cents < 0 and cap2.cr_cents = -v_entry_cents))
       ) then
-        v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','fail'); v_admit := false;
-      else
-        v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','pass');
-      end if;
+      v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','fail'); v_admit := false;
     else
-      v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','not_evaluable'); v_admit := false;
+      v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','pass');
     end if;
 
     if exists (
@@ -5406,12 +5589,13 @@ declare
   v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
   ln record; st record; v_cp uuid; v_cp_kind text; v_domain text;
   v_vec jsonb := '{}'::jsonb; v_admit boolean := true;
-  v_other_id_hit boolean; v_own_id_hit boolean; v_collision_n int;
+  v_other_id_hit boolean; v_own_id_hit boolean; v_collision_ids uuid[];
   v_adjs jsonb;
 begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
 
   select l.*, s.period_start, s.period_end, s.status as stmt_status
     into ln from clara.bank_statement_lines l join clara.bank_statements s on s.id = l.statement_id
@@ -5436,10 +5620,16 @@ begin
       v_vec := v_vec || jsonb_build_object('line_excepted','pass');
     end if;
 
-    -- M4 payer_identifier_contradiction (NEW). A printed TIN/registration number in the line's
-    -- description that resolves to a DIFFERENT counterparty than the one chosen is a
-    -- contradiction; with no recognisable identifier at all, not_evaluable (never pass) --
-    -- ARM-0, H.3's own stated shape.
+    -- M4 payer_identifier_contradiction (NEW; M7 min-length floor, cross-model review HEAD
+    -- d5e5dc6). A printed TIN/registration number in the line's description that resolves to a
+    -- DIFFERENT counterparty than the one chosen is a contradiction; with no recognisable
+    -- identifier at all, not_evaluable (never pass) -- ARM-0, H.3's own stated shape. The bare
+    -- `position(...) > 0` substring test had no floor: a short stored identifier (a 1-2
+    -- character registration/TIN fragment, or a coincidentally short one) could match almost
+    -- any description by sheer chance, in either direction (a false contradiction that blocks a
+    -- real settlement, or a false own-id hit that waves one through). c_min_id_len=4 mirrors the
+    -- same "genuinely distinguishing, not noise" floor M5's own stop-word length uses -- an
+    -- identifier shorter than that is treated as though it were not stored, not as a match.
     if v_cp is null then
       v_vec := v_vec || jsonb_build_object('payer_identifier_contradiction','not_evaluable'); v_admit := false;
     else
@@ -5447,20 +5637,24 @@ begin
           select 1 from clara.counterparties cp2
            where cp2.client_id = p_client and cp2.firm_id = v_firm and cp2.id <> v_cp
              and cp2.retired_at is null and cp2.merged_into is null
-             and ((cp2.registration_normalized is not null
+             and ((nullif(cp2.registration_normalized, '') is not null
+                   and length(cp2.registration_normalized) >= 4
                    and position(cp2.registration_normalized in
                         lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0)
                   or (nullif(btrim(cp2.tin),'') is not null
+                      and length(regexp_replace(cp2.tin,'[^a-zA-Z0-9]','','g')) >= 4
                       and position(lower(regexp_replace(cp2.tin,'[^a-zA-Z0-9]','','g')) in
                            lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0))
         ),
         exists (
           select 1 from clara.counterparties cp3
            where cp3.id = v_cp
-             and ((cp3.registration_normalized is not null
+             and ((nullif(cp3.registration_normalized, '') is not null
+                   and length(cp3.registration_normalized) >= 4
                    and position(cp3.registration_normalized in
                         lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0)
                   or (nullif(btrim(cp3.tin),'') is not null
+                      and length(regexp_replace(cp3.tin,'[^a-zA-Z0-9]','','g')) >= 4
                       and position(lower(regexp_replace(cp3.tin,'[^a-zA-Z0-9]','','g')) in
                            lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0))
         )
@@ -5474,26 +5668,54 @@ begin
       end if;
     end if;
 
-    -- M5 counterparty_collision (NEW). Any significant word (3+ alnum chars) shared between the
-    -- line's description and MORE THAN ONE live counterparty's name is a name-family collision
-    -- (the ROME-family case) -- refused so a human disambiguates.
-    select count(distinct cp4.id) into v_collision_n
+    -- M5 counterparty_collision (H3 recut, cross-model review HEAD d5e5dc6). Any GENUINELY
+    -- distinguishing word (3+ alnum chars, corporate-suffix/generic-business stop-worded --
+    -- the SAME list clara._binding_f1_floor_holds carries (0030 section A), reused verbatim
+    -- rather than inventing a second tokenizer) shared between the line's description and a
+    -- live counterparty's name puts that counterparty in the CANDIDATE SET. The rung passes
+    -- ONLY when the candidate set is EXACTLY {the selected counterparty}: the original
+    -- count-only check let a SOLE candidate through regardless of WHICH counterparty it named,
+    -- so a sole match on the WRONG counterparty silently passed -- now it fails just as loudly
+    -- as a genuine multi-way collision (the ROME-family case), because both are "the candidate
+    -- set is not just the one selected". A candidate set of zero -- the description names no
+    -- counterparty at all -- is not_evaluable, never a silent pass (law 68, ARM-0): absence of
+    -- textual evidence is not evidence of no collision.
+    select coalesce(array_agg(distinct cp4.id), '{}'::uuid[]) into v_collision_ids
       from clara.counterparties cp4,
            (select distinct lower(w) as w from regexp_split_to_table(coalesce(ln.description,''), '[^A-Za-z0-9]+') w
-             where length(w) >= 3) words
+             where length(w) >= 3
+               and lower(w) not in (
+                 'sdn','bhd','pte','ltd','inc','llc','corp','plc',
+                 'berhad','sendirian','bumiputera',
+                 'the','and','of','for','group','trading','holdings',
+                 'enterprise','enterprises','company','resources','services'
+               )) words
      where cp4.client_id = p_client and cp4.firm_id = v_firm
        and cp4.retired_at is null and cp4.merged_into is null
        and cp4.name ~* ('(?:^|[^a-zA-Z0-9])' || clara._bank_rule_regex_escape(words.w) || '(?:[^a-zA-Z0-9]|$)');
-    if coalesce(v_collision_n,0) > 1 then
-      v_vec := v_vec || jsonb_build_object('counterparty_collision','fail'); v_admit := false;
-    else
+    if array_length(v_collision_ids, 1) is null then
+      v_vec := v_vec || jsonb_build_object('counterparty_collision','not_evaluable'); v_admit := false;
+    elsif array_length(v_collision_ids, 1) = 1 and v_collision_ids[1] = v_cp then
       v_vec := v_vec || jsonb_build_object('counterparty_collision','pass');
+    else
+      v_vec := v_vec || jsonb_build_object('counterparty_collision','fail'); v_admit := false;
     end if;
 
     -- M6 unexplained_inflow (NEW), the loan-vs-settlement backstop -- scoped to the AR
-    -- (inflow) domain only, per §3.3's M6 prose. "Document anchor" carries no independent
-    -- parameter on this verb's signature and is folded into "no open item absorbs it" here,
-    -- documented as a stated simplification.
+    -- (inflow) domain only, per §3.3's M6 prose. M7 (cross-model review, HEAD d5e5dc6) asked
+    -- for the document-anchor arm the design admits ("no open item, no document anchor, no
+    -- counterparty resolution"); it is DELIBERATELY STILL ABSENT, named here rather than
+    -- fabricated. Annex A.1's own wake_settle_from_bank_line signature carries no
+    -- document-reference argument, and no existing table links a document to a SPECIFIC
+    -- counterparty/settlement the way this rung would need (document_filings has client_id, not
+    -- counterparty_id; the vendor-identity-binding registration trail is vendor-domain only, not
+    -- reachable for an AR customer). Measured, not assumed: adding this arm honestly needs
+    -- either an ABI addition (a document-reference parameter) or a genuinely new
+    -- counterparty<->document linkage this PR has no mandate to invent -- an OWNER DECISION,
+    -- flagged for the next PR rather than guessed at here. Today's rung is narrower than the
+    -- design's three-way disjunction (open item OR document anchor OR counterparty resolution):
+    -- it checks only "no open item", which is STRICTER than the design (refuses some acts a
+    -- document anchor would have admitted), never laxer -- the safe direction to be wrong in.
     if v_domain = 'ar' and (p_allocations is null or jsonb_typeof(p_allocations) <> 'array'
                              or jsonb_array_length(p_allocations) = 0) then
       v_vec := v_vec || jsonb_build_object('unexplained_inflow','fail'); v_admit := false;
@@ -5608,6 +5830,7 @@ begin
   select firm_id, client_id into v_firm, v_client from clara.bank_statements where id = p_statement;
   if v_firm is null then raise exception 'bank statement not found' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(v_client, v_firm);
+  perform clara._agent_verify_inputs_digest(v_client, p_inputs_digest); -- H2
   begin
     v_res := clara._complete_bank_reconciliation_core(
       jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
@@ -5673,11 +5896,12 @@ create function clara._agent_resolve_and_book_core(p_client uuid, p_exception uu
     p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text,
     p_ack_period_exceptions boolean) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text; v_match uuid; v_act text;
 begin
   select firm_id into v_firm from clara.clients where id = p_client;
   if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
   perform clara._agent_bank_tier_a(p_client, v_firm);
+  perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
   begin
     v_res := clara._resolve_and_book_bank_line_core(
       jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
@@ -5692,6 +5916,25 @@ begin
       p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','refused','errcode',v_state,'reason',v_reason));
     return jsonb_build_object('status','refused','reason',v_reason,'exception_id',p_exception);
   end;
+  -- C1 (cross-model review, HEAD d5e5dc6, CRITICAL): _resolve_and_book_bank_line_core creates
+  -- an agent-origin clara.bank_matches row on EVERY successful call, through EITHER
+  -- _match_bank_line_core (leg='draft') or _settle_from_bank_line_core (leg='settle') -- both
+  -- threaded is_agent=true above -- and the deferred wall t_bank_match_agent_receipt demands
+  -- exactly one ADMITTED match/settle-keyed bank_agent_receipts row for THAT match before
+  -- commit. The exception_resolve receipt below is keyed to the EXCEPTION, never the match, so
+  -- without this every successful agent resolution rolled back at commit with CLR08 -- a defect
+  -- this file's own battery never reached, because none of its cells let a resolve-and-book
+  -- call actually COMMIT. Suffixed op_key: bank_agent_receipts.op_key is table-wide unique and
+  -- the exception_resolve receipt below already claims the bare p_op_key, mirroring this same
+  -- core's own internal ':match'/':settle' sub-call suffixing two lines above (different
+  -- namespace, same convention).
+  v_match := nullif(v_res->>'match_id','')::uuid;
+  if v_match is not null then
+    v_act := case when v_res->>'leg' = 'draft' then 'match' else 'settle' end;
+    perform clara._agent_bank_receipt(v_firm, p_client, v_act, 'admitted', v_match,
+      p_rationale, p_model, p_inputs_digest, p_op_key || ':' || v_act,
+      jsonb_build_object('verdict','admitted','branch',v_res->>'branch','leg',v_res->>'leg'));
+  end if;
   perform clara._agent_bank_receipt(v_firm, p_client, 'exception_resolve', 'admitted', p_exception,
     p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','admitted'));
   return v_res;
@@ -5830,14 +6073,18 @@ begin
   -- Zero-grant pin: none of the ten CoR'd bodies (all ungranted cores/triggers/the mint verb's
   -- own floor) picked up a stray EXECUTE grant to any non-owner role as a side effect of
   -- CREATE OR REPLACE (which preserves existing grants — this asserts none NEW were added by
-  -- this file, since this file issues no GRANT statement on any of the ten).
+  -- this file, since this file issues no GRANT statement on any of the ten). M9 (cross-model
+  -- review, HEAD d5e5dc6, test honesty): the original predicate excluded `a.grantee = 0`
+  -- (PUBLIC) from the count, so a stray PUBLIC grant on any of these four would have been
+  -- INVISIBLE to this exact census -- the census's own job is "zero unexpected grantee", and
+  -- PUBLIC is a grantee. Removed; PUBLIC now counts like any named role.
   select count(*)::int into v_n
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
       lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
     where n.nspname = 'clara' and p.proname in
       ('_bank_match_adjustment_entry','_settle_from_bank_line_core','_allocate_receipt_core',
        '_allocate_payment_core')
-      and a.grantee <> 0 and a.grantee <> p.proowner;
+      and a.grantee <> p.proowner;
   if v_n <> 0 then
     raise exception 'tail: % unexpected grantee(s) on the ungranted settle-limb cores', v_n using errcode='CLR10';
   end if;
@@ -6000,12 +6247,14 @@ begin
     raise exception 'tail2: expected all 13 wake_* wrappers to resolve as SECURITY DEFINER owned by clara_fn_owner, found %', v_n using errcode='CLR10';
   end if;
   -- Each wrapper is EXECUTE-granted to clara_wake_bank and to NO OTHER role (PUBLIC included) --
-  -- the closed-world grantee cell.
+  -- the closed-world grantee cell. M9 (cross-model review, HEAD d5e5dc6): this comment already
+  -- claimed "PUBLIC included" but the predicate excluded `a.grantee = 0` (PUBLIC) from the
+  -- count, so it never actually checked the thing it claimed to. Removed.
   select count(*)::int into v_n
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
       lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
     where n.nspname = 'clara' and p.proname = any(v_wrap)
-      and a.grantee <> 0 and a.privilege_type = 'EXECUTE'
+      and a.privilege_type = 'EXECUTE'
       and a.grantee <> p.proowner and a.grantee <> 'clara_wake_bank'::regrole;
   if v_n <> 0 then
     raise exception 'tail2: % unexpected EXECUTE grantee(s) on the wake wrappers besides clara_wake_bank', v_n using errcode='CLR10';
@@ -6033,10 +6282,12 @@ begin
   if v_n <> 13 then
     raise exception 'tail2: expected all 13 agent cores to resolve as SECURITY DEFINER owned by clara_fn_owner, found %', v_n using errcode='CLR10';
   end if;
+  -- M9 (cross-model review, HEAD d5e5dc6): same PUBLIC-blind-spot class as the wrapper cell
+  -- above and the settle-limb cell earlier -- `a.grantee <> 0` removed, PUBLIC counts.
   select count(*)::int into v_n
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
       lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
-    where n.nspname = 'clara' and p.proname = any(v_core) and a.grantee <> 0 and a.grantee <> p.proowner;
+    where n.nspname = 'clara' and p.proname = any(v_core) and a.grantee <> p.proowner;
   if v_n <> 0 then
     raise exception 'tail2: % unexpected grantee(s) on the 13 agent cores (must be ZERO -- the ungranted-core half of the seam)', v_n using errcode='CLR10';
   end if;

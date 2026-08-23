@@ -31,7 +31,7 @@ import {
   addBankAccount, enterStatement, matchBankLine,
 } from "./x38-match-fixtures.mjs";
 import { wakeQuery, roleQuery, ROLES } from "./rig-helpers.mjs";
-import { WAKE_ROLE, RATIONALE, MODEL, mintCred, callWrapper, approvedEntry } from "./f-a3-pr1b-wake-fixtures.mjs";
+import { WAKE_ROLE, RATIONALE, MODEL, mintCred, callWrapper, approvedEntry, realDigest } from "./f-a3-pr1b-wake-fixtures.mjs";
 
 let ready38 = false;
 let hasWakeVerbs = false;
@@ -227,11 +227,12 @@ test("f31w.g replay: the same op_key returns the stored receipt byte-identically
     opening: 0, specs: [{ entryDate: "2026-07-20", amountCents: 100, description: "f31w.g clean" }],
   });
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digest = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-g-pack"));
   const key = opk("f31w-g-replay");
   const specs = [
     { name: "p_client", cast: "uuid" }, { name: "p_statement", cast: "uuid" }, { name: "p_reason" },
     { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
-  const vals = [world.clients.A1, stmt.statementId, "f31w.g void", RATIONALE, JSON.stringify(MODEL), "d", key];
+  const vals = [world.clients.A1, stmt.statementId, "f31w.g void", RATIONALE, JSON.stringify(MODEL), digest, key];
   const first = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs), vals);
   assert.notEqual(first.rows[0].r.status, "refused", `the first call must be admitted: ${JSON.stringify(first.rows[0].r)}`);
   const second = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs), vals);
@@ -285,11 +286,12 @@ test("f31w.h M14: an unmatch that a LATER complete reconciliation depends on ref
      from terms, cutoff, clara.bank_statements st where st.id = $4`,
     [firm, world.clients.A1, bankAcct.A1.primary, laterStmt.statementId, BANKCOA1, world.users.alice]);
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestH = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-h-pack"));
   const r = await wakeQuery(WAKE_ROLE, cred.secret,
     callWrapper("wake_unmatch_bank_match", [
       { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
       { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
-    [world.clients.A1, match.match_id, "f31w.h unmatch", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-h")]);
+    [world.clients.A1, match.match_id, "f31w.h unmatch", RATIONALE, JSON.stringify(MODEL), digestH, opk("f31w-h")]);
   const res = r.rows[0].r;
   assert.equal(res.status, "refused", "M14 refuses the unmatch");
   assert.equal(res.reason, "later_reconciliation_depends", "the receipt names later_reconciliation_depends");
@@ -311,11 +313,12 @@ test("f31w.i M15: voiding a statement carrying a live match refuses; a clean sta
     client: world.clients.A1, lines: [line], entries: [{ entry_id: entryId, matched_cents: 4400 }],
   });
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestI = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-i-pack"));
   const specs = [
     { name: "p_client", cast: "uuid" }, { name: "p_statement", cast: "uuid" }, { name: "p_reason" },
     { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
   const r1 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs),
-    [world.clients.A1, stmt.statementId, "f31w.i void", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-i1")]);
+    [world.clients.A1, stmt.statementId, "f31w.i void", RATIONALE, JSON.stringify(MODEL), digestI, opk("f31w-i1")]);
   assert.equal(r1.rows[0].r.status, "refused", "M15 refuses voiding a statement with a live match");
   assert.equal(r1.rows[0].r.reason, "statement_has_live_matches");
   // The negative twin -- a clean statement (no match at all) voids, even one she did not file
@@ -325,7 +328,7 @@ test("f31w.i M15: voiding a statement carrying a live match refuses; a clean sta
     opening: 0, specs: [{ entryDate: "2026-07-06", amountCents: 100, description: "f31w.i clean" }],
   });
   const r2 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_void_bank_statement", specs),
-    [world.clients.A1, cleanStmt.statementId, "f31w.i clean void", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-i2")]);
+    [world.clients.A1, cleanStmt.statementId, "f31w.i clean void", RATIONALE, JSON.stringify(MODEL), digestI, opk("f31w-i2")]);
   assert.notEqual(r2.rows[0].r.status, "refused", `a clean statement voids: ${JSON.stringify(r2.rows[0].r)}`);
 });
 
@@ -346,13 +349,14 @@ test("f31w.j M3 (NEW): a second candidate entry tying the SAME amount refuses sa
     memo: "f31w.j rival", bankCoa: BANKCOA1, otherCoa: REVN, cents: 9900,
   });
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestJ = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-j-pack"));
   const r = await wakeQuery(WAKE_ROLE, cred.secret,
     callWrapper("wake_match_bank_line", [
       { name: "p_client", cast: "uuid" }, { name: "p_lines", cast: "jsonb" }, { name: "p_entries", cast: "jsonb" },
       { name: "p_adjustments", cast: "jsonb" }, { name: "p_ack_period_exceptions" },
       { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
     [world.clients.A1, JSON.stringify([line]), JSON.stringify([{ entry_id: chosenId, matched_cents: 9900 }]),
-     null, false, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-j")]);
+     null, false, RATIONALE, JSON.stringify(MODEL), digestJ, opk("f31w-j")]);
   const res = r.rows[0].r;
   assert.equal(res.status, "refused", "M3 refuses when a second candidate ties equally");
   assert.equal(res.rung_vector?.same_amount_ambiguous, "fail", "the vector names same_amount_ambiguous");
@@ -374,6 +378,7 @@ test("f31w.k/l M4 (NEW): a printed identifier for a DIFFERENT counterparty refus
     opening: 0, specs: [{ entryDate: "2026-07-12", amountCents: 5500, description: "REF TIN 201599887766" }],
   });
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestKL = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-kl-pack"));
   const specs = [
     { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
     { name: "p_allocations", cast: "jsonb" }, { name: "p_memo" }, { name: "p_posting_date", cast: "date" },
@@ -382,7 +387,7 @@ test("f31w.k/l M4 (NEW): a printed identifier for a DIFFERENT counterparty refus
     { name: "p_inputs_digest" }, { name: "p_op_key" }];
   const r1 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", specs),
     [world.clients.A1, stmt.lines[0].id, chosenCp.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 5500 }]),
-     "f31w.k memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-k")]);
+     "f31w.k memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestKL, opk("f31w-k")]);
   assert.equal(r1.rows[0].r.status, "refused", "M4 refuses a contradicting printed identifier");
   assert.equal(r1.rows[0].r.rung_vector?.payer_identifier_contradiction, "fail");
 
@@ -392,7 +397,7 @@ test("f31w.k/l M4 (NEW): a printed identifier for a DIFFERENT counterparty refus
   });
   const r2 = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", specs),
     [world.clients.A1, stmt2.lines[0].id, chosenCp.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 3300 }]),
-     "f31w.l memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-l")]);
+     "f31w.l memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestKL, opk("f31w-l")]);
   assert.equal(r2.rows[0].r.status, "refused", "with no identifier at all the vector is still non-empty");
   assert.equal(r2.rows[0].r.rung_vector?.payer_identifier_contradiction, "not_evaluable", "ARM-0: not_evaluable, never pass");
 });
@@ -413,6 +418,7 @@ test("f31w.m M5 (NEW): a name-family collision (two ROME-like counterparties) re
     opening: 0, specs: [{ entryDate: "2026-07-14", amountCents: 2200, description: "TRF ROME PAYMENT" }],
   });
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestM = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-m-pack"));
   const r = await wakeQuery(WAKE_ROLE, cred.secret,
     callWrapper("wake_settle_from_bank_line", [
       { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
@@ -421,7 +427,7 @@ test("f31w.m M5 (NEW): a name-family collision (two ROME-like counterparties) re
       { name: "p_control_account" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
       { name: "p_inputs_digest" }, { name: "p_op_key" }]),
     [world.clients.A1, stmt.lines[0].id, cpA.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 2200 }]),
-     "f31w.m memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-m")]);
+     "f31w.m memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestM, opk("f31w-m")]);
   assert.equal(r.rows[0].r.status, "refused", "M5 refuses on a name-family collision");
   assert.equal(r.rows[0].r.rung_vector?.counterparty_collision, "fail");
 });
@@ -438,6 +444,7 @@ test("f31w.n M6 (NEW): an AR inflow with NO open item absorbing it refuses unexp
     opening: 0, specs: [{ entryDate: "2026-07-16", amountCents: 6600, description: "UNKNOWN INFLOW" }],
   });
   const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestN = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-n-pack"));
   const r = await wakeQuery(WAKE_ROLE, cred.secret,
     callWrapper("wake_settle_from_bank_line", [
       { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
@@ -447,9 +454,97 @@ test("f31w.n M6 (NEW): an AR inflow with NO open item absorbing it refuses unexp
       { name: "p_inputs_digest" }, { name: "p_op_key" }]),
     // p_allocations = [] -- no open item absorbs the inflow.
     [world.clients.A1, stmt.lines[0].id, cp.rows[0].id, "[]",
-     "f31w.n memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-n")]);
+     "f31w.n memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestN, opk("f31w-n")]);
   assert.equal(r.rows[0].r.status, "refused", "M6 refuses an unabsorbed AR inflow");
   assert.equal(r.rows[0].r.rung_vector?.unexplained_inflow, "fail");
+});
+
+// H3 (cross-model review, HEAD d5e5dc6): M5 was a bare candidate-count check -- a SOLE candidate
+// passed regardless of WHICH counterparty it named, so a sole match on the WRONG counterparty
+// silently passed. The recut requires the candidate set to be EXACTLY {the selected
+// counterparty}, stop-words the corporate suffixes (the SAME list clara._binding_f1_floor_holds
+// carries), and makes the zero-candidate arm explicit (not_evaluable, never a silent pass).
+// These three cells share the settle-leg shape f31w.m/f31w.n already use (a fake open_item id --
+// the rung is computed and returned in rung_vector before any allocation is actually walked).
+const SETTLE_SPECS = [
+  { name: "p_client", cast: "uuid" }, { name: "p_line", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
+  { name: "p_allocations", cast: "jsonb" }, { name: "p_memo" }, { name: "p_posting_date", cast: "date" },
+  { name: "p_charge_cents", cast: "bigint" }, { name: "p_charge_account" }, { name: "p_adjustments", cast: "jsonb" },
+  { name: "p_control_account" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+  { name: "p_inputs_digest" }, { name: "p_op_key" }];
+
+test("f31w.r H3(a): a SOLE candidate that is NOT the selected counterparty refuses (the wrong-candidate hit)", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  // WRONGCO itself is never referenced by id below -- it only needs to EXIST so the description's
+  // "WRONGCO" word resolves to a real candidate.
+  await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','WRONGCO ENTERPRISES SDN BHD','wrongcoenterprisessdnbhd',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  const selected = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','F31W R Selected Customer','f31wrselectedcustomer',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-18", amountCents: 3300, description: "TRF WRONGCO PAYMENT" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestR = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-r-pack"));
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", SETTLE_SPECS),
+    [world.clients.A1, stmt.lines[0].id, selected.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 3300 }]),
+      "f31w.r memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestR, opk("f31w-r")]);
+  assert.equal(r.rows[0].r.status, "refused", "the description names WRONGCO by word, but the SELECTED counterparty is someone else");
+  assert.equal(r.rows[0].r.rung_vector?.counterparty_collision, "fail",
+    "a sole candidate that isn't the selected counterparty is a wrong-candidate hit, not an absence of collision");
+});
+
+test("f31w.s H3(b): two Sdn Bhd counterparties -- ACME passes once SDN/BHD are stop-worded, not treated as distinguishing", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const acme = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','ACME SDN BHD','acmesdnbhd',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','GLOBAL SDN BHD','globalsdnbhd',$3)`,
+    [firm, world.clients.A1, world.users.alice]);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-19", amountCents: 4400, description: "PYMT ACME SDN BHD" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestS = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-s-pack"));
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", SETTLE_SPECS),
+    [world.clients.A1, stmt.lines[0].id, acme.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 4400 }]),
+      "f31w.s memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestS, opk("f31w-s")]);
+  // "SDN"/"BHD" are shared by BOTH counterparties' names -- pre-recut they made this a false
+  // two-way collision. Stop-worded, only "ACME" is a distinguishing word, and it names one
+  // counterparty alone -- the candidate set is exactly {the selected counterparty}.
+  assert.equal(r.rows[0].r.rung_vector?.counterparty_collision, "pass",
+    `M5 must pass: SDN/BHD are common corporate suffixes, not a genuine name-family collision (${JSON.stringify(r.rows[0].r.rung_vector)})`);
+});
+
+test("f31w.t H3(c): a description naming no counterparty at all is not_evaluable, never a silent pass", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cp = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','F31W T Unrelated Client','f31wtunrelatedclient',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-20", amountCents: 5500, description: "INTERBANK TRANSFER" }],
+  });
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestT = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-t-pack"));
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", SETTLE_SPECS),
+    [world.clients.A1, stmt.lines[0].id, cp.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 5500 }]),
+      "f31w.t memo", null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestT, opk("f31w-t")]);
+  assert.equal(r.rows[0].r.rung_vector?.counterparty_collision, "not_evaluable",
+    `a description that names no counterparty at all is ARM-0, not a pass (${JSON.stringify(r.rows[0].r.rung_vector)})`);
 });
 
 // ===========================================================================
@@ -492,4 +587,102 @@ test("f31w.p the Tier-C wall: an unlisted-but-typed reason re-raises out of the 
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
     ["x", "CLR11", '{"reason":"already_matched"}']);
   assert.equal(wrongCode.rows[0].r, null, "a listed reason under the WRONG errcode still re-raises (pairs, not bare reasons)");
+  // H5 (cross-model review, HEAD d5e5dc6): the eleven recon_ literals are an EXACT-STRING closed
+  // list now, not a `like 'recon\_%'` prefix match -- an invented, unlisted recon_-prefixed
+  // reason must re-raise exactly like any other unlisted reason, proving the wildcard is really
+  // gone and not merely narrowed to a smaller wildcard.
+  const listedRecon = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR10", '{"reason":"recon_difference_nonzero"}']);
+  assert.equal(listedRecon.rows[0].r, "recon_difference_nonzero", "a real, listed recon_ literal still converts");
+  const unlistedRecon = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR10", '{"reason":"recon_this_reason_was_never_enumerated"}']);
+  assert.equal(unlistedRecon.rows[0].r, null,
+    "an INVENTED recon_-prefixed reason, never one of the eleven, re-raises -- the prefix match is gone, not just narrowed");
+});
+
+// C1 (cross-model review, HEAD d5e5dc6, CRITICAL): _resolve_and_book_bank_line_core creates an
+// agent-origin bank_matches row on its DRAFT leg, and the deferred wall t_bank_match_agent_receipt
+// demands exactly one ADMITTED match/settle-keyed bank_agent_receipts row for it before commit.
+// Every earlier cell in this file only checked the RETURNED status, never whether the call
+// actually SURVIVED COMMIT -- a deferred-trigger rollback is invisible to a cell that stops
+// looking the moment await resolves cleanly. This one asserts the positive, independent, POST-
+// COMMIT read (review laws 2/3): if the wall still finds nothing, THIS AWAIT ITSELF THROWS CLR08,
+// failing the cell loudly rather than quietly returning a refusal shape.
+//
+// VERIFICATION FOUND TWO MORE, IN SEQUENCE, ONLY BY ACTUALLY LETTING THIS CALL REACH COMMIT:
+// (1) FIXED, this lane's own pass: the draft leg's _approve_entry_core call was preheld
+//     (receipt_preheld=true) but nothing wrote the promised F-A2 entry_post_receipts row, so
+//     t_je_agent_post_receipt (a DIFFERENT deferred wall, unrelated to C1's own bank-domain one)
+//     aborted every successful draft-leg resolve-and-book too. Fixed alongside C1 in the
+//     migration (the same _approve_entry_core call site, the SAME class of promise-broken bug).
+// (2) STILL RED, NOT MINE TO FIX: 0040's OWN pre-existing t_bank_recon_belt-family authority
+//     floor on clara.bank_line_exceptions ("bank line exception % was not resolved by a firm
+//     principal; resolution is an owner act", 0040:2664) joins clara.firm_memberships WITH
+//     `u.is_agent = false` -- structurally, an agent actor can NEVER satisfy this floor, no
+//     matter what ctx is threaded through. _resolve_bank_line_exception_core (byte-unmoved,
+//     PR-1a's own extraction, untouched by this file) stamps resolved_by = c.actor, and for the
+//     agent lane c.actor IS the agent's own user id. This means wake_resolve_bank_line_exception
+//     AND this composite's own exception-resolution step can NEVER actually commit an exception
+//     into 'resolved' status for the agent lane as currently built -- a genuine, pre-existing
+//     (0040-era) product/authority-model conflict with F-A3's own design (which built BOTH verbs
+//     assuming the agent COULD resolve), not a mechanical bug this lane can fix unilaterally.
+//     Left RED, on purpose, with the belt's own message asserted below: an owner ruling is owed
+//     on whether 0040's belt gets an agent carve-out, or whether these two verbs are refuse-only
+//     by design. Reported as its own finding, separate from the reviewed nine.
+test("f31w.q C1: resolve_and_book's draft leg genuinely COMMITS -- the deferred wall does not roll back a valid resolution", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const amount = 4400;
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-20", amountCents: amount, description: "f31w.q genuine bank error" }],
+  });
+  const exReceipt = await humanQuery(world.users.alice,
+    "select clara.except_bank_line(p_line => $1, p_kind => $2, p_reason => $3, p_op_key => $4) as r",
+    [stmt.lines[0].id, "bank_error", "f31w.q setup: a genuine bank posting error", opk("f31w-q-except")]);
+  const exId = idOf(exReceipt.rows[0].r, "exception_id", "id");
+  assert.ok(exId, "f31w.q mandatory setup: the exception was really opened");
+
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const draft = {
+    posting_date: stmt.periodEnd, memo: "f31w.q resolve-and-book",
+    lines: [
+      { account_code: BANKCOA1, debit_cents: amount, credit_cents: 0, description: "into the bank" },
+      { account_code: REVN, debit_cents: 0, credit_cents: amount, description: "sundry income" },
+    ],
+  };
+  const opKey = opk("f31w-q");
+  const digestQ = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-q-pack"));
+  const r = await wakeQuery(WAKE_ROLE, cred.secret,
+    callWrapper("wake_resolve_and_book_bank_line", [
+      { name: "p_client", cast: "uuid" }, { name: "p_exception", cast: "uuid" }, { name: "p_disposition" },
+      { name: "p_note" }, { name: "p_draft", cast: "jsonb" }, { name: "p_allocations", cast: "jsonb" },
+      { name: "p_adjustments", cast: "jsonb" }, { name: "p_advance_applications", cast: "jsonb" },
+      { name: "p_charge_cents", cast: "bigint" }, { name: "p_charge_account" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" },
+      { name: "p_ack_period_exceptions" }]),
+    [world.clients.A1, exId, "matched_booking", "f31w.q resolution note", JSON.stringify(draft),
+      null, null, null, 0, null, RATIONALE, JSON.stringify(MODEL), digestQ, opKey, false]);
+  const res = r.rows[0].r;
+  assert.equal(res?.branch, "live", `f31w.q: a small, non-high-stakes draft settles live, not pending/refused (${JSON.stringify(res)})`);
+  const matchId = res?.match_id;
+  assert.ok(matchId, "f31w.q: the composite's own return names the match it created");
+
+  // THE COMMIT PROOF: a FRESH read, after the RPC's own (single-statement) transaction has
+  // already committed, of the exact rows the deferred wall required to exist at that commit.
+  const match = await rootQuery(
+    "select origin, resolution_exception_id from clara.bank_matches where id=$1", [matchId]);
+  assert.equal(match.rows[0]?.origin, "agent", "f31w.q: the match genuinely persisted with origin=agent");
+  assert.equal(match.rows[0]?.resolution_exception_id, exId, "f31w.q: ...and carries the exception it resolved");
+  const matchReceipt = await rootQuery(
+    "select act_kind, outcome, subject_id from clara.bank_agent_receipts where op_key=$1", [`${opKey}:match`]);
+  assert.equal(matchReceipt.rows[0]?.act_kind, "match", "f31w.q: the match-keyed receipt the deferred wall required really exists");
+  assert.equal(matchReceipt.rows[0]?.outcome, "admitted");
+  assert.equal(matchReceipt.rows[0]?.subject_id, matchId, "f31w.q: ...keyed to the match, not the exception");
+  const exceptionReceipt = await rootQuery(
+    "select act_kind, outcome, subject_id from clara.bank_agent_receipts where op_key=$1", [opKey]);
+  assert.equal(exceptionReceipt.rows[0]?.act_kind, "exception_resolve", "f31w.q: the composite's own audit receipt also persisted, keyed to the exception");
+  assert.equal(exceptionReceipt.rows[0]?.subject_id, exId);
 });

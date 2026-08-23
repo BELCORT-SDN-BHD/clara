@@ -7,6 +7,7 @@
 import { rootQuery } from "./a21-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import { GUARD } from "./x38-match-fixtures.mjs";
+import { wakeQuery } from "./rig-helpers.mjs";
 
 export const WAKE_ROLE = "clara_wake_bank_login";
 export const RATIONALE = "f31w battery: unattended agent judgement";
@@ -23,6 +24,34 @@ export async function mintCred(kind, firm, client, obo = null) {
 
 export function callWrapper(name, specs) {
   return `select clara.${name}(${specs.map((s, i) => `${s.name} => $${i + 1}${s.cast ? `::${s.cast}` : ""}`).join(", ")}) as r`;
+}
+
+/** H2 (cross-model review, HEAD d5e5dc6): p_inputs_digest now must name a REAL, prior
+ *  clara._agent_get_bank_pack_core read for the client (bank_agent_receipts.act_kind=
+ *  'pack_read'), or every consuming core refuses inputs_digest_unverified before its own
+ *  judgement logic runs. Every cell below that reaches a judgement rung must fetch one of these
+ *  FIRST and pass its digest through, exactly as a real agent lane would.
+ *
+ *  MEMOIZED per (client, bankAccount): bank_agent_receipts' own partial unique index --
+ *  (act_kind, subject_id) WHERE outcome='admitted' -- allows at most ONE admitted pack_read
+ *  receipt ever, for a given bank account (the same "at most one admitted act per subject" law
+ *  every OTHER judgement act uses, Annex A.3). A real agent reads the pack once and acts on
+ *  several judgements from it in the SAME session; re-fetching a fresh pack per cell would hit
+ *  that constraint on the second call for the same account and is not the shape a real caller
+ *  takes anyway -- multiple judgements citing the SAME pack read is the normal case, not a bug
+ *  to route around per-cell. */
+const _digestCache = new Map();
+export async function realDigest(secret, client, bankAccount, opKey) {
+  const key = `${client}:${bankAccount}`;
+  if (_digestCache.has(key)) return _digestCache.get(key);
+  const r = await wakeQuery(WAKE_ROLE, secret,
+    callWrapper("wake_get_bank_pack", [
+      { name: "p_client", cast: "uuid" }, { name: "p_bank_account", cast: "uuid" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" }]),
+    [client, bankAccount, RATIONALE, JSON.stringify(MODEL), opKey]);
+  const digest = r.rows[0].r.digest;
+  _digestCache.set(key, digest);
+  return digest;
 }
 
 /** A plain APPROVED 2-leg entry (Dr bankCoa / Cr other, both = cents), the draft -> lines ->

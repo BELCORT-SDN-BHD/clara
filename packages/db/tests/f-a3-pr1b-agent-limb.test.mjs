@@ -12,7 +12,7 @@
 // x38-wave-c-b-match / x38-wave-c-b-bank / x40-wave-c-c-tieout suites already cover it and were
 // re-run against this migration with zero new failures (settle-event report).
 //
-// The cells, in file order (DDL a-e, MINT f, SETTLE g-j, MATCH k-l, M11 m, REPOINT o, X-1 p-q):
+// The cells, in file order (DDL a-e, MINT f, SETTLE g-j, MATCH k-l, M11 m1-m2, REPOINT o, X-1 p-q):
 // bank_matches.origin admits {human,rule,agent} (a); wake_credentials' two CHECKs admit
 // bank_agent, byte-preserving interactive_client (b); entry_post_receipts' two CHECKs admit
 // bank_agent/op_key (c); the three new tables carry FORCE RLS + zero non-owner DML (d);
@@ -25,8 +25,8 @@
 // agent-arm _match_bank_line_core writes origin='agent', a human match still writes 'human' (k);
 // an agent-origin group with a rule id is refused -- by the pre-existing
 // ck_bank_matches_origin_rule CHECK, not the new (measured-unreachable) trigger arm (l); the M11
-// duplicate-payment wall's SQL is reachable and typed (m, a structural cell -- see its own note
-// on why the full aged-reconciliation fixture is out of this session's budget);
+// duplicate-payment wall, BEHAVIOURAL both polarities (m1-m2, cross-model review HEAD d5e5dc6):
+// a lone 61-day item with no twin waives cleanly, its true-twin case still refuses by name;
 // _resolve_and_book_bank_line_core with an is_agent ctx no longer CLR04s (o, the public-call
 // hazard, TWO call sites fixed -- see the migration's own D-10 comments); the shared
 // registry-ledger predicate's three arms (p); the drawer-2 gate's arm 4 RED-first headline cell,
@@ -44,12 +44,14 @@ import {
 } from "./a21-helpers.mjs";
 import {
   BANKCOA1, AR1, AP1, EXPN, REVN,
-  hasBankMatching, caught,
+  hasBankMatching, caught, manualRes,
   addBankAccount, enterStatement, matchBankLine, matchRow,
 } from "./x38-match-fixtures.mjs";
 import {
   AGENT_UUID, agentCtx, coreCallSql, coreCall, inTxn, entryRow, receiptRow,
 } from "./f-a3-pr1b-fixtures.mjs";
+import { draftEntryV3 } from "./s6-helpers.mjs";
+import { approveEntry } from "./rig-fixtures.mjs";
 
 let ready38 = false;
 let hasAgentLimb = false;
@@ -185,11 +187,15 @@ test("f31b.f mint_wake_credential('bank_agent', ...): client required, on_behalf
   const noClient = await caught(() => rootQuery(
     "select * from clara.mint_wake_credential($1,$2,null,'00:15:00'::interval,null)", ["bank_agent", firm]));
   assert.ok(noClient, "no client -> refused");
+  // M9 (cross-model review, HEAD d5e5dc6, test honesty): this used to compute the outcome and
+  // only noteLane it -- the cell passed whether on_behalf_of was correctly refused OR
+  // unexpectedly admitted. Asserted now: DDL 2's own CHECK/mint-gate text says "bank_agent wake
+  // requires a firm-congruent active client and no on_behalf_of", so a non-null on_behalf_of
+  // MUST refuse.
   const withObo = await caught(() => rootQuery(
     "select * from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)",
     ["bank_agent", firm, world.users.alice, world.clients.A1]));
-  // on_behalf_of expects a user id; tolerate either a bare id or {id} shape from world.users.
-  noteLane(`f31b.f on_behalf_of probe: ${withObo ? "refused" : "unexpectedly admitted"}`);
+  assert.ok(withObo, "bank_agent forbids on_behalf_of; a non-null value must refuse, not mint");
   const ok = await rootQuery(
     "select * from clara.mint_wake_credential($1,$2,null,'00:15:00'::interval,$3)",
     ["bank_agent", firm, world.clients.A1]);
@@ -404,16 +410,101 @@ test("f31b.l an agent-origin group with a rule id is refused by ck_bank_matches_
   noteLane(`f31b.l refusal: code=${err?.code} constraint=${err?.constraint}`);
 });
 
-// M11 -- the duplicate-payment wall on the agent's stale-outstanding waiver. STRUCTURAL ONLY:
-// the full aged-reconciliation fixture (a real multi-statement chain 35-60+ days deep) is out of
-// this session's budget -- this asserts the wall's SQL is reachable and typed, not a live refusal.
-test("f31b.m a stale item with a same-counterparty same-cents twin inside the window cannot be waived by the agent", async (t) => {
+// M9 (cross-model review, HEAD d5e5dc6, test honesty): this cell was STRUCTURAL ONLY (it
+// asserted the wall's SQL text was present, never that it actually fired or spared a lone item).
+// Now behavioural, both polarities: a lone 61-day entry with no twin is waivable, and its
+// true-twin case still refuses -- the two-cell shape H4's own fix (je.id <> v_ack_id) needs to
+// be proven correct, not merely typed.
+async function customer(sub, client, name) {
+  const r = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ((select firm_id from clara.clients where id=$1),$1,'customer',$2,$3,$4) returning id`,
+    [client, name, name.toLowerCase().replace(/[^a-z0-9]/g, ""), world.users.alice]);
+  return r.rows[0].id;
+}
+/** A customer receipt: Dr bank / Cr AR1, the counterparty riding the top-level vendor proposal
+ *  onto the receivable (control-class) leg -- the SAME shape every a21 vendor-proposal cell
+ *  uses (`vendor: { existing_id, kind }`). */
+async function customerReceipt(sub, { client, bankCoa, counterpartyId, cents, postingDate }) {
+  const d = await draftEntryV3(sub, {
+    client, resolution: await manualRes(sub, client), postingDate,
+    memo: "f31b.m M11 fixture: a customer receipt", opKey: opk("f31b-m11"),
+    vendor: { existing_id: counterpartyId, kind: "customer" },
+    lines: [
+      { account_code: bankCoa, debit_cents: cents, credit_cents: 0, description: "dr" },
+      { account_code: AR1, debit_cents: 0, credit_cents: cents, description: "cr" },
+    ],
+  });
+  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("f31b-m11a") });
+  return d.entry_id;
+}
+
+test("f31b.m1 a LONE 61-day-old entry with no twin is waivable by the agent (M11 does not fire on an absence)", async (t) => {
   if (skipHere(t)) return;
-  noteLane("f31b.m: end-to-end M11 needs a full aged-reconciliation fixture, out of this session's budget -- this cell verifies the wall's SQL is reachable and typed instead.");
-  const src = await rootQuery(
-    `select prosrc from pg_proc where oid='clara._complete_bank_reconciliation_core(jsonb,uuid,uuid[],text)'::regprocedure`);
-  assert.ok(src.rows[0].prosrc.includes("stale_waiver_duplicate_risk"), "the M11 refusal token is present in the live body");
-  assert.ok(src.rows[0].prosrc.includes("c_bank_waiver_dup_days"), "the named duplicate-window constant is present");
+  const firm = await firmOf(world.clients.A1);
+  const cp = await customer(world.users.alice, world.clients.A1, `F31B M11a ${randomUUID().slice(0, 8)}`);
+  const coa = `${190 + (Math.floor(Math.random() * 100))}-M11A`;
+  await upsertAccountClassed(world.users.alice, { client: world.clients.A1, code: coa, name: "f31b m11a bank gl", type: "asset", opKey: opk("f31b-m11a-coa") });
+  const acct = await addBankAccount(world.users.alice, { client: world.clients.A1, bankCode: "MBB", accountNumber: `1099m11a${randomUUID().slice(0, 6)}`, coaAccountCode: coa });
+  const entryId = await customerReceipt(world.users.alice, {
+    client: world.clients.A1, bankCoa: coa, counterpartyId: cp, cents: 7700, postingDate: "2026-05-01",
+  });
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: idOf(acct, "bank_account_id", "id"),
+    periodStart: "2026-08-01", periodEnd: "2026-08-31", opening: 0, specs: [], keepPeriod: true,
+  });
+  // t_bank_recon_agent_receipt (DDL 5) is a REAL deferred wall the moment this migration lands
+  // -- it demands an ADMITTED bank_agent_receipts row for any agent-completed reconciliation,
+  // exactly f31b.j's own settle-limb precedent above, mirroring what the real
+  // _agent_complete_bank_reconciliation_core will write. Writing it here is what makes THIS
+  // cell's claim ("waives cleanly") meaningful -- without it the deferred trigger would abort
+  // the transaction at commit regardless of whether M11 itself ever fired, and the assertion
+  // would be proving the wrong thing.
+  const res = await caught(() => inTxn(async (c) => {
+    const completeRes = await c.query(coreCallSql("_complete_bank_reconciliation_core",
+      [{ name: "p_statement", cast: "uuid" }, { name: "p_ack_outstanding", cast: "uuid[]" }, { name: "p_op_key" }]),
+      [JSON.stringify(agentCtx(firm)), stmt.statementId, [entryId], opk("f31b-m11a-complete")]);
+    const r = completeRes.rows[0].result;
+    await c.query(
+      `insert into clara.bank_agent_receipts(firm_id, client_id, act_kind, outcome, subject_id,
+           acting_actor, via_wake_kind, model_snapshot, rationale, inputs_digest, gate_verdicts,
+           approval_arm, op_key)
+         values ($1,$2,'reconcile_complete','admitted',$3,$4,'bank_agent',
+           '{"provider":"openai","model":"gpt-5.6-terra","version":"v1"}'::jsonb,
+           'f31b.m1 reconciliation judgement','f31b-m1-digest','{"verdict":"admitted"}'::jsonb,
+           'agent_unattended',$5)`,
+      [firm, world.clients.A1, r.reconciliation_id, AGENT_UUID, opk("f31b-m11a-receipt")]);
+    return r;
+  }));
+  assert.ok(!res?.code, `f31b.m1: a lone, twinless stale item must waive cleanly, not raise (${res?.code}: ${res?.message})`);
+});
+
+test("f31b.m2 a stale item with a same-counterparty same-cents twin inside the window CANNOT be waived by the agent", async (t) => {
+  if (skipHere(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cp = await customer(world.users.alice, world.clients.A1, `F31B M11b ${randomUUID().slice(0, 8)}`);
+  const coa = `${290 + (Math.floor(Math.random() * 100))}-M11B`;
+  await upsertAccountClassed(world.users.alice, { client: world.clients.A1, code: coa, name: "f31b m11b bank gl", type: "asset", opKey: opk("f31b-m11b-coa") });
+  const acct = await addBankAccount(world.users.alice, { client: world.clients.A1, bankCode: "MBB", accountNumber: `1099m11b${randomUUID().slice(0, 6)}`, coaAccountCode: coa });
+  const entryId = await customerReceipt(world.users.alice, {
+    client: world.clients.A1, bankCoa: coa, counterpartyId: cp, cents: 8800, postingDate: "2026-05-01",
+  });
+  // The twin: SAME counterparty, SAME absolute cents, within c_bank_waiver_dup_days (35 days)
+  // of the acknowledged item's date, itself unmatched -- Annex B.3's exact predicate.
+  await customerReceipt(world.users.alice, {
+    client: world.clients.A1, bankCoa: coa, counterpartyId: cp, cents: 8800, postingDate: "2026-05-10",
+  });
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: idOf(acct, "bank_account_id", "id"),
+    periodStart: "2026-08-01", periodEnd: "2026-08-31", opening: 0, specs: [], keepPeriod: true,
+  });
+  const res = await caught(() => coreCall(
+    "_complete_bank_reconciliation_core", [{ name: "p_statement", cast: "uuid" }, { name: "p_ack_outstanding", cast: "uuid[]" }, { name: "p_op_key" }],
+    agentCtx(firm), [stmt.statementId, [entryId], opk("f31b-m11b-complete")]));
+  assert.ok(res, "f31b.m2: a same-counterparty same-cents twin inside the window must refuse, not waive");
+  assert.equal(res?.code, "CLR10", `f31b.m2: expected CLR10, got ${res?.code}: ${res?.message}`);
+  assert.match(res?.message ?? "", /stale_waiver_duplicate_risk|is a same-counterparty, same-amount candidate/,
+    `f31b.m2: expected the M11 refusal by name (${res?.message})`);
 });
 
 // REPOINT
@@ -448,7 +539,20 @@ test("f31b.o _resolve_and_book_bank_line_core with an is_agent ctx does not CLR0
        { account_code: REVN, debit_cents: 0, credit_cents: 5000 },
      ] }), null, null, null, 0, null, null, opk("f31b-o"), null],
   ));
-  assert.ok(!(res && res.code === "CLR04"), `must not CLR04 (the credential-less _human_ctx hazard); got ${res ? `${res.code}: ${res.message}` : "no error"}`);
+  // Review law 3 (spelling is not identity): "not CLR04" alone cannot tell the ORIGINAL hazard
+  // this cell targets (the credential-less _human_ctx() call -- "no authenticated actor" --
+  // repointed away by threading p_ctx, so a bare rootQuery/coreCall reaches the core cleanly)
+  // apart from a DIFFERENT, legitimate CLR04 raised for an unrelated reason. This lane's own
+  // verification pass found exactly that: 0040's PRE-EXISTING "resolution is an owner act"
+  // authority floor on bank_line_exceptions (u.is_agent=false in its own membership join)
+  // structurally excludes every agent actor from ever satisfying it, so
+  // _resolve_bank_line_exception_core's resolved_by=c.actor can NEVER pass it for the agent
+  // lane -- a genuine, separate, pre-existing (0040-era) product/authority conflict this lane
+  // cannot fix unilaterally (see f-a3-pr1b-wake-verbs.test.mjs's f31w.q for the full finding).
+  // The ORIGINAL hazard's OWN message shape is asserted by name, not merely "not CLR04".
+  assert.ok(
+    !(res && res.code === "CLR04" && /no authenticated actor|core_ctx_missing/i.test(res.message ?? "")),
+    `must not raise the credential-less _human_ctx hazard by name; got ${res ? `${res.code}: ${res.message}` : "no error"}`);
   noteLane(`f31b.o repoint outcome: ${res ? `${res.code} ${res.message}` : "admitted"}`);
 });
 
