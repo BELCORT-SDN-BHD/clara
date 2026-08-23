@@ -42,7 +42,8 @@ shows PostgREST reads only). Confirm zero non-idle `clara_runtime` sessions.
 
 ## 4. Atomic 0017 apply (16 → 17)
 
-From `packages/db` with the LIVE env (DSN discipline: env only, never argv):
+From `packages/db` with the LIVE env (DSN discipline: env only, never argv; TLS via the
+committed CA-pinned bridge, `docs/ops/dsn-bridge.md` — `sslmode=verify-full`, never `no-verify`):
 `pnpm migrate` — expect exactly `applied 0017_wave_b · 17 total`. The migration is ONE
 transaction with its in-txn tail battery; any failure aborts atomically → stop, diagnose
 on the rig, never hand-patch live.

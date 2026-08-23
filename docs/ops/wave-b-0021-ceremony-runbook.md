@@ -69,7 +69,9 @@ next run then reports drift on a migration that *is* applied. Named explicitly b
 0020 rehearsal found this step unnamed, and an unnamed step at 2am is a guess.
 
 Connection comes from the environment (libpq `PG*` vars or `DATABASE_URL`). **Never a DSN in
-argv** — the leak-scan gate exists because that mistake is one shell-history away.
+argv** — the leak-scan gate exists because that mistake is one shell-history away. TLS: pipe the
+DSN through the committed CA-pinned bridge (`docs/ops/dsn-bridge.md`) — `sslmode=verify-full`,
+never `no-verify`.
 
 Expect: `0021_counterparty_human_lane` applied, and the in-transaction tail's notice —
 `0021: create_counterparty installed — SECURITY DEFINER, search_path pinned,

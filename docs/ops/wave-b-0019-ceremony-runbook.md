@@ -80,7 +80,8 @@ class, and the catch-up verbs. Confirm `/ready` 200.
 
 ## 5. Apply migration 0019 (live: 18 → 19 applied)
 
-From `packages/db` with the LIVE env — **DSN from the environment, never in argv**:
+From `packages/db` with the LIVE env — **DSN from the environment, never in argv**, piped
+through the committed CA-pinned bridge (`docs/ops/dsn-bridge.md`), never `sslmode=no-verify`:
 
 ```
 pnpm migrate            # expect exactly: applied 0019_wiki_boundary · 19 total
