@@ -869,12 +869,17 @@ export const ALLOWED = {
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
     ...RENDER_ZETA_HUMAN_FNS,
+    // F-A8 PR-1 [Wave-F Track A, internet lane, v3] the two Tier-1 human doors — CLR04 via
+    // _human_ctx(role_rank('owner')), body-enforced; agent/wake roles gain ZERO.
+    "decide_policy_draft", "override_policy_draft",
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS]),
-  [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
+  // F-A8 PR-1 [Wave-F Track A, internet lane, v3] the ONE new proactive verb — the incumbent
+  // wake_record_notification row survives untouched (roster extended, never re-seeded).
+  [ROLES.wakeProactive]: new Set(["wake_record_notification", "wake_submit_policy_draft"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
@@ -912,6 +917,10 @@ export const ALLOWED = {
     // and its consumer; F-A1 grants no human EXECUTE at all
     ...WITNESS_F_A1_PR3_RUNTIME_FNS, // F-A1 PR-3 cutover: fail_witness_facts, the running->failed
     // settle verb for the llm_witness lane (mirrors fail_invoice_facts, S6_RUNTIME_FNS above)
+    // F-A8 PR-1 [Wave-F Track A, internet lane, v3] the evidence-substrate writers: the ONLY
+    // writer of fetch_artifacts (IL-D17/IL-D33 — no new role, the privilege sits in the verb)
+    // and the attempt-ledger writer (IL-D25). Neither wake role gains either.
+    "record_fetch_artifact", "record_web_attempt_event",
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
