@@ -17,7 +17,6 @@ import { listTaskMetas, spoolHealth } from "./spool.mjs";
 import { matcherHealth } from "./matcher.mjs";
 import { autodraftHealth } from "./autodraft.mjs";
 import { localFactsHealth } from "./local-facts.mjs";
-import { rulePostHealth } from "./rule-post.mjs";
 import { sstWatchHealth } from "./sst-watch.mjs";
 import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
@@ -169,18 +168,8 @@ export async function checkReadiness() {
             warnings.push(`local_facts_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
 
-          // rule-post consumer health -> warnings only (Wave A2): a stalled rule-post
-          // consumer must never take chat traffic down.
-          try {
-            const rph = await rulePostHealth(c);
-            checks.rulePost = { ok: true, ...rph };
-            const rDead = Number(rph.pendingDeadLetters ?? rph.pending_dead_letters ?? 0);
-            const rLag = Number(rph.lag ?? 0);
-            if (rDead > 0) warnings.push(`${rDead} rule_post dead-letter(s)`);
-            if (rLag > 1000) warnings.push(`rule_post lag ${rLag}`);
-          } catch (err) {
-            warnings.push(`rule_post_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
-          }
+          // rule-post consumer health check RETIRED with the loop itself — F-A2 PR-3
+          // drops clara.execute_rule_post and the rules-execution tier whole.
 
           // sst_watch consumer health -> warnings only (Wave A2.1): a stalled SST compliance
           // watch must never take chat traffic down. Queries pre-0016-safe spine tables only.

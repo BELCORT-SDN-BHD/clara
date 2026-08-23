@@ -12,7 +12,6 @@ import { startLeaderLoop } from "../lib/leader.mjs";
 import { startMatcherLoop } from "../lib/matcher.mjs";
 import { startAutodraftLoop } from "../lib/autodraft.mjs";
 import { startLocalFactsLoop, processLocalFactsTask } from "../lib/local-facts.mjs";
-import { startRulePostLoop } from "../lib/rule-post.mjs";
 import { startSstWatchLoop } from "../lib/sst-watch.mjs";
 import { startFactsGateLoop } from "../lib/facts-gate.mjs";
 import { startClassifyLoop } from "../lib/classify.mjs";
@@ -217,23 +216,22 @@ export default definePlugin(() => {
     localFacts.done.then(() => fatal("local_facts loop"), (e: unknown) => fatal("local_facts loop", e));
     sup.stops.push(localFacts.stop);
 
-    // rule-post consumer (Wave A2) — an INDEPENDENT loop on its own connection under the
-    // 'rule_post' advisory lock. Calls execute_rule_post login-direct on each entry.drafted.
-    // +1 persistent session.
-    const rulePost = startRulePostLoop({ log: (m: string) => console.log(m) });
-    rulePost.done.then(() => fatal("rule_post loop"), (e: unknown) => fatal("rule_post loop", e));
-    sup.stops.push(rulePost.stop);
+    // rule-post consumer (Wave A2) RETIRED — F-A2 PR-3 drops clara.execute_rule_post and
+    // the rules-execution tier whole (docs/plan/active/f-a2-agentic-posting-design.md §5
+    // step 5); the agentic post path (clara.wake_post_entry via _agent_post_entry_core)
+    // replaces it, reached through the ordinary wake-verb dispatch, not a dedicated loop.
 
     // === Wave A2.1 consumers (migration 0016) — three INDEPENDENT loops, each on its own
     // dedicated LISTEN connection under its own advisory lock, structurally isolated from the
     // other consumers' leadership / readiness / heartbeat. +3 persistent sessions.
     //
-    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds TEN dedicated
+    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds NINE dedicated
     // LISTEN/persistent clients — control + leader + matcher + autodraft + local_facts +
-    // rule_post + (A2.1) sst_watch + facts_gate + classify + (Wave B) wiki_projection — ON TOP
+    // (A2.1) sst_watch + facts_gate + classify + (Wave B) wiki_projection — ON TOP
     // OF the pooled budgets in lib/pools.mjs (5 runtime + 5 read + 2 write + 5 engine = 17).
-    // Grand total ≈ 27 sessions against the Supavisor session ceiling; the integrator MUST
-    // confirm headroom before deploy (WB-R18: ~26/60 today + this +1 = 27). The Wave B lint
+    // Grand total ≈ 26 sessions against the Supavisor session ceiling (one fewer than before
+    // F-A2 PR-3 retired the rule_post loop); the integrator MUST confirm headroom before
+    // deploy (WB-R18: ~26/60 today). The Wave B lint
     // belt is a leader-phase sibling (ZERO new sessions); the interview workflows ride the WDK
     // world (ZERO new sessions) — only wiki_projection adds a dedicated session this wave.
 

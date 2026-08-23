@@ -1,7 +1,7 @@
 // The sst-watch consumer — the STRUCTURAL SST compliance-watch spine (Wave A2.1,
 // contract §2.4 / migration 0016). A registered spine consumer beside router + matcher +
-// autodraft + rule_post, reusing lib/relay.mjs's discovery/checkpoint/dead-letter
-// primitives UNCHANGED. Own name ('sst_watch'), own advisory lock (hashtext('sst_watch')),
+// autodraft (the rule_post consumer retired with F-A2 PR-3), reusing lib/relay.mjs's
+// discovery/checkpoint/dead-letter primitives UNCHANGED. Own name ('sst_watch'), own advisory lock (hashtext('sst_watch')),
 // own (consumer,firm) checkpoint, own dead-letter lane, own /ready WARN signal. Subscribes
 // to `entry.approved` ONLY (client-scoped; every other type is a checkpoint-only advance).
 //
@@ -270,8 +270,9 @@ export async function sstWatchHealth(client) {
 }
 
 // The sst-watch leader loop — its OWN dedicated connection + advisory lock ('sst_watch'),
-// mirroring the matcher/rule-post loops. Structurally independent: a stall never touches
-// router/matcher/autodraft/rule_post leadership, readiness, or the engine heartbeat.
+// mirroring the matcher loop (rule-post's sibling loop retired with F-A2 PR-3). Structurally
+// independent: a stall never touches router/matcher/autodraft leadership, readiness, or the
+// engine heartbeat.
 /**
  * @param {{log?:Function, makeClient?:()=>import("pg").Client, batchSize?:number,
  *          maxBatchesPerFirm?:number, onlyFirm?:string|null}} [deps]
