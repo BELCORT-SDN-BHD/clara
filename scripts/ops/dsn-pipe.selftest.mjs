@@ -1,99 +1,55 @@
 #!/usr/bin/env node
-// Self-test for the ceremony DSN bridge (fix-queue-design.md §6, item 3).
+// Self-test for the ceremony DSN bridge (fix-queue-design.md §6, item 3), hardened by the
+// F-T4 PR-1 consolidated review round (2 findings-legs: 3 critical / 3 high / 5 medium). The
+// D4 real-node-postgres-path cell lives in the sibling dsn-pipe.pgpath.selftest.mjs (kept
+// separate so neither file crosses the repo's file-size convention); shared scaffolding is in
+// dsn-pipe.selftest-helpers.mjs.
 //
 //   node scripts/ops/dsn-pipe.selftest.mjs   # exit 0 green, 1 red
 //
-// HERMETIC — no external network calls, so this is safe to wire into `pnpm lint` and run on
-// every PR. It proves, against a THROWAWAY local TLS fixture (never the real pooler): the CA
-// wall refuses on a mismatched CA and admits on a matching one ("a probe that cannot say NO
-// has a meaningless YES" — both directions, same code path, only the CA file differs); the DSN
-// never reaches argv (this tool's own or its child's) or disk; failure modes (malformed DSN,
-// missing `--`, a missing CA file) fail closed without echoing anything sensitive; the exit
-// code passes through untouched. It also reads the COMMITTED `ops/tls/pooler-ca.crt` and
-// fails when fewer than 30 days remain before its `notAfter` — a monotonic direction, never a
-// pinned date, so it cannot rot into a dated tripwire.
+// HERMETIC — safe to wire into `pnpm lint`, runs every PR, no external network calls. Proves:
+// the CA wall refuses on a mismatch and admits on a match (raw TLS probe here; the `pg`-library
+// path is the sibling file); hostile-shell env vars are refused loudly or scrubbed before the
+// child ever sees them; the pin is EXCLUSIVE (a caller-supplied sslrootcert/PGSSLROOTCERT/
+// PGSSLMODE/NODE_EXTRA_CA_CERTS/DATABASE_URL/PGHOST etc. all lose to the bridge's own values,
+// which also let a bare libpq CLI tool connect via env alone — no DSN in ITS argv either); the
+// committed CA is structurally validated (CA:TRUE, in-window, exact fingerprint), not just
+// present; the DSN never reaches argv or disk; every negative cell is honest (no spawn error, no
+// signal, no timeout masquerading as a refusal); every absence-detector has a positive-control
+// twin proving it CAN say NO.
 //
-// NOT proved here (by design, per the F-T4 PR-1 build order): that the committed CA validates
-// the REAL live Supabase pooler today. That is the "positive live leg" — a manual, on-demand
-// check, documented in docs/ops/dsn-bridge.md, run before any ceremony and at PR review; it is
-// deliberately kept OUT of the auto-run battery so `pnpm lint` never depends on third-party
-// network reachability. See this PR's report for the live evidence captured at build time.
+// NOT proved here (deliberately): that the committed CA validates the REAL live Supabase pooler
+// today. That is the "positive live leg" — a manual, on-demand check, documented in
+// docs/ops/dsn-bridge.md, run before any ceremony and at PR review; it is deliberately kept OUT
+// of the auto-run battery so `pnpm lint` never depends on third-party network reachability. See
+// this PR's report for the live evidence captured at build time, including an INDEPENDENT-
+// CHANNEL byte-comparison against Supabase's own publicly-hosted copy of the certificate.
 //
-// Uses the system `openssl` binary ONLY to mint throwaway test fixtures (never a runtime
-// dependency of dsn-pipe.mjs itself) — gated by a named skip if it is not on PATH.
-//
-// Every fixture DSN below is built through fakeDsn() rather than written as one literal — the
-// scheme, credential and host parts never sit contiguously in one source string — so a
-// secret-shaped-string scanner (this repo runs several) has nothing plausible to flag on an
-// admittedly-synthetic, 127.0.0.1-only, MARKER-tagged test value.
+// Uses the system `openssl` binary to mint throwaway test fixtures (never a runtime dependency
+// of dsn-pipe.mjs itself). On Linux, a missing `openssl` FAILS this battery rather than
+// skipping it — the CI runners are Linux and always carry it (review D5).
 
-import { spawn, execFileSync } from "node:child_process";
-import { X509Certificate } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, cpSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "node:tls";
+import { createServer as createTlsServer } from "node:tls";
+import {
+  createHarness, freshDir, fakeDsn, runDsnPipe, assertCleanRefusal,
+  opensslAvailableForCaFixtures, reportOpensslMissing, mintCert, spawnWithBuiltEnv, MARKER,
+} from "./dsn-pipe.selftest-helpers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DSN_PIPE_SRC = join(HERE, "dsn-pipe.mjs");
 const COMMITTED_CA = join(HERE, "..", "..", "ops", "tls", "pooler-ca.crt");
 
-/** Assemble a Postgres URI from parts — see file header for why this is not one literal. */
-function fakeDsn({ scheme = "postgres", user = "u", pass = "p", hostport = "h", db = "d", query = "" }) {
-  const parts = [scheme, ":", "/", "/", user, ":", pass, "@", hostport, "/", db];
-  const base = parts.join("");
-  return query ? base + "?" + query : base;
-}
-
-let failures = 0;
-let skips = 0;
-function testCase(name, fn) {
-  try {
-    fn();
-    console.log("  PASS  " + name);
-  } catch (err) {
-    if (err && err.__skip) {
-      skips++;
-      console.log("  SKIP  " + name + "  -- " + err.message);
-      return;
-    }
-    failures++;
-    console.error("  FAIL  " + name);
-    console.error("        " + String(err.message).split("\n").join("\n        "));
-  }
-}
-async function asyncTestCase(name, fn) {
-  try {
-    await fn();
-    console.log("  PASS  " + name);
-  } catch (err) {
-    if (err && err.__skip) {
-      skips++;
-      console.log("  SKIP  " + name + "  -- " + err.message);
-      return;
-    }
-    failures++;
-    console.error("  FAIL  " + name);
-    console.error("        " + String(err.message).split("\n").join("\n        "));
-  }
-}
-function skipHere(reason) {
-  const e = new Error(reason);
-  e.__skip = true;
-  throw e;
-}
-
-function freshDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
-}
+const { testCase, asyncTestCase, skipHere, reportFail, reportSkip, summarize } = createHarness();
 
 // ---------------------------------------------------------------------------
 // Unit level: the pure functions dsn-pipe.mjs exports.
 // ---------------------------------------------------------------------------
-console.log("unit level -- withVerifyFull / buildChildEnv / splitArgv:");
+console.log("unit level -- withVerifyFull / buildChildEnv / splitArgv / validateCa:");
 
-const { withVerifyFull, buildChildEnv, splitArgv, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
+const { withVerifyFull, buildChildEnv, splitArgv, validateCa, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
 
 testCase("withVerifyFull forces sslmode=verify-full even when the input carries a different mode", () => {
   const out = withVerifyFull(fakeDsn({ hostport: "h:5432", query: "sslmode=require" }));
@@ -132,12 +88,39 @@ testCase("withVerifyFull refuses garbage WITHOUT echoing the input", () => {
   if (!threw) throw new Error("expected a throw for unparseable input");
   if (threw.message.includes(garbage)) throw new Error("the raw input must never appear in the error message");
 });
+testCase("(C2) withVerifyFull refuses a DSN with no host", () => {
+  let threw = null;
+  try {
+    withVerifyFull("postgres:///d"); // scheme + empty authority + db, no host
+  } catch (e) {
+    threw = e;
+  }
+  if (!threw) throw new Error("expected a throw for a hostless DSN");
+});
+testCase("(C2) withVerifyFull refuses a DSN with no database name", () => {
+  let threw = null;
+  try {
+    withVerifyFull(fakeDsn({ hostport: "h:5432", db: "" }));
+  } catch (e) {
+    threw = e;
+  }
+  if (!threw) throw new Error("expected a throw for a databaseless DSN");
+});
+testCase("(B1) withVerifyFull forces sslrootcert=<caPath>, replacing any caller-supplied value", () => {
+  const out = withVerifyFull(fakeDsn({ hostport: "h:5432", query: "sslrootcert=%2Ftmp%2Fother-ca.crt" }), "/the/pinned/ca.crt");
+  const url = new URL(out);
+  if (url.searchParams.get("sslrootcert") !== "/the/pinned/ca.crt") {
+    throw new Error(`expected sslrootcert to be forced to the pinned path, got: ${url.searchParams.get("sslrootcert")}`);
+  }
+  if (out.includes("other-ca.crt")) throw new Error("the caller-supplied sslrootcert must not survive anywhere in the output");
+});
 testCase("buildChildEnv sets DATABASE_URL / PGSSLMODE / PGSSLROOTCERT / NODE_EXTRA_CA_CERTS and forces verify-full", () => {
   const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: {} });
   if (env.PGSSLROOTCERT !== "/x/ca.crt") throw new Error("PGSSLROOTCERT must be the given CA path");
   if (env.NODE_EXTRA_CA_CERTS !== "/x/ca.crt") throw new Error("NODE_EXTRA_CA_CERTS must be the given CA path");
   if (env.PGSSLMODE !== "verify-full") throw new Error("PGSSLMODE must be verify-full");
   if (!env.DATABASE_URL.includes("sslmode=verify-full")) throw new Error("DATABASE_URL must carry verify-full");
+  if (!env.DATABASE_URL.includes("sslrootcert=")) throw new Error("DATABASE_URL must carry sslrootcert");
 });
 testCase("buildChildEnv does not mutate the baseEnv object passed in", () => {
   const base = { EXISTING: "1" };
@@ -149,8 +132,73 @@ testCase("buildChildEnv defaults caPath to the committed pooler-ca.crt, resolved
     throw new Error(`unexpected default CA path: ${DEFAULT_CA_PATH}`);
   }
 });
-testCase("splitArgv requires a `--` separator with at least one token after it", () => {
-  for (const bad of [[], ["node"], ["--"]]) {
+testCase("(A2) buildChildEnv REFUSES LOUDLY when the calling shell has NODE_TLS_REJECT_UNAUTHORIZED=0", () => {
+  let threw = null;
+  try {
+    buildChildEnv({ dsn: fakeDsn({}), caPath: "/x/ca.crt", baseEnv: { NODE_TLS_REJECT_UNAUTHORIZED: "0" } });
+  } catch (e) {
+    threw = e;
+  }
+  if (!threw) throw new Error("expected a loud refusal, not a silent scrub");
+  if (!/NODE_TLS_REJECT_UNAUTHORIZED/.test(threw.message)) throw new Error(`error must name the hostile var: ${threw.message}`);
+});
+testCase("(A1) buildChildEnv REFUSES LOUDLY when NODE_DEBUG contains 'child_process'", () => {
+  let threw = null;
+  try {
+    buildChildEnv({ dsn: fakeDsn({}), caPath: "/x/ca.crt", baseEnv: { NODE_DEBUG: "fs,child_process" } });
+  } catch (e) {
+    threw = e;
+  }
+  if (!threw) throw new Error("expected a loud refusal, not a silent scrub");
+  if (!/NODE_DEBUG/.test(threw.message)) throw new Error(`error must name the hostile var: ${threw.message}`);
+});
+testCase("(A1) a NODE_DEBUG that does NOT mention child_process is NOT refused (no over-trigger)", () => {
+  const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: { NODE_DEBUG: "fs,http" } });
+  if (env.DATABASE_URL === undefined) throw new Error("expected a normal build to proceed");
+});
+testCase("(A3) buildChildEnv SCRUBS the hostile PG identity vars that have no DSN-derived replacement (PGSERVICE/PGSERVICEFILE/PGHOSTADDR)", () => {
+  const hostile = { PGSERVICE: "z", PGSERVICEFILE: "w", PGHOSTADDR: "1.2.3.4" };
+  const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: hostile });
+  for (const k of Object.keys(hostile)) {
+    if (k in env) throw new Error(`${k} must be scrubbed from the child env, found: ${env[k]}`);
+  }
+});
+testCase("(A3/F1) buildChildEnv REPLACES hostile PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE with the DSN-derived values (never the hostile baseEnv's)", () => {
+  const hostile = { PGHOST: "evil.example", PGPORT: "1", PGUSER: "root", PGPASSWORD: "x", PGDATABASE: "y" };
+  const env = buildChildEnv({ dsn: fakeDsn({ user: "u1", pass: "p1", hostport: "h1:5555", db: "d1" }), caPath: "/x/ca.crt", baseEnv: hostile });
+  const want = { PGHOST: "h1", PGPORT: "5555", PGUSER: "u1", PGPASSWORD: "p1", PGDATABASE: "d1" };
+  for (const [k, v] of Object.entries(want)) {
+    if (env[k] !== v) throw new Error(`hostile ${k} must lose to the DSN-derived value, got: ${env[k]}`);
+  }
+});
+testCase("(F1) buildChildEnv populates PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE from a CLEAN baseEnv too (bare `psql`, no argv connection string, connects via env alone), and defaults PGPORT to 5432 when the DSN omits it", () => {
+  const env = buildChildEnv({ dsn: fakeDsn({ user: "u2", pass: "p2", hostport: "h2:6666", db: "d2" }), caPath: "/x/ca.crt", baseEnv: {} });
+  const got = { PGHOST: env.PGHOST, PGPORT: env.PGPORT, PGUSER: env.PGUSER, PGPASSWORD: env.PGPASSWORD, PGDATABASE: env.PGDATABASE };
+  if (got.PGHOST !== "h2" || got.PGPORT !== "6666" || got.PGUSER !== "u2" || got.PGPASSWORD !== "p2" || got.PGDATABASE !== "d2") {
+    throw new Error(`expected the PG* identity vars derived from the DSN, got: ${JSON.stringify(got)}`);
+  }
+  const noPort = buildChildEnv({ dsn: fakeDsn({ hostport: "h3", db: "d3" }), caPath: "/x/ca.crt", baseEnv: {} });
+  if (noPort.PGPORT !== "5432") throw new Error(`expected the standard Postgres port as the default, got: ${noPort.PGPORT}`);
+});
+testCase("(A4) buildChildEnv SCRUBS NODE_OPTIONS silently", () => {
+  const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: { NODE_OPTIONS: "--require=/tmp/evil.js" } });
+  if ("NODE_OPTIONS" in env) throw new Error(`NODE_OPTIONS must be scrubbed, found: ${env.NODE_OPTIONS}`);
+});
+testCase("(B2) the bridge's own four vars WIN over ANY hostile baseEnv preset of the same names", () => {
+  const hostile = {
+    PGSSLMODE: "disable",
+    PGSSLROOTCERT: "/tmp/attacker-ca.crt",
+    NODE_EXTRA_CA_CERTS: "/tmp/attacker-ca.crt",
+    DATABASE_URL: fakeDsn({ hostport: "evil:5432" }),
+  };
+  const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/the/real/ca.crt", baseEnv: hostile });
+  if (env.PGSSLMODE !== "verify-full") throw new Error(`hostile PGSSLMODE must lose, got: ${env.PGSSLMODE}`);
+  if (env.PGSSLROOTCERT !== "/the/real/ca.crt") throw new Error(`hostile PGSSLROOTCERT must lose, got: ${env.PGSSLROOTCERT}`);
+  if (env.NODE_EXTRA_CA_CERTS !== "/the/real/ca.crt") throw new Error(`hostile NODE_EXTRA_CA_CERTS must lose, got: ${env.NODE_EXTRA_CA_CERTS}`);
+  if (env.DATABASE_URL.includes("evil")) throw new Error(`hostile preset DATABASE_URL must lose entirely, got: ${env.DATABASE_URL}`);
+});
+testCase("(C3) splitArgv requires `--` to be the FIRST token — a leading token is refused, not discarded", () => {
+  for (const bad of [[], ["node"], ["--"], ["leading-token", "--", "echo", "hi"]]) {
     let threw = null;
     try {
       splitArgv(bad);
@@ -164,88 +212,115 @@ testCase("splitArgv requires a `--` separator with at least one token after it",
 });
 
 // ---------------------------------------------------------------------------
-// Structural: the COMMITTED CA file itself (hermetic — reads the tracked file only).
+// (C1) validateCa — structural validation, not just existence.
 // ---------------------------------------------------------------------------
-console.log("\nthe committed ops/tls/pooler-ca.crt:");
+console.log("\n(C1) validateCa -- structural CA validation:");
 
-testCase("carries no PRIVATE KEY block -- it is a certificate, never a key (hard constraint 4)", () => {
-  const text = readFileSync(COMMITTED_CA, "utf8");
-  if (/PRIVATE KEY/.test(text)) throw new Error("a private-key block must never be committed");
-  if (!/-----BEGIN CERTIFICATE-----/.test(text)) throw new Error("expected a PEM CERTIFICATE block");
+testCase("the COMMITTED CA passes validateCa (CA:TRUE, in-window, exact pinned fingerprint)", () => {
+  const cert = validateCa(COMMITTED_CA);
+  if (cert.ca !== true) throw new Error("committed CA must report ca===true");
 });
-testCase("parses as exactly one well-formed, self-signed X.509 certificate", () => {
-  const text = readFileSync(COMMITTED_CA, "utf8");
-  const blocks = text.match(/-----BEGIN CERTIFICATE-----/g) || [];
-  if (blocks.length !== 1) throw new Error(`expected exactly 1 certificate block, found ${blocks.length}`);
-  const cert = new X509Certificate(text);
-  if (cert.issuer !== cert.subject) throw new Error(`expected a self-signed root (issuer==subject), got issuer=${cert.issuer} subject=${cert.subject}`);
-  if (!cert.checkIssued(cert)) throw new Error("the certificate does not verify as issuing itself");
+testCase("an EMPTY file fails closed (existence alone is not enough)", () => {
+  const dir = freshDir("dsnpipe-ca-empty-");
+  const p = join(dir, "empty.crt");
+  writeFileSync(p, "");
+  let threw = null;
+  try {
+    validateCa(p);
+  } catch (e) {
+    threw = e;
+  }
+  rmSync(dir, { recursive: true, force: true });
+  if (!threw) throw new Error("expected a throw for an empty file");
 });
-testCase("has at least 30 days remaining before notAfter -- monotonic direction, never a pinned date", () => {
-  const cert = new X509Certificate(readFileSync(COMMITTED_CA, "utf8"));
-  const notAfter = new Date(cert.validTo);
-  const daysLeft = (notAfter.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
-  if (daysLeft < 30) throw new Error(`only ${daysLeft.toFixed(1)} days remain before ${cert.validTo} -- rotate the pinned CA`);
+testCase("a TRUNCATED PEM block fails closed", () => {
+  const dir = freshDir("dsnpipe-ca-trunc-");
+  const p = join(dir, "trunc.crt");
+  const full = readFileSync(COMMITTED_CA, "utf8");
+  writeFileSync(p, full.slice(0, Math.floor(full.length / 2)));
+  let threw = null;
+  try {
+    validateCa(p);
+  } catch (e) {
+    threw = e;
+  }
+  rmSync(dir, { recursive: true, force: true });
+  if (!threw) throw new Error("expected a throw for a truncated PEM block");
 });
 
-// ---------------------------------------------------------------------------
-// Helper: run dsn-pipe.mjs as a real child process, feeding a DSN on stdin, capturing output.
-// ---------------------------------------------------------------------------
-function runDsnPipe({ scriptPath = DSN_PIPE_SRC, dsn, args, cwd = process.cwd(), timeoutMs = 8000 }) {
-  return new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], { cwd, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        /* already gone */
-      }
-    }, timeoutMs);
-    child.on("exit", (code, signal) => {
-      clearTimeout(timer);
-      resolvePromise({ code, signal, stdout, stderr });
-    });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolvePromise({ code: null, signal: null, stdout, stderr, spawnError: err });
-    });
-    child.stdin.write(dsn);
-    child.stdin.end();
+const harnessForOpenssl = { reportFail, reportSkip };
+if (!opensslAvailableForCaFixtures()) {
+  reportOpensslMissing(harnessForOpenssl, "validateCa negative fixtures (not-a-CA / wrong-fingerprint / expired)", 3);
+} else {
+  const fixDir = freshDir("dsnpipe-ca-fixtures-");
+
+  testCase("a cert WITHOUT basicConstraints CA:TRUE fails closed (not a CA)", () => {
+    const { crtPath } = mintCert(fixDir, "leaf-not-a-ca", { ca: false });
+    let threw = null;
+    try {
+      validateCa(crtPath);
+    } catch (e) {
+      threw = e;
+    }
+    if (!threw) throw new Error("expected a throw for a non-CA certificate");
+    if (!/CA:TRUE/.test(threw.message)) throw new Error(`expected the CA:TRUE reason, got: ${threw.message}`);
   });
+
+  testCase("a DIFFERENT, currently-valid CA cert fails closed on FINGERPRINT MISMATCH", () => {
+    const { crtPath } = mintCert(fixDir, "different-ca", { ca: true });
+    let threw = null;
+    try {
+      validateCa(crtPath);
+    } catch (e) {
+      threw = e;
+    }
+    if (!threw) throw new Error("expected a throw for a fingerprint mismatch");
+    if (!/fingerprint/i.test(threw.message)) throw new Error(`expected a fingerprint-shaped reason, got: ${threw.message}`);
+  });
+
+  testCase("an EXPIRED CA cert fails closed on the validity window", () => {
+    const { crtPath } = mintCert(fixDir, "expired-ca", { ca: true, notBefore: "20200101000000Z", notAfter: "20200102000000Z" });
+    let threw = null;
+    try {
+      validateCa(crtPath);
+    } catch (e) {
+      threw = e;
+    }
+    if (!threw) throw new Error("expected a throw for an expired certificate");
+    if (!/validity window/i.test(threw.message)) throw new Error(`expected a validity-window reason, got: ${threw.message}`);
+  });
+
+  rmSync(fixDir, { recursive: true, force: true });
 }
 
-// A marker unlikely to occur by accident, standing in for "the secret" in every leak cell.
-const MARKER = "DSNPIPE_SELFTEST_MARKER_7f3ac91";
 const SYNTHETIC_DSN = fakeDsn({ user: "selftest_" + MARKER, pass: "pw_" + MARKER, hostport: "127.0.0.1:59999", db: "selftestdb" });
 
 // ---------------------------------------------------------------------------
-// Failure modes.
+// Failure modes -- HONEST (D1): every refusal is checked for spawnError/signal/timeout too.
 // ---------------------------------------------------------------------------
-console.log("\nfailure modes:");
+console.log("\nfailure modes (honest -- D1):");
 
-await asyncTestCase("a malformed DSN on stdin refuses (nonzero exit) without echoing the malformed input", async () => {
+await asyncTestCase("a malformed DSN on stdin refuses cleanly without echoing the malformed input", async () => {
   const garbage = "not-a-dsn-at-all-§§§-XYZMARKER";
-  const r = await runDsnPipe({ dsn: garbage, args: ["--", "echo", "should-not-run"] });
-  if (r.code === 0) throw new Error("expected a nonzero exit for a malformed DSN");
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: garbage, args: ["--", "echo", "should-not-run"] });
+  assertCleanRefusal(r);
   if (r.stdout.includes("should-not-run")) throw new Error("the child must never have started");
   if (r.stderr.includes(garbage) || r.stdout.includes(garbage)) throw new Error("the malformed input must never be echoed");
 });
-await asyncTestCase("a missing `--` separator refuses with a usage message, no crash", async () => {
-  const r = await runDsnPipe({ dsn: SYNTHETIC_DSN, args: ["echo", "hi"] });
-  if (r.code === 0) throw new Error("expected a nonzero exit when `--` is missing");
+await asyncTestCase("a missing `--` separator refuses cleanly with a usage message", async () => {
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["echo", "hi"] });
+  assertCleanRefusal(r);
+  if (!/usage/i.test(r.stderr)) throw new Error(`expected a usage message, got stderr=${r.stderr}`);
+});
+await asyncTestCase("a leading token before `--` refuses cleanly (C3 -- no silent discard)", async () => {
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["leading", "--", "echo", "hi"] });
+  assertCleanRefusal(r);
 });
 await asyncTestCase("empty stdin refuses cleanly", async () => {
-  const r = await runDsnPipe({ dsn: "", args: ["--", "echo", "hi"] });
-  if (r.code === 0) throw new Error("expected a nonzero exit for empty stdin");
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: "", args: ["--", "echo", "hi"] });
+  assertCleanRefusal(r);
 });
-await asyncTestCase("a missing CA file FAILS CLOSED before ever attempting to spawn the child", async () => {
-  // Copy dsn-pipe.mjs alone into an isolated tree with NO sibling ops/tls/ -- DEFAULT_CA_PATH
-  // resolves relative to the script's own location, so this genuinely simulates the file
-  // being absent, not merely a wrong argument.
+await asyncTestCase("a missing CA file FAILS CLOSED cleanly before ever attempting to spawn the child", async () => {
   const root = freshDir("dsnpipe-noca-");
   const scriptsDir = join(root, "scripts", "ops");
   mkdirSync(scriptsDir, { recursive: true });
@@ -253,29 +328,48 @@ await asyncTestCase("a missing CA file FAILS CLOSED before ever attempting to sp
   writeFileSync(copy, readFileSync(DSN_PIPE_SRC, "utf8"));
   const r = await runDsnPipe({ scriptPath: copy, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", "console.log('MUST-NOT-RUN')"] });
   rmSync(root, { recursive: true, force: true });
-  if (r.code === 0) throw new Error("expected a nonzero exit when the CA file is missing");
+  assertCleanRefusal(r);
   if (r.stdout.includes("MUST-NOT-RUN")) throw new Error("the child must never start when the CA is missing (fail-closed, not fail-open)");
 });
-await asyncTestCase("the child's own exit code passes through untouched", async () => {
-  const r = await runDsnPipe({ dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", "process.exit(37)"] });
+await asyncTestCase("the child's own exit code passes through untouched (a SUCCESS path, not a refusal)", async () => {
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", "process.exit(37)"] });
+  if (r.spawnError || r.timedOut || r.signal !== null) throw new Error(`expected a clean pass-through, got ${JSON.stringify(r)}`);
   if (r.code !== 37) throw new Error(`expected exit 37 to pass through, got ${r.code}`);
 });
 
 // ---------------------------------------------------------------------------
-// The argv leak cell — this tool's OWN argv, and its CHILD's argv, both proved live.
+// The argv leak cell — this tool's OWN argv, and its CHILD's argv, both proved live, each with
+// a POSITIVE CONTROL (D2): the detector must also be shown to catch a KNOWN-LEAKY case.
 // ---------------------------------------------------------------------------
-console.log("\nargv leak (constraint 4 -- env-to-end, never printed):");
+console.log("\nargv leak (constraint 4 -- env-to-end, never printed), with positive controls (D2):");
+
+function argvListContainsMarker(argvArray) {
+  return argvArray.some((a) => String(a).includes(MARKER));
+}
+
+testCase("(D2) positive control: argvListContainsMarker DOES catch a deliberately-leaky argv", () => {
+  if (!argvListContainsMarker(["node", "--evil=" + MARKER])) {
+    throw new Error("the detector failed to catch a KNOWN leak -- it cannot say NO, so its silence proves nothing");
+  }
+});
+testCase("(D2) negative control: argvListContainsMarker does NOT false-positive on a clean argv", () => {
+  if (argvListContainsMarker(["node", "-e", "console.log(1)"])) {
+    throw new Error("the detector false-positived on a genuinely clean argv");
+  }
+});
 
 await asyncTestCase("the DSN never appears in the CHILD's own process.argv (the child self-reports it)", async () => {
   const grandchildScript = "console.log('ARGV:' + JSON.stringify(process.argv));";
-  const r = await runDsnPipe({ dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", grandchildScript] });
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", grandchildScript] });
   const line = r.stdout.split("\n").find((l) => l.startsWith("ARGV:"));
   if (!line) throw new Error(`grandchild never reported its argv; stdout was:\n${r.stdout}\nstderr:\n${r.stderr}`);
-  if (line.includes(MARKER)) throw new Error(`the DSN marker leaked into the child's own argv: ${line}`);
+  const reportedArgv = JSON.parse(line.slice("ARGV:".length));
+  if (argvListContainsMarker(reportedArgv)) throw new Error(`the DSN marker leaked into the child's own argv: ${line}`);
 });
 
 await asyncTestCase("the DSN never appears in dsn-pipe.mjs's OWN process cmdline (live /proc read, Linux/WSL only)", async () => {
   if (process.platform !== "linux") skipHere("proc-fs is Linux/WSL-only; this platform has no /proc/<pid>/cmdline to read");
+  const { spawn } = await import("node:child_process");
   const grandchildScript = "setTimeout(() => {}, 1500);"; // keep the whole chain alive briefly
   const child = spawn(process.execPath, [DSN_PIPE_SRC, "--", "node", "-e", grandchildScript], { stdio: ["pipe", "ignore", "ignore"] });
   child.stdin.write(SYNTHETIC_DSN);
@@ -293,77 +387,89 @@ await asyncTestCase("the DSN never appears in dsn-pipe.mjs's OWN process cmdline
 });
 
 // ---------------------------------------------------------------------------
-// The disk leak cell.
+// The disk leak cell — cwd AND the OS tmpdir (D3), each with a positive control (D2).
 // ---------------------------------------------------------------------------
-console.log("\ndisk leak (no file, anywhere, ever carries the dsn):");
+console.log("\ndisk leak (no file, anywhere, ever carries the dsn), with positive controls (D2):");
 
-await asyncTestCase("a full run writes NO file under its own cwd, and never prints the marker to stdout/stderr", async () => {
-  const cwd = freshDir("dsnpipe-diskleak-");
+function dirTreeContainsMarker(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (dirTreeContainsMarker(p)) return true;
+    } else if (entry.isFile()) {
+      if (readFileSync(p, "utf8").includes(MARKER)) return true;
+    }
+  }
+  return false;
+}
+
+testCase("(D2) positive control: dirTreeContainsMarker DOES catch a deliberately-leaky file", () => {
+  const dir = freshDir("dsnpipe-diskleak-positive-control-");
+  writeFileSync(join(dir, "leaky.txt"), "oops: " + MARKER);
+  const caught = dirTreeContainsMarker(dir);
+  rmSync(dir, { recursive: true, force: true });
+  if (!caught) throw new Error("the detector failed to catch a KNOWN leak -- it cannot say NO, so its silence proves nothing");
+});
+testCase("(D2) negative control: dirTreeContainsMarker does NOT false-positive on clean files", () => {
+  const dir = freshDir("dsnpipe-diskleak-negative-control-");
+  writeFileSync(join(dir, "clean.txt"), "nothing to see here");
+  const caught = dirTreeContainsMarker(dir);
+  rmSync(dir, { recursive: true, force: true });
+  if (caught) throw new Error("the detector false-positived on a genuinely clean file");
+});
+
+await asyncTestCase("a full run writes NO file under its own CWD, and never prints the marker to stdout/stderr", async () => {
+  const cwd = freshDir("dsnpipe-diskleak-cwd-");
   const before = readdirSync(cwd);
-  const r = await runDsnPipe({ dsn: SYNTHETIC_DSN, cwd, args: ["--", "node", "-e", "console.log('ok'); process.exit(0)"] });
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, cwd, args: ["--", "node", "-e", "console.log('ok'); process.exit(0)"] });
   const after = readdirSync(cwd);
+  const leaked = dirTreeContainsMarker(cwd);
   rmSync(cwd, { recursive: true, force: true });
   if (before.length !== 0 || after.length !== 0) throw new Error(`expected an empty cwd throughout, saw after=${JSON.stringify(after)}`);
+  if (leaked) throw new Error("a file under cwd carried the marker");
+  if (r.stdout.includes(MARKER) || r.stderr.includes(MARKER)) throw new Error("the marker must never reach dsn-pipe's own stdout/stderr");
+});
+
+await asyncTestCase("(D3) a full run writes NO file into the OS TEMP DIR either (TMPDIR/TMP/TEMP redirected to a fresh, watched dir)", async () => {
+  const fakeTmp = freshDir("dsnpipe-diskleak-tmpdir-");
+  const before = readdirSync(fakeTmp);
+  const env = { ...process.env, TMPDIR: fakeTmp, TMP: fakeTmp, TEMP: fakeTmp };
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, env, args: ["--", "node", "-e", "console.log('ok'); process.exit(0)"] });
+  const after = readdirSync(fakeTmp);
+  const leaked = dirTreeContainsMarker(fakeTmp);
+  rmSync(fakeTmp, { recursive: true, force: true });
+  if (before.length !== 0 || after.length !== 0) throw new Error(`expected the redirected temp dir to stay empty, saw after=${JSON.stringify(after)}`);
+  if (leaked) throw new Error("a file under the OS temp dir carried the marker");
   if (r.stdout.includes(MARKER) || r.stderr.includes(MARKER)) throw new Error("the marker must never reach dsn-pipe's own stdout/stderr");
 });
 
 // ---------------------------------------------------------------------------
 // The TLS wall, both directions -- against a THROWAWAY local fixture, never the real pooler.
-// Same code path (dsn-pipe.mjs, unmodified) in two isolated trees that differ in EXACTLY one
-// file: which CA sits at ops/tls/pooler-ca.crt relative to the copy.
+// The REAL, unmodified buildChildEnv() (imported directly from dsn-pipe.mjs) builds the env for
+// a throwaway CA; a fresh child process is spawned with that env to attempt the connection. This
+// deliberately bypasses the CLI's validateCa() preflight gate (which pins the ONE production
+// CA's exact fingerprint, review C1, and would refuse any throwaway fixture before a connection
+// is ever attempted) -- validateCa() is proved separately, directly, in the (C1) section above.
+// (The real node-postgres path is D4, in the sibling dsn-pipe.pgpath.selftest.mjs.)
 // ---------------------------------------------------------------------------
-console.log("\nthe TLS wall, both directions (local throwaway fixture):");
-
-function opensslAvailable() {
-  try {
-    execFileSync("openssl", ["version"], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function mintSelfSignedCert(dir, cn) {
-  const keyPath = join(dir, `${cn}.key`);
-  const crtPath = join(dir, `${cn}.crt`);
-  execFileSync("openssl", [
-    "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-    "-keyout", keyPath, "-out", crtPath,
-    "-days", "1", "-subj", `/CN=${cn}`,
-    "-addext", "subjectAltName=DNS:127.0.0.1,IP:127.0.0.1",
-  ], { stdio: "pipe" });
-  return { keyPath, crtPath };
-}
+console.log("\nthe TLS wall, both directions (local throwaway fixture, raw TLS probe):");
 
 function startLocalTlsServer(keyPath, crtPath) {
   return new Promise((resolvePromise) => {
-    const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(crtPath) }, (socket) => {
+    const server = createTlsServer({ key: readFileSync(keyPath), cert: readFileSync(crtPath) }, (socket) => {
       socket.end("hello\n");
     });
     server.listen(0, "127.0.0.1", () => resolvePromise(server));
   });
 }
 
-/** Build an isolated {scripts/ops/dsn-pipe.mjs, ops/tls/pooler-ca.crt} tree so DEFAULT_CA_PATH resolves to `caCrtPath`. */
-function isolatedDsnPipeTree(caCrtPath) {
-  const root = freshDir("dsnpipe-tlswall-");
-  const scriptsDir = join(root, "scripts", "ops");
-  const tlsDir = join(root, "ops", "tls");
-  mkdirSync(scriptsDir, { recursive: true });
-  mkdirSync(tlsDir, { recursive: true });
-  cpSync(DSN_PIPE_SRC, join(scriptsDir, "dsn-pipe.mjs"));
-  cpSync(caCrtPath, join(tlsDir, "pooler-ca.crt"));
-  return { root, scriptPath: join(scriptsDir, "dsn-pipe.mjs") };
-}
-
-if (!opensslAvailable()) {
-  skips += 2;
-  console.log("  SKIP  TLS wall admits on the matching CA -- no `openssl` on PATH to mint a throwaway test cert");
-  console.log("  SKIP  TLS wall refuses on a mismatched CA -- no `openssl` on PATH to mint a throwaway test cert");
+if (!opensslAvailableForCaFixtures()) {
+  reportOpensslMissing(harnessForOpenssl, "TLS wall admits on the matching CA", 1);
+  reportOpensslMissing(harnessForOpenssl, "TLS wall refuses on a mismatched CA", 1);
 } else {
   const certDir = freshDir("dsnpipe-certs-");
-  const real = mintSelfSignedCert(certDir, "fixture-real");
-  const other = mintSelfSignedCert(certDir, "fixture-other"); // an unrelated CA -- must NOT be trusted
+  const real = mintCert(certDir, "fixture-real", { ca: true });
+  const other = mintCert(certDir, "fixture-other", { ca: true }); // an unrelated CA -- must NOT be trusted
   const server = await startLocalTlsServer(real.keyPath, real.crtPath);
   const port = server.address().port;
   const probeScript = `
@@ -374,17 +480,13 @@ if (!opensslAvailable()) {
     s.on("error", (e) => { console.log("TLS_FAIL:" + e.code); process.exit(1); });
   `;
 
-  await asyncTestCase("WITH the matching CA pinned, the child's TLS connect SUCCEEDS", async () => {
-    const { root, scriptPath } = isolatedDsnPipeTree(real.crtPath);
-    const r = await runDsnPipe({ scriptPath, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", probeScript] });
-    rmSync(root, { recursive: true, force: true });
+  await asyncTestCase("WITH the matching CA pinned, the child's raw TLS connect SUCCEEDS", async () => {
+    const r = await spawnWithBuiltEnv({ dsnPipeSrc: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, caPath: real.crtPath, probeScript });
     if (!r.stdout.includes("TLS_OK")) throw new Error(`expected TLS_OK, got stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
   });
 
-  await asyncTestCase("WITHOUT the matching CA (a different one pinned instead), the child's TLS connect is REFUSED", async () => {
-    const { root, scriptPath } = isolatedDsnPipeTree(other.crtPath);
-    const r = await runDsnPipe({ scriptPath, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", probeScript] });
-    rmSync(root, { recursive: true, force: true });
+  await asyncTestCase("WITHOUT the matching CA (a different one pinned instead), the child's raw TLS connect is REFUSED", async () => {
+    const r = await spawnWithBuiltEnv({ dsnPipeSrc: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, caPath: other.crtPath, probeScript });
     if (!r.stdout.includes("TLS_FAIL:")) throw new Error(`expected a refusal (TLS_FAIL:<code>), got stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
     if (r.stdout.includes("TLS_OK")) throw new Error("a mismatched CA must never be silently trusted");
   });
@@ -394,5 +496,4 @@ if (!opensslAvailable()) {
 }
 
 // ---------------------------------------------------------------------------
-console.log(`\n${failures === 0 ? "ALL GREEN" : failures + " FAILURE(S)"} (${skips} skipped)`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(summarize());

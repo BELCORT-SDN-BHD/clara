@@ -56,10 +56,11 @@ risk is identical whatever the migration contains.
 
 ## 2. Apply migration 0021 (live: 20 → 21 applied)
 
-**Run the migrator. Never `psql -f` the migration file.**
+**Run the migrator. Never `psql -f` the migration file.** From the repo root, piped through the
+committed CA-pinned bridge (`docs/ops/dsn-bridge.md`) — `sslmode=verify-full`, never `no-verify`:
 
-```
-node packages/db/scripts/migrate.mjs
+```sh
+<secret source> | node scripts/ops/dsn-pipe.mjs -- node packages/db/scripts/migrate.mjs
 ```
 
 The migrator is the only path that records the version and checksum, verifies history
@@ -68,10 +69,9 @@ concurrent runners. A `psql -f` applies the SQL and leaves `schema_migrations` l
 next run then reports drift on a migration that *is* applied. Named explicitly because the
 0020 rehearsal found this step unnamed, and an unnamed step at 2am is a guess.
 
-Connection comes from the environment (libpq `PG*` vars or `DATABASE_URL`). **Never a DSN in
-argv** — the leak-scan gate exists because that mistake is one shell-history away. TLS: pipe the
-DSN through the committed CA-pinned bridge (`docs/ops/dsn-bridge.md`) — `sslmode=verify-full`,
-never `no-verify`.
+Connection comes from the environment (libpq `PG*` vars or `DATABASE_URL`, both set by the
+bridge above). **Never a DSN in argv** — the leak-scan gate exists because that mistake is one
+shell-history away.
 
 Expect: `0021_counterparty_human_lane` applied, and the in-transaction tail's notice —
 `0021: create_counterparty installed — SECURITY DEFINER, search_path pinned,
@@ -80,8 +80,12 @@ catalog. That is step 3's job.
 
 ## 3. Post-DB verify
 
-```
-psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0021-postverify.sql
+Through the same bridge — `psql` needs no connection argument of its own (the bridge derives
+`PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` from the DSN; never
+`psql "$DATABASE_URL" -f ...`, which would put the DSN in `psql`'s own argv):
+
+```sh
+<secret source> | node scripts/ops/dsn-pipe.mjs -- psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0021-postverify.sql
 ```
 
 Six probes, read-only, raising on the first failure. Green means:
