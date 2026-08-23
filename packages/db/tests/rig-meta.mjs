@@ -270,6 +270,20 @@ const STATEMENT_F_A1_PR4_UNGRANTED_FNS = ["_persist_statement_core_v2"];
 export const STATEMENT_F_A1_PR4_COHORT = [
   ...STATEMENT_F_A1_PR4_RUNTIME_FNS, ...STATEMENT_F_A1_PR4_UNGRANTED_FNS,
 ];
+// F-A7 gamma (Wave-F Track A, the egress train, window D1-gamma): the firm-narrow typed-egress
+// family's four owner verbs, mirroring WAVE_B_0020_HUMAN_FNS' shape for the client-scoped
+// family exactly (owner floor body-enforced, no agent/wake EXECUTE) + the runtime dispatch
+// preparer, mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch. Its own cohort per the
+// "wholly present or wholly absent" rule (the STATEMENT_F_A1_PR4_COHORT precedent above): this
+// migration also widens the CLIENT-scoped family's CoR'd bodies (grant/activate/deactivate/
+// revoke_client_egress_purpose, prepare_egress_dispatch) but adds no NEW client-scoped names —
+// those four stay in WAVE_B_0020_HUMAN_FNS / WAVE_B_0020_RUNTIME_FNS, byte-unmoved as rosters.
+const F_A7_GAMMA_HUMAN_FNS = [
+  "grant_firm_egress_purpose", "activate_firm_egress_purpose",
+  "deactivate_firm_egress_purpose", "revoke_firm_egress_purpose",
+];
+const F_A7_GAMMA_RUNTIME_FNS = ["prepare_firm_egress_dispatch"];
+export const F_A7_GAMMA_COHORT = [...F_A7_GAMMA_HUMAN_FNS, ...F_A7_GAMMA_RUNTIME_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -869,6 +883,8 @@ export const ALLOWED = {
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
     ...RENDER_ZETA_HUMAN_FNS,
+    ...F_A7_GAMMA_HUMAN_FNS, // [Wave-F Track A, F-A7 gamma] the firm-narrow typed-egress
+    // family's four owner verbs (owner floor body-enforced; see the block above)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -912,6 +928,8 @@ export const ALLOWED = {
     // and its consumer; F-A1 grants no human EXECUTE at all
     ...WITNESS_F_A1_PR3_RUNTIME_FNS, // F-A1 PR-3 cutover: fail_witness_facts, the running->failed
     // settle verb for the llm_witness lane (mirrors fail_invoice_facts, S6_RUNTIME_FNS above)
+    ...F_A7_GAMMA_RUNTIME_FNS, // [Wave-F Track A, F-A7 gamma] prepare_firm_egress_dispatch,
+    // mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch (see the block above)
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1056,6 +1074,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A7 gamma egress train", F_A7_GAMMA_COHORT, liveNames));
   return failures;
 }
 

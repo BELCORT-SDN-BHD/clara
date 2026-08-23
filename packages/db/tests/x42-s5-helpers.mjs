@@ -159,6 +159,14 @@ export const S5_25_BARE_TOKEN_RE = "\\m(now\\(\\)|current_timestamp\\M|localtime
 // discipline. Kept as a comment rather than silently moved, so the next name added here is
 // asked the frontier question first.
 export const S5_25_BARE_TOKEN_ROSTER = [
+  // deactivate_firm_egress_purpose / revoke_firm_egress_purpose / prepare_firm_egress_dispatch
+  // joined at [Wave-F Track A, F-A7 gamma, D1-gamma]: the firm-narrow typed-egress family's
+  // deactivate/revoke (now()-stamped deactivated_at/revoked_at) and its dispatch preparer
+  // (now()/clock_timestamp()-derived expires_at, mirroring prepare_egress_dispatch's own TTL
+  // shape) carry date-shaped code, exactly like their client-scoped siblings
+  // deactivate_client_egress_purpose / revoke_client_egress_purpose / prepare_egress_dispatch
+  // already on this roster. grant_firm_egress_purpose / activate_firm_egress_purpose stay OFF
+  // this roster for the same reason their client-scoped siblings do: no date-shaped code.
   // _adv_reversal_admission joined at the round-8 INTEGRATION: lane M3 factored the advance
   // reversal walls into one admission body carrying its parents' lawful as-of idiom
   // (`v_at := coalesce(p_at, now())` — a timestamptz interval default, never a date). The
@@ -179,19 +187,19 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "claim_document_processing_task", "classify_document", "commit_client_onboarding", "complete_bank_reconciliation", "complete_coding_task",
   "complete_fixed_asset_particulars", "complete_pending_match", "complete_seeding_batch", "complete_stored_document_task", "confirm_attribution_candidate",
   "consume_egress_dispatch", "create_client", "create_firm", "create_seeding_batch", "deactivate_bank_account",
-  "deactivate_client_egress_purpose", "decline_coding_rule", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
+  "deactivate_client_egress_purpose", "deactivate_firm_egress_purpose", "decline_coding_rule", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
   "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all", "execute_rule_post",
   "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
   "get_context_pack", "list_autopost_rules", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
   "mark_wiki_citations_stale", "match_bank_line", "merge_counterparties", "mint_wake_credential", "open_interruption",
-  "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch", "propose_autopost_rule",
+  "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch", "prepare_firm_egress_dispatch", "propose_autopost_rule",
   "propose_bank_rule", "propose_vendor_identity_binding", "reconcile_autopost_rules", "reconcile_sweep_runs", "record_future_attestation",
   "record_opening_keyed_resolution", "relay_health", "remove_member", "rename_counterparty", "request_reextraction",
   "resolve_and_book_bank_line", "resolve_bank_line_exception", "resolve_compliance_watch", "resolve_lint_finding", "resolve_onboarding_plan_item",
   "resolve_open_question", "retire_adjustment_template", "retire_autopost_rule", "retire_bank_rule", "retire_client_alias",
   "retire_coding_rule", "retire_counterparty_alias", "retire_depreciation_authority", "retire_document_filing", "retire_fa_account_profile",
   "retire_staff_advance_account", "retire_wiki_page", "reverse_entry", "revise_entry", "revise_fixed_asset_particulars",
-  "revoke_client_egress", "revoke_client_egress_purpose", "revoke_vendor_identity_binding", "revoke_wake_credential", "run_client_lint",
+  "revoke_client_egress", "revoke_client_egress_purpose", "revoke_firm_egress_purpose", "revoke_vendor_identity_binding", "revoke_wake_credential", "run_client_lint",
   "run_lint_all", "set_counterparty_terms", "set_document_kind", "set_member_role", "set_wiki_synthesis_hold",
   "settle_chat_turn", "settle_ingest_reservation", "sign_adjustment_template", "sign_autopost_rule", "sign_bank_rule",
   "sign_coding_rule", "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
