@@ -200,8 +200,8 @@ is_bank_account` has exactly **two** writers — `add_bank_account` (`0038:2731`
 REGISTRATION**. A zero-registry client therefore carries zero flagged accounts, and arm (4)'s
 predicate returns the empty set **exactly on the population it exists to catch** — the same
 empty-registry defect repairs (1) and (2) already have, one level down. Prediction **P-4′** cannot
-hold as written. **F-T4's design §2.2** (`docs/plan/active/fix-queue-design.md`, on branch
-`track-b/ft4-fixqueue-design` until its docs PR lands) enumerates three surviving arms that do not
+hold as written. **F-T4's design §2.2** (`docs/plan/active/fix-queue-design.md` — landed on `main`
+2026-08-23, PR #297) enumerates three surviving arms that do not
 key on the registration-minted flag; **PR-1b adopts one** and proves it with a **zero-registry
 fixture that MUST fire** (a cell that cannot fail proves nothing — law 31). *This lane recorded the
 finding and did not design the fix.*

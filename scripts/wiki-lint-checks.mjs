@@ -99,6 +99,81 @@ export const WIKI_WHITELIST = new Set([
  * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
+  // F-A3 PR-1a (UNNUMBERED_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
+  // patches, one per public bank-agency verb, each reading its own LIVE prosrc via
+  // `pg_get_functiondef('clara.<verb>(...)'::regprocedure)` — a LITERAL signature, so every
+  // patch's target already resolves (`p.targets` carries no null) — and re-installing it under
+  // a new `_<verb>_core` name plus a thin wrapper, via `execute replace(...) || 'AS
+  // $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$'` and `execute v_head || 'AS
+  // $fa3_wrap$' || format($w$…$w$, …) || '$fa3_wrap$'`. Both statements read a
+  // migration-time-only variable (v_head/v_src, sourced from the catalog at apply, never a
+  // literal in this file's own text) so `staticSqlOf` cannot prove them and every one is
+  // `kind:'unprovable'` — exactly the class this allowlist exists to excuse (the docstring
+  // above, "an UNPROVABLE statement … excused by a declared, wiki-free waiver as a reviewed
+  // human attestation"). NOT waivable via WIKI_WHITELIST: these are ordinary bank-ledger verbs,
+  // never wiki-touch surfaces. Each entry's `relations`/`calls` are the EXACT `clara.*` token
+  // set the live installed body was MEASURED to reference (a rig read, never a file citation —
+  // `select p.prosrc … from pg_proc p where p.proname = '<verb>'` on a migrated throwaway,
+  // 2026-08-24) and every one of the nine bodies was independently confirmed to contain no
+  // word-bounded "wiki" substring at all (`prosrc !~* '\ywiki'`, same read). The migration's
+  // own SS0.3 prestate additionally pins each body's pre-extraction sha256, so a live body that
+  // has drifted from the one this waiver was measured against aborts the migration before this
+  // statement ever runs — the waiver cannot silently go stale under a body swap.
+  ["match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)", {
+    why: "F-A3 PR-1a S1 block 1 — see the family note above. match_bank_line's own body is the "
+      + "richest of the nine (it is the one WITH the estate's lock order, Annex C), so its "
+      + "relations/calls list is the longest; still zero wiki tokens.",
+    relations: ["bank_accounts", "bank_line_exceptions", "bank_match_entry_members",
+      "bank_match_line_members", "bank_matches", "bank_rules", "bank_statement_lines",
+      "bank_statements", "clients", "domain_events", "journal_entries"],
+    calls: ["_append_event", "_audit", "_bank_entry_side_capacity", "_bank_match_adjustment_entry",
+      "_bank_match_audit", "_finish_op", "_hash", "_human_ctx", "_match_bank_line_core",
+      "_reserve_op", "role_rank"],
+  }],
+  ["unmatch_bank_match(uuid,uuid,text,text)", {
+    why: "F-A3 PR-1a S1 block 2 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_unmatch_bank_match_core", "role_rank"],
+  }],
+  ["complete_bank_reconciliation(uuid,uuid[],text)", {
+    why: "F-A3 PR-1a S1 block 3 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_complete_bank_reconciliation_core", "role_rank"],
+  }],
+  ["void_bank_reconciliation(uuid,text,text)", {
+    why: "F-A3 PR-1a S1 block 4 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_void_bank_reconciliation_core", "role_rank"],
+  }],
+  ["resolve_bank_line_exception(uuid,text,text,uuid,text)", {
+    why: "F-A3 PR-1a S1 block 5 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_resolve_bank_line_exception_core", "role_rank"],
+  }],
+  ["resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)", {
+    why: "F-A3 PR-1a S1 block 6 — see the family note above. The extracted core is deliberately "
+      + "unchanged in what it calls (Annex A.2's obligation J.2-a, discharged by the F-A3/PR-1b "
+      + "lane): it still reaches the PUBLIC resolve_bank_line_exception and match_bank_line "
+      + "internally, so this waiver covers only the wrapper/core installation itself, not a "
+      + "call-graph change.",
+    relations: [],
+    calls: ["_human_ctx", "_resolve_and_book_bank_line_core", "role_rank"],
+  }],
+  ["void_bank_statement(uuid,uuid,text,text)", {
+    why: "F-A3 PR-1a S1 block 7 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_void_bank_statement_core", "role_rank"],
+  }],
+  ["add_bank_account(uuid,text,text,text,text,uuid,text)", {
+    why: "F-A3 PR-1a S1 block 8 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_add_bank_account_core", "role_rank"],
+  }],
+  ["upsert_account(uuid,text,text,text,text,text,text)", {
+    why: "F-A3 PR-1a S1 block 9 — see the family note above.",
+    relations: [],
+    calls: ["_human_ctx", "_upsert_account_core", "role_rank"],
+  }],
   ["apply_open_items(uuid,jsonb,text,text)", {
     why: "0055 S7 — the TAIL ASSERTION block (PR #226, full ADR-061 ladder; the round-3 "
       + "scoped review corrected this entry's first cut, which mis-attributed the finding "

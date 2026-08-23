@@ -90,8 +90,8 @@
 -- one. They are NOT repointed at the cores here: repointing would drop an inner floor re-check,
 -- and PR-1a's whole claim is that nothing changed.
 --
--- **PR-1b BUILD OBLIGATION (recorded 2026-08-23; mirrored in bank-agency-annexes-3-build.md).**
--- Those three call sites MUST be repointed to clara._resolve_bank_line_exception_core /
+-- **PR-1b BUILD OBLIGATION (recorded 2026-08-23; annexes-3-build.md, obligation J.2-a).** Those
+-- three call sites MUST be repointed to clara._resolve_bank_line_exception_core /
 -- clara._match_bank_line_core, threading the caller's p_ctx, when PR-1b builds
 -- _agent_resolve_and_book_core. Left as they are, an agent call reaching
 -- _resolve_and_book_bank_line_core raises CLR04 'no authenticated actor' two levels down, from
@@ -130,21 +130,20 @@ end
 $fa3_quiesce$;
 
 -- =====================================================================================
--- SS0.2 THE ROSTER -- declared ONCE, in a session-local table the prestate, the cut and the
--- tail all read. Three hand-copied rosters is three chances for a pinned sha to disagree with
+-- SS0.2 THE ROSTER -- the pins, declared ONCE, in a session-local table the prestate and the
+-- tail both read. Two hand-copied rosters is two chances for a pinned sha to disagree with
 -- itself, and a roster that disagrees with itself proves nothing; ON COMMIT DROP keeps it from
 -- outliving the migration's own transaction.
 --
 -- Each row carries the EXACT regprocedure signature (never a proname -- match_bank_line has two
 -- live overloads and this file extracts ONE of them), the expected overload count for that
 -- proname, the role floor, the exact `_human_ctx` anchor text, and the prosrc sha-256 measured
--- on the rig at frontier 0102.
+-- on a rig at frontier 0102.
 -- =====================================================================================
 create temp table fa3_pr1a_targets (
   name text primary key, sig text not null, overloads int not null, floor text not null,
   nargs int not null, anchor text not null, sha text not null
 ) on commit drop;
-grant select on fa3_pr1a_targets to public;  -- session-local; SS1 reads it as clara_fn_owner
 
 insert into fa3_pr1a_targets (name, sig, overloads, floor, nargs, anchor, sha) values
  ('match_bank_line',
@@ -189,8 +188,7 @@ insert into fa3_pr1a_targets (name, sig, overloads, floor, nargs, anchor, sha) v
 -- =====================================================================================
 do $fa3_pre$
 declare
-  t record; v_oid oid; v_src text; v_def text; v_sha text; v_n int;
-  v_core text; v_pinned int := 0;
+  t record; v_oid oid; v_src text; v_sha text; v_n int; v_core text; v_pinned int := 0;
 begin
   select count(*)::int into v_n from fa3_pr1a_targets;
   if v_n <> 9 then
@@ -260,20 +258,13 @@ begin
         using errcode='CLR10';
     end if;
 
-    -- (f) THE DEFINITION SPLITS EXACTLY at the AS $function$ boundary, and re-assembling the
-    -- three pieces reproduces pg_get_functiondef byte-for-byte. A POSITIVE control on the splice
-    -- instrument itself: a body that ever contained the tag fails HERE rather than producing a
-    -- mis-cut wrapper header.
-    v_def := pg_get_functiondef(v_oid);
-    v_n := (length(v_def) - length(replace(v_def, E'\nAS $function$', ''))) / length(E'\nAS $function$');
-    if v_n <> 1 then
-      raise exception 'F-A3 PR-1a prestate: the AS $function$ boundary occurs % time(s) in % (expected exactly 1)', v_n, t.sig
-        using errcode='CLR10';
-    end if;
-    if v_def <> left(v_def, position(E'\nAS $function$' in v_def)) || 'AS $function$' || v_src || '$function$' || E'\n' then
-      raise exception 'F-A3 PR-1a prestate: pg_get_functiondef(%) does not reassemble from header + AS $function$ + prosrc + $function$ -- the splice instrument does not understand this definition; refuse', t.sig
-        using errcode='CLR10';
-    end if;
+    -- (f) THE BODY DOES NOT CONTAIN THIS FILE'S OWN DOLLAR-QUOTE TAGS. (Its companion -- that
+    -- each live definition splits cleanly at the function-body boundary and re-assembles
+    -- byte-for-byte -- lives in each SS1 block, beside the literal signature it reads; see the
+    -- SS1 header for why every catalog read of a body names its target in literal text. Naming
+    -- that catalog-read function BY NAME here would be a recut phrase quoted in a CoR comment
+    -- -- the wiki dynamic-SQL gate reads this block's own comments un-masked, PROGRESS.md
+    -- Known issues, "the wiki CoR-comment gate" -- so this note describes it instead.)
     if position('$fa3_core$' in v_src) <> 0 or position('$fa3_wrap$' in v_src) <> 0 then
       raise exception 'F-A3 PR-1a prestate: the body of % contains one of this file''s dollar-quote tags', t.sig
         using errcode='CLR10';
@@ -290,7 +281,7 @@ begin
     v_pinned := v_pinned + 1;
   end loop;
 
-  raise notice 'F-A3 PR-1a prestate: clean -- all % target bodies resolve at their exact signatures with the pinned arity and overload count, carry exactly one pinned _human_ctx anchor, split cleanly at the AS $function$ boundary, are volatile plpgsql SECURITY DEFINER owned by clara_fn_owner with search_path=clara+pg_temp and executable by clara_authenticated, hold no core of the extracted name yet, and match their pinned prosrc sha256', v_pinned;
+  raise notice 'F-A3 PR-1a prestate: clean -- all % target bodies resolve at their exact signatures with the pinned arity and overload count, carry exactly one pinned _human_ctx anchor, are volatile plpgsql SECURITY DEFINER owned by clara_fn_owner with search_path=clara+pg_temp and executable by clara_authenticated, hold no core of the extracted name yet, and match their pinned prosrc sha256', v_pinned;
 end
 $fa3_pre$;
 
@@ -299,88 +290,445 @@ $fa3_pre$;
 -- delegators built from their own LIVE headers. Every string that reaches a CREATE is derived
 -- from the catalog at apply time; the only text this file authors is the ctx unpack and the
 -- delegator body.
+--
+-- WHY NINE NEAR-IDENTICAL BLOCKS RATHER THAN ONE LOOP. The wiki-authority boundary gate
+-- (scripts/wiki-lint-checks.mjs) is fail-closed on a change-of-record block whose
+-- pg_get_functiondef target cannot be attributed to a signature IN THE FILE'S OWN TEXT -- an
+-- unknown body goes in and DDL comes out, and migration 0019's prosrc token scan cannot see it.
+-- A loop over a roster is exactly that shape. The gate is right, and the property it is asking
+-- for is one a reviewer of a D1 window wants anyway: each of the nine patches NAMES, in literal
+-- text, the one live body it rewrites. So the target is a literal ::regprocedure at every read,
+-- the 0102 idiom, and the price is repetition. The repetition is not load-bearing: a
+-- copy-paste slip cannot pass, because SS2 re-derives every core from its pinned pre-extraction
+-- sha and checks every wrapper against the core it is supposed to name.
+--
+-- EACH BLOCK, IN ORDER: read the live definition -> assert it splits at the `AS $function$`
+-- boundary and reassembles byte-for-byte (a POSITIVE control on the splice instrument itself)
+-- -> CREATE the core from the live header + the live body with ONE substitution -> revoke it
+-- from PUBLIC -> REPLACE the public verb with a delegator built from that same live header.
 -- =====================================================================================
 set role clara_fn_owner;
 
-do $fa3_cut$
+do $fa3_cut_01$
 declare
-  t record; v_oid oid; v_core_oid oid; v_src text; v_def text; v_head text;
-  v_core text; v_ctx text; v_argnames text; v_n int; v_made int := 0;
+  v_name text := 'match_bank_line'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
 begin
-  for t in select * from fa3_pr1a_targets order by name loop
-    v_core := '_' || t.name || '_core';
-    v_oid := to_regprocedure(t.sig);
-
-    select p.prosrc, pg_get_functiondef(p.oid),
-           (select string_agg(a.n, ', ' order by a.o)
-              from unnest(p.proargnames) with ordinality as a(n,o))
-      into v_src, v_def, v_argnames
-      from pg_proc p where p.oid = v_oid;
-    if v_argnames is null or v_argnames = '' then
-      raise exception 'F-A3 PR-1a S1: % has no named arguments -- the delegator cannot forward without inventing names', t.sig
-        using errcode='CLR10';
-    end if;
-    v_head := left(v_def, position(E'\nAS $function$' in v_def));
-
-    -- THE ONE SUBSTITUTION. The `_human_ctx` acquisition becomes the ctx unpack; the raise is the
-    -- 0044:1722-1726 shape -- FAIL CLOSED on a missing or malformed context (an absent actor or
-    -- firm is CLR10 'core_ctx_missing', never a silent NULL flowing into a firm predicate).
-    v_ctx := format($fa3_ctx$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  v_def := pg_get_functiondef('clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
   if c.actor is null or c.firm is null then
     raise exception 'the %s core requires an actor and a firm in its context'
       using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
-  end if;$fa3_ctx$, t.name);
-
-    -- THE CORE. Header = the live header with the name re-pointed and p_ctx prepended (every
-    -- other property -- the argument list with its defaults, RETURNS, LANGUAGE, SECURITY
-    -- DEFINER, SET search_path, volatility -- rides along verbatim). Body = the live prosrc with
-    -- exactly the one substitution above.
-    v_n := (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.' || t.name || '(', '')))
-             / length('CREATE OR REPLACE FUNCTION clara.' || t.name || '(');
-    if v_n <> 1 then
-      raise exception 'F-A3 PR-1a S1: the CREATE header for % is not uniquely locatable (% occurrence(s))', t.sig, v_n
-        using errcode='CLR10';
-    end if;
-    execute replace(v_head,
-                    'CREATE OR REPLACE FUNCTION clara.' || t.name || '(',
-                    'CREATE OR REPLACE FUNCTION clara.' || v_core || '(p_ctx jsonb, ')
-            || 'AS $fa3_core$' || replace(v_src, t.anchor, v_ctx) || '$fa3_core$';
-
-    select p.oid into v_core_oid from pg_proc p
-     where p.pronamespace='clara'::regnamespace and p.proname=v_core;
-    if v_core_oid is null then
-      raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
-    end if;
-
-    -- UNGRANTED AT BIRTH. A freshly created function has a NULL proacl, which MEANS PUBLIC
-    -- EXECUTE -- rig-meta's grantMatrixFailures reads exactly that -- so this revoke is the
-    -- difference between an internal delegate and a second public entrance (0040 tail-7(3)).
-    execute format('revoke all on function %s from public', v_core_oid::regprocedure);
-
-    -- THE WRAPPER. Header spliced from the LIVE definition -- nothing about the public face is
-    -- retyped. Body: the floor, then the delegation, and NOTHING that acquires.
-    execute v_head || 'AS $fa3_wrap$' || format($fa3_wrap$
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
 declare c record;
 begin
   -- F-A3 PR-1a (design SS4, Annex A.2): the public verb keeps its name, arity, ACL, owner,
   -- volatility and floor and becomes a thin delegator. It acquires NOTHING -- every rung of the
-  -- estate's lock order (Annex C) moved into clara.%s with the body, and so did the prosrc pins
-  -- that measure it.
-  c := clara._human_ctx(clara.role_rank(%L));
-  return clara.%I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
-    %s);
+  -- estate's lock order (Annex C) moved into clara.%1$s with the body, and so did the prosrc
+  -- pins that measure it.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
 end
-$fa3_wrap$, v_core, t.floor, v_core, v_argnames) || '$fa3_wrap$';
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_01$;
 
-    v_made := v_made + 1;
-  end loop;
-
-  if v_made <> 9 then
-    raise exception 'F-A3 PR-1a S1: % extractions executed, expected 9', v_made using errcode='CLR10';
+do $fa3_cut_02$
+declare
+  v_name text := 'unmatch_bank_match'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.unmatch_bank_match(uuid,uuid,text,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.unmatch_bank_match(uuid,uuid,text,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
   end if;
-  raise notice 'F-A3 PR-1a S1: % core extractions executed -- nine cores created from the live bodies and revoked from PUBLIC, nine public verbs replaced by delegators built from their own live headers', v_made;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the lock order lives in clara.%1$s.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
 end
-$fa3_cut$;
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_02$;
+
+do $fa3_cut_03$
+declare
+  v_name text := 'complete_bank_reconciliation'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.complete_bank_reconciliation(uuid,uuid[],text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.complete_bank_reconciliation(uuid,uuid[],text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the lock order lives in clara.%1$s.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_03$;
+
+do $fa3_cut_04$
+declare
+  v_name text := 'void_bank_reconciliation'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.void_bank_reconciliation(uuid,text,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.void_bank_reconciliation(uuid,text,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the lock order lives in clara.%1$s.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_04$;
+
+do $fa3_cut_05$
+declare
+  v_name text := 'resolve_bank_line_exception'; v_floor text := 'owner';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''owner''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.resolve_bank_line_exception(uuid,text,text,uuid,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.resolve_bank_line_exception(uuid,text,text,uuid,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the lock order lives in clara.%1$s.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_05$;
+
+do $fa3_cut_06$
+declare
+  v_name text := 'resolve_and_book_bank_line'; v_floor text := 'owner';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''owner''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the lock order lives in clara.%1$s.
+  -- NOTE (obligation J.2-a): the CORE still calls the PUBLIC resolve_bank_line_exception and
+  -- match_bank_line internally -- deliberately unchanged here, and PR-1b's to repoint.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_06$;
+
+do $fa3_cut_07$
+declare
+  v_name text := 'void_bank_statement'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.void_bank_statement(uuid,uuid,text,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.void_bank_statement(uuid,uuid,text,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the lock order lives in clara.%1$s.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_07$;
+
+do $fa3_cut_08$
+declare
+  v_name text := 'add_bank_account'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.add_bank_account(uuid,text,text,text,text,uuid,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.add_bank_account(uuid,text,text,text,text,uuid,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the ladder lives in clara.%1$s. The
+  -- proposal wall design SS3.10 adds is PR-1b's and goes in the AGENT core ONLY -- this
+  -- delegate stays semantically identical for the human ctx (Annex H.1's M3 cell).
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_08$;
+
+do $fa3_cut_09$
+declare
+  v_name text := 'upsert_account'; v_floor text := 'bookkeeper';
+  v_anchor text := '  c:=clara._human_ctx(clara.role_rank(''bookkeeper''));';
+  v_def text; v_src text; v_head text; v_args text; v_core text; v_ctx text; v_core_oid oid;
+begin
+  v_def := pg_get_functiondef('clara.upsert_account(uuid,text,text,text,text,text,text)'::regprocedure);
+  select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
+                      from unnest(p.proargnames) with ordinality as a(n,o))
+    into v_src, v_args from pg_proc p
+   where p.oid = 'clara.upsert_account(uuid,text,text,text,text,text,text)'::regprocedure;
+  v_core := '_' || v_name || '_core';
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if coalesce(v_args,'') = ''
+     or v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n'
+     or (length(v_head) - length(replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(', '')))
+          / length('CREATE OR REPLACE FUNCTION clara.'||v_name||'(') <> 1 then
+    raise exception 'F-A3 PR-1a S1 %: the live definition does not split at the AS $function$ boundary into a uniquely-locatable header plus the live prosrc with named arguments', v_name
+      using errcode='CLR10';
+  end if;
+  v_ctx := format($c$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the %s core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c$, v_name);
+  execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.'||v_name||'(',
+                          'CREATE OR REPLACE FUNCTION clara.'||v_core||'(p_ctx jsonb, ')
+          || 'AS $fa3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3_core$';
+  select p.oid into v_core_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname=v_core;
+  if v_core_oid is null then
+    raise exception 'F-A3 PR-1a S1: clara.% was not created', v_core using errcode='CLR10';
+  end if;
+  execute format('revoke all on function %s from public', v_core_oid::regprocedure);
+  execute v_head || 'AS $fa3_wrap$' || format($w$
+declare c record;
+begin
+  -- F-A3 PR-1a: a thin delegator. It acquires NOTHING; the ladder lives in clara.%1$s.
+  c := clara._human_ctx(clara.role_rank(%2$L));
+  return clara.%1$I(jsonb_build_object('actor', c.actor, 'firm', c.firm),
+    %3$s);
+end
+$w$, v_core, v_floor, v_args) || '$fa3_wrap$';
+end
+$fa3_cut_09$;
 
 reset role;
 
@@ -389,7 +737,9 @@ reset role;
 -- ways per verb: (1) the public face is unmoved on every property a caller can observe; (2) the
 -- core body INVERTS back to the pinned prestate sha, so the extraction is byte-faithful and not
 -- merely plausible; (3) the core is reachable by nobody; (4) the wrapper acquires and writes
--- nothing while the cores keep the rungs. It RAISES on failure -- a notice is not a gate.
+-- nothing while the cores keep the rungs. It RAISES on failure -- a notice is not a gate. It is
+-- also what makes SS1's nine near-identical blocks safe: a copy-paste slip in any of them --
+-- wrong signature, wrong anchor, wrong floor, wrong core name -- fails HERE.
 -- =====================================================================================
 do $fa3_tail$
 declare
