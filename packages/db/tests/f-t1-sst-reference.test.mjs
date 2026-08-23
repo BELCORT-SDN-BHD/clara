@@ -106,14 +106,19 @@ test("sst_rate_schedule: three rate FORMS, exactly-one-of-rate_bp/rate_amount_se
 // predecessors and their supersession chains.
 // ---------------------------------------------------------------------------
 
-test("sst_rate_schedule: seed is exactly TEN rows (six live + four F2 predecessors), all migration-seeded (recorded_by NULL throughout), each source_note non-blank", async (t) => {
+test("sst_rate_schedule: seed is exactly TEN rows (six currently-live + four F2 predecessors), NONE superseded (F2 RE-FIXED — a rate change is a new row, never a correction), all migration-seeded (recorded_by NULL throughout), each source_note non-blank", async (t) => {
   if (skipHere(t)) return;
   const rows = (await rootQuery(
     "select tax_type, scope_key, rate_kind, rate_bp, rate_amount_sen, unit_code, effective_from::text as ef, effective_to::text as et, superseded_by, recorded_by, source_note from clara.sst_rate_schedule order by tax_type, scope_key, effective_from",
   )).rows;
   assert.equal(rows.length, 10, `sst_rate_schedule carries exactly 10 seed rows (got ${rows.length})`);
+  // F2 RE-FIX (conductor delta-confirm 2026-08-24): a predecessor is chronologically adjacent
+  // history, not a correction — superseded_by/at stay NULL on ALL ten rows. Stamping a
+  // predecessor superseded made uq_sst_rate_schedule_live's WHERE superseded_by IS NULL clause
+  // (S1 above) blind to it, so a date inside its window resolved to NO ROW under the live-row
+  // filter — the exact defect this re-fix removes.
   const superseded = rows.filter((r) => r.superseded_by !== null);
-  assert.equal(superseded.length, 4, `exactly 4 rows are superseded predecessors (F2) (got ${superseded.length})`);
+  assert.equal(superseded.length, 0, `zero rows carry a supersession stamp — every row closes by effective_to alone (got ${superseded.length})`);
   for (const r of rows) {
     assert.equal(r.recorded_by, null, `${r.tax_type}/${r.scope_key}@${r.ef} is migration-seeded, not governed-recorded`);
     assert.ok((r.source_note ?? "").length > 20, `${r.tax_type}/${r.scope_key}@${r.ef} cites a real source_note`);
@@ -122,28 +127,31 @@ test("sst_rate_schedule: seed is exactly TEN rows (six live + four F2 predecesso
     assert.notEqual(bp, amt, `${r.tax_type}/${r.scope_key}@${r.ef}: exactly one of rate_bp/rate_amount_sen is set`);
   }
 
-  const live = Object.fromEntries(rows.filter((r) => r.superseded_by === null).map((r) => [`${r.tax_type}/${r.scope_key}`, r]));
-  assert.equal(Number(live["sales/general"].rate_bp), 1000, "sales/general (live) is 10% (S-1)");
-  assert.equal(Number(live["sales/first_schedule"].rate_bp), 500, "sales/first_schedule (live) is 5% (S-1)");
-  assert.equal(Number(live["service/general"].rate_bp), 800, "service/general (live) is 8% (V-1)");
-  assert.equal(Number(live["service/first_schedule_6pct"].rate_bp), 600, "service/first_schedule_6pct (live) is 6% (V-2)");
+  // "Currently live" is identified by effective_to IS NULL (open-ended) — NOT by
+  // superseded_by IS NULL, which is now true of every row and cannot disambiguate a scope's
+  // most-recent fact from its history.
+  const current = Object.fromEntries(rows.filter((r) => r.et === null).map((r) => [`${r.tax_type}/${r.scope_key}`, r]));
+  assert.equal(Number(current["sales/general"].rate_bp), 1000, "sales/general (current) is 10% (S-1)");
+  assert.equal(Number(current["sales/first_schedule"].rate_bp), 500, "sales/first_schedule (current) is 5% (S-1)");
+  assert.equal(Number(current["service/general"].rate_bp), 800, "service/general (current) is 8% (V-1)");
+  assert.equal(Number(current["service/first_schedule_6pct"].rate_bp), 600, "service/first_schedule_6pct (current) is 6% (V-2)");
 
   // F1 BLOCKER FIX: credit/charge-card now cites P.U.(A) 213/2018 @ 2018-09-01, never
   // 64/2024 @ 2024-03-01 — and has no predecessor (213/2018 IS the earliest instrument).
-  const card = live["service/credit_charge_card"];
-  assert.ok(card, "service/credit_charge_card is live");
+  const card = current["service/credit_charge_card"];
+  assert.ok(card, "service/credit_charge_card is current");
   assert.equal(card.ef, "2018-09-01", "F1 fix: credit_charge_card's effective_from is 2018-09-01, not 2024-03-01");
   assert.equal(Number(card.rate_amount_sen), 2500, "credit/charge card is RM25.00 in sen");
   assert.equal(card.unit_code, "card", "credit/charge card unit_code is 'card'");
   assert.match(card.source_note, /213\/2018/, "F1 fix: source_note cites P.U.(A) 213/2018");
 
   // The V-3 flagship, unchanged by the fix round.
-  const rental = live["service/rental_leasing"];
+  const rental = current["service/rental_leasing"];
   assert.equal(rental.ef, "2026-01-01", "rental_leasing's own scope starts exactly 2026-01-01 (V-3's deemed-effective date)");
   assert.equal(Number(rental.rate_bp), 600, "rental_leasing is 6% once its own First-Schedule item exists (V-3)");
 });
 
-test("sst_rate_schedule: F2's four predecessor rows each supersede into their correct successor, with abutting effective_to/effective_from boundaries and no gap or overlap", async (t) => {
+test("sst_rate_schedule: F2's four predecessor rows are chronologically ADJACENT history, never a supersession — abutting effective_to/effective_from boundaries, no gap or overlap, superseded_by NULL on both sides", async (t) => {
   if (skipHere(t)) return;
   const chains = [
     { tax_type: "sales", scope_key: "general", predFrom: "2022-06-01", predRate: 1000, succFrom: "2025-07-01" },
@@ -157,15 +165,35 @@ test("sst_rate_schedule: F2's four predecessor rows each supersede into their co
       [c.tax_type, c.scope_key, c.predFrom],
     )).rows[0];
     const succ = (await rootQuery(
-      "select id, effective_from::text as ef from clara.sst_rate_schedule where tax_type=$1 and scope_key=$2 and effective_from=$3::date",
+      "select id, effective_from::text as ef, superseded_by from clara.sst_rate_schedule where tax_type=$1 and scope_key=$2 and effective_from=$3::date",
       [c.tax_type, c.scope_key, c.succFrom],
     )).rows[0];
     assert.ok(pred && succ, `${c.tax_type}/${c.scope_key}: both the predecessor and successor rows resolve`);
     assert.equal(Number(pred.rate_bp), c.predRate, `${c.tax_type}/${c.scope_key} predecessor rate matches`);
     assert.equal(pred.et, succ.ef, `${c.tax_type}/${c.scope_key}: predecessor's effective_to abuts the successor's effective_from exactly — no gap, no overlap`);
-    assert.equal(pred.superseded_by, succ.id, `${c.tax_type}/${c.scope_key}: predecessor's superseded_by points at the REAL successor id, not a placeholder`);
-    assert.ok(pred.superseded_at, `${c.tax_type}/${c.scope_key}: predecessor carries a non-null superseded_at`);
+    // F2 RE-FIX: NEITHER side carries a supersession stamp — history, not a correction.
+    assert.equal(pred.superseded_by, null, `${c.tax_type}/${c.scope_key}: predecessor's superseded_by is NULL (F2 re-fix)`);
+    assert.equal(pred.superseded_at, null, `${c.tax_type}/${c.scope_key}: predecessor's superseded_at is NULL (F2 re-fix)`);
+    assert.equal(succ.superseded_by, null, `${c.tax_type}/${c.scope_key}: successor's superseded_by is NULL`);
   }
+});
+
+test("sst_rate_schedule: F2's two-direction re-probe (conductor delta-confirm 2026-08-24) — a date inside the predecessor's window resolves under the SAME live-row filter a real evaluator would use; a date before the earliest verified instrument does not", async (t) => {
+  if (skipHere(t)) return;
+  // The exact live-row predicate uq_sst_rate_schedule_live encodes: superseded_by IS NULL,
+  // effective-dated, at most one row can ever match once rows never overlap.
+  const liveAt = async (taxType, scopeKey, asOf) => (await rootQuery(
+    `select rate_bp from clara.sst_rate_schedule
+      where tax_type=$1 and scope_key=$2 and superseded_by is null
+        and effective_from<=$3::date and (effective_to is null or effective_to>$3::date)`,
+    [taxType, scopeKey, asOf],
+  )).rows;
+  const inside = await liveAt("sales", "general", "2023-01-01");
+  assert.equal(inside.length, 1, "sales/general @2023-01-01 resolves to exactly one row under the live-row filter (the F2 re-fix's own scenario)");
+  assert.equal(Number(inside[0].rate_bp), 1000, "sales/general @2023-01-01 is the 1000bp predecessor rate (P.U.(A) 176/2022)");
+
+  const before = await liveAt("sales", "general", "2022-01-01");
+  assert.equal(before.length, 0, "sales/general @2022-01-01 — before the earliest verified instrument — resolves to NOTHING, the named gap standing rather than a silent extrapolation");
 });
 
 test("sst_rate_schedule: a period before the earliest verified predecessor has NO row for that scope — fail-closed, not extrapolated (F2's own boundary)", async (t) => {
