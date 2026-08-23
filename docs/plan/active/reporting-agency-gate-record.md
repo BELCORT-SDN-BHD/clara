@@ -223,7 +223,7 @@ from the table the check would read. **Fold: severance (§4 below).**
 citing F5-OQ-10 and law 70. But TA-P1's ruling of record names **render-drift consent** among the
 acts passing to Clara (`docs/adr/0074-the-track-a-sitting.md:33`), and the Wave-F contract spells it
 under the heading *"Verbs that become the agent's (TA-P1 C)"*: *"render re-queue **including drift
-consent**"* (`wave-f-contract.md:214`). Law 70's digest text (`README.md:425-428`) is a **descriptive
+consent**"* (`wave-f-contract.md:220`). Law 70's digest text (`README.md:425-428`) is a **descriptive
 mechanism clause** — *"a human requeue … RE-DERIVES pinned inputs recording both digests (drift
 consented via `p_accept_drift`)"* — not a forward reservation in law 74's "stays human" form, and
 ADR-0074 records no carve-out for it. Annex D had no "drift" row, so the deviation was undisclosed.

@@ -130,13 +130,22 @@ export async function registerGrantsPhase(t, world) {
     }
     // A curated table with a granted writer would be a FAIL of E-R5's curation boundary. This is
     // matrix A29's method: privilege state through aclexplode, never the migration's own text.
+    //
+    // EXTENDED BY F-A5 PR-1 (census C6): clara.watermark_policy_versions joins the closed world.
+    // It is curated on exactly the same terms as claim_policy_versions -- firm_id CHECK-pinned to
+    // null, append-only, superseded by a new row -- and its wording is SEEDED BY MIGRATION from
+    // text the owner signs, never written by a verb. It is deliberately absent from the
+    // readable-and-non-empty loop above until PR-4 seeds the artifact_watermark trio: PR-1 ships
+    // the table with ZERO rows (OQ-1's fail-closed default, R-N1 still registered), and a cell
+    // asserting n > 0 on an intentionally empty table would be a cell asserting the wrong thing.
+    // The writer half needs no rows and binds from today.
     const writers = (await rootQuery(
       `select p.proname from pg_proc p
          cross join lateral aclexplode(coalesce(p.proacl,'{}')) a join pg_roles r on r.oid=a.grantee
         where p.pronamespace='clara'::regnamespace and a.privilege_type='EXECUTE'
           and r.rolname=any(array['clara_authenticated','clara_agent_ro','clara_runtime',
             'clara_runtime_login','clara_wake_interactive','clara_wake_proactive'])
-          and lower(coalesce(p.prosrc,'')) ~ '(insert\\s+into|update|delete\\s+from)\\s+clara\\.(statutory_profiles|statutory_profile_versions|statutory_sections|statutory_slots|statutory_wording|protected_placeholders|claim_phrase_lexicon|claim_policy_versions)\\M'
+          and lower(coalesce(p.prosrc,'')) ~ '(insert\\s+into|update|delete\\s+from)\\s+clara\\.(statutory_profiles|statutory_profile_versions|statutory_sections|statutory_slots|statutory_wording|protected_placeholders|claim_phrase_lexicon|claim_policy_versions|watermark_policy_versions)\\M'
         order by 1`)).rows;
     assert.deepEqual(writers, [], "no granted function writes a curated reference table");
   });

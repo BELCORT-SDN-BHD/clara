@@ -20,6 +20,16 @@
 **seventeen** new wrappers after the sandbox severance; `wake_export_sandbox_view` left with §3.6.
 Every downstream count — design §3.1, PR-2, census C.2 — reads THIS list, never a number.)*
 
+> **PARAMETER-ORDER WARNING, added at PR-1 because the estate carries TWO conventions and a
+> transposition between them TYPE-CHECKS.** `clara._draft_report_spec_core` is
+> `(p_actor, p_firm, p_obo, p_wake_kind, …)`; `clara._seal_report_artifact_core` is
+> `(p_firm, p_actor, …)`. **Every core F-A5 mints takes `(p_firm, p_actor, p_obo, p_wake_kind, …)`
+> — firm first.** The ONE exception is the artifact core, whose new triple is appended at the TAIL
+> with NULL defaults so its two live positional callers do not move (F5-D32 / ruling R-L23); the
+> reason is in design §4's "not on the list" paragraph. PR-2's wrappers must read this before they
+> are authored — eta's own battery header records that a transposed `(p_firm, p_actor)` pair
+> satisfies every catalog assertion while writing the FIRM id into an actor column.
+
 Every wrapper: `SECURITY DEFINER` · `set search_path = clara, pg_temp` · `wake_context()` then
 `assert_wake_allowed` · blank `p_op_key` / `p_rationale` / incomplete `p_model` refuse before any
 work · **no DML text in the wrapper body** · `revoke all … from public` then a single
@@ -32,7 +42,7 @@ work · **no DML text in the wrapper body** · `revoke all … from public` then
 | `wake_evaluate_report_pack(run, definition_version_ids, period_ids, snapshot, rationale, model, op_key)` | `_agent_evaluate_fs_pack_core(firm, actor, obo, wake_kind, …)` | **new** orchestrator over the frozen **`_metric_eval_node_v1`** (`0077:222-226`'s idiom) — **never `evaluate_metric_v1`**, which opens with `_human_ctx` (`0059:112`) | no |
 | `wake_seal_report_dataset(run, chart_template_version_ids, rationale, model, op_key)` | `_seal_report_dataset_core(firm, actor, obo, wake_kind, …)` | **extracted** from `0070:437` | **yes — D1 #3** |
 | `wake_assess_report_claim(run, rationale, model, op_key)` | `_assess_report_claim_core(firm, actor, obo, wake_kind, …)` | **extracted** from `0070:279` | **yes — D1 #2** |
-| `wake_seal_report_artifact(run, kind, ext, sha256, byte_size, manifest, prior, rationale, model, op_key)` | `_seal_report_artifact_core(firm, actor, **obo, wake_kind**, …)` (`0071:121`) | **EXTENDED** — the estate's only `insert into clara.report_artifacts` (`0071:432`) now writes `directed_by`/`prepared_by_agent` and the receipt | **yes — D1 #6** |
+| `wake_seal_report_artifact(run, kind, ext, sha256, byte_size, manifest, prior, rationale, model, op_key)` | `_seal_report_artifact_core(firm, actor, …, op_key, **obo, wake_kind, agent**)` (`0071:121`) — **the pair is at the TAIL, with NULL defaults** | **EXTENDED** — the estate's only `insert into clara.report_artifacts` (`0071:432`) now writes `directed_by`/`prepared_by_agent`, **DB-derived from the run row**, and the receipt | **yes — D1 #6 (the core alone; the delegate is byte-unmoved)** |
 | `wake_requeue_render_job(job, why, **accept_drift**, rationale, model, op_key)` | `_requeue_render_job_core(...)` extracted from `0083:169` | extracted; **`p_accept_drift` passes through** (TA-P1 C) | yes (non-D1: no live writer displaced mid-flight — **[PREDICTION]** P7) |
 | `wake_approve_metric_definition(version, expected_formula_sha256, reason, rationale, model, op_key)` | `_agent_approve_metric_definition_core` | new | no (but see D1 #5, the trigger) |
 | `wake_supersede_metric_definition(version, successor, reason, rationale, model, op_key)` | `_agent_supersede_metric_definition_core` | new | no |
@@ -128,7 +138,7 @@ never absent"* — the door column says what PR-3 ships; anything richer is Wave
 | **Issue the pack** (`approve_report_for_issue`) | bookkeeper+ **and** the `close_and_attest` key-2 capability (`0072:61-63`); ≥2 humans ⇒ approver ∉ {requester, director, sealer}; solo ⇒ attestation text | the `/reports` **issue card**: run + period, the **sealed `pre_sign` sha256 the approval must name** (`0072:87-92`), claim status, the `agent_prepared` disclosure, the attestation box, the reason field |
 | **Archive the signed original** | bookkeeper+ | the **archive form** over `clara.archive_signed_original` (design §3.8): signed-PDF sha256, byte size, signature evidence, the `pre_sign` hash it answers |
 | **Retrieve a signed original** | bookkeeper+, audited | a **retrieve** action on the run row → `clara.retrieve_signed_original`; it returns key + hash and **regenerates nothing** (`0080:258-261`) |
-| **Consent to render drift** | **NO LONGER a reserved human act** — TA-P1 C devolved it (ADR-0074:33; `wave-f-contract.md:214`), and law 70's digest text is a mechanism description, not a reservation | the **requeue** card keeps the human's own drift checkbox; Clara reaches the same consent through `wake_requeue_render_job(p_accept_drift)`, receipted with model + rationale (TA-P4). *v1 hard-refused this and was narrower than the ruling — corrected, no dissent recorded.* |
+| **Consent to render drift** | **NO LONGER a reserved human act** — TA-P1 C devolved it (ADR-0074:33; `wave-f-contract.md:220`), and law 70's digest text is a mechanism description, not a reservation | the **requeue** card keeps the human's own drift checkbox; Clara reaches the same consent through `wake_requeue_render_job(p_accept_drift)`, receipted with model + rationale (TA-P4). *v1 hard-refused this and was narrower than the ruling — corrected, no dissent recorded.* |
 | **Sign the watermark wording** (en/ms/zh) | owner, once | not a UI act — a migration seeded from the owner's returned text (§3.6.1, OQ-1) |
 | **Publish a statutory template / house style; enter MASB statutory wording; mint a `canonical` definition** | admin / owner / migration-only | **no agent door at all** — the existing human verbs; statutory wording stays *manually extracted and manually verified* |
 | **Grant the agent's new capabilities + allowlist rows** | owner, as a ceremony from merged `main` | not a UI act — PR-2's grants plus the PR-2→PR-3 **evaluator deploy-flip ceremony** |
