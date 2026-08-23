@@ -107,15 +107,27 @@ if (!opensslAvailableForCaFixtures()) {
       .then(() => process.exit(0))
       .catch((e) => { console.log("PG_FAIL:" + (e.code || e.message)); process.exit(1); });
   `;
+  // (F5, measured empirically against this exact fixture): node-postgres's TLS layer surfaces
+  // Node's own certificate-chain verification error code here -- UNABLE_TO_VERIFY_LEAF_SIGNATURE
+  // for this CA-mismatch shape. The assertion below accepts that family of codes generally
+  // (self-signed / untrusted-issuer / signature / verification-failed), not the one code alone,
+  // so a Node/OpenSSL point-release that surfaces a sibling code doesn't false-fail this cell --
+  // but it must NOT accept an unrelated failure (a network error, a protocol error) as if it
+  // were the CA wall working. A probe that accepts ANY failure as "refused" cannot say NO to the
+  // wrong kind of failure, which is exactly the gap this tightens.
+  const CERT_FAMILY_CODE = /CERT|SIGNATURE|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER/i;
 
   await asyncTestCase("(D4) WITH the matching CA, node-postgres's own Client connects through the bridge's rewritten DSN", async () => {
     const r = await spawnWithBuiltEnv({ dsnPipeSrc: DSN_PIPE_SRC, dsn, caPath: pgCa.crtPath, probeScript: pgProbeScript });
     if (!r.stdout.includes("PG_OK")) throw new Error(`expected PG_OK, got stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
   });
 
-  await asyncTestCase("(D4) WITHOUT the matching CA, node-postgres's own Client is REFUSED through the bridge's rewritten DSN", async () => {
+  await asyncTestCase("(D4/F5) WITHOUT the matching CA, node-postgres's own Client is REFUSED specifically on a CERTIFICATE reason, not any failure", async () => {
     const r = await spawnWithBuiltEnv({ dsnPipeSrc: DSN_PIPE_SRC, dsn, caPath: wrongCa.crtPath, probeScript: pgProbeScript });
-    if (!r.stdout.includes("PG_FAIL:")) throw new Error(`expected a PG_FAIL refusal, got stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
+    const line = r.stdout.split("\n").find((l) => l.startsWith("PG_FAIL:"));
+    if (!line) throw new Error(`expected a PG_FAIL refusal, got stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
+    const reason = line.slice("PG_FAIL:".length);
+    if (!CERT_FAMILY_CODE.test(reason)) throw new Error(`expected a certificate-family refusal reason, got: ${reason}`);
     if (r.stdout.includes("PG_OK")) throw new Error("a mismatched CA must never be silently trusted by the REAL pg client path");
   });
 

@@ -16,6 +16,7 @@ the next. This doc and the scripts it describes are the fix: **in the repo, for 
 | `scripts/ops/dsn-pipe.mjs` | reads a DSN on **stdin only**, forces `sslmode=verify-full` and pins the CA, spawns the given command with the DSN in the **child's environment only** |
 | `scripts/ops/dsn-pipe.selftest.mjs` | the hermetic core battery — wired into `pnpm lint`, runs on every PR |
 | `scripts/ops/dsn-pipe.pgpath.selftest.mjs` | the real node-postgres-path battery (the DSN rewrite exercised through the actual client library, throwaway fixture) — also wired into `pnpm lint` |
+| `scripts/ops/dsn-pipe.ca.selftest.mjs` | `validateCa()`'s own structural-validation battery — also wired into `pnpm lint` |
 | `scripts/ops/dsn-pipe.selftest-helpers.mjs` | shared test scaffolding for the two battery files |
 
 ## Using it
@@ -81,7 +82,9 @@ exclusive rather than merely additional. Proved end-to-end through the real `pg`
 `dsn-pipe.mjs` parses the committed CA at every run (`validateCa()`) and fails closed unless
 **all** of: the file is readable and non-empty, it is exactly one well-formed PEM `CERTIFICATE`
 block, its `basicConstraints` extension says `CA:TRUE`, it is currently inside its own validity
-window, and its sha256 fingerprint matches a constant pinned in `dsn-pipe.mjs` itself
+window, and its **certificate fingerprint (sha256 over the DER-encoded certificate, `X509Certificate.fingerprint256`
+— not a raw file hash of the PEM/base64 text, which would differ on re-wrapping or line-ending
+changes to the same underlying certificate)** matches a constant pinned in `dsn-pipe.mjs` itself
 (`80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`).
 An empty or truncated file, a non-CA leaf certificate, or a swapped/corrupted certificate all
 refuse — existence alone was never proof of trustworthiness.
@@ -129,7 +132,7 @@ a `.crt` swap alone fails closed against the old fingerprint by design).
 
 ## The positive live leg — a REVIEW ITEM, run before any ceremony, not wired into CI
 
-The two selftest files are deliberately **hermetic** — they prove the CA-pinning mechanism (both
+The three selftest files are deliberately **hermetic** — they prove the CA-pinning mechanism (both
 the raw-TLS layer and the real `pg` client path), the argv/disk non-leak, and the failure modes
 against **throwaway local TLS fixtures**, never the real pooler, so `pnpm lint` never depends on
 third-party network reachability. What they do **not** prove is that the *committed* certificate

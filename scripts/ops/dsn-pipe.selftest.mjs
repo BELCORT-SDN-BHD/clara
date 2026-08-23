@@ -47,9 +47,9 @@ const { testCase, asyncTestCase, skipHere, reportFail, reportSkip, summarize } =
 // ---------------------------------------------------------------------------
 // Unit level: the pure functions dsn-pipe.mjs exports.
 // ---------------------------------------------------------------------------
-console.log("unit level -- withVerifyFull / buildChildEnv / splitArgv / validateCa:");
+console.log("unit level -- withVerifyFull / buildChildEnv / splitArgv:");
 
-const { withVerifyFull, buildChildEnv, splitArgv, validateCa, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
+const { withVerifyFull, buildChildEnv, splitArgv, nodeDebugEnablesChildProcess, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
 
 testCase("withVerifyFull forces sslmode=verify-full even when the input carries a different mode", () => {
   const out = withVerifyFull(fakeDsn({ hostport: "h:5432", query: "sslmode=require" }));
@@ -114,6 +114,16 @@ testCase("(B1) withVerifyFull forces sslrootcert=<caPath>, replacing any caller-
   }
   if (out.includes("other-ca.crt")) throw new Error("the caller-supplied sslrootcert must not survive anywhere in the output");
 });
+testCase("(F3) a CA path containing a SPACE round-trips exactly -- percent-encoded (%20), never `+`-encoded", () => {
+  const spacedPath = "C:\\Users\\Jane Doe\\Program Files\\pooler-ca.crt";
+  const out = withVerifyFull(fakeDsn({ hostport: "h:5432" }), spacedPath);
+  if (out.includes("+")) throw new Error(`sslrootcert must never use form-encoding's '+' for a space (ambiguous on decode), got: ${out}`);
+  if (!out.includes("sslrootcert=") || !out.includes(encodeURIComponent(spacedPath))) {
+    throw new Error(`expected the CA path percent-encoded (%20 for space), got: ${out}`);
+  }
+  const roundTripped = new URL(out).searchParams.get("sslrootcert");
+  if (roundTripped !== spacedPath) throw new Error(`expected the exact CA path back after decoding, got: ${roundTripped}`);
+});
 testCase("buildChildEnv sets DATABASE_URL / PGSSLMODE / PGSSLROOTCERT / NODE_EXTRA_CA_CERTS and forces verify-full", () => {
   const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: {} });
   if (env.PGSSLROOTCERT !== "/x/ca.crt") throw new Error("PGSSLROOTCERT must be the given CA path");
@@ -142,19 +152,34 @@ testCase("(A2) buildChildEnv REFUSES LOUDLY when the calling shell has NODE_TLS_
   if (!threw) throw new Error("expected a loud refusal, not a silent scrub");
   if (!/NODE_TLS_REJECT_UNAUTHORIZED/.test(threw.message)) throw new Error(`error must name the hostile var: ${threw.message}`);
 });
-testCase("(A1) buildChildEnv REFUSES LOUDLY when NODE_DEBUG contains 'child_process'", () => {
-  let threw = null;
-  try {
-    buildChildEnv({ dsn: fakeDsn({}), caPath: "/x/ca.crt", baseEnv: { NODE_DEBUG: "fs,child_process" } });
-  } catch (e) {
-    threw = e;
+testCase("(F1) nodeDebugEnablesChildProcess reproduces Node's OWN matcher, not a naive substring/word check", () => {
+  // A naive /\bchild_process\b/ regex misses every one of these -- Node's real matcher is
+  // case-insensitive and treats `*` as a wildcard (reviewer reproduced NODE_DEBUG=* dumping the
+  // full spawn env, DSN included, through the real CLI).
+  for (const shouldMatch of ["*", "child*", "chi*", "child_pro*", "CHILD_PROCESS", "child_process", "fs,child_process", "child_process,fs"]) {
+    if (!nodeDebugEnablesChildProcess(shouldMatch)) throw new Error(`NODE_DEBUG=${shouldMatch} must enable child_process debugging, per Node's own matcher`);
   }
-  if (!threw) throw new Error("expected a loud refusal, not a silent scrub");
-  if (!/NODE_DEBUG/.test(threw.message)) throw new Error(`error must name the hostile var: ${threw.message}`);
+  for (const shouldNotMatch of ["fs", "http", "childish", undefined, ""]) {
+    if (nodeDebugEnablesChildProcess(shouldNotMatch)) throw new Error(`NODE_DEBUG=${JSON.stringify(shouldNotMatch)} must NOT match -- false positive`);
+  }
 });
-testCase("(A1) a NODE_DEBUG that does NOT mention child_process is NOT refused (no over-trigger)", () => {
-  const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: { NODE_DEBUG: "fs,http" } });
-  if (env.DATABASE_URL === undefined) throw new Error("expected a normal build to proceed");
+testCase("(A1) buildChildEnv REFUSES LOUDLY for every NODE_DEBUG shape Node's matcher enables (wildcards, case, lists)", () => {
+  for (const bad of ["*", "child*", "CHILD_PROCESS", "child_pro*", "fs,child_process"]) {
+    let threw = null;
+    try {
+      buildChildEnv({ dsn: fakeDsn({}), caPath: "/x/ca.crt", baseEnv: { NODE_DEBUG: bad } });
+    } catch (e) {
+      threw = e;
+    }
+    if (!threw) throw new Error(`expected a loud refusal for NODE_DEBUG=${bad}, not a silent scrub`);
+    if (!/NODE_DEBUG/.test(threw.message)) throw new Error(`error must name the hostile var: ${threw.message}`);
+  }
+});
+testCase("(A1) a NODE_DEBUG that Node's OWN matcher does not enable for child_process is NOT refused (no over-trigger)", () => {
+  for (const clean of ["fs,http", "childish"]) {
+    const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: { NODE_DEBUG: clean } });
+    if (env.DATABASE_URL === undefined) throw new Error(`expected a normal build to proceed for NODE_DEBUG=${clean}`);
+  }
 });
 testCase("(A3) buildChildEnv SCRUBS the hostile PG identity vars that have no DSN-derived replacement (PGSERVICE/PGSERVICEFILE/PGHOSTADDR)", () => {
   const hostile = { PGSERVICE: "z", PGSERVICEFILE: "w", PGHOSTADDR: "1.2.3.4" };
@@ -179,6 +204,16 @@ testCase("(F1) buildChildEnv populates PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABAS
   }
   const noPort = buildChildEnv({ dsn: fakeDsn({ hostport: "h3", db: "d3" }), caPath: "/x/ca.crt", baseEnv: {} });
   if (noPort.PGPORT !== "5432") throw new Error(`expected the standard Postgres port as the default, got: ${noPort.PGPORT}`);
+});
+testCase("(F4) a PASSWORD-LESS DSN leaves PGUSER/PGPASSWORD ABSENT, never set to empty string", () => {
+  // Mirrors packages/db/lib/pg.mjs:113-114's guard: an env PGPASSWORD="" is not "unset" to
+  // libpq -- it is a literal empty credential, which suppresses ~/.pgpass lookup for a
+  // genuinely password-less DSN (peer/cert auth, a service file, etc). No credential shape in
+  // this literal (no user:pass@), so it needs no fakeDsn() obfuscation.
+  const env = buildChildEnv({ dsn: "postgres://h4:7777/d4", caPath: "/x/ca.crt", baseEnv: {} });
+  if ("PGUSER" in env) throw new Error(`expected PGUSER absent for a userless DSN, found: ${JSON.stringify(env.PGUSER)}`);
+  if ("PGPASSWORD" in env) throw new Error(`expected PGPASSWORD absent for a password-less DSN, found: ${JSON.stringify(env.PGPASSWORD)}`);
+  if (env.PGHOST !== "h4" || env.PGDATABASE !== "d4") throw new Error(`expected host/database still populated, got: ${JSON.stringify({ PGHOST: env.PGHOST, PGDATABASE: env.PGDATABASE })}`);
 });
 testCase("(A4) buildChildEnv SCRUBS NODE_OPTIONS silently", () => {
   const env = buildChildEnv({ dsn: fakeDsn({ hostport: "h:5432" }), caPath: "/x/ca.crt", baseEnv: { NODE_OPTIONS: "--require=/tmp/evil.js" } });
@@ -211,88 +246,10 @@ testCase("(C3) splitArgv requires `--` to be the FIRST token — a leading token
   if (ok.cmd !== "echo" || ok.cmdArgs.join(",") !== "hi") throw new Error(`unexpected split: ${JSON.stringify(ok)}`);
 });
 
-// ---------------------------------------------------------------------------
-// (C1) validateCa — structural validation, not just existence.
-// ---------------------------------------------------------------------------
-console.log("\n(C1) validateCa -- structural CA validation:");
-
-testCase("the COMMITTED CA passes validateCa (CA:TRUE, in-window, exact pinned fingerprint)", () => {
-  const cert = validateCa(COMMITTED_CA);
-  if (cert.ca !== true) throw new Error("committed CA must report ca===true");
-});
-testCase("an EMPTY file fails closed (existence alone is not enough)", () => {
-  const dir = freshDir("dsnpipe-ca-empty-");
-  const p = join(dir, "empty.crt");
-  writeFileSync(p, "");
-  let threw = null;
-  try {
-    validateCa(p);
-  } catch (e) {
-    threw = e;
-  }
-  rmSync(dir, { recursive: true, force: true });
-  if (!threw) throw new Error("expected a throw for an empty file");
-});
-testCase("a TRUNCATED PEM block fails closed", () => {
-  const dir = freshDir("dsnpipe-ca-trunc-");
-  const p = join(dir, "trunc.crt");
-  const full = readFileSync(COMMITTED_CA, "utf8");
-  writeFileSync(p, full.slice(0, Math.floor(full.length / 2)));
-  let threw = null;
-  try {
-    validateCa(p);
-  } catch (e) {
-    threw = e;
-  }
-  rmSync(dir, { recursive: true, force: true });
-  if (!threw) throw new Error("expected a throw for a truncated PEM block");
-});
+// (C1) validateCa's own structural-validation battery lives in the sibling
+// dsn-pipe.ca.selftest.mjs (kept separate so neither file crosses the file-size convention).
 
 const harnessForOpenssl = { reportFail, reportSkip };
-if (!opensslAvailableForCaFixtures()) {
-  reportOpensslMissing(harnessForOpenssl, "validateCa negative fixtures (not-a-CA / wrong-fingerprint / expired)", 3);
-} else {
-  const fixDir = freshDir("dsnpipe-ca-fixtures-");
-
-  testCase("a cert WITHOUT basicConstraints CA:TRUE fails closed (not a CA)", () => {
-    const { crtPath } = mintCert(fixDir, "leaf-not-a-ca", { ca: false });
-    let threw = null;
-    try {
-      validateCa(crtPath);
-    } catch (e) {
-      threw = e;
-    }
-    if (!threw) throw new Error("expected a throw for a non-CA certificate");
-    if (!/CA:TRUE/.test(threw.message)) throw new Error(`expected the CA:TRUE reason, got: ${threw.message}`);
-  });
-
-  testCase("a DIFFERENT, currently-valid CA cert fails closed on FINGERPRINT MISMATCH", () => {
-    const { crtPath } = mintCert(fixDir, "different-ca", { ca: true });
-    let threw = null;
-    try {
-      validateCa(crtPath);
-    } catch (e) {
-      threw = e;
-    }
-    if (!threw) throw new Error("expected a throw for a fingerprint mismatch");
-    if (!/fingerprint/i.test(threw.message)) throw new Error(`expected a fingerprint-shaped reason, got: ${threw.message}`);
-  });
-
-  testCase("an EXPIRED CA cert fails closed on the validity window", () => {
-    const { crtPath } = mintCert(fixDir, "expired-ca", { ca: true, notBefore: "20200101000000Z", notAfter: "20200102000000Z" });
-    let threw = null;
-    try {
-      validateCa(crtPath);
-    } catch (e) {
-      threw = e;
-    }
-    if (!threw) throw new Error("expected a throw for an expired certificate");
-    if (!/validity window/i.test(threw.message)) throw new Error(`expected a validity-window reason, got: ${threw.message}`);
-  });
-
-  rmSync(fixDir, { recursive: true, force: true });
-}
-
 const SYNTHETIC_DSN = fakeDsn({ user: "selftest_" + MARKER, pass: "pw_" + MARKER, hostport: "127.0.0.1:59999", db: "selftestdb" });
 
 // ---------------------------------------------------------------------------
@@ -335,6 +292,20 @@ await asyncTestCase("the child's own exit code passes through untouched (a SUCCE
   const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", "process.exit(37)"] });
   if (r.spawnError || r.timedOut || r.signal !== null) throw new Error(`expected a clean pass-through, got ${JSON.stringify(r)}`);
   if (r.code !== 37) throw new Error(`expected exit 37 to pass through, got ${r.code}`);
+});
+await asyncTestCase("(F6) through the REAL CLI (main(), the real committed CA, argv/stdin plumbing included), the child's DATABASE_URL carries sslrootcert = the committed CA path", async () => {
+  // Closes the main()-wiring gap: every other TLS-wall/D4 cell calls buildChildEnv() directly
+  // (necessarily, to use a throwaway CA -- see the note above the TLS-wall section) -- this is
+  // the one cell that goes through the unmodified CLI end-to-end and still checks the wiring.
+  const grandchildScript = "console.log('DBURL:' + process.env.DATABASE_URL);";
+  const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", grandchildScript] });
+  const line = r.stdout.split("\n").find((l) => l.startsWith("DBURL:"));
+  if (!line) throw new Error(`grandchild never reported DATABASE_URL; stdout=${r.stdout} stderr=${r.stderr} code=${r.code}`);
+  const delivered = line.slice("DBURL:".length);
+  const expectedParam = "sslrootcert=" + encodeURIComponent(COMMITTED_CA);
+  if (!delivered.includes(expectedParam)) {
+    throw new Error(`expected DATABASE_URL to carry ${expectedParam}, got: ${delivered}`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -449,7 +420,8 @@ await asyncTestCase("(D3) a full run writes NO file into the OS TEMP DIR either 
 // a throwaway CA; a fresh child process is spawned with that env to attempt the connection. This
 // deliberately bypasses the CLI's validateCa() preflight gate (which pins the ONE production
 // CA's exact fingerprint, review C1, and would refuse any throwaway fixture before a connection
-// is ever attempted) -- validateCa() is proved separately, directly, in the (C1) section above.
+// is ever attempted) -- validateCa() is proved separately, directly, in the sibling
+// dsn-pipe.ca.selftest.mjs.
 // (The real node-postgres path is D4, in the sibling dsn-pipe.pgpath.selftest.mjs.)
 // ---------------------------------------------------------------------------
 console.log("\nthe TLS wall, both directions (local throwaway fixture, raw TLS probe):");

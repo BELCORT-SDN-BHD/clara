@@ -114,8 +114,16 @@ export function withVerifyFull(dsn, caPath = DEFAULT_CA_PATH) {
     throw new Error("dsn-pipe: stdin's DSN carries no database name — refusing an incomplete URI");
   }
   u.searchParams.set("sslmode", "verify-full");
-  u.searchParams.set("sslrootcert", caPath); // ALWAYS overwrite -- see the exclusivity note above
-  return u.toString();
+  u.searchParams.delete("sslrootcert"); // drop any caller-supplied value -- see the exclusivity note above
+  // NOT u.searchParams.set("sslrootcert", caPath): URLSearchParams' own serializer encodes a
+  // space as `+` (the application/x-www-form-urlencoded convention), which a URI-style query
+  // parser does NOT reliably decode back to a space (review finding F3) -- a CA path containing
+  // a space (common on Windows: "Program Files", a user's full name) would then round-trip as a
+  // literal `+` and fail to open. encodeURIComponent() below always emits `%20`, which every
+  // correct query parser decodes unambiguously.
+  const base = u.toString();
+  const sep = base.includes("?") ? "&" : "?";
+  return base + sep + "sslrootcert=" + encodeURIComponent(caPath);
 }
 
 // Copied verbatim from packages/db/lib/pg.mjs:28-37 (PG_IDENTITY_VARS) -- the identical hazard:
@@ -146,6 +154,27 @@ const SCRUB_KEYS = [...PG_IDENTITY_VARS, "NODE_OPTIONS"];
  * @param {{ dsn: string, caPath?: string, baseEnv?: NodeJS.ProcessEnv }} args
  * @returns {NodeJS.ProcessEnv}
  */
+/**
+ * Reproduces Node's OWN `NODE_DEBUG` matcher (`lib/internal/util/debuglog.js`) exactly, rather
+ * than a naive substring/word-boundary check. Node's real matcher escapes regex metacharacters,
+ * turns `*` into a wildcard, turns `,` into alternation, and matches CASE-INSENSITIVELY — so
+ * `NODE_DEBUG=*`, `child*`, `CHILD_PROCESS`, and `child_pro*` all enable child_process
+ * debugging (review finding F1, reproduced against the real CLI: `NODE_DEBUG=*` dumped the full
+ * spawn env, DSN included, to stderr — a naive `/\bchild_process\b/` check missed every one of
+ * these). Verified empirically against `util.debuglog('child_process').enabled` for the same
+ * set of values Node's own source produces before trusting this reconstruction.
+ * @param {string | undefined} nodeDebugValue
+ * @returns {boolean}
+ */
+export function nodeDebugEnablesChildProcess(nodeDebugValue) {
+  if (!nodeDebugValue) return false;
+  const escaped = nodeDebugValue
+    .replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
+    .replaceAll("*", ".*")
+    .replaceAll(",", "$|^");
+  return new RegExp(`^${escaped}$`, "i").test("child_process");
+}
+
 export function buildChildEnv({ dsn, caPath = DEFAULT_CA_PATH, baseEnv = process.env }) {
   if (String(baseEnv.NODE_TLS_REJECT_UNAUTHORIZED) === "0") {
     throw new Error(
@@ -153,17 +182,18 @@ export function buildChildEnv({ dsn, caPath = DEFAULT_CA_PATH, baseEnv = process
         "certificate validation process-wide for any Node child. Unset it and retry.",
     );
   }
-  if (baseEnv.NODE_DEBUG && /\bchild_process\b/.test(baseEnv.NODE_DEBUG)) {
+  if (nodeDebugEnablesChildProcess(baseEnv.NODE_DEBUG)) {
     throw new Error(
-      "dsn-pipe: refusing — the calling shell has NODE_DEBUG including 'child_process', which makes Node " +
-        "print the full spawn environment (the DSN included) to stderr. Unset it and retry.",
+      "dsn-pipe: refusing — the calling shell's NODE_DEBUG enables 'child_process' debugging (Node's own " +
+        "matcher, not a literal match — this covers '*', 'child*', wildcards and comma lists too), which " +
+        "makes Node print the full spawn environment (the DSN included) to stderr. Unset it and retry.",
     );
   }
   const withSsl = withVerifyFull(dsn, caPath);
   const u = new URL(withSsl); // already validated by withVerifyFull -- host and database are non-empty
   const scrubbed = { ...baseEnv };
   for (const k of SCRUB_KEYS) delete scrubbed[k];
-  return {
+  const env = {
     ...scrubbed,
     DATABASE_URL: withSsl,
     PGSSLMODE: "verify-full", // redundant safety net for libpq tools reading PG* vars, not the DSN
@@ -171,10 +201,15 @@ export function buildChildEnv({ dsn, caPath = DEFAULT_CA_PATH, baseEnv = process
     NODE_EXTRA_CA_CERTS: caPath, // augments Node's global TLS trust store; the DSN's own sslrootcert is what PINS for the `pg` path
     PGHOST: u.hostname,
     PGPORT: u.port || "5432",
-    PGUSER: decodeURIComponent(u.username),
-    PGPASSWORD: decodeURIComponent(u.password),
     PGDATABASE: decodeURIComponent(u.pathname.replace(/^\//, "")),
   };
+  // Guarded, not unconditional (mirrors packages/db/lib/pg.mjs:113-114): an EMPTY PGUSER/
+  // PGPASSWORD is not "unset" to libpq -- it is a literal empty credential, which suppresses
+  // ~/.pgpass lookup for a genuinely password-less DSN (review finding F4). Only set them when
+  // the DSN actually carried a value.
+  if (u.username) env.PGUSER = decodeURIComponent(u.username);
+  if (u.password) env.PGPASSWORD = decodeURIComponent(u.password);
+  return env;
 }
 
 /** Read the whole of STDIN synchronously (fd 0), trimmed. Never reads argv or a file. */
