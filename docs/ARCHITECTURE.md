@@ -11,13 +11,23 @@
 1. **Client attribution** — a DB function (`assert_client_resolved`) gates every client-scoped write on a persisted, *server-verified* client resolution; no write path exists that skips it. The admissible ORIGIN of that resolution is a human click, an exact identifier match, **or the agent's own judgement under the structural walls of ADR-0074/TA-P7** — a printed identifier naming a different client REFUSES, more than one candidate must be clarified, a re-attribution raises a named misrouted-egress event, an unresolvable document falls to a firm-scoped question, and when she is unsure she asks. *(AMENDED by ADR-0074/TA-P7, ratified 2026-08-22; digest law 79. **Was:** ~~"gates every client-scoped write on a persisted, ≥0.95, *server-verified* client resolution"~~. `assert_client_resolved` and its no-write-path-skips-it property are unchanged; only the admissible origin changes, and the ≥0.95 numeral leaves with the judgement it described. A model never scores itself, digest law 72. The §3 function catalog still describes the AS-BUILT ≥0.95 body — it is trued when F-A7a ships the recut.)*
 2. **Provenance binding** — document-origin writes validate `source_doc_sha256` + `document_id` against a real ingested document row in the same transaction; an invalid or absent pair RAISES.
 3. **Wake authority** — each wake kind carries a DB-enforced **allowlist** of invokable functions; `[proactive]` can call only `record_notification`. Not a blocklist.
-4. **Write authorization** — the agent's READ path is **structurally read-only** (a role with no EXECUTE on any volatile writer + `default_transaction_read_only`), so no SELECT-wrapped write is possible; role floors live in the DB. *(Amended by ADR-0071: the agent additionally holds a wake-scoped, allowlisted WRITE lane — posting, matching, adjustments, close key ① — granted by the same lane-split-by-GRANT mechanism; her unattended writes are her own judgement under digest laws 71-72, receipt-stamped with model+version.)*
+4. **Write authorization** — the agent's READ path is **structurally read-only** (a role with no EXECUTE on any volatile writer; **the GRANTS are the wall** — `default_transaction_read_only` is a session belt that applies **only at LOGIN, not under `SET ROLE`**, so it is not the guarantee: `0002_foundation.sql:91-101` says so in its own comment and tolerates its own failure. *(Parenthetical trued 2026-08-23; the belt is kept for the eventual dedicated freeform-read LOGIN role.)*), so no SELECT-wrapped write is possible; role floors live in the DB. *(Amended by ADR-0071: the agent additionally holds a wake-scoped, allowlisted WRITE lane — posting, matching, adjustments, close key ① — granted by the same lane-split-by-GRANT mechanism; her unattended writes are her own judgement under digest laws 71-72, receipt-stamped with model+version.)*
 
 Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy. **One ruled exception (ADR-065/E-R2, 2026-08-08): the year-end close's drawer-2 gates default-REFUSE until a per-item, named, receipted human attestation — close-readiness at the close boundary is fail-closed-with-attestation, not advisory. Drawer-3 readiness signals remain visibility-first. Drawer-1 items (continuity math, control tie-outs, ordering) are structural invariants, not judgement — this sentence never reached them.**
 
 ---
 
 ## 1. Topology — three planes, greenfield
+
+> **[TRUED 2026-08-23] What "Supabase" means here, at the bytes.** The Postgres IS a hosted
+> Supabase project and the browser's bearer IS a Supabase-issued session JWT — both true. What is
+> NOT true, and what this diagram used to imply, is that any Supabase SDK is in the stack:
+> **zero `@supabase/*` packages exist anywhere in the repo.** The dashboard talks to PostgREST and
+> to the runtime by **raw `fetch`** (`apps/dashboard/app/shared/*.ts`), and the runtime verifies
+> the issuer's JWTs with **`jose`** (`packages/runtime/lib/authz.mjs:23` — `jwtVerify` +
+> `createRemoteJWKSet`; `jose` 6.2.3 in `packages/runtime/package.json`). *(The Codex frontend
+> build may adopt `@supabase/ssr` for cookie sessions — an owner ruling of 2026-08-23 — which
+> would change this paragraph; it has not happened yet.)*
 
 ```
 Browser (Next.js dashboard)            Bearer = Supabase session USER JWT (firm claims)
