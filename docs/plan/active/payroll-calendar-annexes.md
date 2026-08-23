@@ -2,8 +2,9 @@
 
 > Companions: `payroll-calendar-survey.md` (as-found + the statutory re-verification and its
 > `[L1]…[H1]` source table) · `payroll-calendar-design.md` (the design this annex serves).
-> **v1, 2026-08-23.** Annex A mechanics · Annex B decision register · Annex C rig-replay
-> predictions · Annex D owner questions · Annex E provenance · Annex F change log.
+> **v2, 2026-08-23 (gate-folded)** against `payroll-calendar-gate-record.md`. Annex A mechanics ·
+> Annex B decision register · Annex C rig-replay predictions · Annex D owner questions · Annex E
+> provenance · Annex F change log.
 
 ---
 
@@ -17,7 +18,7 @@ list is an **ask**, sent to the conductor with this design, not a claim of owner
 | column | shape | why |
 |---|---|---|
 | `id` | `uuid pk default gen_random_uuid()` | `fx_rates`' greenfield idiom (`internet-lane-design.md:183-186`) |
-| `obligation_code` | `text not null` | the stable identity: `pcb_mtd_remittance` · `epf_contribution` · `socso_contribution` · `eis_contribution` · `hrdc_levy` · `form_e_cp8d` · `form_ea_ec` · `cp58` |
+| `obligation_code` | `text not null` | the stable identity: `pcb_mtd_remittance` · `epf_contribution` · `socso_contribution` · `eis_contribution` · `hrdc_levy` · `form_e_cp8d` · `form_cp8d_praisi` · `form_ea_ec` · `cp58` — **nine, corrected in the fold (nit); v1's list omitted `form_cp8d_praisi`** |
 | `authority` | `text not null` | `lhdn` · `kwsp` · `perkeso` · `hrdcorp`; four regulators, four remittance channels, four penalty regimes |
 | `domain` | `text not null` | `payroll` for F-T2's rows, `sst` for F-T1's — **one table, two row sets, no second path** (law 81) |
 | `cadence` | `text not null` | `monthly` · `annual` |
@@ -50,8 +51,9 @@ Partial unique index for the live row per key:
 | `last_day_of_month_in_following_year` | `due_month` | `(make_date(y+1, due_month, 1) + interval '1 month - 1 day')::date` |
 
 `form_ea_ec` uses the third kind (`due_month = 2`), which is why it yields **29 February** in a
-leap year — battery cell 8. `form_e_cp8d` and `cp58` use the second (`3`, `31`). The five
-monthly rows use the first (`due_day = 15`).
+leap year — battery cell 8. `form_e_cp8d` and `cp58` use the second (`3`, `31`).
+**`form_cp8d_praisi` also uses the second kind (`due_month = 2`, `due_day = 25`) — corrected in
+the fold (nit); v1 left it unassigned.** The five monthly rows use the first (`due_day = 15`).
 
 **`statutory_due_date` is what the three rules above produce and it is NEVER shifted.**
 `effective_due` is a **second, separately-named** column derived from it (R-L24):
@@ -89,11 +91,15 @@ Ordered, and the order is the fail-closed half:
 
 1. count live `payroll_summary` filings for the client with `financial_date` **inside** the
    period → `dated_count`;
-2. count live `payroll_summary` filings for the client with `financial_date` **IS NULL** →
-   `undated_count`;
+2. count live `payroll_summary` filings for the client with `financial_date` **IS NULL** **and
+   `document_filings.filed_at` inside `[p_period_start, p_period_end]`** → `undated_count`
+   — **period-bound, folded (gate M2).** v1 counted every undated filing in the client's whole
+   history, so one January filing silenced `missing` for every later month forever. The bound
+   reuses `document_filings.filed_at` (`0007:68`), the same column F-A4's own
+   `undated_documents` gate uses to bound its population (`close-key-1-design.md` D-18);
 3. `dated_count > 0` → **`covered`**;
-4. `undated_count > 0` → **`not_evaluable`** (an undated document may be the period's; a read
-   that cannot say NO has a meaningless YES);
+4. `undated_count > 0` → **`not_evaluable`** (an undated document filed **within this period**
+   may be the period's; a read that cannot say NO has a meaningless YES);
 5. otherwise → **`missing`**.
 
 **Step 4 precedes step 5 deliberately.** Rounding `not_evaluable` to `missing` would chase a
@@ -106,14 +112,22 @@ durable read, and never an OR between two walls. Fixtures **throw** on construct
 
 ### A.4 · The notice payload
 
+**Folded, gate M9.** v1's payload carried one date (`due_date`) plus an undefined free-text
+`weekend_label` — nothing else in the design set gives that field a shape, a producer or a
+battery cell. A firm reading the notice and the same firm reading `/calendar` for the same
+obligation could see two different dates. The fold carries the same typed
+`effective_due`/`holiday_rule`/`working_day_basis` triple `list_statutory_calendar` (A.5) already
+returns, and drops `weekend_label`.
+
 ```
 { obligation_code, authority, domain: "payroll",
   period: { start, end },
-  due_date,                       -- computed by F-A4's oracle
+  due_date,                       -- statutory_due_date, computed by F-A4's oracle; never moved
+  effective_due,                  -- R-L24's derived working-day date (A.2); same body as A.5
+  holiday_rule, working_day_basis,
   wording, instrument,
   source_url, source_accessed_on,
-  coverage: "missing" | "not_evaluable",
-  weekend_label: null | "…"   }
+  coverage: "missing" | "not_evaluable"   }
 ```
 
 `kind` is one of `payroll.document_missing` · `payroll.document_undated` ·
@@ -144,7 +158,7 @@ The `get_close_plan` idiom (`0064:154,280-285,312`): a typed definer reader with
 body, **never a raw `SELECT` grant on a base table**. **There is no `*_cents` column and there
 never will be** (design §3.5).
 
-### A.6 · The two `client_fact_keys` rows, as they will be seeded
+### A.6 · The three `client_fact_keys` rows, as they will be seeded (corrected in the fold, nit — v1's header said two)
 
 ```
 ('payroll.employer_status', 'enum:PAYROLL_EMPLOYER_STATUS_V1',
@@ -158,8 +172,21 @@ never will be** (design §3.5).
  '["mandatory","optional","not_liable"]',
  'The client class under the PSMB Act 2001 -- s.14 mandatory (1% of monthly wage) or s.15
   optional (0.5%). Head-count and sector thresholds are UNVERIFIED as at 2026-08-23, so the
-  class is a captured human fact, never derived. Note HRD Corp Circular 1/2026 exempts the
-  education industry for Jan-Dec 2026 -- an exemption PERIOD, not a class change.')
+  class is a captured human fact, never derived.')
+```
+
+**Folded, gate M8.** v1's seeded description carried an inline claim that "HRD Corp Circular
+1/2026 exempts the education industry for Jan-Dec 2026 — an exemption PERIOD, not a class
+change" into this **append-only, permanent** row. This class has no carrier for a dated
+exemption window — recording the class as `mandatory`/`optional`/`not_liable` says nothing about
+*when* liability is suspended — and the circular's own evidence was never graded to this
+document's own A/B/C/D standard (no source id, no grade marker, `payroll-calendar-survey.md`
+§1.6 marks the whole section OUT OF SCOPE). The claim is dropped from the seeded row rather than
+shipped uncited into a table that can never be corrected in place; the gap is registered instead
+as **risk R-7**. A dated carrier (a fourth `client_fact_keys` row, or a client-scoped effective
+window) is future work once the circular is graded.
+
+```
 
 ('payroll.cp8d_route', 'enum:PAYROLL_CP8D_ROUTE_V1', '["e_data_praisi","e_cp8d"]',
  'Which of the two mutually exclusive C.P.8D routes this client is filed on. They carry
@@ -174,12 +201,14 @@ F-T2 adds no fourth key for it (survey F-P14: two flags, not one — but the fir
 
 ### A.7 · The producer's rung order
 
-B1 hold (F-A4's live-hold idiom) → B2 applicability (`not_evaluable` → the one open question,
-**stop**) → B3 F-A4's oracle candidate → B4 `payroll_period_coverage` (`covered` → **stop**) →
-B5 dedupe against notices already spoken in the cadence window → B6 mint a **single-use**
-proactive credential → B7 `wake_record_notification`. **A rung's own evaluation may never raise
-out of the ladder**; every rung is total, and an unreadable input is `not_evaluable`, never
-`pass`.
+B1 hold (F-A4's live-hold idiom) → B2 applicability, **reading `clara.payroll_applicability`**
+(`not_evaluable` → one open question per missing fact, **stop** — **named in the fold, gate
+M13**: v1 left B2 with no read door at all, since `client_facts`' RLS admits only
+`clara_authenticated` and the producer runs as `clara_runtime`) → B3 F-A4's oracle candidate →
+B4 `payroll_period_coverage` (`covered` → **stop**) → B5 dedupe against notices already spoken in
+the cadence window → B6 mint a **single-use** proactive credential → B7
+`wake_record_notification`. **A rung's own evaluation may never raise out of the ladder**; every
+rung is total, and an unreadable input is `not_evaluable`, never `pass`.
 
 ---
 
@@ -211,6 +240,14 @@ Decisions taken under the standing delegation. **Grounds are stated; a decision 
 | **D-14** | **Nothing is named `*_filings`.** | `clara.document_filings` (`0007:63`) owns that word for the document pipeline; `list_uncoded_filings` and `_coding_lane_core(p_client, p_filing)` all mean documents (`tb-ft1-sst`, 2026-08-23). |
 | **D-15** | **The `open_questions` `origin` spelling is settled at build against the LIVE CHECK**, not against `0011:805-806`. | Bodies and constraints are spliced across generations; F-A3 is adding a member to the same closed world. Extend-only, merge-ordered, announced to the conductor. |
 | **D-16** | **No D1 write-quiesce window.** | F-T2 replaces no live writer's body (design §3.9). If review adds one, the window is F-T2's own and is listed in the migration's §0 quiesce inventory. |
+| **D-20** | **The `undated_count` arm of `payroll_period_coverage` is bound by `document_filings.filed_at` inside the period being evaluated**, not read client-wide. | Gate finding **M2**: an unbound read let one undated filing suppress every later period's `missing` verdict forever. Reuses F-A4's own `undated_documents` gate bound (`close-key-1-design.md` D-18) rather than inventing a second treatment of the same defect class (law 81). |
+| **D-21** | **The applicability matrix is total over the live 8-member `entity_type` enum**: `society` is routed to `not_evaluable` (the WAJIB-dormant citation does not name it) and `other` is routed to `not_evaluable` (the enum cannot express a trust body, a Hindu joint family or an estate). | Gate findings **M6/M22**: v1's table matched neither its own cited enum nor its cited source. Fail-closed on an unclassifiable state beats a wrong statutory assertion (constraint 1). Enum widening is out of scope here — **R-6**. |
+| **D-22** | **`payroll.cp8d_route` gates which of `form_e_cp8d` / `form_cp8d_praisi` applies**, wherever the matrix marks Form E + C.P.8D as applying; a missing route puts both `not_evaluable` without touching Form E. | Gate finding **M7**: v1 minted the fact and gated nothing with it, so the ninth seed row (`form_cp8d_praisi`, D-18) had no applicability rule of its own. |
+| **D-23** | **`clara.payroll_applicability(p_client uuid)` is a second new SECURITY DEFINER read**, granted to `clara_runtime` only, in `depreciation_run_due`'s idiom including its in-body firm check. | Gate finding **M13**: rung B2 (applicability) has no door under either identity F-T2 gives the producer — `client_facts`' RLS admits only `clara_authenticated`, and `clara_runtime` has no grant or policy on the table at all. |
+| **D-24** | **The notice payload carries `effective_due`, `holiday_rule` and `working_day_basis` as typed fields; `weekend_label` is dropped.** | Gate finding **M9**: `weekend_label` was undefined anywhere in the set (one mention, no shape, no producer, no cell); the notice and `/calendar` could show different dates for one obligation. Reuses `list_statutory_calendar`'s (A.5) own typed fields rather than inventing a second date idiom. |
+| **D-25** | **PR-1's blocking gate is F-A4/PR-1c, not PR-1b**, everywhere the design set states the `statutory_deadlines` DDL dependency. | Gate findings **M11/M18/M19/M20** — four lenses, one defect: R-L22 assigns the DDL to F-A4's additive PR-1c; PR-1b is a distinct, correct dependency (F-T2's own wake-kind-chain PR-1b reference at design §3.3, untouched) that v1 conflated with it. |
+| **D-26** | **Battery cell 1 asserts the GRANT matrix / `42501`, not `assert_wake_allowed`.** | Gate finding **M16**: a `proactive` credential calling any function but `wake_record_notification` dies at the GRANT before `assert_wake_allowed`'s body ever runs; asserting the helper as the refusing mechanism risks a false green or a wall-weakening "repair". Matches the estate's own T17 idiom (`rig-meta.mjs:877`). |
+| **D-27** | **§6's acceptance claim is withdrawn: no real-books round is reachable for the coverage predicate on the current estate.** | Gate finding **M23**: ROME PROPERTIES' payroll source documents are ruled excluded from ingestion (`wave-a2-ar-myinvois-contract.md` WA2-R3; reconfirmed `wave-g-e2e-corpus-design.md` OD-4), so no `payroll_summary` filing — dated or not — exists to anchor the predicate. PR-4's round is labelled synthetic per ADR-048 instead. |
 
 ---
 
@@ -223,8 +260,8 @@ F-T2-specific and are added at PR-0:
 |---|---|
 | **P-13** | At the frontier, `clara.wake_fn_allowlist` contains **exactly one** row for `wake_kind='proactive'`, and it is `wake_record_notification`. **If a second row exists, D-02's speak-never-act argument is weaker than written and the design is amended, not the claim.** |
 | **P-14** | `clara.assert_wake_allowed` actually **refuses** a `proactive` credential calling a non-allowlisted function — a cell that makes the wall say NO, not a read of the allowlist table. |
-| **P-15** | `clara.client_fact_keys` is append-only at the frontier (`t_client_fact_keys_append_only`) and contains exactly the two seeded members `entity_type` and `msic` before F-T2's rows land. |
-| **P-16** | `clara.statutory_deadlines` exists at the frontier with A.1's columns, F-A4 having landed the DDL. **If it does not, PR-1 does not open** — F-T2 does not mint it as a stopgap. |
+| **P-15** | `clara.client_fact_keys` is append-only at the frontier (`t_client_fact_keys_append_only`) and contains **four** members — `entity_type`, `msic`, `trade_nature`, `customer_identity_policy` — before F-T2's three rows land (**seven** total after PR-1). **Corrected in the fold (gate M0/nit); v1 predicted two** and was already falsifiable against `main` the day it was written (`0056:1233`, `0062:172`, both merged before the design was authored). |
+| **P-16** | `clara.statutory_deadlines` exists at the frontier with A.1's columns, **F-A4/PR-1c** having landed the DDL (R-L22; corrected in the fold, **gate M11/M18/M19/M20** — v1's design-set text named PR-1b). **If it does not, PR-1 does not open** — F-T2 does not mint it as a stopgap. |
 
 Every prediction is re-derived by `pg_get_functiondef` / `pg_get_constraintdef` on a fresh rig at
 the frontier (`pnpm db:migrate` + `pnpm db:seed` on a throwaway Postgres 17, PG* vars, never
@@ -382,16 +419,23 @@ table to maintain forever, and a maintenance duty nobody has been assigned.
 
 ### OQ-8 · An EPF / SOCSO / EIS rate table as a fourth Tier-1 table
 
-**The finding.** `wave-f-contract.md:342-344` closes Tier-1 at **three** tables for Wave F —
-`fx_rates`, the SST rate table, the SST threshold table — and states *"Income-tax bands, capital
+**The finding.** `wave-f-contract.md:342-344` closed Tier-1 at **three** tables for Wave F —
+`fx_rates`, the SST rate table, the SST threshold table — and stated *"Income-tax bands, capital
 allowances, EPF/SOCSO/EIS, stamp duty and MTD are explicitly out until their own consumers land
-(F-T2/F-T3)."* F-T2 **is** a consumer landing. But F-T2's consumption is **narration, not
-computation** (design §3.5), so the case is weaker than the contract's sentence implies.
+(F-T2/F-T3)."* **Corrected in the fold (nit): `wave-f-contract.md`'s R-L25 (2026-08-23) reopened
+the closure for exactly two more tables — F-T3's own two, seeded on the D17/R-L19 pattern — and
+restated that EPF/SOCSO/EIS, stamp duty and MTD stay out.** F-T2 **is** a consumer landing, but
+F-T2's consumption is **narration, not computation** (design §3.5), so the case for an EPF/SOCSO/
+EIS rate table is weaker than the contract's original sentence implied, and R-L25 does not change
+that — it widens the closure for a different lane's tables, not this one's.
 
 **Options.** **(a)** No rate table in Wave F; the calendar cites rates as *text* on the seed row
 where it needs them at all. **(b)** A fourth Tier-1 table with F-A8's fetch attached — a
 **contract amendment**. **(c)** A migration-seeded rate table with **no** fetch door, outside
-Tier-1 entirely.
+Tier-1 entirely — **this is no longer unprecedented (corrected in the fold): it is the exact
+shape R-L25 already ruled for F-T3's two tables and for the deadline tables themselves (D17/
+R-L19), so choosing it here would not need a new pattern, only the same one applied a third
+time.**
 
 **Recommendation: (a).** F-T2 does not compute a contribution, so it does not need a rate; it
 needs a **deadline**. Opening a fourth Tier-1 table for a consumer that only narrates is cost
@@ -416,7 +460,8 @@ different wage bases is a bigger build than a rate row anyway.
 
 **What this design set did NOT receive and therefore does not assume:** any owner ruling on the
 eight questions of Annex D; any confirmation that `clara.statutory_deadlines`' DDL will carry
-A.1's columns; any F-A4 PR-1b merge.
+A.1's columns; any **F-A4 PR-1c** merge (corrected in the fold, gate M11/M18/M19/M20 — v1 named
+PR-1b here, the unrelated wake-kind-chain dependency named two rows above).
 
 ---
 
@@ -426,3 +471,18 @@ A.1's columns; any F-A4 PR-1b merge.
 |---|---|---|
 | **v1** | 2026-08-23 | First issue on branch track-b/ft2-payroll-design. Statutory surface re-verified the same day: grade-**A** byte-verbatim extraction of the ITA 1967, GPHDN 1/2024 and 2/2024, the 2026 filing programme, the LHDN e-PCB Plus deck, HRD Corp's media release and General Guidelines, PERKESO's LINDUNG 24 JAM FAQ, and the Act 452 / Act 4 / Act 800 / A1760 / A1788 gazette PDFs; grade-**B** browser-DOM reads of KWSP, PERKESO, HRD Corp and the live LHDN employer pages. **No code.** |
 | **v1 (same-day revisions)** | 2026-08-23 | Folded **R-L22** (deadlines are F-A4's seeded table; F-T2 contributes rows + a consumer) and **R-L24** (conflict → earlier date + both citations + a visible flag; per-regulator `holiday_rule` with a second `effective_due` date; the four-base divergence and the June-2026 SOCSO change recorded as out-of-scope engine facts; reprints are structural cites only). Corrected **four v1 errors** on the research lanes' evidence: CP38/CP39 ride PCB's own 15th (**D-19**) · dormancy is not a Form E exemption (design §3.2) · EPF was wrongly put at seeding risk on a plain-fetch 403 (**D-09**) · the C.P.8D Praisi cut-off is its own row (**D-18**). Owner questions re-cut: the wake-sibling question became **D-17**, its slot taken by the **HRD Corp deadline conflict** (**OQ-6**); the answered dormancy question was replaced by the **Form E grace month** (**OQ-2**). |
+| **v2 (gate-folded)** | 2026-08-23 | PR-0 gate (`payroll-calendar-gate-record.md`) confirmed 3 blockers, 19 materials and 5 nits against v1; 6 raised claims were refuted. **Eleven distinct corrections folded** (**D-20…D-27** plus three registered without a decision
+entry, plus the row/count/cite nits above): `payroll_period_coverage`'s `undated_count` bound by
+`filed_at` to the period (D-20) · the applicability matrix made total over the live `entity_type`
+enum, with `society` and `other` routed to `not_evaluable` (D-21) · `payroll.cp8d_route`
+threaded into the matrix (D-22) · a second new read, `clara.payroll_applicability`, named for
+rung B2 (D-23) · `effective_due`/`holiday_rule`/`working_day_basis` added to the notice payload,
+`weekend_label` dropped (D-24) · PR-1's DDL gate corrected from F-A4/PR-1b to F-A4/PR-1c
+everywhere it was misstated (D-25) · battery cell 1 corrected to assert the grant matrix, not
+`assert_wake_allowed` (D-26) · §6's acceptance claim withdrawn — no real-books round is reachable
+today (D-27) · `client_fact_keys`' stale "two members" corrected to four at the frontier
+throughout (§2, P-15) · the ungraded HRD Corp exemption claim dropped from the append-only
+`hrdc_class` seed description, registered as **R-7** · the LLM-classification trust surface on
+`covered` registered as **R-8**. Plus nits: the nine-row / three-`client_fact_keys`-row counts
+trued everywhere they drifted to eight/two, the `wave-f-contract.md:405`→`:424` cite, and the
+stale "Tier-1 closes at three tables" (R-L25 reopened it for two more). **Three blockers and four materials are owner-reserved** — recorded as open cards in the gate record, not resolved here: the `documents.financial_date` coverage anchor (B1/B14), the payroll period-basis anchor (M3), CP58's missing fourth fact (M5/M21), and the weekend-rule computation-of-time direction (M10, feeds OQ-7). |
