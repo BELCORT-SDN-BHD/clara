@@ -12,6 +12,12 @@ ladder (design → delta → as-built + a cross-model pass) in **parallel review
 - **F-A9/PR-4 cannot land inside 48 h without weakening its own gate.** Its third condition is "a bake
   period has passed with the new ledger's monthly numbers cross-checked against the old one's last live
   figures". Shortening the bake IS a quality reduction. Scheduled at **T0 + ≥96 h**.
+  **RULED 2026-08-23 (owner): the third condition is REPLACED, not shortened** — PR-4 rides the Wave-G
+  factory-reset ceremony (legacy data dies there anyway) and verification becomes a controlled-denominator
+  assertion during the Wave-G e2e corpus run, strictly stronger evidence than the old bake+cross-check.
+  **W5 is removed from the sprint's ceremony set** (§5, `metering-gate-record.md` §7 item 4).
+- **RULED 2026-08-23 (owner): the R1 authoring-gate relaxation is APPROVED** (§7) — F-A2/PR-3 authors in
+  wave 0 now (a lane is opening); only the MERGE and the ceremony stay hard-gated on F-A2/PR-2-live.
 - **Track B (F-T1…F-T4) cannot finish in 48 h, or in 96.** It has no survey, no design, no annexes, no PR-0
   gate and therefore no PR list — unlike every Track-A lane. Design → PR-0 gate → ADR-061 ladder for four
   tax engines is **≈ 250–400 agent-lane hours, 14–21 days**. The gate and the ladder ARE the quality.
@@ -311,7 +317,7 @@ F-A9/PR-4.
 | **W2** | T0+16 | 2.5 h | Strict order — **F-A2/PR-3** (cutover: `execute_rule_post` + the rule_post consumer, the coding/autopost rule verbs, the expiry belt, the binding-post-control CI gate) → **F-A4/PR-1b** (16 rows: 6 ALTERs, `finalize_close`, `reopen_fiscal_year`, `attest_close_exception`, begin/abandon_close, open/propose_fiscal_year, `mint_month_snapshot`, both `_tf_agent_task_*` — **carrying task #17 Fix A + TA-P4's close-side receipt columns + TA-P6's `segregation_mode`, the contract's mandated ONE window**) → **F-A3/PR-1a** (9 extractions) → **F-A3/PR-1b** (10 bodies + 7 DDL groups, `_approve_entry_core` gen 10, `bank_agent`) → **F-A3/PR-1c** (5 egress bodies + 4 ACCESS EXCLUSIVE CHECK swaps) → **F-A7/gamma** → **F-A7/alpha** (2 files) → **F-A7/beta** (`filing` kind, 2 deferred triggers) |
 | **W3** | T0+22 | 2.0 h | **F-A5/PR-1** (9 report bodies + 2 CHECK swaps) · **F-A9/PR-1B** (`admit_autodraft_task`, `sweep_run_items` CHECK, `firm_limits` column disposals) · **F-A6/PR-1** (35 brief ACCESS EXCLUSIVE `CREATE POLICY` locks — additive under load, rides for free) · **F-A7b/delta** (`update_onboarding_plan`, `begin_client_onboarding`) |
 | **W4** | T0+25 | 1.5 h | **F-A3/PR-3** retirement drops (the bank rules machine whole) plus any late additive |
-| **W5** | ≥T0+96 | 1.5 h | **F-A9/PR-4** — `admit_autodraft_task`, both `settle_autodraft_task` overloads, `settle_chat_turn`, the three retry-door refund blocks, and the disposal of `firm_usage_daily` / `task_usage`. **This removes live real data**; the owner's ruling is already recorded as that sentence |
+| **W5** | ≥T0+96 | 1.5 h | **F-A9/PR-4** — `admit_autodraft_task`, both `settle_autodraft_task` overloads, `settle_chat_turn`, the three retry-door refund blocks, and the disposal of `firm_usage_daily` / `task_usage`. **This removes live real data**; the owner's ruling is already recorded as that sentence. **REMOVED 2026-08-23 (owner ruling) — PR-4 no longer waits on this window.** It rides the Wave-G factory-reset ceremony instead (legacy data dies there anyway, ADR-0072 ①/ADR-0075); verification is a controlled-denominator assertion during the Wave-G e2e corpus run, not a standalone bake. Detail: `metering-gate-record.md` §7 item 4. |
 
 Standing runbook hazards apply to every quiesce window: the backup-app DSN bridge, a **split-argv**
 `sleep 5400` (quoted, it flaps argv-0), the 110 s quiesce, `fly.exe`'s non-zero exit after a *successful*
@@ -367,7 +373,7 @@ T0+2 so neither becomes a path item later.
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | **F-A2/PR-3's build-time gate on "PR-2 image verified live"** puts 8–12 h of authoring *after* T0+3.6 and is what makes F-A3 co-critical. | Ask the owner for one narrow relaxation: **author PR-3 in wave 0, gate only the MERGE and the ceremony on PR-2-live**. The stranding hazard the gate exists to prevent is an *apply*-time hazard, not an authoring one. Saves 8 h. If declined: three sub-lanes (drops / consumer + roster / the dashboard `kb_rule_proposal` part), 8 h. |
+| R1 | **F-A2/PR-3's build-time gate on "PR-2 image verified live"** puts 8–12 h of authoring *after* T0+3.6 and is what makes F-A3 co-critical. | Ask the owner for one narrow relaxation: **author PR-3 in wave 0, gate only the MERGE and the ceremony on PR-2-live**. The stranding hazard the gate exists to prevent is an *apply*-time hazard, not an authoring one. Saves 8 h. If declined: three sub-lanes (drops / consumer + roster / the dashboard `kb_rule_proposal` part), 8 h. **RULED 2026-08-23 (owner): APPROVED as specified.** Authoring proceeds in wave 0 — a lane is opening now. Protection unchanged; only the authoring serialization is removed. |
 | R2 | **CI capacity.** ~16 h of 2-runner wall clock with no slack; one re-run storm (a flaky e2e, a rebase cascade) turns 30 h into 45. | **Stand up `clara-wsl-3` (and -4) before wave 0 opens** — same labels, same workflows, no quality change, halves CI wall clock. Plus the shared-host race discipline already learned: run-scoped docker tags, per-instance action dest, one flock per resource. Batch docs-only PRs (lint-only, ~5 min). |
 | R3 | **W2 is an eight-migration mega-window.** One failure mid-window extends the quiesce with eight lanes' work in the air. | Pre-flight the **entire** W2 sequence on a throwaway rig as one apply-onto-existing run, in order, twice. Carry a per-migration **prosrc sha tripwire**; a mismatch aborts before the quiesce, never during it. Keep W3 as the designated overflow slot — if W2 runs long, F-A7/alpha+beta roll to W3 rather than extending the window. |
 | R4 | **Rig-replay prediction misses.** F-A9's `admit_autodraft_task` (7 generations, 3 splices), F-A3's P-14 (`_approve_entry_core` accepts the bank ctx keys → 23 vs 24 bodies), F-A7's four **0038-spliced** bodies whose live text exists in no file in the repo. | Every DB lane's **first hour** is a rig replay of `pg_get_functiondef` against the frontier, never a read of migration text. Budget the miss: F-A9/PR-1B's 8 h is a **floor**, not a ceiling. Lanes report the replay result as a settle-event before authoring a line. |
@@ -386,7 +392,7 @@ T0+2 so neither becomes a path item later.
 |---|---|---|---|
 | **Track A merged + W1–W4 run + acceptance recorded** (F-A2 rem., F-A3, F-A4, F-A5, F-A6, F-A7, F-A7b, F-A8, F-A9 except PR-4) — from **now** | **34 h** | **52 h** | **76 h** |
 | …the same, from **T0** | 30 h | 48 h | 72 h |
-| F-A9/PR-4 (W5) — gated on a ≥72 h bake it must not skip | +96 h | +7 d | +7 d |
+| F-A9/PR-4 (W5) — gated on a ≥72 h bake it must not skip. **RULED 2026-08-23 (owner): re-homed to the Wave-G factory-reset ceremony instead, W5 removed — this row's figures are STALE pending the conductor's re-total** (§0, §5; detail `metering-gate-record.md` §7 item 4) | +96 h | +7 d | +7 d |
 | **F-A5b** (design + law-28 + build + ladder) | +45 h | +60 h | +90 h |
 | **F-A6 v2** (needs D-22 first) | +25 h | +35 h | +50 h |
 | **Track B F-T1** (survey → design → PR-0 gate → build → ladder) | +90 h | +140 h | +200 h |
