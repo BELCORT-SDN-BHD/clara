@@ -5,8 +5,8 @@ here; full record `fix-queue-gate-record.md`). Design set 2 of 3. Reads on `fix-
 (findings **F1-F33**); read by `fix-queue-annexes.md` (mechanics · censuses · predictions ·
 decision register · owner questions — **Annex D.3** carries the fold's change log, **D-13..D-25**
 carry each fold's ground). **PR-1 (item F) is SEVERED from this gate by owner ruling (§1, D-25)
-and is building now.** Everything else is still unbuilt until **OQ-9** (the one owner card the
-fold could not close) is ruled.
+and is building now.** **OQ-9 (item C, the claims convention) is RULED 2026-08-23** — option
+(A) via a close-time scan and draft, `fix-queue-gate-record.md` M4 addendum; item C unblocks.
 
 **The laws this design is written under.** Numbers are the DB's, reproduced by a versioned
 deterministic evaluator (constraint 2 / PRD §6) — no item here mints a numeral. Walls are proved
@@ -494,80 +494,5 @@ Source: [MASB MPERS landing page](https://www.masb.org.my/pages.php?id=614) →
 right of set-off."* The same binds an employee holding both an advance (receivable) and a claim
 (payable): presented gross unless a set-off right is recorded.
 
-### 8.3 The options
-
-- **Option 1 — one control account, expense-at-approval (RECOMMENDED).** A single client-level
-  non-`payable`-class liability, "Amount owing to employee — expense claims", credited at
-  approval; settlement debits it and credits bank. Person-level detail is a **register** problem,
-  solved by Wave G's claims module, not by chart bloat. *Pro:* MPERS-correct at recognition; it
-  reuses the proven fail-safe — a non-payable credit cannot masquerade as a `supplier_bill`
-  (`0009:492-499`) and mints no AP item (`x37-wave-c-a-subledger.test.mjs:1974`); zero new DB
-  objects. *Con:* "who is owed what" is a journal-line read until Wave G lands the register.
-- **Option 2 — the advance/clearing convention.** Clone the D-b register
-  (`0043_wave_d_b1_staff_advances.sql:335-363`): one per-person COA account carrying both
-  directions, net. *Pro:* a built, walled, law-19-compliant person model with attestation and
-  retire semantics; netting matches what a float-holding employee actually does. *Con:* the
-  account flips between asset and liability across the year, which **collides with §8.2's set-off
-  rule**, and `staff_advance_applications.advance_id` is `NOT NULL` (`0043:539`) so a pure
-  out-of-pocket claim has no row without widening the register.
-- **Option 3 — hybrid.** Two directional per-person accounts plus an explicit application verb
-  that offsets only where a set-off right is recorded. *Pro:* correct presentation **and** the
-  netting reality. *Con:* two accounts per person, in a chart that today has neither.
-
-**Recommendation: Option 1 for employees, with the director and sole-proprietor rows of §8.2 as
-mandatory rather than conventional, and netting off by default.** Option 2's register is the right
-*eventual* shape and Wave G should build it — but as a claims register in its own right, not by
-overloading the advance account and inheriting a set-off problem the chart already warns about.
-
-### 8.4 The two things the convention alone cannot fix
-
-1. **The role discriminant is a judgement, and it must be ASKED, never inferred.** WC-R10's reason
-   (iv) — *"a staff claim is either a reimbursement or an allowance/perquisite — a professional
-   judgement Clara must never make silently"* — is now grounded in PR 5/2019 §3.7/§6.3. Under
-   law 71 the agent posts unattended, so the design's answer is a **refusal path, not a default**:
-   a claim whose evidence does not establish that the cost was incurred *on the entity's behalf*
-   opens an `open_questions` row and posts nothing. Fail-closed on the unknown. And a claim
-   posting with **no filed document** is refused outright — CA 2016 s.245(1)/(3) makes the receipt
-   part of the statutory record.
-2. **The breeding vector (F28) is not closed by a chart entry.** `x37.w` proves three employee
-   claims still breed a `vendor_account` proposal, and the carve-out discriminates on
-   `checked_via_rule_id is null` (`0037:2030-2033`), not on humanness — so an agent approval
-   satisfies it. Whether F-A2's coder still writes sightings is **F-A2's fact to state**
-   (prediction P-6, cross-item note X-2). If it does, the claims convention needs a wall on that
-   path before an unattended claim ever posts.
-
----
-
-## 9 · The D1 write-quiesce inventory
-
-**Gate-folded (D-13, D-14, D-22, D-23): five DB CoR'd live bodies (was three, and one of the three
-— `request_reextraction` — is now dropped), one CHECK swap on the correct object, four frozen
-runtime-module `_vN`s (not DB, priced into PR-3 alongside), two new tables, one new fact key.**
-
-| PR | body / object | kind |
-|---|---|---|
-| PR-3 | `clara.finalize_document_intake(…)` | **CoR**, prosrc-SHA pin |
-| PR-3 | `ck_processing_task_error_code_f_a1` → successor | CHECK swap, extend-only (D-13) |
-| PR-3 | `clara.fail_invoice_facts` / `fail_statement_facts` / `fail_witness_facts` | 3× **CoR**, prosrc-SHA pin (D-23) |
-| PR-3 | `documentIngest.behavior_v2` / `invoiceFacts.v1.behavior` / `statementFacts.v1.behavior` / `statementFacts.v2.behavior` | 4× new `_vN` + registry repoint (D-22, runtime not DB) |
-| ~~PR-3~~ | ~~`clara.request_reextraction(uuid,text,text)`~~ | **DROPPED — no CoR needed (D-14)** |
-| PR-4 | `clara.bank_recon_close_state(uuid,uuid)` | **CoR**, prosrc-SHA pin |
-| PR-4 | `clara._bank_registry_ledger_state(uuid,date)` | NEW — or F-A3's, called; `security definer` per §2.1 (D-19) |
-| PR-4 | `client_fact_keys` ← `banking_arrangement` | additive INSERT |
-| PR-2 | `clara.refusal_remedies` | NEW table + seed, key widened (D-16, D-17), grant corrected (D-18) |
-
-Every CoR'd body is re-derived on the rig by `pg_get_functiondef` at authoring time and its
-`prosrc` sha256 pinned in the migration's §0 quiesce inventory; files are named
-`UNNUMBERED_ft4_<slug>.sql` and **no number is claimed until merge**.
-
-## 10 · What this design refuses to do
-
-**Weaken a wall to make a fix fit** — `finalize_document_intake`'s door still refuses
-`corrupt`/`encrypted` (`request_reextraction`'s pre-existing, out-of-scope non-refusal is R-5, not
-a weakening this item makes), drawer 1 still has no attestation path, the coding mapper still
-leaks no raw text · **name a `_vN` number** (every version is read from the live registry at
-authoring time) · **trust migration text as a live body** (`finalize_document_intake` is spliced;
-all D1 bodies are rig-replayed) · **decide item C** (the convention is the owner's — OQ-1/OQ-2/
-**OQ-9**; this design states the standard, the options and a recommendation, and stops) ·
-**repair a body that is retiring** (item E) or **claim another lane's item** (G/H/I, and the
-predicate body).
+**Split boundary (2026-08-23, the 500-line ceiling): §8.3 onward, incl. §9-§10 and the
+2026-08-23 OQ-9 ruling, continues in `fix-queue-design-part2.md`.** Section numbers unchanged.
