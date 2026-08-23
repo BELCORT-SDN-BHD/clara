@@ -1,5 +1,13 @@
-# F-A8 — the internet lane: estate survey v2
+# F-A8 — the internet lane: estate survey v3
 
+> **v3, 2026-08-23 — PR-0 leg 2 folded (the law-28 cross-model pass).** Three of this survey's
+> findings are amended in place, each marked **[v3]** — **F6** (the `fetch()` precedent it told
+> PR-2 to reuse is credential-bearing), **F7** (an enumerated deny list is the wrong SHAPE, not
+> merely absent machinery) and **F13** (the identity wall it called for cannot certify a miss, so
+> the architecture must) — and **§5 records what leg 2 measured on a live rig at the 0102
+> frontier**, including five estate facts this survey never looked for. No v2 conclusion is
+> withdrawn.
+>
 > **v2, 2026-08-22 — gate 1 folded (record: `internet-lane-gate-record.md`).** Six of this
 > survey's claims were wrong at the bytes and are re-cut below, each marked **[v2]**: F1's seed
 > dates, F2's proof mechanism, F5's line cites, F6's absence claim, F8's roster measurement, and
@@ -99,8 +107,11 @@ v1 said "no outbound HTTP/web-fetch capability exists anywhere", which is a narr
 zero-hits reported as a general absence (the same wrong-instrument shape as F2 and §2).
 `packages/runtime/lib/storage.mjs:88,122,217,235,307,337` and
 `lib/reconciler-render.mjs:128,158` all call `fetch()`, and `reconciler-render.mjs:126` carries a
-real timeout convention (`AbortSignal.timeout(FLY_TIMEOUT_MS)`). **PR-2 reuses those client
-conventions rather than inventing a second HTTP idiom** (design §3.2). What is genuinely absent
+real timeout convention (`AbortSignal.timeout(FLY_TIMEOUT_MS)`). ~~**PR-2 reuses those client
+conventions rather than inventing a second HTTP idiom**~~ **[v3, law-28 E-3, re-read at the bytes
+2026-08-23: `storage.mjs:88-90` attaches `authorization: Bearer` and `apikey` to its `fetch()`.
+Only the TIMEOUT convention transfers — PR-2 builds a NEW sterile GET-only `web-read` module
+under `packages/runtime/lib/`, with a fixed header allowlist (IL-D22).]** What is genuinely absent
 is a *model-callable web-read tool* and the guard around it:
 `grep -rniE "fetch.*tool|web_read|web_search|WebFetch|undici|node-fetch"` over
 `packages/runtime/lib` and the workflow trees returns zero hits outside build output.
@@ -116,7 +127,11 @@ not a status.**
 migrations returns zero hits. TA-P3's "this doesn't count as a domain whitelist" is a
 **forward-looking framing ruling**, not a confirmation of live machinery — the deny list is
 genuinely new work, and it is a **runtime-side** control (DNS/IP resolution is not something
-Postgres does), not a DB wall.
+Postgres does), not a DB wall. **[v3, law-28 N-2/N-3/N-5: the SHAPE was also wrong. An enumerated
+deny list checked once before connect loses to rebinding, to address forms nobody enumerated
+(IPv4-mapped IPv6, `2130706433`, CGNAT 100.64.0.0/10, `fc00::/7`) and to a redirect. It inverts to
+allow-only-globally-routable-unicast, per hop, HTTPS-only, connecting to a pinned address and
+asserting the socket's real peer afterwards (IL-D21).]**
 
 **F8 — the wake kind `'proactive'` has existed since the very first migration (0002:230-232)
 with a ZERO population of live CREDENTIALS.** **[v2] The roster measurement in v1 was wrong at
@@ -205,7 +220,13 @@ world plus `_web_text_is_client_free`, a refusal predicate over the model-author
 `_web_read_core` (design §3.2). With that wall in place TA-P3/A's "identity-free lookups are not
 disclosures" holds and no named egress purpose is needed — *because of* the wall, not beside it.
 If a future item widens Tier 2 to carry client identity, THAT item re-opens TA-P3's
-egress-purpose framework under a new verb, never a widened parameter here.
+egress-purpose framework under a new verb, never a widened parameter here. **[v3, law-28 E-1/E-2:
+two corrections. (a) The predicate must read the canonical `p_url` too — v2 inspected only
+`p_query`/`p_rationale`, so a collection URL carrying a client name and TIN walked past the wall
+(IL-D29). (b) A predicate that refuses on a match certifies NOTHING on a miss, so "identity-free"
+has to be made true by the architecture, not by the wall: a closed server-owned query taxonomy or
+a named TA-P3 purpose — the owner's call, OQ-A. Until it is ruled, free-text research does not
+ship (IL-D30).]**
 
 **F14 — `clara.role_rank` (0002) ranks `owner` highest (3), above `admin`(2)/`bookkeeper`(1)/
 `viewer`(0); `clara.firm_capability_grants` (0056:1060-1072) is a PER-HUMAN grant table for
@@ -298,6 +319,9 @@ F-A2 lesson that a body's live tip is found by replay, never assumed from a migr
 | PR-4 | `clara.wake_web_fetch` / `clara.wake_web_search` / `_web_read_core` / `_web_text_is_client_free` | wrapper ×2, shared core, **[v2]** + the identity refusal predicate | 0077/0078 idiom |
 | PR-4 | `wake_fn_allowlist` **[v2] `('interactive','wake_web_fetch')`, `('interactive','wake_web_search')`** | INSERT | same |
 | PR-5 | four DEFINER typed readers (bookkeeper+) | read surface | `get_close_plan` (`0064:154,280-285,312`) |
+| **[v3] PR-1** | `clara.fetch_artifacts` · `tier1_endpoints` · `web_attempts` + `web_attempt_events` (**replacing** `tier1_fetch_attempts`) · `policy_fact_spans` · `policy_approval_cards` · `record_fetch_artifact` | six tables + one privileged writer | `report_artifacts` (digest/path/chain habits) + `documents` (`0007:28`) — see §5 F16 |
+| **[v3] PR-1** | `clara.evaluate_policy_source_value_v1` + its `evaluator_versions` row and `frozen-evaluators.json` entry | **registered frozen evaluator** | the freeze family, §5 F17 |
+| **[v3] PR-2** | the `web-read` module under `packages/runtime/lib/` — sterile GET-only client, per-hop policy, versioned canonicalizers | new runtime module | **NOT** `storage.mjs`'s request profile (F6) |
 
 **[v2] `clara.llm_usage_events` is NO LONGER ON THIS LIST** — the widening is F-A9's entirely
 (F10, gate width ruling). v1 carried it as a jointly-owned ALTER; it is severed out.
@@ -340,3 +364,52 @@ gen_random_uuid()` rewrites a two-row table, which the replay states rather than
 - **[v2] R7 — no clocked wake can execute today.** `kind='wake'` `agent_tasks` are born `held`
   and may only be cancelled (F9). Shared with F-A4; owner item OI-2; F-A8's fail-closed default
   is a plain runtime job with no `agent_tasks` row.
+- **[v3] R8-R11** (design §8): a digest proves which bytes Clara saw, never that they were
+  authentic · the artifact writer is `clara_runtime`, so the privilege sits in the verb, not in
+  role separation · registering the extractor in the evaluator freeze makes any later recut of
+  its closure fail at apply until a new `_vN` ships · the canonicalizer is a new parsing surface
+  of our own, and HTML v1 is the whole of it.
+
+---
+
+## 5 · [v3] What leg 2 measured on a live rig (0102 frontier, 2026-08-23)
+
+Five estate facts this survey never looked for, each of which changes a build decision — measured
+by replay (`pnpm db:migrate` + `pnpm db:seed` on a throwaway Postgres 17), never read off
+migration text.
+
+**F16 — the estate has NO raw-bytes column anywhere in `clara`, and TWO digest idioms to copy.**
+`clara.documents` carries `sha256` + `mime_type` + `byte_size` + `storage_path` +
+`bytes_verified_at` (`0007:28`); `clara.report_artifacts` adds the four habits F-A8's
+`fetch_artifacts` copies — a digest **shape CHECK**, `byte_size > 0`, a **content-addressed path
+CHECK** binding the storage key to the digest, and **partial unique indexes** that make a chain
+non-forkable (`uq_report_artifacts_linear_chain`). F-A8 drops the firm segment from the path form
+(its artifacts are firm-independent) and adds `unique (id, sha256)` so children can carry a
+composite FK onto the digest (IL-D17/IL-D26).
+
+**F17 — the evaluator-freeze family is a live, self-proving mechanism, and NAMING is its
+trigger.** `scripts/check-frozen-evaluators.mjs` fires on any `clara.evaluate_*`-shaped body and
+demands an `evaluator_versions` row in the SAME migration plus an append-only
+`frozen-evaluators.json` entry; `clara.verify_evaluator_freeze()` runs between every later
+migration's body and its commit, over **all** registry rows regardless of `deployed`, checking
+`sha256(pg_get_functiondef(...))` per member — the full functiondef, so a re-GRANT moves the hash
+— plus the closure hash and the entry count. v2's `_policy_extract_quoted_value` matched nothing;
+v3 renames into the mechanism and accepts its cost explicitly (IL-D20).
+
+**F18 — the live app roles are exactly five** (`clara_authenticated`, `clara_agent_ro`,
+`clara_wake_interactive`, `clara_wake_proactive`, `clara_runtime`, plus three `*_login` and
+`clara_fn_owner`). There is no "privileged runtime role" to reach for and minting one is three
+census surfaces at once, so F-A8 mints none (IL-D33).
+
+**F19 — the human-authority helper is `clara._human_ctx(p_min_rank int, out actor, out firm)`
+(`0004:299`) and it raises CLR04**, the authz/role-floor class (`0002:40`). Every existing human
+door uses it; the design's hand-rolled `role_rank` comparison raising CLR05 is struck (IL-D32).
+
+**F20 — `wake_fn_allowlist` holds 15 rows today: 6 `autodraft`, 8 `interactive`, 1 `proactive`.**
+F8 re-derived the interactive/proactive halves correctly from migration text but never counted
+`autodraft`. F-A8's three rows take it to 18 (Annex F, C.10d).
+
+*Also confirmed by the same replay, exactly as this survey predicted:* `sst_threshold_schedule`
+has a composite PK and **no `id`** (F1/GB-3 is real), and `client_facts`' supersede idiom
+transfers to `fx_rates` unchanged **except its key**, which v3 makes an exact `rate_date`
+(IL-D23).
