@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, counterpartyRows, openQuestion, dismissOpenQuestion, postingCoreReady,
+  booksVersion, opk, openQuestion, dismissOpenQuestion, createCounterparty, postingCoreReady,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, admits, admitsAll, nonAdmitting, assertVectorShape, assertNonAdmitting,
   supplierLines, salesLines, genericLines, genericWithControlLeg, CHART,
@@ -104,18 +104,33 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
   if (await gateCore(t)) return;
   let probed = 0;
   for (const scope of ["client", "document", "vendor"]) {
-    const p = await agentPostable(OWNER(), { client: A2() });
-    const cps = await counterpartyRows(A2());
+    // VENDOR SCOPE IS SEEDED, NOT ORGANIC. Every iteration of this loop is refused by B9 by
+    // design (that is the cell's whole point), and clara.counterparties rows are birthed by
+    // draft+APPROVE, not by drafting alone — so a purely organic read (the last row of
+    // counterpartyRows(A2())) can never reliably find one from inside this same test: nothing
+    // here ever posts. That made the population-dependent precondition structurally
+    // unsatisfiable rather than merely fragile — the round-5 hardening correctly turned a
+    // vacuous pass into a loud failure, but the fix is to give B9 a REAL counterparty to test
+    // against, not to relax back to a skip. Birthed through the audited door directly
+    // (clara.create_counterparty via createCounterparty), the same product door a human uses.
+    const vendorCp = scope === "vendor"
+      ? await createCounterparty(OWNER(), { client: A2(), kind: "vendor", name: `c3.B9 vendor ${randomUUID().slice(0, 8)}` })
+      : null;
+    // THE DRAFT MUST CITE THE SAME COUNTERPARTY THE QUESTION BLOCKS. agentPostable's default
+    // vendor shape ({new:{name: cited.vendorName}}) births its OWN, separately-named
+    // counterparty — a blocking question opened against the seeded one would then scope to a
+    // party the draft never cites, and B9 would find no match and wrongly ADMIT. Pass
+    // {existing_id, kind} (the same proposal shape 0011/0028's binding doors use) so the draft
+    // is attributed to the exact row the question blocks.
+    const p = await agentPostable(OWNER(), {
+      client: A2(),
+      ...(scope === "vendor" ? { vendor: { existing_id: vendorCp.counterparty_id, kind: "vendor" } } : {}),
+    });
     const scopeId = scope === "document" ? p.cited.documentId
-      : scope === "vendor" ? (cps[cps.length - 1]?.id ?? null)
+      : scope === "vendor" ? (vendorCp?.counterparty_id ?? null)
       : A2();
-    // BOTH ESCAPES WERE `noteLane` + `continue`, AND `noteLane` IS NOT A SKIP — it appends to an
-    // array and the cell still reports PASS. If all three scopes took either escape the loop body
-    // never ran a single assertion, and this cell (the one that proves B9 refuses on every scope
-    // kind) was green having asked nothing. The file's own note records a zero/degenerate
-    // population today, so that was not hypothetical.
     assert.ok(scope !== "vendor" || scopeId,
-      "c3.B9 vendor: a counterparty was born on the draft — without one the vendor arm has no input and the scope is UNPROVEN, not skippable");
+      "c3.B9 vendor: the seeded counterparty carries an id — without one the vendor arm has no input and the scope is UNPROVEN, not skippable");
     const q = await openQuestion(OWNER(), {
       client: A2(), scopeKind: scope, scopeId, question: `c3.B9 ${scope}-scoped blocker`, opKey: opk("c3B9"),
     });

@@ -46,6 +46,16 @@ export async function wakeClientOf(role, secret) {
 // Counterparty writers (human, bookkeeper+) — companion §2.
 // ---------------------------------------------------------------------------
 
+/** The product door for birthing a counterparty directly (registration/TIN optional) —
+ *  mirrors name-only-guard-fixtures.mjs's createCounterparty, the same audited call shape,
+ *  for callers that need a REAL counterparty without a draft+approve round-trip. */
+export async function createCounterparty(sub, { client, kind = "vendor", name, registration = null, tin = null, opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.create_counterparty(p_client => $1, p_kind => $2, p_name => $3, p_registration_no => $4, p_tin => $5, p_op_key => $6) as receipt",
+    [client, kind, name, registration, tin, opKey ?? opk("createcp")]);
+  return r.rows[0].receipt;
+}
+
 export async function addAlias(sub, { client, counterparty, alias, origin = "human", opKey = null }) {
   const r = await humanQuery(sub,
     "select clara.add_counterparty_alias(p_client => $1, p_counterparty => $2, p_alias => $3, p_origin => $4, p_op_key => $5) as r",
