@@ -212,7 +212,7 @@ The prior build had no event layer, no context pack, and no stale-context detect
 | Model-computed numbers in any artifact | Every figure from DB functions (invariant 1). |
 | A full draft tax computation as a hard v1 gate | It is the last v1 slice; may slip to v1.1 (Gate-1 C5). |
 
-**Durable Malaysian-tax context:** GST repealed 2018 → **SST** (service 6%/8% — 8% general from 2024-03-01, 6% retained for specified sectors; sales 5%/10%; output-only, no input credit). MyInvois e-invoice exemption **RM1M** (6 Dec 2025); the RM500k–1M band was **cancelled — never re-add it**. Framework: MPERS (mandates no specific COA). Standard COA seed is LHDN-sourced and re-verified against official sources during Phase 3.
+**Durable Malaysian-tax context:** GST repealed 2018 → **SST** (output-only, no input credit — digest law 17). Sales and service tax RATES are effective-dated facts, not product-law prose (digest law 16): they live in `clara.sst_rate_schedule` (F-T1, Wave F Track B), never quoted or paraphrased here — a rate quoted in this document goes stale the moment RMCD amends it, and has (survey `sst-engine-survey.md` §3, M1: MySST's own published order tables were themselves found stale and silently incomplete on re-verification). MyInvois e-invoice exemption **RM1M** (6 Dec 2025); the RM500k–1M band was **cancelled — never re-add it**. Framework: MPERS (mandates no specific COA). Standard COA seed is LHDN-sourced and re-verified against official sources during Phase 3.
 
 ---
 
