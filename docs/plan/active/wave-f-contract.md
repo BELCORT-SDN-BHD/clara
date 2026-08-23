@@ -14,8 +14,8 @@
 > pending the owner's digest sign-off** (ADR-0074's own preamble names them) — **RATIFIED
 > 2026-08-22 as digest laws 78-81, law 78 carrying the rider R-TA-P1-walls**, so TA-P7's
 > judgement half is no longer signature-gated and the items below are scoped as ruled. The
-> PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits landed in #287; the `AGENTS.md` home for
-> invariant (a) stays FLAGGED for the owner.
+> PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits landed in #287, and the `AGENTS.md` home for
+> invariant (a) is **DECIDED (b) 2026-08-23 — PRD §6 is the single home, no duplicate clause.**
 > The full agenda with its member tables — the consequence map for each item's
 > design — is `track-a-sitting-1.md` / `-2.md` / `-3.md`.
 
@@ -287,7 +287,9 @@ alongside the cross-client named read (R-L17). The owner sees this deviation at 
   (TA-P7 C, the owner's own ruling).** The ≥0.95 human-click-or-exact-identifier wall opens to
   her judgement. **This is a CONSTITUTIONAL AMENDMENT and F-A7a's judgement half may not build
   before the owner signs the digest** — ADR-0074 carries the proposed PRD §6.2(a) /
-  ARCHITECTURE §0.1 wording, and the `AGENTS.md` home is FLAGGED, not drafted. Four
+  ARCHITECTURE §0.1 wording *(landed #287)*, and the `AGENTS.md` home is FLAGGED, not drafted
+  **[ADR-0075-era true, 2026-08-23: the digest was signed 2026-08-22, so the build gate above is
+  LIFTED; and the `AGENTS.md` home is now DECIDED (b) — PRD §6 is the single home]**. Four
   walls-validate riders are part of the item: **(1)** a hard-number CONTRADICTION wall — a
   printed registration mapping to a DIFFERENT client refuses and asks; **(2)** a name-family
   COLLISION guard — more than one candidate must clarify (BELCORT's own ROME family, plus RPR
