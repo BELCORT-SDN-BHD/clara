@@ -77,7 +77,8 @@ the business absorbs it · a DG-varied length → §2.3.
 **`due_date` is NOT computed here.** It is read from **F-A4's due oracle** (R-L22). If the oracle cannot
 answer, the row lands `due_date_status='not_evaluable'` and the period **stops in the open** — it never
 guesses "last day of next month" locally, which is the second path law 81 forbids. *(As at 2026-08-23 no
-F-A4 PR carries that DDL; §8 names the dependency rather than assuming a shape.)*
+**The DDL's home is ruled: F-A4 PR-1c, the additive no-ceremony PR** (conductor's ledger,
+2026-08-23). F-T1's PR-2 depends on it and assumes nothing about its column shape.)*
 
 **F-T1's `statutory_deadlines` seed rows are Annex A.9** — seven rules, each cited in survey §3 and each
 owned by the ORACLE rather than by each consumer. Three are not variants of the others and would be lost by
@@ -199,14 +200,23 @@ lane's reading that s.11(2) is inert under s.11(1A) is *its own inference*, and 
 disapplied. Law 21 as narrowed by TA-P5 governs the belt: *sign once at admin+, **the first firing
 DRAFTS**, receipt everything.*
 
-**Whether it also POSTS is OQ-4 — with the owner now.** **(a) return-only:** the tax enters the SST-02 sum
-and nothing moves in the GL — zero blast radius, but the ledger's `sst_output` balance no longer equals the
-tax position. **(b) ledger:** a reclassification moves the amount from a deferred account to SST payable —
-accounting-correct, but it costs a new `special_acc_type` value (live tip `0017:673-677`, five values), a
-CoR of `_assert_sales_invoice_shape_at`'s closed leg world, a D1 window, and it moves F-A2's B4-sales rung
-with it. Under hard constraint 1 the recommendation is **(b) deferred**: ship (a) so the SST-02 is right,
-take (b) as its own reviewed migration once F-A2's body has stopped moving. **Either way the first firing
-DRAFTS.** Both arms are designed in Annex A.4, so neither ruling costs a redesign.
+**OQ-4 IS RULED (owner, 2026-08-23): THE GL CARRIES THE DEFERRAL.** *(The ruling relay lettered it "(a)";
+Annex D letters the same substance "(b)". **The letters are inverted between the card and this document —
+the substance governs and is not in doubt.**)* **The ruling is also WIDER than OQ-4 asked**: it is not only
+the twelve-month edge case but **the normal payment-basis path**. Two liability accounts —
+**`sst_output_deferred`** credited at invoice for every payment-basis service-tax registrant, transferred to
+**`sst_output`** (payable) **on receipt** (an allocation, §3.2) **or on the s.11(2) twelve-month day**,
+whichever comes first. The transfer is posted by `allocate_receipt` and by the belt, **DB-owned and
+receipted**; **registrants on the s.11(1A) invoice-basis election skip the deferred account entirely**
+(a per-registration scope flag). **Owner's reason, recorded:** it matches local practice — AutoCount and
+SQL Account both carry an "SST Deferred" account — and it is what an auditor expects to see.
+
+**The SST-02 then reads the PAYABLE account's period movement, cross-checked against §3.2's
+allocation-derived figure — both DB-owned, and a mismatch REFUSES rather than silently picking one.**
+That is a differential control, not TA-P11's second architecture: the two derivations are *mutually aware*
+by construction, which is the whole point of the check. §5.1's "the producer computes nothing" is unchanged
+— both figures are evaluator output. **First firing still DRAFTS** (law 21). Annex A.4 carries the shape and
+the costs the ruling accepts.
 
 ### 3.4 Bad-debt relief and its clawback — approval-gated, on DIFFERENT RAILS
 

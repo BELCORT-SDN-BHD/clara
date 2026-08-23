@@ -80,19 +80,67 @@ that **fully settles** the item takes `invoice_tax_sen − Σ(prior realised)` =
 settlement ⇒ `Σ realised_tax < invoice_tax_sen` and **never exceeds it**. A cell that only tests (a) is
 self-referential — (b) is the differential half.
 
-### A.4 · s.11(2)'s two arms, both designed
+### A.4 · The deferred-output-tax mechanism (RULED, owner 2026-08-23)
 
-**Arm (a), return-only (ships in v1).** `sst_deferred_realisation` rows enter the SST-02 evaluator's sum for
-the period containing `service_period_end + 12 months + 1 day`. Nothing moves in the GL. **Named cost:** the
-`sst_output` balance stops equalling the tax position, so the balance sheet overstates nothing but explains
-nothing either; a reconciliation note is required at close.
+**The GL carries the deferral.** The return-only arm this annex previously designed is **rejected** and is
+kept only as the rejected alternative in Annex B/D-7. What ships:
 
-**Arm (b), ledger (deferred pending OQ-4).** Adds `special_acc_type='sst_output_deferred'` (live CHECK tip
-`0017:673-677`, five values) with an `account_type='liability'` conjunct mirroring
-`ck_coa_sst_purchase_cost_expense` (`0016:124-125`); the sales-invoice wall's closed leg world
-(`0022:714-930`) admits it; **B4-sales' component tie moves with it** because "tax" then means two legs,
-not one (`f-a2-annexes-1-estate.md` Annex I). A clocked belt posts the reclassification —
-**first firing DRAFTS** (law 21). **D1**, sharing F-A2's window.
+**Two liability accounts.** `special_acc_type` gains **`sst_output_deferred`** as a **SIXTH** value —
+extend-only on the live CHECK tip **`0017:673-677`**, which holds five
+(`rounding`, `sst_output`, `sst_purchase_cost`, `opening_balance_equity`, `retained_earnings`) because
+`0017` drops and re-adds the constraint after `0016`. It carries an `account_type='liability'` conjunct
+mirroring `ck_coa_sst_purchase_cost_expense` (`0016:124-125`). **`ck_coa_obe_equity` (`0017:679-681`) and
+`uq_coa_special` (`0003:58`) are left untouched** — the latter is per `(client_id, value)` and already
+admits one of each per client, so no index change.
+
+> ⚠ **A stale comment that will mislead the builder:** `0038:139` says the set has *"THREE values as of
+> 0016"*. **It is wrong at the bytes and is not authority** — five is the live count, at `0017:673-677`.
+> This survey's own first draft made the same error from `0016:123`. Measure, never cite.
+
+**The flows.** A payment-basis service-tax registrant credits **`sst_output_deferred`** at invoice. The
+balance transfers to **`sst_output`** (payable) at whichever comes first: **an allocation** (`allocate_receipt`
+posts the transfer for the apportioned tax, §3.2's `realised_tax`) or **the s.11(2) twelve-month day** (the
+belt posts it). Both writers are **DB-owned and receipted**; **the belt's first firing DRAFTS** (law 21).
+**A registrant on the s.11(1A) invoice-basis election never touches the deferred account** — a
+per-registration scope flag, because for them the liability crystallises at issuance.
+
+**The live body it CoRs.** `_assert_sales_invoice_shape_at` (live tip `0022:714-930`) gains the deferred
+arm: the closed leg world `{receivable, income, sst_output, rounding}` admits `sst_output_deferred`, and
+tie 5 (`:927-930`, *"sst_output total differs from the stated tax"*) must accept the tax landing in
+**either** output account depending on the registrant's basis — **not the sum of both**, or a
+half-transferred invoice ties falsely. **`prosrc`-SHA prestate pin → DROP+CREATE in place → a tail
+self-proof that raises**, listed in the migration's §0 quiesce inventory. **D1.**
+
+**The second live body: `allocate_receipt`.** Live tip **`0044:1642`** (`create or replace`; born
+`0037:2584`) — the **wrapper**, and F-T1 CoRs the wrapper. ⚠ **An ordering edge that is not F-T1's to
+choose:** **F-A3/PR-1b CoRs `_allocate_receipt_core` (`0044:1034`)**, the inner **core**, and F-A3 lands
+first with certainty (train ~27 vs Track B). Different bodies, so **no byte collision** — but the wrapper
+calls the core, and F-A3's change adds an agent arm posting past `is_high_stakes`. **So both bodies are
+re-derived by rig replay against merged `main` AFTER F-A3 lands, and the core's POST-F-A3 sha is the one
+pinned.** Never the `0044` text: the wrapper is already one generation past its birth and the core will be
+two.
+
+**The twelve-month belt is ADOPTED, never minted.** R-L22 and law 80 both bind: **F-A4 owns the clock spine
+and there is no second clock.** F-T1's s.11(2) sweep is a *consumer* of F-A4's belt, exactly as F-T2's chase
+notice is. **If it ever appears to need its own cadence machinery, stop and escalate** rather than build one.
+
+**Sequencing, non-negotiable:** **AFTER F-A2 PR-1 merges** (train position 5). **F-A2's B4-sales component
+tie moves with it** — "tax" becomes two possible legs, not one — and it ships as a **NEW generation inside
+F-T1's own migration**, never as an edit to F-A2's files (constraint 9's discipline applied to a shared
+body). **Ceremony: F-T1's own D1 window, or the designated overflow slot W3.**
+
+**Constraint 12 binds harder here, because this arm touches the sales-invoice shape.** `tin` /
+`ssm_registration` are scoped in the key description text as **the CLIENT's own**, and **the ladder must not
+read a counterparty's `tin` or `registration_no` anywhere**. ROME SECRETARY's customers are NAME-ONLY;
+`0062` walls it in the DB and `0063` makes lifting it an OWNER-only act through the audited door. **If the
+deferred-SST arm is ever found to need a counterparty identifier, the build stops and escalates** — it does
+not route around the wall.
+
+**What the ruling accepts, stated:** a live judgement body is re-cut and a write-quiesce window is spent, to
+buy a balance sheet an auditor can read. **What it buys beyond that:** the SST-02 gains a *second*
+DB-owned derivation of the same figure — the payable account's period movement — cross-checked against the
+allocation-derived sum, **refusing on mismatch**. Two mutually-aware derivations are a differential control,
+not TA-P11's two architectures.
 
 ### A.5 · Migration mechanics (the ones that have bitten builders here)
 
@@ -174,7 +222,7 @@ a Federal weekly or public holiday moves to the next day (Guide V3 ¶18).
 | **D-4** | **`sst_taxable_periods` is a NEW object, not a widening of `reporting_periods.grain`.** | An SST period is a statutory *content anchor* carrying a return, not a reporting window; `grain` admits only `month`/`fiscal_year` (`0057:282`). Not a second architecture under TA-P11's test: the two never compute the same fact. |
 | **D-5** | **The due date is READ from F-A4's oracle, never computed locally.** | R-L22. Cost: F-T1's PR-2 is blocked on F-A4's DDL, which no PR carried as at 2026-08-23. Accepted over a second oracle. |
 | **D-6** | **Dual registration separates at the RETURN layer (shape C); the GL split (shape A) is deferred.** | RMCD requires two returns (F-1), so the model is already right; shape A costs a CoR of F-A2's live wall for a case no client in the estate has. **OQ-3.** |
-| **D-7** | **s.11(2) ships return-only in v1; the ledger arm is designed but deferred.** | Hard constraint 1 prefers the ledger; F-A2's body is still moving. **OQ-4 — with the owner.** |
+| **D-7** | ~~s.11(2) ships return-only in v1~~ **SUPERSEDED — OQ-4 RULED (owner, 2026-08-23): the GL carries the deferral**, and not only for the twelve-month edge but for the whole payment-basis path (Annex A.4). | The design's own recommendation was the ledger arm on hard-constraint-1 grounds but *deferred* for F-A2's moving body; the owner took the accounting-correctness reading and accepted the sequencing cost instead. **Recorded reason: local practice — AutoCount and SQL Account both carry an "SST Deferred" account — and auditor expectation.** Cost accepted: a CoR of `_assert_sales_invoice_shape_at` plus a D1 window, sequenced after F-A2 PR-1. **Letter caution: the ruling relay lettered this "(a)"; Annex D letters the same substance "(b)".** |
 | **D-8** | **The scope-treatment set is derived from SST-02 Part D, not invented.** | A treatment that cannot be declared cannot be recorded — it keeps the classification and return layers on one vocabulary. |
 | **D-9** | **Bad-debt relief is approval-gated, with its own claim lifecycle.** | F-6 + reg 19. Cost: a claim cannot be self-served; that is the law, not a limitation. |
 | **D-10** | **The rate table carries three rate FORMS and is keyed on the SERVICE DATE.** | V-3's retroactive P.U.(A) 125/2026 makes a "current rate" column produce wrong numbers; per-unit and per-measure rates cannot live in `rate_bp`. |
@@ -206,6 +254,9 @@ tip is `0017:673-677`'s five.
 | **C-8** | An `apply` allocation can produce a position exceeding the item's `amount_cents`. | If the estate already forbids over-allocation, §3.2's arm is dead code and should be replaced by a cite. |
 | **C-9** | No AR-side field anywhere carries a **service-performed date or range**. | If one exists, R10 shrinks from a schema change to a mapping. |
 | **C-10** | `client_identifiers.kind` is still `('tin','ssm','bank_account')`. | D-13's rationale would need re-stating if an SST kind has landed. |
+| **C-11** | `allocate_receipt`'s live tip is the **wrapper** at `0044:1642` (born `0037:2584`), and `_allocate_receipt_core`'s is `0044:1034`. | PR-4b CoRs the wrapper; if the generations have moved, the prestate pin is against the wrong bytes. |
+| **C-12** | **After F-A3/PR-1b merges**, `_allocate_receipt_core` carries F-A3's agent arm. | **The core's POST-F-A3 sha is the one PR-4b pins** — replay against merged `main`, never the `0044` text, which is already one to two generations stale for these two bodies. |
+| **C-13** | `ck_coa_obe_equity` (`0017:679-681`) and `uq_coa_special` (`0003:58`) are unchanged and need no edit for a sixth `special_acc_type` value. | If either has moved, the extend-only ALTER is no longer additive. |
 
 ---
 
@@ -213,6 +264,13 @@ tip is `0017:673-677`'s five.
 
 **Ten questions, one each, plain-language first.** Every one has options, a recommendation and the cost of
 being wrong. None is rhetorical; each is a real fork the build cannot take alone.
+
+**Routing, ruled 2026-08-23.** **OQ-4 is ANSWERED** — it went to the owner out of band with a worked example
+and came back ruled the same day (see its entry; shape in Annex A.4). **The other nine go to the sitting as
+cards.** Until each is
+ruled the build proceeds on the recommendation stated in its entry, and every one of those provisional
+positions is fail-closed — a refusal or a `not_evaluable`, never a silent assumption — so a ruling that
+goes the other way costs a PR, never a wrong number in a client's books.
 
 **OQ-1 — "DG variations": which one did you mean?**
 大白话: 合同里写的 "DG variations" 有三种可能的意思，我们不确定是哪一种。
@@ -241,14 +299,19 @@ estate is registered for either tax, and splitting now means changing a live pos
 still moving, for a case nobody has. **Cost:** the day a dual registrant arrives, they wait for a PR with a
 write-quiesce window. The refusal is loud, so nobody is mis-declared in the meantime.
 
-**OQ-4 — The twelve-month deferral: books, or return only? *(already with you)***
-大白话: 服务税是收到钱才要交；但发票满 12 个月没收到钱，也要交。这笔"提前到期"的税，要不要真的做一笔分录？
-Options: **(a)** return-only — it appears on the SST-02, nothing moves in the ledger · **(b)** ledger — a
-journal moves it from a deferred account into SST payable. **Recommendation: (b), but deferred** — ship (a)
-now so the return is right, and take (b) as its own reviewed migration once F-A2's posting body settles.
-**Cost of (a) alone:** the SST liability on the balance sheet stops matching the SST-02, and a reader has to
-be told why. **Cost of (b) now:** it changes a live posting wall mid-flight, which is how wrong numbers get
-into books.
+**OQ-4 — The deferral: books, or return only? — ✅ RULED (owner, 2026-08-23): THE BOOKS.**
+大白话: 服务税是收到钱才要交。业主裁定：发票开出时先入「SST Deferred」负债科目，收到钱（或满 12 个月）再转到「SST Payable」——
+账上要看得见，因为 AutoCount 和 SQL Account 都是这样做的，审计师也是这样看的。
+Options as put: **(a)** return-only — it appears on the SST-02, nothing moves in the ledger · **(b)** ledger
+— a journal moves it from a deferred account into SST payable. ***The recommendation was (b)-but-deferred;
+the owner took (b) and declined the deferral.*** ⚠ **The ruling relay lettered the chosen option "(a)". The
+letters are inverted between the card and this document. The substance — the GL carries the deferral — is
+not in doubt, and substance governs.** **The ruling is also wider than the question**: it covers the whole
+payment-basis path, not just the twelve-month edge. **Cost accepted:** a CoR of a live posting wall
+(`_assert_sales_invoice_shape_at`) plus a D1 write-quiesce window, sequenced after F-A2 PR-1 merges, with
+F-A2's B4-sales tie moving as a new generation in F-T1's own migration. **Bought:** a balance sheet whose
+SST liability an auditor can read, and a second DB-owned derivation of the return figure that refuses on
+mismatch. Shape: Annex A.4. Register: D-7.
 
 **OQ-5 — We do not record when a service was performed. May we use the invoice date as a stand-in?**
 大白话: 法律说 12 个月从"提供服务那天"算起，不是开发票那天。我们系统里没有"提供服务日期"。
