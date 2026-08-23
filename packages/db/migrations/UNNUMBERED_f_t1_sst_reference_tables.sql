@@ -8,6 +8,11 @@
 -- six findings (F2-F7), all executed in this revision:
 --   F1 (BLOCKER) the credit/charge-card row cited the wrong instrument and date -- corrected.
 --   F2 predecessor rows seeded exactly as far as the review's verified instruments reach.
+--      RE-FIXED at the delta-confirm (2026-08-24): the first draft wrongly stamped the four
+--      predecessors superseded_by/superseded_at, which made the live-row filter blind to them
+--      (a rate change is a NEW row, never a correction -- effective_to alone closes the old
+--      one). Both stamps are now NULL on all ten rows; see S2 below and the tail's own
+--      two-direction re-probe.
 --   F3 the threshold table gets the SAME immutability+supersede trigger pair as its sibling.
 --   F4 a self-supersession CHECK on both tables (superseded_by IS DISTINCT FROM id).
 --   F5 basis_kind closed to the 0055:395 four-value vocabulary + the document-source tie,
@@ -49,9 +54,12 @@
 --
 -- sst_rate_schedule's SEED -- TEN ROWS, ALL CITED. Six CURRENTLY-LIVE rows (the four headline
 -- ad-valorem rates, the one credit/charge-card per-unit fee, and the V-3 retroactive-correction
--- flagship) plus four VERIFIED PREDECESSOR rows the fix round's F2 ruling adds -- each superseding
--- into its successor above, seeded exactly as far back as a verified instrument reaches and no
--- further (TA-P2's "a missing row REFUSES" idiom governs everything earlier). NOT SEEDED, ON
+-- flagship) plus four VERIFIED PREDECESSOR rows the fix round's F2 ruling adds -- each closing by
+-- effective_to alone, chronologically adjacent to its successor above, superseded_by left NULL
+-- on ALL TEN rows (F2 RE-FIXED 2026-08-24: a rate change is a new row, never a correction --
+-- stamping a predecessor superseded made the live-row filter blind to it). Seeded exactly as far
+-- back as a verified instrument reaches and no further (TA-P2's "a missing row REFUSES" idiom
+-- governs everything earlier). NOT SEEDED, ON
 -- PURPOSE, NAMED SO A LATER READER DOES NOT ASSUME AN OMISSION IS A GAP IN THIS FILE RATHER THAN
 -- A NAMED OPEN QUESTION:
 --   - the Second-Schedule PER-MEASURE specific rates (RM/litre, RM/kg) -- survey U-5: "layout-
@@ -245,12 +253,16 @@ create trigger t_sst_rate_schedule_supersede_only before update on clara.sst_rat
 
 -- =====================================================================================
 -- 2. Seed -- TEN rows: six currently-live + four verified predecessors (F2, conductor
---    fix-round 2026-08-24). A DO block, not plain INSERTs, because the predecessor rows must
---    stamp the LIVE rows' real generated ids as their superseded_by target -- captured via
---    RETURNING, never guessed or pre-assigned. All ten rows are migration-seeded: recorded_by/
---    basis/basis_kind/source_document_id left NULL throughout (the governed-origin conjunct
---    exempts a NULL recorder), matching the live sst_threshold_schedule seed rows' own posture.
---    Every citation not independently re-fetched by this lane against a primary source says so.
+--    fix-round 2026-08-24, RE-FIXED 2026-08-24 per the delta-confirm). NONE of the ten is
+--    superseded_by another -- a rate CHANGE closes the old row by effective_to alone (this
+--    file's own S1 comment above); superseded_by is reserved for a row that was WRONG, which
+--    none of the four predecessors are. A DO block, not plain INSERTs, only because the live
+--    rows' generated ids are captured via RETURNING for readability/future use -- the
+--    predecessor rows below reference NOTHING captured here. All ten rows are migration-seeded:
+--    recorded_by/basis/basis_kind/source_document_id left NULL throughout (the governed-origin
+--    conjunct exempts a NULL recorder), matching the live sst_threshold_schedule seed rows' own
+--    posture. Every citation not independently re-fetched by this lane against a primary source
+--    says so.
 -- =====================================================================================
 do $seed$
 declare
@@ -261,8 +273,7 @@ declare
   v_service_rental_leasing_id uuid;
   v_service_credit_card_id uuid;
 begin
-  -- --- Currently-live rows first (superseded_by/at NULL), so their real ids exist for the
-  -- predecessor rows below to stamp. ---
+  -- --- Currently-live rows first. ---
   insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
     values ('sales', 'general', 'ad_valorem', 1000, date '2025-07-01',
       'S-1: Sales Tax (Rate of Sales Tax) Order 2025, P.U.(A) 170/2025, gazetted 9 Jun 2025, in force 1 Jul 2025 -- 10% on all taxable goods except First-Schedule (5%) and Second-Schedule specific-rate goods. mysst.customs.gov.my/assets/document/SST%20Orders/order/1-PUA%20170_2025.pdf, accessed 2026-08-23 (sst-engine-survey.md S3.1 S-1). Supersedes the predecessor row at 2022-06-01 (P.U.(A) 176/2022) -- the SAME 10% rate re-enacted under a new order, per the conductor fix-round review 2026-08-24 (F2); this lane did not independently re-fetch 176/2022 or 170/2025 against RMCD for this fix round.')
@@ -295,21 +306,30 @@ begin
       'F1 FIX (conductor review 2026-08-24): RM25 per credit/charge card on activation and every twelve months originates in P.U.(A) 213/2018, in force 2018-09-01, under a NUMBERED PARAGRAPH -- NOT a Schedule; schedules as a drafting structure arrive only with P.U.(A) 173/2025 (this same fix round''s row above). P.U.(A) 64/2024''s saving clause expressly EXCLUDES card services from its rate change, so this fee was never touched by 64/2024 and stays sourced to the original 2018 instrument. Corrects this migration''s v1, which wrongly cited 64/2024 @ 2024-03-01 and a nonexistent "Second Schedule" reference for this era -- form item 11(e), counted in cards not ringgit (design S3.1/Annex A.2). Citation per the conductor''s independently-verified review finding, not a primary-source fetch by this lane.')
     returning id into v_service_credit_card_id;
 
-  -- --- Predecessor rows (F2). Each stamps the real id captured above. Seeded exactly as far
-  -- back as the review's verified instruments reach -- NOTHING earlier is asserted; a period
-  -- before the earliest row for a given scope REFUSES with the named gap (TA-P2's fail-closed
-  -- idiom, S3.1) rather than defaulting or extrapolating. ---
+  -- --- Predecessor rows (F2, RE-FIXED per the conductor's delta-confirm 2026-08-24: the FIRST
+  -- fix-round draft wrongly stamped these as superseded_by/superseded_at -- a rate CHANGE is a
+  -- NEW row with the OLD row closed by effective_to alone; BOTH rows stay live (superseded_by
+  -- IS NULL), exactly this file's own S1 comment above ("two DIFFERENT time windows for the
+  -- same (tax_type, scope_key) are both legitimately live at once (a rate change is a NEW row,
+  -- not a correction)"). superseded_by means the row was WRONG, which none of these four are --
+  -- they are the statutory predecessor RATE, correctly enacted for its own window. Stamping
+  -- them superseded made uq_sst_rate_schedule_live's own WHERE superseded_by IS NULL clause
+  -- blind to them, so a date inside a predecessor's window (e.g. sales/general @2023-01-01)
+  -- resolved to NO ROW under the live-row filter -- the exact defect this re-fix removes. ---
+  -- Seeded exactly as far back as the review's verified instruments reach -- NOTHING earlier is
+  -- asserted; a period before the earliest row for a given scope REFUSES with the named gap
+  -- (TA-P2's fail-closed idiom, S3.1) rather than defaulting or extrapolating.
   insert into clara.sst_rate_schedule
-      (tax_type, scope_key, rate_kind, rate_bp, effective_from, effective_to, superseded_by, superseded_at, source_note)
+      (tax_type, scope_key, rate_kind, rate_bp, effective_from, effective_to, source_note)
     values
-      ('sales', 'general', 'ad_valorem', 1000, date '2022-06-01', date '2025-07-01', v_sales_general_id, now(),
-       'F2 (conductor fix-round 2026-08-24): predecessor to the live sales/general row. P.U.(A) 176/2022, in force 2022-06-01 -- 10% general sales tax rate, the instrument P.U.(A) 170/2025 re-enacted at the same rate. Seeded exactly as far back as the review''s verified instruments reach; a period before 2022-06-01 REFUSES with the named gap, never a silent extrapolation.'),
-      ('sales', 'first_schedule', 'ad_valorem', 500, date '2022-06-01', date '2025-07-01', v_sales_first_schedule_id, now(),
-       'F2 (conductor fix-round 2026-08-24): predecessor to the live sales/first_schedule row. P.U.(A) 176/2022, in force 2022-06-01 -- 5% First-Schedule sales tax rate, the instrument P.U.(A) 170/2025 re-enacted at the same rate. Seeded exactly as far back as the review''s verified instruments reach; a period before 2022-06-01 REFUSES with the named gap.'),
-      ('service', 'general', 'ad_valorem', 600, date '2018-09-01', date '2024-03-01', v_service_general_id, now(),
-       'F2 (conductor fix-round 2026-08-24): predecessor to the live service/general row. P.U.(A) 213/2018, in force 2018-09-01 -- 6% flat general service tax rate, superseded by P.U.(A) 64/2024''s 8% general rate effective 2024-03-01. Seeded exactly as far back as the review''s verified instruments reach; a period before 2018-09-01 REFUSES with the named gap.'),
-      ('service', 'first_schedule_6pct', 'ad_valorem', 600, date '2024-03-01', date '2025-07-01', v_service_first_schedule_6pct_id, now(),
-       'F2 (conductor fix-round 2026-08-24): predecessor to the live service/first_schedule_6pct row. P.U.(A) 64/2024, in force 2024-03-01 -- the ORIGINAL four-item 6% list (food/beverage, telecommunications, parking, logistics), superseded by P.U.(A) 173/2025''s expansion to thirteen items effective 2025-07-01. Seeded exactly as far back as the review''s verified instruments reach; a period before 2024-03-01 for this reduced-rate bucket REFUSES with the named gap.');
+      ('sales', 'general', 'ad_valorem', 1000, date '2022-06-01', date '2025-07-01',
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live sales/general row (chronologically adjacent, NOT a correction -- superseded_by stays NULL). P.U.(A) 176/2022, in force 2022-06-01 -- 10% general sales tax rate, the instrument P.U.(A) 170/2025 re-enacted at the same rate. Seeded exactly as far back as the review''s verified instruments reach; a period before 2022-06-01 REFUSES with the named gap, never a silent extrapolation.'),
+      ('sales', 'first_schedule', 'ad_valorem', 500, date '2022-06-01', date '2025-07-01',
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live sales/first_schedule row (chronologically adjacent, NOT a correction -- superseded_by stays NULL). P.U.(A) 176/2022, in force 2022-06-01 -- 5% First-Schedule sales tax rate, the instrument P.U.(A) 170/2025 re-enacted at the same rate. Seeded exactly as far back as the review''s verified instruments reach; a period before 2022-06-01 REFUSES with the named gap.'),
+      ('service', 'general', 'ad_valorem', 600, date '2018-09-01', date '2024-03-01',
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live service/general row (chronologically adjacent, NOT a correction -- superseded_by stays NULL). P.U.(A) 213/2018, in force 2018-09-01 -- 6% flat general service tax rate, replaced by P.U.(A) 64/2024''s 8% general rate effective 2024-03-01. Seeded exactly as far back as the review''s verified instruments reach; a period before 2018-09-01 REFUSES with the named gap.'),
+      ('service', 'first_schedule_6pct', 'ad_valorem', 600, date '2024-03-01', date '2025-07-01',
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live service/first_schedule_6pct row (chronologically adjacent, NOT a correction -- superseded_by stays NULL). P.U.(A) 64/2024, in force 2024-03-01 -- the ORIGINAL four-item 6% list (food/beverage, telecommunications, parking, logistics), replaced by P.U.(A) 173/2025''s expansion to thirteen items effective 2025-07-01. Seeded exactly as far back as the review''s verified instruments reach; a period before 2024-03-01 for this reduced-rate bucket REFUSES with the named gap.');
 end $seed$;
 
 reset role;
@@ -504,12 +524,17 @@ begin
   select count(*) into v_rate_service from clara.sst_rate_schedule where tax_type = 'service';
   select count(*) into v_rate_ad_valorem from clara.sst_rate_schedule where rate_kind = 'ad_valorem';
   select count(*) into v_rate_per_unit from clara.sst_rate_schedule where rate_kind = 'per_unit';
+  -- F2 RE-FIX (conductor delta-confirm 2026-08-24): NONE of the ten rows is superseded --
+  -- every predecessor closes by effective_to alone, exactly this file's own S1 comment
+  -- ("a rate change is a NEW row, not a correction"). superseded_by populated on a predecessor
+  -- would make uq_sst_rate_schedule_live's live-row filter blind to it -- the defect this
+  -- re-fix removes, now asserted here rather than merely fixed in the seed.
   select count(*) into v_rate_superseded from clara.sst_rate_schedule where superseded_by is not null;
   select count(*) into v_rate_recorded from clara.sst_rate_schedule where recorded_by is not null;
   if v_rate_rows <> 10 or v_rate_sales <> 4 or v_rate_service <> 6
      or v_rate_ad_valorem <> 9 or v_rate_per_unit <> 1
-     or v_rate_superseded <> 4 or v_rate_recorded <> 0 then
-    raise exception 'f_t1_sst_reference_tables tail: sst_rate_schedule census total %, sales %, service %, ad_valorem %, per_unit %, superseded %, recorded % -- expected 10 / 4 / 6 / 9 / 1 / 4 / 0',
+     or v_rate_superseded <> 0 or v_rate_recorded <> 0 then
+    raise exception 'f_t1_sst_reference_tables tail: sst_rate_schedule census total %, sales %, service %, ad_valorem %, per_unit %, superseded %, recorded % -- expected 10 / 4 / 6 / 9 / 1 / 0 / 0',
       v_rate_rows, v_rate_sales, v_rate_service, v_rate_ad_valorem, v_rate_per_unit, v_rate_superseded, v_rate_recorded
       using errcode = 'CLR10';
   end if;
@@ -521,6 +546,26 @@ begin
        and effective_from = date '2018-09-01' and rate_amount_sen = 2500
   ) then
     raise exception 'f_t1_sst_reference_tables tail: the F1 credit/charge-card fix did not land -- expected service/credit_charge_card at 2018-09-01, RM25 (2500 sen)'
+      using errcode = 'CLR10';
+  end if;
+  -- F2 RE-FIX, the conductor's own two-direction re-probe, run positively against the live
+  -- table with the SAME predicate a real evaluator's live-row lookup would use (effective-dated,
+  -- superseded_by IS NULL, no ORDER BY/LIMIT needed since exactly one row can ever match a given
+  -- date once rows never overlap): sales/general @2023-01-01 resolves to the PREDECESSOR rate
+  -- (1000bp); sales/general @2022-01-01 -- before the earliest verified instrument -- resolves
+  -- to nothing at all, the named gap standing rather than a silent extrapolation.
+  if (select rate_bp from clara.sst_rate_schedule
+        where tax_type = 'sales' and scope_key = 'general' and superseded_by is null
+          and effective_from <= date '2023-01-01'
+          and (effective_to is null or effective_to > date '2023-01-01')) <> 1000 then
+    raise exception 'f_t1_sst_reference_tables tail: sales/general @2023-01-01 does not resolve to the 1000bp predecessor under the live-row filter -- F2''s re-fix did not land'
+      using errcode = 'CLR10';
+  end if;
+  if exists (select 1 from clara.sst_rate_schedule
+               where tax_type = 'sales' and scope_key = 'general' and superseded_by is null
+                 and effective_from <= date '2022-01-01'
+                 and (effective_to is null or effective_to > date '2022-01-01')) then
+    raise exception 'f_t1_sst_reference_tables tail: sales/general @2022-01-01 resolves to a row -- expected the named gap (no verified instrument reaches this far back)'
       using errcode = 'CLR10';
   end if;
 
@@ -613,5 +658,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-T1 PR-1 tail OK (fix round 2026-08-24): clara.sst_rate_schedule carries 10 rows -- 4 sales/6 service, 9 ad_valorem/1 per_unit, 4 superseded (F2 predecessors)/0 recorded, the F1 credit-card fix landed at 2018-09-01/RM25 -- RLS enabled+forced, zero app-role write grants, immutable+supersede triggers installed, F4 self-supersession + F5 basis_kind/document-tie CHECKs present. clara.sst_threshold_schedule widened -- id populated + item_no=''*'' on both live rows, PK now (service_group, item_no, effective_from), threshold_cents CHECK relaxed to >=0, F4/F5 CHECKs present, THREE non-internal triggers (no_truncate + the new no_delete + supersede_only) -- both G/I seed rows byte-unchanged otherwise (50,000,000 cents, open-ended). The reachable-closure write assertion ran and found zero writers on either table. Deploy principal restored.';
+  raise notice 'F-T1 PR-1 tail OK (fix round 2026-08-24, F2 re-fixed): clara.sst_rate_schedule carries 10 rows -- 4 sales/6 service, 9 ad_valorem/1 per_unit, ZERO superseded (F2''s four predecessors close by effective_to alone, never a correction stamp)/0 recorded, the F1 credit-card fix landed at 2018-09-01/RM25, F2''s two-direction re-probe holds (sales/general @2023-01-01 resolves to the 1000bp predecessor; @2022-01-01 resolves to nothing, the named gap) -- RLS enabled+forced, zero app-role write grants, immutable+supersede triggers installed, F4 self-supersession + F5 basis_kind/document-tie CHECKs present. clara.sst_threshold_schedule widened -- id populated + item_no=''*'' on both live rows, PK now (service_group, item_no, effective_from), threshold_cents CHECK relaxed to >=0, F4/F5 CHECKs present, THREE non-internal triggers (no_truncate + the new no_delete + supersede_only) -- both G/I seed rows byte-unchanged otherwise (50,000,000 cents, open-ended). The reachable-closure write assertion ran and found zero writers on either table. Deploy principal restored.';
 end $tail$;
