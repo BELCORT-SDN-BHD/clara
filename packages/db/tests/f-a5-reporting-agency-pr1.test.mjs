@@ -707,6 +707,33 @@ test("H2 -- the re-aimed maker/checker, FORCED: the DIRECTOR is measured, not th
   const selfRun = (await approve(selfRunOrphan, null)).rows[0].r;
   assert.equal(selfRun.state, "firm_approved", "Clara still approves her own UNDIRECTED draft");
   assert.equal(selfRun.approval_arm, "adoption", "inside a self-run wake, with no attestation owed");
+
+  // ARM 2' -- THE SOLO ARM. It is selected by a POPULATION of one, so the population is moved:
+  // the preparer's membership is deactivated for the length of this arm and restored in `finally`.
+  // 0084's eligible SELECT counts ACTIVE admin/owner non-agent memberships, so this is the term
+  // the arm reads, changed by itself -- and the gate record's obligation 6 asks for both
+  // polarities of ARM 1'/2' on the rig before PR-1 is called done, not for two of the three arms.
+  const soloDraft = await freshDraft(eps, "solo");
+  // 'removed', not 'inactive': firm_memberships_status_check admits exactly {active, removed},
+  // measured from pg_constraint rather than guessed (the first cut guessed and was refused).
+  await rootQuery("update clara.firm_memberships set status='removed' where user_id=$1 and firm_id=$2",
+    [preparer, firm]);
+  try {
+    assert.equal((await rootQuery(
+      `select count(*)::int n from clara.firm_memberships m join clara.users u on u.id=m.user_id
+        where m.firm_id=$1 and m.status='active' and m.role in ('admin','owner') and not u.is_agent`,
+      [firm])).rows[0].n, 1, "the firm now has exactly ONE eligible human -- ARM 2' is the arm under test");
+    const unattested = await caught(() => approve(soloDraft, preparer));
+    assert.ok(unattested, "in a solo firm the director who is also the maker must attest");
+    assert.equal(errorDetail(unattested)?.reason, "agent_self_approval_attestation_required",
+      `${unattested?.message}`);
+    const attested = (await approve(soloDraft, preparer, "the sole accountable human attests")).rows[0].r;
+    assert.equal(attested.approval_arm, "agent_self_approval",
+      "with the attestation it is admitted, and the arm is recorded as a self-approval, not an independent check");
+  } finally {
+    await rootQuery("update clara.firm_memberships set status='active' where user_id=$1 and firm_id=$2",
+      [preparer, firm]);
+  }
 });
 
 // =============================================================================================

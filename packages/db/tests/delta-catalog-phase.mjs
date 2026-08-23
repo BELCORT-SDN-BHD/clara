@@ -457,7 +457,22 @@ await t.test("both evaluator closures are exact, independent, and registered und
   const expected = new Map([["evaluate_metric@v1", ["clara.evaluate_metric_v1(uuid,uuid,uuid[],uuid,uuid)", "clara._metric_eval_node_v1(uuid,uuid,uuid,uuid,jsonb,boolean,text,date)", "clara.validate_metric_ast_v1(jsonb)", "clara._validate_metric_node_v1(jsonb,integer)", "clara._metric_selector_account_ids(uuid,jsonb)", "clara._metric_input_dataset_v1(uuid,uuid,uuid[])", "clara._metric_context_sha256_v1(uuid,uuid[],uuid,uuid,uuid,uuid,bytea,text)", "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)", "clara._hash(jsonb)", "clara.evaluate_fs_pack_v1(uuid,uuid[],uuid[],uuid,uuid)"]], ["assess_metric_cell_independent@v1", independentSignatures],
     ["evaluate_witness_fact_state@v1", witnessFactStateClosure("clara.evaluate_witness_fact_state_v1(uuid,uuid,uuid)")],
     ["evaluate_witness_fact_state@v2", witnessFactStateClosure("clara.evaluate_witness_fact_state_v2(uuid,uuid,uuid)")],
-    ["evaluate_witness_identity@v1", witnessSignatures]]);
+    ["evaluate_witness_identity@v1", witnessSignatures],
+    // F-A5 PR-1's agent-lane pack entrypoint. NINE members, and eight of them are evaluate_metric
+    // v1's OWN ordinals 1-8 in the same order — this closure adds no new estate-wide constraint on
+    // any of them (clara._hash included, frozen since delta shipped); what it newly freezes is
+    // exactly its own entrypoint. It is named here rather than absorbed into a bumped total,
+    // because this census is CLOSED-WORLD by design.
+    ["evaluate_fs_pack_agent@v1", [
+      "clara.evaluate_fs_pack_agent_v1(uuid,uuid,uuid,text,uuid,uuid[],uuid[],uuid,uuid,jsonb,text)",
+      "clara._metric_eval_node_v1(uuid,uuid,uuid,uuid,jsonb,boolean,text,date)",
+      "clara.validate_metric_ast_v1(jsonb)",
+      "clara._validate_metric_node_v1(jsonb,integer)",
+      "clara._metric_selector_account_ids(uuid,jsonb)",
+      "clara._metric_input_dataset_v1(uuid,uuid,uuid[])",
+      "clara._metric_context_sha256_v1(uuid,uuid[],uuid,uuid,uuid,uuid,bytea,text)",
+      "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)",
+      "clara._hash(jsonb)"]]]);
   const members = (await rootQuery(`select e.evaluator_name,e.version,e.deployed,m.ordinal,m.member_signature,encode(m.body_sha256,'hex') stored,encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') live,encode(e.closure_sha256,'hex') aggregate from clara.evaluator_versions e join clara.evaluator_version_members m on m.evaluator_version_id=e.id order by e.evaluator_name,e.version,m.ordinal`)).rows;
   for (const [key, roster] of expected) {
     const rows = members.filter((row) => `${row.evaluator_name}@v${row.version}` === key);

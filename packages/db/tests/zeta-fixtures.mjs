@@ -23,8 +23,17 @@ export const ZETA_ENTRYPOINTS = Object.freeze([
   ["requeue_render_job", "clara.requeue_render_job(uuid,text,boolean)"],
   ["reap_exhausted_render_jobs", "clara.reap_exhausted_render_jobs()"],
   ["render_lease_alive", "clara.render_lease_alive(uuid,text)"],
+  // THIRTEEN ARGUMENTS SINCE F-A5 PR-1 (ruling R-L23): (p_obo, p_wake_kind, p_agent) are appended
+  // at the TAIL with NULL defaults, so clara.complete_render_job's TEN-argument positional call
+  // below is byte-unmoved and still resolves — which is the whole point of the tail-append.
+  //
+  // THIS ROSTER IS ARITY-EXACT, AND THAT IS A TRIPWIRE, NOT A DETAIL. It feeds zetaReadiness();
+  // a stale signature here does not fail, it makes the WHOLE zeta battery report
+  // "not applied -- missing: _seal_report_artifact_core" and SKIP. Measured on the F-A5 rig: nine
+  // zeta cells vanished into skips while the function they test was present and working. A gate
+  // that cannot tell "absent" from "moved" gives a meaningless green either way.
   ["_seal_report_artifact_core",
-    "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)"],
+    "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text,uuid,text,jsonb)"],
 ]);
 
 let _ready = null;
@@ -93,9 +102,31 @@ export async function sharedWorld() {
   return _world;
 }
 
+/**
+ * THE PARK MOVED IN FRONT OF THE SEAL, and that is a consequence of F-A5 PR-1, not a preference.
+ *
+ * `clara._seal_report_dataset_core` now enqueues the run's `pre_sign` render job ITSELF, inside
+ * the sealing transaction — S9's integration line, stated in words at `0080:225-236` since zeta
+ * shipped and landed by F-A5 PR-1 (survey R-N5). So the old cell shape
+ *
+ *     const { eps } = await sealedRun(tag);   // ← the seal enqueues here now
+ *     await parkQueue();                      // ← parks the job the seal just made
+ *     await enqueue_render_job(run,'pre_sign') // ← idempotent: hands back the PARKED job
+ *
+ * left every such cell with nothing claimable and nothing due, which is exactly how it failed:
+ * `claim_render_job` returned null and the assertions read `null.report_run_id`. Parking BEFORE
+ * the seal restores the invariant the cells were written against — after `sealedRun` the queue
+ * holds exactly ONE claimable job and it is this run's — without any cell having to know that the
+ * seal is now the thing that enqueues.
+ *
+ * `park: false` is for the one cell that needs TWO runs claimable at once: park on the first,
+ * not on the second, or the second's park would swallow the first's job.
+ */
 export async function sealedRun(tag, opts = {}) {
+  const { park = true, ...rest } = opts;
   const world = await sharedWorld();
-  const eps = await buildEpsilonWorld(world, { tag: `zeta-${tag}`, seal: true, ...opts });
+  if (park) await parkQueue();
+  const eps = await buildEpsilonWorld(world, { tag: `zeta-${tag}`, seal: true, ...rest });
   return { world, eps };
 }
 
@@ -132,9 +163,11 @@ export async function sealedStatutoryRun(tag) {
  * shape validation here rather than prove something about itself.
  */
 export async function sealArtifact(eps, worker = "battery-sealer", kind = "pre_sign") {
-  // Park first: one world serves the file, claim_render_job hands out the OLDEST job, and without
-  // this the fixture completes some earlier case's job and seals an artifact on the wrong run.
-  await parkQueue();
+  // THE PARK IS `sealedRun`'s NOW (see there): one world serves the file and claim_render_job
+  // hands out the OLDEST job, so the queue must hold only this run's — but since F-A5 PR-1 the
+  // SEAL is what enqueues, so parking here would park the very job this fixture must claim.
+  // The enqueue below stays, and stays idempotent: for `pre_sign` it hands back the seal's own
+  // job, and for any other kind it is still the thing that creates one.
   await asOwner("select clara.enqueue_render_job($1, $2)", [eps.runId, kind]);
   const job = (await asRuntime("select clara.claim_render_job($1) j", [worker])).rows[0].j;
   assert.equal(job?.report_run_id, eps.runId, "the claim must return the job this fixture enqueued");

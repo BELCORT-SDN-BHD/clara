@@ -130,6 +130,16 @@ use typed reads — which is exactly what these are — while the freeform read 
   template publishers duplicates judgement `0069:261-266` forbids duplicating (material 9). The
   extraction is byte-preserving but for the context line and §3.3's identity writes — proven by
   **rig replay of the human lane before and after**, never by reading a diff.
+  *(**Trued at PR-1, and the method is stronger than "moves verbatim" reads.** Nothing is
+  retyped: each core is DERIVED AT APPLY TIME from the live catalog by substitutions with an
+  anchor-uniqueness assertion on each, then PROVEN by REVERSING them and comparing byte for byte
+  against the original — so "byte-preserving but for the context line" is a MEASUREMENT that
+  aborts the migration when it is false, not a claim the replay has to catch afterwards. And the
+  read is of the **whole definition** by literal signature, never `prosrc` plus a hand-typed
+  header: the header is derived too, which removes the one class this file's own PARAMETER-ORDER
+  WARNING says type-checks, and it is the form the wiki dynamic-SQL gate can attribute — see
+  **F5-D34** and **F5-D35**. The derived body's wiki-boundary is asserted at apply on the exact
+  string executed, which no static reader can do.)*
 - **evaluate:** not recut (S2) — **and not routed through `evaluate_metric_v1` either.** That
   entrypoint's own first statement is `c := clara._human_ctx(clara.role_rank('bookkeeper'))`
   (`0059:112`) and it is **ordinal 0** of the same frozen closure (`0059:246`): a wake credential

@@ -169,6 +169,46 @@ TA-P1 C and becomes `wake_mint_metric_input_snapshot`. Its human verb stays for 
 
 ## Annex B · The battery (design §6; contract-blind cells marked ▣)
 
+> **B.0 · AS BUILT AT PR-1 — `packages/db/tests/f-a5-reporting-agency-pr1.test.mjs`, 16 cells,
+> all forced.** PR-1 ships no wrapper, no grant and no allowlist row, so every agent-lane cell
+> calls the UNGRANTED CORE directly as its owner — the only caller that exists yet. The
+> wake-credential half (CLR03, the allowlist, the `proactive` refusal, the op-key replay: B.1 and
+> most of B.2 above) is **PR-2's**, because the doors it tests do not exist in PR-1 and a cell that
+> cannot fail is not a cell. What PR-1 does carry, and what changed in the finishing pass:
+>
+> - **H and H2 were SOURCE-TEXT cells over the sharpest judgement logic in the item** — four
+>   regex matches against `prosrc`, which prove the words are present and nothing about what the
+>   bodies do with them (law: spelling is not identity). Both are now behavioural, each refusing
+>   arm carrying an admitting twin ONE TERM away. H forces the lifecycle trigger's four refusals
+>   and two admissions, including PR-1's new anti-fabrication arm (`human_approval` signed by
+>   `clara.agent_user_id()` → `human_evidence_for_machine_act`) and its human twin, which is what
+>   makes "extend-never-weaken" a measurement. H2 forces the re-aimed maker/checker against the
+>   DIRECTOR (`p_actor` is the agent on every call, so a wall measured against it would measure
+>   nothing — precisely how v1 removed the wall while appearing to keep one), reads the receipt's
+>   **three-valued** rung vector off the row, and forces ARM 0′ at TA-P5's rider's stated width:
+>   a DIRECTED approval of an agent-authored orphan needs an adoption attestation, an UNDIRECTED
+>   one does not. The orphan is a NAMED fixture row — PR-1 ships no agent propose door, and that
+>   is said rather than dressed up.
+> - **J and J2 are new, and they are what makes R-L23 (F5-D32) a measurement.** J drives the REAL
+>   production lane: park the queue, seal through the agent core so S9's line enqueues, then claim
+>   and complete the job as `clara_runtime` — `clara.complete_render_job`'s **ten positional
+>   arguments** resolving against the thirteen-argument core, and the sealed artifact carrying its
+>   RUN's `directed_by`/`prepared_by_agent`, **DB-derived on the lane that supplies no identity at
+>   all**. It then shows the wall is armed BY that derivation: the run's director is refused on the
+>   artifact-side term. J2 forces `artifact_identity_mismatch` in both polarities. Without these,
+>   gate-2 blocker 2 was re-created one level over and cell C still passed — C seals through the
+>   agent lane, which does pass an identity.
+> - **Cell C swallowed its control's premise** in a `.catch`: the control sealed through
+>   `clara.seal_report_dataset` as the OWNER, which resolves no JWT, so it raised CLR04 every time
+>   and the control ran against an UNSEALED run — passing anyway, because the verb under test
+>   refused later for its own reasons. It now seals through the human door and reads the state back.
+> - **B2's admitting half poked a column on a `drafting` run.** `_tf_report_run_lifecycle` runs a
+>   whole-row diff AND a state-transition dispatch, so an update that moves no state is refused
+>   whatever the identity diff thinks. The admitting half is now the audited
+>   `drafting → dataset_sealed` transition; the refusing half proves BOTH new columns are frozen
+>   with no trigger edit, which is P6 behaviourally and the reason `_tf_report_run_lifecycle` is
+>   not on the D1 list.
+
 **B.1 · The wrappers** (every cell runs over the **enumerated A.1 list**, never a count). No credential → CLR03 ▣ · a kind without its allowlist row → CLR03 ▣ · **a
 `'proactive'` credential ATTEMPTING each verb is refused** ▣ *(the call is made and refused — a
 roster read proves the row absent, not the door shut; F-A2's C.1 lesson)* · blank op key ▣ · blank

@@ -219,7 +219,7 @@ export async function registerGrantsPhase(t, world) {
     for (const internal of ["clara._validate_layout_ast_v1(jsonb,text)", "clara._validate_chart_spec_ast_v1(jsonb)",
       "clara._validate_chart_spec_semantics_v1(uuid,jsonb)", "clara._report_manifest_required_keys(text)",
       "clara._report_dataset_payload_v1(uuid)", "clara.verify_report_dataset(uuid)",
-      "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)",
+      "clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text,uuid,text,jsonb)",
       "clara._draft_report_spec_core(uuid,uuid,uuid,text,uuid,text,text,uuid,text,jsonb,jsonb,jsonb,date,text)"]) {
       for (const role of ["clara_authenticated", "clara_agent_ro", "clara_wake_interactive",
         "clara_wake_proactive", "clara_runtime", "public"]) {
@@ -263,7 +263,7 @@ export async function registerGrantsPhase(t, world) {
       rootQuery(`select prosrc from pg_proc
         where oid='clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure`),
       rootQuery(`select prosrc from pg_proc
-        where oid='clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure`),
+        where oid='clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text,uuid,text,jsonb)'::regprocedure`),
     ]);
     const tokens = ["claim_assessment_absent", "claim_assessment_failed", "draft_definition_in_dataset",
       "nonstat_definition_in_dataset", "manifest_key_missing"];

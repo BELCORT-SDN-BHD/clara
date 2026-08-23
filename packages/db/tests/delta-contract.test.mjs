@@ -9,6 +9,13 @@ import { registerCellCapPhase } from "./delta-cell-cap-concurrency-phase.mjs";
 import { registerHardeningPhase } from "./delta-hardening-phase.mjs";
 import { registerPackPhase } from "./delta-pack-phase.mjs";
 
+/** The one registered closure the test-time evaluator ceremony deliberately leaves undeployed —
+ *  F-A5 PR-1's agent pack entrypoint, whose deploy flip is a ceremony of its own and whose
+ *  refusal its own battery must be able to observe. Named identically in
+ *  epsilon-contract.test.mjs and eta-behaviour-phase.mjs; the exclusion's WIDTH is asserted
+ *  wherever it is applied, so it can never widen without a cell going red. */
+const CEREMONY_EXCLUDED = "evaluate_fs_pack_agent";
+
 /** Pre-integration gating, stated once for the whole delta contract: a PACKAGE-WIDE run may precede
  *  the delta migrations, so `tests/delta-preintegration-gate.mjs` (preloaded by the package test
  *  script) sets CLARA_ALLOW_MISSING_WAVE_E_DELTA and this suite skips LOUDLY. A FOCUSED run does not
@@ -55,31 +62,37 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       const identity = (await db.query("select current_user,session_user")).rows[0];
       assert.equal(identity.current_user, identity.session_user,
         "the deployment ceremony uses the direct session principal");
-      await db.query("update clara.evaluator_versions set deployed=true where not deployed");
-      // SIX, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
-      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, F-A2's
-      // evaluate_witness_fact_state **v2** — the three-locks nil-tax arm, a NEW closure beside
-      // the frozen v1 rather than a recut of it — and F-A5 PR-1's evaluate_fs_pack_agent v1, the
-      // agent-lane pack entrypoint, likewise a NEW closure beside evaluate_fs_pack rather than a
-      // recut of it. The ceremony statement is `where not deployed`, so it has always committed
-      // EVERY registered closure — the number is the roster's size, and the roster is pinned by
-      // name AND VERSION three lines above.
+      await db.query(
+        "update clara.evaluator_versions set deployed=true where not deployed and evaluator_name <> $1",
+        [CEREMONY_EXCLUDED]);
+      // FIVE, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
+      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, and F-A2's
+      // evaluate_witness_fact_state **v2** — the three-locks nil-tax arm, a NEW closure beside the
+      // frozen v1 rather than a recut of it. The registered roster is SIX since F-A5 PR-1 (it is
+      // pinned by name AND VERSION three lines above); this ceremony commits the five it COVERS.
       //
-      // THIS TRANSACTION ROLLS BACK, which is why the F-A5 row is flipped here and nowhere else
-      // in the estate run: epsilon's and eta's ceremonies commit, and they deliberately EXCLUDE
-      // that one row so F-A5 PR-1's own ceremony-gate cell can still observe it undeployed
-      // (f-a5-reporting-agency-pr1.test.mjs, cell D). What this cell proves about it is that the
-      // one-way trigger admits it like any other — the property the exclusion must not cost.
+      // ONE ROW IS EXCLUDED BY NAME, and it is excluded here as well as in epsilon's and eta's
+      // helpers because `withActor({transaction:true})` COMMITS: a flip here is not undone, and it
+      // would deploy F-A5's closure at estate position 12, long before the cell that measures its
+      // refusal runs (f-a5-reporting-agency-pr1.test.mjs, cell D — the gate F5-D28 calls
+      // "mechanical, not believed"). That cell owns the flip, and proves the one-way trigger
+      // admits this row like any other by watching the gate stop refusing.
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
-      )).rows[0].n, 6);
+      )).rows[0].n, 5);
       assert.equal((await db.query(
         "select clara.verify_evaluator_freeze() r",
-      )).rows[0].r.verified_deployed, 6);
+      )).rows[0].r.verified_deployed, 5);
+      // AND THE EXCLUSION IS EXACTLY ONE NAMED ROW — read back, never assumed, so a later lane's
+      // closure cannot silently inherit the exemption and go undeployed with no cell noticing.
+      assert.deepEqual((await db.query(
+        "select evaluator_name, version from clara.evaluator_versions where not deployed order by 1,2",
+      )).rows, [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }],
+      "the only closure this ceremony leaves undeployed is F-A5 PR-1's, which owns its own flip");
     });
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.evaluator_versions where deployed",
-    )).rows[0].n, 5, "the named ceremony commits every registered closure before algebra runs");
+    )).rows[0].n, 5, "the named ceremony commits every registered closure it covers before algebra runs");
   });
   await registerPackPhase(t);
   await registerAlgebraPhase(t);
