@@ -1,8 +1,12 @@
 # F-T4 · The fix queue — the design doc of record
 
-**v1 · 2026-08-23 · design set 2 of 3.** Reads on `fix-queue-survey.md` (findings **F1-F33**); read
-by `fix-queue-annexes.md` (mechanics · censuses · predictions · decision register · owner
-questions). **Nothing here is built until the gate passes and the owner questions are answered.**
+**v2 · 2026-08-23 · gate-folded** (Track-B PR-0: 6 blockers + 10 materials confirmed and folded
+here; full record `fix-queue-gate-record.md`). Design set 2 of 3. Reads on `fix-queue-survey.md`
+(findings **F1-F33**); read by `fix-queue-annexes.md` (mechanics · censuses · predictions ·
+decision register · owner questions — **Annex D.3** carries the fold's change log, **D-13..D-25**
+carry each fold's ground). **PR-1 (item F) is SEVERED from this gate by owner ruling (§1, D-25)
+and is building now.** Everything else is still unbuilt until **OQ-9** (the one owner card the
+fold could not close) is ruled.
 
 **The laws this design is written under.** Numbers are the DB's, reproduced by a versioned
 deterministic evaluator (constraint 2 / PRD §6) — no item here mints a numeral. Walls are proved
@@ -20,16 +24,20 @@ registry at authoring time and takes the next free one.
 
 | PR | scope | DB? | D1? | depends on |
 |---|---|---|---|---|
-| **PR-1** | item **F** — the ceremony DSN bridge, in-repo | no | no | nothing |
+| **PR-1** | item **F** — the ceremony DSN bridge, in-repo | no | no | **SEVERED — own gate (D-25)** |
 | **PR-2** | item **B** — N5, the remedy field reaches the coding lane | new table only | no | nothing |
-| **PR-3** | item **D** — the 401/403 split | CHECK swap + 2 CoRs | **yes** | nothing |
+| **PR-3** | item **D** — the 401/403 split | CHECK swap (live object) + 1 CoR + 3 writer-clamp CoRs + 4 frozen `_vN` catch modules | **yes** | nothing |
 | **PR-4** | item **A** — P-3, drawer 1's zero census | 1 CoR + 1 fact key | **yes** | **F-A3** (§2.1) |
 | **PR-5** | item **E** — the two missing F8 cells | tests only | no | nothing |
-| — | item **C** — the claims convention | **owner ruling, then Wave G** | — | OQ-1/OQ-2 |
+| — | item **C** — the claims convention | **owner ruling, then Wave G** | — | OQ-1/OQ-2/**OQ-9** |
 
-**PR-1 first, and that is not ceremonial ordering.** Every remaining Wave-F and Wave-G ceremony
-walks the DSN bridge (F20-F22), and it has already degraded to CA-unpinned TLS against the live
-pooler twice. It touches no DB and no product code, so nothing gates it.
+**PR-1 first, and it no longer waits on this gate — gate-folded (D-25).** Every remaining Wave-F
+and Wave-G ceremony walks the DSN bridge (F20-F22), and it has already degraded to CA-unpinned TLS
+against the live pooler twice. This gate found the joint six-set queue's own sequencing put Track
+A's imminent ceremony windows (W1-W4, and plausibly W5, on the joint gate's own 14-21 day estimate)
+ahead of PR-1 clearing it (M17). **The owner severed PR-1 from the Track-B joint PR-0 gate and
+owner sitting on 2026-08-23; it ships as its own PR, gated only by its own selftest (§6, D-24) and
+the uniform ADR-061 ladder, building now.** It still touches no DB and no product code.
 
 **Deliberately not built:** a second registry-vs-ledger predicate (F-A3 owns the body); a
 `fix`-sentence backfill across ten applied migrations' raise sites (priced and declined, D-4); a
@@ -57,7 +65,12 @@ clara._bank_registry_ledger_state(p_client uuid, p_as_of date) returns jsonb
 
 `state` is **three-valued and fail-closed**; `accounts` enumerates the offending COA accounts with
 their DB-computed positions (read through `clara.trial_balance_as_of`, never recomputed — constraint
-2); `basis` is a versioned literal so a reader can tell which generation answered.
+2); `basis` is a versioned literal so a reader can tell which generation answered. **Security
+posture, gate-folded (D-19):** whoever authors the body first writes it `security definer`, owner
+`clara_fn_owner`, `set search_path = clara, pg_temp`, `revoke all … from public`, and performs the
+explicit `clients.firm_id = c.firm` check `bank_recon_close_state` performs (`0056:2027-2033`) —
+`trial_balance_as_of` is bare `security invoker` with no caller-side firm check
+(`0017_wave_b.sql:3572-3574`), and a bare `p_client uuid` carries no firm/actor context of its own.
 
 ### 2.2 The circularity, and why the predicate may not key on `is_bank_account` alone
 
@@ -68,10 +81,16 @@ their DB-computed positions (read through `clara.trial_balance_as_of`, never rec
 account with movement and no registering row" returns **the empty set on exactly the population it
 exists to catch**. Three arms, evaluated in order:
 
-- **(a) the deactivated / remapped case — non-vacuous.** A COA account with `is_bank_account =
-  true` and no **active** `bank_accounts` row binding it ⇒ `gap`. This arm has real reach:
-  `0038:2532-2535` records that deactivating an account does **not** clear the flag, so the flag
-  outlives the registration and this arm sees it.
+- **(a) the deactivated / remapped case — MEASURED, gate-folded (D-15).** `is_bank_account` alone
+  cannot tell an orphan from a retired binding: `0038:2532-2535` says the flag survives
+  deactivation, and `remap_bank_account_coa` (`0038:2979-2988`) sets the flag on the NEW coa code
+  and leaves the OLD one flagged with no `bank_accounts` row at all. So arm (a) fires ONLY when
+  BOTH hold: (i) no `bank_accounts` row of **any status** (active or inactive) currently or ever
+  bound to this coa code — checked against the code's own history AND, via the remap audit payload
+  (`0038:2990-2993`), any code it was remapped FROM; (ii) `clara.trial_balance_as_of` shows movement
+  on the account that no covering period's reconciliation (current OR the historical binding's)
+  accounts for. A clean deactivation or remap with no uncovered movement reads `clear`; a genuine
+  orphan, or uncovered movement on a retired code, reads `gap`.
 - **(b) the zero-registry case — `not_evaluable`, never `clear`.** If the client has **no**
   `bank_accounts` rows at all, the chart cannot answer the question and the predicate says so.
   Absence of a flagged account is not evidence of a bankless client.
@@ -105,7 +124,7 @@ does work:
 | 0 | *absent* | `not_evaluable` → drawer 1 `unknown`, reason `bank_registry_undeclared` |
 | 0 | `no_accounts` | `clear` — the question is answered, the loop runs over nothing, `tie` stands |
 | 0 | `has_accounts` | `gap`, reason `bank_registry_contradicted` — a declared registry that is empty |
-| ≥1 | any / absent | arm (a) decides; the declared fact does not override a measured gap |
+| ≥1 | any / absent | arm (a) decides, on ITS OWN measured check (D-15) — the declared fact does not override a measured gap |
 
 ### 2.4 The call site — fold into the worst-wins aggregation, never an early return
 
@@ -127,8 +146,11 @@ the empty-registry case unable to reach it.
 ### 2.5 The retroactive consequence, taken deliberately
 
 `clara.verify_close(uuid)` (`0056:2529`) re-probes the four drawer-1 identities from scratch
-against a **sealed** receipt (`:2544-2548`). After this change, **every historical close of a
-client with no registered accounts re-verifies as `unknown`.** That is taken, not hidden:
+against a **sealed** receipt (`:2544-2548`). After this change, **every historical close whose
+account population lands `gap` under the redesigned arm (a) or (b) re-verifies as `unknown`** —
+with D-15's fix, that is genuine orphans and uncovered-movement retirements, not every client who
+ever cleanly deactivated or remapped an account. That narrower population is still taken, not
+hidden:
 
 - **It is the honest answer.** `verify_close` interrogates; saying "this identity cannot be
   re-established today" is true, and a receipt that silently re-verified on a vacuous `tie` was
@@ -159,16 +181,32 @@ Today the remedy a human reads is **hardcoded in the frontend**: `reviewCopy.ts:
 (`CLR21_COPY`) / `:39-44` (`CLR05_COPY`), rendered at `JeReviewCard.tsx:369`. The agent, who has no
 frontend, sees nothing. The fix moves that authority into the DB, once:
 
-**`clara.refusal_remedies(errcode text, reason text, remedy text, basis text, primary key
-(errcode, reason))`** — **code-populated, not firm-configurable**, on the `close_gate_checks`
-posture (`0056:369-378`): append-only trigger, no-truncate trigger, RLS forced, a global read
-policy for `clara_authenticated`, and a select grant. Seeded from the existing frontend copy so
-**no wording is invented** and the change is a move, not a rewrite.
+**`clara.refusal_remedies(errcode text, reason text, subsystem text, direction text, remedy text,
+basis text, primary key (errcode, reason, subsystem, direction))`** — **gate-folded key (D-16,
+D-17):** `(errcode, reason)` alone collides — `CLR05`/`distinct_checker`/`self_attestation` is
+independently raised and independently rendered by `CommitGate.tsx`, `openingModel.ts`'s
+`refusalHint()`, and the Wave-E reporting/close-reopen band (`0059`/`0072`/`0084`/`0085`), and
+`CLR21`/`vendor_malformed` needs a **direction**-sensitive remedy (`reviewCopy.ts`'s
+`clr21Copy(reason, direction)` swaps "vendor" for "customer" on a sales filing — the un-keyed
+table would render the purchase wording on a customer invoice). `subsystem` names the consuming
+lane (`je_review` for item B's own rows; a NULL/`'*'` row is a catch-all fallback only where no
+lane collision exists); `direction` is `'purchase' | 'sales' | NULL` (NULL = direction-neutral).
+**Code-populated, not firm-configurable**, on the `close_gate_checks` posture (`0056:369-378`):
+append-only trigger, no-truncate trigger, RLS forced. **Grant, gate-folded (D-18):** the coding
+lanes this item exists to serve (`autoDraft`, `chatTurn`) never connect as `clara_authenticated` —
+they connect as `clara_agent_ro` / `clara_wake_interactive` (`packages/runtime/lib/pools.mjs`).
+The table therefore mirrors the estate's own agent-catalog pattern (`0059:12`/`0060:372`, a
+dedicated `p_..._agent_catalog` policy + `grant select … to clara_agent_ro`), IN ADDITION TO the
+existing human-dashboard policy for `clara_authenticated`. Seeded from the existing frontend copy
+so **no wording is invented** and the change is a move, not a rewrite.
 
-**Resolution order in the mapper, fail-closed:**
+**Resolution order in the mapper, fail-closed (widened for the new key, D-16/D-17):**
 
-1. `(err.code, reason)` present in `clara.refusal_remedies` → that remedy. The table wins.
-2. otherwise → **no remedy at all.** An unknown reason shows the refusal with no advice.
+1. `(err.code, reason, subsystem, direction)` present → that remedy.
+2. `(err.code, reason, subsystem, NULL)` present (direction-neutral row for this lane) → that remedy.
+3. otherwise → **no remedy at all.** An unknown `(code, reason)` for this lane shows the refusal
+   with no advice — never a different lane's or a different direction's row. The table wins only
+   within the caller's own subsystem/direction.
 
 ### 3.3 The oracle objection is answered structurally, not by promise
 
@@ -191,7 +229,10 @@ takes the next free number, and tells the conductor before authoring. Wire side:
 (`shared/wire.ts:60-69`, `chat/api.ts:232`) gain it, `chat/parts.tsx:212-220` renders it, and
 `JeReviewCard.tsx:369` prefers the DB remedy over `clr21Copy(...)`, keeping the hardcoded lookup
 only as a fallback until the table's coverage is proven — then deleting it in the same PR that
-proves it.
+proves it. **Gate-folded (D-16):** `JeReviewCard.tsx:370`, a SECOND render site
+(`CLR05_COPY[clr.reason]`) the v1 wire list omitted, gains the same DB-remedy-first treatment, and
+the call passes `direction` (`directionOf(r?.coding_kind ?? null)`, already computed at `:242`) and
+`subsystem: 'je_review'` into the lookup.
 
 ### 3.5 What proves it
 
@@ -227,27 +268,49 @@ that adapter may need no change at all.
 
 ### 4.2 The DB code, extended not replaced
 
-`ck_processing_task_error_code_0038` (`0038:7279-7286`) is dropped and re-added with
-`engine_auth` appended. **Shared surface** — the live text is re-read with `pg_get_constraintdef`
-first, and a prestate probe aborts loudly if any predecessor value is missing (extend-only). It
-does **not** join the NEVER-CLAIMED allowlist (`0038:7288-7292`): an auth failure happens on a
-CLAIMED task, so the existing `workflow_run_id` arm already admits it.
+**Gate-folded (D-13): the live object is `ck_processing_task_error_code_f_a1`, not
+`ck_processing_task_error_code_0038`.** `_0038` was retired inside `0090_f_a1_walls.sql:1518-1519`
+and re-cut again (still widened, not renamed) by `0097_f_a1_cutover.sql:352-361`, which added a
+29th literal, `wait_exhausted` — `0090:179-181`'s "re-pinned" cite is a PRESTATE probe for 0090's
+OWN drop, not evidence the `_0038` name survives it. `ck_processing_task_error_code_f_a1` (live
+text, 29 values, `0097:352-361`) is dropped and re-added with `engine_auth` appended as the 30th.
+**Shared surface** — the live text is re-read with `pg_get_constraintdef` first, and a prestate
+probe aborts loudly if any of the 29 predecessor values is missing (extend-only). It does **not**
+join the NEVER-CLAIMED allowlist (`0038:7288-7292`): an auth failure happens on a CLAIMED task, so
+the existing `workflow_run_id` arm already admits it.
 
 ### 4.3 The narrowing that makes this safe: retryable **at the doors**, not automatically
 
-A 401 is retryable in principle, but the `ocr` lane has **no attempt cap** (`0051:910-914`), so
-adding `engine_auth` to the runtime `RETRYABLE` sets would let a persistently-401 lane spin and
-re-buy vendor reads forever. **`engine_auth` is therefore admitted at the two human doors and
-nowhere else:**
+A 401 is retryable in principle, but the `ocr` lane **is** capped — `0051:910-914`: "the lane's
+summed `attempt_count` must be under 3 — the ONLY cap an ingest lane has" (**D-6's ground
+corrected, D-20**: the prior text read this citation backwards). Runtime retry is separately
+bounded (`documentIngest.behavior_v2.mjs` `MAX_RETRIES=3` ⇒ 4 total attempts). Even so,
+**`engine_auth` is admitted at ONE human door, gate-folded (D-14):**
 
-- `clara.finalize_document_intake`'s adopted-branch list (`0051:1286`) gains it;
-- `clara.request_reextraction(uuid,text,text)`'s own list gains it.
+- `clara.finalize_document_intake`'s adopted-branch list (`0051:1286`) gains it — CoR'd inside a
+  D1 window, prosrc-SHA prestate pin, tail self-proof.
+- **`clara.request_reextraction(uuid,text,text)` needs NO CoR.** Its `failed_retry` door
+  (`0051:552-561`) is status-only — it admits ANY `status='failed'` task on the lane already,
+  unconditionally, regardless of `error_code` — so `engine_auth` reaches it for free. (This also
+  means `corrupt`/`encrypted` are already re-admissible there today, a pre-existing gap outside
+  item D's scope — R-5.)
 
-Both are **live, spliced bodies** — `0051` is a harvest-and-splice migration (`:46`, `:809`) — so
-both are CoR'd inside a D1 window with prosrc-SHA prestate pins and a tail self-proof that raises
-on failure. The runtime `RETRYABLE` sets are **left alone**, so no frozen behaviour module needs a
-new version for this half. Automatic retry under a new `ocr` attempt cap is priced in the decision
-register (**D-6**) and deferred.
+**The runtime `RETRYABLE` sets are left alone, but they are not the only frozen surface — gate-
+folded (D-22, D-23).** Each terminal writer downstream of the classifier independently clamps to a
+closed literal list, so `engine_auth` must clear TWO more gates before it ever reaches a door:
+
+- **The four catch-side allowlists** (`documentIngest.behavior_v2.mjs:122-127`,
+  `invoiceFacts.v1.behavior.mjs:26-31`, `statementFacts.v1.behavior.mjs:~76-109`,
+  `statementFacts.v2.behavior.mjs:~111-136`) map any code outside their own set to `'internal'` —
+  a code `finalize_document_intake`'s door refuses unconditionally (`0051:1245-1249`). All four are
+  frozen (`frozen-workflows.json`); each needs a new `_vN` export + registry repoint (D-22).
+- **The three facts-lane terminal writers** (`clara.fail_invoice_facts` `0009:2168-2170`,
+  `clara.fail_statement_facts` `0038:2063-2071`, `clara.fail_witness_facts` `0097:397-401`) each
+  hardcode their own literal list and clamp anything else to `'engine_error'` — a code that never
+  reaches `finalize_document_intake`'s admission check at all. Each is a live SECURITY DEFINER body
+  needing its own CoR to admit `engine_auth`, inside PR-3's D1 window (D-23).
+
+Automatic retry under a new `ocr` attempt cap stays deferred, priced in D-6.
 
 ### 4.4 What this does NOT do — the seven documents stay stuck
 
@@ -261,10 +324,12 @@ prevent. It goes to the owner as **OQ-4** rather than being decided here.
 ### 4.5 What proves it
 
 A forced cell that drives a stubbed 401 through the adapter and asserts the task lands
-`engine_auth`, not `bad_type`; a **differential** cell that drives a 500 and a 400 through the same
-path and asserts `engine_error` / `bad_type` respectively (so the new arm did not swallow its
-neighbours); a door cell proving `engine_auth` is admitted; and a **wall** cell proving `corrupt`
-and `encrypted` are still refused by the same door — extend-never-weaken, proved by refusal.
+`engine_auth`, not `bad_type`, on all three facts lanes (D-22/D-23's four modules + three writers,
+not just the ocr path); a **differential** cell that drives a 500 and a 400 through the same path
+and asserts `engine_error` / `bad_type` respectively; a door cell proving `finalize_document_intake`
+admits it; and a **wall** cell proving `corrupt`/`encrypted` are still refused there — extend-
+never-weaken, proved by refusal. `request_reextraction` gets a REGRESSION cell, not a wall cell
+(D-14): its unconditional `failed_retry` admission is unchanged, not newly widened.
 
 ---
 
@@ -302,11 +367,15 @@ Four artefacts, no product code, no DB:
    file; appends `sslmode=verify-full`; sets `PGSSLROOTCERT` to (1) and `NODE_EXTRA_CA_CERTS` for
    the Node client; spawns the given command with the DSN in the **child env only**. It is the
    `wave-e-delta-ceremony-asrun.md:74-79` recipe, made durable.
-3. **scripts/ops/dsn-pipe.selftest.mjs** — the **both-directions** proof, because a probe that
+3. **scripts/ops/dsn-pipe.selftest.mjs** — the **both-directions** TLS proof, because a probe that
    cannot say NO has a meaningless YES: connect **with** the CA and succeed; connect **without**
    it and be **refused**. It also reads the committed certificate's `notAfter` and fails when
    fewer than 30 days remain — a monotonic direction, never a pinned date, so it cannot rot into a
-   dated tripwire.
+   dated tripwire. **Gate-folded (D-24):** the TLS pair proves nothing about the property hard
+   constraint 4 actually turns on — that the DSN never reaches argv or disk. Two more cells, same
+   file: an **argv-rejection** cell asserting the tool refuses (or ignores) a DSN passed as a
+   process argument rather than on stdin; a **child-env-only** cell asserting the spawned child's
+   env carries the DSN and no temp file on disk ever does. Building now, same lane as (2).
 4. **docs/ops/dsn-bridge.md**, plus a one-line TLS step added to each of the five runbooks that
    today carry only the argv rule (`wave-b-0019-ceremony-runbook.md:83`,
    `wave-b-0021-ceremony-runbook.md:71-72`, `wave-b-ceremony-runbook.md:45`,
@@ -471,18 +540,21 @@ overloading the advance account and inheriting a set-off problem the chart alrea
 
 ## 9 · The D1 write-quiesce inventory
 
-**Three CoR'd live bodies, one CHECK swap, two new tables, one new fact key** — all of it, on the
-recommended paths:
+**Gate-folded (D-13, D-14, D-22, D-23): five DB CoR'd live bodies (was three, and one of the three
+— `request_reextraction` — is now dropped), one CHECK swap on the correct object, four frozen
+runtime-module `_vN`s (not DB, priced into PR-3 alongside), two new tables, one new fact key.**
 
 | PR | body / object | kind |
 |---|---|---|
 | PR-3 | `clara.finalize_document_intake(…)` | **CoR**, prosrc-SHA pin |
-| PR-3 | `clara.request_reextraction(uuid,text,text)` | **CoR**, prosrc-SHA pin |
-| PR-3 | `ck_processing_task_error_code_0038` → successor | CHECK swap, extend-only |
+| PR-3 | `ck_processing_task_error_code_f_a1` → successor | CHECK swap, extend-only (D-13) |
+| PR-3 | `clara.fail_invoice_facts` / `fail_statement_facts` / `fail_witness_facts` | 3× **CoR**, prosrc-SHA pin (D-23) |
+| PR-3 | `documentIngest.behavior_v2` / `invoiceFacts.v1.behavior` / `statementFacts.v1.behavior` / `statementFacts.v2.behavior` | 4× new `_vN` + registry repoint (D-22, runtime not DB) |
+| ~~PR-3~~ | ~~`clara.request_reextraction(uuid,text,text)`~~ | **DROPPED — no CoR needed (D-14)** |
 | PR-4 | `clara.bank_recon_close_state(uuid,uuid)` | **CoR**, prosrc-SHA pin |
-| PR-4 | `clara._bank_registry_ledger_state(uuid,date)` | NEW — or F-A3's, called |
+| PR-4 | `clara._bank_registry_ledger_state(uuid,date)` | NEW — or F-A3's, called; `security definer` per §2.1 (D-19) |
 | PR-4 | `client_fact_keys` ← `banking_arrangement` | additive INSERT |
-| PR-2 | `clara.refusal_remedies` | NEW table + seed |
+| PR-2 | `clara.refusal_remedies` | NEW table + seed, key widened (D-16, D-17), grant corrected (D-18) |
 
 Every CoR'd body is re-derived on the rig by `pg_get_functiondef` at authoring time and its
 `prosrc` sha256 pinned in the migration's §0 quiesce inventory; files are named
@@ -490,10 +562,12 @@ Every CoR'd body is re-derived on the rig by `pg_get_functiondef` at authoring t
 
 ## 10 · What this design refuses to do
 
-**Weaken a wall to make a fix fit** — the `0051` door still refuses `corrupt`/`encrypted`, drawer 1
-still has no attestation path, the coding mapper still leaks no raw text · **name a `_vN` number**
-(every version is read from the live registry at authoring time) · **trust migration text as a live
-body** (three of these are spliced; all are rig-replayed) · **decide item C** (the convention is the
-owner's — OQ-1/OQ-2; this design states the standard, the options and a recommendation, and stops)
-· **repair a body that is retiring** (item E) or **claim another lane's item** (G/H/I, and the
+**Weaken a wall to make a fix fit** — `finalize_document_intake`'s door still refuses
+`corrupt`/`encrypted` (`request_reextraction`'s pre-existing, out-of-scope non-refusal is R-5, not
+a weakening this item makes), drawer 1 still has no attestation path, the coding mapper still
+leaks no raw text · **name a `_vN` number** (every version is read from the live registry at
+authoring time) · **trust migration text as a live body** (`finalize_document_intake` is spliced;
+all D1 bodies are rig-replayed) · **decide item C** (the convention is the owner's — OQ-1/OQ-2/
+**OQ-9**; this design states the standard, the options and a recommendation, and stops) ·
+**repair a body that is retiring** (item E) or **claim another lane's item** (G/H/I, and the
 predicate body).
