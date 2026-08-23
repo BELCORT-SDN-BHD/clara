@@ -23,7 +23,7 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · dispatch-model-guard · eslint
+pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · harness-links · pinned-ids · dispatch-model-guard · eslint
 pnpm build       # nitro runtime + next dashboard
 pnpm test        # per-package tests
 ```
@@ -172,8 +172,8 @@ the runner *first* (`docs/ops/ci-runner.md`). An offline runner makes jobs queue
 never lets one silently pass.
 
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
-leak-scan, gitleaks, the wiki dynamic-SQL gates, the vendor-binding post-control gate,
-harness-links, eslint. A diff that touches code additionally gets, in parallel jobs
+leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches
+code additionally gets, in parallel jobs
 (ADR-0073): typecheck/build + the worker-path gate, the deploy-onto-existing check + the
 estate suite (migrate → seed → every package's tests), the live-behavior e2es + the DR
 round-trip, and the render drill — all against throwaway `postgres:17` service containers.

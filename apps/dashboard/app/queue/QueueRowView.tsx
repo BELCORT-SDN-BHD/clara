@@ -58,7 +58,6 @@ export function QueueRowView({ row, active, selectable, selected, onOpen, onTogg
       </span>
       <span className={styles.rowAccessories}>
         {row.auto ? <span className={`${styles.badge} ${styles.badgeAuto}`}>auto</span> : null}
-        {row.rule_backed ? <span className={`${styles.badge} ${styles.badgeRule}`}>rule</span> : null}
         {row.high_stakes ? <span className={`${styles.badge} ${styles.badgeHigh}`}>high-stakes</span> : null}
         {RowAccessory ? <RowAccessory row={row} /> : null}
         <span className={`${styles.band} ${band.cls}`}>{band.label}</span>

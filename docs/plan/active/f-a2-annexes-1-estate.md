@@ -48,7 +48,7 @@ bank-matching family, they **survive**, and they are F-A3's (`wave-f-contract.md
 4. **The generic kind.** `chatTurn.v12.tools.ts:292` sends NULL `coding_kind`;
    `autoDraft.v8.prompt.ts:129` offers only the three coded kinds; a NULL kind skips
    `0016:4020-4034` and is outside the direction-family arm's kind list (`0046:2687-2689`).
-5. **The false-green gate.** `check-binding-post-control.mjs` scans the migration tree on disk
+5. **The false-green gate.** check-binding-post-control.mjs (RETIRED with PR-3, §B.4 below) scans the migration tree on disk
    (`:38`, `:50-56`) for the last static `create or replace function clara.execute_rule_post`
    (`:58`); `parseFunctions` matches only `CREATE [OR REPLACE]`, so a `drop function` is invisible
    to every failure path and the `:161-168` "no static definition exists" branch is unreachable.
@@ -89,7 +89,7 @@ missed** (§B.5) and **one roster miscount corrected** (§B.2).
 | `_settle_rule_post_skip` | `0029:357-387` | revoke-all `0029:389` | executor only |
 | `propose_coding_rule` / `sign_coding_rule` | `0016:3031` / `0016:3082` | `0011:4021-4022`; ACL pin `0011:4252-4255` | `reviewApi.ts:137`, `:141`; **no `proposeCodingRule` wire exists** |
 | `decline_coding_rule` · `retire_coding_rule` · `get_coding_rule` | `0011:2180` · `~2200` · `3607` | `0011:4023/4024/4035` | `reviewApi.ts:141`, `:55` |
-| `propose_autopost_rule` / `sign_autopost_rule` | `0016:1606` / `0016:1776` | `0015:3556-3564`; tail `0015:3667-3675` proves `clara_agent_ro` lacks them | `reviewApi.ts:242`, `:226`; `apps/dashboard/app/rules/page.tsx`, `AutopostRulePanel.tsx:163,170` |
+| `propose_autopost_rule` / `sign_autopost_rule` | `0016:1606` / `0016:1776` | `0015:3556-3564`; tail `0015:3667-3675` proves `clara_agent_ro` lacks them | `reviewApi.ts:242`, `:226`; apps/dashboard/app/rules/page.tsx, AutopostRulePanel.tsx:163,170 (RETIRED whole with PR-3) |
 | `retire_autopost_rule` / `list_autopost_rules` | `0015:2914` / `0015:2855` | `0015:3559/3562` | `reviewApi.ts:235`, `:83` |
 | `acknowledge_rule_posts` / `get_rule_post_run` | `0015:2801` / `0015:2831` | `0015:3560/3561` | `reviewApi.ts:171`, `:78` |
 | `reconcile_autopost_rules()` | `0015:2759-2795`; drift pin `0017:410-434` | **`0015:3566-3568` → `clara_runtime` (the GROUP)** — a *different* posture from the executor's login-direct; do not conflate | `lib/leader.mjs:79,177,185,191` → `lib/reconciler.mjs:622,472,475` |
@@ -158,13 +158,13 @@ Removing the eleven retired names is likewise exact in **both** directions.
 
 ### B.4 · CI, lint and partition obligations
 
-- **`scripts/check-binding-post-control.mjs` goes FALSE-GREEN — and worse than v1 said.** It scans
+- **scripts/check-binding-post-control.mjs (RETIRED with PR-3) goes FALSE-GREEN — and worse than v1 said.** It scans
   the migration tree on disk (`:38`, `:50-56`) for the last static
   `create or replace function clara.execute_rule_post(uuid,text)` (`:58`), then asserts 0029's
   binding-gate source order (`:79-80`, `:170-192`). **`parseFunctions` matches only
   `CREATE [OR REPLACE]` — there is NO DROP handling at all**, so a drop is invisible to every
   failure path and its `:161-168` "no static definition exists" branch is unreachable. Retire in
-  the drop PR with `check-binding-post-control.selftest.mjs` (`:11`, `:37`, `:359-365`), the
+  the drop PR with check-binding-post-control.selftest.mjs (RETIRED alongside it — `:11`, `:37`, `:359-365`), the
   `ci.yml:189-192` step and both `package.json` entries (`:14`, `:33-34`).
 - **Lints that do NOT trip** (all 14 verb names searched across `scripts/`):
   `check-wiki-dynamic-sql`, `wiki-lint-checks`, `check-frozen-workflows`,
@@ -219,8 +219,8 @@ chat-fixture trues** and the **~8 N1 fixture re-routes** — while the battery-c
 ruling (D36) settles what the replacement IS, not whether the cell breaks**)
 · **`x42-producer-role.test.mjs`** (list line 48; `signedCodingRule` at `:79`, `:83`, `:149`).
 
-**DB rig, 38 files. Whole-file retire (10):** `wave-a2-execute-rule-post.test.mjs` ·
-`wave-a2-autopost-rule.test.mjs` · **the wave-a sightings battery — RETIRED IN PR-1, not PR-3**
+**DB rig, 38 files. Whole-file retire (10, ALL RETIRED WITH PR-3):** wave-a2-execute-rule-post.test.mjs ·
+wave-a2-autopost-rule.test.mjs · **the wave-a sightings battery — RETIRED IN PR-1, not PR-3**
 (the breeding block's own witness: its CLAIM *is* breeding behaviour, so the claim-split ruling
 retires it with the excision and C.8's inverted twins replace it; the file no longer exists, and
 this line is deliberately not a path any more) · `a21-prestate` · `a21-ocr-envelope` ·
@@ -240,18 +240,17 @@ employee claims STILL breed a vendor_account proposal"* — whose **inversion is
 function is gone. Same shape at `x37-wave-c-a-subledger.test.mjs:1684-1693` (`caught()` →
 `noteLane()` → early return). **Both stop proving their own claim without going red.**
 
-**Runtime, 13 files.** Whole-file retire: `rule-post-unit.test.mjs`,
-`reconcile-autopost-unit.test.mjs`. Roster: `relay-redrive-consumers.test.mjs`.
-**Consumer + wiring:** `packages/runtime/lib/rule-post.mjs` (342 lines) whole;
+**Runtime, 13 files.** Whole-file retire (ALL RETIRED WITH PR-3): rule-post-unit.test.mjs,
+reconcile-autopost-unit.test.mjs. Roster: `relay-redrive-consumers.test.mjs`.
+**Consumer + wiring:** packages/runtime/lib/rule-post.mjs (342 lines, RETIRED whole) + callers;
 `plugins/startWorld.ts:15,209-213,221`
 · `lib/health.mjs:20,175-182` · `scripts/relay.mjs:23,65,79-81,85` · `lib/receipts.mjs:8` ·
 `README.md:33,37,96`.
 
-**Dashboard.** `apps/dashboard/app/rules/` retires whole — **except `AdjustmentTemplatePanel.tsx`,
+**Dashboard.** apps/dashboard/app/rules/ retires whole (RETIRED WITH PR-3) — **except `AdjustmentTemplatePanel.tsx`** (relocated to `apps/dashboard/app/close/adjustments/`),
 a Wave-D surface: RELOCATE, do not delete.** Parts catalog: `shared/parts.ts:77,80,161` ·
 `chat/partCatalog.ts:117-120` · `chat/parts.tsx:17,239-241` ·
-`apps/dashboard/app/shared/cards/RulePostReceiptCard.tsx`
-· `chat/partCatalog.test.tsx:80-87` (**test at `:83` breaks**).
+apps/dashboard/app/shared/cards/RulePostReceiptCard.tsx (RETIRED WITH PR-3) · `chat/partCatalog.test.tsx:80-87` (**test at `:83` breaks**).
 
 **THE `rule_backed` COLUMN — OQ-2's ruled dashboard removal (D35), a PR-3 surface.** With
 `_draft_entry_core`'s `rule_decisions` write stopped, no entry F-A2 posts can ever be rule-backed, so the

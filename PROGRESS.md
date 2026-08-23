@@ -459,10 +459,9 @@ version + ceremony):**
   lane's checkout. The control is isolation. Practices that follow: cut every branch inside your
   worktree · print `git branch --show-current` INSIDE the commit command, not before it · after any
   surprise, resolve state against `git show origin/<branch>:<file>`, never against a working tree.
-- **Local-only test-isolation flake in the db package** (pre-existing, NOT functional):
-  `a21-prestate.test.mjs` leaks `PGDATABASE` into the shared Node process, so reused-DB
-  full-suite runs inflate failures (13 vs the true 7; `pipeline.test.mjs` self-diagnoses the
-  mismatch). CI green both ways. Fix candidate: scope the env var inside the subprocess.
+- ~~**Local-only test-isolation flake in the db package**~~ — **MOOT, 2026-08-23 (F-A2 PR-3):**
+  a21-prestate.test.mjs, the file that leaked `PGDATABASE` into the shared Node process, is
+  whole-file RETIRED with the rules-execution tier (Annex B.1/B.6) — the flake retires with it.
 - **The estate-wide whitespace-blind blank-op-key idiom** stays REGISTERED under η residuals
   in the Backlog — noted here so a Known-issues-only reader does not miss it.
 - **VHDX compaction residue** (2026-08-14 disk-full event; narrative archived): the ~60GB

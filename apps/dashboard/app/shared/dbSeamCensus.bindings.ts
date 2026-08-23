@@ -57,13 +57,15 @@ export const OPAQUE_READS: Record<string, string> = {
   // client_id, close_run.state, receipt.state, checks) is a literal this read
   // actually emits.
   get_close_plan: "to_jsonb(v_receipt.evaluator_version_ids) -- v_receipt is a record, not a declared scalar (the adjustment_run_due/e.collision shape); the underlying uuid[] is genuinely keyless but the instrument cannot prove a record field's type",
-  get_coding_rule: "to_jsonb over the rule row",
+  // get_coding_rule RETIRED with F-A2 PR-3 (Annex B.1) — the verb is dropped.
   get_draft_review: "to_jsonb over the entry + proposal rows",
   get_lint_finding: "to_jsonb over the finding row",
   get_open_question: "to_jsonb over the question row",
   get_opening_dryrun: "to_jsonb over the dry-run delta rows",
   get_sweep_run: "to_jsonb over the sweep-run row",
-  list_notifications: "jsonb_agg(to_jsonb(n)) over the notifications view",
+  // list_notifications RETIRED-FROM-USE with F-A2 PR-3: listRuleNotifications (its only
+  // dashboard caller, the rule-lifecycle nudge reader) retired with the autopost-rule tier.
+  // The verb itself still exists in the DB; nothing in the dashboard calls it anymore.
   list_review_queue: "to_jsonb over the per-kind row CTEs (its own parity probe is queueKindCatalog.test.tsx)",
   list_vendor_bindings: "jsonb_agg(to_jsonb(...)) over the binding rows",
   // staff_advance_statement was here until round 6 and should never have been: its
@@ -122,14 +124,8 @@ export const PHANTOM_BRANCHING_ALLOW: Record<string, Record<string, string>> = {
     debit_cents: "same (stored lines[] key)",
     description: "same (stored lines[] key)",
   },
-  get_rule_post_run: {
-    entries: "WA2 §6.4 defensive dual shape — the mapper accepts a `posts[]` batch OR a flat receipt; both spellings are read",
-    posts: "same dual-shape read; the emitted spelling is whichever the run carries",
-  },
-  list_autopost_rules: {
-    client_id: "WA2 §6 assumed-shape read (the companion pins no autopost LIST read); degrades to null",
-    reason: "same assumed-shape read; degrades to null",
-  },
+  // get_rule_post_run and list_autopost_rules RETIRED with F-A2 PR-3 (Annex B.1) —
+  // both verbs are dropped and neither has a dashboard caller anymore.
   list_bank_match_candidates: {
     counterparty_name: "hydrated from the counterparty join in some shapes; degrades to null when absent",
   },
@@ -243,7 +239,7 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // whose consumption the census's mapper-closure instrument cannot see,
   // recorded honestly rather than narrowed to make the ledger look shorter.
   get_close_plan: "applies_when attestation attested_at attested_by books_watermark check_key close_entry_id close_run_id closed_at closed_by closing_position closing_tb_digest dataset_sha256 drawer end_reason ended_at ended_by ends_on evaluated_at evaluator_version_ids fy_end_source gate_digest item_key items kind label measured measured_digest ordinal pl_net_cents reason receipt_id result retained_earnings_account run_state segregation_mode self_attestation started_at started_by starts_on status title",
-  get_coding_rule: "counterparty name question registration_no rule",
+  // get_coding_rule RETIRED with F-A2 PR-3 (Annex B.1) — the verb is dropped.
   get_depreciation_authority: "client_id",
   get_depreciation_run: "client_id",
   // `idx` entered with migration 0054_region_ordinal (WAVE E / F9): the per-region

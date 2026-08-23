@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AdvisoryBanners, ProposeWarningBanners, TemplateRow } from "./AdjustmentTemplatePanel";
-import type { AdjustmentTemplateWarning } from "../shared/adjustmentApi";
+import type { AdjustmentTemplateWarning } from "../../shared/adjustmentApi";
 import {
   advisoryOk, advisoryUnavailable, toAdjustmentRunDue, toListAdjustmentRunsRead,
   type AdjustmentRunDue, type ListAdjustmentRunsRead, type AdjustmentTemplateRow,

@@ -469,9 +469,11 @@ function migrationApplied(prefix: string): boolean {
 // checked against the catalog before being excused from the "unknown" failure, and once
 // 0046 IS applied, the name is not excused from anything — it re-joins `reads` and gets
 // the FULL bidirectional accounting like every other read, with zero special-casing.
-const FRONTIER_GATED_READS: Record<string, string> = {
-  preview_ocr_sales_evidence: "0046",
-};
+// preview_ocr_sales_evidence RETIRED with F-A2 PR-3 (Annex B.1/B.5) — the verb it
+// named as "not yet applied on this branch" is now permanently dropped rather than
+// pending, and previewOcrSalesEvidence (its only dashboard caller) is gone too, so
+// the excuse this map existed for no longer applies to anything.
+const FRONTIER_GATED_READS: Record<string, string> = {};
 
 test("[rig] every jsonb key crossing the DB→dashboard seam is accounted for, both directions", () => {
   if (!RIG) return; // self-skip: no migrated rig configured (CLARA_RIG_DB!=1)
