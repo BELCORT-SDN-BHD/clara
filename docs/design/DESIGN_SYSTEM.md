@@ -4,10 +4,19 @@
 > lands at Wave G.** **No documented design system exists yet.** Phase 4 has shipped real UI
 > surfaces (the review queue, `je_review`/`clarify`/`doc_review`, `/bank`, `/aging`,
 > `/assets`, `/clients/plan`, and more — see `apps/dashboard`) but they were built directly
-> against shadcn/Tailwind primitives, surface by surface, with no separately authored token set,
-> component library, or pattern documentation behind them. **The as-built dashboard is the only
-> truth about Clara's current visual language** — read the code in `apps/dashboard`, not a spec,
-> if you need to know what Clara looks like today.
+> surface by surface, with no separately authored token set, component library, or pattern
+> documentation behind them. **The as-built dashboard is the only truth about Clara's current
+> visual language** — read the code in `apps/dashboard`, not a spec, if you need to know what
+> Clara looks like today.
+>
+> **[TRUED 2026-08-23] The "built against shadcn/Tailwind primitives" clause was FALSE and is
+> removed.** At the bytes, `apps/dashboard/package.json` declares exactly four dependencies —
+> `next`, `pdfjs-dist`, `react`, `react-dom` (plus type/TS devDeps) — and **no `tailwind*` or
+> `shadcn*` package or config exists anywhere in the tree**. The surfaces are **plain CSS
+> Modules**. Nothing was built on a design system that was never installed. **The Codex frontend
+> build decides the system** (owner ruling 2026-08-23: the new app package lands in this repo on
+> its own branch and replaces `apps/dashboard` at cutover), so a token set adopted here now would
+> be superseded before it was used.
 
 ## Why this is empty on purpose
 
