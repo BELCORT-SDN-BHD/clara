@@ -1,9 +1,20 @@
-# F-T3 — the draft tax computation: annexes (v1)
+# F-T3 — the draft tax computation: annexes (v1.2)
 
 > Annexes to `tax-computation-design.md`, on `tax-computation-survey.md`.
-> **A** mechanics and a worked ladder · **B** decision register D-1..D-14 · **C** predictions to
-> discharge at PR-0's rig replay · **D** owner questions (nine) · **E** the standing maintenance duty.
-> Design stage: **no code authored, no rig run**.
+> **A** mechanics and a worked ladder · **B** decision register D-1..D-17 · **C** predictions to
+> discharge at PR-0's rig replay · **D** the question register — **three RULED, three carded for the
+> owner's sitting, three lane-open** · **E** the standing maintenance duty the `law_review_due` belt
+> watches. Design stage: **no code authored, no rig run**.
+>
+> **v1.2, 2026-08-23 — conductor's measured corrections.** **D-16** the frozen closure collapses to
+> ONE evaluator member (twelve would freeze twelve bodies estate-wide; `deployed:false` buys
+> nothing) · **D-17** the `client_fact_keys` name-only-wall scoping obligation, its own seed block,
+> and battery cell **C15** · P-10 added to Annex C.
+>
+> **v1.1, 2026-08-23 — the ruling trues.** OQ-6 → **R-L25** (developer-seeded law tables, **D-15**) ·
+> OQ-4 → **REFUSE** · OQ-5 → **the pack, form version pinned** (D-8 extended, D-14 amended) ·
+> OQ-8's **product half granted and designed** (design §4.6; Annex E rewritten around the belt) ·
+> OQ-1 / OQ-7 / OQ-8's governance half rewritten as **one-question cards D.1-D.3**.
 
 ---
 
@@ -169,7 +180,10 @@ tool-boundary mechanism here exactly as TA-P4 made it for the fetch tool.
 | **D-11** | **The severance: Clara writes a `code`, the DB owns every numeral.** The proposal table has no numeric column. | *Let the model emit the amount and validate it.* Validation is a check on an output; the absence of a column is a property of the schema. Hard constraint 2 says the enforcement is structural, not prompt-level. |
 | **D-12** | **Instalment rounding: `floor(estimate/n)` with the whole remainder on the FIRST instalment.** | *Remainder on the last.* Both sum exactly; the first-instalment convention means a mid-year revision never has to reconcile a stray sen in a month that has not happened yet. |
 | **D-13** | **A treatment code's citation is bound ONCE, by the owner's signature — never re-picked per run.** | *Cite per computation from the model's reasoning.* This is the exact error class the survey found in the prior research (§6.4a — depreciation cited to s.39(1)(b)). Bind once, and it is wrong at most once, visibly, before it ships. |
-| **D-14** | **Integer cents throughout; the exact rational is stored in `metric_cells`; per-field whole-ringgit truncation is declared in the field-pack definition.** | *Round the computation to whole ringgit because the form does.* Then the computation statement and the pack disagree, and the reviewer cannot tie them. |
+| **D-14** | **Integer cents throughout; the exact rational is stored in `metric_cells`; per-field whole-ringgit truncation is declared in the field-pack definition** — and, per the OQ-5 ruling, it is a property of the **pinned form version**, not a global convention. | *Round the computation to whole ringgit because the form does.* Then the computation statement and the pack disagree, and the reviewer cannot tie them. |
+| **D-16** *(conductor, measured, 2026-08-23)* | **The frozen closure is ONE member**, `evaluate_tax_computation_v1`, self-contained and calling only built-ins. | *Twelve members, one per rung* (v1.1). **`verify_evaluator_freeze()` iterates `evaluator_versions` with no `where deployed` and hashes the FULL `pg_get_functiondef`** — so registration freezes immediately (**`deployed:false` buys nothing**, which v1.1's "appended undeployed" wording obscured), and a later ACL/owner/`search_path` change to any member raises **at that later lane's apply, pointing at F-T3**. Twelve members = twelve bodies frozen estate-wide. Also rejected: *three members* (ladder/CA/CP204) — the SME predicate is needed by all three, so it becomes a shared fourth frozen body or gets inlined three times (two mutually-unaware paths, law 81). |
+| **D-17** *(conductor, 2026-08-23)* | **F-T3's `client_fact_keys` describe the CLIENT, and say so in their own description text.** Each key's description scopes it explicitly — "the CLIENT's own TIN; nothing to do with a counterparty's" — citing the generic name-only wall (`0062`/`0063`). **The ladder reads no counterparty `tin` or `registration_no` anywhere** (battery C15); if it ever needs one — related-party disclosure, withholding — **stop and escalate**, because lifting that wall is an OWNER-only act through `0063`'s audited door. F-T3 also takes its **own** seed block, never shared with F-A7's. | *Registering `tin`/`ssm_registration` with a bare description.* `0055`'s culture is that the description carries the law (see `customer_identity_policy`'s), and this catalog is one table away from the wall that keeps a name-only client's counterparties unenriched. A later reader or agent must not mistake it for a place to record a customer's identifier. **Note on framing, checked at the bytes 2026-08-23:** the obligation attaches to the **GENERIC** wall, not to a client-specific rule. ADR-0075 §(5) retired the old client-specific wording, and `AGENTS.md` constraint 12 has since been trued to read as the generic mechanism — *"a client may be flagged NAME-ONLY, and a name-only client's counterparties are NEVER enriched by inference"*, with `0062`/`0063` untouched. So citing "constraint 12" is correct **as the harness now words it**; what the description must never do is reproduce the retired client-specific phrasing. |
+| **D-15** *(from R-L25, 2026-08-23)* | **The law tables are DEVELOPER-SEEDED, not governed-door tables.** `tax_rate_bands`, `capital_allowance_rates`, `tax_thresholds` and `tax_authorities` land as versioned, effective-dated migration rows through the full PR ladder, each cited with its fetch date, immutable + supersede, `valid_through` on every row, a missing row refusing by name. A rate change is a ticket and a PR. | *TA-P2's owner one-click door* (the v1 design's choice). Two governed-row mechanisms for one job is two architectures (law 81); the D17/R-L19 precedent already settled the identical question for price rows, and the same reasoning applies — a rate is platform data, not client data, and no human session holds a role that makes a one-click approval meaningfully different from a PR. The F-A8 fetch can attach later without changing how a row lands. |
 
 ---
 
@@ -189,25 +203,115 @@ discharged.
 | **P-7** | `publish_report_template_version` refuses `report_class='statutory'` from the agent principal and accepts it from the human admin verb. | exercise both arms — a refusal that cannot say NO has a meaningless YES |
 | **P-8** | `fixed_assets.ca_class` has no CHECK domain restricting it to the classes the CA rate table will key on. | `pg_get_constraintdef`; if it does, PR-1's rate-table keys must match it exactly |
 | **P-9** | `evaluator_versions.deployed` cannot be flipped by a plain UPDATE — `_tf_evaluator_deploy_once` (`0060:93-100`) is the only door. | attempt the plain UPDATE on the rig |
+| **P-10** | D-16's two load-bearing properties hold as reported: `verify_evaluator_freeze()` covers **undeployed** rows, and its hash moves when only a member's **ACL / owner / `search_path`** changes (body untouched). | Reported measured by the conductor (L19-verified) — **F-T3 still re-measures both** on its own rig, because a design that collapsed twelve members to one on the strength of these two facts may not hold them on hearsay. Register an undeployed row → confirm it freezes; then `alter function … owner to` / `set search_path` → confirm the checker raises. |
 
 ---
 
-# Annex D · Owner questions
+# Annex D · Questions — three ruled, three carded for the sitting, three lane-open
 
-Nine. Each states the collision, the cost of each answer, and the recommendation. None is a
-build choice the lane may make alone.
+Nine were raised. Their status as at **2026-08-23**:
 
-### OQ-1 · There is no acceptance oracle for F-T3 in the corpus. What is the bar?
+| # | Question | Status |
+|---|---|---|
+| OQ-1 | the missing acceptance oracle | **CARD — owner's sitting** (D.1) |
+| OQ-2 | no fixed-asset population to test CA against | lane-open |
+| OQ-3 | partial official-source access | lane-open |
+| OQ-4 | refuse vs default to 24% | **RULED — REFUSE** |
+| OQ-5 | field pack vs form replica | **RULED — the PACK, form version pinned** |
+| OQ-6 | the Tier-1 closure collision | **RULED — R-L25, seeded fact tables** |
+| OQ-7 | whose signature signs a treatment code | **CARD — owner's sitting** (D.2) |
+| OQ-8 | who owns the annual duty to true the law | **CARD — owner's sitting** (D.3); **the product half is GRANTED and designed** (design §4.6) |
+| OQ-9 | does the confirmed figure post a provision in Wave F | lane-open |
 
-The owner's three folders contain no Form C, no tax computation, no CP204 and no fixed-asset
-register (survey §5). ADR-0075 §(2) says no oracle exists beyond the folders **or is required** — so
-"reproduce last year's return" is not available and is not owed. Options: **(a)** the owner or the
-firm's tax agent hand-works one YA for one client and that becomes the golden bar; **(b)** acceptance
-is the battery's behavioural cells plus a review of the worked ladder, with the golden bar deferred
-to Wave G; **(c)** F-T3 accepts on synthetic ROME PUBLIC ADVISORY data only.
-**Recommendation: (a) for one company + (b) for the rest.** One hand-worked computation is a few
-hours of the owner's time and it is the only thing that can catch a whole-ladder sign error. Without
-it, every cell can pass and the total can still be wrong.
+**The three rulings, recorded** (orchestrator, standing delegation, 2026-08-23):
+
+- **OQ-4 → REFUSE.** An unknown SME status is a question to the human, never a rate. The design's
+  recommendation stands unchanged; `sme_facts_missing` names the missing fact and Clara chases it.
+- **OQ-5 → the field-addressed PACK**, never a form replica — **and the pack pins the form
+  version**, mapping to LHDN's own field ids for that edition. New refusal
+  `form_version_superseded`; the whole-ringgit rule becomes a property of the pinned version. Design
+  §8 carries the fold.
+- **OQ-6 → R-L25.** The Wave-F Tier-1 closure re-opens for the income-tax rate bands and the
+  capital-allowance rate schedule, as **developer-seeded** versioned effective-dated fact tables on
+  the D17/R-L19 pattern — not a second governed-row architecture. `wave-f-contract.md`'s
+  `[TB-2026-08-23]` block is the contract note; **D-15** is the decision.
+
+The three cards below are written for the owner's sitting: **one question, the options, what each
+costs, and the lane's recommendation.** Nothing in them is a build choice the lane may make alone.
+The three lane-open questions keep their original longer form after the cards.
+
+## D.1 · CARD — OQ-1 · What is F-T3's acceptance bar, given there is no oracle?
+
+**The question.** F-T3 computes tax. Nothing in the estate can tell it whether the total is right.
+
+**Why it is being asked.** Your three folders hold no Form C, no tax computation, no CP204 and no
+fixed-asset register (survey §5); the desktop `2025 Tax` folder is empty. ADR-0075 says no oracle
+exists beyond the folders **or is required** — so "reproduce last year's return" is neither available
+nor owed. That leaves a real hole: the fourteen battery cells each prove one wall bites, and **every
+one of them can pass while the bottom line is still wrong** (a sign flip between add-backs and
+deductions, a rung wired to the wrong input). A wall test cannot catch a ladder error.
+
+| Option | What it costs you | What it buys |
+|---|---|---|
+| **(a)** you or the firm's tax agent hand-work **one YA for one company**, and that becomes the golden bar | a few hours, once | the only thing that catches a whole-ladder error; a permanent regression bar |
+| **(b)** acceptance = the battery + a review of the worked ladder in Annex A.3; golden bar deferred to Wave G | nothing now | ships sooner; the ladder error stays possible until Wave G |
+| **(c)** accept on synthetic ROME PUBLIC ADVISORY data only | nothing now | proves the arithmetic against numbers we invented — circular |
+
+**Recommendation: (a) for one company, (b) for the rest.** Pick the company with real fixed assets
+if there is one, so the hand-worked bar exercises capital allowances too.
+
+## D.2 · CARD — OQ-7 · Whose signature signs a treatment code?
+
+**The question.** When Clara says "this is entertainment, add back 50%, s.39(1)(l)" — whose
+professional name is on the *rule* she applied?
+
+**Why it is being asked.** The whole design rests on Clara choosing a **code** while the DB owns the
+fraction and the citation (D-11, D-13). That only holds if the code itself was signed by someone
+answerable. `tax_treatment_codes.owner_signed_by` is that act, and an unsigned code is unusable — so
+whoever signs is, in substance, certifying "this fraction and this statutory reference belong
+together." It happens once per code, not once per computation.
+
+| Option | What it costs | What it risks |
+|---|---|---|
+| **(a)** the owner personally | your time, ~30-40 codes once | your name on a technical tax citation you may not have drafted |
+| **(b)** a **named licensed tax agent** (who may be you) with the licence reference recorded on the signature row | the same time, plus recording the licence | nothing obvious — it matches how the statutory boundary is actually held |
+| **(c)** either, whoever is available | least friction | the signature stops meaning anything specific, which is the one thing it must not do |
+
+**Recommendation: (b).** The professional-signature framing is what holds the statutory boundary in
+this product; record the licence reference so the row says *which* professional and under what
+authority. It also answers D.3's "tax lead" by the same name.
+
+## D.3 · CARD — OQ-8 · Who owns the annual duty to true the law?
+
+**The question.** Every January, someone must extend or supersede the rate rows. Who is that, by name?
+
+**Why it is being asked.** Act 53 as read is stamped *as at 21 May 2024*; Budget 2026 and its tax
+bills are already in circulation. Every band, threshold and Schedule-3 rate carries an
+effective-YA window, and **a missing row refuses by name** — correct behaviour, and it means the
+computation stops for a client whose YA has rolled past the last seeded row. **This is the most
+likely way F-T3 quietly breaks.**
+
+**Half of this is already solved and needs no ruling.** The *product* half was granted 2026-08-23 and
+is designed: every seeded row carries `valid_through`, and a `law_review_due` belt raises **one typed
+question to the firm's tax lead** before expiry, naming the row, its authority, its last-fetched date
+and what refuses if it is not trued (design §4.6). It triggers on data, is idempotent per row, and
+**closes only when a superseding row is seeded** — it cannot be dismissed.
+
+**What is left is the governance half: who receives that question, and is answering it a duty.**
+
+| Option | What it costs | What it risks |
+|---|---|---|
+| **(a)** a **named tax lead** (the same person as D.2), with the annual true-up written as a standing duty | one named person; a real January obligation | if they leave, the duty must be reassigned — the belt makes that visible |
+| **(b)** the belt raises to the firm owner every time | no designation needed | the owner becomes the tax-law maintainer by default |
+| **(c)** nobody named; the belt raises and whoever notices acts | nothing | this is how it silently breaks — a question with no owner is a question nobody answers |
+
+**Recommendation: (a), with (b) as the automatic fallback** — the design already specifies that when
+no tax lead is designated the belt raises to the firm owner **and says that it did**, so (c) cannot
+happen by drift.
+
+---
+
+## The three still open to the lane
 
 ### OQ-2 · There is no fixed-asset population to test capital allowances against.
 
@@ -225,62 +329,14 @@ Today `phl.hasil.gov.my` and both AGC portals were unreachable, so **no gazette 
 read at its own official source**, and LHDN's own consolidated Act 53 is stamped *as at 21 May 2024*
 (survey §6.1, §6.3). Six items are consequently unverified (U1-U6), including a live CA rate. Also
 unfetched: the Form C guide notes, which the field pack needs to know which fields drop sen (A.2).
-Options: **(a)** Tier-1 rows land only on two **official** sources, and an unreachable gazette simply
-blocks that rate — the design's current posture; **(b)** a professional-firm secondary counts as one
-of the two when the official source is provably down, with the row flagged; **(c)** the owner keys
-the rate himself as a human act, which is neither Clara's draft nor a fetch.
-**Recommendation: (a), with (c) as the escape.** A rate the owner keys is a human act with a human's
-name on it — that is a better answer than relaxing what "official" means.
-
-### OQ-4 · An unproven SME premise: refuse, or draft at 24% with a banner?
-
-The frozen build drafted at the standard rate and surfaced the conditions; this design refuses and
-names the missing fact (D-6). The cost of refusing is that a human sees no number until the paid-up
-capital and shareholding facts are recorded. The cost of defaulting is a figure on a draft that a
-tired reviewer may not re-question — and the difference is material (RM31,409.50 on the worked
-example, A.3).
-**Recommendation: refuse.** But this is genuinely the owner's call, because it changes what a busy
-tax agent sees on screen in the common case.
-
-### OQ-5 · Field-value pack, or a replica of the LHDN form?
-
-v1 produces the computation statement plus a field-code → value pack (D-8); the renderer cannot
-produce a boxed statutory form and the wording is owner-signed. A pack is what a human keys from; a
-replica is what a human recognises.
-**Recommendation: the pack for v1**, with a named Wave-G item for the form renderer if the owner
-wants recognition as well as keyability.
-
-### OQ-6 · The Tier-1 closure collides with the ALL-IN ruling. Contract amendment.
-
-`wave-f-contract.md:342-344` closes Tier-1 to three tables for Wave F and puts income-tax bands and
-capital allowances out "until their own consumers land (F-T2/F-T3)". The 2026-08-23 ruling lands
-F-T3 *inside* Wave F, so the consumer has landed inside the closure. Either Tier-1 re-opens for
-`tax_rate_bands` + `capital_allowance_rates`, or F-T3 builds a second governed-row mechanism — two
-architectures for one job (digest law 81).
-**Recommendation: re-open Tier-1 for exactly two more tables**, same door, same two-source check,
-same immutable+supersede shape. It is a smaller change than it sounds and it keeps one mechanism.
-
-### OQ-7 · Whose signature signs a treatment code?
-
-`tax_treatment_codes.owner_signed_by` is the hinge of the whole severance (D-11, D-13): it is the act
-that binds a fraction and a statutory citation together. Is that signature the owner's personally, or
-the firm's licensed tax agent's, or either? The professional-signature framing is what holds the
-statutory boundary here — the person who signs the code is the person who is professionally
-answerable for the citation.
-**Recommendation: a named licensed tax agent, who may be the owner.** Record the licence reference
-on the signature row.
-
-### OQ-8 · Who owns the standing duty to true the law after each Finance Act?
-
-Act 53 as read is stamped 21 May 2024 (U7); Budget 2026 and its tax bills are already in circulation
-(LHDN published a joint-memorandum response). Every rate band, threshold and Schedule-3 rate in
-`tax_rate_bands` / `tax_thresholds` / `capital_allowance_rates` has an effective-YA window that
-someone must extend or supersede each year, and **a missing row for the YA refuses by name** — which
-is the correct behaviour, and it means the computation stops working every January until someone
-acts.
-**Recommendation: make it an explicit annual duty with a named owner and a clocked reminder** (digest
-law 80 permits the clock to wake her; the work still triggers on data — she drafts the rows, the
-human signs). Left unnamed, this is the most likely way F-T3 quietly breaks.
+Options: **(a)** a row is seeded only against an **official** source, and an unreachable gazette
+simply blocks that rate — the design's current posture, which **R-L25 named as the model**;
+**(b)** a professional-firm secondary suffices when the official source is provably down, with the
+row flagged; **(c)** the owner or tax lead supplies the rate as a human act, cited to their own
+authority rather than to a URL.
+**Recommendation: (a), with (c) as the escape.** R-L25 settles the *mechanism* (seeded by PR, cited,
+missing-refuses) but not the *evidence bar*, so this stays open. A rate a named professional supplies
+is a human act with a human's name on it — a better answer than relaxing what "official" means.
 
 ### OQ-9 · Does the confirmed tax figure post a provision in Wave F?
 
@@ -293,18 +349,57 @@ number existing only inside a sealed report nobody journals from.
 
 ---
 
-# Annex E · The standing maintenance duty (a summary of what OQ-8 asks someone to own)
+## The five that are settled — stubs kept so a reader following a cite lands somewhere
 
-| Table | Refreshed when | Refused if stale |
-|---|---|---|
-| `tax_rate_bands` | each Finance Act / Budget affecting Schedule 1 | `rate_row_missing_for_ya` |
-| `capital_allowance_rates` | each gazette order affecting Schedule 3 rates | `rate_row_missing_for_ya` |
-| `tax_thresholds` | each Finance Act affecting a threshold in §4(5) of the design | the dependent rung is `not_evaluable` |
-| `tax_treatment_codes` | when a Public Ruling is withdrawn or replaced | the code's `effective_ya_to` closes; a superseding code is signed |
-| `tax_authorities` | when a cited URL moves or a PR is reissued | `citation_missing` at seal |
+### ~~OQ-4~~ · RULED 2026-08-23 — **REFUSE**
 
-Two things follow. First, **the refusals are the health signal** — a January that produces
-`rate_row_missing_for_ya` across the estate is the system correctly saying nobody has trued the year
-yet, and it is far better than a silent carry-forward. Second, the table above is the argument for
-`tax_authorities` carrying `accessed_at`: a citation whose last successful read was two years ago is
-a citation worth re-reading, and that is a query, not a memory.
+An unproven SME premise refuses and names the missing fact; it never falls back to 24%. The design's
+recommendation became the answer. Fold: design §6. The RM31,409.50 swing on the worked ladder (A.3)
+is why.
+
+### ~~OQ-5~~ · RULED 2026-08-23 — **the PACK, with the form version PINNED**
+
+The field-addressed pack ships; no form replica. The ruling **added** a requirement the design did
+not carry: the pack maps to LHDN's own field ids for a **pinned `form_version`**, a superseded
+version is the named refusal `form_version_superseded`, and the whole-ringgit truncation rule becomes
+a property of the mapped version rather than a global convention. Fold: design §8, D-8 extended,
+D-14 amended.
+
+### ~~OQ-6~~ · RULED 2026-08-23 — **R-L25, developer-seeded fact tables**
+
+The Wave-F Tier-1 closure re-opens for `tax_rate_bands` + `capital_allowance_rates`, seeded by
+migration on the D17/R-L19 pattern rather than through TA-P2's one-click door — one seeding
+architecture, not two (law 81). **The lane's own recommendation was wrong on the mechanism**: it
+proposed re-opening the *governed door*, and the ruling correctly points out that the price-row
+precedent already settled this. Folds: `wave-f-contract.md` `[TB-2026-08-23]`, design §4 + §11 (PR-1
+no longer builds a door), **D-15**.
+
+### ~~OQ-7~~ · CARDED — see **D.2**
+
+### ~~OQ-8~~ · CARDED — see **D.3**. Its **product half is granted and designed** (design §4.6).
+
+---
+
+# Annex E · The standing maintenance duty — what the belt watches
+
+This is the population the `law_review_due` belt reads (design §4.6). Each row carries
+`valid_through`; the belt raises one typed question per expiring row to the firm's tax lead, and the
+question closes only when a superseding row is **seeded** (R-L25 — a rate change is a ticket and a
+PR, never an in-place edit).
+
+| Table | Refreshed when | Refuses if stale | `valid_through` set from |
+|---|---|---|---|
+| `tax_rate_bands` | each Finance Act / Budget affecting Schedule 1 | `rate_row_missing_for_ya` | the last YA the band is legislated for |
+| `capital_allowance_rates` | each gazette order affecting Schedule 3 rates | `rate_row_missing_for_ya` | the order's own expiry, or the last YA seeded |
+| `tax_thresholds` | each Finance Act affecting a threshold in §4(5) of the design | the dependent rung is `not_evaluable` | the last YA the threshold is legislated for |
+| `tax_treatment_codes` | when a Public Ruling is withdrawn or replaced | `treatment_code_unsigned` on the successor until it is signed | `effective_ya_to`, plus a re-read horizon on the cited PR |
+| `tax_authorities` | when a cited URL moves or a PR is reissued | `citation_missing` at seal | a re-read horizon from `accessed_at` |
+| the field-pack map | when LHDN issues a new form edition | `form_version_superseded` | the pinned `form_version`'s own YA |
+
+Three things follow. First, **the refusals are the health signal, and the belt is the early warning**
+— a January that produces `rate_row_missing_for_ya` across the estate means nobody trued the year,
+which is far better than a silent carry-forward, but the belt should have said so in November.
+Second, this table is the argument for `tax_authorities` carrying `accessed_at`: a citation whose
+last successful read was two years ago is worth re-reading, and that is a query, not a memory.
+Third, **the belt is why a `valid_through` in the past is not an error state** — the row still
+computes and the question is already open, so the system degrades by asking rather than by stopping.
