@@ -433,6 +433,15 @@ const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 // one-line fill instead of a re-derivation.
 const POSTING_F_A2_PR1_CLOCK_NAMES = [];
 
+// F-A6 PR-1 [`f_a6_freeform_read` at whatever number merge claimed]: re-run arm (D) against the
+// migration's own bodies (the F-A2 seat's obligation, stated in full above) — two names flag,
+// both lawful, neither a date derivation: `_freeform_settle` stamps `settled_at = now()`, the
+// same timestamptz shape as every settle stamp already rostered above; `wake_freeform_read`
+// reads `clock_timestamp()` to measure WALL-CLOCK ELAPSED TIME for the read's deadline loop
+// (design §3.3), an interval measurement that writes no date/timestamptz column. Gated on the
+// migration stem, never a number, exactly like every seat above.
+const F_A6_FREEFORM_READ_CLOCK_NAMES = ["_freeform_settle", "wake_freeform_read"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -456,6 +465,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
+  if (await appliedStem("f_a6_freeform_read$")) names.push(...F_A6_FREEFORM_READ_CLOCK_NAMES);
   return names.sort();
 }
 

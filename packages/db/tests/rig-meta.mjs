@@ -816,6 +816,26 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
+// ---------------------------------------------------------------------------
+// F-A6 PR-1 [Wave-F Track A] — the audited freeform read. The ENUMERATED EXECUTE surface of
+// clara_freeform_ro, and the reason it is a cohort rather than a loose list: A.2 is a CLOSED
+// SEVEN, cemented by the migration's own tail, and this roster is the test-side twin. The
+// ungranted core is named among the internals so its ABSENCE from every role set is a DECLARED
+// expectation rather than a silent default — v1's GB-2 defect was exactly a core that was
+// described as ungranted in one place and granted in another.
+const FREEFORM_F_A6_GRANTED_FNS = [
+  "wake_freeform_read", "_freeform_arm", "_freeform_settle",
+  "_freeform_scope_clients", "_freeform_admitted",
+];
+const FREEFORM_F_A6_UNGRANTED_FNS = [
+  "_freeform_core", "_tf_freeform_settle_once", "_tf_freeform_must_settle",
+];
+export const FREEFORM_F_A6_COHORT = [...FREEFORM_F_A6_GRANTED_FNS, ...FREEFORM_F_A6_UNGRANTED_FNS];
+// The two shared helpers the freeform policies call. They are NOT in the cohort (they are
+// 0004/0011 objects that predate F-A6), but they ARE in the role's expected EXECUTE set, and
+// wake_firm is a policy helper besides — which is why the strict matrix skips it.
+const FREEFORM_F_A6_SHARED_FNS = ["wake_firm", "shares_my_firm_wake"];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -883,6 +903,22 @@ export const ALLOWED = {
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
+  // F-A6 PR-1 — BOTH new roles are KEYS, and that is the whole point of adding them (E.2/C11,
+  // GM-6): `grantMatrixFailures` iterates Object.keys(ALLOWED), so a role that is not a key is
+  // never probed by the exact-EXECUTE census AT ALL.
+  //
+  // `wake_firm` and `shares_my_firm_wake` are in the group's set but never probed: both are RLS
+  // policy helpers, so `allowedBroadly` skips them. They are listed anyway so this roster reads
+  // as the SEVEN of Annex A.2 rather than as five names and a footnote.
+  "clara_freeform_ro": new Set([...FREEFORM_F_A6_GRANTED_FNS, ...FREEFORM_F_A6_SHARED_FNS]),
+  // THE LOGIN SHELL'S SET IS EMPTY, AND THAT IS THE ASSERTION — measured, not assumed. The first
+  // cut of this entry mirrored the group's, on the reasoning that has_function_privilege answers
+  // through membership; it went RED on all five verbs. `grant … with inherit false` means the
+  // BARE login holds nothing at all until it explicitly SET ROLEs, and has_function_privilege
+  // reports exactly that. So this key now buys the strongest statement available: across EVERY
+  // function in schema clara, the fourth login's ambient EXECUTE surface is ZERO — the S4-AB1
+  // property, asserted over the whole catalog instead of over one probe.
+  "clara_freeform_login": new Set([]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
@@ -1029,8 +1065,20 @@ export async function grantMatrixFailures() {
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara'`,
   );
-  const roles = Object.keys(ALLOWED);
+  // A role key whose role does not exist on THIS frontier is skipped, not probed:
+  // has_function_privilege RAISES on an unknown role, which would turn "F-A6 has not applied
+  // here" into a torrent of unrelated failures. The skip is NAMED below rather than silent —
+  // a key that never resolves anywhere is a dead roster entry and must be visible as one.
+  const allKeys = Object.keys(ALLOWED);
+  const live = await rootQuery(
+    "select r as rolname, to_regrole(r) is not null as ok from unnest($1::text[]) r", [allKeys],
+  );
+  const roles = live.rows.filter((r) => r.ok).map((r) => r.rolname);
+  const absent = live.rows.filter((r) => !r.ok).map((r) => r.rolname);
   const failures = [];
+  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform"))) {
+    failures.push(`ALLOWED names role(s) that do not exist on this database: ${absent.join(", ")}`);
+  }
   for (const f of fns.rows) {
     if (f.public_exec) failures.push(`PUBLIC has EXECUTE on clara.${f.proname}`);
     if (allowedBroadly.has(f.proname)) continue;
@@ -1064,6 +1112,12 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
+  // cohort is a half-applied migration and is reported as one.
+  const freeformLive = FREEFORM_F_A6_COHORT.filter((n) => liveNames.has(n));
+  if (freeformLive.length !== 0) {
+    failures.push(...cohortFailures("F-A6 PR-1 audited freeform read", FREEFORM_F_A6_COHORT, liveNames));
+  }
   return failures;
 }
 

@@ -75,12 +75,18 @@ declare
   live text := '';
   -- Group roles the migrations create NOLOGIN and never flip to LOGIN — safe to
   -- re-assert NOLOGIN unconditionally.
+  -- F-A6 PR-1 adds clara_freeform_ro here, and it is NOT optional bookkeeping: pg_dump never
+  -- emits roles, so a role missing from this file is a role that does not exist at restore time
+  -- — and the dump's `GRANT SELECT ON … TO clara_freeform_ro` then fails, taking the restore
+  -- with it. The DR round-trip is where that would be discovered otherwise.
   grp text[] := array[
     'clara_fn_owner', 'clara_authenticated', 'clara_agent_ro',
-    'clara_wake_interactive', 'clara_wake_proactive', 'clara_runtime'
+    'clara_wake_interactive', 'clara_wake_proactive', 'clara_runtime',
+    'clara_freeform_ro'
   ];
   -- Login SHELLS: created NOLOGIN here; a LIVE project flips them to LOGIN out of band.
-  logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'];
+  logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
+                         'clara_freeform_login'];
 begin
   -- Fail closed: never run on a live project (a login shell already LOGIN) w/o override.
   foreach r in array logins loop
@@ -164,6 +170,7 @@ end $$;
 grant clara_runtime         to clara_runtime_login     with inherit false, set true;
 grant clara_agent_ro        to clara_agent_read_login  with inherit false, set true;
 grant clara_wake_interactive to clara_wake_write_login with inherit false, set true;
+grant clara_freeform_ro      to clara_freeform_login   with inherit false, set true;
 
 -- 2b. Deploy-role membership. The restoring role must be a member of clara_fn_owner
 --     WITH INHERIT + SET so it can restore object ownership — the full dump emits
@@ -186,6 +193,8 @@ begin
     grant clara_runtime_login    to postgres with inherit false, set true;
     grant clara_agent_read_login to postgres with inherit false, set true;
     grant clara_wake_write_login to postgres with inherit false, set true;
+    grant clara_freeform_ro      to postgres with inherit false, set true;
+    grant clara_freeform_login   to postgres with inherit false, set true;
   else
     raise notice 'postgres role absent — skipping the deploy-role SET grants (bare throwaway); the restoring role gets clara_fn_owner below';
   end if;

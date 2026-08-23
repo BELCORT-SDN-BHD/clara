@@ -365,7 +365,8 @@ purpose list lands. *Fail-closed default:* that reading, plus R-5 — F-A6 must 
 sanctioning the chat lane's currently ungoverned egress.
 
 **OQ-E (opened by the fold, D-28) — the contract's XLSX/DOCX clause.** The live contract block
-(`wave-f-contract.md:257-259`) says structured-parse content *"becomes reachable by AI-assisted read
+(`wave-f-contract.md:263-265`, re-derived against `origin/main` at 6807b39 — the design's
+first cut said `:257-259`, which was true of the pre-amendment file) says structured-parse content *"becomes reachable by AI-assisted read
 here"*; v1's S-2 exclusion means it is not, through this door. *Recommendation:* hold the exclusion
 in v1 — a client pin cannot be compiled on a table with no `client_id`, and the alternative leaks a
 sibling client's document body — and build the EXISTS-join arm to `document_filings` in v2.

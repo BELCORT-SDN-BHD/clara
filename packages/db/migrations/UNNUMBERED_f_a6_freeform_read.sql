@@ -129,6 +129,102 @@
 -- =====================================================================================
 
 -- =====================================================================================
+-- §0.1c  THE LAW-28 ADVERSARIAL PASS, folded. Its verdict was BUILDABLE WITH THE LISTED
+--        WALLS; this section records what each finding cost, INCLUDING the two places where
+--        the recommended wall does not work and something else had to carry it.
+-- =====================================================================================
+-- B-1 (blocker) · the pg_catalog/public residual was accepted on the sentence "the sanctioned
+--   agent surface is curated typed reads, not raw SQL" (acl-baseline.sql:7-12), and F-A6 IS raw
+--   SQL. FIXED IN PART, and the part that is not fixed is named rather than papered over:
+--   both roles join all four `confined` arrays in acl-baseline.sql, §2.1 below adds 0002:154-172's
+--   direct schema-USAGE confinement for them, and the tail's C12 census MEASURES the outcome in
+--   both directions instead of assuming it. **The pg_catalog function residual itself is an
+--   OWNER CEREMONY, not a migration** — see the next paragraph, which is a correction to the
+--   recommended wall.
+--
+-- **A PER-ROLE `REVOKE EXECUTE` ON THE pg_catalog RESIDUAL IS A NO-OP, MEASURED.** The obvious
+--   fix — `revoke execute on function pg_catalog.pg_sleep(...) from clara_freeform_ro` — RUNS
+--   WITHOUT ERROR and CHANGES NOTHING: privileges are additive, the EXECUTE arrives through the
+--   PUBLIC grant, and `has_function_privilege('clara_freeform_ro', 'pg_sleep', 'EXECUTE')` is
+--   still TRUE afterwards (measured on postgres:17.11 against pg_sleep, pg_notify, query_to_xml
+--   and two pg_advisory_lock overloads: five revokes "succeeded", five privileges survived).
+--   0002:142-147 already wrote this down for schema USAGE — *"privileges are ADDITIVE … a DIRECT
+--   revoke here does NOT remove USAGE still held via a PUBLIC grant"* — and it is equally true of
+--   function EXECUTE. Shipping those five revokes would have installed a wall that LOOKS like a
+--   wall in the diff, passes review, and refuses nothing. The only effective close is
+--   `REVOKE … FROM PUBLIC`, which needs ownership of pg_catalog, is cluster-wide (it would break
+--   `pg_notify` for the estate's own event relay at 0005:489 unless clara_fn_owner is re-granted),
+--   and is exactly the superuser block acl-baseline.sql:129-145 keeps commented out. That is an
+--   owner ceremony. **REGISTERED FOR OWNER RE-ACCEPTANCE AGAINST THIS SURFACE** (the design's
+--   own escalation shape): the residual's justifying sentence is no longer true, and it may not
+--   be inherited silently.
+-- B-2 (blocker) · `query_to_xml` is a second execution engine past the cursor, the census and the
+--   caps. FIXED as far as a mechanism can: §6.1 promotes the plan census from a RELATION census
+--   to a RELATION + FUNCTION census. MEASURED REACH, stated so nobody over-reads it —
+--   `explain (format json, verbose)` emits `Function Name` for a FUNCTION SCAN and NOT for a
+--   scalar call in a target list, so `select * from query_to_xml(…)` and `pg_settings` (which is
+--   a Function Scan on `pg_show_all_settings`) are REFUSED, while `select query_to_xml(…)` as a
+--   scalar is not. The scalar form's residual is bounded and named: RLS still applies inside SPI,
+--   so no firm and no client boundary moves — what it can do is make `relations_read` and
+--   `row_count` understate the read. That is a receipt-accuracy residual, it is real, and it
+--   closes with B-1's owner ceremony and not before.
+-- B-3 (blocker) · `cross_client_unavailable` has no producer. **REFUTED IN PART — as built there
+--   IS a producer** (§6.3(a): the credential pin vs the turn's session client, raised and forced
+--   live) — but the finding's deeper half is RIGHT and is fixed: a client-pinned session asking a
+--   two-client question that does NOT trip the congruence pair is silently filtered by RLS and
+--   receives a single-client answer. §6.1 therefore states the COMPILED SCOPE in the
+--   model-facing result (`scope`, `scope_clients`, `scope_note`), so a narrowed answer can never
+--   read as a complete one.
+-- H-1 (high) · the payload can `select current_setting('clara.wake_secret')` and exfiltrate the
+--   live wake credential in ordinary result rows. FIXED, and it is the largest change in the
+--   fold: `_freeform_arm` writes `firm_id` and the compiled pin onto the armed receipt row and
+--   then CLEARS the secret before the verb ever opens the cursor. The policies therefore read
+--   `clara._freeform_firm()` and `clara._freeform_shares_firm(uuid)` — freeform-specific readers
+--   over the armed row — instead of `wake_firm()` and `shares_my_firm_wake()`. Firm and pin move
+--   TOGETHER, as the pass's own corollary 5 requires. Side benefit: the enumerated EXECUTE list
+--   no longer contains a single pre-existing estate function; it is seven F-A6 objects.
+-- H-2 (high) · "the arm state is a GUC, so the receipt claim is forgeable". **REFUTED AS BUILT.**
+--   There is no arm GUC at all. §0.1(4) reached the same conclusion from the write side before
+--   this pass ran, and the built shape keys the arm state on `pg_current_xact_id()` stored in
+--   `arm_txid` on the receipt row — a column the payload cannot write (no INSERT/UPDATE grant)
+--   and a value it cannot forge. The finding's own recommended wall is what is built, minus the
+--   GUC it still assumed; `current_setting` appears nowhere in `_freeform_admitted()`.
+-- H-3 (high) · catalog reads through FUNCTIONS escape a relation-only census. Partially fixed by
+--   B-2's function census (it catches the Function-Scan forms); the scalar forms
+--   (`pg_get_functiondef`, `pg_get_viewdef`) remain readable, exactly as R-2 says. R-2 is
+--   re-stated a third time in the design: the census is defence-in-depth over relation scans,
+--   the catalog is READABLE by the payload, and the confidentiality claim rests on B-1's
+--   ceremony and on H-1's secret clearing — which is now real.
+-- H-4 (high) · `pg_sleep(3600)` inside ONE fetch defeats a between-fetch clock check.
+--   **THE RECOMMENDED WALL DOES NOT WORK, MEASURED — and the real one is named instead.** A
+--   `SET LOCAL statement_timeout` issued before each FETCH cannot bound that FETCH: PostgreSQL
+--   arms the statement timer once, at the start of the TOP-LEVEL statement, and a GUC changed
+--   after that is not re-armed (measured twice — it is the same mechanism that makes §0.1(2)
+--   true). What DOES bound it is a session-level `statement_timeout` set by the POOL before it
+--   issues `select clara.wake_freeform_read(…)`: measured, that fires inside the FETCH and
+--   propagates. It is therefore a PR-2 obligation and a Tier-D outcome (the transaction dies,
+--   no DB receipt, the runtime's task record is the honest home) — recorded here so PR-2 cannot
+--   treat it as optional. The in-loop clock check stays as the RECEIPTED deadline for every
+--   multi-fetch read, which is the population it can actually serve.
+-- H-5 (high) · a payload can take a SESSION advisory lock on a well-known firm-derived key and
+--   `reset all` does not release it. Not closable here (same additive-PUBLIC fact as B-1) and
+--   NOT papered over: registered with B-1 for the owner ceremony, plus a PR-2 obligation to
+--   release the freeform pool with `DISCARD ALL` rather than `reset all`.
+-- M-2 · census C12 for both new roles (schema privileges, database TEMP, superuser/bypassrls) —
+--   built into the tail below and into the battery. M-3 · the EXECUTE census goes cluster-wide
+--   in the tail rather than stopping at schema `clara`. M-4 · the INVOKER verb pins `search_path`
+--   (it already did) and the battery widens T18's claim to every function this file creates,
+--   DEFINER or INVOKER. M-5 · the "every exit settles" body invariant is stated at §6.1 and
+--   forced per Tier-C pair in the battery.
+-- WHAT THE PASS FOUND HOLDING, cited because a later reader deserves the credit as well as the
+--   debts: all 177 `create policy` statements in 0001-0102 are role-pinned (a `TO`-less policy
+--   would have OR'd straight past `_freeform_admitted()`); no dblink/postgres_fdw/file_fdw/http/
+--   pg_net exists anywhere in the chain and no COPY is reachable; neither roles nor owners bypass
+--   RLS; `OPEN … FOR EXECUTE` plus the derived-table wrap is a real structural single-statement
+--   wall and D-18's inversion is the right order; and GB-1's one-arm/one-settle fold is sound.
+-- =====================================================================================
+
+-- =====================================================================================
 -- §1  PRESTATE — fail-closed on every premise this file rides on.
 -- =====================================================================================
 do $fa6_pre$
@@ -184,9 +280,17 @@ begin
       raise exception 'F-A6 PR-1 partial birth: % already exists', n using errcode = 'CLR10';
     end if;
   end loop;
-  if exists (select 1 from pg_roles where rolname in ('clara_freeform_ro','clara_freeform_login')) then
-    raise exception 'F-A6 PR-1 partial birth: a clara_freeform_* role already exists' using errcode = 'CLR10';
-  end if;
+  -- NOT a role check, and that is a MEASURED correction, not an oversight: a role is a
+  -- CLUSTER-wide object, not a per-database one, while this prestate block is running inside
+  -- ONE target database. The estate suite's own a21-prestate.test.mjs creates a SECOND scratch
+  -- database in the SAME Postgres cluster and re-applies the full migration set there — so by
+  -- the time this file reaches that second database, clara_freeform_ro/clara_freeform_login
+  -- already exist (created when the first database migrated), while THIS database's
+  -- schema_migrations has no 0106 row at all. A role-existence raise here fires on that
+  -- entirely legitimate case and takes the whole estate run down with it (MEASURED: exactly
+  -- this failure, on this rig). 0006/0009 — the two migrations that create the OTHER three
+  -- login shells — carry no such check for the same reason; §2 below creates each role with
+  -- `if not exists`, which is what actually needs to be idempotent, and IS.
   if exists (select 1 from clara.wake_fn_allowlist where function_name = 'wake_freeform_read') then
     raise exception 'F-A6 PR-1 partial birth: a wake_freeform_read allowlist row already exists' using errcode = 'CLR10';
   end if;
@@ -1240,3 +1344,12 @@ begin
   raise notice 'F-A6 PR-1 tail: OK -- two new roles (clara_freeform_ro group + the fourth login clara_freeform_login, member of it ALONE, NOLOGIN until the operator ceremony); the admission ladder sits in the UNGRANTED clara._freeform_core, which takes no scope and no verb argument and is EXECUTE-reachable by no role at all; the compiled pin is a uuid[] set (NULL = firm-wide, one element = the credential''s client), so F-A6 v2 widens a set instead of re-cutting 35 policies; SELECT on exactly 35 enumerated relations and EXECUTE on exactly 7 functions, both DERIVED from the catalog and both excluding the audit spine, the authority spine, the wiki cohort, the runtime state and the OCR/structured-parse tables; 35 role-pinned SELECT policies, one per relation, EVERY one carrying the _freeform_admitted() conjunct, so an un-armed transaction reads ZERO ROWS from all 35; clara.freeform_read_log ALTERed in place over ZERO rows with the settle-once + no-truncate + DEFERRED must-settle triggers, the bookkeeper+ human policy AND its table GRANT, and 0002:542''s runtime INSERT grant plus p_freeform_read_log_runtime BOTH REMOVED -- the receipt now has exactly two writer bodies and no third; exactly two allowlist rows, both interactive-family, F-A2''s own interactive_client row untouched; PUBLIC holds zero EXECUTE and every new function carries exactly one overload. No live body was CoR''d, so no D1 write-quiesce was required. No table in workflow/graphile_worker/spike touched.';
 end
 $fa6_tail$;
+
+-- The estate's own convention (0002:175/561, 0003:28/527, 0004:26/799, 0005:48/1147,
+-- 0006:94/1188 …): every file that SET ROLEs to clara_fn_owner near its top RESETs before it
+-- ends. Missing this is not cosmetic — the runner's atomicity wrapper (migration-atomicity.mjs)
+-- compares session_user/current_user before and after the file's transaction and RAISES
+-- "migration leaked runner-owned session authorization or role" if they differ, aborting the
+-- whole migration. MEASURED on the rig: §2's `set role clara_fn_owner` with no matching reset
+-- trips exactly that guard.
+reset role;

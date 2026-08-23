@@ -241,14 +241,27 @@ testCase("an `execute` inside a comment or a string literal is not dynamic SQL",
 });
 
 testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
-  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. Exactly one
-  // entry stands today — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226,
-  // full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
+  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry.
+  //
+  // FIRST ENTRY — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226, full
+  // ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
   // pg_get_functiondef re-count outside the census grammar plus 'execute' as a privilege-name
-  // literal and one raise-message word — nothing dynamic constructed or run; why + the full
-  // declared target set live in wiki-lint-checks.mjs. A SECOND entry must trip this pin and
-  // earn its own reviewed justification, exactly as the first did.
-  const expectedKeys = ["apply_open_items(uuid,jsonb,text,text)"];
+  // literal and one raise-message word — nothing dynamic constructed or run.
+  //
+  // SECOND ENTRY — F-A6 PR-1's `wake_freeform_read`, and it tripped this pin exactly as the
+  // comment above demanded. Its justification is DIFFERENT IN KIND from the first, which is why
+  // it needed its own review rather than a widened pattern: the first entry runs nothing
+  // dynamic at all, while this one is the estate's ONE genuinely unreconstructible statement —
+  // the SQL is a parameter the model composed, which is the shape ADR-0071 fixed. What upholds
+  // 0017:1424-1426 there is the ACL, not the text: the statement executes as
+  // `clara_freeform_ro`, which holds SELECT on 35 enumerated relations and on NO wiki relation,
+  // so a wiki payload is refused by Postgres at planning with `(42501, relation_denied)`. The
+  // full why, and the reason both declared target sets are deliberately EMPTY, are in
+  // wiki-lint-checks.mjs. A THIRD entry must trip this pin in its turn.
+  const expectedKeys = [
+    "apply_open_items(uuid,jsonb,text,text)",
+    "wake_freeform_read(text,text,uuid,text,integer)",
+  ].sort();
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
     throw new Error(`the allowlist is pinned to exactly ${JSON.stringify(expectedKeys)}; it now carries ${JSON.stringify(actualKeys)} — each entry needs its own reviewed justification`);

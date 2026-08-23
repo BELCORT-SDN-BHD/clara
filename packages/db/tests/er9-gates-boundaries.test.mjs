@@ -444,18 +444,29 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
   const machineRoles = (await rootQuery(
     "select rolname from pg_roles where rolname ~ '^clara_' order by rolname",
   )).rows.map((r) => r.rolname).filter((r) => !sanctioned.has(r));
-  // mandatory setup: today's estate (0002 six + 0006's two _login roles + 0009's
-  // clara_wake_write_login) carries exactly seven non-sanctioned clara_ roles — the four the
-  // old blacklist named PLUS clara_agent_read_login, clara_runtime_login, clara_wake_write_login,
-  // which it silently missed. A role invented later only grows this set; it is never re-hardcoded.
-  assert.equal(machineRoles.length, 7,
-    `mandatory setup: expected the seven known non-sanctioned clara_ roles (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
-  for (const expected of [
-    "clara_agent_ro", "clara_agent_read_login", "clara_runtime", "clara_runtime_login",
-    "clara_wake_interactive", "clara_wake_proactive", "clara_wake_write_login",
-  ]) {
-    assert.ok(machineRoles.includes(expected), `mandatory setup: the derived census includes ${expected}`);
-  }
+  // mandatory setup: the non-sanctioned clara_ roles are a REGISTERED ROSTER, not a count.
+  //
+  // TRUED BY F-A6 PR-1. This used to read `assert.equal(machineRoles.length, 7)` plus a
+  // seven-name presence loop, and the sentence above it said "a role invented later only grows
+  // this set; it is never re-hardcoded" — which the hard-equal made false in practice: F-A6's
+  // two new roles turn it red, and the only way past a bare 7 is to retype an 9. A number
+  // carries no owner, so a bump is indistinguishable from a leak. The roster does carry one:
+  // each role names the migration that creates it and a probe for whether that migration has
+  // applied HERE, so this cell is bimodal-green across frontiers without ever being re-cut.
+  //
+  // Both directions still hold, and one of them is new: a LIVE role nobody registered fails
+  // (the closed world), and a REGISTERED role whose migration is applied but which is MISSING
+  // fails too (the direction a count could never express).
+  const { CLARA_ROLE_ROSTER, appliedEntries, rosterFailures } =
+    await import("./fixtures/wake-allowlist-roster.mjs");
+  const appliedRoles = await appliedEntries(CLARA_ROLE_ROSTER, rootQuery);
+  const rosterCheck = rosterFailures(
+    "mandatory setup: the non-sanctioned clara_ role census",
+    machineRoles, appliedRoles.map((e) => e.role), CLARA_ROLE_ROSTER.map((e) => e.role),
+  );
+  assert.deepEqual(rosterCheck.failures, [], rosterCheck.failures.join(" | "));
+  assert.ok(machineRoles.length >= 7,
+    `mandatory setup: the estate floor is the 0002 four + 0006's two logins + 0009's write login (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
 
   for (const f of fns) {
     const exists = (await rootQuery("select to_regprocedure($1) is not null as ok", [f])).rows[0].ok;

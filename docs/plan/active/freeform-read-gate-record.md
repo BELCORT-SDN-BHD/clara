@@ -16,6 +16,14 @@
 > the fold, so a pass run now would have been run against a body nobody will build. It runs against
 > v2, before PR-1 merges — the contract imposes it, this record does not waive it.
 >
+> **TRUED 2026-08-23 — the pass RAN, against v2, before PR-1's build.** Record:
+> `freeform-read-law28-review.md` (Codex refused the prompt under its cyber-content filter; a
+> native fresh-context lane substituted, per `wave-f-lane-brief.md`'s standing rule). Its blockers
+> B-1/B-2/B-3 and highs H-1..H-5 are folded into `UNNUMBERED_f_a6_freeform_read.sql` §0.1c, with
+> the two places the review's own recommended wall did not work (a per-role `REVOKE EXECUTE` on
+> the pg_catalog residual, and a `SET LOCAL statement_timeout` before each FETCH) named rather
+> than papered over. Every sentence below that still reads "outstanding" predates this.
+>
 > Standing caveat unchanged: migration-source reads are predictions about the live catalog; PR-1's
 > rig replay confirms them (§7).
 
@@ -240,7 +248,7 @@ conjunct, and the execution wall. **The small hard core ships first.**
    ceremony's train is **the lead's call, not this design's** (the D29 precedent) — v1 was right to
    refuse to self-assert it, and the fold does not change that.
 6. **Too NARROW in one place, and the fold does not paper over it:** the contract's XLSX/DOCX clause
-   (`wave-f-contract.md:257-259`). See OQ-E in §6.
+   (`wave-f-contract.md:263-265`). See OQ-E in §6.
 
 **The revised train:** PR-0 (this gate — DONE, law-28 pass still outstanding) → PR-1 (DB: two roles,
 35 relations + 7 functions, the policies, the receipt ALTER + three triggers + the human grant and
@@ -295,7 +303,7 @@ stays under 500 lines with the annex map current.
    calls the arm verb aborts; (iii) a read with no settled receipt cannot COMMIT. **Alternative (a)
    is REJECTED** — a payload escaping the role switch would run as `clara_fn_owner`, a worse failure
    class than a forged receipt.
-3. **OQ-E — the contract's XLSX/DOCX clause.** `wave-f-contract.md:257-259` says structured-parse
+3. **OQ-E — the contract's XLSX/DOCX clause.** `wave-f-contract.md:263-265` says structured-parse
    content *"becomes reachable by AI-assisted read here"*; v1's S-2 exclusion means it is not.
    *Fail-closed default:* excluded in v1, `read_document` → `get_document_extract` named as the
    surviving door, the EXISTS join to `document_filings` deferred to v2. The owner should see the

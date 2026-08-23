@@ -241,7 +241,7 @@ create policy p_<t>_freeform on clara.<t> for select to clara_freeform_ro
   **S-2 excluded from v1** — `document_extractions`/`document_regions` carry no `client_id`
   (survey §3.5), so under a client pin they would leak sibling clients' OCR text. **Named cost, in
   the contract's own words (D-28, OQ-E):** the contract says *"XLSX/DOCX content (values-only today,
-  `monetary_cents: null`) becomes reachable by AI-assisted read here"* (`wave-f-contract.md:257-259`)
+  `monetary_cents: null`) becomes reachable by AI-assisted read here"* (`wave-f-contract.md:263-265`)
   — and it is **not**, through this door, in v1: structured-parse output lands in exactly those two
   tables. It stays reachable through the existing typed door (`read_document` →
   `clara.get_document_extract`, `0011:3232-3260`); v2's shape is the EXISTS join to
@@ -419,7 +419,7 @@ an F-A2 ceremony's train it rides that window for free; **the lead rules the tra
    adversarial pass has NOT yet been run and must now run against THIS shape** — the injection
    surface's execution order (D-18) and its granted-function set (D-20/D-21) both changed, so a pass
    run against v1 would have been run against a body nobody will build. The rig replay answers
-   **P-1..P-20**.
+   **P-1..P-20**. **TRUED 2026-08-23 — it ran** (`freeform-read-law28-review.md`), folded into §0.1c.
 2. **PR-1 (DB).** The two roles; the enumerated grants (35 relations, **7** functions); the
    policies; the `freeform_read_log` ALTER + the settle-once and must-settle triggers + the human
    grant and policy; **ONE verb** plus `_freeform_arm` / `_freeform_settle` /

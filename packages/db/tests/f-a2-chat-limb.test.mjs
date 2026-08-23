@@ -228,14 +228,39 @@ test("f-a2.c13.mint the new kind mints only with a firm-congruent active client,
   noteLane("c13.mint: the mint verifies FIRM-CONGRUENT AND ACTIVE, not that this human is authorised for that client — the estate's existing firm-scoped model, stated rather than implied");
 });
 
-test("f-a2.c13.one-row GB-3's closed-world cell — interactive_client holds EXACTLY ONE allowlist row", async (t) => {
+test("f-a2.c13.one-row GB-3's closed-world cell — interactive_client's allowlist is EXACTLY its registered roster", async (t) => {
   if (gateWaveA(t)) return;
   if (await gateChatParity(t)) return;
-  const r = await rootQuery(
-    "select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind=$1 order by 1", [NEW_KIND]);
-  const fns = r.rows.map((x) => x.fn);
-  assert.deepEqual(fns, ["wake_open_question"],
-    `c13.one-row: exactly ONE row, and it is the fail-closed question call. A SECOND row is how this kind would quietly become a posting kind (got ${fns.join(", ")})`);
+  // TRUED BY F-A6 PR-1, and the literal is GONE ON PURPOSE. The wall this cell defends is real —
+  // a row this kind acquires unnoticed is how it would quietly become a posting kind — but
+  // `deepEqual(fns, ["wake_open_question"])` made every later claimant RE-CUT the cell, and a
+  // re-cut closed world is one nobody can audit: an intentional widening and a merge that lost
+  // an entry look identical afterwards. The roster is now registered, per row, keyed by the
+  // owning migration's stem and gated on that migration's OWN presence probe.
+  //
+  // The wall is not weakened, it is doubled. Direction (a): every LIVE row must be rostered, so
+  // an unregistered row still fails here. Direction (b), which the literal could not express:
+  // every rostered row whose migration IS applied must be LIVE, so a row that goes MISSING fails
+  // too. What no longer fails is a lane landing its own registered row.
+  const { WAKE_ALLOWLIST_ROSTER, appliedEntries, rosterFailures } =
+    await import("./fixtures/wake-allowlist-roster.mjs");
+  const roster = WAKE_ALLOWLIST_ROSTER[NEW_KIND];
+  const live = (await rootQuery(
+    "select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind=$1 order by 1",
+    [NEW_KIND],
+  )).rows.map((x) => x.fn);
+  const applied = await appliedEntries(roster, rootQuery);
+  const { failures, dormant } = rosterFailures(
+    `c13.one-row (${NEW_KIND})`, live, applied.map((e) => e.fn), roster.map((e) => e.fn),
+  );
+  assert.deepEqual(failures, [], failures.join(" | "));
+  // POSTING IS STILL THE THING BEING WALLED, and this half stays a literal because it is not a
+  // roster: NO row of this kind may name a posting verb, whoever registers it.
+  const posting = live.filter((fn) => /^wake_(post_entry|draft_entry|approve|record_client_resolution)$/.test(fn));
+  assert.deepEqual(posting, [],
+    `c13.one-row: the pinned chat kind must never carry a posting verb (got ${posting.join(", ")})`);
+  noteLane(`c13.one-row: ${NEW_KIND} carries ${live.length} allowlist row(s) — ${live.join(", ") || "(none)"}`
+    + `; registered-but-not-yet-applied: ${dormant.join(", ") || "(none)"}`);
 });
 
 test("f-a2.c13.woq wake_open_question succeeds from the pinned kind, and still REFUSES an unpinned credential", async (t) => {
