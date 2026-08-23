@@ -1,7 +1,17 @@
 -- UNNUMBERED_f_a7_beta_filing_verb.sql -- Wave-F Track A, F-A7 (the filing verb + the interview
 -- model layer), PR-4, TRAIN BETA. Authored UNNUMBERED; the number is claimed at MERGE
--- PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md). The battery gates
--- on the CATALOG and on this file's STEM, never on a number.
+-- PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md). CI's PARTITION GATE
+-- (the mechanism deciding which battery a migration belongs to) keys on the CATALOG and on this
+-- file's STEM, never on a number -- that is a statement about the repo-wide mechanism, not a
+-- claim that this train's OWN test file (f-a7-beta-filing-verb.test.mjs) carries a catalog
+-- existence gate of its own; it does, added after an independent review found the header read
+-- as if it already had one. HARD MERGE-ORDER FACT, found by that same review and not previously
+-- recorded anywhere: this file also depends on TRAIN PI's objects (`_firm_question_core`,
+-- `name_family_candidates`, `agent_receipt_surfaces`' f_a7 row, …), and pi is NOT on `main` as
+-- of this authoring session (`git grep firm_open_questions main -- packages/db/migrations/` is
+-- empty; it lives only on `f-a7/pr-1-pi`). annexes-2.md SSI.1's beta row names only "alpha and
+-- gamma merged; F-A2 PR-1" as prerequisites -- pi belongs in that list too and is not merely
+-- implied by pi being an earlier train number.
 --
 -- Design of record: docs/plan/active/filing-and-interview-design.md v2 SS3.1-SS3.4 (the ladder,
 -- the receipts, the filing wake kind) + -annexes-1.md Annex A (verb catalog, the filing kind's
@@ -17,37 +27,34 @@
 -- runtime consumes this train.
 --
 -- =====================================================================================
--- A HARD, NAMED GAP -- READ BEFORE REVIEWING THE LADDER BELOW.
+-- STATUS, AS OF THIS FILE'S LAST REVISION (2026-08-24) -- READ BEFORE REVIEWING THE LADDER.
 -- =====================================================================================
--- This file's rig-replay (2026-08-24, frontier: F-A2/PR-1 + F-A4/PR-1a + F-A4/PR-1b +
--- F-A3/PR-1a + F-A3/PR-1b + F-A3/PR-1c + F-A7 pi, see the numbered staging list in this PR's
--- settle report) found that TRAIN ALPHA (the constitutional recut: clara._file_document_write,
--- the fourth client_resolutions.method / document_filings.basis value, and
--- approve_wrong_client_correction's extension at its live tip 0027:268) and TRAIN GAMMA (the
--- egress train: the document_processing / firm_narrow_intake purposes and the firm-scoped
--- egress-dispatch-authorization family) carry ZERO migration content on their branches as of
--- this authoring session, though design SS6/annexes-2 SSI.1 gate this train on both. Neither
--- gap is guessed around, and this file's own rig-replay narrows it PAST what the design's
--- prose alone says: rung A9 (egress-authorization admissibility) is a TIER-A RAISE, ahead of
--- Tier B in SS3.2's own ordering, and it can never pass while
--- clara.firm_egress_dispatch_authorizations does not exist -- so `_agent_file_document_core`'s
--- entire Tier-B ladder (B1-B9) is UNREACHABLE on this rig, not only its terminal write. That is
--- not a defect here; it is this train's own rig-replay independently CONFIRMING why
--- annexes-2 SSI.1 gates beta on "alpha AND gamma merged" as a functional dependency, not a
--- courtesy ordering. What IS fully rig-proven below: every Tier-A rung ahead of A9 (credential/
--- allowlist/firm/client-status/duplicate-filing/model/rationale/verdict-shape), the whole
--- receipt+RLS+ACL+allowlist+role machinery, wake_open_firm_question and
--- wake_propose_identifier_promotion (neither takes an authorization param), wake_reattribute_
--- document's citation-blocker refusal (same), and wake_propose_filing_correction's full propose
--- path, MEASURED against the unmodified live approve_wrong_client_correction rather than
--- assumed: a human-attributed destination approves fine pre-alpha (its two-value predicate was
--- never in that path's way); a JUDGED destination is cell 61's actual gap and cannot be
--- constructed without alpha's fourth method value, so only THAT half is a named skip. Every
--- point this file reaches a real gap carries an
--- explicit, typed, existence-checked refusal -- never a guess at either train's eventual shape,
--- never a silent success. This mirrors the estate's own "ships ahead of its producer" precedent
--- (UNNUMBERED_f_a2_posted_chain.sql's header: inert on arrival, on purpose, so the settle path
--- can never land without its chain already in place).
+-- Authored initially against a rig WITHOUT trains alpha or gamma (both carried zero migration
+-- content on their branches at that point) -- every rung that could be built and rig-proven
+-- independently of them was, and every point the ladder genuinely could not proceed carried an
+-- explicit, typed, existence-checked refusal, never a guess at either train's eventual shape.
+-- That discipline is WHY this file could be finished correctly once both trains actually
+-- landed: nothing had to be un-guessed, only un-gated. Per conductor ruling (2026-08-24),
+-- alpha (3 commits, ACL-hardened) and gamma (2 commits) are now BOTH staged in this train's rig
+-- chain, rig-replayed (never assumed) before wiring, and:
+--   - `_agent_file_document_core`'s write branch is WIRED: it mints a `method='judgement'`
+--     client_resolutions row (confidence pinned 1.0, D-2) and calls the real
+--     `_file_document_write` (alpha1's extraction, alpha2's CoR admits 'judgement' beside
+--     'human'/'rule').
+--   - `wake_reattribute_document`'s refile step is WIRED the same way.
+--   - Tier A rung A9 reads the real `clara.firm_egress_dispatch_authorizations` (gamma) and
+--     CONSUMES it (a judgement call this file names as one, not a design citation -- see SS4.2's
+--     own comment at the consumption site).
+--   - `wake_propose_filing_correction`'s duplicated destination-authority check is widened to
+--     'judgement', matching alpha2's now-live extension of the body it duplicates.
+-- ONE dependency remains an open merge-order fact, not a build gap: this file also depends on
+-- TRAIN PI's objects (`_firm_question_core`, `name_family_candidates`, `agent_receipt_
+-- surfaces`' f_a7 row, …), and pi is NOT on `main` as of this revision (`git grep
+-- firm_open_questions main -- packages/db/migrations/` is empty; it lives only on
+-- `f-a7/pr-1-pi`). annexes-2.md SSI.1's beta row names only "alpha and gamma merged; F-A2 PR-1"
+-- as prerequisites -- pi belongs in that list too. This mirrors the estate's own "ships ahead
+-- of its producer" precedent (UNNUMBERED_f_a2_posted_chain.sql's header) for the WINDOW during
+-- which alpha/gamma were absent; the window has now closed and this comment records that it did.
 --
 -- =====================================================================================
 -- WHAT THIS FILE SHIPS
@@ -115,8 +122,12 @@ begin
     raise exception 'F-A7 beta prestate: object(s) already present: %', v_missing
       using errcode = 'CLR10';
   end if;
+  -- NOTICE, not a hard abort: roles are cluster-scoped and `pnpm db:reset` drops only the
+  -- schema, so a leftover role from a prior apply on the SAME cluster is the standard,
+  -- expected shape of a scratch-DB redo, not a half-applied predecessor. SS2.1's own `create
+  -- role` is idempotent-guarded for exactly this.
   if exists (select 1 from pg_roles where rolname = 'clara_wake_filing') then
-    raise exception 'F-A7 beta prestate: role clara_wake_filing already exists' using errcode='CLR10';
+    raise notice 'F-A7 beta prestate: role clara_wake_filing already exists on this cluster (a prior apply''s leftover, expected on a redo) -- SS2.1 will not recreate it';
   end if;
   if exists (select 1 from clara.event_types where name = 'egress.misrouted') then
     raise exception 'F-A7 beta prestate: event_types already carries egress.misrouted' using errcode='CLR10';
@@ -239,7 +250,24 @@ end $$;
 -- CREATEROLE privilege, measured the hard way (a first draft of this file placed the role
 -- creation after the role switch and it failed loudly with "permission denied to create role"
 -- on this train's own rig, rather than silently).
-create role clara_wake_filing nologin;
+--
+-- GUARDED (0009_coding_floor.sql:50-58's idiom, copied verbatim in shape): roles are
+-- CLUSTER-scoped, `scripts/reset.mjs` drops only the `clara` SCHEMA, so an unguarded
+-- `create role` makes `pnpm db:reset && pnpm db:migrate` -- the standard scratch-DB redo
+-- (`.claude/rules/db-migrations.md`) -- abort on the SECOND apply against the same cluster. A
+-- first draft of this file used a bare `create role` (SS1(a)'s own prestate then correctly, but
+-- unhelpfully, treated a leftover role as "already applied" and hard-aborted); guarded +
+-- idempotent-hardened is the estate's own idiom for exactly this.
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'clara_wake_filing') then
+    create role clara_wake_filing nologin;
+  end if;
+  alter role clara_wake_filing nologin nocreaterole inherit;
+  if current_setting('is_superuser') = 'on' then
+    alter role clara_wake_filing nosuperuser nobypassrls nocreatedb;
+  end if;
+end $$;
 comment on role clara_wake_filing is
   'F-A7 beta / D-12: the filing wake kind''s PostgreSQL role. Reached only via a live '
   'wake_credentials row of kind=filing plus the matching wake_fn_allowlist row (SS9).';
@@ -373,6 +401,15 @@ create table clara.agent_filing_receipts (
     foreign key (client_id, firm_id) references clara.clients(id, firm_id),
   constraint fk_agent_filing_receipts_filing
     foreign key (filing_id, firm_id) references clara.document_filings(id, firm_id),
+  -- CONGRUENCE, STRUCTURAL, NOT JUST THE BARE (filing_id, firm_id) FK ABOVE -- added on
+  -- independent review: `uq_document_filings_id_firm_client_document` already carries the
+  -- exact 4-column key this needs, so a receipt cannot name a filing_id and then disagree with
+  -- it about which client or which document that filing is for. MATCH SIMPLE (Postgres' default)
+  -- makes this a no-op on a refusal receipt (filing_id IS NULL there), so it constrains only the
+  -- rows that claim an actual filing -- exactly the ones where the congruence matters.
+  constraint fk_agent_filing_receipts_filing_congruent
+    foreign key (filing_id, firm_id, client_id, document_id)
+    references clara.document_filings(id, firm_id, client_id, document_id),
   constraint ck_agent_filing_receipts_filed_iff_clean
     check ((filing_id is not null) = (failing_rungs = '{}'::text[]))
 );
@@ -499,6 +536,7 @@ declare
   v_auth record; v_purpose_mismatch boolean := false;
   v_identity_kind boolean; v_enrichment_requested boolean;
   v_receipt_id uuid; v_question_id uuid; v_write_delegate_exists boolean;
+  v_judged_resolution uuid; v_write_result jsonb; v_filing_id uuid;
 begin
   -- ---- TIER A -- AUTHORITY AND SHAPE. RAISE. Nothing reserved until every premise below holds.
   if p_actor is null or p_firm is null or p_wake_kind is null
@@ -572,6 +610,21 @@ begin
     raise exception 'no firm-narrow egress authorization infrastructure is installed yet (train gamma has not landed)'
       using errcode='CLR28', detail='{"reason":"no_live_egress_authorization","class":"gamma_not_installed"}';
   end if;
+  -- THE GAMMA-LANDED-BUT-DIFFERENT-SHAPE TRIPWIRE (added on independent review, the same
+  -- posture the write branch below already carries for train alpha): the table existing is not
+  -- the same fact as the eight columns (id, firm_id + the six this rung reads/writes)
+  -- existing with these exact names. Without this, a shape mismatch would surface as an
+  -- untyped 42703 at plan time on a money-adjacent verb; with it, the failure is typed, named,
+  -- and points at the rung to re-verify.
+  if not (to_regclass('clara.firm_egress_dispatch_authorizations') is not null
+      and exists (select 1 from information_schema.columns c
+        where c.table_schema='clara' and c.table_name='firm_egress_dispatch_authorizations'
+          and c.column_name in ('id','firm_id','document_sha256','moment','purpose',
+                                 'consumed_at','expires_at','invalidated_at')
+        having count(*) = 8)) then
+    raise exception 'clara.firm_egress_dispatch_authorizations exists but does not carry the columns this rung was authored against -- train gamma landed with a different shape than assumed; re-verify SS4.2 rung A9 before relying on it'
+      using errcode='CLR28', detail='{"reason":"no_live_egress_authorization","class":"gamma_shape_mismatch"}';
+  end if;
   -- PLAIN SQL, not dynamic -- the to_regclass guard above already returns before this
   -- statement can ever run against an absent table, and plpgsql does not validate a referenced
   -- relation's existence at CREATE FUNCTION time (measured on this train's own rig before
@@ -582,12 +635,21 @@ begin
   select a.id, a.document_sha256, a.moment, a.purpose, a.consumed_at, a.expires_at
     into v_auth
     from clara.firm_egress_dispatch_authorizations a
-   where a.id = p_authorization and a.firm_id = p_firm;
+   where a.id = p_authorization and a.firm_id = p_firm and a.invalidated_at is null
+     for update;
   if v_auth.id is null or v_auth.purpose <> 'firm_narrow_intake'
      or v_auth.consumed_at is not null or v_auth.expires_at <= statement_timestamp() then
     raise exception 'no live, admissible-purpose egress authorization for this attribution'
       using errcode='CLR28', detail='{"reason":"no_live_egress_authorization"}';
   end if;
+  -- CONSUMPTION MOVES TO AFTER B7 (below) -- BLOCKER on independent review, fixed: consuming
+  -- here, before the authorization's BINDING (document_sha256/moment) is even checked, let a
+  -- filing attempt presenting document Y's authorization against document X's actual
+  -- attribution DESTROY X's live authorization on a wrong-document call -- nothing rolls back a
+  -- committed Tier-B refusal. The estate's own sibling consumer, `clara.consume_egress_
+  -- dispatch`, re-binds client/purpose/event/sha BEFORE consuming and its own comment states
+  -- the rule this file now matches: "a mismatch is not consumed ... stays live for its
+  -- legitimate dispatch." See B7 below for where the actual UPDATE now lives.
 
   -- ---- TIER B -- THE ADMISSION GATES. TYPED NON-FILING RECEIPT, NO RAISE. Every rung
   -- evaluates, always; the vector is the full, honest picture, never short-circuited.
@@ -659,21 +721,30 @@ begin
   end if;
 
   -- B4 -- region anchoring: every citation resolves to a LIVE document_regions row of THIS
-  -- document (id-equality, the _write_entry_evidence idiom).
+  -- document (id-equality, the _write_entry_evidence idiom). A model-supplied `region_id` that
+  -- is not even UUID-shaped is treated as unresolvable, never cast -- MEASURED on this train's
+  -- own rig: `(c->>'region_id')::uuid` on a malformed value raises a bare 22P02 (invalid uuid
+  -- syntax), aborting the whole transaction with NO receipt and NO firm question -- exactly the
+  -- silent-no-op law 6/SS3.2 forbids. The regex is the estate's own uuid shape
+  -- (`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, case-insensitive).
   select exists (
     select 1 from jsonb_array_elements(v_citations) c
-     where not exists (
-       select 1 from clara.document_regions r
-         join clara.document_extractions e on e.id = r.extraction_id
-        where r.id = nullif(c->>'region_id','')::uuid
-          and r.firm_id = p_firm and e.document_id = p_document)
+     where not (
+       coalesce(c->>'region_id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       and exists (
+         select 1 from clara.document_regions r
+           join clara.document_extractions e on e.id = r.extraction_id
+          where r.id = (c->>'region_id')::uuid
+            and r.firm_id = p_firm and e.document_id = p_document))
   ) into v_bad_region;
   if v_bad_region then v_failing := array_append(v_failing, 'attribution_region_unresolvable'); end if;
 
   -- B5 -- generation currency: no citation names a SUPERSEDED fact-generation extraction.
   -- Fact-generation extractions only (invoice_facts/statement_facts/llm_text_facts/
   -- llm_vision_facts); OCR/structured_parse are out of scope (the F-A2 B8 alpha-scoping
-  -- analogue, P-8's settled four-member closed world).
+  -- analogue, P-8's settled four-member closed world). Same shape-guard as B4 -- reached only
+  -- when B4 already found every citation both well-shaped and resolvable, so the cast here is
+  -- safe by construction.
   if not v_bad_region then
     select exists (
       select 1 from jsonb_array_elements(v_citations) c
@@ -687,10 +758,19 @@ begin
   end if;
   if v_stale then v_failing := array_append(v_failing, 'attribution_stale_generation'); end if;
 
-  -- B6 -- cross-firm: no candidate the verdict names crosses the firm boundary. The identifier
-  -- and name-family queries above are already firm-scoped by construction (every join carries
-  -- `firm_id = p_firm`), so the only way this rung can fire is a counterparty candidate whose
-  -- OWN client binding sits outside p_firm's client set -- checked explicitly, never inferred.
+  -- B6 -- cross-firm: no candidate the verdict names crosses the firm boundary.
+  -- MEASURED, NOT ASSUMED, BY INDEPENDENT REVIEW: this rung is PROVABLY UNREACHABLE on the live
+  -- schema today. clara.name_family_candidates already filters `cl.firm_id = p_firm` AND
+  -- `cp.firm_id = p_firm` on both its arms; clara.counterparties.client_id is NOT NULL with
+  -- `fk_counterparties_client FOREIGN KEY (client_id, firm_id) REFERENCES clara.clients(id,
+  -- firm_id)` -- so every `bound_client` the family predicate can EVER return is necessarily a
+  -- client of p_firm, and v_cross_firm can never be true. Annex A.2's own law: "a rung provably
+  -- unreachable is not listed (law 31) and its unreachability argument lives in the decision
+  -- register, not in the vocabulary." This file does not remove the rung unilaterally (the
+  -- design's own vocabulary is not this train's to edit) -- it is kept as harmless defense in
+  -- depth against a FUTURE schema change (e.g. a candidate source B2 does not yet consume), and
+  -- the unreachability finding is carried to the conductor/design-register in this train's
+  -- settle report rather than silently left for Annex B cell 16 to discover it can never force.
   select exists (
     select 1 from clara.name_family_candidates(p_firm, v_name) fc
      where fc.bound_client is not null
@@ -710,10 +790,43 @@ begin
     v_failing := array_append(v_failing, 'attribution_purpose_mismatch');
   end if;
 
-  -- B8 -- the identity-document refusal: a document.document_kind of identity_document is
-  -- refused and quarantined, and the refusal is itself an event (SS7's caller, not this
-  -- function, owns quarantine bookkeeping beyond the token -- see the receipt/firm-question
-  -- branch below).
+  -- CONSUMPTION -- a JUDGEMENT CALL, named as one: train gamma ships `prepare_firm_egress_
+  -- dispatch` (mints the row) but no consumer anywhere in the estate for THIS (firm-scoped)
+  -- table (measured: neither get_document_extract nor any other live body sets consumed_at on
+  -- it). Consuming it HERE -- only once B7 has proven the authorization is actually BOUND to
+  -- this document and moment -- regardless of whether Tier B goes on to file or refuse for some
+  -- OTHER reason (either way the authorization's purpose, producing THIS document's verdict, is
+  -- genuinely fulfilled), is this train's own decision, not a design citation. A mis-bound
+  -- authorization (B7 failed) is explicitly NOT consumed and stays live for its real dispatch,
+  -- matching `clara.consume_egress_dispatch`'s own stated rule. Flagged to the conductor/
+  -- design-register in this train's settle report; train rho (the runtime consumer of this
+  -- same authorization for the actual document READ) may need to revisit this once it lands.
+  -- A GAMMA GAP, NAMED HERE BECAUSE BETA IS THE FIRST WRITER TO MEET IT (independent review):
+  -- `firm_egress_dispatch_authorizations` carries no update-guard trigger at all (measured:
+  -- zero non-internal triggers on it), unlike the client-scoped sibling
+  -- `egress_dispatch_authorizations`, which refuses a re-terminating UPDATE, a column outside
+  -- {consumed_at,invalidated_at,invalidated_reason} being touched, and a DELETE. This file's own
+  -- UPDATE is correct and minimal, but nothing stops a DIFFERENT future writer from mis-using
+  -- the same unguarded surface. Carried to gamma/the conductor, not fixed here (out of this
+  -- train's own D1 scope).
+  if not v_purpose_mismatch then
+    update clara.firm_egress_dispatch_authorizations set consumed_at = statement_timestamp()
+      where id = v_auth.id;
+  end if;
+
+  -- B8 -- the identity-document refusal. `identity_document` is NOW LIVE on
+  -- `documents_document_kind_check` (train gamma landed and rig-replay confirms it -- gamma's
+  -- own tail: "identity_document is a settleable kind on documents_document_kind_check +
+  -- classify_document + set_document_kind (NOT in any refusal list)"), so this rung is
+  -- REACHABLE, unlike B6 (M-2, which stays structurally unreachable for an unrelated reason --
+  -- the family predicate's own domain, not a missing kind value).
+  -- ONE GAP REMAINS, named rather than silently assumed: THIS RUNG APPENDS ONLY THE TOKEN. It
+  -- does NOT quarantine the document (no retention/legal-hold write) and does NOT emit a
+  -- dedicated refusal event beyond the standard receipt+firm-question branch below, though
+  -- design SS3.2's B8 text and Annex B cell 18 both name quarantine and "the refusal event
+  -- exists" as part of this rung. No owner is named for that work anywhere in this item's
+  -- design set; it is NOT built here (an unscoped mechanism this train would otherwise have to
+  -- invent unilaterally) and is carried to the conductor in this train's settle report.
   select document_kind = 'identity_document' into v_identity_kind
     from clara.documents where id = p_document;
   if coalesce(v_identity_kind, false) then
@@ -756,25 +869,58 @@ begin
         'failing_rungs', to_jsonb(v_failing)));
   end if;
 
-  -- ---- THE WRITE. Every rung passed. GATED, HONESTLY, ON TRAIN ALPHA -- see this file's
-  -- header. clara._file_document_write is the extracted delegate α1 ships (design SS3.1: "the
-  -- agent core calls the same delegate, so the agent can never mint a second 'human'
-  -- resolution"); it does not exist on any branch as of this authoring session. This branch is
-  -- therefore INERT ON ARRIVAL, ON PURPOSE (the same posture UNNUMBERED_f_a2_posted_chain.sql
-  -- documents for its own producer-not-yet-landed case): every rung above it is complete and
-  -- rig-proven; this one raises a typed, existence-checked refusal rather than guess at a
-  -- signature nobody has authored yet.
+  -- ---- THE WRITE. Every rung passed. NOW WIRED -- trains alpha and gamma both landed on
+  -- origin (conductor ruling, 2026-08-24) and were rig-replayed before this branch was
+  -- authored, never guessed. clara._file_document_write's live signature
+  -- (jsonb,uuid,uuid,text,text) matches this file's original existence-guard exactly; its
+  -- live body (alpha2's CoR) accepts a resolution of method IN ('human','rule','judgement')
+  -- and stamps document_filings.basis='judgement' when it does (case-derived from the
+  -- resolution's own method, never supplied by this core).
   v_write_delegate_exists := to_regprocedure('clara._file_document_write(jsonb,uuid,uuid,text,text)') is not null;
   if not v_write_delegate_exists then
     raise exception 'the judged-attribution write path is not yet installed (train alpha has not landed)'
       using errcode='CLR10', detail='{"reason":"filing_write_not_installed","class":"train_alpha"}';
-  else
-    -- SAFETY NET, not a working call: alpha has landed since this file was authored but SS5's
-    -- write branch was never updated to call it. Fail loud rather than silently mis-wire a
-    -- judged filing.
-    raise exception 'train alpha has landed but this file''s write branch (SS5) was never wired to its real signature -- update before relying on this path'
-      using errcode='CLR10', detail='{"reason":"filing_write_not_wired","class":"train_alpha"}';
   end if;
+
+  -- SS3.2/D-2: confidence is PINNED at 1.0 by this core -- the model's own stated confidence
+  -- (p_verdict->>'confidence') is never read here; it lives ONLY in the receipt's `verdict`
+  -- column, as an annotation (D-2, "the model never grades itself"). This is the ONE
+  -- client_resolutions row a judged filing may ever mint -- _file_document_write's own
+  -- auto-create branch (method='human') is structurally unreachable from this call because a
+  -- resolved, valid v_judged_resolution is always supplied as p_resolution.
+  insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id,
+      confidence, method, evidence, resolved_by)
+    values (p_firm, p_client, 'document', p_document, 1.0, 'judgement',
+      jsonb_build_object('source', 'agent_file_document', 'rationale', p_rationale,
+        'model', p_model, 'verdict', p_verdict),
+      p_actor)
+    returning id into v_judged_resolution;
+
+  v_write_result := clara._file_document_write(
+    jsonb_build_object('firm', p_firm, 'actor', p_actor),
+    p_document, p_client, v_judged_resolution::text, p_op_key || ':file_document_write');
+  v_filing_id := nullif(v_write_result->>'filing_id', '')::uuid;
+  if v_filing_id is null then
+    -- Never observed on this train's own battery, but not assumed impossible either: the
+    -- delegate returning no filing_id would leave a judged resolution with no filing to point
+    -- at. Fail loud rather than silently write a receipt claiming a filing that does not exist.
+    raise exception 'the judged-attribution write delegate returned no filing_id' using errcode='CLR10',
+      detail='{"reason":"filing_write_returned_no_filing"}';
+  end if;
+
+  insert into clara.agent_filing_receipts(firm_id, document_id, client_id, filing_id,
+      model, model_version, rationale, verdict, failing_rungs, via_wake_kind,
+      trigger_kind, trigger_id, authorization_id, acting_actor, on_behalf_of)
+    values (p_firm, p_document, p_client, v_filing_id,
+      p_model->>'model', p_model->>'version', p_rationale, p_verdict, '{}'::text[], p_wake_kind,
+      p_trigger_kind, p_trigger_id, p_authorization, p_actor, p_obo)
+    returning id into v_receipt_id;
+  perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind, 'agent_file_document_filed', null,
+    jsonb_build_object('document', p_document, 'client', p_client, 'filing', v_filing_id,
+      'resolution', v_judged_resolution, 'receipt', v_receipt_id, 'op_key', p_op_key));
+  return clara._finish_op(p_firm, 'agent_file_document', p_op_key,
+    jsonb_build_object('filed', true, 'filing_id', v_filing_id, 'receipt_id', v_receipt_id,
+      'resolution_id', v_judged_resolution, 'failing_rungs', '[]'::jsonb));
 end $fn$;
 
 -- =====================================================================================
@@ -838,7 +984,11 @@ begin
     values (w.firm_id, p_document, null, null,
       p_model->>'model', p_model->>'version', p_rationale,
       jsonb_build_object('citations','[]'::jsonb, 'note','standalone firm question, no ladder run'),
-      array['attribution_no_basis']::text[], w.wake_kind, 'wake_task', w.credential_id::text,
+      -- NOT a borrowed Annex A.2 rung token (a first draft used attribution_no_basis, which
+      -- would over-count B3's failure rate the moment design SS7's re-measurement runs -- MEASURED
+      -- by independent review, corrected). This IS a ladder-external act, so it gets its own,
+      -- honestly-named, out-of-vocabulary marker that no rung ever emits.
+      array['not_a_ladder_run']::text[], w.wake_kind, 'wake_task', w.credential_id::text,
       clara.agent_user_id(), w.on_behalf_of)
     returning id into v_receipt_id;
   v_question_id := clara._firm_question_core(clara.agent_user_id(), w.firm_id, w.on_behalf_of,
@@ -864,6 +1014,22 @@ begin
   if nullif(btrim(coalesce(p_op_key,'')),'') is null then
     raise exception 'op_key is required' using errcode='CLR10',
       detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  -- Added on independent review (N-1): this wrapper was the only one of the five lacking the
+  -- typed blank-rationale / incomplete-model CLR10 checks its siblings all carry -- without
+  -- them the refusal still happens (client_identifier_promotions' own table CHECKs), but as an
+  -- untyped 23514, after _reserve_op rather than before it.
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended identifier promotion must state its rationale' using errcode='CLR10',
+      detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  if p_model is null or jsonb_typeof(p_model) <> 'object'
+     or nullif(btrim(coalesce(p_model->>'provider','')),'') is null
+     or nullif(btrim(coalesce(p_model->>'model','')),'') is null
+     or nullif(btrim(coalesce(p_model->>'version','')),'') is null then
+    raise exception 'an unattended identifier promotion must name its model (provider, model, version)'
+      using errcode='CLR10',
+      detail='{"reason":"invalid_request","class":"model_snapshot","constraint":"provider+model+version"}';
   end if;
   v_dedupe := clara._reserve_op(w.firm_id,'wake_propose_identifier_promotion',p_op_key,
     clara._hash(jsonb_build_object('client',p_client,'kind',p_kind,'value',p_value)));
@@ -897,7 +1063,8 @@ create function clara.wake_reattribute_document(
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
 declare
   w record; v_dedupe jsonb; f record; v_peek_doc uuid; v_blockers jsonb;
-  v_to_status text; v_write_delegate_exists boolean; v_verdict jsonb;
+  v_to_status text; v_write_delegate_exists boolean;
+  v_judged_resolution uuid; v_write_result jsonb; v_new_filing_id uuid; v_receipt_id uuid;
 begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
@@ -947,8 +1114,13 @@ begin
     raise exception 'reattribution destination is the same as the current client' using errcode='CLR10';
   end if;
 
-  -- The client-row serializer (0017:2049-2053's position), same as retire_document_filing.
+  -- The client-row serializer (0017:2049-2053's position), same as retire_document_filing --
+  -- INCLUDING its not-found check (N-3 on independent review: a first draft of this file
+  -- dropped this predicate while otherwise claiming byte-for-byte reuse of the shape).
   perform 1 from clara.clients cl where cl.id = f.client_id and cl.firm_id = f.firm_id for update;
+  if not found then
+    raise exception 'filing client not in the supplied firm' using errcode='CLR11';
+  end if;
 
   -- THE UNPOSTED-ONLY GUARD -- byte-identical predicate to retire_document_filing's own
   -- blocker query (0027:426-434): a live (draft, or approved-and-unreversed) journal entry
@@ -982,15 +1154,61 @@ begin
   perform clara._append_event(w.firm_id,'document.filing_retired',f.client_id,clara.agent_user_id(),
     w.on_behalf_of, w.wake_kind, null, f.document_id, f.resolution_id,
     jsonb_build_object('filing_id', f.id, 'reattributed_to', p_to_client));
+  -- design SS3.3 rider 3: "EITHER arm emits egress.misrouted" -- MEASURED as absent from this
+  -- file's first draft by independent review (only wake_propose_filing_correction, the posted
+  -- arm, emitted it). Emitted here, alongside document.filing_retired, once the retire is real
+  -- (both roll back together if the refile below still refuses).
+  perform clara._append_event(w.firm_id,'egress.misrouted',f.client_id,clara.agent_user_id(),
+    w.on_behalf_of, w.wake_kind, null, f.document_id, null,
+    jsonb_build_object('filing_id', f.id, 'from_client', f.client_id, 'to_client', p_to_client,
+      'purpose', 'firm_narrow_intake'));
 
   v_write_delegate_exists := to_regprocedure('clara._file_document_write(jsonb,uuid,uuid,text,text)') is not null;
   if not v_write_delegate_exists then
     raise exception 'the judged-attribution write path is not yet installed (train alpha has not landed) -- the retire above will roll back with this exception'
       using errcode='CLR10', detail='{"reason":"filing_write_not_installed","class":"train_alpha"}';
-  else
-    raise exception 'train alpha has landed but this file''s refile branch was never wired to its real signature -- update before relying on this path'
-      using errcode='CLR10', detail='{"reason":"filing_write_not_wired","class":"train_alpha"}';
   end if;
+
+  -- NOW WIRED (train alpha rig-replayed, not guessed -- see _agent_file_document_core's own
+  -- header note for the shape). This verb carries no p_authorization (design: not gated on
+  -- gamma), so the receipt below carries authorization_id = NULL, honestly -- this reattribution
+  -- was not produced by a fresh document read under a firm-narrow authorization, it is Clara
+  -- correcting her own earlier filing.
+  insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id,
+      confidence, method, evidence, resolved_by)
+    values (w.firm_id, p_to_client, 'document', f.document_id, 1.0, 'judgement',
+      jsonb_build_object('source', 'wake_reattribute_document', 'rationale', p_rationale,
+        'model', p_model, 'reattributed_from_filing', f.id),
+      clara.agent_user_id())
+    returning id into v_judged_resolution;
+  v_write_result := clara._file_document_write(
+    jsonb_build_object('firm', w.firm_id, 'actor', clara.agent_user_id()),
+    f.document_id, p_to_client, v_judged_resolution::text, p_op_key || ':file_document_write');
+  v_new_filing_id := nullif(v_write_result->>'filing_id', '')::uuid;
+  if v_new_filing_id is null then
+    raise exception 'the judged-attribution write delegate returned no filing_id' using errcode='CLR10',
+      detail='{"reason":"filing_write_returned_no_filing"}';
+  end if;
+
+  insert into clara.agent_filing_receipts(firm_id, document_id, client_id, filing_id,
+      model, model_version, rationale, verdict, failing_rungs, via_wake_kind,
+      trigger_kind, trigger_id, authorization_id, acting_actor, on_behalf_of)
+    values (w.firm_id, f.document_id, p_to_client, v_new_filing_id,
+      p_model->>'model', p_model->>'version', p_rationale,
+      jsonb_build_object('citations','[]'::jsonb, 'reattributed_from_filing', f.id,
+        'reattributed_from_client', f.client_id),
+      '{}'::text[], w.wake_kind, 'wake_task', w.credential_id::text, null,
+      clara.agent_user_id(), w.on_behalf_of)
+    returning id into v_receipt_id;
+
+  perform clara._audit(w.firm_id, clara.agent_user_id(), w.on_behalf_of, w.wake_kind,
+    'wake_reattribute_document_refile', null,
+    jsonb_build_object('old_filing', f.id, 'new_filing', v_new_filing_id, 'document', f.document_id,
+      'to_client', p_to_client, 'resolution', v_judged_resolution, 'receipt', v_receipt_id,
+      'op_key', p_op_key));
+  return clara._finish_op(w.firm_id, 'wake_reattribute_document', p_op_key,
+    jsonb_build_object('retired_filing_id', f.id, 'filing_id', v_new_filing_id,
+      'receipt_id', v_receipt_id, 'resolution_id', v_judged_resolution));
 end $fn$;
 
 -- =====================================================================================
@@ -1006,12 +1224,12 @@ end $fn$;
 -- computation the human path uses, rather than a third copy of it.
 --
 -- THE DESTINATION-AUTHORITY CHECK is duplicated from propose_wrong_client_correction's own
--- CURRENT (two-value) predicate, deliberately, for the same reason record_rule_resolution's
--- AB-3 discipline is duplicated into B1 above: this file does not extend any live body's
--- predicate (that is train alpha's job, Annex H row 6, EXTEND), so this copy stays at
--- method IN ('human','rule') until whoever extends propose_wrong_client_correction ALSO widens
--- this copy -- named here so that obligation is not lost the way the gate found it lost once
--- already (annexes-2 SSH).
+-- live predicate, deliberately, for the same reason record_rule_resolution's AB-3 discipline
+-- is duplicated into B1 above: this file does not extend any live body's predicate (that was
+-- train alpha's job, Annex H row 6, EXTEND). Alpha has now landed and its live tip carries
+-- 'judgement' (rig-replayed and confirmed) -- this copy is WIDENED to match, honouring the
+-- obligation the first draft named rather than letting it go stale the way the gate found it
+-- lost once already (annexes-2 SSH).
 create function clara.wake_propose_filing_correction(
     p_document uuid, p_from_client uuid, p_to_client uuid, p_reason text,
     p_rationale text, p_model jsonb, p_op_key text)
@@ -1065,10 +1283,14 @@ begin
   -- firm_open_questions, so 0027's lock-order law does not bind it (it binds new ACQUIRERS).
   v_preview := clara.preview_wrong_client_correction(p_document, p_from_client, p_to_client);
 
-  -- THE TWO-VALUE DESTINATION-AUTHORITY CHECK, current-world, duplicated (see header comment).
+  -- THE THREE-VALUE DESTINATION-AUTHORITY CHECK, duplicated from propose_wrong_client_
+  -- correction's own live predicate (see header comment) -- WIDENED to 'judgement' now that
+  -- train alpha's live tip actually carries it (rig-replayed and confirmed, not assumed): this
+  -- copy tracks the real body it duplicates, honouring the obligation this file's own header
+  -- comment named when it was still two-value.
   if not exists (select 1 from clara.client_resolutions r
       where r.firm_id = w.firm_id and r.client_id = p_to_client and r.subject_kind = 'document'
-        and r.subject_id = p_document and r.method in ('human','rule') and r.confidence >= 0.95
+        and r.subject_id = p_document and r.method in ('human','rule','judgement') and r.confidence >= 0.95
         and r.superseded_at is null) then
     raise exception 'destination client attribution is not authoritative' using errcode='CLR01';
   end if;
@@ -1095,13 +1317,13 @@ begin
       p_model->>'model', p_model->>'version', p_rationale,
       jsonb_build_object('citations','[]'::jsonb, 'correction_id', v_id, 'from_client', p_from_client,
         'to_client', p_to_client, 'plan_hash', v_hash),
-      array['attribution_purpose_mismatch']::text[], -- placeholder token: a correction proposal
-      -- is not a ladder run and carries no rung vector of its own; the estate's typed
-      -- vocabulary has no dedicated non-filing token for "a correction was proposed, not
-      -- filed", so this receipt is marked with the nearest existing non-empty-vector token
-      -- (never an empty one -- ck_agent_filing_receipts_filed_iff_clean forbids an empty
-      -- vector without a filing_id) so the row's own CHECK stays honest about "no filing
-      -- happened here, a proposal did".
+      -- NOT a borrowed Annex A.2 rung token -- MEASURED by independent review: a first draft
+      -- used attribution_purpose_mismatch, which would over-count B7's failure rate under
+      -- design SS7's re-measurement. A correction proposal is not a ladder run and carries no
+      -- rung vector of its own; ck_agent_filing_receipts_filed_iff_clean still requires a
+      -- non-empty vector without a filing_id, so this gets the SAME honest, out-of-vocabulary
+      -- marker wake_open_firm_question uses, not a rung's name.
+      array['not_a_ladder_run']::text[],
       w.wake_kind, 'wake_task', w.credential_id::text, clara.agent_user_id(), w.on_behalf_of)
     returning id into v_receipt_id;
 
@@ -1126,15 +1348,28 @@ end $fn$;
 -- SS7 -- (F) THE TWO DEFERRED TIER-C TRIGGERS. Both DEFERRABLE INITIALLY DEFERRED: the
 -- transaction, not the statement, is the judge.
 -- =====================================================================================
--- SCOPED BY A NEGATIVE SET, not a literal fourth value -- this file cannot name train alpha's
--- new client_resolutions.method / document_filings.basis value (nobody has authored it yet;
--- see this file's header). "A judged filing" is instead defined structurally, as ANY basis NOT
--- among the five values that exist today (document_filings_basis_check's live text at this
--- file's authoring: legacy-0007, human, rule, correction, seed-0007). This is FORWARD-COMPATIBLE
--- by construction: the moment alpha's CHECK extension adds its new value, every row carrying it
--- automatically falls under these triggers with no CoR of this file. Until then the triggers are
--- INERT ON ARRIVAL, ON PURPOSE (this file's header) -- no code path in this repo can produce a
--- basis outside the five, so they never fire, and the tail's own cell proves that emptiness.
+-- SCOPED BY A NEGATIVE SET, not a literal fourth value -- authored before alpha's CHECK
+-- extension named its own value ('judgement'), and left this way deliberately: "a judged
+-- filing" is defined structurally, as ANY basis NOT among the five values that predate it
+-- (document_filings_basis_check's pre-alpha text: legacy-0007, human, rule, correction,
+-- seed-0007). FORWARD-COMPATIBLE by construction and proven so: alpha has since landed and
+-- 'judgement' rows now exist on this rig (this train's own battery mints them), and both
+-- triggers correctly recognise them with no CoR of this file needed.
+--
+-- THE CONGRUENCE TRIGGER'S OWN REACHABILITY, MEASURED BY INDEPENDENT REVIEW: on the CURRENT
+-- schema, `_tf_document_filings_agent_congruence` is UNREACHABLE via any live write path, for
+-- TWO independent reasons, not one. (1) On INSERT, the PRE-EXISTING `t_document_filings_stamp`
+-- (BEFORE INSERT, alpha2's own CoR of `_tf_stamp_document_pipeline`) already refuses any
+-- resolution/client/document mismatch -- its predicate is a strict SUPERSET of this trigger's,
+-- so every row this trigger would reject is already rejected earlier in the same INSERT. (2) On
+-- UPDATE, the pre-existing `t_document_filings_update` (`_tf_document_filing_update`) refuses
+-- any UPDATE that is not a pure active->retired transition, and explicitly refuses a change to
+-- `resolution_id`/`client_id`/`document_id` ("filing identity is immutable") -- so no UPDATE can
+-- ever present this trigger with an incongruent row either. This is the SAME "provably
+-- unreachable, kept as defense in depth" class as rung B6 above (Annex A.2 law 31: an
+-- unreachable check is not force-tested; its argument lives in the decision register, not a
+-- fabricated cell). It earns its place anyway: it is what actually protects a FUTURE write path
+-- this item or a later one might add that does not route through either existing guard.
 create function clara._tf_document_filings_agent_congruence() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $fn$
 declare v_res record;
@@ -1288,7 +1523,7 @@ begin
 end $fa7_beta_tail_a$;
 
 do $fa7_beta_tail_b$
-declare v_n int; v_def text;
+declare v_n int; v_ns int; v_def text; v_role text;
 begin
   -- (3) Both wake_credentials CHECKs now admit filing AND still admit every earlier kind.
   select pg_get_constraintdef(oid) into v_def from pg_constraint
@@ -1347,6 +1582,49 @@ begin
     raise exception 'F-A7 beta tail: _agent_file_document_core holds % non-owner grant(s), expected 0', v_n using errcode='CLR10';
   end if;
 
+  -- (6b) THE has_function_privilege CENSUS -- added per the conductor's fleet-wide lesson
+  -- (2026-08-24, learned 4x today, an actual PUBLIC-EXECUTE leak found on
+  -- clara._file_document_write by the estate matrices): information_schema.role_routine_grants
+  -- reads NOTHING for a role when a function's proacl is NULL (the Postgres DEFAULT ACL, which
+  -- means EXECUTE granted to PUBLIC by default on every new function) -- a row-count check like
+  -- (6) above is BLIND to that case. has_function_privilege resolves the ACTUAL EFFECTIVE
+  -- privilege regardless of whether proacl is NULL or customized, so it is asserted here
+  -- explicitly, against PUBLIC and every live app role, for every function this file installs.
+  -- All of mine DO carry an explicit revoke (SS9), so proacl is never NULL for them -- this
+  -- census proves that fact rather than assuming it from the revoke statement's mere presence.
+  for v_role in
+    select unnest(array['public','clara_authenticated','clara_agent_ro','clara_wake_interactive',
+      'clara_wake_proactive','clara_wake_bank','clara_runtime'])
+  loop
+    if has_function_privilege(v_role, 'clara._agent_file_document_core(uuid,uuid,uuid,text,text,text,uuid,uuid,jsonb,text,jsonb,uuid,text)', 'EXECUTE')
+       or has_function_privilege(v_role, 'clara._tf_document_filings_agent_congruence()', 'EXECUTE')
+       or has_function_privilege(v_role, 'clara._tf_document_filings_agent_receipt()', 'EXECUTE') then
+      raise exception 'F-A7 beta tail: role % holds EXECUTE on an ungranted core (has_function_privilege, not row-count)', v_role using errcode='CLR10';
+    end if;
+    if v_role <> 'clara_wake_filing' and v_role <> 'clara_wake_interactive' -- (interactive is wake_file_document's OTHER floor)
+       and has_function_privilege(v_role, 'clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)', 'EXECUTE') then
+      raise exception 'F-A7 beta tail: role % unexpectedly holds EXECUTE on wake_file_document', v_role using errcode='CLR10';
+    end if;
+    if v_role <> 'clara_wake_filing'
+       and (has_function_privilege(v_role, 'clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text)', 'EXECUTE')
+         or has_function_privilege(v_role, 'clara.wake_propose_identifier_promotion(uuid,text,text,int,jsonb,text,jsonb,text)', 'EXECUTE')
+         or has_function_privilege(v_role, 'clara.wake_reattribute_document(uuid,uuid,uuid,text,text,jsonb,text)', 'EXECUTE')
+         or has_function_privilege(v_role, 'clara.wake_propose_filing_correction(uuid,uuid,uuid,text,text,jsonb,text)', 'EXECUTE')) then
+      raise exception 'F-A7 beta tail: role % unexpectedly holds EXECUTE on one of the filing-only wrappers', v_role using errcode='CLR10';
+    end if;
+  end loop;
+  -- The positive control: clara_wake_filing itself DOES resolve EXECUTE on all five wrappers
+  -- (has_function_privilege agreeing with the GRANTs SS9 just made, not a self-referential check
+  -- -- a differential cell, proven against the catalog's own privilege resolver, not against the
+  -- GRANT statement's mere presence in this file).
+  if not (has_function_privilege('clara_wake_filing', 'clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)', 'EXECUTE')
+      and has_function_privilege('clara_wake_filing', 'clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text)', 'EXECUTE')
+      and has_function_privilege('clara_wake_filing', 'clara.wake_propose_identifier_promotion(uuid,text,text,int,jsonb,text,jsonb,text)', 'EXECUTE')
+      and has_function_privilege('clara_wake_filing', 'clara.wake_reattribute_document(uuid,uuid,uuid,text,text,jsonb,text)', 'EXECUTE')
+      and has_function_privilege('clara_wake_filing', 'clara.wake_propose_filing_correction(uuid,uuid,uuid,text,text,jsonb,text)', 'EXECUTE')) then
+    raise exception 'F-A7 beta tail: clara_wake_filing is missing EXECUTE on one of its five wrappers (has_function_privilege)' using errcode='CLR10';
+  end if;
+
   -- (7) agent_filing_receipts: forced RLS, owner-only policy, zero app-role DML.
   if not exists (select 1 from pg_class c where c.oid='clara.agent_filing_receipts'::regclass
       and c.relrowsecurity and c.relforcerowsecurity) then
@@ -1386,6 +1664,27 @@ begin
   end if;
 
   -- (11) No table in workflow/graphile_worker/spike touched by this file.
-  select count(*)::int into v_n from pg_namespace where nspname in ('workflow','graphile_worker','spike');
-  raise notice 'F-A7 beta tail (b): OK -- both wake_credentials CHECKs admit filing alongside the full interactive_client/close_prep/bank_agent/autodraft chain; the filing allowlist holds exactly its 6 provable rows (annexes-1 SSA.3 rows 1-6; row 7 is F-A7b''s); clara_wake_filing holds exactly 6 EXECUTE grants and cannot log in; clara_wake_interactive gained wake_file_document; every ungranted core holds zero app-role grants; agent_filing_receipts is RLS-forced with zero app-role DML; the f_a7 receipt shim conforms to pi''s 19-column contract; both Tier-C triggers are DEFERRABLE INITIALLY DEFERRED and their negative-set scope is currently vacuous (0 rows); egress.misrouted is registered once, client_scoped, decision=ignore. TRAIN ALPHA AND TRAIN GAMMA REMAIN UNBUILT (this file''s header) -- the ladder''s write branch and Tier A''s authorization rung both refuse by explicit, typed, existence-checked design rather than by accident, and this train''s own battery names every cell that cannot pass until they land. % namespace(s) among workflow/graphile_worker/spike exist on this database, none touched by this file.', v_n;
+  select count(*)::int into v_ns from pg_namespace where nspname in ('workflow','graphile_worker','spike');
+
+  -- (12) THE ROSTER/CENSUS RE-TRUING (design SS3.1: "re-trues all six roster/census surfaces BY
+  --      CENSUS, not from a list" -- MEASURED as absent from this file's first draft by
+  --      independent review, added here). clara_wake_filing must hold ZERO table/column-level
+  --      grants ANYWHERE in the schema, not merely zero on agent_filing_receipts -- an ACL
+  --      CENSUS, not an assumption, so a future stray GRANT on some OTHER table is caught here
+  --      rather than passing silently. Function EXECUTE grants are the only privilege this role
+  --      may ever hold (checked exhaustively at (5)/(6) above).
+  select count(*)::int into v_n from information_schema.role_table_grants g
+    where g.grantee = 'clara_wake_filing';
+  if v_n <> 0 then
+    raise exception 'F-A7 beta tail: clara_wake_filing holds % table/column grant(s) somewhere in the schema, expected 0', v_n
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from information_schema.column_privileges g
+    where g.grantee = 'clara_wake_filing';
+  if v_n <> 0 then
+    raise exception 'F-A7 beta tail: clara_wake_filing holds % column-level grant(s), expected 0', v_n
+      using errcode='CLR10';
+  end if;
+
+  raise notice 'F-A7 beta tail (b): OK -- both wake_credentials CHECKs admit filing alongside the full interactive_client/close_prep/bank_agent/autodraft chain; the filing allowlist holds exactly its 6 provable rows (annexes-1 SSA.3 rows 1-6; row 7 is F-A7b''s); clara_wake_filing holds exactly 6 EXECUTE grants, ZERO table/column grants schema-wide (the roster/census re-truing), and cannot log in; clara_wake_interactive gained wake_file_document; every ungranted core holds zero app-role grants; agent_filing_receipts is RLS-forced with zero app-role DML; the f_a7 receipt shim conforms to pi''s 19-column contract; both Tier-C triggers are DEFERRABLE INITIALLY DEFERRED and their negative-set scope is currently vacuous (0 rows); egress.misrouted is registered once, client_scoped, decision=ignore; the has_function_privilege census (6b) confirms zero PUBLIC/app-role EXECUTE anywhere it should not be, catalog-resolved, not row-counted. TRAINS ALPHA AND GAMMA ARE NOW STAGED (conductor ruling 2026-08-24) -- the ladder''s write branch, wake_reattribute_document''s refile, and Tier A''s authorization rung are all WIRED to their real, rig-replayed shapes; only train pi''s absence from `main` remains an open merge-order fact (this file''s header). % namespace(s) among workflow/graphile_worker/spike exist on this database, none touched by this file.', v_ns;
 end $fa7_beta_tail_b$;
