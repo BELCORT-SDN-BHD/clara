@@ -190,24 +190,103 @@ test("§0.4 held and awaiting_input tasks consume NO compute slot; the cap still
 });
 
 // ===========================================================================
-// §6 — budget metering, RATIFIED as-built semantics (orchestrator adjudication
-// 2026-07-18, accepted deviation D-A from §3.6's original wording): admission
-// CHECKS the committed daily counter but CONSUMES nothing — usage lands only at
-// settle. Consequences under test: (a) used ≥ budget refuses exactly (CLR14,
-// which-limit, UTC-reset copy); (b) at budget−1, concurrent admissions
-// serialize on the admission guard (proven block) and MAY all admit, hard-
-// bounded by the run cap (§0.4: overshoot ≤ the sum of admitted in-flight
-// runs' usage); (c) every admitted turn's settle lands its usage, after which
-// the boundary refuses again (fail-closed after overshoot).
+// §6 — usage metering after F-A9 PR-0. THE BRAKE IS GONE; THE METER STAYS.
+//
+// WHAT CHANGED AND WHY THE OLD CELL COULD NOT SURVIVE. Until F-A9 PR-0 this
+// section proved a daily TOKEN HARD-CAP: at `firm_usage_daily.tokens_used >=
+// firm_limits.daily_token_limit`, `begin_chat_turn` refused a new turn with
+// CLR14 and UTC-reset copy. The owner ruled that gate out (TA-P12 = A, the
+// 2026-08-22 Track-A sitting; digest law 76 / §9 "meter, never cap" — per-call
+// usage is RECORDED, and a spend-shaped brake on a professional's own work is
+// not the product's to hold). A cell whose PREMISE is a removed refusal cannot
+// be repaired by relaxing it; law 31 says the honest shape is a DIFFERENTIAL —
+// the old cell was the pre-change half, run for real against the pre-change
+// body, and this is the post-change half. Design record:
+// `docs/plan/active/metering-design.md` §3.3 gate 1; the cells are Annex C's
+// C.9 (below) and C.9b (PR-1B's, once the column itself is dropped).
+//
+// WHAT DID *NOT* CHANGE, and is asserted here rather than assumed:
+//   * the CONCURRENCY floor (`max_concurrent_runs`) — engine protection, law
+//     76's own carve-out, design §3.3 gate 2 "KEEP, byte-unchanged";
+//   * the ratified D-A consume-at-settle mechanic — admission moves no counter,
+//     `settle_chat_turn` lands the task's CHECKPOINTED sum exactly once;
+//   * the namespaced admission guard's serialization (the X7 proven block).
+//
+// RETIREMENT NOTE FOR THE NEXT LANE. C.9 writes `firm_limits.daily_token_limit`
+// on purpose: that is what makes its admission a MEASURED over-limit admission
+// rather than an unobserved one. F-A9 PR-1B drops that column, so C.9 retires
+// with it and C.9b (same law, no column) succeeds it. Do not "fix" C.9 by
+// deleting the column write — delete the cell and land C.9b.
 // ===========================================================================
 
-test("§6 budget (ratified D-A): used ≥ budget refuses CLR14+copy; at budget−1 admission serializes (proven) and may admit ≤ cap; usage lands at settle then the boundary closes", async (t) => {
+test("§6 [C.9] the chat daily token cap is REMOVED: a firm pinned far OVER its own daily_token_limit still ADMITS; the concurrency floor alone still refuses, and its copy names runs, never tokens", async (t) => {
+  if (unready(t)) return;
+  const { firm, owner, sessions } = await firmWithSessions("c9", DEFAULT_RUN_CAP + 3);
+
+  // Materialize the daily row organically (round-2 S4-AB6: usage = the task's
+  // CHECKPOINTED sum, so the setup turn checkpoints before settling). The setup
+  // turn SETTLES, so it holds no compute slot when the concurrency half runs.
+  const setup = taskIdOf(await beginChatTurn({ session: sessions[0], author: owner, turnKey: opk("c9s") }));
+  await checkpointTurn({ task: setup, segment: 1, tokens: 1000 });
+  await driveTaskStatus(setup, ["running"]); // S4-AB11: settle only from a compute state
+  await settleChatTurn({ task: setup, tokens: 0, outcome: "completed" });
+  const col = usageCounterColumn(await usageSnapshot(firm), 1000);
+  assert.ok(col, "a daily token-usage counter column was found");
+
+  // THE PREMISE IS MEASURED, NOT ASSUMED. Absence is only evidence when the
+  // state that WOULD have refused is proven to be the state under test: the
+  // firm's own limit is read back at 1, and its recorded UTC-day usage is read
+  // back far above it. Both writes go through a read that can say NO.
+  const pinned = await rootQuery(
+    `insert into clara.firm_limits (firm_id, daily_token_limit, max_concurrent_runs) values ($1, 1, $2)
+       on conflict (firm_id) do update set daily_token_limit = 1, max_concurrent_runs = $2
+     returning daily_token_limit, max_concurrent_runs`, [firm, DEFAULT_RUN_CAP]);
+  assert.equal(Number(pinned.rows[0].daily_token_limit), 1, "the firm's daily_token_limit really is pinned to 1");
+  assert.equal(Number(pinned.rows[0].max_concurrent_runs), DEFAULT_RUN_CAP, `the firm's max_concurrent_runs really is pinned to ${DEFAULT_RUN_CAP}`);
+  assert.ok((await setDailyUsage(firm, col, DEFAULT_DAILY_TOKENS)) >= 1, "the daily usage row was pinned");
+  const used = Number((await usageSnapshot(firm))[0]?.[col]);
+  assert.ok(used > 1, `the firm's recorded UTC-day usage (${used}) is far ABOVE its own limit (1) — exactly the state the pre-hotfix body refused with CLR14`);
+
+  // (a) POSITIVE-BY-ABSENCE, and the absence is measured: the admission returns a
+  // task id AND a real queued row stands behind it (a receipt with no row would
+  // be a YES that could not have said NO).
+  const admitted = await beginChatTurn({ session: sessions[1], author: owner, turnKey: opk("c9a") });
+  const task = taskIdOf(admitted);
+  assert.ok(task, `a turn over the old token cap ADMITS (got ${JSON.stringify(admitted)})`);
+  const row = await readRow("agent_tasks", task);
+  assert.equal(row?.status, "queued", `the admitted turn is a real queued chat_turn row, not a bare receipt (got ${JSON.stringify(row)})`);
+  assert.equal(row?.kind, "chat_turn", "the admitted row is a chat turn");
+  // Admission still moves NO counter — the meter is a record, not a reservation.
+  assert.equal(Number((await usageSnapshot(firm))[0]?.[col]), used, "the daily counter is UNCHANGED by an over-limit admission (consume-at-settle, ratified D-A)");
+
+  // (b) THE KEEP HALF STILL BITES — the removal was surgical, not a wholesale
+  // deletion of the refusal path. Fill to the cap, then the next turn refuses.
+  for (let i = 2; i <= DEFAULT_RUN_CAP; i++) {
+    assert.ok(taskIdOf(await beginChatTurn({ session: sessions[i], author: owner, turnKey: opk(`c9f${i}`) })),
+      `compute turn ${i} admits while under the run cap — still over the old token limit`);
+  }
+  const compute = await rootQuery(
+    "select count(*)::int as n from clara.agent_tasks where firm_id = $1 and kind = 'chat_turn' and status in ('queued','running','cancel_requested')",
+    [firm],
+  );
+  assert.equal(compute.rows[0].n, DEFAULT_RUN_CAP, `exactly ${DEFAULT_RUN_CAP} compute runs are open before the cap cell (got ${compute.rows[0].n})`);
+  const refused = await assertRaises(CLR14, () => beginChatTurn({ session: sessions[DEFAULT_RUN_CAP + 1], author: owner, turnKey: opk("c9x") }),
+    "the turn over max_concurrent_runs");
+
+  // (c) THE COPY. The surviving CLR14 is the ONLY one admission can raise now, so
+  // it must name the concurrency floor and must NOT be spelled as a spend budget
+  // (law 22 — a visible record must not lie; the runtime's 429 mapping is fixed in
+  // the same PR, and `packages/runtime/tests/chat-limit-copy.test.mjs` reads it).
+  const copy = `${refused.message} ${refused.detail ?? ""} ${refused.hint ?? ""}`;
+  assert.match(copy, /run|concurren|cap|slot/i, `the surviving refusal names WHICH limit (runs) — got: ${refused.message}`);
+  assert.doesNotMatch(copy, /token|budget|daily/i, `the surviving refusal must not be spelled as a spend budget — got: ${refused.message}`);
+  noteLane(`C.9: over-limit admission succeeded (task ${task}); the surviving CLR14 reads "${refused.message}"`);
+});
+
+test("§6 the METER survives the brake's removal: concurrent admissions still serialize on the firm guard (PROVEN blocked), admission moves no counter, and each settle lands its CHECKPOINTED tokens exactly once", async (t) => {
   if (unready(t)) return;
   const { firm, owner, sessions } = await firmWithSessions("bg", 4);
 
-  // Materialize the daily row organically (round-2 S4-AB6: usage = the task's
-  // CHECKPOINTED sum, so the setup turn checkpoints its tokens before settling),
-  // then pin usage as the operator (root).
   const setup = taskIdOf(await beginChatTurn({ session: sessions[0], author: owner, turnKey: opk("b0") }));
   await checkpointTurn({ task: setup, segment: 1, tokens: 1000 });
   await driveTaskStatus(setup, ["running"]); // S4-AB11: settle only from a compute state
@@ -219,42 +298,29 @@ test("§6 budget (ratified D-A): used ≥ budget refuses CLR14+copy; at budget�
   noteLane(`firm_usage_daily token counter column discovered as '${col}'`);
   const usedNow = async () => Number((await usageSnapshot(firm))[0]?.[col]);
 
-  // (a) The boundary: at used ≥ budget a single admission is refused CLR14 with
-  // which-limit AND the UTC-reset copy (§0.4 fail-closed, §3.6 copy law).
-  assert.ok((await setDailyUsage(firm, col, DEFAULT_DAILY_TOKENS + 1_000_000)) >= 1, "pinned usage over budget");
-  const over = await assertRaises(CLR14, () => beginChatTurn({ session: sessions[1], author: owner, turnKey: opk("bo") }), "admission with usage OVER budget (§0.4 fail-closed)");
-  const overCopy = `${over.message} ${over.detail ?? ""} ${over.hint ?? ""}`;
-  assert.match(overCopy, /token|budget|daily/i, `CLR14 carries WHICH limit (tokens) — got: ${over.message}`);
-  assert.match(overCopy, /utc|reset|myt/i, `the CLR14 budget copy surfaces the UTC reset — got: ${over.message}`);
-
-  // (b) At budget−1: admission SERIALIZES on the firm guard (the loser must be
-  // proven blocked until the winner commits) and MAY admit — the ratified
-  // overshoot, hard-bounded by the run cap. A refused loser is ALSO legal
-  // (a future admission-time reservation) but must then be a clean CLR14.
-  assert.ok((await setDailyUsage(firm, col, DEFAULT_DAILY_TOKENS - 1)) >= 1, "pinned usage to budget−1");
+  // The counter is pinned high on purpose: pre-PR-0 this value alone refused the
+  // race outright, so a race that now RUNS is itself the differential.
+  assert.ok((await setDailyUsage(firm, col, DEFAULT_DAILY_TOKENS + 1_000_000)) >= 1, "pinned usage far over the retired budget");
   const out = await admissionRace({
     winner: { session: sessions[1], author: owner, turnKey: opk("bw") },
     loser: { session: sessions[2], author: owner, turnKey: opk("bl") },
   });
-  noteLane(`budget race (D-A semantics): winner=${JSON.stringify(out.winner)} loser=${JSON.stringify(out.loser)} provedBlocked=${out.provedBlocked}`);
-  assert.ok(out.winner?.ok, `the winner admitted the last budget slot (got ${JSON.stringify(out.winner)})`);
+  noteLane(`admission race (post-PR-0): winner=${JSON.stringify(out.winner)} loser=${JSON.stringify(out.loser)} provedBlocked=${out.provedBlocked}`);
+  assert.ok(out.winner?.ok, `the winner admitted (got ${JSON.stringify(out.winner)})`);
+  assert.ok(out.loser?.ok, `the loser ALSO admitted — with the token cap gone and the run cap not reached, neither arm may refuse (got ${JSON.stringify(out.loser)})`);
   assert.equal(out.provedBlocked, true, "X7: the second admission was PROVEN blocked on the admission guard before the first committed");
-  if (out.loser?.ok === false) {
-    assert.equal(out.loser.code, CLR14, `a refused concurrent admission must be a clean CLR14 (got ${out.loser.code}: ${out.loser.message})`);
-    noteLane("budget race: the loser was REFUSED — admission now reserves budget (stricter than the ratified minimum; fine)");
-  }
+
   // Usage is untouched by admission (consume-at-settle is the ratified mechanic).
-  assert.equal(await usedNow(), DEFAULT_DAILY_TOKENS - 1, "the daily counter is UNCHANGED by admissions (usage lands at settle)");
-  // The overshoot is hard-bounded by the run cap.
+  assert.equal(await usedNow(), DEFAULT_DAILY_TOKENS + 1_000_000, "the daily counter is UNCHANGED by admissions (usage lands at settle)");
   const compute = await rootQuery(
     "select count(*)::int as n from clara.agent_tasks where firm_id = $1 and status in ('queued','running','cancel_requested')",
     [firm],
   );
-  assert.ok(compute.rows[0].n <= DEFAULT_RUN_CAP, `admitted-over-budget turns never exceed the run cap (got ${compute.rows[0].n})`);
+  assert.ok(compute.rows[0].n <= DEFAULT_RUN_CAP, `admitted turns never exceed the run cap (got ${compute.rows[0].n})`);
 
-  // (c) Each admitted turn's settle LANDS its usage exactly once (round-2
-  // S4-AB6: via its CHECKPOINTED sum — settle's p_tokens is ignored), and the
-  // boundary then refuses again — the §0.4 overshoot loop closes.
+  // Each admitted turn's settle LANDS its usage exactly once (round-2 S4-AB6: via
+  // its CHECKPOINTED sum — settle's p_tokens is ignored). The meter keeps counting
+  // past the retired budget, which is the whole point of "meter, never cap".
   const before = await usedNow();
   let settled = 0;
   for (const [i, side] of [out.winner, out.loser].entries()) {
@@ -267,7 +333,10 @@ test("§6 budget (ratified D-A): used ≥ budget refuses CLR14+copy; at budget�
   }
   assert.ok(settled > 0, "at least the winner settles");
   assert.equal(await usedNow(), before + settled, "every admitted turn's settle landed exactly its CHECKPOINTED tokens on the daily counter");
-  await assertRaises(CLR14, () => beginChatTurn({ session: sessions[3], author: owner, turnKey: opk("bx") }), "post-settle admission at used ≥ budget (fail-closed after overshoot)");
+  // And the boundary does NOT close behind them — the fail-closed overshoot loop
+  // the old cell asserted here is precisely what the ruling removed.
+  assert.ok(taskIdOf(await beginChatTurn({ session: sessions[3], author: owner, turnKey: opk("bx") })),
+    "a post-settle admission at a counter far past the retired budget still ADMITS");
 });
 
 // ===========================================================================
