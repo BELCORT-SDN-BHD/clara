@@ -35,7 +35,7 @@ wrong tool will mis-grade a row:
 
 | target | plain fetch | note |
 |---|---|---|
-| `hasil.gov.my/wp-content/uploads/*.pdf` | **HTTP 200**, real `application/pdf` | **every grade-A LHDN source came through here.** Browse the `/en/…` index page for the link, then plain-`curl` the PDF |
+| `https://hasil.gov.my/wp-content/uploads/*.pdf` | **HTTP 200**, real application/pdf | **every grade-A LHDN source came through here.** Browse the `/en/…` index page for the link, then plain-`curl` the PDF |
 | `hasil.gov.my/media/*` · the e-CP39 FAQ · the Form E sample | **404** (a 243 KB HTML error page) | killed both e-PCB Plus media statements |
 | `hasil.gov.my/en/employers/*` | **404** | the live slugs are `/en/majikan/*` |
 | `phl.hasil.gov.my` | **ECONNREFUSED** | separate host, down today |
@@ -269,24 +269,24 @@ ASSIST 2.0** · the paper **CP39** form text · LHDN's **payment-channel ↔ mod
 
 ### 1.8 Sources — all accessed 2026-08-23
 
-**Grade A** (downloaded + text-extracted), all under `hasil.gov.my/wp-content/uploads/` unless
+**Grade A** (downloaded + text-extracted), all under `https://hasil.gov.my/wp-content/uploads/` unless
 stated: **S1** GPHDN 1/2024 (MTD guideline) · **S2** Income Tax Act 1967, consolidated **as at
 21 May 2024** · **S3** *Program Memfail Borang Nyata 2026* (issued 30 Dec 2025) · **S4** GPHDN
 2/2024 (SPC) · **S5** LHDN e-PCB Plus briefing deck 2025 · **S6** MTD Computerised Calculation
 Spec 2026 (upd. 01 Jan 2026) · **S7** P.U.(A) 123/2021 · **H3** HRD Corp media release 29 Jul
-2025 and **H4** HRD Corp General Guidelines (`hrdcorp.gov.my/wp-content/uploads/`) · **PF1**
-PERKESO LINDUNG 24 JAM FAQ v2.1 (`perkeso.gov.my/images/lindung/lindung-24-jam/faq-2.1.pdf`) ·
+2025 and **H4** HRD Corp General Guidelines (`https://hrdcorp.gov.my/wp-content/uploads/`) · **PF1**
+PERKESO LINDUNG 24 JAM FAQ v2.1 (`https://perkeso.gov.my/images/lindung/lindung-24-jam/faq-2.1.pdf`) ·
 **E1** Employment Act 1955 reprint (`lom.agc.gov.my`).
 **Grade G** (Act / amendment PDFs): Act A1788 and Act 800 (perkeso.gov.my) · Act A1760, Act 452,
 Act 4 (lom.agc.gov.my).
-**Grade B** (live page, direct read): **L1** `hasil.gov.my/en/majikan/tanggungjawab-majikan/`
+**Grade B** (live page, direct read): **L1** `https://hasil.gov.my/en/majikan/tanggungjawab-majikan/`
 (footer *"Last updated on: 18/06/2026"*) · **L2** `…/en/majikan/pembayaran-pcb/` · **S8–S11** the
 other `/en/majikan/*` and `/en/syarikat/*` pages · **K1**
-`kwsp.gov.my/en/employer/responsibilities/payments` (browser DOM; FAQ 31),
+`https://kwsp.gov.my/en/employer/responsibilities/payments` (browser DOM; FAQ 31),
 `…/mandatory-contribution`, `…/non-malaysian-citizen-employees` · **P1**
-`perkeso.gov.my/en/rate-of-contribution.html` · **P2**
+`https://perkeso.gov.my/en/rate-of-contribution.html` · **P2**
 `…/our-services/employer-employee/contributions.html` · **P3** `…/pembayaran.html` · **H1/H2**
-`supportcentre.hrdcorp.gov.my/portal/en/kb/articles/hrd-levy`, `hrdcorp.gov.my/faq`.
+`https://supportcentre.hrdcorp.gov.my/portal/en/kb/articles/hrd-levy`, `https://hrdcorp.gov.my/faq`.
 **Grade D** (failed today): see the §0 reachability table, plus AGC Act 612 (**HTTP 500**) and
 HRD Corp's P.U.(A) 141/2001 PDF (scanned image, no text layer).
 
@@ -321,7 +321,7 @@ preserves, at the bytes:
   INFORMATIONAL-ONLY … NEVER authoritative"*. It is the estate's only existing signal that a
   statutory remittance has left the bank account.
 - **No statutory payroll COA is seeded.** `packages/db/seeds/0002_core_seed.sql` (164 lines) seeds
-  no `410-*` payable. The `410-001/003/004/005/006` WAGES/EPF/SOCSO/EIS/PCB **ACCRUED** codes
+  no `410-*` payable. The 410-001 / 003 / 004 / 005 / 006 WAGES/EPF/SOCSO/EIS/PCB **ACCRUED** codes
   exist only as evidence about **one real client's own chart**
   (`slice6/6-rpr-corpus.md:62-66`; `wave-a2/F-rpr-eval-corpus.md:142,182-183,236`) and as a
   Wave-B proposal (`coa-codex-completeness-review.md:336-349`, adding `410-007` PCB/MTD payable
@@ -414,7 +414,7 @@ implementation at all"* (`docs/audit/01-findings-report.md:3167-3174`).
   `clara.agent_act_receipts` is **F-A4's** (`close-key-1-annexes-2-record.md` §E.3) — designed,
   **UNBUILT**. TA-P4's citation mechanism is **F-A8's** — designed, **UNBUILT**
   (`internet-lane-design.md:280-288`).
-- **The human surface.** `apps/dashboard/app/` has fifteen page routes and **no `api/route.ts`
+- **The human surface.** `apps/dashboard/app/` has fifteen page routes and **no api/route.ts
   anywhere** — pages call PostgREST `rpc()` directly. The crude-door idiom is
   `apps/dashboard/app/close/page.tsx` (header `:1-27`): `"use client"`, dev auth = a pasted
   session JWT in `sessionStorage` under the shared `clara_dev_jwt` key, reads via named RPC
@@ -438,8 +438,8 @@ change what the design may build.
   **`conflict`** flag, never a silent pick · weekend roll-over is a **per-regulator** column ·
   rates and bases are **not the calendar's business** but are recorded here as engine facts
   (§1.6) · every row cites the page + fetch date, and **reprints are structural cites only**.
-- **The wake-kind chain (`conductor`).** Merge order `F-A2/PR-1` → **`F-A4/PR-1b`** →
-  `F-A3/PR-1b` → `F-A7/PR-4beta`; F-T2 would be **fifth**. Adopting F-A4's `agent_tasks` arm does
+- **The wake-kind chain (`conductor`).** Merge order F-A2 PR-1 → **F-A4 PR-1b** →
+  F-A3 PR-1b → F-A7 PR-4beta; F-T2 would be **fifth**. Adopting F-A4's `agent_tasks` arm does
   **not** by itself decide whether a kind is minted, and **the site list is re-derived by rig
   replay, never asserted as a count.**
 - **Naming hazard (`tb-ft1-sst`).** **Never `*_filings`** — `clara.document_filings` (`0007:63`)

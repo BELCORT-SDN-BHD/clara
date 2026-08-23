@@ -299,9 +299,9 @@ and authority, **both dates** (`statutory_due_date` and `effective_due`), `holid
 `source_accessed_on` + `evidence_grade`, the coverage verdict as a **word** (`covered` /
 `missing` / `not_evaluable`), and the last notice spoken.
 
-**One page.** `apps/dashboard/app/calendar/page.tsx`, on `/close`'s idiom exactly
+**One page.** A new calendar/page.tsx under `apps/dashboard/app/`, on `/close`'s idiom exactly
 (`close/page.tsx:1-27`): `"use client"`, dev auth from `sessionStorage` under the shared
-`clara_dev_jwt` key, reads through a sibling `calendarApi.ts` over PostgREST `rpc()`, **no new
+`clara_dev_jwt` key, reads through a sibling calendarApi.ts over PostgREST `rpc()`, **no new
 writer invented**, every verdict rendered as **glyph + text word, never hue-only**, and the
 two-layer client-switch race guard (AbortController tied to the effect's dependencies **plus** a
 monotonic generation ref checked before any `setState`). **The no-computed-cents rule is free
