@@ -102,24 +102,23 @@ test("f-a2.c3.B7 amount-bearing evidence at the model_read tier refuses unverifi
 
 test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names the question_id", async (t) => {
   if (await gateCore(t)) return;
+  let probed = 0;
   for (const scope of ["client", "document", "vendor"]) {
     const p = await agentPostable(OWNER(), { client: A2() });
     const cps = await counterpartyRows(A2());
     const scopeId = scope === "document" ? p.cited.documentId
       : scope === "vendor" ? (cps[cps.length - 1]?.id ?? null) : null;
-    if (scope === "vendor" && !scopeId) {
-      noteLane("c3.B9 vendor: no counterparty was born on the draft — the vendor arm's input could not be built");
-      continue;
-    }
-    let q = null;
-    try {
-      q = await openQuestion(OWNER(), {
-        client: A2(), scopeKind: scope, scopeId, question: `c3.B9 ${scope}-scoped blocker`, opKey: opk("c3B9"),
-      });
-    } catch (e) {
-      noteLane(`c3.B9 ${scope}: open_question refused (${e.code}: ${e.message}) — the scope's input shape differs from the fixture's`);
-      continue;
-    }
+    // BOTH ESCAPES WERE `noteLane` + `continue`, AND `noteLane` IS NOT A SKIP — it appends to an
+    // array and the cell still reports PASS. If all three scopes took either escape the loop body
+    // never ran a single assertion, and this cell (the one that proves B9 refuses on every scope
+    // kind) was green having asked nothing. The file's own note records a zero/degenerate
+    // population today, so that was not hypothetical.
+    assert.ok(scope !== "vendor" || scopeId,
+      "c3.B9 vendor: a counterparty was born on the draft — without one the vendor arm has no input and the scope is UNPROVEN, not skippable");
+    const q = await openQuestion(OWNER(), {
+      client: A2(), scopeKind: scope, scopeId, question: `c3.B9 ${scope}-scoped blocker`, opKey: opk("c3B9"),
+    });
+    assert.ok(q, `c3.B9 ${scope}: the blocking question was really opened — mandatory setup`);
     // THE BOOKS VERSION IS RE-READ, and it is not tidiness: `open_question` is itself a write,
     // so the token `agentPostable` captured before it is stale and Tier A refuses CLR12 before
     // any rung is evaluated — the cell would then be measuring the books guard, not B9.
@@ -128,7 +127,12 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
     const qid = q?.question_id ?? q?.id ?? q;
     assert.ok(JSON.stringify(r).includes(String(qid)),
       `c3.B9 ${scope}: the receipt names the question_id ${qid} — a refusal that cannot say WHICH question blocks is not actionable`);
+    probed += 1;
   }
+  // ALL THREE, COUNTED. The claim in the title is "all THREE blocking scope kinds"; a loop that
+  // completed two of them and reported PASS is the shape this counter exists to forbid.
+  assert.equal(probed, 3,
+    `c3.B9: all three scope kinds were actually probed (got ${probed})`);
   noteLane("c3.B9: G-11 measured this machinery at a ZERO population today (client 0/0, vendor 2 both rule_proposal, document 8 all BEE self-blocking) — real machinery, honest pricing");
 });
 
@@ -253,7 +257,18 @@ test("f-a2.c3.D-fa an FA ACQUISITION DEBIT posts — the cell that would have go
   await upsertAccountClassed(OWNER(), { client: A2(), code: cost, name: "Motor Vehicles at cost", type: "asset", opKey: opk("c3fa") })
     .catch((e) => noteLane(`c3.D-fa: chart seat (${e.code}: ${e.message})`));
   await upsertFaProfile(OWNER(), { client: A2(), assetAccount: cost, opKey: opk("c3faprof") })
-    .catch((e) => noteLane(`c3.D-fa: FA enrolment refused (${e.code}: ${e.message}) — the belt's precondition could not be built, so the cell measures an UNENROLLED account and says so`));
+    .catch((e) => noteLane(`c3.D-fa: FA enrolment raised (${e.code}: ${e.message})`));
+  // THE PREMISE IS RE-READ, NOT ASSUMED. The enrolment call was wrapped in a catch that only
+  // noted the failure, and the cell's own comment admitted the consequence: it would then
+  // measure an UNENROLLED account. But the single assertion below — "it posts" — is satisfied
+  // by ANY ordinary asset/bank JV with no control leg, enrolled or not, because B12 is cut
+  // pre-hook. So the cell could pass without the FA belt ever being in the picture, which is the
+  // one thing it exists to prove. The enrolment is now read back from the catalog.
+  const enrolled = await rootQuery(
+    `select count(*)::int as n from clara.fa_profiles
+      where client_id=$1 and asset_account=$2`, [A2(), cost]).catch(() => ({ rows: [{ n: 0 }] }));
+  assert.ok(enrolled.rows[0].n >= 1,
+    `c3.D-fa precondition: the asset account is REALLY enrolled in the FA register (got ${enrolled.rows[0].n}) — without it this cell measures an unenrolled account and proves nothing about B12`);
   const p = await agentPostable(OWNER(), {
     client: A2(), amount: 500000, codingKind: null,
     lines: genericLines(500000, { debitCode: cost, creditCode: CHART.bank }),
@@ -415,9 +430,23 @@ test("f-a2.c3.vec-producer the PRODUCER obeys D26 too: a missing or json-null ru
     "c3.vec-producer: the Tier-B admission count walks the CLOSED rung roster, so an absent key is counted");
   assert.ok(!src.src.includes("jsonb_each_text(v_vector)"),
     "c3.vec-producer: …and the key-driven form is GONE — it could not see an absent key at all");
+  // THE PREDICATE IS EXTRACTED FROM THE SHIPPED BODY, NOT RETYPED. The first cut executed a
+  // hand-written copy of the expression that lives beside the string-match above — so the four
+  // controls below proved properties of the TEST'S duplicate, and any divergence between the
+  // copy and the core (or an inert matching string somewhere else in the body) left this cell
+  // green regardless of what `_agent_post_entry_core` actually does. That is law 3: a
+  // re-implementation is a projection of the predicate, not the predicate.
+  //
+  // Pulling the WHERE clause out of `prosrc` and binding the vector into it means the SQL
+  // executed here is the SQL the core executes, character for character. If the shipped form
+  // changes shape, this changes with it or fails to extract — both loud.
+  const m = /from\s+unnest\(v_rungs\)\s+r\s+where\s+([^;]+);/i.exec(src.src);
+  assert.ok(m,
+    "c3.vec-producer: the admission-count predicate was EXTRACTED from the shipped body — a cell that cannot find it must not fall back to a hand-written copy");
+  const predicate = m[1].replace(/v_vector/g, "($2::jsonb)");
+  noteLane(`c3.vec-producer: executing the SHIPPED predicate verbatim — where ${predicate.trim()}`);
   const count = async (vector) => (await rootQuery(
-    `select count(*)::int as n from unnest($1::text[]) r
-      where coalesce(($2::jsonb)->>r,'') <> 'pass'`,
+    `select count(*)::int as n from unnest($1::text[]) r where ${predicate}`,
     [TIER_B_RUNGS, JSON.stringify(vector)])).rows[0].n;
   const all = Object.fromEntries(TIER_B_RUNGS.map((r) => [r, "pass"]));
   assert.equal(await count(all), 0,

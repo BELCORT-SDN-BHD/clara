@@ -272,20 +272,63 @@ test("f-a2.c4.birth-race (CLR23, counterparty_birth_race) converts — two sessi
     "select clara.wake_post_entry(p_entry => $1::uuid, p_expected_revision => $2::uuid, "
     + "p_client => $3::uuid, p_books_version => $4::bigint, p_rationale => $5::text, "
     + "p_model => $6::jsonb, p_op_key => $7::text) as r";
+  // THE BOOKS TOKEN IS READ HERE, NOT AT DRAFT TIME. `agentPostable` captures it when the draft
+  // is made, and every cell above this one commits a post in between -- so by now both sides
+  // carry a STALE token and Tier A refuses CLR12 before a single lock is taken. Measured: that
+  // is exactly what happened, and the old disjunction hid it because the other side posted. The
+  // c4.clr26 cell already reads the token immediately before its race for the same reason.
+  const bv = await booksVersion(A2());
   const side = (p, key) => ({
     role: ROLES.wakeInteractive, wakeSecret: p.cred.secret,
-    run: (c) => c.query(sql, [p.args.entry, p.args.expectedRevision, A2(), p.args.booksVersion,
+    run: (c) => c.query(sql, [p.args.entry, p.args.expectedRevision, A2(), bv,
       RATIONALE, JSON.stringify(MODEL), key]).then((x) => x.rows[0].r),
   });
   const out = await holdThenContend({ a: side(a, opk("c4raceA")), b: side(b, opk("c4raceB")) });
   const receipts = [out.a, out.b].map((s) => s?.receipt).filter(Boolean);
   const converted = receipts.filter((x) => x?.refusal?.tier === "C" && x.refusal.reason === "counterparty_birth_race");
-  assert.ok(out.provedBlocked || converted.length > 0 || receipts.some((x) => x?.posted),
-    `c4.birth-race: the pair either serialised or converted — never a raw task failure (a=${JSON.stringify(out.a)}, b=${JSON.stringify(out.b)})`);
+
+  // THE OLD DISJUNCTION ACCEPTED THE WINNER ALONE. `provedBlocked || converted || someone
+  // posted` is satisfied by a run in which the birth-race conversion has been DELETED, one side
+  // posts and the other fails raw — `receipts.some(posted)` is true and nothing else is even
+  // consulted. Forcing the parts separately is what revealed the finding below.
+  assert.equal(out.provedBlocked, true,
+    `c4.birth-race: the two sides really SERIALISED — read from pg_blocking_pids, not inferred from an outcome (got ${JSON.stringify(out)})`);
+
+  // THE CONVERSION IS NOT REACHABLE FROM THIS LANE, AND THAT IS A MEASUREMENT, NOT A GUESS.
+  // Forcing `out.b.ok === true` turned this cell RED: the loser comes back CLR12, "the books
+  // moved past token N". It is structural, not timing. `assert_books_current` (0005:493-516) is
+  // a TIER-A gate, so it runs before any lock is taken, and under this schedule side A COMMITS
+  // before side B proceeds — which moves the books token B is holding. Two agent posts on one
+  // client therefore always collide on freshness BEFORE they can collide on the birth, so
+  // `(CLR23, counterparty_birth_race)` joins the two CLR25 pairs as DECLARED UNREACHABLE from
+  // the posting lane (law 31). The pair stays in E.2's set and its presence in the classifier is
+  // asserted structurally in `c4.unlisted`; a reachable producer for it, if one exists, is a
+  // rule-post or human-lane pairing, which is REPORTED to the lead rather than invented here.
+  assert.equal(out.a?.ok, true,
+    `c4.birth-race: the FIRST side completes — it holds the fresh token (got ${JSON.stringify(out.a)})`);
+  assert.equal(out.b?.ok, false,
+    `c4.birth-race: the second side does NOT complete (got ${JSON.stringify(out.b)})`);
+  assert.equal(out.b?.code, "CLR12",
+    `c4.birth-race: …and it is the TIER-A books-freshness gate that stops it, before any lock is taken — which is WHY the birth-race conversion cannot be reached from this lane. If this ever stops being CLR12, the declaration above must be revisited (got ${out.b?.code}: ${out.b?.message})`);
+
+  // WHAT REMAINS PROVABLE IS FORCED: one post, one birth, and no untyped receipt.
+  assert.equal(receipts.filter((x) => x?.posted === true).length, 1,
+    `c4.birth-race: exactly ONE side posts (got ${JSON.stringify(receipts.map((x) => x?.posted))})`);
+  const born = await rootQuery(
+    `select count(*)::int as n from clara.counterparties
+      where client_id=$1 and name_normalized=lower(regexp_replace($2,'[^a-zA-Z0-9]','','g'))`,
+    [A2(), name]);
+  assert.equal(born.rows[0].n, 1,
+    `c4.birth-race: …and exactly ONE counterparty exists for the contested name (got ${born.rows[0].n})`);
   for (const x of receipts.filter((y) => y?.posted === false)) {
     assert.ok(typeof x?.refusal?.tier === "string" && x.refusal.tier.length > 0,
-      `c4.birth-race: every non-posting side carries a TYPED refusal, not a bare exception (got ${JSON.stringify(x?.refusal)})`);
+      `c4.birth-race: any non-posting RECEIPT carries a typed refusal (got ${JSON.stringify(x?.refusal)})`);
+    if (x.refusal.tier === "C") {
+      assert.equal(x.refusal.reason, "counterparty_birth_race",
+        `c4.birth-race: …and a Tier-C conversion here is THE birth-race pair (got ${JSON.stringify(x.refusal)})`);
+    }
   }
+  noteLane(`c4.birth-race: serialised=${out.provedBlocked}, converted=${converted.length}, loser=${out.b?.code} — (CLR23, counterparty_birth_race) is DECLARED UNREACHABLE from this lane: the Tier-A books-freshness gate pre-empts it. REPORTED with the two CLR25 pairs.`);
 });
 
 test("f-a2.c4.birth-race-human a HUMAN approve racing an agent post on ONE new counterparty (R5-B3)", async (t) => {
@@ -617,9 +660,22 @@ test("f-a2.c4.bare-clr23 a bare CLR23 from inside _assert_supplier_bill_shape_at
   ]);
   assert.equal(doctored.ok, true,
     `c4.bare-clr23: mandatory setup — the draft's lines are doctored into the mis-shaped form (${doctored.code}: ${doctored.message}); the behavioural half is the half that matters here`);
-  const r = await post(p).catch((e) => ({ raised: e.code, detail: e.detail }));
+  // THE TOKEN MUST BE THE DOCTORED ONE. Posting with `p.args.expectedRevision` — the token read
+  // BEFORE the lines were rewritten — means the post can refuse CLR06 (stale revision) and never
+  // reach the shape floor at all, so a Tier-C conversion of the bare CLR23 could be sitting there
+  // undetected behind a revision check. `doctorLines` hands back the current token; use it.
+  const r = await post(p, { expectedRevision: doctored.revisionToken })
+    .catch((e) => ({ raised: e.code, detail: e.detail, message: e.message }));
+  assert.notEqual(r?.raised, "CLR06",
+    `c4.bare-clr23: the post is NOT refused for a stale revision — that would mask the wall under test (got ${JSON.stringify(r)})`);
   assert.notEqual(r?.refusal?.tier, "C",
     `c4.bare-clr23: a bare CLR23 is NOT converted into a Tier-C receipt (got ${JSON.stringify(r)})`);
+  // AND THE BARE RAISE REALLY PROPAGATED. "Not Tier C" is also true of a clean post, so the
+  // outcome is pinned: the mis-shaped entry never posts, and nothing durable is behind it.
+  assert.notEqual(r?.posted, true,
+    `c4.bare-clr23: the mis-shaped entry never posts (got ${JSON.stringify(r)})`);
+  assert.equal(await postReceiptCount(p.args.entry), 0,
+    "c4.bare-clr23: …and no post receipt was written behind the bare raise");
 });
 
 test("f-a2.c4.unlisted an UNLISTED (errcode, reason) propagates as a task FAILURE", async (t) => {
@@ -627,10 +683,36 @@ test("f-a2.c4.unlisted an UNLISTED (errcode, reason) propagates as a task FAILUR
   const { src } = await bodyOfName("_agent_post_entry_core");
   assert.ok(src, "c4.unlisted: the ungranted core resolves");
   const bare = src.replace(/--[^\n]*/g, " ");
-  assert.ok(/raise\b/i.test(bare),
-    "c4.unlisted: the conversion block RE-RAISES on an unknown pair rather than falling through to a default receipt");
+  // SCOPED TO THE HANDLER, because the whole body is not the claim. `_agent_post_entry_core`
+  // carries eleven-plus unrelated `raise exception`s in its Tier-A prologue alone, so a
+  // whole-body `/raise/` test stays true even if the terminal bare `raise;` this cell is named
+  // for were converted into a graceful `return <receipt>` — which is exactly the fail-open the
+  // cell exists to catch.
+  const at = bare.search(/exception\s+when\s+others\s+then/i);
+  assert.ok(at > 0,
+    "c4.unlisted: the core's `exception when others then` handler is found — without it there is nothing to scope to");
+  const handler = bare.slice(at);
+  assert.match(handler, /if\s+not\s+v_pair\s+then\s+raise\s*;/i,
+    "c4.unlisted: the handler RE-RAISES on an unlisted pair (`if not v_pair then raise;`) rather than falling through to a default receipt");
   assert.ok(!/when\s+others\s+then\s+return/i.test(bare),
     "c4.unlisted: there is no `when others then return <receipt>` arm — that would be the wildcard by another name");
+
+  // THE PAIR SET ITSELF, AS A CLOSED SET. Two of its nine members — both CLR25s — are DECLARED
+  // unreachable from this lane (B2/B3 pre-empt them, proven in c4.currency and c4.money-wall),
+  // so no behavioural cell can notice if they are deleted from the classifier. The literal is
+  // the only evidence available for those two, and that is stated rather than dressed up as a
+  // behavioural proof: this asserts the set the CLASSIFIER tests against, which is a different
+  // site from the delegate's raises the §J tail censuses.
+  for (const pair of [
+    "('CLR25','currency_unsupported')", "('CLR25','corroboration_contradicted')",
+    "('CLR23','counterparty_landscape_moved')", "('CLR23','registration_conflict')",
+    "('CLR23','counterparty_birth_race')", "('CLR10','customer_identity_name_only')",
+    "('CLR21','duplicate_bill')", "('CLR21','duplicate_sales')",
+    "('CLR19','write_into_closed_period')",
+  ]) {
+    assert.ok(src.includes(pair),
+      `c4.unlisted: the classifier still admits ${pair} — E.2's closed set may only GROW, and the two CLR25 members have no behavioural cell that could notice their removal`);
+  }
   noteLane("c4.unlisted: the SET MAY ONLY GROW. A new wall that arrives without joining the pair set surfaces as a task failure, which is loud and fail-closed — never a silently mis-labelled refusal");
 });
 
