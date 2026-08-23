@@ -2,12 +2,19 @@
 // Design of record: docs/plan/active/sst-engine-design.md S1-S4 + -design-part2.md S8's PR-1
 // row + -annexes.md Annex A.1/A.1a + -annexes-2.md Annex C-4/C-5 + -gate-record-part2.md OQ-14.
 //
+// FIX ROUND (conductor review, 2026-08-24): F1 (blocker, credit-card citation) + F2 (predecessor
+// rows) + F3 (threshold table immutability triggers) + F4 (self-supersession CHECK, both tables)
+// + F5 (basis_kind vocabulary + document tie, both tables) + F7 (the two orphaned Annex A.1
+// obligations: this file's own re-cut plus a21-watch.test.mjs's, and a measured cell for the
+// 0016:882-886 schedule-note residual). F6's conceptual note is doc-only, recorded in the design.
+//
 // STEM-GATED (db-tests.md, wave-f-lane-brief.md): keys on the file STEM, never a number —
 // this file's migration ships UNNUMBERED and is renumbered by the conductor at merge.
 //
-// SCOPE: clara.sst_rate_schedule (greenfield, six cited seed rows) + the clara.sst_threshold_
-// schedule ALTER (Annex A.1's ordered specification) + the reachable-closure write assertion,
-// armed for both tables. No evaluator, no writer verb — those are later F-T1 PRs / F-A8's own.
+// SCOPE: clara.sst_rate_schedule (greenfield, ten rows — six live + four verified predecessors)
+// + the clara.sst_threshold_schedule ALTER (Annex A.1's ordered spec + the F3-F5 hardening) +
+// the reachable-closure write assertion, armed for both tables. No evaluator, no writer verb —
+// those are later F-T1 PRs / F-A8's own.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -15,6 +22,7 @@ import {
   rootQuery, roleQuery, endPool, ROLES, CLR, assertRaisesOneOf,
 } from "./rig-helpers.mjs";
 import { checkDefs, uniqueIndexDefs, rlsFlags, roleCanExecute } from "./a21-helpers.mjs";
+import { withTxn } from "./rig-txn.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { markSkip, printSkipCount } from "./wave-a-helpers.mjs";
 
@@ -47,7 +55,7 @@ after(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// clara.sst_rate_schedule — shape, RLS, immutability.
+// clara.sst_rate_schedule — shape, RLS, CHECK vocabulary.
 // ---------------------------------------------------------------------------
 
 test("sst_rate_schedule: RLS enabled + forced, zero direct app-role write grants", async (t) => {
@@ -66,7 +74,7 @@ test("sst_rate_schedule: RLS enabled + forced, zero direct app-role write grants
   assert.equal(g.rows[0].n, 0, "no lane role can write sst_rate_schedule directly — zero direct app-role grants (Annex A.1)");
 });
 
-test("sst_rate_schedule: three rate FORMS, exactly-one-of-rate_bp/rate_amount_sen, and the effective-order/supersession/governed-origin CHECKs are live", async (t) => {
+test("sst_rate_schedule: three rate FORMS, exactly-one-of-rate_bp/rate_amount_sen, the effective-order/supersession CHECKs, F4's self-supersession block, and F5's basis_kind + document-tie", async (t) => {
   if (skipHere(t)) return;
   const defs = await checkDefs("sst_rate_schedule");
   for (const frag of [
@@ -77,8 +85,14 @@ test("sst_rate_schedule: three rate FORMS, exactly-one-of-rate_bp/rate_amount_se
     "(rate_kind = ANY (ARRAY['per_unit'::text, 'per_measure'::text])) = (unit_code IS NOT NULL)",
     "(effective_to IS NULL) OR (effective_to > effective_from)",
     "(superseded_by IS NULL) = (superseded_at IS NULL)",
+    // F4 (conductor fix-round 2026-08-24): self-supersession forgery blocked structurally.
+    "superseded_by IS DISTINCT FROM id",
+    // F5: basis_kind closed to the 0055:395 four-value vocabulary (nullable here, unlike client_facts).
+    "(basis_kind IS NULL) OR (basis_kind = ANY (ARRAY['owner_instruction'::text, 'document'::text, 'registry_lookup'::text, 'interview_carryover'::text]))",
+    // F5: the document-source tie, 0055:413's shape verbatim.
+    "(basis_kind = 'document'::text) = (source_document_id IS NOT NULL)",
   ]) {
-    assert.ok(defs.includes(frag), `sst_rate_schedule CHECK vocabulary carries: ${frag} (got: ${defs.slice(0, 400)})`);
+    assert.ok(defs.includes(frag), `sst_rate_schedule CHECK vocabulary carries: ${frag} (got: ${defs.slice(0, 600)})`);
   }
   const uq = await uniqueIndexDefs("sst_rate_schedule");
   assert.ok(
@@ -87,45 +101,98 @@ test("sst_rate_schedule: three rate FORMS, exactly-one-of-rate_bp/rate_amount_se
   );
 });
 
-test("sst_rate_schedule: seed is exactly six rows, all migration-seeded (superseded_by and recorded_by both NULL), each source_note non-blank", async (t) => {
+// ---------------------------------------------------------------------------
+// F1/F2 — the seed content: ten rows, the credit-card citation fix, the four verified
+// predecessors and their supersession chains.
+// ---------------------------------------------------------------------------
+
+test("sst_rate_schedule: seed is exactly TEN rows (six live + four F2 predecessors), all migration-seeded (recorded_by NULL throughout), each source_note non-blank", async (t) => {
   if (skipHere(t)) return;
   const rows = (await rootQuery(
-    "select tax_type, scope_key, rate_kind, rate_bp, rate_amount_sen, unit_code, effective_from::text as ef, effective_to, superseded_by, recorded_by, source_note from clara.sst_rate_schedule order by tax_type, scope_key",
+    "select tax_type, scope_key, rate_kind, rate_bp, rate_amount_sen, unit_code, effective_from::text as ef, effective_to::text as et, superseded_by, recorded_by, source_note from clara.sst_rate_schedule order by tax_type, scope_key, effective_from",
   )).rows;
-  assert.equal(rows.length, 6, `sst_rate_schedule carries exactly 6 seed rows (got ${rows.length})`);
+  assert.equal(rows.length, 10, `sst_rate_schedule carries exactly 10 seed rows (got ${rows.length})`);
+  const superseded = rows.filter((r) => r.superseded_by !== null);
+  assert.equal(superseded.length, 4, `exactly 4 rows are superseded predecessors (F2) (got ${superseded.length})`);
   for (const r of rows) {
-    assert.equal(r.superseded_by, null, `${r.tax_type}/${r.scope_key} is not superseded`);
-    assert.equal(r.recorded_by, null, `${r.tax_type}/${r.scope_key} is migration-seeded, not governed-recorded`);
-    assert.ok((r.source_note ?? "").length > 20, `${r.tax_type}/${r.scope_key} cites a real source_note`);
-    // exactly one of rate_bp / rate_amount_sen populated, matching rate_kind.
+    assert.equal(r.recorded_by, null, `${r.tax_type}/${r.scope_key}@${r.ef} is migration-seeded, not governed-recorded`);
+    assert.ok((r.source_note ?? "").length > 20, `${r.tax_type}/${r.scope_key}@${r.ef} cites a real source_note`);
     const bp = r.rate_bp !== null;
     const amt = r.rate_amount_sen !== null;
-    assert.notEqual(bp, amt, `${r.tax_type}/${r.scope_key}: exactly one of rate_bp/rate_amount_sen is set`);
+    assert.notEqual(bp, amt, `${r.tax_type}/${r.scope_key}@${r.ef}: exactly one of rate_bp/rate_amount_sen is set`);
   }
 
-  const byKey = Object.fromEntries(rows.map((r) => [`${r.tax_type}/${r.scope_key}`, r]));
-  assert.equal(Number(byKey["sales/general"].rate_bp), 1000, "sales/general is 10% (S-1)");
-  assert.equal(Number(byKey["sales/first_schedule"].rate_bp), 500, "sales/first_schedule is 5% (S-1)");
-  assert.equal(Number(byKey["service/general"].rate_bp), 800, "service/general is 8% (V-1)");
-  assert.equal(Number(byKey["service/first_schedule_6pct"].rate_bp), 600, "service/first_schedule_6pct is 6% (V-2)");
-  assert.equal(Number(byKey["service/credit_charge_card"].rate_amount_sen), 2500, "credit/charge card is RM25.00 in sen (V-1)");
-  assert.equal(byKey["service/credit_charge_card"].unit_code, "card", "credit/charge card unit_code is 'card'");
+  const live = Object.fromEntries(rows.filter((r) => r.superseded_by === null).map((r) => [`${r.tax_type}/${r.scope_key}`, r]));
+  assert.equal(Number(live["sales/general"].rate_bp), 1000, "sales/general (live) is 10% (S-1)");
+  assert.equal(Number(live["sales/first_schedule"].rate_bp), 500, "sales/first_schedule (live) is 5% (S-1)");
+  assert.equal(Number(live["service/general"].rate_bp), 800, "service/general (live) is 8% (V-1)");
+  assert.equal(Number(live["service/first_schedule_6pct"].rate_bp), 600, "service/first_schedule_6pct (live) is 6% (V-2)");
 
-  // The V-3 flagship: rental/leasing is its OWN scope from 2026-01-01, at 6%, distinct from the
-  // general 8% bucket that covered it before item 14 existed — proving the table is effective-
-  // dated and can carry a rate whose gazette (P.U.(A) 125/2026, 13 Mar 2026) post-dates the
-  // period it governs (deemed effective 2026-01-01).
-  const rental = byKey["service/rental_leasing"];
+  // F1 BLOCKER FIX: credit/charge-card now cites P.U.(A) 213/2018 @ 2018-09-01, never
+  // 64/2024 @ 2024-03-01 — and has no predecessor (213/2018 IS the earliest instrument).
+  const card = live["service/credit_charge_card"];
+  assert.ok(card, "service/credit_charge_card is live");
+  assert.equal(card.ef, "2018-09-01", "F1 fix: credit_charge_card's effective_from is 2018-09-01, not 2024-03-01");
+  assert.equal(Number(card.rate_amount_sen), 2500, "credit/charge card is RM25.00 in sen");
+  assert.equal(card.unit_code, "card", "credit/charge card unit_code is 'card'");
+  assert.match(card.source_note, /213\/2018/, "F1 fix: source_note cites P.U.(A) 213/2018");
+
+  // The V-3 flagship, unchanged by the fix round.
+  const rental = live["service/rental_leasing"];
   assert.equal(rental.ef, "2026-01-01", "rental_leasing's own scope starts exactly 2026-01-01 (V-3's deemed-effective date)");
   assert.equal(Number(rental.rate_bp), 600, "rental_leasing is 6% once its own First-Schedule item exists (V-3)");
 });
 
-test("sst_rate_schedule: immutable + supersede — DELETE, TRUNCATE and an out-of-shape UPDATE all refuse (as clara_fn_owner, the only role with any grant at all)", async (t) => {
+test("sst_rate_schedule: F2's four predecessor rows each supersede into their correct successor, with abutting effective_to/effective_from boundaries and no gap or overlap", async (t) => {
   if (skipHere(t)) return;
-  // A DEDICATED throwaway fixture row (never one of the six real seed rows) — the supersession
-  // half of this cell permanently mutates whatever row it targets (the trigger refuses a SECOND
-  // update to an already-superseded row by design), so a real seed row must never be the target:
-  // the six-row/none-superseded shape is a standing invariant other cells in this file assert.
+  const chains = [
+    { tax_type: "sales", scope_key: "general", predFrom: "2022-06-01", predRate: 1000, succFrom: "2025-07-01" },
+    { tax_type: "sales", scope_key: "first_schedule", predFrom: "2022-06-01", predRate: 500, succFrom: "2025-07-01" },
+    { tax_type: "service", scope_key: "general", predFrom: "2018-09-01", predRate: 600, succFrom: "2024-03-01" },
+    { tax_type: "service", scope_key: "first_schedule_6pct", predFrom: "2024-03-01", predRate: 600, succFrom: "2025-07-01" },
+  ];
+  for (const c of chains) {
+    const pred = (await rootQuery(
+      "select rate_bp, effective_from::text as ef, effective_to::text as et, superseded_by, superseded_at from clara.sst_rate_schedule where tax_type=$1 and scope_key=$2 and effective_from=$3::date",
+      [c.tax_type, c.scope_key, c.predFrom],
+    )).rows[0];
+    const succ = (await rootQuery(
+      "select id, effective_from::text as ef from clara.sst_rate_schedule where tax_type=$1 and scope_key=$2 and effective_from=$3::date",
+      [c.tax_type, c.scope_key, c.succFrom],
+    )).rows[0];
+    assert.ok(pred && succ, `${c.tax_type}/${c.scope_key}: both the predecessor and successor rows resolve`);
+    assert.equal(Number(pred.rate_bp), c.predRate, `${c.tax_type}/${c.scope_key} predecessor rate matches`);
+    assert.equal(pred.et, succ.ef, `${c.tax_type}/${c.scope_key}: predecessor's effective_to abuts the successor's effective_from exactly — no gap, no overlap`);
+    assert.equal(pred.superseded_by, succ.id, `${c.tax_type}/${c.scope_key}: predecessor's superseded_by points at the REAL successor id, not a placeholder`);
+    assert.ok(pred.superseded_at, `${c.tax_type}/${c.scope_key}: predecessor carries a non-null superseded_at`);
+  }
+});
+
+test("sst_rate_schedule: a period before the earliest verified predecessor has NO row for that scope — fail-closed, not extrapolated (F2's own boundary)", async (t) => {
+  if (skipHere(t)) return;
+  const before = [
+    { tax_type: "sales", scope_key: "general", asOf: "2022-05-31" },
+    { tax_type: "service", scope_key: "general", asOf: "2018-08-31" },
+    { tax_type: "service", scope_key: "first_schedule_6pct", asOf: "2024-02-29" },
+  ];
+  for (const b of before) {
+    const hit = await rootQuery(
+      `select 1 from clara.sst_rate_schedule
+        where tax_type=$1 and scope_key=$2 and effective_from<=$3::date
+          and (effective_to is null or effective_to>$3::date)`,
+      [b.tax_type, b.scope_key, b.asOf],
+    );
+    assert.equal(hit.rowCount, 0, `${b.tax_type}/${b.scope_key} has NO covering row as of ${b.asOf} — a period this early REFUSES by name (no fabricated pre-history)`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// sst_rate_schedule immutability (unchanged pattern from v1 — throwaway probe rows, never a
+// real seed row, since the trigger's supersession stamp is permanent).
+// ---------------------------------------------------------------------------
+
+test("sst_rate_schedule: immutable + supersede — DELETE, TRUNCATE, an out-of-shape UPDATE and F4's self-supersession attempt all refuse (as clara_fn_owner, the only role with any grant at all)", async (t) => {
+  if (skipHere(t)) return;
   await roleQuery(
     ROLES.fnOwner,
     `insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
@@ -143,9 +210,11 @@ test("sst_rate_schedule: immutable + supersede — DELETE, TRUNCATE and an out-o
   await assertRaisesOneOf([CLR.immutable], () => roleQuery(ROLES.fnOwner, "delete from clara.sst_rate_schedule where id=$1", [row.id]), "DELETE on sst_rate_schedule");
   await assertRaisesOneOf([CLR.immutable], () => roleQuery(ROLES.fnOwner, "truncate clara.sst_rate_schedule"), "TRUNCATE on sst_rate_schedule");
   await assertRaisesOneOf([CLR.badRequest], () => roleQuery(ROLES.fnOwner, "update clara.sst_rate_schedule set rate_bp = rate_bp + 1 where id=$1", [row.id]), "an UPDATE that is not the supersession stamp");
+  // F4: self-supersession is a CHECK violation (23514), a different failure than the trigger's
+  // CLR10 — proven directly, never assumed to be caught by the trigger path.
+  await assertRaisesOneOf(["23514"], () => roleQuery(ROLES.fnOwner, "update clara.sst_rate_schedule set superseded_by=id, superseded_at=now() where id=$1", [row.id]), "self-supersession (superseded_by = own id)");
 
-  // The ONE lawful UPDATE — the supersession stamp, paired — is admitted, pointing at a REAL
-  // row (the FK on superseded_by demands one; a fabricated uuid correctly refuses at 23503).
+  // The ONE lawful UPDATE — the supersession stamp, paired, pointing at a REAL other row.
   await roleQuery(
     ROLES.fnOwner,
     "update clara.sst_rate_schedule set superseded_by=$2, superseded_at=now() where id=$1",
@@ -154,21 +223,30 @@ test("sst_rate_schedule: immutable + supersede — DELETE, TRUNCATE and an out-o
   const after1 = (await rootQuery("select superseded_by from clara.sst_rate_schedule where id=$1", [row.id])).rows[0];
   assert.equal(after1.superseded_by, successor.id, "the supersession stamp is admitted");
   await assertRaisesOneOf([CLR.badRequest], () => roleQuery(ROLES.fnOwner, "update clara.sst_rate_schedule set superseded_at=now() where id=$1", [row.id]), "a second update to an already-superseded row");
-  noteLane("sst_rate_schedule immutability cell left its OWN throwaway probe row (_ft1_test_immutability_probe) permanently superseded, by design — the six real seed rows are untouched by this cell.");
+  noteLane("sst_rate_schedule immutability cell left its OWN throwaway probe row (_ft1_test_immutability_probe) permanently superseded, by design — the ten real seed rows are untouched by this cell.");
 });
 
 // ---------------------------------------------------------------------------
-// clara.sst_threshold_schedule — the Annex A.1 ordered ALTER, backward-compatible.
+// clara.sst_threshold_schedule — the Annex A.1 ordered ALTER + the F3-F5 fix-round hardening.
 // ---------------------------------------------------------------------------
 
-test("sst_threshold_schedule: the ordered ALTER landed — id+unique, paired supersession, governed-origin conjunct, relaxed NIL-capable CHECK, per-item PK", async (t) => {
+test("sst_threshold_schedule: the ordered ALTER landed — id+unique, paired supersession, F4's self-supersession block, the governed-origin conjunct, F5's basis_kind + document-tie, the relaxed NIL-capable CHECK, per-item PK", async (t) => {
   if (skipHere(t)) return;
   const defs = await checkDefs("sst_threshold_schedule");
   assert.ok(defs.includes("threshold_cents >= 0"), `threshold_cents CHECK relaxed to >= 0 (V-6 NIL-threshold defect) (got: ${defs})`);
   assert.ok(defs.includes("(superseded_by IS NULL) = (superseded_at IS NULL)"), "paired supersession CHECK present");
+  assert.ok(defs.includes("superseded_by IS DISTINCT FROM id"), "F4: self-supersession block present");
   assert.ok(
     defs.includes("(recorded_by IS NULL) OR ((btrim(COALESCE(basis, ''::text)) <> ''::text) AND (basis_kind IS NOT NULL))"),
     `governed-origin conjunct present (got: ${defs})`,
+  );
+  assert.ok(
+    defs.includes("(basis_kind IS NULL) OR (basis_kind = ANY (ARRAY['owner_instruction'::text, 'document'::text, 'registry_lookup'::text, 'interview_carryover'::text]))"),
+    `F5: basis_kind vocabulary CHECK present (got: ${defs.slice(0, 800)})`,
+  );
+  assert.ok(
+    defs.includes("(basis_kind = 'document'::text) = (source_document_id IS NOT NULL)"),
+    `F5: document-source tie present (got: ${defs.slice(0, 800)})`,
   );
 
   const pk = (await rootQuery(
@@ -198,6 +276,95 @@ test("sst_threshold_schedule: both G/I seed rows survive the ALTER byte-for-byte
     assert.equal(row.superseded_by, null, `group ${g} is not superseded by this ALTER`);
     assert.equal(row.recorded_by, null, `group ${g} stays migration-seeded (governed-origin conjunct exempts a NULL recorder)`);
   }
+});
+
+test("sst_threshold_schedule: F3 — immutable + supersede now mirrors its sibling exactly. Before this fix DELETE and an out-of-shape UPDATE of a live row were BOTH allowed (measured); now they refuse", async (t) => {
+  if (skipHere(t)) return;
+  // UNLIKE the sst_rate_schedule probe above, this one MUST roll back rather than leave a
+  // permanently-superseded row: sst_threshold_schedule already has FIVE LIVE READERS
+  // (ack_compliance_watch, evaluate_sst_watch, evaluate_sst_watches_all,
+  // record_future_attestation, set_turnover_classification), every one of them keyed on
+  // service_group ALONE with no item_no or superseded_by filter (F6's named group-grain
+  // obligation) — a permanent extra row for group G, even superseded, still satisfies
+  // `effective_from<=today and (effective_to is null or ...)` and can silently win a bare
+  // `select ... into` with no ORDER BY/LIMIT. MEASURED the hard way in this fix round: an
+  // earlier draft of this cell left such a row and corrupted a21-watch.test.mjs's tier-boundary
+  // assertions elsewhere in the estate suite — exactly the class F6 names, not merely a risk.
+  await withTxn(async (c) => {
+    await c.query("set role clara_fn_owner");
+    await c.query(
+      `insert into clara.sst_threshold_schedule (service_group, item_no, threshold_cents, effective_from, source_note)
+         values ('G', '_ft1_test_thr_immutability_probe', 1, current_date, 'throwaway immutability-probe fixture, rolled back — never a real threshold'),
+                ('G', '_ft1_test_thr_immutability_probe_successor', 2, current_date, 'throwaway successor fixture, rolled back — never a real threshold')`,
+    );
+    const row = (await c.query(
+      "select id from clara.sst_threshold_schedule where service_group='G' and item_no='_ft1_test_thr_immutability_probe'",
+    )).rows[0];
+    const successor = (await c.query(
+      "select id from clara.sst_threshold_schedule where service_group='G' and item_no='_ft1_test_thr_immutability_probe_successor'",
+    )).rows[0];
+    assert.ok(row && successor, "throwaway fixture rows present");
+
+    // A failed statement aborts the whole enclosing transaction, not just itself — SAVEPOINT
+    // around each expected-failure statement (the x56-wall-battery.test.mjs idiom) so the
+    // transaction can keep going after each controlled refusal.
+    const expectRefused = async (sp, sql, params, expectedCode, label) => {
+      await c.query(`savepoint ${sp}`);
+      let err = null;
+      try {
+        await c.query(sql, params);
+      } catch (e) {
+        err = e;
+      }
+      await c.query(`rollback to savepoint ${sp}`);
+      assert.ok(err, `${label}: expected SQLSTATE ${expectedCode} but the call SUCCEEDED`);
+      assert.equal(err.code, expectedCode, `${label}: expected SQLSTATE ${expectedCode}, got ${err.code ?? "(no code)"} — ${err.message}`);
+    };
+
+    await expectRefused("sp_delete", "delete from clara.sst_threshold_schedule where id=$1", [row.id], CLR.immutable, "DELETE on sst_threshold_schedule");
+    await expectRefused("sp_badupdate", "update clara.sst_threshold_schedule set threshold_cents = threshold_cents + 1 where id=$1", [row.id], CLR.badRequest, "an UPDATE that is not the supersession stamp");
+    await expectRefused("sp_selfsupersede", "update clara.sst_threshold_schedule set superseded_by=id, superseded_at=now() where id=$1", [row.id], "23514", "F4: self-supersession on the threshold table");
+
+    await c.query(
+      "update clara.sst_threshold_schedule set superseded_by=$2, superseded_at=now() where id=$1",
+      [row.id, successor.id],
+    );
+    const after1 = (await c.query("select superseded_by from clara.sst_threshold_schedule where id=$1", [row.id])).rows[0];
+    assert.equal(after1.superseded_by, successor.id, "the supersession stamp is admitted");
+    await expectRefused("sp_doublesupersede", "update clara.sst_threshold_schedule set superseded_at=now() where id=$1", [row.id], CLR.badRequest, "a second update to an already-superseded row");
+  }, { commit: false });
+});
+
+// ---------------------------------------------------------------------------
+// F7(a) — the 0016:882-886 schedule-note residual (Annex A.1 GN-2's named, accepted gap):
+// no LIMIT/DISTINCT on the string_agg, so it double-lists a service_group once more than one
+// live threshold row shares it. MEASURED inside a rolled-back transaction — never a permanent
+// row, and the append-only trigger (F3) would refuse a DELETE afterward regardless.
+// ---------------------------------------------------------------------------
+
+test("0016:882-886 schedule-note residual: double-lists a group once an item-grain row coexists with the group-wide row — MEASURED, not fabricated (Annex A.1 GN-2, accepted as advisory-only)", async (t) => {
+  if (skipHere(t)) return;
+  await withTxn(async (c) => {
+    await c.query("set role clara_fn_owner");
+    await c.query(
+      `insert into clara.sst_threshold_schedule (service_group, item_no, threshold_cents, effective_from, source_note)
+         values ('G', '_ft1_test_double_list_probe', 1, current_date, 'throwaway item-grain probe fixture, rolled back — never a real threshold')`,
+    );
+    // Stay as clara_fn_owner throughout: evaluate_sst_watches_all is DEFINER so any granted
+    // caller could invoke it, but compliance_eval_runs' own RLS carries an OWNER-ONLY policy
+    // (no clara_runtime read grant) — reading the receipt back needs the owner role, not
+    // merely EXECUTE on the function that wrote it.
+    await c.query("select clara.evaluate_sst_watches_all($1)", ["_ft1_test_double_list_probe"]);
+    const note = (await c.query(
+      "select schedule_note from clara.compliance_eval_runs order by started_at desc limit 1",
+    )).rows[0].schedule_note ?? "";
+    const gHits = (note.match(/\bG@/g) || []).length;
+    assert.ok(
+      gHits >= 2,
+      `schedule_note double-lists group G once a per-item row coexists with the group-wide row (0016:882-886, GN-2's named residual — F7) — got: "${note}"`,
+    );
+  }, { commit: false });
+  // Rolled back: no throwaway row and no compliance_eval_runs receipt survive this cell.
 });
 
 // ---------------------------------------------------------------------------
@@ -247,7 +414,7 @@ async function reachableClosureWriters(target) {
   return offenders;
 }
 
-test("reachable closure: currently ZERO writers reach sst_threshold_schedule or sst_rate_schedule (no governed door exists yet)", async (t) => {
+test("reachable closure: currently ZERO writers reach sst_threshold_schedule or sst_rate_schedule (no governed door exists yet; the two new F3 trigger functions are neither granted nor called by anything, so they never enter the closure)", async (t) => {
   if (skipHere(t)) return;
   assert.deepEqual(await reachableClosureWriters("sst_threshold_schedule"), [], "no reachable writer for sst_threshold_schedule");
   assert.deepEqual(await reachableClosureWriters("sst_rate_schedule"), [], "no reachable writer for sst_rate_schedule");
@@ -291,12 +458,15 @@ test("reachable closure ADVERSARIAL TWIN: an ungranted core writing sst_rate_sch
   }
 });
 
-test("PUBLIC has no EXECUTE on the new trigger function; clara_fn_owner owns it (DEFINER hygiene)", async (t) => {
+test("PUBLIC has no EXECUTE on either new trigger function; clara_fn_owner owns both (DEFINER hygiene)", async (t) => {
   if (skipHere(t)) return;
-  const pub = await roleCanExecute("public", "_tf_sst_rate_schedule_supersede_only");
-  assert.notEqual(pub, true, "PUBLIC does not hold EXECUTE on the new supersede-only trigger function");
-  const owner = (await rootQuery(
-    "select pg_get_userbyid(proowner) as o from pg_proc where proname='_tf_sst_rate_schedule_supersede_only' and pronamespace='clara'::regnamespace",
-  )).rows[0]?.o;
-  assert.equal(owner, "clara_fn_owner", "the new trigger function is clara_fn_owner-owned (DEFINER-writer idiom)");
+  for (const fn of ["_tf_sst_rate_schedule_supersede_only", "_tf_sst_threshold_schedule_supersede_only"]) {
+    const pub = await roleCanExecute("public", fn);
+    assert.notEqual(pub, true, `PUBLIC does not hold EXECUTE on ${fn}`);
+    const owner = (await rootQuery(
+      "select pg_get_userbyid(proowner) as o from pg_proc where proname=$1 and pronamespace='clara'::regnamespace",
+      [fn],
+    )).rows[0]?.o;
+    assert.equal(owner, "clara_fn_owner", `${fn} is clara_fn_owner-owned (DEFINER-writer idiom)`);
+  }
 });

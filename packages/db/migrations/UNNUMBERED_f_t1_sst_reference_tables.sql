@@ -4,10 +4,27 @@
 -- (Annex C-4/C-5), -gate-record.md + -gate-record-part2.md (OQ-14). Statutory row ids (S-*/V-*)
 -- resolve in sst-engine-survey.md S3, fetched/verified 2026-08-23.
 --
--- SCOPE, EXACTLY (design-part2.md S8 PR-1 row): (1) clara.sst_rate_schedule, greenfield, + a
--- narrow cited seed -- (2) the reachable-closure write assertion, armed for BOTH SST reference
--- tables -- (3) the clara.sst_threshold_schedule ALTER, Annex A.1's ordered specification --
--- (4) PRD.md:215's prose-rates correction (a doc edit, this migration's sibling change, not SQL).
+-- FIX ROUND (conductor review, 2026-08-24) -- MERGEABLE-WITH-FIXES verdict, one blocker (F1) +
+-- six findings (F2-F7), all executed in this revision:
+--   F1 (BLOCKER) the credit/charge-card row cited the wrong instrument and date -- corrected.
+--   F2 predecessor rows seeded exactly as far as the review's verified instruments reach.
+--   F3 the threshold table gets the SAME immutability+supersede trigger pair as its sibling.
+--   F4 a self-supersession CHECK on both tables (superseded_by IS DISTINCT FROM id).
+--   F5 basis_kind closed to the 0055:395 four-value vocabulary + the document-source tie,
+--      both tables.
+--   F7 the two orphaned obligations Annex A.1 already scoped INTO this PR: the a21-watch.test.mjs
+--      P1 re-cut and a measured cell for the 0016:882-886 schedule-note residual.
+-- F6's conceptual note (the five group-grain readers; the no-default-service-tax evaluator law)
+-- is DOC-ONLY in this PR -- recorded in Annex A.1 and Annex F respectively as named F-T1
+-- obligations; the successor reader body and the evaluator-side enforcement are later-PR work.
+-- Every citation this lane did NOT independently re-fetch against a primary source says so.
+--
+-- SCOPE, EXACTLY (design-part2.md S8 PR-1 row, as widened by the fix round above): (1)
+-- clara.sst_rate_schedule, greenfield, + a narrow cited seed with its verified predecessors --
+-- (2) the reachable-closure write assertion, armed for BOTH SST reference tables -- (3) the
+-- clara.sst_threshold_schedule ALTER, Annex A.1's ordered specification, now including the same
+-- immutability trigger pair as its sibling -- (4) PRD.md:215's prose-rates correction (a doc
+-- edit, this migration's sibling change, not SQL).
 -- NOT in scope: any evaluator, any writer verb, any governed door -- those are F-T1 PR-3+ and
 -- F-A8's own PR (the fetch attaches to the schema this file lands, per survey S1.7/S4 row 6).
 --
@@ -30,14 +47,13 @@
 -- their prosrc calls, transitively) is EMPTY of DML on either table -- the correctly-scoped
 -- version of 0016's claim, armed for two tables, never a patch to 0016's applied bytes.
 --
--- sst_rate_schedule's SEED IS DELIBERATELY NARROW -- SIX ROWS, ALL BYTE-GRADE CITED. It carries
--- the four headline ad-valorem rates (sales general 10% + First-Schedule goods 5%, service
--- general 8% + First-Schedule 6% bucket), the one credit/charge-card per-unit fee (RM25), and
--- the flagship retroactive-correction case the design names by name (V-3: rental/leasing moves
--- from the 8% general bucket into its OWN 6% scope on 2026-01-01, ruled by a gazette dated ten
--- weeks later -- the live proof an effective-dated, supersedable table is required at all).
--- NOT SEEDED, ON PURPOSE, NAMED SO A LATER READER DOES NOT ASSUME AN OMISSION IS A GAP IN THIS
--- FILE RATHER THAN A NAMED OPEN QUESTION:
+-- sst_rate_schedule's SEED -- TEN ROWS, ALL CITED. Six CURRENTLY-LIVE rows (the four headline
+-- ad-valorem rates, the one credit/charge-card per-unit fee, and the V-3 retroactive-correction
+-- flagship) plus four VERIFIED PREDECESSOR rows the fix round's F2 ruling adds -- each superseding
+-- into its successor above, seeded exactly as far back as a verified instrument reaches and no
+-- further (TA-P2's "a missing row REFUSES" idiom governs everything earlier). NOT SEEDED, ON
+-- PURPOSE, NAMED SO A LATER READER DOES NOT ASSUME AN OMISSION IS A GAP IN THIS FILE RATHER THAN
+-- A NAMED OPEN QUESTION:
 --   - the Second-Schedule PER-MEASURE specific rates (RM/litre, RM/kg) -- survey U-5: "layout-
 --     extracted from a PDF and is column-shift-prone... line-by-line re-verification before any
 --     Part-C seed." Seeding an unverified specific figure would be exactly the fabricated-tax-
@@ -55,13 +71,13 @@
 -- PR to do that reading; this file only seeds the rows an evaluator will later read.
 --
 -- CEREMONY POSTURE -- ADDITIVE AND INERT ON ARRIVAL. One CREATE TABLE (new, unread by anything
--- live), one seed INSERT (six rows into that new table), one ALTER TABLE (five nullable-column
--- additions + one CHECK relaxation + one PK column addition, all backward-compatible with the
--- two live seed rows and every existing reader -- Annex A.1's "every new column nullable, so
--- 0016:247-248's two seed rows need no backfill"), one DO-block assertion (reads the catalog,
--- writes nothing). No live function body is replaced. No D1 write-quiesce obligation.
+-- live), one seed DO block (ten rows into that new table), one ALTER TABLE (widened per Annex
+-- A.1 plus the F3-F5 fix-round hardening, all backward-compatible with the two live seed rows
+-- and every existing reader -- Annex A.1's "every new column nullable, so 0016:247-248's two
+-- seed rows need no backfill"), one DO-block assertion (reads the catalog, writes nothing). No
+-- live function body is replaced. No D1 write-quiesce obligation.
 
-set local statement_timeout = '5min';   -- PRECAUTIONARY: small DDL + 6-row seed + a catalog scan.
+set local statement_timeout = '5min';   -- PRECAUTIONARY: small DDL + a 10-row seed + a catalog scan.
 
 create temp table _ft1_pr1_pre(k text primary key, v text not null) on commit drop;
 insert into _ft1_pr1_pre values ('deploy_principal', session_user);
@@ -110,14 +126,18 @@ end $pre$;
 -- =====================================================================================
 -- 1. clara.sst_rate_schedule -- greenfield, on the client_facts (0055:386-420) immutable +
 --    supersede idiom, replayed live at this file's authoring (S2.1's own cited precedent), with
---    no firm_id (Tier-1 facts are firm-independent, Annex A.1's Table DDL posture).
+--    no firm_id (Tier-1 facts are firm-independent, Annex A.1's Table DDL posture). basis_kind
+--    and the document-source tie mirror client_facts' 0055:395/413 CHECKs verbatim in
+--    VOCABULARY (F5) but NOT in nullability -- a migration-seeded row here has no governed
+--    recorder at all, unlike client_facts, so basis_kind stays nullable and the vocabulary CHECK
+--    is written to pass a NULL, never to require one.
 -- =====================================================================================
 set role clara_fn_owner;
 
 create table clara.sst_rate_schedule (
-  id               uuid primary key default gen_random_uuid(),
-  tax_type         text not null check (tax_type in ('sales','service')),
-  scope_key        text not null check (btrim(scope_key) <> ''),
+  id                 uuid primary key default gen_random_uuid(),
+  tax_type           text not null check (tax_type in ('sales','service')),
+  scope_key          text not null check (btrim(scope_key) <> ''),
   -- Three rate FORMS (design S3.1, S-1/V-2/F-6): a percentage (ad_valorem, in basis points --
   -- the estate's existing SST unit, opening_items.sst_rate_bp, survey S1.4: 800 = 8%), a flat
   -- per-unit money amount (per_unit -- RM25/card), or a specific per-measure money amount
@@ -125,19 +145,24 @@ create table clara.sst_rate_schedule (
   -- is populated, and it is the one rate_kind names -- not merely "at least one", which would
   -- admit a per_unit row silently carrying a percentage. unit_code names the measure/unit for
   -- the two money-amount forms and is meaningless (and refused) for a percentage.
-  rate_kind        text not null check (rate_kind in ('ad_valorem','per_unit','per_measure')),
-  rate_bp          int,
-  rate_amount_sen  bigint,
-  unit_code        text,
-  effective_from   date not null,
-  effective_to     date,                    -- HALF-OPEN (S3.1): the day this rate stops applying.
-  superseded_by    uuid references clara.sst_rate_schedule(id) deferrable initially deferred,
-  superseded_at    timestamptz,
-  recorded_by      uuid references clara.users(id),
-  basis            text,
-  basis_kind       text,
-  recorded_at      timestamptz not null default now(),
-  source_note      text not null check (btrim(source_note) <> ''),
+  rate_kind          text not null check (rate_kind in ('ad_valorem','per_unit','per_measure')),
+  rate_bp            int,
+  rate_amount_sen    bigint,
+  unit_code          text,
+  effective_from     date not null,
+  effective_to       date,                    -- HALF-OPEN (S3.1): the day this rate stops applying.
+  superseded_by      uuid references clara.sst_rate_schedule(id) deferrable initially deferred,
+  superseded_at      timestamptz,
+  recorded_by        uuid references clara.users(id),
+  basis              text,
+  -- F5 (conductor fix-round 2026-08-24): closed to the 0055:395 four-value vocabulary,
+  -- NULLABLE (a migration-seeded row carries no recorder at all).
+  basis_kind         text check (basis_kind is null or basis_kind in
+                        ('owner_instruction','document','registry_lookup','interview_carryover')),
+  -- F5: the document-source tie, mirroring 0055:413's ck_client_facts_document_basis verbatim.
+  source_document_id uuid references clara.documents(id),
+  recorded_at        timestamptz not null default now(),
+  source_note        text not null check (btrim(source_note) <> ''),
   constraint ck_sst_rate_schedule_rate_bp_positive     check (rate_bp is null or rate_bp > 0),
   constraint ck_sst_rate_schedule_rate_amount_positive check (rate_amount_sen is null or rate_amount_sen > 0),
   constraint ck_sst_rate_schedule_rate_kind_bp         check ((rate_kind = 'ad_valorem') = (rate_bp is not null)),
@@ -145,12 +170,22 @@ create table clara.sst_rate_schedule (
   constraint ck_sst_rate_schedule_unit_code            check ((rate_kind in ('per_unit','per_measure')) = (unit_code is not null)),
   constraint ck_sst_rate_schedule_effective_order      check (effective_to is null or effective_to > effective_from),
   constraint ck_sst_rate_schedule_supersession_paired  check ((superseded_by is null) = (superseded_at is null)),
+  -- F4 (conductor fix-round 2026-08-24): self-supersession is forgery, not history -- a row that
+  -- points superseded_by at ITSELF can defeat the live-row reasoning a reader builds on top of
+  -- this column pair. Blocked structurally; there is no legitimate reading of self-reference.
+  constraint ck_sst_rate_schedule_no_self_supersede    check (superseded_by is distinct from id),
   -- The governed-origin conjunct (Annex A.1's sst_threshold_schedule ALTER carries the identical
-  -- shape): a row that names a human recorder must also name why. A migration-seeded row (this
-  -- file's own six) leaves recorded_by NULL and is exempt by construction, exactly as the two
-  -- live sst_threshold_schedule seed rows are today.
+  -- shape): a row that names a human recorder must also name why. A migration-seeded row (every
+  -- row in this file's seed) leaves recorded_by NULL and is exempt by construction, exactly as
+  -- the two live sst_threshold_schedule seed rows are today.
   constraint ck_sst_rate_schedule_governed_origin check (
     recorded_by is null or (btrim(coalesce(basis,'')) <> '' and basis_kind is not null)
+  ),
+  -- F5: a document rides a document basis, and ONLY a document basis (0055:413's two-way
+  -- reading verbatim) -- a stray document id on a non-document basis would be provenance
+  -- theatre; a 'document' basis with no document id names nothing.
+  constraint ck_sst_rate_schedule_document_basis check (
+    (basis_kind = 'document') = (source_document_id is not null)
   )
 );
 
@@ -179,20 +214,21 @@ begin
       using errcode = 'CLR10', detail = '{"reason":"sst_rate_schedule_immutable"}';
   end if;
   if new.superseded_by is null or new.superseded_at is null
-     or new.id                is distinct from old.id
-     or new.tax_type          is distinct from old.tax_type
-     or new.scope_key         is distinct from old.scope_key
-     or new.rate_kind         is distinct from old.rate_kind
-     or new.rate_bp           is distinct from old.rate_bp
-     or new.rate_amount_sen   is distinct from old.rate_amount_sen
-     or new.unit_code         is distinct from old.unit_code
-     or new.effective_from    is distinct from old.effective_from
-     or new.effective_to      is distinct from old.effective_to
-     or new.recorded_by       is distinct from old.recorded_by
-     or new.basis             is distinct from old.basis
-     or new.basis_kind        is distinct from old.basis_kind
-     or new.recorded_at       is distinct from old.recorded_at
-     or new.source_note       is distinct from old.source_note then
+     or new.id                 is distinct from old.id
+     or new.tax_type           is distinct from old.tax_type
+     or new.scope_key          is distinct from old.scope_key
+     or new.rate_kind          is distinct from old.rate_kind
+     or new.rate_bp            is distinct from old.rate_bp
+     or new.rate_amount_sen    is distinct from old.rate_amount_sen
+     or new.unit_code          is distinct from old.unit_code
+     or new.effective_from     is distinct from old.effective_from
+     or new.effective_to       is distinct from old.effective_to
+     or new.recorded_by        is distinct from old.recorded_by
+     or new.basis              is distinct from old.basis
+     or new.basis_kind         is distinct from old.basis_kind
+     or new.source_document_id is distinct from old.source_document_id
+     or new.recorded_at        is distinct from old.recorded_at
+     or new.source_note        is distinct from old.source_note then
     raise exception 'sst_rate_schedule admits exactly one update: the supersession stamp (superseded_by and superseded_at together, set once)'
       using errcode = 'CLR10', detail = '{"reason":"sst_rate_schedule_immutable"}';
   end if;
@@ -208,40 +244,81 @@ create trigger t_sst_rate_schedule_supersede_only before update on clara.sst_rat
   for each row execute function clara._tf_sst_rate_schedule_supersede_only();
 
 -- =====================================================================================
--- 2. Seed -- six rows, every one cited to a survey S3 row and a gazette instrument + fetch date.
---    All migration-seeded: recorded_by/basis/basis_kind left NULL (the governed-origin conjunct
+-- 2. Seed -- TEN rows: six currently-live + four verified predecessors (F2, conductor
+--    fix-round 2026-08-24). A DO block, not plain INSERTs, because the predecessor rows must
+--    stamp the LIVE rows' real generated ids as their superseded_by target -- captured via
+--    RETURNING, never guessed or pre-assigned. All ten rows are migration-seeded: recorded_by/
+--    basis/basis_kind/source_document_id left NULL throughout (the governed-origin conjunct
 --    exempts a NULL recorder), matching the live sst_threshold_schedule seed rows' own posture.
+--    Every citation not independently re-fetched by this lane against a primary source says so.
 -- =====================================================================================
-insert into clara.sst_rate_schedule
-    (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
-values
-  ('sales', 'general', 'ad_valorem', 1000, date '2025-07-01',
-   'S-1: Sales Tax (Rate of Sales Tax) Order 2025, P.U.(A) 170/2025, gazetted 9 Jun 2025, in force 1 Jul 2025 -- 10% on all taxable goods except First-Schedule (5%) and Second-Schedule specific-rate goods. mysst.customs.gov.my/assets/document/SST%20Orders/order/1-PUA%20170_2025.pdf, accessed 2026-08-23 (sst-engine-survey.md S3.1 S-1).'),
-  ('sales', 'first_schedule', 'ad_valorem', 500, date '2025-07-01',
-   'S-1 (same instrument, P.U.(A) 170/2025): First-Schedule goods at 5%. accessed 2026-08-23 (sst-engine-survey.md S3.1 S-1).');
+do $seed$
+declare
+  v_sales_general_id uuid;
+  v_sales_first_schedule_id uuid;
+  v_service_general_id uuid;
+  v_service_first_schedule_6pct_id uuid;
+  v_service_rental_leasing_id uuid;
+  v_service_credit_card_id uuid;
+begin
+  -- --- Currently-live rows first (superseded_by/at NULL), so their real ids exist for the
+  -- predecessor rows below to stamp. ---
+  insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
+    values ('sales', 'general', 'ad_valorem', 1000, date '2025-07-01',
+      'S-1: Sales Tax (Rate of Sales Tax) Order 2025, P.U.(A) 170/2025, gazetted 9 Jun 2025, in force 1 Jul 2025 -- 10% on all taxable goods except First-Schedule (5%) and Second-Schedule specific-rate goods. mysst.customs.gov.my/assets/document/SST%20Orders/order/1-PUA%20170_2025.pdf, accessed 2026-08-23 (sst-engine-survey.md S3.1 S-1). Supersedes the predecessor row at 2022-06-01 (P.U.(A) 176/2022) -- the SAME 10% rate re-enacted under a new order, per the conductor fix-round review 2026-08-24 (F2); this lane did not independently re-fetch 176/2022 or 170/2025 against RMCD for this fix round.')
+    returning id into v_sales_general_id;
 
-insert into clara.sst_rate_schedule
-    (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
-values
-  ('service', 'general', 'ad_valorem', 800, date '2024-03-01',
-   'V-1: P.U.(A) 64/2024, gazetted 26 Feb 2024, in force 1 Mar 2024 -- 8% general service tax rate (6% retained for the named specified sectors, seeded as scope_key=''first_schedule_6pct'' below). accessed 2026-08-23 (sst-engine-survey.md S3.2 V-1).'),
-  ('service', 'first_schedule_6pct', 'ad_valorem', 600, date '2025-07-01',
-   'V-2: P.U.(A) 173/2025, gazetted 9 Jun 2025, in force 1 Jul 2025 -- First Schedule items 1-13 at 6% (food/beverage x4, telecommunications x2, parking, logistics, healthcare, traditional & complementary medicine, allied health, construction works, education). This row is the BUCKET rate only -- the per-item/group breakdown is a named non-goal of this seed (this file''s header, U-5/D-11). accessed 2026-08-23 (sst-engine-survey.md S3.2 V-2).'),
-  ('service', 'rental_leasing', 'ad_valorem', 600, date '2026-01-01',
-   'V-3: P.U.(A) 125/2026, gazetted 13 Mar 2026, "deemed to have come into operation on 1 January 2026" -- inserts First Schedule item 14 ("provision of rental or leasing services") into the 6% bucket. Before this date rental/leasing carried no distinct scope row and fell under scope_key=''general'' (8%, V-1/V-2, in force 1 Jul 2025 through 31 Dec 2025) -- the live proof V-3 names by name that this table must be effective-dated and support a row whose gazette post-dates the period it governs. accessed 2026-08-23 (sst-engine-survey.md S3.2 V-3).');
+  insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
+    values ('sales', 'first_schedule', 'ad_valorem', 500, date '2025-07-01',
+      'S-1 (same instrument, P.U.(A) 170/2025): First-Schedule goods at 5%. accessed 2026-08-23 (sst-engine-survey.md S3.1 S-1). Supersedes the predecessor row at 2022-06-01 (P.U.(A) 176/2022) -- the SAME 5% rate re-enacted, per the conductor fix-round review 2026-08-24 (F2); not independently re-fetched by this lane this fix round.')
+    returning id into v_sales_first_schedule_id;
 
-insert into clara.sst_rate_schedule
-    (tax_type, scope_key, rate_kind, rate_amount_sen, unit_code, effective_from, source_note)
-values
-  ('service', 'credit_charge_card', 'per_unit', 2500, 'card', date '2024-03-01',
-   'V-1: P.U.(A) 64/2024, gazetted 26 Feb 2024, in force 1 Mar 2024 -- RM25 per credit/charge card on activation and every twelve months (Second Schedule; form item 11(e), counted in cards not ringgit -- design S3.1/Annex A.2). accessed 2026-08-23 (sst-engine-survey.md S3.2 V-1).');
+  insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
+    values ('service', 'general', 'ad_valorem', 800, date '2024-03-01',
+      'V-1: P.U.(A) 64/2024, gazetted 26 Feb 2024, in force 1 Mar 2024 -- 8% general service tax rate (6% retained for the named specified sectors, seeded as scope_key=''first_schedule_6pct'' below). accessed 2026-08-23 (sst-engine-survey.md S3.2 V-1). Supersedes the predecessor row at 2018-09-01 (P.U.(A) 213/2018, 6% flat), per the conductor fix-round review 2026-08-24 (F2); not independently re-fetched by this lane this fix round.')
+    returning id into v_service_general_id;
+
+  insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
+    values ('service', 'first_schedule_6pct', 'ad_valorem', 600, date '2025-07-01',
+      'V-2: P.U.(A) 173/2025, gazetted 9 Jun 2025, in force 1 Jul 2025 -- First Schedule items 1-13 at 6% (food/beverage x4, telecommunications x2, parking, logistics, healthcare, traditional & complementary medicine, allied health, construction works, education). This row is the BUCKET rate only -- the per-item/group breakdown is a named non-goal of this seed (this file''s header, U-5/D-11). accessed 2026-08-23 (sst-engine-survey.md S3.2 V-2). Supersedes the predecessor row at 2024-03-01 (P.U.(A) 64/2024''s ORIGINAL four-item 6% list), which 173/2025 expanded to thirteen items -- per the conductor fix-round review 2026-08-24 (F2); not independently re-fetched by this lane this fix round.')
+    returning id into v_service_first_schedule_6pct_id;
+
+  insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
+    values ('service', 'rental_leasing', 'ad_valorem', 600, date '2026-01-01',
+      'V-3: P.U.(A) 125/2026, gazetted 13 Mar 2026, "deemed to have come into operation on 1 January 2026" -- inserts First Schedule item 14 ("provision of rental or leasing services") into the 6% bucket. Before this date rental/leasing carried no distinct scope row -- the live proof V-3 names by name that this table must be effective-dated and support a row whose gazette post-dates the period it governs. accessed 2026-08-23 (sst-engine-survey.md S3.2 V-3). CAUTION (F6, conductor fix-round 2026-08-24): the estate has NO catch-all/default service tax on an unprescribed service -- a period before this row exists for rental/leasing must NOT be priced by falling back to scope_key=''general''; a future evaluator confirms independently that a service is prescribed in SOME First-Schedule group before pricing it at the general rate. This is a named evaluator-side obligation (Annex F), not discharged by this seed.')
+    returning id into v_service_rental_leasing_id;
+
+  -- F1 BLOCKER FIX (conductor review 2026-08-24). v1 wrongly cited P.U.(A) 64/2024 @ 2024-03-01
+  -- and a nonexistent "Second Schedule" attribution for this era.
+  insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_amount_sen, unit_code, effective_from, source_note)
+    values ('service', 'credit_charge_card', 'per_unit', 2500, 'card', date '2018-09-01',
+      'F1 FIX (conductor review 2026-08-24): RM25 per credit/charge card on activation and every twelve months originates in P.U.(A) 213/2018, in force 2018-09-01, under a NUMBERED PARAGRAPH -- NOT a Schedule; schedules as a drafting structure arrive only with P.U.(A) 173/2025 (this same fix round''s row above). P.U.(A) 64/2024''s saving clause expressly EXCLUDES card services from its rate change, so this fee was never touched by 64/2024 and stays sourced to the original 2018 instrument. Corrects this migration''s v1, which wrongly cited 64/2024 @ 2024-03-01 and a nonexistent "Second Schedule" reference for this era -- form item 11(e), counted in cards not ringgit (design S3.1/Annex A.2). Citation per the conductor''s independently-verified review finding, not a primary-source fetch by this lane.')
+    returning id into v_service_credit_card_id;
+
+  -- --- Predecessor rows (F2). Each stamps the real id captured above. Seeded exactly as far
+  -- back as the review's verified instruments reach -- NOTHING earlier is asserted; a period
+  -- before the earliest row for a given scope REFUSES with the named gap (TA-P2's fail-closed
+  -- idiom, S3.1) rather than defaulting or extrapolating. ---
+  insert into clara.sst_rate_schedule
+      (tax_type, scope_key, rate_kind, rate_bp, effective_from, effective_to, superseded_by, superseded_at, source_note)
+    values
+      ('sales', 'general', 'ad_valorem', 1000, date '2022-06-01', date '2025-07-01', v_sales_general_id, now(),
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live sales/general row. P.U.(A) 176/2022, in force 2022-06-01 -- 10% general sales tax rate, the instrument P.U.(A) 170/2025 re-enacted at the same rate. Seeded exactly as far back as the review''s verified instruments reach; a period before 2022-06-01 REFUSES with the named gap, never a silent extrapolation.'),
+      ('sales', 'first_schedule', 'ad_valorem', 500, date '2022-06-01', date '2025-07-01', v_sales_first_schedule_id, now(),
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live sales/first_schedule row. P.U.(A) 176/2022, in force 2022-06-01 -- 5% First-Schedule sales tax rate, the instrument P.U.(A) 170/2025 re-enacted at the same rate. Seeded exactly as far back as the review''s verified instruments reach; a period before 2022-06-01 REFUSES with the named gap.'),
+      ('service', 'general', 'ad_valorem', 600, date '2018-09-01', date '2024-03-01', v_service_general_id, now(),
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live service/general row. P.U.(A) 213/2018, in force 2018-09-01 -- 6% flat general service tax rate, superseded by P.U.(A) 64/2024''s 8% general rate effective 2024-03-01. Seeded exactly as far back as the review''s verified instruments reach; a period before 2018-09-01 REFUSES with the named gap.'),
+      ('service', 'first_schedule_6pct', 'ad_valorem', 600, date '2024-03-01', date '2025-07-01', v_service_first_schedule_6pct_id, now(),
+       'F2 (conductor fix-round 2026-08-24): predecessor to the live service/first_schedule_6pct row. P.U.(A) 64/2024, in force 2024-03-01 -- the ORIGINAL four-item 6% list (food/beverage, telecommunications, parking, logistics), superseded by P.U.(A) 173/2025''s expansion to thirteen items effective 2025-07-01. Seeded exactly as far back as the review''s verified instruments reach; a period before 2024-03-01 for this reduced-rate bucket REFUSES with the named gap.');
+end $seed$;
 
 reset role;
 
 -- =====================================================================================
--- 3. clara.sst_threshold_schedule -- the ordered ALTER, Annex A.1's specification verbatim.
---    Order is load-bearing: id + its own UNIQUE constraint must exist before the self-
---    referencing superseded_by FK can be declared against it.
+-- 3. clara.sst_threshold_schedule -- the ordered ALTER, Annex A.1's specification, plus the
+--    F3-F5 fix-round hardening (conductor review, 2026-08-24). Order is load-bearing: id + its
+--    own UNIQUE constraint must exist before the self-referencing superseded_by FK can be
+--    declared against it.
 -- =====================================================================================
 set role clara_fn_owner;
 
@@ -249,17 +326,27 @@ set role clara_fn_owner;
 alter table clara.sst_threshold_schedule add column id uuid not null default gen_random_uuid();
 alter table clara.sst_threshold_schedule add constraint uq_sst_threshold_schedule_id unique (id);
 
--- (2) supersession, paired.
+-- (2) supersession, paired, plus F4's self-supersession block (a row that points superseded_by
+-- at itself is forgery, not history -- see the identical rate_schedule note above).
 alter table clara.sst_threshold_schedule add column superseded_by uuid
   references clara.sst_threshold_schedule(id) deferrable initially deferred;
 alter table clara.sst_threshold_schedule add column superseded_at timestamptz;
 alter table clara.sst_threshold_schedule add constraint ck_sst_threshold_schedule_supersession_paired
   check ((superseded_by is null) = (superseded_at is null));
+alter table clara.sst_threshold_schedule add constraint ck_sst_threshold_schedule_no_self_supersede
+  check (superseded_by is distinct from id);
 
--- (3) the opaque WHO/BASIS trio, and the governed-origin conjunct (a recorder must name why).
+-- (3) the opaque WHO/BASIS trio, the governed-origin conjunct (a recorder must name why), and
+-- F5's basis_kind closure + document-source tie (0055:395/413's vocabulary, nullable here).
 alter table clara.sst_threshold_schedule add column recorded_by uuid references clara.users(id);
 alter table clara.sst_threshold_schedule add column basis text;
 alter table clara.sst_threshold_schedule add column basis_kind text;
+alter table clara.sst_threshold_schedule add constraint ck_sst_threshold_schedule_basis_kind
+  check (basis_kind is null or basis_kind in
+    ('owner_instruction','document','registry_lookup','interview_carryover'));
+alter table clara.sst_threshold_schedule add column source_document_id uuid references clara.documents(id);
+alter table clara.sst_threshold_schedule add constraint ck_sst_threshold_schedule_document_basis
+  check ((basis_kind = 'document') = (source_document_id is not null));
 alter table clara.sst_threshold_schedule add constraint ck_sst_threshold_schedule_governed_origin
   check (recorded_by is null or (btrim(coalesce(basis,'')) <> '' and basis_kind is not null));
 
@@ -274,11 +361,48 @@ alter table clara.sst_threshold_schedule add constraint sst_threshold_schedule_t
 -- V-6 defect 2: the PK grain (service_group, effective_from) cannot hold PER-ITEM thresholds
 -- (Group H item 1 NIL vs items 2-4 RM1m; Group I items 14-16 RM1.5m vs the group's RM500k).
 -- item_no default '*' means "group-wide" so the two live seed rows (G, I) stay valid untouched;
--- a later per-item row overrides by specificity (an evaluator concern, not this migration's).
+-- a later per-item row overrides by specificity -- BUT NOT YET SAFE: see this migration's tail
+-- note and Annex A.1's addendum on the five frozen group-grain readers (F6, doc-only this PR).
 alter table clara.sst_threshold_schedule add column item_no text not null default '*';
 alter table clara.sst_threshold_schedule drop constraint sst_threshold_schedule_pkey;
 alter table clara.sst_threshold_schedule add constraint sst_threshold_schedule_pkey
   primary key (service_group, item_no, effective_from);
+
+-- F3 (conductor fix-round 2026-08-24, MEASURED): before this fix, DELETE and an out-of-shape
+-- UPDATE of the live G/I rows were BOTH allowed -- the table had no trigger layer at all beyond
+-- the pre-existing no-truncate guard (0016), only ACL/RLS protection. Mirrors sst_rate_schedule's
+-- trigger pair exactly (S1 above), adapted to this table's own column list.
+create function clara._tf_sst_threshold_schedule_supersede_only() returns trigger
+  language plpgsql security definer set search_path to 'clara', 'pg_temp' as $fn$
+begin
+  if old.superseded_at is not null or old.superseded_by is not null then
+    raise exception 'a superseded sst_threshold_schedule row is immutable'
+      using errcode = 'CLR10', detail = '{"reason":"sst_threshold_schedule_immutable"}';
+  end if;
+  if new.superseded_by is null or new.superseded_at is null
+     or new.service_group      is distinct from old.service_group
+     or new.item_no            is distinct from old.item_no
+     or new.threshold_cents    is distinct from old.threshold_cents
+     or new.effective_from     is distinct from old.effective_from
+     or new.effective_to       is distinct from old.effective_to
+     or new.source_note        is distinct from old.source_note
+     or new.id                 is distinct from old.id
+     or new.recorded_by        is distinct from old.recorded_by
+     or new.basis              is distinct from old.basis
+     or new.basis_kind         is distinct from old.basis_kind
+     or new.source_document_id is distinct from old.source_document_id then
+    raise exception 'sst_threshold_schedule admits exactly one update: the supersession stamp (superseded_by and superseded_at together, set once)'
+      using errcode = 'CLR10', detail = '{"reason":"sst_threshold_schedule_immutable"}';
+  end if;
+  return new;
+end $fn$;
+revoke all on function clara._tf_sst_threshold_schedule_supersede_only() from public;
+
+create trigger t_sst_threshold_schedule_no_delete before delete on clara.sst_threshold_schedule
+  for each row execute function clara._tf_append_only();
+create trigger t_sst_threshold_schedule_supersede_only before update on clara.sst_threshold_schedule
+  for each row execute function clara._tf_sst_threshold_schedule_supersede_only();
+-- t_sst_threshold_schedule_no_truncate already exists, born 0016 -- not re-created.
 
 reset role;
 
@@ -290,7 +414,9 @@ reset role;
 --    convention, confirmed live at 0044:1652/1927 calling clara._allocate_receipt_core), is
 --    scanned for INSERT/UPDATE/DELETE text against either table. At PR-1 time neither table has
 --    ANY writer, granted or ungranted -- the assertion below proves that, by measurement, not by
---    assumption; it is re-armed (not edited) by whichever lane later builds a governed door.
+--    assumption; it is re-armed (not edited) by whichever lane later builds a governed door. The
+--    two new trigger functions above are neither granted to any lane role nor written by any
+--    other function's prosrc, so they cannot appear here as either a root or a false positive.
 -- =====================================================================================
 do $reachable_closure$
 declare
@@ -363,25 +489,38 @@ reset role;
 do $tail$
 declare
   v_rate_rows int; v_rate_sales int; v_rate_service int;
-  v_rate_ad_valorem int; v_rate_per_unit int;
+  v_rate_ad_valorem int; v_rate_per_unit int; v_rate_superseded int; v_rate_recorded int;
   v_rate_rls record;
   v_thr_id_count int; v_thr_item_no_star int;
   v_thr_g_eff_to date; v_thr_i_eff_to date; v_thr_g_cents bigint; v_thr_i_cents bigint;
   v_thr_pk text;
   v_thr_check_def text;
+  v_rate_no_self_check text; v_thr_no_self_check text;
+  v_rate_basis_kind_check text; v_thr_basis_kind_check text;
+  v_thr_trig_count int;
 begin
   select count(*) into v_rate_rows from clara.sst_rate_schedule;
   select count(*) into v_rate_sales from clara.sst_rate_schedule where tax_type = 'sales';
   select count(*) into v_rate_service from clara.sst_rate_schedule where tax_type = 'service';
   select count(*) into v_rate_ad_valorem from clara.sst_rate_schedule where rate_kind = 'ad_valorem';
   select count(*) into v_rate_per_unit from clara.sst_rate_schedule where rate_kind = 'per_unit';
-  if v_rate_rows <> 6 or v_rate_sales <> 2 or v_rate_service <> 4
-     or v_rate_ad_valorem <> 5 or v_rate_per_unit <> 1 then
-    raise exception 'f_t1_sst_reference_tables tail: sst_rate_schedule census total %, sales %, service %, ad_valorem %, per_unit % -- expected 6 / 2 / 4 / 5 / 1',
-      v_rate_rows, v_rate_sales, v_rate_service, v_rate_ad_valorem, v_rate_per_unit using errcode = 'CLR10';
+  select count(*) into v_rate_superseded from clara.sst_rate_schedule where superseded_by is not null;
+  select count(*) into v_rate_recorded from clara.sst_rate_schedule where recorded_by is not null;
+  if v_rate_rows <> 10 or v_rate_sales <> 4 or v_rate_service <> 6
+     or v_rate_ad_valorem <> 9 or v_rate_per_unit <> 1
+     or v_rate_superseded <> 4 or v_rate_recorded <> 0 then
+    raise exception 'f_t1_sst_reference_tables tail: sst_rate_schedule census total %, sales %, service %, ad_valorem %, per_unit %, superseded %, recorded % -- expected 10 / 4 / 6 / 9 / 1 / 4 / 0',
+      v_rate_rows, v_rate_sales, v_rate_service, v_rate_ad_valorem, v_rate_per_unit, v_rate_superseded, v_rate_recorded
+      using errcode = 'CLR10';
   end if;
-  if exists (select 1 from clara.sst_rate_schedule where superseded_by is not null or recorded_by is not null) then
-    raise exception 'f_t1_sst_reference_tables tail: a seeded sst_rate_schedule row carries superseded_by or recorded_by -- the migration-seed premise (both NULL) is violated'
+  -- The credit_charge_card row's F1 fix, re-read positively (never assumed from this file's own
+  -- earlier INSERT statement).
+  if not exists (
+    select 1 from clara.sst_rate_schedule
+     where tax_type = 'service' and scope_key = 'credit_charge_card'
+       and effective_from = date '2018-09-01' and rate_amount_sen = 2500
+  ) then
+    raise exception 'f_t1_sst_reference_tables tail: the F1 credit/charge-card fix did not land -- expected service/credit_charge_card at 2018-09-01, RM25 (2500 sen)'
       using errcode = 'CLR10';
   end if;
 
@@ -400,6 +539,41 @@ begin
   ) then
     raise exception 'f_t1_sst_reference_tables tail: a lane role holds a write grant on sst_rate_schedule -- zero direct app-role grants was the premise'
       using errcode = 'CLR10';
+  end if;
+
+  -- F4: the self-supersession block, on both tables.
+  select pg_get_constraintdef(oid) into v_rate_no_self_check from pg_constraint
+   where conrelid = 'clara.sst_rate_schedule'::regclass and conname = 'ck_sst_rate_schedule_no_self_supersede';
+  select pg_get_constraintdef(oid) into v_thr_no_self_check from pg_constraint
+   where conrelid = 'clara.sst_threshold_schedule'::regclass and conname = 'ck_sst_threshold_schedule_no_self_supersede';
+  if v_rate_no_self_check is distinct from 'CHECK ((superseded_by IS DISTINCT FROM id))'
+     or v_thr_no_self_check is distinct from 'CHECK ((superseded_by IS DISTINCT FROM id))' then
+    raise exception 'f_t1_sst_reference_tables tail: the F4 self-supersession CHECK is missing or reads wrong on one or both tables (rate: %, threshold: %)',
+      v_rate_no_self_check, v_thr_no_self_check using errcode = 'CLR10';
+  end if;
+
+  -- F5: basis_kind closed on both tables.
+  select pg_get_constraintdef(oid) into v_rate_basis_kind_check from pg_constraint
+   where conrelid = 'clara.sst_rate_schedule'::regclass and conname = 'sst_rate_schedule_basis_kind_check';
+  select pg_get_constraintdef(oid) into v_thr_basis_kind_check from pg_constraint
+   where conrelid = 'clara.sst_threshold_schedule'::regclass and conname = 'ck_sst_threshold_schedule_basis_kind';
+  if v_rate_basis_kind_check is null or v_thr_basis_kind_check is null
+     or position('owner_instruction' in v_rate_basis_kind_check) = 0
+     or position('interview_carryover' in v_rate_basis_kind_check) = 0
+     or position('owner_instruction' in v_thr_basis_kind_check) = 0
+     or position('interview_carryover' in v_thr_basis_kind_check) = 0 then
+    raise exception 'f_t1_sst_reference_tables tail: the F5 basis_kind vocabulary CHECK is missing or short on one or both tables (rate: %, threshold: %)',
+      v_rate_basis_kind_check, v_thr_basis_kind_check using errcode = 'CLR10';
+  end if;
+
+  -- F3: the threshold table's new immutability triggers exist (no_delete + supersede_only;
+  -- no_truncate already existed and is untouched by this file).
+  select count(*) into v_thr_trig_count from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'clara' and c.relname = 'sst_threshold_schedule' and not t.tgisinternal;
+  if v_thr_trig_count <> 3 then
+    raise exception 'f_t1_sst_reference_tables tail: sst_threshold_schedule carries % non-internal trigger(s), expected exactly 3 (no_truncate from 0016 + the two F3 triggers this file adds)',
+      v_thr_trig_count using errcode = 'CLR10';
   end if;
 
   -- The ALTER: shape + the two live seed rows' byte-for-byte survival (a21-watch.test.mjs P1's
@@ -439,5 +613,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-T1 PR-1 tail OK: clara.sst_rate_schedule created (6 seed rows -- 2 sales/4 service, 5 ad_valorem/1 per_unit, all migration-seeded with superseded_by/recorded_by NULL), RLS enabled+forced, zero app-role write grants, immutable+supersede triggers installed. clara.sst_threshold_schedule widened -- id populated + item_no=''*'' on both live rows, PK now (service_group, item_no, effective_from), threshold_cents CHECK relaxed to >=0 -- both G/I seed rows byte-unchanged otherwise (50,000,000 cents, open-ended). The reachable-closure write assertion ran and found zero writers on either table. Deploy principal restored.';
+  raise notice 'F-T1 PR-1 tail OK (fix round 2026-08-24): clara.sst_rate_schedule carries 10 rows -- 4 sales/6 service, 9 ad_valorem/1 per_unit, 4 superseded (F2 predecessors)/0 recorded, the F1 credit-card fix landed at 2018-09-01/RM25 -- RLS enabled+forced, zero app-role write grants, immutable+supersede triggers installed, F4 self-supersession + F5 basis_kind/document-tie CHECKs present. clara.sst_threshold_schedule widened -- id populated + item_no=''*'' on both live rows, PK now (service_group, item_no, effective_from), threshold_cents CHECK relaxed to >=0, F4/F5 CHECKs present, THREE non-internal triggers (no_truncate + the new no_delete + supersede_only) -- both G/I seed rows byte-unchanged otherwise (50,000,000 cents, open-ended). The reachable-closure write assertion ran and found zero writers on either table. Deploy principal restored.';
 end $tail$;
