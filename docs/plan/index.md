@@ -1,19 +1,19 @@
 # docs/plan — index
 
 Authored at the 2026-08-12 harness docs-tree refactor, when this directory split into
-`active/` (the wave currently in build) and `completed/` (every closed wave and slice, plus the
+active/ (the wave currently in build) and `completed/` (every closed wave and slice, plus the
 former REBUILD-PLAN.md's archived chronology). `research/` is untouched by this refactor and
 keeps its own tree of per-wave cross-model research dossiers.
 
 **The path-stability convention (made explicit 2026-08-18, at the ADR-0071 harness sweep):**
-a document minted under `active/` KEEPS its minted path when its wave closes — **status
+a document minted under active/ KEEPS its minted path when its wave closes — **status
 lives in this index, never in the path** — because closed-wave paths are cited verbatim by
 immutable artifacts (migrations `0064`/`0065`, hooks, test batteries cite
 `docs/plan/active/wave-e-…` at file:line, and a migration's bytes can never be edited).
 Documents authored AFTER a wave closes (ceremony as-runs, acceptance records) land in
 `completed/` directly. The convention is FORWARD-ONLY from 2026-08-12: the wave contracts
 and design docs already sitting in `completed/` were created at those paths by the harness
-refactor itself (commit `1a66a61`), never renamed out of `active/` — no history contradicts
+refactor itself (commit `1a66a61`), never renamed out of active/ — no history contradicts
 this paragraph. This sentence is the reconciliation of PRD line 3's
 active-then-completed wording with the citation-stability that the immutable estate
 requires — the same authority split as the ζ squash-subject precedent (the directory is
@@ -21,13 +21,13 @@ the authority; frozen testimony goes stale honestly).
 
 **Wave contracts of CLOSED waves are historical records of record: never re-grill them, cite
 them.** If you're building against a closed wave's mechanism, read the file below for what was
-ratified and why — don't re-open the question with the owner. Only `active/` documents describe
+ratified and why — don't re-open the question with the owner. Only active/ documents describe
 work still open for negotiation.
 
 Status key: **live** = current build target, changes expected · **historical** = closed, frozen,
 cite-only · **superseded** = replaced/retired, kept only as a pointer to where its content went.
 
-## `active/` — Wave F's live build (ADR-0071 ruled 2026-08-18; live frontier 92/`0097_f_a1_cutover`)
+## active/ — Wave F's live build (ADR-0071 ruled 2026-08-18; live frontier 92/`0097_f_a1_cutover`)
 
 | File | Status | Hook |
 |---|---|---|
@@ -94,6 +94,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `track-a-sitting-1.md` | **live** | **The Track-A sitting record, part 1 of 3 (2026-08-22)** — the agenda as PUT TO THE OWNER, preserved with its member tables, which are the consequence map the F-A3…F-A9 designs read (each row says what a given option turns a specific question into). Carries the reading guide, the agenda order table with every ruling, and **TA-P1** (the OPEN REGISTER — law 71's roster becomes a reservation) · **TA-P2** (three number-origins + the governed policy-table door) · **TA-P3** (one purpose per processing class; the firm-level narrow purpose; C6 to critical path) · **TA-P4** (mechanically-bound receipts; the DEFINER read wrapper) · **TA-P5** (the clock; law 21 narrowed to posting belts). Rulings are minuted in `docs/adr/0074-the-track-a-sitting.md`, which governs. |
 | `track-a-sitting-2.md` | **live** | **Sitting record part 2 of 3** — **TA-P6** (walls re-aim at the DIRECTING human; `agent_prepared`; the solo arm) · **TA-P7** (**attribution becomes the agent's JUDGEMENT under structural walls** — the constitutional amendment, with the orchestrator's DB-judged-corroboration dissent) · **TA-P8** (learned identifiers are context, never keys; the promotion door) · **TA-P9** (the DECIDED freeform read surface, closing audit GAP5-5) · **TA-P10** (sandbox exports with a byte-burned watermark; the covered-recipient cross-client test; aggregates narrative-only) · **TA-P11** (the one-architecture TEST; the bank rules machine retires whole, superseding WCC-R5's bank arm; 7A-R3 + E-R13 recorded dissolved). |
 | `track-a-sitting-3.md` | **live** | **Sitting record part 3 of 3, and the live half of the register** — **TA-P12** (the brake census; three gates REMOVED, the concurrency floors kept) · **TA-P13** (ONE metering ledger; `client_id` added now or never) · **TA-P14** (closed-loop DONE: repair your own gates, build the minimal human door, a durable proposal carrier, acceptance on real books, "end to end" rewritten, lost records treated as lost) — **plus the residue R-A … R-G**: the 60-day figure (the sitting's only standalone question), the 71 design-layer questions per project, the per-project human-act lists carrying **the 2026-08-22 test-data delegation** (the agent may perform law-71 human acts as the owner's delegate through the real audited doors, ledgered — e-filing excluded by its nature), the seven refused questions that never come back, the five conflict adjudications, the doc-staleness sweep, and **R-OWNER**, still open. |
+| harness-audit-2026-08-23.md | **live** | **The harness drift + unrecorded-deferral audit (2026-08-23)**, pinned to `origin/main` at #291 and read via `git show <SHA>:<path>` throughout (the local tree was shared with concurrent lanes). **(A) the two-home claim does NOT hold** — ~18 real forward-looking obligations carry no `PROGRESS.md` row at all (mostly unruled owner-questions inside already-GATED v2 design/gate records for F-A3/F-A4/F-A8/F-A9/F-T3, plus three DR/incident follow-ups) and ~5 more sit in Lanes/Next/posture rather than Backlog or Known issues. **(B) the drift table** — 25 load-bearing harness claims re-derived at the bytes; the live ones were the CI runner count (2 → 4, trued in the same PR as this report) and the AGENTS.md constraint-12 reading (owner ruling pending); the rest CONFIRMED, incl. the PRD/ARCHITECTURE as-built caveat against `0018:57,62`, the lint-script comment, the db ledger, the registry pointers, harness-menu file existence, index ↔ active coverage and every MEMORY.md pointer. Closes with the ambiguities the repo alone cannot settle. |
 | `wave-f-lane-brief.md` | **live** | **The operating brief every Wave-F build lane reads before its first write** (landed from the sprint's session scratch so it survives the session). Grounding order · the throwaway-rig protocol and the **measured** rule that `pnpm db:migrate` SKIPS an `UNNUMBERED_*` file (a green migrate is not evidence your migration ran; keep the numbered copy on disk for the whole rig session or stage it outside the repo with `CLARA_MIGRATIONS_DIR`) · the authoring laws (prosrc-SHA prestate pins, behavioural walls, forced cells that never degrade to a note, three-valued evaluation) · the shared-surface announce protocol · **the three tenancy traps measured this sprint** (a NULL `firm_id` under `firm_id = jwt_firm()` is hidden from everyone; never infer a scope from a NULL; an owner-run plain view over an RLS+FORCE table leaks cross-tenant, and `security_invoker` breaks a nested ungranted shim instead of fixing it) · **the evaluator freeze bites at MERGE**, over every registered row, with undeletable rows · git and reporting discipline. |
 | `freeform-read-law28-review.md` | **live** | **F-A6's law-28 adversarial pass (2026-08-23)** — the contract-obligated independent attack on the audited freeform read, run as a native fresh-context lane after Codex's cyber filter refused the prompt twice. **Verdict: BUILDABLE WITH THE LISTED WALLS.** Three blockers (the `pg_catalog` residual was accepted on the premise that the agent surface is *curated typed reads* — F-A6 IS raw SQL, so the acceptance's own ground fails · `query_to_xml` is a second execution engine that returns a whole table in one row past the caps while the plan names no relation · `cross_client_unavailable` has no producer, so the pin silently filters and the model gets a single-client answer to a two-client question), five HIGH (the payload can read the wake secret; the deadline is unenforceable inside one FETCH; an advisory lock blocks the firm's writers and `reset all` does not release it; the plan census cannot see catalog reads via functions), and what HOLDS — all 177 policies role-pinned, no dblink/fdw/pg_net, the single-statement wall real. |
 | `internet-lane-law28-review.md` | **live** | **F-A8's law-28 leg-2 pass (2026-08-23)** — the prompt-injection and untrusted-content attack on the internet lane. **20 findings, ALL CONFIRMED, none refuted**; folded into design **v3** as IL-D17..IL-D34. The finding that re-cut the item: v2's "evidence" was a model-authored quote — no raw bytes and no digest were stored and no destination registry existed, so a model could cite a fetch that never happened and a hidden instruction could move a rate past the owner's approval card. |
@@ -104,7 +105,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-g-e2e-corpus-design.md` | **live** | **The Wave-G corpus's CONTRACT OF RECORD for what the 2026-08-20 sitting ruled** (ADR-0072 ⑤), and a design for what it did not. Ruled and binding: **§3.0's two-tier reshape** (an ORACLE tier — BEE across two FYs, ROME SECRETARY and ROME PROPERTIES as single terminal periods — plus an **open-intake REALITY tier**, because two of the three designated clients are terminal-period books for companies in strike-off and can never supply a second consecutive FY) · **§10's eleven OD rulings** (custody FULL PERMISSION with the IC copy excluded · **no second principal**, so B3's distinct-checker arm ships named-unexercised · a **whole clean product DB on the live project**, sandbox and fixtures not re-created · the **UX floor precedes the run**) · and **§5's step-4 G1 amendment** — *"standing rules earn autopost"* is dead, F-A2's agent judgement is the authority. Still design: the slot matrix's axes, the golden-standard package, the run script, the vacuous-green rule and the edge-case lens (now incl. **EC-14, the strike-off/terminal period**). |
 | `wave-g-corpus-oracle-assessment.md` | **live** | The corpus's evidence companion (2026-08-20, read-only, nothing copied or modified): per-client verdicts against §4's seven-item package, **the named gaps that must close before an acceptance run can start** (BEE has no GL and no TB for either FY; RPR is missing two months of bank statements and has no accounts at a period end; neither RS nor RPR names a producer), what the assessment CONFIRMED (BEE's bar verified against the client's own papers; its bank ties to both balance sheets to the sen; RS and RPR genuinely greenfield), the exclusions and fixture sets (the IC copy · 68 byte-duplicates · the ~32 USD invoices, retained as the FX-lite fixture), the OCR-hardest classes, and the personal-data inventory behind OD-4. |
 
-## `active/` — Wave E's citation-stable historical set (CLOSED 2026-08-16; pinned here PERMANENTLY by the path-stability convention above — `packages/db/migrations/0064_wave_e_theta_close_plan.sql`, `0065_wave_e_epsilon_reporting.sql`, `scripts/hooks/pinned-ids-guard-checks.mjs`, and the `x55`/`x56`/`x57`/`er9-corpus-fixtures` test batteries cite these ten paths verbatim by filename and can never be repointed)
+## active/ — Wave E's citation-stable historical set (CLOSED 2026-08-16; pinned here PERMANENTLY by the path-stability convention above — `packages/db/migrations/0064_wave_e_theta_close_plan.sql`, `0065_wave_e_epsilon_reporting.sql`, `scripts/hooks/pinned-ids-guard-checks.mjs`, and the `x55`/`x56`/`x57`/`er9-corpus-fixtures` test batteries cite these ten paths verbatim by filename and can never be repointed)
 
 | File | Status | Hook |
 |---|---|---|
@@ -119,7 +120,7 @@ cite-only · **superseded** = replaced/retired, kept only as a pointer to where 
 | `wave-e-acceptance-matrix-part2.md` | historical | Matrix continued: Section F and the cross-section sweeps. |
 | `wave-e-delta-handoff-2026-08-13.md` | historical | Clock-out checkpoint for δ final-finding closure — **discharged by the night run**; kept as the rulings' source of record. |
 
-*(These ten stay physically in `active/` forever — see the path-stability convention above. Their ceremony as-run records, which physically live in `completed/` already, are listed there under "Wave E → F ceremony as-run chronology", not here.)*
+*(These ten stay physically in active/ forever — see the path-stability convention above. Their ceremony as-run records, which physically live in `completed/` already, are listed there under "Wave E → F ceremony as-run chronology", not here.)*
 
 ## `completed/` — closed waves and slices
 
