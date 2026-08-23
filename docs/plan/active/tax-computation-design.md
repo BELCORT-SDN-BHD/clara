@@ -1,405 +1,500 @@
-# F-T3 — the draft tax computation: design (v1)
+# F-T3 — the draft tax computation: design (v2, gate-folded 2026-08-23)
 
-> **Design of record for Wave-F Track-B item F-T3.** Reads on `tax-computation-survey.md` (the
-> estate + the law, both re-fetched 2026-08-23) and `tax-computation-annexes.md` (mechanics,
-> decision register D-1..D-14, predictions, owner questions OQ-1..OQ-8). Contract:
-> `wave-f-contract.md:406-408`. Owner ruling 2026-08-23: **ALL-IN in Wave F**, not slipped to v1.1.
+> **Design of record for Wave-F Track-B item F-T3 — part 1 of 2 (§1-§7).**
+> **`tax-computation-design-part2.md` carries §8-§13** (artifacts, the refusal vocabulary, the
+> battery, the PR ladder, sequencing, scope). Reads on `tax-computation-survey.md`,
+> `tax-computation-annexes.md` (decision register D-1..D-26, predictions, question register) and
+> **`tax-computation-annexes-2-mechanics.md`** (the verb set, the surface DDL, tenancy/RLS, the
+> disposal mechanics and the behavioural battery). **The split and the annex move happened at v2 to
+> keep each file inside the 500-line budget; nothing was dropped in either move.**
+> Contract: `wave-f-contract.md:406-408`. Owner ruling 2026-08-23: **ALL-IN in Wave F**.
 >
-> **Design-stage only. No code was authored and no rig was run.** Every DB cite is source-read; the
-> replay is PR-0's.
+> **v2, 2026-08-23 — the PR-0 gate fold.** The gate confirmed **11 blockers, 11 materials and one
+> nit** against v1.2 and refuted nine. Every one is folded; the record, with a fold disposition per
+> finding, is `tax-computation-gate-record.md`. The ten that changed a mechanism:
+>
+> | What was wrong in v1.2 | Where it is fixed |
+> |---|---|
+> | The ladder read `closing_position`, which is **balance-sheet-only**; the per-account P&L movement is `snapshot->'pl_rows'`, and the sign rule was never stated | §3, A.2 (**D-18**) |
+> | The **two loss deductions were in each other's rung** and the s.44(6) cap sat on the wrong base | §3 R7/R8 (**D-19**) |
+> | The **carry-forward inputs did not exist** anywhere in the estate; the ladder deducted zero silently | §4.2 (**D-19**) |
+> | `record_client_fact` **cannot carry F-T3's facts** — no valid time, a fail-closed dispatch, CLR04 in a migration — and `tin`/`ssm` already have a governed home | §4.1 (**D-21, D-22**) |
+> | A basis period diverging from the sealed fiscal year computed anyway | §3 R1 (**D-23**) |
+> | The **human-keyed guarantee was a NOT-NULL check the agent satisfies** | §2 (**D-24**) |
+> | **No wake door** for any of the three agent writes | §3.1 (**D-25**) |
+> | The disposal value is **not** the accounting proceeds; the FA immutability allowlist excludes the new column; the disposal verb does not write the register row | §5, mechanics §M3 (**D-7 re-cut, D-26**) |
+> | The frozen evaluator read tables created in a **later** PR | part 2 §11 |
+> | Ten new relations with **no tenancy or RLS shape**, and every refusal string missing its `metric_na_reason_versions` row | mechanics §M4, part 2 §9 |
+>
+> **Carried forward unchanged where the fold did not touch them:** §3's ONE evaluator member (D-16) ·
+> the name-only-wall scoping obligation, re-homed onto F-T3's own attribute catalog (D-17) ·
+> OQ-6 → R-L25 · OQ-4 → REFUSE · OQ-5 → the pinned-version PACK · OQ-8's product half.
+>
+> **Design-stage only. No code authored, no rig run.** Every DB cite is source-read; replay is PR-0's.
 
 ---
 
 ## 1 · The shape, in one paragraph
 
-A Malaysian tax computation is a ladder from a sealed accounting profit to a tax charge. Every rung
-of that ladder is arithmetic over DB-owned inputs, and therefore belongs to a versioned deterministic
-evaluator — hard constraint 2, and there is no second way to make a number in this estate (survey
-§3.1). Exactly one thing in the computation is *not* arithmetic: deciding **which treatment a line
-of the books attracts** — is this entertainment, is it private, is it capital. That decision is
-Clara's, it is cited, and a human approves it in one click. The design's whole job is to make those
-two halves **structurally unable to touch**: Clara picks a *label from a closed set*, the DB owns
-every *numeral*, and the model has no column to type a number into. The output is a sealed
-computation statement plus a field-addressed pack a human keys into MyTax. **F-T3 builds no
-submission verb of any kind** (digest laws 71, 74, 80, 82 — e-filing is human, excluded by nature
-even from the delegate grant).
+A Malaysian tax computation is a ladder from a sealed accounting profit to a tax charge. Every rung is
+arithmetic over DB-owned inputs and therefore belongs to a versioned deterministic evaluator — hard
+constraint 2, and there is no second way to make a number in this estate (survey §3.1). Exactly one
+thing is *not* arithmetic: deciding **which treatment a line of the books attracts** — is this
+entertainment, is it private, is it capital. That decision is Clara's, it is cited, and a human
+approves it in one click. The design's whole job is to make the two halves **structurally unable to
+touch**: Clara picks a *label from a closed set*, the DB owns every *numeral*, and the model has no
+column to type a number into. The output is a sealed computation statement plus a field-addressed pack
+a human keys into MyTax. **F-T3 builds no submission verb of any kind** (laws 71, 74, 80, 82 —
+e-filing is human, excluded by nature even from the delegate grant).
 
 ---
 
 ## 2 · The severance — the one structural idea
 
-The failure this design exists to prevent is a model-authored numeral reaching a document a human
-signs and files. Prompt discipline cannot prevent it; a schema can.
+The failure this design exists to prevent is a model-authored numeral reaching a document a human signs
+and files. Prompt discipline cannot prevent it; a schema can.
 
-**Clara's only write into the computation is a `code`.** The treatment codes are a
-migration-seeded, owner-signed, closed set. Each code carries its own fraction and its own statutory
-citation. Clara's proposal row has **no numeric column at all** — there is nothing to type.
+**Clara's only write into the computation is a `code`.** The treatment codes are a migration-seeded,
+owner-signed, closed set. Each code carries its own fraction and its own statutory citation. Clara's
+proposal row has **no numeric column at all** — there is nothing to type.
 
 ```
-tax_treatment_codes            (migration-seeded, immutable + supersede, OWNER-SIGNED)
-  code                    text pk        e.g. 'ADDBACK_ENTERTAINMENT_50'
-  direction               text           add_back | deduct | allowable | exclude
-  fraction_bp             int            10000 = 100%, 5000 = 50%, 0 = nil     <-- the DB owns this
-  regime                  text           company | individual | both
-  statutory_ref           text           's.39(1)(l) ITA 1967'
-  authority_id            uuid  -> tax_authorities                             <-- the citation
-  effective_ya_from/to    int
-  owner_signed_by/at      NOT NULL                                             <-- unsigned = unusable
+tax_treatment_codes        (migration-seeded, immutable + supersede, OWNER-SIGNED)
+  code pk 'ADDBACK_ENTERTAINMENT_50' · direction add_back|deduct|allowable|exclude
+  fraction_bp int          10000 = 100%, 5000 = 50%, 0 = nil     <-- the DB owns this
+  regime · statutory_ref 's.39(1)(l) ITA 1967' · effective_ya_from/to
+  authority_id -> tax_authorities                                <-- the citation
+  owner_signed_by/at NOT NULL                                    <-- unsigned = unusable
 
-tax_account_treatments         (Clara PROPOSES, a human APPROVES)
-  client_id, account_id, ya
-  code                    text  -> tax_treatment_codes                         <-- Clara writes ONLY this
-  proposal_basis          text                                                 <-- her narration
-  proposed_by, proposed_at
-  approved_by, approved_at                                                     <-- the one-click door
-  apportionment_bp        int NULL                                             <-- HUMAN-keyed only
-  apportionment_entered_by
+tax_account_treatments     (Clara PROPOSES, a human APPROVES)
+  client_id, firm_id, account_id, ya                   <-- tenancy: mechanics §M4
+  code -> tax_treatment_codes                          <-- Clara writes ONLY this
+  proposal_basis text                                  <-- her narration
+  proposed_by/at · approved_by/at                      <-- the one-click door
+  apportionment_bp int NULL · apportionment_entered_by <-- HUMAN-keyed only
   CHECK (apportionment_bp IS NULL
          OR (approved_by IS NOT NULL AND apportionment_entered_by IS NOT NULL))
 ```
 
-The evaluator's fraction is `code.fraction_bp * COALESCE(apportionment_bp, 10000) / 10000`, and the
-amount is that fraction applied to the **sealed closing position of the account**. Three properties
-follow mechanically, and each gets a behavioural cell in the battery (§10):
+The evaluator's fraction is `code.fraction_bp * COALESCE(apportionment_bp, 10000) / 10000`, applied to
+the account's **sealed P&L movement for the basis period** (§3 R2/R3 — `snapshot->'pl_rows'`, never
+`closing_position`). Three properties follow, each with a behavioural cell (mechanics §M6): **(1)** a
+model cannot emit a numeral into the computation — not "is discouraged from", cannot; **(2)** a
+treatment cannot exist without a citation, because the code carries one and an unsigned code is
+unusable; **(3)** an apportionment percentage — the one judgement number that is genuinely a number —
+is human-keyed or it does not exist.
 
-1. **A model cannot emit a numeral into the computation.** Not "is discouraged from" — cannot.
-2. **A treatment cannot exist without a citation**, because the code carries one and an unsigned code
-   is unusable (`owner_signed_by NOT NULL`).
-3. **An apportionment percentage — the one judgement number that is genuinely a number** — is keyed
-   by a human or it does not exist. Clara may argue for 60% in `proposal_basis`; she cannot store 60.
+**Property (3) is NOT the CHECK.** *(Gate blocker; **D-24**.)* The CHECK above is NULL-shaped, and the
+agent is a real `clara.users` row with a stable uuid (`0002:195` `is_agent`, `0002:334-335`
+`agent_user_id()`), so a row carrying `agent_user_id()` in both `approved_by` and
+`apportionment_entered_by` satisfies it exactly as a human-keyed row does — law 68's "a CASE whose arms
+are all NULL-poisoned is an open door drawn as a wall". The wall is **three mechanisms**:
 
-This also fixes the error class the survey found in the prior research (§6.4a): the citation is bound
-**once, to the code, by the owner**, not re-picked per run by a model. A depreciation add-back cannot
-cite the wrong paragraph on Tuesday and the right one on Wednesday.
+1. **The CHECK stays** as the shape rule — an apportionment without an approval is malformed.
+2. **`_tf_tax_treatment_human_only`**, a `before insert or update` trigger, is the ARM-0 guard: for each
+   of `approved_by` and `apportionment_entered_by` the **first** arm refuses NULL-where-required and
+   the second refuses a value resolving to `clara.users.is_agent` — a machine principal in either
+   column raises, whatever door it came through.
+3. **The approve door is a human verb, on the estate's own established shape.** `approve_tax_treatment`
+   opens with `clara._human_ctx(clara.role_rank('admin'))` and counts eligible approvers with the
+   predicate `approve_metric_definition` already uses at `0059:85` — `join clara.users u … and not
+   u.is_agent` — refusing `no_eligible_human`, requiring a distinct checker where two or more exist,
+   and admitting self-approval only for a sole eligible human with an attestation. Clara's proposal
+   verb is a **wake** verb (§3.1) with no path to those columns.
+
+Cell **C2b** is the arm the v1 battery never ran: write the approval and apportionment as
+`agent_user_id()` and assert it **refuses**; repeat as a real human and assert it computes. The
+severance also fixes the error class the survey found in the prior research (§6.4a): the citation is
+bound **once, to the code, by the owner**, not re-picked per run by a model — a depreciation add-back
+cannot cite the wrong paragraph on Tuesday and the right one on Wednesday.
 
 ---
 
-## 3 · The ladder as evaluator members
+## 3 · The ladder as ONE evaluator member
 
-One `evaluator_version` (`clara.evaluator_versions`, appended undeployed; `deployed` flipped by the
-`_tf_evaluator_deploy_once` ceremony — `0060:93-100`), whose members are the rungs. Every rung's
-output is a `metric_cell` with `formula_sha256`, `resolved_inputs_sha256` and `evaluator_version_id`.
+> **[RE-CUT 2026-08-23 — conductor, measured.]** v1.1 registered **~12 members, one per rung**. Wrong,
+> for a measured reason: **`verify_evaluator_freeze()` iterates `evaluator_versions` with no
+> `where deployed`, and hashes the FULL `pg_get_functiondef`.** So **(a)** registration freezes
+> immediately — **`deployed:false` buys nothing**; **(b)** a later ACL, owner or `search_path` change to
+> any member raises **at that later lane's apply, pointing at F-T3**. Twelve members = twelve bodies
+> frozen estate-wide and twelve chances to hand a red migration to a lane that never heard of this
+> item. **(D-16.)**
+
+**ONE registered member**, self-contained, calling **nothing but built-ins**:
+`clara.evaluate_tax_computation_v1(p_client uuid, p_ya int) returns setof clara.tax_computation_line` —
+`(rung, line_key, amount_cents, exact_num, exact_den, status, reason, treatment_code, authority_id,
+asset_id)` — **`STABLE`, pure, reads and never writes.** It computes the whole ladder in one body
+(R1-R12, the CA schedule, the SME predicate and its reasons, the CP204 schedule) and returns them as
+addressable rows. Nothing else in F-T3 is a member.
+
+**Why one, not three.** The tempting split (ladder / CA / CP204) fails on the SME predicate, which R10,
+the small-value-asset cap (§5) and the CP204 relief (§7) all need. Registering it freezes a fourth
+body; inlining it three times duplicates judgement logic across three bodies — two mutually-unaware
+paths in a third hat (law 81). One body has it once. **The cost, stated:** one large body reviews
+harder than twelve small ones, and changing any rung's arithmetic becomes a new `_v2` member plus a new
+`evaluator_version`, not an edit. Both accepted — the rungs stay separately **addressable** (one
+`metric_definition` and one returned row each), and "changing how a number is derived is a versioned
+act" is what hard constraint 2 wants anyway.
+
+**And it is why the member is the LAST DDL-dependent PR** *(gate blocker)*. Postgres does not validate a
+plpgsql body's referenced relations at `create function` time, so a member registered before a table it
+reads applies cleanly and then raises `relation … does not exist` on its **first call** — aborting the
+whole `setof` return, which is precisely what part 2 §9 promises never happens. The body is frozen the
+instant its `evaluator_versions` row lands, so that cannot be patched later without a `_v2`. **PR-6
+carries a closed census of every relation the body names, each with the PR that creates it, and every
+one is created strictly before PR-6.**
+
+**Deliberately NOT members**, and so free to change: the run wrapper that materialises `ca_asset_years`,
+the carry-out rows and `metric_cells` from the returned rowset (which is also why the evaluator stays
+pure); Clara's proposal verb; the approval door; the `law_review_due` belt; every read view. **No F-T3
+member is a general-purpose helper** — satisfied trivially by there being one, calling only built-ins.
+**`frozen-evaluators.json` is append-only vs `origin/main`**, and **a manifest conflict is NEVER
+resolved by dropping another lane's key.**
+
+Every rung's output is a `metric_cell` with `formula_sha256`, `resolved_inputs_sha256` and
+`evaluator_version_id` — and, for every non-`ok` cell, a `na_reason_version_id`, which `0058:261-262`
+makes a hard CHECK (part 2 §9).
 
 | # | Rung | Reads | Yields |
 |---|---|---|---|
-| R1 | **accounting profit before tax** | `close_receipts.pl_net_cents` + `snapshot->'closing_position'` for the fiscal year, `status='active'`, `kind='close'` | the base |
-| R2 | **add-backs** | `tax_account_treatments` (approved) × the sealed closing position | one line per treated account, one total |
+| R1 | **accounting profit before tax** | `close_receipts.pl_net_cents` for the fiscal year the basis period names, `status='active'`, `kind='close'` | the base |
+| R2 | **add-backs** | `tax_account_treatments` (approved) × the account's sealed **`snapshot->'pl_rows'`** movement, normalised by `account_type` (A.2) | one line per treated account, one total |
 | R3 | **further deductions / income not taxable** | same, `direction ∈ {deduct, exclude}` | exempt/single-tier dividends, capital gains reversed |
-| R4 | **adjusted income** (s.33) | R1 + R2 − R3 | per business source |
+| R4 | **adjusted income** (s.33) | R1 + R2 − R3 | the single modelled business source (§3.2) |
 | R5 | **capital allowances** (Sch 3) | `ca_asset_years` (§5) | IA + AA + balancing adjustments |
-| R6 | **statutory income** (s.42) | R4 − R5, floored at nil; excess CA carried | per source |
-| R7 | **aggregate income** (s.43) | Σ R6 across sources, less current-year adjusted loss | |
-| R8 | **total income** (s.44) | R7 less brought-forward loss (s.44(5F): 10 YAs) and approved donations (s.44(6): ≤10% of R7) | |
-| R9 | **chargeable income** | company: = R8. individual: R8 less personal reliefs — **not F-T3's** (§8) | |
+| R6 | **statutory income** (s.42) | R4 − R5, floored at nil; unabsorbed CA carried **within the source** | |
+| R7 | **aggregate income** (s.43) | (Σ R6 **business** sources − brought-forward business loss, **s.43(2)**, floored at that business aggregate, the excess carried) + Σ R6 **non-business** sources | |
+| R8 | **total income** (s.44) | R7 less current-year adjusted loss (**s.44(2)**) and approved donations (**s.44(6)**: ≤10% of **R7**) | |
+| R9 | **chargeable income** | company: = R8. individual: R8 less personal reliefs — **not F-T3's** | |
 | R10 | **tax charge** | R9 through `tax_rate_bands` for the regime the SME predicate returned (§6) | |
-| R11 | **CP204 estimate + instalment schedule** | R10, the 85% floor, months in the basis period | §7 |
-| R12 | **s.107C(10) exposure** | R10 vs the latest recorded estimate | narrative, never a posting |
+| R11 | **CP204 estimate + instalments for `p_ya + 1`** | R10, the 85% floor from `p_ya`'s filing, months in **`p_ya + 1`**'s basis period | §7 |
+| R12 | **s.107C(10) exposure for `p_ya`** | R10 vs the latest `cp204_filings` row **for `p_ya`** | narrative, never a posting |
 
-R1's input rule is a wall, not a preference: **no active `close_receipts` row ⇒ `close_not_sealed`**.
-Reading `trial_balance()` live would give a computation that silently changes after it is filed.
+**R7/R8 were swapped in v1.2, and the cap sat on the wrong base** *(gate blocker; **D-19**)*. Under the
+Act the brought-forward business loss is the **s.43(2)** deduction, taken against the aggregate of
+statutory income from **business sources only** and floored at that aggregate — the excess carries
+forward, it does not reach rental, interest or other-source income. The **current-year** adjusted loss
+is the **s.44(2)** deduction from aggregate income. s.44(5F) is the ten-YA **time limit** on the carried
+amount, not the deduction provision, so v1.2 printed it as the authority for a deduction whose
+authority is s.43(2). And because R7 no longer subtracts the current-year loss, the s.44(6) donation cap
+now sits on aggregate income, which is what the Act says.
+
+**R1's input rules are walls, not preferences.**
+
+- **No active `close_receipts` row ⇒ `close_not_sealed`.** Reading `trial_balance()` live would give a
+  computation that silently changes after it is filed.
+- **The basis period must be co-extensive with the fiscal year the receipt seals** *(gate blocker;
+  **D-23**)*. The member resolves `tax_basis_periods` for `(client, p_ya)`; no row ⇒
+  `basis_period_undetermined`. The row's `derived_from_fiscal_year_id` names the fiscal year, and R1
+  reads the active close receipt for **that** year. If the row names no fiscal year, or its
+  `(period_start, period_end)` is not exactly that year's `(starts_on, ends_on)`, every rung from R1 is
+  `not_evaluable` with **`basis_period_not_coextensive_with_close`**. `close_receipts` is one active row
+  per `fiscal_year_id` (`uq_cr_one_active_close`, `0056:1544`) sealing the whole fiscal year's movement,
+  so an 18-month first period, a change of accounting date or a cessation short period cannot be served
+  by scaling it. **Apportionment across two YAs is out of v1**: s.21A(3)-(7) turns on a DGIR direction
+  Clara cannot see.
+
+### 3.1 · The verb set — wake wrappers, ungranted cores, human doors
+
+*(Gate blocker; **D-25**. v1.2 specified three agent writes with no entrance at all — no wrapper, no
+credential, no allowlist row, no kind, no receipt — while every sibling design in the wave states this
+analysis explicitly. The failure it invites is on the record here: `0078:124-127` shipped a wrapper
+delegating to a `_human_ctx` core that "raised CLR04 for every wake caller and could never have
+executed".)*
+
+The three agent writes — `wake_propose_tax_treatment`, `wake_run_tax_computation` and
+`wake_raise_law_review_due` — take the **`0078:90-107` shape exactly**: resolve the wake credential,
+refuse without one (CLR03), assert the per-kind `wake_fn_allowlist` row, then delegate to an ungranted
+core taking an already-resolved `(firm, actor, on_behalf_of, wake_kind)`. The core carries the DML; the
+wrapper carries none. Receipts run `_reserve_op` / `_audit` / `_finish_op` plus `agent_act_receipts`.
+
+**The kind analysis, stated rather than assumed.** `0011:618-628` carries two CHECK families:
+`wake_kind in ('interactive','proactive','autodraft')`, and the pairing rule that `autodraft`
+**requires** a non-null `client_id` while `interactive`/`proactive` require it null. The two
+client-scoped writes are therefore `autodraft`; the belt is firm-scoped and clock-woken, so it rides
+`proactive` exactly as F-T2's payroll belt does. **F-T3 needs no new wake kind and no CHECK
+extension** — and this sentence is the analysis the gate found missing, not a claim that none was
+needed. The five human doors, their role floors and the full wrapper table are in **mechanics §M1**.
+
+### 3.2 · One business source, said out loud
+
+*(Gate material; **D-20**.)* R4-R7 are stated per source, and **nothing in the estate carries a
+business-source dimension** — `coa_accounts` has none through its whole lineage, `pl_rows` carries
+`account_code`/`account_type`/`movement_cents` only, and `fixed_assets` has none, so capital allowances
+cannot be attributed to a source at all. Left as written, a two-source client silently collapses to
+one: source A's capital allowances absorb source B's income and the nil floor at R6 is applied once
+instead of per source, understating statutory income with no refusal. v1 therefore **models exactly one
+business source and refuses the rest**. `client_tax_attributes` carries `business_source_count`; absent
+⇒ **`business_source_count_unknown`**; greater than one ⇒ R4-R7 are `not_evaluable` with
+**`multiple_business_sources_unmodelled`**, naming the count. Multiple sources are part 2 §13's. This is
+the same move D-1, D-6 and D-9 already make: model it, or refuse it by name — never compute through it.
 
 ---
 
 ## 4 · New DB surfaces
 
-Seven, all new; nothing existing is altered except one column (D-7).
+**Ten relations, all new**, plus **two alterations** to `clara.fixed_assets` (one column pair and one
+unique constraint — D-7). Every column list, every CHECK, the tenancy shape and the composite keys are
+in **mechanics §M2 and §M4**; this section carries what each relation is *for* and the three the gate
+made the design re-think.
 
-**(1) `tax_authorities`** — the citation catalog. `kind ∈ {act_section, schedule_para, public_ruling,
-gazette_order, lhdn_page}`, `label`, `url`, `accessed_at`, `quote`, `fetched_by`, `owner_signed_by/at`.
-This is F-T3's answer to survey §3.4: **neither** F-A8's `web_fetch_citations` **nor** F-A5's
-`basis_citations` is the right home for a *statutory* citation, because both are per-run artefacts of
-a fetch, and a statutory reference is standing law that must not be re-fetched (and re-risked) on
-every computation. `tax_authorities` rows are seeded by migration for the provisions this design
-names, and a *new* authority arrives through the same TA-P2 governed door as a Tier-1 rate row: Clara
-drafts it from a fetch, two independent official sources agree, the owner one-clicks. A
-`report_agent_receipt`'s `basis_citations` then carries `tax_authorities.id` values — so F-A5's
-carrier is still used, as a pointer, not as the store. **(D-5)**
+| # | Relation | What it is | Scope |
+|---|---|---|---|
+| 1 | `tax_authorities` | the citation catalog — `kind`, `label`, `url`, `accessed_at`, `quote`, `owner_signed_by/at` | platform |
+| 2 | `tax_treatment_codes` | §2's closed, owner-signed code set | platform |
+| 3 | `tax_rate_bands` | Schedule 1 bands per regime and YA | platform |
+| 4 | `capital_allowance_rates` | Schedule 3 IA/AA rates per class and YA window | platform |
+| 5 | `tax_thresholds` | the fourteen seeded scalars (MSMC limits, MV caps, SVA caps, CP204 floor, s.107C(10) rates, the donation cap, the loss-carry years) | platform |
+| 6 | `ca_asset_years` | the capital-allowance schedule, one row per asset per YA — §5 | client |
+| 7 | `cp204_filings` | what was actually filed and when — human-keyed | client |
+| 8 | `client_tax_attributes` | the **valid-time** entity facts the SME predicate reads as-at | client |
+| 9 | `tax_carryforwards` | brought-forward adjusted loss and unabsorbed capital allowance | client |
+| 10 | `tax_entry_treatments` | the per-entry treatment override, same severance shape as §2 | client |
+| — | the field-pack map | `(form_code, form_version, field_id, label, value_cell_id, whole_ringgit)` — part 2 §8 | platform |
 
-**(2) `tax_treatment_codes`** — §2. Seeded per the survey's verified law; each row owner-signed once.
+**(1) is F-T3's answer to survey §3.4.** **Neither** F-A8's `web_fetch_citations` **nor** F-A5's
+`basis_citations` is the right home for a *statutory* citation: both are per-run artefacts of a fetch,
+and a statutory reference is standing law that must not be re-fetched (and re-risked) on every
+computation. A `report_agent_receipt`'s `basis_citations` then carries `tax_authorities.id` values —
+F-A5's carrier used as a pointer, not as the store. **(D-5.)** **How (3), (4) and (5) land —
+[RULED 2026-08-23, OQ-6 → R-L25].** They are **developer-seeded fact
+tables on the D17/R-L19 pattern**, not TA-P2 governed-door tables: **versioned, effective-dated rows
+seeded by migration through the full PR ladder**, each cited to LHDN or the AGC gazette with its fetch
+date via `authority_id`, immutable + supersede, and **a missing row for the YA refuses by name and
+stops in the open** — never carried forward from the previous year. A rate change is a ticket and a PR.
+This is the **same** mechanism as the F-A9 price rows and the deadline tables — one seeding
+architecture, not two (law 81) — and the F-A8 scheduled fetch may attach later without changing how a
+row lands. The Tier-1 closure re-opens for **exactly these two rate tables**; EPF/SOCSO/EIS, stamp duty
+and MTD stay out. Contract note: `wave-f-contract.md`'s `[TB-2026-08-23]`. **(D-15.)**
 
-**(3) `tax_rate_bands`** — Tier-1, effective-dated, immutable + supersede.
-`(regime, ya, band_lower_cents, band_upper_cents NULL, rate_bp, authority_id, revision,
-superseded_by, actor)`. Regimes: `company_msmc`, `company_standard`, `individual_resident`,
-`individual_non_resident`. **A missing row for the YA refuses by name and stops in the open** — never
-carries the previous year forward (TA-P2's rule, and it is the correct rule: a band that silently
-persists past a Budget is a wrong number in a client's books).
+Two rows are **deliberately absent**, and their classes refuse by name. The ICT 40/20 row
+(P.U.(A) 328/2024) is not seeded — survey §6.3 U1: the gazette text could not be read at an official
+source on 2026-08-23, and a rate on professional-firm secondaries is not a cited official row, so an
+asset whose `ca_class` resolves to ICT returns `rate_row_missing_for_ya`. `sva_annual_cap` is not
+seeded either — PR 3/2021 is survey U2, unfetched (§5). **R-L25 names this posture as the model for the
+whole family**: that is the design working, not failing.
 
-**(4) `capital_allowance_rates`** — `(ya_from, ya_to, ca_class, ia_bp, aa_bp, authority_id, …)`.
-Seeded from PR 12/2014's three categories and PR 3/2018's IBA. **The ICT 40/20 row (P.U.(A) 328/2024)
-is NOT seeded** — survey §6.3 U1: the gazette text could not be read at an official source today, and
-a rate on secondary evidence fails TA-P2's two-official-sources check. An asset whose `ca_class`
-resolves to ICT therefore returns `rate_row_missing_for_ya`. That is the design working, not failing.
+### 4.1 · (8) `client_tax_attributes` — why `record_client_fact` could not carry this
 
-**(5) `tax_thresholds`** — `(ya, key, value_cents | value_bp, authority_id, …)`. Keys:
-`msmc_paid_up_max` (RM2,500,000) · `msmc_gross_income_max` (RM50,000,000) · `msmc_foreign_holding_max_bp`
-(2000) · `related_company_paid_up_min` (RM2,500,000) · `sva_asset_max` (RM2,000) ·
-`sva_annual_cap` (RM20,000) · `mv_qe_cap_default` (RM50,000) · `mv_qe_cap_new` (RM100,000) ·
-`mv_new_cost_ceiling` (RM150,000) · `cp204_floor_bp` (8500) · `s107c10_threshold_bp` (3000) ·
-`s107c10_penalty_bp` (1000) · `s44_6_donation_cap_bp` (1000) · `loss_carry_forward_years` (10).
+*(Gate blockers; **D-21**.)* v1.2 routed seven new `client_fact_keys` through `record_client_fact`.
+Three independent walls, all read from the live body of `0055`, make that unbuildable:
 
-**(6) `ca_asset_years`** — the capital-allowance schedule, §5. Evaluator-written only.
+- **No valid-time dimension.** `client_facts` carries `recorded_at` and the supersession pair only
+  (`0055:386-421`); `uq_client_fact_live` (`:422`) admits exactly **one live row per
+  `(client, fact_key)`**; the door's signature (`:499-501`) has no as-at parameter. The store can answer
+  "what is it now", never "what was it at the beginning of the YA2024 basis period" — and the worked
+  ladder prices that difference at RM31,409.50 on one shareholding fact (A.3).
+- **The validation dispatch is fail-closed and implements two branches.** `0055:588-607` handles
+  `enum:%` membership and a hard-coded `msic` regex and raises `fact_value_invalid` on everything else;
+  `:582` additionally requires `jsonb_typeof(p_fact_value) = 'string'`, so a `{value, as_at}` object
+  cannot ride inside the value either. None of F-T3's facts is an enum.
+- **The door cannot execute inside a migration, and it writes the other table anyway.** It opens on
+  `clara._human_ctx(clara.role_rank('admin'))`, which raises CLR04 without a JWT (`0004:302-305`), and
+  its only writes are `insert into clara.client_facts`; `client_fact_keys` is a bare owner insert
+  (`0055:342-370`). "A migration seed block through `record_client_fact`" is two different acts, and
+  neither is the one described.
 
-**(7) `cp204_filings`** — what was actually filed and when: `(client_id, ya, kind ∈
-{estimate, revision_m6, revision_m9, revision_m11}, amount_cents, filed_on, recorded_by)`. Human-keyed,
-because Clara cannot e-file and therefore cannot know. Its absence is a named `not_evaluable`, never
-a zero.
+So **F-T3 mints no `client_fact_keys` and never calls `record_client_fact`.**
 
-**Plus, not a table: new `client_fact_keys`** written through the existing audited door
-`record_client_fact` (`0055`) — `tin`, `ssm_registration`, `incorporation_date`,
-`paid_up_ordinary_capital_cents` (as-at-dated), `foreign_or_noncitizen_holding_bp` (as-at-dated),
-`related_company_paid_up_cents`, `commenced_operations_on`. **No column is added to `clara.clients`**
-(survey §2.5). **(D-3)**
+**`tin` and `ssm_registration` are dropped from F-T3's surface entirely** *(gate material; **D-22**)*.
+They already have a governed home: `clara.client_identifiers` (`0007:222-236`,
+`kind in ('tin','ssm','bank_account')`, composite tenant FK) written through `add_client_identifier`
+(`0007:1508`, bookkeeper+) — and a sibling Wave-F design, `filing-and-interview-design.md:163`, already
+treats it as **attribution-authoritative** for exactly these values. A parallel store would be law 81's
+two mutually-unaware paths, on the one number the Form C pack prints for a human to key into MyTax.
+F-T3 **reads** it; no `kind='tin'` row ⇒ `entity_identifier_missing` on the pack rather than a blank
+field.
+
+**The dated facts land in the new valid-time table**, keyed `(client_id, firm_id, attribute_key,
+effective_on)` with a value column per declared kind. Keys: `incorporation_date` ·
+`commenced_operations_on` · `paid_up_ordinary_capital_cents` · `foreign_or_noncitizen_holding_bp` ·
+`related_company_paid_up_cents` · `tax_resident_in_malaysia` · `business_source_count`. **The read is
+as-at**: the live row with the greatest `effective_on <= the as-at date`; **no such row ⇒ the dependent
+rung refuses by name**, never today's value. Written through `record_client_tax_attribute` (admin+,
+human-only, supersede-never-update).
+
+**Why a second fact store is one architecture, not two.** `client_facts` is a **current-state** store by
+deliberate design, and `0057:2129` records that it carries no staleness trigger because it "feed[s]
+close GATES … not the presented P&L or balance-sheet figures", adding that "**if a later pack ever
+PRESENTS a fact from one of them, that table joins the six and this decision is the thing to
+revisit**". F-T3 is that pack. A valid-time store answers *what was true on this date* — a different
+question, not a second answer to the same one. Each attribute key's description scopes it explicitly to
+the CLIENT and cites the generic name-only wall, exactly as D-17 required of the fact keys.
+
+### 4.2 · (9) `tax_carryforwards` — the input that did not exist
+
+*(Gate blocker; **D-19**.)* v1.2's R6 promised "excess CA carried" and R8 deducted a brought-forward
+loss, and **no input in the estate or in the design held either figure** — a repo-wide sweep for
+`unabsorbed|loss_carr|brought.forward|carry.forward` returns two unrelated comments. A conforming
+implementer had to deduct zero, silently, on a statutory document. The design's own precedent is one
+row away in the table above: `cp204_filings` is human-keyed "because Clara cannot e-file and therefore
+cannot know. Its absence is a named `not_evaluable`, never a zero."
+
+The table is keyed `(client_id, firm_id, ya, kind ∈ {adjusted_business_loss,
+unabsorbed_capital_allowance})` with `origin ∈ {human_keyed, evaluator}`, `origin_ya`, `amount_cents`
+and a basis. **Human-keyed** rows are the opening balance for a client whose history predates Clara — a
+professional's figure, on `cp204_filings`' shape and through the same kind of door. **Evaluator** rows
+are written by the run wrapper from the prior YA's returned carry-out rows with their
+`evaluator_version_id` and `cell_id`, so once F-T3 has run a year the next year's input is DB-owned and
+reproducible, exactly like `ca_asset_years`. Three rules:
+
+- **Absence is not a nil.** No row ⇒ **`losses_brought_forward_unknown`**, naming kind and YA. A human
+  asserting there is none keys `amount_cents = 0` with a basis — "nobody entered it" and "there is
+  none" are different states, which law 31 requires.
+- **The set-off arithmetic is gated on U5.** The survey ruled the carry rules "goes to U5 and **stays
+  out of the evaluator until read**" (`survey:438-441`) — PR 1/2022 unfetched, Sch 3 para 75/75A's
+  continuity conditions unverified. v1.2 put them in anyway. A **nil** row computes; a **non-nil** row
+  makes the dependent rung `not_evaluable` with **`loss_relief_rules_unread`** until the authority is
+  seeded. R-L25's posture, unchanged.
+- **The two carries are kept apart.** Unabsorbed capital allowance is a Sch 3 quantity carried within
+  the same source under continuity conditions; a brought-forward adjusted business loss is an s.43(2)
+  quantity under the s.44(5F) ten-YA limit. v1.2 conflated them into one phrase; `kind` is the fix.
+
+### 4.3 · (10) `tax_entry_treatments` — moved forward, not deferred
+
+v1 treats at account level by default (part 2 §9, D-10); the exceptional line needs an entry-level
+override. Because the frozen member reads it, it must exist **before** the member is registered — so it
+ships in PR-4 with the account-level table rather than in a PR after the freeze, which would have
+needed a `_v2` member for a table the design always meant v1 to have. Same severance shape as §2: Clara
+proposes a `code`, a human approves, no numeric column. Its presence for an account removes that
+account from `mixed_account_needs_split`.
+
+### 4.6 · `valid_through` and the law-review belt — [GRANTED 2026-08-23, OQ-8's product half]
+
+A refusal is the right behaviour when a rate row is missing, and it is a **terrible first warning**: the
+firm discovers it in January, mid-filing, on a client's return. The seeded law tables therefore carry
+their own expiry, and something wakes before it.
+
+**Every row in `tax_rate_bands`, `capital_allowance_rates`, `tax_thresholds` and `tax_authorities`
+carries `valid_through`** — the last date the row is known-current, set at seed time from the source's
+own scope. It is **not** an automatic invalidation: past `valid_through` the row still computes, and the
+belt has already raised the question. **`law_review_due`** is a periodic belt, a **consumer of F-A4's
+clock** (law 80), entered through `wake_raise_law_review_due` on the `proactive` kind (§3.1); it reads
+the seeded tables and raises **one typed question to the firm's tax lead** per row expiring inside the
+horizon. **Its five belt properties, its recipient rule and its resolution rule are in mechanics §M5.**
+This is the product half of Annex E's standing duty; the **governance** half stays OQ-8's card.
 
 ---
 
 ## 5 · The capital allowance schedule
 
 The evaluator finally gives `fixed_assets.ca_class` / `is_commercial_vehicle` / `is_new`
-(`0041:354-357`) the consumer Wave D deferred to Wave F.
-
-`ca_asset_years(client_id, fixed_asset_id, ya, qe_cents, ia_cents, aa_cents, balancing_cents,
-residual_open_cents, residual_close_cents, rate_row_id, evaluator_version_id, cell_id)` — one row per
-asset per YA, produced only by the evaluator, hand-writable by nobody.
+(`0041:354-357`) the consumer Wave D deferred to Wave F. `ca_asset_years` is one row per asset per YA,
+produced only by the run wrapper from the evaluator's rowset, hand-writable by nobody (columns in
+mechanics §M2).
 
 **Qualifying expenditure.** `qe = cost` except for a motor vehicle that is not a commercial vehicle,
 where `qe = LEAST(cost, is_new AND cost <= mv_new_cost_ceiling ? mv_qe_cap_new : mv_qe_cap_default)`
 (PR 6/2015 §(b)). `is_commercial_vehicle` and `is_new` are register facts, not inferences.
-
-**Allowances.** IA on QE in the year the asset comes into use; AA on QE each year, both at the rate
-row for the `ca_class` and YA; AA never exceeds residual expenditure. **No AA in the year of
-disposal** — a balancing allowance or charge instead, and a balancing charge is capped at the
-allowances actually made.
+**Allowances:** IA on QE in the year the asset comes into use; AA on QE each year, both at the rate row
+for the `ca_class` and YA; AA never exceeds residual expenditure. **No AA in the year of disposal** — a
+balancing allowance or charge instead, and a balancing charge is capped at the allowances actually made.
 
 **Small value assets** (Sch 3 para 19A). `cost <= sva_asset_max` ⇒ the full cost in lieu of IA/AA,
 subject to `sva_annual_cap` per YA — **except** for a company resident and incorporated in Malaysia
-meeting the MSMC criteria, where the cap does not apply (para 19A(3); PR 8/2025 Table 6 "No limit").
-Note the cascade this creates and accept it: **SVA depends on the SME predicate, so a
-`not_evaluable` SME verdict makes the SVA cap `not_evaluable`, which makes the CA total
-`not_evaluable`, which makes the whole computation `not_evaluable`.** Fail-closed all the way up
-(§9). It is not available to an LLP, a business trust or an ABS SPV.
+meeting the MSMC criteria, where the cap does not apply (para 19A(3); PR 8/2025 Table 6 "No limit"). Not
+available to an LLP, a business trust or an ABS SPV. **Accept the cascade this creates:** a
+`not_evaluable` SME verdict makes the SVA cap `not_evaluable` → the CA total → the whole computation.
 
-**Accounting depreciation and capital allowances never meet.** `fa_depreciation` (`0041:519-543`)
-feeds R2 as an add-back; `fixed_assets` feeds R5 as QE. Two different reads, two different rungs. A
-differential battery cell proves they are not wired to the same source (§10 C8).
+**What happens above the cap** *(gate material; v1.2 stopped at the cap and left the build to choose)*.
+Expenditure the cap excludes is **not stranded**: an asset outside the annual cap takes **normal IA/AA
+at its `ca_class` rate**, which is what "in lieu of" means per asset. Two rules make it deterministic,
+because the Act does not order the assets and Clara may not elect for the taxpayer: **(a)** assets are
+taken in **descending `qe_cents`** order, so the cap covers the largest qualifying expenditure and the
+allowance is maximised; **(b)** an asset is **wholly inside or wholly outside** the cap, never split
+across the boundary. And the rule may not land until its authority does: PR 3/2021 is survey U2, not
+fetched, so `sva_annual_cap` is absent and the SVA branch refuses with `rate_row_missing_for_ya` in the
+meantime — R-L25's posture, unchanged.
 
-**One register change (D-7).** `dispose_fixed_asset` (`0041:3644`) posts proceeds and gain/loss but
-stores neither. The balancing adjustment needs the **disposal value**. Options were (a) re-derive it
-from the posted entry, (b) add `disposal_value_cents` + `disposed_on` to `fixed_assets`. (b) is
-chosen: re-deriving a statutory input from a posting's shape is exactly the "derived state is not
-evidence" trap (digest law 31), and the disposal verb already knows the number. This touches a live
-writer's body — a `prosrc`-SHA prestate pin and a D1 write-quiesce window, listed in PR-3's §0
-inventory.
+**Accounting depreciation and capital allowances never meet.** `fa_depreciation` (`0041:519-543`) feeds
+R2 as an add-back; `fixed_assets` feeds R5 as QE — two different reads, two rungs, proved differentially.
+
+**The disposal value, the register writer and the split** are the fold's largest single correction and
+live in **mechanics §M3**. In one paragraph: the Schedule 3 disposal value is **not** the accounting
+proceeds (para 62(1) — the greater of market value and net proceeds; a controlled sale is deemed), so it
+is **human-keyed** at the disposal's approval with a stated basis and is `disposal_value_not_established`
+without one; **one** new column pair lands because `fixed_assets.disposed_at` already exists and a second
+disposal date could disagree about the YA; `dispose_fixed_asset` is proposal-shaped and does **not**
+write the register row — `clara._fa_on_approve` does, both on the full path and on the partial supersede
+split; and the post-approval immutability guard's allowlist must be widened or the **first** disposal in
+the estate raises CLR13, a mistake `0041:864-866` records the repo already having made once. **PR-3
+therefore replaces three live bodies, not one.**
 
 ---
 
 ## 6 · SME eligibility — a three-valued predicate, never a default
 
 `sme_rate_eligibility_v1(client_id, ya) → (verdict, reasons jsonb)` with
-`verdict ∈ {eligible, not_eligible, not_evaluable}`. Five conditions, evaluated independently
-(PR 8/2025 §6.2.1, survey §6.2):
+`verdict ∈ {eligible, not_eligible, not_evaluable}`. Five conditions, evaluated independently (PR
+8/2025 §6.2.1, survey §6.2). Every as-at read resolves against `client_tax_attributes` at the **basis
+period's `period_start`**, and no such row ⇒ `sme_facts_missing` naming the attribute **and the date**.
 
 | C | Condition | Input |
 |---|---|---|
-| C1 | resident **and** incorporated in Malaysia | `entity_type` + a residence fact |
+| C1 | resident **and** incorporated in Malaysia | `entity_type` (`client_facts`, read-only) + `tax_resident_in_malaysia` as-at |
 | C2 | paid-up ordinary share capital ≤ RM2.5m **at the beginning of the basis period** | `paid_up_ordinary_capital_cents` as-at that date |
 | C3 | gross business income ≤ RM50m **in the basis period** | derived from the sealed close |
-| C4 | not >50% owned by a related company (paid-up > RM2.5m) | `related_company_paid_up_cents` |
+| C4 | not >50% owned by a related company (paid-up > RM2.5m) | `related_company_paid_up_cents` as-at |
 | C5 | **from YA2024**, not >20% owned directly or indirectly by foreign companies or non-citizens | `foreign_or_noncitizen_holding_bp` as-at |
 
 **Combination rule.** Any condition returning a definite *fail* ⇒ `not_eligible` (a proven
 disqualification is decisive; no missing fact can rescue it). Otherwise, any condition returning
 `not_evaluable` ⇒ `not_evaluable`. Only all-pass ⇒ `eligible`.
 
-**And `not_evaluable` refuses the computation — it does not fall back to 24%.** The frozen build's
-honesty layer defaulted to the standard rate and printed a banner (survey §6.4c). F-T3 does not
-inherit that. A rate applied on an unproven premise is a fabricated number in a durable artifact
-(hard constraint 2), it is the *wrong* number in the client's favour-or-not depending on which way
-the fact lands, and a banner is a prompt-level mitigation for a structural problem. The refusal
-`sme_facts_missing` names the exact missing fact, and Clara chases it — which is the product's whole
-shape. **(D-6; OQ-5 puts the ruling in front of the owner because it changes what the human sees.)**
+**And `not_evaluable` refuses the computation — it does not fall back to 24%. [RULED 2026-08-23,
+OQ-4 → REFUSE.]** The frozen build's honesty layer defaulted to the standard rate and printed a banner
+(survey §6.4c); F-T3 does not inherit that. A rate on an unproven premise is a fabricated number in a
+durable artifact (hard constraint 2), wrong in the client's favour or against depending which way the
+fact lands, and a banner is prompt-level mitigation for a structural problem. **An unknown SME status
+is a question to the human, never a rate** — and the refusal is not a dead end on screen, because
+`sme_facts_missing` names the exact missing fact. **(D-6.)** The as-at read is the whole point of
+§4.1's table: reading today's paid-up capital for a YA2024 computation is the same failure OQ-4
+refuses, certified by a `resolved_inputs_sha256` over a figure that is not re-derivable. A later share
+issue must not retroactively disqualify a filed year, and a capital reduction must not retroactively
+qualify it.
 
 ---
 
 ## 7 · CP204
 
-`cp204_estimate_v1(client_id, ya)`:
-- the natural estimate is R10 for the YA;
-- the **85% floor** is `0.85 × ` the latest `cp204_filings` row for `ya-1` (revision if any, else the
-  original estimate — s.107C(3));
-- **no prior row ⇒ the floor is `prior_estimate_unknown`**, and the pack says so beside the number
-  rather than silently omitting the floor. The estimate itself still computes.
+**R11 is the estimate for `p_ya + 1`, and the design now says so** *(gate material)*. s.107C(1)-(2)
+requires the estimate **not later than 30 days before the beginning of the basis period for its YA**,
+while R1 walls on a sealed close that exists only after the computed year has ended — so an estimate
+"for the YA" under v1.2's literal reading was always produced twelve months after its own deadline. The
+annex's worked ladder had already silently shifted to YA+1 while the body kept `ya-1`; the two bindings
+differ by exactly one year on a statutory floor.
 
-`cp204_instalments_v1`: `n` = months in the basis period; equal monthly instalments due on the **15th
-of each calendar month**, beginning at **month 2** for an established taxpayer and **month 6** for one
-that first commenced operation with a basis period of ≥6 months (s.107C(4), (6); LHDN tax-estimation
-page). Rounding convention **D-12**: instalments are `floor(estimate/n)` with the whole remainder on
-the **first** instalment, so the schedule sums exactly to the estimate and no rounding drift reaches
-the last month.
+- **The estimate:** R10 for `p_ya`, proposed as the estimate for **`ya_target = p_ya + 1`**.
+- **The 85% floor** is `0.85 ×` the latest `cp204_filings` row for `ya_target - 1` — which **is
+  `p_ya`**, the computed year, not `p_ya - 1` (s.107C(3): revision if any, else the original). **No
+  prior row ⇒ the floor is `prior_estimate_unknown`**, said beside the number rather than silently
+  omitted. The estimate itself still computes.
+- **The divisor** `n` = months in **`ya_target`'s** basis period, from `tax_basis_periods` for
+  `(client, ya_target)`. **No row ⇒ `basis_period_undetermined` naming `ya_target`** — never a silent
+  fallback to the computed year's `months`, which differs in exactly the first-period, change-of-date
+  and cessation cases A.1 exists for.
+- **The cell's period.** `metric_cell_periods` (`0058:265-269`) binds every cell to a concrete
+  `reporting_periods` row, so R11's cells are stamped on `ya_target`'s period and R1-R10's on `p_ya`'s.
 
-**The new-company relief** (s.107C(4A)): a company resident and incorporated in Malaysia that first
-commenced operation is relieved for that YA and the immediate following YA (or the two following),
-provided paid-up ordinary ≤ RM2.5m at the beginning of each, and — from YA2024 — provided the >20%
-foreign/non-citizen test does not bite (PR 8/2025 §6.6.2). Reuses C2 and C5 from §6, so it inherits
-the same three-valued discipline.
+`cp204_instalments_v1`: equal monthly instalments due on the **15th of each calendar month**, beginning
+at **month 2** for an established taxpayer and **month 6** for one that first commenced operation with a
+basis period of ≥6 months (s.107C(4), (6); LHDN tax-estimation page). Rounding convention **D-12**:
+`floor(estimate/n)` with the whole remainder on the **first** instalment, so the schedule sums exactly
+to the estimate and no rounding drift reaches the last month.
 
-`cp204_underestimate_exposure_v1` (R12): where `actual − estimate > 0.30 × actual`, exposure =
-`0.10 × (actual − estimate − 0.30 × actual)`. It is **narrative** — a number in the computation's
-commentary and in the pack, never a provision, never a posting.
-
-A taxpayer that has **not commenced operations** need not furnish CP204 (LHDN Filing Programme 2026
-note 3(i)(b)); a **dormant** one must still furnish the return form. Both are verdicts of the
-evaluator, both printed.
-
----
-
-## 8 · The artifacts, and where the human wall stands
-
-Three, all `report_runs` instances (`0065:369-401`) of new report definitions.
-
-**(1) The computation statement.** Statement-shaped, one `report_dataset_point` per rung, each add-back
-line carrying its treatment code, its statutory reference and its `tax_authorities` citation. This is
-the document a Malaysian firm actually attaches and a tax agent actually reviews. It is the primary
-deliverable.
-
-**(2) The field-value packs** — `form_c`, `form_pt`, `form_b`, `form_p`, `cp204`. A field-code → value
-table, so a human keys MyTax without re-deriving anything. **Not a replica of the LHDN form**:
-`publish_report_template_version` refuses a `report_class='statutory'` template from anything but the
-human admin verb (`0069:121`), `statutory_wording` has zero seeded rows, and fixed-layout boxed-form
-rendering is unbuilt — the Typst engine carries a chart/line AST only (survey §3.3). Attempting a
-pixel replica in v1 would mean either building a form renderer or faking one. **(D-8; OQ-4.)**
-
-**(3) The transparent-entity worksheet.** For `entity_type ∈ {sole_prop, partnership}` there is **no
-entity tax charge and no CP204** — the entity is transparent, and the computation stops at adjusted
-and statutory income, which the worksheet hands to the proprietor's Form B or the partners' shares
-via Form P. R9-R12 **refuse by name** (`entity_transparent_no_entity_charge`) rather than compute
-zero. Zero is a number and it is wrong; a refusal is correct. This re-earns a guard the frozen build
-already had (`docs/audit/01-findings-report.md:1408`). **(D-9.)** BEE CREATIVE SOLUTION is the live
-case (survey §5.5).
-
-**Personal reliefs are out of scope by nature.** An individual's chargeable income is total income
-less s.46-49 reliefs, which are facts about a person's household, not about the books. F-T3 computes
-to statutory/total income and stops. The Form B pack carries the business-source figures only.
-
-**The wall.** The terminal state is `issued` with `issue_mode` naming a human, and **F-T3 builds no
-verb that transmits anything to LHDN.** Digest law 82 makes the delegate grant explicit on this
-point: e-filing is *excluded by nature*, not merely reserved. The battery proves the wall positively
-(§10 C13) — by showing the pack's only egress is a human-initiated artifact retrieval — never by the
-absence of a submit function, because absence is not evidence.
+**The new-company relief** (s.107C(4A)): a company resident and incorporated in Malaysia first
+commencing operation is relieved for that YA and the immediate following YA (or the two following),
+provided paid-up ordinary ≤ RM2.5m at the beginning of each and — from YA2024 — the >20%
+foreign/non-citizen test does not bite (PR 8/2025 §6.6.2). It reuses C2 and C5 from §6 and so inherits
+the same three-valued discipline **and the same as-at read, at each relieved year's own basis-period
+start**. **R12, the s.107C(10) exposure** is measured for **`p_ya`**, against the latest `cp204_filings`
+row **for `p_ya`** — the estimate on record for the year now assessed, never R11's proposal for the next
+one. Where `actual − estimate > 0.30 × actual`, exposure = `0.10 × (actual − estimate − 0.30 × actual)`.
+**Narrative** — commentary and pack, never a provision, never a posting. And a taxpayer that has **not
+commenced operations** need not furnish CP204 (Filing Programme 2026 note 3(i)(b)) while a **dormant**
+one must still furnish the return form: both are verdicts of the evaluator, both printed.
 
 ---
 
-## 9 · Three-valued evaluation and the refusal vocabulary
-
-Every rung returns `ok` | `refused` | `not_evaluable`, mapped onto the live
-`metric_cells.cell_status ∈ ('ok','undefined','absent','refused')`: `not_evaluable` → `undefined`
-where the inputs exist but the rule cannot decide, and → `absent` where a required input row does
-not exist. **[PREDICTION — the mapping is asserted from `0058:239-263` source, and PR-0's replay
-confirms the live CHECK domain.]**
-
-**Fail-closed on the missing, the malformed and the unknown.** A rung's own evaluation never raises
-out of the ladder — it returns a status and a named reason, and the ladder continues so the human
-sees *everything* that is wrong at once rather than one error at a time. A downstream rung whose
-input is `not_evaluable` is itself `not_evaluable` (the cascade in §5 is the intended behaviour).
-
-The refusal vocabulary, each string printable and each one a battery cell:
-
-`close_not_sealed` · `basis_period_undetermined` · `account_untreated` · `treatment_unapproved` ·
-`treatment_code_unsigned` · `rate_row_missing_for_ya` · `ca_class_unassigned` ·
-`disposal_proceeds_unavailable` · `sme_facts_missing` · `entity_transparent_no_entity_charge` ·
-`prior_estimate_unknown` · `citation_missing` · `mixed_account_needs_split`.
-
-**`account_untreated` is the important one.** An account with a non-zero sealed balance and no
-approved treatment makes the computation `not_evaluable` and names the account. **An untreated
-account is never silently allowable.** That is the difference between a tool that helps and a tool
-that quietly under-declares.
-
-**Mixed accounts.** v1 treats at **account level only**. An account Clara believes carries two
-treatments (a motor-expenses account holding both commercial fuel and private petrol) yields
-`mixed_account_needs_split` and a coding proposal to split it — pushing the fix upstream into the
-books, where the system of record is. A per-entry override is PR-6 work and is code-only and
-human-approved on the same shape as §2. **(D-10.)**
-
----
-
-## 10 · Walls, and the cells that prove them
-
-Behavioural cells: each makes a wall **refuse**. No cell asserts on source text (spelling is not
-identity), none swallows a premise, and each forced cell asserts its precondition or exits by a
-named, counted `skipHere`.
-
-| # | Wall | Differential cell |
-|---|---|---|
-| C1 | no active close receipt ⇒ no computation | seal a close → computes; set `status<>'active'` → `close_not_sealed` |
-| C2 | Clara cannot write a numeral | attempt an insert into `tax_account_treatments` with a fraction → **no such column**; attempt `apportionment_bp` without `approved_by` → CHECK refuses |
-| C3 | an unsigned treatment code is unusable | reference a code with `owner_signed_by IS NULL` → `treatment_code_unsigned`; sign it → computes |
-| C4 | an untreated account is not allowable | leave one non-zero account untreated → `account_untreated` naming it; treat it → computes |
-| C5 | a missing rate row refuses, never carries forward | delete the YA row → `rate_row_missing_for_ya`; restore → computes. Also assert the **previous** year's row present does **not** rescue it |
-| C6 | SME `not_evaluable` refuses, does not default to 24% | remove the paid-up fact → `sme_facts_missing`; assert the charge is **not** 24% and **not** any number |
-| C7 | a proven disqualification is decisive over a missing fact | set foreign holding 25% **and** remove the gross-income fact → `not_eligible` (24%), not `not_evaluable` |
-| C8 | depreciation and CA are not the same read | change `fa_depreciation` only → R2 moves, R5 does not; change an asset's `ca_class` only → R5 moves, R2 does not |
-| C9 | the MV QE cap bites both ways | new car, cost 140,000 → QE 100,000; same car `is_new=false` → QE 50,000; commercial van 200,000 → QE 200,000 |
-| C10 | the SVA cap cascade is real | MSMC-eligible → no cap; flip C5 to fail → cap applies at RM20,000; make C2 unknown → **`not_evaluable`, not the capped figure** |
-| C11 | a transparent entity gets no entity charge | `entity_type='sole_prop'` → `entity_transparent_no_entity_charge`; assert the charge cell is **not** `0` |
-| C12 | evaluator freeze holds | add a member without a migration → `verify_evaluator_freeze()` fails the migration run |
-| C13 | the pack's only egress is human | enumerate the run's terminal transitions and assert the `issued` transition's actor is a human principal and `issue_mode` names them; assert the wake allowlist contains no member of the pack's egress set (**positively**, by enumerating the allowlist, not by grepping for a name) |
-| C14 | a citation is structurally present | every `report_dataset_point` whose treatment is `direction='add_back'` resolves to ≥1 `tax_authorities` row; break the FK → the seal refuses |
-
-**Judgement logic, and therefore review law 1.** PR-2 (the SME predicate), PR-4 (the treatment
-proposal and its approval door) and PR-5 (the ladder's refusal branches) all decide *whether*
-something is allowed. Each gets an independent review pass. PR-4 additionally gets a **cross-model
-adversarial pass**: it is the model's only entrance into a statutory document, and it is an
-injection surface (a supplier invoice's description text is an input to Clara's classification
-reasoning).
-
----
-
-## 11 · The PR ladder
-
-| PR | Content | Judgement? | D1 window |
-|---|---|---|---|
-| **PR-0** | gate record; rig replay at the frontier; the `prosrc`-SHA prestate pins; discharge the survey's [PREDICTION] tags; the shared-surface note to `conductor` (Tier-1 family, `client_fact_keys`, `evaluator_versions`) | — | — |
-| **PR-1** | `tax_authorities` · `tax_treatment_codes` · `tax_rate_bands` · `capital_allowance_rates` · `tax_thresholds`; the TA-P2 governed door; owner-signature requirement; the seeded law from survey §6.2 | **yes** (the door's refusal branches) | no |
-| **PR-2** | new `client_fact_keys`; the basis-period model (D-1); `sme_rate_eligibility_v1` | **yes** | no |
-| **PR-3** | `disposal_value_cents` on `fixed_assets` + the `dispose_fixed_asset` body replacement; `ca_asset_years` + the CA evaluator | partial | **yes** (one live writer) |
-| **PR-4** | `tax_account_treatments`; Clara's proposal verb; the human one-click approve door; the citation binding | **yes** + cross-model | no |
-| **PR-5** | the ladder evaluator R1-R10 as one `evaluator_version`; the refusal vocabulary | **yes** | no |
-| **PR-6** | `cp204_filings`; R11-R12; the per-entry treatment override | partial | no |
-| **PR-7** | the report definitions; the statutory-class template publication (a **human** act); the field packs; the `report_run` wiring | — | rides F-A5's |
-
-**PR-3's D1 window** is F-T3's only one and it is small (one verb body). It must **not** be merged
-into F-A4/F-A5's `finalize_close` window — different body, different lane, and combining them widens
-a quiesce for no gain. The conductor owns the ordering.
-
----
-
-## 12 · Sequencing — and the two things that gate the build
-
-**Hard, from the survey §7:** F-A5 PR-1 (the seal→render closure, gap S9) and F-A4 (a real
-`close_receipts` row — the chain has never run). F-T3's evaluators can be *authored* against a
-rig-seeded close, but F-T3 cannot be *accepted* until a real one exists.
-
-**And two open items that are not F-T3's to settle:**
-
-1. **The Tier-1 closure collides with the ALL-IN ruling** (survey §7). The contract closes Tier-1 to
-   three tables for Wave F and puts income-tax bands and capital allowances out "until their own
-   consumers land (F-T2/F-T3)"; the owner then landed F-T3 *in* Wave F. Either Tier-1 re-opens for
-   `tax_rate_bands` + `capital_allowance_rates`, or F-T3 builds a second governed-row mechanism —
-   which is two architectures for one job (digest law 81). **OQ-6**; it is a contract amendment.
-2. **There is no acceptance oracle in the corpus** (survey §5, F2). **OQ-1.**
-
----
-
-## 13 · Explicitly not in v1, each with its reason
-
-| Not built | Why |
-|---|---|
-| **s.6D rebate** (new MSMC, up to RM20,000/YA for 3 YAs — PR 8/2025 §6.5) | needs the incorporation date, an "operating expenditure" definition and a three-YA window; mis-claiming it carries a penalty. Wants its own design pass. |
-| **ICT accelerated CA** (IA 40% / AA 20%) | the gazette (P.U.(A) 328/2024) could not be read at an official source on 2026-08-23; a rate on secondary evidence fails TA-P2's two-source check (survey §6.3 U1) |
-| Group relief (s.44A), carry-back (s.44B) | multi-entity; no consumer in the estate |
-| Incentives — pioneer status, ITA, reinvestment allowance | each is its own regime and its own ruling |
-| Transfer pricing, s.140C interest limitation, CbCR | out of the firm's client profile |
-| **The tax provision posting** into the close | the *confirmed* figure feeds a provision, but posting it needs a close reopen — F-A4's window, not F-T3's |
-| Personal reliefs (s.46-49) | facts about a household, not about the books (§8) |
-| CP500 / CP502 (individual instalments) | not fetched from an official source today (survey §6.3 U6) |
-| A pixel replica of any LHDN form | the renderer is unbuilt and the wording is owner-signed (§8, D-8) |
-| Any submission verb | law, not scope: e-filing is human, excluded by nature (digest laws 71, 74, 80, 82) |
+**Continue at `tax-computation-design-part2.md` — §8 the artifacts and the human wall · §9 the refusal
+vocabulary · §10 the battery · §11 the PR ladder · §12 sequencing · §13 what is not in v1.**

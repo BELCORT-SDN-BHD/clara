@@ -4,7 +4,7 @@
 // the caller (scripts/serve.mjs) runs runReconcilerSweep only while it holds the
 // relay leader lock, so exactly one process sweeps at a time.
 //
-// Because start() carries NO idempotency key (verified against workflow@4.6.0), the
+// Because start() carries NO idempotency key (re-verified against workflow@4.8.4), the
 // enqueue dedupe is RUN-LISTING (S4-V1 fallback): the route binds workflow_run_id
 // onto the task immediately after start(); the reconciler only re-enqueues a task
 // that is still 'queued' with a NULL run beyond a grace window, and the bind is a
@@ -12,7 +12,7 @@
 // (settle_chat_turn is idempotent by task — the second run's settle is a
 // stored-outcome no-op), which is the contract's accepted honesty envelope (§0.4).
 //
-// Engine status vocabulary (workflow@4.6.0 / @workflow/world-postgres@4.3.0):
+// Engine status vocabulary (workflow@4.8.4 / @workflow/world-postgres@4.3.4):
 // pending | running | completed | failed | cancelled. A PARKED run reports
 // 'running' (S4-P1a) — so `awaiting_input` on the TASK is the only parked-visibility
 // source; the reconciler never treats engine 'running' as "finished".

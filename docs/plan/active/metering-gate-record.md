@@ -79,9 +79,10 @@ classified" while the largest surviving brake went unnamed.
 **Fold:** survey §A.5 re-derived from refusal sites rather than from one table — **eight
 gates, not three**; design §3.3 carries all eight. The concurrency pair is classified
 **KEEP** here (the ruling's own engine-protection carve-out, decided by this lane). The
-two day budgets are **NOT classified by this lane** — Annex A **D13**, design §4, with
+two day budgets were **NOT classified by this lane** — Annex A **D13**, design §4, with
 **KEEP as the fail-closed default** and PR-3 reporting "six of eight classified" until
-the owner rules (§7).
+the owner ruled (§7). **RULED 2026-08-23 (owner): gate 6 KEEP as ENGINE PROTECTION (+ the
+mandatory `refused_budget` rename), gate 7 REMOVE as a spend brake — eight of eight classified.**
 
 **GB-2 · The sales-cap removal cites a byte range that CONTAINS the door it declares
 untouched, and is not separable from the column drop.**
@@ -332,14 +333,16 @@ the `0011` cites both lenses quote.
 ## 7 · Owner items — what this lane did not decide
 
 1. **Do TA-P12's REMOVE classes reach the document/processing lane's per-UTC-day doc and
-   page budgets?** (GB-1; Annex A D13; design §4.) A ruling is needed in either
-   direction. Costs stated: REMOVE puts two more live bodies
-   (`_reserve_document_ingest`, `_reserve_processing_call`) into PR-1B's D1 window and
-   removes the only per-day brake on vendor page spend; KEEP leaves a live
-   automation-pausing quota that is spend-shaped in its own author's words, so law 76 is
-   executed for six of eight gates.
-   **Fail-closed default the design proceeds on: both gates stay LIVE, byte-unchanged,
-   and PR-3's acceptance says "six of eight classified, two pending" — never "complete".**
+   page budgets?** (GB-1; Annex A D13; design §4.) **RULED 2026-08-23 (owner) — and the
+   answer is SPLIT, which is why the question was worth putting.** **Gate 6** (document
+   ingest, `0007:1638-1650`) **= KEEP, re-classified ENGINE PROTECTION** — it bounds engine
+   work, not spend, so it sits with gates 2, 4 and 8 under law 76's own carve-out, and it
+   carries the **mandatory `refused_budget` rename** alongside gate 4's `refused_concurrency`.
+   **Gate 7** (processing call, `0038:7063-7078`) **= REMOVE** — its own author calls the
+   budget the firm's vendor spend, so G8's meter-never-cap reaches it.
+   **Consequences: only ONE extra body joins PR-1B's D1 window (`_reserve_processing_call`),
+   not two; and the census is CLOSED-WORLD — PR-3's acceptance now says "EIGHT of eight
+   classified", four REMOVE (1·3·5·7) and four KEEP (2·4·6·8).**
 2. ~~**WHICH human may approve a firm-agnostic price row?**~~ (GM-5; D17; §4.)
    **RULED 2026-08-23 (owner, R-L19) — DISSOLVED, not answered: price rows are DEVELOPER-SEEDED
    platform data**, a versioned effective-dated migration seed through the full PR ladder; **a
@@ -352,6 +355,17 @@ the `0011` cites both lenses quote.
    (`0046:472-482`); an open batch is then bounded only by `batch_size` (1-500). This is
    the direct consequence of TA-P12's own REMOVE and needs no new ruling, but the sentence
    belongs in PR-1B's summary so the owner meets it before the behaviour, not after.
+4. ~~**PR-4's third condition: a bake period has passed with the new ledger's monthly
+   numbers cross-checked against the old one's last live figures** (design.md §3.9
+   condition (3); `wave-f-sprint-dag.md` W5, ≥T0+96h).~~ **RULED 2026-08-23 (owner) —
+   REPLACED, not shortened: PR-4 rides the Wave-G factory-reset ceremony** (legacy data
+   dies there anyway, ADR-0072 ①/ADR-0075), and verification becomes a **controlled-
+   denominator assertion during the Wave-G e2e corpus run** (K fired calls = K priced
+   ledger rows, aligned per call kind — ground truth, not a frozen-baseline comparison).
+   **W5 is removed from the sprint's ceremony set.** Rationale, recorded verbatim: **the
+   old ledger was never a gold oracle** (narrow scope, frozen at the retrofit); **the
+   controlled denominator is strictly stronger evidence of pipeline correctness, so this
+   is an instrument upgrade, not a quality reduction.**
 
 ## 8 · What PR-1's rig replay must confirm (this gate's own predictions)
 
