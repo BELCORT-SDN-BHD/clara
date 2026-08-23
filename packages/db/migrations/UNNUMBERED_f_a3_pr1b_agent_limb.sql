@@ -26,27 +26,42 @@
 -- (Annex F: "the repair is PR-1d, not a D1 body") so its re-cut carries no D1 write-quiesce term
 -- even though it ships in this window.
 --
--- WHAT THIS FILE DOES NOT SHIP (reported, not silently dropped): the thirteen wake sibling verbs
--- (Annex A.1) and their ungranted agent cores — the granted wrapper / ungranted core / shared
--- delegate seam over the bodies this file re-cuts. That is real, substantial, genuinely NEW
--- judgement logic (the fifteen-rung Tier-B ladder, M1-M15, none of which exists anywhere in the
--- estate today) and belongs in its own reviewed window rather than appended hastily to a file whose
--- job is getting ten money-path bodies and the shared-registry predicate exactly right. Until that
--- window lands, `wake_credentials` admits the `bank_agent` kind but `wake_fn_allowlist` holds no
--- row for it — the kind is MINTABLE but calls NOTHING, which is the fail-safe-by-construction
--- residue the 0077/0078 idiom is built on (posting_grants.sql's own header, verbatim shape): a
--- credential with nothing to call is strictly LESS surface than one with a broken call, never a
--- half-open door.
+-- SCOPE WIDENED 2026-08-23 (team-lead ruling, this lane's session): "Build the FULL DAG scope" —
+-- the ten CoR'd bodies + seven DDL groups BELOW, PLUS the thirteen wake sibling verbs (Annex A.1),
+-- their agent cores, and the full Tier-B ladder (M1-M15) that an earlier draft of this header
+-- deferred to "its own reviewed window". That window is §K/§L, in this same file. Four of the
+-- fifteen rungs (M3 same-amount ambiguity, M4 payer-identifier contradiction, M5 counterparty
+-- name-family collision, M6 unexplained inflow) are GENUINELY NEW judgement logic with no
+-- precedent anywhere in the estate — each is a documented MINIMAL implementation (see §K.5's own
+-- header), execution-proven by this lane's own battery (f-a3-pr1b-wake-verbs.test.mjs), and
+-- flagged there for independent review per review law 1. TWO PREREQUISITES remain genuinely
+-- outside this file's own scope and are carried as MANDATORY PRE-PR gates until their owning PRs
+-- land: F-A4/PR-1b's real `close_prep` wake-credential shape (the §0 prestate probe below already
+-- hard-aborts on it being absent, by design) and PR-1c's real widening of the `bank_matching`
+-- egress-purpose CHECK/verbs (without it, every bank_agent call refuses purpose_unconsented before
+-- reaching any Tier-B rung — proven both ways by this lane's own battery, which skips its
+-- purpose-dependent cells named-and-counted without a LOCAL-RIG-ONLY, never-committed TESTSTAGE
+-- stub, and passes them for real with one).
 --
 --   §0  prestate — prosrc sha pins for every live body this file re-cuts, the wake_credentials
---       CHECK prestate probe (hard-abort on interactive_client absent, soft-warn on close_prep
---       absent per the F-A2->F-A4->F-A3 merge order), the D1 quiesce inventory
+--       CHECK prestate probe (HARD-ABORTS on EITHER predecessor disjunct missing —
+--       interactive_client from F-A2/PR-1, close_prep from F-A4/PR-1b, per the conductor's
+--       ruling 2026-08-23 on the merge train of record: ... -> F-A4/PR-1b -> ... -> F-A3/PR-1a ->
+--       F-A3/PR-1b), the D1 quiesce inventory
 --   §A  DDL 1  — bank_matches.origin CHECK gains 'agent'
 --   §B  DDL 2  — wake_credentials' two CHECKs gain the bank_agent disjuncts
 --   §C  DDL 3  — open_questions' CHECK family gains the bank_line scope / bank_ambiguity origin
 --   §D  the ten CoR'd bodies (D1 — see the §0 inventory)
 --   §E  the shared registry-ledger predicate (X-1) + the drawer-2 gate's repaired arm (4)
---   §F  tail census
+--   §F..§G  DDL 4 (the three new tables + clara.set_bank_agency_hold, the hold's own writer)
+--       through DDL 6 (the proposal-accept trigger)
+--   §H  DDL 7 (partial) — the clara_wake_bank role, empty at creation
+--   §I  the shared registry-ledger predicate + drawer-2 arm 4 (X-1) — see §E; kept together in
+--       one window for locality
+--   §J  TAIL CENSUS, part 1 — the ten bodies + seven DDL groups
+--   §K  the thirteen wake wrappers + agent cores (Tier-A + Tier-B M1-M15 + Tier-C)
+--   §L  DDL 7 completion — the 13-row bank_agent allowlist, clara_wake_bank_login, schema USAGE
+--   §M  TAIL CENSUS, part 2 — §K/§L
 -- ================================================================================================
 
 set local statement_timeout = '10min';
@@ -136,16 +151,19 @@ begin
 
   -- -----------------------------------------------------------------------------------------
   -- SHARED-SURFACE PRESTATE — wake_credentials' two CHECKs (Annex O.4 obligation 4 / the wave-f
-  -- lane brief). Merge order is F-A2(interactive_client) -> F-A4(close_prep) -> F-A3(bank_agent).
-  -- interactive_client is a TRUE git-stacked predecessor of this branch (F-A2/PR-1 is this
-  -- branch's base) and is HARD-REQUIRED: its absence means F-A2/PR-1 was not actually applied
-  -- and this file must abort loudly rather than mint a CHECK with a hole in it. close_prep
-  -- (F-A4/PR-1b) is NOT a git-stacked predecessor of this branch and, at the time this file was
-  -- authored, F-A4/PR-1a itself carries zero commits over main — so close_prep's absence is
-  -- TOLERATED here (a NOTICE, never an abort): the merge order guarantees it lands before this
-  -- file's real apply regardless of what this rig sees today. Either way the live text is
-  -- re-read via pg_get_constraintdef and carried forward BYTE-IDENTICAL (the extend-only law) —
-  -- this file only ever ADDS the bank_agent disjunct to whatever it finds.
+  -- lane brief). CORRECTED per the conductor's ruling 2026-08-23 (my probe polarity was wrong):
+  -- the merge train of record is ... -> F-A4/PR-1b (close_prep) -> ... -> F-A3/PR-1a ->
+  -- F-A3/PR-1b (this file) — so at THIS file's real apply, BOTH predecessor disjuncts
+  -- (interactive_client from F-A2/PR-1, close_prep from F-A4/PR-1b, a SEPARATE not-yet-opened
+  -- lane, not F-A4/PR-1a) MUST be present. The probe therefore HARD-ABORTS on EITHER missing —
+  -- never warn-and-proceed (DAG §4 note 5). Today's rig can only stage F-A2's chain (F-A4/PR-1b
+  -- has no branch yet), so this file's own battery runs against the interactive_client-only
+  -- stack with the close_prep leg as a NAMED, COUNTED skip (never a fabricated stand-in) —
+  -- MANDATORY PRE-PR STEP, carried in every settle report until discharged: once F-A4/PR-1b's
+  -- branch exists, re-stage this rig with its migration in the chain and re-prove this probe +
+  -- the extension against the complete predecessor state before this file may merge. Either way
+  -- the live text is re-read via pg_get_constraintdef and carried forward BYTE-IDENTICAL (the
+  -- extend-only law) — this file only ever ADDS the bank_agent disjunct to whatever it finds.
   -- -----------------------------------------------------------------------------------------
   select pg_get_constraintdef(oid) into v_kind_def
     from pg_constraint where conname='ck_wake_credentials_kind_0011' and conrelid='clara.wake_credentials'::regclass;
@@ -158,11 +176,11 @@ begin
     raise exception 'prestate: wake_credentials'' CHECKs are missing the interactive_client disjunct — F-A2/PR-1 (this branch''s own base) is not applied as expected. kind=% client=%', v_kind_def, v_client_def
       using errcode='CLR10';
   end if;
-  if v_kind_def ~ 'close_prep' and v_client_def ~ 'close_prep' then
-    raise notice 'prestate: close_prep disjunct PRESENT in both wake_credentials CHECKs (F-A4/PR-1b landed before this file) — preserving byte-identical alongside the new bank_agent disjunct';
-  else
-    raise notice 'prestate: close_prep disjunct ABSENT from wake_credentials'' CHECKs at this apply (F-A4/PR-1b not yet landed here) — TOLERATED per the merge-order contract (F-A2 -> F-A4 -> F-A3); this file does not assume its presence and does not remove anything that is there. kind=% client=%', v_kind_def, v_client_def;
+  if v_kind_def !~ 'close_prep' or v_client_def !~ 'close_prep' then
+    raise exception 'prestate: wake_credentials'' CHECKs are missing the close_prep disjunct — per the merge train of record (... -> F-A4/PR-1b -> ... -> F-A3/PR-1a -> F-A3/PR-1b) that predecessor MUST be present at this file''s real apply. On a rig that has not staged F-A4/PR-1b''s migration (today''s dev rigs), this abort is EXPECTED and correct — do not weaken this check to unblock local testing; stage the predecessor instead, or accept the named skip this file''s own battery declares. kind=% client=%', v_kind_def, v_client_def
+      using errcode='CLR10';
   end if;
+  raise notice 'prestate: BOTH predecessor disjuncts (interactive_client, close_prep) present in wake_credentials'' two CHECKs — preserving byte-identical alongside the new bank_agent disjunct. kind=% client=%', v_kind_def, v_client_def;
 
   -- bank_matches.origin — CoR'd DDL 1's own prestate: the CHECK holds exactly {human, rule}
   -- today (no prior 'agent' widening from any other lane).
@@ -187,7 +205,7 @@ begin
     raise exception 'prestate: F-A3 PR-1b partial birth — one of the three new tables already exists' using errcode='CLR10';
   end if;
 
-  raise notice 'prestate: clean — ten target bodies pinned by prosrc sha at the F-A2/PR-1 + F-A3/PR-1a frontier, _approve_entry_core confirmed at its pinned NINTH-generation sha (P-14 cleared, no tenth body), wake_credentials'' two CHECKs carry interactive_client (hard-required) with close_prep tolerated present-or-absent, bank_matches.origin holds exactly {human,rule}, open_questions carries no bank_line reference yet, and none of the three new tables exist.';
+  raise notice 'prestate: clean — ten target bodies pinned by prosrc sha at the F-A2/PR-1 + F-A3/PR-1a frontier, _approve_entry_core confirmed at its pinned NINTH-generation sha (P-14 cleared, no tenth body; a MANDATORY pre-merge re-derivation against F-A2/PR-1''s merged prosrc is still owed since that PR is unmerged), bank_matches.origin holds exactly {human,rule}, open_questions carries no bank_line reference yet, and none of the three new tables exist. wake_credentials'' two-predecessor check runs separately below and HARD-ABORTS on either missing.';
 end $prestate$;
 
 -- ================================================================================================
@@ -3863,7 +3881,11 @@ create table clara.bank_agent_receipts (
                        ('match','unmatch','settle','reconcile_complete','reconcile_void',
                         'exception_resolve','exception_propose','statement_void',
                         'bank_account_add','account_upsert',
-                        'identifier_promotion_propose')),
+                        'identifier_promotion_propose',
+                        -- 'pack_read': added building §K, ahead of DDL 4's own commit boundary
+                        -- (this table is not yet applied anywhere else) — TA-P4's "read and
+                        -- receipt in one transaction" for wake_get_bank_pack.
+                        'pack_read')),
   outcome            text not null check (outcome in ('admitted','refused')),
   subject_id         uuid not null,
   retry_after        timestamptz,
@@ -3969,9 +3991,76 @@ create policy p_bank_agency_holds_read on clara.bank_agency_holds
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.bank_agency_holds to clara_authenticated;
 
+-- clara.set_bank_agency_hold(client, on|off, reason, op_key) -- design Annex D's OWN writer for
+-- bank_agency_holds, named in the table's own comment as shipping "in the follow-up window
+-- alongside the wrapper/agent-core seam". §K/§L close that window; without this verb the hold's
+-- Tier-A read (§K.1's `_agent_bank_tier_a`) would be a real column checking a table NOTHING can
+-- legitimately write -- a brake with no lever. Bookkeeper-floor human verb, the same
+-- `_human_ctx(role_rank('bookkeeper'))` -> thin-body shape void_bank_statement's own public verb
+-- uses, an ordinary idempotent op (_reserve_op/_finish_op), audited, upserted on the client PK.
+create or replace function clara.set_bank_agency_hold(p_client uuid, p_on boolean, p_reason text,
+    p_op_key text) returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'clara', 'pg_temp'
+as $function$
+declare c record; v_dedupe jsonb; v_firm uuid; v_reason text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select firm_id into v_firm from clara.clients where id = p_client and firm_id = c.firm;
+  if v_firm is null then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
+  v_reason := nullif(btrim(coalesce(p_reason,'')),'');
+  if v_reason is null then
+    raise exception 'a hold reason is required' using errcode='CLR10',detail='{"reason":"reason_required"}';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'set_bank_agency_hold', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'on', p_on, 'reason', v_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  insert into clara.bank_agency_holds(client_id, firm_id, on_hold, reason, set_by, set_at)
+    values (p_client, c.firm, coalesce(p_on,false), v_reason, c.actor, now())
+    on conflict (client_id) do update
+      set on_hold = excluded.on_hold, reason = excluded.reason,
+          set_by = excluded.set_by, set_at = excluded.set_at;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'set_bank_agency_hold', null,
+    jsonb_build_object('client', p_client, 'on', coalesce(p_on,false), 'reason', v_reason, 'op_key', p_op_key));
+  perform clara._append_event(c.firm, 'bank.agency_hold_set', p_client, c.actor,
+    null, null, null, null, null,
+    jsonb_build_object('on', coalesce(p_on,false)));
+  return clara._finish_op(c.firm, 'set_bank_agency_hold', p_op_key,
+    jsonb_build_object('client_id', p_client, 'on', coalesce(p_on,false)));
+end $function$;
+revoke all on function clara.set_bank_agency_hold(uuid,boolean,text,text) from public;
+grant execute on function clara.set_bank_agency_hold(uuid,boolean,text,text) to clara_authenticated;
+
+-- The event type this verb's own _append_event call needs: clara.event_types is a closed-world
+-- registry (_tf_validate_domain_event raises "unknown event_type" on any name absent from it,
+-- rig-replay-caught by this file's own battery, f31w.e) -- every OTHER bank.* type already
+-- exists from earlier migrations; this one is new to THIS verb.
+--
+-- THE PAIR IS NOT OPTIONAL (the UNNUMBERED_f_a2_posting_core.sql §I idiom, itself copied from
+-- 0015:388-395): the estate holds a FULL-COVERAGE LAW -- every row of clara.event_types must be
+-- mapped by the ACTIVE clara.trigger_taxonomy version -- so an event type registered without its
+-- decision is an event the runtime cannot route (rig-replay-caught: rig-docs-events.test.mjs:79,
+-- rig-events-structure.test.mjs §7, s6-tasks.test.mjs P5/P6, wave-a-shape.test.mjs §3, all four
+-- independently). DECISION: 'ignore', matching EVERY one of the fifteen existing bank.* siblings
+-- in the active taxonomy (bank.account_created through bank.statement_voided) -- a bank agency
+-- hold flip is a bookkeeper-floor administrative control act, not a domain event needing
+-- notification or review, and the whole bank.* family already agrees on that.
+with inserted_types as (
+  insert into clara.event_types(name, client_scoped, description)
+    values ('bank.agency_hold_set', true, 'clara.set_bank_agency_hold flipped the client''s bank agency hold')
+    on conflict (name) do nothing returning name
+)
+insert into clara.trigger_taxonomy(version, event_type, decision, note)
+select a.version, i.name, 'ignore', null from inserted_types i cross join clara.taxonomy_active a;
+
 do $ddl4_tail$
 begin
-  raise notice 'DDL 4: the three new tables created — bank_agent_receipts (outcome-scoped uniqueness, partial admitted index, append-only + no-truncate, zero DML grant), bank_agent_proposals (open/accepted only, ck_bap_terminal), bank_agency_holds (client PK, FORCE RLS, human SELECT-only, zero machine grants). All three BEHAVIOURALLY INERT — nothing in this file writes to any of them; the wrapper/agent-core seam that will is a follow-up window.';
+  raise notice 'DDL 4: the three new tables created — bank_agent_receipts (outcome-scoped uniqueness, partial admitted index, append-only + no-truncate, zero DML grant), bank_agent_proposals (open/accepted only, ck_bap_terminal), bank_agency_holds (client PK, FORCE RLS, human SELECT-only, zero machine grants) -- with its own writer, clara.set_bank_agency_hold, a bookkeeper-floor human verb (upsert on the client PK, idempotent, audited). bank_agent_receipts and bank_agent_proposals stay BEHAVIOURALLY INERT here -- nothing in this file writes to them yet; the wrapper/agent-core seam that will is §K, immediately below.';
 end $ddl4_tail$;
 
 -- ================================================================================================
@@ -4021,6 +4110,7 @@ begin
   end if;
   return null;
 end $function$;
+revoke all on function clara._tf_assert_bank_match_agent_receipt() from public;
 
 create constraint trigger t_bank_match_agent_receipt after insert or update on clara.bank_matches
   deferrable initially deferred
@@ -4057,6 +4147,7 @@ begin
   end if;
   return null;
 end $function$;
+revoke all on function clara._tf_assert_bank_recon_agent_receipt() from public;
 
 create constraint trigger t_bank_recon_agent_receipt after insert or update on clara.bank_reconciliations
   deferrable initially deferred
@@ -4091,6 +4182,7 @@ begin
   -- clara.bank_line_exceptions itself.
   return null;
 end $function$;
+revoke all on function clara._tf_bank_agent_proposal_accept() from public;
 
 create trigger t_bank_agent_proposal_accept after insert on clara.bank_line_exceptions
   for each row execute function clara._tf_bank_agent_proposal_accept();
@@ -4224,6 +4316,7 @@ begin
   -- Arm (c) implicitly: at least one registered account, none deactivated-and-unbound. Clear.
   return jsonb_build_object('state','clear','accounts','[]'::jsonb,'basis','bank_registry_ledger_v1');
 end $function$;
+revoke all on function clara._bank_registry_ledger_state(uuid, date) from public;
 
 comment on function clara._bank_registry_ledger_state(uuid, date) is
   'Shared registry-vs-ledger predicate (Annex O.4 obligation 6, F-T4 design-doc §2.1 contract). F-A3/PR-1b authors it (lands first); F-T4''s own drawer-1 bank_recon_close_state calls it, unmodified by this file, when that item builds. One predicate, one owner (this file), two call sites.';
@@ -4312,6 +4405,1388 @@ begin
 end $close_gate_tail$;
 
 reset role;
+
+-- ================================================================================================
+-- §K · THE WAKE SIBLING VERBS (Annex A.1) — the granted wrapper / ungranted agent core / shared
+-- delegate seam, the 0077/0078 idiom exactly (posting_grants.sql's own wake_post_entry shape).
+-- Built per the conductor's ruling 2026-08-23 (full DAG scope). Every agent core below takes NO
+-- lock of its own (Annex C: "the agent core takes no lock; it reserves, reads, then calls the
+-- delegate, which takes the estate's rungs").
+--
+-- THE PURPOSE GATE IS STRUCTURALLY UNSATISFIABLE TODAY, ON PURPOSE. `bank_matching` is PR-1c's
+-- own CHECK-swap addition to `client_egress_purpose_consents`/`_activations`; today those CHECKs
+-- admit only {wiki_synthesis, statement_extraction, witness_extraction}, so a `bank_matching`
+-- consent+activation row can never exist until PR-1c lands. Every agent core below therefore
+-- refuses `purpose_unconsented` UNCONDITIONALLY on this rig — exactly the fail-closed sequencing
+-- the design names ("an unsigned client's bank agency does not run at all"), never a silent
+-- downgrade. The battery for these verbs therefore tests the CORE logic via direct core calls
+-- (bypassing the wrapper's Tier-A, the SAME method this file's earlier battery already uses for
+-- the ten CoR'd bodies) — wrapper-level end-to-end admission is untestable before PR-1c merges,
+-- and that is the correct, designed state, not a gap in this file.
+-- ================================================================================================
+set role clara_fn_owner;
+
+-- §K.1 — the shared Tier-A helper: purpose consent + the client hold. Client-in-firm and the
+-- credential's own client pin are the WRAPPER's job (the 0078:96-107 shape, wake_post_entry's own
+-- precedent) — this helper carries only the two rungs specific to the bank domain.
+create function clara._agent_bank_tier_a(p_client uuid, p_firm uuid) returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_held boolean; v_reason text;
+begin
+  if not exists(select 1 from clara.client_egress_purpose_activations a
+      join clara.client_egress_purpose_consents c
+        on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id
+          and c.purpose=a.purpose
+      where a.firm_id=p_firm and a.client_id=p_client
+        and a.purpose='bank_matching'
+        and a.deactivated_at is null and c.revoked_at is null) then
+    raise exception 'the bank_matching purpose is not signed and active for this client'
+      using errcode='CLR10',detail='{"reason":"purpose_unconsented"}';
+  end if;
+  select h.on_hold, h.reason into v_held, v_reason
+    from clara.bank_agency_holds h where h.client_id=p_client;
+  if coalesce(v_held,false) then
+    raise exception 'the bank agency lane is held for this client: %', v_reason
+      using errcode='CLR10',detail=jsonb_build_object('reason','bank_agency_held','hold_reason',v_reason)::text;
+  end if;
+end $$;
+revoke all on function clara._agent_bank_tier_a(uuid,uuid) from public;
+
+-- §K.2 — the shared receipt writer (Annex A.3). Every agent core writes EXACTLY one row through
+-- this, in its own transaction, so the shape (and the two-apostrophe default) is centralised once.
+create function clara._agent_bank_receipt(
+    p_firm uuid, p_client uuid, p_act_kind text, p_outcome text, p_subject uuid,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text,
+    p_gate_verdicts jsonb, p_retry_after timestamptz default null
+  ) returns uuid language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_id uuid;
+begin
+  if p_rationale is null or btrim(p_rationale) = '' then
+    raise exception 'an unattended bank act must state its rationale' using errcode='CLR10',
+      detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  if p_model is null or jsonb_typeof(p_model) <> 'object'
+     or nullif(btrim(coalesce(p_model->>'provider','')),'') is null
+     or nullif(btrim(coalesce(p_model->>'model','')),'') is null
+     or nullif(btrim(coalesce(p_model->>'version','')),'') is null then
+    raise exception 'an unattended bank act must name its model (provider, model, version)'
+      using errcode='CLR10',
+        detail='{"reason":"invalid_request","class":"model_snapshot","constraint":"provider+model+version"}';
+  end if;
+  -- REPLAY (v2, material M6/Annex A.3): op_key is UNIQUE for exactly this reason -- a delegate's
+  -- OWN _reserve_op dedupe can return a cached result without re-executing on a replayed op_key,
+  -- and a caller that then unconditionally inserted a SECOND receipt row would hit this table's
+  -- own uq_bank_agent_receipts_op_key (23505), an ungraceful low-level error instead of "the
+  -- replayed op_key returns the stored receipt" -- rig-replay-caught by this file's own battery,
+  -- f31w.g. ON CONFLICT DO NOTHING keeps the table append-only (no UPDATE) and idempotent.
+  insert into clara.bank_agent_receipts(firm_id, client_id, act_kind, outcome, subject_id,
+      retry_after, acting_actor, on_behalf_of, via_wake_kind, model_snapshot, rationale,
+      inputs_digest, gate_verdicts, approval_arm, op_key)
+    values (p_firm, p_client, p_act_kind, p_outcome, p_subject, p_retry_after,
+      clara.agent_user_id(), null, 'bank_agent', p_model,
+      p_rationale, coalesce(nullif(btrim(p_inputs_digest),''), p_op_key),
+      p_gate_verdicts, 'agent_unattended', p_op_key)
+    on conflict (op_key) do nothing
+    returning id into v_id;
+  if v_id is null then
+    select id into v_id from clara.bank_agent_receipts where op_key = p_op_key;
+  end if;
+  return v_id;
+end $$;
+revoke all on function clara._agent_bank_receipt(uuid,uuid,text,text,uuid,text,jsonb,text,text,jsonb,timestamptz) from public;
+
+-- §K.3 — Tier C, THE CLOSED LIST (F-A2 D6's law: (errcode,reason) PAIRS ONLY, unknown re-raises;
+-- conductor's ruling, this lane's session: B.4 IS the wall, not a starting point -- a reason
+-- string outside it is meant to explode loudly at the converter, which is how a genuinely NEW
+-- case gets noticed, rather than disappearing into a normal-looking "refused" receipt (digest
+-- law 36, fail-closed-on-unknown). SUPERSEDES an earlier draft of this function that converted
+-- ANY typed reason with one exclusion (`core_ctx_missing`) -- that draft was a superset of B.4,
+-- ruled against, and struck.
+--
+-- THE LIST, transcribed from Annex B.4 (bank-agency-annexes-1-mechanics.md) in its own shape --
+-- one shared set, since B.4 itself is one flat table, not partitioned per verb:
+--   already_matched · wrong_account · wrong_period · amount_beyond_tolerance · reversed_entry ·
+--   reversal_mirror · line_excepted · orphaned_reservation_draft · bank_account_unmapped ·
+--   adjustment_account_invalid · tenancy_incongruent (CLR11) · adjustment_key_collision ·
+--   approve_key_collision
+-- `(CLR16, draft_anchor_moved)` -- B.4's own text: "PR-1b types" this one, already a member.
+-- `recon_*` -- B.4's own row is written "(CLR10, recon_*) — the nine reconciliation reasons",
+-- a NAMED prefix family in the annex's own notation (not a general wildcard escape: every OTHER
+-- row is an exact string). Implemented as a literal prefix match on `recon_`, CLR10 only.
+-- `(CLR10, stale_waiver_duplicate_risk)` -- M11's OWN new pair (Annex B.3's mechanism, built by
+-- THIS PR): B.4's own precedent for `draft_anchor_moved` is that a PR minting a new typed raise
+-- ADDS it to this list rather than leaving it unconvertible; M11's design text (§3.3) explicitly
+-- names Tier-C conversion as its mechanism, so this pair is added on that same footing.
+-- `core_ctx_missing` is NOT on this list (falls out automatically, per the ruling) -- it can only
+-- fire from a malformed ctx this file's OWN agent cores build, a code bug never a business fact,
+-- and now re-raises for the SAME reason every other unlisted reason does, not as a special case.
+create function clara._agent_bank_tier_c_reason(p_sqlerrm text, p_sqlstate text, p_detail text)
+  returns text language plpgsql immutable as $$
+declare v_json jsonb; v_reason text;
+begin
+  begin
+    v_json := p_detail::jsonb;
+  exception when others then
+    return null;
+  end;
+  if v_json is null or jsonb_typeof(v_json) <> 'object' then return null; end if;
+  v_reason := nullif(btrim(coalesce(v_json->>'reason','')),'');
+  if v_reason is null then return null; end if;
+  if p_sqlstate = 'CLR10' and (
+       v_reason in ('already_matched','wrong_account','wrong_period','amount_beyond_tolerance',
+         'reversed_entry','reversal_mirror','line_excepted','orphaned_reservation_draft',
+         'bank_account_unmapped','adjustment_account_invalid','adjustment_key_collision',
+         'approve_key_collision','stale_waiver_duplicate_risk')
+       or v_reason like 'recon\_%'
+     ) then
+    return v_reason;
+  end if;
+  if p_sqlstate = 'CLR11' and v_reason = 'tenancy_incongruent' then return v_reason; end if;
+  if p_sqlstate = 'CLR16' and v_reason = 'draft_anchor_moved' then return v_reason; end if;
+  return null;
+end $$;
+revoke all on function clara._agent_bank_tier_c_reason(text, text, text) from public;
+
+-- §K.4 — the nine SIMPLE verbs: Tier-A + delegate + Tier-C conversion, with TWO named Tier-B
+-- rungs added explicitly (M14 on unmatch_bank_match and void_bank_reconciliation, M15 on
+-- void_bank_statement -- each a read-only pre-check mirroring its delegate's own belt, per
+-- H.3's "belt is the backstop, rung is the evidence" shape). Every other refusal on these nine
+-- verbs is a plain Tier-C conversion of the delegate's own typed raise (M8 and the rest ARE
+-- already pre-checked/pre-raised belts inside the delegates and need no separate rung here,
+-- since match/settle/reconciliation-completion — where most of M1-M13 actually bind — are the
+-- four COMPLEX verbs below). The wrapper shape is 0078:96-107 exactly (posting_grants.sql's
+-- wake_post_entry, verbatim).
+
+-- --- unmatch_bank_match --------------------------------------------------------------------
+-- M14 (design §3.3/Annex B.2, H.3): "no LATER reconciliation depends on the match being
+-- unmatched" is evaluated as a named Tier-B rung BEFORE the delegate is even attempted (a
+-- receipted refusal, never a raise) -- mirroring, read-only, the delegate's own
+-- `recon_period_settled` belt (0038's "THE SCOPE IS THE LINE'S STATEMENT PERIOD" block) INCLUDING
+-- its pending-parked-reservation exclusion, so the rung and the belt can never disagree on the
+-- SAME predicate. The belt stays live inside the delegate as the backstop -- the H.3 M10 shape
+-- ("the belt is the backstop, the rung is the evidence") applies verbatim here.
+create function clara._agent_unmatch_bank_match_core(p_client uuid, p_match uuid, p_reason text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text; v_m14_hit boolean;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+
+  select (not (g.status = 'pending' and g.pending_resolution is not null
+               and g.resolution_exception_id is not null))
+     and exists (
+       select 1
+         from clara.bank_match_line_members mm
+         join clara.bank_statement_lines bl on bl.id = mm.line_id
+         join clara.bank_statements st on st.id = bl.statement_id
+         join clara.bank_reconciliations br
+           on br.bank_account_id = st.bank_account_id
+          and br.status = 'complete'
+          and br.period_end >= st.period_end
+        where mm.match_id = p_match)
+    into v_m14_hit
+    from clara.bank_matches g
+   where g.id = p_match and g.client_id = p_client and g.firm_id = v_firm;
+  if coalesce(v_m14_hit, false) then
+    perform clara._agent_bank_receipt(v_firm, p_client, 'unmatch', 'refused', p_match,
+      p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict', 'refused', 'rung_vector',
+        jsonb_build_object('later_reconciliation_depends', 'fail')));
+    return jsonb_build_object('status', 'refused', 'reason', 'later_reconciliation_depends', 'match_id', p_match);
+  end if;
+
+  begin
+    v_res := clara._unmatch_bank_match_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_client, p_match, p_reason, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'unmatch', 'refused', p_match,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'refused', 'errcode', v_state, 'reason', v_reason));
+    return jsonb_build_object('status', 'refused', 'reason', v_reason, 'match_id', p_match);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'unmatch', 'admitted', p_match,
+    p_rationale, p_model, p_inputs_digest, p_op_key,
+    jsonb_build_object('verdict', 'admitted', 'rung_vector',
+      jsonb_build_object('later_reconciliation_depends', 'pass')));
+  return v_res;
+end $$;
+revoke all on function clara._agent_unmatch_bank_match_core(uuid,uuid,text,text,jsonb,text,text) from public;
+
+create function clara.wake_unmatch_bank_match(p_client uuid, p_match uuid, p_reason text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_unmatch_bank_match');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_unmatch_bank_match_core(p_client, p_match, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_unmatch_bank_match(uuid,uuid,text,text,jsonb,text,text) from public;
+grant execute on function clara.wake_unmatch_bank_match(uuid,uuid,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- void_bank_reconciliation ------------------------------------------------------------------
+-- No p_client in the public verb's own arity; client is DERIVED from the reconciliation row.
+-- M14 (design §3.3/Annex B.2, H.3): the chain-tail law, evaluated read-only as a named Tier-B
+-- rung before the delegate is attempted -- mirrors the delegate's own `recon_chain_order` belt
+-- exactly (any COMPLETE reconciliation on the same bank account covering a LATER period must be
+-- voided first). Belt stays live inside the delegate as the backstop (H.3 M10 shape).
+create function clara._agent_void_bank_reconciliation_core(p_recon uuid, p_reason text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_client uuid; v_res jsonb; v_reason text; v_state text; v_detail text; v_m14_hit boolean;
+begin
+  select firm_id, client_id into v_firm, v_client from clara.bank_reconciliations where id = p_recon;
+  if v_firm is null then raise exception 'reconciliation not found' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(v_client, v_firm);
+
+  select exists (
+      select 1 from clara.bank_reconciliations later
+        where later.bank_account_id = r.bank_account_id and later.status = 'complete'
+          and later.period_end > r.period_end)
+    into v_m14_hit
+    from clara.bank_reconciliations r where r.id = p_recon;
+  if coalesce(v_m14_hit, false) then
+    perform clara._agent_bank_receipt(v_firm, v_client, 'reconcile_void', 'refused', p_recon,
+      p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict', 'refused', 'rung_vector',
+        jsonb_build_object('later_reconciliation_depends', 'fail')));
+    return jsonb_build_object('status', 'refused', 'reason', 'later_reconciliation_depends', 'reconciliation_id', p_recon);
+  end if;
+
+  begin
+    v_res := clara._void_bank_reconciliation_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_recon, p_reason, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, v_client, 'reconcile_void', 'refused', p_recon,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'refused', 'errcode', v_state, 'reason', v_reason));
+    return jsonb_build_object('status', 'refused', 'reason', v_reason, 'reconciliation_id', p_recon);
+  end;
+  perform clara._agent_bank_receipt(v_firm, v_client, 'reconcile_void', 'admitted', p_recon,
+    p_rationale, p_model, p_inputs_digest, p_op_key,
+    jsonb_build_object('verdict', 'admitted', 'rung_vector',
+      jsonb_build_object('later_reconciliation_depends', 'pass')));
+  return v_res;
+end $$;
+revoke all on function clara._agent_void_bank_reconciliation_core(uuid,text,text,jsonb,text,text) from public;
+
+create function clara.wake_void_bank_reconciliation(p_recon uuid, p_reason text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record; v_client uuid;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_void_bank_reconciliation');
+  select client_id into v_client from clara.bank_reconciliations where id = p_recon;
+  if w.client_id is not null and v_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_void_bank_reconciliation_core(p_recon, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_void_bank_reconciliation(uuid,text,text,jsonb,text,text) from public;
+grant execute on function clara.wake_void_bank_reconciliation(uuid,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- resolve_bank_line_exception -----------------------------------------------------------
+create function clara._agent_resolve_bank_line_exception_core(p_exception uuid, p_disposition text,
+    p_note text, p_counterpart_line uuid, p_rationale text, p_model jsonb, p_inputs_digest text,
+    p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_client uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+begin
+  select e.firm_id, e.client_id into v_firm, v_client from clara.bank_line_exceptions e where e.id = p_exception;
+  if v_firm is null then raise exception 'bank line exception not found' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(v_client, v_firm);
+  begin
+    v_res := clara._resolve_bank_line_exception_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_exception, p_disposition, p_note, p_counterpart_line, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, v_client, 'exception_resolve', 'refused', p_exception,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('errcode', v_state, 'reason', v_reason));
+    return jsonb_build_object('status', 'refused', 'reason', v_reason, 'exception_id', p_exception);
+  end;
+  perform clara._agent_bank_receipt(v_firm, v_client, 'exception_resolve', 'admitted', p_exception,
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  return v_res;
+end $$;
+revoke all on function clara._agent_resolve_bank_line_exception_core(uuid,text,text,uuid,text,jsonb,text,text) from public;
+
+create function clara.wake_resolve_bank_line_exception(p_exception uuid, p_disposition text,
+    p_note text, p_counterpart_line uuid, p_rationale text, p_model jsonb, p_inputs_digest text,
+    p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record; v_client uuid;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_resolve_bank_line_exception');
+  select client_id into v_client from clara.bank_line_exceptions where id = p_exception;
+  if w.client_id is not null and v_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_resolve_bank_line_exception_core(p_exception, p_disposition, p_note, p_counterpart_line, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_resolve_bank_line_exception(uuid,text,text,uuid,text,jsonb,text,text) from public;
+grant execute on function clara.wake_resolve_bank_line_exception(uuid,text,text,uuid,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- add_bank_account (design §3.10, register A28) -----------------------------------------
+-- THE WALL: p_proposal_id is MANDATORY on the agent lane (the human core's own arg is optional,
+-- byte-unmoved) — `_add_bank_account_core` already locks the named proposal and fills every
+-- blank field from it (0038:2595-2603's own shape), so requiring the id IS the wall; this core
+-- adds no second, hand-rolled corroboration check on top of it.
+create function clara._agent_add_bank_account_core(p_client uuid, p_coa_account_code text,
+    p_proposal_id uuid, p_bank_code text, p_account_number text, p_bank_name_display text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+begin
+  if p_proposal_id is null then
+    raise exception 'an unattended bank-account registration must name the proposal it corroborates'
+      using errcode='CLR10',detail='{"reason":"proposal_required"}';
+  end if;
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+  begin
+    v_res := clara._add_bank_account_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_client, p_coa_account_code, p_bank_code, p_account_number, p_bank_name_display,
+      p_proposal_id, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'bank_account_add', 'refused', p_proposal_id,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('errcode', v_state, 'reason', v_reason));
+    return jsonb_build_object('status', 'refused', 'reason', v_reason, 'proposal_id', p_proposal_id);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'bank_account_add', 'admitted',
+    coalesce(nullif(v_res->>'bank_account_id','')::uuid, p_proposal_id),
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  return v_res;
+end $$;
+revoke all on function clara._agent_add_bank_account_core(uuid,text,uuid,text,text,text,text,jsonb,text,text) from public;
+
+create function clara.wake_add_bank_account(p_client uuid, p_coa_account_code text,
+    p_proposal_id uuid, p_bank_code text, p_account_number text, p_bank_name_display text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_add_bank_account');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_add_bank_account_core(p_client, p_coa_account_code, p_proposal_id, p_bank_code, p_account_number, p_bank_name_display, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_add_bank_account(uuid,text,uuid,text,text,text,text,jsonb,text,text) from public;
+grant execute on function clara.wake_add_bank_account(uuid,text,uuid,text,text,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- upsert_account --------------------------------------------------------------------------
+create function clara._agent_upsert_account_core(p_client uuid, p_code text, p_name text,
+    p_type text, p_special_acc_type text, p_account_class text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text; v_subject uuid;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+  -- coa_accounts carries no independent uuid identity column suitable as a receipt subject;
+  -- the receipt keys on a deterministic md5-derived uuid of (client, code), stable across
+  -- replays (the standard Postgres deterministic-uuid idiom; md5 always returns exactly 32
+  -- hex characters, which the uuid input function parses without dashes).
+  v_subject := md5(p_client::text || ':' || p_code)::uuid;
+  begin
+    v_res := clara._upsert_account_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_client, p_code, p_name, p_type, p_special_acc_type, p_op_key, p_account_class);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'account_upsert', 'refused', v_subject,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('errcode', v_state, 'reason', v_reason));
+    return jsonb_build_object('status', 'refused', 'reason', v_reason, 'account_code', p_code);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'account_upsert', 'admitted', v_subject,
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  return v_res;
+end $$;
+revoke all on function clara._agent_upsert_account_core(uuid,text,text,text,text,text,text,jsonb,text,text) from public;
+
+create function clara.wake_upsert_account(p_client uuid, p_code text, p_name text, p_type text,
+    p_special_acc_type text, p_account_class text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_upsert_account');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_upsert_account_core(p_client, p_code, p_name, p_type, p_special_acc_type, p_account_class, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_upsert_account(uuid,text,text,text,text,text,text,jsonb,text,text) from public;
+grant execute on function clara.wake_upsert_account(uuid,text,text,text,text,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- void_bank_statement -----------------------------------------------------------------------
+-- M15 (design §3.3/Annex B.2, H.3): "a statement being voided carries no live or pending match",
+-- evaluated read-only as a named Tier-B rung before the delegate is attempted -- mirrors the
+-- delegate's own `statement_has_live_matches` belt exactly. Belt stays live inside the delegate
+-- as the backstop (H.3 M10 shape).
+create function clara._agent_void_bank_statement_core(p_client uuid, p_statement uuid, p_reason text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text; v_m15_hit boolean;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+
+  select exists (
+      select 1 from clara.bank_match_line_members m
+        join clara.bank_statement_lines bl on bl.id = m.line_id
+       where bl.statement_id = p_statement and m.group_status in ('pending','live'))
+    into v_m15_hit;
+  if coalesce(v_m15_hit, false) then
+    perform clara._agent_bank_receipt(v_firm, p_client, 'statement_void', 'refused', p_statement,
+      p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict', 'refused', 'rung_vector',
+        jsonb_build_object('statement_has_live_matches', 'fail')));
+    return jsonb_build_object('status', 'refused', 'reason', 'statement_has_live_matches', 'statement_id', p_statement);
+  end if;
+
+  begin
+    v_res := clara._void_bank_statement_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_client, p_statement, p_reason, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'statement_void', 'refused', p_statement,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'refused', 'errcode', v_state, 'reason', v_reason));
+    return jsonb_build_object('status', 'refused', 'reason', v_reason, 'statement_id', p_statement);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'statement_void', 'admitted', p_statement,
+    p_rationale, p_model, p_inputs_digest, p_op_key,
+    jsonb_build_object('verdict', 'admitted', 'rung_vector',
+      jsonb_build_object('statement_has_live_matches', 'pass')));
+  return v_res;
+end $$;
+revoke all on function clara._agent_void_bank_statement_core(uuid,uuid,text,text,jsonb,text,text) from public;
+
+create function clara.wake_void_bank_statement(p_client uuid, p_statement uuid, p_reason text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_void_bank_statement');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_void_bank_statement_core(p_client, p_statement, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_void_bank_statement(uuid,uuid,text,text,jsonb,text,text) from public;
+grant execute on function clara.wake_void_bank_statement(uuid,uuid,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- propose_bank_line_exception (design §3.5, A3-M-propose) -------------------------------
+-- Writes a PROPOSAL, never an exception. No `accept_*` verb exists (blocker B4's fold) — the
+-- owner's one click stays except_bank_line, and t_bank_agent_proposal_accept (DDL 6) flips this
+-- row when that verb writes.
+create function clara._agent_propose_line_exception_core(p_line uuid, p_kind text, p_reason text,
+    p_evidence_document uuid, p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_client uuid; v_receipt uuid; v_proposal uuid; v_dedupe jsonb;
+begin
+  select l.firm_id, l.client_id into v_firm, v_client from clara.bank_statement_lines l where l.id = p_line;
+  if v_firm is null then raise exception 'statement line not found' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(v_client, v_firm);
+  if p_kind is null or p_kind not in ('bank_error','disputed') then
+    raise exception 'a proposed exception kind must be bank_error or disputed'
+      using errcode='CLR10',detail='{"reason":"kind_malformed"}';
+  end if;
+  if nullif(btrim(coalesce(p_reason,'')),'') is null then
+    raise exception 'a proposed exception requires a reason' using errcode='CLR10',detail='{"reason":"reason_required"}';
+  end if;
+  v_dedupe := clara._reserve_op(v_firm, 'propose_bank_line_exception', p_op_key,
+    clara._hash(jsonb_build_object('line', p_line, 'kind', p_kind, 'reason', p_reason, 'evidence', p_evidence_document)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  v_receipt := clara._agent_bank_receipt(v_firm, v_client, 'exception_propose', 'admitted', p_line,
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  insert into clara.bank_agent_proposals(firm_id, client_id, kind, subject_id, payload, rationale, receipt_id)
+    values (v_firm, v_client, 'line_exception', p_line,
+      jsonb_build_object('line_id', p_line, 'kind', p_kind, 'reason', p_reason, 'evidence_document', p_evidence_document),
+      p_rationale, v_receipt)
+    returning id into v_proposal;
+  perform clara._append_event(v_firm, 'bank.line_exception_proposed', v_client, clara.agent_user_id(), null, 'bank_agent',
+    null, p_evidence_document, null, jsonb_build_object('proposal_id', v_proposal, 'line_id', p_line, 'kind', p_kind));
+  return clara._finish_op(v_firm, 'propose_bank_line_exception', p_op_key,
+    jsonb_build_object('proposal_id', v_proposal, 'status', 'open', 'line_id', p_line));
+end $$;
+revoke all on function clara._agent_propose_line_exception_core(uuid,text,text,uuid,text,jsonb,text,text) from public;
+
+create function clara.wake_propose_bank_line_exception(p_line uuid, p_kind text, p_reason text,
+    p_evidence_document uuid, p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record; v_client uuid;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_propose_bank_line_exception');
+  select client_id into v_client from clara.bank_statement_lines where id = p_line;
+  if w.client_id is not null and v_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_propose_line_exception_core(p_line, p_kind, p_reason, p_evidence_document, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_propose_bank_line_exception(uuid,text,text,uuid,text,jsonb,text,text) from public;
+grant execute on function clara.wake_propose_bank_line_exception(uuid,text,text,uuid,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- propose_identifier_promotion (design §3.9, blocker B5) ---------------------------------
+create function clara._agent_propose_identifier_promotion_core(p_client uuid, p_counterparty uuid,
+    p_identifier_kind text, p_identifier_value text, p_times_seen int,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_receipt uuid; v_proposal uuid; v_dedupe jsonb;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+  if p_identifier_kind is null or p_identifier_kind not in ('tin','ssm','bank_account') then
+    raise exception 'identifier_kind must be one of tin/ssm/bank_account (the client_identifiers catalog)'
+      using errcode='CLR10',detail='{"reason":"identifier_kind_malformed"}';
+  end if;
+  if nullif(btrim(coalesce(p_identifier_value,'')),'') is null then
+    raise exception 'a promotion proposal requires a non-blank identifier value' using errcode='CLR10',detail='{"reason":"identifier_value_required"}';
+  end if;
+  if not exists(select 1 from clara.counterparties where id = p_counterparty and client_id = p_client) then
+    raise exception 'counterparty not found for this client' using errcode='CLR11';
+  end if;
+  v_dedupe := clara._reserve_op(v_firm, 'propose_identifier_promotion', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'counterparty', p_counterparty,
+      'kind', p_identifier_kind, 'value', p_identifier_value)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  v_receipt := clara._agent_bank_receipt(v_firm, p_client, 'identifier_promotion_propose', 'admitted',
+    p_counterparty, p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  insert into clara.bank_agent_proposals(firm_id, client_id, kind, subject_id, payload, rationale, receipt_id)
+    values (v_firm, p_client, 'identifier_promotion', p_counterparty,
+      jsonb_build_object('counterparty_id', p_counterparty, 'identifier_kind', p_identifier_kind,
+        'identifier_value', p_identifier_value, 'times_seen', p_times_seen),
+      p_rationale, v_receipt)
+    returning id into v_proposal;
+  perform clara._append_event(v_firm, 'bank.identifier_promotion_proposed', p_client, clara.agent_user_id(), null, 'bank_agent',
+    null, null, null, jsonb_build_object('proposal_id', v_proposal, 'counterparty_id', p_counterparty));
+  return clara._finish_op(v_firm, 'propose_identifier_promotion', p_op_key,
+    jsonb_build_object('proposal_id', v_proposal, 'status', 'open', 'counterparty_id', p_counterparty));
+end $$;
+revoke all on function clara._agent_propose_identifier_promotion_core(uuid,uuid,text,text,int,text,jsonb,text,text) from public;
+
+create function clara.wake_propose_identifier_promotion(p_client uuid, p_counterparty uuid,
+    p_identifier_kind text, p_identifier_value text, p_times_seen int,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_propose_identifier_promotion');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_propose_identifier_promotion_core(p_client, p_counterparty, p_identifier_kind, p_identifier_value, p_times_seen, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,text,jsonb,text,text) from public;
+grant execute on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,text,jsonb,text,text) to clara_wake_bank;
+
+-- --- get_bank_pack (design §3.8, TA-P4/TA-P9) ------------------------------------------------
+-- Read AND receipt in ONE transaction (TA-P4): no receipt, no read. This verb ADDS p_rationale/
+-- p_model to Annex A.1's abbreviated signature (which elides the common trailing params for
+-- every OTHER receipt-writing verb too) — bank_agent_receipts.model_snapshot is NOT NULL and a
+-- read receipt is still a receipt; there is no honest value to synthesise for "which model read
+-- this" without the caller stating it, so this file states the params rather than inventing one.
+-- Deliberately SIMPLIFIED vs the full pack shape (Annex G): the learned-payer context block and
+-- the reconciliation-terms preview are NOT built here (no citation gives their exact aggregation
+-- shape, and inventing one is a judgement call this file does not make) — both report
+-- `"not_implemented": true` rather than a fabricated or silently empty value. Lines/candidates/
+-- open items/open proposals are real reads through the estate's own surfaces.
+create function clara._agent_get_bank_pack_core(p_client uuid, p_bank_account uuid,
+    p_rationale text, p_model jsonb, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_firm uuid; v_acct jsonb; v_stmt jsonb; v_lines jsonb; v_cands jsonb;
+  v_items jsonb; v_proposals jsonb; v_digest text; v_pack jsonb;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+  select to_jsonb(a) into v_acct from clara.bank_accounts a
+    where a.id = p_bank_account and a.client_id = p_client and a.firm_id = v_firm;
+  if v_acct is null then raise exception 'bank account not found for this client' using errcode='CLR11'; end if;
+  select to_jsonb(s) into v_stmt from clara.bank_statements s
+    where s.bank_account_id = p_bank_account and s.status = 'live'
+    order by s.period_end desc limit 1;
+  select coalesce(jsonb_agg(x), '[]'::jsonb) into v_lines
+    from clara.list_unmatched_lines(p_client) x
+    where (to_jsonb(x)->>'bank_account_id')::uuid = p_bank_account
+       or (to_jsonb(x) ? 'bank_account_id') is false;
+  select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) into v_cands
+    from clara.list_bank_match_candidates(p_client, p_bank_account) x;
+  select coalesce(jsonb_agg(to_jsonb(i) order by i.item_date), '[]'::jsonb) into v_items
+    from clara.open_items i where i.client_id = p_client;
+  select coalesce(jsonb_agg(jsonb_build_object('id', pr.id, 'kind', pr.kind,
+           'subject_id', pr.subject_id, 'payload', pr.payload, 'created_at', pr.created_at)), '[]'::jsonb)
+    into v_proposals
+    from clara.bank_agent_proposals pr where pr.client_id = p_client and pr.status = 'open';
+  v_pack := jsonb_build_object('schema', 'clara.bank-pack/v1',
+    'bank_account', v_acct, 'statement', v_stmt, 'lines', v_lines, 'candidates', v_cands,
+    'open_items', v_items,
+    'learned_payers', jsonb_build_object('not_implemented', true),
+    'recon_terms', jsonb_build_object('not_implemented', true),
+    'open_proposals', v_proposals,
+    'budget', jsonb_build_object('lines', jsonb_array_length(v_lines), 'candidates', jsonb_array_length(v_cands), 'truncated', false));
+  v_digest := encode(clara._hash(v_pack), 'hex');
+  v_pack := v_pack || jsonb_build_object('digest', v_digest);
+  perform clara._agent_bank_receipt(v_firm, p_client, 'pack_read', 'admitted', p_bank_account,
+    coalesce(nullif(btrim(p_rationale),''), 'bank pack read'),
+    coalesce(p_model, '{"provider":"unspecified","model":"unspecified","version":"unspecified"}'::jsonb),
+    v_digest, p_op_key, jsonb_build_object('verdict', 'admitted'));
+  return v_pack;
+end $$;
+revoke all on function clara._agent_get_bank_pack_core(uuid,uuid,text,jsonb,text) from public;
+
+create function clara.wake_get_bank_pack(p_client uuid, p_bank_account uuid,
+    p_rationale text, p_model jsonb, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_get_bank_pack');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  return clara._agent_get_bank_pack_core(p_client, p_bank_account, p_rationale, p_model, p_op_key);
+end $$;
+revoke all on function clara.wake_get_bank_pack(uuid,uuid,text,jsonb,text) from public;
+grant execute on function clara.wake_get_bank_pack(uuid,uuid,text,jsonb,text) to clara_wake_bank;
+
+-- §K.5 — the FOUR COMPLEX verbs: full Tier-B vector, evaluated ALWAYS, ahead of the delegate
+-- (F-A2 D7 / Annex B.2 point 1) -- admission requires an EMPTY (all-'pass') vector; any 'fail'
+-- or 'not_evaluable' commits a refused receipt WITHOUT calling the delegate at all, so a doomed
+-- attempt never even reaches the estate's own locks. Tier-C stays live as the backstop for
+-- whatever the pre-check cannot see (concurrency, malformed-input shape, idempotency replay).
+--
+-- FOUR RUNGS ARE GENUINELY NEW (M3/M4/M5/M6, Annex B.2) -- no precedent exists anywhere in this
+-- estate for "a second candidate group ties equally", "a printed identifier contradicts the
+-- chosen counterparty", "a name-family collision", or "an unexplained inflow". Each below is a
+-- DELIBERATE MINIMAL implementation, documented at its own site, biased toward `not_evaluable`
+-- (never `pass`) when the estate's data cannot decide the question -- law 68's ARM-0 discipline.
+-- These four are judgement logic (review law 1) and are flagged for independent review at merge.
+--
+-- KNOWN SIMPLIFICATION, stated once: every pre-check below derives its bank account/COA/period
+-- from a BEST-EFFORT re-read of the caller's arguments, not a byte-perfect re-run of the
+-- delegate's own multi-line cross-validation. Where that re-derivation and the delegate's own
+-- (Tier-A/Tier-C) validation could disagree, the delegate's raise is what actually stops a bad
+-- write -- the pre-check's job is the RECEIPTED vector for the common, well-formed case, not a
+-- second, independent source of truth for shape validation the estate already owns.
+
+-- === match_bank_line ===========================================================================
+-- Applicable rungs (Annex B.2, scoped to what match_bank_line's own domain can ask): M1, M2, M3,
+-- M7, M8, M9, M12, M13. NON-MEMBERS, each with its ground (law 31): M4/M5 read a CHOSEN
+-- counterparty, which match_bank_line's signature has no such parameter to name (settle_from_
+-- bank_line's job); M6 (unexplained inflow to income) is a SETTLEMENT concern, and match_bank_line
+-- never resolves an amount to an income account -- it only ties existing approved entries; M10
+-- (cancelled-reservation orphan) never fires here because this delegate always inserts
+-- status='live' groups directly, never 'pending' ones (only resolve_and_book's composite creates
+-- a pending reservation); M11 is the reconciliation waiver wall, keyed on p_ack_outstanding, which
+-- this verb's signature does not carry; M14/M15 are the unmatch/void-side rungs.
+create function clara._agent_match_bank_line_core(p_client uuid, p_lines jsonb, p_entries jsonb,
+    p_adjustments jsonb, p_ack_period_exceptions boolean,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+  v_line_ids uuid[]; v_entry_ids uuid[]; v_line_cents bigint := 0; v_entry_cents bigint := 0;
+  v_adj_cents bigint := 0; v_bank uuid; v_coa text; v_period_end date;
+  v_vec jsonb := '{}'::jsonb; v_admit boolean := true;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+
+  select array_agg(distinct x.lid) into v_line_ids
+    from (select (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end)::uuid as lid
+          from jsonb_array_elements(coalesce(p_lines,'[]'::jsonb)) as elem
+          where (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end)
+                ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') x(lid);
+  select array_agg(distinct (elem->>'entry_id')::uuid) into v_entry_ids
+    from jsonb_array_elements(coalesce(p_entries,'[]'::jsonb)) as elem
+    where coalesce(elem->>'entry_id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  select coalesce(sum((elem->>'matched_cents')::bigint),0) into v_entry_cents
+    from jsonb_array_elements(coalesce(p_entries,'[]'::jsonb)) as elem
+    where coalesce(elem->>'entry_id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  select coalesce(sum((elem->>'amount_cents')::bigint),0) into v_adj_cents
+    from jsonb_array_elements(coalesce(p_adjustments,'[]'::jsonb)) as elem
+    where jsonb_typeof(elem) = 'object' and jsonb_typeof(elem->'amount_cents') = 'number';
+
+  if v_line_ids is null or array_length(v_line_ids,1) is null then
+    v_vec := jsonb_build_object('line_excepted','not_evaluable','tie_nonzero','not_evaluable',
+      'same_amount_ambiguous','not_evaluable','adjustment_account_invalid','not_evaluable',
+      'reversed_entry','not_evaluable','capacity_exhausted','not_evaluable',
+      'statement_not_corroborated','not_evaluable','period_exception_unacknowledged','not_evaluable');
+    v_admit := false;
+  else
+    if exists (select 1 from clara.bank_line_exceptions x where x.line_id = any(v_line_ids) and x.status='open') then
+      v_vec := v_vec || jsonb_build_object('line_excepted','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('line_excepted','pass');
+    end if;
+
+    select l.bank_account_id, s.period_end into v_bank, v_period_end
+      from clara.bank_statement_lines l join clara.bank_statements s on s.id = l.statement_id
+     where l.id = v_line_ids[1] and l.client_id = p_client and l.firm_id = v_firm;
+    select sum(l.amount_cents) into v_line_cents from clara.bank_statement_lines l
+     where l.id = any(v_line_ids) and l.client_id = p_client and l.firm_id = v_firm;
+    select ba.coa_account_code into v_coa from clara.bank_accounts ba
+      where ba.id = v_bank and ba.firm_id = v_firm and ba.client_id = p_client;
+
+    if v_bank is null or v_coa is null or v_line_cents is null then
+      v_vec := v_vec || jsonb_build_object('tie_nonzero','not_evaluable'); v_admit := false;
+    elsif v_line_cents <> v_entry_cents + v_adj_cents then
+      v_vec := v_vec || jsonb_build_object('tie_nonzero','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('tie_nonzero','pass');
+    end if;
+
+    if v_coa is not null then
+      if exists (
+        select 1 from clara.journal_entries je
+          cross join lateral clara._bank_entry_side_capacity(je.id, v_coa) cap2
+         where je.client_id = p_client and je.firm_id = v_firm and je.status = 'approved'
+           and je.reversed_by is null and je.reversal_of is null
+           and not (je.id = any(coalesce(v_entry_ids, '{}'::uuid[])))
+           and ((v_entry_cents > 0 and cap2.dr_cents = v_entry_cents)
+                or (v_entry_cents < 0 and cap2.cr_cents = -v_entry_cents))
+      ) then
+        v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','fail'); v_admit := false;
+      else
+        v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','pass');
+      end if;
+    else
+      v_vec := v_vec || jsonb_build_object('same_amount_ambiguous','not_evaluable'); v_admit := false;
+    end if;
+
+    if exists (
+      select 1 from jsonb_array_elements(coalesce(p_adjustments,'[]'::jsonb)) as elem
+       where jsonb_typeof(elem) = 'object'
+         and not exists (
+           select 1 from clara.coa_accounts a
+            where a.client_id = p_client and a.firm_id = v_firm
+              and a.account_code = btrim(elem->>'account_code')
+              and a.is_active and a.account_type in ('income','expense')
+              and coalesce(a.is_bank_account,false) = false)
+    ) then
+      v_vec := v_vec || jsonb_build_object('adjustment_account_invalid','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('adjustment_account_invalid','pass');
+    end if;
+
+    if v_entry_ids is not null and exists (
+      select 1 from clara.journal_entries je
+       where je.id = any(v_entry_ids) and (je.reversed_by is not null or je.reversal_of is not null)
+    ) then
+      v_vec := v_vec || jsonb_build_object('reversed_entry','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('reversed_entry','pass');
+    end if;
+
+    if v_coa is not null and v_entry_ids is not null then
+      if exists (
+        select 1 from jsonb_array_elements(coalesce(p_entries,'[]'::jsonb)) as elem
+          cross join lateral clara._bank_entry_side_capacity((elem->>'entry_id')::uuid, v_coa) cap3
+         where coalesce(elem->>'entry_id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+           and (
+             ((elem->>'matched_cents')::bigint > 0 and (elem->>'matched_cents')::bigint >
+                cap3.dr_cents - coalesce((select sum(em.matched_cents) from clara.bank_match_entry_members em
+                  join clara.bank_matches bm on bm.id = em.match_id
+                  join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+                 where em.entry_id = (elem->>'entry_id')::uuid and em.matched_cents > 0
+                   and bm.status in ('pending','live') and ba2.coa_account_code = v_coa and ba2.client_id = p_client), 0))
+             or
+             ((elem->>'matched_cents')::bigint < 0 and -(elem->>'matched_cents')::bigint >
+                cap3.cr_cents - coalesce((select sum(-em.matched_cents) from clara.bank_match_entry_members em
+                  join clara.bank_matches bm on bm.id = em.match_id
+                  join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+                 where em.entry_id = (elem->>'entry_id')::uuid and em.matched_cents < 0
+                   and bm.status in ('pending','live') and ba2.coa_account_code = v_coa and ba2.client_id = p_client), 0))
+           )
+      ) then
+        v_vec := v_vec || jsonb_build_object('capacity_exhausted','fail'); v_admit := false;
+      else
+        v_vec := v_vec || jsonb_build_object('capacity_exhausted','pass');
+      end if;
+    else
+      v_vec := v_vec || jsonb_build_object('capacity_exhausted','not_evaluable'); v_admit := false;
+    end if;
+
+    -- M12 subsumed by `status='live'` (law 31): the CHECK `superseded_by IS NULL OR
+    -- status='void'` means a live statement is never superseded, and the witness pipeline's
+    -- own ingest-time gate (0098) is what lets a statement become live at all.
+    if v_period_end is null then
+      v_vec := v_vec || jsonb_build_object('statement_not_corroborated','not_evaluable'); v_admit := false;
+    elsif (select bool_and(s.status = 'live')
+             from clara.bank_statement_lines l join clara.bank_statements s on s.id = l.statement_id
+            where l.id = any(v_line_ids)) then
+      v_vec := v_vec || jsonb_build_object('statement_not_corroborated','pass');
+    else
+      v_vec := v_vec || jsonb_build_object('statement_not_corroborated','fail'); v_admit := false;
+    end if;
+
+    if v_period_end is not null and v_entry_ids is not null then
+      if exists (select 1 from clara.journal_entries je
+                  where je.id = any(v_entry_ids) and je.posting_date > v_period_end)
+         and not coalesce(p_ack_period_exceptions,false) then
+        v_vec := v_vec || jsonb_build_object('period_exception_unacknowledged','fail'); v_admit := false;
+      else
+        v_vec := v_vec || jsonb_build_object('period_exception_unacknowledged','pass');
+      end if;
+    else
+      v_vec := v_vec || jsonb_build_object('period_exception_unacknowledged','not_evaluable'); v_admit := false;
+    end if;
+  end if;
+
+  if not v_admit then
+    perform clara._agent_bank_receipt(v_firm, p_client, 'match', 'refused',
+      coalesce(v_line_ids[1], p_client), p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict','refused','rung_vector',v_vec));
+    return jsonb_build_object('status','refused','rung_vector',v_vec);
+  end if;
+
+  begin
+    v_res := clara._match_bank_line_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_client, p_lines, p_entries, p_adjustments, p_ack_period_exceptions, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'match', 'refused', coalesce(v_line_ids[1], p_client),
+      p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict','refused','errcode',v_state,'reason',v_reason,'rung_vector',v_vec));
+    return jsonb_build_object('status','refused','reason',v_reason);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'match', 'admitted', (v_res->>'match_id')::uuid,
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','admitted','rung_vector',v_vec));
+  return v_res;
+end $$;
+revoke all on function clara._agent_match_bank_line_core(uuid,jsonb,jsonb,jsonb,boolean,text,jsonb,text,text) from public;
+
+create function clara.wake_match_bank_line(p_client uuid, p_lines jsonb, p_entries jsonb,
+    p_adjustments jsonb, p_ack_period_exceptions boolean,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_match_bank_line');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_match_bank_line_core(p_client, p_lines, p_entries, p_adjustments, p_ack_period_exceptions, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,jsonb,text,text) from public;
+grant execute on function clara.wake_match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,jsonb,text,text) to clara_wake_bank;
+
+-- === settle_from_bank_line =====================================================================
+-- Applicable rungs: M1, M4, M5, M6, M7, M12. NON-MEMBERS, each with its ground (law 31): M2
+-- (tie_nonzero) never fires here -- v_settle_cents is DERIVED (line minus adjustments), never an
+-- independently-supplied total that could fail to tie; M3 (same-amount ambiguity) is a
+-- match-side candidate-selection concern and this verb settles ONE named line against ONE named
+-- counterparty, no candidate SET to be ambiguous among; M8/M9 (reversed/capacity) read an
+-- EXISTING entry_id, and this verb always MINTS a fresh entry through the allocate composite, so
+-- neither applies; M10/M11/M14/M15 belong to other verbs per their own sections above; M13
+-- (period-exception acknowledgement) has no analogue here -- settle's own posting-date rule is a
+-- hard hard-hard structural refusal (`posting_date_out_of_period`), not an acknowledgeable
+-- exception, so it stays Tier-C, not a Tier-B rung.
+create function clara._agent_settle_from_bank_line_core(p_client uuid, p_line uuid, p_counterparty uuid,
+    p_allocations jsonb, p_memo text, p_posting_date date, p_charge_cents bigint, p_charge_account text,
+    p_adjustments jsonb, p_control_account text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+  ln record; st record; v_cp uuid; v_cp_kind text; v_domain text;
+  v_vec jsonb := '{}'::jsonb; v_admit boolean := true;
+  v_other_id_hit boolean; v_own_id_hit boolean; v_collision_n int;
+  v_adjs jsonb;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+
+  select l.*, s.period_start, s.period_end, s.status as stmt_status
+    into ln from clara.bank_statement_lines l join clara.bank_statements s on s.id = l.statement_id
+   where l.id = p_line and l.client_id = p_client and l.firm_id = v_firm;
+
+  if not found then
+    v_vec := jsonb_build_object('line_excepted','not_evaluable',
+      'payer_identifier_contradiction','not_evaluable','counterparty_collision','not_evaluable',
+      'unexplained_inflow','not_evaluable','adjustment_account_invalid','not_evaluable',
+      'statement_not_corroborated','not_evaluable');
+    v_admit := false;
+  else
+    v_cp := clara._canonical_counterparty(p_client, p_counterparty);
+    select cp.kind into v_cp_kind from clara.counterparties cp where cp.id = v_cp;
+    v_domain := case v_cp_kind when 'customer' then 'ar' when 'vendor' then 'ap' else null end;
+    v_adjs := coalesce(p_adjustments, '[]'::jsonb);
+
+    -- M1 line_excepted.
+    if exists (select 1 from clara.bank_line_exceptions x where x.line_id = p_line and x.status='open') then
+      v_vec := v_vec || jsonb_build_object('line_excepted','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('line_excepted','pass');
+    end if;
+
+    -- M4 payer_identifier_contradiction (NEW). A printed TIN/registration number in the line's
+    -- description that resolves to a DIFFERENT counterparty than the one chosen is a
+    -- contradiction; with no recognisable identifier at all, not_evaluable (never pass) --
+    -- ARM-0, H.3's own stated shape.
+    if v_cp is null then
+      v_vec := v_vec || jsonb_build_object('payer_identifier_contradiction','not_evaluable'); v_admit := false;
+    else
+      select exists (
+          select 1 from clara.counterparties cp2
+           where cp2.client_id = p_client and cp2.firm_id = v_firm and cp2.id <> v_cp
+             and cp2.retired_at is null and cp2.merged_into is null
+             and ((cp2.registration_normalized is not null
+                   and position(cp2.registration_normalized in
+                        lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0)
+                  or (nullif(btrim(cp2.tin),'') is not null
+                      and position(lower(regexp_replace(cp2.tin,'[^a-zA-Z0-9]','','g')) in
+                           lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0))
+        ),
+        exists (
+          select 1 from clara.counterparties cp3
+           where cp3.id = v_cp
+             and ((cp3.registration_normalized is not null
+                   and position(cp3.registration_normalized in
+                        lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0)
+                  or (nullif(btrim(cp3.tin),'') is not null
+                      and position(lower(regexp_replace(cp3.tin,'[^a-zA-Z0-9]','','g')) in
+                           lower(regexp_replace(coalesce(ln.description,''),'[^a-zA-Z0-9]','','g'))) > 0))
+        )
+        into v_other_id_hit, v_own_id_hit;
+      if coalesce(v_other_id_hit,false) then
+        v_vec := v_vec || jsonb_build_object('payer_identifier_contradiction','fail'); v_admit := false;
+      elsif not coalesce(v_own_id_hit,false) then
+        v_vec := v_vec || jsonb_build_object('payer_identifier_contradiction','not_evaluable'); v_admit := false;
+      else
+        v_vec := v_vec || jsonb_build_object('payer_identifier_contradiction','pass');
+      end if;
+    end if;
+
+    -- M5 counterparty_collision (NEW). Any significant word (3+ alnum chars) shared between the
+    -- line's description and MORE THAN ONE live counterparty's name is a name-family collision
+    -- (the ROME-family case) -- refused so a human disambiguates.
+    select count(distinct cp4.id) into v_collision_n
+      from clara.counterparties cp4,
+           (select distinct lower(w) as w from regexp_split_to_table(coalesce(ln.description,''), '[^A-Za-z0-9]+') w
+             where length(w) >= 3) words
+     where cp4.client_id = p_client and cp4.firm_id = v_firm
+       and cp4.retired_at is null and cp4.merged_into is null
+       and cp4.name ~* ('(?:^|[^a-zA-Z0-9])' || clara._bank_rule_regex_escape(words.w) || '(?:[^a-zA-Z0-9]|$)');
+    if coalesce(v_collision_n,0) > 1 then
+      v_vec := v_vec || jsonb_build_object('counterparty_collision','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('counterparty_collision','pass');
+    end if;
+
+    -- M6 unexplained_inflow (NEW), the loan-vs-settlement backstop -- scoped to the AR
+    -- (inflow) domain only, per §3.3's M6 prose. "Document anchor" carries no independent
+    -- parameter on this verb's signature and is folded into "no open item absorbs it" here,
+    -- documented as a stated simplification.
+    if v_domain = 'ar' and (p_allocations is null or jsonb_typeof(p_allocations) <> 'array'
+                             or jsonb_array_length(p_allocations) = 0) then
+      v_vec := v_vec || jsonb_build_object('unexplained_inflow','fail'); v_admit := false;
+    elsif v_domain is null then
+      v_vec := v_vec || jsonb_build_object('unexplained_inflow','not_evaluable'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('unexplained_inflow','pass');
+    end if;
+
+    -- M7 adjustment_account_invalid.
+    if exists (
+      select 1 from jsonb_array_elements(v_adjs) as elem
+       where jsonb_typeof(elem) = 'object'
+         and not exists (
+           select 1 from clara.coa_accounts a
+            where a.client_id = p_client and a.firm_id = v_firm
+              and a.account_code = btrim(elem->>'account_code')
+              and a.is_active and a.account_class is null
+              and a.account_type in ('income','expense'))
+    ) then
+      v_vec := v_vec || jsonb_build_object('adjustment_account_invalid','fail'); v_admit := false;
+    else
+      v_vec := v_vec || jsonb_build_object('adjustment_account_invalid','pass');
+    end if;
+
+    -- M12, subsumed by `status='live'` exactly as match_bank_line's (law 31).
+    if ln.stmt_status = 'live' then
+      v_vec := v_vec || jsonb_build_object('statement_not_corroborated','pass');
+    else
+      v_vec := v_vec || jsonb_build_object('statement_not_corroborated','fail'); v_admit := false;
+    end if;
+  end if;
+
+  if not v_admit then
+    perform clara._agent_bank_receipt(v_firm, p_client, 'settle', 'refused', p_line,
+      p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict','refused','rung_vector',v_vec));
+    return jsonb_build_object('status','refused','rung_vector',v_vec);
+  end if;
+
+  begin
+    v_res := clara._settle_from_bank_line_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model,
+        'receipt_preheld', false, 'fn', 'wake_settle_from_bank_line'),
+      p_client, p_line, p_counterparty, p_allocations, p_memo, p_posting_date, p_charge_cents,
+      p_charge_account, p_adjustments, null, p_control_account, p_op_key, null);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'settle', 'refused', p_line,
+      p_rationale, p_model, p_inputs_digest, p_op_key,
+      jsonb_build_object('verdict','refused','errcode',v_state,'reason',v_reason,'rung_vector',v_vec));
+    return jsonb_build_object('status','refused','reason',v_reason);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'settle', 'admitted', (v_res->>'match_id')::uuid,
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','admitted','rung_vector',v_vec));
+  return v_res;
+end $$;
+revoke all on function clara._agent_settle_from_bank_line_core(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,jsonb,text,text) from public;
+
+create function clara.wake_settle_from_bank_line(p_client uuid, p_line uuid, p_counterparty uuid,
+    p_allocations jsonb, p_memo text, p_posting_date date, p_charge_cents bigint, p_charge_account text,
+    p_adjustments jsonb, p_control_account text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_settle_from_bank_line');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  -- p_attestation is absent BY DESIGN (design §3.4/Annex A.1) -- the agent takes her own
+  -- approval_arm ('agent_unattended') and writes no attestation, because an attestation
+  -- asserts a judgement a human made.
+  return clara._agent_settle_from_bank_line_core(p_client, p_line, p_counterparty, p_allocations,
+    p_memo, p_posting_date, p_charge_cents, p_charge_account, p_adjustments, p_control_account,
+    p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,jsonb,text,text) from public;
+grant execute on function clara.wake_settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- === complete_bank_reconciliation ==============================================================
+-- Applicable rungs: M11, M12 -- and NEITHER needs a separate Tier-B pre-check. M11 (Annex B.3)
+-- is built directly into `_complete_bank_reconciliation_core` itself (this file's own §D CoR,
+-- gated on `p_ctx->>'is_agent'`) as a hard raise carrying `detail.reason='stale_waiver_duplicate_
+-- risk'` -- the design's own comment at that site names Annex B.3 as its mechanism, so the rung
+-- and the belt have already collapsed into ONE site by the design's own construction (the M10
+-- "belt is the backstop, rung is the evidence" shape, here realized as a single raise Tier C
+-- converts). M12 is subsumed by the delegate's own `status <> 'live'` -> `statement_not_live`
+-- raise, same law-31 ground as match/settle's M12. Every OTHER refusal this delegate can raise
+-- (recon_already_complete, recon_coa_shared, recon_period_gap, recon_prior_missing,
+-- recon_line_reserved, recon_line_unsettled, recon_uncleared_off_account, recon_opening_mismatch,
+-- recon_outstanding_stale, recon_difference_nonzero) is Annex B.4's own "(CLR10, recon_*) -- the
+-- nine reconciliation reasons -- typed" Tier-C member, not a Tier-B rung at all (Annex B.2's table
+-- lists ONLY M11/M12 against this verb). This verb is therefore Tier-A + delegate + Tier-C, the
+-- SAME shape as the nine simple verbs in §K.4.
+create function clara._agent_complete_bank_reconciliation_core(p_statement uuid, p_ack_outstanding uuid[],
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_client uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+begin
+  select firm_id, client_id into v_firm, v_client from clara.bank_statements where id = p_statement;
+  if v_firm is null then raise exception 'bank statement not found' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(v_client, v_firm);
+  begin
+    v_res := clara._complete_bank_reconciliation_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_statement, p_ack_outstanding, p_op_key);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, v_client, 'reconcile_complete', 'refused', p_statement,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','refused','errcode',v_state,'reason',v_reason));
+    return jsonb_build_object('status','refused','reason',v_reason,'statement_id',p_statement);
+  end;
+  perform clara._agent_bank_receipt(v_firm, v_client, 'reconcile_complete', 'admitted',
+    coalesce((v_res->>'reconciliation_id')::uuid, p_statement),
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','admitted'));
+  return v_res;
+end $$;
+revoke all on function clara._agent_complete_bank_reconciliation_core(uuid,uuid[],text,jsonb,text,text) from public;
+
+create function clara.wake_complete_bank_reconciliation(p_statement uuid, p_ack_outstanding uuid[],
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record; v_client uuid;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_complete_bank_reconciliation');
+  select client_id into v_client from clara.bank_statements where id = p_statement;
+  if w.client_id is not null and v_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_complete_bank_reconciliation_core(p_statement, p_ack_outstanding, p_rationale, p_model, p_inputs_digest, p_op_key);
+end $$;
+revoke all on function clara.wake_complete_bank_reconciliation(uuid,uuid[],text,jsonb,text,text) from public;
+grant execute on function clara.wake_complete_bank_reconciliation(uuid,uuid[],text,jsonb,text,text) to clara_wake_bank;
+
+-- === resolve_and_book_bank_line =================================================================
+-- NO Tier-B rung is a member of this verb. M10 (orphaned_reservation_draft) is the one candidate
+-- with any surface plausibility -- its actual mechanism, `_tf_je_bank_pending_orphan_belt`
+-- (a DEFERRED trigger on clara.journal_entries), fires only when an entry anchoring an UNMATCHED
+-- (cancelled) bank-match reservation is later approved -- but design §3.2 states, as a structural
+-- law and not a per-verb choice, "No pending/high-stakes reservation on the agent lane": D28's
+-- explicit agent-arm bypass in `_allocate_receipt_core`/`_allocate_payment_core` (this file's own
+-- §D CoR) makes every agent-driven settlement land LIVE unconditionally, so an agent act can never
+-- MINT the pending reservation M10's belt protects in the first place -- there is no cancelled
+-- reservation for an agent-approved draft to orphan. Claiming M10 here would be exactly the class
+-- law 31 forbids (a wall listed that cannot fire) and the class this file's own battery already
+-- caught once (`_tf_bank_match_congruence`'s dead new arm). Every other refusal this composite can
+-- raise (`disposition` shape, `pending_branch_ancillary_unsupported`, the prior-booking wall, the
+-- register door, `exception_line_orphan`, etc.) is a Tier-C pair, not an M-rung -- Annex B.2's
+-- table lists NOTHING against this verb. Tier-A + delegate + Tier-C, same shape as the nine simple
+-- verbs.
+create function clara._agent_resolve_and_book_core(p_client uuid, p_exception uuid, p_disposition text,
+    p_note text, p_draft jsonb, p_allocations jsonb, p_adjustments jsonb, p_advance_applications jsonb,
+    p_charge_cents bigint, p_charge_account text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text,
+    p_ack_period_exceptions boolean) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_res jsonb; v_reason text; v_state text; v_detail text;
+begin
+  select firm_id into v_firm from clara.clients where id = p_client;
+  if v_firm is null then raise exception 'client not in your firm' using errcode='CLR11'; end if;
+  perform clara._agent_bank_tier_a(p_client, v_firm);
+  begin
+    v_res := clara._resolve_and_book_bank_line_core(
+      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      p_client, p_exception, p_disposition, p_note, p_draft, p_allocations, p_adjustments,
+      p_advance_applications, p_charge_cents, p_charge_account, null, p_op_key, p_ack_period_exceptions);
+  exception when others then
+    get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
+    v_reason := clara._agent_bank_tier_c_reason(sqlerrm, v_state, v_detail);
+    if v_reason is null then raise; end if;
+    perform clara._agent_bank_receipt(v_firm, p_client, 'exception_resolve', 'refused', p_exception,
+      p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','refused','errcode',v_state,'reason',v_reason));
+    return jsonb_build_object('status','refused','reason',v_reason,'exception_id',p_exception);
+  end;
+  perform clara._agent_bank_receipt(v_firm, p_client, 'exception_resolve', 'admitted', p_exception,
+    p_rationale, p_model, p_inputs_digest, p_op_key, jsonb_build_object('verdict','admitted'));
+  return v_res;
+end $$;
+revoke all on function clara._agent_resolve_and_book_core(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,jsonb,text,text,boolean) from public;
+
+create function clara.wake_resolve_and_book_bank_line(p_client uuid, p_exception uuid, p_disposition text,
+    p_note text, p_draft jsonb, p_allocations jsonb, p_adjustments jsonb, p_advance_applications jsonb,
+    p_charge_cents bigint, p_charge_account text,
+    p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text,
+    p_ack_period_exceptions boolean) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_resolve_and_book_bank_line');
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
+  end if;
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
+  end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then
+    raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
+  end if;
+  return clara._agent_resolve_and_book_core(p_client, p_exception, p_disposition, p_note, p_draft,
+    p_allocations, p_adjustments, p_advance_applications, p_charge_cents, p_charge_account,
+    p_rationale, p_model, p_inputs_digest, p_op_key, p_ack_period_exceptions);
+end $$;
+revoke all on function clara.wake_resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,jsonb,text,text,boolean) from public;
+grant execute on function clara.wake_resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,jsonb,text,text,boolean) to clara_wake_bank;
+
+reset role;
+
+-- ================================================================================================
+-- §L · DDL 7 COMPLETION — the wake_fn_allowlist rows for all thirteen verbs, and
+-- clara_wake_bank_login (the login role PR-2's DSN/pool wiring reaches, mirroring
+-- clara_wake_write_login's own shape exactly: nologin at creation time, membership in the group
+-- role, password/LOGIN granted out-of-band at deploy per constraint 4 -- never in a migration).
+-- Until this section, §H's role was reachable by nothing (zero grants, zero allowlist rows); after
+-- it, the role can be REACHED (login + membership) but every wrapper still independently checks
+-- assert_wake_allowed itself, so a stray allowlist row without its wrapper's own consent/hold/
+-- shape checks would still refuse -- this section only widens WHO can knock, never what a knock
+-- is allowed to do.
+-- ================================================================================================
+set role clara_fn_owner;
+do $allowlist$
+begin
+  insert into clara.wake_fn_allowlist(wake_kind, function_name) values
+    ('bank_agent', 'wake_match_bank_line'),
+    ('bank_agent', 'wake_unmatch_bank_match'),
+    ('bank_agent', 'wake_settle_from_bank_line'),
+    ('bank_agent', 'wake_complete_bank_reconciliation'),
+    ('bank_agent', 'wake_void_bank_reconciliation'),
+    ('bank_agent', 'wake_resolve_bank_line_exception'),
+    ('bank_agent', 'wake_resolve_and_book_bank_line'),
+    ('bank_agent', 'wake_propose_bank_line_exception'),
+    ('bank_agent', 'wake_propose_identifier_promotion'),
+    ('bank_agent', 'wake_add_bank_account'),
+    ('bank_agent', 'wake_upsert_account'),
+    ('bank_agent', 'wake_void_bank_statement'),
+    ('bank_agent', 'wake_get_bank_pack')
+  on conflict (wake_kind, function_name) do nothing;
+end $allowlist$;
+reset role;
+
+-- USAGE on the schema itself -- clara_wake_interactive and clara_wake_proactive both already
+-- carry it (rig-replay-confirmed); clara_wake_bank is a NEW role and needs the same grant or
+-- every one of its EXECUTE grants below is unreachable ("permission denied for schema clara",
+-- caught by this file's own battery before this line existed -- f31w.g/k/n).
+grant usage on schema clara to clara_wake_bank;
+
+do $role_bank_login$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'clara_wake_bank_login') then
+    create role clara_wake_bank_login nologin inherit;
+  end if;
+  if not exists (select 1 from pg_auth_members m
+                  join pg_roles r on r.oid = m.member
+                  join pg_roles g on g.oid = m.roleid
+                  where r.rolname = 'clara_wake_bank_login' and g.rolname = 'clara_wake_bank') then
+    grant clara_wake_bank to clara_wake_bank_login;
+  end if;
+  -- Rig-testability parity with clara_wake_write_login's own precedent: postgres (the rig's
+  -- migration/test superuser) holds membership so the battery can SET ROLE into the bank wake
+  -- lane without a second, out-of-band login credential existing on a throwaway database.
+  if not exists (select 1 from pg_auth_members m
+                  join pg_roles r on r.oid = m.member
+                  join pg_roles g on g.oid = m.roleid
+                  where r.rolname = 'postgres' and g.rolname = 'clara_wake_bank_login') then
+    grant clara_wake_bank_login to postgres;
+  end if;
+  raise notice 'DDL 7 (complete): 13 wake_fn_allowlist row(s) for bank_agent (one per verb, exact), clara_wake_bank_login present (nologin, inherit, member of clara_wake_bank), postgres holds test-only membership matching clara_wake_write_login''s own precedent.';
+end $role_bank_login$;
 
 -- ================================================================================================
 -- §J · TAIL CENSUS — re-reads the live catalog and reports what it found; the evidence a reviewer
@@ -4498,6 +5973,118 @@ begin
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
    where n.nspname in ('workflow','graphile_worker','spike') and c.relkind='r';
 
-  raise notice 'F-A3 PR-1b tail: OK -- ten CoR''d bodies resolve at their pinned signatures, SECURITY DEFINER, owned by clara_fn_owner, no new grant on any of the four ungranted settle-limb cores. Three new tables carry FORCE RLS + exactly the owner/read policy pair (6 policies) + zero DML grant to any non-owner role. Two deferred agent-receipt walls installed DEFERRABLE INITIALLY DEFERRED. t_bank_agent_proposal_accept present on bank_line_exceptions; except_bank_line resolves and is untouched by this file (no CoR issued against it). wake_credentials'' two CHECKs admit bank_agent AND keep interactive_client. bank_matches.origin admits exactly {human,rule,agent}. entry_post_receipts'' two CHECKs admit bank_agent / op_key alongside the untouched invoice-domain paths. clara_wake_bank exists, cannot log in, holds zero grants. The shared registry-ledger predicate and the drawer-2 gate''s arm-4 recut both resolve as STABLE reads (no D1 term). % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file). REMAINING FOR A FOLLOW-UP WINDOW (not this file, per its own header): the thirteen wake sibling verbs, their ungranted agent cores and the full Tier-B ladder (M1-M15) -- until that window lands, the bank_agent wake kind is MINTABLE but calls NOTHING (wake_fn_allowlist holds no row for it), which is the fail-safe-by-construction residue the 0077/0078 idiom is built on.', v_n;
+  raise notice 'F-A3 PR-1b tail (§0-§J, the ten CoR''d bodies + seven DDL groups): OK -- ten CoR''d bodies resolve at their pinned signatures, SECURITY DEFINER, owned by clara_fn_owner, no new grant on any of the four ungranted settle-limb cores. Three new tables carry FORCE RLS + exactly the owner/read policy pair (6 policies) + zero DML grant to any non-owner role. Two deferred agent-receipt walls installed DEFERRABLE INITIALLY DEFERRED. t_bank_agent_proposal_accept present on bank_line_exceptions; except_bank_line resolves and is untouched by this file (no CoR issued against it). wake_credentials'' two CHECKs admit bank_agent AND keep interactive_client. bank_matches.origin admits exactly {human,rule,agent}. entry_post_receipts'' two CHECKs admit bank_agent / op_key alongside the untouched invoice-domain paths. clara_wake_bank exists, cannot log in, holds zero TABLE grants (its function grants are §K/§L''s own, censused below). The shared registry-ledger predicate and the drawer-2 gate''s arm-4 recut both resolve as STABLE reads (no D1 term). % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file). The thirteen wake sibling verbs, their agent cores and DDL 7''s allowlist/login role are §K/§L''s own tail, immediately below.', v_n;
 end $tail$;
-    -- is FK-anchored -- a template, an enrolment, a statement line -- and carries no resolution
+
+-- ================================================================================================
+-- §M · TAIL CENSUS, PART 2 — §K (the thirteen wake wrappers/agent cores, the full Tier-B ladder)
+-- and §L (DDL 7 completion). Same discipline as §J: re-reads the live catalog, raises on any
+-- claim it cannot confirm.
+-- ================================================================================================
+do $tail2$
+declare
+  v_n int; v_wrap text[]; v_core text[]; v_missing text;
+begin
+  -- The thirteen wake_* wrappers: each resolves, is SECURITY DEFINER owned by clara_fn_owner,
+  -- carries NO DML of its own (the 0078:96-107 shape -- resolve credential, assert allowlist,
+  -- refuse blank shape, delegate; H.7's "the new wake wrappers carry no DML" catalog cell).
+  v_wrap := array['wake_match_bank_line','wake_unmatch_bank_match','wake_settle_from_bank_line',
+    'wake_complete_bank_reconciliation','wake_void_bank_reconciliation',
+    'wake_resolve_bank_line_exception','wake_resolve_and_book_bank_line',
+    'wake_propose_bank_line_exception','wake_propose_identifier_promotion',
+    'wake_add_bank_account','wake_upsert_account','wake_void_bank_statement','wake_get_bank_pack'];
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'clara' and p.proname = any(v_wrap)
+      and p.prosecdef and p.proowner = 'clara_fn_owner'::regrole;
+  if v_n <> 13 then
+    raise exception 'tail2: expected all 13 wake_* wrappers to resolve as SECURITY DEFINER owned by clara_fn_owner, found %', v_n using errcode='CLR10';
+  end if;
+  -- Each wrapper is EXECUTE-granted to clara_wake_bank and to NO OTHER role (PUBLIC included) --
+  -- the closed-world grantee cell.
+  select count(*)::int into v_n
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+      lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    where n.nspname = 'clara' and p.proname = any(v_wrap)
+      and a.grantee <> 0 and a.privilege_type = 'EXECUTE'
+      and a.grantee <> p.proowner and a.grantee <> 'clara_wake_bank'::regrole;
+  if v_n <> 0 then
+    raise exception 'tail2: % unexpected EXECUTE grantee(s) on the wake wrappers besides clara_wake_bank', v_n using errcode='CLR10';
+  end if;
+  select count(distinct p.proname)::int into v_n
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+      lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    where n.nspname = 'clara' and p.proname = any(v_wrap)
+      and a.grantee = 'clara_wake_bank'::regrole and a.privilege_type = 'EXECUTE';
+  if v_n <> 13 then
+    raise exception 'tail2: expected all 13 wake_* wrappers to grant EXECUTE to clara_wake_bank, found %', v_n using errcode='CLR10';
+  end if;
+
+  -- The thirteen agent cores: present, ZERO grant to any role (the ungranted-core half of the
+  -- 0077/0078 seam -- only the wrapper is reachable, exactly as the nine simple verbs already
+  -- proved in §K.4's own build).
+  v_core := array['_agent_match_bank_line_core','_agent_unmatch_bank_match_core',
+    '_agent_settle_from_bank_line_core','_agent_complete_bank_reconciliation_core',
+    '_agent_void_bank_reconciliation_core','_agent_resolve_bank_line_exception_core',
+    '_agent_resolve_and_book_core','_agent_propose_line_exception_core',
+    '_agent_propose_identifier_promotion_core','_agent_add_bank_account_core',
+    '_agent_upsert_account_core','_agent_void_bank_statement_core','_agent_get_bank_pack_core'];
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'clara' and p.proname = any(v_core) and p.prosecdef and p.proowner = 'clara_fn_owner'::regrole;
+  if v_n <> 13 then
+    raise exception 'tail2: expected all 13 agent cores to resolve as SECURITY DEFINER owned by clara_fn_owner, found %', v_n using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+      lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    where n.nspname = 'clara' and p.proname = any(v_core) and a.grantee <> 0 and a.grantee <> p.proowner;
+  if v_n <> 0 then
+    raise exception 'tail2: % unexpected grantee(s) on the 13 agent cores (must be ZERO -- the ungranted-core half of the seam)', v_n using errcode='CLR10';
+  end if;
+
+  -- The closed-world allowlist cell (H.6): bank_agent holds EXACTLY its 13 enumerated rows, no
+  -- more, no fewer -- checked both by count and by exact set membership.
+  select count(*)::int into v_n from clara.wake_fn_allowlist where wake_kind = 'bank_agent';
+  if v_n <> 13 then
+    raise exception 'tail2: expected exactly 13 wake_fn_allowlist row(s) for bank_agent, found %', v_n using errcode='CLR10';
+  end if;
+  select function_name into v_missing from clara.wake_fn_allowlist
+    where wake_kind = 'bank_agent' and not (function_name = any(v_wrap));
+  if v_missing is not null then
+    raise exception 'tail2: bank_agent''s allowlist carries an unexpected row: %', v_missing using errcode='CLR10';
+  end if;
+
+  -- clara_wake_bank_login: present, cannot log in itself (LOGIN/password is an out-of-band
+  -- ceremony act, never a migration literal -- constraint 4), IS a member of clara_wake_bank.
+  perform 1 from pg_roles where rolname = 'clara_wake_bank_login' and not rolcanlogin;
+  if not found then
+    raise exception 'tail2: clara_wake_bank_login is missing or unexpectedly a login role' using errcode='CLR10';
+  end if;
+  perform 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+    join pg_roles g on g.oid = m.roleid
+    where r.rolname = 'clara_wake_bank_login' and g.rolname = 'clara_wake_bank';
+  if not found then
+    raise exception 'tail2: clara_wake_bank_login is not a member of clara_wake_bank' using errcode='CLR10';
+  end if;
+
+  -- No public/human bank verb picked up an allowlist row anywhere (H.7: "the human bank verbs
+  -- still hold zero allowlist rows").
+  select count(*)::int into v_n from clara.wake_fn_allowlist
+    where function_name in ('match_bank_line','unmatch_bank_match','settle_from_bank_line',
+      'complete_bank_reconciliation','void_bank_reconciliation','resolve_bank_line_exception',
+      'resolve_and_book_bank_line','propose_bank_line_exception','add_bank_account',
+      'upsert_account','void_bank_statement');
+  if v_n <> 0 then
+    raise exception 'tail2: % human bank verb(s) unexpectedly hold an allowlist row', v_n using errcode='CLR10';
+  end if;
+
+  -- USAGE on schema clara -- the fact f31w.g/k/n's own "permission denied for schema clara"
+  -- failure caught before this line existed. clara_wake_interactive/clara_wake_proactive both
+  -- already carry it; clara_wake_bank must too or its EXECUTE grants are all unreachable.
+  perform 1 from pg_namespace n, lateral aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a
+    where n.nspname = 'clara' and a.grantee = 'clara_wake_bank'::regrole and a.privilege_type = 'USAGE';
+  if not found then
+    raise exception 'tail2: clara_wake_bank lacks USAGE on schema clara' using errcode='CLR10';
+  end if;
+
+  raise notice 'F-A3 PR-1b tail2 (§K/§L, the thirteen wake wrappers + agent cores + DDL 7 completion): OK -- all 13 wake_* wrappers resolve, SECURITY DEFINER, owned by clara_fn_owner, carry EXECUTE to clara_wake_bank and NO other grantee; all 13 agent cores resolve with ZERO grant to any role. wake_fn_allowlist holds EXACTLY the 13 expected rows for bank_agent (closed-world) and zero rows for any human bank verb name. clara_wake_bank_login exists, cannot log in on its own, and is a member of clara_wake_bank -- LOGIN/password stays an out-of-band deploy act, never committed. The bank_agent wake kind is now MINTABLE AND CAN CALL its full 13-verb surface, closing the fail-safe residue §J''s tail named.';
+end $tail2$;
