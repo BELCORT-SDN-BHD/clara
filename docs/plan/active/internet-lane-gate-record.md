@@ -1,24 +1,25 @@
-# F-A8 PR-0 — the gate record (gate 1)
+# F-A8 PR-0 — the gate record (gates 1 and 2)
 
-> **The gate ran 2026-08-22** against design **v1** (`internet-lane-design.md` +
-> `internet-lane-survey.md` + `internet-lane-annexes.md`). **One leg of the two the design's own
-> §6 called for:** the **independent judgement-logic review** (law 1) — two fresh-context lenses,
-> a **bytes** lens (every migration cite verified at file:line, every closed-world census and
-> roster measured, the D1 list re-derived independently from the design's verb set) and a
-> **rulings** lens (the design set gated against `wave-f-contract.md` §F-A8, ADR-0074's TA-P1..
-> TA-P14, and the F-A2 quality bar) — with **every finding adversarially re-verified by an
-> independent verifier whose re-graded severity governs**.
+> **Gate 1 ran 2026-08-22** against design **v1** (`internet-lane-design.md` +
+> `internet-lane-survey.md` + `internet-lane-annexes.md`): the **independent judgement-logic
+> review** (law 1) — a **bytes** lens (every migration cite verified at file:line, every
+> closed-world census and roster measured, the D1 list re-derived independently) and a
+> **rulings** lens (gated against `wave-f-contract.md` §F-A8, ADR-0074's TA-P1..TA-P14 and the
+> F-A2 bar) — **every finding adversarially re-verified by an independent verifier whose
+> re-graded severity governs**.
 >
 > **Verdict: five blockers, nine materials. The design's core shape HOLDS; the width is severed
 > into seven limbs; the document set is reconciled.** Every finding below names its fold target;
 > **the fold is v2, and `internet-lane-annexes.md` Annex H is its change-log entry.**
 >
-> **Leg 2 has NOT run.** The design's §6 also called for a **cross-model adversarial pass
-> (law 28)** on the Tier-2 injection surface. It did not run in this gate and remains an open
-> obligation — see §8.1. Do not read "PR-0 done" off this record without it.
+> **Gate 2 — leg 2, the law-28 cross-model pass — RAN 2026-08-23; §10 is its record.** (This
+> header previously read "Leg 2 has NOT run … an open obligation, see §8.1"; §8.1 stands as the
+> statement of what was owed.) **Twenty findings, all CONFIRMED, none refuted; the fold is design
+> v3 + `internet-lane-annexes-2.md`.** "PR-0 done" still may not be read off this record alone —
+> the walls have to be IN the PRs that need them (design §7).
 >
-> Standing caveat, unchanged from the F-A2 gate: migration-source reads are **predictions** about
-> the live catalog. PR-1's and PR-3's rig replays confirm the decisive ones (§9).
+> Standing caveat: migration-source reads are **predictions** about the live catalog; PR-1's and
+> PR-3's rig replays confirm the decisive ones (§9).
 
 ---
 
@@ -317,22 +318,20 @@ the design's vocabulary.)*
   group-I row's free-text `source_note` — v1 read it as two effective dates, so **there is no
   live example anywhere of a date-boundary transition on this table**, which the design's C.4d /
   C.5h cells now have to build.
-- `client_facts` is `0055:386-420`, not 387-421 · `_tf_client_facts_supersede_only()` is
-  `0055:428`, not 424 (424 is `ix_client_facts_client`).
+- `client_facts` is `0055:386-420`, not 387-421 · `_tf_client_facts_supersede_only()` is `:428`.
 - Survey F2's "the tail assertion proves this at every migration since" — **withdrawn**. The 0016
   DO block runs once, at 0016's own apply. The conclusion survives on an independent repo-wide
   grep, and PR-3's replay re-derives it on the live catalog.
 - Survey F6's "no outbound HTTP/web-fetch capability exists anywhere" — **re-worded to "no
   WEB-READ TOOL"**. `lib/storage.mjs:88,122,217,235,307,337` and
   `lib/reconciler-render.mjs:128,158` call `fetch()`, and `:126` carries a real
-  `AbortSignal.timeout` convention PR-2 should reuse rather than invent a second HTTP idiom.
-- The contract cite: `§F-A8` is **~line 311**, not 118-126 — that range is now F-A3's bank-matching
-  prose after the ADR-0074 sitting commit inserted clauses above it. Corrected in both the design
-  and the survey headers.
-- PR-1's artifact list said "the **two** `wake_fn_allowlist` rows"; the design's own verb set
-  requires **three**. Each `(wake_kind, function_name)` pair is now named explicitly.
-- Survey §2 mislabelled the allowlist roster as "a T17-style pin"; the real T17 is the EXECUTE
-  grant matrix (GM-2), a different and larger census.
+  `AbortSignal.timeout` convention PR-2 should reuse. **[v3, law-28 E-3: the TIMEOUT convention
+  only — `storage.mjs:88-90` attaches `authorization`/`apikey`, so the request profile must NOT
+  be reused. IL-D22.]**
+- The contract cite: `§F-A8` is **~line 311**, not 118-126 (that range is now F-A3's prose after
+  the ADR-0074 sitting commit). Corrected in the design and survey headers.
+- PR-1 said "the **two** `wake_fn_allowlist` rows"; the verb set requires **three**, each named.
+- Survey §2 mislabelled the roster as "a T17-style pin"; the real T17 is the EXECUTE grant matrix.
 
 ---
 
@@ -373,7 +372,7 @@ does not depend on how TA-P1 resolves. That holds and does not need re-litigatin
 
 | PR | scope | D1 |
 |---|---|---|
-| **PR-0** | **Leg 1 DONE** (this record; the fold is v2). **Leg 2 — the law-28 cross-model adversarial pass — OWED before PR-2**, then extended before PR-4 (§8.1) | — |
+| **PR-0** | **Leg 1 DONE** (the fold is v2). **[v3] Leg 2 DONE 2026-08-23** (§10; the fold is v3 + `internet-lane-annexes-2.md`) — **PR-0 closes only when the walls are in the PRs that need them** | — |
 | **PR-1** | Tier-1 DB, greenfield only: `fx_rates`, `policy_drafts`, `tier1_fetch_attempts`, the three predicates, the wake wrapper + core, the two human verbs + shared commit core, ONE allowlist row, Annex E's DDL posture, Annex F's T17 roster edits. Closed set = `{'fx_rates'}` | none predicted |
 | **PR-2** | Tier-1 runtime: the outbound HTTP client (reusing the estate's conventions), the resolved-address deny list, the scheduled job minting its own `'proactive'` credential, a manual one-shot trigger. **Tier 1 live end-to-end on a table nobody reads yet** | — |
 | **PR-3** | The `sst_threshold_schedule` limb alone: the surrogate-`id` ALTER, the closed set widened, the 0016 truing (reachable closure), the `a21-watch` P1 re-cut, the `0016:882-886` cell | none predicted; **replay confirms** |
@@ -399,55 +398,53 @@ does not depend on how TA-P1 resolves. That holds and does not need re-litigatin
 
 ## 8 · Owner items and open obligations
 
-**8.1 · Leg 2 of PR-0 has not run.** The design's own §6 called for a **cross-model adversarial
-pass (law 28)** on the Tier-2 injection surface. This gate ran only the law-1 leg. The obligation
-is now **wider** than v1 framed it: Tier-1's own extraction path also reads attacker-influenced
-page text into a model before the quote reaches the DB extractor, so the pass is owed **before
-PR-2** (the first PR that makes an outbound call) and extended before PR-4 for the chat surface.
-GB-5's new refusal predicate is itself judgement logic and takes law 1's independent pass inside
-PR-4's own review.
+**8.1 · Leg 2 of PR-0 — DISCHARGED 2026-08-23 (§10).** Stated as it was owed: the **cross-model
+adversarial pass (law 28)**, **wider** than v1 framed it, because Tier-1's own extraction path
+also reads attacker-influenced page text into a model before the value reaches the DB — so it was
+owed **before PR-2**, extended before PR-4. GB-5's refusal predicate is itself judgement logic
+and still takes law 1's independent pass inside PR-4's own review, **as does every wall IL-D17..
+IL-D34 that decides whether something is allowed.**
 
-**OI-1 · Who owes TA-P8's context landing for web-found identifiers?** TA-P8 = B rules that such
+**OI-1 · Who owes TA-P8's context landing for web-found identifiers?** TA-P8 = B rules such
 identifiers ARE recorded in the knowledge layer as context (never as keys) and grants the
-promotion door; member **F-A8-M4** names F-A8 directly. Building a KB context landing means either
-an owner-ruled `wiki_page_citations.source_kind` extension with a keys-forbidden conjunct, or a
-different carrier. **Recommendation:** F-A7 owns it — it owns the identity learning loop and the
-audited counterparty door (`0063`'s shape); F-A8 supplies the `web_fetch_citations` rows such a
-landing would cite. **Fail-closed default the build proceeds on:** F-A8 v1 writes nothing to the
-knowledge layer, and the design no longer claims TA-P8 forbids it (design §1, IL-D16).
+promotion door; member **F-A8-M4** names F-A8 directly. A KB context landing needs either an
+owner-ruled `wiki_page_citations.source_kind` extension with a keys-forbidden conjunct, or a
+different carrier. **Recommendation:** F-A7 owns it (the identity learning loop, `0063`'s audited
+door); F-A8 supplies the `web_fetch_citations` rows it would cite. **Fail-closed default:** F-A8
+v1 writes nothing to the knowledge layer (design §1, IL-D16).
 
 **OI-2 · Which item lands the clocked-wake EXECUTION path, and with what D1 posture?**
 `kind='wake'` `agent_tasks` are born `held` (`0011:1230`) and may only go `held → cancelled`
-(`0011:1271`) — **no clocked wake can execute at all today.** Either that transition set widens,
-or a new task kind is minted; both routes are a CoR of the two live judgement bodies whose kind
-arms end in `raise 'unknown task kind'` — `_tf_agent_task_insert` (`0011:1222-1243`) and
-`_tf_agent_task_update` (`0011:1248-1285`). **F-A4 is already taking the second route for its own
-kind** (`ck_agent_tasks_kind_0011` extended with `'close_prep'`,
+(`0011:1271`) — **no clocked wake can execute at all today.** Widening the transition set or
+minting a task kind both CoR the two live judgement bodies whose kind arms end in `raise 'unknown
+task kind'` — `_tf_agent_task_insert` (`0011:1222-1243`), `_tf_agent_task_update`
+(`0011:1248-1285`). **F-A4 already takes the second route for its own kind**
+(`ck_agent_tasks_kind_0011` + `'close_prep'`,
 `close-key-1-annexes-1-mechanics.md:268`), so the precedent exists — but the ordering, the shared
 body, and the D1 posture are not F-A8's to decide alone. **Fail-closed default:** F-A8's fetch
-runs as a plain runtime job with **no `agent_tasks` row**; the credential, the receipt and the
-`tier1_fetch_attempts` row are the durable record (IL-D15).
-
-*This obligation was surfaced by the fold, not by either lens — GM-8 named the credential-kind
-collision, and re-deriving the trigger path to fix it found that the execution path underneath is
-missing for everyone.*
+runs as a plain runtime job with **no `agent_tasks` row**; the credential, the receipt and
+**[v3]** the `web_attempts` row (IL-D25) are the durable record (IL-D15). *Surfaced by the fold,
+not by either lens: re-deriving the trigger path found the execution path missing for everyone.*
 
 **OI-3 · `llm_usage_events.firm_id` for a firm-independent call.** `0094:55` is `not null` and
-TA-P13's specified widening does not touch it, so a clock-triggered, firm-independent Tier-1 fetch
-could not be metered even after the widening lands. **F-A9's to rule.** **Fail-closed default:**
-F-A8 records an honestly-stated metering gap and never fabricates a `firm_id`, `document_id` or
-`task_id` (IL-D7, ODQ-3).
+TA-P13's widening does not touch it, so a clock-triggered Tier-1 fetch could not be metered even
+after it lands. **F-A9's to rule** (its R-L10 makes `firm_id` NULLABLE for platform calls — the
+same shape IL-D34 projects). **Fail-closed default:** an honestly-stated gap, never a fabricated
+`firm_id`/`document_id`/`task_id` (IL-D7, ODQ-3).
 
-**OI-4 · A new `agent_tasks.kind` or a new wake kind, if either becomes necessary.** TA-P5's own
-rider grants "a new wake kind (CHECK pair + six rosters, D34 precedent)" as design law within the
-delegation, so minting one is not itself an escalation — but F-A8 does **not** need one (it mints
-`'proactive'`), and any item that decides otherwise must say so against this record rather than
-inherit it silently.
+**OI-4 · A new `agent_tasks.kind` or wake kind, if either becomes necessary.** TA-P5's rider makes
+minting one design law within the delegation, so it is not itself an escalation — but F-A8 does
+**not** need one (it mints `'proactive'`), and any item deciding otherwise must say so against
+this record rather than inherit it silently.
 
-**Not an owner item:** whether Tier 2 should register a named TA-P3 egress purpose regardless of
-the identity wall. TA-P3 = A rules identity-free lookups are not disclosures; adding a purpose
-anyway would be belt-and-braces, and *removing* the wall in favour of a purpose would be a TA-P3
-amendment. Recorded here so the question is not re-opened as a design choice.
+~~**Not an owner item:** whether Tier 2 should register a named TA-P3 egress purpose regardless of
+the identity wall.~~ **[v3, 2026-08-23 — RE-OPENED by law-28 E-2, and it is the owner's, not a
+design choice: `OQ-A`.]** TA-P3 = A rules identity-free lookups are not disclosures — but the
+predicate cannot certify that a free-text query IS identity-free (a miss proves nothing), so
+"identity-free" has to be made true by the ARCHITECTURE: a closed server-owned taxonomy, or a
+named purpose the owner signs. The v2 sentence was right that removing the wall in favour of a
+purpose would be a TA-P3 amendment; what it missed is that keeping free-text research WITHOUT one
+is not the safe half. Fail-closed until ruled: free-text research does not ship (IL-D30).
 
 ---
 
@@ -458,12 +455,46 @@ amendment. Recorded here so the question is not re-opened as a design choice.
    FALSE for several of its own bodies.)*
 2. **PR-1's no-D1 prediction** — a fresh-DB apply and a deploy-onto-existing apply both clean.
 3. **PR-3's zero-writer population, re-derived on the LIVE catalog** before the ALTER relies on
-   it — never read off the migration source. Both seed rows unchanged in every pre-existing column
-   afterwards; the `add column id … default gen_random_uuid()` rewrite stated, not assumed.
+   it; both seed rows unchanged afterwards, the `add column id …` rewrite stated, not assumed.
 4. **The live tips of every body this record cites**, found by replay: `mint_wake_credential`
    (`0011:1156`, superseding `0004:687` dropped at `0011:1131`), `wake_context` (`0011:1133`),
-   `assert_wake_allowed` (`0004:114`), `_tf_agent_task_update` (`0011:1248`).
+   `assert_wake_allowed` (`0004:114`), `_tf_agent_task_update` (`0011:1248`). **[v3 adds
+   `_wake_cred_full` (`0002:389`), `_human_ctx` (`0004:299`) and `verify_evaluator_freeze`.]**
 5. **T17 / T18 / DEFINER-hygiene green at the end of each PR, and RED before that PR's roster
    edit** — proving the edit was necessary rather than decorative.
-6. **The allowlist arithmetic**: three new pairs, the pre-existing `'proactive'` row still present,
-   and the roster's total matching Annex F exactly.
+6. **The allowlist arithmetic**: three new pairs, the pre-existing `'proactive'` row still present.
+   **[v3, measured on a live rig at the 0102 frontier: 15 rows today — 6 `autodraft`, 8
+   `interactive`, 1 `proactive` — so F-A8 takes it to 18.]**
+
+---
+
+## 10 · Leg 2 — the law-28 cross-model adversarial pass (2026-08-23)
+
+**Scope.** Content injection through fetched bytes · the allowlist/network boundary ·
+poisoned-but-plausible facts at the owner door · client-data egress · replay, freshness and
+receipt authenticity — Tier 1 **and** Tier 2, because §8.1's widening is right: Tier-1's own
+extraction reads attacker-influenced page text too.
+
+**Verdict: BUILDABLE WITH THE LISTED WALLS — not mergeable as designed. PR-2 and PR-4 stay
+blocked until the walls are built.** Two advertised mechanisms did not exist in the design of
+record: **no raw response bytes or content digest were stored anywhere**, and **no destination
+registry existed** (`wake_fn_allowlist` governs callable DB verbs, not network destinations). The
+durable evidence was caller/model-supplied `{url, accessed_at, quote}` — so the owner was
+guaranteed neither source bytes nor a byte-bound excerpt, and a model could cite a fetch that
+never happened.
+
+**Counts. Twenty findings — fifteen blockers, four HIGH, one MEDIUM — every one re-derived
+against the design text and the cited repo bytes: all twenty CONFIRMED, none refuted.** Three
+narrowed, recorded (N-1: ODQ-2's default already intended two channels, only the mechanism was
+missing · N-3: C.8e already contracted resolved-address checking, so what failed was connect-time
+pinning, peer verification and the non-enumerable address forms · N-4: a plain `fetch()` does
+load no subresources — a property to CONTRACT and TEST, cell C.12g, not a refutation).
+
+**The fold.** Walls **IL-D17..IL-D34** (register: `internet-lane-annexes.md` Annex D.1b; specs:
+`internet-lane-annexes-2.md` Annex K), cells **C.11-C.16** (Annex L), the per-finding table
+(Annex J), every struck v2 passage verbatim (Annex M). Design §7 is re-cut — **the evidence
+substrate moves INTO PR-1**, because a wall that arrives after the door it guards is not a wall.
+**Six owner questions** (Annex N); **OQ-A — the client-free query architecture — GATES PR-4.**
+Where a wall's shape was a genuine choice rather than a mechanism (bytes retention, PDF, the
+registry's own landing door, the two-phase click, the item's width) it became one of those
+questions, each with a fail-closed default the build proceeds on.
