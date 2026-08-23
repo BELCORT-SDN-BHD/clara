@@ -367,8 +367,9 @@ every job** (`:436-450`) — a red lint blocks merge on every PR, docs-only incl
 classifier** (`:72-116`) marks a diff docs-only when every file matches `docs/*`, `AGENTS.md`,
 `CLAUDE.md` or `PROGRESS.md`; **anything else — `.claude/*` included — is code** and pulls in
 typecheck/build, the DB estate suite, live e2es, the DR round-trip and the render drill. Runners are
-two self-hosted WSL2 instances labelled `self-hosted, linux, clara`; an offline runner makes jobs
-queue visibly, never silently pass. **You add the Worker size gate (≤ 10 MiB compressed).**
+**four** self-hosted WSL2 instances (`clara-wsl` … `-4`, expanded from two on 2026-08-23; `docs/ops/ci-runner.md`)
+labelled `self-hosted, linux, clara`; an offline runner makes jobs queue visibly, never silently pass.
+**You add the Worker size gate (≤ 10 MiB compressed).**
 
 ## 7 · Skills and MCPs — what each is for
 
