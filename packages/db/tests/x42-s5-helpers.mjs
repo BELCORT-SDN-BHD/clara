@@ -27,8 +27,12 @@ export async function x42Has0042() {
     const r = await rootQuery(
       "select version from clara.schema_migrations where version ~ '^0042_'");
     return r.rows.length > 0;
-  } catch {
-    return false;
+  } catch (e) {
+    // NARROWED, NOT BLANKET. 42P01 (clara.schema_migrations itself absent) is the one honest
+    // "not ready yet" case — a pre-0001 database. Any other error (a typo, a permission change,
+    // a renamed column) is a real bug and must propagate, not be read as "0042 isn't live".
+    if (e.code === "42P01") return false;
+    throw e;
   }
 }
 

@@ -306,7 +306,16 @@ test("f-a2.c3.D-adv a STAFF-ADVANCE DISBURSEMENT DEBIT posts — the same proof 
   await upsertAccountClassed(OWNER(), { client: A2(), code: adv, name: "Staff advances", type: "asset", opKey: opk("c3adv") })
     .catch((e) => noteLane(`c3.D-adv: chart seat (${e.code}: ${e.message})`));
   await enrolStaffAdvanceAccount(OWNER(), { client: A2(), accountCode: adv, opKey: opk("c3advenrol") })
-    .catch((e) => noteLane(`c3.D-adv: advance enrolment refused (${e.code}: ${e.message}) — precondition unbuilt; the cell measures an UNENROLLED account and says so`));
+    .catch((e) => noteLane(`c3.D-adv: advance enrolment raised (${e.code}: ${e.message})`));
+  // THE PREMISE IS RE-READ, NOT ASSUMED — the c3.D-fa sibling's exact lesson: the enrolment
+  // call was wrapped in a catch that only noted the failure, and B12/B13 are cut PRE-hook, so
+  // an ordinary asset/bank JV posts whether or not the account is really enrolled. Without this
+  // read-back the cell could measure an UNENROLLED account and prove nothing about B13.
+  const enrolled = await rootQuery(
+    `select count(*)::int as n from clara.staff_advance_accounts
+      where client_id=$1 and account_code=$2 and active`, [A2(), adv]).catch(() => ({ rows: [{ n: 0 }] }));
+  assert.ok(enrolled.rows[0].n >= 1,
+    `c3.D-adv precondition: the account is REALLY enrolled in the staff-advance register (got ${enrolled.rows[0].n}) — without it this cell measures an unenrolled account and proves nothing about B13`);
   const p = await agentPostable(OWNER(), {
     client: A2(), amount: 300000, codingKind: null,
     lines: genericLines(300000, { debitCode: adv, creditCode: CHART.bank }),
