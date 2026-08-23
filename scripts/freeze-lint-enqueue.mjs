@@ -6,15 +6,19 @@
 import { blankSource, parseImportBindings, escapeRe, REGISTRY_REL } from "./freeze-lint-lex.mjs";
 
 /**
- * The WDK enqueue surface of the PINNED workflow@4.6.0 (contract §4.10),
+ * The WDK enqueue surface of the PINNED workflow@4.8.4 (contract §4.10),
  * enumerated from the package's own type surface — not guessed:
- * workflow/dist/api.d.ts re-exports from @workflow/core/runtime exactly
- * { start, getRun, getHookByToken, resumeHook, resumeWebhook, runStep, Run }.
+ * workflow/dist/api.d.ts re-exports from @workflow/core/runtime exactly the
+ * callables { start, getRun, getHookByToken, resumeHook, resumeWebhook, runStep,
+ * Run } (4.8.4 widened the re-export with TYPES only — Event, StartOptions,
+ * StopSleepOptions, StopSleepResult, WorkflowReadableStream(Options), WorkflowRun
+ * — which carry no call site).
  * Of these, `start` is the ONLY callable that takes a workflow REFERENCE (the
  * rest take run IDs / hook tokens; so do cancelRun / reenqueueRun / wakeUpRun /
- * recreateRunFromExisting on the deep runtime path). `workflow` (root) and
- * `workflow/runtime` do NOT export start — so `getWorld().start?.()` in the
- * boot plugin is a world-lifecycle call, not an enqueue, and stays clean.
+ * recreateRunFromExisting AND 4.8.x's new readStream / listStreams on the deep
+ * runtime path — every one of them is `(world, runId|streamId, …)`). `workflow`
+ * (root) and `workflow/runtime` do NOT export start — so `getWorld().start?.()`
+ * in the boot plugin is a world-lifecycle call, not an enqueue, and stays clean.
  */
 export const ENQUEUE_MODULES = new Set(["workflow/api", "@workflow/core/runtime", "@workflow/core/runtime/start"]);
 export const ENQUEUE_CALLABLES = new Set(["start"]);
