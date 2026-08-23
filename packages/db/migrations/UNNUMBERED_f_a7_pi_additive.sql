@@ -1027,6 +1027,7 @@ revoke all on function clara._identifier_promotion_core(uuid,uuid,uuid,text,uuid
 revoke all on function clara._assert_receipt_surface_conforms(text) from public;
 revoke all on function clara.agent_receipt_source_census() from public;
 revoke all on function clara.agent_receipt_dark_rows() from public;
+revoke all on function clara.name_family_token(text) from public;
 revoke all on function clara.name_family_candidates(uuid,text) from public;
 revoke all on function clara.name_family_is_ambiguous(uuid,text) from public;
 revoke all on function clara.resolve_firm_question(uuid,text,uuid,text) from public;
@@ -1216,6 +1217,7 @@ begin
     from (select s.sig, r.rolname
             from (values ('clara._firm_question_core(uuid,uuid,uuid,text,uuid,text,text,jsonb,text)'),
                          ('clara._identifier_promotion_core(uuid,uuid,uuid,text,uuid,text,text,int,jsonb,text,jsonb)'),
+                         ('clara.name_family_token(text)'),
                          ('clara.name_family_candidates(uuid,text)'),
                          ('clara.name_family_is_ambiguous(uuid,text)'),
                          ('clara._assert_receipt_surface_conforms(text)'),
