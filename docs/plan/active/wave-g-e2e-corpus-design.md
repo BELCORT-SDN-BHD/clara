@@ -210,10 +210,10 @@ face; none was computed or inferred.
 > machine-readable text layer of ~32 documents. The inventory, by class and location only, is in
 > `wave-g-corpus-oracle-assessment.md` §5.
 
-> **Constraint 12 rides along, unchanged:** ROME SECRETARY's customers stay **NAME-ONLY**. The
-> wall is structural (`0062`) and lifting it is an OWNER act through the audited door
-> (`0063`). No corpus slot's onboarding may enrich an RS customer, and a new client's
-> counterparty that happens to share a name with an RS customer is a different row.
+> **The name-only wall rides along, unchanged:** ROME SECRETARY's customers stay **NAME-ONLY**. The wall is
+> structural (`0062`) and lifting it is an OWNER act through the audited door (`0063`). No corpus slot's
+> onboarding may enrich an RS customer, and a new client's counterparty that happens to share a name with an RS
+> customer is a different row. **[ADR-0075 2026-08-23]** Was "Constraint 12 rides along, unchanged" — constraint 12 is RETIRED as a *named* constraint; the GENERIC wall and both migrations are untouched, so every sentence above still binds.
 
 ## 5. The E2E run script, per client
 

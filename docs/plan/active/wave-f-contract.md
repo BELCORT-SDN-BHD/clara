@@ -10,10 +10,13 @@
 > TA-P14).** Fourteen principle rulings scope F-A3 … F-A9 and widen F-A10's completion
 > criterion. Amendments are marked in place as `[TA-2026-08-22]` blocks under the item they
 > change — **appended, never a silent rewrite**: the pre-amendment text stands above each block
-> so the delta is readable. Four of the sitting's rulings are **constitutional amendments
-> pending the owner's next digest sign-off** (ADR-0074's own preamble names them); the items
-> below are scoped as ruled, and a design may not start on the unratified half of TA-P7 before
-> that signature. The full agenda with its member tables — the consequence map for each item's
+> so the delta is readable. Four of the sitting's rulings were **constitutional amendments
+> pending the owner's digest sign-off** (ADR-0074's own preamble names them) — **RATIFIED
+> 2026-08-22 as digest laws 78-81, law 78 carrying the rider R-TA-P1-walls**, so TA-P7's
+> judgement half is no longer signature-gated and the items below are scoped as ruled. The
+> PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits landed in #287, and the `AGENTS.md` home for
+> invariant (a) is **DECIDED (b) 2026-08-23 — PRD §6 is the single home, no duplicate clause.**
+> The full agenda with its member tables — the consequence map for each item's
 > design — is `track-a-sitting-1.md` / `-2.md` / `-3.md`.
 
 ## The one completion condition that outranks the item list
@@ -136,6 +139,9 @@ geometry library, two entrances, checked against this test at review.
 - **Identifiers (TA-P8 B):** a payer account number Clara learns by judgement is knowledge-layer
   CONTEXT, never an exact-match key. Hard constraint 12 is NOT widened; RS bank matching runs
   on amount + date until a human confirms, or Clara's promotion proposal is one-click accepted.
+  **[ADR-0075 2026-08-23]** Constraint 12 is RETIRED as a *named* constraint; the GENERIC
+  name-only wall it referenced is unchanged (`0062`/`0063` untouched) and so is this clause's
+  substance — read "the name-only wall is not widened".
 
 ### F-A4 · Close key ①
 
@@ -281,7 +287,9 @@ alongside the cross-client named read (R-L17). The owner sees this deviation at 
   (TA-P7 C, the owner's own ruling).** The ≥0.95 human-click-or-exact-identifier wall opens to
   her judgement. **This is a CONSTITUTIONAL AMENDMENT and F-A7a's judgement half may not build
   before the owner signs the digest** — ADR-0074 carries the proposed PRD §6.2(a) /
-  ARCHITECTURE §0.1 wording, and the `AGENTS.md` home is FLAGGED, not drafted. Four
+  ARCHITECTURE §0.1 wording *(landed #287)*, and the `AGENTS.md` home is FLAGGED, not drafted
+  **[ADR-0075-era true, 2026-08-23: the digest was signed 2026-08-22, so the build gate above is
+  LIFTED; and the `AGENTS.md` home is now DECIDED (b) — PRD §6 is the single home]**. Four
   walls-validate riders are part of the item: **(1)** a hard-number CONTRADICTION wall — a
   printed registration mapping to a DIFFERENT client refuses and asks; **(2)** a name-family
   COLLISION guard — more than one candidate must clarify (BELCORT's own ROME family, plus RPR
@@ -310,6 +318,9 @@ alongside the cross-client named read (R-L17). The owner sees this deviation at 
   "promote to hard fact" as a typed card (seen N times, judgement stable); **one human click**
   writes it through the audited counterparty door (`0063`'s shape) and the receipt records the
   confirmer. Hard constraint 12 stays RS-pinned and is NOT widened.
+  **[ADR-0075 2026-08-23]** Constraint 12 is RETIRED as a *named* constraint and the wall is now
+  the GENERIC one (a client may be flagged name-only; its counterparties are never enriched).
+  `0062`'s uuid pin and `0063`'s owner-only door are untouched, so nothing here widens.
 - **F-A7b scope (TA-P14):** the **CLIENT onboarding interview only** — the firm's own first-run
   setup interview is a named follow-on. Interview-v3's three residuals clear here, above all
   the **runtime-contract receipt gap** (a server-authored per-`(run, park, submission)` receipt
@@ -333,6 +344,23 @@ alongside the cross-client named read (R-L17). The owner sees this deviation at 
 - **Tier-1 CLOSES to three tables** for Wave F: `fx_rates` + the SST rate table + the SST
   threshold table. Income-tax bands, capital allowances, EPF/SOCSO/EIS, stamp duty and MTD are
   explicitly out until their own consumers land (F-T2/F-T3).
+
+**[TB-2026-08-23] R-L25 — the closure re-opens for F-T3's two tables, as SEEDED FACT TABLES not a
+second governed door.** The owner's 2026-08-23 ALL-IN ruling landed **F-T3 inside Wave F**, so the
+consumer the clause above defers to has arrived inside the closure it was scoped by
+(`tax-computation-survey.md` §7; `tax-computation-annexes.md` OQ-6). Ruled: the Wave-F Tier-1
+closure **re-opens for exactly two more tables — the income-tax rate bands and the
+capital-allowance rate schedule** — and they land on the **D17/R-L19 developer-seeded pattern**,
+not on TA-P2's owner one-click door: **versioned, effective-dated rows seeded by migration through
+the full PR ladder, each row cited to LHDN or the AGC gazette with its fetch date, immutable +
+supersede, and a missing row for the year of assessment REFUSES BY NAME and stops in the open** —
+never carried forward from the previous year. F-T3's posture on the ICT 40/20 rate is the model:
+the gazette text could not be read at an official source on 2026-08-23, so **the row is not seeded
+and the asset class refuses**, rather than landing on professional-firm secondaries. This is the
+**same mechanism** as the F-A9 price rows and the deadline tables — **one seeding architecture, not
+two** (digest law 81); the F-A8 scheduled fetch may attach to these tables later without changing
+how a row lands. A rate change is a ticket and a PR. **EPF/SOCSO/EIS, stamp duty and MTD stay out**
+— the clause above is amended for F-T3's two tables only.
 - **How a Tier-1 row lands (TA-P2 A+):** Clara fetches the official sources and **DRAFTS the
   row**; it lands through an **audited owner ONE-CLICK door — NOT a PR** — behind two mechanical
   checks (two independent official sources agree; the value inside a plausibility band). This

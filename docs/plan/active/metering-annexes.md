@@ -29,11 +29,11 @@
 | — | | **v2: the `clara_price_approver` ROLE half is WITHDRAWN (GM-5) — superseded by D17** | | |
 | D11 | Currency for the price table and the evaluator? | **USD only, enforced by a CHECK** | Vendor billing is USD; MYR conversion needs the FX wave (law 18/P-FX) | Store MYR via an ad-hoc FX rate |
 | D12 | Ship a monthly-usage dashboard screen in this item? | **No — the read function ships; the screen does not (TA-P13-OQ-2 stays open)** | The ruling scopes F-A9 to visibility as a CAPABILITY, not a screen | Design and ship a dashboard card now |
-| **D13** | Classify the document/processing lane's per-UTC-day doc/page budgets (gates 6-7)? | **Not here — an owner item, with KEEP as the fail-closed default** | They are spend-shaped in their own author's words (`0038:7056-7058`) but sit outside the lanes TA-P12 enumerated, and REMOVING them adds two live bodies to a D1 window. The lane will not infer a removal the owner did not name, nor hide a live brake behind a census called complete | Classify REMOVE by analogy with the 15/day quota · Leave them unnamed (v1's silence) |
+| **D13** | Classify the document/processing lane's per-UTC-day doc/page budgets (gates 6-7)? | ~~Not here — an owner item, with KEEP as the fail-closed default~~ **RULED 2026-08-23 (owner), SPLIT: gate 6 (document ingest, `0007:1638-1650`) = KEEP, re-classified ENGINE PROTECTION + the mandatory `refused_budget` rename; gate 7 (processing call, `0038:7063-7078`) = REMOVE, a spend brake under G8. Only `_reserve_processing_call` joins the D1 list; the census is eight-of-eight, four REMOVE (1·3·5·7) / four KEEP (2·4·6·8).** | They are spend-shaped in their own author's words (`0038:7056-7058`) but sit outside the lanes TA-P12 enumerated, and REMOVING them adds two live bodies to a D1 window. The lane will not infer a removal the owner did not name, nor hide a live brake behind a census called complete | Classify REMOVE by analogy with the 15/day quota · Leave them unnamed (v1's silence) |
 | **D14** | How is the sales cap removed, given it shares one SELECT with the backfill door's watermark? | **Rewrite `0046:2223-2225` to read the watermark alone; delete only `:2245-2259`; the door at `:2226-2242` is byte-untouched** | Deleting the cited span kills 7A-R5's human-recorded backfill door; deleting only the cap branch strands a read of a column §3.4 drops in the same migration (PL/pgSQL late binding → the first sales admission after the window dies) | Delete `0046:2223-2259` wholesale (v1's literal wording) |
 | **D15** | Do gates 6-8 change `firm_document_limits`? | **No column of that table is touched by F-A9** | Gate 8 is KEEP by the ruling's carve-out; gates 6-7 are pending D13 | Dispose its columns with `firm_limits`' |
 | **D16** | Privilege shape of the priced read path | **`get_llm_usage_summary` is SECURITY DEFINER (owned by `clara_fn_owner`) with an explicit `p_firm = clara.jwt_firm()` refusal; the view is owner-executed, EXECUTE granted to `clara_authenticated`** | A `security_invoker` relation makes the CALLER's grants govern, and the base-table GRANT check precedes RLS — so v1's shape raised `42501` for the only role a human session holds. This is the estate's own typed-read idiom (`0016:1075`) and what D5 always implied | SECURITY INVOKER view + function (v1) · grant SELECT on `llm_price_table` to `clara_authenticated` (breaks D5) |
-| **D17** | Grant shape of the approval door | **Coarse EXECUTE to `clara_authenticated` + an OWNER-rank floor read inside the DEFINER body + `_reserve_op` + `_audit`** — the `0056:1130-1176` / `0063:24-33` idiom. **WHICH firm's owner remains the owner's ruling (§4); PR-1E is severed until it lands** | No human session ever holds a role other than `clara_authenticated` (`0006:72`, `deploy/storage-provision.sql:57-58`, `0002:112` non-inheriting), so a role-gated verb is a psql ceremony, not a one-click door — and C.17 would have proved only that nobody can approve | The `clara_price_approver` role + ops ceremony (v1) |
+| **D17** | Grant shape of the approval door | ~~Coarse EXECUTE to `clara_authenticated` + an OWNER-rank floor read inside the DEFINER body + `_reserve_op` + `_audit` — the `0056:1130-1176` / `0063:24-33` idiom; WHICH firm's owner remains the owner's ruling (§4), PR-1E severed until it lands.~~ **RULED 2026-08-23 (owner, R-L19) — THE DOOR IS NOT BUILT AT ALL: price rows are DEVELOPER-SEEDED platform data, a versioned effective-dated migration seed through the full PR ladder; a price change is a ticket/PR. `approve_llm_price_proposal` and the "Clara drafts a price proposal" limb are DROPPED (not deferred) with PR-1E; the evaluator prices from seeded rows and the unpriced-count rollup stays as the tripwire. C.17 retires with the verb.** | KEPT AS THE RECORD OF WHY THE DOOR WAS NEVER BUILT: no human session ever holds a role other than `clara_authenticated` (`0006:72`, `deploy/storage-provision.sql:57-58`, `0002:112` non-inheriting), so a role-gated verb is a psql ceremony, not a one-click door — and C.17 would have proved only that nobody can approve. The successor question ("an owner of WHICH firm may approve a cross-tenant fact?") is DISSOLVED rather than answered | The `clara_price_approver` role + ops ceremony (v1, withdrawn at gate 1 as GM-5); the owner-floor door (v2, dropped by R-L19) |
 | **D18** | One flag or two for the price checks? | **Two nullable columns (`sources_agree`, `band_ok`) + a `check_note`; NULL means "not checkable", never "fine"** | v1 wrote three distinguishable states into one nullable boolean — the same "one string, three meanings" defect survey §A.6 raises against `refused_budget` | One `plausibility_band_ok` boolean (v1) |
 | **D19** | Overlap / inverted-range wall for `llm_price_table` | **`check (effective_to is null or effective_to >= effective_from)` + a partial unique index on `(engine_id) where effective_to is null` + approve REFUSING a non-forward `effective_from`** | `btree_gist` is installed nowhere in this estate and the estate says so itself (`0056:266-269`, `0057:305-313`) — an EXCLUDE would add an extension to a ceremony. Contiguity by construction is the house idiom | `EXCLUDE USING gist (engine_id with =, daterange(...) with &&)` |
 | **D20** | Who repairs the eight `packages/db/tests` files? | **PR-1B, budgeted there, in survey §A.7's three classes** | Two of them PROVE the refusals this item removes — deciding what the estate still proves is judgement logic, not a roster edit | Leave them to PR-1C's roster edits (v1's implicit position) |
@@ -64,13 +64,16 @@
 5. **PR-1D — the price machine, minus the approval door.** `llm_price_table` (+ D19's two
    walls), `llm_price_proposals`, `propose_llm_price`, `reject_llm_price_proposal`,
    `llm_usage_events_priced`, `get_llm_usage_summary`. No D1 (all brand-new objects).
-6. **PR-1E — the approval door alone.** `approve_llm_price_proposal` + D17's floor.
+6. ~~**PR-1E — the approval door alone.** `approve_llm_price_proposal` + D17's floor.~~ **DROPPED 2026-08-23
+   (owner, R-L19)** — price rows are developer-seeded migration data; PR-1D's table ships with its first
+   effective-dated seed and a price change is a ticket/PR.
    **Gated on the owner's D13/§4 ruling on who may approve.** No D1.
 7. **PR-2 — the chat retrofit.** A new `chatTurn_vN` (N ≥ 14, see B.3). New frozen export
    + registry repoint; bundle-grep after build per `.claude/rules/runtime-workflows.md`.
 8. **PR-3 — acceptance.** Real BELCORT usage (constraint 13); the unpriced count
-   published, not hidden; §3.9's three conditions recorded met-or-not; **the census is
-   reported as six-of-eight classified while D13 is open** — never as complete.
+   published, not hidden; §3.9's three conditions recorded met-or-not; ~~the census is reported as
+   six-of-eight classified while D13 is open~~ **RULED 2026-08-23 (owner) — D13 is CLOSED, so the
+   census is reported as EIGHT of eight: four REMOVE (1·3·5·7), four KEEP (2·4·6·8).**
 9. **PR-4 — schema retirement.** Deferred, own reviewed migration, own D1 window.
 
 ### B.2 · The D1 body list
@@ -126,8 +129,9 @@ measure, do not assume.
    is already removing the gate's host body"); per (3) it resolves to no.
 5. **The `call_kind` roster is extended by each later lane's own migration**, not by
    F-A9. F-A9 ships the enum and the door; F-A2/F-A5/F-A6/F-A7/F-A8 each add their value.
-6. **PR-1E waits on an owner ruling, and nothing else waits on PR-1E.** The evaluator and
-   rollup ship without it and read honestly empty.
+6. ~~**PR-1E waits on an owner ruling, and nothing else waits on PR-1E.**~~ **RULED 2026-08-23 (R-L19):
+   PR-1E is DROPPED.** The evaluator and rollup were always able to ship without it; they now price from
+   the seeded rows and publish the unpriced count for any day with no effective row.
 
 ## Annex C · Test battery manifest
 
@@ -170,15 +174,21 @@ verb's documented contract, never against today's implementation detail.
 - **The seven-generation lineage's true tip is unmeasured until rig replay** — every line
   number this design cites for `admit_autodraft_task` is a prediction (survey standing
   caveat). PR-1B's prestate re-derives the tip before touching anything.
-- **Two live usage gates are unclassified** (D13). Until the owner rules, F-A9 executes
-  TA-P12 for six of eight gates, and the acceptance record says so in those words.
+- ~~**Two live usage gates are unclassified** (D13).~~ **RULED 2026-08-23 (owner): gate 6 KEEP as
+  ENGINE PROTECTION (with the mandatory `refused_budget` rename, alongside gate 4's
+  `refused_concurrency`), gate 7 REMOVE as a spend brake.** The census is CLOSED-WORLD: eight of
+  eight classified, and only `_reserve_processing_call` joins the D1 list — PR-1B's window becomes
+  two bodies, not three. **The two KEEP rows that a shorter reproduction of this census had
+  dropped — gate 4 and gate 6, the two that carry rename obligations — are named here in full.**
 - **PR-1B stops reading the old ledger but keeps writing it** — a deliberate, named waste
   until PR-4's three conditions are met. `settle_chat_turn` also keeps reading it.
 - **The chat retrofit's `chatTurn_vN` depends on F-A2's merge order** (B.3.1).
-- **The price-approval door is designed but not ruled** (D17); PR-1E is severed, so the
-  money column stays honestly empty rather than a limb shipping half-built.
-- **A brand-new `engine_id` cannot be plausibility-checked** — `band_ok IS NULL` and the
-  owner is told so; the human judgement call is unavoidable for a first price row.
+- ~~**The price-approval door is designed but not ruled** (D17); PR-1E is severed.~~ **RULED 2026-08-23
+  (R-L19): the door is DROPPED — price rows are developer-seeded migration data.** The money column reads
+  honestly empty for any day with no seeded effective row, which is the tripwire, not a gap.
+- ~~**A brand-new `engine_id` cannot be plausibility-checked** — `band_ok IS NULL` and the owner is told so.~~
+  **Moot under R-L19:** a new engine's first price arrives in a reviewed migration, so the plausibility band
+  and its human judgement call are replaced by the PR ladder.
 - **`db-slice-frontiers` fails LATE.** An ungated roster addition reddens the weekly
   sweep / manual dispatch (`ci.yml:360`), not the PR — so the `appliedStem` gate is part
   of the change, not a follow-up (GM-3).
@@ -227,8 +237,9 @@ migration comment calls the firm's *vendor spend* (`0038:7056-7058`) — plus tw
 concurrency floors in `0090`, were absent from a census the acceptance record would have
 called complete. **Fold:** survey §A.5 re-derived from refusal sites rather than from one
 table; §3.3 now carries **eight** gates; the concurrency pair is classified KEEP by the
-ruling's own carve-out; the two day budgets go to the owner as D13 with KEEP as the
-fail-closed default, and PR-3 reports "six of eight classified".
+ruling's own carve-out; the two day budgets went to the owner as D13 with KEEP as the
+fail-closed default. **RULED 2026-08-23: gate 6 KEEP (engine protection, + rename), gate 7 REMOVE
+(spend). PR-3 reports "eight of eight classified".**
 
 **GB-2 — the sales-cap removal was unbuildable in both readings.** The cited range
 `0046:2223-2259` CONTAINS the 7A-R5 backfill door the same cell declared untouched, and

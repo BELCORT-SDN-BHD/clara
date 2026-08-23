@@ -9,10 +9,19 @@ merge queue froze. Runner minutes on self-hosted are free and unlimited for priv
 
 - **Host:** the owner's Windows 11 machine → **WSL2 Ubuntu** distro (`Ubuntu`).
 - **Inside WSL:** Docker Engine (docker-ce; systemd-managed) — required for the
-  `postgres:17` service containers CI declares — plus **TWO** GitHub Actions runner
-  instances (`~/actions-runner` → `clara-wsl`, `~/actions-runner-2` → `clara-wsl-2`),
-  both registered at REPO level to `BELCORT-SDN-BHD/clara` with labels
-  **`self-hosted, linux, clara`** — two instances let the db-slice matrix run 2-wide.
+  `postgres:17` service containers CI declares — plus **FOUR** GitHub Actions runner
+  instances, each in its own home directory with its own `_work` tree (and therefore its
+  own lazily-created `_work/_tool` tool cache and `_work/_actions` action cache — zero
+  path overlap):
+  - `~/actions-runner`   → `clara-wsl`
+  - `~/actions-runner-2` → `clara-wsl-2`
+  - `~/actions-runner-3` → `clara-wsl-3` (added 2026-08-23)
+  - `~/actions-runner-4` → `clara-wsl-4` (added 2026-08-23)
+
+  All four are registered at REPO level to `BELCORT-SDN-BHD/clara` with identical labels
+  **`self-hosted, linux, clara`** — four instances let a single PR's four parallel legs
+  (build · db-estate · db-live-gates · render-drill, ADR-0073) run fully 4-wide instead of
+  queuing 2-at-a-time, and let two PRs each run 2-wide concurrently.
 - The `runner` user holds **passwordless sudo** (`/etc/sudoers.d/runner`) — hosted-runner
   parity: workflows written for GitHub images assume it (the DR pg_dump step's
   `sudo apt-get` was the first casualty without it). Acceptable ONLY because the repo is
@@ -73,7 +82,8 @@ this runbook and cuts future load independently.
 ## The CI economics overhaul (ADR-0073, 2026-08-21)
 
 The former ~42-min monolithic `ci` job is split into parallel jobs (build · db-estate ·
-db-live-gates · render-drill) so the two runner instances run 2-wide per PR, and **the
+db-live-gates · render-drill) so the runner instances run up to 4-wide per PR (2-wide
+before the 2026-08-23 expansion), and **the
 closed-wave upgrade/contract drills + the D-b frontier matrix run on the weekly sweep and
 `workflow_dispatch` ONLY** (owner-ruled lever 1; the estate suite + deploy-onto-existing
 stay per-PR as backstop). The required check `ci` is now a fail-closed meta-gate over
@@ -88,5 +98,45 @@ gh workflow run ci.yml    # runs EVERY leg, closed-wave drills included
 ```
 
 Installs use a shared local pnpm store at `~/.pnpm-store` (content-addressed, lock-safe
-across the two instances); the pinned gitleaks binary caches at `~/.cache/`. Hybrid
+across all four instances); the pinned gitleaks binary caches at `~/.cache/`. Hybrid
 GitHub-hosted runners were considered and DECLINED — the $0 preference above stands.
+
+## Runner count expansion to four (2026-08-23)
+
+Two more instances — `clara-wsl-3` (`~/actions-runner-3`) and `clara-wsl-4`
+(`~/actions-runner-4`) — were added identically to the existing two: same runner version
+(2.336.0, tarball sha256 verified against the GitHub release notes before extracting),
+same labels (`self-hosted,linux,clara`), same `svc.sh install <user> && svc.sh start`
+systemd-service pattern (`actions.runner.BELCORT-SDN-BHD-clara.clara-wsl-{3,4}.service`,
+`User=runner`), same repo-level registration. Verified all four `online` with identical
+labels via `gh api repos/BELCORT-SDN-BHD/clara/actions/runners`.
+
+**Isolation, unchanged by design:** each instance's `_work` (and therefore its
+lazily-created `_work/_tool` tool cache and `_work/_actions` action cache) lives under its
+own `~/actions-runner*` root — four disjoint filesystem trees, confirmed by `stat` on all
+four paths post-install. The two shared-host race hazards from the original two-instance
+build already generalize to N instances without change: the `postgres:17` service
+containers bind **ephemeral host ports** (`ports: [5432]`, read back via
+`job.services.postgres.ports['5432']`), so concurrent jobs never collide on a fixed port;
+the render-drill's `docker build` tags the image `clara-render:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`
+(run-scoped, `.github/workflows/ci.yml`), so concurrent builds never collide on a tag; and
+the `pg17-client` composite's apt/dpkg install is serialized by a single host-wide
+`flock /var/lock/clara-pgdg.lock` regardless of how many runner processes are racing it.
+
+**Capacity verdict: proceed with four, monitor memory.** The WSL2 VM: 24 vCPUs (matches
+the host's 24 logical processors — no `processors=` cap in `.wslconfig`), ~15.5 GiB RAM
+(the WSL2 default of half the host's ~32 GiB physical memory — `.wslconfig` sets only
+`vmIdleTimeout`, no `memory=` override). CPU is not a concern at 4-wide (6 cores/job).
+Memory is the binding resource but not, on the evidence gathered, *clearly* insufficient:
+idle baseline with both original runners' services up is ~1.2–1.5 GiB used / ~14 GiB
+available; `dmesg`/`journalctl -k` show no OOM-kill history; a `postgres:17` service
+container itself is cheap (observed 70–320 MiB live). No GitHub Actions job happened to be
+mid-run during this check, so peak `pnpm build` + `tsc` + `next build` + `postgres`
+memory under real 4-wide load was not directly measured — back-of-envelope (4 concurrent
+jobs × an estimated 2–4 GiB peak each) fits inside the ~15.5 GiB cap with a thinner-than-
+ideal margin. **Action for the owner:** watch `wsl -d Ubuntu -- free -h` /
+`docker stats --no-stream` during the first few genuinely 4-wide PRs (all four
+build/db-estate/db-live-gates/render-drill legs of one PR landing at once); if the VM
+gets memory-pressured or a job is OOM-killed, the lever is raising `.wslconfig`'s
+`memory=` (the host has ~32 GiB physical, so there's room to raise the ~15.5 GiB default
+cap) rather than removing a runner instance.
