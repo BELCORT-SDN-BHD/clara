@@ -11,7 +11,11 @@ lifecycle (onboarding → ongoing close → tax → reporting) under professiona
 an RLS-isolated Postgres. **The DB owns every authoritative number; the agent orchestrates.**
 The dashboard is not a form UI — it is the agent's body language.
 
-**The fifteen hard constraints come before the menu — read them before your first write.**
+**The fourteen hard constraints come before the menu — read them before your first write.**
+*(Number 12 is vacant: it retired on 2026-08-23 with the owner's ruling on ADR-0075 — the
+name-only wall is a PRODUCT INVARIANT, `docs/product/PRD.md` §6 invariant 2(b), not an agent
+constraint; `0062`/`0063` are untouched. The other numbers did NOT shift, so every citation of
+"constraint 13/14/15" written before or after that date still resolves.)*
 Nothing else in this repo outranks them.
 
 ## Run / verify
@@ -19,7 +23,7 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · eslint
+pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · dispatch-model-guard · eslint
 pnpm build       # nitro runtime + next dashboard
 pnpm test        # per-package tests
 ```
@@ -65,18 +69,19 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
     `scripts/hooks/pinned-ids-guard.mjs`, registered in `.claude/settings.json`. It is a
     **mistake-net for verbatim-id write shapes**, not containment: the ids' primary protection
     is this constraint plus the DB walls, and deliberate obfuscation is out of scope by design.
-12. **ROME SECRETARY's customers are NAME-ONLY — never enrich them** with a registration
-    number or a TIN. (STRUCTURAL since 2026-08-14: `0062` walls it in the DB — fact-driven,
-    uuid-pinned, behaviourally self-proven at apply — and `0063` makes lifting it an
-    OWNER-only act through the audited door. The constraint stays here as the law the wall
-    enforces.)
-13. **Four firms, and they are not interchangeable:** **BELCORT** is the real, high-stakes
-    firm (ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION — its sole proprietor is
-    not an employee, his account is EQUITY) · **ROME PUBLIC ADVISORY** is the synthetic
-    sandbox · **Alara** and **Borneo** are slice-era RLS fixtures. Never repurpose one.
-14. **ADR-060's data authority is DATA-scoped and expires at beta.** Test data may be
-    deleted, reseeded and re-run freely; the product's security mechanisms are the thing
-    under test and are never weakened or bypassed for testing convenience.
+13. **BELCORT is the OPERATOR firm; every other firm and client in the estate is a
+    RESETTABLE TEST FIXTURE** — ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION
+    (whose sole proprietor is not an employee: his account is EQUITY) · the synthetic
+    **ROME PUBLIC ADVISORY** · the slice-era RLS fixtures **Alara** and **Borneo**. All of
+    it is factory-reset and re-run at the Wave-G e2e. **Never repurpose the synthetic
+    sandbox as a real firm.** (ADR-0075.)
+14. **The data authority is DATA-scoped and expires at beta** (ADR-060, widened by
+    **ADR-0075**). Test data — every client's, the live DB included — may be deleted,
+    reseeded, reversed and re-run freely without asking, and the agent walks law-71's gates
+    as the owner's DELEGATE through the REAL audited doors, receipted (e-filing excluded by
+    nature; secrets env-to-env, never printed). **The product's security mechanisms are the
+    thing under test and are NEVER weakened or bypassed for testing convenience** — that
+    clause is the operative one on any collision.
 15. **Never disturb the frozen prior build or the Slice-0 spike's parked run** (the
     `workflow` / `graphile_worker` / `spike` schemas).
 
@@ -87,7 +92,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Product law: what/why/scope, and the invariants that bind every feature | `docs/product/PRD.md` (**§6 is LAW**) |
 | The bar the work is judged against, before you call something done | `docs/product/EVALUATION_RUBRIC.md` |
 | Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
-| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` — **read the digest first**; drill to the ADR only if the digest is thin |
+| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
 | A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/`(make sure the files are arranged correctly ) |
 | Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
@@ -159,9 +164,9 @@ Law 1 is the floor, not the ceiling.
 
 ## CI/CD
 
-CI is GitHub Actions on **two self-hosted WSL2 runner instances** (`clara-wsl` +
-`clara-wsl-2`, labels
-`self-hosted, linux, clara`) — the same workflows and the same binding green-check gate, on
+CI is GitHub Actions on **four self-hosted WSL2 runner instances** (`clara-wsl`,
+`clara-wsl-2`, `clara-wsl-3`, `clara-wsl-4` — labels
+`self-hosted, linux, clara`; expanded from two on 2026-08-23, `docs/ops/ci-runner.md`) — the same workflows and the same binding green-check gate, on
 our own hardware. It is **private-repo only**: if the repo is ever made public, decommission
 the runner *first* (`docs/ops/ci-runner.md`). An offline runner makes jobs queue visibly; it
 never lets one silently pass.

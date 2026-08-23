@@ -109,7 +109,9 @@ These conventions governed the append-only log and still govern this directory:
 | [0071](0071-the-agentic-charter.md) | THE AGENTIC CHARTER: judgement becomes the posting authority; the LLM witness pair; the rules machine retires | 2026-08-18 | standing | Twelve rulings + one dissolution + two principles from the owner's vision grilling. Supersedes (exactly enumerated in-file): ADR-015's never-signs clause · ADR-025/laws 5+12 · law 4's agentic-lane reach + WCA-R7 · law 8's judgement half · ADR-047's roster + #25 · law 14's reader half · WB-R2 + 0064's anti-circular (moot) · E-R5/E-R18 · E-R11 key ① · the bank zero-grant law · PRD §8 budgets · ARCH §4.1 no-web. §6.1 and invariants (a)(b)(c) stand. Wave F re-scoped (`docs/plan/active/wave-f-contract.md`); laws 71-76 fold below. |
 | [0072](0072-the-f-a2-rulings-and-the-corpus-sitting.md) | THE F-A2 RULINGS AND THE WAVE-G CORPUS SITTING: the old era is deleted; any-amount authority re-confirmed; the corpus splits into two tiers | 2026-08-20 | standing | Five ruling blocks. ① opener ⑥ ratified + **delete the old era** (execution tier retires inside Wave F · **the post-Window-A re-extraction is TWENTY documents, superseding the full-64 backfill** — so the legacy fallback arms' trigger falls through its own "whichever lands first" clause to the Wave-G reset, and F-A10 closes there · legacy DATA dies at that reset · the spike schemas DROP there too after a cold archive, so constraint 15's spike clause retires THEN, not now). ② high-stakes RE-CONFIRMED at any amount, no thresholds (ADR-0071/G1; the build's fail-closed ceiling on file as dissent; the HUMAN lane and ADR-0044 untouched). ③ **OQ-4 three exits** + **OQ-6 no category gate on the agent lane**, with the human lane's gate STANDING — mechanism of record is `docs/plan/active/f-a2-agentic-posting-design.md` §3.3.3/§4. ④ **R1 RULED** — a closing transfer is not turnover; Fix A to Track B, task #17 unblocked, OD-7 discharged. ⑤ the corpus sitting: two tiers (oracle + open-intake reality), OD-1 BEE two FYs + RS/RPR terminal single periods, OD-4 full permission (IC copy excluded · payroll tightest), OD-5 no second principal (B3's distinct-checker arm ships unexercised, named), OD-6/10 a WHOLE CLEAN DB on the live project (sandbox + fixtures not re-created — the RPA name collision dissolves), OD-11 the UX floor precedes the run, OD-2/8/9 defaulted. No standing law changes; 0071's scoping re-confirmed. |
 | [0073](0073-ci-economics-overhaul.md) | THE CI ECONOMICS OVERHAUL: closed-wave drills demote to the weekly sweep; the monolith splits; the required check `ci` becomes a fail-closed meta-gate | 2026-08-21 | standing | Owner-ruled lever (1): per-PR CI *scope* amended — estate suite + deploy-onto-existing stay per-PR as backstop, a current wave's drill rides per-PR until its wave closes; ADR-061's uniform review ladder untouched. Closes two pre-existing fail-open shapes (lint never required; skipped-satisfies-protection on classifier failure). Hybrid runners DECLINED ($0 preference). Mechanism: `.github/workflows/ci.yml` + `.github/actions/*`. |
-| [0074](0074-the-track-a-sitting.md) | THE TRACK-A SITTING: fourteen principle rulings for F-A3..F-A9; the roster becomes an OPEN REGISTER; attribution becomes JUDGEMENT | 2026-08-22 | standing | Fourteen rulings (TA-P1..P14) settling every Track-A authority question from the contract plus standing law. **Four CONSTITUTIONAL AMENDMENTS — RATIFIED by the owner 2026-08-22**, entering the set with laws 78-81 at that signature: law 71's "exactly" roster → an OPEN REGISTER (TA-P1 C) · invariant (a) attribution → the agent's JUDGEMENT under structural walls (TA-P7 C; PRD §6.2(a) · ARCH §0.1 · digest law 2 — `AGENTS.md`'s home FLAGGED, not drafted) · law 21 narrowed to periodic POSTING belts (TA-P5) · law 76's "LLM" drift trued (TA-P13). Also: three number-origins + a governed policy-table door relaxing `0016`'s migration-only assertion (TA-P2) · one purpose per processing class + a firm-level narrow purpose, C6 to critical path (TA-P3) · mechanically-bound receipts + a DEFINER read wrapper (TA-P4) · walls re-aim at the DIRECTING human, `agent_prepared` (TA-P6) · learned identifiers are context, never keys, + a promotion door (TA-P8) · a DECIDED freeform read surface closing GAP5-5 (TA-P9) · sandbox exports with a byte-burned watermark, aggregates narrative-only (TA-P10) · the one-architecture TEST — the bank rules machine retires whole (supersedes WCC-R5's bank arm), **7A-R3 + E-R13 recorded DISSOLVED** (TA-P11) · the brake census, three gates REMOVED (TA-P12) · ONE metering ledger, `client_id` added now (TA-P13) · closed-loop DONE (TA-P14). Orchestrator dissents on file: TA-P1, TA-P7. Laws 78-81 fold below (§11); mechanism of record `docs/plan/active/wave-f-contract.md` + the sitting record `docs/plan/active/track-a-sitting-1.md`. |
+| [0074](0074-the-track-a-sitting.md) | THE TRACK-A SITTING: fourteen principle rulings for F-A3..F-A9; the roster becomes an OPEN REGISTER; attribution becomes JUDGEMENT | 2026-08-22 | standing | Fourteen rulings (TA-P1..P14) settling every Track-A authority question from the contract plus standing law. **Four CONSTITUTIONAL AMENDMENTS — RATIFIED by the owner 2026-08-22**, entering the set with laws 78-81 at that signature: law 71's "exactly" roster → an OPEN REGISTER (TA-P1 C) · invariant (a) attribution → the agent's JUDGEMENT under structural walls (TA-P7 C; PRD §6.2(a) · ARCH §0.1 · digest law 2 — `AGENTS.md`'s home FLAGGED, not drafted) · law 21 narrowed to periodic POSTING belts (TA-P5) · law 76's "LLM" drift trued (TA-P13). Also: three number-origins + a governed policy-table door relaxing `0016`'s migration-only assertion (TA-P2) · one purpose per processing class + a firm-level narrow purpose, C6 to critical path (TA-P3) · mechanically-bound receipts + a DEFINER read wrapper (TA-P4) · walls re-aim at the DIRECTING human, `agent_prepared` (TA-P6) · learned identifiers are context, never keys, + a promotion door (TA-P8) · a DECIDED freeform read surface closing GAP5-5 (TA-P9) · sandbox exports with a byte-burned watermark, aggregates narrative-only (TA-P10) · the one-architecture TEST — the bank rules machine retires whole (supersedes WCC-R5's bank arm), **7A-R3 + E-R13 recorded DISSOLVED** (TA-P11) · the brake census, three gates REMOVED (TA-P12) · ONE metering ledger, `client_id` added now (TA-P13) · closed-loop DONE (TA-P14). Orchestrator dissents on file: TA-P1, TA-P7. Laws 78-81 fold below (§11); mechanism of record `docs/plan/active/wave-f-contract.md` + the sitting record `docs/plan/active/track-a-sitting-1.md`. **The exact register — supersessions, what stands, the test-data delegation, the residue (R-A/R-D/R-F/R-OWNER), the boundary and TA-P1's dissent in full — split out verbatim 2026-08-23 to [`0074-annex-a-mechanisms.md`](0074-annex-a-mechanisms.md)** at the entry's 500-line ceiling; 0074 keeps the rulings, the amendments, the ratification stamps and the rider. |
+
+| [0075](0075-test-data-authority-widened.md) | TEST-DATA AUTHORITY WIDENED: no real client exists before go-live; data is free, gates are walked by the delegate, mechanisms never move | 2026-08-23 | standing | Owner ruling (Tao, 2026-08-23, the alignment grill), amending **ADR-060**'s data authority and widening the 2026-08-22 identity grant. **(1)** Every client in the estate is TEST DATA authorised by its owner — BELCORT's ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION, the synthetic ROME PUBLIC ADVISORY, the Alara/Borneo RLS fixtures — all factory-reset and re-run at the Wave-G e2e. **(2) DATA is free:** delete, reseed, reverse, re-run any client's data, documents, consents and close state, **live DB included**, without asking; the corpus is the owner's three folders and **no oracle exists beyond them or is required**. **(3) GATES are walked by the agent as the owner's DELEGATE** through the REAL audited doors, receipted — law-71 human acts, consent signatures, capability grants, password-bearing acts (secrets env-to-env, **never printed**); **e-filing excluded by nature**. **(4) MECHANISMS never move** — RLS, the attribution walls, receipts, roles/grants, the generic name-only wall are the product under test; weakening one for testing convenience is forbidden (the NARROW reading, owner-confirmed, and the operative clause on any collision). **(5) No client-specific mechanism or documentation for a test client:** hard constraint **12 RETIRED as a named constraint** (the GENERIC "a client may be flagged name-only, never enriched" wall stays — `0062`/`0063` untouched), constraint **13 REWRITTEN** (BELCORT is the operator firm; every other firm/client is a resettable test fixture; never repurpose the synthetic sandbox as a real firm), constraint **14's "expires at beta" STANDS**. **(6)** Every wave's validation still runs in full; nothing is deferred to the e2e except what is e2e by nature, and a Known-issues or Backlog row is the only lawful home for a deferral. Folds as digest **law 82** (§12). |
 
 **Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
@@ -128,33 +130,9 @@ governs.
 > **SIGNED OFF — Tao (BELCORT), 2026-08-12.** Laws 1-67 below are ratified as the
 > current standing set at the ADR-0069 harness refactor. Additions or supersessions land
 > as new ADR entries; this digest is re-trued whenever one does.
-> **RE-TRUED 2026-08-16 (the Wave-E clock-out):** laws 68-70 fold ADR-0070's wave-close
-> supplement (rulings 10-13) into the digest; they carry the standing status of their
-> source ADR and enter the ratified set at the owner's next digest sign-off.
-> **RE-TRUED 2026-08-18 (ADR-0071, the Agentic Charter):** the owner's twelve-ruling
-> grilling supersedes the clauses annotated below (nine annotations: laws 2, 3, 4, 5,
-> 8, 12, 13, 14, 25) and folds laws 71-76 (§9). The supersessions were ruled in-session
-> by the owner directly; the annotations here are the re-truing that ADR's own text
-> mandates.
-> **RE-TRUED 2026-08-20 (ADR-0072, the F-A2 rulings + the corpus sitting):** **no law
-> changes, and that is the finding.** The night's five ruling blocks land entirely inside
-> ADR-0071's existing scoping and re-confirm it at the two places it was most likely to be
-> read wider than it was written: **law 71** binds at ANY amount with no threshold and no
-> per-firm amount dial (0072 ②), and **law 4's human half is untouched** — the human lane
-> keeps its distinct-checker gate on `is_year_end` and `tax_affecting` even though the agent
-> lane is freed of it (0072 ③, supplementary). **Law 12** stays superseded-and-moot; 0072 ①
-> fixes only WHEN the machinery it governed retires. Hard constraint 15's spike clause is
-> superseded **prospectively** — at the Wave-G reset, after a cold archive — and is not
-> lifted here; `AGENTS.md` stands unchanged until that ceremony.
-> **RE-TRUED 2026-08-21 (ADR-0073, the CI economics overhaul):** law 77 folds below (§10). No existing law
-> changes: law 26 (uniform review intensity) is expressly untouched — 0073 amends per-PR **CI scope**, not
-> review scope — and law 39's named legs (deploy-onto-existing · freeze-lint · leak-scan · the DR round-trip)
-> all stay per-PR. Law 77 enters the ratified set at the owner's next digest sign-off.
-> **RE-TRUED 2026-08-22 (ADR-0074, the Track-A sitting):** laws 78-81 fold below (§11) and laws 2 (invariant
-> (a)), 21, 71 and 76 are amended in place — **all eight RATIFIED 2026-08-22 (owner), with law 78 carrying the
-> rider R-TA-P1-walls.** The three CONSTITUTIONAL ones are ratified as LAW here; their product-text homes
-> (PRD §6.2(a) · ARCHITECTURE §0.1) still carry the pre-amendment wording and are a **named follow-up** — this
-> digest governs. TA-P2 routes AROUND law 1; constraints 12/13 re-confirmed.
+> **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's
+> 500-line ceiling, verbatim and append-only. Six minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 ·
+> 08-23). **The laws below govern; the log records when each was re-read and what the reading found.**
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -170,7 +148,7 @@ governs.
    write authorization (structural read-only agent role). *(0002; realized 0015. Invariant (d)
    amended by 0071: the agent's READ path stays structurally read-only; a wake-scoped, allowlisted
    agentic WRITE lane now exists. **Invariant (a) AMENDED by 0074/TA-P7 — law 79 — RATIFIED 2026-08-22
-   (owner); PRD §6.2(a) / ARCH §0.1 still unedited, a named follow-up.** (b)(c) untouched.)*
+   (owner); PRD §6.2(a) / ARCH §0.1 AMENDED to match in #287.** (b)(c) untouched.)*
 3. **Write authorization is lane-split by GRANT, never detected at runtime.** *(0015 —
    the lane-split-by-GRANT principle stands and is the mechanism of 0071's new verbs.
    The "agent-never-signs is the ABSENCE of an entry point" clause is SUPERSEDED by
@@ -469,32 +447,32 @@ governs.
 
 ## 11 · The Track-A sitting supplement (folded 2026-08-22; source ADR-0074 — the sitting's other ten rulings bind through the ADR and `docs/plan/active/wave-f-contract.md`)
 
-78. **The human roster is an OPEN REGISTER.** Law 71's seven acts are a RESERVATION, not a census: any act they
-    do not reserve is the agent's, adding one is an owner ruling, new authority arrives as a wake SIBLING verb
-    (never a live-body rewrite), capabilities default-on, no per-firm dial. **Rider R-TA-P1-walls (2026-08-22):
-    the open register ships WALLED — a run with a live `close_attestations` row cannot be abandoned by Clara
-    (B6), a re-freeze refuses while a reopen's correction is in flight (B14), and every entrance's wall stays at
-    its own door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** *(0074/TA-P1; dissent on file)*
-79. **Attribution is JUDGEMENT under walls.** Invariant (a) is satisfied by a human click, an exact identifier
-    match, or her own judgement — walled by a hard-number contradiction refusal, a name-family collision guard, a
-    correction path raising a named misrouted-egress event, and a firm-scoped carrier for the unattributable
-    document. **Unsure → she asks**; a model never scores itself (law 72). *(0074/TA-P7; dissent on file)*
-80. **A clock may wake her; law 71 governs what she then does.** ONE time-triggered wake source, no
-    ramp/first-draft/sampling; the WORK still triggers on data (a missing statement yields a chase notice, never
-    a fabricated reconciliation); every clocked act is receipted; statutory PREPARATION is hers and submission
-    stays human. *(0074/TA-P5; law 21 narrowed to posting belts)*
-81. **One ledger, no brakes, one architecture.** Per-call usage records through a SINGLE ledger carrying
-    `client_id` and the triggering actor from its first row; every usage gate that pauses automation is REMOVED
-    and engine-protection refusals renamed off the budget string; and one deterministic core with one entrance
-    per surface is ONE architecture — two mutually-unaware paths are two. *(0074/TA-P11, TA-P12, TA-P13)*
+78. **The human roster is an OPEN REGISTER.** Law 71's seven acts are a RESERVATION, not a census: any act they do not reserve is
+    the agent's, adding one is an owner ruling, new authority arrives as a wake SIBLING verb (never a live-body rewrite),
+    capabilities default-on, no per-firm dial. **Rider R-TA-P1-walls (2026-08-22): the open register ships WALLED — a run with a
+    live `close_attestations` row cannot be abandoned by Clara (B6), a re-freeze refuses while a reopen's correction is in flight
+    (B14), and every entrance's wall stays at its own door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** *(0074/TA-P1; dissent on file)*
+79. **Attribution is JUDGEMENT under walls.** Invariant (a) is satisfied by a human click, an exact identifier match, or her own judgement
+    — walled by a hard-number contradiction refusal, a name-family collision guard, a correction path raising a named misrouted-egress
+    event, and a firm-scoped carrier for the unattributable document. **Unsure → she asks**; a model never scores itself (law 72).
+    **As-built caveat: the live `assert_client_resolved` body still enforces `method in ('human','rule')` and `confidence >= 0.95`
+    (`0018_gate_k_domain.sql:57,62`) until F-A7a recuts it.** *(0074/TA-P7; dissent on file)*
+80. **A clock may wake her; law 71 governs what she then does.** ONE time-triggered wake source, no ramp/first-draft/sampling; the
+    WORK still triggers on data (a missing statement yields a chase notice, never a fabricated reconciliation); every clocked act
+    is receipted; statutory PREPARATION is hers and submission stays human. *(0074/TA-P5; law 21 narrowed to posting belts)*
+81. **One ledger, no brakes, one architecture.** Per-call usage records through a SINGLE ledger carrying `client_id` and the triggering
+    actor from its first row; every usage gate that pauses automation is REMOVED and engine-protection refusals renamed off the budget
+    string; and one deterministic core with one entrance per surface is ONE architecture — two mutually-unaware paths are two. *(0074/TA-P11, TA-P12, TA-P13)*
+
+## 12 · The test-data authority supplement (folded 2026-08-23; source ADR-0075)
+82. **Test data is free; law-71 gates are walked by the DELEGATE; mechanisms NEVER move.** Every client in the estate is test data (reset, reseed, reverse, re-run freely — live DB included); the agent walks law-71's gates as the owner's DELEGATE through the REAL audited doors, receipted, e-filing excluded by nature and secrets never printed; **no mechanism ever moves for testing convenience** (RLS, the attribution walls, receipts, roles/grants, the generic name-only wall — they are the product under test), and nothing client-specific is built or kept for a test client. Full text: `0075-test-data-authority-widened.md`. *(0075; expires at beta with hard constraint 14)*
 
 ## 10 · The CI-economics supplement (folded 2026-08-21; source ADR-0073)
 
-77. **Per-PR CI scope is current-wave + backstop; closed-wave drills live on the weekly sweep.** Per-PR: lint
-    (every event, docs-only included) · typecheck/build + the worker-path gate · the estate suite +
-    deploy-onto-existing (the ruled backstop) · the live-behavior e2es + the DR pair · the render drill · the
-    partition gate · the CURRENT wave's drill while its wave is open. Sweep + manual dispatch only: every
-    closed wave's upgrade/contract drill and the D-b frontier matrix. The required check `ci` is a fail-closed
-    meta-gate over every job — success or lawfully-skipped, both directions asserted. After merging a PR that
-    touches a closed drill or the pipeline itself, run the sweep by hand (`gh workflow run ci.yml`). Review
-    intensity (law 26) is unaffected. *(0073)*
+77. **Per-PR CI scope is current-wave + backstop; closed-wave drills live on the weekly sweep.** Per-PR: lint (every event,
+    docs-only included) · typecheck/build + the worker-path gate · the estate suite + deploy-onto-existing (the ruled backstop) ·
+    the live-behavior e2es + the DR pair · the render drill · the partition gate · the CURRENT wave's drill while its wave is
+    open. Sweep + manual dispatch only: every closed wave's upgrade/contract drill and the D-b frontier matrix. The required
+    check `ci` is a fail-closed meta-gate over every job — success or lawfully-skipped, both directions asserted. After merging a
+    PR that touches a closed drill or the pipeline itself, run the sweep by hand (`gh workflow run ci.yml`). Review intensity
+    (law 26) is unaffected. *(0073)*

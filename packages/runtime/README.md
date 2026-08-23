@@ -10,7 +10,7 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 ## What is wired now
 
 - **Durable substrate**: the Workflow DevKit Postgres world (`workflow` +
-  `@workflow/world-postgres`, `ai@7.0.31`), built by Nitro with the
+  `@workflow/world-postgres`, `ai@7.0.77`), built by Nitro with the
   `workflow/nitro` compiler module (Appendix A).
 - **The chat loop** (`workflows/chatTurn.v11.ts` + its FROZEN closure
   `chatTurn.v11.impl.ts` / `chatTurn.v11.prompt.ts` / `chatTurn.v11.tools.ts`;

@@ -271,6 +271,56 @@ standing operating law whose one-sentence form stays in PROGRESS.md. Full text v
   runner copies fight one registration → Conflict crashloop) — cure is a full `wsl --shutdown`
   when runners are IDLE, then one keeper.
 
+## Session-log entry archived 2026-08-23 (the Track-A v2 landing, closed by its own merge; moved verbatim)
+
+*Landed as PRs #284/#285/#286/#287, all merged. The design sets themselves are the operative
+record now (`docs/plan/active/`, one gate record per item), which is why the narrative moves here.*
+
+- **2026-08-22 (the TRACK-A v2 DESIGN LANDING)** — **all seven Track-A design sets reached v2 and
+  landed in one docs-only PR**: F-A3 bank agency · F-A4 close key ① · F-A5 reporting agency
+  (renamed `fa5-agency-*` → `reporting-agency-*` at landing) · F-A6 audited freeform read ·
+  F-A7 filing + interview · F-A8 internet lane · F-A9 metering — **36 files, every one gated
+  2026-08-22, each with its own PR-0 gate record.** Design gates 1 (F-A3/A7/A8/A9, 87 lanes) and
+  2 (F-A4/A5/A6, 53 lanes) ran two lenses each with per-finding adversarial verification, and both
+  fold batches are folded. **Eight orchestrator rulings under the standing delegation, R-L11…R-L18**
+  (mechanism and sequencing only, no law touched): B13's ADJ oracle admission satisfied additively ·
+  the TA-P1 walled-wide shape ships as the named rider **R-TA-P1-walls** · the undated-document
+  question stays off-digest · F-A5's solo-attestation default · **two new lanes registered — F-A5b
+  sandbox export and F-A6 v2 cross-client named read** · F-A6's GB-1 obligation re-worded to its
+  intent (unforgeable receipt, unmoved privilege set) · XLSX/DOCX structured-parse deferred to
+  F-A6 v2. **C6 legal pack drafted + citation-verified** (`docs/ops/legal/`). **The hard
+  prerequisite every v2 named for its PR-1 — the owner's digest re-sign — was GIVEN THE SAME DAY:
+  laws 78-81 + the four amendments RATIFIED 2026-08-22, law 78 carrying the rider R-TA-P1-walls.**
+  Every v2's prerequisite line is annotated SATISFIED in place; the remaining PR-1 prerequisite is
+  **F-A2's PR-1 merged**; the PRD/ARCHITECTURE product-text edits landed in #287.
+
+## Backlog block archived 2026-08-23 — the SLICE-ERA STANDING RESIDUALS, in full (moved verbatim; PROGRESS.md keeps a pointer)
+
+*None has a PR; every row is deferred, declined, event-triggered or absorbed, and each names its
+disposition. Moved at the split-pass sweep so PROGRESS.md could stay under its ceiling.*
+
+**Slice-era standing residuals** (carried from the retired PART 2 register; none has a PR).
+*(The `0017` kind-blind-supersede row is GONE 2026-08-20 — DISCHARGED whole; record in the archive.)*
+- **Always-run role/membership reconciliation** — deferred: poisoning needs SUPERUSER, outside the threat model. *(Slice-2 HIGH 6/7)*
+- **Supabase non-superuser deploy-role CI** — PARTIALLY discharged by #234's non-superuser
+  owner-login rehearsal plus two live ceremonies exercising the guarded SUSET branch.
+  REMAINING: the standing CI leg under that role — **DESIGNATED to the weekly sweep by
+  ADR-0073, its own PR** (candidate design on file in the ADR: harden the
+  deploy-onto-existing leg's role posture on the sweep first; promote to per-PR only if
+  measured cheap). *(Slice-2 HIGH 8/9)*
+- **Opaque/HMAC pack tokens** — declined; recorded, not pending work. *(Slice-3 C12)*
+- **`activate_taxonomy_version(v)` + the predicate-dimension taxonomy schema** — event-triggered: ships when a second taxonomy version first exists. *(Slice-3 C8/C16)*
+- **Slice-4 residuals** *(ADR-017)* — audited owner compliance export + a visibility-aware
+  trace-debug surface · per-firm chat-visibility toggle + un-share · S4-V2
+  engine-hook-lifetime ≥14d (the canary watch — a *watch* precisely because `daba7f2e` is
+  hard-blocked from ever being answered) · job-level engine liveness. ~~Per-part-type field
+  schemas → the fail-closed card catalog~~ **ABSORBED → Wave G** · ~~firm-local-time
+  budgets~~ **STALE** (G8 narrowed §8 to metering-only) · ~~billing-grade metering~~
+  **ABSORBED → F-A9**.
+- **Slice-6 / Wave-A residuals — ALL THREE ABSORBED** *(ADR-019/023)*: task-per-ingest coding
+  → **F-A2** (which inverts its premise exactly) · the proactive notification-inbox surface →
+  **Wave G** · agent-visible attribution candidates → **F-A7a**.
+
 ## Backlog blocks archived at the 2026-08-22 landing sweep (the ARGUMENT moved; PROGRESS.md keeps the state)
 
 *Same law as the 2026-08-20 disposition sweep: a disposition is not a deletion, and the reasoning
@@ -310,3 +360,11 @@ record of their own — ADR-0072 ④ for the first, ADR-0073 for the second.*
   branch-protection interplay stays as recorded (#277): a stale PR needs `gh pr update-branch` +
   re-green — **never `--admin`**. Batch-CI-per-wave stays REJECTED (scope routing, not frequency
   reduction).
+
+## Known issue archived 2026-08-23 — the `AGENTS.md` home for invariant (a)
+
+- ~~**The `AGENTS.md` home for invariant (a) is FLAGGED, not drafted**~~ — **DECIDED (b) 2026-08-23
+  (owner): PRD §6.2(a) is the single home; `AGENTS.md` points at §6 and gains NO duplicate clause.**
+  The question was real — the sitting record named "constraint 2" as a third home, but constraint 2
+  is the DB-owns-every-authoritative-number law and no hard constraint states invariant (a) at all.
+  One statement of a law, in one place, is the answer. **Closed; nothing was guessed in.**
