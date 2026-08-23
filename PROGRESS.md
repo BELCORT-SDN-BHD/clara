@@ -50,8 +50,8 @@ clock-out)*
   71's roster becomes an **OPEN REGISTER** (any act it does not reserve is the agent's, and it
   ships WALLED — B6 · B14 · the entrance seam) · **invariant (a) becomes the agent's JUDGEMENT
   under structural walls** · law 21 narrows to periodic POSTING belts · law 76's "LLM" drift is
-  trued. **The PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits LANDED (#287); the `AGENTS.md`
-  home for invariant (a) stays FLAGGED for the owner** (see Known issues). **Ruled ahead of PR-1 on
+  trued. **The PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits LANDED (#287), and the `AGENTS.md`
+  home question is DECIDED (b) 2026-08-23 — PRD §6 is the single home, no duplicate clause.** **Ruled ahead of PR-1 on
   purpose:** the one-architecture TEST retires the **bank rules machine whole** (superseding
   **WCC-R5**'s bank arm) and RECORDS **7A-R3 + E-R13 as dissolved** with it. Orchestrator
   dissents on file: TA-P1, TA-P7. Mechanism of record: `docs/plan/active/wave-f-contract.md`
@@ -117,7 +117,7 @@ clock-out)*
 |---|---|---|---|
 | Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — PR-1 #263 (0089-0095) · PR-2 #265 (witnessFacts.v1, v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 + 0097 CUTOVER, ceremonied 2026-08-20)** · **PR-4 #268 (0098, shipped UNPOINTED — activated at the 2026-08-21 window)**. Consents granted+activated RS/BEE/RPR. **Corpus MEASURED**: witness 0/33 vs legacy 28/92 on two named conjuncts (NIL-TAX; the type_code prompt-intent mismatch) — **both fixed by the openers and re-measured 2026-08-21**. D12 identity gate PASSES. | ceremonied | #263 #265 #266 #267 #268 |
 | Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
-| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design at v6.** Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole → **B15** · B10/B11's pre-stamp counterparty raise → projected-state predicate · the unbuildable-as-written `interactive_client` limb → corrected, both CHECKs extend) + **11 materials** (headline: B4-sales derived against a body superseded at `0022` — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width: B12/B13 CUT on correctness grounds · PR-1 = THREE files, one D1 window · chat parity RIDES THE TRAIN — owner-ruled 2026-08-22 (方案二, D34), overriding the gate's severance; orchestrator's dissent on file.** **OQ-2/3/5 RULED 2026-08-22** (owner, per recommendations: stop-write-keep-table + drop the permanently-false `rule_backed` column · preview verb retires + the seeding tick re-points to the knowledge layer · B4-generic adopted with both costs priced and MEASURED at PR-4). Build NOT started — PR-1 authoring is next. | design | — |
+| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design at v6.1** (#282, `cfa0710` — the PR-1 build trues, six orchestrator rulings under the standing delegation, **R-L1..R-L6 ledgered as D38-D43**: **D38** B8 resolved from the sources — no citation names a SUPERSEDED fact generation, α scoping, C.3 becomes a five-cell set · **D39** the retirement CLAIM SPLIT — breeding-claim tests retire in PR-1 with the 8th body, verb-existence tests in PR-3 · **D40** lock order is the delegate's own (filing `FOR SHARE` → entry row → vendor `203005003` → client `203005004`), closing an ABBA against a concurrent human approve · **D41** the D1 list stays TEN and the supplier floor's BODY moves · **D42** B7's amount-bearing evidence is `field_path='invoice.total'` · **D43** `sweep_runs.posted_count` is a FOURTH counter, so finalize is drafted + skipped + refused + posted = expected). Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole → **B15** · B10/B11's pre-stamp counterparty raise → projected-state predicate · the unbuildable-as-written `interactive_client` limb → corrected, both CHECKs extend) + **11 materials** (headline: B4-sales derived against a body superseded at `0022` — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width: B12/B13 CUT on correctness grounds · PR-1 = THREE files, one D1 window · chat parity RIDES THE TRAIN — owner-ruled 2026-08-22 (方案二, D34), overriding the gate's severance; orchestrator's dissent on file.** **OQ-2/3/5 RULED 2026-08-22** (owner, per recommendations: stop-write-keep-table + drop the permanently-false `rule_backed` column · preview verb retires + the seeding tick re-points to the knowledge layer · B4-generic adopted with both costs priced and MEASURED at PR-4). Build NOT started — PR-1 authoring is next. | design | — |
 | Wave F · Track A — **F-A3 bank agency** | **DESIGN v2, GATED 2026-08-22** — the seven `bank-agency-*` files (survey · design · four annexes · gate record [`bank-agency-gate-record.md`](docs/plan/active/bank-agency-gate-record.md)); gate 1 ran two lenses, 5 blockers / 6 materials folded, width severed into PR-1a pure extraction · PR-1b agent limb · PR-1c egress · the clock PR (which sequences AFTER F-A4 mints the wake kind, R-L7). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): open-register verbs (enter/void statement · certify · unmatch ANY pair · resolve exception incl. write-off · **the 60-day waiver, running at 60 until F-A3's battery gives the owner data**) + a duplicate-payment wall + `add_bank_account`'s COA-binding check · new `bank_matching` purpose, per client · clock-driven under law 71 · **the bank rules machine retires whole and 7A-R3/E-R13 are recorded dissolved** · owns drawer-2's vacuous-green gate | design | — |
 | Wave F · Track A — **F-A4 close key ①** | **DESIGN v2, GATED 2026-08-22** — the five `close-key-1-*` files; gate record [`close-key-1-gate-record.md`](docs/plan/active/close-key-1-gate-record.md) (3 blockers / 10 materials folded; **OQ-7/OQ-8/OQ-9 ruled by R-L12/R-L13/R-L11**). **OWNS the clock spine** (R-L7 — F-A3/F-A5/F-A8 consume it) and **OWNS task #17 Fix A at PR-1b** (R-L9/GM-7/D-23). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): mints the product's FIRST calendar wake source (new wake kind, CHECK pair, six rosters; law 71 posture, no ramp) · open-year / abandon-any / re-freeze / snapshot-mint pass to her · **the minimal human doors are IN SCOPE** (finalize · abandon · a "Clara proposes close" card + its durable carrier) · evaluator-backed adjustments post, judgement accruals draft · owns the uncoded-voucher gate · **shares ONE D1 window with task #17 and TA-P6 on `finalize_close`** | design | — |
 | Wave F · Track A — **F-A5 reporting agency** | **DESIGN v2, GATED 2026-08-22** — the five `reporting-agency-*` files (renamed from `fa5-agency-*` at landing); gate record [`reporting-agency-gate-record.md`](docs/plan/active/reporting-agency-gate-record.md) (3 blockers / 7 materials / 1 nit folded; **OQ-5 ruled by R-L14** — the solo self-attestation arm on the agent lane; **the sandbox EXPORT path severed to lane F-A5b, R-L15**). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): **"end to end" rewritten open→evaluate→seal→render — ISSUE IS HUMAN** · the issue wall re-arms on the DIRECTING human, self-run fails closed to a human, `agent_prepared` receipts, a solo arm · self-run packs exempt from `0084`'s orphan-adoption · sandbox exports with a **byte-burned watermark** + the covered-recipient cross-client test · **the first real seal + byte-reproduction drill precedes N3** | design | — |
@@ -188,6 +188,19 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 ## Backlog
 
 Registered but not scheduled. Sources of record in brackets.
+
+**Unowned gaps found by the 2026-08-23 alignment scan — now OWNED** (each was real work with no home;
+the owner is named so none of them drifts back into nobody's queue):
+- **Manual journal-entry compose UI → the Codex frontend build.** The verb exists
+  (`wake_draft_entry`); no surface composes a JE by hand, so a bookkeeper cannot enter one without
+  a document. Not a DB gap — a UI gap, and the new app package owns it.
+- **`coding_rules` propose/sign retirement → F-A2 PR-4's closing criterion.** TA-P11 retired the
+  bank rules machine whole; the CODING rules machine's propose/sign path has no equivalent
+  retirement date. Writes stop, history stays as knowledge fuel — the same treatment, consistent
+  with OQ-2's ruling.
+- **The autoDraft 8-step cap → F-A2 PR-2's design cell.** The cap appears in no brake census and no
+  design; `autoDraft_v9` either states it as a named, designed bound or removes it. An undocumented
+  step ceiling is a silent stop.
 
 **Named build debts (deadline-triggered):**
 - **The `closing_transfer`/SST-turnover latent (0056) — R1 RULED 2026-08-20 (ADR-0072 ④), task #17
@@ -354,10 +367,11 @@ twice; worth pricing for in-repo custody.
   R-OWNER + `docs/plan/active/f-a2-annexes-4-build.md` J.4 (`_document_direction` recut so ONE held hard id
   suffices, new `untestable` class, D1 + `prosrc`-SHA pin; B15 also refuses
   `generic_registration_untestable`) — **D18 now stands for direction-SILENT documents only.**
-- **The `AGENTS.md` home for invariant (a) is FLAGGED, not drafted** (ADR-0074/TA-P7). The
-  sitting record names "constraint 2" as the third home, but constraint 2 is the
-  DB-owns-every-authoritative-number law and **no hard constraint states invariant (a) at all**
-  — so it is either a no-op or a new clause. Owner's call at sign-off; nothing was guessed in.
+- ~~**The `AGENTS.md` home for invariant (a) is FLAGGED, not drafted**~~ — **DECIDED (b) 2026-08-23
+  (owner): PRD §6.2(a) is the single home; `AGENTS.md` points at §6 and gains NO duplicate clause.**
+  The question was real — the sitting record named "constraint 2" as a third home, but constraint 2
+  is the DB-owns-every-authoritative-number law and no hard constraint states invariant (a) at all.
+  One statement of a law, in one place, is the answer. **Closed; nothing was guessed in.**
 - **The wiki dynamic-SQL gate reads CoR-block comments UN-MASKED** (found 2026-08-20 on 0097):
   `parseCoRPatches` tests `CREATE_FN_RE` against a block whose `--` comments survive the
   file-level `maskComments` (dollar-quoted interiors are skipped), so a create-function phrase
@@ -392,7 +406,10 @@ version + ceremony):**
   discount — still the owner's, since the change would be the evaluator inventing structure.
 - **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it):
   the sidecar `runId` is clobbered on the re-mint path —
-  `packages/runtime/lib/reconciler-documents.mjs:198-206` with `packages/runtime/lib/spool.mjs:124`.
+  `packages/runtime/lib/reconciler-documents.mjs:450` with `packages/runtime/lib/spool.mjs:124`.
+  *(Cite TRUED 2026-08-23: `:198-206` is `documentTaskSnapshot`, a SELECT — the clobber is the
+  re-enqueue's `writeTaskMeta(task.taskId, { ...task, runId: … })` full overwrite at `:450`, where
+  the merging `patchTaskMeta` was wanted.)*
   A real defect with a known site pair; its own PR, not a rider on a pacing fix.
 - *(The stranded-pair row is in the archived batch above; the `0051` door's `v_lane` defect
   stays unrepaired by design — no new member can mint post-cutover.)*

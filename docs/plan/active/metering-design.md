@@ -171,13 +171,18 @@ every byte cite):
 | 3 · Unattended token-budget 60%/100% | `admit_autodraft_task`, `0011:2555-2566` / live text `0036:1408-1417` (both predictions; the tip is a rig-replay fact) | **REMOVE** the block | PR-1B |
 | 4 · Unattended concurrency floor | `admit_autodraft_task`, `0011:2543-2554` / live text `0036:1397-1407`, + `0048:172-192`'s own-run fix | **KEEP** the bound; **RENAME** the outcome/reason string `'refused_budget'` → `'refused_concurrency'` (new value on the `sweep_run_items.outcome` CHECK, drop+add, ACCESS EXCLUSIVE, validates trivially — every existing row keeps its historical string; only future rows use the new one) | PR-1B |
 | 5 · 15-drafts/day sales quota | `admit_autodraft_task`'s 0046 splice — **three constructs, not one range** (survey §A.5(5)'s table): REWRITE `0046:2223-2225`, UNTOUCHED `:2226-2242`, REMOVE `:2245-2259` (all predicted) | **REMOVE the cap only.** The shared select is rewritten to read `sales_admission_watermark` alone; the 7A-R5 backfill door keeps its `sales_backlog_held` refusal byte-for-byte. **Order-dependent**: the rewrite lands ahead of §3.4's column drop in the same file. **Untouched**: `sales_lane_active`, `sales_backfill_batches`, `sales_admission_watermark`, `sales_backlog_held` | PR-1B |
-| 6 · Document ingest per-UTC-day docs/pages | `_reserve_document_ingest`, `0007:1638-1650` (`docs_per_day`, `pages_per_day` on `firm_document_limits`) | **UNCLASSIFIED — owner item (§4).** Spend-shaped by its own comment, but outside the lanes TA-P12 enumerated. **Fail-closed default: the gate stays live**, and PR-3's acceptance does not claim a complete census until the owner rules | — |
-| 7 · Processing-call per-UTC-day pages | `_reserve_processing_call` live tip `0038:7063-7078`; its own comment (`:7056-7058`) calls the budget the firm's **vendor spend** | **UNCLASSIFIED — same owner item, same default** | — |
+| 6 · Document ingest per-UTC-day docs/pages | `_reserve_document_ingest`, `0007:1638-1650` (`docs_per_day`, `pages_per_day` on `firm_document_limits`) | ~~UNCLASSIFIED — owner item (§4)~~ **RULED 2026-08-23 (owner): KEEP, re-classified ENGINE PROTECTION** — it bounds how much work the intake engine takes at once, which is law 76's own carve-out, the same class as gates 2, 4 and 8. **MANDATORY RENAME with it:** the refusal must stop sharing the `refused_budget` string (law 22 — a visible record must not lie about why it refused) | PR-1B (rename only; the bound is byte-unchanged) |
+| 7 · Processing-call per-UTC-day pages | `_reserve_processing_call` live tip `0038:7063-7078`; its own comment (`:7056-7058`) calls the budget the firm's **vendor spend** | ~~UNCLASSIFIED — same owner item, same default~~ **RULED 2026-08-23 (owner): REMOVE** — its own author calls it the firm's vendor spend, so it is a SPEND brake and G8's meter-never-cap reaches it | PR-1B (the body joins the D1 list) |
 | 8 · Document-processing concurrency floors | `claim_document_processing_task`, `0090:421-428` (`ocr_concurrency`) and `:434-442` (`llm_witness_concurrency`) | **KEEP** — engine protection, law 76's own carve-out, the same class as gates 2 and 4. No `outcome` string is involved (raised CLR18 only), so no rename obligation | — |
 
-**If the owner rules gates 6/7 REMOVE**, two more live bodies join the D1 list
-(`_reserve_document_ingest`, `_reserve_processing_call`) and PR-1B's window grows from
-one body to three. That is why the classification is not this lane's to make.
+~~**If the owner rules gates 6/7 REMOVE**, two more live bodies join the D1 list…~~
+**RULED 2026-08-23, and the answer is SPLIT, so only ONE body joins:** gate 7's
+`_reserve_processing_call` is REMOVED and enters the D1 list; gate 6's `_reserve_document_ingest`
+is KEPT as engine protection and is recut only for the `refused_budget` rename. **PR-1B's window
+grows from one body to two, not three.** The census is now CLOSED-WORLD and complete: **eight gates,
+four REMOVE (1 · 3 · 5 · 7) and four KEEP (2 · 4 · 6 · 8)** — and **two of the four KEEPs carry the
+mandatory rename off `refused_budget`: gate 4 (`refused_concurrency`) and gate 6.** Gate 8 raises
+CLR18 only and writes no outcome string, so it carries no rename.
 
 **The rename's full surface** (law 22 — a visible record must not lie): the CHECK
 extension on `sweep_run_items.outcome`; the concurrency block's own literal strings
@@ -427,13 +432,16 @@ PR-1:
   the firm's vendor spend"), the same shape as the already-REMOVE'd 15/day sales quota.
   But it also paces a lane the ruling never discussed, and REMOVING it puts two more live
   bodies (`_reserve_document_ingest`, `_reserve_processing_call`) into a D1 window.
-  **Recommendation**: rule them explicitly, in either direction — this lane will not
-  infer a removal the owner did not name, and will not quietly leave a live vendor-spend
-  brake out of a census the acceptance record calls complete. **Fail-closed default**:
-  both gates stay LIVE and byte-unchanged; §3.3 carries them as UNCLASSIFIED; PR-3's
-  acceptance says "six of eight gates classified, two pending an owner ruling" rather
-  than claiming a complete census. The concurrency pair (gate 8) is NOT part of this
-  question — it is KEEP by the ruling's own carve-out, decided here.
+  **RULED 2026-08-23 (owner), and SPLIT — the two gates are not the same animal.**
+  **Gate 6 (document ingest, `0007:1638-1650`) = KEEP, re-classified ENGINE PROTECTION**, the
+  same class as gates 2, 4 and 8; it bounds engine work, not spend. **Gate 7 (processing call,
+  `0038:7063-7078`) = REMOVE** — its own author calls the budget the firm's vendor spend, so
+  G8's meter-never-cap reaches it. Consequences: **only ONE extra body joins the D1 list**
+  (`_reserve_processing_call`), not two; **gate 6 carries the mandatory `refused_budget` rename**
+  with gate 4; and the census is now **CLOSED-WORLD and COMPLETE — eight gates, four REMOVE
+  (1·3·5·7), four KEEP (2·4·6·8)**, so **PR-3's acceptance says "eight of eight classified"**,
+  not "six of eight, two pending". The concurrency pair (gate 8) was never part of this question
+  — KEEP by the ruling's own carve-out, decided at gate 1.
 - **Is the initial `call_kind` roster (§3.1) complete?** It cannot be, by construction
   — F-A2/F-A6/F-A7b/F-A8 have not reached their own design stages yet.
   **Recommendation**: ship the roster above; each later item's own design adds its

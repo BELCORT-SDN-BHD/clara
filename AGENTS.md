@@ -19,7 +19,7 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · eslint
+pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · dispatch-model-guard · eslint
 pnpm build       # nitro runtime + next dashboard
 pnpm test        # per-package tests
 ```
