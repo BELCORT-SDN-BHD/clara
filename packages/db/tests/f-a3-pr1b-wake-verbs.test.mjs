@@ -547,6 +547,154 @@ test("f31w.t H3(c): a description naming no counterparty at all is not_evaluable
     `a description that names no counterparty at all is ARM-0, not a pass (${JSON.stringify(r.rows[0].r.rung_vector)})`);
 });
 
+// H1 (opus consolidated round): a LITERALLY EMPTY description is a distinct case from "content
+// that names nothing" (f31w.t, above) -- both must land not_evaluable, but the pre-recut code
+// took a DIFFERENT path to a silent 'pass' for an empty string specifically (regexp_split_to_table
+// on '' still returns one row, filtered out by the length>=3 floor, leaving the OLD flat
+// count-based check's `else PASS` branch with nothing to compare -- ARM-0's exact silent-pass
+// shape). Both polarities: empty string and NULL.
+test("f31w.u H1: a description that is genuinely EMPTY (or NULL) is not_evaluable, never a silent pass", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cp = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','F31W U Empty-Descr Client','f31wuemptydescrclient',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const digestU = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-u-pack"));
+  for (const [label, descr] of [["empty string", ""], ["NULL", null]]) {
+    const stmt = await enterStatement(world.users.alice, {
+      client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+      opening: 0, specs: [{ entryDate: "2026-07-21", amountCents: 6600, description: descr }],
+    });
+    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_settle_from_bank_line", SETTLE_SPECS),
+      [world.clients.A1, stmt.lines[0].id, cp.rows[0].id, JSON.stringify([{ open_item: randomUUID(), cents: 6600 }]),
+        `f31w.u ${label}`, null, 0, null, null, AR1, RATIONALE, JSON.stringify(MODEL), digestU, opk(`f31w-u-${label.replace(/\s/g, "")}`)]);
+    assert.equal(r.rows[0].r.rung_vector?.counterparty_collision, "not_evaluable",
+      `f31w.u (${label} description): must be not_evaluable, never a silent pass (${JSON.stringify(r.rows[0].r.rung_vector)})`);
+  }
+});
+
+// H3 (opus consolidated round, adapted from the reviewer's own probe5.mjs): every ONE of the
+// 13 wake_* bank wrappers, smoked through a REAL minted bank_agent credential -- looking for
+// STRUCTURAL deadness (CLR04 "no authenticated actor"/credential hazards, 42883 undefined
+// function, 42501 insufficient privilege, 23505 an unhandled unique violation, 42703 undefined
+// column) as opposed to a clean, typed business refusal (CLR10/CLR11 -- "not found"-class, since
+// every subject below is a fresh random id this client never created). B1's own end-to-end
+// wake_get_bank_pack cell (this file's own realDigest calls already exercise it 12 times over,
+// but never asserted its OWN shape directly) is folded in here as verb #1, using the real
+// account this file's world already built.
+test("f31w.v H3: all 13 wake_* bank wrappers reach a typed business refusal, never structural deadness", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const M = JSON.stringify(MODEL);
+  const NX = () => randomUUID();
+  const K = (n) => opk(`f31w-v-${n}`);
+  const STRUCTURAL_DEADNESS = new Set(["CLR04", "42883", "42501", "23505", "42703", "undefined_function", "insufficient_privilege", "unique_violation", "undefined_column"]);
+
+  const calls = [
+    ["wake_get_bank_pack", "p_client => $1, p_bank_account => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5",
+      () => [world.clients.A1, bankAcct.A1.primary, RATIONALE, M, K(1)]],
+    ["wake_match_bank_line", "p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => $4::jsonb, p_ack_period_exceptions => false, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8",
+      () => [world.clients.A1, "[]", "[]", "[]", RATIONALE, M, "d", K(2)]],
+    ["wake_settle_from_bank_line", "p_client => $1, p_line => $2, p_counterparty => $3, p_allocations => $4::jsonb, p_memo => $5, p_posting_date => current_date, p_charge_cents => 0, p_charge_account => null, p_adjustments => '[]'::jsonb, p_control_account => null, p_rationale => $6, p_model => $7::jsonb, p_inputs_digest => $8, p_op_key => $9",
+      () => [world.clients.A1, NX(), NX(), "[]", RATIONALE, M, "d", K(3)]],
+    ["wake_unmatch_bank_match", "p_client => $1, p_match => $2, p_reason => $3, p_rationale => $4, p_model => $5::jsonb, p_inputs_digest => $6, p_op_key => $7",
+      () => [world.clients.A1, NX(), "smoke", RATIONALE, M, "d", K(4)]],
+    ["wake_complete_bank_reconciliation", "p_statement => $1, p_ack_outstanding => null, p_rationale => $2, p_model => $3::jsonb, p_inputs_digest => $4, p_op_key => $5",
+      () => [NX(), RATIONALE, M, "d", K(5)]],
+    ["wake_void_bank_reconciliation", "p_recon => $1, p_reason => $2, p_rationale => $3, p_model => $4::jsonb, p_inputs_digest => $5, p_op_key => $6",
+      () => [NX(), "smoke", RATIONALE, M, "d", K(6)]],
+    ["wake_resolve_bank_line_exception", "p_exception => $1, p_disposition => $2, p_note => $3, p_counterpart_line => null, p_rationale => $4, p_model => $5::jsonb, p_inputs_digest => $6, p_op_key => $7",
+      () => [NX(), "not_ours", "n", RATIONALE, M, "d", K(7)]],
+    ["wake_resolve_and_book_bank_line", "p_client => $1, p_exception => $2, p_disposition => $3, p_note => $4, p_draft => null, p_allocations => null, p_adjustments => null, p_advance_applications => null, p_charge_cents => 0, p_charge_account => null, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8, p_ack_period_exceptions => false",
+      () => [world.clients.A1, NX(), "matched_booking", "n", RATIONALE, M, "d", K(8)]],
+    ["wake_propose_bank_line_exception", "p_line => $1, p_kind => $2, p_reason => $3, p_evidence_document => null, p_rationale => $4, p_model => $5::jsonb, p_inputs_digest => $6, p_op_key => $7",
+      () => [NX(), "not_ours", "smoke", RATIONALE, M, "d", K(9)]],
+    ["wake_propose_identifier_promotion", "p_client => $1, p_counterparty => $2, p_identifier_kind => $3, p_identifier_value => $4, p_times_seen => 3, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8",
+      () => [world.clients.A1, NX(), "tin", "X123", RATIONALE, M, "d", K(10)]],
+    ["wake_add_bank_account", "p_client => $1, p_coa_account_code => $2, p_proposal_id => $3, p_bank_code => $4, p_account_number => $5, p_bank_name_display => $6, p_rationale => $7, p_model => $8::jsonb, p_inputs_digest => $9, p_op_key => $10",
+      () => [world.clients.A1, "999999", NX(), "MBB", "1234567890", "Maybank", RATIONALE, M, "d", K(11)]],
+    ["wake_upsert_account", "p_client => $1, p_code => $2, p_name => $3, p_type => $4, p_special_acc_type => null, p_account_class => null, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8",
+      () => [world.clients.A1, "888888", "H3 smoke acct", "expense", RATIONALE, M, "d", K(12)]],
+    ["wake_void_bank_statement", "p_client => $1, p_statement => $2, p_reason => $3, p_rationale => $4, p_model => $5::jsonb, p_inputs_digest => $6, p_op_key => $7",
+      () => [world.clients.A1, NX(), "smoke", RATIONALE, M, "d", K(13)]],
+  ];
+  assert.equal(calls.length, 13, "f31w.v mandatory setup: this cell must name all 13 verbs, not a subset");
+
+  for (const [name, argspec, mk] of calls) {
+    const sql = `select clara.${name}(${argspec}) as r`;
+    const err = await caught(() => wakeQuery(WAKE_ROLE, cred.secret, sql, mk()));
+    if (err) {
+      assert.ok(!STRUCTURAL_DEADNESS.has(err.code),
+        `f31w.v ${name}: structural deadness, not a business refusal -- ${err.code}: ${err.message}`);
+    }
+    // A caught error is a typed refusal (fine); no error at all is an admission (also fine --
+    // wake_upsert_account/wake_add_bank_account/wake_get_bank_pack can legitimately succeed on
+    // a fresh subject). Either shape passes; only structural deadness fails.
+  }
+});
+
+// B2 (opus consolidated round): the four genuinely-repeatable act kinds -- proven, per team-lead's
+// own named list, on wake_upsert_account -- must each tolerate a SECOND admitted act on the SAME
+// subject (a real repeat visit, a fresh op_key each time), not raise a bare 23505.
+test("f31w.w B2: account_upsert, identifier_promotion_propose, exception_propose and pack_read all tolerate a genuine repeat admitted act", async (t) => {
+  if (skipPurpose(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("bank_agent", firm, world.clients.A1);
+  const M = JSON.stringify(MODEL);
+  const digestW = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-w-pack0"));
+
+  // account_upsert: subject_id is a deterministic md5(client, code) -- SAME code, two edits.
+  for (const [n, name] of [[1, "B2 acct v1"], [2, "B2 acct v2"]]) {
+    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_upsert_account", [
+      { name: "p_client", cast: "uuid" }, { name: "p_code" }, { name: "p_name" }, { name: "p_type" },
+      { name: "p_special_acc_type" }, { name: "p_account_class" }, { name: "p_rationale" },
+      { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+      [world.clients.A1, "777-WWW", name, "expense", null, null, RATIONALE, M, digestW, opk(`f31w-w-acct-${n}`)]);
+    assert.ok(r.rows[0].r, `f31w.w account_upsert #${n} must not raise`);
+  }
+
+  // identifier_promotion_propose: subject_id = p_counterparty -- SAME counterparty, two proposals.
+  const cp = await rootQuery(
+    `insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized, created_by)
+       values ($1,$2,'customer','F31W W Repeat Customer','f31wwrepeatcustomer',$3) returning id`,
+    [firm, world.clients.A1, world.users.alice]);
+  for (const n of [1, 2]) {
+    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_propose_identifier_promotion", [
+      { name: "p_client", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" }, { name: "p_identifier_kind" },
+      { name: "p_identifier_value" }, { name: "p_times_seen" }, { name: "p_rationale" },
+      { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+      [world.clients.A1, cp.rows[0].id, "tin", `TIN${n}`, 3, RATIONALE, M, digestW, opk(`f31w-w-idprom-${n}`)]);
+    assert.ok(r.rows[0].r, `f31w.w identifier_promotion_propose #${n} must not raise`);
+  }
+
+  // exception_propose: subject_id = p_line -- SAME line, two proposals (e.g. a declined first
+  // proposal, re-proposed).
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-22", amountCents: 7700, description: "f31w.w repeat exception line" }],
+  });
+  for (const n of [1, 2]) {
+    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_propose_bank_line_exception", [
+      { name: "p_line", cast: "uuid" }, { name: "p_kind" }, { name: "p_reason" }, { name: "p_evidence_document" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+      [stmt.lines[0].id, "bank_error", `f31w.w proposal ${n}`, null, RATIONALE, M, digestW, opk(`f31w-w-except-${n}`)]);
+    assert.ok(r.rows[0].r, `f31w.w exception_propose #${n} must not raise`);
+  }
+
+  // pack_read: subject_id = p_bank_account -- SAME account, two reads (already proven implicitly
+  // by every realDigest() call above across this file; this is the DIRECT, dedicated proof).
+  for (const n of [1, 2]) {
+    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_get_bank_pack", [
+      { name: "p_client", cast: "uuid" }, { name: "p_bank_account", cast: "uuid" },
+      { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" }]),
+      [world.clients.A1, bankAcct.A1.primary, RATIONALE, M, opk(`f31w-w-pack-${n}`)]);
+    assert.ok(r.rows[0].r?.digest, `f31w.w pack_read #${n} must not raise and must return a digest`);
+  }
+});
+
 // ===========================================================================
 // H.7 catalog
 // ===========================================================================
@@ -587,19 +735,19 @@ test("f31w.p the Tier-C wall: an unlisted-but-typed reason re-raises out of the 
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
     ["x", "CLR11", '{"reason":"already_matched"}']);
   assert.equal(wrongCode.rows[0].r, null, "a listed reason under the WRONG errcode still re-raises (pairs, not bare reasons)");
-  // H5 (cross-model review, HEAD d5e5dc6): the eleven recon_ literals are an EXACT-STRING closed
-  // list now, not a `like 'recon\_%'` prefix match -- an invented, unlisted recon_-prefixed
-  // reason must re-raise exactly like any other unlisted reason, proving the wildcard is really
-  // gone and not merely narrowed to a smaller wildcard.
+  // Tier-C adjudication FINAL (opus consolidated round): the nine ruled recon_ literals are an
+  // EXACT-STRING closed list, not a `like 'recon\_%'` prefix match -- an invented, unlisted
+  // recon_-prefixed reason must re-raise exactly like any other unlisted reason, proving the
+  // wildcard is really gone and not merely narrowed to a smaller wildcard.
   const listedRecon = await rootQuery(
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
     ["x", "CLR10", '{"reason":"recon_difference_nonzero"}']);
   assert.equal(listedRecon.rows[0].r, "recon_difference_nonzero", "a real, listed recon_ literal still converts");
   const unlistedRecon = await rootQuery(
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
-    ["x", "CLR10", '{"reason":"recon_this_reason_was_never_enumerated"}']);
+    ["x", "CLR10", '{"reason":"recon_x_new"}']);
   assert.equal(unlistedRecon.rows[0].r, null,
-    "an INVENTED recon_-prefixed reason, never one of the eleven, re-raises -- the prefix match is gone, not just narrowed");
+    "an INVENTED recon_-prefixed reason (recon_x_new), never one of the nine, re-raises -- the prefix match is gone, not just narrowed");
 });
 
 // C1 (cross-model review, HEAD d5e5dc6, CRITICAL): _resolve_and_book_bank_line_core creates an

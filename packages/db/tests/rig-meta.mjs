@@ -816,6 +816,12 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
+// F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold. A named cohort
+// (nit, opus consolidated round) rather than a bare inline string, so a future rename/retire
+// of this one function is caught by the closed-roster dead-exemption sweep like every other
+// wave's own cohort, instead of silently going stale as an unwrapped literal.
+export const BANK_AGENCY_F_A3_PR1B_COHORT = ["set_bank_agency_hold"];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -881,7 +887,7 @@ export const ALLOWED = {
     // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
     // something the agent lane can flip on itself).
-    "set_bank_agency_hold",
+    ...BANK_AGENCY_F_A3_PR1B_COHORT,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1069,6 +1075,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   return failures;
 }
 

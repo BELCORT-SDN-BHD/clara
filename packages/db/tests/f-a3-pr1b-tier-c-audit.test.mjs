@@ -78,6 +78,13 @@ test("f31tc.a the closed-list audit: live (errcode,reason) pairs vs what the con
     else reraises++;
   }
   assert.ok(m11Found, "the M11 addition (stale_waiver_duplicate_risk) is live AND converts");
+  // M2 (opus consolidated round): this audit's own header said it is "NOT a pass/fail assertion
+  // on the SIZE of either set" -- true, but it asserted NOTHING about the re-raise side at all,
+  // which made it descriptive only (a noteLane, never a wall). At least one of the live pairs
+  // this file's own extraction finds must actually re-raise, or the closed-list property this
+  // audit exists to prove has never been checked by the audit itself.
+  assert.ok(reraises > 0,
+    `f31tc.a: the live extraction must find at least one re-raising (errcode,reason) pair, proving the closed list is a real wall, not just narrower prose (converts=${converts}, reraises=${reraises})`);
   noteLane(`f31tc.a: ${rows.rowCount} distinct live (errcode,reason) pairs across ${DELEGATES.length} delegates -- ${converts} convert (B.4's closed list + the two PR-1b additions), ${reraises} re-raise (everything else, by design -- the wall)`);
 });
 

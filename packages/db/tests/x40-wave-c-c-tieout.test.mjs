@@ -3110,9 +3110,24 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
   const resolveCoreSrc = await fnSource("_resolve_bank_line_exception_core");
   ordered(resolveCoreSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "_resolve_bank_line_exception_core lock order");
 
-  // NO pre-existing journal_entries row is ever locked by these five verbs
-  // (the C-a partial order stays untouched, S5).
-  for (const [label, src] of [["_complete_bank_reconciliation_core", completeCoreSrc], ["_void_bank_reconciliation_core", voidRCoreSrc], ["except_bank_line", exceptSrc], ["_resolve_bank_line_exception_core", resolveCoreSrc]]) {
+  // F-A3/PR-1b nit (opus consolidated round): the census's OWN comment already said "these five
+  // verbs" while the loop below checked only four -- the fifth was always meant to widen as new
+  // callers of these same cores land. It has: the agent lane's own wake wrappers delegate to the
+  // SAME three cores (via their _agent_*_core layer) and must be just as innocent of locking a
+  // pre-existing journal_entries row.
+  const wakeCompleteSrc = await fnSource("wake_complete_bank_reconciliation");
+  const wakeVoidRSrc = await fnSource("wake_void_bank_reconciliation");
+  const wakeResolveSrc = await fnSource("wake_resolve_bank_line_exception");
+
+  // NO pre-existing journal_entries row is ever locked by these EIGHT verbs (five human-lane +
+  // the three agent-lane wrappers over the same cores) -- the C-a partial order stays untouched
+  // across both lanes, S5.
+  for (const [label, src] of [
+    ["_complete_bank_reconciliation_core", completeCoreSrc], ["_void_bank_reconciliation_core", voidRCoreSrc],
+    ["except_bank_line", exceptSrc], ["_resolve_bank_line_exception_core", resolveCoreSrc],
+    ["wake_complete_bank_reconciliation", wakeCompleteSrc], ["wake_void_bank_reconciliation", wakeVoidRSrc],
+    ["wake_resolve_bank_line_exception", wakeResolveSrc],
+  ]) {
     assert.ok(!/journal_entries[\s\S]{0,40}for update/i.test(src), `${label}: never locks a pre-existing journal_entries row`);
   }
 });

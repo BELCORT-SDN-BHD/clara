@@ -294,10 +294,17 @@ end $oq_tail$;
 --     the requirement is invoice-domain-shaped and the bank lane can never satisfy it.
 -- Measured: the only two readers of `gate_verdicts->>'extraction_id'` are
 -- `_tf_assert_sales_invoice_shape` and `_tf_assert_supplier_bill_shape` (a live pg_proc census,
--- this session) — both gated behind `coding_kind in ('sales_invoice','supplier_bill')`, which the
--- bank lane never sets (Annex B.5 / nit N2: the bank lane sets customer_receipt, supplier_payment
--- or NULL). So a bank-origin row with no extraction_id is inert to both readers by construction —
--- exactly the same "coding_kind gate makes an absent field harmless" shape N2 already established.
+-- this session). M1 (opus consolidated round): the coding_kind gate is NOT in these two trigger
+-- bodies themselves (measured: neither mentions `coding_kind` in its own prosrc) -- it is two
+-- (sales) to three (supplier) hops down their own call chain, in `_assert_sales_invoice_shape_at`
+-- and `_assert_supplier_bill_shape_at_projected` respectively, which each of the two triggers
+-- reaches via `_assert_sales_invoice_shape`/`_assert_supplier_bill_shape` before the gate fires.
+-- The CONCLUSION is unchanged (this file's own §J tail census re-derives it, below): the bank
+-- lane never sets `coding_kind in ('sales_invoice','supplier_bill')` (Annex B.5 / nit N2: the
+-- bank lane sets customer_receipt, supplier_payment or NULL), so a bank-origin row with no
+-- extraction_id is inert to both readers' whole call chain by construction — exactly the same
+-- "coding_kind gate makes an absent field harmless" shape N2 already established. Only the GROUND
+-- (which function's own body carries the literal gate) was imprecise; the code needed no change.
 -- Both CHECKs are extend-only ACCESS EXCLUSIVE swaps; the invoice domain's existing behaviour is
 -- untouched (extraction_id is STILL REQUIRED, unconditionally, on every non-bank_agent row --
 -- see M8 below). This file only adds a second, disjoint, bank-domain-shaped satisfaction path
@@ -329,7 +336,7 @@ alter table clara.entry_post_receipts
 
 do $epr_tail$
 begin
-  raise notice 'DDL 1b (NEW finding, rig-replay-caught): entry_post_receipts'' via_wake_kind CHECK now admits bank_agent alongside autodraft/interactive; its gate_verdicts CHECK is DOMAIN-DISJOINT (M8 recut) -- via_wake_kind<>bank_agent still requires a non-blank extraction_id UNCONDITIONALLY (byte-identical to the pre-this-file floor), via_wake_kind=bank_agent requires a non-blank op_key instead, and neither domain can satisfy the other''s arm. The two readers of extraction_id (_tf_assert_sales_invoice_shape, _tf_assert_supplier_bill_shape) are both coding_kind-gated away from every bank-origin row, so the new arm stays inert to them by construction.';
+  raise notice 'DDL 1b (NEW finding, rig-replay-caught): entry_post_receipts'' via_wake_kind CHECK now admits bank_agent alongside autodraft/interactive; its gate_verdicts CHECK is DOMAIN-DISJOINT (M8 recut) -- via_wake_kind<>bank_agent still requires a non-blank extraction_id UNCONDITIONALLY (byte-identical to the pre-this-file floor), via_wake_kind=bank_agent requires a non-blank op_key instead, and neither domain can satisfy the other''s arm. The two readers of extraction_id (_tf_assert_sales_invoice_shape, _tf_assert_supplier_bill_shape) each reach a coding_kind gate two-to-three hops down their own call chain (_assert_sales_invoice_shape_at / _assert_supplier_bill_shape_at_projected, M1 ground fix), never set by the bank lane, so the new arm stays inert to their whole call chain by construction.';
 end $epr_tail$;
 
 -- ================================================================================================
@@ -3911,6 +3918,29 @@ set role clara_fn_owner;
 -- reason legitimately produces. A refusal's subject_id is the candidate group's ANCHOR LINE id (no
 -- bank_matches row exists yet to name). The default in each coalesce is '' — TWO apostrophes (the
 -- F-A2 R-3 lesson: four apostrophes made the model-name wall always pass).
+--
+-- B3 (opus consolidated round): op_key was GLOBALLY unique, matching NEITHER _reserve_op's own
+-- namespace (op_receipts' PK is (firm_id, fn, op_key), 0002:295-303) nor any tenancy boundary --
+-- proven: two DIFFERENT (firm, client) pairs racing the SAME op_key string had the second call's
+-- receipt silently returned to the FIRST caller. Re-scoped to (firm_id, op_key), mirroring
+-- op_receipts' own precedent -- a legitimate cross-firm op_key coincidence (client-chosen key
+-- schemes are entirely plausible to collide across unrelated firms) can no longer even reach the
+-- conflict path. The (firm, client, act_kind, subject, digest) identity-verify + RAISE on the
+-- read-back branch (H6, below) stays as the same-firm safety net for a genuine same-firm bug.
+--
+-- B2 (opus consolidated round): the SECOND uniqueness layer -- "at most one admitted act per
+-- subject, ever" -- escaped the writer's own on-conflict handling as a raw 23505 (unhandled),
+-- proven on a legitimate SECOND wake_upsert_account call for the same account (different op_key,
+-- an ordinary repeat visit, not a replay). Annex A.3's own rationale (the "why the uniqueness key
+-- changed" note, and subject_id's own comment -- "ADMITTED: match_id / recon_id / exception_id")
+-- frames "at most one admitted, ever" around the JUDGEMENT-act family the two deferred receipt
+-- walls actually consume (t_bank_match_agent_receipt reads act_kind IN ('match','settle');
+-- t_bank_recon_agent_receipt reads act_kind='reconcile_complete') -- it was never a semantic that
+-- fits a REPEATABLE act. Scoped below to exclude the four verbs team-lead named as genuine repeat
+-- cases: account_upsert (re-editing an already-registered account), identifier_promotion_propose
+-- and exception_propose (re-proposing after a prior proposal was declined/superseded), and
+-- pack_read (re-reading the pack is the NORMAL shape, not an edge case). Every other act_kind
+-- keeps the cap.
 create table clara.bank_agent_receipts (
   id                 uuid primary key default gen_random_uuid(),
   firm_id            uuid not null references clara.firms(id),
@@ -3941,12 +3971,20 @@ create table clara.bank_agent_receipts (
   approval_arm       text not null,
   op_key             text not null,
   created_at         timestamptz not null default now(),
-  constraint uq_bank_agent_receipts_op_key unique (op_key)
+  -- B3: firm-scoped, mirroring op_receipts' own (firm_id, fn, op_key) PK -- a client-chosen
+  -- op_key string is not, and was never meant to be, globally unique across every firm on the
+  -- estate.
+  constraint uq_bank_agent_receipts_op_key unique (firm_id, op_key)
 );
 comment on table clara.bank_agent_receipts is
-  'F-A3 (Annex A.3): one row per agent bank JUDGEMENT ACT (never per post — see clara.entry_post_receipts for that). Written only inside the acting agent core, in the same transaction, so a Tier-C conversion rolls it back. Zero DML grant to any role. Outcome-scoped uniqueness: unique(op_key) for replay; the partial admitted index below caps ONE admitted act per subject while refusals accumulate freely.';
+  'F-A3 (Annex A.3): one row per agent bank JUDGEMENT ACT (never per post — see clara.entry_post_receipts for that). Written only inside the acting agent core, in the same transaction, so a Tier-C conversion rolls it back. Zero DML grant to any role. Outcome-scoped uniqueness: unique(firm_id, op_key) for replay, firm-scoped like op_receipts; the partial admitted index below caps ONE admitted act per subject for the judgement-act family only (match/settle/reconcile_complete and the other resolving acts) while refusals accumulate freely and the four genuinely-repeatable acts (account_upsert, identifier_promotion_propose, exception_propose, pack_read) are exempt.';
+-- B2: scoped to the judgement-act family the two deferred receipt walls actually consume, per
+-- Annex A.3's own subject_id comment ("ADMITTED: match_id / recon_id / exception_id") -- NOT a
+-- blanket cap over every act_kind, which broke every legitimate repeat visit on the four kinds
+-- below.
 create unique index uq_bank_agent_receipts_admitted
-  on clara.bank_agent_receipts (act_kind, subject_id) where outcome = 'admitted';
+  on clara.bank_agent_receipts (act_kind, subject_id) where outcome = 'admitted'
+    and act_kind not in ('account_upsert','identifier_promotion_propose','exception_propose','pack_read');
 create index ix_bank_agent_receipts_client on clara.bank_agent_receipts(client_id, created_at desc);
 create index ix_bank_agent_receipts_retry on clara.bank_agent_receipts(client_id, retry_after)
   where outcome = 'refused' and retry_after is not null;
@@ -4074,23 +4112,36 @@ end $function$;
 revoke all on function clara.set_bank_agency_hold(uuid,boolean,text,text) from public;
 grant execute on function clara.set_bank_agency_hold(uuid,boolean,text,text) to clara_authenticated;
 
--- The event type this verb's own _append_event call needs: clara.event_types is a closed-world
+-- The event types this file's own _append_event calls need: clara.event_types is a closed-world
 -- registry (_tf_validate_domain_event raises "unknown event_type" on any name absent from it,
 -- rig-replay-caught by this file's own battery, f31w.e) -- every OTHER bank.* type already
--- exists from earlier migrations; this one is new to THIS verb.
+-- exists from earlier migrations; these three are new to THIS file's own verbs.
 --
 -- THE PAIR IS NOT OPTIONAL (the UNNUMBERED_f_a2_posting_core.sql §I idiom, itself copied from
 -- 0015:388-395): the estate holds a FULL-COVERAGE LAW -- every row of clara.event_types must be
 -- mapped by the ACTIVE clara.trigger_taxonomy version -- so an event type registered without its
 -- decision is an event the runtime cannot route (rig-replay-caught: rig-docs-events.test.mjs:79,
 -- rig-events-structure.test.mjs §7, s6-tasks.test.mjs P5/P6, wave-a-shape.test.mjs §3, all four
--- independently). DECISION: 'ignore', matching EVERY one of the fifteen existing bank.* siblings
--- in the active taxonomy (bank.account_created through bank.statement_voided) -- a bank agency
--- hold flip is a bookkeeper-floor administrative control act, not a domain event needing
--- notification or review, and the whole bank.* family already agrees on that.
+-- independently). DECISION: 'ignore' for every one of the three, matching EVERY one of the
+-- fifteen pre-existing bank.* siblings in the active taxonomy (bank.account_created through
+-- bank.statement_voided) -- a bank agency hold flip, a proposed identifier promotion and a
+-- proposed line exception are all bookkeeper-floor (or agent-lane) administrative acts, not
+-- domain events needing notification or review, and the whole bank.* family already agrees.
+--
+-- H3/B2 (opus consolidated round): bank.identifier_promotion_proposed and
+-- bank.line_exception_proposed were BOTH emitted by their own agent cores
+-- (_agent_propose_identifier_promotion_core, _agent_propose_line_exception_core) but never
+-- registered -- caught only once the all-13-wrappers end-to-end cell (f31w.v) and the B2
+-- repeat-admission cell (f31w.w) actually exercised these two verbs' SUCCESS path for the first
+-- time in this file's own battery; every earlier cell for these two verbs only ever reached a
+-- refusal, which never emits the event at all. Registered alongside bank.agency_hold_set here,
+-- same coupling, same decision.
 with inserted_types as (
   insert into clara.event_types(name, client_scoped, description)
-    values ('bank.agency_hold_set', true, 'clara.set_bank_agency_hold flipped the client''s bank agency hold')
+    values
+      ('bank.agency_hold_set', true, 'clara.set_bank_agency_hold flipped the client''s bank agency hold'),
+      ('bank.identifier_promotion_proposed', true, 'clara.wake_propose_identifier_promotion proposed an identifier promotion for a counterparty'),
+      ('bank.line_exception_proposed', true, 'clara.wake_propose_bank_line_exception proposed a bank-line exception')
     on conflict (name) do nothing returning name
 )
 insert into clara.trigger_taxonomy(version, event_type, decision, note)
@@ -4525,21 +4576,24 @@ begin
       clara.agent_user_id(), null, 'bank_agent', p_model,
       p_rationale, v_digest,
       p_gate_verdicts, 'agent_unattended', p_op_key)
-    on conflict (op_key) do nothing
+    -- B3 (opus consolidated round): op_key's own uniqueness is now (firm_id, op_key), matching
+    -- the ALTER above -- the conflict target is threaded through so the on-conflict path can
+    -- only ever collide within THIS firm; a different firm's identical op_key string inserts
+    -- cleanly, never reaching the branch below at all.
+    on conflict (firm_id, op_key) do nothing
     returning id into v_id;
   if v_id is null then
-    -- H6 (cross-model review, HEAD d5e5dc6): op_key is table-wide unique, so a bare read-back
-    -- keyed on op_key ALONE would hand back another act's receipt to a caller who merely
-    -- happened to reuse (or collide on) the same key string -- review law 3, spelling is not
-    -- identity: the op_key names an act only if the act it actually belongs to is THIS one.
-    -- Every dimension a genuine replay must agree on is checked; any mismatch means the key was
-    -- claimed by a different act, and that is refused rather than silently handed back.
+    -- H6 (cross-model review, HEAD d5e5dc6; B3 tightened it further): the read-back is now
+    -- ITSELF firm-scoped (matching the conflict target), so a same-firm collision is the only
+    -- thing this branch can ever see. The remaining identity check is the same-firm safety net
+    -- law 3 asks for (spelling is not identity): the op_key names an act only if the act it
+    -- actually belongs to is THIS one, even within the caller's own firm.
     select id, firm_id, client_id, act_kind, subject_id, inputs_digest into v_existing
-      from clara.bank_agent_receipts where op_key = p_op_key;
-    if v_existing.firm_id is distinct from p_firm or v_existing.client_id is distinct from p_client
+      from clara.bank_agent_receipts where firm_id = p_firm and op_key = p_op_key;
+    if v_existing.client_id is distinct from p_client
        or v_existing.act_kind is distinct from p_act_kind or v_existing.subject_id is distinct from p_subject
        or v_existing.inputs_digest is distinct from v_digest then
-      raise exception 'op_key % is already claimed by a different act; a replayed op_key must never return a receipt for another firm/client/act/subject/digest', p_op_key
+      raise exception 'op_key % is already claimed by a different act; a replayed op_key must never return a receipt for another client/act/subject/digest', p_op_key
         using errcode='CLR10', detail='{"reason":"op_key_identity_mismatch"}';
     end if;
     v_id := v_existing.id;
@@ -4594,22 +4648,23 @@ revoke all on function clara._agent_verify_inputs_digest(uuid, text) from public
 --   adjustment_account_invalid · tenancy_incongruent (CLR11) · adjustment_key_collision ·
 --   approve_key_collision
 -- `(CLR16, draft_anchor_moved)` -- B.4's own text: "PR-1b types" this one, already a member.
--- `recon_*` -- H5 (cross-model review, HEAD d5e5dc6): B.4's own row reads "(CLR10, recon_*) —
--- the nine reconciliation reasons", but B.4 does not itself spell those nine literals, and its
--- top line is unambiguous -- "Only PAIRS; no wildcards, no errcode-only members" -- so a LIKE
--- match on the bare prefix was never a legitimate transcription of a PAIRS-only annex, whatever
--- count its own prose claims. Measured instead, directly against the live source it cites
--- (0040:1587-2057, clara._complete_bank_reconciliation_core's own body, every CLR10 raise
--- carrying a `recon_` reason): ELEVEN distinct literals, not nine -- B.4's prose undercounts,
--- and even the file's own header comment at 0040:1538-1569 (ten items) omits
--- `recon_terms_underivable`, a real, live raise the header simply does not mention. Review law 2
--- (absence is not evidence): a design annex's count is not itself evidence of the code's actual
--- shape; only a read of the live raise sites is. The eleven, transcribed verbatim as exact
--- strings, closed-list, no prefix match:
---   recon_already_complete · recon_coa_shared · recon_period_gap · recon_prior_missing ·
---   recon_line_reserved · recon_line_unsettled · recon_uncleared_off_account ·
---   recon_terms_underivable · recon_opening_mismatch · recon_outstanding_stale ·
---   recon_difference_nonzero
+-- `recon_*` -- Tier-C adjudication FINAL (opus consolidated round, superseding this lane's own
+-- H5 draft below): B.4's own row reads "(CLR10, recon_*) — the nine reconciliation reasons", and
+-- its top line is unambiguous -- "Only PAIRS; no wildcards, no errcode-only members" -- so a LIKE
+-- match on the bare prefix was never a legitimate transcription of a PAIRS-only annex (Codex's
+-- own H5 finding: the opus probes proved an INVENTED pattern-matching unlisted name re-raises
+-- only once the wildcard is actually gone, never against the LIKE). NINE exact-string literals,
+-- ruled: the header comment's ten (0040:1538-1569) minus `recon_already_complete`, which is its
+-- own idempotency-adjacent outcome (a DIFFERENT op_key hitting an already-complete statement --
+-- _reserve_op's own dedupe already handles the SAME-op_key replay case, per the header's own
+-- note), not a reconciliation-CONTENT rung the other nine all are. `recon_terms_underivable` --
+-- this lane's own earlier measurement found it as a real, live, header-omitted raise -- is
+-- DELIBERATELY left off this ruled list; it re-raises like any other unlisted reason (a narrower
+-- Tier-C list is always the safe direction to be wrong in -- an over-eager conversion is the
+-- unsafe one). The nine, transcribed verbatim as exact strings, closed-list, no prefix match:
+--   recon_coa_shared · recon_period_gap · recon_prior_missing · recon_line_reserved ·
+--   recon_line_unsettled · recon_uncleared_off_account · recon_opening_mismatch ·
+--   recon_outstanding_stale · recon_difference_nonzero
 -- `(CLR10, stale_waiver_duplicate_risk)` -- M11's OWN new pair (Annex B.3's mechanism, built by
 -- THIS PR): B.4's own precedent for `draft_anchor_moved` is that a PR minting a new typed raise
 -- ADDS it to this list rather than leaving it unconvertible; M11's design text (§3.3) explicitly
@@ -4634,10 +4689,10 @@ begin
          'reversed_entry','reversal_mirror','line_excepted','orphaned_reservation_draft',
          'bank_account_unmapped','adjustment_account_invalid','adjustment_key_collision',
          'approve_key_collision','stale_waiver_duplicate_risk',
-         -- H5: the eleven measured recon_ literals, exact strings, no prefix match.
-         'recon_already_complete','recon_coa_shared','recon_period_gap','recon_prior_missing',
+         -- Tier-C FINAL: the nine ruled recon_ literals, exact strings, no prefix match.
+         'recon_coa_shared','recon_period_gap','recon_prior_missing',
          'recon_line_reserved','recon_line_unsettled','recon_uncleared_off_account',
-         'recon_terms_underivable','recon_opening_mismatch','recon_outstanding_stale',
+         'recon_opening_mismatch','recon_outstanding_stale',
          'recon_difference_nonzero')
      ) then
     return v_reason;

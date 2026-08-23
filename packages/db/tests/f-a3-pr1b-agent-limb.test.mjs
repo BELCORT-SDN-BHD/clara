@@ -602,3 +602,31 @@ test("f31b.q the drawer-2 gate's arm 4: a zero-registered-account client with ba
   assert.equal(gate.rows[0].r.state, "fail", "the gate fails on a zero-registered-account client with a flagged COA account");
   assert.equal(gate.rows[0].r.no_registered_account, true, "the gate names no_registered_account explicitly");
 });
+
+// M1 (opus consolidated round): the DDL-1b ground fix (the coding_kind gate lives two-to-three
+// hops down, not in the two trigger bodies themselves) needs its own POSITIVE CONTROL, not just
+// the corrected sentence -- a REAL bank-origin agent entry that actually survived both shape
+// triggers end to end, read back from the live catalog rather than asserted from the migration's
+// own claim. f31b.g/j (above) already wrote real, successfully-committed entry_post_receipts
+// rows with via_wake_kind='bank_agent' as a SIDE EFFECT of proving F-A2's receipt wall -- this
+// cell reads them back and confirms none of them ever carry a coding_kind the two extraction_id
+// readers' call chains actually gate on.
+test("f31b.r M1 positive control: real bank-origin agent entries exist and never carry an extraction-gated coding_kind", async (t) => {
+  if (skipHere(t)) return;
+  const rows = await rootQuery(
+    `select je.id, je.coding_kind, je.origin, je.status, r.via_wake_kind, r.gate_verdicts
+       from clara.entry_post_receipts r join clara.journal_entries je on je.id = r.entry_id
+      where r.via_wake_kind = 'bank_agent'
+      order by r.created_at desc limit 20`);
+  assert.ok(rows.rowCount > 0,
+    "f31b.r mandatory setup: at least one real bank-origin agent entry_post_receipts row must exist (f31b.g/j write them) -- an empty result proves nothing");
+  for (const row of rows.rows) {
+    assert.ok(!["sales_invoice", "supplier_bill"].includes(row.coding_kind),
+      `f31b.r: entry ${row.id} carries coding_kind=${row.coding_kind}, which the two extraction_id readers DO gate on -- the M1 inertness claim would be false`);
+    assert.ok(nullif_blank(row.gate_verdicts?.op_key), `f31b.r: entry ${row.id}'s receipt names op_key (the bank-domain arm), not extraction_id`);
+  }
+  const total = await rootQuery(
+    "select count(*)::int as n from clara.entry_post_receipts where via_wake_kind='bank_agent'");
+  noteLane(`f31b.r: ${total.rows[0].n} real bank-origin agent entry_post_receipts row(s) on file, ${rows.rowCount} sampled`);
+});
+function nullif_blank(v) { return v != null && String(v).trim() !== ""; }
