@@ -22,13 +22,19 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { rootQuery, endPool, ROLES } from "./rig-helpers.mjs";
+import { rootQuery, endPool, withActor } from "./rig-helpers.mjs";
 import { buildWorld } from "./rig-fixtures.mjs";
 import {
   skipUnlessEpsilon, caught, errorDetail, opk, firmIdOf,
-  sealArtifact, approveIssue, evaluateMetricHuman,
+  sealArtifact, approveIssue, evaluateMetricHuman, sealDataset,
+  proposeMetricDefinition, measure, metricAst, buildManifest,
 } from "./epsilon-fixtures.mjs";
-import { buildEpsilonWorld, artifactRows } from "./epsilon-world.mjs";
+import { buildEpsilonWorld, artifactRows, ensureEpsilonAdmin } from "./epsilon-world.mjs";
+// THE REAL RENDER-WORKER PATH, borrowed rather than re-implemented: the queue is drained with
+// zeta's own parker and the job is claimed and completed as clara_runtime through
+// clara.complete_render_job -- the ONLY caller that seals a pre_sign artifact in production, and
+// the one R-L23's tail-append exists to keep whole.
+import { parkQueue, asRuntime } from "./zeta-fixtures.mjs";
 import { grantCapability } from "./x56-fixtures.mjs";
 
 /** The agent principal, pinned rather than read from clara.agent_user_id(): an expectation
@@ -86,10 +92,34 @@ async function pr1Ready() {
   return true;
 }
 
+/** THE RIG'S OWN EVALUATOR CEREMONY, minus this item's row.
+ *
+ *  clara.evaluate_metric v1 is BORN UNDEPLOYED and a one-way ceremony flips it (0060), so every
+ *  cell below that evaluates a metric needs it committed. In the estate run epsilon-contract has
+ *  already done it by the time this file is reached; run this file ALONE and nothing has, which
+ *  is how five cells here first failed with `metric evaluator is not deployed` on a pristine rig
+ *  — a missing premise, not a defect in the item.
+ *
+ *  clara.evaluate_fs_pack_agent is EXCLUDED, here and in the two shared helpers, because cell D
+ *  measures its refusal. That exclusion is asserted at exactly one name in
+ *  epsilon-contract.test.mjs; this call must not be the place it silently widens, so it names the
+ *  row it skips rather than filtering on anything derived. */
+async function ensureMetricEvaluatorDeployed() {
+  const pending = (await rootQuery(
+    `select count(*)::int n from clara.evaluator_versions
+      where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'`)).rows[0].n;
+  if (pending === 0) return;
+  await withActor({ transaction: true }, (db) => db.query(
+    `update clara.evaluator_versions set deployed=true
+      where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'`));
+}
+
 before(async () => {
   if (await skipUnlessEpsilon({ skip: () => {} })) return;
   ready = await pr1Ready();
-  if (ready) world = await buildWorld();
+  if (!ready) return;
+  await ensureMetricEvaluatorDeployed();
+  world = await buildWorld();
 });
 after(async () => { await endPool(); });
 
@@ -195,16 +225,31 @@ test("B -- requested_by / directed_by / prepared_by_agent, all three shapes", as
 
 test("B2 -- P6 behaviourally: the lifecycle trigger admits an issue-column update and FREEZES the new pair", async (t) => {
   if (!ready) return skipHere(t, "the cores are absent");
+  const owner = world.users.alice;
   const eps = await buildEpsilonWorld(world, { tag: `p6-${randomUUID().slice(0, 6)}`, seal: false });
-  // the ADMITTING half: the trigger's exempt list still moves
-  await rootQuery("update clara.report_runs set issue_reason='p6 probe' where id=$1", [eps.runId]);
-  // the REFUSING half: a new column is frozen with no trigger edit, because the test is a
-  // whole-row diff minus the exempt columns
+  // THE ADMITTING HALF is a REAL audited transition, not a bare column poke. Its first cut wrote
+  // `set issue_reason=...` on a drafting run and failed with `illegal report run transition
+  // drafting -> drafting`: the trigger runs a whole-row diff AND a state-transition dispatch, so
+  // an update that moves no state is refused by the second check whatever the first one thinks.
+  // Sealing through the human door is the transition the estate actually performs.
+  const sealed = await sealDataset(owner, { runId: eps.runId, opKey: opk("fa5-p6-seal") });
+  assert.ok(sealed, "the trigger admits the audited drafting -> dataset_sealed transition");
+  assert.equal((await rootQuery("select state from clara.report_runs where id=$1", [eps.runId])).rows[0].state,
+    "dataset_sealed", "read back off the row, not inferred from the call returning");
+
+  // THE REFUSING HALF: the new column is frozen with NO trigger edit, because the immutability
+  // test is a whole-row jsonb diff minus the SEVEN EXEMPT columns -- so a column added by this
+  // migration joins the frozen set automatically. That is P6, behaviourally, and it is the reason
+  // clara._tf_report_run_lifecycle is NOT on this file's D1 list.
   const frozen = await caught(() => rootQuery(
     "update clara.report_runs set directed_by=$2 where id=$1", [eps.runId, world.users.bob]));
   assert.ok(frozen, "changing directed_by after INSERT is refused");
   assert.equal(errorDetail(frozen)?.reason, "report_run_identity_immutable",
-    `the refusal is the identity freeze, not something else: ${frozen?.message}`);
+    `the refusal is the identity freeze, not the transition dispatch: ${frozen?.message}`);
+  const frozenPair = await caught(() => rootQuery(
+    "update clara.report_runs set prepared_by_agent = not prepared_by_agent where id=$1", [eps.runId]));
+  assert.equal(errorDetail(frozenPair)?.reason, "report_run_identity_immutable",
+    `and so is prepared_by_agent -- BOTH new columns, not just the one: ${frozenPair?.message}`);
 });
 
 // =============================================================================================
@@ -232,7 +277,6 @@ test("C -- the issue wall refuses the director and admits an independent human",
 
   // Seal the pre_sign artifact through the CORE, with the identity pair at the TAIL (R-L23).
   const sha = "b".repeat(64);
-  const { buildManifest } = await import("./epsilon-fixtures.mjs");
   const manifest = await buildManifest({ runId, kind: "pre_sign", sha256: sha });
   await rootQuery(
     `select clara._seal_report_artifact_core($1,$2,$3,'pre_sign','pdf',$4,4096,$5::jsonb,null,$6,$7,$8,$9::jsonb) as r`,
@@ -271,8 +315,16 @@ test("C -- the issue wall refuses the director and admits an independent human",
   // Bob, a HUMAN-prepared run -- issues as two_person. Without this the cell above would pass on a
   // body that stamped agent_prepared unconditionally.
   const humanSha = "c".repeat(64);
-  await rootQuery("select clara.seal_report_dataset($1,'{}'::uuid[],$2)", [eps.runId, opk("fa5-ctl-seal")])
-    .catch(async () => { await rootQuery("select 1"); });
+  // THE CONTROL'S PREMISE IS ASSERTED, NOT SWALLOWED. Its first cut sealed this dataset through
+  // rootQuery and dropped the failure in a `.catch` -- and rootQuery reaches clara.seal_report_dataset
+  // as the OWNER, which resolves no JWT, so the call raised CLR04 every time and the control ran
+  // against an UNSEALED run. It passed anyway, because approve_report_for_issue's own refusal came
+  // later. A swallowed premise is the forced-cell law's named failure: seal through the HUMAN door
+  // and read the state back.
+  const sealedControl = await sealDataset(owner, { runId: eps.runId, opKey: opk("fa5-ctl-seal") });
+  assert.ok(sealedControl, "the control run's dataset really sealed, through the human door");
+  assert.equal((await rootQuery("select state from clara.report_runs where id=$1", [eps.runId])).rows[0].state,
+    "dataset_sealed", "and the run is in the state the control needs before it can prove anything");
   const humanManifest = await buildManifest({ runId: eps.runId, kind: "pre_sign", sha256: humanSha });
   await sealArtifact(owner, { runId: eps.runId, kind: "pre_sign", sha256: humanSha,
     manifest: humanManifest, opKey: opk("fa5-ctl-art") });
@@ -433,7 +485,6 @@ test("G2 -- an agent-prepared issue without its attestation text is refused", as
   await rootQuery(`select clara._seal_report_dataset_core($1,$2,$3,$4,$5,'{}'::uuid[],$6)`,
     [firm, AGENT_USER_ID, world.users.bob, "interactive", runId, opk("fa5-att-seal")]);
   const sha = "d".repeat(64);
-  const { buildManifest } = await import("./epsilon-fixtures.mjs");
   const manifest = await buildManifest({ runId, kind: "pre_sign", sha256: sha });
   await rootQuery(
     `select clara._seal_report_artifact_core($1,$2,$3,'pre_sign','pdf',$4,4096,$5::jsonb,null,$6,$7,$8,null)`,
@@ -456,30 +507,206 @@ test("G2 -- an agent-prepared issue without its attestation text is refused", as
 // =============================================================================================
 // H -- THE LIFECYCLE TRIGGER ARM (survey S3, design SS3.5). Both polarities + anti-fabrication.
 // =============================================================================================
-test("H -- the definition lifecycle admits agent_self_approval and REFUSES a machine act dressed as a human one", async (t) => {
-  if (!ready) return skipHere(t, "the cores are absent");
-  const body = (await rootQuery(
-    `select prosrc from pg_proc p where p.oid='clara._tf_metric_definition_lifecycle_v1()'::regprocedure`
-  )).rows[0].prosrc;
-  assert.match(body, /agent_self_approval/, "the agent evidence arm is installed");
-  assert.match(body, /definition_evidence_kind_unknown/,
-    "and a fifth evidence kind refuses rather than falling through (law 36)");
-  assert.match(body, /human_approval/, "the human arm's admitting condition survives");
+/** A fresh DRAFT metric definition version, proposed through the real audited door.
+ *  A hand-inserted row would be testing a shape this estate never produces; the trigger under
+ *  test fires on the transition, so the row it transitions has to be a real one. */
+async function freshDraft(eps, tag) {
+  const preparer = await ensureEpsilonAdmin(world);
+  return proposeMetricDefinition(preparer, {
+    client: eps.client, key: `fa5_lc_${tag}_${randomUUID().slice(0, 8)}`, unit: "money",
+    ast: metricAst({ root: measure({ set: "revenue" }), unit: "money" }),
+  });
+}
+
+/** The transition the trigger judges, written as one UPDATE so every arm differs in exactly the
+ *  term under test. Run as the superuser session, which bypasses RLS and NOT the trigger --
+ *  the wall is in the trigger, and that is the point. */
+const attemptApproval = (versionId, approvedBy, evidence) => rootQuery(
+  `update clara.metric_definition_versions
+      set state='firm_approved', approved_by=$2, approved_at=now(),
+          approval_reason='f-a5 pr1 lifecycle cell', approved_formula_sha256=formula_sha256,
+          approval_evidence=$3::jsonb
+    where id=$1`, [versionId, approvedBy, JSON.stringify(evidence)]);
+
+/** AN AGENT-AUTHORED DRAFT WITH NO ACCOUNTABLE DIRECTOR -- the state PR-2's wake propose door
+ *  will produce and that NO verb in PR-1 can, so it is built as a fixture and SAID to be one.
+ *  It is a new REVISION of a real proposed draft's definition, copied column for column, with
+ *  exactly two terms changed: proposed_by becomes the agent, and the proposal evidence carries
+ *  no `on_behalf_of` -- which is precisely what makes the core's effective maker NULL and the
+ *  draft an orphan. Everything else is the audited door's own output, so the arm is measured
+ *  against a row shaped like the estate's, not like the test's idea of one. */
+async function agentAuthoredDraft(eps, tag) {
+  const seed = await freshDraft(eps, tag);
+  const id = randomUUID();
+  await rootQuery(
+    `insert into clara.metric_definition_versions
+       (id, firm_id, definition_id, revision, ast, normalized_ast, formula_sha256, unit_key,
+        temporality_key, result_scale, edge_policy_set_id, averaging_policy_id, allow_negative,
+        state, applies_from, applies_to, supersedes_version_id, proposed_by, proposal_evidence,
+        proposed_at, approval_evidence)
+     select $2, firm_id, definition_id, revision + 1, ast, normalized_ast, formula_sha256, unit_key,
+        temporality_key, result_scale, edge_policy_set_id, averaging_policy_id, allow_negative,
+        'draft', applies_from, applies_to, null, clara.agent_user_id(),
+        jsonb_build_object('kind', 'agent_proposal', 'version', 1), now(), '{}'::jsonb
+       from clara.metric_definition_versions where id = $1`, [seed, id]);
+  const row = (await rootQuery(
+    "select proposed_by, state, proposal_evidence from clara.metric_definition_versions where id=$1",
+    [id])).rows[0];
+  assert.equal(row.proposed_by, AGENT_USER_ID, "the fixture really is agent-authored");
+  assert.equal(row.state, "draft", "and really is a draft");
+  assert.equal(row.proposal_evidence.on_behalf_of, undefined, "and really names no director");
+  return id;
+}
+
+const AGENT_EVIDENCE = Object.freeze({
+  kind: "agent_self_approval", version: 1,
+  agent: { model: "claude-opus-5", model_version: "2026-08", rationale: "f-a5 pr1 lifecycle cell" },
 });
 
-test("H2 -- the re-aimed maker/checker measures the DIRECTOR, not the acting identity", async (t) => {
+test("H -- the definition lifecycle, FORCED: four refusals and two admissions, one term apart", async (t) => {
   if (!ready) return skipHere(t, "the cores are absent");
-  const src = (await rootQuery(
-    `select prosrc from pg_proc p
-      where p.oid='clara._agent_approve_metric_definition_core(uuid,uuid,uuid,text,uuid,bytea,text,text,jsonb,text)'::regprocedure`
-  )).rows[0].prosrc;
-  // The three re-aimed arms exist and are named. The BEHAVIOURAL forcing of each arm needs the
-  // wake door to supply p_obo per call and lands with PR-2's wrappers; named here, not implied.
-  assert.match(src, /definition_directed_self_approval/, "ARM 1' is installed");
-  assert.match(src, /agent_self_approval_attestation_required/, "ARM 2' is installed");
-  assert.match(src, /v_checker := p_obo/, "the checker is the approval wake's DIRECTOR");
-  assert.match(src, /role in \('admin','owner'\)/,
-    "and the eligible population is 0084's own, not eligible_checker_count (F5-D33)");
+  // FORCED, NOT READ. Its first cut asserted three regexes against prosrc, which proves the words
+  // are present and nothing about what the trigger does with them (law: spelling is not identity).
+  // Every arm below is a real transition on a real draft, and each refusing arm has an admitting
+  // twin differing in ONE term -- so a body that refused everything would fail here.
+  const eps = await buildEpsilonWorld(world, { tag: `lc-${randomUUID().slice(0, 6)}`, seal: false });
+  const human = world.users.alice;
+
+  // (1) A MACHINE ACT DRESSED AS A HUMAN ONE. This is the arm PR-1 adds: the human evidence kind
+  // was admissible to ANY writer, including one signing as the machine -- law 22's fabrication
+  // written into the evidence record.
+  const dressedDraft = await freshDraft(eps, "dressed");
+  const dressed = await caught(() => attemptApproval(
+    dressedDraft, AGENT_USER_ID, { kind: "human_approval", version: 1 }));
+  assert.ok(dressed, "human_approval signed by the agent identity is refused");
+  assert.equal(errorDetail(dressed)?.class, "human_evidence_for_machine_act",
+    `and the refusal names WHY, not merely that: ${dressed?.message}`);
+
+  // (1') ITS ADMITTING TWIN -- the SAME evidence, one term changed: a human signs it. This is what
+  // makes (1) a wall rather than a body that stopped admitting human_approval altogether
+  // (extend-never-weaken, measured).
+  const humanOk = await freshDraft(eps, "humanok");
+  await attemptApproval(humanOk, human, { kind: "human_approval", version: 1 });
+  assert.equal((await rootQuery(
+    "select state from clara.metric_definition_versions where id=$1", [humanOk])).rows[0].state,
+    "firm_approved", "the human arm's admitting condition is byte-unchanged and still admits");
+
+  // (2) AN AGENT APPROVAL NOT SIGNED BY THE AGENT.
+  const signerDraft = await freshDraft(eps, "signer");
+  const wrongSigner = await caught(() => attemptApproval(signerDraft, human, AGENT_EVIDENCE));
+  assert.equal(errorDetail(wrongSigner)?.class, "approved_by",
+    `an agent_self_approval signed by a human is refused: ${wrongSigner?.message}`);
+
+  // (3) AN AGENT APPROVAL THAT CANNOT SAY WHICH MODEL APPROVED, OR WHY.
+  for (const [label, agent] of [
+    ["no model", { model_version: "2026-08", rationale: "r" }],
+    ["no rationale", { model: "claude-opus-5", model_version: "2026-08" }],
+  ]) {
+    const thinDraft = await freshDraft(eps, "thin");
+    const thin = await caught(() => attemptApproval(thinDraft, AGENT_USER_ID,
+      { kind: "agent_self_approval", version: 1, agent }));
+    assert.equal(errorDetail(thin)?.class, "model_or_rationale", `${label}: ${thin?.message}`);
+  }
+
+  // (3') ITS ADMITTING TWIN -- the complete agent evidence transitions.
+  const agentOk = await freshDraft(eps, "agentok");
+  await attemptApproval(agentOk, AGENT_USER_ID, AGENT_EVIDENCE);
+  const row = (await rootQuery(
+    "select state, approved_by from clara.metric_definition_versions where id=$1", [agentOk])).rows[0];
+  assert.equal(row.state, "firm_approved", "a complete agent self-approval is ADMITTED (TA-P1 C)");
+  assert.equal(row.approved_by, AGENT_USER_ID, "signed, honestly, by the machine that did it");
+
+  // (4) LAW 36: a FIFTH kind refuses and says which value it saw, rather than falling through.
+  const unknownDraft = await freshDraft(eps, "unknown");
+  const unknown = await caught(() => attemptApproval(
+    unknownDraft, AGENT_USER_ID, { kind: "board_resolution", version: 1 }));
+  const det = errorDetail(unknown);
+  assert.equal(det?.reason, "definition_evidence_kind_unknown", `${unknown?.message}`);
+  assert.equal(det?.kind, "board_resolution", "and it NAMES the unregistered value it was given");
+});
+
+test("H2 -- the re-aimed maker/checker, FORCED: the DIRECTOR is measured, not the acting identity", async (t) => {
+  if (!ready) return skipHere(t, "the cores are absent");
+  // FORCED, NOT READ. Its first cut matched four regexes against the core's source and deferred
+  // the behaviour to PR-2 on the ground that the arms need a wake door -- but the core is directly
+  // callable as its owner, which is exactly how every other agent-lane cell in this file reaches
+  // one. p_actor is the AGENT on every call here, which is the whole point: a wall measured
+  // against p_actor would measure nothing, and that is how v1 removed it while appearing to keep it.
+  const eps = await buildEpsilonWorld(world, { tag: `mc-${randomUUID().slice(0, 6)}`, seal: false });
+  const firm = await firmIdOf(eps.client);
+  const owner = world.users.alice;
+  const preparer = await ensureEpsilonAdmin(world);   // the admin who PROPOSES -- the effective maker
+
+  // THE ARM UNDER TEST IS SELECTED BY A POPULATION, so the population is read, not assumed --
+  // and it is read with 0084's OWN definition (F5-D33), not eligible_checker_count.
+  const eligible = (await rootQuery(
+    `select count(*)::int n from clara.firm_memberships m join clara.users u on u.id=m.user_id
+      where m.firm_id=$1 and m.status='active' and m.role in ('admin','owner') and not u.is_agent`,
+    [firm])).rows[0].n;
+  assert.ok(eligible >= 2, `ARM 1' is the arm under test only where two accountable humans exist (got ${eligible})`);
+
+  const approve = async (versionId, obo, attestation = null) => {
+    const hash = (await rootQuery(
+      "select '\\x'||encode(formula_sha256,'hex') as h from clara.metric_definition_versions where id=$1",
+      [versionId])).rows[0].h;
+    return rootQuery(
+      `select clara._agent_approve_metric_definition_core($1,$2,$3,'interactive',$4,$5::bytea,
+         'f-a5 pr1 maker/checker cell',$6,$7::jsonb,$8) as r`,
+      [firm, AGENT_USER_ID, obo, versionId, hash, attestation, JSON.stringify(agentObj()),
+        opk("fa5-mc")]);
+  };
+
+  // THE REFUSING POLARITY -- the human who DIRECTED the draft directs its approval too. Clara is
+  // the acting identity on both, so nothing about p_actor distinguishes this from the twin below.
+  const selfDirected = await freshDraft(eps, "self");
+  const refused = await caught(() => approve(selfDirected, preparer));
+  assert.ok(refused, "the draft's effective maker cannot direct its own approval");
+  const det = errorDetail(refused);
+  assert.equal(det?.reason, "definition_directed_self_approval", `${refused?.message}`);
+  assert.equal(det?.effective_maker, preparer, "and the refusal names the maker it measured");
+  assert.equal(det?.approval_director, preparer, "and the director it compared him with");
+
+  // THE ADMITTING TWIN -- ONE TERM CHANGED: a different accountable human directs the approval.
+  const independent = await freshDraft(eps, "indep");
+  const ok = (await approve(independent, owner)).rows[0].r;
+  assert.equal(ok.state, "firm_approved", "an independently directed approval is admitted");
+  assert.equal(ok.approval_arm, "independent_check", "and records WHICH arm let it through");
+
+  // AND THE RECEIPT IS WRITTEN IN THE SAME TRANSACTION -- "no receipt, no act", read off the row.
+  const receipt = (await rootQuery(
+    `select act, outcome, directed_by, acting_identity, rung_vector, model
+       from clara.report_agent_receipts where definition_version_id=$1`, [independent])).rows[0];
+  assert.ok(receipt, "the approval wrote its F-A5 receipt");
+  assert.equal(receipt.act, "approve_definition");
+  assert.equal(receipt.directed_by, owner, "the receipt names the human who directed it");
+  assert.equal(receipt.acting_identity, AGENT_USER_ID, "and the machine that acted");
+  assert.deepEqual(receipt.rung_vector, {
+    arm_0_orphan: "pass", arm_1_distinct_checker: "pass", arm_2_solo_attestation: "not_evaluable",
+  }, "the rung vector is THREE-VALUED: an arm this firm's population cannot reach is not_evaluable, never a pass");
+
+  // ARM 0' -- ORPHAN ADOPTION, AT TA-P5'S RIDER'S STATED WIDTH, which is the width v1 of the
+  // design got wrong (F5-D24: the rider exempts a self-run report pack from ARM 0' and NOTHING
+  // else). Two calls one term apart: a DIRECTED approval of an agent-authored orphan must adopt
+  // it with an attestation; an UNDIRECTED one -- a self-run pack -- is exempt.
+  //
+  // Its first cut tried to make the orphan by UPDATEing proposed_by, and the definition lifecycle
+  // trigger refused it as historical -- correctly: proposed_by is not on its exempt list. The
+  // orphan is therefore CONSTRUCTED as a fixture row (see agentAuthoredDraft), which is honest
+  // about the fact that PR-1 ships no agent propose door and the state is PR-2's to produce.
+  const orphan = await agentAuthoredDraft(eps, "orph1");
+  const unadopted = await caught(() => approve(orphan, owner));
+  assert.ok(unadopted, "a directed approval of an orphan draft with no attestation is refused");
+  assert.equal(errorDetail(unadopted)?.reason, "self_approval_attestation_missing", `${unadopted?.message}`);
+  const adopted = (await approve(orphan, owner, "alice adopts this agent-authored draft")).rows[0].r;
+  assert.equal(adopted.approval_arm, "adoption", "with the adoption text it is admitted, and says so");
+
+  // THE RIDER'S OWN ARM: no director at all. Clara approves her own undirected draft with no
+  // attestation -- the commonest lawful shape, and the proof TA-P1 C is not narrowed. Named
+  // because every arm above is a refusal and a reader can take the list for the whole rule.
+  const selfRunOrphan = await agentAuthoredDraft(eps, "orph2");
+  const selfRun = (await approve(selfRunOrphan, null)).rows[0].r;
+  assert.equal(selfRun.state, "firm_approved", "Clara still approves her own UNDIRECTED draft");
+  assert.equal(selfRun.approval_arm, "adoption", "inside a self-run wake, with no attestation owed");
 });
 
 // =============================================================================================
@@ -501,4 +728,120 @@ test("I -- sealing a dataset enqueues its pre_sign render job, attributed to the
   assert.ok(audit, "the enqueue is audited");
   assert.equal(audit.actor, owner, "a human-prepared run's enqueue is attributed to the human");
   assert.equal(audit.via_wake_kind, null, "and carries no wake kind, because no wake happened");
+});
+
+// =============================================================================================
+// J -- DERIVATION #6 / RULING R-L23, ON THE LANE THAT ACTUALLY SEALS. Every pre_sign artifact in
+// production is sealed by clara.complete_render_job, which calls the core POSITIONALLY WITH TEN
+// ARGUMENTS and supplies no identity at all. Both halves of R-L23 are measured here: the ten-
+// argument call still resolves against the thirteen-argument core (the tail-append), and the
+// artifact's identity is DB-DERIVED from its run rather than taken from a caller that has none.
+// Without this cell, gate-2 blocker 2 would be re-created one level over and cell C would still
+// pass -- because cell C seals through the AGENT lane, which does pass an identity.
+// =============================================================================================
+test("J -- R-L23: the render worker's ten-argument call still resolves, and DB-derives the run's identity", async (t) => {
+  if (!ready) return skipHere(t, "the cores are absent");
+  const owner = world.users.alice;
+  const eps = await buildEpsilonWorld(world, { tag: `rl23-${randomUUID().slice(0, 6)}`, seal: false });
+  const firm = await firmIdOf(eps.client);
+
+  // An AGENT-PREPARED run DIRECTED by Alice -- so "DB-derived" has something to be wrong about.
+  const run = (await rootQuery(
+    `select clara._open_report_run_core($1,$2,$3,$4,$5,$6,$7,$8,$9) as r`,
+    [firm, AGENT_USER_ID, owner, "interactive", eps.client,
+      eps.spec.report_spec_version_id, eps.snapshotId, eps.period.id, opk("fa5-rl23")])).rows[0].r;
+  const runId = run.report_run_id;
+  await evaluateMetricHuman(owner, {
+    client: eps.client, definitionVersion: eps.definitionVersionId,
+    periodIds: [eps.period.id], snapshotId: eps.snapshotId, runId,
+  });
+
+  // DRAIN FIRST, THEN SEAL. clara.claim_render_job hands out the OLDEST job, so without the park
+  // this cell would complete some earlier case's job and assert against the wrong run -- zeta's
+  // own lesson, reused rather than re-learned. The seal then enqueues MY job (S9's landed line).
+  await parkQueue();
+  await rootQuery(`select clara._seal_report_dataset_core($1,$2,$3,$4,$5,'{}'::uuid[],$6)`,
+    [firm, AGENT_USER_ID, owner, "interactive", runId, opk("fa5-rl23-seal")]);
+
+  const worker = `fa5-rl23-${randomUUID().slice(0, 8)}`;
+  const job = (await asRuntime("select clara.claim_render_job($1) j", [worker])).rows[0].j;
+  assert.ok(job, "the seal enqueued a job for the worker to claim");
+  assert.equal(job.report_run_id, runId, "and it is THIS run's job, not an earlier case's");
+  assert.equal(job.kind, "pre_sign", "of the kind S9's line enqueues");
+
+  // The worker's completion manifest: the request half carried verbatim, the environment half
+  // synthesised in the shape the real worker builds (zeta-fixtures.mjs's recipe).
+  const sha = "e".repeat(64);
+  const manifest = {
+    ...job.request_manifest,
+    render_request_sha256: job.manifest_sha256,
+    assembler_version: "clara.reporting-render/v1",
+    renderer_image_digest: `sha256:${"c".repeat(64)}`,
+    renderer_source_commit: "d".repeat(40),
+    node_version: "v20.19.5", os_version: "linux test", architecture: "x64",
+    font_engine_version: "typst 0.0.0-test",
+    document_metadata: { title: "f-a5 pr1", creation_date_utc: "2025-12-31T00:00:00Z" },
+    extracted_text_sha256: "f".repeat(64),
+    extraction_tool: "pdftotext (poppler-utils) 0.0.0-test",
+    pre_sign_pdf_sha256: sha,
+  };
+  const done = (await asRuntime("select clara.complete_render_job($1,$2,$3,4096,$4::jsonb) r",
+    [job.render_job_id, worker, sha, JSON.stringify(manifest)])).rows[0].r;
+  assert.ok(done.report_artifact_id,
+    "the TEN-argument positional call still resolves against the thirteen-argument core (R-L23)");
+
+  const art = (await artifactRows(runId)).find((a) => a.id === done.report_artifact_id);
+  assert.equal(art.sealed_by, AGENT_USER_ID,
+    "complete_render_job seals as the machine -- which is why sealed_by alone could never arm ARM 1");
+  assert.equal(art.directed_by, owner,
+    "the artifact's director is DB-DERIVED from its run, on the lane that supplied no identity at all");
+  assert.equal(art.prepared_by_agent, true, "and so is prepared_by_agent");
+
+  // AND THE WALL IS ARMED BY IT. The run's director cannot now issue the pack she directed, on the
+  // artifact side -- the term that was NULL before R-L23 and could never have refused anything.
+  const refused = await caught(() => approveIssue(owner, {
+    runId, expectedSha256: sha, selfAttestation: "alice attests", opKey: opk("fa5-rl23-issue") }));
+  assert.ok(refused, "the director's own issue is refused on the render-worker-sealed artifact");
+  assert.equal(errorDetail(refused)?.artifact_directed_by, owner,
+    `and the refusal names the ARTIFACT-side term, not only the run's: ${refused?.message}`);
+});
+
+test("J2 -- an explicit director that disagrees with the run refuses artifact_identity_mismatch", async (t) => {
+  if (!ready) return skipHere(t, "the cores are absent");
+  const owner = world.users.alice;
+  const eps = await buildEpsilonWorld(world, { tag: `mism-${randomUUID().slice(0, 6)}`, seal: false });
+  const firm = await firmIdOf(eps.client);
+  const run = (await rootQuery(
+    `select clara._open_report_run_core($1,$2,$3,$4,$5,$6,$7,$8,$9) as r`,
+    [firm, AGENT_USER_ID, owner, "interactive", eps.client,
+      eps.spec.report_spec_version_id, eps.snapshotId, eps.period.id, opk("fa5-mism")])).rows[0].r;
+  const runId = run.report_run_id;
+  await evaluateMetricHuman(owner, {
+    client: eps.client, definitionVersion: eps.definitionVersionId,
+    periodIds: [eps.period.id], snapshotId: eps.snapshotId, runId,
+  });
+  await rootQuery(`select clara._seal_report_dataset_core($1,$2,$3,$4,$5,'{}'::uuid[],$6)`,
+    [firm, AGENT_USER_ID, owner, "interactive", runId, opk("fa5-mism-seal")]);
+
+  const sha = "a".repeat(64);
+  const manifest = await buildManifest({ runId, kind: "pre_sign", sha256: sha });
+  const seal = (obo, opKey) => rootQuery(
+    `select clara._seal_report_artifact_core($1,$2,$3,'pre_sign','pdf',$4,4096,$5::jsonb,null,$6,$7,
+       'interactive',$8::jsonb) as r`,
+    [firm, AGENT_USER_ID, runId, sha, JSON.stringify(manifest), opKey, obo,
+      JSON.stringify(agentObj())]);
+
+  // THE REFUSING POLARITY -- Bob did not direct this run; Alice did.
+  const refused = await caught(() => seal(world.users.bob, opk("fa5-mism-a")));
+  assert.ok(refused, "a seal naming a different director than its run is refused");
+  const det = errorDetail(refused);
+  assert.equal(det?.reason, "artifact_identity_mismatch", `${refused?.message}`);
+  assert.equal(det?.run_directed_by, owner, "and it names the run's director");
+  assert.equal(det?.seal_directed_by, world.users.bob, "beside the one the seal claimed");
+
+  // THE ADMITTING TWIN -- ONE TERM CHANGED: the same seal, naming the run's real director.
+  const ok = (await seal(owner, opk("fa5-mism-b"))).rows[0].r;
+  assert.ok(ok.report_artifact_id, "the agreeing seal is admitted");
+  const art = (await artifactRows(runId)).find((a) => a.id === ok.report_artifact_id);
+  assert.equal(art.directed_by, owner, "and the row still carries the RUN's director, DB-derived");
 });

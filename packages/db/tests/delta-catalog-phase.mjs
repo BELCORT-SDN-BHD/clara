@@ -533,13 +533,14 @@ await t.test("freeze verifier positively reads registered live bodies while depl
   const result = (await rootQuery("select clara.verify_evaluator_freeze() r")).rows[0].r;
   assert.equal(result.ok ?? result.verified ?? result.valid, true, JSON.stringify(result));
   assert.equal(result.verified_deployed, 0, JSON.stringify(result));
-  // FIVE registered closures at this frontier: delta's evaluate_metric +
+  // SIX registered closures at this frontier: delta's evaluate_metric +
   // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
-  // evaluate_witness_identity (0091/0092), and F-A2's evaluate_witness_fact_state **v2** — the
+  // evaluate_witness_identity (0091/0092), F-A2's evaluate_witness_fact_state **v2** — the
   // three-locks nil-tax arm, a NEW closure beside the frozen v1 rather than a recut of it, so
-  // the count moves by one and the frozen predecessor keeps its own row. ZERO deployed is the
-  // property this cell is really about — the verifier reads every registered closure's live
-  // bodies BEFORE any ceremony has flipped one, and that half is unchanged.
-  assert.equal(result.verified_registered, 5, JSON.stringify(result));
+  // the count moves by one and the frozen predecessor keeps its own row — and F-A5 PR-1's
+  // evaluate_fs_pack_agent v1, the agent-lane pack entrypoint, on the same terms. ZERO deployed
+  // is the property this cell is really about — the verifier reads every registered closure's
+  // live bodies BEFORE any ceremony has flipped one, and that half is unchanged.
+  assert.equal(result.verified_registered, 6, JSON.stringify(result));
 });
 }

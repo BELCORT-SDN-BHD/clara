@@ -560,12 +560,35 @@ begin
     raise exception 'f_a5 extract %: residual context reference survives the derivation', p_sig using errcode='CLR10';
   end if;
 
+  perform pg_temp._fa5_assert_no_wiki('extract ' || p_sig, v_new);
   return format(
     'create function clara.%I(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, %s) returns %s'
     || E' language plpgsql security definer set search_path = clara, pg_temp as $fa5core$%s$fa5core$',
     p_core_name, v_args, v_ret, v_new);
 end
 $ext$;
+
+-- THE WIKI AUTHORITY BOUNDARY, ENFORCED ON THE TEXT THAT IS ACTUALLY INSTALLED.
+--
+-- 0019's tail scans prosrc for wiki tokens; a body assembled at apply time is invisible to any
+-- STATIC reader, which is why scripts/check-wiki-dynamic-sql.mjs fails closed on a dynamic create
+-- whose target it cannot attribute (WB-R21). Every derivation below therefore asks the question
+-- the lint wants asked, of the REAL string, immediately before it is executed. This is strictly
+-- stronger than the static check it answers: the lint reasons about source text, this reads the
+-- bytes that become the catalog. The token set is the lint's own (WIKI_RELATIONS + WIKI_CALLS in
+-- scripts/wiki-lint-checks.mjs), widened to any wiki-prefixed identifier so a relation added
+-- later is refused here before anybody remembers to widen a list.
+create function pg_temp._fa5_assert_no_wiki(p_label text, p_sql text) returns void
+  language plpgsql as $nw$
+begin
+  if p_sql ~* '\mwiki[a-z0-9_]*\M'
+     or p_sql ~* '\m(get_context_pack|run_client_lint|run_lint_all)\M' then
+    raise exception 'f_a5 %: the derived body names a wiki relation or a wiki-touch verb', p_label
+      using errcode = 'CLR10',
+      detail = '{"reason":"wiki_authority_boundary","fix":"a reporting body may not reach the wiki surface; move the read into a whitelisted wiki verb"}';
+  end if;
+end
+$nw$;
 
 -- Argument NAMES of a live function, in order -- what a thin delegate passes through.
 create function pg_temp._fa5_argnames(p_sig text) returns text language sql as $an$
@@ -594,20 +617,44 @@ $x1$;
 --   prepared_by_agent p_actor is not distinct from clara.agent_user_id()
 -- prepared_by_agent reads the ACTING IDENTITY, not the wake kind: a wake kind is a label on the
 -- channel, the actor is the thing itself (law: spelling is not identity).
+--
+-- THIS BLOCK AND THE FOUR LIKE IT (#3b, #7b, #9, #6) USE THE ESTATE'S OWN CHANGE-OF-RECORD IDIOM
+-- (0017/0018/0019, 0097-0102): read the WHOLE DEFINITION by literal signature, splice it, put it
+-- back. NOT prosrc plus a hand-typed header. Two reasons, and the second is the one that moved
+-- them:
+--   (a) A RE-TYPED HEADER IS A SECOND PLACE FOR THE SIGNATURE TO BE WRONG, and this file's own
+--       PARAMETER-ORDER WARNING says a (p_firm, p_actor) transposition TYPE-CHECKS. Deriving the
+--       header removes the class instead of watching for it. Measured on the rig: the round trip
+--       preserves prosrc, prosecdef, proowner and proconfig ('search_path=clara, pg_temp',
+--       byte-identical), so section 10's posture assertions read the same values either way.
+--   (b) scripts/check-wiki-dynamic-sql.mjs FAILS CLOSED on a dynamically created body whose target
+--       it cannot attribute, and an unresolved target is never waivable (its finding F8). Reading
+--       the definition by literal signature is the form it attributes. The lint was RIGHT to refuse
+--       the earlier shape: an assembled body is invisible to 0019's prosrc token scan -- which is
+--       also why pg_temp._fa5_assert_no_wiki re-asks the boundary question of the exact string that
+--       is executed, at apply, which no static reader can do.
+--
+-- THE PROSE LIVES OUT HERE, ABOVE THE BLOCK, AND THAT IS NOT A STYLE CHOICE. Measured: the lint's
+-- comment masker does not know E'' backslash escapes, and a_vals below is one -- so every comment
+-- AFTER it inside this block is parsed as CODE. Two words of prose ("create function") and one
+-- builtin name were enough to make this block read as a second, unattributable patch site. It is
+-- fail-closed, so the defect costs a false RED and never a false green; it is reported to the
+-- sprint lead rather than worked around silently, and the prose is simply moved out of range.
 do $x1b$
 declare
   d text; v_n int;
   a_cols text := E'reporting_period_id, period_start, period_end, state, requested_by)';
   a_vals text := E'p.period_start, p.period_end, \'drafting\', p_actor) returning id into v_id;';
 begin
-  select p.prosrc into d from pg_proc p where p.oid = 'clara._open_report_run_core(uuid,uuid,uuid,text,uuid,uuid,uuid,uuid,text)'::regprocedure;
+  d := pg_get_functiondef('clara._open_report_run_core(uuid,uuid,uuid,text,uuid,uuid,uuid,uuid,text)'::regprocedure);
   v_n := (length(d) - length(replace(d, a_cols, ''))) / length(a_cols);
   if v_n <> 1 then raise exception 'f_a5 pr1 #1b: column anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
   v_n := (length(d) - length(replace(d, a_vals, ''))) / length(a_vals);
   if v_n <> 1 then raise exception 'f_a5 pr1 #1b: values anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
   d := replace(d, a_cols, E'reporting_period_id, period_start, period_end, state, requested_by,\n      directed_by, prepared_by_agent)');
   d := replace(d, a_vals, E'p.period_start, p.period_end, \'drafting\', coalesce(p_obo, p_actor),\n      p_obo, p_actor is not distinct from clara.agent_user_id()) returning id into v_id;');
-  execute format('create or replace function clara._open_report_run_core(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, p_client uuid, p_report_spec_version_id uuid, p_books_snapshot_id uuid, p_reporting_period_id uuid, p_op_key text) returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fa5core$%s$fa5core$', d);
+  perform pg_temp._fa5_assert_no_wiki('pr1 #1b', d);
+  execute d;
   raise notice 'f_a5 pr1 #1b: the run INSERT now writes requested_by=coalesce(obo,actor), directed_by and prepared_by_agent';
 end
 $x1b$;
@@ -672,7 +719,8 @@ declare
   a_assess text := 'v_assessment := clara.assess_report_claim(r.id, p_op_key || '':assess'');';
   a_audit  text := '  perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind, ''seal_report_dataset'', null,';
 begin
-  select p.prosrc into d from pg_proc p where p.oid = 'clara._seal_report_dataset_core(uuid,uuid,uuid,text,uuid,uuid[],text)'::regprocedure;
+  -- CoR idiom, for #1b's two reasons (the derived header and the wiki gate's attribution).
+  d := pg_get_functiondef('clara._seal_report_dataset_core(uuid,uuid,uuid,text,uuid,uuid[],text)'::regprocedure);
   v_n := (length(d) - length(replace(d, a_assess, ''))) / length(a_assess);
   if v_n <> 1 then raise exception 'f_a5 pr1 #3b: assess anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
   v_n := (length(d) - length(replace(d, a_audit, ''))) / length(a_audit);
@@ -684,7 +732,8 @@ begin
  || E'  -- core so the render enqueue is attributed to the identity that actually enqueued it.\n'
  || E'  perform clara._enqueue_render_job_core(p_firm, p_actor, p_obo, p_wake_kind, r.id, ''pre_sign'');\n'
  || a_audit);
-  execute format('create or replace function clara._seal_report_dataset_core(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, p_report_run_id uuid, p_chart_template_version_ids uuid[], p_op_key text) returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fa5core$%s$fa5core$', d);
+  perform pg_temp._fa5_assert_no_wiki('pr1 #3b', d);
+  execute d;
   raise notice 'f_a5 pr1 #3b: the seal core calls the assess CORE and lands S9''s enqueue line before its final audit';
 end
 $x3b$;
@@ -725,7 +774,8 @@ declare
   d text; v_n int;
   a text := '  if p_claim_capability is null or p_claim_capability not in (''claims_compliance'', ''no_claim'')';
 begin
-  select p.prosrc into d from pg_proc p where p.oid = 'clara._publish_report_template_core(uuid,uuid,uuid,text,text,text,text,text,uuid,uuid,jsonb,date,text)'::regprocedure;
+  -- CoR idiom, for #1b's two reasons (the derived header and the wiki gate's attribution).
+  d := pg_get_functiondef('clara._publish_report_template_core(uuid,uuid,uuid,text,text,text,text,text,uuid,uuid,jsonb,date,text)'::regprocedure);
   v_n := (length(d) - length(replace(d, a, ''))) / length(a);
   if v_n <> 1 then raise exception 'f_a5 pr1 #7b: floor anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
   d := replace(d, a,
@@ -741,7 +791,8 @@ begin
  || E'      detail = ''{"reason":"statutory_template_human","fix":"an admin publishes a statutory template through clara.publish_report_template_version"}'';\n'
  || E'  end if;\n'
  || a);
-  execute format('create or replace function clara._publish_report_template_core(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, p_template_key text, p_title text, p_report_class text, p_claim_capability text, p_statutory_profile_version_id uuid, p_house_style_version_id uuid, p_layout_ast jsonb, p_effective_from date, p_op_key text) returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fa5core$%s$fa5core$', d);
+  perform pg_temp._fa5_assert_no_wiki('pr1 #7b', d);
+  execute d;
   raise notice 'f_a5 pr1 #7b: the report-template core refuses report_class=statutory on any wake lane (statutory_template_human)';
 end
 $x7b$;
@@ -801,20 +852,32 @@ declare
   v_body text; v_new text; v_check text; v_n int;
   a text := E'    perform clara._audit(r.firm_id, r.requested_by, null, null, \'enqueue_render_job\', null,';
   b text := E'    perform clara._audit(coalesce(p_firm, r.firm_id), v_actor, v_obo, p_wake_kind, \'enqueue_render_job\', null,';
+  -- THE HEADER IS DERIVED, NOT RE-TYPED (#1b's reasons). pg_get_functiondef hands back the whole
+  -- CREATE, so the extracted core inherits SECURITY DEFINER, the pinned search_path and the RETURNS
+  -- type from the body it came from rather than from a second hand-written copy of them; the only
+  -- edit is the identity line, and it is anchor-asserted like every other splice in this file.
+  h_old text := 'clara.enqueue_render_job(p_report_run_id uuid, p_kind text)';
+  h_new text := 'clara._enqueue_render_job_core(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, p_report_run_id uuid, p_kind text)';
 begin
-  select p.prosrc into v_body from pg_proc p where p.oid = 'clara.enqueue_render_job(uuid,text)'::regprocedure;
+  v_body := pg_get_functiondef('clara.enqueue_render_job(uuid,text)'::regprocedure);
   if position('p_firm' in v_body) > 0 or position('p_actor' in v_body) > 0 or position('v_actor' in v_body) > 0 then
     raise exception 'f_a5 pr1 #9: the body already uses a name the derivation introduces' using errcode='CLR10';
   end if;
+  v_n := (length(v_body) - length(replace(v_body, h_old, ''))) / length(h_old);
+  if v_n <> 1 then raise exception 'f_a5 pr1 #9: header anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
   v_n := (length(v_body) - length(replace(v_body, a, ''))) / length(a);
   if v_n <> 1 then raise exception 'f_a5 pr1 #9: audit anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
   v_n := (length(v_body) - length(replace(v_body, 'declare r record;', ''))) / length('declare r record;');
   if v_n <> 1 then raise exception 'f_a5 pr1 #9: declare anchor occurs % time(s)', v_n using errcode='CLR10'; end if;
 
-  v_new := replace(v_body, 'declare r record;', 'declare v_actor uuid; v_obo uuid; r record;');
+  v_new := replace(v_body, h_old, h_new);
+  v_new := replace(v_new, 'declare r record;', 'declare v_actor uuid; v_obo uuid; r record;');
   v_new := replace(v_new, a, b);
-  -- the reversal proof: undo both substitutions and the original must reappear byte for byte
+  -- the reversal proof: undo all THREE substitutions, innermost last, and the original definition
+  -- must reappear byte for byte -- header included, which is what makes "the core is the delegate's
+  -- body under a new identity" a measurement rather than a claim
   v_check := replace(replace(v_new, b, a), 'declare v_actor uuid; v_obo uuid; r record;', 'declare r record;');
+  v_check := replace(v_check, h_new, h_old);
   if v_check is distinct from v_body then
     raise exception 'f_a5 pr1 #9: the reversal does not reconstruct the original body' using errcode='CLR10';
   end if;
@@ -828,7 +891,8 @@ begin
  || E'    v_actor := coalesce(p_actor, case when r.prepared_by_agent then clara.agent_user_id() else r.requested_by end);\n'
  || E'    v_obo   := coalesce(p_obo,   case when r.prepared_by_agent then r.directed_by else null end);\n'
  || b);
-  execute format('create function clara._enqueue_render_job_core(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text, p_report_run_id uuid, p_kind text) returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fa5core$%s$fa5core$', v_new);
+  perform pg_temp._fa5_assert_no_wiki('pr1 #9', v_new);
+  execute v_new;
   raise notice 'f_a5 pr1 #9: clara._enqueue_render_job_core derived, reversal-proven, and its audit attribution is prepared_by_agent-aware';
 end
 $x9$;
@@ -870,6 +934,11 @@ declare
   n_cols text := E'      prior_artifact_id, sealed_by, directed_by, prepared_by_agent)';
   n_vals text := E'      p_manifest, a.id, v_removed, a.uncertified, p_prior_artifact_id, p_actor,\n      r.directed_by, r.prepared_by_agent)';
   n_audit text := E'  perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind, \'seal_report_artifact\', null,';
+  -- the ARGUMENT LIST, spliced on the definition's own header. The three new parameters are
+  -- appended at the TAIL with NULL defaults so the two live positional callers keep resolving.
+  a_args text := 'p_prior_artifact_id uuid, p_op_key text)';
+  n_args text := 'p_prior_artifact_id uuid, p_op_key text, p_obo uuid DEFAULT NULL::uuid,'
+              || ' p_wake_kind text DEFAULT NULL::text, p_agent jsonb DEFAULT NULL::jsonb)';
   -- the ADDED block, likewise: an addition is reversed by removing exactly the string added
   n_block text :=
     E'  -- R-L23: an explicit direction from the wake door must AGREE with the run it seals. Compared\n'
@@ -885,8 +954,12 @@ declare
  || E'      null, null, p_obo, coalesce(p_wake_kind, ''interactive''), p_agent, p_op_key);\n'
  || E'  end if;\n';
 begin
-  select p.prosrc into v_body from pg_proc p where p.oid = 'clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure;
-  foreach a in array array[a_cols, a_vals, a_audit] loop
+  -- CoR idiom (#1b's reasons). Here the derived header also carries the ARGUMENT LIST, so the
+  -- tail-append is a splice on the definition's own text rather than a re-typed thirteen-parameter
+  -- signature -- which is the single place this file could most easily have transposed
+  -- (p_firm, p_actor) while type-checking, per the PARAMETER-ORDER WARNING in the header.
+  v_body := pg_get_functiondef('clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure);
+  foreach a in array array[a_cols, a_vals, a_audit, a_args] loop
     v_n := (length(v_body) - length(replace(v_body, a, ''))) / length(a);
     if v_n <> 1 then raise exception 'f_a5 pr1 #6: an anchor occurs % time(s), expected exactly 1', v_n using errcode='CLR10'; end if;
   end loop;
@@ -895,21 +968,23 @@ begin
     raise exception 'f_a5 pr1 #6: the body already uses a name the derivation introduces' using errcode='CLR10';
   end if;
 
-  -- STAGE 1 -- three pure substitutions, each reversible by a plain replace()
+  -- STAGE 1 -- four pure substitutions, each reversible by a plain replace()
   v_new := v_body;
+  v_new := replace(v_new, a_args,  n_args);
   v_new := replace(v_new, a_cols,  n_cols);
   v_new := replace(v_new, a_vals,  n_vals);
   v_new := replace(v_new, a_audit, n_audit);
   -- STAGE 2 -- one pure ADDITION, immediately before the (already rewritten) audit line
   v_new := replace(v_new, n_audit, n_block || n_audit);
 
-  -- THE REVERSAL PROOF. Remove the added block, then undo the three substitutions; the original
-  -- body must reappear byte for byte. Nothing here is a regex: an addition of a known string is
-  -- reversed by removing that exact string, which is why stage 2 is separate from stage 1.
+  -- THE REVERSAL PROOF. Remove the added block, then undo the four substitutions; the original
+  -- definition must reappear byte for byte. Nothing here is a regex: an addition of a known string
+  -- is reversed by removing that exact string, which is why stage 2 is separate from stage 1.
   v_check := replace(v_new, n_block, '');
   v_check := replace(v_check, n_audit, a_audit);
   v_check := replace(v_check, n_vals,  a_vals);
   v_check := replace(v_check, n_cols,  a_cols);
+  v_check := replace(v_check, n_args,  a_args);
   if v_check is distinct from v_body then
     raise exception 'f_a5 pr1 #6: the reversal does not reconstruct the original body -- refusing to move it' using errcode='CLR10';
   end if;
@@ -919,8 +994,9 @@ begin
 
   -- DROP + CREATE, not CREATE OR REPLACE: the argument list changes. The two live callers pass ten
   -- positional arguments and both keep resolving, because the new pair is at the TAIL with defaults.
+  perform pg_temp._fa5_assert_no_wiki('pr1 #6', v_new);
   drop function clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text);
-  execute format('create function clara._seal_report_artifact_core(p_firm uuid, p_actor uuid, p_report_run_id uuid, p_kind text, p_key_extension text, p_sha256 text, p_byte_size bigint, p_manifest jsonb, p_prior_artifact_id uuid, p_op_key text, p_obo uuid default null, p_wake_kind text default null, p_agent jsonb default null) returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fa5core$%s$fa5core$', v_new);
+  execute v_new;
   revoke all on function clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text,uuid,text,jsonb) from public;
   raise notice 'f_a5 pr1 #6: the artifact core takes (p_obo, p_wake_kind, p_agent) at the TAIL with NULL defaults; the artifact''s directed_by/prepared_by_agent are DB-derived from its run; an explicit disagreeing director refuses artifact_identity_mismatch';
 end
@@ -1641,6 +1717,7 @@ revoke all on function clara._tf_report_agent_receipt_authority() from public;
 do $tail$
 declare
   n int; v_sha text; v_pin text; v_bad text[] := '{}'; r record;
+  v_callable boolean; v_state text;
   v_cores text[] := array[
     'clara._open_report_run_core(uuid,uuid,uuid,text,uuid,uuid,uuid,uuid,text)',
     'clara._assess_report_claim_core(uuid,uuid,uuid,text,uuid,text)',
@@ -1738,15 +1815,32 @@ begin
   perform clara.verify_evaluator_freeze();
   perform clara.verify_metric_input_producer_freeze();
 
-  -- (6) THE DEFINITION-WRITER CENSUS IS STILL FOUR (survey C1 / eta 0077:23-29). Measured against
-  -- GRANTED bodies: every new INSERT lives in an ungranted core, so the granted count cannot move.
-  select count(*)::int into n
-    from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
-   where ns.nspname='clara'
-     and p.prosrc ~ '(insert into|update)[[:space:]]+clara\.metric_definition(_versions)?[[:space:]]'
-     and exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
-                  where a.privilege_type='EXECUTE' and a.grantee <> p.proowner);
-  raise notice 'f_a5 pr1 tail: % granted bodies carry definition DML (census C1 is asserted live by tests/eta-contract.test.mjs:172-190, which this file leaves green)', n;
+  -- (6) THE DEFINITION-WRITER CENSUS (survey C1 / eta 0077:23-29). Every definition write this
+  -- file adds lives in an UNGRANTED core, so the APP-EXECUTABLE census cannot move -- and the way
+  -- to say that honestly is to measure it with the instrument that owns it.
+  --
+  -- THIS PREDICATE IS eta-contract.test.mjs:172-190's, VERBATIM: the six app roles by name (a
+  -- privilege reachable through any of them), lower(prosrc), all four DML verbs, both relations.
+  -- Its first cut was a DIFFERENT predicate -- case-sensitive, no delete/merge, "any non-owner
+  -- grantee" -- and it printed 3 beside a comment that said "still four". Two instruments, two
+  -- numbers, and the notice was reporting neither census: measure with the instrument the census
+  -- is defined by (lesson: the absence-from-the-wrong-instrument class).
+  --
+  -- IT STAYS A NOTICE AND IS NOT ASSERTED HERE ON PURPOSE. The census is a CLOSED WORLD OWNED BY
+  -- eta's test, which names its four members; a count asserted in this file would red at a LATER
+  -- lane's apply for a writer that lane lawfully added, i.e. it would fail in the wrong place and
+  -- against the wrong reader. The names are printed so the notice can be read, not just counted.
+  select count(*)::int, coalesce(string_agg(sig, ', ' order by sig), '(none)')
+    into n, v_pin
+    from (select distinct p.oid::regprocedure::text as sig
+            from pg_proc p
+            cross join lateral unnest(array['clara_authenticated','clara_agent_ro','clara_runtime',
+              'clara_runtime_login','clara_wake_interactive','clara_wake_proactive']) app(rolname)
+            join pg_roles g on g.rolname = app.rolname
+           where p.pronamespace = 'clara'::regnamespace
+             and has_function_privilege(g.oid, p.oid, 'EXECUTE')
+             and lower(p.prosrc) ~ '(insert\s+into|update|delete\s+from|merge\s+into)\s+clara\.(metric_definitions|metric_definition_versions)\M') x;
+  raise notice 'f_a5 pr1 tail: % app-executable definition writer(s) after this file: % (census C1 is ASSERTED by tests/eta-contract.test.mjs:172-190, which names delta''s four; this file leaves it green)', n, v_pin;
 
   -- (7) THE IDENTITY-WRITE CENSUS (census C.8). For every column an identity wall READS, a writer
   -- must exist. A wall column with no writer is the mechanical form of gate-2 blocker 2.
@@ -1785,13 +1879,28 @@ begin
     raise exception 'f_a5 pr1 tail: % watermark row(s) seeded -- PR-1 is DDL only, OQ-1 is the owner''s', n using errcode='CLR10';
   end if;
 
-  -- (10) THE NARRATIVE-AUTHORITY WALL IS PROVEN BEHAVIOURALLY, at apply, in both polarities.
-  -- A wall proven by reading its source text is not proven at all (law: spelling is not identity).
+  -- (10) THE WALL FUNCTION IS REACHABLE ONLY AS A TRIGGER, and this cell can say NO.
+  --
+  -- ITS FIRST CUT WAS A FALSE GREEN and is kept here as the reason for the shape: it read
+  --   begin perform ...(); raise exception 'callable outside a trigger'; exception when others then null; end;
+  -- whose own failure signal was caught by its own handler, so the block passed identically
+  -- whether the function refused or returned. A cell that cannot fail is not a cell. The verdict
+  -- is carried OUT of the subtransaction in a plpgsql variable instead -- assignments are not
+  -- transactional, which is the same property the wall proof below relies on -- and the sqlstate
+  -- is recorded so "it refused" is a POSITIVE reading of a real error, never the absence of one.
+  v_callable := false; v_state := null;
   begin
     perform clara._tf_report_agent_receipt_authority();
-    raise exception 'f_a5 pr1 tail: the authority wall function is callable outside a trigger' using errcode='CLR10';
-  exception when others then null;
+    v_callable := true;                     -- reached only if the call RETURNED
+  exception when others then v_state := sqlstate;
   end;
+  if v_callable then
+    raise exception 'f_a5 pr1 tail: the authority wall function is callable outside a trigger' using errcode='CLR10';
+  end if;
+  if v_state is distinct from '0A000' then
+    raise exception 'f_a5 pr1 tail: the authority wall function refused with sqlstate % -- expected 0A000 (trigger-only)',
+      coalesce(v_state,'(none)') using errcode='CLR10';
+  end if;
   raise notice 'f_a5 pr1 tail: OK -- 9 live bodies recut (6 extracted by reversal-proven derivation, 1 extended at the tail, 1 wall re-armed, 1 trigger arm added), 10 cores minted and granted to NOBODY, 2 relations born RLS-forced and append-only with 0 rows, 1 evaluator closure appended UNDEPLOYED, both freeze verifiers green, and every body this file promised not to touch re-read and unmoved';
 end
 $tail$;
@@ -1867,6 +1976,7 @@ $wallproof$;
 
 drop function pg_temp._fa5_extract(text,text,text,int,int);
 drop function pg_temp._fa5_argnames(text);
+drop function pg_temp._fa5_assert_no_wiki(text,text);
 drop table _fa5_pr1_prestate;
 
 reset role;

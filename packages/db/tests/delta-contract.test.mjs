@@ -45,6 +45,7 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       "select evaluator_name,version,deployed from clara.evaluator_versions order by evaluator_name,version",
     )).rows, [
       { evaluator_name: "assess_metric_cell_independent", version: 1, deployed: false },
+      { evaluator_name: "evaluate_fs_pack_agent", version: 1, deployed: false },
       { evaluator_name: "evaluate_metric", version: 1, deployed: false },
       { evaluator_name: "evaluate_witness_fact_state", version: 1, deployed: false },
       { evaluator_name: "evaluate_witness_fact_state", version: 2, deployed: false },
@@ -55,18 +56,26 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       assert.equal(identity.current_user, identity.session_user,
         "the deployment ceremony uses the direct session principal");
       await db.query("update clara.evaluator_versions set deployed=true where not deployed");
-      // FIVE, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
-      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, and F-A2's
+      // SIX, not two: delta's evaluate_metric + assess_metric_cell_independent, F-A1's
+      // evaluate_witness_fact_state (v1) + evaluate_witness_identity, F-A2's
       // evaluate_witness_fact_state **v2** — the three-locks nil-tax arm, a NEW closure beside
-      // the frozen v1 rather than a recut of it. The ceremony statement is `where not deployed`,
-      // so it has always committed EVERY registered closure — the number is the roster's size,
-      // and the roster is pinned by name AND VERSION three lines above.
+      // the frozen v1 rather than a recut of it — and F-A5 PR-1's evaluate_fs_pack_agent v1, the
+      // agent-lane pack entrypoint, likewise a NEW closure beside evaluate_fs_pack rather than a
+      // recut of it. The ceremony statement is `where not deployed`, so it has always committed
+      // EVERY registered closure — the number is the roster's size, and the roster is pinned by
+      // name AND VERSION three lines above.
+      //
+      // THIS TRANSACTION ROLLS BACK, which is why the F-A5 row is flipped here and nowhere else
+      // in the estate run: epsilon's and eta's ceremonies commit, and they deliberately EXCLUDE
+      // that one row so F-A5 PR-1's own ceremony-gate cell can still observe it undeployed
+      // (f-a5-reporting-agency-pr1.test.mjs, cell D). What this cell proves about it is that the
+      // one-way trigger admits it like any other — the property the exclusion must not cost.
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
-      )).rows[0].n, 5);
+      )).rows[0].n, 6);
       assert.equal((await db.query(
         "select clara.verify_evaluator_freeze() r",
-      )).rows[0].r.verified_deployed, 5);
+      )).rows[0].r.verified_deployed, 6);
     });
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.evaluator_versions where deployed",
