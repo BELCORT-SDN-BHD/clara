@@ -1,12 +1,15 @@
-# F-T2 · The payroll deadline calendar — design v1
+# F-T2 · The payroll deadline calendar — design v2
 
-> **Item:** Wave F Track B **F-T2**, `wave-f-contract.md:405`. **Companions:**
+> **Item:** Wave F Track B **F-T2**, `wave-f-contract.md:424`. **Companions:**
 > `payroll-calendar-survey.md` (the as-found estate + the statutory re-verification, with the
 > source table this document cites by `[id]`) and `payroll-calendar-annexes.md` (mechanics ·
 > decision register · rig-replay predictions · owner questions).
-> **v1, 2026-08-23.** Written under digest laws **80 · 81 · 16 · 19 · 2 · 27(2) · 31 · 78**,
-> TA-P4 · TA-P5 · TA-P14 clause 2, PRD **§6** (LAW) and **§8**'s payroll non-goal, and the
-> three rulings recorded at `payroll-calendar-survey.md` §6.
+> **v2, 2026-08-23 (gate-folded).** v1 was PR-0 gated the same day: 3 blockers and 19 materials
+> confirmed against it (`payroll-calendar-gate-record.md`). Eleven distinct corrections fold
+> here; three blockers and four materials are **owner-reserved** and recorded as open cards in
+> the gate record, not resolved unilaterally. Written under digest laws **80 · 81 · 16 · 19 · 2 ·
+> 27(2) · 31 · 78**, TA-P4 · TA-P5 · TA-P14 clause 2, PRD **§6** (LAW) and **§8**'s payroll
+> non-goal, and the three rulings recorded at `payroll-calendar-survey.md` §6.
 > **No code ships with this document.** It is a design for review.
 
 ---
@@ -49,11 +52,11 @@ Five things were decided before this design and are not re-opened in it.
 | No statutory payroll COA is seeded; every `410-*` code in the repo is evidence about one client's chart | survey F-P2 |
 | `proactive` is allowlisted for **exactly one** function — `wake_record_notification` (`0002:558`); `0011:3903-3910` adds none and `0078:181` is explicitly interactive-only | survey F-P5 |
 | `notifications.kind` has **no CHECK** (`0003:184-192`) — a new notice kind needs no migration | survey F-P5 |
-| `client_fact_keys` is a **code-populated, append-only** global vocabulary with two members today (`0055:347-382`); the capture door is `clara.record_client_fact(...)` at an **admin+** floor (`0055:499-509`) | survey §5, read here |
+| `client_fact_keys` is a **code-populated, append-only** global vocabulary with **four members at the frontier** — `entity_type`, `msic` (`0055:347-382`), `trade_nature` (`0056:1233`), `customer_identity_policy` (`0062:172`, the name-only wall's control row) — not two (**folded**, gate M0/nit); the capture door is `clara.record_client_fact(...)` at an **admin+** floor (`0055:499-509`) | survey §5, read here |
 | The runtime must not compute a period — *"a period is a figure"* (`0041:3613-3615`); the house date is `clara._book_today()` (`0042:4592`) | survey §3 |
 | No public-holiday calendar and no business-day arithmetic exist anywhere | survey F-P7 |
 | `open_questions` carries two closed worlds and an extend-only precedent (F-A3's `bank_line`/`bank_ambiguity`) | survey F-P6 |
-| Tier-1 closes at three tables for Wave F; a rate table is a **contract amendment** | survey F-P9 |
+| Tier-1 closed at three tables for Wave F; **R-L25 (2026-08-23) reopened it for two more SEEDED fact tables** (F-T3's, on the D17/R-L19 pattern) — **not** a fetch door. A rate table for THIS item is still a **contract amendment** (**folded**, nit) | survey F-P9 |
 | Never name anything `*_filings` | survey §6 |
 
 ---
@@ -62,7 +65,8 @@ Five things were decided before this design and are not re-opened in it.
 
 ### 3.1 The rows F-T2 contributes to `clara.statutory_deadlines`
 
-**Eight rows, and every one of them is a LAW plus its citation.** The table is F-A4's; F-T2
+**Nine rows, and every one of them is a LAW plus its citation** (**folded**, nit — v1's header
+said eight and contradicted its own §3.1 table and PR-1 line). The table is F-A4's; F-T2
 supplies rows through a `UNNUMBERED_ft2_*` seed migration on the D17 price-row pattern — shipped
 through the full PR ladder, never a live edit.
 
@@ -78,8 +82,8 @@ through the full PR ladder, never a live edit.
 | `form_ea_ec` | `lhdn` · **ITA s.83(1A)** | annual · **last day of February** following | *"prepare and **render to his employee** a statement… **on or before the last day of February in the year immediately following**"* — **not filed with LHDN** | **A** [S2] |
 | `cp58` | `lhdn` · **ITA s.83A** | annual · 31 March following | *"**Every company** shall… provide to **each of its agent, dealer or distributor**… **not later than 31 March in the year immediately following**"* — **companies only, provided not filed** | **A** [S2] |
 
-**Nine rows, not eight** — the C.P.8D e-Data Praisi cut-off is split out per R-L24, because a firm
-on that route owes something on **25 February** and a row that hides it behind 31 March is a
+The C.P.8D e-Data Praisi cut-off (`form_cp8d_praisi`) is split out per R-L24, because a firm on
+that route owes something on **25 February** and a row that hides it behind 31 March is a
 calendar that will let a client be late.
 
 **Three properties of the row, and each one is load-bearing.**
@@ -136,15 +140,30 @@ Applicability is then read, never inferred:
 | fact state | PCB · EPF · SOCSO · EIS | HRD levy | Form E + C.P.8D | Form EA | CP58 |
 |---|---|---|---|---|---|
 | `employer_status = employer` | **applies** | per `hrdc_class` | **applies** | **applies** | per entity: **companies only** |
-| `not_an_employer` **and** `entity_type ∈ {sdn_bhd, bhd, llp, society, cooperative}` | does not apply | does not apply | **APPLIES — dormancy is not an exemption** ([**A**], survey §1.2) | does not apply | companies only |
+| `not_an_employer` **and** `entity_type ∈ {sdn_bhd, bhd, llp, cooperative}` | does not apply | does not apply | **APPLIES — dormancy is not an exemption** ([**A**], survey §1.2) | does not apply | companies only |
+| `not_an_employer` **and** `entity_type = 'society'` | does not apply | does not apply | **`not_evaluable`** — **corrected in the fold (gate M6).** v1 put `society` in the WAJIB-dormant row; the cited programme [**A**, S3 ¶2(i)(b)] names *syarikat, LLP, badan amanah, koperasi*, never *persatuan/society* — asserting the duty here was an extension the citation does not reach (review law 3) | does not apply | companies only |
 | `not_an_employer` **and** `entity_type ∈ {sole_prop, partnership}` | does not apply | does not apply | **Form E applies; C.P.8D exempt** | does not apply | n/a |
-| **either fact missing** | **`not_evaluable`** | `not_evaluable` | `not_evaluable` | `not_evaluable` | `not_evaluable` |
+| `not_an_employer` **and** `entity_type = 'other'` | does not apply | does not apply | **`not_evaluable`** — **added in the fold (gate M6/M22).** The frozen `ENTITY_TYPES_V2` enum (`0055:371-372`) has no member for a trust body (*badan amanah*, WAJIB under the same programme) or for a Hindu joint family or an estate (both C.P.8D-exempt, survey F-P14); all three land in `other`, which the enum cannot disambiguate. **Named gap — R-6**, not a silent default | does not apply | `n/a` — not a company |
+| **either of `employer_status`/`entity_type` missing** | **`not_evaluable`** | `not_evaluable` | `not_evaluable` | `not_evaluable` | `not_evaluable` |
 
-**`not_evaluable` produces exactly ONE open question and never a notice.** A missing
-applicability fact is a gap in the firm's own onboarding record, not a client's late filing, and
-chasing a client monthly for a document they may not owe is the noise that gets a real notice
-ignored. The question rides `clara.wake_open_question` at `scope_kind='client'` with an
-**extend-only** new `origin` member (F-A3's `bank_ambiguity` precedent, D34) — the exact
+**The matrix is now total over the live 8-member `entity_type` enum** (`sdn_bhd`, `bhd`,
+`sole_prop`, `partnership`, `llp`, `society`, `cooperative`, `other`) — v1's table matched neither
+its own cited enum nor its cited source; every reachable state now has a defined row.
+
+**The C.P.8D route is a THIRD applicability fact, not decorative (folded, gate M7).** Wherever the
+table above marks Form E + C.P.8D as **applies**, C.P.8D itself resolves through
+`payroll.cp8d_route`: `e_data_praisi` → `form_cp8d_praisi` applies (25 February) and
+`form_e_cp8d` does not; `e_cp8d` → `form_e_cp8d` applies (the e-E date) and `form_cp8d_praisi`
+does not; **the route fact missing → both C.P.8D rows `not_evaluable`, Form E itself unaffected**
+(the entity/employer facts already gate Form E; the route only selects which C.P.8D row fires).
+v1 minted `payroll.cp8d_route` and gated nothing with it — battery cell 3 is corrected below to
+match.
+
+**`not_evaluable` produces exactly ONE open question per missing fact and never a notice.** A
+missing applicability fact is a gap in the firm's own onboarding record, not a client's late
+filing, and chasing a client monthly for a document they may not owe is the noise that gets a
+real notice ignored. The question rides `clara.wake_open_question` at `scope_kind='client'` with
+an **extend-only** new `origin` member (F-A3's `bank_ambiguity` precedent, D34) — the exact
 spelling is settled at build against the **live** CHECK text, never against `0011:805-806`.
 
 The facts are captured through the **existing** human door `clara.record_client_fact` at its
@@ -152,23 +171,36 @@ existing admin+ floor. **F-T2 mints no new authority and no wake sibling** — u
 register a sibling is arguably owed, but the fact is an *onboarding* datum and **F-A7b** is the
 lane that asks the questions (**D-17**).
 
-**The dormant case is now settled, and the earlier draft of this design had it backwards.** It
-proposed `not_evaluable` for Form E on the strength of an UNVERIFIED reading. The 2026 filing
-programme answers it directly [**A**, S3 ¶2(i)(b)]: *"**Syarikat, perkongsian liabiliti terhad,
-badan amanah dan koperasi yang dorman adalah WAJIB mengemukakan Borang e-E dan C.P.8D**"*. **A
-dormant company files.** The only relief is the narrower one in the table above.
+**The dormant case is settled for the classes the programme actually names**, and the earlier
+draft of this design had it backwards. It proposed `not_evaluable` for Form E on the strength of
+an UNVERIFIED reading. The 2026 filing programme answers it directly [**A**, S3 ¶2(i)(b)]:
+*"**Syarikat, perkongsian liabiliti terhad, badan amanah dan koperasi yang dorman adalah WAJIB
+mengemukakan Borang e-E dan C.P.8D**"*. **A dormant company, LLP or cooperative files.** `society`
+is not named by this quote (corrected above) and `badan amanah` has no live carrier (R-6). The
+only relief for an unincorporated form is the narrower one in the table above.
 
 ### 3.3 The consumer — what F-T2 actually builds
 
-Three parts, and **only the middle one is new machinery**. The shape is deliberately
-`close_prep`'s (`close-key-1-design.md:170-183`), because two mutually-unaware clock consumers
-would be two architectures (law 81).
+Four parts, and **only the two middle ones are new machinery** (**folded**: v1 named one new
+read, gate M13 found a second it never budgeted). The shape is deliberately `close_prep`'s
+(`close-key-1-design.md:170-183`), because two mutually-unaware clock consumers would be two
+architectures (law 81).
 
 1. **The dates: F-A4's oracle.** It reads `statutory_deadlines`, applies `due_rule_kind` against
    `clara._book_today()`, and emits one candidate per (client, obligation, period) inside
    `notice_lead_days`. **F-T2 contributes no date arithmetic whatsoever.**
-2. **The data: `clara.payroll_period_coverage(p_client uuid, p_period_start date,
-   p_period_end date)`** — F-T2's one new read. STABLE, SECURITY DEFINER, **granted to
+2. **The facts: `clara.payroll_applicability(p_client uuid)`** — **added in the fold (gate M13);
+   v1 miscounted its own reads as one.** STABLE, SECURITY DEFINER, **granted to `clara_runtime`
+   and nobody else**, in `depreciation_run_due`'s idiom (`0041:3617-3630`) — including that body's
+   **in-body firm check** (`v_jwt := clara.jwt_firm(); if v_jwt is not null and v_jwt <> v_firm
+   then raise…`), because `client_facts`' own RLS policy (`0055:461-467`) admits only
+   `clara_authenticated`, not `clara_runtime`, and a no-JWT sweep credential would see zero rows
+   under it even with a bare `SELECT` grant. It reads `payroll.employer_status`,
+   `payroll.hrdc_class`, `entity_type` and — where Form E + C.P.8D applies — `payroll.cp8d_route`,
+   and is rung B2's implementation (Annex A.7).
+3. **The data: `clara.payroll_period_coverage(p_client uuid, p_period_start date,
+   p_period_end date)`** — F-T2's **second** new read (not its only one — corrected above).
+   STABLE, SECURITY DEFINER, **granted to
    `clara_runtime` and nobody else**, in `depreciation_run_due`'s idiom (`0041:3617`). It answers
    **one** question with **three** values, and it is the only thing standing between a clock tick
    and a chase:
@@ -176,10 +208,14 @@ would be two architectures (law 81).
    | verdict | when |
    |---|---|
    | `covered` | a live `payroll_summary` filing exists for the client whose `documents.financial_date` falls inside `[p_period_start, p_period_end]` |
-   | `missing` | no `payroll_summary` filing for the client has a `financial_date` in the period, **and** none is undated |
-   | `not_evaluable` | at least one `payroll_summary` is filed with a **NULL `financial_date`** — it may or may not be the period's, and a read that cannot say NO has a meaningless YES |
+   | `missing` | no `payroll_summary` filing for the client has a `financial_date` in the period, **and** none undated was filed within the period |
+   | `not_evaluable` | at least one `payroll_summary` is filed with a **NULL `financial_date`** whose `document_filings.filed_at` falls **inside this period** — it may or may not be the period's, and a read that cannot say NO has a meaningless YES |
 
-   **`not_evaluable` is not rounded to `missing`.** It produces its own notice — *"a payroll
+   **`not_evaluable` is not rounded to `missing`, and it is now period-bound (folded, gate M2).**
+   v1's `undated_count` read every undated filing in the client's whole history, so one January
+   filing silenced every later month's `missing` forever; the fold bounds it by
+   `document_filings.filed_at` (`0007:68`), the same bound F-A4's own `undated_documents` gate
+   uses (`close-key-1-design.md` D-18). `not_evaluable` produces its own notice — *"a payroll
    summary is filed but undated; it cannot be matched to a period"* — which is a different act
    with a different remedy (date the document) and it is the honest one. It is also the same
    defect class F-A4 is repairing in the uncoded-voucher gate (`close-key-1-design.md` §3.10),
@@ -189,7 +225,7 @@ would be two architectures (law 81).
    **there is no way to recognise one**: no statutory payroll COA is seeded (survey F-P2), and
    inventing an account code would be assuming a client's chart. Recognising a payroll JV needs
    an account-role convention that does not exist — **OQ-5**, adjacent to F-T4's E-R10.
-3. **The speech: `wake_record_notification` on a `proactive` credential — and F-T2 mints NO
+4. **The speech: `wake_record_notification` on a `proactive` credential — and F-T2 mints NO
    wake kind.** This is the design's single most important structural choice, so it is argued
    rather than asserted:
 
@@ -217,8 +253,13 @@ would be two architectures (law 81).
 
 **The notice kinds** — free text, no migration (survey F-P5): `payroll.document_missing` ·
 `payroll.document_undated` · `payroll.deadline_upcoming` · `payroll.deadline_passed`. The
-payload carries the obligation code, the period, the computed statutory date, the wording, the
-source URL and the accessed date. **It carries no amount.**
+payload carries the obligation code, the period, **both dates** (`due_date`/`statutory_due_date`
+and `effective_due`, plus `holiday_rule` and `working_day_basis`), the wording, the source URL
+and the accessed date. **It carries no amount.** **Folded, gate M9:** v1's payload carried only
+`due_date` plus an undefined free-text `weekend_label`, so the notice a firm reads and the
+`/calendar` screen it also reads could name different dates for the same obligation. The
+payload now carries the same typed `effective_due`/`holiday_rule`/`working_day_basis` triple
+`list_statutory_calendar` (A.5) already returns, and `weekend_label` is dropped.
 
 ### 3.4 There is no quiet period, and there is no ramp
 
@@ -325,7 +366,7 @@ F-T2 **does not touch, wrap, recut or re-grant** any of: `clara.document_filings
 write-quiesce window in F-T2** — no live writer's body is replaced.
 
 The two shared surfaces F-T2 **does** extend, both extend-only and both announced to the
-conductor: `clara.client_fact_keys` (two new rows) and `clara.open_questions`' `origin` closed
+conductor: `clara.client_fact_keys` (**three** new rows — corrected in the fold, nit) and `clara.open_questions`' `origin` closed
 world (one new member, spelling settled against the live CHECK).
 
 ---
@@ -353,7 +394,7 @@ close.
 | PR | contents | gate |
 |---|---|---|
 | **PR-0** | this design set, reviewed; the rig replay of survey §8's twelve predictions, with the pinned `prosrc` sha256s recorded | design gate |
-| **PR-1** | the **nine seed rows** into `clara.statutory_deadlines` + the **three** `client_fact_keys` rows. Docs/DB only, **no writer, no grant**. **Blocked on F-A4/PR-1b** landing the DDL. Every row's source re-fetched **on the authoring day** (P-11) **using survey §0's reachability table**; grade-C sources upgraded or the row dropped | the DDL exists; every row cites a direct read |
+| **PR-1** | the **nine seed rows** into `clara.statutory_deadlines` + the **three** `client_fact_keys` rows. Docs/DB only, **no writer, no grant**. **Blocked on F-A4/PR-1c** landing the DDL (R-L22; **corrected in the fold** — v1 named PR-1b here, four ways, conflating this with the unrelated wake-kind-chain PR-1b dependency of §3.3/Annex E, which is correct as written and untouched). Every row's source re-fetched **on the authoring day** (P-11) **using survey §0's reachability table**; grade-C sources upgraded or the row dropped | the DDL exists; every row cites a direct read |
 | **PR-2** | `clara.payroll_period_coverage` + the `origin` widening + the chase producer on F-A4's belt + the battery | judgement logic → review law 1's independent pass |
 | **PR-3** | `clara.list_statutory_calendar` + `/calendar` | TA-P14 clause 2 |
 | **PR-4** | acceptance (§6) | ADR-048 labelling if synthetic |
@@ -369,17 +410,30 @@ committed (`pnpm db:migrate` silently skips any filename not starting with a dig
 **Cells that make a wall REFUSE** (a zero-count refusal head is a question, not a wall — law 31):
 
 1. A `proactive` credential calling **anything other than** `wake_record_notification` is
-   refused by `assert_wake_allowed` — the speak-never-act wall, **asked**, not assumed.
+   refused **at the GRANT** — `42501 insufficient_privilege`, and a `has_function_privilege`
+   sweep returns FALSE for every other `wake_*` function against `clara_wake_proactive`
+   (`0004:783-789`, the estate's own T17 idiom, `rig-meta.mjs:877`). **Folded, gate M16:** v1
+   named `assert_wake_allowed` as the refusing mechanism, but a proactive session dies at the
+   GRANT before that helper's body ever runs — asserting it as written would either record a
+   false green off the wrong error, or tempt a "repair" that grants a second function to
+   `clara_wake_proactive`, weakening the exact wall the cell exists to prove.
 2. A second `wake_record_notification` on the **same** proactive credential with a **different**
    `op_key` raises CLR03 (single-use), while the **same** `op_key` replays the stored receipt.
-3. A client with **no** `payroll.employer_status` fact produces **zero notices** and **exactly
-   one** open question — and a second cycle produces **no second question**.
-4. A filed `payroll_summary` with a **NULL** `financial_date` yields `not_evaluable`, **not**
-   `missing`, and the undated notice kind — the differential cell, run against a sibling client
-   whose document IS dated.
-5. Every `payroll.*` notice payload contains **no numeric key** outside `{period, due_date}`.
+3. A client missing **any one** of the three applicability facts (`payroll.employer_status`,
+   `entity_type`, and — where Form E + C.P.8D applies — `payroll.cp8d_route`, folded per gate M7)
+   produces **zero notices** for the affected obligation(s) and **exactly one** open question per
+   missing fact — and a second cycle produces **no second question**.
+4. A filed `payroll_summary` with a **NULL** `financial_date` whose `document_filings.filed_at`
+   falls inside the period yields `not_evaluable`, **not** `missing`, and the undated notice kind
+   — the differential cell, run against a sibling client whose document IS dated, **and** a
+   second differential cell shows the SAME undated filing does not suppress a different period's
+   `missing` verdict (folded, gate M2).
+5. Every `payroll.*` notice payload contains **no numeric key** outside
+   `{period, due_date, effective_due}` — a payload-shape convention checked at build and PR
+   review, not a DB-enforced wall (`notifications.payload` carries no CHECK, `0003:184-192`); the
+   same honesty §3.5's fourth bullet already applies to hard constraint 2.
 6. `list_statutory_calendar` called by a role **below** bookkeeper is refused **in the body**.
-7. Each of the eight seed rows: the **stored wording** and the **computed date** agree for a
+7. Each of the **nine** seed rows: the **stored wording** and the **computed date** agree for a
    sampled period — the differential form (compute from `due_rule_kind`, compare to the quote's
    parsed day), never a self-referential read of the same column twice.
 8. `form_ea_ec` computes **29 February** for a leap year and **28 February** otherwise.
@@ -392,11 +446,16 @@ committed (`pnpm db:migrate` silently skips any filename not starting with a dig
 10. The `payroll_summary` → `invoice_facts` wall still refuses (P-10) — F-T2 did not perturb it.
 11. Cross-tenant: a calendar read under firm A returns **zero** rows for firm B's client.
 
-**Acceptance.** On the real BELCORT estate the payroll accruals of ROME PROPERTIES YA2025 are
-already in evidence (four payroll JVs, `ADR-0054`), so a real-books round is reachable for the
-coverage predicate. Where a real round is not reachable, the round is **labelled synthetic per
-ADR-048** and the deferral is **RECORDED**, per TA-P14 clause 4 — on the record, never an
-omission.
+**Acceptance — corrected in the fold (gate M23); v1's claim was false the day it was written.**
+ROME PROPERTIES YA2025's payroll accruals are evidenced by **four payroll JVs** (`ADR-0054`), but
+`clara.payroll_period_coverage` anchors on a **filed `payroll_summary` document**, never a JV
+(§3.3 point 3, D-06) — and ROME PROPERTIES' payroll source documents are **ruled excluded from
+ingestion entirely**: `wave-a2-ar-myinvois-contract.md` WA2-R3 — *"The payroll subtree (incl. the
+IC copy) is never uploaded or egressed … aggregate salary JVs are books vouchers, in scope"* —
+reconfirmed as the tightest-custody exclusion by `wave-g-e2e-corpus-design.md` OD-4
+(2026-08-20). **No real-books round is reachable for the coverage predicate today.** PR-4's
+acceptance round is **labelled synthetic per ADR-048** and the deferral is **RECORDED**, per
+TA-P14 clause 4 — on the record, never an omission.
 
 ---
 
@@ -405,10 +464,13 @@ omission.
 | id | risk |
 |---|---|
 | **R-1** | **The calendar is right and nobody reads it.** The notice is the whole product; if the inbox is noisy the notice is invisible. §3.2's refusal to chase on `not_evaluable` is the only mitigation in v1, and it is a mitigation, not a fix. |
-| **R-2** | **A statutory date moves and the seed row does not.** The rows are developer-seeded and there is no fetch attached (Tier-1 closes at three tables). The mitigation is the citation columns making staleness *visible* — `source_accessed_on` is on the screen — not automatic. **OQ-8.** |
+| **R-2** | **A statutory date moves and the seed row does not.** The rows are developer-seeded and there is no fetch attached (Tier-1 closed at three tables; **R-L25 reopened it for two more seeded fact tables**, still no fetch door). The mitigation is the citation columns making staleness *visible* — `source_accessed_on` is on the screen — not automatic. **OQ-8.** |
 | **R-3** | **The seeding instrument can lie about availability.** KWSP, PERKESO and Cloudflare-fronted LHDN pages return **HTTP 403** to a plain fetcher while rendering normally in a browser, and `hasil.gov.my/media/*` **404s** while `hasil.gov.my/wp-content/uploads/*.pdf` serves fine. A future seed author who probes with the wrong tool will mis-grade a row and drop it. **The reachability table in survey §0 is part of the build instructions, not background.** |
 | **R-4** | **The document anchor is weaker than a JV anchor.** A client who sends a payroll summary but whose JV is never posted reads as `covered`. **OQ-5.** |
 | **R-5** | **The applicability facts are captured by a human at admin+ and may simply never be captured**, leaving every client `not_evaluable` and the calendar empty of notices. That is fail-closed and it is also useless; onboarding must actually ask. |
+| **R-6** | **Added in the fold (gate M6/M22).** The frozen `ENTITY_TYPES_V2` enum cannot express a trust body (*badan amanah*), a Hindu joint family or an estate — all three collapse into `other`, which §3.2's applicability matrix now routes to `not_evaluable` rather than asserting a wrong verdict. Widening the enum is F-A7b's onboarding lane's call, not F-T2's. |
+| **R-7** | **Added in the fold (gate M8).** A levy-exemption PERIOD (e.g. HRD Corp Circular 1/2026's reported education-industry relief) has no carrier — `payroll.hrdc_class` is a three-value class fact with no effective-dated window. An exempt client recorded as `mandatory` is chased for a levy it may not owe, and flipping the class to `not_liable` is worse (wrong from the exemption's end date, nothing schedules the reversal). The circular's own evidence was never graded to survey standard (Annex A.6 corrected); a dated carrier is future work, adjacent to **OQ-4**. |
+| **R-8** | **Added in the fold (gate M15).** The `covered` verdict trusts `document_kind='payroll_summary'`, an LLM classification `clara.classify_document` commits automatically at ≥0.8 confidence with no human attestation between. Fail-closed **today** only because the same wall that keeps `payroll_summary` out of `invoice_facts`/`witness_facts` also means no writer ever sets `financial_date` on one (so `covered` cannot fire yet) — the exposure is live the moment any dating path lands. §5's review-law-1 pass on `payroll_period_coverage` must cover the classification-integrity surface, not only the coverage arithmetic. |
 
 **Named non-goals inside the item:** any computation of a contribution, deduction or net pay ·
 an employee register or any employee-level datum (law 19) · e-filing or submission of anything
