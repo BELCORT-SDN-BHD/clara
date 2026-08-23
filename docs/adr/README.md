@@ -454,7 +454,9 @@ governs.
     (B14), and every entrance's wall stays at its own door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** *(0074/TA-P1; dissent on file)*
 79. **Attribution is JUDGEMENT under walls.** Invariant (a) is satisfied by a human click, an exact identifier match, or her own judgement
     — walled by a hard-number contradiction refusal, a name-family collision guard, a correction path raising a named misrouted-egress
-    event, and a firm-scoped carrier for the unattributable document. **Unsure → she asks**; a model never scores itself (law 72). *(0074/TA-P7; dissent on file)*
+    event, and a firm-scoped carrier for the unattributable document. **Unsure → she asks**; a model never scores itself (law 72).
+    **As-built caveat: the live `assert_client_resolved` body still enforces `method in ('human','rule')` and `confidence >= 0.95`
+    (`0018_gate_k_domain.sql:57,62`) until F-A7a recuts it.** *(0074/TA-P7; dissent on file)*
 80. **A clock may wake her; law 71 governs what she then does.** ONE time-triggered wake source, no ramp/first-draft/sampling; the
     WORK still triggers on data (a missing statement yields a chase notice, never a fabricated reconciliation); every clocked act
     is receipted; statutory PREPARATION is hers and submission stays human. *(0074/TA-P5; law 21 narrowed to posting belts)*
