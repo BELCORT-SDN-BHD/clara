@@ -295,6 +295,23 @@ const F_A7_PI_UNGRANTED_FNS = [
   "_assert_receipt_surface_conforms", "agent_receipt_source_census", "agent_receipt_dark_rows",
 ];
 export const F_A7_PI_COHORT = [...F_A7_PI_HUMAN_FNS, ...F_A7_PI_UNGRANTED_FNS];
+// F-A9 PR-1A — the LLM usage ledger reshape. Its OWN cohort per the "wholly present or wholly
+// absent" rule (0024's note): folding these into an earlier wave's cohort would make a
+// pre-PR-1A database report a PARTIAL cohort.
+//   record_agent_usage_event — the second door (design SS3.2): clara_runtime ONLY, mirrors
+//     record_llm_usage_event's own runtime-only shape (WITNESS_F_A1_RUNTIME_FNS above) —
+//     no human writes metering.
+//   get_llm_usage_summary — the monthly rollup (design SS3.7): clara_authenticated ONLY, its
+//     own jwt_firm() wall body-enforced (the estate's floor-body-enforced idiom).
+// UNGRANTED: clara._tf_llm_price_no_overlap, the price-table overlap wall's statement-level
+// trigger function — no application role, PUBLIC included, may reach it; the sweep's
+// expected=false on every role IS the assertion (0038's own trigger-fn revoke idiom).
+const F_A9_PR1A_RUNTIME_FNS = ["record_agent_usage_event"];
+const F_A9_PR1A_HUMAN_FNS = ["get_llm_usage_summary"];
+const F_A9_PR1A_UNGRANTED_FNS = ["_tf_llm_price_no_overlap"];
+export const F_A9_PR1A_COHORT = [
+  ...F_A9_PR1A_RUNTIME_FNS, ...F_A9_PR1A_HUMAN_FNS, ...F_A9_PR1A_UNGRANTED_FNS,
+];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -896,6 +913,7 @@ export const ALLOWED = {
     ...RENDER_ZETA_HUMAN_FNS,
     ...F_A7_PI_HUMAN_FNS, // F-A7 pi: the firm-question door + the identifier-promotion card,
     // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
+    ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -939,6 +957,7 @@ export const ALLOWED = {
     // and its consumer; F-A1 grants no human EXECUTE at all
     ...WITNESS_F_A1_PR3_RUNTIME_FNS, // F-A1 PR-3 cutover: fail_witness_facts, the running->failed
     // settle verb for the llm_witness lane (mirrors fail_invoice_facts, S6_RUNTIME_FNS above)
+    ...F_A9_PR1A_RUNTIME_FNS, // [Wave-F Track A, F-A9 PR-1A] the second door — see the block above
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1084,6 +1103,8 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
+>>>>>>> 4d3fa03 (feat(db): F-A9 PR-1A — the llm_usage_events ledger reshape)
   return failures;
 }
 
