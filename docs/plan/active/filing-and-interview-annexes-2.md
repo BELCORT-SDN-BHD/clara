@@ -220,6 +220,116 @@ new columns.
    installing (`0038:7495-7500`, `:7604-7609`, `:7766-7770`, `:7816-7822` are the shapes to
    copy) — a body this item cannot account for is not a body it may replace.
 
+### I.5 · π AS BUILT (PR-1, 2026-08-23) — this section GOVERNS the receipt surface
+
+Everything below is measured on a rig replay at frontier 0102 and re-proven by the migration's
+own tail plus `packages/db/tests/f-a7-pi.test.mjs` (20 cells). Where it differs from §3.4 or §I.1,
+**this section is what exists.**
+
+**1 · The contract is a PROJECTION contract, not a physical-column one.** §3.4's ten names are not
+the columns the members have: F-A2's `entry_post_receipts` carries `model_snapshot jsonb` +
+`gate_verdicts jsonb` and none of `failing_rungs / trigger_kind / trigger_id / authorization_id /
+adopted_verbatim` (`f-a2-annexes-3-record.md` E.1); F-A8 diverges the same way. Each member keeps
+its table exactly as designed and PROJECTS onto the contract. No in-flight member PR changed.
+
+**2 · NINETEEN columns**, live at `select ordinal, column_name, data_type from
+clara.agent_receipt_contract order by ordinal`: `receipt_kind · receipt_id · firm_id · client_id ·
+subject_id · acting_actor · on_behalf_of · occurred_at · model · model_version · rationale ·
+verdict · failing_rungs · via_wake_kind · trigger_kind · trigger_id · authorization_id ·
+adopted_verbatim · scope`. `receipt_id`/`subject_id`/`trigger_id` are `text` because member PKs are
+`uuid` on some tables and `bigint` on others (`freeform_read_log.id`, measured). Nullability is
+DOCUMENTED, not enforced — a view column carries no NOT NULL, so the member's CHECK owns it.
+
+**3 · `scope` (R-L26, 2026-08-23) is ordinal 19 — LAST — and non-nullable.** `create or replace
+view` permits only a TRAILING append, so placing it beside `firm_id` where it reads better would
+break every shim an earlier train position had installed, repairable only by a `drop view` the
+union forbids. Non-nullable because a three-valued column in a visibility predicate is how a row
+becomes visible to everyone by accident.
+
+**4 · The union floor is TWO CLOSED ARMS**, one notch tighter than R-L26's letter:
+`((scope='firm' and firm_id = clara.jwt_firm()) or (scope='platform' and firm_id is null)) and
+coalesce(clara.actor_role_rank(),-1) >= clara.role_rank('bookkeeper')`. A bare `or
+scope='platform'` would let ONE mislabelled firm-scoped row reach every firm in the estate. With
+both arms closed the correspondence `platform ⇔ firm_id IS NULL` holds in both directions and
+every inconsistent row is INVISIBLE rather than over-visible — a member that mislabels loses its
+own rows and finds out, and can never leak another firm's. *Why the predicate had to move at all:
+under a bare `firm_id = jwt_firm()` a NULL `firm_id` evaluates NULL, which `is not true`, so a
+platform receipt would be hidden from EVERY firm — worse than the mapping R-L26 rejected.*
+
+**5 · SEVEN per-item SHIM VIEWS, not a union over base tables**, because zero of the seven member
+receipt tables exist at the frontier (all measured absent; F-A6's `freeform_read_log` exists but
+pre-contract). π creates `_agent_receipt_src_f_a2 … _f_a8` as typed empty stubs, **ungranted**;
+`agent_receipts_visible` is created once and **never re-cut by a member**. A member's whole
+registration act is one `create or replace view` on its OWN shim plus
+`select clara._assert_receipt_surface_conforms('_agent_receipt_src_<item>')` in its tail.
+Order-independent; no merge-time coordination. **The wall is Postgres itself** — rename, retype,
+drop and reorder are all refused — with one hole it does not close: an extra TRAILING column
+installs unseen, so the checker tests **arity first**, deriving the expected count from the
+contract (never a literal). `clara.agent_receipt_source_census()` reports per-item wiring from
+`pg_depend` (what the shim REACHES), never from `expected_source` (what it claims).
+**MEMBER ONBOARDING — the one sentence that matters: `scope` is not optional; a NULL there hides
+all your rows.** The stub ships `null::text as scope`, so a member that overrides the eighteen
+columns it already knew about and leaves the nineteenth alone projects `scope = NULL`, which
+matches NEITHER arm of the floor. There is no DDL error, no read error, and
+`_assert_receipt_surface_conforms` PASSES — arity 19 and `null::text` is valid `text`. The rows are
+simply visible to nobody. This is the single most likely mistake in the design, which is why the
+net exists: `agent_receipt_source_census()` reports a per-shim `dark_rows` count and
+`clara.agent_receipt_dark_rows()` gives the detail, both written `… is not true` rather than
+`not (…)` so that a NULL `scope` cannot exclude itself from its own census (the three-valued trap
+that would make the instrument blind to exactly what it is for). Battery cell `pi-A10` plants one
+and proves both instruments name it.
+
+**The shims stay at the DEFAULT (definer semantics) — measured, alternative disproven.** The F-A8
+lane built the real nesting on a rig: with `security_invoker = true` the intended path REFUSES with
+`42501 permission denied` on the base table, because the human's identity propagates through the
+owner-run union into the shim, where that human holds no SELECT grant. The option that reads like
+hardening turns every item's arm dark. **The residual hole it cannot close, named:** a wrongly
+granted `select` on a shim returns rows to a human, bypassing the bookkeeper floor AND both arm
+predicates — so the ACL census is not defence-in-depth, it is the wall. `pi-A9` asserts zero
+non-owner grantees on all eight internal views AND grants one to prove the census fails. On F-A8's
+firm-less shim that mistake costs Tier-1 draft content below the role floor; on the six
+FIRM-SCOPED shims it is a cross-tenant read.
+
+**Do not define the shims off one another** (`select * from <the first> where false`): it makes six
+items depend on one item's view and reports `wired=true` before any receipt table exists — a
+false green from the census built to be differential. The first draft did exactly this and the
+migration tail caught it; all seven are written out in full and depend on nothing.
+
+**Registered cost:** an eighth receipt-bearing item beyond the seven needs one CoR of the union
+view; the census fails loudly if one appears. *(A registry of `projection_sql` TEXT rebuilt by a
+function was ruled first and superseded: a persisted `clara.*` function containing `EXECUTE` is a
+hard red on `check-wiki-dynamic-sql` — measured, with a positive control — and a stored SQL string
+executed by a DEFINER is an arbitrary-DDL door past RLS.)*
+
+**6 · π ships NO wake surface; the four wrappers and BOTH correction siblings moved to β.**
+`clara_wake_filing` is **not a role** — the live set is `clara_authenticated · clara_agent_ro ·
+clara_wake_interactive · clara_wake_proactive · clara_runtime · clara_fn_owner` (+3 LOGIN roles),
+and the string appears in no `.sql` in the repo. Annex A.1's floor name means "the wake write role,
+gated to the `filing` KIND by `assert_wake_allowed`", and that kind plus its seven allowlist rows
+are β's (§A.3). A wrapper shipped in π would be reachable by no principal. The correction siblings
+additionally need α1's `_file_document_write` and α2's `method`/`basis` CHECK extensions — the
+design already says the posted arm cannot work before α2. **π therefore ships: relations,
+UNGRANTED cores (`_firm_question_core`, `_identifier_promotion_core`), the pure family predicate,
+the human-side verbs (`resolve_firm_question`, `dismiss_firm_question`,
+`confirm_identifier_promotion`, `decline_identifier_promotion`) and the read surface.** β adds one
+allowlist row and one grant per wrapper over cores that already exist.
+
+**7 · Three further build deltas, recorded rather than absorbed.** (a) `resolve_firm_question`
+carries **no `p_file` arm**: A.1's sketch `(…, p_client uuid default null, p_file boolean default
+false, p_op_key)` is not a legal Postgres signature (a defaulted parameter may not precede a
+non-defaulted one), and its filing arm needs `confirm_attribution_candidate(p_candidate, p_op_key,
+p_file_document)` — measured live signature — which takes an attribution CANDIDATE, not a
+(question, client) pair. β adds the arm. (b) **No `egress.misrouted` event type**: it exists for
+the correction siblings, so registering it now would touch `event_types` + `trigger_taxonomy` +
+`taxonomy_active` for a consumer that arrives in β. For the same reason `_firm_question_core`
+writes `clara._audit` and does not `_append_event`. (c) The family predicate uses
+**boundary-preserving** normalisation, NOT the estate's `name_normalized` expression
+(`lower(regexp_replace(name,'[^a-zA-Z0-9]','','g'))`, live in `create_counterparty`), which strips
+spaces too and turns 'ROME PROPERTIES' into 'romeproperties' — no leading token survives it. §3.3's
+"strip non-alphanumerics … then take the leading token set" cannot be read both ways at once; the
+build takes the reading that produces tokens, and P-3 is confirmed on a fixture with the ruled
+cardinalities (ROME = 2 clients + 1 counterparty, ambiguous; BEE = 1, not ambiguous).
+
 ---
 
 ## Annex J · Cells the fold owes (additions and re-cuts to annexes-1 Annex B)
