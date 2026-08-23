@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, counterpartyRows, openQuestion, postingCoreReady,
+  booksVersion, opk, counterpartyRows, openQuestion, dismissOpenQuestion, postingCoreReady,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, admits, admitsAll, nonAdmitting, assertVectorShape, assertNonAdmitting,
   supplierLines, salesLines, genericLines, genericWithControlLeg, CHART,
@@ -107,7 +107,8 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
     const p = await agentPostable(OWNER(), { client: A2() });
     const cps = await counterpartyRows(A2());
     const scopeId = scope === "document" ? p.cited.documentId
-      : scope === "vendor" ? (cps[cps.length - 1]?.id ?? null) : null;
+      : scope === "vendor" ? (cps[cps.length - 1]?.id ?? null)
+      : A2();
     // BOTH ESCAPES WERE `noteLane` + `continue`, AND `noteLane` IS NOT A SKIP — it appends to an
     // array and the cell still reports PASS. If all three scopes took either escape the loop body
     // never ran a single assertion, and this cell (the one that proves B9 refuses on every scope
@@ -127,6 +128,11 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
     const qid = q?.question_id ?? q?.id ?? q;
     assert.ok(JSON.stringify(r).includes(String(qid)),
       `c3.B9 ${scope}: the receipt names the question_id ${qid} — a refusal that cannot say WHICH question blocks is not actionable`);
+    // DISMISSED, NOT LEFT OPEN. A 'client' scope blocker is CLIENT-WIDE (clara.open_questions,
+    // status='open') and outlives this iteration — left open it blocks every later A2() post in
+    // this file (B9-neg's rule_proposal admit, D-fa, D-adv), which would then measure this
+    // leftover row instead of what each cell claims to. Dismissed for all three scopes uniformly.
+    await dismissOpenQuestion(OWNER(), { question: qid, reason: `c3.B9 ${scope} probe complete`, opKey: opk("c3B9dismiss") });
     probed += 1;
   }
   // ALL THREE, COUNTED. The claim in the title is "all THREE blocking scope kinds"; a loop that
@@ -265,8 +271,8 @@ test("f-a2.c3.D-fa an FA ACQUISITION DEBIT posts — the cell that would have go
   // pre-hook. So the cell could pass without the FA belt ever being in the picture, which is the
   // one thing it exists to prove. The enrolment is now read back from the catalog.
   const enrolled = await rootQuery(
-    `select count(*)::int as n from clara.fa_profiles
-      where client_id=$1 and asset_account=$2`, [A2(), cost]).catch(() => ({ rows: [{ n: 0 }] }));
+    `select count(*)::int as n from clara.fa_account_profiles
+      where client_id=$1 and asset_account_code=$2 and active`, [A2(), cost]).catch(() => ({ rows: [{ n: 0 }] }));
   assert.ok(enrolled.rows[0].n >= 1,
     `c3.D-fa precondition: the asset account is REALLY enrolled in the FA register (got ${enrolled.rows[0].n}) — without it this cell measures an unenrolled account and proves nothing about B12`);
   const p = await agentPostable(OWNER(), {
