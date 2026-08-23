@@ -442,6 +442,8 @@ train:
 5. **PR-3 (cutover + retirement), only after PR-2's image is verified live.** The drops, the consumer file, the
    roster edits, `apps/dashboard/app/rules/` (**relocate `AdjustmentTemplatePanel.tsx`**), the parts catalog
    **including the `kb_rule_proposal` part type (GM-11)**, the CI gate, WB-R2. **D1.**
+   **Amended 2026-08-23 (owner, R1 relaxation, `wave-f-sprint-dag.md` §7):** binds the MERGE and the
+   ceremony only now — authoring proceeds in wave 0, unchanged protection, only the serialization removed.
 6. **PR-4 (acceptance, zero code).** Re-measure as-run, `PROGRESS.md`, **F-A10's terminal check — closing at the
    Wave-G reset (ADR-0072 ①.2), not on a backfill.**
 

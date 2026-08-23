@@ -355,6 +355,17 @@ the `0011` cites both lenses quote.
    (`0046:472-482`); an open batch is then bounded only by `batch_size` (1-500). This is
    the direct consequence of TA-P12's own REMOVE and needs no new ruling, but the sentence
    belongs in PR-1B's summary so the owner meets it before the behaviour, not after.
+4. ~~**PR-4's third condition: a bake period has passed with the new ledger's monthly
+   numbers cross-checked against the old one's last live figures** (design.md §3.9
+   condition (3); `wave-f-sprint-dag.md` W5, ≥T0+96h).~~ **RULED 2026-08-23 (owner) —
+   REPLACED, not shortened: PR-4 rides the Wave-G factory-reset ceremony** (legacy data
+   dies there anyway, ADR-0072 ①/ADR-0075), and verification becomes a **controlled-
+   denominator assertion during the Wave-G e2e corpus run** (K fired calls = K priced
+   ledger rows, aligned per call kind — ground truth, not a frozen-baseline comparison).
+   **W5 is removed from the sprint's ceremony set.** Rationale, recorded verbatim: **the
+   old ledger was never a gold oracle** (narrow scope, frozen at the retrofit); **the
+   controlled denominator is strictly stronger evidence of pipeline correctness, so this
+   is an instrument upgrade, not a quality reduction.**
 
 ## 8 · What PR-1's rig replay must confirm (this gate's own predictions)
 
