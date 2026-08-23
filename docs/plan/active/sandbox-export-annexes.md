@@ -1,0 +1,266 @@
+# F-A5b annexes — surface, battery, decisions, predictions, owner questions, risks
+
+> Companion to `sandbox-export-design.md` (the design of record) and `sandbox-export-survey.md`
+> (the estate at the bytes). **Where this file and the design disagree, the design is right and this
+> file is the bug.** Where this file and the *migration's printed line* disagree, **the printed line
+> is right and this file is the bug** — the standing caveat every count in this repo carries.
+
+---
+
+## Annex A · The surface
+
+### A.1 · Relations — three, enumerated (law 34: an addition is a review event)
+
+| relation | posture | why it exists |
+|---|---|---|
+| `clara.sandbox_views` | firm-scoped, FORCE RLS, **append-only + no-truncate** (`0005:280-298` idiom) | the referent `p_view` never had (gate defect 1). Immutable because `body_sha256` is what makes an export reproducible |
+| `clara.sandbox_exports` | firm-scoped, FORCE RLS, **lifecycle wall** freezing the request half (`0079:136-140` idiom) | the export record TA-P10 C′ (1) requires, and the retry lifecycle a render needs. **Not append-only** — that was gate defect 2 |
+| `clara.export_recipients` | firm-scoped, FORCE RLS, **immutable + supersede** | OQ-3's answer; the schema has none (survey X8) |
+
+**No table SELECT is granted to `clara_agent_ro` on any of the three** (F-A5's C4/C5 posture,
+inherited). The agent reaches them through the typed readers in A.2 and nowhere else.
+
+### A.2 · The verb enumeration — this list is the count, and every census reads it
+
+| # | verb | lane | grantee |
+|---|---|---|---|
+| 1 | `clara.wake_mint_sandbox_view(jsonb, jsonb, text, jsonb, text)` | wake wrapper → ungranted core | the wake role |
+| 2 | `clara.wake_request_sandbox_export(uuid, uuid, text, text, jsonb, text)` | wake wrapper → ungranted core | the wake role |
+| 3 | `clara.wake_sandbox_export_state(uuid)` | `stable` definer reader, own receipt | the wake role |
+| 4 | `clara.sandbox_export_payload(uuid, text)` | `stable` definer, **lease-scoped** (`0081:162-168`) | `clara_runtime` |
+| 5 | `clara.complete_sandbox_export(uuid, text, text, bigint, text)` | definer, **hash IN**, set-once | `clara_runtime` |
+| 6 | `clara.fail_sandbox_export(uuid, text, jsonb)` | definer, attempts/backoff | `clara_runtime` |
+| 7 | `clara.register_export_recipient(text, uuid, text, text, uuid[], text)` | human, **admin+** | `clara_authenticated` |
+| 8 | `clara.supersede_export_recipient(uuid, text, text)` | human, **admin+** | `clara_authenticated` |
+| 9 | `clara.list_sandbox_exports(uuid, int)` | human, **bookkeeper+** (`0002:518-520` idiom) | `clara_authenticated` |
+
+Plus the ungranted cores (`_sandbox_view_mint_core`, `_sandbox_export_request_core`,
+`_sandbox_client_set`, `_recipient_covers`) — **granted to NOBODY**, reached as internal calls under
+`clara_fn_owner` (the `0004:749-750` containment, `0077:22-29`'s rule).
+
+**Allowlist rows: exactly two per read/write wake verb per admitted kind** —
+`('interactive','wake_mint_sandbox_view')`, `('interactive','wake_request_sandbox_export')`,
+`('interactive','wake_sandbox_export_state')`, and the `interactive_client` triple once F-A2's D34
+limb merges. **Six rows when complete; never a `'proactive'` or unattended row.** The closed-world
+cell asserts the count **in both directions** (F5-D30: a roster that can only find extras cannot
+find omissions).
+
+### A.3 · The token vocabulary — every refusal is typed, none is a bare string
+
+| token | raised by | means |
+|---|---|---|
+| `sandbox_view_basis_absent` | mint | no basis rows; an unresolved client set is the unknown, not the empty |
+| `sandbox_view_body_malformed` | mint | a figure arrived as a number rather than a `displayed_text` string (E-R8 floor 1) |
+| `export_recipient_unknown` | request | no such recipient in this firm |
+| `export_recipient_superseded` | request | the row has a successor |
+| `export_recipient_membership_inactive` | request | `kind='firm_member'` whose membership is `removed` |
+| `recipient_coverage_incomplete` | request | `client_set ⊄ covered_clients`; **the uncovered ids are named** |
+| `watermark_policy_absent` | request | no `sandbox_watermark` row for this locale in the effective window (law 36; TA-P10 C′ (3)) |
+| `sandbox_export_lease_not_held` | payload / complete / fail | the `0081:162-168` shape |
+| `sandbox_export_already_completed` | complete | the set-once arm |
+| `chart_kind_unknown` | renderer | no fallback to bars on this entrance either |
+| `sandbox_authority_refused` | posting / facts / report writers | F-A5's wall, proven at this boundary |
+
+---
+
+## Annex B · The battery — what each cell forces, and what would make it a lie
+
+**Standing rules, inherited.** A forced cell asserts its precondition or exits via a NAMED, COUNTED
+`skipHere`; never `noteLane`+return, never a `.catch` swallowing a premise, never an OR between two
+walls. Fixtures THROW on construction failure. **Differential cells over self-referential ones.**
+A wall's proof is a cell that makes the wall REFUSE — never a substring match on source text.
+
+### B.1 · The client-set derivation (§3.2) — judgement logic, so every arm is forced
+
+| cell | forces |
+|---|---|
+| B1.1 | a preview-cell basis derives the cells' own client ids, `client_set_basis='exact'` |
+| B1.2 | a `scope='client'` free-read basis derives `{client_scope}`, `'exact'` |
+| B1.3 | a `scope='cross_client'` basis derives the receipt's named set, `'exact'` — **skips, named and counted, until F-A6 v2 merges** |
+| B1.4 | a `scope='firm'` basis derives **the whole firm roster**, `'firm_closure'` — and the twin: adding a client to the firm AFTER the mint does not change the frozen set |
+| B1.5 | **no basis → REFUSE** `sandbox_view_basis_absent`; the differential twin with one basis row succeeds |
+| B1.6 | a mixed basis (preview cells **and** a firm-wide read) derives the **union**, and the union carries `'firm_closure'` — the weaker label wins, never the stronger |
+| B1.7 | replay: derive twice from the same row, byte-identical (P-3) |
+
+### B.2 · Coverage (§3.3)
+
+| cell | forces |
+|---|---|
+| B2.1 | `firm_member` + active membership → covered; the twin with `status='removed'` → `export_recipient_membership_inactive` |
+| B2.2 | `external` with `client_set ⊆ covered_clients` → covered; the twin one client short → `recipient_coverage_incomplete`, **and the refusal NAMES the uncovered id** |
+| B2.3 | a `firm_closure` view + an `external` recipient covering three of twenty clients → REFUSE. This is the §3.2 consequence made visible, not an accident |
+| B2.4 | a recipient of **another firm** → `export_recipient_unknown` (never "found but refused" — it is not visible) |
+| B2.5 | a superseded recipient → refuse; the successor row → covered |
+| B2.6 | `covered_clients` cannot be written by any wake verb — a prosrc census over the granted wake surface, **plus** a behavioural attempt |
+
+### B.3 · The watermark (§3.6) — the positive control and its differential twin
+
+| cell | forces |
+|---|---|
+| B3.1 | **the extracted text of the produced PDF contains the signed string on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export |
+| B3.2 | with the policy row absent, the **request** refuses (`watermark_policy_absent`) and **no bytes exist** — never unwatermarked bytes |
+| B3.3 | the pinned `watermark_policy_version_id` is what the bytes carry: supersede the row, re-render the same export, bytes unchanged |
+| B3.4 | a hostile label cannot remove the background — the law-28 payloads run and B3.1 still passes (P-2) |
+| B3.5 | there is **no code path** producing a sandbox PDF without a watermark: the entrance has no `decision.watermark` branch, forced behaviourally by rendering with every decision shape |
+
+### B.4 · The narrative-authority wall at the boundary (§3.7)
+
+| cell | forces |
+|---|---|
+| B4.1 | a posting provenance handed a `sandbox_view_id` → `sandbox_authority_refused`; **the twin** with a legitimate document basis → succeeds |
+| B4.2 | a `client_facts` write handed a `sandbox_view_id` → refuses; the twin succeeds |
+| B4.3 | a report cell handed one → refuses; the twin succeeds |
+| B4.4 | `sandbox_views` has **no** `definition_version_id` and **no** `cell_id` column — a catalog assertion, and the structural reason B4.1-B4.3 cannot be fixed by a caller |
+
+### B.5 · One architecture (§3.5)
+
+| cell | forces |
+|---|---|
+| B5.1 | **G-1**: every `chart.mjs` export is reachable from both entrances or neither — asserted in both directions |
+| B5.2 | **G-2**: the sandbox path end to end leaves `clara.render_jobs` empty (census C10 re-proven positively) |
+| B5.3 | an unknown `chart_kind` on the sandbox entrance REFUSES; the twin with a known kind renders |
+| B5.4 | both entrances produce byte-identical geometry for the same series — the "two mutually-unaware computations" detector |
+
+### B.6 · Lifecycle and forgery
+
+| cell | forces |
+|---|---|
+| B6.1 | every frozen column of `sandbox_exports` refuses an UPDATE (one cell per column, P-4) |
+| B6.2 | every moving column accepts its lawful transition (P-4's other direction) |
+| B6.3 | `complete_sandbox_export` twice → `sandbox_export_already_completed` |
+| B6.4 | a worker without the lease → `sandbox_export_lease_not_held`, for payload, complete and fail alike |
+| B6.5 | `sandbox_views` refuses UPDATE and DELETE (append-only) and TRUNCATE (no-truncate) |
+| B6.6 | cross-firm: no session of firm A sees a view, export or recipient of firm B — a POSITIVE read of firm-B fixtures from a firm-A session returning zero, never an empty table |
+
+---
+
+## Annex C · Decisions
+
+| # | decision | ground |
+|---|---|---|
+| **C-1** | `p_view` becomes **two relations**: an immutable `sandbox_views` and a lifecycle `sandbox_exports` | gate defects 1 + 2; the `render_jobs` split idiom (`0079:136-140`) |
+| **C-2** | **The hash comes IN** at completion; the DB never renders and never re-hashes | `_seal_report_artifact_core`'s real signature (`0071:121-124`) |
+| **C-3** | **No third artifact relation.** `report_artifacts`' chain machinery serves the seal chain the sandbox is structurally unreachable from | law 74; weight |
+| **C-4** | `client_set` is **derived at mint from durable rows**, never supplied | F5-D14 |
+| **C-5** | **A firm-wide free read derives the WHOLE firm roster** (`firm_closure`) | `freeform_read_log` cannot name its clients (gate defect 3); review law 2 — absence is not evidence; law 36 |
+| **C-6** | The set is **frozen with the view**; a later roster change does not widen an old export's coverage | reproducibility of the coverage proof |
+| **C-7** | **`clara.export_recipients` is minted**, with two kinds; firm-member coverage is **computed, never stored** | survey X8; a stored roster copy is stale the moment a client is added |
+| **C-8** | **Registering a recipient is a HUMAN act (admin+)** | `covered_clients` IS the wall; law 78 devolves acts, not the authorship of the guard. **Owner question 2** |
+| **C-9** | The **presence check runs at request time**, and the resolved version is **pinned** into the frozen half | an actionable refusal beats a dying job; pinning makes the bytes reproducible |
+| **C-10** | The sandbox watermark is **unconditional** — no `decision.watermark` branch on this entrance | an unwatermarked sandbox artifact is indistinguishable from a sealed one |
+| **C-11** | A **sibling job family**, not a widened `render_jobs` | X3; census C10 stays closed, and closed is now a positive claim (G-2) |
+| **C-12** | **One geometry library, two entrances, censused in both directions** (G-1) | TA-P10's rider; TA-P11 A's test |
+| **C-13** | An unknown chart kind **refuses** on this entrance too | `reporting-agency-design.md:380-381` — the fallback is how S6 stayed invisible |
+| **C-14** | **Export is not TA-P3's egress regime**; `client_egress_purpose_consents` is not widened | survey X9. **Owner question 4** |
+| **C-15** | v1 mints the view **on the export path**; the screen seam is stated so F-A5/Wave-G can close the divergence for free | scope. **R-1; owner question 6** |
+| **C-16** | This lane's **renderer PR lands after F-A5 PR-4** | two renderer ceremonies must not contend |
+| **C-17** | `watermark_policy_versions` is a **shared surface** — the conductor is notified before authoring, and a CHECK extension is priced, not assumed | survey U1/X7 |
+
+---
+
+## Annex D · Predictions (the survey's P-1..P-6, restated as what settles them)
+
+**P-1** per-page watermark in extracted PDF text · **P-2** `typstString()` holds against the law-28
+payloads · **P-3** the derivation replays byte-identically · **P-4** the lifecycle wall transplants
+(a cell per frozen column and per moving column) · **P-5** the sibling job family shares zeta's
+worker and Fly app — **if it cannot, the cost is a second machine and it is priced at PR-3, never
+absorbed** · **P-6** `watermark_policy_versions` admits the sandbox payload **without** a CHECK
+extension — **unpredictable from text; the table does not exist** (U1).
+
+**Every prediction is a prediction until the rig prints it.** None is banked as a green.
+
+---
+
+## Annex E · Owner questions — six, each with its recommendation, default and cost
+
+**Q1 (OQ-1 + OQ-2, moved here by R-L15) — the `sandbox_watermark` trio, and does it ride one
+signing with `artifact_watermark`?** *Why it is not a unilateral fix:* a string burned into an
+artifact's bytes changes future artifacts' bytes — a renderer ceremony and a wording decision at
+once. *Recommendation:* **one sitting, two keys, six rows**, in the register of `0067:142-148`'s
+claim labels (a plain statement of what the document is not). **Draft for the sandbox key, for the
+owner to cut or replace:**
+
+| locale | stamp (the page background) | footer line (the boxed sentence) |
+|---|---|---|
+| en | ANALYSIS ONLY — NOT AN AUTHORITATIVE FIGURE | Prepared by Clara for analysis. Not a financial statement, not reviewed, not for filing or lodgement. |
+| ms | ANALISIS SAHAJA — BUKAN ANGKA BERAUTORITI | Disediakan oleh Clara untuk analisis. Bukan penyata kewangan, tidak disemak, bukan untuk pemfailan. |
+| zh | 仅供分析 — 非权威数字 | 由 Clara 编制，仅供分析之用。非财务报表，未经复核，不得用于报送或申报。 |
+
+*Fail-closed default (the standing one, `gate-record:260-261`):* **no row is seeded** — and for this
+lane that means **the export path ships DARK: nothing can be exported at all** (survey X12), because
+TA-P10 C′ (3) forbids a code default. That is the honest cost of the default, and it is the reason
+Q1 is first.
+
+**Q2 — who may register an EXTERNAL export recipient?** *Recommendation:* **a human at the admin+
+floor**, for both kinds, because `covered_clients` is the wall itself (C-8). *Fail-closed default:*
+admin+ for both. *The owner rules toward maximum autonomy and may want the `firm_member` kind
+devolved to Clara* — that is a narrower widening (a firm member's coverage is total either way) and
+would be his to make. *Cost of the default:* one admin action the first time a group owner is added.
+
+**Q3 — the `firm_closure` rule.** A chart computed from a HOME (firm-wide) free read carries the
+whole firm's client set, so only a firm-covering recipient may receive it (§3.2, C-5).
+*Recommendation:* **accept it**; the route to a tight set is to compute from *named* reads, which is
+exactly what F-A6 v2 provides. *The alternative, priced:* let a human **declare** a narrower set with
+a written attestation — buildable, but it moves the coverage decision from a mechanical check to a
+human sentence, which is the thing TA-P10 C′ (2) chose a mechanical check over.
+*Fail-closed default:* `firm_closure`, no declared narrowing.
+
+**Q4 — does an EXTERNAL export need a client-level consent?** Today `client_egress_purpose_consents`
+governs sending data to a **model provider**, purpose closed to `('wiki_synthesis')` (`0020:153`).
+*Recommendation:* **recipient coverage is the whole gate; do not widen the purpose CHECK** (C-14,
+survey X9) — merging a human-recipient decision into a provider-processing register would make every
+downstream reader of that register wrong about what a consent row means. *Fail-closed default:* the
+recommendation. *If the owner wants a consent:* it is a **new** register, not a widened one.
+
+**Q5 — retention for sandbox export bytes.** The sealed lane keeps artifacts seven years (E-R14).
+*Recommendation:* **the RECORD forever, the BYTES 24 months** — a non-authoritative analysis PDF has
+no statutory retention, and `clara-render` storage only grows (F-A5's own named cost).
+*Fail-closed default:* the recommendation, written into `docs/ops/DR-render.md` with PR-4.
+*Cost:* an export older than 24 months can be re-rendered from its frozen view, not retrieved.
+
+**Q6 — screen/file divergence.** v1 mints the view at export time, so a chart on screen and the same
+chart in a file are not structurally the same bytes (C-15, R-1). *Recommendation:* **accept for v1**
+and have the Wave-G screen half render from `sandbox_views.body`, which closes it for free.
+*Fail-closed default:* the recommendation, R-1 registered. *Cost:* until Wave-G, "the chart I saw"
+and "the chart I sent" are proven identical by discipline, not by structure.
+
+---
+
+## Annex F · Risks, non-goals, acceptance
+
+### F.1 · Risks, each with its owner and its early warning
+
+| # | risk | early warning |
+|---|---|---|
+| **R-1** | screen/file divergence until the Wave-G seam closes (Q6) | any support question of the form *"the chart in the PDF differs from what I saw"* |
+| **R-2** | **U1 bites** — `watermark_policy_versions` closes its payload keys and this lane needs a CHECK extension on a shared surface | read F-A5 PR-1's landed DDL the day it merges; notify the `conductor` before authoring either way |
+| **R-3** | the injection surface (X11) is genuinely new; the law-28 pass may find that model-composed strings cannot safely reach Typst at all | a finding at PR-0. *Fallback if so:* the sandbox body's free text is restricted to a **closed set of typed blocks with escaped leaf strings**, and prose moves out of the PDF into the chat turn |
+| **R-4** | **the lane never gets scheduled** — the same risk R7 recorded against the severance itself (`reporting-agency-gate-record.md:227`) | it is registered in `PROGRESS.md:128`; this design's landing is the second registration |
+| **R-5** | `firm_closure` makes the feature feel broken to a user who expects to export a HOME-computed chart to a client | Q3 puts it in front of the owner **before** it is discovered in use |
+| **R-6** | a second renderer ceremony contends with F-A5 PR-4's | C-16 sequences them; the pre-change digest stays pullable seven years either way |
+
+### F.2 · Non-goals (the design's §7, restated so nothing is inferred)
+
+The sandbox's on-screen half · any change to the seal chain, `report_artifacts`, `render_jobs` or
+the claim path · SST-02 · a portal or any **delivery** mechanism (this lane produces a file and a
+record; who sends it is out of scope, and Q4 tests whether that stays true) · any widening of
+`client_egress_purpose_consents` · e-filing · a per-asker RBAC tier on exports (TA-P9 A(6)'s posture,
+inherited) · **and nothing here narrows TA-P10 C′** — §7 enumerates every clause and where it is
+built.
+
+### F.3 · Acceptance — done means the loop is walkable (TA-P14 A)
+
+1. On **RPR** (the synthetic sandbox firm — real structure, no client harm; F-A5's OQ-4 answer):
+   a narrative aggregate is computed, a view is minted, **exported to a firm member**, the bytes
+   carry the watermark on every page, and the export appears in the human list.
+2. A **cross-client** view (two RPR clients) is exported to an **external** recipient registered by
+   a human as covering both — and the same view **REFUSES** to a recipient covering one.
+3. A **`firm_closure`** view refuses to that same external recipient and succeeds to a firm member.
+4. With the `sandbox_watermark` row for `ms` absent, an `ms` export **refuses at the request** and
+   no bytes exist; with it present, it renders.
+5. A posting, a `client_facts` write and a report cell each **refuse** the exported view as a basis;
+   each succeeds on a legitimate basis.
+6. **The law-28 pass has run and its findings are folded** — this is an acceptance item, not a
+   review preference.
+7. The full estate suite is green on a pristine rig, tails unfiltered, **every skip named and
+   counted** (B1.3 is expected to skip until F-A6 v2 merges).
