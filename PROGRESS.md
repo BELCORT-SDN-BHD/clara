@@ -128,7 +128,7 @@ clock-out)*
 | Wave F · Track A — **F-A5b sandbox export** | **DESIGN v1 2026-08-23** — `sandbox-export-survey.md` · `-design.md` · `-annexes.md`; **PR-0 gate pending.** **The lane ships DARK until the owner signs the `sandbox_watermark` trio** (design §3.6, owner question 1; survey X12): the default that stands is *no row seeded*, and a missing row for the locale REFUSES the render — so the export path is built and inert until one signing. **REGISTERED 2026-08-22 (R-L15)** — severed out of F-A5's v2 as SEQUENCING, explicitly **not** a narrowing of TA-P10 C′. Its own design pass and its own PR-0 **carrying the law-28 cross-model pass**, plus OQ-1/OQ-2's `sandbox_watermark` trio and OQ-3's recipient-scope model (the mechanical "recipient covers every `client_id` in the file" check that lets a group owner see a multi-company comparison). F-A5 proper keeps the sealed lane's `artifact_watermark` trio. Default on the wording: no row seeded, literals stay, R-N1 registered. | design | — |
 | Wave F · Track A — **F-A6 v2 cross-client named read** | **DESIGN v1 2026-08-23** — `freeform-read-v2-survey.md` · `-design.md` · `-annexes.md`; **PR-0 gate pending.** **Hard prerequisite: F-A2 PR-1 MERGED** — the verb cannot function until `interactive_client` and both `wake_credentials` CHECKs land (design §6, survey U2). **Owner confirmation 2026-08-23: v1 waits for v2** (D-22 / R-L17) — recorded here because the lane's own survey (U4) and annexes flagged that the repo did not yet carry it. **REGISTERED 2026-08-22 (R-L17)** — severed out of F-A6 v1 as SEQUENCING, explicitly **not** a narrowing of TA-P9 A(2): the cross-client sibling verb cannot function until **F-A2's `interactive_client` limb merges**. v1's refusal `cross_client_unavailable` must NAME the deferred action (the battery cell forcing the naming stays in v1); HOME chat is unaffected. **Also carries R-L18's deferral** — XLSX/DOCX `structured_parse` content, excluded from v1 because `document_extractions`/`document_regions` carry no `client_id`, so a client pin would leak a sibling's document body (`get_document_extract` stays the door). | design | — |
 | Wave G · frontend (Codex session, parallel) | **HANDOFF LANDED 2026-08-23** — `docs/plan/active/frontend-handoff-2026-08-23.md`: the complete enterprise frontend (signup/invite · onboarding · the two-pane Agentic OS shell · documents · drafts · bank · close · reports · receipts · admin) built in THIS repo as the new **apps/web** package on branch **frontend/web**, replacing `apps/dashboard` at cutover. **ALIGN BEFORE CODE** — §8's grill-first list goes to the owner (visual direction · two-pane IA · card-catalog extensions · mobile scope · i18n EN/BM/中文 · the a11y bar above the legal floor · per-journey "done") before product code, per constraint 6. Settled and closed in §0: Cloudflare Workers via `@opennextjs/cloudflare` · Supabase cookie auth, invite-only first · Resend carrying no client data · Tailwind + shadcn adopted · the LIVE project as the data (ADR-0075) · crude Track-A doors replaced IN PLACE with the same verb, never a new gate. | design | — |
-| Wave F · Track B — **F-T3 draft tax computation** | **DESIGN v1 2026-08-23** (`tax-computation-survey.md` · `-design.md` · `-annexes.md`); **PR-0 gate pending**; **hard-gated on F-A5 PR-1 + F-A4 `close_receipts`**; owner questions **OQ-1/7/8** for the sitting. Three findings reorder the item: the tax layer is **greenfield** (zero repo hits for `cp204`/`form_c`/`add_back`/`chargeable`, and `0041`'s `ca_class` trio is written by the register and read by nothing — F-T3 is WD-R12's first consumer) · **no acceptance oracle exists in the owner's three folders** (no Form C/B/P, no CP204, no computation worksheet, no FA register — so acceptance cannot be "reproduce the accountant's prior year", **OQ-1**) · **the number path is live but has never carried a run** (`reporting_periods`/`period_snapshots` zero rows, no `report_run` ever opened) — a hard sequencing dependency, not a build-time discovery. | design | — |
+| Wave F · Track B — **F-T3 draft tax computation** | **DESIGN v1.2 2026-08-23** — **v1.2 folds the conductor's measured corrections**: the frozen evaluator closure collapses from ~12 members to **ONE** (`verify_evaluator_freeze()` ignores `deployed` and hashes the full `pg_get_functiondef`, so twelve members would freeze twelve bodies estate-wide and raise at a *later* lane's apply — **D-16**, re-measured at PR-0 as **P-10**) · `client_fact_keys` gains the generic name-only-wall scoping obligation, its own seed block and battery cell **C15** (**D-17**) · the `dispose_fixed_asset` prosrc pin corrects to `0041:3643` · **F-A9 is NOT an evaluator-roster claimant** (its priced view has no `prosrc`); the live claimants in merge order are **F-A5 PR-2 + the C-flip ceremony → F-A8 PR-1 → F-T3** · merge order recorded: **F-A8 PR-1 (train 13) → F-T1's SST tables → F-T3 PR-1**, F-T1 having no train slot yet. **v1.1** — three of the nine owner questions are RULED under the standing delegation: **OQ-6 → R-L25** (the Wave-F Tier-1 closure re-opens for F-T3's two tables, which land as **developer-seeded fact tables through the PR ladder**, not through TA-P2's one-click door — contract note `[TB-2026-08-23]`), plus **OQ-4** and **OQ-5**, and the law-review belt. **The owner ruled ALL-IN in Wave F** — F-T3 is not slipped to a later version. Base **v1** — (`tax-computation-survey.md` · `-design.md` · `-annexes.md`); **PR-0 gate pending**; **hard-gated on F-A5 PR-1 + F-A4 `close_receipts`**; owner questions **OQ-1/7/8** for the sitting. Three findings reorder the item: the tax layer is **greenfield** (zero repo hits for `cp204`/`form_c`/`add_back`/`chargeable`, and `0041`'s `ca_class` trio is written by the register and read by nothing — F-T3 is WD-R12's first consumer) · **no acceptance oracle exists in the owner's three folders** (no Form C/B/P, no CP204, no computation worksheet, no FA register — so acceptance cannot be "reproduce the accountant's prior year", **OQ-1**) · **the number path is live but has never carried a run** (`reporting_periods`/`period_snapshots` zero rows, no `report_run` ever opened) — a hard sequencing dependency, not a build-time discovery. | design | — |
 | Wave F · Track B — **F-T4 fix queue** | **DESIGN v1 2026-08-23** (`fix-queue-survey.md` · `-design.md` · `-annexes.md`); **PR-0 gate pending.** Five PRs: **the ceremony DSN bridge first** (in-repo at last — it was never in the repo, and every remaining Wave-F/G ceremony walks it) · **N5 as a governed `refusal_remedies` table** rather than a `fix` backfill across ten applied migrations, preserving the coding mapper's no-raw-text hardening · **the 401/403 split** with a retryable `engine_auth` code, at the two human doors only · **P-3's drawer-1 census via a `banking_arrangement` client FACT** on the `trade_nature` precedent, never an attestation (drawer 1 has no attestation path and gains none) · **item E's two cells**. **The claims accounting convention (§8) is an OWNER SITTING QUESTION**, with MPERS / CA 2016 / LHDN citations fetched 2026-08-23 and four NOT-FOUND absences recorded honestly. Cross-item **X-1**: the bank-class COA account any registry-vs-ledger predicate keys on is **minted by registration**, which makes F-A3's arm 4 vacuous on the same population. **No rig ran — every body-level claim is a prediction for PR-0's replay.** | design | — |
 | Wave F · Track B | tax per the contract (F-T1..F-T4). **task #17 UNBLOCKED** — R1 ruled (ADR-0072 ④); Fix A's **owner = F-A4 PR-1b, and Track B's 13-cell battery rides it** (R-L9 / close-key-1 D-23 — the double claim is resolved to one owner). Shape unchanged: both writer bodies in ONE migration, D1 on the 0085 template. **F-T1 now also OWNS the SST rate table** (ADR-0074/TA-P2 — F-A8 depends on it) | design | — |
 | Harness — **the CI economics overhaul (ADR-0073)** | **DELIVERED 2026-08-21, proven on all three event paths same-day**: PR run green in **~13 min** (was ~42) · post-merge push green · the manual dispatch full sweep green incl. all 12 closed-wave drills + 4 frontier legs in their new sweep-only home. Reviews: 5-lens adversarial workflow (3 confirmed → fixed: `bash -e {0}` exact shells · classifier learns `.github/actions/**` · per-run dispatch concurrency group) + Codex cross-model (3 shared-host races → fixed). | merged | #278 |
@@ -206,14 +206,13 @@ the owner is named so none of them drifts back into nobody's queue):
 **Named build debts (deadline-triggered):**
 - **The `closing_transfer`/SST-turnover latent (0056) — R1 RULED 2026-08-20 (ADR-0072 ④), task #17
   UNBLOCKED; the full argument moved 2026-08-22 to
-  `docs/plan/completed/progress-archive-2026-08-part2.md`.** State: **Fix A's OWNER is F-A4 PR-1b**
-  (R-L9 / GM-7 / close-key-1 D-23 — the double claim between F-A4 and Track B is resolved to one
-  owner); **Track B's 13-cell battery rides it.** Shape unchanged: BOTH writer bodies
-  (`finalize_close` + the `0085:379-386` B3 reopen mirrors) marked at birth in ONE migration — a
-  single-body fix INVERTS the defect into compounding inflation — D1 on the `0085` template, a
-  forward-only proof asserted fail-closed at apply. Blast radius advisory-only (a suppressed 80%
-  early-warning ladder, never a wrong book). Fix B stays STRUCTURALLY BLOCKED. **OD-7 discharged by
-  the same ruling.** *(task #17)*
+  `docs/plan/completed/progress-archive-2026-08-part2.md`.** State: **Fix A's OWNER is F-A4 PR-1b** (R-L9 /
+  GM-7 / close-key-1 D-23 — the double claim between F-A4 and Track B is resolved to one owner); **Track B's
+  13-cell battery rides it.** Shape unchanged: BOTH writer bodies (`finalize_close` + the `0085:379-386` B3
+  reopen mirrors) marked at birth in ONE migration — a single-body fix INVERTS the defect into compounding
+  inflation — D1 on the `0085` template, a forward-only proof asserted fail-closed at apply. Blast radius
+  advisory-only (a suppressed 80% early-warning ladder, never a wrong book). Fix B stays STRUCTURALLY
+  BLOCKED. **OD-7 discharged by the same ruling.** *(task #17)*
 - **Reconciler follow-ups (#255's law-1 review — all pre-existing, none blocking, each its own
   PR):** the `expired` key collision (`reconciler.mjs:633` spreads `intakeRecovery`
   unconditionally after `expiry`, always clobbering `expireClarifies`' count — unread by
@@ -221,12 +220,11 @@ the owner is named so none of them drifts back into nobody's queue):
   not reach it) · the leader render-pair try/catch (`leader.mjs:200-211`) still swallows
   halt-class errors — unreachable today, but the one remaining halt-eating catch on that path ·
   `wiki-projection.mjs:333-346`/`:594-599` carry three bare `to_regprocedure` probes.
-- **`high_stakes_amount_cents` has no governed self-serve verb** (found by the 2026-08-21
-  client-naming audit): the RM100k threshold was set by a one-time hand-run deploy script
-  (ADR-0044's ceremony); a future SaaS firm cannot configure its own threshold through an
-  audited door. Not a defect today (the column and its `is_high_stakes` reader are fully
-  generic and per-firm); a **Wave-G OS-surface item** — the governed verb ships with the
-  firm-setup flow. *(audit record: session log 2026-08-21)*
+- **`high_stakes_amount_cents` has no governed self-serve verb** (found by the 2026-08-21 client-naming
+  audit): the RM100k threshold was set by a one-time hand-run deploy script (ADR-0044's ceremony); a future
+  SaaS firm cannot configure its own threshold through an audited door. Not a defect today (the column and
+  its `is_high_stakes` reader are fully generic and per-firm); a **Wave-G OS-surface item** — the governed
+  verb ships with the firm-setup flow. *(audit record: session log 2026-08-21)*
 - **`closing_stock` producer verb** — before any real goods-trader close. **Wave G does NOT
   schedule it:** ADR-0072 ⑤ defaulted OD-2 to "not in the first pass". *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. The Wave-G corpus
@@ -374,24 +372,22 @@ twice; worth pricing for in-repo custody.
   is the DB-owns-every-authoritative-number law and no hard constraint states invariant (a) at all.
   One statement of a law, in one place, is the answer. **Closed; nothing was guessed in.**
 - **The wiki dynamic-SQL gate reads CoR-block comments UN-MASKED** (found 2026-08-20 on 0097):
-  `parseCoRPatches` tests `CREATE_FN_RE` against a block whose `--` comments survive the
-  file-level `maskComments` (dollar-quoted interiors are skipped), so a create-function phrase
-  **quoted in a comment** reclassifies the block as a dynamic function-creator and reds the
-  gate. Workaround: wording — never quote a recut statement in a CoR comment. Real fix = mask
-  the block's own comments before the CREATE test + a selftest cell. Judgement logic, its own
-  reviewed PR; **re-homed to the F-A2 fix queue.**
+  `parseCoRPatches` tests `CREATE_FN_RE` against a block whose `--` comments survive the file-level
+  `maskComments` (dollar-quoted interiors are skipped), so a create-function phrase **quoted in a comment**
+  reclassifies the block as a dynamic function-creator and reds the gate. Workaround: wording — never quote
+  a recut statement in a CoR comment. Real fix = mask the block's own comments before the CREATE test + a
+  selftest cell. Judgement logic, its own reviewed PR; **re-homed to the F-A2 fix queue.**
 - ~~Riders ③④⑤ 0-live~~ · ~~corroboration 0/33~~ · ~~ci.yml over 500~~ · ~~the stranded pair~~ —
   **all four RESOLVED and ARCHIVED 2026-08-22** (`-part2.md`; re-measure 12/20 stands in posture).
 
 **THE NEXT-ROUND QUEUE (from the 2026-08-21 re-measure; the first four are PROMPT-side — the
 evaluator stays strict, and widening it would be a frozen-evaluator change needing its own
 version + ceremony):**
-- **MYR currency-code prompt fix — the largest measured refusal cause outside the arm, and a
-  FALSE refusal (2/20).** Both EZSEC documents answer `value("RINGGIT MALAYSIA")`; the rule
-  reduces to letters and demands `('RM','MYR')`, so `'RINGGITMALAYSIA'` lands outside and the
-  document is judged **unproven, not foreign**. Every other conjunct was read individually on
-  both and holds. **Ask for the currency CODE, not the printed rendering** (witnessFacts v3).
-  *(Two undriven EZSEC documents share the layout.)*
+- **MYR currency-code prompt fix — the largest measured refusal cause outside the arm, and a FALSE refusal
+  (2/20).** Both EZSEC documents answer `value("RINGGIT MALAYSIA")`; the rule reduces to letters and demands
+  `('RM','MYR')`, so `'RINGGITMALAYSIA'` lands outside and the document is judged **unproven, not foreign**.
+  Every other conjunct was read individually on both and holds. **Ask for the currency CODE, not the printed
+  rendering** (witnessFacts v3). *(Two undriven EZSEC documents share the layout.)*
 - **Dash-is-not-a-value clarification.** Vision reports a bare `-` as `state:'value'`, text as
   `not_printed`; the mismatch sets `v_agree_ok := false` unconditionally and cost **both
   BRIGHTPATH documents**. (`509e788d` also has a rounding SIGN split: text `+0.40` vs `- 0.40`.)
@@ -405,13 +401,12 @@ version + ceremony):**
   SECRETARY / D&D-family); the third came from a *changed read*, not a changed rule. **Trues the
   number in the on-file owner trigger question** on whether sub-case (b) should admit a printed
   discount — still the owner's, since the change would be the evaluator inventing structure.
-- **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it):
-  the sidecar `runId` is clobbered on the re-mint path —
-  `packages/runtime/lib/reconciler-documents.mjs:450` with `packages/runtime/lib/spool.mjs:124`.
-  *(Cite TRUED 2026-08-23: `:198-206` is `documentTaskSnapshot`, a SELECT — the clobber is the
-  re-enqueue's `writeTaskMeta(task.taskId, { ...task, runId: … })` full overwrite at `:450`, where
-  the merging `patchTaskMeta` was wanted.)*
-  A real defect with a known site pair; its own PR, not a rider on a pacing fix.
+- **M1's reconciler re-mint is a NAMED FOLLOW-UP** (found at #270's review, not shipped in it): the sidecar
+  `runId` is clobbered on the re-mint path — `packages/runtime/lib/reconciler-documents.mjs:450` with
+  `packages/runtime/lib/spool.mjs:124`. *(Cite TRUED 2026-08-23: `:198-206` is `documentTaskSnapshot`, a
+  SELECT — the clobber is the re-enqueue's `writeTaskMeta(task.taskId, { ...task, runId: … })` full
+  overwrite at `:450`, where the merging `patchTaskMeta` was wanted.)* A real defect with a known site pair;
+  its own PR, not a rider on a pacing fix.
 - *(The stranded-pair row is in the archived batch above; the `0051` door's `v_lane` defect
   stays unrepaired by design — no new member can mint post-cutover.)*
 - **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered
