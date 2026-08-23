@@ -127,7 +127,7 @@ begin
   select h.component, h.beat_at into v_component, v_beat from clara.runtime_heartbeats h
    where h.beat_at > now() - interval '90 seconds' order by h.beat_at desc limit 1;
   if v_component is not null then
-    raise exception 'F-A2 QUIESCE GUARD: a runtime heartbeat is fresh (component %, beat_at %) — this file replaces SEVEN live bodies incl. clara._approve_entry_core and clara._draft_entry_core, and an in-flight call finishes on the OLD body (D1); stop clara-runtime, wait for staleness (>90s), and re-apply',
+    raise exception 'F-A2 QUIESCE GUARD: a runtime heartbeat is fresh (component %, beat_at %) — this file replaces SEVEN live bodies incl. clara._approve_entry_core and clara._draft_entry_core -- and part 2 replaces an EIGHTH, clara.wake_draft_entry (H1) -- and an in-flight call finishes on the OLD body (D1); the window covers all three parts; stop clara-runtime, wait for staleness (>90s), and re-apply',
       v_component, v_beat;
   end if;
 end

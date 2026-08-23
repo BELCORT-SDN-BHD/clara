@@ -38,7 +38,7 @@ create temp table _fa2p2_pre(k text primary key, v text not null) on commit drop
 insert into _fa2p2_pre values ('deploy_user', current_user), ('deploy_role', current_role);
 
 do $fa2p2_pre$
-declare n text; v_writers int;
+declare n text; v_writers int; v_sha text;
 begin
   -- PART 1 MUST BE PRESENT, probed in exact regprocedure form.
   foreach n in array array[
@@ -61,6 +61,22 @@ begin
   if position('interactive_client' in (select pg_get_constraintdef(c.oid) from pg_constraint c
       where c.conrelid='clara.wake_credentials'::regclass and c.conname='ck_wake_credentials_kind_0011')) = 0 then
     raise exception 'F-A2 part2 prestate: the kind CHECK has not been extended — apply part 1 first' using errcode='CLR10';
+  end if;
+
+  -- H1: THE ONE BODY THIS FILE RECUTS, PINNED BY PROSRC SHA-256 AT FRONTIER 0102.
+  -- `wake_draft_entry` (live frontier 0009:1432) reads the wake credential and never compares
+  -- `p_client` to `w.client_id` -- so a credential PINNED to client A can open a draft on client
+  -- B, and only the POST door refuses it. The draft is already a durable write. This is a D1
+  -- replacement of a live writer's body, so it rides the combined quiesce window part 1 opened
+  -- rather than a second one, and the pin is checked here, next to the edit, rather than
+  -- remotely.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid='clara.wake_draft_entry(uuid,uuid,date,text,jsonb,uuid,text,jsonb,text,bigint,jsonb,jsonb,jsonb,text)'::regprocedure;
+  if v_sha is null then
+    raise exception 'F-A2 part2 prestate: clara.wake_draft_entry is absent at the pinned overload' using errcode='CLR10';
+  end if;
+  if v_sha <> 'b898a3876b4439159446a81581109e6ab82025ea2fa4b6acd6112c05e68d0420' then
+    raise exception 'F-A2 part2 prestate: clara.wake_draft_entry has DRIFTED from the 0102 frontier (sha %) -- re-derive the recut against the live body before applying', v_sha using errcode='CLR10';
   end if;
 
   -- PARTIAL BIRTH.
@@ -91,6 +107,65 @@ end
 $fa2p2_pre$;
 
 set role clara_fn_owner;
+
+-- ---------------------------------------------------------------------------------------------
+-- H1  clara.wake_draft_entry — THE DRAFT DOOR NEVER CHECKED THE CREDENTIAL'S CLIENT PIN.
+--
+-- `wake_post_entry` refuses a pinned credential aimed at another client (see the guard below at
+-- its own site). `wake_draft_entry` — the door the SAME credentials use, one step earlier —
+-- reads `clara.wake_context()`, asserts the allowlist, checks the books token, and then hands
+-- `p_client` straight to `_draft_entry_core` without ever comparing it to `w.client_id`. So a
+-- credential pinned to client A could open a draft on client B, and only the POST door would
+-- refuse it. A draft is already a durable write on the wrong client's books, with the wrong
+-- client's filing bound to it — the post refusing later does not undo that.
+--
+-- WHY IT IS A REPLACEMENT AND NOT AN ADDITION. This overload is what every live autodraft and
+-- interactive credential already calls, and it is what the allowlist and the grants are written
+-- against; a sibling function would need every caller and both re-plumbed. So the body is
+-- replaced IN PLACE, byte-identical except the inserted guard — which is the same idiom part 1
+-- uses for its own eight D1 bodies, and it rides the SAME combined quiesce window rather than
+-- opening a second one. The prestate above pins the 0102 sha so a drifted body is refused
+-- instead of silently overwritten.
+--
+-- FAIL-CLOSED AND NARROW, worded exactly as `wake_post_entry`'s guard: only a credential that IS
+-- pinned is held to its pin, so a client-less `interactive` credential keeps serving every lane
+-- it was always allowed to serve. Same CLR11, same reason token — it is the same class of
+-- answer, one door earlier.
+--
+-- THE DEFAULTS ARE REPRODUCED VERBATIM, and that is not cosmetic: `create or replace` refuses to
+-- remove parameter defaults from an existing function ("cannot remove parameter defaults"), and
+-- had it not refused, dropping them would have silently changed the CALL SHAPE every live caller
+-- relies on. Measured off `pg_get_functiondef` at the pinned frontier, not retyped from memory.
+-- ---------------------------------------------------------------------------------------------
+create or replace function clara.wake_draft_entry(
+  p_client uuid, p_resolution uuid, p_posting_date date, p_memo text, p_lines jsonb,
+  p_document uuid default null::uuid, p_sha256 text default null::text,
+  p_flags jsonb default '{}'::jsonb, p_op_key text default null::text,
+  p_books_version bigint default null::bigint, p_proposed_counterparty jsonb default null::jsonb,
+  p_evidence jsonb default null::jsonb, p_coding jsonb default null::jsonb,
+  p_coding_kind text default null::text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $wde$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then
+    raise exception 'no valid wake credential' using errcode='CLR03';
+  end if;
+  perform clara.assert_wake_allowed(w.wake_kind,'wake_draft_entry');
+  -- H1: the credential's client pin, checked at the DRAFT door as well as the post door.
+  if w.client_id is not null and p_client is distinct from w.client_id then
+    raise exception 'this wake credential is pinned to another client' using errcode='CLR11',
+      detail='{"reason":"credential_client_pin"}';
+  end if;
+  if p_books_version is null then
+    raise exception 'wake_draft_entry requires a books_version token' using errcode='CLR10';
+  end if;
+  return clara._draft_entry_core(clara.agent_user_id(),w.firm_id,w.on_behalf_of,
+    w.wake_kind,false,p_client,p_resolution,p_posting_date,p_memo,p_lines,p_document,
+    p_sha256,p_flags,p_op_key,p_books_version,p_proposed_counterparty,p_evidence,
+    p_coding,p_coding_kind);
+end $wde$;
+
 
 -- ---------------------------------------------------------------------------------------------
 -- THE GRANTED WRAPPER. The 0004:617-628 / 0078:96-107 shape exactly: resolve the credential,
@@ -185,6 +260,7 @@ on conflict do nothing;
 do $fa2p2_tail$
 declare
   v_role text; n int; v_writers int; v_sig text; v_grantees text[]; v_public int; v_count int;
+  v_src text;
   v_wrapper text := 'clara.wake_post_entry(uuid,uuid,uuid,bigint,text,jsonb,text)';
   v_cores text[] := array[
     'clara._agent_post_entry_core(uuid,uuid,uuid,text,uuid,uuid,uuid,bigint,text,jsonb,text)',
@@ -321,11 +397,31 @@ begin
       (select v from _fa2p2_pre where k='entry_dml_writers'), v_writers using errcode='CLR10';
   end if;
 
+  -- (6b) H1: the DRAFT door now carries the credential's client pin, and it carries it BEFORE it
+  -- hands p_client to the core. Order is the invariant -- a guard after the delegate call is not
+  -- a guard -- so both facts are read off the INSTALLED body.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.wake_draft_entry(uuid,uuid,date,text,jsonb,uuid,text,jsonb,text,bigint,jsonb,jsonb,jsonb,text)'::regprocedure;
+  if position('credential_client_pin' in v_src) = 0 then
+    raise exception 'F-A2 part2 tail: wake_draft_entry does not carry the credential client pin (H1)' using errcode='CLR10';
+  end if;
+  if position('w.client_id is not null and p_client is distinct from w.client_id' in v_src) = 0 then
+    raise exception 'F-A2 part2 tail: wake_draft_entry''s pin is not the CONDITIONAL form -- a client-less interactive credential would be locked out (H1)' using errcode='CLR10';
+  end if;
+  if position('credential_client_pin' in v_src) > position('_draft_entry_core' in v_src) then
+    raise exception 'F-A2 part2 tail: wake_draft_entry checks the client pin AFTER delegating to the core (H1)' using errcode='CLR10';
+  end if;
+  -- ...and exactly one overload survives the replace, so no caller can reach an unguarded twin.
+  if (select count(*) from pg_proc where proname='wake_draft_entry'
+        and pronamespace='clara'::regnamespace) <> 1 then
+    raise exception 'F-A2 part2 tail: wake_draft_entry has more than one overload (H1)' using errcode='CLR10';
+  end if;
+
   -- (6) Nothing was posted BY the migration.
   if (select count(*) from clara.entry_post_receipts) <> 0 then
     raise exception 'F-A2 part2 tail: the migration wrote a post receipt' using errcode='CLR10';
   end if;
 
-  raise notice 'F-A2 part2 tail: OK -- clara.wake_post_entry is EXECUTE-granted to clara_wake_interactive and nothing else (grantee surface enumerated by aclexplode, PUBLIC included), carries NO DML text, and is allowlisted for exactly two kinds, autodraft and interactive -- never proactive, never interactive_client. Part 1''s cores and the shared clara._approve_entry_core keep their ZERO-GRANT pin against all eight app roles incl. both non-inheriting login shells. PUBLIC=0 and exactly one overload on all 14 touched functions. The pinned chat kind holds EXACTLY ONE allowlist row, for wake_open_question, which posts nothing. App-executable journal_entries DML writers unmoved at %, and zero post receipts exist.', v_writers;
+  raise notice 'F-A2 part2 tail: OK -- clara.wake_post_entry is EXECUTE-granted to clara_wake_interactive and nothing else (grantee surface enumerated by aclexplode, PUBLIC included), carries NO DML text, and is allowlisted for exactly two kinds, autodraft and interactive -- never proactive, never interactive_client. Part 1''s cores and the shared clara._approve_entry_core keep their ZERO-GRANT pin against all eight app roles incl. both non-inheriting login shells. PUBLIC=0 and exactly one overload on all 14 touched functions. The pinned chat kind holds EXACTLY ONE allowlist row, for wake_open_question, which posts nothing. App-executable journal_entries DML writers unmoved at %, and zero post receipts exist. H1: clara.wake_draft_entry was re-cut IN PLACE (one overload, defaults verbatim, sha-pinned at 0102) and now refuses a pinned credential aimed at another client at the DRAFT door, before it delegates -- conditional, so a client-less interactive credential is unaffected.', v_writers;
 end
 $fa2p2_tail$;
