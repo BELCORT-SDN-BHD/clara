@@ -360,3 +360,11 @@ record of their own — ADR-0072 ④ for the first, ADR-0073 for the second.*
   branch-protection interplay stays as recorded (#277): a stale PR needs `gh pr update-branch` +
   re-green — **never `--admin`**. Batch-CI-per-wave stays REJECTED (scope routing, not frequency
   reduction).
+
+## Known issue archived 2026-08-23 — the `AGENTS.md` home for invariant (a)
+
+- ~~**The `AGENTS.md` home for invariant (a) is FLAGGED, not drafted**~~ — **DECIDED (b) 2026-08-23
+  (owner): PRD §6.2(a) is the single home; `AGENTS.md` points at §6 and gains NO duplicate clause.**
+  The question was real — the sitting record named "constraint 2" as a third home, but constraint 2
+  is the DB-owns-every-authoritative-number law and no hard constraint states invariant (a) at all.
+  One statement of a law, in one place, is the answer. **Closed; nothing was guessed in.**

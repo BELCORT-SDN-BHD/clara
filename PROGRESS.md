@@ -103,7 +103,8 @@ clock-out)*
 - **The close model is LIVE-INERT:** zero `fiscal_years` rows; activation is the first human
   `open_fiscal_year`. The snapshot registry is likewise inert (zero `reporting_periods` /
   `period_snapshots`) until the first `mint_month_snapshot`.
-- **CI (ADR-0073, 2026-08-21):** self-hosted `clara-wsl` + `clara-wsl-2` (private-repo-only
+- **CI (ADR-0073, 2026-08-21):** self-hosted `clara-wsl`/`-2`/`-3`/`-4` — FOUR instances since
+  2026-08-23, all verified online (private-repo-only
   law). Per-PR (~13 min, parallel): lint · build · estate suite + deploy-onto-existing ·
   live e2es + DR pair · render drill · partition gate; **closed-wave drills + frontier
   matrix on the weekly sweep + manual dispatch only**; required check `ci` = fail-closed
@@ -177,7 +178,7 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    78-81 and the four annotated laws (2, 21, 71, 76) are RATIFIED, law 78 carrying the rider
    R-TA-P1-walls; F-A7a's judgement half is unblocked.** The two follow-ups the signature did not
    itself do: ~~the PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits~~ **LANDED (#287)**, and the
-   **`AGENTS.md` home question for invariant (a) — still OPEN, the owner's call.** ~~R1~~, ~~the corpus
+   ~~`AGENTS.md` home question for invariant (a)~~ **DECIDED (b) 2026-08-23 — PRD §6 is the single home; no duplicate clause in AGENTS.md.** ~~R1~~, ~~the corpus
    decisions~~, ~~the CI overhaul~~, ~~F-A2's
    OQ-2/3/5~~ and ~~R-OWNER~~ are all RULED. Still open: **FX-lite build timing** · **the
    corpus's oracle-tier gaps** (BEE's GL + TB for both FYs and the full FY2025 document · RPR's
@@ -212,12 +213,11 @@ the owner is named so none of them drifts back into nobody's queue):
   fix INVERTS the defect into compounding inflation — D1 on the `0085` template, a forward-only proof asserted
   fail-closed at apply. Blast radius advisory-only (a suppressed 80% early-warning ladder, never a wrong
   book). Fix B stays STRUCTURALLY BLOCKED. **OD-7 discharged by the same ruling.** *(task #17)*
-- **Reconciler follow-ups (#255's law-1 review — all pre-existing, none blocking, each its own
-  PR):** the `expired` key collision (`reconciler.mjs:633` spreads `intakeRecovery`
-  unconditionally after `expiry`, always clobbering `expireClarifies`' count — unread by
-  `leader.mjs` today; clarify-expiry survives the rules-machine retirement, so the Charter does
-  not reach it) · the leader render-pair try/catch (`leader.mjs:200-211`) still swallows
-  halt-class errors — unreachable today, but the one remaining halt-eating catch on that path ·
+- **Reconciler follow-ups (#255's law-1 review — all pre-existing, none blocking, each its own PR):** the
+  `expired` key collision (`reconciler.mjs:633` spreads `intakeRecovery` unconditionally after `expiry`, always
+  clobbering `expireClarifies`' count — unread by `leader.mjs` today; clarify-expiry survives the rules-machine
+  retirement, so the Charter does not reach it) · the leader render-pair try/catch (`leader.mjs:200-211`) still
+  swallows halt-class errors — unreachable today, but the one remaining halt-eating catch on that path ·
   `wiki-projection.mjs:333-346`/`:594-599` carry three bare `to_regprocedure` probes.
 - **`high_stakes_amount_cents` has no governed self-serve verb** (found by the 2026-08-21 client-naming
   audit): the RM100k threshold was set by a one-time hand-run deploy script (ADR-0044's ceremony); a future
@@ -358,6 +358,14 @@ stack · the ComplianceWatchCard `acknowledged_at` echo · the unreverted-admin-
 derivation tooling retained only at `C:\ct\`** — the machine-local-custody shape that bit the DSN bridge
 twice; worth pricing for in-repo custody.
 
+- **The unrecorded-obligation backlog (harness audit, 2026-08-23 — `docs/plan/active/harness-audit-2026-08-23.md`).**
+  The audit measured that this file is NOT the only home for forward-looking obligations: ~18 carry no row here at
+  all — chiefly **unruled owner-questions inside design sets already marked GATED v2** (F-A3, F-A4, F-A8, F-A9,
+  F-T3) plus three DR/incident follow-ups — and ~5 more live in Lanes/Next/posture instead of Backlog or Known
+  issues. **Standing rule from here: an OQ that survives its gate gets a Backlog line the day the gate record
+  lands, not the day it is finally ruled** — a gate record is a minute, not a work queue. The audit's §A table is
+  the list to work through; each item is closed by ruling it or by giving it a row.
+
 ## Known issues
 
 - ~~**R-OWNER — B15's second door**~~ — **RULED 2026-08-22 (owner, option C), now a PR-1 BUILD OBLIGATION,
@@ -365,11 +373,7 @@ twice; worth pricing for in-repo custody.
   R-OWNER + `docs/plan/active/f-a2-annexes-4-build.md` J.4 (`_document_direction` recut so ONE held hard id
   suffices, new `untestable` class, D1 + `prosrc`-SHA pin; B15 also refuses
   `generic_registration_untestable`) — **D18 now stands for direction-SILENT documents only.**
-- ~~**The `AGENTS.md` home for invariant (a) is FLAGGED, not drafted**~~ — **DECIDED (b) 2026-08-23
-  (owner): PRD §6.2(a) is the single home; `AGENTS.md` points at §6 and gains NO duplicate clause.**
-  The question was real — the sitting record named "constraint 2" as a third home, but constraint 2
-  is the DB-owns-every-authoritative-number law and no hard constraint states invariant (a) at all.
-  One statement of a law, in one place, is the answer. **Closed; nothing was guessed in.**
+- ~~**The `AGENTS.md` home for invariant (a)**~~ — **DECIDED (b) 2026-08-23 (owner): PRD §6.2(a) is the single home; no duplicate clause in `AGENTS.md`.** Record verbatim in `docs/plan/completed/progress-archive-2026-08-part2.md`.
 - **The wiki dynamic-SQL gate reads CoR-block comments UN-MASKED** (found 2026-08-20 on 0097):
   `parseCoRPatches` tests `CREATE_FN_RE` against a block whose `--` comments survive the file-level
   `maskComments` (dollar-quoted interiors are skipped), so a create-function phrase **quoted in a comment**
@@ -392,10 +396,9 @@ version + ceremony):**
   BRIGHTPATH documents**. (`509e788d` also has a rounding SIGN split: text `+0.40` vs `- 0.40`.)
 - **Vision-prompt check against the bare SST-id shape** (`[A-Z]\d{2}-\d{4}-\d{8}`). Lock 3 caught
   the one genuine registrant on the **text** channel alone — the margin was one channel, not two.
-- **`coverage.pages` is emitted EMPTY on every text row (20/20).** Well-formed, and **no lock
-  reads it** (verified against the live evaluator body), so nothing fails closed — but a field
-  that always says `[]` cannot be promoted into a lock without being fixed first. **Fix in the
-  v2 behavior or drop it, before anything reads it.**
+- **`coverage.pages` is emitted EMPTY on every text row (20/20).** Well-formed, and **no lock reads it** (verified
+  against the live evaluator body), so nothing fails closed — but a field that always says `[]` cannot be promoted
+  into a lock without being fixed first. **Fix in the v2 behavior or drop it, before anything reads it.**
 - **The discount-no-net class counts 3, not 2** (`f48a8830`, `6f82065e`, `bd6d37fb` — all ROME
   SECRETARY / D&D-family); the third came from a *changed read*, not a changed rule. **Trues the
   number in the on-file owner trigger question** on whether sub-case (b) should admit a printed
@@ -408,11 +411,10 @@ version + ceremony):**
   its own PR, not a rider on a pacing fix.
 - *(The stranded-pair row is in the archived batch above; the `0051` door's `v_lane` defect
   stays unrepaired by design — no new member can mint post-cutover.)*
-- **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered
-  books-writer would pass silently — the roster runs only at 0057's own apply. Candidate: a
-  standing census cell. **Sharper since the cutover:** `0096` rotated the writer estate and
-  `0098` added `_persist_statement_core_v2`, so the guarded population grew while the roster
-  stayed pinned. **Re-homed to the F-A2 fix queue.**
+- **0057 §11's writer roster has no live successor** (PR-4 review): a future unrostered books-writer would pass
+  silently — the roster runs only at 0057's own apply. Candidate: a standing census cell. **Sharper since the
+  cutover:** `0096` rotated the writer estate and `0098` added `_persist_statement_core_v2`, so the guarded
+  population grew while the roster stayed pinned. **Re-homed to the F-A2 fix queue.**
 - **Rig recipe pin + the WSL split-brain cure** — full record ARCHIVED 2026-08-22 to
   `docs/plan/completed/progress-archive-2026-08-part2.md` (verbatim); **the standing law stands:**
   drive the db suite with libpq `PG*` vars + `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL`,
@@ -427,10 +429,9 @@ version + ceremony):**
   the four `opening_items` sum to +7,850,406 cents with no `obe_plug` item while the journal
   balances through `190-OBE` — **UNADJUDICATED** (sign convention unknown, nothing guessed).
 - **WSL VM/NAT operating law** (2026-08-14/15 incident; narrative archived): a detached keeper for any
-  port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList "-e","sleep","43200"` —
-  NAT dies ~10 min after the last client detaches even with the VM held); NEVER `wsl --shutdown` with runners
-  busy (restart services via `wsl -u root systemctl restart`); never diagnose VM health with a probe that
-  cycles the VM.
+  port-dependent WSL work (`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList "-e","sleep","43200"` — NAT dies
+  ~10 min after the last client detaches even with the VM held); NEVER `wsl --shutdown` with runners busy (restart
+  services via `wsl -u root systemctl restart`); never diagnose VM health with a probe that cycles the VM.
 - **The 0007 firm-limits pseudo-upsert trigger is column-hardcoded** (`_tf_firm_document_limits_upsert`): a
   partial-column INSERT against an existing firm row silently RESETS the other limit columns to their
   defaults, and `0090`'s `llm_witness_concurrency` is invisible to it entirely — settable only by direct
@@ -440,14 +441,13 @@ version + ceremony):**
   re-key + the `statementFacts_v2` repoint); record archived in `-part2.md`. **The residual that
   never closes: the historical coin-flipped pairs are NEVER repaired** — `superseded_by` is
   once-only (CLR08), so they are counted and named, never rewritten (design §3.9 note 5).
-- **2026-08-23: stale dependency cites in frozen provenance comments, after the ai/workflow bump**
-  (#293 review). The freeze-lint-frozen files — `witnessFacts.v1.services.mjs`,
-  `witnessFacts.v2.services.mjs`, `statementFacts.v2.services.mjs` and eight autoDraft/chatTurn impl
-  files — carry provenance comments citing `ai@7.0.31` and `@workflow/core` v4.6.0. **True at their
-  authoring date and STRUCTURALLY UNEDITABLE** (constraint 9: a frozen body's bytes never change),
-  so they stay and are read as dated provenance, not as current fact. **Two EDITABLE test files
-  carry the same stale cites and should be trued in the next test-touching PR:**
-  `ledger-44-autodraft-v4.test.mjs` and `wave-e-f9-autodraft-v7-retry.test.mjs`.
+- **2026-08-23: stale dependency cites in frozen provenance comments, after the ai/workflow bump** (#293
+  review). The freeze-lint-frozen files — `witnessFacts.v1.services.mjs`, `witnessFacts.v2.services.mjs`,
+  `statementFacts.v2.services.mjs` and eight autoDraft/chatTurn impl files — carry provenance comments citing
+  `ai@7.0.31` and `@workflow/core` v4.6.0. **True at their authoring date and STRUCTURALLY UNEDITABLE**
+  (constraint 9: a frozen body's bytes never change), so they stay and are read as dated provenance, not as
+  current fact. **Two EDITABLE test files carry the same stale cites and should be trued in the next
+  test-touching PR:** `ledger-44-autodraft-v4.test.mjs` and `wave-e-f9-autodraft-v7-retry.test.mjs`.
 - **MAX_PATH breaks git's RECOVERY verbs too** — archived (verbatim) in `-part2.md`; standing
   practice: `git rebase --quit` → MIXED `git reset <sha>` → `git symbolic-ref`, never
   abort→hard-reset; prefer fresh short-path clones for conflict-bearing operations.

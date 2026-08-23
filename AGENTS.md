@@ -166,9 +166,9 @@ Law 1 is the floor, not the ceiling.
 
 ## CI/CD
 
-CI is GitHub Actions on **two self-hosted WSL2 runner instances** (`clara-wsl` +
-`clara-wsl-2`, labels
-`self-hosted, linux, clara`) — the same workflows and the same binding green-check gate, on
+CI is GitHub Actions on **four self-hosted WSL2 runner instances** (`clara-wsl`,
+`clara-wsl-2`, `clara-wsl-3`, `clara-wsl-4` — labels
+`self-hosted, linux, clara`; expanded from two on 2026-08-23, `docs/ops/ci-runner.md`) — the same workflows and the same binding green-check gate, on
 our own hardware. It is **private-repo only**: if the repo is ever made public, decommission
 the runner *first* (`docs/ops/ci-runner.md`). An offline runner makes jobs queue visibly; it
 never lets one silently pass.
