@@ -5,7 +5,16 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { admissionNeedsStart, admitDocument, resolveDocumentFilings, runCatchupPass, AUTODRAFT_CONSUMER, AUTODRAFT_EVENT_TYPES } from "../lib/autodraft.mjs";
+import {
+  admissionNeedsStart,
+  admitDocument,
+  admitWithdrawalEvent,
+  resolveDocumentFilings,
+  runAutodraftCycle,
+  runCatchupPass,
+  AUTODRAFT_CONSUMER,
+  AUTODRAFT_EVENT_TYPES,
+} from "../lib/autodraft.mjs";
 
 // A scripted mock pg client: open_sweep_run returns a fixed run id; admit_autodraft_task
 // returns the next scripted receipt. Captures the calls so the assertions can inspect args.
@@ -36,7 +45,12 @@ const twoFilings = async () => [
 
 test("consumer name + subscribed event types are the fixed spine identity", () => {
   assert.equal(AUTODRAFT_CONSUMER, "autodraft");
-  assert.deepEqual([...AUTODRAFT_EVENT_TYPES], ["document.invoice_facts_completed", "document.invoice_facts_failed"]);
+  assert.deepEqual([...AUTODRAFT_EVENT_TYPES], [
+    "document.invoice_facts_completed",
+    "document.invoice_facts_failed",
+    "entry.withdrawn",
+  ]);
+  assert.ok(!AUTODRAFT_EVENT_TYPES.includes("entry.revised"), "GM-10 is triggered by withdrawal; revision is evidence only");
 });
 
 test("admissionNeedsStart enqueues on ALL THREE task-minting outcomes — every no-op/refusal outcome does not", () => {
@@ -122,9 +136,113 @@ test("admitDocument passes the sweep origin, run id, model, and reserve tokens t
   assert.deepEqual(client.calls.admits[0], ["fil-1", "sweep", "run-9", "gpt-x", 12345]);
 });
 
-test("runCatchupPass admits with origin 'sweep' — the UNATTENDED pass may never take the one_click door", async () => {
+test("GM-10 withdrawal events use the audited exact-event door and enqueue only a minted task", async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      assert.match(sql, /readmit_autodraft_after_withdrawal/);
+      return {
+        rows: [{ receipt: { outcome: "re_admitted_after_withdrawal", task_id: "task-fresh" } }],
+        rowCount: 1,
+      };
+    },
+  };
+
+  const out = await admitWithdrawalEvent(
+    client,
+    { eventId: "withdrawal-event" },
+    { model: "gpt-x", reserveTokens: 24680 },
+  );
+
+  assert.deepEqual(calls[0].params, ["withdrawal-event", "gpt-x", 24680]);
+  assert.deepEqual(out.admitted, ["task-fresh"]);
+  assert.equal(out.retry, false);
+  assert.equal(out.receipt.outcome, "re_admitted_after_withdrawal");
+});
+
+test("GM-10 near-miss withdrawal evidence is consumed without inventing an admission", async () => {
+  const client = {
+    query: async () => ({ rows: [{ receipt: { outcome: "not_eligible" } }], rowCount: 1 }),
+  };
+  const out = await admitWithdrawalEvent(client, { eventId: "manual-draft-withdrawal" });
+  assert.deepEqual(out.admitted, []);
+  assert.equal(out.retry, false);
+  assert.equal(out.receipt.outcome, "not_eligible");
+});
+
+test("GM-10 retains an early withdrawal until its originating task has settled", async () => {
+  const client = {
+    query: async () => ({
+      rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-running" } }],
+      rowCount: 1,
+    }),
+  };
+  const out = await admitWithdrawalEvent(client, { eventId: "early-withdrawal" });
+  assert.deepEqual(out.admitted, []);
+  assert.equal(out.retry, true, "the effect transaction must retain this event without checkpointing");
+  assert.equal(out.receipt.prior_task_id, "task-running");
+});
+
+test("GM-10 cycle rolls back and retains a pending-settlement withdrawal without dead-lettering", async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      const normalized = sql.trim().toLowerCase();
+      if (normalized === "begin" || normalized === "rollback") return { rows: [], rowCount: 0 };
+      if (/from clara\.firm_event_seq/.test(sql)) {
+        return { rows: [{ firm_id: "F", head_seq: 6, last_seq: 5 }], rowCount: 1 };
+      }
+      if (/from clara\.domain_events/.test(sql)) {
+        return {
+          rows: [{ seq: 6, id: "early-withdrawal", event_type: "entry.withdrawn", document_id: "D" }],
+          rowCount: 1,
+        };
+      }
+      if (/readmit_autodraft_after_withdrawal/.test(sql)) {
+        return {
+          rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-running" } }],
+          rowCount: 1,
+        };
+      }
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  const enqueued = [];
+  const logs = [];
+  const out = await runAutodraftCycle(client, {
+    onlyFirm: "F",
+    enqueue: async (task) => enqueued.push(task),
+    log: (message) => logs.push(message),
+  });
+
+  assert.deepEqual(
+    calls.filter(({ sql }) => /^(begin|commit|rollback)$/i.test(sql.trim())).map(({ sql }) => sql.trim().toLowerCase()),
+    ["begin", "rollback"],
+    "the live-task result rolls back its effect transaction and never commits",
+  );
+  assert.equal(
+    calls.some(({ sql }) => /insert into clara\.relay_checkpoints/i.test(sql)),
+    false,
+    "the withdrawal checkpoint is retained (the discovery SELECT is expected)",
+  );
+  assert.equal(
+    calls.some(({ sql }) => /insert into clara\.relay_dead_letters/i.test(sql)),
+    false,
+    "a transient owner-task race spends no poison budget",
+  );
+  assert.deepEqual(enqueued, [], "no task exists to enqueue before terminal settlement");
+  assert.deepEqual(out, { firms: 1, admitted: 0, capped: false });
+  assert.ok(logs.some((message) => /deferred without checkpoint: retry_pending_settlement/.test(message)));
+});
+
+test("runCatchupPass admits with origin 'sweep' — the generic unattended pass may never take the one_click door", async () => {
   // 0053 / §7-A F8: the re-admit-after-withdrawal arm is gated on p_origin='one_click', which
-  // is what makes a human's withdrawal STICKY AGAINST AUTOMATION. That gate is runtime-layer
+  // is what makes a human's withdrawal STICKY AGAINST ORDINARY AUTOMATION. GM-10 has one
+  // separately named path: the current entry.withdrawn event goes through the audited DB door,
+  // which proves the exact human act before it delegates to 0053. The generic catch-up pass has
+  // no such evidence and must stay sweep. That gate is runtime-layer
   // discipline, NOT a privilege boundary: clara_runtime can call admit_autodraft_task with
   // 'one_click' directly, and 0053's prestate producer census reads pg_proc, which the runtime
   // is not in. So the property has to be pinned HERE, on the one production call site that

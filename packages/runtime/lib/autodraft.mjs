@@ -4,12 +4,16 @@
 // `consumer`) — the router + matcher stay byte-identical. Own name ('autodraft'), own
 // advisory lock key (hashtext('autodraft')), own (consumer,firm) checkpoint, own dead-letter
 // lane, own /ready WARN signal. Subscribes DIRECTLY to document.invoice_facts_completed /
-// _failed (matcher precedent — no trigger_taxonomy read; every other type is a checkpoint-only
-// advance). The consumer NEVER runs a model (the matcher contract): it resolves the event's
-// document -> active filing(s), pre-creates a sweep run, admits one autodraft task per filing
+// _failed and entry.withdrawn (matcher precedent — no trigger_taxonomy read; every other type
+// is a checkpoint-only advance). The consumer NEVER runs a model (the matcher contract): for
+// facts events it resolves the event's document -> active filing(s), pre-creates a sweep run,
+// and admits one autodraft task per filing
 // via clara.admit_autodraft_task (which re-evaluates the lane, enforces the filing-keyed
-// registry, and RESERVES budget), and enqueues autoDraft_v1 for each 'admitted' task. A
-// catch-up pass re-admits list_autodraft_candidates() stragglers and finalizes stale runs.
+// registry, and RESERVES budget). For GM-10 it hands the exact withdrawal event id to the
+// audited DB door, which alone can prove event -> prior task -> entry -> filing identity and
+// select 0053's human-act exception. It enqueues autoDraft_v1 for each task-minting outcome. A
+// catch-up pass re-admits list_autodraft_candidates() stragglers and finalizes stale runs; both
+// ordinary unattended paths remain origin='sweep'.
 //
 // Read-surface note (integration cross-check): the event -> filing resolution goes through
 // deps.resolveDocumentFilings, defaulting to clara.list_document_autodraft_candidates(document)
@@ -27,7 +31,11 @@ import { isConnErr, waitForNudge } from "./listen.mjs";
 /** The autodraft consumer name — its own checkpoint / dead-letter / lock key. */
 export const AUTODRAFT_CONSUMER = "autodraft";
 /** The event types the consumer acts on; all others are checkpoint-only. */
-export const AUTODRAFT_EVENT_TYPES = Object.freeze(["document.invoice_facts_completed", "document.invoice_facts_failed"]);
+export const AUTODRAFT_EVENT_TYPES = Object.freeze([
+  "document.invoice_facts_completed",
+  "document.invoice_facts_failed",
+  "entry.withdrawn",
+]);
 const AUTODRAFT_EVENT_SET = new Set(AUTODRAFT_EVENT_TYPES);
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_AUTODRAFT_MAX_ATTEMPTS || 5);
@@ -106,6 +114,33 @@ export async function admitDocument(client, { firmId, documentId }, deps = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// GM-10 withdrawal admission. This is deliberately NOT admitDocument(..., one_click): an
+// event carries a document, and one document may have active filings for several clients. The
+// runtime has neither an exact task->entry identity proof nor direct access to the governing
+// relations. The additive DB door accepts only the entry.withdrawn event id, proves the exact
+// agent-draft -> human-revision -> withdrawal chain, audits machine actor + human OBO, and then
+// delegates to 0053. `entry.revised` remains checkpoint-only and can never call this helper.
+// MUST run inside the caller's open effect transaction.
+// ---------------------------------------------------------------------------
+export async function admitWithdrawalEvent(client, { eventId }, deps = {}) {
+  const model = deps.model ?? SWEEP_MODEL;
+  const reserve = deps.reserveTokens ?? RESERVE_TOKENS;
+  const r = await client.query(
+    "select clara.readmit_autodraft_after_withdrawal($1, $2, $3) as receipt",
+    [eventId, model, reserve],
+  );
+  const receipt = r.rows[0]?.receipt ?? {};
+  const admitted = admissionNeedsStart(receipt.outcome) && receipt.task_id
+    ? [String(receipt.task_id)]
+    : [];
+  return {
+    admitted,
+    receipt,
+    retry: receipt.outcome === "retry_pending_settlement",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Dead-letter (consumer='autodraft') — its OWN transaction so the attempt count survives the
 // effect-transaction rollback (the matcher idiom). Returns the post-increment count.
 // ---------------------------------------------------------------------------
@@ -164,12 +199,19 @@ async function checkpointOnly(client, { firmId, seq }) {
   }
 }
 
-/** Admission for one invoice_facts event + its checkpoint, in ONE transaction. Returns the
- *  admitted task ids so the caller can enqueue them AFTER commit. */
+/** Admission for one facts/withdrawal event + its checkpoint, in ONE transaction. Returns the
+ *  admitted task ids so the caller can enqueue them AFTER commit. The branch is keyed on the
+ *  current entry.withdrawn event, never on the earlier entry.revised evidence. */
 async function runEffectTxn(client, { firmId, ev, deps }) {
   await client.query("begin");
   try {
-    const res = await admitDocument(client, { firmId, documentId: ev.documentId }, deps);
+    const res = ev.eventType === "entry.withdrawn"
+      ? await admitWithdrawalEvent(client, { eventId: ev.id }, deps)
+      : await admitDocument(client, { firmId, documentId: ev.documentId }, deps);
+    if (res.retry) {
+      await client.query("rollback");
+      return { ok: false, retry: true, reason: res.receipt.outcome };
+    }
     await writeCheckpoint(client, { consumer: AUTODRAFT_CONSUMER, firmId, seq: ev.seq });
     await client.query("commit");
     return { ok: true, admitted: res.admitted };
@@ -208,6 +250,10 @@ async function processAutodraftFirm(client, { firmId, lastSeq, batchSize, deps }
         }
       }
       continue;
+    }
+    if (res.retry) {
+      log(`[autodraft] event=${ev.id} deferred without checkpoint: ${res.reason}`);
+      return { readCount: evs.length, maxSeq: cursor, admitted: admittedCount, blocked: true };
     }
     if (res.attempts >= MAX_ATTEMPTS) {
       log(`[autodraft] event=${ev.id} exhausted ${MAX_ATTEMPTS} attempts → dead-lettered + skipped: ${res.err?.message ?? res.err}`);
