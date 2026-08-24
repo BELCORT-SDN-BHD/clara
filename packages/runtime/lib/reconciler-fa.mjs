@@ -36,7 +36,8 @@
 // "the leader runs under set role clara_runtime; clara_runtime_login privileges are
 // inherit-false") — a plain call on the already-role-set leader connection, the
 // evaluate_sst_watch / run_client_lint precedent, NO reset-role / login-direct dance
-// (contrast rule-post.mjs's execute_rule_post, which IS login-direct and does not apply here).
+// (contrast the now-retired rule-post.mjs's execute_rule_post, which WAS login-direct and
+// never applied here — F-A2 PR-3 dropped both).
 // run_depreciation_period derives its own actor (authority.signed_by) and firm (from the
 // client row) internally — the runtime supplies only client_id, the period, and an op_key.
 

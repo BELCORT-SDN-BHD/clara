@@ -103,7 +103,7 @@ import {
   upsertAccountClassed, upsertPayableAccount, grantConsent,
   draftEntryV3, approveEntry, insertUser, addMember,
   idOf, reasonOf, HIGH_STAKES_CENTS,
-  roleCanExecute, fnSource, rlsFlags,
+  roleCanExecute, fnSource, rlsFlags, restateSightings,
 } from "./a21-helpers.mjs";
 import { holdThenContend, sawDeadlock } from "./rig-docs-race.mjs";
 // fix-wave E7/CX12: the REAL Gate-K onboarding-plan lifecycle (K1..K14), for x40.m/x40.n's
@@ -2958,9 +2958,23 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
   assert.equal(await sightingCount(armB), 0, "x40.am ARM B: three stamped approvals that DO carry a vendor accrue ZERO rule_sightings -- with v_counterparty non-null the 0040 S5 conjunct is the only wall left, and it holds");
   assert.equal(await vendorAccountProposals(client, cpStamped), 0, "x40.am ARM B: and therefore ZERO vendor_account autopost proposals -- a bank rule may not breed a coding rule out of three assisted approvals of its own output (WA2-R9)");
 
-  // ---- ARM C: THE POSITIVE CONTROL. Arm B's draft MINUS the stamp, on a different
-  // counterparty -- if the carve-out (or the whole sighting mechanism) were dead this would
-  // ALSO breed zero and both arms above would be proving nothing. It must breed exactly one.
+  // ---- ARM C, INVERTED (F-A2 PR-1, D39). ----
+  //
+  // THE RETIRED CLAIM, named rather than deleted: *"the identical UNSTAMPED trio accrues one
+  // debit sighting per entry on the coded account -- the accrual the stamp withheld in arm B"*,
+  // and *"breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive."* It
+  // was the POSITIVE CONTROL, and it is exactly what the eighth `clara._approve_entry_core`
+  // body deletes: the whole `0037:2046-2100` block goes, so an ordinary approval breeds nothing
+  // on any counterparty. Same class as `x42.prod-23`'s control half (B.7) and the same
+  // treatment -- an inverted twin, whose battery successors are `f-a2.c8.inv-ordinary` and
+  // `f-a2.c8.zero`.
+  //
+  // AND ARMS A AND B ARE NOW VACUOUS, which is stated rather than left to be discovered. Their
+  // zeros no longer discriminate: nothing accrues anywhere, so the 0040 S5 carve-out conjunct
+  // they were built to isolate has nothing left to withhold. They are kept because the SETUP
+  // halves above them are live claims about the producer (arm A's three lawful accepts, arm B's
+  // ABI-shaped stamp surviving arm (3)'s five axes), and because a zero that stops
+  // discriminating is a law-31 finding to record, never a cell to quietly delete.
   const armC = [];
   for (let i = 0; i < 3; i++) {
     const d = await draftEntryV3(sub, {
@@ -2971,9 +2985,18 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-ctrla-${i}`) });
     armC.push(d.entry_id);
   }
-  assert.equal(await sightingCount(armC), 3, "x40.am POSITIVE CONTROL: the identical UNSTAMPED trio accrues one debit sighting per entry on the coded account -- the accrual the stamp withheld in arm B");
-  assert.equal(await vendorAccountProposals(client, cpControl), 1, "x40.am POSITIVE CONTROL: an identical UNSTAMPED trio breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive, and the carve-out is the reason arms A and B bred none");
-  noteLane(`x40.am carve-out arms: lawful=${armA.length} stamped=${armB.length} control=${armC.length}; signed coding rule ${ruleId}`);
+  assert.equal(await sightingCount(armC), 0,
+    "x40.am ARM C, INVERTED (D39): the identical UNSTAMPED trio accrues ZERO rule_sightings -- an ordinary approval no longer moves the counter, so the accrual the stamp used to withhold no longer exists to withhold");
+  assert.equal(await vendorAccountProposals(client, cpControl), 0,
+    "x40.am ARM C, INVERTED (D39): …and breeds NO vendor_account proposal. The successor claims are f-a2.c8.inv-ordinary and f-a2.c8.zero");
+  // THE INSTRUMENT IS STILL LIVE, and this half is why the two zeros above are evidence rather
+  // than an absence (review law 2). `restateSightings` replays the retired writer's own inserts
+  // onto arm C's real approved entries, and the SAME `sightingCount` read that returned zero
+  // now returns three.
+  for (const entry of armC) await restateSightings(entry, { counterparty: cpControl });
+  assert.equal(await sightingCount(armC), 3,
+    "x40.am ARM C control-of-the-control: the restated pool reads THREE through the same instrument -- the zeros above are the door's answer, not a broken reader");
+  noteLane(`x40.am carve-out arms: lawful=${armA.length} stamped=${armB.length} control=${armC.length}; signed coding rule ${ruleId}. ARMS A AND B ARE NOW VACUOUS (law 31): with breeding excised nothing accrues on any arm, so the 0040 S5 conjunct they isolated has nothing to withhold.`);
 });
 
 // ===========================================================================
@@ -3050,7 +3073,14 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
       assert.ok(at[i - 1] < at[i], `${label}: "${needles[i - 1]}" must be acquired BEFORE "${needles[i]}" (got ${at[i - 1]} vs ${at[i]}) -- the total lock order is inverted`);
     }
   };
-  const completeSrc = await fnSource("complete_bank_reconciliation");
+  // F-A3 PR-1a (design §4, Annex A.2 / material M2) factored complete_bank_reconciliation,
+  // void_bank_reconciliation and resolve_bank_line_exception into their _<verb>_core delegates
+  // so PR-1b's agent cores have a ctx-shaped body to call. Each acquisition sequence moved WITH
+  // the body and so does its pin — same rungs, same order, nothing dropped — and each gains the
+  // "the public body acquires NOTHING" twin at the end of this cell. except_bank_line is NOT
+  // extracted by this item (Annex J.4: "never touched by this item, in any PR"), so its pin
+  // stays on the public body and is a differential against the other three.
+  const completeSrc = await fnSource("_complete_bank_reconciliation_core");
   // INTEGRATION FIX (assembly, contract-blind law -- the DESIGN pinned this and
   // the cell mis-guessed): design S5 says "line rows `FOR SHARE` in id order,
   // THEN the statement". A completion READS the lines; it never writes one, so
@@ -3060,22 +3090,48 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
     "pg_advisory_xact_lock(203005004",
     "pg_advisory_xact_lock(203005006",
     "order by l.id for share",
-  ], "complete_bank_reconciliation lock order");
-  assert.ok(completeSrc.includes("for share") && /bank_accounts/i.test(completeSrc), "complete_bank_reconciliation takes the bank_accounts row FOR SHARE (S5)");
+  ], "_complete_bank_reconciliation_core lock order");
+  assert.ok(completeSrc.includes("for share") && /bank_accounts/i.test(completeSrc), "_complete_bank_reconciliation_core takes the bank_accounts row FOR SHARE (S5)");
 
-  const voidRSrc = await fnSource("void_bank_reconciliation");
-  ordered(voidRSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006"], "void_bank_reconciliation lock order");
+  const voidRSrc = await fnSource("_void_bank_reconciliation_core");
+  ordered(voidRSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006"], "_void_bank_reconciliation_core lock order");
 
   const exceptSrc = await fnSource("except_bank_line");
   ordered(exceptSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "except_bank_line lock order");
-  const resolveSrc = await fnSource("resolve_bank_line_exception");
-  ordered(resolveSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "resolve_bank_line_exception lock order");
+  const resolveSrc = await fnSource("_resolve_bank_line_exception_core");
+  ordered(resolveSrc, ["pg_advisory_xact_lock(203005004", "pg_advisory_xact_lock(203005006", "for update"], "_resolve_bank_line_exception_core lock order");
 
   // NO pre-existing journal_entries row is ever locked by these five verbs
   // (the C-a partial order stays untouched, S5).
-  for (const [label, src] of [["complete_bank_reconciliation", completeSrc], ["void_bank_reconciliation", voidRSrc], ["except_bank_line", exceptSrc], ["resolve_bank_line_exception", resolveSrc]]) {
+  for (const [label, src] of [["_complete_bank_reconciliation_core", completeSrc], ["_void_bank_reconciliation_core", voidRSrc], ["except_bank_line", exceptSrc], ["_resolve_bank_line_exception_core", resolveSrc]]) {
     assert.ok(!/journal_entries[\s\S]{0,40}for update/i.test(src), `${label}: never locks a pre-existing journal_entries row`);
   }
+
+  // THE WRAPPER TWINS (F-A3 PR-1a, material M2's "MOVE the pin and ADD the wrapper pin").
+  // Per-oid, never fnSource: a concatenation over overloads can be satisfied by a sibling body
+  // and would let a re-inlined ladder hide behind a delegating twin. Each extracted verb keeps
+  // its floor, delegates, and acquires NOTHING.
+  for (const [fn, floor] of [["complete_bank_reconciliation", "bookkeeper"],
+    ["void_bank_reconciliation", "bookkeeper"], ["resolve_bank_line_exception", "owner"]]) {
+    const rows = (await rootQuery(
+      `select p.oid::regprocedure::text as sig, p.prosrc as src
+         from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='clara' and p.proname=$1 order by 1`, [fn])).rows;
+    assert.equal(rows.length, 1, `clara.${fn} has exactly one live arity`);
+    ordered(rows[0].src, [`clara._human_ctx(clara.role_rank('${floor}'))`, `clara._${fn}_core(`],
+      `${rows[0].sig} delegation order`);
+    for (const rung of ["pg_advisory_xact_lock(", "clara._reserve_op(", "for update", "for share",
+      "insert into ", "update clara."]) {
+      assert.ok(!rows[0].src.includes(rung),
+        `${rows[0].sig} must acquire and write NOTHING in its own body — found "${rung}", so the ladder was re-inlined above the core and the core's pin no longer covers the live path`);
+    }
+  }
+  // THE DIFFERENTIAL: except_bank_line is untouched by F-A3 in every PR, so its PUBLIC body must
+  // still hold the rungs itself. Without this, a build that factored it too would pass every
+  // assertion above while silently widening the one verb the sitting ruled stays human.
+  assert.ok(/clara\._human_ctx\(clara\.role_rank\('owner'\)\)/.test(exceptSrc)
+    && exceptSrc.includes("pg_advisory_xact_lock(203005004"),
+  "except_bank_line is NOT extracted: its public body still resolves the human context AND takes the rungs itself (Annex J.4)");
 });
 
 // ---------------------------------------------------------------------------

@@ -83,6 +83,11 @@ const V_B1 = "^[0-9]{4}_wave_d_b1_staff_advances$";
 const V_B3 = "^[0-9]{4}_wave_d_b3_af2_composite$";
 // eslint-disable-next-line no-unused-vars -- whole-roster invariant; see the note above
 const V_B2 = "^[0-9]{4}_wave_d_b2_recurring_adjustments$";
+// F-A3 PR-1a [the nine pure core extractions, numbered at merge like every slice above]: moves
+// resolve_and_book_bank_line's WHOLE body into an ungranted _resolve_and_book_bank_line_core,
+// leaving the public verb a thin ctx-unpack delegator. lw3 below reads whichever one actually
+// carries the wall call, MEASURED by which exists, never assumed by frontier.
+const V_A3_PR1A = "^[0-9]{4}_f_a3_pr1a_core_extractions$";
 
 const caught = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
@@ -156,10 +161,15 @@ test("x42x.lw3 [POST arm] once 0044 is applied, BOTH D-b3 bodies reach the D-b1 
   }
   // COMMENT-STRIPPED on purpose (E19): every slice carries `[SPLIT D-bN]` notes that NAME the
   // bodies it does and does not ship, so raw text would read a mention as a call.
-  const composite = await strippedDef("resolve_and_book_bank_line");
-  assert.ok(composite, "clara.resolve_and_book_bank_line exists at D-b3");
+  // F-A3 PR-1a moved the composite's WHOLE body into _resolve_and_book_bank_line_core, leaving
+  // resolve_and_book_bank_line a thin ctx-unpack delegator with no wall call of its own — read
+  // whichever body actually carries the logic today, MEASURED by which exists.
+  const pr1aLive = (await applied(V_A3_PR1A)) > 0;
+  const compositeName = pr1aLive ? "_resolve_and_book_bank_line_core" : "resolve_and_book_bank_line";
+  const composite = await strippedDef(compositeName);
+  assert.ok(composite, `clara.${compositeName} exists at D-b3`);
   assert.ok(/clara\._adv_assert_proposal\(/.test(composite),
-    "the composite CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)");
+    `the composite (clara.${compositeName}) CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)`);
 
   const block = await strippedDef("_wdb_line_booking_block");
   assert.ok(block, "clara._wdb_line_booking_block exists at D-b3");

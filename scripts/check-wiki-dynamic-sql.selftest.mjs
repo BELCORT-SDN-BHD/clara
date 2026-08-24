@@ -241,20 +241,34 @@ testCase("an `execute` inside a comment or a string literal is not dynamic SQL",
 });
 
 testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
-  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. Two entries
-  // stand today — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226, full
-  // ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
-  // pg_get_functiondef re-count outside the census grammar plus 'execute' as a privilege-name
-  // literal and one raise-message word — nothing dynamic constructed or run; why + the full
-  // declared target set live in wiki-lint-checks.mjs. THE SECOND (F-A4 PR-1b): attest_close_
-  // exception's p_from_proposal arm reads clara.close_proposals (a PR-1c table, forward-
-  // referenced) via `execute` because the migration runner refuses to disable
-  // check_function_bodies — a genuinely dynamic, genuinely non-wiki statement, its one
-  // declared relation carrying no wiki content and no wiki-touch call behind it. A THIRD
-  // entry must trip this pin and earn its own reviewed justification, exactly as the first two did.
+  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. The first entry
+  // stood alone until F-A3 PR-1a: 0055 S7's TAIL ASSERTION block on the apply_open_items key
+  // (PR #226, full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named
+  // S2): a pg_get_functiondef re-count outside the census grammar plus 'execute' as a
+  // privilege-name literal and one raise-message word — nothing dynamic constructed or run.
+  // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder) adds nine: one
+  // per public bank-agency verb S1 extracts into a `_<verb>_core`, each an `unprovable` CoR
+  // patch by construction (the installed body is the LIVE prosrc, read fresh from the catalog
+  // at apply — never a literal in this file's own text) and each independently rig-measured to
+  // carry no word-bounded "wiki" token anywhere in its body. F-A4 PR-1b adds ONE more:
+  // attest_close_exception's p_from_proposal arm reads clara.close_proposals (a PR-1c table,
+  // forward-referenced) via `execute` because the migration runner refuses to disable
+  // check_function_bodies — a genuinely dynamic, genuinely non-wiki statement, its one declared
+  // relation carrying no wiki content and no wiki-touch call behind it. Why + the full declared
+  // target set per key live in wiki-lint-checks.mjs. The NEXT entry must trip this pin and earn
+  // its own reviewed justification, exactly as these eleven did.
   const expectedKeys = [
+    "add_bank_account(uuid,text,text,text,text,uuid,text)",
     "apply_open_items(uuid,jsonb,text,text)",
     "attest_close_exception(uuid,text,text,text,text,uuid)",
+    "complete_bank_reconciliation(uuid,uuid[],text)",
+    "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
+    "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",
+    "resolve_bank_line_exception(uuid,text,text,uuid,text)",
+    "unmatch_bank_match(uuid,uuid,text,text)",
+    "upsert_account(uuid,text,text,text,text,text,text)",
+    "void_bank_reconciliation(uuid,text,text)",
+    "void_bank_statement(uuid,uuid,text,text)",
   ];
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {

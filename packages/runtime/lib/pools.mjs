@@ -334,6 +334,56 @@ export function mintWakeCredentialObo(firmId, oboUserId, ttl = READ_CREDENTIAL_T
 }
 
 /**
+ * F-A2 (D34 / §D.2c / R-1) — mint the PINNED chat wake kind, `interactive_client`.
+ *
+ * WHY A NEW KIND RATHER THAN A CLIENT ON `interactive`. `clara.wake_open_question` is keyed on
+ * the credential's CLIENT PIN, and a plain `interactive` credential is client-less BY
+ * CONSTRUCTION (`ck_wake_credentials_client_0011`) — so the attended lane could not open the
+ * typed open question the contract requires. The fix is an EXTENSION of the kind enumeration,
+ * never a weakening of the client binding: the census that killed the weakening is on file
+ * (`list_unassigned_documents` regresses, `coding_lane` widens SILENTLY and changes frozen
+ * chatTurn_v12's answers with no byte change, eight more readers flip, and it contradicts the
+ * PIN BLOCKER comment at 0011:1980-1983). The three existing kinds keep byte-identical
+ * semantics and no plain `interactive` credential ever gains a client.
+ *
+ * NARROWED TO ONE CALL PATH (R-1, verified sound at the PR-0 gate). This credential is minted
+ * for the fail-closed `wake_open_question` call and NOTHING else — every other chat read and
+ * write, INCLUDING the post, keeps plain `interactive` with its NULL-client guarantee, which is
+ * what makes the census findings genuinely not arise rather than merely be argued around. The
+ * DB backs the narrowing independently: `interactive_client` holds EXACTLY ONE
+ * `wake_fn_allowlist` row, for `wake_open_question`, which posts nothing.
+ *
+ * IT KEEPS `on_behalf_of` (unlike `autodraft`, which forbids it), so the question is opened
+ * under the initiating bookkeeper's live authority. The DB mint verifies the client is
+ * firm-congruent and ACTIVE — honest footnote, carried from the design: it does NOT verify that
+ * this human is authorised for that client, which is the estate's existing firm-scoped model and
+ * opens nothing new.
+ *
+ * FAIL LOUD, NEVER FALL BACK. If the kind is absent (a runtime deployed ahead of PR-1's
+ * migration) the DB raises CLR10 `bad wake_kind` and that error PROPAGATES. Silently falling
+ * back to plain `interactive` would mint a credential `wake_open_question` refuses CLR03 anyway,
+ * one layer further from the cause.
+ *
+ * Same secret-handling law as the two helpers above, whose signatures and bodies are
+ * byte-untouched: minted, used and discarded inside ONE step execution attempt.
+ * @param {string} firmId
+ * @param {string} oboUserId  the task's created_by (the initiating member)
+ * @param {string} clientId   the chat session's client — REQUIRED; the pin is the whole point
+ * @param {string} [ttl]
+ * @returns {Promise<{credentialId: string, secret: string}>}
+ */
+export function mintWakeCredentialClientObo(firmId, oboUserId, clientId, ttl = READ_CREDENTIAL_TTL) {
+  if (!clientId) throw new Error("interactive_client wake credential requires a client id — the pin is the authority");
+  return withRuntime(async (c) => {
+    const r = await c.query(
+      "select credential_id, secret from clara.mint_wake_credential($1, $2, $3, $4::interval, $5)",
+      ["interactive_client", firmId, oboUserId, ttl, clientId],
+    );
+    return { credentialId: r.rows[0].credential_id, secret: r.rows[0].secret };
+  });
+}
+
+/**
  * Run a firm-scoped read on the read pool with a wake secret bound TXN-LOCALLY
  * (SET LOCAL inside a transaction, so it can never leak to a later checkout —
  * P4). The whole read runs inside a read-only transaction; we ROLLBACK to end it

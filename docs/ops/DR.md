@@ -373,7 +373,7 @@ ping (`/fail` on error).
 
 | Secret | Power | Where it lives |
 |---|---|---|
-| Session-pooler DSN (**port 5432**) | reads all schemas + ownership/ACLs + `auth` PII ≈ project admin | `fly secrets` (`DATABASE_URL`) |
+| Session-pooler DSN (**port 5432**) | reads all schemas + ownership/ACLs + `auth` PII ≈ project admin | `fly secrets` (`DATABASE_URL`); piped through the committed CA-pinned bridge for `sslmode=verify-full` (`docs/ops/dsn-bridge.md`), never `no-verify` |
 | Supabase `service_role` key | account-wide Storage bypass (firm-docs LIST/READ) | `fly secrets` **`CLARA_BACKUP_STORAGE_SERVICE_KEY_B64`** (base64-encoded — Fly file-secrets require it); materialized at `/run/secrets/clara_storage_service_key` by machine-run `--file-secret`; the image bakes `CLARA_BACKUP_STORAGE_KEY_FILE` to that path. Neither is ever logged; note the machine ALSO receives every app secret as env, so the base64 form rides in process env — the code reads only the file |
 | R2 API token | write to the DR bucket | `fly secrets` **`RCLONE_CONFIG_R2_ACCESS_KEY_ID` / `RCLONE_CONFIG_R2_SECRET_ACCESS_KEY` / `RCLONE_CONFIG_R2_ENDPOINT`** (rclone env-remote config — never argv; `packages/backup/deploy/rclone.conf.example` remains the LOCAL-rehearsal form) |
 | age **recipient (public)** key | none (encrypt-only) | committed: `packages/backup/deploy/age-recipient.txt` |

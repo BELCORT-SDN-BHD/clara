@@ -193,6 +193,11 @@ test("x42.r8.tails.4d TAIL 6(a) flags-key writer census, widened, matches the pi
     )).rows[0].n;
   };
   assert.equal(await widenedWriters("recurring_adjustment"), "_adj_on_approve, _adj_run_occurrence_core");
-  assert.equal(await widenedWriters("staff_advance_application"), "book_staff_advance_application, resolve_and_book_bank_line");
+  // F-A3 PR-1a moved resolve_and_book_bank_line's WHOLE body (the staff_advance_application flags
+  // write included) into the new _resolve_and_book_bank_line_core; the public verb is now a thin
+  // ctx-unpack delegator carrying no jsonb literal of its own. This census is unconditional (not
+  // stem-gated like x42-s5-helpers' arm D roster), so it reads whatever the CURRENT full catalog
+  // is — matching x42.r8.tails.4c's own precedent above ("widened … matches the pinned three").
+  assert.equal(await widenedWriters("staff_advance_application"), "_resolve_and_book_bank_line_core, book_staff_advance_application");
   assert.equal(await widenedWriters("bank_rule_suggested"), "accept_bank_rule_suggestion");
 });

@@ -382,7 +382,16 @@ export async function approvedTurnoverEntry({
 /** ADV-R2 (R1#5 strict): the OCR floor demands >=6 DISTINCT STATED invoice
  *  numbers — sighting fixtures seed a minimal done invoice_facts extraction
  *  stating one (raw, the D-P4 idiom; the doc keeps exactly ONE done lane). */
-export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } = {}) {
+// F-A2 PR-1 (D11): `vendorName` — STATE THE SUPPLIER so the document has a readable DIRECTION.
+// The draft core's direction-family arm used to fire only for `p_wake_kind='autodraft'`; D11
+// re-cuts it to `not p_is_human`, so every agent-lane coded draft — the chat/interactive lane
+// included — is now held to the document's direction. A page that names nobody resolves
+// `unresolved`, and a `sales_invoice` or `supplier_bill` draft on it is refused CLR21
+// `direction_family_mismatch`. Callers pass the CLIENT's own registered name for a sales
+// document (the resolver's (S) arm) and a third party's for a purchase (the (P2) arm). Default
+// null keeps every existing caller byte-identical, and the field joins NO corroboration term
+// (0023:304-346 never reads it), so a stated-only document still reads corroborated=false.
+export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null, vendorName = null } = {}) {
   const id = invoiceId ?? `RIG-${randomUUID().slice(0, 10)}`;
   const ext = randomUUID();
   await rootQuery(
@@ -400,6 +409,13 @@ export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } =
      values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.invoice_id',$3,1.0)`,
     [firm, ext, id],
   );
+  if (vendorName) {
+    await rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.vendor_name',$3,1.0)`,
+      [firm, ext, vendorName],
+    );
+  }
   return id;
 }
 

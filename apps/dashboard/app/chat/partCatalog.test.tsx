@@ -68,23 +68,22 @@ test("slice-6 part types are registered in the catalog", () => {
   assert.ok(RENDER_BRANCH_TYPES.includes("refusal"), "refusal must be registered");
 });
 
-// Belt-and-braces: the five Wave-A part types are registered (the union unification +
-// new card set — contract §9). A future refactor dropping one fails here AND fails the
-// compile-time parity guard in partCatalog.ts.
+// Belt-and-braces: the FOUR surviving Wave-A part types are registered (the union
+// unification + new card set — contract §9). kb_rule_proposal RETIRED with F-A2 PR-3
+// (GM-11 — it rendered get_coding_rule, a dropped verb). A future refactor dropping
+// one of these four fails here AND fails the compile-time parity guard in partCatalog.ts.
 test("wave-a part types are registered in the catalog", () => {
-  for (const t of ["doc_review", "diff", "sweep_receipt", "kb_rule_proposal", "open_question"]) {
+  for (const t of ["doc_review", "diff", "sweep_receipt", "open_question"]) {
     assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
   }
 });
 
-// Belt-and-braces: the Wave-A2 rule_post_receipt part (the 15th member) is registered
-// (union + catalog + render branch land together — the compile-time guard in
-// partCatalog.ts forces the union member and this key to arrive as a pair).
-test("wave-a2 rule_post_receipt is registered and renders non-empty", () => {
-  assert.ok(RENDER_BRANCH_TYPES.includes("rule_post_receipt" as (typeof RENDER_BRANCH_TYPES)[number]), "rule_post_receipt must be registered");
-  const html = render([{ type: "rule_post_receipt", run_id: "run-9999" }]);
-  assert.ok(html.includes("Posted by rule"), "the id-only card state must render");
-  assert.ok(!html.includes(FALLBACK_UNSUPPORTED_PREFIX), "rule_post_receipt must not hit the unsupported fallback");
+// The Wave-A2 rule_post_receipt part RETIRED with F-A2 PR-3 — it rendered the
+// rule_post_runs receipt from a signed-and-executed autopost rule, and the whole
+// rules-execution tier (including the verb that ever produced such a run) is dropped.
+// A forced NEGATIVE cell, not a deletion of the claim: the type must NOT be registered.
+test("wave-a2 rule_post_receipt is RETIRED — no longer registered in the catalog", () => {
+  assert.ok(!RENDER_BRANCH_TYPES.includes("rule_post_receipt" as (typeof RENDER_BRANCH_TYPES)[number]), "rule_post_receipt must not be registered post-retirement");
 });
 
 // Belt-and-braces: the two Wave C-c parts (bank_recon_receipt/bank_rule_proposal,
