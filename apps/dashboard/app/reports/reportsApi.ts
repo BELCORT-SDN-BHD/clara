@@ -66,6 +66,10 @@ export type ReportArtifactRow = {
   uncertified: boolean;
   sealed_by: string;
   sealed_at: string;
+  // F-A5 PR-3: the agent_prepared disclosure the issue card must show (design SS3.3/annex A.4) --
+  // directed_by is the OBO human when Clara prepared the pack, null on a plain human pack.
+  directed_by: string | null;
+  prepared_by_agent: boolean;
 };
 
 export type ReportArtifactsRead =
@@ -86,7 +90,7 @@ export async function listReportArtifacts(token: string, clientId: string): Prom
   try {
     const rows = await pgrestSelect<ReportArtifactRow>(
       `report_artifacts?client_id=eq.${encodeURIComponent(clientId)}` +
-        `&select=id,client_id,report_run_id,kind,storage_key,key_extension,sha256,byte_size,claim_removed,uncertified,sealed_by,sealed_at` +
+        `&select=id,client_id,report_run_id,kind,storage_key,key_extension,sha256,byte_size,claim_removed,uncertified,sealed_by,sealed_at,directed_by,prepared_by_agent` +
         `&order=sealed_at.desc`,
       token,
     );

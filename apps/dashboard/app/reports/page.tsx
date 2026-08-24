@@ -258,6 +258,15 @@ function IssueForm({ token, artifact }: { token: string; artifact: ReportArtifac
   return (
     <div className={styles.rowMeta} style={{ flexDirection: "column", alignItems: "stretch", gap: "0.35rem" }}>
       <span className={styles.mono}>Issue this pack -- names sha256 {artifact.sha256.slice(0, 16)}&hellip; (the sealed pre-sign hash, unrecomputed)</span>
+      {/* THE AGENT_PREPARED DISCLOSURE (design SS3.3/annex A.4) -- read straight off the artifact
+          row, never inferred: a plain human pack shows nothing here, an agent-prepared one names
+          its director so an approver knows the wall (ARM 0/1) they are about to satisfy. */}
+      {artifact.prepared_by_agent ? (
+        <span className={`${styles.band} ${styles.bandFlag}`}>
+          <span className={styles.glyph} aria-hidden="true">!</span>
+          agent_prepared -- directed by {artifact.directed_by ? shortId(artifact.directed_by) : "nobody (self-run pack)"}
+        </span>
+      ) : null}
       <input className={styles.input} placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Issue reason" />
       <input className={styles.input} placeholder="Self-attestation (solo firm only; agent_prepared always needs one)" value={attestation}
         onChange={(e) => setAttestation(e.target.value)} aria-label="Self-attestation text" />
