@@ -57,8 +57,20 @@ before(async () => {
 });
 after(async () => { await endPool(); });
 
+/** Pre-integration gating (review round item 4): a PACKAGE-WIDE run may precede the alpha1/
+ *  alpha2 migrations, so tests/f-a7-alpha-preintegration-gate.mjs (preloaded by the package test
+ *  script) sets CLARA_ALLOW_MISSING_F_A7_ALPHA and this suite skips LOUDLY. A FOCUSED run does
+ *  not preload the gate, so an unmigrated database fails here instead of a silent 6-skip
+ *  false-green. */
 const gate = (t) => {
-  if (!ready) { t.skip("F-A7 train alpha not applied (clara._file_document_write absent)"); return true; }
+  if (!ready) {
+    if (process.env.CLARA_ALLOW_MISSING_F_A7_ALPHA === "1") {
+      console.warn("SKIP F-A7 alpha: alpha1/alpha2 are not applied to this database (explicit pre-integration run).");
+      t.skip("F-A7 train alpha not applied -- explicit pre-integration run");
+      return true;
+    }
+    assert.fail("F-A7 train alpha is required for a focused or post-migration run: apply alpha1/alpha2, or set CLARA_ALLOW_MISSING_F_A7_ALPHA=1 for the package-wide pre-integration sweep");
+  }
   return false;
 };
 
@@ -144,6 +156,55 @@ test("AB-2 (a): file_document accepts a judgement resolution and mints no second
   )).rows[0];
   assert.equal(filing.resolution_id, res, "the filing binds the SAME judgement resolution the caller supplied");
   assert.equal(filing.basis, "judgement", "basis stamps 'judgement', not a silent fallback to 'human'");
+});
+
+test("MF-1: file_document refuses a judgement resolution scoped to a DIFFERENT document (no laundering into a fresh human mint)", async (t) => {
+  if (gate(t)) return;
+  const { users, clients } = world;
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [clients.A1])).rows[0].firm_id;
+  const docA = await seedUnfiledDocument(firm);
+  const docB = await seedUnfiledDocument(firm);
+  const resForA = await judgementResolution({ firm, client: clients.A1, document: docA });
+
+  const before_ = (await rootQuery("select count(*)::int as n from clara.client_resolutions where subject_id=$1", [docB])).rows[0].n;
+  assert.equal(before_, 0, "docB starts with no resolutions of its own");
+
+  await assertRaises(
+    CLR.client,
+    () => fileDocument(users.bob, { document: docB, client: clients.A1, resolution: resForA, opKey: opk("a7a-mf1") }),
+    "file_document with a judgement resolution scoped to a different document",
+  );
+
+  const after_ = (await rootQuery("select count(*)::int as n from clara.client_resolutions where subject_id=$1", [docB])).rows[0].n;
+  assert.equal(after_, 0, "the refused attempt minted NO resolution for docB — the pre-alpha2 fallback would have silently minted a fresh human-stamped one here");
+});
+
+test("MF-2: the basis<->method congruence wall refuses a mismatched pairing and exempts 'correction'", async (t) => {
+  if (gate(t)) return;
+  const { users, clients } = world;
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [clients.A1])).rows[0].firm_id;
+  const doc = await seedUnfiledDocument(firm);
+  const res = await judgementResolution({ firm, client: clients.A1, document: doc });
+
+  await assertRaises(
+    CLR.client,
+    () => rootQuery(
+      "insert into clara.document_filings(firm_id,document_id,client_id,filed_by,resolution_id,basis) values ($1,$2,$3,$4,$5,'human')",
+      [firm, doc, clients.A1, users.bob, res],
+    ),
+    "a judgement-method resolution filed with basis='human'",
+  );
+
+  // 'correction' is exempt (approve_wrong_client_correction's shape, cell 61) — must NOT refuse.
+  await rootQuery(
+    "insert into clara.document_filings(firm_id,document_id,client_id,filed_by,resolution_id,basis) values ($1,$2,$3,$4,$5,'correction')",
+    [firm, doc, clients.A1, users.bob, res],
+  );
+  const filing = (await rootQuery(
+    "select basis from clara.document_filings where document_id=$1 and client_id=$2 and resolution_id=$3",
+    [doc, clients.A1, res],
+  )).rows[0];
+  assert.equal(filing.basis, "correction", "basis='correction' is admitted regardless of the resolution's method");
 });
 
 test("AB-1 twin at the public entrance: file_document still refuses an agent-method resolution", async (t) => {
