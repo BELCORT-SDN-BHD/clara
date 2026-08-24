@@ -64,28 +64,23 @@ export type DiffPart = { type: "diff"; entry_id: string; client_id: string };
  *  opening a FINALIZED run offers the audited bookkeeper+ acknowledgement. */
 export type SweepReceiptPart = { type: "sweep_receipt"; run_id: string };
 
-/** A KB Layer-2 rule proposal (contract §6 / WA-R9): renders get_coding_rule (+ the
- *  originating question); sign/decline are human-only bookkeeper+ acts. */
-export type KbRuleProposalPart = { type: "kb_rule_proposal"; rule_id: string; question_id: string; client_id: string };
-
 /** A durable open question (contract §6 / WA-R10): renders get_open_question; resolve/
  *  dismiss are human-only bookkeeper+ acts. */
 export type OpenQuestionPart = { type: "open_question"; question_id: string; client_id: string };
 
-// --- Wave-A2 new part type (contract §6.4/§7; migration 0015 S4) ----------------
-/** A posted-by-rule receipt (WA2-R7 / §6.4): identifier-only; the card hydrates the
- *  rule_post_runs receipt (the batch of entries a signed autopost rule posted) via its
- *  pinned read fn on mount, and offers the bookkeeper+ acknowledgement (an ack is NOT
- *  an approval — every rule-post is reversible). Mirrors `SweepReceiptPart`. */
-export type RulePostReceiptPart = { type: "rule_post_receipt"; run_id: string };
+// KbRuleProposalPart ("kb_rule_proposal", get_coding_rule) and RulePostReceiptPart
+// ("rule_post_receipt", the rule_post_runs receipt) RETIRED with F-A2 PR-3 — both
+// were live dashboard consumers of the rules-execution verbs the design drops whole
+// (Annex B.1/B.6, GM-11). rule_post_runs and coding_rules stay KEEP-AS-HISTORY at the
+// DB layer; only these two chat-part surfaces stop rendering them.
 
 // --- Wave C-c additions (design v2.1 §7) -----------------------------------------
 // Identifier-only, mirroring the Wave-A/A2 receipt/proposal idiom exactly. NOTE (see
 // build-0040/u1-notes.md): design §7 names "new ClaraPart members + catalog entries"
 // without naming them — C-c ships no new machine lane, so nothing in the runtime
 // emits these on the wire TODAY. They are declared here by analogy (a completed
-// reconciliation is a receipt, a bank rule proposal is a proposal — the SweepReceiptPart/
-// KbRuleProposalPart shape) so the surface exists the day a chat turn references one; both
+// reconciliation is a receipt, a bank rule proposal is a proposal — the SweepReceiptPart
+// shape) so the surface exists the day a chat turn references one; both
 // cards hydrate authoritative state on mount, same as every other Wave-A/A2 part.
 
 /** A completed (or voided) bank reconciliation's receipt (design §4.1/§6).
@@ -155,10 +150,7 @@ export type ClaraPart =
   | DocReviewPart
   | DiffPart
   | SweepReceiptPart
-  | KbRuleProposalPart
   | OpenQuestionPart
-  // --- Wave-A2 addition ---
-  | RulePostReceiptPart
   // --- Wave C-c additions ---
   | BankReconReceiptPart
   | BankRuleProposalPart

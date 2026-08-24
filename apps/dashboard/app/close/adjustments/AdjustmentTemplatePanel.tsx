@@ -16,8 +16,8 @@ import { useCallback, useEffect, useState } from "react";
 import {
   listAdjustmentTemplates, listAdjustmentRuns, adjustmentRunDue, proposeAdjustmentTemplate,
   signAdjustmentTemplate, retireAdjustmentTemplate, runAdjustmentManual,
-} from "../shared/adjustmentApi";
-import type { AdjustmentTemplateWarning } from "../shared/adjustmentApi";
+} from "../../shared/adjustmentApi";
+import type { AdjustmentTemplateWarning } from "../../shared/adjustmentApi";
 import {
   canSignTemplate, canRetireTemplate, blockedReasonLabel, templateLinesBalance,
   latestRunForTemplate, readAdvisory, advisoryUnavailable, templateBlockState, templateDueState,
@@ -26,9 +26,9 @@ import {
   type AdjustmentRunDue, type AdjustmentRunRow, type ListAdjustmentTemplatesRead,
   type ListAdjustmentRunsRead,
 } from "./adjustmentModel";
-import type { PgrestError } from "../shared/wire";
-import { fmtCents, fmtDeltaCents, shortId } from "../shared/fmt";
-import styles from "./rules.module.css";
+import type { PgrestError } from "../../shared/wire";
+import { fmtCents, fmtDeltaCents, shortId } from "../../shared/fmt";
+import styles from "./adjustments.module.css";
 
 export function AdjustmentTemplatePanel({ token, clientId }: { token: string; clientId: string }) {
   const [read, setRead] = useState<ListAdjustmentTemplatesRead | null>(null);

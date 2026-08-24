@@ -432,9 +432,10 @@ test("f-a2.c9.posted-needs-receipt-A a REFUSED draft settled 'posted' is REFUSED
     "c9.posted-needs-receipt-A: the task did NOT land completed — a completed task is what makes admit answer already_done and abandons the filing");
 });
 
-test("f-a2.c9.rule-needs-sightings the autopost proposer REFUSES without three congruent sightings", async (t) => {
-  if (await gateChain(t)) return;
-  if (await gateCore(t)) return;
+test("f-a2.c9.rule-needs-sightings the autopost proposer REFUSES without three congruent sightings", { skip: "propose_autopost_rule retired with F-A2 PR-3 — the autopost proposer no longer exists" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): propose_autopost_rule — the verb this cell's whole claim is
+  // about — is dropped whole along with the rest of the autopost-rule tier. There is no
+  // proposer left to refuse anything, so the claim is unreconstructable, not merely unproven.
   // `liveAutopostRule` earns three human-approved sightings before proposing, and it costs three
   // extra sweeps to do it. A reader is entitled to ask whether that scaffolding is load-bearing
   // or superstition, and "I remember it failing once" is not an answer a later author can check.
@@ -469,9 +470,13 @@ test("f-a2.c9.rule-needs-sightings the autopost proposer REFUSES without three c
     `c9.rule-needs-sightings: ...by name, so the sightings in liveAutopostRule are a real precondition and not scaffolding-by-superstition (got ${proposed.error.code}: ${proposed.error.message} ${proposed.error.detail ?? ""})`);
 });
 
-test("f-a2.c9.posted-needs-receipt-B an APPROVED entry with a rule id and NO receipt is refused under 'posted' (C4)", async (t) => {
-  if (await gateChain(t)) return;
-  if (await gateCore(t)) return;
+test("f-a2.c9.posted-needs-receipt-B an APPROVED entry with a rule id and NO receipt is refused under 'posted' (C4)", { skip: "the real producer (propose_autopost_rule/sign_autopost_rule) retired with F-A2 PR-3 — forging checked_via_rule_id was already rejected by this cell's own history" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): this cell's own comment says it must be BUILT THROUGH THE
+  // REAL PRODUCER, NOT FORGED — a raw UPDATE was tried and refused CLR10 (skips subledger
+  // materialisation). The real producer, liveAutopostRule (propose_autopost_rule +
+  // sign_autopost_rule), is dropped whole with the rest of the autopost-rule tier, and forging
+  // the state is exactly what this cell's own history says not to do — so it is skipped, not
+  // reconstructed with a fixture its author already rejected.
   // C4's must-fail B. The other unconditional arm: `e.status='approved' and checked_via_rule_id
   // is not null` is the RULE-POST shape, lawful for a `drafted` settle and never evidence of a
   // post. Under the partition it must not satisfy the posted arm.

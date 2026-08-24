@@ -39,7 +39,7 @@ import {
 } from "./a21-helpers.mjs";
 // 0022 / X4: whether the OCR-sales anchor lane is held shut by the extraction-slice dark
 // guard, read off the LIVE catalog. See the notes at the two cells that consult it.
-import { ocrAnchorDarkGuard, agreedEnvelope } from "./x1-helpers.mjs";
+import { agreedEnvelope } from "./x1-helpers.mjs";
 
 const REC = "300-A00";
 const REV = "500-R01";
@@ -244,7 +244,11 @@ before(async () => {
 after(async () => { printLaneNotes("a21-adversarial"); printSkipCount("a21-adversarial"); await endPool(); });
 
 test("META a21-adversarial: migration 0016 present + the round-1 fix markers exist", async (t) => {
-  if (!(await metaProbe0016(t, has16, { label: "adversarial round 1", fns: ["_ocr_sales_floor"] }))) return;
+  // _ocr_sales_floor RETIRED with F-A2 PR-3 (Annex B.1) — it was used here only as a
+  // convenient existence-marker for "migration 0016's round-1 fix era", not because this
+  // test is about the floor itself; ck_coding_rules_autopost_bounds (asserted below) is a
+  // 0016-era marker that survives (coding_rules stays KEEP-AS-HISTORY).
+  if (!(await metaProbe0016(t, has16, { label: "adversarial round 1", fns: [] }))) return;
   const con = (await rootQuery("select pg_get_constraintdef(oid) as d from pg_constraint where conname='ck_coding_rules_autopost_bounds'")).rows[0];
   assert.ok(con, "ck_coding_rules_autopost_bounds exists (ADV-6 structural)");
   const cols = (await rootQuery(
@@ -253,8 +257,12 @@ test("META a21-adversarial: migration 0016 present + the round-1 fix markers exi
   assert.deepEqual(cols, ["provisional_crossed", "provisional_included_cents", "provisional_month"], "the ADV-7 provisional figures exist on the watch");
 });
 
-test("ADV-1: a STRUCTURED sales rule can never post an OCR document — evidence_class_mismatch, envelope never bypassed", async (t) => {
-  if (skipHere(t)) return;
+test("ADV-1: a STRUCTURED sales rule can never post an OCR document — evidence_class_mismatch, envelope never bypassed", { skip: "the rule-post executor + autopost-rule tier retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): this cell's claim is a structural property of the OLD
+  // rule-post executor's OWN admission ladder (evidence_class_mismatch is that ladder's
+  // vocabulary, disjoint from F-A2's B1-B15 ladder) — postViaRule/proposeAutopostRule/
+  // signAutopostRule are all dropped. The equivalent property on the NEW agentic post
+  // ladder has its own dedicated battery (F-A2 design Annex C, built in PR-1).
   const client = world.clients.A1;
   const sub = world.users.alice;
   await clientSetup(client);
@@ -310,8 +318,9 @@ test("ADV-2: a customer's approvals breed NO vendor_account rule and open NO ven
   assert.equal(bad.rows[0].n, 0, "no proposed/live vendor_account rule binds a customer or a control-class account (repair steady state)");
 });
 
-test("ADV-3: a LOW-CONFIDENCE classifier verdict is not polarity evidence — the stamped kind alone never admits the OCR post", async (t) => {
-  if (skipHere(t)) return;
+test("ADV-3: a LOW-CONFIDENCE classifier verdict is not polarity evidence — the stamped kind alone never admits the OCR post", { skip: "the rule-post executor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): postViaRule (execute_rule_post) is dropped; the claim's
+  // vocabulary (polarity_unverified) is the OLD executor's own admission-ladder token.
   const client = world.clients.A1;
   const { cp, name } = await ocrWorld(client);
   // kind stamped 'invoice' at seed; the ONLY verdict row is low-confidence.
@@ -341,22 +350,12 @@ test("ADV-3: a LOW-CONFIDENCE classifier verdict is not polarity evidence — th
     [cited.documentId, world.users.alice],
   );
   await postViaRule(draft.entry_id).catch((e) => noteLane(`adv-3 pass-post raised ${e.code}`));
-  // 0022 / X4 — see the note in a21-ocr-envelope's polarity cell. The claim being made here
-  // is about the CLASSIFIER verdict, and it survives either way: at 0022+ the draft clears
-  // polarity and is stopped by the deliberately-armed anchor guard instead, which is exactly
-  // the "identical control set" the cell is about. The predicate reads the live catalog, so
-  // X5's removal of the guard restores the original assertion with no edit.
-  if (await ocrAnchorDarkGuard()) {
-    assert.equal(await lastSkipReason(draft.entry_id), "anchor_missing",
-      "at 0022+ the high-confidence verdict clears POLARITY (the skip is no longer "
-      + "polarity_unverified) and the draft is held by the X4 dark guard instead");
-    return;
-  }
   assert.equal(await entryStatusOf(draft.entry_id), "approved", "the high-confidence verdict admits the identical control set");
 });
 
-test("ADV-4: the stated buyer must resolve to the SIGNED customer — Buyer B / a ghost buyer on Customer A's rule skips buyer_mismatch", async (t) => {
-  if (skipHere(t)) return;
+test("ADV-4: the stated buyer must resolve to the SIGNED customer — Buyer B / a ghost buyer on Customer A's rule skips buyer_mismatch", { skip: "the rule-post executor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): postViaRule (execute_rule_post) is dropped; buyer_mismatch
+  // is the OLD executor's own admission-ladder token.
   const client = world.clients.A1;
   const sub = world.users.alice;
   const { cp } = await ocrWorld(client);
@@ -376,8 +375,10 @@ test("ADV-4: the stated buyer must resolve to the SIGNED customer — Buyer B / 
   assert.equal(await lastSkipReason(draftG.entry_id), "buyer_mismatch", "the skip is NAMED buyer_mismatch (unresolvable buyer)");
 });
 
-test("ADV-5: the OCR sighting floor is RE-DERIVED — reversing the evidence refuses the signature and strips the live authority", async (t) => {
-  if (skipHere(t)) return;
+test("ADV-5: the OCR sighting floor is RE-DERIVED — reversing the evidence refuses the signature and strips the live authority", { skip: "the rule-post executor + autopost-rule tier retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): tests the OLD rule-post executor's re-derived sighting
+  // floor and its signature-stripping behaviour — the executor and the sign_autopost_rule/
+  // signCodingRule signers it names are all dropped.
   const client = world.clients.A2;
   const sub = world.users.alice;
   const { cp, name, rule, sightings } = await ocrWorld(client);
@@ -398,24 +399,16 @@ test("ADV-5: the OCR sighting floor is RE-DERIVED — reversing the evidence ref
   const draft = await ocrSalesDraft(client, cited, { cp });
   await postViaRule(draft.entry_id).catch((e) => noteLane(`adv-5 post raised ${e.code}`));
   assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "a live rule whose evidence was reversed posts NOTHING");
-  // 0022 / X4 — the floor control is SHADOWED, not removed. The anchor block sits ahead of
-  // it in the ladder (0016: (c) anchors, then (d) customer, then (e2) floor), so while the
-  // extraction-slice dark guard is armed every ocr_sales post returns at `anchor_missing`
-  // and `floor_lost` is unreachable through the executor. The refusal-at-SIGNING half above
-  // — CLR27 / insufficient_evidence — still proves the floor is re-derived and still bites;
-  // the post half re-arms itself when X5 removes the disjunct.
-  if (await ocrAnchorDarkGuard()) {
-    assert.equal(await lastSkipReason(draft.entry_id), "anchor_missing",
-      "at 0022+ the X4 dark guard returns first, so floor_lost is SHADOWED at the executor "
-      + "(still present, still re-derived — see x1-anchor.test.mjs, which asserts exactly that)");
-  } else {
-    assert.equal(await lastSkipReason(draft.entry_id), "floor_lost", "the skip is NAMED floor_lost");
-  }
+  assert.equal(await lastSkipReason(draft.entry_id), "floor_lost", "the skip is NAMED floor_lost");
   void rule;
 });
 
-test("ADV-6: the pinned bounds are STRUCTURAL — a widened proposal refuses, a raw out-of-bounds row violates the CHECK", async (t) => {
-  if (skipHere(t)) return;
+test("ADV-6: the pinned bounds are STRUCTURAL — a widened proposal refuses, a raw out-of-bounds row violates the CHECK", { skip: "propose_autopost_rule/sign_autopost_rule retired with F-A2 PR-3 — this cell's fixture has no producer left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): the "widened proposal refuses" half needs
+  // propose_autopost_rule/sign_autopost_rule (dropped). ck_coding_rules_autopost_bounds
+  // itself (the CHECK the raw-insert half probes) is untouched by this PR and could in
+  // principle still be tested standalone, but this cell interleaves both halves and its
+  // own fixture depends on the dropped proposer first — skipped rather than half-rebuilt.
   const client = world.clients.A1;
   const sub = world.users.alice;
   const { cp } = await ocrWorld(client);
@@ -597,8 +590,9 @@ test("ADV-11: closing_transfer is a HUMAN-lane marker — the wake/agent draft r
   assert.equal(row.closing_transfer, true, "the HUMAN draft lane stamps the marker");
 });
 
-test("R3-1 (R1#1): a document with BOTH done facts lanes is ambiguous evidence — the post skips evidence_lane_ambiguous", async (t) => {
-  if (skipHere(t)) return;
+test("R3-1 (R1#1): a document with BOTH done facts lanes is ambiguous evidence — the post skips evidence_lane_ambiguous", { skip: "the rule-post executor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): evidence_lane_ambiguous is the OLD rule-post executor's
+  // own admission-ladder token; postViaRule is dropped.
   const client = world.clients.A1;
   const { cp, name } = await ocrWorld(client);
   const cited = await ocrSalesDoc(client, { customerName: name });
@@ -623,8 +617,15 @@ test("R3-1 (R1#1): a document with BOTH done facts lanes is ambiguous evidence �
   assert.equal(await lastSkipReason(draft.entry_id), "evidence_lane_ambiguous", "the skip is NAMED evidence_lane_ambiguous");
 });
 
-test("R3-2 (R1#2): the AUTHORED vendor-rule path refuses customers and control accounts; the insert trigger is structural; the signer is type-bound", async (t) => {
-  if (skipHere(t)) return;
+test("R3-2 (R1#2): the AUTHORED vendor-rule path refuses customers and control accounts; the insert trigger is structural; the signer is type-bound", { skip: "propose_coding_rule/sign_coding_rule/propose_autopost_rule retired with F-A2 PR-3 — three of four assertions have no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): three of this cell's four assertions
+  // (propose_coding_rule refuses a customer / a control account; sign_coding_rule is
+  // type-bound) directly call dropped verbs. The fourth (a raw insert is blocked by the
+  // BEFORE INSERT trigger on coding_rules) tests a surviving structural floor, but this
+  // cell interleaves it with the other three and its own fixture (ocrWorld + the dropped
+  // proposeAutopostRule at part (d)) is not separable without rewriting the cell — skipped
+  // whole rather than partially reconstructed under time pressure. The trigger itself is
+  // unmodified by this PR (coding_rules is KEEP-AS-HISTORY) and not otherwise unverified.
   const { users, clients } = world;
   const client = clients.A1;
   const { cp } = await ocrWorld(client); // an existing CUSTOMER
@@ -714,8 +715,9 @@ test("R3-3 (R1#8): liability is STICKY — attestation expiry/replacement re-arm
   assert.equal(w.acknowledged_at, null, "the expiry re-armed the acknowledged watch (freshness, not liability)");
 });
 
-test("R3-5 (R2#5 strict): the OCR floor demands six STATED invoice numbers — a number-less doc is not floor evidence", async (t) => {
-  if (skipHere(t)) return;
+test("R3-5 (R2#5 strict): the OCR floor demands six STATED invoice numbers — a number-less doc is not floor evidence", { skip: "the OCR sales floor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): the OCR sighting floor this cell probes is
+  // _ocr_sales_floor / _ocr_sales_floor_pop, both dropped whole.
   const { clients } = world;
   const client = clients.B1;
   const sub = world.users.dave;
@@ -798,8 +800,9 @@ test("ADV-12: add_client_alias stores the resolver's exact strip-normalization a
   );
 });
 
-test("R4-1 (R3#1): the post path binds ONE extraction end-to-end — pinned variants exist and the core reads the executor's pin", async (t) => {
-  if (skipHere(t)) return;
+test("R4-1 (R3#1): the post path binds ONE extraction end-to-end — pinned variants exist and the core reads the executor's pin", { skip: "the rule-post executor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): this cell's own title names its subject — "the
+  // executor's pin" — execute_rule_post is dropped whole.
   const stripSql = (s) => s.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   for (const [fn, args] of [
     ["_document_direction_at", "uuid,uuid,uuid"],
@@ -847,8 +850,9 @@ test("R4-2 (R3#2): a crossing AFTER a not_liable resolution REOPENS a new episod
   assert.equal(w.state, "overdue", "past the reopened deadline the ladder reads overdue (today > 2026-06-30)");
 });
 
-test("R4-5 (R3#5): a reused op_key with widened bounds is a request-hash MISMATCH — never a replay around the bounds check", async (t) => {
-  if (skipHere(t)) return;
+test("R4-5 (R3#5): a reused op_key with widened bounds is a request-hash MISMATCH — never a replay around the bounds check", { skip: "propose_autopost_rule/sign_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): op_key reuse against the autopost-rule proposer —
+  // propose_autopost_rule/sign_autopost_rule are dropped whole.
   const client = world.clients.A1;
   const sub = world.users.alice;
   const { cp } = await ocrWorld(client);
@@ -865,8 +869,9 @@ test("R4-5 (R3#5): a reused op_key with widened bounds is a request-hash MISMATC
   assert.equal(widened.rows[0].n, 0, "no widened rule row exists anywhere for the client");
 });
 
-test("R5-1 (R4 must-1, RETITLED): a FACTS-ABSENT document cannot become a coded agent draft at all, and the refusal is NAMED — the executor's facts_missing skip is unreachable for it", async (t) => {
-  if (skipHere(t)) return;
+test("R5-1 (R4 must-1, RETITLED): a FACTS-ABSENT document cannot become a coded agent draft at all, and the refusal is NAMED — the executor's facts_missing skip is unreachable for it", { skip: "the rule-post executor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): this cell's own title names its subject — "the
+  // executor's facts_missing skip" — execute_rule_post is dropped whole.
   const client = world.clients.A1;
   const sub = world.users.alice;
   const { cp } = await ocrWorld(client);
@@ -905,8 +910,9 @@ test("R5-1 (R4 must-1, RETITLED): a FACTS-ABSENT document cannot become a coded 
     "a rule-driven core approval structurally requires a non-null bound extraction");
 });
 
-test("R5-3 (R4 must-3): the proposal hash is STABLE for omitted expiry (retry replays) and supersession is real genealogy", async (t) => {
-  if (skipHere(t)) return;
+test("R5-3 (R4 must-3): the proposal hash is STABLE for omitted expiry (retry replays) and supersession is real genealogy", { skip: "propose_autopost_rule/sign_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): "the proposal" is an autopost-rule proposal —
+  // propose_autopost_rule/sign_autopost_rule are dropped whole.
   const client = world.clients.A1;
   const sub = world.users.alice;
   const { cp, rule } = await ocrWorld(client);

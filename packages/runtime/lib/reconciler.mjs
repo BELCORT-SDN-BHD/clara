@@ -586,9 +586,10 @@ export async function runReconcilerSweep(client, deps) {
   // (0022_extraction_slice_x1.sql:133-142, 0023:80-95), which the INDEPENDENT 'control' beat
   // (control.mjs:204) and the supervisor's 'world' beat already keep hot on their own loops —
   // the reconciler beat is redundant to them, not load-bearing for them. And the writer those
-  // migrations swap, clara.execute_rule_post, is never called by this sweep at all — its only
-  // caller is rule-post.mjs:53, an independent loop. /ready (health.mjs:99-115) reads only
-  // 'world' and 'control'; nothing anywhere reads the 'reconciler' component.
+  // migrations swapped, clara.execute_rule_post, was never called by this sweep at all — its
+  // only caller was rule-post.mjs, an independent loop that F-A2 PR-3 retired along with the
+  // function itself. /ready (health.mjs:99-115) reads only 'world' and 'control'; nothing
+  // anywhere reads the 'reconciler' component.
   //
   // The defensible reason is narrower and leans on no downstream reader: a leader that cannot
   // complete the CHEAPEST possible write on its own connection — a single-row upsert — has
