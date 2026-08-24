@@ -403,11 +403,21 @@ test("x42.r8s-k2 the acknowledgement is IN the request hash, and it never manufa
   // in clara.match_bank_line's audit payload and in this verb's). A hash that omitted it
   // would serve an ack=true replay the ack=false call's receipt on any verb whose dedup IS
   // reachable — which is the defect clara.match_bank_line's own header records.
+  //
+  // RETARGETED (F-A3/PR-1a core extraction, this branch's own stacked base): the public
+  // clara.resolve_and_book_bank_line is now a thin delegator (its own comment says so
+  // verbatim -- "the prosrc pins that measure it moved with the body") and carries NO
+  // _hash(...) call of its own; the request-hash construction this cell reads lives in
+  // clara._resolve_and_book_bank_line_core, where the extraction moved it byte-for-byte.
+  // The FIRST _hash(jsonb_build_object(...)) in that body is the request hash (the second
+  // is the draft leg's derived approve-key hash, a different act); [0] pins that ordering
+  // rather than leaving the regex to match whichever comes first by accident.
   const src = (await rootQuery(
     `select p.prosrc as s from pg_proc p
-      where p.pronamespace='clara'::regnamespace and p.proname='resolve_and_book_bank_line'`)).rows[0].s;
-  const hashArgs = /clara\._hash\(jsonb_build_object\(([\s\S]*?)\)\)\)/.exec(src)?.[1] ?? "";
-  assert.match(hashArgs, /'ack'/,
+      where p.pronamespace='clara'::regnamespace and p.proname='_resolve_and_book_bank_line_core'`)).rows[0].s;
+  const hashCalls = [...src.matchAll(/clara\._hash\(jsonb_build_object\(([\s\S]*?)\)\)\)/g)];
+  assert.ok(hashCalls.length >= 1, "the core still constructs at least one request hash");
+  assert.match(hashCalls[0][1], /'ack'/,
     "the composite's request hash must carry the acknowledgement");
 
   // …and the AUDIT records the caller's answer, which is the other half of that law.

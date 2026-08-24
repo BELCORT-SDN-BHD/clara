@@ -147,13 +147,22 @@ begin
   end if;
 
   -- The ELEVENTH CoR'd body (owner ruling, Track-A sitting, ADR-0074/law 78 -- see the CoR's own
-  -- comment below for the full citation). Pinned at its 0040-era, byte-unmoved pre-ruling sha so
-  -- a later drift is caught rather than silently assumed compatible, the SAME discipline as
+  -- comment below for the full citation). Pinned at its LIVE, PRE-RULING catalog sha -- NOT
+  -- 0040's own file text, which is stale: migration 0044 already patches this same function's
+  -- body dynamically at its own apply time (a CoR string-replace, the same mechanism 0044 uses
+  -- on itself elsewhere), splicing in (a) the one-standing-booking law call
+  -- (clara._wdb_assert_line_booking_lawful, S4.11) and (b) the three parked-cascade admission
+  -- doors (clara._bank_parked_cascade_admitted, D-b SS4). This pin is queried off the LIVE
+  -- catalog with both patches already applied, so it is the correct base for the CoR below --
+  -- the base a first pass at this CoR got wrong by copying 0040's file text directly, silently
+  -- erasing both patches; caught by the full estate suite, root-caused by diffing the new live
+  -- prosrc against this exact pin, fixed by rebuilding the CoR from the live text instead. A
+  -- later drift is caught rather than silently assumed compatible, the SAME discipline as
   -- _approve_entry_core's P-14 pin above.
   select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
     from pg_proc where oid = 'clara._tf_bank_settled_authority_belt()'::regprocedure;
   if v_sha is distinct from '291aa474ef746f7e5a971c02fc67e84407be982c28e61e8a67343064dfb01072' then
-    raise exception 'prestate: _tf_bank_settled_authority_belt drifted from its pinned pre-ruling sha (found %)', v_sha using errcode='CLR10';
+    raise exception 'prestate: _tf_bank_settled_authority_belt drifted from its pinned pre-ruling (0040+0044-patched) sha (found %)', v_sha using errcode='CLR10';
   end if;
 
   -- The P-14 pin: _approve_entry_core's NINTH generation, re-derived here so a later drift
@@ -3934,6 +3943,23 @@ end $function$;
 -- `_agent_resolve_bank_line_exception_core` inside the SAME transaction, strictly before this
 -- deferred constraint trigger fires at commit, so the read-back here always sees it when the
 -- agent path actually ran the receipted act.
+--
+-- THE BASE THIS CoR IS BUILT ON, named explicitly because getting it wrong once already cost a
+-- real regression: the body below is NOT 0040's own file text -- 0044 dynamically patches this
+-- SAME function's LIVE body at its own apply time (before this file ever runs), via a CoR
+-- string-replace exactly like the ones 0044 issues against itself elsewhere. Two patches are
+-- preserved here, byte-identical, because this CoR was rebuilt off the live (post-0044) catalog
+-- rather than off 0040's source: (1) the one-standing-booking law call
+-- (`clara._wdb_assert_line_booking_lawful`, spliced into ARM (a)'s line-member block, S4.11),
+-- and (2) the three parked-cascade admission doors (`clara._bank_parked_cascade_admitted`, D-b
+-- SS4, ADMISSION SITES 2/4/5/7 of 7). Neither is part of this CoR's own change -- ADR-0074/law
+-- 78 touches the RESOLUTION floor only, in ARMS (b)/(c) below -- they are named here because a
+-- CREATE OR REPLACE against the wrong base silently erases whatever the wrong base was missing,
+-- and that is exactly what happened on the first pass: copying 0040's file text instead of the
+-- live prosrc erased both, reopening the exact double-booking defects 0044 exists to close.
+-- Caught by running the full 280-file estate suite (not just this PR's own battery) and
+-- root-caused with a byte-level diff of the corrected body against the true live prosrc, which
+-- showed only the intended resolution-floor widening and this comment block differ.
 -- ------------------------------------------------------------------------------------------------
 create or replace function clara._tf_bank_settled_authority_belt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$

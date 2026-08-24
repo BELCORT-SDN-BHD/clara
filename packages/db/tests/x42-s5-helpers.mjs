@@ -433,6 +433,42 @@ const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 // one-line fill instead of a re-derivation.
 const POSTING_F_A2_PR1_CLOCK_NAMES = [];
 
+// F-A3 PR-1a [the core extraction, `f_a3_pr1a_core_extractions` at whatever number merge
+// claimed]: nine bank-domain public verbs became thin delegators around new `_core` bodies
+// (fa3_pr1a_targets, the migration's own SS0.2 target table). The bare clock token each
+// extracted body carries moved WITH it, verbatim — the same "prosrc pins that measure it
+// moved with the body" the extraction's own delegator comment states. Eight of the nine
+// targets carry a bare clock token either way (measured directly against the live catalog,
+// this session); the ninth (upsert_account) carries none under either name. A tenth target
+// this roster does NOT retire or add — clara._settle_from_bank_line_core — was ALREADY on
+// the base S5_25_BARE_TOKEN_ROSTER under its core name before this extraction (its own
+// wrapper/core split predates this migration), so it is neither removed nor duplicated here.
+//
+// match_bank_line is NOT retired, unlike its seven siblings: fa3_pr1a_targets' own row pins
+// it at exactly TWO live overloads, and the extraction's own signature
+// (uuid,jsonb,jsonb,jsonb,boolean,text) names only the 6-arg one. The SEVENTH-arg overload
+// (the `p_via_rule` arity) was never a target -- measured directly against the live catalog,
+// it still carries its own `now()` in the same body, unextracted -- so the bare public name
+// legitimately stays flagged on its own account, independent of the new core.
+const CORE_EXTRACTION_F_A3_PR1A_RETIRED_NAMES = [
+  "add_bank_account", "complete_bank_reconciliation",
+  "resolve_and_book_bank_line", "resolve_bank_line_exception",
+  "unmatch_bank_match", "void_bank_reconciliation", "void_bank_statement",
+];
+const CORE_EXTRACTION_F_A3_PR1A_CLOCK_NAMES = [
+  "_add_bank_account_core", "_complete_bank_reconciliation_core", "_match_bank_line_core",
+  "_resolve_and_book_bank_line_core", "_resolve_bank_line_exception_core",
+  "_unmatch_bank_match_core", "_void_bank_reconciliation_core", "_void_bank_statement_core",
+];
+
+// F-A3 PR-1b [the bank-agency agent limb, `f_a3_pr1b_agent_limb` at whatever number merge
+// claimed]: two genuinely new bodies, neither a rename. `set_bank_agency_hold`'s `now()` is
+// the hold row's own `set_at` timestamptz default idiom — the same shape every other human
+// writer already on this roster uses. `_tf_bank_agent_proposal_accept`'s `now()` stamps
+// `decided_at` on the AFTER INSERT trigger (DDL 6) — the same "the audit stamp is the clock"
+// idiom every other `_tf_*` trigger already on this roster carries.
+const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set_bank_agency_hold"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -456,6 +492,14 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
+  if (await appliedStem("f_a3_pr1a_core_extractions$")) {
+    for (const n of CORE_EXTRACTION_F_A3_PR1A_RETIRED_NAMES) {
+      const i = names.indexOf(n);
+      if (i !== -1) names.splice(i, 1);
+    }
+    names.push(...CORE_EXTRACTION_F_A3_PR1A_CLOCK_NAMES);
+  }
+  if (await appliedStem("f_a3_pr1b_agent_limb$")) names.push(...AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES);
   return names.sort();
 }
 

@@ -156,10 +156,19 @@ test("x42x.lw3 [POST arm] once 0044 is applied, BOTH D-b3 bodies reach the D-b1 
   }
   // COMMENT-STRIPPED on purpose (E19): every slice carries `[SPLIT D-bN]` notes that NAME the
   // bodies it does and does not ship, so raw text would read a mention as a call.
-  const composite = await strippedDef("resolve_and_book_bank_line");
-  assert.ok(composite, "clara.resolve_and_book_bank_line exists at D-b3");
+  //
+  // RETARGETED (F-A3/PR-1a core extraction, this branch's own stacked base): the public
+  // clara.resolve_and_book_bank_line is now a thin delegator with no wall-calling logic of
+  // its own; the extraction moved that body byte-for-byte into
+  // clara._resolve_and_book_bank_line_core, so that is where the D-b1 wall call actually
+  // lives now. fnExists/existence checks above (lw1/lw2) stay on the public name -- those
+  // assert SHAPE (does the surface exist at this frontier), not the wall-calling BODY this
+  // cell checks.
+  assert.ok(await fnExists("resolve_and_book_bank_line"), "clara.resolve_and_book_bank_line still exists at D-b3");
+  const composite = await strippedDef("_resolve_and_book_bank_line_core");
+  assert.ok(composite, "clara._resolve_and_book_bank_line_core exists at D-b3 (post PR-1a extraction)");
   assert.ok(/clara\._adv_assert_proposal\(/.test(composite),
-    "the composite CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)");
+    "the composite's core CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)");
 
   const block = await strippedDef("_wdb_line_booking_block");
   assert.ok(block, "clara._wdb_line_booking_block exists at D-b3");

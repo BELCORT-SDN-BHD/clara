@@ -193,6 +193,12 @@ test("x42.r8.tails.4d TAIL 6(a) flags-key writer census, widened, matches the pi
     )).rows[0].n;
   };
   assert.equal(await widenedWriters("recurring_adjustment"), "_adj_on_approve, _adj_run_occurrence_core");
-  assert.equal(await widenedWriters("staff_advance_application"), "book_staff_advance_application, resolve_and_book_bank_line");
+  // RETARGETED (F-A3/PR-1a core extraction, this branch's own stacked base): the
+  // jsonb_build_object('staff_advance_application', ...) key moved with the rest of the
+  // body from the public clara.resolve_and_book_bank_line into
+  // clara._resolve_and_book_bank_line_core (its own comment: "the prosrc pins that measure
+  // it moved with the body"), so that is the name this roster now names, in 'C' collation
+  // order ('_' sorts before 'b').
+  assert.equal(await widenedWriters("staff_advance_application"), "_resolve_and_book_bank_line_core, book_staff_advance_application");
   assert.equal(await widenedWriters("bank_rule_suggested"), "accept_bank_rule_suggestion");
 });
