@@ -35,4 +35,9 @@ regexes = [
   # A delta acceptance-battery account-set KEY (a per-test grouping label, not a
   # credential); "bound512" + "eval" trips generic-api-key on entropy alone.
   '''^bound512_eval$''',
+  # F-T1's sst_rate_schedule immutability-probe fixture scope_keys (throwaway rig
+  # rows, self-describing "never a real rate" in the same INSERT); the SQL shape
+  # scope_key='_ft1_test_…' trips generic-api-key on entropy alone. Regex-based,
+  # not fingerprint-based, for the squash-rewrite reason the paths comment states.
+  '''^_ft1_test_immutability_probe(_successor)?$''',
 ]

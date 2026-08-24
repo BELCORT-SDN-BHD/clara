@@ -408,6 +408,16 @@ const WITNESS_F_A1_CLOCK_NAMES = ["persist_witness_facts"];
 // PR-4 still measures the roster it actually has.
 const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_statement_facts_v2"];
 
+// F-A5 PR-1 [`f_a5_reporting_agency_pr1` at whatever number merge claimed]:
+// clara._agent_approve_metric_definition_core stamps `approved_at = statement_timestamp()` — the
+// SAME bare timestamptz stamp its human sibling clara.approve_metric_definition already carries
+// and which is already on this roster. It is an approval INSTANT written to a timestamptz column,
+// never a business DATE, so arm (D)'s standing advice ("call the date authority instead") does not
+// apply: clara._book_today() would answer a different question. Joining the roster is the declared
+// cost of the stamp, exactly as the sibling's was. Gated on the migration STEM like every group
+// above, so a chain stopped short of F-A5 measures the roster it actually has.
+const REPORTING_AGENCY_F_A5_CLOCK_NAMES = ["_agent_approve_metric_definition_core"];
+
 // F-A1 PR-3 [the cutover, `f_a1_cutover` at whatever number merge claimed]:
 // clara.fail_witness_facts stamps `finished_at=now()` — the SAME timestamptz column its
 // siblings fail_invoice_facts / fail_statement_facts already stamp bare, no ::date suffix and
@@ -503,6 +513,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
+  if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
