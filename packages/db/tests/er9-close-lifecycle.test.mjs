@@ -103,7 +103,7 @@ test("R9.A2 the CONTRAST arm: an end date the human CHOSE is labelled 'asserted'
   assert.equal(row.length_reason, "er9 rig: a stub period, stated as required");
 });
 
-test("R9.A3 get_close_plan BEFORE any close run: all 13 catalog checks ride with their drawer, every result reads the honest 'not_yet_measured', run and receipt read 'absent' — and the goods-trading check is SHOWN, never hidden, for a services client", async (t) => {
+test("R9.A3 get_close_plan BEFORE any close run: all 14 catalog checks ride with their drawer, every result reads the honest 'not_yet_measured', run and receipt read 'absent' — and the goods-trading check is SHOWN, never hidden, for a services client", async (t) => {
   if (gate(t)) return;
   const plan = await getClosePlan(world.users.alice, W.fy);
   assert.equal(plan.fiscal_year.id, W.fy);
@@ -114,9 +114,15 @@ test("R9.A3 get_close_plan BEFORE any close run: all 13 catalog checks ride with
   assert.equal(plan.close_run.state, "absent", "no close run has begun");
   assert.equal(plan.receipt.state, "absent", "no receipt exists");
 
+  // CENSUS C15 (F-A4 PR-1a): the catalog grew from THIRTEEN to FOURTEEN when the undated-
+  // document gate was added as its OWN drawer-2 row (design close-key-1-design.md §3.10,
+  // D-18) rather than by widening `uncoded_documents`. The count moves WITH the key named,
+  // never as a bare number, so a future arrival cannot be absorbed silently.
   const catalogN = (await rootQuery("select count(*)::int as n from clara.close_gate_checks")).rows[0].n;
-  assert.equal(catalogN, 13, "mandatory setup: the shipped gate catalog carries 13 checks");
-  assert.equal(plan.checks.length, 13, "EVERY applicable check rides the plan, all 13");
+  assert.equal(catalogN, 14, "mandatory setup: the shipped gate catalog carries 14 checks");
+  assert.equal(plan.checks.length, 14, "EVERY applicable check rides the plan, all 14");
+  assert.ok(plan.checks.some((c) => c.check_key === "undated_documents"),
+    "the fourteenth is undated_documents — the F-A4 PR-1a gate for filings carrying no financial date");
 
   for (const c of plan.checks) {
     assert.equal(c.result.state, "not_yet_measured",
@@ -128,7 +134,8 @@ test("R9.A3 get_close_plan BEFORE any close run: all 13 catalog checks ride with
   const drawers = plan.checks.map((c) => c.drawer);
   assert.deepEqual([...drawers].sort((a, b) => a - b), drawers, "the plan is ordered by drawer");
   assert.equal(plan.checks.filter((c) => c.drawer === 1).length, 6, "six drawer-1 identities");
-  assert.equal(plan.checks.filter((c) => c.drawer === 2).length, 5, "five drawer-2 default-refuse checks");
+  assert.equal(plan.checks.filter((c) => c.drawer === 2).length, 6,
+    "six drawer-2 default-refuse checks — five shipped by 0056 plus undated_documents (census C15)");
   assert.equal(plan.checks.filter((c) => c.drawer === 3).length, 2, "two drawer-3 advisory checks");
   assert.equal(planCheck(plan, "closing_stock_present").applies_when, "goods_trading",
     "the goods-trading check is PRESENT for a services client — hiding it would hide fresh positive evidence");
@@ -155,7 +162,8 @@ test("R9.B1 begin_close mints ONE in-progress run, flips the year to 'closing', 
   assert.equal(live, 1, "exactly ONE live run per fiscal year (the partial unique index)");
 
   const g = await latestGates(W.run);
-  assert.equal(g.size, 13, "all 13 checks produced a result row");
+  assert.equal(g.size, 14, "all 14 checks produced a result row (census C15)");
+  assert.ok(g.has("undated_documents"), "including the undated-document gate");
 
   // THE ZERO-ENROLMENT POSITIVE. This client has no bank accounts and no fixed assets —
   // BEE's live posture on the bank side exactly (0 bank_accounts, measured). The two
@@ -179,6 +187,10 @@ test("R9.B1 begin_close mints ONE in-progress run, flips the year to 'closing', 
   assert.equal(g.get("depreciation_through_fy_end").state, "pass", "no enrolled asset lags");
   assert.equal(g.get("open_bank_recon_items").state, "pass", "no open exception, no statement gap");
   assert.equal(g.get("uncoded_documents").state, "pass", "no FY-dated filing lacks its entry");
+  assert.equal(g.get("undated_documents").state, "pass",
+    "and no UNDATED filing sits inside the year's filed_at bound either — the F-A4 gate reads pass on a measured empty population, never on an unasked question");
+  assert.equal(g.get("undated_documents").measured.undated_count, 0);
+  assert.equal(g.get("undated_documents").drawer, 2);
   assert.equal(g.get("bank_recon_informational").drawer, 3);
   assert.equal(g.get("fa_register_tie_view").drawer, 3);
 });
@@ -196,7 +208,7 @@ test("R9.B2 the plan and the readiness read AGREE, check for check and digest fo
   assert.equal(readiness.close_run_id, W.run, "get_close_readiness resolves the SAME run");
   assert.equal(readiness.run_state, "in_progress");
   assert.equal(readiness.fy_end_source, "default_1231");
-  assert.equal(readiness.gates.length, 13);
+  assert.equal(readiness.gates.length, 14);   // census C15: 0056's thirteen + undated_documents
 
   const rByKey = new Map(readiness.gates.map((x) => [x.check_key, x]));
   for (const c of plan.checks) {

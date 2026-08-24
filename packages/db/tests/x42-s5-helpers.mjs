@@ -467,11 +467,27 @@ const KL_ROSTER_BASE = [
 ];
 const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
 
+// F-A4 PR-1a [close key 1, Window A, `f_a4_pr_1a_measurement_layer` at whatever number merge
+// claims]: clara._close_gate_undated spells the same MYT idiom (design close-key-1-design.md
+// v2 §3.10 decision (i)) for its `filed_on` bound and payload key. It CANNOT call
+// clara._book_today() instead: the authority answers "what MYT date is today", while this body
+// needs "what MYT date does THIS document's filed_at timestamp fall on" — a per-row question
+// the authority does not answer, exactly the same shape that put _ocr_sales_floor and its
+// siblings on this roster rather than through the authority. Declared cost, not drift.
+// GATED on the migration's STABLE STEM, never its number — numbers are claimed at merge, and
+// this battery also runs against pre-PR-1a chains where the body does not exist yet.
+const KL_ROSTER_F_A4_PR1A = ["_close_gate_undated"];
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
-  const applied = (await query(
-    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  const applied = async (pat) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version like '${pat}'`
   )).rows[0].n === 1;
-  const names = applied ? [...KL_ROSTER_BASE, ...KL_ROSTER_0046] : [...KL_ROSTER_BASE];
+  const appliedStem = async (re) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
+  )).rows[0].n === 1;
+  const names = [...KL_ROSTER_BASE];
+  if (await applied("0046_%")) names.push(...KL_ROSTER_0046);
+  if (await appliedStem("f_a4_pr_1a_measurement_layer$")) names.push(...KL_ROSTER_F_A4_PR1A);
   return names.sort().join(" ");
 }
