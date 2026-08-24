@@ -184,13 +184,20 @@ test("GM-10 retains an early withdrawal until its originating task has settled",
   assert.equal(out.receipt.prior_task_id, "task-running");
 });
 
-test("GM-10 cycle rolls back and retains a pending-settlement withdrawal without dead-lettering", async () => {
+test("GM-10 cycle rolls back and retains a pending-settlement withdrawal, recording ONE bounded attempt", async () => {
+  // F2 (opus review, measured): a live owner task used to spend NO attempt budget at all —
+  // 3 cycles, checkpoint never moved, relay_dead_letters stayed at 0 the whole time, no
+  // operator signal, ever. It now DOES spend attempt budget (bounded — see the next test),
+  // via the SAME retained-event ledger the thrown-error path already used, so the count
+  // survives across cycles/restarts. One attempt, well under the cap, still retains without
+  // checkpointing — that half of the old contract is unchanged.
   const calls = [];
+  let dlAttempts = 0;
   const client = {
     query: async (sql, params) => {
       calls.push({ sql, params });
       const normalized = sql.trim().toLowerCase();
-      if (normalized === "begin" || normalized === "rollback") return { rows: [], rowCount: 0 };
+      if (normalized === "begin" || normalized === "rollback" || normalized === "commit") return { rows: [], rowCount: 0 };
       if (/from clara\.firm_event_seq/.test(sql)) {
         return { rows: [{ firm_id: "F", head_seq: 6, last_seq: 5 }], rowCount: 1 };
       }
@@ -206,6 +213,10 @@ test("GM-10 cycle rolls back and retains a pending-settlement withdrawal without
           rowCount: 1,
         };
       }
+      if (/insert into clara\.relay_dead_letters/i.test(sql)) {
+        dlAttempts += 1;
+        return { rows: [{ attempt_count: dlAttempts }], rowCount: 1 };
+      }
       throw new Error("unexpected query: " + sql);
     },
   };
@@ -219,22 +230,76 @@ test("GM-10 cycle rolls back and retains a pending-settlement withdrawal without
 
   assert.deepEqual(
     calls.filter(({ sql }) => /^(begin|commit|rollback)$/i.test(sql.trim())).map(({ sql }) => sql.trim().toLowerCase()),
-    ["begin", "rollback"],
-    "the live-task result rolls back its effect transaction and never commits",
+    ["begin", "rollback", "begin", "commit"],
+    "the effect transaction rolls back, then the bounded-attempt record commits in its OWN transaction",
   );
   assert.equal(
     calls.some(({ sql }) => /insert into clara\.relay_checkpoints/i.test(sql)),
     false,
-    "the withdrawal checkpoint is retained (the discovery SELECT is expected)",
+    "the withdrawal checkpoint is still retained — one attempt is well under the cap",
   );
-  assert.equal(
-    calls.some(({ sql }) => /insert into clara\.relay_dead_letters/i.test(sql)),
-    false,
-    "a transient owner-task race spends no poison budget",
-  );
+  assert.equal(dlAttempts, 1, "exactly one bounded attempt was recorded for this cycle");
   assert.deepEqual(enqueued, [], "no task exists to enqueue before terminal settlement");
   assert.deepEqual(out, { firms: 1, admitted: 0, capped: false });
-  assert.ok(logs.some((message) => /deferred without checkpoint: retry_pending_settlement/.test(message)));
+  assert.ok(logs.some((message) => /deferred without checkpoint \(attempt 1\/5\): retry_pending_settlement/.test(message)));
+});
+
+test("GM-10 a stuck owner task dead-letters and the checkpoint advances after MAX_RETRY_PENDING_CYCLES cycles", async () => {
+  // The bound itself, end to end: an owner task that NEVER settles (a crashed worker, a
+  // human review that never finishes) must not block the firm's whole autodraft lane
+  // head-of-line forever. After the cap, the SAME treatment the thrown-error path already
+  // gets: checkpoint PAST the poison and leave its relay_dead_letters row exactly where it
+  // is — status stays 'pending', so this IS retention (an operator can still see and redrive
+  // it), never a silent drop.
+  let dlAttempts = 0;
+  let checkpointSeq = null;
+  const client = {
+    query: async (sql) => {
+      const normalized = sql.trim().toLowerCase();
+      if (normalized === "begin" || normalized === "rollback" || normalized === "commit") return { rows: [], rowCount: 0 };
+      if (/from clara\.firm_event_seq/.test(sql)) {
+        if (checkpointSeq != null && checkpointSeq >= 6) return { rows: [], rowCount: 0 }; // caught up
+        return { rows: [{ firm_id: "F", head_seq: 6, last_seq: checkpointSeq ?? 5 }], rowCount: 1 };
+      }
+      if (/from clara\.domain_events/.test(sql)) {
+        return {
+          rows: [{ seq: 6, id: "stuck-withdrawal", event_type: "entry.withdrawn", document_id: "D" }],
+          rowCount: 1,
+        };
+      }
+      if (/readmit_autodraft_after_withdrawal/.test(sql)) {
+        return {
+          rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-stuck" } }],
+          rowCount: 1,
+        };
+      }
+      if (/insert into clara\.relay_dead_letters/i.test(sql)) {
+        dlAttempts += 1;
+        return { rows: [{ attempt_count: dlAttempts }], rowCount: 1 };
+      }
+      if (/insert into clara\.relay_checkpoints/i.test(sql)) {
+        checkpointSeq = 6;
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  const logs = [];
+  for (let cycle = 1; cycle <= 5; cycle++) {
+    await runAutodraftCycle(client, { onlyFirm: "F", enqueue: async () => {}, log: (m) => logs.push(m) });
+  }
+  assert.equal(dlAttempts, 5, "five cycles spent exactly five bounded attempts — cross-cycle persistent state, not an in-memory counter");
+  assert.equal(checkpointSeq, 6, "PROVED: after the cap the checkpoint advances past the stuck deferral");
+  assert.ok(
+    logs.some((m) => /owner task never settled after 5 cycles .* dead-lettered \+ skipped/.test(m)),
+    `expected an exhaustion log line, got: ${JSON.stringify(logs.slice(-3))}`,
+  );
+  // Retention, not silent-drop: a 6th cycle finds nothing left behind the now-advanced
+  // checkpoint — the event never silently respawns, and its dead-letter row (attempt_count=5,
+  // status still 'pending') stays exactly where an operator would find it.
+  const after = await runAutodraftCycle(client, { onlyFirm: "F", enqueue: async () => {}, log: () => {} });
+  assert.equal(after.admitted, 0);
+  assert.equal(dlAttempts, 5, "the caught-up firm is never rediscovered, so no further attempt is spent");
 });
 
 test("runCatchupPass admits with origin 'sweep' — the generic unattended pass may never take the one_click door", async () => {

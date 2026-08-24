@@ -39,6 +39,15 @@ export const AUTODRAFT_EVENT_TYPES = Object.freeze([
 const AUTODRAFT_EVENT_SET = new Set(AUTODRAFT_EVENT_TYPES);
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_AUTODRAFT_MAX_ATTEMPTS || 5);
+// F2 (opus review): retry_pending_settlement (a LIVE owner task, GM-10) is a real, not-yet-
+// terminal fact -- never an error -- so it deliberately does NOT share MAX_ATTEMPTS' error
+// semantics or its counter. But left genuinely unbounded, a task that crashes stuck 'running'
+// (or a human review that never finishes) blocks this firm's WHOLE autodraft lane head-of-
+// line forever: the checkpoint can never advance past the retained event, so every later
+// event on the firm is stranded behind it too, and nothing ever signals an operator (measured
+// -- opus review F2: 3 cycles, checkpoint never moves, relay_dead_letters stays at 0 the
+// whole time). Its own dedicated cap, same order of magnitude as MAX_ATTEMPTS' spirit.
+const MAX_RETRY_PENDING_CYCLES = Number(process.env.CLARA_AUTODRAFT_MAX_RETRY_PENDING_CYCLES || 5);
 const POLL_INTERVAL_MS = Number(process.env.CLARA_AUTODRAFT_POLL_MS || 2000);
 const CATCHUP_MS = Number(process.env.CLARA_AUTODRAFT_CATCHUP_SECONDS || 300) * 1000;
 const RESERVE_TOKENS = Number(process.env.CLARA_AUTODRAFT_RESERVE_TOKENS || 40000);
@@ -210,7 +219,18 @@ async function runEffectTxn(client, { firmId, ev, deps }) {
       : await admitDocument(client, { firmId, documentId: ev.documentId }, deps);
     if (res.retry) {
       await client.query("rollback");
-      return { ok: false, retry: true, reason: res.receipt.outcome };
+      // F2 (opus review): a LIVE owner task is retained WITHOUT checkpointing (correct — the
+      // event is not consumed yet), but that retention must be BOUNDED across cycles, not just
+      // within one. relay_dead_letters is the retained-event pathway's own cross-cycle state
+      // (survives a process restart, unlike an in-memory counter) — reused here for its
+      // per-(consumer,event_id) attempt_count, in its OWN dedicated txn so the count persists
+      // even though THIS txn just rolled back. The row's status stays 'pending' the whole
+      // time (never silently resolved), so it is retention, not a silent drop, once exhausted.
+      const attempts = await recordAutodraftDeadLetter(client, {
+        eventId: ev.id,
+        reason: `retry_pending_settlement: ${res.receipt.outcome}`,
+      });
+      return { ok: false, retry: true, reason: res.receipt.outcome, attempts };
     }
     await writeCheckpoint(client, { consumer: AUTODRAFT_CONSUMER, firmId, seq: ev.seq });
     await client.query("commit");
@@ -252,7 +272,13 @@ async function processAutodraftFirm(client, { firmId, lastSeq, batchSize, deps }
       continue;
     }
     if (res.retry) {
-      log(`[autodraft] event=${ev.id} deferred without checkpoint: ${res.reason}`);
+      if (res.attempts >= MAX_RETRY_PENDING_CYCLES) {
+        log(`[autodraft] event=${ev.id} owner task never settled after ${MAX_RETRY_PENDING_CYCLES} cycles → dead-lettered + skipped: ${res.reason}`);
+        await checkpointOnly(client, { firmId, seq: ev.seq }); // advance past the stuck deferral
+        cursor = ev.seq;
+        continue;
+      }
+      log(`[autodraft] event=${ev.id} deferred without checkpoint (attempt ${res.attempts}/${MAX_RETRY_PENDING_CYCLES}): ${res.reason}`);
       return { readCount: evs.length, maxSeq: cursor, admitted: admittedCount, blocked: true };
     }
     if (res.attempts >= MAX_ATTEMPTS) {
