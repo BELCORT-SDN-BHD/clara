@@ -201,16 +201,17 @@ after(async () => {
 // A. THE FLOOR'S NEW SHAPE AND ITS TWO NEW TERMS.
 // ---------------------------------------------------------------------------
 
-test("A1 the floor returns qualifying/distinct_invoices/corroborated/span_days, and distinct_docs is gone", async (t) => {
-  if (skipHere(t)) return;
+test("A1 the floor returns qualifying/distinct_invoices/corroborated/span_days, and distinct_docs is gone", { skip: "_ocr_sales_floor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): _ocr_sales_floor itself is dropped.
   const r = await rootQuery(
     "select pg_get_function_result('clara._ocr_sales_floor(uuid,uuid,text)'::regprocedure) as shape");
   assert.equal(r.rows[0].shape,
     "TABLE(qualifying integer, distinct_invoices integer, corroborated integer, span_days integer)");
 });
 
-test("A2 7A-R4: entries the HUMAN lane produces (coding_kind NULL) earn NO sales posting authority", async (t) => {
-  if (skipHere(t)) return;
+test("A2 7A-R4: entries the HUMAN lane produces (coding_kind NULL) earn NO sales posting authority", { skip: "_ocr_sales_floor/propose_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): _ocr_sales_floor (via floorOf) and propose_autopost_rule
+  // are dropped.
   const sub = world.users.alice;
   const client = await freshSalesClient(sub);
   const cred = await mintInteractive(await firmOf(client));
@@ -240,8 +241,8 @@ test("A2 7A-R4: entries the HUMAN lane produces (coding_kind NULL) earn NO sales
   assert.match(String(prop.error.detail ?? prop.error.message), /insufficient_evidence/);
 });
 
-test("A3 7A-R4: the SAME seven entries, tagged sales_invoice, DO earn it", async (t) => {
-  if (skipHere(t)) return;
+test("A3 7A-R4: the SAME seven entries, tagged sales_invoice, DO earn it", { skip: "_ocr_sales_floor/propose_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): _ocr_sales_floor and propose_autopost_rule are dropped.
   const sub = world.users.alice;
   const client = await freshSalesClient(sub);
   const cred = await mintInteractive(await firmOf(client));
@@ -269,8 +270,8 @@ test("A3 7A-R4: the SAME seven entries, tagged sales_invoice, DO earn it", async
   noteLane(`A3 floor: qualifying=${f.qualifying} invoices=${f.distinct_invoices} corroborated=${f.corroborated} span=${f.span_days}`);
 });
 
-test("A4 the corroboration gate is POSITIVE at propose and at sign, not merely present", async (t) => {
-  if (skipHere(t)) return;
+test("A4 the corroboration gate is POSITIVE at propose and at sign, not merely present", { skip: "propose_autopost_rule/sign_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): propose_autopost_rule/sign_autopost_rule are dropped.
   const sub = world.users.alice;
   const client = await freshSalesClient(sub);
   const cred = await mintInteractive(await firmOf(client));
@@ -304,8 +305,8 @@ test("A4 the corroboration gate is POSITIVE at propose and at sign, not merely p
   assert.match(String(prop.error.detail ?? prop.error.message), /insufficient_evidence/);
 });
 
-test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices ADMIT", async (t) => {
-  if (skipHere(t)) return;
+test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices ADMIT", { skip: "propose_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): propose_autopost_rule is dropped.
   // A2/A3/A4 are all NEGATIVE — they prove the two new terms REFUSE. A gate that only ever
   // refuses is indistinguishable from a gate that always refuses, so this is the cell that
   // proves the ROOT fix lets earned authority through. It is also the only place x46
@@ -912,8 +913,8 @@ test("D2 the 6-arity preserves 0036's semantics rather than reverting to 0011's"
 // E. THE PREVIEW (skeleton §2b) AND THE BACKFILL DOOR (7A-R5).
 // ---------------------------------------------------------------------------
 
-test("E1 the preview answers not-applicable for an inaccessible rule and never raises", async (t) => {
-  if (skipHere(t)) return;
+test("E1 the preview answers not-applicable for an inaccessible rule and never raises", { skip: "preview_ocr_sales_evidence retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1/OQ-3/D36): preview_ocr_sales_evidence is dropped.
   // Called as a HUMAN: the verb goes through clara._human_ctx exactly like
   // clara.list_autopost_rules, so a root/no-actor call is refused by design.
   const r = await humanQuery(world.users.alice,
@@ -923,8 +924,8 @@ test("E1 the preview answers not-applicable for an inaccessible rule and never r
   assert.ok(r.rows[0].p.evaluated_at, "and carries an evaluation timestamp");
 });
 
-test("E2 the preview reports the floor's own numbers plus the tax-silent gap", async (t) => {
-  if (skipHere(t)) return;
+test("E2 the preview reports the floor's own numbers plus the tax-silent gap", { skip: "preview_ocr_sales_evidence retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1/OQ-3/D36): preview_ocr_sales_evidence is dropped.
   const sub = world.users.alice;
   const client = await freshSalesClient(sub);
   const cred = await mintInteractive(await firmOf(client));
@@ -1005,8 +1006,11 @@ test("E3 the backfill door is recorded, singular per client, pausable, and termi
 // F. PURCHASE ISOLATION. The whole purchase lane must be untouched.
 // ---------------------------------------------------------------------------
 
-test("F1 the purchase floor is STRUCTURALLY untouched: its 3-sighting branch is intact and the corroboration term appears ONLY inside the ocr_sales branch", async (t) => {
+test("F1 the purchase floor is STRUCTURALLY untouched: its 3-sighting branch is intact and the corroboration term appears ONLY inside the ocr_sales branch", { skip: "propose_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async (t) => {
   if (skipHere(t)) return;
+  // RETIRED (F-A2 PR-3, Annex B.1): propose_autopost_rule is dropped whole, taking its
+  // source-structure with it — there is no longer a v_seen<3 branch or an ocr_sales branch
+  // to compare. The purchase lane's SST/tax posture is F-T1/F-T3 territory now, not this file's.
   // The purchase floor is the SEPARATE v_seen<3 branch (0016:1714-1725); the OCR floor sits
   // under v_evc='ocr_sales' and structured sales never calls it. A purchase proposal must
   // therefore never see a corroboration term at all.

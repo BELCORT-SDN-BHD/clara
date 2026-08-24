@@ -321,8 +321,15 @@ test("f-a4.pr1a.A-4 F3 reproduced then repaired: a live filing with financial_da
   assert.equal(row.financial_date, null, "mandatory setup: the document carries NO financial date");
   assert.equal(row.retired_at, null, "mandatory setup: the filing is live");
   const endsOn = (await rootQuery("select ends_on from clara.fiscal_years where id=$1", [fx.fy])).rows[0].ends_on;
-  assert.ok(row.filed_on <= new Date(endsOn).toISOString().slice(0, 10) || String(row.filed_on) <= String(endsOn).slice(0, 10),
-    `mandatory setup: the filing date (${row.filed_on}) is inside the FY's filed_at bound (ends_on ${endsOn})`);
+  // node-postgres materializes a `date` column as a JS Date at LOCAL midnight, so neither
+  // Date<=string (NaN, always false) nor String(Date) (weekday-name lexicographic — the shape
+  // that failed every Tuesday and Wednesday) compares calendar dates; and toISOString() would
+  // shift a day on any runner east of UTC. Local components are how node-pg materialized it.
+  const localIsoDate = (d) => d instanceof Date
+    ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+    : String(d).slice(0, 10);
+  assert.ok(localIsoDate(row.filed_on) <= localIsoDate(endsOn),
+    `mandatory setup: the filing date (${localIsoDate(row.filed_on)}) is inside the FY's filed_at bound (ends_on ${localIsoDate(endsOn)})`);
 
   const begun = await beginClose(owner, { fy: fx.fy });
   const g = await latestGates(begun.close_run_id);

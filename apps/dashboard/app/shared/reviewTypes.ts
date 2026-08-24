@@ -49,7 +49,11 @@ export type QueueRow = {
   document_id: string | null;
   lane: QueueLane;
   auto: boolean;
-  rule_backed: boolean;
+  // rule_backed RETIRED (D35/OQ-2, F-A2 PR-3): no entry F-A2 posts can ever be
+  // rule-backed once the write stopped, so a permanently-false column is dropped
+  // rather than rendered (law 27(2)). The DB projection itself is unchanged — it
+  // still reads honestly over KEEP-AS-HISTORY rule_decisions rows — only this type
+  // and the dashboard surfaces that read it stop carrying the field.
   high_stakes: boolean;
   aged_since: string | null;
   amount_cents: number | null;
@@ -134,7 +138,6 @@ function toQueueRow(raw: unknown): QueueRow {
     document_id: s(o.document_id),
     lane: (s(o.lane) as QueueLane) ?? null,
     auto: b(o.auto),
-    rule_backed: b(o.rule_backed),
     high_stakes: b(o.high_stakes),
     aged_since: s(o.aged_since),
     amount_cents: numOrNull(o.amount_cents),

@@ -59,7 +59,7 @@ const FIXTURE_BASE: QueueRow = {
   row_kind: "draft", section: "needs_review", sort: [],
   client_id: "c1000000-0000-4000-8000-000000000001", counterparty_id: null,
   filing_id: null, entry_id: null, question_id: null, task_id: null, document_id: null,
-  lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
+  lane: null, auto: false, high_stakes: false, aged_since: null,
   amount_cents: null, period: null, question_text: null, created_at: null,
   id: "fixture-row", coding_kind: null, watch_id: null, tier: null, finding_id: null,
   asset_id: null,

@@ -170,42 +170,65 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   // assembly; this pin records the same adjudication.
   "_adj_run_occurrence_core", "_adv_assert_proposal", "_adv_enrolment_at", "_adv_on_approve", "_adv_reversal_admission", "_adv_window_closed_under",
   "_approve_entry_core", "_approve_opening_entry", "_derive_vendor_binding_proposal", "_draft_entry_core", "_enqueue_invoice_facts_core",
-  "_fa_on_approve", "_ocr_sales_floor", "_pair_reverse_core", "_publish_wiki_page_version_core", "_record_onboarding_contributor",
+  "_fa_on_approve", "_pair_reverse_core", "_publish_wiki_page_version_core", "_record_onboarding_contributor",
   "_refund_document_reservation", "_refund_processing_call", "_reserve_document_ingest", "_reserve_processing_call", "_resize_document_reservation",
   "_resolve_vendor_binding", "_seed_verified_document", "_settle_document_reservation", "_settle_from_bank_line_core", "_settle_processing_call",
   "_tf_agent_task_insert", "_tf_agent_task_update", "_tf_autodraft_attempt_update", "_tf_coding_task_update", "_tf_counterparty_update_0011",
   "_tf_document_intake_update", "_tf_fa_movement_belt", "_tf_filing_correction_update", "_tf_firm_document_limits_upsert", "_tf_fixed_assets_immutable_0017",
   "_tf_processing_call_reservation_update", "_tf_processing_task_update", "_tf_reservation_update", "_tf_rotate_token", "_tf_wake_intent_consume",
-  "_wake_cred_full", "ack_compliance_watch", "acknowledge_rule_posts", "acknowledge_sweep_run", "add_bank_account",
   // `begin_chat_turn` LEFT this base array at F-A9 PR-0 and is now a REVERSE-gated cohort
   // (CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES, below) — it is pushed back on any database that
   // has not applied the hotfix. Removed here rather than kept-and-subtracted so the base
   // array stays what it claims to be: the set measured at the CURRENT frontier.
+  //
+  // ELEVEN F-A2-PR-3-RETIRED NAMES do NOT leave this array the same way -- see
+  // RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES below, which pushes them back exactly like
+  // begin_chat_turn's reverse gate, one migration later in the estate's life instead of one
+  // earlier. Unconditional removal (what an earlier pass of this file did) breaks every
+  // `db-slice-frontiers` leg pinned before the cutover, where all eleven still carry a bare
+  // clock token by catalog read: the identical unconditional-append defect this file's own
+  // :153-164 comment already names, mirrored to the removal direction.
+  "_wake_cred_full", "ack_compliance_watch", "acknowledge_sweep_run", "add_bank_account",
   "admit_autodraft_task", "answer_interruption", "approve_opening_correction", "approve_opening_seed", "approve_pair_reversal",
   "approve_wrong_client_correction", "begin_client_onboarding", "bootstrap_client_plan", "cancel_agent_task",
   "cancel_client_onboarding", "cancel_opening_seed", "cancel_pair_reversal", "cancel_seeding_batch", "claim_document_intake_upload",
   "claim_document_processing_task", "classify_document", "commit_client_onboarding", "complete_bank_reconciliation", "complete_coding_task",
   "complete_fixed_asset_particulars", "complete_pending_match", "complete_seeding_batch", "complete_stored_document_task", "confirm_attribution_candidate",
   "consume_egress_dispatch", "create_client", "create_firm", "create_seeding_batch", "deactivate_bank_account",
-  "deactivate_client_egress_purpose", "decline_coding_rule", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
-  "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all", "execute_rule_post",
+  "deactivate_client_egress_purpose", "decline_seeding_proposal", "dismiss_attribution_candidate", "dismiss_coding_task",
+  "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all",
   "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
-  "get_context_pack", "list_autopost_rules", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
+  "get_context_pack", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
   "mark_wiki_citations_stale", "match_bank_line", "merge_counterparties", "mint_wake_credential", "open_interruption",
-  "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch", "propose_autopost_rule",
-  "propose_bank_rule", "propose_vendor_identity_binding", "reconcile_autopost_rules", "reconcile_sweep_runs", "record_future_attestation",
+  "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch",
+  "propose_bank_rule", "propose_vendor_identity_binding", "reconcile_sweep_runs", "record_future_attestation",
   "record_opening_keyed_resolution", "relay_health", "remove_member", "rename_counterparty", "request_reextraction",
   "resolve_and_book_bank_line", "resolve_bank_line_exception", "resolve_compliance_watch", "resolve_lint_finding", "resolve_onboarding_plan_item",
-  "resolve_open_question", "retire_adjustment_template", "retire_autopost_rule", "retire_bank_rule", "retire_client_alias",
-  "retire_coding_rule", "retire_counterparty_alias", "retire_depreciation_authority", "retire_document_filing", "retire_fa_account_profile",
+  "resolve_open_question", "retire_adjustment_template", "retire_bank_rule", "retire_client_alias",
+  "retire_counterparty_alias", "retire_depreciation_authority", "retire_document_filing", "retire_fa_account_profile",
   "retire_staff_advance_account", "retire_wiki_page", "reverse_entry", "revise_entry", "revise_fixed_asset_particulars",
   "revoke_client_egress", "revoke_client_egress_purpose", "revoke_vendor_identity_binding", "revoke_wake_credential", "run_client_lint",
   "run_lint_all", "set_counterparty_terms", "set_document_kind", "set_member_role", "set_wiki_synthesis_hold",
-  "settle_chat_turn", "settle_ingest_reservation", "sign_adjustment_template", "sign_autopost_rule", "sign_bank_rule",
-  "sign_coding_rule", "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
+  "settle_chat_turn", "settle_ingest_reservation", "sign_adjustment_template", "sign_bank_rule",
+  "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
 ].sort();
+
+// F-A2 PR-3 [the cutover, `f_a2_cutover_retirement` at whatever number merge claimed]: ELEVEN
+// names that ALL carried a bare clock token as part of the rules-execution tier, retired whole
+// (Annex B.1). Every one of them is present from EARLY in the estate's life (the coding-rule/
+// autopost-rule machinery is Wave-A2/A2.1-era, and _ocr_sales_floor is 0016's), so unlike a
+// born-late cohort this needs no LOWER gate at all -- only the same upper "not yet retired" gate
+// SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES uses, and the exact mirror image of
+// CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES's reverse-gate shape below (there the name is pushed back
+// on NOT-yet-applied; here it is pushed back on NOT-yet-retired). GATED ON THE STEM, never a
+// number, for the reason every other block in this file states.
+const RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES = [
+  "_ocr_sales_floor", "acknowledge_rule_posts", "decline_coding_rule", "execute_rule_post",
+  "list_autopost_rules", "propose_autopost_rule", "reconcile_autopost_rules", "retire_autopost_rule",
+  "retire_coding_rule", "sign_autopost_rule", "sign_coding_rule",
+];
 
 // ---------------------------------------------------------------------------
 // 0046 [§7-A] — THE THREE NAMES THIS MIGRATION ADDS, AND WHY THE ROSTER IS BIMODAL.
@@ -226,8 +249,18 @@ export const S5_25_BARE_TOKEN_ROSTER = [
 // cohortFailures() gate already exist to prevent. Gating on the migration ledger keeps arm
 // (D) exact in BOTH directions at 0045 and at 0046+ alike: a missing name still fails.
 const SALES_LANE_0046_CLOCK_NAMES = [
-  "preview_ocr_sales_evidence", "set_sales_backfill_state", "set_sales_lane_activation",
+  "set_sales_backfill_state", "set_sales_lane_activation",
 ];
+// preview_ocr_sales_evidence RETIRED with F-A2 PR-3 (Annex B.1, OQ-3/D36): it is a
+// BORN-THEN-RETIRED name, present from 0046 until the cutover migration lands, and this
+// battery also runs against BOTH slices of that window — the d-b0..b3 legs pinned before
+// 0046 (where it never existed) and, since F-A2 PR-3, the frontier legs pinned AFTER the
+// cutover (where it no longer exists). A window name needs an upper gate as well as a lower
+// one, or the roster silently over-asserts on every post-retirement frontier — the SAME
+// unconditional-append defect :153-160 already names for fail_witness_facts, generalised to
+// a name that is later DROPPED rather than merely born late. Its own array, kept separate
+// from the names above (which never retire) so the two gates read independently.
+const SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES = ["preview_ocr_sales_evidence"];
 
 // 0055 [Wave E lane α]: record_client_fact stamps recorded_at/superseded_at with bare
 // now() — timestamptz audit stamps, the lawful class; the door never derives a DATE
@@ -498,7 +531,13 @@ export async function s5BareTokenRoster(query) {
     `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
   const names = [...S5_25_BARE_TOKEN_ROSTER];
+  // REVERSE gate, no lower bound -- these eleven are early-born (see the array's own header),
+  // so they are expected everywhere the roster reaches UNTIL the cutover retires them.
+  if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES);
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
+  if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) {
+    names.push(...SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES);
+  }
   if (await applied("0055_%")) names.push(...CLIENT_FACTS_0055_CLOCK_NAMES);
   if (await applied("0056_%")) names.push(...CLOSE_MODEL_0056_CLOCK_NAMES);
   if (await applied("0057_%")) names.push(...REGISTRY_0057_CLOCK_NAMES);
@@ -534,10 +573,18 @@ export async function s5BareTokenRoster(query) {
 // agree with. Spelling the floor's own expression is the correctness fix, and joining this
 // roster is its declared cost. 0046's own tail arm (7) pins the same ten names.
 const KL_ROSTER_BASE = [
-  "_adj_on_approve", "_adj_run_occurrence_core", "_book_today", "_ocr_sales_floor",
+  "_adj_on_approve", "_adj_run_occurrence_core", "_book_today",
   "ack_compliance_watch", "evaluate_sst_watch", "evaluate_sst_watches_all",
   "record_future_attestation", "reverse_entry",
 ];
+// clara._ocr_sales_floor is BORN AT 0016, not 0046 -- it lawfully needs its own array with
+// ONLY the F-A2 PR-3 cutover's upper gate, never a number-keyed lower one (B.3-forbidden: a
+// `like '0046_%'` bound would have been wrong on arrival and stays wrong on renumber). RETIRED
+// with F-A2 PR-3 (Annex B.1, OQ-3/D36), the same reverse shape RULE_MACHINERY_RETIRED_F_A2_PR3
+// _CLOCK_NAMES uses above for arm (D)'s roster.
+const KL_ROSTER_RETIRED_F_A2_PR3 = ["_ocr_sales_floor"];
+// preview_ocr_sales_evidence: genuinely 0046-born AND retired with F-A2 PR-3 -- a true WINDOW
+// name, present only from 0046 until the cutover (unlike _ocr_sales_floor above).
 const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
 
 // F-A4 PR-1a [close key 1, Window A, `f_a4_pr_1a_measurement_layer` at whatever number merge
@@ -560,7 +607,10 @@ export async function s5KlDuplicationRoster(query) {
     `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
   const names = [...KL_ROSTER_BASE];
-  if (await applied("0046_%")) names.push(...KL_ROSTER_0046);
+  // _ocr_sales_floor: early-born (0016), no lower gate — reverse-gated only on the cutover.
+  if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...KL_ROSTER_RETIRED_F_A2_PR3);
+  // preview_ocr_sales_evidence: a true WINDOW name, present from 0046 until the cutover.
+  if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) names.push(...KL_ROSTER_0046);
   if (await appliedStem("f_a4_pr_1a_measurement_layer$")) names.push(...KL_ROSTER_F_A4_PR1A);
   return names.sort().join(" ");
 }

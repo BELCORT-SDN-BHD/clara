@@ -51,6 +51,19 @@ async function suggestedEntriesOf(client) {
   return entriesWithFlag(client, "bank_rule_suggested");
 }
 
+/** True iff `0106_f_a2_posting_core` — the breeding-excision body — is applied. Keyed on the
+ *  migration's STABLE STEM, never its number (numbers are claimed at merge), matching the
+ *  frontier-gate law `f-a2-post-fixtures.mjs`'s header states for this exact hazard: "the
+ *  `db-slice-frontiers` matrix runs this package against databases pinned at EARLIER frontiers
+ *  (d-b0..b3 stop at 0042-0045) … an unconditional assertion about a not-yet-born object reds
+ *  those legs while saying nothing about the thing under test." This file stays CONTRACT-BLIND
+ *  (its own header) so the probe is local rather than an import of the F-A2 battery's fixtures. */
+async function breedingExcised() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", ["f_a2_posting_core$"]);
+  return r.rows[0].n > 0;
+}
+
 // ===========================================================================
 // x42.prod-19 — THE HAPPY PATH. A SIGNED kind='coding' rule + an unmatched,
 // un-excepted line on a live statement → ONE draft, stamped
@@ -336,14 +349,23 @@ test("x42.prod-23 the sighting carve-out (control INVERTED, D39): an accepted su
     noteLane("x42.prod-23: the suggested entry carries NO counterparty on any leg, so the carve-out is vacuous in this build — the accrual gate would have been closed by `v_counterparty is null` anyway (finding: the design's counterparty-bearing coding proposal does not reach the legs)");
   }
 
-  // THE CONTROL, INVERTED (F-A2 PR-1, D39). §B.7 names this half by line: *"The CONTROL is the
-  // point of the cell: the same counterparty and the same account, approved through an ORDINARY
-  // draft, MUST move the counter"* — a POSITIVE witness that breeding happens on an ordinary
-  // approval, the same class as x37:1951, and *"the control half is exactly what the excision
-  // deletes."* Its disposition is an inverted twin, and the battery successors are
-  // `f-a2.c8.inv-ordinary` and `f-a2.c8.zero-heads`. The carve-out half above is now VACUOUS —
-  // `:335`'s noteLane already recorded it as such in this build — so this half is the only live
-  // evidence in the cell, and it is inverted rather than deleted.
+  // THE CONTROL, FRONTIER-GATED (F-A2 PR-1, D39). §B.7 names this half by line: *"The CONTROL is
+  // the point of the cell: the same counterparty and the same account, approved through an
+  // ORDINARY draft, MUST move the counter"* — a POSITIVE witness that breeding happens on an
+  // ordinary approval, the same class as x37:1951, and *"the control half is exactly what the
+  // excision deletes."* D39's claim split retires/re-points the ~40 breeding-CLAIM tests "IN
+  // PR-1, with the excision" — but the excision itself is a DB body, `0106_f_a2_posting_core`'s
+  // ninth `_approve_entry_core` (informally "the 8th body" — the annexes' own count is off by
+  // one, trued at `0106:1379-1391`), which this file's own d-b2 frontier leg never reaches: that
+  // leg pins the chain at 0045, and 0106 is an F-A2 migration, decades of numbers later. Before
+  // it is applied the ORIGINAL control still holds — `f-a2-excision.test.mjs`'s header names this
+  // exact cell: *"x42.prod-23's control half … asserts an ordinary approval DOES move the
+  // sighting counter. After the 8th body both must be FALSE, and PR-3 re-points them. Until then,
+  // these cells hold the other end."* So this half asks rather than assumes, the same idiom
+  // `x42x-b3-b2-hook-order.test.mjs` uses for its own slice-frontier arms. Post-excision, the
+  // battery successors are `f-a2.c8.inv-ordinary` and `f-a2.c8.zero-heads`; the carve-out half
+  // above is now VACUOUS in this build — `:335`'s noteLane already recorded it — so this half is
+  // the only live evidence in the cell either way.
   const d = await draftEntryV3(world.users.alice, {
     client, resolution: await manualRes(world.users.alice, client),
     memo: "x42 carve-out control: an ordinary coded bill", postingDate: w.period.mid,
@@ -356,15 +378,20 @@ test("x42.prod-23 the sighting carve-out (control INVERTED, D39): an accepted su
   await approveEntry(world.users.bob, {
     entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x42-carve-ctrla"),
   });
-  assert.equal(await ruleSightingCount(client), before,
-    "THE CONTROL, INVERTED (D39): an ordinary approval on the same counterparty+account no longer moves the sighting counter — the eighth _approve_entry_core body breeds nothing, on any lane");
-  // …and the counter itself still reads, which is what keeps the zero above evidence rather
-  // than an absence (review law 2). The restatement replays the retired writer's own inserts
-  // onto this very entry and the SAME counter moves.
-  assert.ok(await restateSightings(d.entry_id, { counterparty: cp }) > 0,
-    "the restatement wrote rows onto the ordinary approval");
-  assert.ok(await ruleSightingCount(client) > before,
-    "…and the SAME counter moves for them — the inverted zero is the door's answer, not a broken reader");
+  if (await breedingExcised()) {
+    assert.equal(await ruleSightingCount(client), before,
+      "THE CONTROL, INVERTED (D39, post-excision): an ordinary approval on the same counterparty+account no longer moves the sighting counter — the ninth _approve_entry_core body breeds nothing, on any lane");
+    // …and the counter itself still reads, which is what keeps the zero above evidence rather
+    // than an absence (review law 2). The restatement replays the retired writer's own inserts
+    // onto this very entry and the SAME counter moves.
+    assert.ok(await restateSightings(d.entry_id, { counterparty: cp }) > 0,
+      "the restatement wrote rows onto the ordinary approval");
+    assert.ok(await ruleSightingCount(client) > before,
+      "…and the SAME counter moves for them — the inverted zero is the door's answer, not a broken reader");
+  } else {
+    assert.ok(await ruleSightingCount(client) > before,
+      "THE CONTROL, AS ORIGINALLY DESIGNED (pre-excision frontier — no f_a2_posting_core migration applied): an ordinary approval on the same counterparty+account MUST move the sighting counter, or the carve-out above is evidence against a broken instrument");
+  }
 });
 
 // ===========================================================================

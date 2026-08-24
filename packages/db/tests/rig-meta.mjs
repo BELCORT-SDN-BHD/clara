@@ -40,13 +40,16 @@ const S6_RUNTIME_FNS = ["enqueue_invoice_facts", "persist_invoice_facts", "fail_
 // gains the client-pinned coding-lane reads + wake_client (+ the fix-round
 // _agent_read_admitted gate helper, granted clara_agent_ro only); the autodraft/sweep
 // runtime surface lands on clara_runtime; wake_interactive gains wake_open_question.
+// F-A2 PR-3 (docs/plan/active/f-a2-agentic-posting-design.md Annex B.1/B.2) retires the
+// rules-execution tier: propose_coding_rule, sign_coding_rule, decline_coding_rule,
+// retire_coding_rule and get_coding_rule are DROPped, so this WAVE-A-frontier roster —
+// consumed live below, not as a historical snapshot — loses those five names.
 const WAVE_A_HUMAN_FNS = [
   "rename_counterparty", "add_counterparty_alias", "retire_counterparty_alias", "merge_counterparties",
   "request_autodraft", "acknowledge_sweep_run",
-  "propose_coding_rule", "sign_coding_rule", "decline_coding_rule", "retire_coding_rule",
   "open_question", "resolve_open_question", "dismiss_open_question", "promote_clarify_to_question",
   "grant_client_egress", "revoke_client_egress", "approve_routine_entry",
-  "get_sweep_run", "get_open_question", "get_coding_rule", "list_review_queue",
+  "get_sweep_run", "get_open_question", "list_review_queue",
   "coding_lane", "list_coding_lanes", "get_entry_diff", "get_doc_entry_diff",
 ];
 const WAVE_A_AGENT_READS = [
@@ -62,14 +65,15 @@ const WAVE_A_WAKE_INTERACTIVE_FNS = ["wake_open_question"];
 // [WAVE-A2 §6/§7] posting-tier standing-rules human surfaces (PostgREST rpc, coarse
 // grant to clara_authenticated; role floors are body-enforced): sign (admin+),
 // propose/retire/acknowledge (bookkeeper+), and the rule/notification/receipt reads.
-const WAVE_A2_HUMAN_FNS = [
-  "sign_autopost_rule", "propose_autopost_rule", "retire_autopost_rule",
-  "acknowledge_rule_posts", "get_rule_post_run", "list_autopost_rules", "list_notifications",
-];
+// F-A2 PR-3 retires the whole autopost-rule verb family (sign/propose/retire/acknowledge/
+// list/get_run) — list_notifications is the ONE survivor, kept general-purpose.
+const WAVE_A2_HUMAN_FNS = ["list_notifications"];
 // [WAVE-A2 §6.2] the expiry/nudge sweep — runtime lane only (execute_rule_post is granted
 // LOGIN-DIRECT to clara_runtime_login, like record_rule_resolution, so it is deliberately
-// NOT in any of the five matrix roles).
-const WAVE_A2_RUNTIME_FNS = ["reconcile_autopost_rules"];
+// NOT in any of the five matrix roles). F-A2 PR-3 retires reconcile_autopost_rules, and
+// with it this cohort — kept as an explicit empty array (not deleted) so the ...spread
+// below stays a one-line diff against its Wave-A2 origin rather than a silent removal.
+const WAVE_A2_RUNTIME_FNS = [];
 // 0055 [Wave E lane α]: the ONE human door of the client-facts trio (admin floor,
 // body-enforced). Absent on pre-0055 frontiers — existence is the gate.
 const CLIENT_FACTS_0055_HUMAN_FNS = ["record_client_fact"];
@@ -871,7 +875,9 @@ export const EXTRACTION_0022_COHORT = [...EXTRACTION_0022_HUMAN_FNS];
 // the signing-time evidence preview plus the recorded backfill door; the drafter itself
 // reaches the DB through verbs that already existed.
 const SALES_LANE_0046_HUMAN_FNS = ["open_sales_backfill", "set_sales_backfill_state"];
-const SALES_LANE_0046_READ_FNS = ["preview_ocr_sales_evidence", "list_sales_backfill_batches"];
+// preview_ocr_sales_evidence RETIRED with F-A2 PR-3 (Annex B.1) — it retires with the floor
+// it read (_ocr_sales_floor / _ocr_sales_floor_pop, both dropped in the same file).
+const SALES_LANE_0046_READ_FNS = ["list_sales_backfill_batches"];
 // The definer internals, named so their absence from every role set is a DECLARED
 // expectation the cohort carries rather than a silent default (the 0020 block's reasoning).
 //
@@ -880,8 +886,9 @@ const SALES_LANE_0046_READ_FNS = ["preview_ocr_sales_evidence", "list_sales_back
 // granted to NO application role — and the main sweep, which expects `false` for every role
 // not listed in ALLOWED, is what turns that ruling into a test. If a future migration ever
 // grants it, this file fails and somebody has to say so out loud.
+// _ocr_sales_floor_pop RETIRED with F-A2 PR-3 (Annex B.1), alongside _ocr_sales_floor itself.
 const SALES_LANE_0046_UNGRANTED_FNS = [
-  "_ocr_sales_floor_pop", "_sales_lane_active", "_autodraft_direction_tri",
+  "_sales_lane_active", "_autodraft_direction_tri",
   "_sales_admission_open", "set_sales_lane_activation",
 ];
 export const SALES_LANE_0046_COHORT = [
