@@ -157,18 +157,25 @@ test("x42x.lw3 [POST arm] once 0044 is applied, BOTH D-b3 bodies reach the D-b1 
   // COMMENT-STRIPPED on purpose (E19): every slice carries `[SPLIT D-bN]` notes that NAME the
   // bodies it does and does not ship, so raw text would read a mention as a call.
   //
-  // RETARGETED (F-A3/PR-1a core extraction, this branch's own stacked base): the public
-  // clara.resolve_and_book_bank_line is now a thin delegator with no wall-calling logic of
-  // its own; the extraction moved that body byte-for-byte into
-  // clara._resolve_and_book_bank_line_core, so that is where the D-b1 wall call actually
-  // lives now. fnExists/existence checks above (lw1/lw2) stay on the public name -- those
-  // assert SHAPE (does the surface exist at this frontier), not the wall-calling BODY this
-  // cell checks.
+  // FRONTIER-AWARE (F-A3/PR-1a core extraction): this cell's own gate above checks D-b3
+  // (0044) only, not the later extraction, so it is reachable at a frontier where the
+  // extraction has not landed -- "old shape still pinned for pre-PR frontiers". Pre-
+  // extraction, the public clara.resolve_and_book_bank_line IS the wall-calling body.
+  // Post-extraction, it becomes a thin delegator with no wall-calling logic of its own, and
+  // the extraction moves that body byte-for-byte into clara._resolve_and_book_bank_line_core
+  // instead. Read whichever body is actually live at THIS frontier rather than assuming
+  // either shape.
   assert.ok(await fnExists("resolve_and_book_bank_line"), "clara.resolve_and_book_bank_line still exists at D-b3");
-  const composite = await strippedDef("_resolve_and_book_bank_line_core");
-  assert.ok(composite, "clara._resolve_and_book_bank_line_core exists at D-b3 (post PR-1a extraction)");
+  // strippedDef returns "" (not null/undefined) when a name resolves to nothing --
+  // stripSqlComments' own (src ?? "") coalesces a missing def to the empty string, which
+  // defeats a ?? fallback (only null/undefined trigger it) but not a || one (empty string
+  // is falsy too). || is the correct operator against this helper's actual contract.
+  const core = await strippedDef("_resolve_and_book_bank_line_core");
+  const composite = core || await strippedDef("resolve_and_book_bank_line");
+  assert.ok(composite,
+    `clara.${core ? "_resolve_and_book_bank_line_core" : "resolve_and_book_bank_line"} exists at D-b3`);
   assert.ok(/clara\._adv_assert_proposal\(/.test(composite),
-    "the composite's core CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)");
+    `the composite${core ? "'s core" : ""} CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)`);
 
   const block = await strippedDef("_wdb_line_booking_block");
   assert.ok(block, "clara._wdb_line_booking_block exists at D-b3");
