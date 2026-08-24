@@ -170,7 +170,7 @@ begin
                  ('_agent_receipt_src_f_a2'),('_agent_receipt_src_f_a3'),
                  ('_agent_receipt_src_f_a4'),('_agent_receipt_src_f_a5'),
                  ('_agent_receipt_src_f_a6'),('_agent_receipt_src_f_a7'),
-                 ('_agent_receipt_src_f_a8')) t(n)
+                 ('_agent_receipt_src_f_a8'),('_agent_receipts_all')) t(n)
    where to_regclass('clara.'||t.n) is not null;
   if v_missing is not null then
     raise exception 'F-A7 pi prestate: relation(s) already present: %', v_missing
@@ -229,7 +229,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-A7 pi prestate: clean -- 12 new relations absent, 11 premises live, the four *_visible siblings hold the idiom, client_identifiers.kind is the three-value world';
+  raise notice 'F-A7 pi prestate: clean -- 13 new relations absent, 11 premises live, the four *_visible siblings hold the idiom, client_identifiers.kind is the three-value world';
 end $$;
 
 set role clara_fn_owner;
@@ -258,7 +258,7 @@ comment on table clara.agent_receipt_contract is
 insert into clara.agent_receipt_contract(ordinal, column_name, data_type, nullable, semantics) values
   ( 1,'receipt_kind',    'text',                       false,'the discriminator; equals clara.agent_receipt_surfaces.receipt_kind for the owning item'),
   ( 2,'receipt_id',      'text',                       false,'the member row''s own primary key rendered as text (member PKs are uuid on some tables, bigint on others)'),
-  ( 3,'firm_id',         'uuid',                       false,'tenant scope; agent_receipts_visible filters on it'),
+  ( 3,'firm_id',         'uuid',                       true ,'tenant scope; agent_receipts_visible filters on it. NULL exactly when scope=''platform'' -- a platform act (F-A8 Tier-1 official-source feeds) belongs to no firm; every firm-scoped act carries it'),
   ( 4,'client_id',       'uuid',                       true ,'NULL where the act is structurally client-less (pre-attribution filing, a firm-narrow read)'),
   ( 5,'subject_id',      'text',                       true ,'the thing acted on -- entry / document / filing / report -- as text, for the reason receipt_id is'),
   ( 6,'acting_actor',    'uuid',                       false,'who acted; clara.agent_user_id() on an agent lane'),
@@ -738,9 +738,23 @@ comment on function clara.name_family_token(text) is
 -- The candidate set. `clients` UNION the firm''s `counterparties` (D-19), because ADR-0074
 -- names ROME PUBLIC ADVISORY a COUNTERPARTY: a clients-only predicate cannot see the very
 -- collision the ruling used as its worked example.
+-- SECURITY INVOKER (the default), deliberately -- not the definer semantics every other core in
+-- this file carries. p_firm is CALLER-SUPPLIED, and a SECURITY DEFINER function with a caller-
+-- supplied tenant parameter is the exact cross-tenant-oracle shape 0002:453-458 records the
+-- estate paying for once: reached under the owner's privilege, its own `cl.firm_id = p_firm` /
+-- `cp.firm_id = p_firm` predicates are the ONLY thing standing between a caller and another
+-- firm's rows, because SECURITY DEFINER bypasses ambient RLS. Both `clara.clients` and
+-- `clara.counterparties` carry their own forced-RLS `firm_id = clara.jwt_firm()` policies, so at
+-- the default (invoker) semantics a future accidental direct grant runs under the CALLER's own
+-- RLS on top of this function's predicates, not past it -- belt AND suspenders instead of a
+-- single elevated belt. The function is reachable today only from the two SECURITY DEFINER cores
+-- (`_firm_question_core`, `_identifier_promotion_core` via `name_family_is_ambiguous`), which
+-- already run as clara_fn_owner: a definer caller's internal call to an invoker callee still
+-- executes as the definer's effective role, so nothing here changes today's behaviour -- REVOKE
+-- ALL FROM PUBLIC below is still the primary wall, this is defence-in-depth under it.
 create function clara.name_family_candidates(p_firm uuid, p_name text)
   returns table (party_kind text, party_id uuid, party_name text, bound_client uuid)
-  language sql stable security definer set search_path = clara, pg_temp as $fn$
+  language sql stable set search_path = clara, pg_temp as $fn$
   with tok as (select clara.name_family_token(p_name) as t)
   select 'client'::text, cl.id, cl.name, cl.id
     from clara.clients cl, tok
@@ -762,8 +776,10 @@ comment on function clara.name_family_candidates(uuid, text) is
   'the firm''s live counterparties. More than one row means CLARIFY -- the caller never picks.';
 
 -- The wall''s own shape, so no caller re-derives ">1 means clarify" and gets it subtly wrong.
+-- SECURITY INVOKER too, same reasoning as name_family_candidates above (this function's only
+-- work is calling that one and comparing a count -- no direct table read of its own to guard).
 create function clara.name_family_is_ambiguous(p_firm uuid, p_name text) returns boolean
-  language sql stable security definer set search_path = clara, pg_temp as $fn$
+  language sql stable set search_path = clara, pg_temp as $fn$
   select (select count(*) from clara.name_family_candidates(p_firm, p_name)) > 1
 $fn$;
 comment on function clara.name_family_is_ambiguous(uuid, text) is
@@ -1063,7 +1079,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- (2) The contract is 18 rows with contiguous ordinals 1..18. A gap would silently exempt a
+  -- (2) The contract is 19 rows with contiguous ordinals 1..19. A gap would silently exempt a
   --     column from the checker, which walks by ordinal.
   select count(*)::int into v_n from clara.agent_receipt_contract;
   if v_n <> 19 then
