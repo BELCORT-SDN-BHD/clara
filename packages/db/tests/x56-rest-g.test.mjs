@@ -66,14 +66,32 @@ test("close-ordering: begin_close on FY2 refuses CLR41/close_ordering_violation 
   assert.equal(err.code, "CLR41", `expected CLR41 (got ${err.code} -- ${err.message})`);
   assert.equal(JSON.parse(err.detail ?? "{}").reason, "close_ordering_violation");
 
-  // Structural: the guard lives in begin_close, checked UNDER the 004/007 lock pair
-  // (the R1.5 TOCTOU lesson applied at authoring time -- read here, not assumed).
-  const body = (await rootQuery(
+  // Structural: the guard lives in the shared core begin_close delegates to (F-A4 PR-1b's
+  // entrance-seam body-move, design D-15 -- begin_close itself is now a thin delegate: the
+  // 004/007 locks and the ordering check moved into clara._begin_close_core, not begin_close's
+  // own prosrc, so a fixture written against the pre-move shape reads here instead). Checked
+  // UNDER the 004/007 lock pair (the R1.5 TOCTOU lesson applied at authoring time -- read
+  // here, not assumed).
+  const wrapperBody = (await rootQuery(
     "select pg_get_functiondef('clara.begin_close(uuid,text)'::regprocedure) as def",
   )).rows[0].def;
+  const coreExists = (await rootQuery(
+    "select to_regprocedure('clara._begin_close_core(uuid,uuid,uuid,text)') is not null as ok",
+  )).rows[0].ok;
+  // Frontier-gated (opus C-1): this assertion is only TRUE post-F-A4/PR-1b -- an unconditional
+  // match here would hard-fail (never gracefully fall through to the coreExists branch below)
+  // on any chain that has not yet applied the entrance-seam body-move.
+  if (coreExists) {
+    assert.match(wrapperBody, /_begin_close_core/, "post-F-A4/PR-1b: begin_close delegates to the shared core");
+  }
+  const body = coreExists
+    ? (await rootQuery(
+        "select pg_get_functiondef('clara._begin_close_core(uuid,uuid,uuid,text)'::regprocedure) as def",
+      )).rows[0].def
+    : wrapperBody;
   const lock007Pos = body.indexOf("pg_advisory_xact_lock(203005007");
   const orderingPos = body.indexOf("close_ordering_violation");
-  assert.ok(lock007Pos > 0 && orderingPos > 0, "mandatory setup: both the 007 lock and the ordering refusal are present in the live body");
+  assert.ok(lock007Pos > 0 && orderingPos > 0, "mandatory setup: both the 007 lock and the ordering refusal are present in the live body (begin_close pre-F-A4, _begin_close_core after)");
   assert.ok(lock007Pos < orderingPos, "the ordering guard is checked AFTER (under) the 007 lock, not before it");
 
   // Right answer: close FY1 first, then FY2 admits.
