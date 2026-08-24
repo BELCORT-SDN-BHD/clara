@@ -139,7 +139,8 @@ begin
    where h.beat_at > now() - interval '90 seconds' order by h.beat_at desc limit 1;
   if v_component is not null then
     raise exception 'F-A9 PR-0 QUIESCE GUARD: a runtime heartbeat is fresh (component %, beat_at %) -- this file replaces clara.begin_chat_turn, the chat-admission hot path, and an in-flight call finishes on the OLD body (D1); stop clara-runtime, wait for staleness (>90s), and re-apply',
-      v_component, v_beat;
+      v_component, v_beat
+      using errcode='CLR10';
   end if;
 end
 $f_a9_quiesce$;
