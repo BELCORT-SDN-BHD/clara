@@ -63,6 +63,11 @@ export const F_A2_STEMS = {
   chain: "f_a2_posted_chain$",
   /** PR-1b — the `get_context_pack` fifth splice, a read body with no D1 window. */
   pack: "f_a2_pack_splice$",
+  /** PR-2's GM-10 — the withdrawal re-admit door. Its own migration file, applied on top of
+   *  (never inside) `core`, so a DB that has `core` but not this file must SKIP the two GM-10
+   *  cells rather than hard-fail on a function that does not exist yet (a numbered-only
+   *  control DB proved this: `gateCore` alone let those cells reach the call). */
+  readmit: "f_a2_gm10_withdrawal_readmit$",
 };
 
 /** True iff a migration whose version matches `stem` is recorded applied. Catalog-probed
@@ -88,6 +93,7 @@ export const postingCoreReady = () => once("core", () => appliedStem(F_A2_STEMS.
 export const postingGrantsReady = () => once("grants", () => appliedStem(F_A2_STEMS.grants));
 export const postedChainReady = () => once("chain", () => appliedStem(F_A2_STEMS.chain));
 export const packSpliceReady = () => once("pack", () => appliedStem(F_A2_STEMS.pack));
+export const readmitReady = () => once("readmit", () => appliedStem(F_A2_STEMS.readmit));
 
 /** PR-2's runtime lane is a TypeScript deliverable with no DB stem of its own. A cell that
  *  needs it is skip-guarded on the named reason rather than on a probe that cannot exist —
@@ -120,6 +126,10 @@ export async function gateChain(t) {
 }
 export async function gatePack(t) {
   return (await packSpliceReady()) ? false : skipHere(t, PR1B_PENDING);
+}
+export async function gateReadmit(t) {
+  return (await readmitReady())
+    ? false : skipHere(t, `F-A2 PR-2 GM-10 readmit door absent (no ${F_A2_STEMS.readmit} migration applied)`);
 }
 
 // ===========================================================================
