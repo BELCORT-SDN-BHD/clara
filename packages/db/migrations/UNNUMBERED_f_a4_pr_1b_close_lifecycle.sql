@@ -523,9 +523,11 @@ begin
         -- DEBIT (zeroing the account the evaluator sums as credit-minus-debit) counted, and every
         -- year-end roll DEFLATED the rolling figure -- permanent SUPPRESSION of the 80%
         -- early-warning ladder, never a false alarm (measured direction, T7). A single-body fix
-        -- (this one alone, without the reopen mirror below) would leave the mirror's own debit
-        -- unmarked on every reopened-then-reclosed year, reproducing the SAME suppression a
-        -- second time -- which is why both bodies are marked in this one migration (D-23, GM-7).
+        -- (this one alone, without the reopen mirror below) would leave the mirror's own
+        -- income-leg CREDIT unmarked on every reopened-then-reclosed year -- the mirror swaps
+        -- debit/credit, so an unmarked mirror INVERTS the defect into compounding INFLATION of
+        -- the rolling figure -- which is why both bodies are marked in this one migration
+        -- (D-23, GM-7).
         true);
     v_line := 0;
     for r in select * from jsonb_array_elements(v_pl_rows) x(el) loop
@@ -804,9 +806,10 @@ begin
         -- launder its own history; a reversal of a POST-FIX one (born true, per §B above) carries
         -- the fact forward. Either way the mirror's classification matches what it undoes -- a
         -- single-body fix (marking only finalize_close) would leave the mirror false, and the
-        -- mirror's own income-leg debit would then ALSO deflate the rolling figure, reproducing
-        -- task #17's suppression on every reopen/reclose cycle -- which is why both bodies are
-        -- marked in this one migration (D-23, GM-7).
+        -- mirror's own income-leg CREDIT (debit/credit swapped from the closing entry) would
+        -- then INFLATE the rolling figure, INVERTING task #17's suppression into compounding
+        -- inflation on every reopen/reclose cycle -- which is why both bodies are marked in
+        -- this one migration (D-23, GM-7).
         o.closing_transfer
         from clara.journal_entries o where o.id = v_entry;
     insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
