@@ -139,11 +139,16 @@ do $$
 declare
   v_relrx  constant text := '\m(wiki_pages|wiki_page_versions|wiki_page_citations|wiki_page_refs|wiki_log|wiki_budgets|wiki_synthesis_holds)\M';
   v_callrx constant text := '\m(publish_wiki_page_version|_publish_wiki_page_version_core|record_wiki_source_ingest|retire_wiki_page|set_wiki_synthesis_hold|clear_wiki_synthesis_hold|get_wiki_page|list_wiki_pages|get_context_pack|run_client_lint|run_lint_all|mark_wiki_citations_stale)\M';
+  -- F-A2 PR-3 retires execute_rule_post, propose_coding_rule, sign_coding_rule,
+  -- propose_autopost_rule, sign_autopost_rule and reconcile_autopost_rules whole
+  -- (docs/plan/active/f-a2-agentic-posting-design.md Annex B.1) -- removed here
+  -- (Annex B.5) so the next W2 audit does not scan for six functions that no
+  -- longer exist. tick_seeding_proposal STAYS: it survives, recut (OQ-3/D36), and
+  -- must still reach NO wiki state directly (WB-R6(1)) -- this census re-proves that.
   v_auth constant text[] := array[
     'retire_document_filing','approve_wrong_client_correction',
     '_approve_entry_core','_draft_entry_core','draft_entry','wake_draft_entry',
-    'approve_entry','execute_rule_post','propose_coding_rule','sign_coding_rule',
-    'propose_autopost_rule','sign_autopost_rule','reconcile_autopost_rules',
+    'approve_entry',
     '_assert_supplier_bill_shape','is_high_stakes','assert_client_resolved',
     'assert_books_current','assert_provenance','_open_question_blocks',
     'evaluate_sst_watch','coding_lane',

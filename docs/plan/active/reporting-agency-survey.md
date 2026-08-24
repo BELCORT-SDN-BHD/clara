@@ -388,7 +388,12 @@ found in the reporting estate, registered anew as **R-N1..R-N5**, each with a ho
   effective-window filter, so a window-filtering core would `CLR11` every preview). Home: F-A5
   design cell; the honest posture (a false refusal, never a false preview) **stands** in v1.
 - **R-N5 — the seal→enqueue integration line was never landed; no draft render is enqueued by
-  anything** (S9). Home: F-A5, PR-2, inside the seal core recut.
+  anything** (S9). Home: F-A5, **PR-1**, inside the seal core recut. *(Trued at PR-1: this row said
+  PR-2, which went stale when gate 2 moved the seal core into PR-1's D1 window — design §3.2's
+  "render" bullet, §4 D1 #3 and §5's PR-1 line all put it there. **LANDED**: the core now carries
+  `perform clara._enqueue_render_job_core(p_firm, p_actor, p_obo, p_wake_kind, r.id, 'pre_sign')`
+  immediately before its final audit, inside the sealing transaction, exactly as `0080:225-236`
+  states the contract in words.)*
 
 **N3 is not lost** — it is the contract's own renderer clause and is designed here.
 

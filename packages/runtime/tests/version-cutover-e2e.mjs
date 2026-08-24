@@ -50,6 +50,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { SignJWT } from "jose";
+import { ephemeralPort } from "./ephemeral-port.mjs";
 
 // --- Fail-closed local gate (the intake-e2e precedent).
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -79,7 +80,9 @@ if (!process.env.WORKFLOW_POSTGRES_URL
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";
-process.env.PORT ||= "3215";
+// OS-assigned: CI jobs from different PRs share the runner host's network namespace; a
+// fixed port cross-wires one job's client into another job's runtime (401 jwt_signature).
+process.env.PORT ||= await ephemeralPort();
 process.env.WORKFLOW_TARGET_WORLD = "@workflow/world-postgres";
 // Lengthen the reconciler grace far beyond the test window so the leader loop can never
 // re-enqueue the unbound T6 on workflows.chatTurn (whatever's currently newest) mid-test —

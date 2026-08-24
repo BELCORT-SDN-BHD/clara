@@ -11,6 +11,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SignJWT } from "jose";
+import { ephemeralPort } from "./ephemeral-port.mjs";
 
 // Fail-closed local gate. Any PGPORT is accepted (local 5544, CI's 5432 service),
 // but the host MUST be loopback and the database MUST be one of the two sanctioned
@@ -30,7 +31,9 @@ process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";
 process.env.CLARA_DOC_EGRESS_APPROVED = "1";
 process.env.WORKFLOW_TARGET_WORLD = "@workflow/world-postgres";
-process.env.PORT ||= "3212";
+// OS-assigned: CI jobs from different PRs share the runner host's network namespace; a
+// fixed port cross-wires one job's client into another job's runtime (401 jwt_signature).
+process.env.PORT ||= await ephemeralPort();
 process.env.CLARA_INTAKE_CORS_ORIGINS = "https://dashboard.test";
 const tempBase = process.env.CLARA_TEST_TMP_ROOT || tmpdir();
 await mkdir(tempBase, { recursive: true });

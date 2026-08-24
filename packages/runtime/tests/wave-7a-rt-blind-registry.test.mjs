@@ -18,6 +18,8 @@ const { register } = await import("tsx/esm/api");
 register();
 
 const registry = await import("../workflows/registry.ts");
+const entryAutoDraftV9 = await import("../workflows/autoDraft.v9.ts");
+const entryChatTurnV13 = await import("../workflows/chatTurn.v13.ts");
 const entryAutoDraftV8 = await import("../workflows/autoDraft.v8.ts");
 const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
@@ -38,15 +40,29 @@ const promptV8 = await import("../workflows/chatTurn.v8.prompt.ts");
 // a superseded body must stay exported or its parked runs are stranded. F-A1 PR-3a
 // (the witness-pair consumer widening) then moved both pins one further —
 // autoDraft_v8 / chatTurn_v12 — by the same law: v7's and v11's assertions below
-// became policy (c) assertions in turn.
+// became policy (c) assertions in turn. F-A2 PR-2 (the agentic posting lane, plus
+// chat parity on owner ruling D34) has now moved both pins again — autoDraft_v9 /
+// chatTurn_v13 — and v8's and v12's assertions became policy (c) assertions in
+// their turn. The ladder of assertions is the point: each one records that a body
+// which USED to be the pin is still reachable for its parked runs.
 // ===========================================================================
 
-test("registry pins autoDraft to the v8 export", () => {
-  assert.equal(registry.workflows.autoDraft, entryAutoDraftV8.autoDraft_v8);
+test("registry pins autoDraft to the v9 export", () => {
+  assert.equal(registry.workflows.autoDraft, entryAutoDraftV9.autoDraft_v9);
 });
 
-test("registry pins chatTurn to the v12 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV12.chatTurn_v12);
+test("registry pins chatTurn to the v13 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV13.chatTurn_v13);
+});
+
+test("registry still EXPORTS autoDraft_v8 so no parked v8 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.autoDraft_v8, "function");
+  assert.equal(registry.autoDraft_v8, entryAutoDraftV8.autoDraft_v8);
+});
+
+test("registry still EXPORTS chatTurn_v12 so no parked v12 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v12, "function");
+  assert.equal(registry.chatTurn_v12, entryChatTurnV12.chatTurn_v12);
 });
 
 test("registry still EXPORTS autoDraft_v7 so no parked v7 run is stranded (Appendix A policy (c))", () => {

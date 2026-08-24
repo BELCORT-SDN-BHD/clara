@@ -29,7 +29,27 @@ const REC = "300-000"; // trade debtors (receivable control)
 const REV = "500-000"; // revenue (income)
 const SST = "250-000"; // SST-output (liability, special_acc_type='sst_output')
 const CLIENT_REG = "199901000001"; // the client's own registration (supplier=client ⇒ sales)
-const CLIENT_NAME = "ROME PROPERTIES SDN BHD";
+
+/** THE CLIENT'S OWN NAME, READ FROM THE CLIENT ROW.
+ *
+ *  This was a hardcoded `"ROME PROPERTIES SDN BHD"`, and that one constant made the whole file
+ *  vacuous. Every fixture here states "supplier = the client ⇒ sales direction", but the rig
+ *  client is named `rig_<run>_A1`, so the page named a company that was NOT this client while
+ *  stating a registration that WAS — 0049:924's CONTRADICTION shape. `_document_direction`
+ *  answered CLR30 whatever the testability rule said, the direction-family arm refused every
+ *  draft before the sales floor was ever asked, and the cells below recorded green against a
+ *  wall none of them is about. Sourcing the name from `clara.clients` is what makes the stated
+ *  intent real.
+ *
+ *  IT FAILS CLOSED. A fixture that cannot read the client's own name cannot build a sales
+ *  document at all, so it throws rather than falling back to a literal — a silent fallback is
+ *  how the constant survived unnoticed in the first place. */
+async function clientName(client) {
+  const r = await rootQuery("select name from clara.clients where id=$1", [client]);
+  const n = r.rows[0]?.name;
+  if (!n) throw new Error(`clientName(${client}): the client row carries no name — a sales fixture cannot state a supplier identity it cannot read`);
+  return n;
+}
 
 let ready = false;
 let has15 = false;
@@ -86,7 +106,7 @@ async function salesFiling({ client, gross, net, tax, typeCode = "01" }) {
   const fields = [
     factField("invoice.total", rm(gross)),
     factField("invoice.currency", "MYR"),
-    factField("invoice.vendor_name", CLIENT_NAME),       // supplier = the client ⇒ sales direction
+    factField("invoice.vendor_name", await clientName(client)),  // supplier = the client ⇒ sales
     factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }),
     factField("invoice.customer_name", "D & DREAM PROPERTIES SDN BHD"),
     factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`),
@@ -114,8 +134,76 @@ async function draftSales({ client, cited, lines, codingKind = "sales_invoice" }
       evidence: [ev(region?.id, region?.text_content ?? rm(0), "invoice.total")],
       codingKind, opKey: `sales:${cited.filingId}:${cited.documentId}`,
     });
-  } catch (e) { noteLane(`draftSales(${codingKind}) raised ${e.code}: ${e.message} — sales draft path shape assumption`); return null; }
+  } catch (e) {
+    noteLane(`draftSales(${codingKind}) raised ${e.code} ${e.detail ?? ""}: ${e.message} — sales draft path shape assumption`);
+    // F-A2 PR-1 (N1): the refusal is RETURNED, not swallowed into null. The sales shape floor
+    // now runs at the DRAFT door on the agent lane, so a deliberately mis-shaped fixture is
+    // refused a door earlier and the cells below have to be able to SEE which family refused.
+    // Callers that only test `d?.entry_id` are unaffected -- an error object has none.
+    return { error: e };
+  }
 }
+
+/** F-A2 PR-1 (N1, design 3.4): THE SHAPE FLOORS RUN AT THE DRAFT DOOR on the agent lane now,
+ *  so a deliberately mis-shaped coded sales draft is refused before it becomes a draft. It is
+ *  the SAME floor raising the SAME family it raised at approve -- only the door moved, and a
+ *  coded sales_invoice has no other lane to be born on (clara.draft_entry takes no
+ *  p_coding_kind).
+ *
+ *  A cell whose claim is "this shape never approves" is SATISFIED by that refusal and says so
+ *  here; it does not get to skip quietly, because an unexpected errcode still fails. Mirrors
+ *  `n1DraftRefusal` in wave-a2-execute-rule-post.test.mjs, which is the same disposition on the
+ *  purchase side. */
+function n1SalesDraftRefusal(maybe, label, expect, codes = ["CLR23", "CLR21"]) {
+  const e = maybe?.error;
+  if (!e) return false;
+  assert.ok(codes.includes(e.code),
+    `${label}: the draft-door refusal rides the same family the approve door used to raise (got ${e.code}: ${e.message})`);
+  assert.ok(expect instanceof RegExp, `${label}: the call site states which wall it expects`);
+  const seen = `${e.detail ?? ""} ${e.message ?? ""}`;
+  assert.match(seen, expect,
+    `${label}: ...and it is THAT wall answering, not merely a member of the code union (got ${e.code}: ${seen.trim()})`);
+  noteLane(`${label}: refused at the DRAFT door (N1) with ${e.code} ${seen.trim()}`);
+  return true;
+}
+
+// THE THREE SALES SITES BELOW NOW REACH THE SALES FLOOR, and each is pinned to the wall IT is
+// about rather than to one shared code union. That is the end of a two-step correction worth
+// keeping, because the first step's diagnosis was wrong and only the second step's measurement
+// caught it:
+//
+//   T10 found all three passing on CLR21 `direction_family_mismatch` — a DIFFERENT wall from the
+//   one each cell names — pinned the true discriminant so the transition could not happen
+//   silently, and attributed the cause to 0049's both-kinds testability rule, predicting the
+//   sites would go RED once C6 relaxed it. C6 landed and they did not move. The prediction
+//   failed because the diagnosis had: `before()` DOES land both identifiers (the `desired field
+//   'value'` lane note is the adaptive caller reporting an unused EXTRA field, not a failed
+//   write), so `v_hard_id` was already true under the old rule and no direction RULE was ever
+//   the binding constraint. The real cause was in the fixture: it stated a hardcoded vendor name
+//   while the rig client is named `rig_<run>_A1`, so the NAME arm missed while the REGISTRATION
+//   arm hit — 0049:924's CONTRADICTION shape, CLR30 regardless of testability.
+//
+// The name is now read from the client row (see `clientName`), so "supplier = the client ⇒
+// sales" is finally TRUE of the document, the direction resolves, and the shape floor answers.
+// MEASURED after the fix, and these are the three pins below: FIX-1 gets CLR23 "a sales entry
+// admits only receivable, income, sst_output and rounding legs"; FIX-2 gets CLR21
+// `type_polarity_mismatch`; RESIDUAL-1 gets CLR23 "a sales entry admits no material amount
+// outside the receivable/income/sst legs". Each is that cell's OWN claim, arriving at the DRAFT
+// door under N1 instead of the approve door — same floor, same family, one door earlier.
+//
+// A SHARED CONSTANT IS NOT USED FOR THESE ANY MORE. One regex covering three different walls is
+// how a cell drifts onto a neighbour's wall without anything turning red; the per-site pins
+// below cannot.
+const SALES_CONTROL_LEG = /admits only receivable, income, sst_output and rounding legs/;
+const SALES_TYPE_POLARITY = /type_polarity_mismatch/;
+const SALES_ROUNDING_BOUND = /admits no material amount outside the receivable\/income\/sst legs/;
+// …and the three walls that became reachable at the same time, each pinned to the reason or the
+// sentence the wall itself raises. MEASURED at frontier 0105: CLR21 `{"reason":"tax_tie_failed"}`,
+// CLR10 `{"reason":"sst_account_missing"}`, CLR23 (no detail) "a sales entry requires exactly one
+// direction-correct receivable control leg".
+const SALES_TAX_TIE = /tax_tie_failed/;
+const SALES_SST_MISSING = /sst_account_missing/;
+const SALES_CN_POLARITY = /requires exactly one direction-correct receivable control leg/;
 
 before(async () => {
   ready = await waveAEnsureReady();
@@ -190,9 +278,9 @@ test("P6 a valid 2-leg sales invoice (no tax) approves — the shape floor accep
   await upsertAccountClassed(world.users.alice, { client, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("rec") }).catch((e) => noteLane(`rec upsert ${e.code}`));
   await upsertAccountClassed(world.users.alice, { client, code: REV, name: "Revenue", type: "income", opKey: opk("rev") }).catch((e) => noteLane(`rev upsert ${e.code}`));
   const f = await salesFiling({ client, gross: 250000, net: 250000, tax: 0, typeCode: "01" });
-  if (!f) { noteLane("sales filing not built — happy-path 2-leg cell skipped"); return; }
+  assert.ok(f, "the sales filing was built (mandatory setup — a happy-path cell that cannot build its subject proves nothing)");
   const d = await draftSales({ client, cited: f.cited, lines: salesLines(250000, 250000, 0, { withSst: false }) });
-  if (!d?.entry_id) { noteLane("sales draft not created — happy-path 2-leg cell skipped"); return; }
+  assert.ok(d?.entry_id, `the 2-leg sales draft was created (mandatory setup; ${d?.error?.code ?? ""} ${d?.error?.message ?? ""})`);
   await assert.doesNotReject(
     () => approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("apsi") }),
     "a balanced 2-leg sales invoice passes the sales shape floor and approves",
@@ -206,7 +294,7 @@ test("P6/§5 a 3-leg SST sales invoice ties (Dr AR=gross, Cr rev=net, Cr sst=tax
   const f = await salesFiling({ client, gross: 106000, net: 100000, tax: 6000, typeCode: "01" });
   if (!f) return;
   const d = await draftSales({ client, cited: f.cited, lines: salesLines(106000, 100000, 6000) });
-  if (!d?.entry_id) { noteLane("3-leg SST draft not created — cell skipped"); return; }
+  assert.ok(d?.entry_id, `the 3-leg SST sales draft was created (mandatory setup; ${d?.error?.code ?? ""} ${d?.error?.message ?? ""})`);
   // A tax-affecting entry is high-stakes (is_high_stakes ⇐ tax_affecting) → attest.
   await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "reviewed sst split", opKey: opk("apsst") })
     .then(() => assert.ok(true, "a well-tied 3-leg SST sales invoice approves"))
@@ -225,12 +313,18 @@ test("P6/§5/#9 a ≤5-sen net+tax≠gross mismatch REFUSES (tax_tie_failed) —
   const f = await salesFiling({ client, gross: 106000, net: 100000, tax: 6003, typeCode: "01" });
   if (!f) return;
   const d = await draftSales({ client, cited: f.cited, lines: salesLines(106000, 100000, 6003) });
-  if (!d?.entry_id) { noteLane("mismatch draft not created — cell skipped"); return; }
+  // REACHABLE SINCE THE VENDOR NAME CAME FROM THE CLIENT ROW. This used to note-and-return on a
+  // draft the direction arm had already refused, so the cell recorded a green having asked
+  // nothing. It now meets its OWN wall, one door earlier (N1), and the pin is the reason the
+  // cell is named for -- not a code union.
+  if (n1SalesDraftRefusal(d, "P6/§5/#9 tax tie", SALES_TAX_TIE, ["CLR21"])) return;
+  assert.ok(d?.entry_id, "the ≤5-sen mismatch draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("apmis") }); }
   catch (e) { err = e; }
   assert.ok(err, "a ≤5-sen net+tax≠gross mismatch is REFUSED at approve (not absorbed by rounding)");
-  if (err && reasonOf(err) && reasonOf(err) !== "tax_tie_failed") noteLane(`mismatch refused with reason '${reasonOf(err)}' (expected tax_tie_failed) — inspect`);
+  assert.equal(reasonOf(err), "tax_tie_failed",
+    `the mismatch is refused as a TAX TIE, never silently rounded away (got ${err?.code}/${reasonOf(err)})`);
 });
 
 test("P6/§5 a tax-bearing invoice meeting a chart with NO sst_output account refuses (sst_account_missing)", async (t) => {
@@ -244,7 +338,7 @@ test("P6/§5 a tax-bearing invoice meeting a chart with NO sst_output account re
   const firm = await firmOf(client);
   await grantConsent(world.users.dave, { firm, client }).catch(() => {});
   const f = await salesFilingFor(world.users.dave, { client, gross: 106000, net: 100000, tax: 6000 });
-  if (!f) { noteLane("sst-missing filing not built — cell skipped"); return; }
+  assert.ok(f, "the firm-B filing was built (mandatory setup)");
   // A BALANCED 3-leg whose tax leg lands on a PLAIN liability (no sst_output marker) —
   // so the draft validates, but the shape floor sees tax facts + no sst_output account.
   const lines = [
@@ -253,12 +347,17 @@ test("P6/§5 a tax-bearing invoice meeting a chart with NO sst_output account re
     { account_code: PLAIN_LIAB, debit_cents: 0, credit_cents: 6000, description: "tax-on-plain-liab" },
   ];
   const d = await draftSalesFor(world.users.dave, { client, cited: f.cited, lines });
-  if (!d?.entry_id) { noteLane("sst-missing draft not created — cell noted"); return; }
+  // Same story as the tax-tie cell, and note the errcode: this floor raises CLR10, not the
+  // CLR23/CLR21 pair the other sales walls use, so the code union is stated explicitly rather
+  // than inherited from the default.
+  if (n1SalesDraftRefusal(d, "P6/§5 sst_output missing", SALES_SST_MISSING, ["CLR10"])) return;
+  assert.ok(d?.entry_id, "the no-sst_output draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.dave, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("apnosst") }); }
   catch (e) { err = e; }
   assert.ok(err, "a tax-bearing invoice against a chart with no sst_output account is refused (sst_account_missing)");
-  if (err && reasonOf(err) && reasonOf(err) !== "sst_account_missing") noteLane(`sst-missing refused with '${reasonOf(err)}' (expected sst_account_missing) — inspect`);
+  assert.equal(reasonOf(err), "sst_account_missing",
+    `...and it is the MISSING ACCOUNT that refuses it (got ${err?.code}/${reasonOf(err)})`);
 });
 
 test("P6 a sales CREDIT note reverses polarity (Cr AR=gross, Dr rev=net, Dr sst=tax)", async (t) => {
@@ -269,17 +368,20 @@ test("P6 a sales CREDIT note reverses polarity (Cr AR=gross, Dr rev=net, Dr sst=
   // A credit note drafted with INVOICE polarity (Dr AR) must be refused — the shape
   // floor for sales_credit_note requires the mirror (Cr AR).
   const wrong = await draftSales({ client, cited: f.cited, lines: salesLines(106000, 100000, 6000), codingKind: "sales_credit_note" });
-  if (wrong?.entry_id) {
+  // The wrong-polarity half was an `if (wrong?.entry_id) { … } else noteLane(…)`: the ELSE
+  // branch was the outcome that proves nothing, and it was the branch actually taken. Forced.
+  if (!n1SalesDraftRefusal(wrong, "P6 CN wrong polarity", SALES_CN_POLARITY)) {
+    assert.ok(wrong?.entry_id, "the wrong-polarity CN draft was created (mandatory setup)");
     let err = null;
     try { await approveEntry(world.users.alice, { entry: wrong.entry_id, expectedRevision: wrong.revision_token, attestation: "x", opKey: opk("apcnwrong") }); }
     catch (e) { err = e; }
     assert.ok(err, "a credit note with INVOICE polarity (Dr receivable) is refused — CN must credit receivable");
-  } else noteLane("CN wrong-polarity draft not created — cell noted");
+  }
   // The correctly-mirrored CN should tie.
   const f2 = await salesFiling({ client, gross: 106000, net: 100000, tax: 6000, typeCode: "02" });
   if (!f2) return;
   const cn = await draftSales({ client, cited: f2.cited, lines: creditNoteLines(106000, 100000, 6000), codingKind: "sales_credit_note" });
-  if (!cn?.entry_id) { noteLane("CN correct-polarity draft not created — cell noted"); return; }
+  assert.ok(cn?.entry_id, `the correctly-mirrored CN draft was created (mandatory setup; ${cn?.error?.code ?? ""} ${cn?.error?.message ?? ""})`);
   await approveEntry(world.users.alice, { entry: cn.entry_id, expectedRevision: cn.revision_token, attestation: "x", opKey: opk("apcn") })
     .then(() => assert.ok(true, "a correctly-mirrored sales credit note ties and approves"))
     .catch((e) => { if (reasonOf(e) === "tax_tie_failed") assert.fail("a correct CN mirror was refused tax_tie_failed"); noteLane(`CN approve raised ${e.code}/${reasonOf(e)} — inspect`); });
@@ -292,7 +394,7 @@ test("P6 a debit note (type 03) RAISES receivable like an invoice (invoice polar
   if (!f) return;
   // A debit note is a sales_invoice with the DN type code — invoice polarity (Dr AR).
   const dn = await draftSales({ client, cited: f.cited, lines: salesLines(53000, 50000, 3000), codingKind: "sales_invoice" });
-  if (!dn?.entry_id) { noteLane("DN draft not created — cell noted"); return; }
+  assert.ok(dn?.entry_id, `the debit-note draft was created (mandatory setup; ${dn?.error?.code ?? ""} ${dn?.error?.message ?? ""})`);
   await approveEntry(world.users.alice, { entry: dn.entry_id, expectedRevision: dn.revision_token, attestation: "x", opKey: opk("apdn") })
     .then(() => assert.ok(true, "a debit note raises receivable like an invoice and approves"))
     .catch((e) => { if (reasonOf(e) === "tax_tie_failed") assert.fail("a DN with correct invoice polarity was refused tax_tie_failed"); noteLane(`DN approve raised ${e.code}/${reasonOf(e)} — inspect`); });
@@ -324,6 +426,7 @@ test("FIX-1 a sales invoice with an EXTRA payable-control leg is REFUSED (no lau
     { account_code: AP4, debit_cents: 0, credit_cents: 10500, description: "launder-into-payable" },
   ];
   const d = await draftSales({ client, cited: f.cited, lines });
+  if (n1SalesDraftRefusal(d, "FIX-1 control-account laundering", SALES_CONTROL_LEG)) return;
   assert.ok(d?.entry_id, "the laundering draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aplaunder") }); }
@@ -342,6 +445,7 @@ test("FIX-2 a type-02 (credit note) document coded as a sales_invoice is REFUSED
   assert.ok(f, "the type-02 facts filing was built (mandatory setup)");
   await upsertAccountClassed(world.users.alice, { client, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sstT") }).catch(() => {});
   const d = await draftSales({ client, cited: f.cited, lines: salesLines(10600, 10000, 600), codingKind: "sales_invoice" });
+  if (n1SalesDraftRefusal(d, "FIX-2 type/polarity mismatch", SALES_TYPE_POLARITY)) return;
   assert.ok(d?.entry_id, "the type-mismatch draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aptype") }); }
@@ -380,6 +484,7 @@ test("RESIDUAL-1 a sales invoice laundering a material amount into a ROUNDING le
     { account_code: SRND, debit_cents: 0, credit_cents: 10500, description: "launder-into-rounding" },
   ];
   const d = await draftSales({ client, cited: f.cited, lines });
+  if (n1SalesDraftRefusal(d, "RESIDUAL-1 rounding-leg laundering", SALES_ROUNDING_BOUND)) return;
   assert.ok(d?.entry_id, "the rounding-laundering sales draft was created (mandatory setup)");
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("apsrnd") }); }
@@ -403,7 +508,7 @@ async function salesFilingFor(sub, { client, gross, net, tax, typeCode = "01" })
   await claimTask(task.id, { egressApproved: true });
   const fields = [
     factField("invoice.total", rm(gross)), factField("invoice.currency", "MYR"),
-    factField("invoice.vendor_name", CLIENT_NAME), factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }),
+    factField("invoice.vendor_name", await clientName(client)), factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }),
     factField("invoice.customer_name", "SOME BUYER SDN BHD"), factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`),
     factField("invoice.type_code", typeCode, { polygon: [], confidence: 0.9 }),
     factField("invoice.total_excl_tax", rm(net), { polygon: [], confidence: 0.9 }),
@@ -424,5 +529,10 @@ async function draftSalesFor(sub, { client, cited, lines, codingKind = "sales_in
       evidence: [ev(region?.id, region?.text_content ?? rm(0), "invoice.total")],
       codingKind, opKey: `salesB:${cited.filingId}:${cited.documentId}`,
     });
-  } catch (e) { noteLane(`draftSalesFor ${e.code}: ${e.message}`); return null; }
+  } catch (e) {
+    // N1, same as `draftSales`: the firm-B twin must RETURN its refusal too, or a cell whose
+    // wall now answers one door earlier can only see `null` and has nothing to assert against.
+    noteLane(`draftSalesFor ${e.code} ${e.detail ?? ""}: ${e.message}`);
+    return { error: e };
+  }
 }

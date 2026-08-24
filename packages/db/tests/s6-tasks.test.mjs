@@ -225,7 +225,9 @@ test("coding_attempts: a wake draft carrying p_coding writes ONE attempt row (ta
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // F-A2 PR-1 (D11): this cell drafts a CODED supplier_bill on the agent lane, which is now held
+  // to the document's direction on EVERY wake kind, so the fixture states its supplier.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, direction: "purchase" });
   // The coding attempt rides on the CHAT-TURN agent_task (coding_attempts.task_id
   // FKs to agent_tasks) — the recovery carrier for the in-turn coding step [C-12].
   const session = await createChatSession({ firm, author: users.alice, client: clients.A1 });
@@ -258,7 +260,9 @@ test("coding_attempts: a wake draft carrying p_coding writes ONE attempt row (ta
   }
   assert.ok(/\(\s*task_id\s*\)/.test(uniques), `W4: coding_attempts unique is now (task_id) — got: ${uniques}`);
   // A second attempt for the SAME task on a DIFFERENT filing/document → CLR21 double_coded.
-  const cited2 = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // Direction-stated too (D11), so the SECOND attempt is refused by the one-coding-per-turn wall
+  // this cell is about — not by the direction arm firing first on an unreadable document.
+  const cited2 = await seedCitedDocument(users.alice, { firm, client: clients.A1, direction: "purchase" });
   const cred2 = await mintInteractive(firm, users.alice);
   const res2 = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: cited2.documentId });
   await assertRaisesReason(CLR21, REASON.doubleCoded,

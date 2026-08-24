@@ -1,6 +1,7 @@
 // The facts-gate consumer — the classifier→facts re-fire spine (Wave A2.1, migration 0016
-// P3 / WA21-R7). A registered spine consumer beside router + matcher + autodraft + rule_post
-// + sst_watch, reusing lib/relay.mjs's discovery/checkpoint/dead-letter primitives UNCHANGED.
+// P3 / WA21-R7). A registered spine consumer beside router + matcher + autodraft
+// + sst_watch (the rule_post consumer retired with F-A2 PR-3), reusing lib/relay.mjs's
+// discovery/checkpoint/dead-letter primitives UNCHANGED.
 // Own name ('facts_gate'), own advisory lock (hashtext('facts_gate')), own (consumer,firm)
 // checkpoint, own dead-letter lane, own /ready WARN signal. Subscribes to
 // `document.classified` ONLY (every other type is a checkpoint-only advance).

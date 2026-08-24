@@ -196,15 +196,22 @@ test("x36c0.a §A: a stated NONZERO tax with NO sst_purchase_cost leg REFUSES at
   // purchase SST is expensed into cost, so expense=gross either way) — what is wrong is
   // that the stated RM6.00 of tax is invisible, on the ONE shape for which no owner
   // precedent exists (the SST-ZERO 2-leg is precedented; this is not).
-  const d = await billDraft(client, cited, { cp, lines: billLines(EXP, AP, 10600) });
-  assert.ok(d?.entry_id, "the 2-leg draft on a nonzero-tax document exists (mandatory setup)");
-
-  const err = await tryApprove(d.entry_id, d.revision_token, "belt-nz");
-  assert.ok(err, "a 2-leg bill on a document stating a NONZERO tax must be REFUSED, not approved");
+  // F-A2 PR-1 (N1, design §3.4): THE WALL MOVED EARLIER ON THE AGENT LANE and this cell moves
+  // with it. The draft core now runs the deferred shape floors at DRAFT for `not p_is_human`, so
+  // this deliberately mis-shaped agent bill is refused before it becomes a draft rather than at
+  // approve. The CLAIM is unchanged and still forced non-vacuously — a 2-leg bill on a document
+  // stating a nonzero tax is REFUSED, on the CLR21 tax-tie family, with the DISTINCT
+  // tax_leg_missing token — only the door it is refused at moved, and no entry survives. The
+  // human lane is not an escape here: clara.draft_entry takes no p_coding_kind, so a coded
+  // supplier_bill can only be born on the agent lane, which is exactly the lane N1 governs.
+  let err = null;
+  try {
+    await billDraft(client, cited, { cp, lines: billLines(EXP, AP, 10600) });
+  } catch (e) { err = e; }
+  assert.ok(err, "a 2-leg bill on a document stating a NONZERO tax must be REFUSED, not drafted");
   assert.equal(err.code, CLR21, `the belt rides the CLR21 tax-tie family (got ${err.code}: ${err.message})`);
   assert.equal(reasonOf(err), "tax_leg_missing",
     `the reason must be the DISTINCT tax_leg_missing token, not tax_tie_failed — the remedy differs (add a leg, not fix an amount). Got ${reasonOf(err)}`);
-  assert.notEqual(await entryStatusOf(d.entry_id), "approved", "the refused bill never reaches approved");
 });
 
 // ===========================================================================
@@ -411,8 +418,17 @@ test("x36c0.d §A regression: the leg-PRESENT paths are unchanged — tied 3-leg
 // ===========================================================================
 test("x36c0.e1 §A: the belt is lexically INSIDE the `reversal_of is null` gate — a reversal mirror can never reach it", async (t) => {
   if (skipHere(t)) return;
+  // F-A2 PR-1 (D31): the floor's BODY moved into the projected variant and the 2-arity entry
+  // point became a thin delegate passing NULL. The claim is about where the belt sits INSIDE the
+  // body, so the probe follows the body — reading the delegate would assert lexical containment
+  // over three lines that contain neither the belt nor the gate, which is a vacuous green.
+  const floorSig = (await rootQuery(
+    "select to_regprocedure('clara._assert_supplier_bill_shape_at_projected(uuid,uuid,uuid)') is not null as ok", [],
+  )).rows[0].ok
+    ? "clara._assert_supplier_bill_shape_at_projected(uuid,uuid,uuid)"
+    : "clara._assert_supplier_bill_shape_at(uuid,uuid)";
   const raw = (await rootQuery(
-    "select pg_get_functiondef('clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure) as src", [],
+    `select pg_get_functiondef('${floorSig}'::regprocedure) as src`, [],
   )).rows[0].src;
   // The migration tail's own normalizer: block comments, then line comments, then collapse
   // whitespace, then lowercase. Stripping comments FIRST is load-bearing — the function's

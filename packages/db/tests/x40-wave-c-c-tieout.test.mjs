@@ -103,7 +103,7 @@ import {
   upsertAccountClassed, upsertPayableAccount, grantConsent,
   draftEntryV3, approveEntry, insertUser, addMember,
   idOf, reasonOf, HIGH_STAKES_CENTS,
-  roleCanExecute, fnSource, rlsFlags,
+  roleCanExecute, fnSource, rlsFlags, restateSightings,
 } from "./a21-helpers.mjs";
 import { holdThenContend, sawDeadlock } from "./rig-docs-race.mjs";
 // fix-wave E7/CX12: the REAL Gate-K onboarding-plan lifecycle (K1..K14), for x40.m/x40.n's
@@ -2958,9 +2958,23 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
   assert.equal(await sightingCount(armB), 0, "x40.am ARM B: three stamped approvals that DO carry a vendor accrue ZERO rule_sightings -- with v_counterparty non-null the 0040 S5 conjunct is the only wall left, and it holds");
   assert.equal(await vendorAccountProposals(client, cpStamped), 0, "x40.am ARM B: and therefore ZERO vendor_account autopost proposals -- a bank rule may not breed a coding rule out of three assisted approvals of its own output (WA2-R9)");
 
-  // ---- ARM C: THE POSITIVE CONTROL. Arm B's draft MINUS the stamp, on a different
-  // counterparty -- if the carve-out (or the whole sighting mechanism) were dead this would
-  // ALSO breed zero and both arms above would be proving nothing. It must breed exactly one.
+  // ---- ARM C, INVERTED (F-A2 PR-1, D39). ----
+  //
+  // THE RETIRED CLAIM, named rather than deleted: *"the identical UNSTAMPED trio accrues one
+  // debit sighting per entry on the coded account -- the accrual the stamp withheld in arm B"*,
+  // and *"breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive."* It
+  // was the POSITIVE CONTROL, and it is exactly what the eighth `clara._approve_entry_core`
+  // body deletes: the whole `0037:2046-2100` block goes, so an ordinary approval breeds nothing
+  // on any counterparty. Same class as `x42.prod-23`'s control half (B.7) and the same
+  // treatment -- an inverted twin, whose battery successors are `f-a2.c8.inv-ordinary` and
+  // `f-a2.c8.zero`.
+  //
+  // AND ARMS A AND B ARE NOW VACUOUS, which is stated rather than left to be discovered. Their
+  // zeros no longer discriminate: nothing accrues anywhere, so the 0040 S5 carve-out conjunct
+  // they were built to isolate has nothing left to withhold. They are kept because the SETUP
+  // halves above them are live claims about the producer (arm A's three lawful accepts, arm B's
+  // ABI-shaped stamp surviving arm (3)'s five axes), and because a zero that stops
+  // discriminating is a law-31 finding to record, never a cell to quietly delete.
   const armC = [];
   for (let i = 0; i < 3; i++) {
     const d = await draftEntryV3(sub, {
@@ -2971,9 +2985,18 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-ctrla-${i}`) });
     armC.push(d.entry_id);
   }
-  assert.equal(await sightingCount(armC), 3, "x40.am POSITIVE CONTROL: the identical UNSTAMPED trio accrues one debit sighting per entry on the coded account -- the accrual the stamp withheld in arm B");
-  assert.equal(await vendorAccountProposals(client, cpControl), 1, "x40.am POSITIVE CONTROL: an identical UNSTAMPED trio breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive, and the carve-out is the reason arms A and B bred none");
-  noteLane(`x40.am carve-out arms: lawful=${armA.length} stamped=${armB.length} control=${armC.length}; signed coding rule ${ruleId}`);
+  assert.equal(await sightingCount(armC), 0,
+    "x40.am ARM C, INVERTED (D39): the identical UNSTAMPED trio accrues ZERO rule_sightings -- an ordinary approval no longer moves the counter, so the accrual the stamp used to withhold no longer exists to withhold");
+  assert.equal(await vendorAccountProposals(client, cpControl), 0,
+    "x40.am ARM C, INVERTED (D39): …and breeds NO vendor_account proposal. The successor claims are f-a2.c8.inv-ordinary and f-a2.c8.zero");
+  // THE INSTRUMENT IS STILL LIVE, and this half is why the two zeros above are evidence rather
+  // than an absence (review law 2). `restateSightings` replays the retired writer's own inserts
+  // onto arm C's real approved entries, and the SAME `sightingCount` read that returned zero
+  // now returns three.
+  for (const entry of armC) await restateSightings(entry, { counterparty: cpControl });
+  assert.equal(await sightingCount(armC), 3,
+    "x40.am ARM C control-of-the-control: the restated pool reads THREE through the same instrument -- the zeros above are the door's answer, not a broken reader");
+  noteLane(`x40.am carve-out arms: lawful=${armA.length} stamped=${armB.length} control=${armC.length}; signed coding rule ${ruleId}. ARMS A AND B ARE NOW VACUOUS (law 31): with breeding excised nothing accrues on any arm, so the 0040 S5 conjunct they isolated has nothing to withhold.`);
 });
 
 // ===========================================================================
