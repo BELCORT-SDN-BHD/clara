@@ -39,6 +39,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
 import { scriptedAnswers } from "./wave-b-interview-testkit.mjs";
+import { ephemeralPort } from "./ephemeral-port.mjs";
 
 // --- Fail-closed local gate (the intake-e2e precedent). Any PGPORT is accepted (local
 // 55440, CI's 5432 service), but the host MUST be loopback and the database MUST be a
@@ -71,7 +72,9 @@ if (!process.env.WORKFLOW_POSTGRES_URL
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1"; // explicit opt-in — this IS a world test
-process.env.PORT ||= "3214";
+// OS-assigned: CI jobs from different PRs share the runner host's network namespace; a
+// fixed port cross-wires one job's client into another job's runtime (401 jwt_signature).
+process.env.PORT ||= await ephemeralPort();
 process.env.WORKFLOW_TARGET_WORLD = "@workflow/world-postgres";
 const ISSUER = "https://clara-interview.test/auth/v1";
 const AUD = "authenticated";
