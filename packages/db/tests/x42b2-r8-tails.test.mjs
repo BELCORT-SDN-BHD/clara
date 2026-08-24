@@ -193,6 +193,21 @@ test("x42.r8.tails.4d TAIL 6(a) flags-key writer census, widened, matches the pi
     )).rows[0].n;
   };
   assert.equal(await widenedWriters("recurring_adjustment"), "_adj_on_approve, _adj_run_occurrence_core");
-  assert.equal(await widenedWriters("staff_advance_application"), "book_staff_advance_application, resolve_and_book_bank_line");
+  // FRONTIER-AWARE (F-A3/PR-1a core extraction): this file's own gate (x42S5Ready) does not
+  // require the extraction, so this cell is reachable at a frontier where it has not landed
+  // yet -- "old shape still pinned for pre-PR frontiers". Pre-extraction, the
+  // jsonb_build_object('staff_advance_application', ...) key lives in the public
+  // clara.resolve_and_book_bank_line. Once the extraction lands, that body becomes a thin
+  // delegator (its own comment: "the prosrc pins that measure it moved with the body") and
+  // the key moves, byte-for-byte, into clara._resolve_and_book_bank_line_core instead. The
+  // stem check reads the SAME migration name the extraction census in x42-s5-helpers.mjs
+  // gates on, so both cells agree about which frontier is live.
+  const pr1aLanded = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr1a_core_extractions$"])).rows[0].n === 1;
+  assert.equal(await widenedWriters("staff_advance_application"),
+    pr1aLanded
+      ? "_resolve_and_book_bank_line_core, book_staff_advance_application"
+      : "book_staff_advance_application, resolve_and_book_bank_line");
   assert.equal(await widenedWriters("bank_rule_suggested"), "accept_bank_rule_suggestion");
 });

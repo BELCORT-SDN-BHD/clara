@@ -241,14 +241,33 @@ testCase("an `execute` inside a comment or a string literal is not dynamic SQL",
 });
 
 testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
-  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. Exactly one
-  // entry stands today — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226,
-  // full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
-  // pg_get_functiondef re-count outside the census grammar plus 'execute' as a privilege-name
-  // literal and one raise-message word — nothing dynamic constructed or run; why + the full
-  // declared target set live in wiki-lint-checks.mjs. A SECOND entry must trip this pin and
-  // earn its own reviewed justification, exactly as the first did.
-  const expectedKeys = ["apply_open_items(uuid,jsonb,text,text)"];
+  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. The first entry
+  // stood alone until F-A3 PR-1a: 0055 S7's TAIL ASSERTION block on the apply_open_items key
+  // (PR #226, full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named
+  // S2): a pg_get_functiondef re-count outside the census grammar plus 'execute' as a
+  // privilege-name literal and one raise-message word — nothing dynamic constructed or run.
+  // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder) adds nine: one
+  // per public bank-agency verb S1 extracts into a `_<verb>_core`, each an `unprovable` CoR
+  // patch by construction (the installed body is the LIVE prosrc, read fresh from the catalog
+  // at apply — never a literal in this file's own text) and each independently rig-measured to
+  // carry no word-bounded "wiki" token anywhere in its body. Why + the full declared target set
+  // per key live in wiki-lint-checks.mjs. F-A4 PR-1b's attest_close_exception arm does NOT add
+  // a twelfth: MEASURED (gate B3), plpgsql does not resolve an embedded relation at CREATE time
+  // even with check_function_bodies=on, so that arm ships as plain static SQL and never needed
+  // a waiver at all — a dynamic-SQL entry proposed, tested, and correctly NOT taken. The NEXT
+  // entry must trip this pin and earn its own reviewed justification, exactly as these ten did.
+  const expectedKeys = [
+    "add_bank_account(uuid,text,text,text,text,uuid,text)",
+    "apply_open_items(uuid,jsonb,text,text)",
+    "complete_bank_reconciliation(uuid,uuid[],text)",
+    "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
+    "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",
+    "resolve_bank_line_exception(uuid,text,text,uuid,text)",
+    "unmatch_bank_match(uuid,uuid,text,text)",
+    "upsert_account(uuid,text,text,text,text,text,text)",
+    "void_bank_reconciliation(uuid,text,text)",
+    "void_bank_statement(uuid,uuid,text,text)",
+  ];
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
     throw new Error(`the allowlist is pinned to exactly ${JSON.stringify(expectedKeys)}; it now carries ${JSON.stringify(actualKeys)} — each entry needs its own reviewed justification`);

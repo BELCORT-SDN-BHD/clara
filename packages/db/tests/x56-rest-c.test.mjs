@@ -19,7 +19,7 @@ import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   has0056, hasB3, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
   grantCapability, revokeCapability, freshActiveClient, proposeFY, openFY, addDaysStr,
-  forgeClosedPeriodMovement, setupCloseCoa, plainEntry, BANK1, RE1, REVN, EXPN,
+  forgeClosedPeriodMovement, setupCloseCoa, plainEntry, BANK1, RE1, REVN, EXPN, attestCloseSig,
 } from "./x56-fixtures.mjs";
 
 let ready = false;
@@ -307,7 +307,7 @@ test("A19g the HOW: approve_opening_seed is a harvested SPLICE (never a from-fil
   )).rows[0];
   assert.equal(checkRow.drawer, 1, "opening_continuity_tie is drawer 1 -- no attestation path exists, for anybody");
   const attestBody = (await rootQuery(
-    "select pg_get_functiondef('clara.attest_close_exception(uuid,text,text,text,text)'::regprocedure) as def",
+    "select pg_get_functiondef($1::regprocedure) as def", [await attestCloseSig()],
   )).rows[0].def;
   assert.ok(/v_chk\.drawer\s*<>\s*2/.test(attestBody), "attest_close_exception's own item-domain CHECK refuses any non-drawer-2 check_key, structurally -- opening_continuity_tie included");
 });
