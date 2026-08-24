@@ -469,6 +469,23 @@ const REPORTING_AGENCY_F_A5_CLOCK_NAMES = ["_agent_approve_metric_definition_cor
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// [Wave-F Track A, F-A7 gamma, D1-gamma / B3(a) review fold] deactivate_firm_egress_purpose /
+// revoke_firm_egress_purpose / prepare_firm_egress_dispatch: the firm-narrow typed-egress
+// family's deactivate/revoke (now()-stamped deactivated_at/revoked_at) and its dispatch
+// preparer (now()/clock_timestamp()-derived expires_at, mirroring prepare_egress_dispatch's own
+// TTL shape) carry date-shaped code, exactly like their client-scoped siblings
+// deactivate_client_egress_purpose / revoke_client_egress_purpose / prepare_egress_dispatch
+// already on the unconditional roster. grant_firm_egress_purpose / activate_firm_egress_purpose
+// stay OFF entirely for the same reason their client-scoped siblings do: no date-shaped code.
+// GATED, not appended to the unconditional roster above: these three are born in this
+// migration, and `db-slice-frontiers` runs this battery against earlier-frontier databases
+// where they do not exist (the same appliedStem class as WITNESS_F_A1_PR3_CLOCK_NAMES above —
+// an unconditional entry would red every such leg on a one-name diff that says nothing about
+// clock discipline). Keyed on the migration's STABLE STEM, never its number.
+const F_A7_GAMMA_CLOCK_NAMES = [
+  "deactivate_firm_egress_purpose", "prepare_firm_egress_dispatch", "revoke_firm_egress_purpose",
+];
+
 // F-A3 PR-1a [the nine pure core extractions]: SS1 moves each verb's WHOLE live body into a new
 // ungranted `_<verb>_core` and leaves the public name a thin ctx-unpack delegator (`c :=
 // clara._human_ctx(...); return clara._<verb>_core(...)`) — byte-identical machinery that carries
@@ -595,6 +612,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a7_gamma_egress$")) names.push(...F_A7_GAMMA_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);

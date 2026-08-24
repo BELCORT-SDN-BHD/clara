@@ -282,6 +282,20 @@ const STATEMENT_F_A1_PR4_UNGRANTED_FNS = ["_persist_statement_core_v2"];
 export const STATEMENT_F_A1_PR4_COHORT = [
   ...STATEMENT_F_A1_PR4_RUNTIME_FNS, ...STATEMENT_F_A1_PR4_UNGRANTED_FNS,
 ];
+// F-A7 gamma (Wave-F Track A, the egress train, window D1-gamma): the firm-narrow typed-egress
+// family's four owner verbs, mirroring WAVE_B_0020_HUMAN_FNS' shape for the client-scoped
+// family exactly (owner floor body-enforced, no agent/wake EXECUTE) + the runtime dispatch
+// preparer, mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch. Its own cohort per the
+// "wholly present or wholly absent" rule (the STATEMENT_F_A1_PR4_COHORT precedent above): this
+// migration also widens the CLIENT-scoped family's CoR'd bodies (grant/activate/deactivate/
+// revoke_client_egress_purpose, prepare_egress_dispatch) but adds no NEW client-scoped names —
+// those four stay in WAVE_B_0020_HUMAN_FNS / WAVE_B_0020_RUNTIME_FNS, byte-unmoved as rosters.
+const F_A7_GAMMA_HUMAN_FNS = [
+  "grant_firm_egress_purpose", "activate_firm_egress_purpose",
+  "deactivate_firm_egress_purpose", "revoke_firm_egress_purpose",
+];
+const F_A7_GAMMA_RUNTIME_FNS = ["prepare_firm_egress_dispatch"];
+export const F_A7_GAMMA_COHORT = [...F_A7_GAMMA_HUMAN_FNS, ...F_A7_GAMMA_RUNTIME_FNS];
 // F-A3 PR-1a — THE NINE PURE CORE EXTRACTIONS (survey census rows C1/C2/C3, "extend with the new
 // ungranted cores; no name leaves"). Its OWN cohort rather than additions to BANK_0038_*,
 // TIEOUT_0040_* and AF2_0044_*, for exactly the reason the PR-4 block above records: a fold-in
@@ -970,6 +984,8 @@ export const ALLOWED = {
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
     ...RENDER_ZETA_HUMAN_FNS,
+    ...F_A7_GAMMA_HUMAN_FNS, // [Wave-F Track A, F-A7 gamma] the firm-narrow typed-egress
+    // family's four owner verbs (owner floor body-enforced; see the block above)
     ...F_A7_PI_HUMAN_FNS, // F-A7 pi: the firm-question door + the identifier-promotion card,
     // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
     ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
@@ -1025,6 +1041,8 @@ export const ALLOWED = {
     // and its consumer; F-A1 grants no human EXECUTE at all
     ...WITNESS_F_A1_PR3_RUNTIME_FNS, // F-A1 PR-3 cutover: fail_witness_facts, the running->failed
     // settle verb for the llm_witness lane (mirrors fail_invoice_facts, S6_RUNTIME_FNS above)
+    ...F_A7_GAMMA_RUNTIME_FNS, // [Wave-F Track A, F-A7 gamma] prepare_firm_egress_dispatch,
+    // mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch (see the block above)
     ...F_A9_PR1A_RUNTIME_FNS, // [Wave-F Track A, F-A9 PR-1A] the second door — see the block above
   ]),
 };
@@ -1171,6 +1189,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A7 gamma egress train", F_A7_GAMMA_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
