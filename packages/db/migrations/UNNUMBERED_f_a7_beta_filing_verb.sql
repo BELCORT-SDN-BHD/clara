@@ -5,13 +5,18 @@
 -- file's STEM, never on a number -- that is a statement about the repo-wide mechanism, not a
 -- claim that this train's OWN test file (f-a7-beta-filing-verb.test.mjs) carries a catalog
 -- existence gate of its own; it does, added after an independent review found the header read
--- as if it already had one. HARD MERGE-ORDER FACT, found by that same review and not previously
--- recorded anywhere: this file also depends on TRAIN PI's objects (`_firm_question_core`,
--- `name_family_candidates`, `agent_receipt_surfaces`' f_a7 row, …), and pi is NOT on `main` as
--- of this authoring session (`git grep firm_open_questions main -- packages/db/migrations/` is
--- empty; it lives only on `f-a7/pr-1-pi`). annexes-2.md SSI.1's beta row names only "alpha and
--- gamma merged; F-A2 PR-1" as prerequisites -- pi belongs in that list too and is not merely
--- implied by pi being an earlier train number.
+-- as if it already had one. HARD MERGE-ORDER FACT, found by that same review, TRUED HERE
+-- (independent native review, opus, 2026-08-24 -- finding 4, LOW): this file depends on TRAIN
+-- PI's objects (`_firm_question_core`, `name_family_candidates`, `agent_receipt_surfaces`'
+-- f_a7 row, …). AS OF THIS FILE'S FIRST AUTHORING, pi was NOT on `main` -- the original prose
+-- below (kept for the record, not deleted) measured that with `git grep firm_open_questions
+-- main -- packages/db/migrations/` returning empty. PI HAS SINCE MERGED: `git grep
+-- firm_open_questions origin/main -- packages/db/migrations/` now returns 26 hits, all from
+-- `0103_f_a7_pi_additive.sql` (`main`@7b5b758, "db: F-A7 pi — the agent-receipts additive
+-- layer (0103) (#313)"). The open merge-order fact this file's own SS0/STATUS section
+-- describes below is CLOSED as of that merge; nothing in this file's own logic depended on
+-- pi's absence (every dependency was existence-checked, never guessed), so no code changes
+-- with pi's landing -- only this prose does.
 --
 -- Design of record: docs/plan/active/filing-and-interview-design.md v2 SS3.1-SS3.4 (the ladder,
 -- the receipts, the filing wake kind) + -annexes-1.md Annex A (verb catalog, the filing kind's
@@ -47,14 +52,19 @@
 --     own comment at the consumption site).
 --   - `wake_propose_filing_correction`'s duplicated destination-authority check is widened to
 --     'judgement', matching alpha2's now-live extension of the body it duplicates.
--- ONE dependency remains an open merge-order fact, not a build gap: this file also depends on
+-- TRUED (independent native review, opus, 2026-08-24 -- finding 4): this file also depends on
 -- TRAIN PI's objects (`_firm_question_core`, `name_family_candidates`, `agent_receipt_
--- surfaces`' f_a7 row, …), and pi is NOT on `main` as of this revision (`git grep
--- firm_open_questions main -- packages/db/migrations/` is empty; it lives only on
--- `f-a7/pr-1-pi`). annexes-2.md SSI.1's beta row names only "alpha and gamma merged; F-A2 PR-1"
--- as prerequisites -- pi belongs in that list too. This mirrors the estate's own "ships ahead
--- of its producer" precedent (UNNUMBERED_f_a2_posted_chain.sql's header) for the WINDOW during
--- which alpha/gamma were absent; the window has now closed and this comment records that it did.
+-- surfaces`' f_a7 row, …). AT AUTHORING, pi was an open merge-order fact, not a build gap --
+-- the prose below (kept for the record) measured `git grep firm_open_questions main --
+-- packages/db/migrations/` as empty, live only on `f-a7/pr-1-pi`, and annexes-2.md SSI.1's beta
+-- row named only "alpha and gamma merged; F-A2 PR-1" as prerequisites, pi belonging in that
+-- list too. PI HAS SINCE MERGED (`main`@7b5b758, "db: F-A7 pi — the agent-receipts additive
+-- layer (0103) (#313)"): the reproduction now returns 26 hits, all from `0103_f_a7_pi_
+-- additive.sql`. This mirrored the estate's own "ships ahead of its producer" precedent
+-- (UNNUMBERED_f_a2_posted_chain.sql's header) for the WINDOW during which alpha/gamma/pi were
+-- all absent; that window closed in stages (alpha/gamma first, per the STATUS block above; pi
+-- last, per this one) and this comment records that it did, all three times, honestly, rather
+-- than silently overwriting the earlier true-at-the-time record.
 --
 -- =====================================================================================
 -- THE OWNER-RULING DELTA (2026-08-24, F-A7 gate-record card dispositions) -- SS0 GROWS
@@ -225,6 +235,54 @@
 -- and the same three provenance citations.
 --
 -- =====================================================================================
+-- THE VERB'S REAL REACH (independent native review, opus, 2026-08-24 -- finding 2, ACCEPTED-
+-- AS-SCOPED, NO CODE CHANGE) -- SS0 GROWS AGAIN
+-- =====================================================================================
+-- STATED PLAINLY, because the ladder's own rung count can read as broader than it is: today,
+-- B3's corroborated-anchor floor (v_confirms_client, a hard-identifier match against printed
+-- SSM/TIN/bank-account text -- the myinvois identity pass being the one live producer of a TIN/
+-- BRN pair matching B1/B3's field_path patterns) means unattended auto-filing REACHES, in
+-- practice, MyInvois XML sales e-invoices where the SUPPLIER is the client (the identity pass's
+-- own two deliberate keys, myinvois.supplier_tin / myinvois.supplier_brn, 0015:106-118's own
+-- S0.c). Every other document shape -- OCR'd invoices without a clean myinvois identity read,
+-- any document where the CLIENT is the buyer rather than the supplier, receipts, statements,
+-- anything B1-B9 cannot corroborate deterministically -- correctly routes to the ask path
+-- (B3's refusal, or B10's, or any other rung's). This is FAIL-CLOSED and CORRECT, not a defect:
+-- a narrow unattended-auto-file surface with everything else asking a human is exactly the
+-- conservative beta posture hard constraint 1 (accounting-correctness precedence) calls for.
+-- Widening the reach (a witness-corroborated OCR path, buyer-side attribution, etc.) is FUTURE
+-- WORK for a successor train or a producer-lane change, not a gap in this one. The owner is
+-- being given the same statement in the docs batch.
+--
+-- FORWARD OBLIGATION, NAMED (the reviewer's own latent finding, not a beta defect): `field_path`
+-- is CALLER-SUPPLIED and UN-CHECKED anywhere in this ladder or the tables it reads (document_
+-- regions.field_path carries no CHECK constraint pinning its vocabulary) -- B1/B3/B10's LIKE
+-- patterns ('%tin%'/'%ssm%'/'%brn%'/'%account%') match on SUBSTRING, not an enumerated set, so
+-- ANY future producer lane that emits a field_path merely CONTAINING one of those substrings
+-- (for a reason having nothing to do with a genuine hard identifier) would manufacture an
+-- anchor these rungs would treat as real. This is a real, out-of-scope-for-beta risk to name
+-- for the producer lanes (Azure OCR's own future field_path choices, the myinvois identity
+-- pass's own future additions, any successor facts pass), not something this train's own
+-- reader-side code can close by itself -- the closed set, if one is ever wanted, belongs on the
+-- WRITER side (a CHECK on document_regions.field_path, or a narrower producer-side vocabulary
+-- contract), never invented unilaterally by a reader train guessing at the writers' intent.
+--
+-- CROSS-LANE NAME COLLISION, REPORTED, NOT ACTED ON (finding 3's second half): f-a3/pr-1b
+-- (bank-agency, HEAD d44a4d8, unmerged) mints its OWN clara.wake_propose_identifier_promotion
+-- with a DIFFERENT signature -- `(p_client, p_counterparty uuid, p_identifier_kind text,
+-- p_identifier_value text, p_times_seen int, …)` (bank-agency-annexes-1-mechanics.md:50-52) --
+-- against this file's `(p_client, p_kind, p_value, p_sightings int, p_citations jsonb,
+-- p_rationale, p_model, p_op_key)` (filing-and-interview-annexes-1.md:29, byte-matching what
+-- this file actually built). Archaeology (not a unilateral resolution -- reported to the
+-- conductor for arbitration): docs/plan/active/wave-f-contract.md:285 assigns "F-A7 scope,
+-- from TA-P7 · TA-P3 · TA-P8 · TA-P4 · TA-P14" explicitly, and :315-320 describes TA-P8 B's
+-- "promotion door" in exactly this file's own shape (a typed proposal card, one human click
+-- through the audited door). Bank-agency's own copy is dated "NEW at v2, blocker B5" (bank-
+-- agency-annexes-2-record.md:166) -- a LATER addition to ITS OWN design, not an earlier claim.
+-- This file does not touch f-a3/pr-1b's branch or negotiate the resolution; see this train's
+-- settle report to the conductor for the full citations and the fold-vs-rename trade-offs.
+--
+-- =====================================================================================
 -- WHAT THIS FILE SHIPS
 -- =====================================================================================
 -- (A) The `filing` wake kind: both wake_credentials CHECKs extended (extend-only, LAST in the
@@ -288,13 +346,27 @@ do $$
 declare v_missing text; v_def text; v_sha text;
 begin
   -- (a) Nothing this file creates may already exist.
+  -- MEDIUM, FOUND AND FIXED (independent native review, opus, 2026-08-24 -- finding 3): a
+  -- BARE NAME passed to to_regprocedure (no parenthesized arg types) resolves ONLY a niladic
+  -- (zero-arg) overload -- none of the eight function names below have one, so
+  -- to_regprocedure('clara.'||t.n) returned NULL for every one of them REGARDLESS of whether
+  -- they actually existed. Measured: only agent_filing_receipts (a TABLE, correctly resolved
+  -- by to_regclass) was ever truly detectable by this check with all nine objects present --
+  -- the other eight could never make this guard say NO. Fixed with a pg_proc PRONAME lookup
+  -- (any overload of that name is a genuine collision worth naming, which is what "nothing
+  -- this file creates may already exist" actually means -- more correct than pinning one
+  -- specific signature the way SS9's revokes do, since a DIFFERENT-signature same-name
+  -- function would still collide at CREATE FUNCTION time and this check exists to name that
+  -- EARLY, not let it surface as a bare Postgres error later in the file).
   select string_agg(t.n, ', ' order by t.n) into v_missing
     from (values ('agent_filing_receipts'),('_tf_document_filings_agent_congruence'),
                  ('_tf_document_filings_agent_receipt'),('_agent_file_document_core'),
                  ('wake_file_document'),('wake_open_firm_question'),
                  ('wake_propose_identifier_promotion'),('wake_reattribute_document'),
                  ('wake_propose_filing_correction')) t(n)
-   where to_regclass('clara.'||t.n) is not null or to_regprocedure('clara.'||t.n) is not null;
+   where to_regclass('clara.'||t.n) is not null
+      or exists (select 1 from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+                  where ns.nspname = 'clara' and p.proname = t.n);
   if v_missing is not null then
     raise exception 'F-A7 beta prestate: object(s) already present: %', v_missing
       using errcode = 'CLR10';
@@ -921,18 +993,47 @@ begin
   -- machinery every arm below reduces to; only the NAME each arm feeds it differs.
   --
   -- ARM (a) -- THE SERVER-DERIVED FLOOR, "a deterministic floor, cannot be starved" (owner's own
-  -- words): tokenizes THIS document's OWN extracted party names, sourced exactly like B1 (AB-3
-  -- discipline, engine_kind in ('ocr','structured_parse'), the field_path convention verbatim
-  -- from 0009/0015/0016 -- invoice.customer_name / invoice.vendor_name). This arm fires on ITS
-  -- OWN evidence even when p_verdict carries no matched_name and no candidates at all -- a
-  -- completely empty or absent model verdict can NEVER open the gate this arm would have closed.
+  -- words). Fires on ITS OWN evidence even when p_verdict carries no matched_name and no
+  -- candidates at all -- a completely empty or absent model verdict can NEVER open the gate
+  -- this arm would have closed. ONE deterministic, non-model-confirmed signal (a second was
+  -- assessed and rig-proven redundant -- see the "(i)" comment below, kept for the record):
+  --
+  -- HIGH, FOUND AND FIXED (independent native review, opus, full rig replay, 2026-08-24 --
+  -- finding 1): the first draft sourced NAME tokens from engine_kind in ('ocr','structured_
+  -- parse') -- copied verbatim from B1's OWN identifier-matching scope -- but MEASURED, not
+  -- assumed, this arm's field_path pair (invoice.customer_name / invoice.vendor_name) is
+  -- NEVER written under those engine_kinds by any live producer. Rig-replayed: clara.persist_
+  -- invoice_facts (live tip, this train's authoring session) writes them under engine_kind=
+  -- 'invoice_facts' ONLY (0015:106-118's own S0.c assertion names this explicitly: "the
+  -- facts-pass keys ... live in engine_kind='invoice_facts' extractions (structurally
+  -- invisible to the AB-3 matcher)"). Azure OCR's own raw output uses a page/line locator
+  -- shape with no field_path in this vocabulary at all; the myinvois identity pass carries
+  -- only THREE field_paths -- myinvois.supplier_tin, myinvois.supplier_brn (both TIN/BRN
+  -- NUMBERS, not names) and myinvois.buyer_id_primary (itself a facts-pass key, confirmed by
+  -- the SAME 0015 S0.c array) -- none of them a party NAME. This arm's battery cell (this
+  -- train's own first draft) manufactured a field_path/engine_kind PAIR no live writer ever
+  -- produces -- green against a fixture, INERT against real data.
+  --
+  -- CONDUCTOR RULING ON THE FIX DIRECTION (2026-08-24): arm (a) may read BOTH (i) the myinvois
+  -- identity paths (deterministic) AND (ii) the invoice_facts party-name rows -- the AB-3
+  -- exclusion is an ATTRIBUTION-SOURCE wall (it exists so B1/B3 never CONFIRM a client from a
+  -- model-derived fact); arm (a) is a REFUSAL-ONLY arm (it can only ADD an ambiguity flag,
+  -- never confirm or admit anything on its own), so reading a model-derived facts row here is
+  -- monotone-safe under the owner's own only-ADD-caution principle and weakens no wall B1/B3
+  -- still enforce untouched.
+  --
+  -- (ii) NAME-TOKEN AMBIGUITY -- engine_kind widened to ALSO admit 'invoice_facts' (the real,
+  -- measured production writer), field_path unchanged (invoice.customer_name / invoice.
+  -- vendor_name, 0009/0015/0016's own convention). 'ocr'/'structured_parse' are KEPT, not
+  -- removed -- a future producer writing these paths there is still caught; this is strictly a
+  -- widening, never a narrowing, so no existing behaviour on any other rung moves.
   select coalesce(array_agg(distinct sn), '{}'::text[]) into v_server_names
     from (
       select nullif(btrim(r.text_content), '') as sn
         from clara.document_extractions e
         join clara.document_regions r on r.extraction_id = e.id and r.firm_id = p_firm
        where e.document_id = p_document and e.firm_id = p_firm and e.status = 'done'
-         and e.engine_kind in ('ocr','structured_parse')
+         and e.engine_kind in ('ocr','structured_parse','invoice_facts')
          and r.field_path in ('invoice.customer_name','invoice.vendor_name')
     ) s
    where sn is not null;
@@ -941,6 +1042,27 @@ begin
      where clara.name_family_is_ambiguous(p_firm, sn.name)
   ) into v_server_ambiguous;
   if v_server_ambiguous is null then v_server_ambiguous := false; end if;
+
+  -- (i) THE MYINVOIS IDENTITY PATHS -- ASSESSED, NOT SHIPPED, RIG-PROVEN REDUNDANT. A first
+  -- draft of this fix read the conductor's "(i) the myinvois identity paths (deterministic)"
+  -- as a NEW signal: does the SET of client_identifiers rows this document's own printed TIN/
+  -- BRN (myinvois.supplier_tin / myinvois.supplier_brn, engine_kind='structured_parse') resolve
+  -- to span MORE than one distinct client? Rig-proven, not assumed: this can NEVER be the
+  -- deciding factor for the ladder's admit/refuse outcome. Proof, both directions: whenever
+  -- that count is >1, AT LEAST ONE of the matching clients is necessarily <> p_client (a set of
+  -- more than one distinct value cannot consist entirely of one value), which is EXACTLY B1's
+  -- own trigger condition (`ci.client_id <> p_client`) -- so B1 ALREADY refuses in every case
+  -- this signal could ever fire. And in the sub-case where p_client is itself ONE of the
+  -- matching clients, v_confirms_client is ALSO true, which suppresses B2's OWN flag via cell
+  -- 12's hard case regardless. Confirmed on this train's own rig: a fixture built to exercise
+  -- this signal (two clients sharing one printed TIN, one of them p_client) produced
+  -- attribution_contradicted (B1) alone, never attribution_name_family_collision, because
+  -- v_confirms_client's cell-12 carve-out suppressed B2 exactly as designed. "(i)" is therefore
+  -- read as NAMING B1/B3's PRE-EXISTING, unchanged coverage of the identity pass (already
+  -- correctly scoped, untouched by this fix) rather than asking for new code in arm (a) -- the
+  -- only actionable, NON-redundant widening this finding required was (ii) below. Not
+  -- implementing dead code here is a deliberate choice, not an oversight; the rig proof is this
+  -- comment's own evidence, reported to the conductor rather than silently guessed past.
 
   -- ARM (b) -- THE MODEL'S OWN CANDIDATE LIST. p_verdict->'candidates', an array the RUNTIME/
   -- PROMPT layer will make MANDATORY (F-A2/PR-2's prompt file or its successor -- a runtime-side
@@ -2089,5 +2211,14 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice 'F-A7 beta tail (b): OK -- both wake_credentials CHECKs admit filing alongside the full interactive_client/close_prep/bank_agent/autodraft chain; the filing allowlist holds exactly its 6 provable rows (annexes-1 SSA.3 rows 1-6; row 7 is F-A7b''s); clara_wake_filing holds exactly 6 EXECUTE grants, ZERO table/column grants schema-wide (the roster/census re-truing), and cannot log in; clara_wake_interactive gained wake_file_document; every ungranted core holds zero app-role grants; agent_filing_receipts is RLS-forced with zero app-role DML; the f_a7 receipt shim conforms to pi''s 19-column contract; both Tier-C triggers are DEFERRABLE INITIALLY DEFERRED and their negative-set scope is currently vacuous (0 rows); egress.misrouted is registered once, client_scoped, decision=ignore; the has_function_privilege census (6b) confirms zero PUBLIC/app-role EXECUTE anywhere it should not be, catalog-resolved, not row-counted. TRAINS ALPHA AND GAMMA ARE NOW STAGED (conductor ruling 2026-08-24) -- the ladder''s write branch, wake_reattribute_document''s refile, and Tier A''s authorization rung are all WIRED to their real, rig-replayed shapes; only train pi''s absence from `main` remains an open merge-order fact (this file''s header). % namespace(s) among workflow/graphile_worker/spike exist on this database, none touched by this file.', v_ns;
+  -- RECONCILED (independent native review, opus, 2026-08-24 -- finding 4): the printed notice
+  -- below used to close with "only train pi's absence from `main` remains an open merge-order
+  -- fact (this file's header)" -- true when this tail was first authored (this train's staging
+  -- rig, pi absent from real `main`), but pi has SINCE merged (`main`@7b5b758, migration 0103)
+  -- and this is a STATIC string that would otherwise print the stale claim on every future
+  -- apply, regardless of the real chain's state at that time. The header's own STATUS section
+  -- carries the full historical record (both facts, dated, neither overwritten); this printed
+  -- notice is trued to the CURRENT state so an operator reading real apply output is never told
+  -- something false about the chain they are actually running.
+  raise notice 'F-A7 beta tail (b): OK -- both wake_credentials CHECKs admit filing alongside the full interactive_client/close_prep/bank_agent/autodraft chain; the filing allowlist holds exactly its 6 provable rows (annexes-1 SSA.3 rows 1-6; row 7 is F-A7b''s); clara_wake_filing holds exactly 6 EXECUTE grants, ZERO table/column grants schema-wide (the roster/census re-truing), and cannot log in; clara_wake_interactive gained wake_file_document; every ungranted core holds zero app-role grants; agent_filing_receipts is RLS-forced with zero app-role DML; the f_a7 receipt shim conforms to pi''s 19-column contract; both Tier-C triggers are DEFERRABLE INITIALLY DEFERRED and their negative-set scope is currently vacuous (0 rows); egress.misrouted is registered once, client_scoped, decision=ignore; the has_function_privilege census (6b) confirms zero PUBLIC/app-role EXECUTE anywhere it should not be, catalog-resolved, not row-counted. TRAINS ALPHA, GAMMA AND PI ARE ALL STAGED (alpha/gamma per conductor ruling 2026-08-24; pi merged to `main` as migration 0103, `git grep firm_open_questions` now returning 26 hits there) -- the ladder''s write branch, wake_reattribute_document''s refile, and Tier A''s authorization rung are all WIRED to their real, rig-replayed shapes, and this file''s own dependency on pi''s objects (_firm_question_core, name_family_candidates, agent_receipt_surfaces'' f_a7 row) resolves against pi''s REAL merged bodies, not a staged copy. No merge-order fact remains open. % namespace(s) among workflow/graphile_worker/spike exist on this database, none touched by this file.', v_ns;
 end $fa7_beta_tail_b$;

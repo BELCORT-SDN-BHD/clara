@@ -195,6 +195,42 @@ async function seedPartyNameRegion(doc, name, { role = "customer" } = {}) {
   );
 }
 
+/** Review finding 1 (independent native review, 2026-08-24): the REAL production shape a
+ *  party-name region is actually written under -- clara.persist_invoice_facts's live tip
+ *  writes invoice.customer_name / invoice.vendor_name ONLY under engine_kind='invoice_facts'
+ *  (0015:106-118's own S0.c assertion), never 'ocr'/'structured_parse'. seedPartyNameRegion
+ *  above is the FIXTURE shape B2 arm (a) was first authored against; this is the shape that
+ *  actually reaches production. */
+async function seedRealInvoiceFactsPartyNameRegion(doc, name, { role = "customer" } = {}) {
+  const ext = await rootQuery(
+    `insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind, version_n, status, page_count, envelope)
+       values ($1,$2,'test:invoice_facts','invoice_facts',1,'done',1,'{}'::jsonb) returning id`,
+    [world.firms.A, doc.documentId],
+  );
+  await rootQuery(
+    `insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
+       values ($1,$2,'page_polygon','{"page":1}'::jsonb,$3,$4,0.97)`,
+    [world.firms.A, ext.rows[0].id, `invoice.${role}_name`, name],
+  );
+}
+
+/** Review finding 1: the REAL production shape a MyInvois identity-pass identifier is written
+ *  under -- engine_kind='structured_parse', field_path in ('myinvois.supplier_tin',
+ *  'myinvois.supplier_brn') (0015:106-118's own S0.c assertion: "the identity pass
+ *  (structured_parse) intentionally carries EXACTLY two matching keys"). */
+async function seedMyinvoisIdentifierRegion(doc, fieldPath, value) {
+  const ext = await rootQuery(
+    `insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind, version_n, status, page_count, envelope)
+       values ($1,$2,'test:myinvois','structured_parse',1,'done',1,'{}'::jsonb) returning id`,
+    [world.firms.A, doc.documentId],
+  );
+  await rootQuery(
+    `insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
+       values ($1,$2,'page_polygon','{"page":1}'::jsonb,$3,$4,0.97)`,
+    [world.firms.A, ext.rows[0].id, fieldPath, value],
+  );
+}
+
 /** Seeds two live counterparties -- one bound to A1, one to A2 -- sharing a name-family TOKEN
  *  (clara.name_family_token's first-word rule), so clara.name_family_is_ambiguous(firm, family)
  *  is TRUE. Returns the A1-bound counterparty's full name, suitable to feed either a document's
@@ -611,6 +647,81 @@ test("wake_file_document Tier B2 cell 1: the SERVER-DERIVED tokenization floor f
   assert.equal(result.filed, false);
   assert.ok(result.failing_rungs.includes("attribution_name_family_collision"),
     `server-derived floor did not fire with an absent model verdict: ${JSON.stringify(result.failing_rungs)}`);
+});
+
+// ---------------------------------------------------------------------------
+// Review finding 1 (independent native review, opus, 2026-08-24): the cell above proves the
+// MECHANISM over a manufactured (engine_kind, field_path) shape no live producer writes. These
+// three cells prove it over the REAL production shapes, rig-replayed before this train wrote
+// them: clara.persist_invoice_facts (engine_kind='invoice_facts') for party names, and the
+// myinvois identity pass (engine_kind='structured_parse', field_path in
+// ('myinvois.supplier_tin','myinvois.supplier_brn')) for the identifier-family signal.
+// ---------------------------------------------------------------------------
+test("wake_file_document Tier B2 review finding 1, ASSESSED cell (i): a REAL myinvois.supplier_tin ambiguous across two clients is rig-proven REDUNDANT with B1 -- documented, not shipped as a new B2 signal", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  // A genuinely ambiguous printed TIN: the SAME normalized value registered to BOTH A1 and A2
+  // (a data-quality edge case -- two clients sharing one identifier by mistake), sourced under
+  // the REAL myinvois identity-pass shape (engine_kind='structured_parse',
+  // field_path='myinvois.supplier_tin').
+  const value = randomUUID().replace(/-/g, "").slice(0, 12);
+  await rootQuery(
+    `insert into clara.client_identifiers(firm_id, client_id, kind, value_normalized, added_by)
+       values ($1,$2,'tin',$3,$4), ($1,$5,'tin',$3,$4)`,
+    [world.firms.A, world.clients.A1, value, world.users.alice, world.clients.A2],
+  );
+  await seedMyinvoisIdentifierRegion(doc, "myinvois.supplier_tin", value);
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    verdict: { citations: [] },
+  });
+  const result = r.rows[0].result;
+  assert.equal(result.filed, false, "still refuses -- B1's own wall alone is sufficient");
+  // THE FINDING: B1 alone carries this refusal. A1's own matching row ALSO makes
+  // v_confirms_client true, which suppresses B2's flag via cell 12's hard case -- so a
+  // dedicated "identifier-family ambiguity" signal in B2 would never be the deciding factor
+  // here (or in any reachable case: whenever such a signal could fire, either B1 already
+  // refuses independently, or v_confirms_client's carve-out suppresses B2 regardless). This is
+  // the migration's own SS5 comment, proven here rather than merely asserted.
+  assert.deepEqual(result.failing_rungs, ["attribution_contradicted"],
+    `expected B1 alone (redundancy proof): ${JSON.stringify(result.failing_rungs)}`);
+});
+
+test("wake_file_document Tier B2 review finding 1, FIXED, cell (real-ii): a REAL invoice_facts party-name row (the actual production writer) fires -- the manufactured fixture shape is no longer the only proof", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  const familyName = await seedNameFamilyCollision();
+  await seedRealInvoiceFactsPartyNameRegion(doc, familyName, { role: "customer" });
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    verdict: { citations: [] },
+  });
+  const result = r.rows[0].result;
+  assert.equal(result.filed, false);
+  assert.ok(result.failing_rungs.includes("attribution_name_family_collision"),
+    `the real invoice_facts party-name row did not fire: ${JSON.stringify(result.failing_rungs)}`);
+});
+
+test("wake_file_document Tier B2 review finding 1, FIXED, cell (real, cannot-be-starved): the REAL invoice_facts shape fires with NO model candidate list either -- the asymmetry proof holds against production data, not only the fixture shape", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  const familyName = await seedNameFamilyCollision();
+  await seedRealInvoiceFactsPartyNameRegion(doc, familyName, { role: "vendor" });
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    // Absent model verdict, exactly like the fixture-shape cell above.
+    verdict: { citations: [] },
+  });
+  const result = r.rows[0].result;
+  assert.equal(result.filed, false);
+  assert.ok(result.failing_rungs.includes("attribution_name_family_collision"),
+    `production shape did not fire with an absent model verdict: ${JSON.stringify(result.failing_rungs)}`);
 });
 
 test("wake_file_document Tier B2 cell 2: the MODEL'S candidate list adds a refusal the server-derived floor alone would have missed", async (t) => {
