@@ -1021,19 +1021,12 @@ create trigger t_client_identifier_promotions_no_truncate
 -- therefore not defence-in-depth -- it is the wall. On F-A8's firm-less shim the cost of that
 -- mistake is Tier-1 draft content below the bookkeeper floor; on the six FIRM-SCOPED shims the
 -- identical mistake is a CROSS-TENANT read, which is hard-constraint territory.
-revoke all on clara._agent_receipts_all from public;
-revoke all on clara._agent_receipt_src_f_a2 from public;
-revoke all on clara._agent_receipt_src_f_a3 from public;
-revoke all on clara._agent_receipt_src_f_a4 from public;
-revoke all on clara._agent_receipt_src_f_a5 from public;
-revoke all on clara._agent_receipt_src_f_a6 from public;
-revoke all on clara._agent_receipt_src_f_a7 from public;
-revoke all on clara._agent_receipt_src_f_a8 from public;
-revoke all on clara.agent_receipt_contract from public;
-revoke all on clara.agent_receipt_surfaces from public;
-revoke all on clara.firm_open_questions from public;
-revoke all on clara.client_identifier_promotions from public;
-revoke all on clara.agent_receipts_visible from public;
+-- NO relation-level `revoke ... from public` here, DELIBERATELY: relations carry no default
+-- PUBLIC privileges, so such a revoke is a privilege no-op whose only effect is materializing
+-- the relation's NULL acl into an explicit default-equal one — which pg_dump does NOT emit,
+-- so the DR full-profile round-trip (dr-verify 4.6, aclexplode matrix) reads it as 96 rows of
+-- source-only grant drift and fails the leg. The ungrant itself IS the wall (above), and the
+-- tail's ACL census + the battery's adversarial twin are what prove it holds.
 grant select on clara.agent_receipts_visible to clara_authenticated;
 
 -- Cores stay UNGRANTED (beta adds the wake wrappers over them); the human verbs go to
