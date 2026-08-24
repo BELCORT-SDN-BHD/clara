@@ -13,10 +13,14 @@
 -- witness engine kind allowlist (0090 wall 8) is untouched by this recut.
 --
 -- THE CENSUS, not a caller list (AB-1/AB-2/D-17). "Who calls assert_client_resolved" sees
--- NONE of the inline re-derivations. The instrument is a pg_proc.prosrc TEXT census for the
--- predicate `method in ('human','rule')`, run fresh against this rig (clara-rig-fa7alpha,
--- frontier 0102 + alpha1) before authoring, per filing-and-interview-annexes-2.md Annex H:
--- exactly SEVEN live bodies carry it. Six EXTEND (this file); one STAYS two-value (D-16).
+-- NONE of the inline re-derivations, and even a `pg_proc.prosrc` TEXT census for the literal
+-- predicate `method in ('human','rule')` has its OWN blind spot: it cannot see a two-arm
+-- EXHAUSTIVE case (`when method='rule' then 'rule' else 'human' end`), which folds every OTHER
+-- value -- including a future 'judgement' -- into 'human' without ever spelling out an
+-- admitted-methods list. The independent review round's MF-2 finding caught exactly this in
+-- clara.finalize_document_intake, which the original text-pattern census missed. Per
+-- filing-and-interview-annexes-2.md Annex H the design predicted SEVEN; the census instrument
+-- itself is now EIGHT, corrected against the live catalog, not the design's prediction.
 --
 --   1. clara.assert_client_resolved            -- EXTEND (the constitutional gate itself)
 --   2. clara.assert_client_resolved_bound       -- STAYS two-value (D-16, opening-seed lane
@@ -25,34 +29,59 @@
 --                                                  only asserted unchanged below
 --   3. clara._tf_stamp_document_pipeline        -- EXTEND (AB-1: the document_filings BEFORE
 --                                                  INSERT trigger; every judged filing aborts
---                                                  at INSERT without this)
+--                                                  at INSERT without this) PLUS a NEW
+--                                                  basis<->method congruence check (MF-2),
+--                                                  the estate's backstop against any writer
+--                                                  -- present or future -- miscomputing its
+--                                                  own basis-derivation CASE
 --   4. clara._file_document_write               -- EXTEND (the delegate alpha1 extracted;
 --                                                  AB-2 attack a: without this the agent core
 --                                                  either raises CLR01 or silently mints a
---                                                  second 'human' resolution of its own)
+--                                                  second 'human' resolution of its own).
+--                                                  MF-1 (HIGH, review round): the SECOND,
+--                                                  subject-less fallback check inside this
+--                                                  body STAYS two-value -- widening it would
+--                                                  launder an agent judgement for a DIFFERENT
+--                                                  document into a fresh 'human'-stamped
+--                                                  resolution for THIS one. See the CoR body.
 --   5. clara._seed_verified_document             -- EXTEND (fixture/seed parity; a divergent
 --                                                  two-value seed world is a false negative)
 --   6. clara.propose_wrong_client_correction     -- EXTEND (rider 3's proposal arm targets a
 --                                                  client whose only resolution may be judged)
 --   7. clara.approve_wrong_client_correction     -- EXTEND (AB-2 attack b: without this rider
 --                                                  3's posted arm can never be approved)
+--   8. clara.finalize_document_intake            -- NEW, MF-2 (review round, MED-HIGH): the
+--                                                  FIFTH document_filings writer (0027:26-40's
+--                                                  six-writer census) and a confirmed
+--                                                  assert_client_resolved caller (cell 29's
+--                                                  three); its own basis-derivation CASE folds
+--                                                  anything but 'rule' into 'human', so a judged
+--                                                  filing written through this door was read
+--                                                  back by every basis-consumer (context pack,
+--                                                  document extract, the uncoded list) as
+--                                                  human-attributed. EXTEND the CASE's arm.
 --
 -- Every CoR below is authored from the rig replay captured after alpha1 applied (NOT from
 -- migration text -- annexes-2 SS G: approve_wrong_client_correction's true live tip is
 -- 0027:196, spliced further at 0038:7495-7520, and exists in no single migration file).
--- Prestate pins the exact pre-recut body of all seven; a drift aborts the apply rather than
+-- Prestate pins the exact pre-recut body of all eight; a drift aborts the apply rather than
 -- silently CoR'ing a body this file cannot account for (annexes-2 Annex J cell 62).
 --
 -- AM-1 fold: 0018's own tail block (0018:487-809) is a ONE-SHOT apply-position assertion
 -- against the body 0018 creates in the SAME file -- it cannot observe a CoR authored here,
 -- three migrations later. This file's own postcheck (template 0090:1062-1100) re-authors
 -- the properties 0018's tail can no longer prove: the prosrc marker, the accept-unbound and
--- reject-bound functional probes, and the seven-body re-derivation census -- re-runnable,
--- and therefore forceable both ways (cell 71).
+-- reject-bound functional probes, and the re-derivation census -- re-runnable, and therefore
+-- forceable both ways (cell 71).
 --
--- Deploy note: six live-writer bodies replaced (D1). Ceremony needs the write-quiesce window
--- for all seven document-pipeline writers this recut touches. Zero-risk on CI/throwaway
+-- Deploy note: seven live-writer bodies replaced (D1). Ceremony needs the write-quiesce window
+-- for all eight document-pipeline writers this recut touches. Zero-risk on CI/throwaway
 -- targets (no concurrent writers), same as every prior CoR in this lineage.
+
+-- Precautionary, not load-bearing (ADR-059 ceremony law): seven CoRs + two extend-only CHECK
+-- ALTERs, no backfill, no bulk scan. The bound exists only so a runaway lock wait on a live
+-- ceremony target fails fast and visibly. Set HERE, as the runner's true first statement.
+set local statement_timeout = '2min';
 
 set role clara_fn_owner;
 
@@ -81,7 +110,7 @@ begin
   end if;
   select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
     from pg_proc where oid = 'clara._file_document_write(jsonb,uuid,uuid,text,text)'::regprocedure;
-  if v_sha is distinct from '63a3d23c70f2a67dce5ad28d7bc668faaf56a0435cecefdfa8915861d7e7a0f1' then
+  if v_sha is distinct from 'fe2cffb73e76014e6e59c2e43dffa5b54129e3d857242b979ff4a55a77793bd3' then
     raise exception 'f_a7_alpha2 prestate: _file_document_write prosrc sha256 mismatch (got %) -- alpha1 must apply first, unmodified', v_sha using errcode = 'CLR10';
   end if;
   select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
@@ -98,6 +127,11 @@ begin
     from pg_proc where oid = 'clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure;
   if v_sha is distinct from '32d03cd050f65d65cf25c2498677efd7d1a18bbdd7c6e289cf08b8be0e93bf95' then
     raise exception 'f_a7_alpha2 prestate: approve_wrong_client_correction prosrc sha256 mismatch (got %) -- live tip is 0027:196 spliced by 0038:7495-7520; re-derive by rig replay, never migration text', v_sha using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
+    from pg_proc where oid = 'clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)'::regprocedure;
+  if v_sha is distinct from '2c5b8c452f051fb7606a20721f104822514c68acf9835623b354f1953ac3fbec' then
+    raise exception 'f_a7_alpha2 prestate: finalize_document_intake prosrc sha256 mismatch (got %) -- MF-2 (review round): re-derive by rig replay, never migration text', v_sha using errcode = 'CLR10';
   end if;
 
   select pg_get_constraintdef(oid) into v_def from pg_constraint
@@ -160,7 +194,7 @@ end $$;
 -- tip (0007:415, created once, never previously replaced).
 create or replace function clara._tf_stamp_document_pipeline()
   returns trigger language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_firm uuid; v_doc uuid; v_client uuid;
+declare v_firm uuid; v_doc uuid; v_client uuid; v_res_method text;
 begin
   case tg_table_name
     when 'document_filings' then
@@ -174,6 +208,25 @@ begin
           and subject_kind = 'document' and subject_id = new.document_id
           and method in ('human', 'rule', 'judgement') and confidence >= 0.95 and superseded_at is null) then
         raise exception 'filing resolution is not authoritative for this document/client' using errcode = 'CLR01';
+      end if;
+      -- MF-2 (review round, MED-HIGH): the STRUCTURAL basis<->method congruence wall. Nothing
+      -- before this recut ever verified that document_filings.basis, whatever a writer computed
+      -- it to be, actually matches the resolution's real method -- finalize_document_intake's
+      -- own basis-derivation CASE (row 8 below) proved that gap live: a judgement resolution
+      -- passed the authority check above and was then stamped basis='human' by a two-arm CASE
+      -- that folds anything but 'rule' into 'human'. This is the backstop against THAT class of
+      -- bug in every writer, present or future, not only the one caught this round: the three
+      -- method-mirroring basis values (human/rule/judgement) must equal the resolution's own
+      -- method exactly. 'correction' and 'seed-0007' are workflow-provenance markers, not
+      -- method-mirrors -- approve_wrong_client_correction legitimately stamps 'correction'
+      -- regardless of the destination resolution's method (rider 3's whole point, and cell 61's
+      -- proof), so those two basis values are deliberately EXEMPT from this congruence, never
+      -- from the authority check above.
+      if new.resolution_id is not null and new.basis in ('human', 'rule', 'judgement') then
+        select method into v_res_method from clara.client_resolutions where id = new.resolution_id;
+        if v_res_method is distinct from new.basis then
+          raise exception 'filing basis (%) does not match its resolution''s method (%) -- a writer''s basis-derivation is wrong, not the resolution', new.basis, v_res_method using errcode = 'CLR01';
+        end if;
       end if;
     when 'document_intakes' then
       if new.origin = 'chat' then
@@ -254,6 +307,11 @@ declare
   v_resolution uuid; v_input_resolution uuid; v_created boolean := false;
   v_resolution_created boolean := false; v_facts jsonb;
 begin
+  -- alpha1's SHOULD-7 null-guard, carried forward verbatim -- CREATE OR REPLACE fully replaces
+  -- the body, so omitting it here would silently drop it the moment this file applies.
+  if c_firm is null or c_actor is null then
+    raise exception 'file_document context is malformed (firm/actor required)' using errcode = 'CLR10';
+  end if;
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
   v_dedupe := clara._reserve_op(c_firm, 'file_document', p_op_key,
     clara._hash(jsonb_build_object('document', p_document, 'client', p_client,
@@ -276,9 +334,22 @@ begin
       and r.method in ('human', 'rule', 'judgement') and r.confidence >= 0.95 and r.superseded_at is null
       and r.subject_kind = 'document' and r.subject_id = p_document;
   if v_resolution is null then
+    -- Review round MF-1 (HIGH): this second check is SUBJECT-LESS by design (it exists to admit
+    -- a HUMAN caller who supplied SOME valid resolution as supporting evidence for a DIFFERENT
+    -- subject -- the fallback below then mints a fresh 'human' resolution FOR THIS document, at
+    -- confidence 1.0, on the strength of the human's own act of calling this verb). Widening it
+    -- to 'judgement' turns that same fallback into a laundering path: an agent-judged resolution
+    -- for a DIFFERENT document would pass here (right client/firm, admitted method, wrong
+    -- subject), fall through, and mint a NEW resolution stamped 'human' -- model-influenced
+    -- attribution wearing human provenance, the exact hazard the wall exists to close. This
+    -- check STAYS two-value; a judgement resolution for the WRONG document correctly refuses
+    -- CLR01 here (never silently re-homed) — the widened, subject-SCOPED select above is the
+    -- only lawful admission path for a judged resolution, and it already requires an exact
+    -- subject match. Train beta's caller discipline (never pass a resolution for a different
+    -- subject) is a comment on that lane, not a wall; this file owns the wall.
     if v_input_resolution is not null and not exists(select 1 from clara.client_resolutions r
         where r.id = v_input_resolution and r.client_id = p_client and r.firm_id = c_firm
-          and r.method in ('human', 'rule', 'judgement') and r.confidence >= 0.95
+          and r.method in ('human', 'rule') and r.confidence >= 0.95
           and r.superseded_at is null) then
       raise exception 'client attribution not established' using errcode = 'CLR01';
     end if;
@@ -653,6 +724,178 @@ begin
       'coding_task_id',v_coding_task));
 end $$;
 
+-- ---- 8. finalize_document_intake -- MF-2 (review round). Only the basis-derivation CASE near
+-- the end changes; everything else (the intake-recovery door, the mime-mismatch/attempt-cap
+-- refusals, the echo/mint modes) is reproduced verbatim from the live tip.
+create or replace function clara.finalize_document_intake(p_intake uuid, p_token_hash text default null,
+    p_engine_id text default 'clara-fixture:v1', p_engine_config jsonb default '{}'::jsonb,
+    p_version_n integer default 1, p_lane text default 'ocr', p_client uuid default null,
+    p_resolution uuid default null, p_op_key text default null)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  i record; d record; v_dedupe jsonb; v_doc uuid; v_task uuid; v_filing uuid;
+  v_created boolean:=false; v_upgraded boolean:=false; v_filed boolean:=false; v_basis text;
+  v_expired jsonb;
+  v_recovery jsonb; v_ing record; v_rvn int; v_rtask uuid;
+  v_rmode text; v_rrefuse jsonb; v_attempts int;
+begin
+  select * into i from clara.document_intakes where id=p_intake for update;
+  if not found then
+    raise exception 'intake finalize capability/state is invalid' using errcode='CLR16';
+  end if;
+  if i.expires_at<=now() or (p_token_hash is not null and i.token_hash<>p_token_hash) then
+    raise exception 'intake finalize capability/state is invalid' using errcode='CLR16';
+  end if;
+  if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  v_dedupe:=clara._reserve_op(i.firm_id,'finalize_document_intake',p_op_key,
+    clara._hash(jsonb_build_object('i',p_intake)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  if i.status not in ('verified','duplicate') then
+    raise exception 'intake finalize capability/state is invalid' using errcode='CLR16';
+  end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then
+    return clara._finish_op(i.firm_id,'finalize_document_intake',p_op_key,v_expired);
+  end if;
+
+  select * into d from clara.documents where firm_id=i.firm_id and sha256=i.sha256 for update;
+  if i.status='verified' and not found then
+    insert into clara.documents(firm_id,sha256,original_filename,mime_type,byte_size,
+        storage_path,bytes_verified_at,extraction_status,uploaded_by)
+      values(i.firm_id,i.sha256,i.original_filename,i.declared_mime,i.declared_bytes,
+        i.storage_key,now(),'pending',i.uploaded_by) returning id into v_doc;
+    v_created:=true;
+  else
+    if not found then raise exception 'duplicate intake has no canonical document' using errcode='CLR16'; end if;
+    v_doc:=d.id;
+    if d.bytes_verified_at is null then
+      perform clara._upgrade_legacy_document(v_doc,i.storage_key,now());
+      v_upgraded:=true;
+    end if;
+  end if;
+
+  if v_created or v_upgraded then
+    insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status)
+      values(i.firm_id,v_doc,p_engine_id,coalesce(p_engine_config,'{}'::jsonb),p_version_n,p_lane,'queued')
+      on conflict (document_id,engine_id,version_n,lane) do nothing returning id into v_task;
+    if v_task is null then
+      select id into v_task from clara.document_processing_tasks
+        where document_id=v_doc and engine_id=p_engine_id and version_n=p_version_n and lane=p_lane;
+      if v_task is null then
+        raise exception 'impossible state: an ON CONFLICT fired for (document=%,engine=%,version=%,lane=%) but no row exists at that key',
+          v_doc,p_engine_id,p_version_n,p_lane using errcode='CLR35';
+      end if;
+    end if;
+    update clara.document_ingest_reservations set task_id=v_task where intake_id=p_intake;
+  else
+    if p_lane in ('ocr','structured_parse','none') then
+      select * into v_ing from clara.document_processing_tasks
+        where document_id=v_doc and lane=p_lane
+        order by version_n desc, id desc limit 1;
+      if found and v_ing.status in ('failed','queued')
+         and lower(btrim(coalesce(i.declared_mime,''))) is distinct from lower(btrim(coalesce(d.mime_type,''))) then
+        v_rrefuse := jsonb_build_object('reason','mime_mismatch',
+          'document_mime',d.mime_type,'upload_mime',i.declared_mime);
+      elsif found and v_ing.status='queued' then
+        v_rmode := 'echo'; v_rtask := v_ing.id; v_rvn := v_ing.version_n;
+      elsif found and v_ing.status='failed' then
+        if coalesce(v_ing.error_code,'') not in ('engine_error','timeout','engine_lost','storage_error') then
+          v_rrefuse := jsonb_build_object('reason','not_retryable','error_code',v_ing.error_code,
+            'remedy','this document could not be read in its current form. That can mean the file itself, or that the reading service refused the request. If the file is sound, it may read on a later attempt; a corrected or re-exported file is new bytes and takes the ordinary pipeline.');
+        elsif exists (select 1 from clara.document_processing_tasks pit
+             where pit.document_id=v_doc and pit.lane=p_lane
+               and pit.status in ('queued','held_egress','running')) then
+          v_rrefuse := jsonb_build_object('reason','lane_busy');
+        else
+          select coalesce(sum(attempt_count),0)::int into v_attempts
+            from clara.document_processing_tasks
+            where document_id=v_doc and lane=p_lane;
+          if v_attempts >= 3 then
+            v_rrefuse := jsonb_build_object('reason','attempt_cap','attempts',v_attempts);
+          else
+            select coalesce(max(version_n),0)+1 into v_rvn
+              from clara.document_processing_tasks
+              where document_id=v_doc and lane=p_lane;
+            insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+                version_n,lane,status)
+              values(i.firm_id,v_doc,p_engine_id,coalesce(p_engine_config,'{}'::jsonb),v_rvn,p_lane,'queued')
+              on conflict (document_id,engine_id,version_n,lane) do nothing
+              returning id into v_rtask;
+            if v_rtask is null then
+              raise exception 'impossible state: the intake recovery mint conflicted at (document=%,engine=%,version=%,lane=%) while this transaction holds the documents row FOR UPDATE',
+                v_doc,p_engine_id,v_rvn,p_lane using errcode='CLR35';
+            end if;
+            v_rmode := 'mint';
+            update clara.document_ingest_reservations set task_id=v_rtask where intake_id=p_intake;
+          end if;
+        end if;
+      end if;
+      if v_rtask is not null then
+        v_recovery := jsonb_build_object('task_id',v_rtask,'lane',p_lane,'version_n',v_rvn,
+          'engine_id',(select engine_id from clara.document_processing_tasks where id=v_rtask),
+          'storage_path',d.storage_path,'sha256',d.sha256,'mime_type',d.mime_type,
+          'format',substring(d.storage_path from '[.]([a-z0-9]{1,12})$'),'mode',v_rmode);
+      end if;
+    end if;
+    if v_rmode is distinct from 'mint' then
+      perform clara._refund_document_reservation(i.firm_id,p_intake,'duplicate-adopted');
+    end if;
+    select id into v_task from clara.document_processing_tasks
+      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+      order by version_n desc limit 1;
+    if v_rtask is not null then v_task := v_rtask; end if;
+  end if;
+
+  if p_client is not null then
+    perform clara.assert_client_resolved(p_client,p_resolution,v_doc);
+    select id into v_filing from clara.document_filings
+      where document_id=v_doc and client_id=p_client and retired_at is null for share;
+    if v_filing is null then
+      select method into v_basis from clara.client_resolutions where id=p_resolution;
+      insert into clara.document_filings(firm_id,document_id,client_id,filed_by,resolution_id,basis)
+        values(i.firm_id,v_doc,p_client,i.uploaded_by,p_resolution,
+          -- MF-2 fix: the ORIGINAL two-arm case (`when v_basis='rule' then 'rule' else 'human'
+          -- end`) folded a judgement resolution into basis='human' -- exactly the hazard the
+          -- new congruence wall in _tf_stamp_document_pipeline would now refuse at INSERT
+          -- (correctly), but the honest fix is here, at the source of the wrong value.
+          case when v_basis='rule' then 'rule' when v_basis='judgement' then 'judgement' else 'human' end) returning id into v_filing;
+      v_filed:=true;
+      perform clara._recompute_document_retention(v_doc);
+    end if;
+  elsif p_resolution is not null then
+    raise exception 'resolution requires an explicit client' using errcode='CLR10';
+  end if;
+
+  if not v_created and i.status='verified' then
+    perform set_config('clara.intake_adopt_race',p_intake::text,true);
+  end if;
+  update clara.document_intakes set status=case when v_created then 'finalized' else 'adopted' end,
+    document_id=v_doc where id=p_intake;
+  if not v_created and i.status='verified' then
+    perform set_config('clara.intake_adopt_race','',true);
+  end if;
+  perform clara._audit(i.firm_id,i.uploaded_by,null,null,'finalize_document_intake',null,
+    jsonb_build_object('intake',p_intake,'document',v_doc,'task',v_task,'filing',v_filing,
+      'created',v_created,'upgraded',v_upgraded,'op_key',p_op_key));
+  if v_created then
+    perform clara._append_event(i.firm_id,'document.ingested',null,i.uploaded_by,null,null,
+      null,v_doc,null,'{}'::jsonb);
+  end if;
+  if v_filed then
+    perform clara._append_event(i.firm_id,'document.filed',p_client,i.uploaded_by,null,null,
+      null,v_doc,p_resolution,jsonb_build_object('filing_id',v_filing));
+  end if;
+  return clara._finish_op(i.firm_id,'finalize_document_intake',p_op_key,
+    jsonb_build_object('intake_id',p_intake,'document_id',v_doc,'task_id',v_task,
+      'filing_id',v_filing,'status',case when v_created then 'finalized' else 'adopted' end,
+      'upgraded',v_upgraded)
+    || case when v_recovery is null then '{}'::jsonb
+            else jsonb_build_object('recovery',v_recovery) end
+    || case when v_rrefuse is null then '{}'::jsonb
+            else jsonb_build_object('recovery_refused',v_rrefuse) end);
+end $$;
+
 reset role;
 
 -- =====================================================================
@@ -667,8 +910,10 @@ declare
   v_scope_plan uuid; v_scope_reg uuid; v_res_bound_judgement uuid;
   v_probe_ok boolean;
 begin
-  -- ---- prosrc marker: each EXTEND body's live text names 'judgement' AND still names
-  -- 'human'/'rule' (extend-never-weaken) ----
+  -- ---- prosrc marker: each of the SEVEN IN-list-shaped EXTEND bodies' live text names
+  -- 'judgement' AND still names 'human'/'rule' (extend-never-weaken). finalize_document_intake
+  -- (row 8) is checked separately below -- its CASE shape carries no `in (...)` list to search
+  -- for, which is exactly the census blind spot MF-2 found. ----
   for v_src in
     select prosrc from pg_proc
       where pronamespace = 'clara'::regnamespace
@@ -684,8 +929,11 @@ begin
     end if;
   end loop;
 
-  -- ---- the seven-body prosrc TEXT census (Annex H): exactly these seven carry the
-  -- predicate today, six of them now also carrying 'judgement' ----
+  -- ---- the IN-list-pattern census (Annex H's original instrument, corrected scope): exactly
+  -- these SIX carry the literal `'human','rule'` list-shaped predicate today. Body 8
+  -- (finalize_document_intake) is EXCLUDED here deliberately -- it never carried this shape,
+  -- so including it in the exclusion list would hide a future regression of THIS instrument
+  -- rather than prove anything about that body. ----
   select count(*) into v_n from pg_proc
     where pronamespace = 'clara'::regnamespace
       and (prosrc ~ '''human''\s*,\s*''rule''' or prosrc ~ '''rule''\s*,\s*''human''')
@@ -693,7 +941,7 @@ begin
         '_tf_stamp_document_pipeline','_file_document_write','_seed_verified_document',
         'propose_wrong_client_correction','approve_wrong_client_correction');
   if v_n <> 0 then
-    raise exception 'f_a7_alpha2 postcheck: an UNACCOUNTED body still carries the bare two-value predicate (% found outside the census seven) -- stop and re-census, never guess', v_n using errcode = 'CLR10';
+    raise exception 'f_a7_alpha2 postcheck: an UNACCOUNTED body carries the bare list-shaped two-value predicate (% found outside the census six) -- stop and re-census, never guess', v_n using errcode = 'CLR10';
   end if;
   select count(*) into v_n from pg_proc
     where pronamespace = 'clara'::regnamespace
@@ -702,7 +950,27 @@ begin
         'propose_wrong_client_correction','approve_wrong_client_correction')
       and prosrc ~ '''human''\s*,\s*''rule''\s*,\s*''judgement''';
   if v_n <> 6 then
-    raise exception 'f_a7_alpha2 postcheck: expected all six EXTEND bodies to carry the human,rule,judgement predicate verbatim in that order; got %', v_n using errcode = 'CLR10';
+    raise exception 'f_a7_alpha2 postcheck: expected all six list-shaped EXTEND bodies to carry the human,rule,judgement predicate verbatim in that order; got %', v_n using errcode = 'CLR10';
+  end if;
+
+  -- ---- body 8, finalize_document_intake: its OWN shape (a two-arm CASE, no IN-list) gets its
+  -- OWN marker -- the three-way case naming judgement between the rule arm and the human
+  -- fallback, verbatim. ----
+  select prosrc into v_src from pg_proc
+    where proname = 'finalize_document_intake' and pronamespace = 'clara'::regnamespace;
+  if position('whenv_basis=''judgement''then''judgement''' in regexp_replace(lower(v_src), '\s+', '', 'g')) = 0 then
+    raise exception 'f_a7_alpha2 postcheck: finalize_document_intake is missing the judgement CASE arm (MF-2 unresolved)' using errcode = 'CLR10';
+  end if;
+  if position('whenv_basis=''rule''then''rule''' in regexp_replace(lower(v_src), '\s+', '', 'g')) = 0 then
+    raise exception 'f_a7_alpha2 postcheck: finalize_document_intake dropped its rule CASE arm (weakened, not extended)' using errcode = 'CLR10';
+  end if;
+
+  -- ---- the structural congruence wall (MF-2's backstop): _tf_stamp_document_pipeline's
+  -- document_filings arm now names the basis<->method equality check. ----
+  select prosrc into v_src from pg_proc
+    where proname = '_tf_stamp_document_pipeline' and pronamespace = 'clara'::regnamespace;
+  if position('filing basis (%) does not match its resolution' in v_src) = 0 then
+    raise exception 'f_a7_alpha2 postcheck: _tf_stamp_document_pipeline is missing the MF-2 basis<->method congruence wall' using errcode = 'CLR10';
   end if;
 
   -- ---- D-16: assert_client_resolved_bound STAYS two-value, unchanged from the prestate pin ----
@@ -808,12 +1076,61 @@ begin
       raise exception 'f_a7_alpha2 functional: t_document_filings_stamp ADMITTED an agent-method filing' using errcode = 'CLR10';
     end if;
 
+    -- (f) MF-2 congruence NEGATIVE: the SAME judgement resolution used with a WRONG basis
+    -- ('human') is refused by the new congruence wall -- proving the wall reads the real
+    -- method, not merely the caller's claimed basis.
+    v_probe_ok := false;
+    begin
+      insert into clara.document_filings(firm_id, document_id, client_id, filed_by, resolution_id, basis)
+        values (v_f, v_doc, v_c, v_u, v_res_judgement, 'human');
+    exception when sqlstate 'CLR01' then v_probe_ok := true;
+    end;
+    if not v_probe_ok then
+      raise exception 'f_a7_alpha2 functional: the congruence wall ADMITTED basis=human on a judgement-method resolution (MF-2 unresolved)' using errcode = 'CLR10';
+    end if;
+    -- (f) MF-2 congruence twin, 'correction' EXEMPT: the same judgement resolution with
+    -- basis='correction' is NOT refused by the congruence wall (rider 3 / cell 61's shape).
+    begin
+      insert into clara.document_filings(firm_id, document_id, client_id, filed_by, resolution_id, basis)
+        values (v_f, v_doc, v_c, v_u, v_res_judgement, 'correction');
+    exception when sqlstate 'CLR01' then
+      raise exception 'f_a7_alpha2 functional: the congruence wall wrongly refused basis=correction on a judgement resolution (rider 3 would break)' using errcode = 'CLR10';
+    end;
+    update clara.document_filings set retired_at = now(), retired_by = v_u, retirement_reason = 'probe cleanup'
+      where document_id = v_doc and client_id = v_c and resolution_id = v_res_judgement and retired_at is null;
+
+    -- (g) MF-1 NEGATIVE, through the ACTUAL function call path (not a raw insert): a judgement
+    -- resolution scoped to v_doc is refused CLR01 when the caller names a DIFFERENT document --
+    -- the subject-less fallback must never launder it into a fresh 'human' mint.
+    declare v_doc2 uuid;
+    begin
+      v_doc2 := gen_random_uuid();
+      insert into clara.documents(id, firm_id, sha256, original_filename, mime_type, byte_size, storage_path,
+          bytes_verified_at, extraction_status, uploaded_by, page_count)
+        values (v_doc2, v_f, repeat('b', 64), 'probe2.pdf', 'application/pdf', 100,
+          'firms/' || v_f::text || '/docs/' || repeat('b', 64) || '.pdf',
+          now(), 'pending', v_u, 1);
+      v_probe_ok := false;
+      begin
+        perform clara._file_document_write(jsonb_build_object('firm', v_f, 'actor', v_u),
+          v_doc2, v_c, v_res_judgement::text, 'f_a7_alpha2_probe_mf1');
+      exception when sqlstate 'CLR01' then v_probe_ok := true;
+      end;
+      if not v_probe_ok then
+        raise exception 'f_a7_alpha2 functional: _file_document_write ADMITTED a judgement resolution for the WRONG document (MF-1 unresolved -- laundering path open)' using errcode = 'CLR10';
+      end if;
+      -- and no stray resolution was minted for v_doc2 by the (correctly refused) attempt.
+      if exists(select 1 from clara.client_resolutions where subject_id = v_doc2) then
+        raise exception 'f_a7_alpha2 functional: a refused MF-1 attempt still minted a resolution for the wrong document' using errcode = 'CLR10';
+      end if;
+    end;
+
     -- Force the subtransaction to unwind so no fixture row commits.
     raise exception 'clara_f_a7_alpha2_probe_rollback' using errcode = 'CLR99';
   exception
     when sqlstate 'CLR99' then null;  -- expected: fixtures discarded
   end;
 
-  raise notice 'f_a7_alpha2 postcheck: OK -- 6/6 EXTEND bodies carry judgement beside human/rule, assert_client_resolved_bound unchanged (D-16), the census names exactly the seven expected bodies and no others, and all five functional probes (accept-unbound, agent-still-refused, bound-still-refuses-judgement, trigger-admits-judgement, trigger-still-refuses-agent) passed inside a forced-rollback subtransaction';
+  raise notice 'f_a7_alpha2 postcheck: OK -- 7/7 EXTEND bodies (six list-shaped + finalize_document_intake''s own CASE) carry judgement, assert_client_resolved_bound unchanged (D-16), the census names exactly the expected bodies and no others, the MF-2 congruence wall is present and functionally proven both ways, MF-1''s subject-less fallback correctly refuses a wrong-document judgement resolution through the real function call, and every other probe (accept-unbound, agent-still-refused, bound-still-refuses-judgement, trigger-admits-judgement, trigger-still-refuses-agent) passed inside a forced-rollback subtransaction';
 end
 $postcheck$;
