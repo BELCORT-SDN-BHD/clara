@@ -57,6 +57,42 @@
 -- which alpha/gamma were absent; the window has now closed and this comment records that it did.
 --
 -- =====================================================================================
+-- THE OWNER-RULING DELTA (2026-08-24, F-A7 gate-record card dispositions) -- SS0 GROWS
+-- =====================================================================================
+-- Two rulings landed after this train's first settle, both re-shaping Tier B judgement logic in
+-- `_agent_file_document_core` -- no table/grant/allowlist surface changed, so the D1 inventory
+-- above (one CoR'd body, mint_wake_credential) is UNCHANGED; the delta is entirely inside that
+-- one already-CoR'd-adjacent function's own body, authored fresh (this function did not exist
+-- on `main` before this train), rig-replayed against a freshly recreated rig before writing.
+--   - B2, "union of cautions" (grade A+): the collision rung now reads TWO independent sources
+--     and refuses if EITHER names more than one candidate -- (a) a SERVER-DERIVED tokenization
+--     of the document's OWN extracted party names (a deterministic floor that cannot be starved
+--     by an absent model verdict), and (b) the model's own `candidates` array (a RUNTIME/PROMPT-
+--     layer obligation, NOT implemented here -- see the runtime counterpart note below). The
+--     asymmetry is proved by battery: absence of the model list never opens the gate; its
+--     presence may only add refusals.
+--   - B3, "the corroborated-anchor floor" (grade A): unattended filing now requires at least ONE
+--     corroborated anchor -- a hard-identifier match (v_confirms_client, unchanged) OR a
+--     witness-corroborated region, read as a typed STATUS from clara.evaluate_witness_identity_v1
+--     (never witness-engine-kind region CONTENT, per 0090 wall 8). A bare name-only sighting now
+--     REFUSES where the prior form admitted it.
+-- RUNTIME COUNTERPART OBLIGATION, NOTED HERE AND NOT IMPLEMENTED (explicit owner instruction:
+-- "do not implement prompts in DB"): B2 arm (b) reads p_verdict->'candidates' defensively (an
+-- absent or malformed key degrades to no additional refusal, never a raise) because nothing yet
+-- makes the model actually SUPPLY that array. F-A2/PR-2's prompt file (chatTurn/autoDraft's
+-- successor covering this verb) or its own successor must make `candidates` MANDATORY in the
+-- verdict shape SS3.2 documents below for arm (b) to do real work; until then it is a live,
+-- correctly-wired, currently-quiet arm -- not a stub, but not yet fed.
+-- KNOWN GAP, NAMED RATHER THAN FAKED: B3 arm (b) is PROVABLY UNREACHABLE via any live call path
+-- in wake_file_document today (full argument at the rung itself, SS5) -- the evaluator it calls
+-- self-derives its candidate client from a live clara.document_filings row, and Tier A already
+-- refuses the one case that row could ever equal p_client. The corroborated-anchor floor is
+-- therefore, in practice, arm (a) alone until either a candidate-parameterized evaluator variant
+-- lands (pi/F-A1-successor scope) or a SAVEPOINT-based ladder restructure is independently
+-- reviewed (assessed and not attempted here -- clara._append_event's event_seq does not roll
+-- back with a SAVEPOINT). Carried to the conductor in this train's settle report.
+--
+-- =====================================================================================
 -- WHAT THIS FILE SHIPS
 -- =====================================================================================
 -- (A) The `filing` wake kind: both wake_credentials CHECKs extended (extend-only, LAST in the
@@ -93,6 +129,11 @@
 --     "citations": [ { "region_id": uuid, "note": text } , ... ],   -- REQUIRED array, may be
 --                                        -- empty; each element anchors the verdict to a live
 --                                        -- clara.document_regions row of THIS document (B4)
+--     "candidates": [ text|uuid, ... ]|absent,  -- OPTIONAL today, read defensively (B2 arm b) --
+--                                        -- the owner-ruling delta's runtime counterpart
+--                                        -- obligation is to make this MANDATORY (not built
+--                                        -- here); >1 distinct entries adds a refusal, absence
+--                                        -- adds none, and can NEVER remove one arm (a) caught
 --     "confidence": numeric,            -- the model's own stated number, an ANNOTATION ONLY
 --                                        -- (D-2); never read by any rung
 --     "identifier_write_requested": boolean }   -- true only if the model asked to also mint an
@@ -530,8 +571,14 @@ create function clara._agent_file_document_core(
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
 declare
   v_dedupe jsonb; v_doc_firm uuid; v_active uuid; v_client_status text;
-  v_name text; v_citations jsonb; v_n int; v_failing text[] := '{}'::text[];
+  v_name text; v_citations jsonb; v_failing text[] := '{}'::text[];
   v_b1 boolean; v_confirms_client boolean; v_ambiguous boolean;
+  -- B2 delta (owner ruling, 2026-08-24, "union of cautions", grade A+): a SERVER-DERIVED
+  -- tokenization floor plus the model's own (runtime-mandated, not yet built) candidate list.
+  v_server_names text[]; v_server_ambiguous boolean; v_candidates jsonb; v_model_list_ambiguous boolean;
+  -- B3 delta (owner ruling, 2026-08-24, "the corroborated-anchor floor", grade A): a witness-
+  -- corroboration STATUS read, never witness-engine-kind region CONTENT (0090 wall 8).
+  v_text_x uuid; v_ident jsonb; v_witness_corroborated boolean;
   v_bad_region boolean; v_stale boolean; v_cross_firm boolean;
   v_auth record; v_purpose_mismatch boolean := false;
   v_identity_kind boolean; v_enrichment_requested boolean;
@@ -656,7 +703,6 @@ begin
 
   v_name := nullif(btrim(coalesce(p_verdict->>'matched_name','')), '');
   v_citations := coalesce(p_verdict->'citations', '[]'::jsonb);
-  v_n := jsonb_array_length(v_citations);
 
   -- B1 -- the hard-number contradiction wall. Inherits record_rule_resolution's AB-3 source
   -- discipline (engine_kind in ('ocr','structured_parse')) and its MyInvois sentinel-TIN
@@ -700,23 +746,111 @@ begin
        and ci.client_id = p_client
   ) into v_confirms_client;
 
-  -- B2 -- the name-family collision guard (D-4/D-19, pi's clara.name_family_candidates over
-  -- clients UNION the firm's counterparties). >1 candidate means CLARIFY, never choose --
-  -- UNLESS an identifier hit disambiguates the family in p_client's favour (cell 12).
-  v_ambiguous := (v_name is not null) and clara.name_family_is_ambiguous(p_firm, v_name);
+  -- B2 -- THE UNION-OF-CAUTIONS COLLISION GUARD (owner ruling, 2026-08-24, grade A+, superseding
+  -- the single-source form). >1 candidate means CLARIFY, never choose -- UNLESS an identifier
+  -- hit disambiguates the family in p_client's favour (cell 12's hard case, unchanged, and
+  -- applied to every arm below alike). D-4/D-19's pi predicate (clara.name_family_candidates /
+  -- clara.name_family_is_ambiguous, over clients UNION the firm's counterparties) is the shared
+  -- machinery every arm below reduces to; only the NAME each arm feeds it differs.
+  --
+  -- ARM (a) -- THE SERVER-DERIVED FLOOR, "a deterministic floor, cannot be starved" (owner's own
+  -- words): tokenizes THIS document's OWN extracted party names, sourced exactly like B1 (AB-3
+  -- discipline, engine_kind in ('ocr','structured_parse'), the field_path convention verbatim
+  -- from 0009/0015/0016 -- invoice.customer_name / invoice.vendor_name). This arm fires on ITS
+  -- OWN evidence even when p_verdict carries no matched_name and no candidates at all -- a
+  -- completely empty or absent model verdict can NEVER open the gate this arm would have closed.
+  select coalesce(array_agg(distinct sn), '{}'::text[]) into v_server_names
+    from (
+      select nullif(btrim(r.text_content), '') as sn
+        from clara.document_extractions e
+        join clara.document_regions r on r.extraction_id = e.id and r.firm_id = p_firm
+       where e.document_id = p_document and e.firm_id = p_firm and e.status = 'done'
+         and e.engine_kind in ('ocr','structured_parse')
+         and r.field_path in ('invoice.customer_name','invoice.vendor_name')
+    ) s
+   where sn is not null;
+  select exists (
+    select 1 from unnest(v_server_names) as sn(name)
+     where clara.name_family_is_ambiguous(p_firm, sn.name)
+  ) into v_server_ambiguous;
+  if v_server_ambiguous is null then v_server_ambiguous := false; end if;
+
+  -- ARM (b) -- THE MODEL'S OWN CANDIDATE LIST. p_verdict->'candidates', an array the RUNTIME/
+  -- PROMPT layer will make MANDATORY (F-A2/PR-2's prompt file or its successor -- a runtime-side
+  -- obligation this train notes but does NOT implement; DB code never authors a prompt). Typed
+  -- defensively, never cast blind: an absent or non-array `candidates` key degrades to "no
+  -- additional refusal from this arm" rather than raising, matching B4/B5's own shape-guard
+  -- discipline (a malformed model field must never abort the whole transaction).
+  v_candidates := p_verdict->'candidates';
+  if v_candidates is not null and jsonb_typeof(v_candidates) = 'array' then
+    v_model_list_ambiguous := jsonb_array_length(v_candidates) > 1;
+  else
+    v_model_list_ambiguous := false;
+  end if;
+
+  -- ARM (c) -- the pre-existing single matched_name check (D-4/D-19's original form). Kept
+  -- verbatim, not superseded: the owner's ruling adds two sources, it does not retire this one,
+  -- and a union can only gain refusal opportunities by keeping every arm that already had one.
+  --
+  -- THE ASYMMETRY THE OWNER'S RULING REQUIRES PROVEN (battery cells below): arm (a) alone must
+  -- still catch a real collision with NO model list present (cell 1); arm (b) may ADD a refusal
+  -- arm (a) would have missed but may never REMOVE one arm (a) already caught (cell 2); with
+  -- both arms clean, the gate admits (cell 3).
+  v_ambiguous := v_server_ambiguous or v_model_list_ambiguous
+    or ((v_name is not null) and clara.name_family_is_ambiguous(p_firm, v_name));
   if v_ambiguous and not v_confirms_client then
     v_failing := array_append(v_failing, 'attribution_name_family_collision');
   end if;
 
-  -- B3 -- a basis exists: an identifier hit (for or against ANY client -- its mere presence is
-  -- evidence the model had something to read), a name/alias hit naming p_client among the
-  -- family candidates, OR at least one cited region. Zero of all three is a guess, not a
-  -- judgement.
-  if not v_b1 and not v_confirms_client
-     and not (v_name is not null and exists (
-       select 1 from clara.name_family_candidates(p_firm, v_name) fc
-        where fc.bound_client = p_client))
-     and v_n = 0 then
+  -- B3 -- THE CORROBORATED-ANCHOR FLOOR (owner ruling, 2026-08-24, grade A, superseding the
+  -- prior "any of three weaker signals" form -- a bare name-family hit or a nonzero citation
+  -- count alone is EXPLICITLY no longer sufficient; a bare name-only sighting must refuse).
+  -- Unattended filing requires at least ONE corroborated anchor: (a) v_confirms_client, the
+  -- hard-identifier match already computed above (document-extracted SSM/TIN/bank number equal
+  -- to p_client's own clara.client_identifiers row), OR (b) a witness-corroborated region.
+  --
+  -- Per 0090 wall 8, witness engine kinds stay OUT of the attribution-source allowlist -- arm
+  -- (b) may read only the anchor's CORROBORATION STATUS (a typed verdict from a frozen
+  -- evaluator), never witness-engine-kind document_regions.text_content directly the way B1
+  -- reads OCR/structured_parse text. clara.evaluate_witness_identity_v1 is the estate's one
+  -- existing frozen evaluator computing exactly this verdict
+  -- ('corroborated' | 'not_corroborated' | 'withdrawn_self_referential' | 'withdrawn_contest'),
+  -- called here correctly, per its real (rig-replayed, not guessed) contract.
+  --
+  -- MEASURED, NOT ASSUMED (independent finding, this train's own authoring session): the
+  -- evaluator self-derives its candidate client from LIVE clara.document_filings rows for
+  -- p_document -- it takes no candidate-client parameter of its own. This core's Tier A (above)
+  -- already raises CLR10 "document is already actively filed to this client" whenever a live
+  -- filing to p_client exists -- so the one case in which the evaluator could ever resolve its
+  -- internal v_client = p_client is exactly the case Tier A has already refused before this
+  -- rung runs. Arm (b) is therefore PROVABLY UNREACHABLE via any live call path in
+  -- wake_file_document today -- the same unreachability class as B6 and the SS7 congruence
+  -- trigger (both measured, not assumed, by independent review, and both kept as documented
+  -- defense-in-depth rather than removed unilaterally).
+  --
+  -- Making arm (b) reachable needs one of: (i) a new evaluator variant taking an explicit
+  -- candidate-client parameter (out of this train's scope -- pi/F-A1-successor's to own), or
+  -- (ii) restructuring this core's ladder-before-write ordering around a SAVEPOINT trial-insert-
+  -- then-rollback of the candidate filing. (ii) was assessed and NOT attempted unilaterally in
+  -- this train: clara._append_event mints event_seq from a sequence, which is NOT transactional
+  -- and does not roll back with a SAVEPOINT, so a trial call through the real write delegate
+  -- would leave a PERMANENT gap in the firm's event spine -- a correctness risk this train will
+  -- not introduce into judgement logic without its own independent review (hard constraint 1,
+  -- review law 1). Flagged to the conductor/design-register in this train's settle report,
+  -- battery cell "(2) witness-corroborated region admits" reported as a NAMED, MEASURED SKIP
+  -- rather than faked or silently dropped.
+  v_text_x := clara._document_facts_extraction(p_document);
+  if v_text_x is not null then
+    v_ident := clara.evaluate_witness_identity_v1(p_document, v_text_x, false);
+    v_witness_corroborated :=
+      (v_ident->>'vendor_registration_verdict' = 'corroborated')
+      or (v_ident->>'customer_registration_verdict' = 'corroborated');
+    if v_witness_corroborated is null then v_witness_corroborated := false; end if;
+  else
+    v_witness_corroborated := false;
+  end if;
+
+  if not v_confirms_client and not v_witness_corroborated then
     v_failing := array_append(v_failing, 'attribution_no_basis');
   end if;
 
