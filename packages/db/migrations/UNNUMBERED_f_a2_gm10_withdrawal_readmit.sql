@@ -20,8 +20,8 @@
 -- D1: NONE. This adds one function and changes no deployed writer body.
 -- RLS: no relation is created, so there is no RLS surface to configure.
 
-set local lock_timeout = '5s';
 set local statement_timeout = '60s';
+set local lock_timeout = '5s';
 
 -- =====================================================================================
 -- PRESTATE -- refuse if the exact door we delegate to, its duplicate wall, or the PR-1

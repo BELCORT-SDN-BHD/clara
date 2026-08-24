@@ -27,6 +27,11 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+// The GM-10 cells dynamically import packages/runtime/lib/pools.mjs, whose production mode
+// fails closed without CLARA_RUNTIME_DATABASE_URL; the runtime package's rig.mjs sets this
+// for every runtime test, but this db-package file must set it itself (the first db test to
+// cross-import the pool client).
+process.env.RELAY_TEST_MODE ??= "1";
 import {
   endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
   booksVersion, opk, entryRow, postingCoreReady, upsertAccountClassed,
