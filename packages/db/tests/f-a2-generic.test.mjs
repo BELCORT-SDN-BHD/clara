@@ -27,14 +27,22 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+// The GM-10 cells dynamically import packages/runtime/lib/pools.mjs, whose production mode
+// fails closed without CLARA_RUNTIME_DATABASE_URL; the runtime package's rig.mjs sets this
+// for every runtime test, but this db-package file must set it itself (the first db test to
+// cross-import the pool client).
+process.env.RELAY_TEST_MODE ??= "1";
 import {
-  endPool, buildWorld, printLaneNotes, printSkipCount, noteLane, skipHere,
+  endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
   booksVersion, opk, entryRow, postingCoreReady, upsertAccountClassed,
-  gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
+  gateCore, gateReadmit, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   unwitnessedFiling, admits, nonAdmitting, assertNonAdmitting, assertVectorShape,
   genericLines, suppressedPayableLines, genericWithControlLeg, CHART,
-  RUNG_TOKEN, TIER_D_TOKENS, PR2_PENDING, rootQuery, addClientIdentifier,
+  RUNG_TOKEN, TIER_D_TOKENS, rootQuery, addClientIdentifier,
   createClient, TIER_B_TOKENS, LETTER_THIRD_PARTY, LETTER_HELD_SSM,
+  ORIGIN, AP, EXP, billLines, primeReadyFiling, admitAutodraft, beginAutodraft,
+  settleAutodraft, mintAutodraftCred, wakeBillDraft, reviseAgentDraft, withdrawDraft,
+  roleQuery, ROLES,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -49,6 +57,14 @@ const A1 = () => world.clients.A1;
 const A2 = () => world.clients.A2;
 const OWNER = () => world.users.alice;
 const post = (p, over = {}) => wakePostEntry(p.cred, { ...p.args, ...over });
+const readmitWithdrawal = async (event, model = "gpt-5.6-terra", reserve = 40000) => {
+  const r = await roleQuery(
+    ROLES.runtime,
+    "select clara.readmit_autodraft_after_withdrawal($1, $2, $3::bigint) as receipt",
+    [event, model, reserve],
+  );
+  return r.rows[0]?.receipt ?? {};
+};
 
 // ===========================================================================
 // The generic lane's own three walls.
@@ -558,25 +574,448 @@ test("f-a2.c14.b14-interlock B14 and B15 are COHERENT — a directional invoice 
 // GM-10's re-admit door — PR-2's cell, recorded here so the obligation is visible in a run.
 // ===========================================================================
 
-test("f-a2.c14.readmit GM-10's re-admit door after withdrawal — a PR-2 DESIGN OBLIGATION, not authored by this lane", async (t) => {
-  skipHere(t, `${PR2_PENDING} — GM-10's re-admission door does not exist yet, and this cell belongs to PR-2`);
-  // WRITTEN OUT so a later reader does not have to reconstruct it. v4 claimed `entry.revised`
-  // re-admitted a human-revised draft for a fresh agent read. That is FALSE at the bytes:
-  // `revise_entry` does emit the event, but NO coding-lane reader keys on it — the event
-  // re-admits nothing. And once the human's draft is WITHDRAWN (which the double-coding wall
-  // makes a precondition for OQ-4's exit 2), a fresh sweep on that filing is refused
-  // `already_done` by the gate `0053` installed ON PURPOSE to stop duplicate sweeps.
-  //
-  // So exit 2 has no mechanical door today, and PR-2 must build one: a deliberate, AUDITED
-  // re-admission after withdrawal that does NOT weaken `0053`'s duplicate-sweep gate. The cell
-  // PR-2 owes is PAIRED, and both halves are required:
-  //   (a) after a withdrawal through the re-admit door, the document IS re-read by the agent;
-  //   (b) an ORDINARY repeat sweep on an already-done filing is STILL refused `already_done`.
-  // A door that opened (a) by weakening the gate would pass (a) and fail (b) — which is exactly
-  // why the pair, and not (a) alone, is the obligation.
-  //
-  // The RULING is untouched by any of this. What changed at the gate is that the mechanism is
-  // WORK, not an existing capability, and pretending otherwise would have shipped a ruled exit
-  // nobody could take. f-a2-ladder.test.mjs's `c2.A8-exit2` proves the POST half is lawful once
-  // a fresh draft exists; this cell is the missing DOOR to that draft.
+// admitAutodraft (wave-a-fixtures.mjs) opens a BRAND-NEW sweep_run per sweep-origin call
+// (run-bound admission, as-built) and neither GM-10 cell ever reconciles them, so they
+// accumulate as permanently-open runs on the shared world.firms.A — the exact fixture-
+// accumulation wave-a-budget.test.mjs:63-65 already names and works around ("the run-bound
+// admitAutodraft opens a sweep_run per call and these accumulate on the shared firm across
+// tests — only the cap test constrains it"). Left at the default max_concurrent_sweeps=2,
+// the first GM-10 cell's OWN two sweep-origin admissions (its `first` and `ordinaryRepeat`)
+// are enough to trip the concurrency cap on the second cell's very first admission —
+// measured directly: 3 sweep_runs open on this firm at the failure point, all state='open',
+// no firm_limits row (so max_concurrent_sweeps defaults to 2) and firm_usage_daily.tokens_used
+// at 2500 — nowhere near the 600,000/1,000,000 token ceilings, so this is the concurrency
+// gate, not the token-budget one. Bumped generously (999, matching the sibling file's own
+// value) rather than pinned to today's exact call count, since runAutodraftCycle's own
+// catch-up sweep pass (packages/runtime/lib/autodraft.mjs) can open further runs on this
+// firm too. No product code is touched — this only widens a resource-budget TEST fixture
+// that neither GM-10 cell exercises as its subject.
+async function raiseSweepConcurrencyCap(firm) {
+  await rootQuery(
+    `insert into clara.firm_limits (firm_id, max_concurrent_sweeps)
+     values ($1, 999)
+     on conflict (firm_id) do update set max_concurrent_sweeps = excluded.max_concurrent_sweeps`,
+    [firm],
+  );
+}
+
+test("f-a2.c14.readmit GM-10 re-reads after withdrawal while an ordinary repeat sweep stays already_done", async (t) => {
+  if (await gateCore(t)) return;
+  // F3 (opus review): gateCore alone proved false-clean on a numbered-only control DB that
+  // carries the F-A2 posting core but not GM-10's own migration file — the two cells below
+  // then hard-failed CI on "function readmit_autodraft_after_withdrawal does not exist"
+  // instead of a graceful, counted skip. GM-10 ships its OWN migration file on top of core
+  // (never inside it), so it needs its OWN stem gate.
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+
+  const amount = 500000;
+  const vendorName = `GM10 READY ${opk("vendor")}`;
+  const rf = await primeReadyFiling(OWNER(), {
+    client: A1(),
+    amount,
+    vendorName,
+    registration: `2026${opk("reg").replace(/[^a-z0-9]/gi, "").slice(-8)}`,
+  });
+
+  // Production-shaped first read: a real sweep task, a wake-authored agent draft, the
+  // coding_attempts task->entry identity link, and a completed autodraft attempt.
+  const first = await admitAutodraft({
+    filing: rf.filingId,
+    origin: ORIGIN.sweep,
+    reserveTokens: 40000,
+  });
+  assert.equal(first.outcome, "admitted", `GM-10 premise: first sweep admits (${JSON.stringify(first)})`);
+  await beginAutodraft({ task: first.task_id, workflowRunId: `gm10-first-${opk("wf")}` });
+  const firstCred = await mintAutodraftCred(world.firms.A, A1());
+  const firstDraft = await wakeBillDraft(OWNER(), firstCred, {
+    client: A1(),
+    cited: rf,
+    amount,
+    vendorName,
+    opKey: opk("gm10-first-draft"),
+    coding: { task_id: first.task_id, part_payload: { kind: "coding_card", source: "GM-10 first read" } },
+  });
+  const firstEntry = firstDraft.entry_id ?? firstDraft.entryId;
+  assert.ok(firstEntry, "GM-10 premise: the first agent read produced a real draft");
+  await settleAutodraft({ task: first.task_id, outcome: "drafted", tokens: 1200, entry: firstEntry });
+
+  // The human genuinely revises the agent draft (entry.revised is positive evidence), then
+  // deliberately withdraws it. Revision alone is not allowed to trigger the runtime lane.
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: firstEntry,
+    lines: billLines(EXP, AP, amount),
+    expectedRevision: firstDraft.revision_token,
+    vendorName,
+    document: rf.documentId,
+    opKey: opk("gm10-revise"),
+  });
+  await withdrawDraft(OWNER(), {
+    entry: firstEntry,
+    reason: "GM-10: ask the agent to re-derive after considering my revision",
+    expectedRevision: revised.revision_token,
+    opKey: opk("gm10-withdraw"),
+  });
+  assert.equal((await entryRow(firstEntry)).status, "withdrawn", "GM-10 premise: the human-edited draft is withdrawn");
+
+  const withdrawal = (await rootQuery(
+    `select id, seq from clara.domain_events
+      where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2
+      order by seq desc limit 1`,
+    [world.firms.A, firstEntry],
+  )).rows[0];
+  assert.ok(withdrawal?.id, "GM-10 premise: withdraw_draft emitted the exact entry.withdrawn trigger event");
+
+  // HALF 2, before opening the deliberate door: the ordinary background sweep still takes
+  // 0053's duplicate wall on this same completed, now-withdrawn filing. If somebody widens
+  // sweep admission to make HALF 1 pass, this exact assertion goes red.
+  const ordinaryRepeat = await admitAutodraft({
+    filing: rf.filingId,
+    origin: ORIGIN.sweep,
+    reserveTokens: 40000,
+  });
+  assert.equal(
+    ordinaryRepeat.outcome,
+    "already_done",
+    `GM-10 half 2: ordinary repeat sweep remains refused already_done (${JSON.stringify(ordinaryRepeat)})`,
+  );
+
+  // Put the consumer immediately before entry.revised so this run observes BOTH candidate
+  // events. Only the later entry.withdrawn is subscribed; keying on revision would fail the
+  // exact-event DB proof and enqueue nothing.
+  const revisedEvent = (await rootQuery(
+    `select seq from clara.domain_events
+      where firm_id=$1 and event_type='entry.revised' and entry_id=$2
+      order by seq desc limit 1`,
+    [world.firms.A, firstEntry],
+  )).rows[0];
+  assert.ok(revisedEvent?.seq, "GM-10 premise: revise_entry emitted entry.revised evidence");
+  await rootQuery(
+    `insert into clara.relay_checkpoints(consumer, firm_id, last_seq, updated_at)
+     values ('autodraft', $1, $2, now())
+     on conflict (consumer, firm_id) do update set last_seq=excluded.last_seq, updated_at=now()`,
+    [world.firms.A, Number(revisedEvent.seq) - 1],
+  );
+
+  const [{ runAutodraftCycle }, { makeRuntimeClient }] = await Promise.all([
+    import("../../runtime/lib/autodraft.mjs"),
+    import("../../runtime/lib/pools.mjs"),
+  ]);
+  const runtimeClient = makeRuntimeClient();
+  const enqueued = [];
+  let cycle;
+  await runtimeClient.connect();
+  try {
+    await runtimeClient.query("set role clara_runtime");
+    cycle = await runAutodraftCycle(runtimeClient, {
+      onlyFirm: world.firms.A,
+      enqueue: async (task) => enqueued.push(task),
+      model: "gpt-5.6-terra",
+      reserveTokens: 40000,
+      log: (message) => noteLane(`GM-10 runtime: ${message}`),
+    });
+  } finally {
+    await runtimeClient.end();
+  }
+
+  // HALF 1: the WITHDRAWAL event crossed the real consumer, the audited exact-event door
+  // minted a fresh one_click task, and that task can perform the fresh agent read/draft.
+  assert.equal(cycle.admitted, 1, `GM-10 half 1: one fresh task admitted (${JSON.stringify(cycle)})`);
+  assert.equal(enqueued.length, 1, `GM-10 half 1: one fresh task enqueued (${JSON.stringify(enqueued)})`);
+  assert.notEqual(enqueued[0], first.task_id, "GM-10 half 1: re-admission minted a new task identity");
+
+  const readmit = (await rootQuery(
+    `select aa.origin, aa.task_id, t.status
+       from clara.autodraft_attempts aa
+       join clara.agent_tasks t on t.id=aa.task_id
+      where aa.filing_id=$1 and aa.task_id=$2`,
+    [rf.filingId, enqueued[0]],
+  )).rows[0];
+  assert.deepEqual(
+    { origin: readmit.origin, task: readmit.task_id, status: readmit.status },
+    { origin: ORIGIN.oneClick, task: enqueued[0], status: "queued" },
+    "GM-10 half 1: the event path used the distinct deliberate door, not the sweep origin",
+  );
+
+  const audit = (await rootQuery(
+    `select actor, on_behalf_of, args
+      from clara.audit_log
+      where fn='readmit_autodraft_after_withdrawal' and entry_id=$1
+      order by at desc limit 1`,
+    [firstEntry],
+  )).rows[0];
+  assert.ok(audit, "GM-10 half 1: re-admission has its own audit row");
+  const agentId = (await rootQuery("select clara.agent_user_id() as id")).rows[0].id;
+  assert.equal(audit.actor, agentId, "GM-10 audit: the runtime action is recorded under agent identity");
+  assert.equal(audit.on_behalf_of, OWNER(), "GM-10 audit: machine act is on behalf of the withdrawing human");
+  assert.equal(audit.args?.withdrawal_event_id, withdrawal.id, "GM-10 audit: exact withdrawal event is receipted");
+  assert.equal(audit.args?.outcome, "re_admitted_after_withdrawal", "GM-10 audit: the distinct 0053 outcome is receipted");
+
+  await beginAutodraft({ task: enqueued[0], workflowRunId: `gm10-second-${opk("wf")}` });
+  const secondCred = await mintAutodraftCred(world.firms.A, A1());
+  const secondDraft = await wakeBillDraft(OWNER(), secondCred, {
+    client: A1(),
+    cited: rf,
+    amount,
+    vendorName,
+    opKey: opk("gm10-second-draft"),
+    coding: { task_id: enqueued[0], part_payload: { kind: "coding_card", source: "GM-10 fresh read" } },
+  });
+  const secondEntry = secondDraft.entry_id ?? secondDraft.entryId;
+  assert.ok(secondEntry, "GM-10 half 1: the re-admitted task produced a fresh agent draft");
+  assert.notEqual(secondEntry, firstEntry, "GM-10 half 1: the re-read owns a new entry, never the human-edited one");
+  await settleAutodraft({ task: enqueued[0], outcome: "drafted", tokens: 1300, entry: secondEntry });
+});
+
+test("f-a2.c14.readmit GM-10 retains a withdrawal that races the originating settle", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+
+  const amount = 500000;
+  const vendorName = `GM10 EARLY ${opk("vendor")}`;
+  const rf = await primeReadyFiling(OWNER(), {
+    client: A1(),
+    amount,
+    vendorName,
+    registration: `2026${opk("reg").replace(/[^a-z0-9]/gi, "").slice(-8)}`,
+  });
+  const first = await admitAutodraft({
+    filing: rf.filingId,
+    origin: ORIGIN.sweep,
+    reserveTokens: 40000,
+  });
+  assert.equal(first.outcome, "admitted", `GM-10 early premise: first sweep admits (${JSON.stringify(first)})`);
+  await beginAutodraft({ task: first.task_id, workflowRunId: `gm10-early-${opk("wf")}` });
+  const cred = await mintAutodraftCred(world.firms.A, A1());
+  const draft = await wakeBillDraft(OWNER(), cred, {
+    client: A1(),
+    cited: rf,
+    amount,
+    vendorName,
+    opKey: opk("gm10-early-draft"),
+    coding: { task_id: first.task_id, part_payload: { kind: "coding_card", source: "GM-10 early withdrawal" } },
+  });
+  const entry = draft.entry_id ?? draft.entryId;
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry,
+    lines: billLines(EXP, AP, amount),
+    expectedRevision: draft.revision_token,
+    vendorName,
+    document: rf.documentId,
+    opKey: opk("gm10-early-revise"),
+  });
+  await withdrawDraft(OWNER(), {
+    entry,
+    reason: "GM-10: early human withdrawal before the originating settle",
+    expectedRevision: revised.revision_token,
+    opKey: opk("gm10-early-withdraw"),
+  });
+  const event = (await rootQuery(
+    `select id from clara.domain_events
+      where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2
+      order by seq desc limit 1`,
+    [world.firms.A, entry],
+  )).rows[0]?.id;
+  assert.ok(event, "GM-10 early premise: the exact withdrawal event exists");
+
+  const pending = await readmitWithdrawal(event);
+  assert.equal(
+    pending.outcome,
+    "retry_pending_settlement",
+    `GM-10 race: a proved withdrawal is retained while its task is live (${JSON.stringify(pending)})`,
+  );
+  assert.equal(pending.prior_task_id, first.task_id, "GM-10 race: the deferral names the exact live owner task");
+
+  // Model the originating workflow's own settle landing AFTER the human's withdrawal, still
+  // reporting 'drafted' (the real production race this cell names) rather than 'failed'.
+  // F5 (opus review, measured): settling 'failed' instead reaches settle_autodraft_task's
+  // ORDINARY terminal branch and 0034's plain supersede arm in admit_autodraft_task, never
+  // 0053's own withdrawal exception (which requires task_status='completed', not 'failed') —
+  // a loose disjunction accepting either outcome token then passed even with 0053's specific
+  // arm silently broken. Settling 'drafted' here is SAFE even though the entry is already
+  // withdrawn: settle_autodraft_task's [0047 / SS7-A F1] ARM 3 recognises the identity match
+  // whose status left 'draft' the OTHER way (a human withdrew it) and settles TERMINALLY as
+  // 'superseded_by_human' -- agent_tasks.status still lands 'completed', which is exactly
+  // 0053's own task_status='completed' premise.
+  await settleAutodraft({
+    task: first.task_id,
+    outcome: "drafted",
+    tokens: 1000,
+    entry,
+  });
+  const retried = await readmitWithdrawal(event);
+  assert.equal(
+    retried.outcome,
+    "re_admitted_after_withdrawal",
+    `GM-10 race: the retained event admits through 0053's OWN withdrawal exception, not the ordinary supersede arm (${JSON.stringify(retried)})`,
+  );
+  assert.ok(retried.task_id, "GM-10 race: terminal replay minted a fresh task");
+  assert.notEqual(retried.task_id, first.task_id, "GM-10 race: the fresh task never reuses the failed owner task");
+
+  // Leave no live reservation behind in the shared file world.
+  await beginAutodraft({ task: retried.task_id, workflowRunId: `gm10-early-cleanup-${opk("wf")}` });
+  await settleAutodraft({
+    task: retried.task_id,
+    outcome: "failed",
+    tokens: 0,
+    refusal: { reason: "gm10_race_cell_cleanup" },
+  });
+});
+
+// ===========================================================================
+// GM-10 negative probes (opus review, F5 fold-in) — the identity chain refuses everything
+// that is not the exact proved human-withdrawal shape. Adapted from the reviewer's own
+// gm10-attack.test.mjs P1.a/b/c/d/f (this file's idiom substituted for the reviewer's
+// standalone rig helpers; the assertions and the six named scenarios are unchanged).
+// ===========================================================================
+
+/** Full eligible chain up to (but not including) revise/withdraw — a completed, drafted
+ *  agent read on a brand-new READY filing. Mirrors cells 1/2's own setup, factored so the
+ *  five negative cells below do not each re-duplicate it. */
+async function gm10BuildEligible(tag) {
+  const amount = 500000;
+  const vendorName = `GM10NEG ${tag} ${opk("v")}`;
+  const rf = await primeReadyFiling(OWNER(), {
+    client: A1(), amount, vendorName,
+    registration: `2026${opk("reg").replace(/[^a-z0-9]/gi, "").slice(-8)}`,
+  });
+  const first = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep, reserveTokens: 40000 });
+  assert.equal(first.outcome, "admitted", `GM-10 negative premise ${tag}: ${JSON.stringify(first)}`);
+  await beginAutodraft({ task: first.task_id, workflowRunId: `gm10neg-${tag}-${opk("wf")}` });
+  const cred = await mintAutodraftCred(world.firms.A, A1());
+  const draft = await wakeBillDraft(OWNER(), cred, {
+    client: A1(), cited: rf, amount, vendorName,
+    opKey: opk(`gm10neg-${tag}-draft`),
+    coding: { task_id: first.task_id, part_payload: { kind: "coding_card", source: tag } },
+  });
+  const entry = draft.entry_id ?? draft.entryId;
+  assert.ok(entry, `GM-10 negative premise ${tag}: agent draft exists`);
+  return { rf, first, entry, draft, amount, vendorName };
+}
+
+/** Revise then withdraw ctx.entry, returning the exact entry.withdrawn event row. */
+async function gm10ReviseAndWithdraw(ctx, tag) {
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: ctx.entry, lines: billLines(EXP, AP, ctx.amount),
+    expectedRevision: ctx.draft.revision_token, vendorName: ctx.vendorName,
+    document: ctx.rf.documentId, opKey: opk(`gm10neg-${tag}-rev`),
+  });
+  await withdrawDraft(OWNER(), {
+    entry: ctx.entry, reason: `gm10 negative ${tag}`,
+    expectedRevision: revised.revision_token, opKey: opk(`gm10neg-${tag}-wd`),
+  });
+  const ev = (await rootQuery(
+    `select id, seq from clara.domain_events
+      where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2 order by seq desc limit 1`,
+    [world.firms.A, ctx.entry],
+  )).rows[0];
+  assert.ok(ev?.id, `GM-10 negative premise ${tag}: withdrawal event exists`);
+  return ev;
+}
+
+test("f-a2.c14.readmit GM-10 negative: an entry.revised id must NOT open the door (revision is evidence, never the trigger)", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  const ctx = await gm10BuildEligible("p1a");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  await reviseAgentDraft(OWNER(), {
+    entry: ctx.entry, lines: billLines(EXP, AP, ctx.amount),
+    expectedRevision: ctx.draft.revision_token, vendorName: ctx.vendorName,
+    document: ctx.rf.documentId, opKey: opk("gm10neg-p1a-rev"),
+  });
+  const revEv = (await rootQuery(
+    `select id from clara.domain_events where firm_id=$1 and event_type='entry.revised' and entry_id=$2
+      order by seq desc limit 1`, [world.firms.A, ctx.entry])).rows[0];
+  assert.ok(revEv?.id, "premise: entry.revised exists");
+  const out = await readmitWithdrawal(revEv.id);
+  assert.equal(out.outcome, "not_eligible", `entry.revised must refuse: ${JSON.stringify(out)}`);
+  const reg = (await rootQuery(
+    "select task_id, origin from clara.autodraft_attempts where filing_id=$1", [ctx.rf.filingId])).rows[0];
+  assert.equal(reg.task_id, ctx.first.task_id, "registry never moved");
+  assert.equal(reg.origin, ORIGIN.sweep, "origin never flipped to one_click");
+});
+
+test("f-a2.c14.readmit GM-10 negative: an agent draft withdrawn with NO human revision is refused (no entry.revised evidence)", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  const ctx = await gm10BuildEligible("p1b");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  await withdrawDraft(OWNER(), {
+    entry: ctx.entry, reason: "gm10 negative p1b no revision",
+    expectedRevision: ctx.draft.revision_token, opKey: opk("gm10neg-p1b-wd"),
+  });
+  const ev = (await rootQuery(
+    `select id from clara.domain_events where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2
+      order by seq desc limit 1`, [world.firms.A, ctx.entry])).rows[0];
+  assert.ok(ev?.id, "premise: withdrawal event exists");
+  const out = await readmitWithdrawal(ev.id);
+  assert.equal(out.outcome, "not_eligible", `unrevised withdrawal must refuse: ${JSON.stringify(out)}`);
+});
+
+test("f-a2.c14.readmit GM-10 negative: a withdrawal event from filing X can never admit sibling filing Y", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  const x = await gm10BuildEligible("p1cx");
+  const y = await gm10BuildEligible("p1cy");
+  await settleAutodraft({ task: x.first.task_id, outcome: "drafted", tokens: 1000, entry: x.entry });
+  await settleAutodraft({ task: y.first.task_id, outcome: "drafted", tokens: 1000, entry: y.entry });
+  const ev = await gm10ReviseAndWithdraw(x, "p1cx");
+  const out = await readmitWithdrawal(ev.id);
+  assert.equal(out.outcome, "re_admitted_after_withdrawal", `premise: X admits (${JSON.stringify(out)})`);
+  assert.equal(out.filing_id, x.rf.filingId, "the receipt names X's filing");
+  const yReg = (await rootQuery(
+    "select task_id, origin from clara.autodraft_attempts where filing_id=$1", [y.rf.filingId])).rows[0];
+  assert.equal(yReg.task_id, y.first.task_id, "Y's registry never moved");
+  assert.equal(yReg.origin, ORIGIN.sweep, "Y's registry origin never flipped to one_click");
+});
+
+test("f-a2.c14.readmit GM-10 negative: null/blank/negative arguments and a non-event uuid all refuse", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  await assert.rejects(() => readmitWithdrawal(null), /event is required/i);
+  const ctx = await gm10BuildEligible("p1d");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  const ev = await gm10ReviseAndWithdraw(ctx, "p1d");
+  await assert.rejects(() => readmitWithdrawal(ev.id, "   ", 40000), /model is required/i);
+  await assert.rejects(() => readmitWithdrawal(ev.id, null, 40000), /model is required/i);
+  await assert.rejects(() => readmitWithdrawal(ev.id, "gpt-5.6-terra", 0), /reserve_tokens must be positive/i);
+  await assert.rejects(() => readmitWithdrawal(ev.id, "gpt-5.6-terra", -5), /reserve_tokens must be positive/i);
+  const bogus = (await rootQuery("select gen_random_uuid() as u")).rows[0].u;
+  assert.equal((await readmitWithdrawal(bogus)).outcome, "not_eligible", "a uuid that is no event at all refuses");
+  // and after all those refusals the registry is untouched
+  const reg = (await rootQuery(
+    "select task_id, origin from clara.autodraft_attempts where filing_id=$1", [ctx.rf.filingId])).rows[0];
+  assert.equal(reg.task_id, ctx.first.task_id);
+  assert.equal(reg.origin, ORIGIN.sweep);
+});
+
+test("f-a2.c14.readmit GM-10 negative: the filing registry having moved on kills a stale withdrawal event", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  // W1 admits T2. T2 then drafts E2; the registry now points at T2, not T1. F1's own memo
+  // reorder (this file's migration fix) means the FIRST admission already wrote a memo, so
+  // this cell deletes it to force a fresh op-key path — measuring the CHAIN, not the memo.
+  const ctx = await gm10BuildEligible("p1f");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  const ev = await gm10ReviseAndWithdraw(ctx, "p1f");
+  const first = await readmitWithdrawal(ev.id);
+  assert.equal(first.outcome, "re_admitted_after_withdrawal", JSON.stringify(first));
+  const t2 = (await rootQuery(
+    "select task_id from clara.autodraft_attempts where filing_id=$1", [ctx.rf.filingId])).rows[0].task_id;
+  assert.notEqual(t2, ctx.first.task_id, "registry advanced to the new task");
+
+  const del = await rootQuery(
+    `delete from clara.op_receipts where fn='readmit_autodraft_after_withdrawal' and op_key=$1`,
+    [`gm10-withdrawal:${ev.id}`],
+  );
+  assert.equal(del.rowCount, 1, "the door wrote exactly one op receipt");
+  const again = await readmitWithdrawal(ev.id);
+  assert.equal(again.outcome, "not_eligible",
+    `a stale withdrawal whose filing has moved on must refuse on the CHAIN, not only on the memo: ${JSON.stringify(again)}`);
 });
