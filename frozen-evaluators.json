@@ -1,6 +1,12 @@
 {
   "version": 1,
   "evaluators": {
+    "clara.evaluate_fs_pack_agent_v1": {
+      "sha256": "d94696991276094afc02bd202ec1c0aa6c97479cdd5565c35042e5c3f9490ae5",
+      "migration": "packages/db/migrations/UNNUMBERED_f_a5_reporting_agency_pr1.sql",
+      "deployed": false,
+      "note": "F-A5 PR-1, the agent lane's pack entrypoint. UNDEPLOYED and born so: 0060's _tf_evaluator_deploy_once makes the flip a one-way ceremony act, and the core itself refuses `evaluator_undeployed` until the owner runs it from merged main (design SS3.2 / F5-D28). It is named clara.evaluate_* DELIBERATELY -- this lint discovers only that spelling, so an underscore-named entrypoint would be catalog-frozen at apply and invisible to review, which is the half-freeze this manifest exists to close. The eight OTHER members of its closure are delta's already-frozen bodies (evaluate_metric v1's ordinals 1-8, clara._hash included) and are NOT renamed: renaming a frozen member IS moving it. They stay DB-frozen and source-invisible, the same posture clara.assess_metric_cell_independent_v1 already holds. The entry is hand-inserted rather than --update re-baselined so this PR blesses ONE body and re-hashes nobody else's."
+    },
     "clara.evaluate_fs_pack_v1": {
       "sha256": "69086e62a2c9f52989f9bedb821343dca26e4dcf74cb242f05dc56ef30b8308b",
       "migration": "packages/db/migrations/0059_wave_e_delta_metrics_behavior.sql",

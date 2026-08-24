@@ -3130,6 +3130,32 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
   ]) {
     assert.ok(!/journal_entries[\s\S]{0,40}for update/i.test(src), `${label}: never locks a pre-existing journal_entries row`);
   }
+
+  // THE WRAPPER TWINS (F-A3 PR-1a, material M2's "MOVE the pin and ADD the wrapper pin").
+  // Per-oid, never fnSource: a concatenation over overloads can be satisfied by a sibling body
+  // and would let a re-inlined ladder hide behind a delegating twin. Each extracted verb keeps
+  // its floor, delegates, and acquires NOTHING.
+  for (const [fn, floor] of [["complete_bank_reconciliation", "bookkeeper"],
+    ["void_bank_reconciliation", "bookkeeper"], ["resolve_bank_line_exception", "owner"]]) {
+    const rows = (await rootQuery(
+      `select p.oid::regprocedure::text as sig, p.prosrc as src
+         from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='clara' and p.proname=$1 order by 1`, [fn])).rows;
+    assert.equal(rows.length, 1, `clara.${fn} has exactly one live arity`);
+    ordered(rows[0].src, [`clara._human_ctx(clara.role_rank('${floor}'))`, `clara._${fn}_core(`],
+      `${rows[0].sig} delegation order`);
+    for (const rung of ["pg_advisory_xact_lock(", "clara._reserve_op(", "for update", "for share",
+      "insert into ", "update clara."]) {
+      assert.ok(!rows[0].src.includes(rung),
+        `${rows[0].sig} must acquire and write NOTHING in its own body — found "${rung}", so the ladder was re-inlined above the core and the core's pin no longer covers the live path`);
+    }
+  }
+  // THE DIFFERENTIAL: except_bank_line is untouched by F-A3 in every PR, so its PUBLIC body must
+  // still hold the rungs itself. Without this, a build that factored it too would pass every
+  // assertion above while silently widening the one verb the sitting ruled stays human.
+  assert.ok(/clara\._human_ctx\(clara\.role_rank\('owner'\)\)/.test(exceptSrc)
+    && exceptSrc.includes("pg_advisory_xact_lock(203005004"),
+  "except_bank_line is NOT extracted: its public body still resolves the human context AND takes the rungs itself (Annex J.4)");
 });
 
 // ---------------------------------------------------------------------------

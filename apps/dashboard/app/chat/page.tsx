@@ -13,6 +13,7 @@ import {
   createSession,
   getMessages,
   jwtSub,
+  limitBanner,
   listSessions,
   liveTasks,
   pendingInterruption,
@@ -244,8 +245,11 @@ export default function ChatPage() {
       setBanner("A turn is already running in this session.");
       void discoverAndAttach(selected);
     } else if (r.kind === "limit") {
-      // The server's copy VERBATIM — it names which limit + the UTC reset (§0.4).
-      setBanner([r.message, r.resetCopy].filter(Boolean).join(" "));
+      // The server's copy VERBATIM — the DB message already names WHICH limit and its live
+      // numbers. Since F-A9 PR-0 `resetCopy` is always null (the daily token budget is gone,
+      // and the surviving concurrency floor has no reset instant to describe); limitBanner
+      // is the named seam that proves a null never reaches the banner as the text "null".
+      setBanner(limitBanner(r.message, r.resetCopy));
     } else {
       setBanner(r.message);
     }

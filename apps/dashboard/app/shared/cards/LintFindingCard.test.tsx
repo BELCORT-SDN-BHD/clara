@@ -40,7 +40,7 @@ function mkRow(p: Partial<QueueRow> = {}): QueueRow {
   return {
     row_kind: "lint_finding", section: "needs_you", sort: [], client_id: "cl1", counterparty_id: null,
     filing_id: null, entry_id: null, question_id: null, task_id: null, document_id: null,
-    lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
+    lane: null, auto: false, high_stakes: false, aged_since: null,
     amount_cents: null, period: null, question_text: "Lint: contradiction", created_at: null, id: "lf1",
     coding_kind: null, watch_id: null, tier: "critical", finding_id: "lf1", ...p,
   };

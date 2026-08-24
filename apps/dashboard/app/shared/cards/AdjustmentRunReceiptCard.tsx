@@ -68,7 +68,7 @@ import { useCallback, useState } from "react";
 import type { AdjustmentRunReceiptPart } from "../parts";
 import { getAdjustmentRun, reverseAdjustmentPair, approvePairReversal, cancelPairReversal } from "../adjustmentApi";
 import type { GetAdjustmentRunRead, PairReversalResult } from "../adjustmentApi";
-import type { AdjustmentRunRow } from "../../rules/adjustmentModel";
+import type { AdjustmentRunRow } from "../../close/adjustments/adjustmentModel";
 import { useCard, type Clr } from "./cardHooks";
 import { fmtCents, shortId } from "../fmt";
 import styles from "./cards.module.css";

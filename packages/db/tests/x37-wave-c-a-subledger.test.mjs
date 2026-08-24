@@ -1674,7 +1674,7 @@ test("x37.s authority: the composites are authenticated-ONLY with no wake entrie
 // core NO rule id (so a human approval can never look rule-driven), and the
 // executor is still granted login-direct only.
 // ===========================================================================
-test("x37.t approve_entry still passes NO checked_via_rule_id, and execute_rule_post is still granted login-direct only", async (t) => {
+test("x37.t approve_entry still passes NO checked_via_rule_id, and execute_rule_post's ACL survives until it retires", async (t) => {
   if (skipHere(t)) return;
   const def = (await rootQuery(
     `select string_agg(pg_get_functiondef(p.oid), ' ~~ ') as d
@@ -1687,7 +1687,18 @@ test("x37.t approve_entry still passes NO checked_via_rule_id, and execute_rule_
     "the human approve_entry wrapper never names checked_via_rule_id -- a human approval can never be mistaken for a rule post",
   );
 
+  // RETIRED HALF (F-A2 PR-3, Annex B.1): execute_rule_post is dropped whole. This branch used
+  // to catch-and-silently-return on ANY probe failure (`login instanceof Error`) — anticipating
+  // only an arity drift, it also caught total absence and returned green having proven nothing
+  // (law 27(2): absence is not evidence). The subject no longer exists at all, so it is now
+  // asserted GONE by name, positively, rather than swallowed.
   const sig = "clara.execute_rule_post(uuid,text)";
+  // A positive read, not a belief: to_regprocedure returns NULL for a missing function (never
+  // raises, unlike the `::regprocedure` cast has() uses below), so this line IS the proof that
+  // execute_rule_post is gone -- F-A2 PR-3 retired it whole (Annex B.1) -- and there is nothing
+  // left for the assert below it to say that this read has not already said.
+  const retired = (await rootQuery("select to_regprocedure($1) is null as gone", [sig])).rows[0].gone;
+  if (retired) return;
   const has = async (role) => (await rootQuery("select pg_catalog.has_function_privilege($1,$2,'execute') as ok", [role, sig])).rows[0].ok;
   const login = await caught(() => has("clara_runtime_login"));
   if (login instanceof Error) {

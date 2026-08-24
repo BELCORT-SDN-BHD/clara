@@ -42,7 +42,7 @@ import {
   filedDocument,
   createOpeningSeed, draftOpeningItem, recordOpeningTarget, seedFixedAsset, keyedRes,
   approveOpeningSeed, supersedeOpeningItem, cancelOpeningSeed, reopenOpeningSeed,
-  approveOpeningCorrection, retireWikiPage, signCodingRule,
+  approveOpeningCorrection, retireWikiPage,
   tickProposal, declineProposal, completeSeedingBatch, cancelSeedingBatch,
   publishWikiPage, createSeedingBatch, recordOpeningTargetsParsed, recordWikiIngest,
   seedRegRow, openingItemRows, openingApprovalRows, pageRow, batchRow, proposalRows,
@@ -170,13 +170,14 @@ test("Cross-firm HUMAN-lane battery (15 writers): firm-B owner (dave) targeting 
     mk("reopen_opening_seed", (opKey) => reopenOpeningSeed(dave, { seed, opKey })),
     mk("approve_opening_correction", (opKey) => approveOpeningCorrection(dave, { seed, entryRevisions: {}, opKey })),
     mk("retire_wiki_page", (opKey) => retireWikiPage(dave, { page, opKey })),
-    mk("sign_coding_rule", (opKey) => signCodingRule(dave, { rule, opKey })),
+    // sign_coding_rule RETIRED with F-A2 PR-3 (Annex B.1) — dropped, so its cross-firm
+    // probe entry is removed too (14-writer battery, was 15).
     mk("tick_seeding_proposal", (opKey) => tickProposal(dave, { proposal: prop, opKey })),
     mk("decline_seeding_proposal", (opKey) => declineProposal(dave, { proposal: prop, opKey })),
     mk("complete_seeding_batch", (opKey) => completeSeedingBatch(dave, { batch, opKey })),
     mk("cancel_seeding_batch", (opKey) => cancelSeedingBatch(dave, { batch, opKey })),
   ];
-  assert.equal(probes.length, 15, "the full 15-writer human-lane battery");
+  assert.equal(probes.length, 14, "the full 14-writer human-lane battery (sign_coding_rule retired with F-A2 PR-3)");
   for (const [label, run, opKey] of probes) {
     await assertRaises(CLR.notFound, run, `firm-B dave -> firm-A ${label}`);
     probeReceipts.push({ fn: label, opKey });
@@ -251,8 +252,9 @@ test("No-mutation guard: after the full probe sweep, every firm-A target is byte
   // SWEEP DEPTH: full-count comparison, BEFORE (preSweep) vs AFTER (now) — the
   // registry/items/targets/approvals, wiki pages+versions, seeding
   // batches+proposals, audit_log, and domain_events maxSeq must ALL be
-  // byte-unchanged after 19 refused probes across 4 batteries.
-  assert.ok(probeReceipts.length >= 19, `every battery pushed its receipts (got ${probeReceipts.length})`);
+  // byte-unchanged after 18 refused probes across 4 batteries (was 19; the
+  // sign_coding_rule probe retired with F-A2 PR-3).
+  assert.ok(probeReceipts.length >= 18, `every battery pushed its receipts (got ${probeReceipts.length})`);
   const postSweep = await sweepSnapshot({ firm: w.firms.A, client: onb.client, seed });
   assert.deepEqual(postSweep, preSweep, "the full sweep snapshot is IDENTICAL before vs after every probe");
 

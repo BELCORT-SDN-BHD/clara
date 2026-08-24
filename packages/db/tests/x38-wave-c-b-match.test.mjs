@@ -1466,7 +1466,7 @@ test("x38.z authority: match_bank_line / unmatch_bank_match / settle_from_bank_l
 // lock order is a claim about ACQUISITION SEQUENCE, provable only against the
 // function bodies (the x37.s precedent this cell follows exactly).
 // ===========================================================================
-test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line and void_bank_statement, including the new 203005006 chain rung", async (t) => {
+test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line and void_bank_statement (on the extracted cores, plus the per-oid 'the wrapper acquires nothing' twins), including the new 203005006 chain rung", async (t) => {
   if (skipHere(t)) return;
   const positions = (src, needles) => needles.map((n) => src.indexOf(n));
   const ordered = (src, needles, label) => {
@@ -1480,11 +1480,19 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
   // match_bank_line locks PRE-EXISTING entries (design S4.9): journal_entries
   // FOR UPDATE ORDER BY id -> advisory 004 -> line rows FOR UPDATE + statement
   // FOR SHARE -> member writes.
-  ordered(await fnSource("match_bank_line"), [
+  //
+  // F-A3 PR-1a (design §4, Annex A.2 / material M2) factored the 6-arg human body into
+  // clara._match_bank_line_core so PR-1b's agent core has a ctx-shaped delegate. The
+  // acquisition sequence moved WITH the body, and so does this pin — same three rungs, same
+  // order, nothing dropped (the 0042 precedent immediately below, written when the settle body
+  // was factored). NEVER DELETED: Annex C's "the order is the DELEGATE'S OWN order" would
+  // otherwise become an unmeasured claim and the ABBA deadlock the R-L2/D40 lesson cost would
+  // be re-introducible in silence.
+  ordered(await fnSource("_match_bank_line_core"), [
     "order by je.id for update", // the pre-existing journal_entries rows, locked first (as-built spelling)
     "pg_advisory_xact_lock(203005004",
     "order by l.id for update", // the statement's line rows
-  ], "match_bank_line lock order");
+  ], "_match_bank_line_core lock order");
 
   // settle_from_bank_line NEVER locks a pre-existing entry -- it rides the
   // composite order (op-receipt -> sub-key reservations -> 003 -> 004 ->
@@ -1537,20 +1545,60 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
     }
   }
 
+  // THE match_bank_line WRAPPER PIN — PER-OID, and that is load-bearing rather than stylistic.
+  // fnSource() concatenates same-named overloads, and F-A3 PR-1a extracts the 6-arg HUMAN arity
+  // ONLY: the 7-arg p_via_rule arity keeps its whole body until PR-3 drops it. A pin written as
+  // fnSource("match_bank_line") therefore stays GREEN off the still-fat /7 while measuring
+  // nothing at all about the live human path — a vacuous pass, which is exactly the failure the
+  // moved pin exists to prevent. So each arity is asserted on its own body, differentially.
+  const matchOverloads = await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.pronargs::int as nargs, p.prosrc as src
+       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='match_bank_line' order by p.pronargs`,
+  );
+  assert.deepEqual(matchOverloads.rows.map((r) => r.nargs), [6, 7],
+    "clara.match_bank_line still has exactly the two live arities (the 6-arg human form and the 7-arg p_via_rule form PR-3 drops)");
+  const [match6, match7] = matchOverloads.rows;
+  ordered(match6.src, [
+    "clara._human_ctx(clara.role_rank('bookkeeper'))", // the floor stays in the wrapper ...
+    "clara._match_bank_line_core(",                    // ... above the delegation
+  ], `${match6.sig} delegation order`);
+  for (const rung of ["clara._reserve_op(", "pg_advisory_xact_lock(203005004", "for update",
+    "insert into clara.bank_match_line_members"]) {
+    assert.ok(!match6.src.includes(rung),
+      `${match6.sig} must acquire NOTHING in its own body — found the rung "${rung}", so the ladder has been re-inlined above the core and the core's pin no longer covers the live path`);
+  }
+  // The DIFFERENTIAL half: the rule arity is UNTOUCHED by PR-1a and still carries the full
+  // order itself. Without this the two assertions above could both be satisfied by a build that
+  // quietly factored /7 as well, and the /7 drop in PR-3 would then be measuring a stub.
+  ordered(match7.src, [
+    "order by je.id for update",
+    "pg_advisory_xact_lock(203005004",
+    "order by l.id for update",
+  ], `${match7.sig} lock order (the rule arity is NOT extracted by PR-1a)`);
+
   // void_bank_statement: 004 -> 203005006 (the NEW per-account chain rung) ->
   // line rows FOR UPDATE -> the live-member probe (the void-vs-match race).
-  // F-A3 PR-1a MOVED this pin (Annex C: "MOVE the pin to the extracted core and ADD the
-  // wrapper pin") -- void_bank_statement is now a thin delegator; the ladder lives in
-  // _void_bank_statement_core. Re-derived at the tail, not merely asserted (x38.aj's sibling
-  // shape, x38-wave-c-b-bank.test.mjs).
-  const voidStmtSrc = await fnSource("void_bank_statement");
-  assert.ok(voidStmtSrc.includes("_void_bank_statement_core"), "void_bank_statement routes through _void_bank_statement_core");
-  assert.ok(!voidStmtSrc.includes("pg_advisory_xact_lock"), "void_bank_statement's own thin-delegator body acquires NOTHING");
+  // F-A3 PR-1a: the rungs moved into clara._void_bank_statement_core with the body.
   ordered(await fnSource("_void_bank_statement_core"), [
     "pg_advisory_xact_lock(203005004",
     "pg_advisory_xact_lock(203005006",
     "for update",
   ], "_void_bank_statement_core lock order");
+  const voidStmtOverloads = await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.prosrc as src
+       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='void_bank_statement' order by 1`,
+  );
+  assert.equal(voidStmtOverloads.rows.length, 1, "clara.void_bank_statement has exactly one live arity");
+  ordered(voidStmtOverloads.rows[0].src, [
+    "clara._human_ctx(clara.role_rank('bookkeeper'))",
+    "clara._void_bank_statement_core(",
+  ], `${voidStmtOverloads.rows[0].sig} delegation order`);
+  for (const rung of ["clara._reserve_op(", "pg_advisory_xact_lock(", "for update", "for share"]) {
+    assert.ok(!voidStmtOverloads.rows[0].src.includes(rung),
+      `${voidStmtOverloads.rows[0].sig} must acquire NOTHING in its own body — found "${rung}"`);
+  }
 
   // The 203005006 rung is genuinely NEW in this wave -- no earlier migration's
   // function catalog names it (verified once, structurally, against the whole

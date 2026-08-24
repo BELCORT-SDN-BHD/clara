@@ -23,7 +23,7 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · binding post-control · harness-links · pinned-ids · dispatch-model-guard · eslint
+pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · harness-links · pinned-ids · dispatch-model-guard · eslint
 pnpm build       # nitro runtime + next dashboard
 pnpm test        # per-package tests
 ```
@@ -99,6 +99,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
+| Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
 | The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
 | The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |
@@ -172,8 +173,8 @@ the runner *first* (`docs/ops/ci-runner.md`). An offline runner makes jobs queue
 never lets one silently pass.
 
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
-leak-scan, gitleaks, the wiki dynamic-SQL gates, the vendor-binding post-control gate,
-harness-links, eslint. A diff that touches code additionally gets, in parallel jobs
+leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches
+code additionally gets, in parallel jobs
 (ADR-0073): typecheck/build + the worker-path gate, the deploy-onto-existing check + the
 estate suite (migrate → seed → every package's tests), the live-behavior e2es + the DR
 round-trip, and the render drill — all against throwaway `postgres:17` service containers.

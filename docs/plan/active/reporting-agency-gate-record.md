@@ -223,7 +223,7 @@ from the table the check would read. **Fold: severance (§4 below).**
 citing F5-OQ-10 and law 70. But TA-P1's ruling of record names **render-drift consent** among the
 acts passing to Clara (`docs/adr/0074-the-track-a-sitting.md:33`), and the Wave-F contract spells it
 under the heading *"Verbs that become the agent's (TA-P1 C)"*: *"render re-queue **including drift
-consent**"* (`wave-f-contract.md:214`). Law 70's digest text (`README.md:425-428`) is a **descriptive
+consent**"* (`wave-f-contract.md:220`). Law 70's digest text (`README.md:425-428`) is a **descriptive
 mechanism clause** — *"a human requeue … RE-DERIVES pinned inputs recording both digests (drift
 consented via `p_accept_drift`)"* — not a forward reservation in law 74's "stays human" form, and
 ADR-0074 records no carve-out for it. Annex D had no "drift" row, so the deviation was undisclosed.
@@ -418,3 +418,31 @@ Beyond Annex E's carried predictions, this gate adds five and re-cuts one:
 6. **Both polarities of the two re-aimed walls**, observed on the rig before PR-1 is called done —
    ARM 1's artifact-side arm (GB-2) and ARM 1′/2′ of the definition approval (GB-3). A wall seen
    only refusing is not yet a wall; a wall seen only admitting is not one at all.
+
+**DISCHARGE (PR-1 build, rig `clara-rig-fa5pr1`, migration staged as `0103`).** 1-5 are answered in
+Annex E's replay table (P13/P14/P15 measured; the D1 recount is PRINTED by the migration tail, and
+every one of the nine lineage tips is re-derived by prosrc sha at apply, aborting on mismatch).
+**Obligation 6 was the one this pass had to actually build**, because the battery's first cut
+discharged it with `assert.match(prosrc, /…/)` — four regexes, which prove the words are present
+and nothing about what the bodies do with them:
+
+- **ARM 1's artifact-side arm (GB-2)** — cell `J`. The refusal is forced on the REAL production
+  lane: `clara.complete_render_job` claims and completes the job S9's line enqueued, sealing the
+  `pre_sign` artifact with **no identity supplied at all**, and the artifact's `directed_by` is
+  read off the row as the RUN's director (DB-derived, R-L23). The run's director is then refused
+  at issue **on `artifact_directed_by`** — the term that was NULL before R-L23 and could not have
+  refused anything. `J2` forces `artifact_identity_mismatch` in both polarities, one term apart.
+- **ARM 1′ (GB-3)** — cell `H2`: the draft's effective maker directing its own approval is refused
+  (`definition_directed_self_approval`, naming both the maker it measured and the director it
+  compared him with); a DIFFERENT accountable human directing it is admitted as `independent_check`,
+  with the receipt's three-valued rung vector read off `report_agent_receipts`.
+- **ARM 0′** — both polarities against a NAMED agent-authored orphan fixture (PR-1 ships no agent
+  propose door, so the row is constructed and said to be constructed): directed ⇒ adoption
+  attestation required; undirected ⇒ exempt, which is TA-P5's rider **at its stated width**.
+- **ARM 2′** — forced by moving the term the arm reads: the second eligible human's membership is
+  deactivated for the length of the arm (restored in `finally`), the population is asserted to be
+  ONE, and the solo director-who-is-the-maker is refused without an attestation and admitted with
+  one, recorded as `agent_self_approval` rather than `independent_check`.
+- **The definition lifecycle trigger (S3)** is forced on the same terms — four refusals and two
+  admissions — including PR-1's new anti-fabrication arm and its human twin, which is what makes
+  "extend-never-weaken" a measurement rather than a comment.

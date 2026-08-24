@@ -2070,7 +2070,11 @@ test("x38.aj the SS4.9 statement-chain lock (203005006) is acquired by persist_s
   if (skipHere(t)) return;
   const src1 = await fnSource("persist_statement_facts");
   const src2 = await fnSource("enter_bank_statement");
-  const src3 = await fnSource("void_bank_statement");
+  // F-A3 PR-1a (design §4, Annex A.2 / material M2): void_bank_statement's body was factored
+  // into clara._void_bank_statement_core, and the chain rung moved with it. The pin MOVES to the
+  // core and gains its wrapper twin below — never deleted (Annex C: the order is the DELEGATE'S
+  // OWN order, and an unmeasured order is how the R-L2/D40 ABBA deadlock returns).
+  const src3 = await fnSource("_void_bank_statement_core");
   const srcCore = await fnSource("_persist_statement_core");
   // ADJUDICATED at assembly: the chain lock lives in the ONE shared core; the two ingest
   // callers prove their call edge into it; void takes the rung directly.
@@ -2079,23 +2083,36 @@ test("x38.aj the SS4.9 statement-chain lock (203005006) is acquired by persist_s
     assert.ok(src && src.length > 0, `clara.${label} exists`);
     assert.ok(src.includes("_persist_statement_core"), `${label} routes through _persist_statement_core (the lock + the shared ladder)`);
   }
-  // F-A3 PR-1a MOVED this pin (Annex C: "MOVE the pin to the extracted core and ADD the
-  // wrapper pin", the x38-match:1496-1538 precedent's own shape) -- void_bank_statement is now
-  // a thin delegator (its own comment says so verbatim), so the wrapper acquires NOTHING and
-  // the pin moves to _void_bank_statement_core. Re-derived at the tail, not merely asserted.
-  const src3Core = await fnSource("_void_bank_statement_core");
-  assert.ok(src3 && src3.includes("_void_bank_statement_core"), "void_bank_statement routes through _void_bank_statement_core");
-  assert.ok(src3 && !src3.includes("203005006"), "void_bank_statement's own thin-delegator body acquires NOTHING (the lock moved with the body)");
-  assert.ok(src3Core && src3Core.includes("203005006"), "_void_bank_statement_core acquires the chain lock 203005006 directly");
-  // The core's stated order: 004 -> 203005006 -> line rows FOR UPDATE -> the live-member probe
-  // (the void-vs-match race).
-  const at = (s, n) => s.indexOf(n);
-  const a4 = at(src3Core, "pg_advisory_xact_lock(203005004");
-  const a6 = at(src3Core, "203005006");
-  if (a4 >= 0 && a6 >= 0) {
-    assert.ok(a4 < a6, "_void_bank_statement_core takes advisory 004 BEFORE the chain lock 203005006 (SS4.9's stated order)");
-  } else {
-    noteLane(`x38.aj _void_bank_statement_core lock-order probe: 004 at ${a4}, 203005006 at ${a6} -- one or both rungs not found by literal match; inspect prosrc directly`);
+  assert.ok(src3 && src3.includes("203005006"), "_void_bank_statement_core acquires the chain lock 203005006 directly");
+  // void_bank_statement's stated order: 004 -> 203005006 -> line rows FOR UPDATE
+  // -> the live-member probe (the void-vs-match race).
+  const at = (s, n) => src3.indexOf(n);
+  const a4 = at(src3, "pg_advisory_xact_lock(203005004");
+  const a6 = at(src3, "203005006");
+  // A read that cannot say NO has a meaningless YES: BOTH rungs must be found, and the
+  // not-found branch is a FAILURE, not a note. (Pre-PR-1a this cell degraded to noteLane when
+  // the literals were missing — which is precisely how the extraction could have moved them out
+  // from under the pin without anyone noticing.)
+  assert.ok(a4 >= 0 && a6 >= 0,
+    `_void_bank_statement_core must carry BOTH rungs by literal match (004 at ${a4}, 006 at ${a6})`);
+  assert.ok(a4 < a6, "_void_bank_statement_core takes advisory 004 BEFORE the chain lock 203005006 (SS4.9's stated order)");
+
+  // THE WRAPPER TWIN (F-A3 PR-1a, material M2's "MOVE the pin and ADD the wrapper pin"): the
+  // public verb keeps the bookkeeper floor, delegates, and acquires NOTHING. Read per-oid so a
+  // future overload cannot satisfy it by proxy.
+  const voidStmt = await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.prosrc as src
+       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='void_bank_statement' order by 1`,
+  );
+  assert.equal(voidStmt.rows.length, 1, "clara.void_bank_statement has exactly one live arity");
+  const wrap = voidStmt.rows[0];
+  assert.ok(wrap.src.includes("clara._human_ctx(clara.role_rank('bookkeeper'))")
+    && wrap.src.includes("clara._void_bank_statement_core("),
+  `${wrap.sig} keeps its bookkeeper floor and delegates to the core`);
+  for (const rung of ["pg_advisory_xact_lock(", "clara._reserve_op(", "for update", "for share"]) {
+    assert.ok(!wrap.src.includes(rung),
+      `${wrap.sig} must acquire NOTHING in its own body — found "${rung}", so the ladder was re-inlined above the core and the core's pin no longer covers the live path`);
   }
 });
 

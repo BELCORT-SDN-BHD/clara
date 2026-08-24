@@ -83,6 +83,10 @@ const V_B1 = "^[0-9]{4}_wave_d_b1_staff_advances$";
 const V_B3 = "^[0-9]{4}_wave_d_b3_af2_composite$";
 // eslint-disable-next-line no-unused-vars -- whole-roster invariant; see the note above
 const V_B2 = "^[0-9]{4}_wave_d_b2_recurring_adjustments$";
+// F-A3 PR-1a (0119) moves resolve_and_book_bank_line's WHOLE body into an ungranted
+// _resolve_and_book_bank_line_core, leaving the public verb a thin ctx-unpack delegator.
+// lw3 below reads whichever one actually carries the wall call, MEASURED by which exists
+// (catalog fact), never by a frontier or version-string check — so no V_ constant here.
 
 const caught = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 

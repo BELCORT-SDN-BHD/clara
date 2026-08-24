@@ -78,6 +78,11 @@ test("f-a2.c8.zero after the 8th body an AGENT POST breeds nothing — sightings
     assert.equal(after[k], before[k],
       `c8.zero: an agent post writes no ${k} row (${before[k]} -> ${after[k]}). The ≥3-distinct-entry loop and both sighting inserts die with the block`);
   }
+  // THE SAME NULL CHECK THE LOOP ABOVE APPLIES, NOT SKIPPED FOR THIS FIELD TOO. Without it a
+  // broken kb_events query reads null both before and after, and null===null passes the
+  // equality vacuously — proving the query is consistently broken, not that nothing was emitted.
+  assert.notEqual(before.kb_events, null,
+    "c8.zero: kb_events is a real read, not a query that silently failed both times");
   assert.equal(after.kb_events, before.kb_events,
     `c8.zero: …and emits no kb_rule.* event (${before.kb_events} -> ${after.kb_events})`);
 });
@@ -154,6 +159,7 @@ test("f-a2.c8.inv-ordinary an ORDINARY approval on the same counterparty+account
   // already records as vacuous, which is why only the control half needs an opposite number
   // (M-10).
   const before = await countFor("rule_sightings", A2());
+  assert.notEqual(before, null, "c8.inv-ordinary: the count is a real read, not an absent relation read as zero");
   const p = await agentPostable(OWNER(), { client: A2(), amount: 130000 });
   await approveEntry(OWNER(), { entry: p.args.entry, expectedRevision: p.args.expectedRevision, opKey: opk("c8ord") });
   assert.equal((await entryRow(p.args.entry))?.status, "approved", "c8.inv-ordinary: the ordinary human approval landed");
@@ -186,6 +192,7 @@ test("f-a2.c8.zero-heads BOTH re-pointed zero-count heads: an agent post AND a h
 test("f-a2.c8.rule-decisions _draft_entry_core writes no rule_decisions row (OQ-2)", async (t) => {
   if (await gateCore(t)) return;
   const before = await countFor("rule_decisions", A1());
+  assert.notEqual(before, null, "c8.rule-decisions: the count is a real read, not an absent relation read as zero");
   await agentPostable(OWNER(), { client: A1(), amount: 151000 });
   assert.equal(await countFor("rule_decisions", A1()), before,
     `c8.rule-decisions: the coding_rules FOR SHARE read and the rule_decisions insert are both gone from the draft core (${before})`);
@@ -216,13 +223,15 @@ test("f-a2.c8.human-identical the human approve path is otherwise BYTE-IDENTICAL
   assert.ok(!keys.includes("post_receipt_id"),
     `c8.human-identical: the HUMAN receipt gained no agent-lane key (keys: ${keys.join(",")})`);
   assert.ok(!keys.includes("rung_vector"), "c8.human-identical: …and no rung vector");
+  // MANDATORY, NOT OPTIONAL. `if (audit.rows.length)` made a broken query indistinguishable
+  // from "no audit row exists yet" — both silently skipped the two assertions this cell exists
+  // to run. A human approval MUST leave an audit row; the read is required to succeed and find one.
   const audit = await rootQuery(
     "select fn, on_behalf_of, via_wake_kind from clara.audit_log where entry_id=$1 order by at desc limit 1",
-    [p.args.entry]).catch(() => ({ rows: [] }));
-  if (audit.rows.length) {
-    assert.equal(audit.rows[0].on_behalf_of, null, "c8.human-identical: a human approval carries no on_behalf_of");
-    assert.equal(audit.rows[0].via_wake_kind, null, "c8.human-identical: …and no wake kind");
-  }
+    [p.args.entry]);
+  assert.equal(audit.rows.length, 1, "c8.human-identical: mandatory setup — a human approval writes exactly one audit_log row");
+  assert.equal(audit.rows[0].on_behalf_of, null, "c8.human-identical: a human approval carries no on_behalf_of");
+  assert.equal(audit.rows[0].via_wake_kind, null, "c8.human-identical: …and no wake kind");
   const events = await rootQuery(
     "select event_type from clara.domain_events where entry_id=$1 order by seq", [p.args.entry]);
   const types = events.rows.map((x) => x.event_type);
@@ -244,6 +253,13 @@ test("f-a2.c8.parked a parked run against a FROZEN toolface still reaches clara.
     .catch((e) => ({ error: e }));
   assert.ok(!out?.error || out.error.code !== "42P01",
     `c8.parked: coding_lane does not raise undefined_table (got ${out?.error?.code}: ${out?.error?.message})`);
+  // ANY OTHER ERROR IS SURFACED, NOT SILENTLY ACCEPTED. This cell's stated scope is narrow —
+  // 42P01 specifically, the signature a dropped table would leave on a frozen bundle's call —
+  // but a DIFFERENT error (e.g. a lost grant) is still worth a visible note rather than a
+  // silent pass, since the cell's own name claims the call "still reaches" the function.
+  if (out?.error && out.error.code !== "42P01") {
+    noteLane(`c8.parked: coding_lane raised a non-42P01 error outside this cell's scope (${out.error.code}: ${out.error.message}) — worth a look, not a failure here`);
+  }
   for (const rel of ["rule_sightings", "coding_rules", "rule_decisions", "rule_post_runs", "rule_post_skips"]) {
     const r = await rootQuery("select to_regclass($1) as rel", [`clara.${rel}`]);
     assert.ok(r.rows[0].rel, `c8.parked: clara.${rel} still EXISTS — keep-as-history drops the WRITES and the VERBS, never the TABLES`);
