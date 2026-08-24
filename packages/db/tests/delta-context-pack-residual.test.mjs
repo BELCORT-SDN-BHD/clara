@@ -41,8 +41,17 @@ before(async () => {
   const def = (await rootQuery(
     "select pg_get_functiondef('clara.get_context_pack(uuid,text)'::regprocedure) as d",
   )).rows[0]?.d ?? "";
-  ready = def.includes("'pack_schema_version',5") && def.includes("'period_snapshot_registry'");
-  if (!ready) { noteLane("v5 period_snapshot_registry absent -- delta context-pack residual suite skipped"); return; }
+  // RE-KEYED by F-A2 PR-1b, and it is a fail-open repair rather than a courtesy. This gate used
+  // to require BOTH `'period_snapshot_registry'` AND the literal `'pack_schema_version',5`, so
+  // ANY future bump of that integer -- by anyone, for any reason -- silently turned this whole
+  // suite OFF: it would have printed a lane note and skipped, and nobody reads a lane note as a
+  // missing proof. A gate that skips on the very thing it exists to assert is a vacuous green.
+  // The gate now keys ONLY on the block this suite actually tests; the schema version is
+  // ASSERTED just below, where a wrong value reds loudly instead of vanishing.
+  ready = def.includes("'period_snapshot_registry'");
+  if (!ready) { noteLane("period_snapshot_registry absent -- delta context-pack residual suite skipped"); return; }
+  assert.ok(def.includes("'pack_schema_version',5"),
+    "delta residual: this suite was written against pack schema version 5. If the version was deliberately bumped, TRUE this line and the two `=== 5` reads below -- the suite must never skip its way out of a schema change it is supposed to notice");
   const posture = (await rootQuery(`select p.prosecdef,p.proowner::regrole::text owner,p.proconfig
     from pg_proc p where p.oid='clara._tf_metric_cell_provenance_complete()'::regprocedure`)).rows[0];
   assert.deepEqual(
