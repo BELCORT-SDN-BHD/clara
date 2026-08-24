@@ -4537,7 +4537,7 @@ grant execute on function clara.set_bank_agency_hold(uuid,boolean,text,text) to 
 --
 -- H3/B2 (opus consolidated round): bank.identifier_promotion_proposed and
 -- bank.line_exception_proposed were BOTH emitted by their own agent cores
--- (_agent_propose_identifier_promotion_core, _agent_propose_line_exception_core) but never
+-- (_agent_propose_bank_identifier_promotion_core, _agent_propose_line_exception_core) but never
 -- registered -- caught only once the all-13-wrappers end-to-end cell (f31w.v) and the B2
 -- repeat-admission cell (f31w.w) actually exercised these two verbs' SUCCESS path for the first
 -- time in this file's own battery; every earlier cell for these two verbs only ever reached a
@@ -4547,7 +4547,7 @@ with inserted_types as (
   insert into clara.event_types(name, client_scoped, description)
     values
       ('bank.agency_hold_set', true, 'clara.set_bank_agency_hold flipped the client''s bank agency hold'),
-      ('bank.identifier_promotion_proposed', true, 'clara.wake_propose_identifier_promotion proposed an identifier promotion for a counterparty'),
+      ('bank.identifier_promotion_proposed', true, 'clara.wake_propose_bank_identifier_promotion proposed an identifier promotion for a counterparty'),
       ('bank.line_exception_proposed', true, 'clara.wake_propose_bank_line_exception proposed a bank-line exception')
     on conflict (name) do nothing returning name
 )
@@ -5590,8 +5590,22 @@ end $$;
 revoke all on function clara.wake_propose_bank_line_exception(uuid,text,text,uuid,text,jsonb,text,text) from public;
 grant execute on function clara.wake_propose_bank_line_exception(uuid,text,text,uuid,text,jsonb,text,text) to clara_wake_bank;
 
--- --- propose_identifier_promotion (design §3.9, blocker B5) ---------------------------------
-create function clara._agent_propose_identifier_promotion_core(p_client uuid, p_counterparty uuid,
+-- --- propose_bank_identifier_promotion (design §3.9, blocker B5) ----------------------------
+-- RENAMED (conductor arbitration, 2026-08-24): this verb collided BY NAME with F-A7's own
+-- clara.wake_propose_identifier_promotion (filing-and-interview-annexes-1.md:29), which the
+-- wave-level contract assigns the identifier-promotion door to (wave-f-contract.md:285,
+-- TA-P8 B at :315-320) -- bank-agency's copy is dated "NEW at v2, blocker B5"
+-- (bank-agency-annexes-2-record.md:166), a LATER, lane-local addition to its own design, and
+-- loses the name on that ground. The semantics genuinely overlap (both ultimately confirm a
+-- hard identifier onto clara.client_identifiers via one human click, and F-A7's own
+-- `_identifier_promotion_core` enumerates 'bank_account' as one of its three kinds), so a fold
+-- onto F-A7's door is the semantically correct long-run shape -- but that core lives in
+-- f-a7/pr-1-pi (migration 0103), an UNMERGED sibling branch, and folding onto it now would make
+-- this branch's mergeability contingent on a third unlanded branch landing first in the right
+-- order. Renamed instead, bank-scoped so it cannot collide by construction: this stays fully
+-- self-contained on bank-agency's own bank_agent_proposals carrier and does not preclude a
+-- later, owner-ruled consolidation once pi stabilizes.
+create function clara._agent_propose_bank_identifier_promotion_core(p_client uuid, p_counterparty uuid,
     p_identifier_kind text, p_identifier_value text, p_times_seen int,
     p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -5611,7 +5625,7 @@ begin
   if not exists(select 1 from clara.counterparties where id = p_counterparty and client_id = p_client) then
     raise exception 'counterparty not found for this client' using errcode='CLR11';
   end if;
-  v_dedupe := clara._reserve_op(v_firm, 'propose_identifier_promotion', p_op_key,
+  v_dedupe := clara._reserve_op(v_firm, 'propose_bank_identifier_promotion', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'counterparty', p_counterparty,
       'kind', p_identifier_kind, 'value', p_identifier_value)));
   if v_dedupe is not null then return v_dedupe; end if;
@@ -5625,12 +5639,12 @@ begin
     returning id into v_proposal;
   perform clara._append_event(v_firm, 'bank.identifier_promotion_proposed', p_client, clara.agent_user_id(), null, 'bank_agent',
     null, null, null, jsonb_build_object('proposal_id', v_proposal, 'counterparty_id', p_counterparty));
-  return clara._finish_op(v_firm, 'propose_identifier_promotion', p_op_key,
+  return clara._finish_op(v_firm, 'propose_bank_identifier_promotion', p_op_key,
     jsonb_build_object('proposal_id', v_proposal, 'status', 'open', 'counterparty_id', p_counterparty));
 end $$;
-revoke all on function clara._agent_propose_identifier_promotion_core(uuid,uuid,text,text,int,text,jsonb,text,text) from public;
+revoke all on function clara._agent_propose_bank_identifier_promotion_core(uuid,uuid,text,text,int,text,jsonb,text,text) from public;
 
-create function clara.wake_propose_identifier_promotion(p_client uuid, p_counterparty uuid,
+create function clara.wake_propose_bank_identifier_promotion(p_client uuid, p_counterparty uuid,
     p_identifier_kind text, p_identifier_value text, p_times_seen int,
     p_rationale text, p_model jsonb, p_inputs_digest text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -5638,7 +5652,7 @@ declare w record;
 begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
-  perform clara.assert_wake_allowed(w.wake_kind, 'wake_propose_identifier_promotion');
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_propose_bank_identifier_promotion');
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -5648,10 +5662,10 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
-  return clara._agent_propose_identifier_promotion_core(p_client, p_counterparty, p_identifier_kind, p_identifier_value, p_times_seen, p_rationale, p_model, p_inputs_digest, p_op_key);
+  return clara._agent_propose_bank_identifier_promotion_core(p_client, p_counterparty, p_identifier_kind, p_identifier_value, p_times_seen, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $$;
-revoke all on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,text,jsonb,text,text) from public;
-grant execute on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,text,jsonb,text,text) to clara_wake_bank;
+revoke all on function clara.wake_propose_bank_identifier_promotion(uuid,uuid,text,text,int,text,jsonb,text,text) from public;
+grant execute on function clara.wake_propose_bank_identifier_promotion(uuid,uuid,text,text,int,text,jsonb,text,text) to clara_wake_bank;
 
 -- --- get_bank_pack (design §3.8, TA-P4/TA-P9) ------------------------------------------------
 -- Read AND receipt in ONE transaction (TA-P4): no receipt, no read. This verb ADDS p_rationale/
@@ -6463,7 +6477,7 @@ begin
     ('bank_agent', 'wake_resolve_bank_line_exception'),
     ('bank_agent', 'wake_resolve_and_book_bank_line'),
     ('bank_agent', 'wake_propose_bank_line_exception'),
-    ('bank_agent', 'wake_propose_identifier_promotion'),
+    ('bank_agent', 'wake_propose_bank_identifier_promotion'),
     ('bank_agent', 'wake_add_bank_account'),
     ('bank_agent', 'wake_upsert_account'),
     ('bank_agent', 'wake_void_bank_statement'),
@@ -6713,7 +6727,7 @@ begin
   v_wrap := array['wake_match_bank_line','wake_unmatch_bank_match','wake_settle_from_bank_line',
     'wake_complete_bank_reconciliation','wake_void_bank_reconciliation',
     'wake_resolve_bank_line_exception','wake_resolve_and_book_bank_line',
-    'wake_propose_bank_line_exception','wake_propose_identifier_promotion',
+    'wake_propose_bank_line_exception','wake_propose_bank_identifier_promotion',
     'wake_add_bank_account','wake_upsert_account','wake_void_bank_statement','wake_get_bank_pack'];
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'clara' and p.proname = any(v_wrap)
@@ -6750,7 +6764,7 @@ begin
     '_agent_settle_from_bank_line_core','_agent_complete_bank_reconciliation_core',
     '_agent_void_bank_reconciliation_core','_agent_resolve_bank_line_exception_core',
     '_agent_resolve_and_book_core','_agent_propose_line_exception_core',
-    '_agent_propose_identifier_promotion_core','_agent_add_bank_account_core',
+    '_agent_propose_bank_identifier_promotion_core','_agent_add_bank_account_core',
     '_agent_upsert_account_core','_agent_void_bank_statement_core','_agent_get_bank_pack_core'];
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'clara' and p.proname = any(v_core) and p.prosecdef and p.proowner = 'clara_fn_owner'::regrole;

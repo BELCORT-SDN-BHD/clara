@@ -612,7 +612,7 @@ test("f31w.v H3: all 13 wake_* bank wrappers reach a typed business refusal, nev
       () => [world.clients.A1, NX(), "matched_booking", "n", RATIONALE, M, "d", K(8)]],
     ["wake_propose_bank_line_exception", "p_line => $1, p_kind => $2, p_reason => $3, p_evidence_document => null, p_rationale => $4, p_model => $5::jsonb, p_inputs_digest => $6, p_op_key => $7",
       () => [NX(), "not_ours", "smoke", RATIONALE, M, "d", K(9)]],
-    ["wake_propose_identifier_promotion", "p_client => $1, p_counterparty => $2, p_identifier_kind => $3, p_identifier_value => $4, p_times_seen => 3, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8",
+    ["wake_propose_bank_identifier_promotion", "p_client => $1, p_counterparty => $2, p_identifier_kind => $3, p_identifier_value => $4, p_times_seen => 3, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8",
       () => [world.clients.A1, NX(), "tin", "X123", RATIONALE, M, "d", K(10)]],
     ["wake_add_bank_account", "p_client => $1, p_coa_account_code => $2, p_proposal_id => $3, p_bank_code => $4, p_account_number => $5, p_bank_name_display => $6, p_rationale => $7, p_model => $8::jsonb, p_inputs_digest => $9, p_op_key => $10",
       () => [world.clients.A1, "999999", NX(), "MBB", "1234567890", "Maybank", RATIONALE, M, "d", K(11)]],
@@ -662,7 +662,7 @@ test("f31w.w B2: account_upsert, identifier_promotion_propose, exception_propose
        values ($1,$2,'customer','F31W W Repeat Customer','f31wwrepeatcustomer',$3) returning id`,
     [firm, world.clients.A1, world.users.alice]);
   for (const n of [1, 2]) {
-    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_propose_identifier_promotion", [
+    const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_propose_bank_identifier_promotion", [
       { name: "p_client", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" }, { name: "p_identifier_kind" },
       { name: "p_identifier_value" }, { name: "p_times_seen" }, { name: "p_rationale" },
       { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
@@ -708,7 +708,7 @@ test("f31w.o clara_wake_bank holds EXACTLY the 13-verb allowlist for bank_agent 
     "wake_match_bank_line", "wake_unmatch_bank_match", "wake_settle_from_bank_line",
     "wake_complete_bank_reconciliation", "wake_void_bank_reconciliation",
     "wake_resolve_bank_line_exception", "wake_resolve_and_book_bank_line",
-    "wake_propose_bank_line_exception", "wake_propose_identifier_promotion",
+    "wake_propose_bank_line_exception", "wake_propose_bank_identifier_promotion",
     "wake_add_bank_account", "wake_upsert_account", "wake_void_bank_statement",
     "wake_get_bank_pack",
   ]) {
