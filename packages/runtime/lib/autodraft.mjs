@@ -170,15 +170,16 @@ async function recordAutodraftDeadLetter(client, { eventId, reason }) {
   await client.query("begin");
   try {
     const r = await client.query(
-      // F2-R hygiene fix (opus review): `reason` is now updated on every conflict too, not
-      // only `attempt_count` -- the ORIGINAL shape froze the FIRST error's text forever, so a
-      // LATER, DIFFERENT error on the same event still reported the stale first cause (a
-      // first-writer-wins lie an operator reading relay_dead_letters would trust).
+      // `reason` is deliberately IMMUTABLE on this table: clara._tf_dead_letter_update pins the
+      // mutable set to exactly {status, attempt_count, resolved_at} (CLR08 on anything else), so
+      // an on-conflict reason update is DB-refused whenever the cause actually changes -- and the
+      // refused UPDATE freezes attempt_count, making MAX_ATTEMPTS unreachable and wedging the
+      // firm's lane (measured, GM-10 round 3). First-writer-wins on `reason` is the append-only
+      // contract, same as every sibling consumer; a per-attempt cause trail belongs in the log.
       `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
          values ($1, $2, $3, null)
        on conflict (consumer, event_id) do update
-         set attempt_count = clara.relay_dead_letters.attempt_count + 1,
-             reason = excluded.reason
+         set attempt_count = clara.relay_dead_letters.attempt_count + 1
        returning attempt_count`,
       [AUTODRAFT_CONSUMER, eventId, String(reason).slice(0, 500)],
     );
