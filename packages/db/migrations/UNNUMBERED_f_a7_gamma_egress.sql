@@ -724,6 +724,76 @@ alter table clara.firm_egress_dispatch_authorizations force row level security;
 create policy p_firm_egress_dispatch_authorizations_owner on clara.firm_egress_dispatch_authorizations for all to clara_fn_owner using (true) with check (true);
 grant all on clara.firm_egress_dispatch_authorizations to clara_fn_owner;
 
+-- [B/F3 review fold] the two upstream firm tables (consents, activations) carried ZERO
+-- triggers, unlike every one of their client-scoped twins -- a silently rewritable consent
+-- or activation record is the C6 chain's weakest link. Mirroring the client-scoped shape
+-- (0020:302-320, one-revocation-only / one-deactivation-only) and the dispatch-authorization
+-- guard pair Section 12 below already installs on this family's third table.
+set role clara_fn_owner;
+create function clara._tf_firm_egress_purpose_consent_update() returns trigger
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+begin
+  if tg_op='DELETE' then
+    raise exception 'typed egress consents are historical' using errcode='CLR08';
+  end if;
+  if old.revoked_at is not null or new.revoked_at is null
+     or (to_jsonb(new)-array['revoked_by','revoked_at','revoke_reason']) is distinct from
+        (to_jsonb(old)-array['revoked_by','revoked_at','revoke_reason']) then
+    raise exception 'typed egress consent permits only one revocation' using errcode='CLR08';
+  end if;
+  return new;
+end $$;
+alter function clara._tf_firm_egress_purpose_consent_update() owner to clara_fn_owner;
+revoke all on function clara._tf_firm_egress_purpose_consent_update() from public;
+create trigger t_firm_egress_purpose_consents_update before update or delete
+  on clara.firm_egress_purpose_consents
+  for each row execute function clara._tf_firm_egress_purpose_consent_update();
+create trigger t_firm_egress_purpose_consents_no_truncate before truncate
+  on clara.firm_egress_purpose_consents
+  for each statement execute function clara._tf_no_truncate();
+
+create function clara._tf_firm_egress_purpose_activation_update() returns trigger
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+begin
+  if tg_op='DELETE' then
+    raise exception 'typed egress activations are historical' using errcode='CLR08';
+  end if;
+  if old.deactivated_at is not null or new.deactivated_at is null
+     or (to_jsonb(new)-array['deactivated_by','deactivated_at','deactivation_reason'])
+        is distinct from
+        (to_jsonb(old)-array['deactivated_by','deactivated_at','deactivation_reason']) then
+    raise exception 'typed egress activation permits only one deactivation'
+      using errcode='CLR08';
+  end if;
+  return new;
+end $$;
+alter function clara._tf_firm_egress_purpose_activation_update() owner to clara_fn_owner;
+revoke all on function clara._tf_firm_egress_purpose_activation_update() from public;
+create trigger t_firm_egress_purpose_activations_update before update or delete
+  on clara.firm_egress_purpose_activations
+  for each row execute function clara._tf_firm_egress_purpose_activation_update();
+create trigger t_firm_egress_purpose_activations_no_truncate before truncate
+  on clara.firm_egress_purpose_activations
+  for each statement execute function clara._tf_no_truncate();
+reset role;
+
+do $f3_post$
+declare v_nc int; v_na int;
+begin
+  select count(*)::int into v_nc from pg_trigger t join pg_class c on c.oid=t.tgrelid
+   where c.relname='firm_egress_purpose_consents' and not t.tgisinternal;
+  select count(*)::int into v_na from pg_trigger t join pg_class c on c.oid=t.tgrelid
+   where c.relname='firm_egress_purpose_activations' and not t.tgisinternal;
+  if v_nc <> 2 then
+    raise exception 'f_a7_gamma_egress F3 postcheck: expected exactly 2 triggers on firm_egress_purpose_consents (got %)', v_nc using errcode='CLR10';
+  end if;
+  if v_na <> 2 then
+    raise exception 'f_a7_gamma_egress F3 postcheck: expected exactly 2 triggers on firm_egress_purpose_activations (got %)', v_na using errcode='CLR10';
+  end if;
+  raise notice 'f_a7_gamma_egress F3: OK -- firm_egress_purpose_consents and firm_egress_purpose_activations now each carry the same update-guard + no-truncate pair their client-scoped twins have (2 triggers each, all four verified present)';
+end
+$f3_post$;
+
 set role clara_fn_owner;
 
 create function clara.grant_firm_egress_purpose(p_purpose text,p_moment text,
@@ -1539,6 +1609,12 @@ begin
   -- v_ekind above can only be 'ocr' or 'structured_parse' given the lane guard already
   -- passed, so this conjunct is unreachable under every caller live today. Wired now so the
   -- wall exists the moment a future lane's engine_kind could ever reach this function.
+  -- [B/F1 review fold] the predicate is purpose-CONSTRAINED to 'document_processing' -- the
+  -- one client-scoped purpose gamma's classify->facts hand-off actually authorizes. MEASURED
+  -- (review adversarial cell H3): unconstrained, ANY live client-scoped purpose (wiki_synthesis
+  -- included) satisfied this exists() -- a client consented ONLY to wiki synthesis would have
+  -- passed a wall named for document processing. Fixed while the wall is still INERT under
+  -- every live caller, before a future lane ever makes it reachable.
   if p_status='done' and v_ekind in ('invoice_facts','statement_facts','llm_text_facts','llm_vision_facts') then
     v_client_scoped := exists(
       select 1 from clara.document_filings df
@@ -1546,6 +1622,7 @@ begin
         join clara.client_egress_purpose_consents c
           on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
        where df.document_id=t.document_id and df.retired_at is null
+         and a.purpose='document_processing'
          and a.deactivated_at is null and c.revoked_at is null);
     if not v_client_scoped then
       raise exception 'a firm-narrow-only authorization cannot settle a fact-generation extraction'
@@ -2076,6 +2153,201 @@ end
 $s10$;
 
 -- =====================================================================================
+-- SECTION 11 -- clara._tf_processing_task_update(): THE LANE-SCOPED TRANSITION-VALIDITY
+-- TRIGGER. MEASURED (full-estate battery caught this): a FOURTH gate this file's SECTION 6
+-- classify arm needed and initially missed. 0038 E2b, 0040 S4.11a and F-A1 wall 13 each CoR'd
+-- this SAME trigger when THEY added their own lane-scoped queued->failed flip codes
+-- (statement/witness/skipped_kind) -- SECTION 9's widened ck_processing_task_error_code_f_a1
+-- and ck_processing_task_binding_f_a1 admit the three new classify-gate codes at the COLUMN
+-- level, but this trigger is a SEPARATE, row-level gate that enumerates admitted (old_status,
+-- new_status, error_code, lane) combinations independently -- the classify gate's flip branch
+-- (SECTION 6, `update ... set status='failed', error_code=v_gate ... where ... status='queued'`)
+-- was REJECTED here with "illegal document processing transition queued -> failed" the moment
+-- an in-flight queued classify task existed to flip (the fresh-insert path this file's own
+-- battery exercised never triggers a row-level UPDATE at all, which is why this was missed
+-- there and only surfaced against real estate fixtures that file, retire and refile). Adds ONE
+-- new OR-branch, LANE-SCOPED to 'classify' exactly as every prior addition scoped its own lane
+-- -- a queued invoice/ocr/statement/witness task still cannot be flipped by a classify-gate
+-- code, and no lane can flip a running or terminal task at all.
+-- =====================================================================================
+do $s11_pre$
+declare v_sha text;
+begin
+  select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
+    from pg_proc where oid='clara._tf_processing_task_update()'::regprocedure;
+  if v_sha <> '31358d71f0950a550d29d3460bccdad2c21a752e09d2d6e9d607b3d4e4680525' then
+    raise exception 'f_a7_gamma_egress S11 prestate: _tf_processing_task_update prosrc sha256 mismatch (got %, expected the value measured on THIS lane''s own rig replay)', v_sha using errcode='CLR10';
+  end if;
+end
+$s11_pre$;
+
+set role clara_fn_owner;
+create or replace function clara._tf_processing_task_update()
+  returns trigger
+  language plpgsql
+  security definer
+  set search_path to 'clara', 'pg_temp'
+ as $$
+declare v_ok boolean;
+begin
+  if tg_op='DELETE' then raise exception 'document processing tasks are not deleted' using errcode='CLR08'; end if;
+  if old.status in ('done','failed') then raise exception 'terminal document processing task is immutable' using errcode='CLR16'; end if;
+  if new.id<>old.id or new.firm_id<>old.firm_id or new.document_id<>old.document_id
+     or new.engine_id<>old.engine_id or new.engine_config<>old.engine_config
+     or new.version_n<>old.version_n or new.lane<>old.lane or new.created_at<>old.created_at then
+    raise exception 'document processing task identity/config is immutable' using errcode='CLR08';
+  end if;
+  if new.status<>old.status then
+    -- 0038 E2b: queued->failed widens by the two enqueue-time gate verdicts -- the gate
+    -- flips an in-flight queued task in place when a later filing invalidates its consent
+    -- basis. Both are never-claimed codes (ck_processing_task_binding_0038); the flip is
+    -- the only writer that uses them on this transition, and it only ever acts on the
+    -- statement lanes -- so the widening is LANE-SCOPED (delta-review round 2,
+    -- 2026-07-31): a queued invoice/classify/ocr task still cannot be flipped to a gate
+    -- verdict by any future writer.
+    -- 0040 (C-c, WCC-R8 ride-along; register entry 9): RE-KIND RETIREMENT joins the
+    -- queued->failed arm, LANE-SCOPED exactly as 0038 E2b scoped its two gate verdicts. A
+    -- document's lane is a function of the kind it carried at enqueue; when a human or the
+    -- classifier changes the kind, a queued task in a KIND-BOUND lane is work nobody wants --
+    -- and it blocks the correct lane's enqueue, because the router's in-flight short-circuit
+    -- hands back the stale task. So it is retired to the never-claimed `skipped_kind` receipt
+    -- (already in the binding CHECK's allowlist, 0038:7304, and already the router's own idiom
+    -- for "this document has nowhere to go"). The scoping is the point: the kind-INDEPENDENT
+    -- 'classify' lane can never be retired this way, and no writer can flip a running or
+    -- terminal task at all.
+    -- F-A1 PR-1 (wall 13): the WITNESS gate verdicts join the queued->failed arm,
+    -- LANE-SCOPED exactly as 0038 E2b and 0040 S4.11a scoped theirs. _enqueue_invoice_facts_core's
+    -- llm_witness branch flips an in-flight queued task in place when the typed witness_extraction
+    -- consent is absent/inactive or the document is filed to more than one client; both codes are
+    -- never-claimed (ck_processing_task_binding_f_a1) and the flip is their only writer. Scoping is
+    -- the point: no future writer can flip a queued invoice/classify/ocr/statement task to a
+    -- WITNESS verdict, and no lane can flip a running or terminal task at all.
+    -- F-A7 gamma (SECTION 6, D-18/AB-4): the CLASSIFY gate verdicts join the queued->failed arm,
+    -- LANE-SCOPED exactly as every prior addition scoped its own. _enqueue_invoice_facts_core's
+    -- classify branch flips an in-flight queued task in place when the client's document_processing
+    -- consent (filed population) or the firm's firm-narrow attribution activation (unfiled
+    -- population) is absent/inactive, or the document is filed to more than one client; all three
+    -- codes are never-claimed (ck_processing_task_binding_f_a1) and the flip is their only writer.
+    -- Scoping is the point: no future writer can flip a queued invoice/ocr/statement/witness task
+    -- to a CLASSIFY verdict, and no lane can flip a running or terminal task at all.
+    v_ok:=(old.status='queued' and new.status in ('running','held_egress'))
+      or (old.status='queued' and new.status='failed'
+          and (new.error_code in ('budget','attempt_cap')
+               or (new.error_code in ('consent_inactive','statement_multi_client')
+                   and new.lane in ('statement_facts','statement_parse'))
+               or (new.error_code in ('witness_consent_inactive','witness_multi_client')
+                   and new.lane='llm_witness')
+               or (new.error_code='skipped_kind'
+                   and new.lane in ('invoice_facts','statement_facts','statement_parse','llm_witness'))
+               or (new.error_code in ('document_processing_multi_client','document_processing_consent_inactive','firm_narrow_consent_inactive')
+                   and new.lane='classify')))
+      or (old.status='held_egress' and new.status='queued')
+      or (old.status='running' and new.status in ('done','failed','queued','held_egress'));
+    if not v_ok then
+      raise exception 'illegal document processing transition % -> %',old.status,new.status
+        using errcode='CLR16';
+    end if;
+  end if;
+  new.updated_at:=now();
+  return new;
+end $$;
+alter function clara._tf_processing_task_update() owner to clara_fn_owner;
+reset role;
+
+do $s11_post$
+declare v_sha text;
+begin
+  select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
+    from pg_proc where oid='clara._tf_processing_task_update()'::regprocedure;
+  if v_sha <> '54fd2fc5c94ccbb5abe888b95bef8c72f69a2695daa49e635884a24e633f82f4' then
+    raise exception 'f_a7_gamma_egress S11 postcheck: _tf_processing_task_update prosrc sha256 mismatch (got %, expected the value measured on THIS lane''s own rig replay after the recut)', v_sha using errcode='CLR10';
+  end if;
+  if not exists(select 1 from pg_trigger t join pg_class c on c.oid=t.tgrelid
+                 where c.relname='document_processing_tasks' and t.tgname='t_document_processing_tasks_update'
+                   and t.tgfoid='clara._tf_processing_task_update()'::regprocedure) then
+    raise exception 'f_a7_gamma_egress S11 postcheck: t_document_processing_tasks_update no longer points at the recut function' using errcode='CLR10';
+  end if;
+  raise notice 'f_a7_gamma_egress S11: OK -- _tf_processing_task_update admits the three classify-gate codes on lane=classify, queued->failed only; every prior lane''s admission (0038/0040/F-A1) byte-verified unmoved in the same body; the trigger''s own registration (t_document_processing_tasks_update) unmoved';
+end
+$s11_post$;
+
+-- =====================================================================================
+-- SECTION 12 -- firm_egress_dispatch_authorizations: THE UPDATE-GUARD TRIGGER PAIR.
+-- MEASURED (beta lane, conductor relay): this table shipped in SECTION 5 with FORCE RLS and an
+-- owner-only policy but carried ZERO triggers -- unlike its client-scoped sibling,
+-- egress_dispatch_authorizations, whose t_egress_dispatch_authorizations_update /
+-- t_egress_dispatch_authorizations_no_truncate pair is the ONLY thing standing between "one
+-- terminal transition, ever" and an in-place superuser/clara_fn_owner UPDATE silently
+-- rewriting a live authorization. Mirrors the sibling's guard EXACTLY (same predicate: the OLD
+-- row must not already be terminal, the NEW row must set EXACTLY ONE of consumed_at/
+-- invalidated_at, and no other column may move) -- its own function, not a shared one, because
+-- the sibling's is table-name-free logic but this repo's own precedent (0090's own guard
+-- functions) keeps one guard function per table rather than a generic cross-table one.
+-- =====================================================================================
+do $s12_pre$
+begin
+  if exists(select 1 from pg_trigger t join pg_class c on c.oid=t.tgrelid
+             where c.relname='firm_egress_dispatch_authorizations' and not t.tgisinternal) then
+    raise exception 'f_a7_gamma_egress S12 prestate: firm_egress_dispatch_authorizations already carries a trigger -- unexpected pre-existing state' using errcode='CLR10';
+  end if;
+end
+$s12_pre$;
+
+set role clara_fn_owner;
+create function clara._tf_firm_egress_dispatch_authorization_update()
+  returns trigger
+  language plpgsql
+  security definer
+  set search_path to 'clara', 'pg_temp'
+ as $$
+begin
+  if tg_op='DELETE' then
+    raise exception 'dispatch authorizations are historical' using errcode='CLR08';
+  end if;
+  -- One terminal, once -- byte-identical predicate to the client-scoped sibling's guard
+  -- (clara._tf_egress_dispatch_authorization_update): an UPDATE that touches any column other
+  -- than consumed_at/invalidated_at/invalidated_reason, that re-terminates an already-terminal
+  -- row, or that sets no terminal at all is refused.
+  if old.consumed_at is not null or old.invalidated_at is not null
+     or (new.consumed_at is null and new.invalidated_at is null)
+     or (to_jsonb(new)-array['consumed_at','invalidated_at','invalidated_reason'])
+        is distinct from
+        (to_jsonb(old)-array['consumed_at','invalidated_at','invalidated_reason']) then
+    raise exception 'a dispatch authorization permits exactly one terminal transition'
+      using errcode='CLR08';
+  end if;
+  return new;
+end $$;
+alter function clara._tf_firm_egress_dispatch_authorization_update() owner to clara_fn_owner;
+-- MEASURED (full-estate battery, T17/T17b + §3.10 EXECUTE matrix): `set role clara_fn_owner;`
+-- before CREATE FUNCTION does NOT reliably inherit 0004's `alter default privileges ...
+-- revoke execute on functions from public` -- a fresh fn leaks PUBLIC EXECUTE until an
+-- EXPLICIT revoke closes it (the same belt-and-suspenders idiom Section 5 above already
+-- uses for its five new functions; this trigger function was the one site in this file
+-- that skipped it).
+revoke all on function clara._tf_firm_egress_dispatch_authorization_update() from public;
+
+create trigger t_firm_egress_dispatch_authorizations_update
+  before delete or update on clara.firm_egress_dispatch_authorizations
+  for each row execute function clara._tf_firm_egress_dispatch_authorization_update();
+create trigger t_firm_egress_dispatch_authorizations_no_truncate
+  before truncate on clara.firm_egress_dispatch_authorizations
+  for each statement execute function clara._tf_no_truncate();
+reset role;
+
+do $s12_post$
+declare v_n int;
+begin
+  select count(*)::int into v_n from pg_trigger t join pg_class c on c.oid=t.tgrelid
+   where c.relname='firm_egress_dispatch_authorizations' and not t.tgisinternal;
+  if v_n <> 2 then
+    raise exception 'f_a7_gamma_egress S12 postcheck: expected exactly 2 triggers on firm_egress_dispatch_authorizations (got %)', v_n using errcode='CLR10';
+  end if;
+  raise notice 'f_a7_gamma_egress S12: OK -- firm_egress_dispatch_authorizations now carries the same update-guard + no-truncate pair its client-scoped sibling has (2 triggers, both verified present)';
+end
+$s12_post$;
+
+-- =====================================================================================
 -- TAIL -- POSTCHECK.
 -- =====================================================================================
 do $post$
@@ -2113,7 +2385,7 @@ begin
   end if;
   select p.prosrc into v_src from pg_proc p where p.oid='clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure;
   v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
-  if v_sha <> 'd6a63f240a162f999a1b3f9c04f462945e9f3a73b0691d6c76d8f35aaed217dd' then
+  if v_sha <> '8ba95a5210ad839d510729baebff3863862b6073691bf6efaaa7f6e38b8e2354' then
     raise exception 'f_a7_gamma_egress postcheck: persist_document_extraction prosrc sha256 mismatch (got %)', v_sha using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p where p.oid='clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)'::regprocedure;

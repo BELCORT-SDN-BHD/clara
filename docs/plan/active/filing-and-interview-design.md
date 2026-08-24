@@ -291,8 +291,18 @@ consent+activation, an **unfiled** one requires the firm-narrow `attribution` mo
 verdict writes the terminal never-claimed **failed receipt** (the `skipped_kind` idiom) — **never a
 raise**, because that function runs inside `file_document` / `finalize_document_intake` /
 `confirm_attribution_candidate` / `approve_wrong_client_correction` and a raise would abort an
-unrelated filing transaction. The lane's comment (`0090:346`) and the worker's header
-(`classify.mjs:12-14`) are corrected in the same PR — **the comment is part of the finding**.
+unrelated filing transaction. ~~The lane's comment (`0090:346`) and the worker's header
+(`classify.mjs:12-14`) are corrected in the same PR — the comment is part of the finding.~~
+**CORRECTED (F-A7 gamma, independent γ review, 2026-08-25): this instruction is unsatisfiable
+under this SAME paragraph's own AB-4 discipline.** `0090` is an already-applied migration;
+db-migrations.md's "Applied files are immutable... fix forward with a new file" (and hard
+constraint 9's freeze law) forbid editing its committed text in place — the runner checksums
+each file, so touching `0090:346` trips a checksum-drift error at apply. The comment's own claim
+("classify … never hold[s]") is ALSO still literally true post-gamma in the sense it was written
+(the kill-switch's `held_egress` status) — gamma's enqueue-time gate flips straight to a terminal
+`failed` receipt, never `held_egress`, so no live text is actually wrong. The worker's header
+(`classify.mjs:12-14`, runtime, PR-rho's territory per R1 above) is left for that lane. No
+migration text changes as a result of this correction.
 
 **The admissible-document list and the IC refusal.** The closed list rides the **onboarding intake
 door**, where a human declares the kind as they hand the file in:

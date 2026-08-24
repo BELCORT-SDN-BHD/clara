@@ -382,6 +382,19 @@ twice; worth pricing for in-repo custody.
   selftest cell. Judgement logic, its own reviewed PR; **re-homed to the F-A2 fix queue.**
 - ~~Riders ③④⑤ 0-live~~ · ~~corroboration 0/33~~ · ~~ci.yml over 500~~ · ~~the stranded pair~~ —
   **all four RESOLVED and ARCHIVED 2026-08-22** (`-part2.md`; re-measure 12/20 stands in posture).
+- **F-A7 gamma residuals** (independent γ review fold, 2026-08-25; recorded per law-82 — a
+  deferral belongs here, not only in a commit message): **R1** classify egress stays UNGOVERNED
+  by `GOVERNED_EGRESS_PURPOSES` (`packages/runtime/lib/egress.mjs`) until the runtime side lands
+  — the DB half (`document_processing` purpose, the classify consent gate) is complete and
+  gamma's own migration tail already states this is PR-rho's (annexes-2 SSI.1 train rho). **R2**
+  the firm-narrow family has NO `consume_firm_egress_dispatch` verb and no body ever sets
+  `firm_egress_dispatch_authorizations.consumed_at` — the client family's one-shot consume
+  binding has no firm-scoped counterpart yet; `expires_at` is written and read by nothing
+  (decorative at this frontier). Both are β/δ's to build, not gamma's. **R3**
+  `document_intakes.origin` was NOT extended with `onboarding_interview` — annexes-2 §I.2 lists
+  it as one of gamma's ALTER targets, but the pre-activation intake door it would gate did not
+  ship this round (MEASURED: the live CHECK still refuses the value). A deliberate cut, not a
+  miss — recorded so a later lane does not assume the door exists.
 
 **THE NEXT-ROUND QUEUE (from the 2026-08-21 re-measure; the first four are PROMPT-side — the
 evaluator stays strict, and widening it would be a frozen-evaluator change needing its own

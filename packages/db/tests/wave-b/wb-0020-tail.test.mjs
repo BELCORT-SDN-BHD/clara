@@ -246,23 +246,32 @@ test("[0020 §8]: the four purpose-discriminated event types are registered — 
   fail0020(live);
   const egress = (await rootQuery(
     "select name from clara.event_types where name like 'egress.%' order by name")).rows.map((x) => x.name);
-  // [Wave-F Track A, F-A7 gamma, D1-gamma] widened this closed set: the firm-narrow typed-
-  // egress family (purpose 'firm_narrow_intake') mints its OWN four lifecycle event types under
-  // the same `egress.` prefix, since 0020's `egress.purpose_*` names are purpose-generic in
-  // wording but the client-scoped table shape (client_id NOT NULL) cannot represent a firm-
-  // scoped grant — so gamma names its own siblings rather than reusing 0020's. This is the
-  // FIRST wave to add a NEW `egress.`-prefixed name since 0020 (F-A1/F-A3/PR-1c all reused the
-  // existing four purpose-discriminated types for their new PURPOSE VALUES, minting no new
-  // event TYPE). The title's "0020 registered NOTHING else" claim is therefore true only up to
-  // the 20-migration frontier this file is contract-blind to; this cell now names the full live
-  // set honestly rather than re-asserting a stale absolute.
-  assert.deepEqual(egress, [
+  // [Wave-F Track A, F-A7 gamma, D1-gamma / B3(b) review fold] widened this closed set: the
+  // firm-narrow typed-egress family (purpose 'firm_narrow_intake') mints its OWN four lifecycle
+  // event types under the same `egress.` prefix, since 0020's `egress.purpose_*` names are
+  // purpose-generic in wording but the client-scoped table shape (client_id NOT NULL) cannot
+  // represent a firm-scoped grant — so gamma names its own siblings rather than reusing 0020's.
+  // This is the FIRST wave to add a NEW `egress.`-prefixed name since 0020 (F-A1/F-A3/PR-1c all
+  // reused the existing four purpose-discriminated types for their new PURPOSE VALUES, minting
+  // no new event TYPE). GATED, not unconditionally widened: `db-slice-frontiers` runs this
+  // battery against databases pinned at 20-through-intermediate frontiers, where gamma's four
+  // names do not exist yet — an unconditional widening would red every such leg on a four-name
+  // diff that says nothing about 0020's own closed-set claim. Keyed on the migration's STABLE
+  // STEM, never its number (numbers are claimed at merge).
+  const gammaApplied = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'f_a7_gamma_egress$'"
+  )).rows[0].n === 1;
+  const expected = [
     "egress.consent_granted", "egress.consent_revoked",
-    "egress.firm_purpose_activated", "egress.firm_purpose_consent_granted",
-    "egress.firm_purpose_consent_revoked", "egress.firm_purpose_deactivated",
+    ...(gammaApplied ? [
+      "egress.firm_purpose_activated", "egress.firm_purpose_consent_granted",
+      "egress.firm_purpose_consent_revoked", "egress.firm_purpose_deactivated",
+    ] : []),
     "egress.purpose_activated", "egress.purpose_consent_granted",
     "egress.purpose_consent_revoked", "egress.purpose_deactivated",
-  ], `the two legacy + four 0020 typed + four F-A7-gamma firm-narrow egress event types (got ${egress.join(",")})`);
+  ].sort();
+  assert.deepEqual(egress, expected,
+    `the two legacy + four 0020 typed${gammaApplied ? " + four F-A7-gamma firm-narrow" : ""} egress event types (got ${egress.join(",")})`);
   for (const n of PURPOSE_EVENT_TYPES) assert.ok(egress.includes(n), `${n} registered`);
 });
 

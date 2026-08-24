@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, roleQuery, humanQuery, opk, endPool, ensureReady,
 } from "./rig-helpers.mjs";
-import { buildWorld, freshResolution } from "./rig-fixtures.mjs";
+import { buildWorld, freshResolution, createClient } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, fileDocument } from "./rig-docs-fixtures.mjs";
 import { classifyDocument, setDocumentKind } from "./a21-helpers.mjs";
 
@@ -57,7 +57,10 @@ after(async () => { await endPool(); });
 // ---------------------------------------------------------------------------
 
 async function classifyEvidenceDoc(sub, { firm }) {
-  const seed = await seedVerifiedDocument({ firm, kind: "consent_evidence" });
+  // grantClassifyConsent: false — an evidence document must never itself trigger the fixture
+  // convenience's firm-narrow auto-grant as a side effect (this file's own negative cells,
+  // e.g. the "onboarding_interview alone" test, depend on that NOT happening here).
+  const seed = await seedVerifiedDocument({ firm, kind: "consent_evidence", grantClassifyConsent: false });
   await rootQuery(
     "update clara.documents set bytes_verified_at = coalesce(bytes_verified_at, now()) where id=$1",
     [seed.documentId]);
@@ -190,6 +193,11 @@ test("document_processing joins the purpose vocabulary: grant+activate succeeds,
   if (gate(t)) return;
   const client = world.clients.A1;
   const firm = world.firms.A;
+  // [B/F4 review fold] PREMISE, so "grant+activate succeeds" is a real state change, not a
+  // no-op reflecting a pre-existing (fixture-convenience-granted) consent this cell never
+  // proved it needed.
+  const before = await liveDPConsent(client);
+  assert.equal(before, null, "PREMISE: client A1 holds no live document_processing consent yet");
   const { consent } = await enableDP(world.users.alice, { firm, client });
   assert.ok(consent, "a live document_processing consent exists");
 
@@ -218,14 +226,22 @@ test("document_processing joins the purpose vocabulary: grant+activate succeeds,
 
 // ===========================================================================
 // The classify consent gate, AT ENQUEUE (D-18/AB-4) — the two populations.
+//
+// [Conductor ruling, F-A7 gamma fixture-convenience] `fileDocument`/`seedVerifiedDocument`
+// grant classify consent by DEFAULT now (rig-docs-fixtures.mjs — every test firm is a
+// CONSENTED fixture, ADR-0075's own framing), through the real governed verbs, with a
+// `grantClassifyConsent: false` opt-out. The two DIFFERENTIAL PAIRS below are that ruling's
+// mandatory condition (3): the opt-out on each side proves the gate genuinely still refuses an
+// UNCONSENTED firm/client, and the DEFAULT (no flag at all) proves the convenience itself
+// actually grants — both polarities, both populations, forced, not assumed from either alone.
 // ===========================================================================
 
-test("classify enqueue, FILED document, no document_processing consent: holds — no queued task, a terminal never-claimed failed receipt, code document_processing_consent_inactive", async (t) => {
+test("[fixture-convenience differential, CLIENT-scoped] FILED document, grantClassifyConsent:false: holds — no queued task, a terminal never-claimed failed receipt, code document_processing_consent_inactive", async (t) => {
   if (gate(t)) return;
   const client = world.clients.A2;
   const seed = await seedVerifiedDocument({ firm: world.firms.A }); // document_kind NULL
   await fileDocument(world.users.alice, {
-    document: seed.documentId, client,
+    document: seed.documentId, client, grantClassifyConsent: false,
     resolution: await freshResolution(world.users.alice, client, { subjectKind: "document", subjectId: seed.documentId }),
   });
 
@@ -245,12 +261,12 @@ test("classify enqueue, FILED document, no document_processing consent: holds �
   assert.equal(rows2.length, 1, "still exactly one row after the re-fire");
 });
 
-test("classify enqueue, FILED document, WITH document_processing consent: proceeds — a queued classify task", async (t) => {
+test("[fixture-convenience differential, CLIENT-scoped] FILED document, DEFAULT fileDocument (no flag): proceeds — the convenience itself grants document_processing, a queued classify task", async (t) => {
   if (gate(t)) return;
   const firm = world.firms.A;
-  const client = world.clients.A1; // already document_processing-enabled by the earlier test, but re-enable is idempotent-refused; use a fresh doc instead
+  const client = world.clients.A1;
   const seed = await seedVerifiedDocument({ firm });
-  await fileDocument(world.users.alice, {
+  await fileDocument(world.users.alice, { // no grantClassifyConsent flag — the DEFAULT path
     document: seed.documentId, client,
     resolution: await freshResolution(world.users.alice, client, { subjectKind: "document", subjectId: seed.documentId }),
   });
@@ -263,10 +279,10 @@ test("classify enqueue, FILED document, WITH document_processing consent: procee
   assert.equal(rows[0].error_code, null);
 });
 
-test("classify enqueue, UNFILED document, no firm-narrow attribution activation: holds — code firm_narrow_consent_inactive", async (t) => {
+test("[fixture-convenience differential, FIRM-narrow] UNFILED document, grantClassifyConsent:false: holds — code firm_narrow_consent_inactive", async (t) => {
   if (gate(t)) return;
-  // A fresh firm with NO firm-narrow consent granted yet, so the negative is real.
-  const seed = await seedVerifiedDocument({ firm: world.firms.B }); // client=null: unfiled
+  // A fresh firm with NO firm-narrow consent granted yet — the opt-out keeps the negative real.
+  const seed = await seedVerifiedDocument({ firm: world.firms.B, grantClassifyConsent: false }); // client=null: unfiled
   const r = await enqueue(seed.documentId);
   assert.equal(r.status, "failed", `holds (got ${JSON.stringify(r)})`);
   assert.equal(r.reason, "firm_narrow_consent_inactive");
@@ -275,20 +291,22 @@ test("classify enqueue, UNFILED document, no firm-narrow attribution activation:
   assert.equal(rows[0].error_code, "firm_narrow_consent_inactive");
 });
 
-test("classify enqueue, UNFILED document, WITH the firm-narrow ATTRIBUTION moment activated: proceeds — a queued classify task; the ONBOARDING_INTERVIEW moment alone does not cover it", async (t) => {
+test("[fixture-convenience differential, FIRM-narrow] UNFILED document, DEFAULT seedVerifiedDocument (no flag): proceeds — the convenience itself grants the attribution moment; the ONBOARDING_INTERVIEW moment alone does not cover it", async (t) => {
   if (gate(t)) return;
   const firm = world.firms.S;
   await enableFirmNarrow(world.users.erin, { firm, moment: "onboarding_interview" });
-  const seedWrongMoment = await seedVerifiedDocument({ firm });
+  // Opt out here deliberately: this document must prove onboarding_interview ALONE does not
+  // cover attribution, and the DEFAULT convenience would otherwise auto-grant attribution too,
+  // making that assertion vacuous.
+  const seedWrongMoment = await seedVerifiedDocument({ firm, grantClassifyConsent: false });
   const rWrong = await enqueue(seedWrongMoment.documentId);
   assert.equal(rWrong.status, "failed",
     "the onboarding_interview moment alone does NOT authorize the attribution-moment classify gate");
   assert.equal(rWrong.reason, "firm_narrow_consent_inactive");
 
-  await enableFirmNarrow(world.users.erin, { firm, moment: "attribution" });
-  const seed = await seedVerifiedDocument({ firm });
+  const seed = await seedVerifiedDocument({ firm }); // no flag — the DEFAULT path grants attribution
   const r = await enqueue(seed.documentId);
-  assert.equal(r.status, "queued", `proceeds once the attribution moment is activated (got ${JSON.stringify(r)})`);
+  assert.equal(r.status, "queued", `proceeds once the DEFAULT convenience grants the attribution moment (got ${JSON.stringify(r)})`);
 });
 
 test("prepare_firm_egress_dispatch: moment-scoped — an activation for one moment refuses uniformly 'unknown' for the OTHER moment, and requires a hash", async (t) => {
@@ -345,4 +363,232 @@ test("identity_document is NOT a DB_REFUSED_KINDS member on this frontier: the D
     classifyDocument({ document: seed.documentId, kind: "not_a_real_kind", confidence: 0.95 }),
     /CLR10|unsupported document kind/,
     "an off-vocabulary kind is still refused");
+});
+
+// ===========================================================================
+// firm_egress_dispatch_authorizations: THE UPDATE-GUARD TRIGGER PAIR (beta lane finding,
+// conductor relay). Both polarities: an arbitrary UPDATE refuses; the lawful terminal
+// transition (the one consume_egress_dispatch-shaped write) still succeeds.
+// ===========================================================================
+
+test("firm_egress_dispatch_authorizations update-guard: an arbitrary UPDATE (e.g. re-dating expires_at) on a LIVE authorization refuses CLR08", async (t) => {
+  if (gate(t)) return;
+  // firms.S already carries a live attribution activation from the earlier "DEFAULT
+  // seedVerifiedDocument" differential-pair cell — reused here rather than re-granting
+  // (grant is one-live-per-firm-purpose-moment, so a second grant call would duplicate_live).
+  const firm = world.firms.S;
+  const sha = "c".repeat(64);
+  const granted = await prepareFirmNarrowDispatch({ firm, moment: "attribution", sha });
+  assert.equal(granted.verdict, "granted");
+
+  await assert.rejects(
+    rootQuery("update clara.firm_egress_dispatch_authorizations set expires_at = expires_at + interval '1 hour' where id=$1", [granted.authorization_id]),
+    /CLR08|exactly one terminal transition/,
+    "an arbitrary UPDATE on a live (non-terminal) authorization is refused");
+
+  await assert.rejects(
+    rootQuery("delete from clara.firm_egress_dispatch_authorizations where id=$1", [granted.authorization_id]),
+    /CLR08|historical/,
+    "DELETE is refused — dispatch authorizations are historical");
+
+  await assert.rejects(
+    rootQuery("truncate clara.firm_egress_dispatch_authorizations"),
+    /cannot be truncated/,
+    "TRUNCATE is refused");
+});
+
+test("firm_egress_dispatch_authorizations update-guard: the LAWFUL terminal transition (consumed_at set, nothing else touched) still succeeds; a second terminal transition on the same row then refuses", async (t) => {
+  if (gate(t)) return;
+  const firm = world.firms.S;
+  const sha = "d".repeat(64);
+  const granted = await prepareFirmNarrowDispatch({ firm, moment: "attribution", sha });
+  assert.equal(granted.verdict, "granted");
+
+  const consumed = await rootQuery(
+    "update clara.firm_egress_dispatch_authorizations set consumed_at = now() where id=$1 returning consumed_at",
+    [granted.authorization_id]);
+  assert.ok(consumed.rows[0].consumed_at, "the lawful one-column terminal UPDATE (consumed_at) succeeds");
+
+  await assert.rejects(
+    rootQuery("update clara.firm_egress_dispatch_authorizations set invalidated_at = now(), invalidated_reason = 'double-terminal probe' where id=$1", [granted.authorization_id]),
+    /CLR08|exactly one terminal transition/,
+    "a SECOND terminal transition on an already-consumed row is refused — one terminal, once");
+});
+
+// ===========================================================================
+// [Wave-F Track A, F-A7 gamma — independent γ review fold, 2026-08-25]
+// F1/F2/F3/F4: the firm-narrow output wall's purpose constraint, its cell-36 negative twin,
+// the multi-client/deactivate-revoke/owner-floor/evidence-doc adversarial surface the review's
+// own zz-review-fa7gamma-adversarial.test.mjs battery forced (adopted here, adapted to this
+// file's own fixture-convenience opt-out so a cell's PREMISE is never contaminated by the
+// convenience's own default grant — the collision class the review's raw probes hit on C1/C2/
+// F3/H2, none of which is a product defect: it is ADR-0075's fixture convenience firing as
+// designed on a null-kind seed/file, exactly as the differential-pair cells above already prove).
+// ===========================================================================
+
+test("[cell 36, POSITIVE] persist_document_extraction's fact-generation branch is UNREACHABLE at this frontier: v_ekind is a two-valued (ocr|structured_parse) assignment, assigned exactly once", async (t) => {
+  if (gate(t)) return;
+  const src = (await rootQuery(
+    "select prosrc from pg_proc where oid='clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure"
+  )).rows[0].prosrc;
+  assert.match(src, /v_ekind:=case when t\.lane='ocr' then 'ocr' else 'structured_parse' end;/,
+    "v_ekind is a two-valued assignment (ocr | structured_parse)");
+  assert.equal(src.split("v_ekind:=").length - 1, 1, "v_ekind is assigned exactly once — no other value can reach the wall");
+});
+
+test("[cell 36, NEGATIVE TWIN — B/F1/F2 review fold] the wall's client-scoped predicate is FORCED (its exact live SQL, run standalone since v_ekind cannot reach a fact kind through the real call): a client with ONLY a live wiki_synthesis activation does NOT satisfy it; the same client WITH document_processing DOES", async (t) => {
+  if (gate(t)) return;
+  const firm = world.firms.A;
+  const client = await createClient(world.users.alice, { name: `${world.prefix}_cell36neg`, opKey: opk("cli") });
+  const wikiEv = await classifyEvidenceDoc(world.users.alice, { firm });
+  await humanQuery(world.users.alice,
+    `select clara.grant_client_egress_purpose(p_client => $1, p_purpose => 'wiki_synthesis',
+       p_evidence_document => $2, p_scope_note => 'cell36 wiki', p_op_key => $3) as r`,
+    [client, wikiEv.documentId, opk("gw")]);
+  const wikiConsent = (await rootQuery(
+    "select id from clara.client_egress_purpose_consents where client_id=$1 and purpose='wiki_synthesis' and revoked_at is null",
+    [client])).rows[0].id;
+  await humanQuery(world.users.alice,
+    `select clara.activate_client_egress_purpose(p_client => $1, p_purpose => 'wiki_synthesis',
+       p_consent => $2, p_op_key => $3)`, [client, wikiConsent, opk("aw")]);
+
+  const doc = await seedVerifiedDocument({ firm, grantClassifyConsent: false });
+  await fileDocument(world.users.alice, {
+    document: doc.documentId, client,
+    resolution: await freshResolution(world.users.alice, client, { subjectKind: "document", subjectId: doc.documentId }),
+    grantClassifyConsent: false,
+  });
+
+  // The wall's EXACT live predicate (Section 7), reproduced standalone and evaluated for real.
+  const wallSatisfied = async () => (await rootQuery(
+    `select exists(
+       select 1 from clara.document_filings df
+         join clara.client_egress_purpose_activations a on a.client_id=df.client_id and a.firm_id=df.firm_id
+         join clara.client_egress_purpose_consents c
+           on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
+        where df.document_id=$1 and df.retired_at is null
+          and a.purpose='document_processing'
+          and a.deactivated_at is null and c.revoked_at is null) as ok`, [doc.documentId])).rows[0].ok;
+
+  assert.equal(await wallSatisfied(), false,
+    "NEGATIVE: a live wiki_synthesis-only activation does not satisfy the document_processing wall");
+
+  const dpEv = await classifyEvidenceDoc(world.users.alice, { firm });
+  await humanQuery(world.users.alice,
+    `select clara.grant_client_egress_purpose(p_client => $1, p_purpose => 'document_processing',
+       p_evidence_document => $2, p_scope_note => 'cell36 dp', p_op_key => $3) as r`,
+    [client, dpEv.documentId, opk("gd")]);
+  const dpConsent = (await rootQuery(
+    "select id from clara.client_egress_purpose_consents where client_id=$1 and purpose='document_processing' and revoked_at is null",
+    [client])).rows[0].id;
+  await humanQuery(world.users.alice,
+    `select clara.activate_client_egress_purpose(p_client => $1, p_purpose => 'document_processing',
+       p_consent => $2, p_op_key => $3)`, [client, dpConsent, opk("ad")]);
+
+  assert.equal(await wallSatisfied(), true,
+    "POSITIVE CONTROL: the SAME client now holding document_processing DOES satisfy the wall — the predicate discriminates on purpose, not merely on liveness");
+});
+
+test("[F4-A multi-client fresh-insert] classify gate: a document filed to TWO clients holds with document_processing_multi_client, even when BOTH hold live document_processing consent", async (t) => {
+  if (gate(t)) return;
+  const firm = world.firms.A;
+  const c1 = await createClient(world.users.alice, { name: `${world.prefix}_mcA`, opKey: opk("cli") });
+  const c2 = await createClient(world.users.alice, { name: `${world.prefix}_mcB`, opKey: opk("cli") });
+  await enableDP(world.users.alice, { firm, client: c1 });
+  await enableDP(world.users.alice, { firm, client: c2 });
+  const doc = await seedVerifiedDocument({ firm, grantClassifyConsent: false });
+  // Raw-inserted filings (never through file_document/its convenience) so the gate's FRESH-
+  // INSERT branch (v_flip = 0) is what is exercised, not a flip of an already-queued task.
+  for (const cl of [c1, c2]) {
+    await rootQuery(
+      `insert into clara.document_filings(firm_id,document_id,client_id,basis,resolution_id,filed_by)
+       values($1,$2,$3,'legacy-0007',null,null)`, [firm, doc.documentId, cl]);
+  }
+  const n = (await rootQuery(
+    "select count(*)::int n from clara.document_filings where document_id=$1 and retired_at is null",
+    [doc.documentId])).rows[0].n;
+  assert.equal(n, 2, "PREMISE: two live filings exist");
+  const r = await enqueue(doc.documentId);
+  assert.equal(r.status, "failed", `multi-client must hold (got ${JSON.stringify(r)})`);
+  assert.equal(r.reason, "document_processing_multi_client");
+});
+
+test("[F4-B deactivate/revoke invalidation UPDATEs] deactivate_firm_egress_purpose and revoke_firm_egress_purpose stamp their own historical row — deactivated_at/deactivated_by/deactivation_reason and revoked_at/revoked_by/revoke_reason respectively", async (t) => {
+  if (gate(t)) return;
+  const firm = world.firms.B;
+  const { consent } = await enableFirmNarrow(world.users.dave, { firm, moment: "onboarding_interview" });
+
+  await humanQuery(world.users.dave,
+    `select clara.deactivate_firm_egress_purpose(p_purpose => 'firm_narrow_intake', p_moment => 'onboarding_interview',
+       p_reason => 'F4-B probe', p_op_key => $1)`, [opk("dfn")]);
+  const act = (await rootQuery(
+    `select deactivated_at, deactivated_by, deactivation_reason from clara.firm_egress_purpose_activations
+      where consent_id=$1 order by activated_at desc limit 1`, [consent])).rows[0];
+  assert.ok(act.deactivated_at && act.deactivated_by && act.deactivation_reason,
+    "deactivate_firm_egress_purpose stamps all three deactivation columns on the activation row");
+
+  await humanQuery(world.users.dave,
+    `select clara.revoke_firm_egress_purpose(p_purpose => 'firm_narrow_intake', p_moment => 'onboarding_interview',
+       p_reason => 'F4-B probe', p_op_key => $1)`, [opk("rfn")]);
+  const con = (await rootQuery(
+    "select revoked_at, revoked_by, revoke_reason from clara.firm_egress_purpose_consents where id=$1",
+    [consent])).rows[0];
+  assert.ok(con.revoked_at && con.revoked_by && con.revoke_reason,
+    "revoke_firm_egress_purpose stamps all three revocation columns on the consent row");
+});
+
+test("[F4-C owner floor] grant/activate/deactivate/revoke_firm_egress_purpose all refuse a BOOKKEEPER (body-enforced, CLR04)", async (t) => {
+  if (gate(t)) return;
+  // moment: onboarding_interview, not attribution — firm A's attribution moment is already
+  // live by this point (an EARLIER differential-pair cell's DEFAULT seedVerifiedDocument call
+  // lets the fixture convenience auto-grant it, ADR-0075's own framing); a distinct untouched
+  // moment keeps this cell's refusals independent of that pre-existing, unrelated grant.
+  const ev = await classifyEvidenceDoc(world.users.alice, { firm: world.firms.A });
+  const isCLR04 = (e) => e.code === "CLR04";
+  await assert.rejects(humanQuery(world.users.bob,
+    `select clara.grant_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_evidence_document=>$1,p_scope_note=>'x',p_op_key=>$2)`, [ev.documentId, opk("x1")]),
+    isCLR04, "grant by bookkeeper refuses");
+  await assert.rejects(humanQuery(world.users.bob,
+    `select clara.activate_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_consent=>gen_random_uuid(),p_op_key=>$1)`, [opk("x2")]),
+    isCLR04, "activate by bookkeeper refuses");
+  await assert.rejects(humanQuery(world.users.bob,
+    `select clara.deactivate_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_reason=>'x',p_op_key=>$1)`, [opk("x3")]),
+    isCLR04, "deactivate by bookkeeper refuses");
+  await assert.rejects(humanQuery(world.users.bob,
+    `select clara.revoke_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_reason=>'x',p_op_key=>$1)`, [opk("x4")]),
+    isCLR04, "revoke by bookkeeper refuses");
+});
+
+test("[F4-D evidence-doc wall] grant_firm_egress_purpose refuses a NULL evidence doc, a non-consent_evidence doc, and a FOREIGN-firm consent_evidence doc; the same call with a live same-firm consent_evidence doc SUCCEEDS", async (t) => {
+  if (gate(t)) return;
+  // moment: onboarding_interview — see F4-C's own note; the positive-control grant below needs
+  // a moment genuinely free of any prior live grant.
+  const owner = world.users.alice, firm = world.firms.A;
+  const isCLR28 = (e) => e.code === "CLR28";
+  await assert.rejects(humanQuery(owner,
+    `select clara.grant_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_evidence_document=>null,p_scope_note=>'x',p_op_key=>$1)`, [opk("e1")]),
+    isCLR28, "null evidence refuses");
+
+  const plain = await seedVerifiedDocument({ firm, grantClassifyConsent: false }); // kind NULL, not consent_evidence
+  await assert.rejects(humanQuery(owner,
+    `select clara.grant_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_evidence_document=>$1,p_scope_note=>'x',p_op_key=>$2)`, [plain.documentId, opk("e2")]),
+    isCLR28, "wrong-kind evidence refuses");
+
+  const foreign = await classifyEvidenceDoc(world.users.dave, { firm: world.firms.B });
+  await assert.rejects(humanQuery(owner,
+    `select clara.grant_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_evidence_document=>$1,p_scope_note=>'x',p_op_key=>$2)`, [foreign.documentId, opk("e3")]),
+    isCLR28, "foreign-firm evidence refuses");
+
+  const ev = await classifyEvidenceDoc(owner, { firm });
+  const r = (await humanQuery(owner,
+    `select clara.grant_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
+       p_evidence_document=>$1,p_scope_note=>'x',p_op_key=>$2) as r`, [ev.documentId, opk("e4")])).rows[0].r;
+  assert.equal(r.status, "live", "POSITIVE CONTROL: a live, verified, same-firm consent_evidence doc succeeds");
 });
