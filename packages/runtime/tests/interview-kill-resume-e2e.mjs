@@ -25,6 +25,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { scriptedAnswers } from "./wave-b-interview-testkit.mjs";
+import { ephemeralPort } from "./ephemeral-port.mjs";
 
 if (process.env.CLARA_SKIP_KILL_RESUME === "1") {
   console.log("[kill-resume] skipped (CLARA_SKIP_KILL_RESUME=1)");
@@ -57,7 +58,9 @@ if (!process.env.WORKFLOW_POSTGRES_URL
   }
 }
 
-const PORT = process.env.INTERVIEW_KILL_PORT || "3216";
+// OS-assigned: CI jobs from different PRs share the runner host's network namespace; a
+// fixed port cross-wires one job's client into another job's runtime (401 jwt_signature).
+const PORT = process.env.INTERVIEW_KILL_PORT || (await ephemeralPort());
 const BASE = `http://127.0.0.1:${PORT}`;
 const ISSUER = "https://clara-interview-kr.test/auth/v1";
 const AUD = "authenticated";
