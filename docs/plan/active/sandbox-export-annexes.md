@@ -1,5 +1,12 @@
 # F-A5b annexes — surface, battery, decisions, predictions, owner questions, risks
 
+> **v2, gate-folded 2026-08-23** alongside `sandbox-export-design.md`
+> (`sandbox-export-gate-record.md` is the fold's spec). The fold added cells B1.8-B1.13, B2.7,
+> B3.6 and B4.5, re-cut B3.5 and B4.1-B4.3, corrected the F.3 acceptance fixture, added decisions
+> C-18..C-24 and risk R-7, and took in five sections the design shed to stay under 500 lines:
+> **G** (law 28's brief) · **H** (censuses) · **I** (the second render entrance) · **J** (the human
+> doors) · **K** (dependencies).
+>
 > Companion to `sandbox-export-design.md` (the design of record) and `sandbox-export-survey.md`
 > (the estate at the bytes). **Where this file and the design disagree, the design is right and this
 > file is the bug.** Where this file and the *migration's printed line* disagree, **the printed line
@@ -35,8 +42,12 @@ inherited). The agent reaches them through the typed readers in A.2 and nowhere 
 | 9 | `clara.list_sandbox_exports(uuid, int)` | human, **bookkeeper+** (`0002:518-520` idiom) | `clara_authenticated` |
 
 Plus the ungranted cores (`_sandbox_view_mint_core`, `_sandbox_export_request_core`,
-`_sandbox_client_set`, `_recipient_covers`) — **granted to NOBODY**, reached as internal calls under
-`clara_fn_owner` (the `0004:749-750` containment, `0077:22-29`'s rule).
+**`_sandbox_client_set(p_firm uuid, p_basis jsonb, p_body jsonb)`**, `_recipient_covers`) — **granted
+to NOBODY**, reached as internal calls under `clara_fn_owner` (the `0004:749-750` containment,
+`0077:22-29`'s rule). **The containment is about WHO MAY INVOKE, never about tenant-scoping the
+body** (gate B6): `clara_fn_owner`'s own policy is `using (true)`, so every relation these cores read
+is scoped by an **explicit predicate in the body** against `p_firm`, which the wrapper resolves from
+`clara.wake_context()` and never reads off a basis row (design §3.2; the `0083:102-108` precedent).
 
 **Allowlist rows: exactly two per read/write wake verb per admitted kind** —
 `('interactive','wake_mint_sandbox_view')`, `('interactive','wake_request_sandbox_export')`,
@@ -50,6 +61,10 @@ find omissions).
 | token | raised by | means |
 |---|---|---|
 | `sandbox_view_basis_absent` | mint | no basis rows; an unresolved client set is the unknown, not the empty |
+| `sandbox_view_basis_unknown` | mint | a basis element that does not resolve **in the caller's firm** — absent, foreign and NULL-`firm_id` answer IDENTICALLY (no existence oracle, `0083:109-111`) |
+| `sandbox_view_block_basis_absent` | mint | a body block carries no `basis_ref` — nothing ties it to a durable row (design §3.1) |
+| `sandbox_view_block_basis_unknown` | mint | a block's `basis_ref` names no label of this view's own `basis` |
+| `sandbox_view_client_set_empty` | mint **and** request | the derived set is `{}`; containment over the empty set is vacuously true, so it is refused at both doors |
 | `sandbox_view_body_malformed` | mint | a figure arrived as a number rather than a `displayed_text` string (E-R8 floor 1) |
 | `export_recipient_unknown` | request | no such recipient in this firm |
 | `export_recipient_superseded` | request | the row has a successor |
@@ -59,7 +74,8 @@ find omissions).
 | `sandbox_export_lease_not_held` | payload / complete / fail | the `0081:162-168` shape |
 | `sandbox_export_already_completed` | complete | the set-once arm |
 | `chart_kind_unknown` | renderer | no fallback to bars on this entrance either |
-| `sandbox_authority_refused` | posting / facts / report writers | F-A5's wall, proven at this boundary |
+| `watermark_text_unresolved` | **renderer** | the pinned row's string is absent or blank in the render payload — a `need()`-shaped guard AHEAD of `typstString`, which would otherwise coerce it to `""` (design §3.6, gate B7) |
+| `sandbox_authority_refused` | **the receipt schema** (F-A5 PR-1) | F-A5's wall at its true scope. **CORRECTED at the fold** (gate M8): v1 attributed it to "posting / facts / report writers" — two of those have no owning PR and `record_client_fact` cannot raise it at all (`0055:532-545`). What guards the rest is **G-3**, plus the detective control at B4.3 |
 
 ---
 
@@ -81,6 +97,12 @@ A wall's proof is a cell that makes the wall REFUSE — never a substring match 
 | B1.5 | **no basis → REFUSE** `sandbox_view_basis_absent`; the differential twin with one basis row succeeds |
 | B1.6 | a mixed basis (preview cells **and** a firm-wide read) derives the **union**, and the union carries `'firm_closure'` — the weaker label wins, never the stronger |
 | B1.7 | replay: derive twice from the same row, byte-identical (P-3) |
+| **B1.8** | a body block with **no `basis_ref`** → REFUSE `sandbox_view_block_basis_absent`; the twin with the ref present succeeds. *(fold, gate B0)* |
+| **B1.9** | **the narrowing differential** — a two-block body, block 1 citing client A's read and block 2 citing client B's, derives `{A,B}`; **the twin that drops block 2's `basis_ref` REFUSES** rather than deriving `{A}`. This is the cell the gate's failure path walks, and a green on the first arm alone proves nothing |
+| **B1.10** | a `basis_ref` naming a label absent from this view's own `basis` → REFUSE `sandbox_view_block_basis_unknown`; the twin naming a declared label succeeds |
+| **B1.11** | **cross-firm basis** — a `freeform_read_log` id owned by firm B, minted from a firm-A session → REFUSE `sandbox_view_basis_unknown`; the twin on firm A's own row succeeds. **Two further arms, same token, no oracle:** an id that does not exist, and a row whose `firm_id` is NULL (`0002:310` — still nullable until F-A6 hardens it). All three refusals must be **indistinguishable** to the caller |
+| **B1.12** | `firm_closure` covers **non-active** clients — an `archived` AND an `onboarding` fixture client are present in `client_set`; the **differential twin** runs an `active`-only derivation against the same fixture and the cell FAILS. *(fold, gate M2 — the estate's house form is the wrong one here: `0016:866`, `0017:4927-4928`)* |
+| **B1.13** | a `firm_closure` mint on a firm with **zero** clients → REFUSE `sandbox_view_client_set_empty`; the twin on a one-client firm succeeds |
 
 ### B.2 · Coverage (§3.3)
 
@@ -92,25 +114,35 @@ A wall's proof is a cell that makes the wall REFUSE — never a substring match 
 | B2.4 | a recipient of **another firm** → `export_recipient_unknown` (never "found but refused" — it is not visible) |
 | B2.5 | a superseded recipient → refuse; the successor row → covered |
 | B2.6 | `covered_clients` cannot be written by any wake verb — a prosrc census over the granted wake surface, **plus** a behavioural attempt |
+| **B2.7** | **`_recipient_covers` never answers YES on an empty set** — a view whose `client_set` is `{}` (constructed directly, bypassing B1.13's mint refusal, so the second door is proven on its own) REFUSES `sandbox_view_client_set_empty` for **both** kinds; the twin with one client covered succeeds. Without this cell an implementation using `<@` passes every external recipient alive. *(fold, gate M10; the `0020:640-643` idiom)* |
 
 ### B.3 · The watermark (§3.6) — the positive control and its differential twin
 
 | cell | forces |
 |---|---|
-| B3.1 | **the extracted text of the produced PDF contains the signed string on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export |
+| B3.1 | **the extracted text of the produced PDF contains the signed STAMP on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export. *(The footer line, if the owner signs one, emits ONCE in flow — `layout.mjs:152`'s box sits before the sections loop — so it is asserted per DOCUMENT, never per page: design §3.6.)* |
 | B3.2 | with the policy row absent, the **request** refuses (`watermark_policy_absent`) and **no bytes exist** — never unwatermarked bytes |
 | B3.3 | the pinned `watermark_policy_version_id` is what the bytes carry: supersede the row, re-render the same export, bytes unchanged |
 | B3.4 | a hostile label cannot remove the background — the law-28 payloads run and B3.1 still passes (P-2) |
-| B3.5 | there is **no code path** producing a sandbox PDF without a watermark: the entrance has no `decision.watermark` branch, forced behaviourally by rendering with every decision shape |
+| B3.5 | **the DECISION axis** — the entrance has no `decision.watermark` branch, forced behaviourally by rendering with every decision shape. **RE-CUT at the fold:** v1 read this as proving *"no code path produces an unwatermarked PDF"*; it proves only that the BRANCH always runs. The string's own axis is B3.6 |
+| **B3.6** | **the PAYLOAD-CONTENT axis** — the policy row is present and pinned at request (so B3.2's door passes), then the render payload is mutated so the watermark string is **absent**, then `null`, then `""`, then whitespace-only. Each arm: the render REFUSES `watermark_text_unresolved`, **no bytes exist and `complete_sandbox_export` is never reached**; the twin with the string present renders and B3.1 passes. Forced by mutating the payload, never by a substring match on source. *(fold, gate B7 — `typstString` coerces `null` to `""` and never throws, `layout.mjs:73-79`)* |
 
 ### B.4 · The narrative-authority wall at the boundary (§3.7)
 
+**RE-CUT at the fold (gate M8).** v1's B4.1-B4.3 asserted a NAMED refusal from three writers. Only
+one of the three has an owning PR and a body that can raise it; `record_client_fact` validates a
+non-blank basis, a `basis_kind` in four literals and a document for the document kind, and nothing
+else (`0055:394-397`, `:499-501`, `:532-545`), so a `sandbox_view_id` typed into its free-text
+`p_basis` **succeeds** — v1's refuse arm was a green that proved nothing, and its differential twin
+was self-referential. The battery now proves what is actually walled, and names what is not.
+
 | cell | forces |
 |---|---|
-| B4.1 | a posting provenance handed a `sandbox_view_id` → `sandbox_authority_refused`; **the twin** with a legitimate document basis → succeeds |
-| B4.2 | a `client_facts` write handed a `sandbox_view_id` → refuses; the twin succeeds |
-| B4.3 | a report cell handed one → refuses; the twin succeeds |
-| B4.4 | `sandbox_views` has **no** `definition_version_id` and **no** `cell_id` column — a catalog assertion, and the structural reason B4.1-B4.3 cannot be fixed by a caller |
+| B4.1 | **the receipt schema** refuses a sandbox citation in a field typed as an authoritative basis → `sandbox_authority_refused`; **the twin** with a legitimate basis succeeds. **Skips, named and counted, until F-A5 PR-1 merges** — the wall is F-A5's to build (`reporting-agency-design.md:321-324`), and this lane asserts it rather than claiming it |
+| B4.2 | **RETIRED** — see B4.5. There is no `client_facts` refusal to force, and a cell that cannot fail is worse than no cell |
+| B4.3 | **the DETECTIVE control is not vacuous** — the PR-4 query counting `client_facts` rows whose free-text `basis` contains a `sandbox_views`/`sandbox_exports` id returns **zero** on a pristine rig, and returns **one** after a fixture plants such a row. This proves the DETECTOR, not a wall: the free-text path is the inherited F-A6 R-8 residual and is registered, never claimed |
+| B4.4 | `sandbox_views` has **no** `definition_version_id` and **no** `cell_id` column — a catalog assertion, and the structural reason a caller cannot launder authority through the view row |
+| **B4.5** | **G-3, in both directions** — a catalog census over every FK and every uuid column of the posting, reporting and knowledge relations asserts **none** is typed to reference `clara.sandbox_views` or `clara.sandbox_exports`; and the reverse arm asserts the census's own relation name list equals the enumeration in Annex H, so a relation added later cannot slip out of coverage (F5-D30: a roster that can only find extras cannot find omissions) |
 
 ### B.5 · One architecture (§3.5)
 
@@ -155,6 +187,13 @@ A wall's proof is a cell that makes the wall REFUSE — never a substring match 
 | **C-15** | v1 mints the view **on the export path**; the screen seam is stated so F-A5/Wave-G can close the divergence for free | scope. **R-1; owner question 6** |
 | **C-16** | This lane's **renderer PR lands after F-A5 PR-4** | two renderer ceremonies must not contend |
 | **C-17** | `watermark_policy_versions` is a **shared surface** — the conductor is notified before authoring, and a CHECK extension is priced, not assumed | survey U1/X7 |
+| **C-18** | **Every body block carries a `basis_ref` LABEL into the view's own `basis`, and an unattributable block refuses the mint** | gate B0; TA-P10 C′ (2)'s *"every `client_id` in the file"*. A pointer keeps F5-D14 (the model never types a client id) while binding the set to the body |
+| **C-19** | **`coverage_proof` records `body_sha256`** | the proof names the exact body it covered, not "a body" |
+| **C-20** | **The basis is read under an explicit `firm_id = p_firm` conjunct in the core's body**, with the firm resolved by the wrapper from `wake_context()`; equality, never `is not distinct from` | gate B6; `clara_fn_owner`'s policy is `using (true)` (`0002:485-491`) and the estate has one recorded fail-open of this exact class (`0083:102-108`). NULL is the unknown and must refuse |
+| **C-21** | **`firm_closure` is every `clara.clients` row of the firm at ANY `status`**, and `covered_clients` is validated the same way | gate M2; `0003:38` + `0017:658-659` are three-valued and the estate's roster habit filters `active` (`0016:866`) — the wrong way here |
+| **C-22** | **An empty derived `client_set` REFUSES at the mint AND at the coverage check** | gate M10; containment over `{}` is vacuously true, so the wall would pass for every recipient. The `0020:640-643` explicit-zero-cardinality idiom |
+| **C-23** | **The renderer keeps its own watermark wall** — a `need()`-shaped guard raising `watermark_text_unresolved` on an absent or blank string, ahead of `typstString` | gate B7; `typstString` coerces `null` to `""` (`layout.mjs:73-79`). Law 78's rider R-TA-P1-walls: an entrance's wall sits at its own door |
+| **C-24** | **§3.7's refusal is scoped to the receipt schema; G-3 carries the rest and the free-text path is a registered residual with a detective control** | gate M8; F-A5's own wording (`reporting-agency-design.md:321-324`) and `record_client_fact`'s actual validation set |
 
 ---
 
@@ -196,6 +235,13 @@ floor**, for both kinds, because `covered_clients` is the wall itself (C-8). *Fa
 admin+ for both. *The owner rules toward maximum autonomy and may want the `firm_member` kind
 devolved to Clara* — that is a narrower widening (a firm member's coverage is total either way) and
 would be his to make. *Cost of the default:* one admin action the first time a group owner is added.
+*Priced, at the fold, so this is a decision and not a rebuild:* devolving `firm_member` costs **one
+wake sibling verb over the same ungranted core plus one allowlist row**. **This question is genuinely
+OPEN** — the design's §1 carried the human floor under *"the ruled shape (fixed, not designable)"*
+with no ADR-0074 clause behind it, while TA-P1 C's ratified text says **"adding a reservation is an
+owner ruling"** (`0074:339`) and this same wave built the closest analogue as an agent-reachable wake
+verb (`wake_add_bank_account`, `bank-agency-annexes-1-mechanics.md:53`). The fold moved the item out
+of that heading; the question stands as it was. *(gate M9.)*
 
 **Q3 — the `firm_closure` rule.** A chart computed from a HOME (firm-wide) free read carries the
 whole firm's client set, so only a firm-covering recipient may receive it (§3.2, C-5).
@@ -238,6 +284,7 @@ and "the chart I sent" are proven identical by discipline, not by structure.
 | **R-4** | **the lane never gets scheduled** — the same risk R7 recorded against the severance itself (`reporting-agency-gate-record.md:227`) | it is registered in `PROGRESS.md:128`; this design's landing is the second registration |
 | **R-5** | `firm_closure` makes the feature feel broken to a user who expects to export a HOME-computed chart to a client | Q3 puts it in front of the owner **before** it is discovered in use |
 | **R-6** | a second renderer ceremony contends with F-A5 PR-4's | C-16 sequences them; the pre-change digest stays pullable seven years either way |
+| **R-7** | **the TRANSCRIPTION residual** — §3.1's `basis_ref` binds a block to a durable row, but the figure inside it is still a numeral the model typed. A block correctly cited to client A's read can carry a number read elsewhere or invented, and nothing in the estate can contradict it (`freeform_read_log` stores the query text and no result, `0002:308-315`) | **this is OWNER CARD 1, not a risk the lane may absorb** (design §7; `sandbox-export-gate-record.md` §6). *Early warning:* any support question of the form *"this figure is not what the system says"*. *Fail-closed default while it is open:* **the figure path is not built** |
 
 ### F.2 · Non-goals (the design's §7, restated so nothing is inferred)
 
@@ -250,17 +297,142 @@ built.
 
 ### F.3 · Acceptance — done means the loop is walkable (TA-P14 A)
 
-1. On **RPR** (the synthetic sandbox firm — real structure, no client harm; F-A5's OQ-4 answer):
-   a narrative aggregate is computed, a view is minted, **exported to a firm member**, the bytes
-   carry the watermark on every page, and the export appears in the human list.
-2. A **cross-client** view (two RPR clients) is exported to an **external** recipient registered by
-   a human as covering both — and the same view **REFUSES** to a recipient covering one.
-3. A **`firm_closure`** view refuses to that same external recipient and succeeds to a firm member.
+**The fixture, corrected at the fold (gate M4).** v1 named *"RPR (the synthetic sandbox firm)"*. **RPR
+is ROME PROPERTIES SDN BHD** — a real BELCORT test **client**, created by `create_client` under
+BELCORT (`packages/db/scripts/onboard-rpr.mjs:4-5`, `:54`, `:101`, `:202`;
+`packages/db/deploy/rpr-coa.csv:3`), with no clients of its own. The synthetic sandbox **firm** is
+**ROME PUBLIC ADVISORY** `39008536` (digest law 66, `docs/adr/README.md:381-382`; ADR-0045). The
+conflation was inherited verbatim from `reporting-agency-annexes-2-record.md:179`, whose own `:207`
+proves RPR there means ROME PROPERTIES — review law 3's exact shape, and the repo warns against it by
+name (`tax-computation-survey.md:87-89`). Under either reading items 2 and 3 were **unrunnable**:
+RPR is one client, and ROME PUBLIC ADVISORY has exactly one client
+(`f-a2-window-ab-ceremony-asrun.md:141-147`).
+
+**The choice, made visibly rather than left to PR-4.** Three options existed: (a) mint a second client
+under ROME PUBLIC ADVISORY — rejected, because **ADR-0072 ⑤ ruled the sandbox firm NOT re-created at
+the Wave-G factory reset** (`f-a2-window-ab-ceremony-asrun.md:151-153`), so the fixture has a shelf
+life; (b) run on **BELCORT** over two of its three ADR-0075 test-fixture clients — **TAKEN**; (c)
+record a TA-P14 (4) deferral — unnecessary, since (b) is available now. **BELCORT is the operator firm
+and ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION are resettable test fixtures** authorised
+as test data by their owner (hard constraint 13; ADR-0075 §1), which is the true ground — *not* the
+"no client harm" gloss, which was wrong about which entity it described. No bytes reach an outside
+party either way: §7's non-goal keeps delivery out of scope.
+
+1. On **BELCORT** (the operator firm; its three clients are ADR-0075 test fixtures): a narrative
+   aggregate is computed, a view is minted, **exported to a firm member**, the bytes carry the
+   watermark on every page, and the export appears in the human list.
+2. A **cross-client** view over **ROME PROPERTIES and ROME SECRETARY** is exported to an **external**
+   recipient registered by a human as covering both — and the same view **REFUSES** to a recipient
+   covering only one, **naming the uncovered client**.
+3. A **`firm_closure`** view over BELCORT refuses to that same external recipient (BELCORT has a third
+   client, BEE CREATIVE SOLUTION, which the recipient does not cover — so the refusal is real, not
+   arranged) and succeeds to a firm member.
 4. With the `sandbox_watermark` row for `ms` absent, an `ms` export **refuses at the request** and
    no bytes exist; with it present, it renders.
-5. A posting, a `client_facts` write and a report cell each **refuse** the exported view as a basis;
-   each succeeds on a legitimate basis.
-6. **The law-28 pass has run and its findings are folded** — this is an acceptance item, not a
-   review preference.
+5. **The receipt schema refuses** the exported view as an authoritative basis and succeeds on a
+   legitimate one (B4.1), **G-3's census is green in both directions** (B4.5), and **the detective
+   control reports zero** on the estate with a planted-row twin proving it can report one (B4.3).
+   *(Re-cut at the fold: v1 asked three writers to refuse; two have no owning PR and the third
+   cannot — gate M8.)*
+6. **The law-28 pass has run AGAINST v2 and its findings are folded** — an acceptance item, not a
+   review preference, **and it is outstanding as of this fold**.
 7. The full estate suite is green on a pristine rig, tails unfiltered, **every skip named and
-   counted** (B1.3 is expected to skip until F-A6 v2 merges).
+   counted** (B1.3 until F-A6 v2 merges; B4.1 until F-A5 PR-1 merges).
+8. **Neither owner card has been closed by a build.** The `displayed_text` figure path ships only
+   after card 1 is ruled; Q4's answer is on file or the export path stays firm-member-only.
+
+---
+
+## Annex G · Law 28's cross-model adversarial pass — the brief
+
+**STILL OWED. It runs against v2, before PR-1 merges** (`reporting-agency-gate-record.md:250-253`).
+The centre is X11: this is the first path putting **model-composed text** in front of the typesetter.
+Given a hostile `p_body` — labels, titles, prose — and a hostile `p_basis`, can it:
+
+1. **Escape `typstString()` and reach `#page(...)`, producing an UNWATERMARKED export?** The headline
+   attack. §3.6's positive control (B3.1) is the detector; the pass must try to defeat it.
+2. **Defeat the render-time watermark guard** — reach the emit with an unresolved or blank string
+   past C-23's `need()`-shaped check. *(New at the fold: v1 had no guard here to attack, only an
+   absent branch to observe.)*
+3. **Narrow the client set** — a body whose blocks show more than their `basis_ref`s resolve to, so
+   a narrower recipient passes coverage. *(The fold gave this a mechanism, C-18/C-19; **the pass must
+   attack the mechanism, not re-report the gap**. Note what it does NOT close: R-7's transcription
+   channel is owner card 1 and out of the pass's scope.)*
+4. **Reach across firms through the basis** — a `freeform_read_log` id of another firm, a NULL-firm
+   row, a guessed sequential id. *(New at the fold: C-20's predicate is the thing to defeat.)*
+5. **Forge or re-target an export record** — reach `complete_sandbox_export` with another export's
+   id, or re-run a completed one.
+6. **Exfiltrate through a label** — carry a sibling client's data into a chart label the recipient is
+   not covered for.
+7. **Launder authority** — get a `sandbox_view_id` accepted as a basis, by any route G-3's census
+   does not cover.
+8. **Bypass the recipient register** — a row of another firm, a superseded row, or a `firm_member`
+   row whose membership was removed; and **an empty `client_set`** against C-22's two doors.
+
+The pass runs on a lane independent of the author's (review law 1 is the floor, not the ceiling), and
+its findings fold into v3.
+
+---
+
+## Annex H · Walls, censuses and gates that move (design §4)
+
+**C10 stays closed and is re-proven positively** (G-2). **C6's name list gains
+`watermark_policy_versions`** — an F-A5 PR-1 obligation this lane depends on (survey §3); if F-A5
+lands without it, F-A5b adds it and says so rather than inheriting an uncovered table. **The wake
+grant roster** gains this lane's wrappers, asserted by NAME LIST in both directions (F5-D30). **The
+relation/table census** moves by three (`sandbox_views`, `sandbox_exports`, `export_recipients`) —
+counted from the migration's printed line, never from an annex. **The RLS forced-relation census**
+gains three: all firm-scoped, FORCE RLS, no `clara_agent_ro` table grant anywhere (F-A5's C4/C5).
+**G-1** is new and is TA-P11's watch made mechanical (Annex I).
+
+**G-3 is new at the fold** (design §3.7, cell B4.5): **no FK and no uuid column in the posting,
+reporting or knowledge layers is typed to reference `clara.sandbox_views` or
+`clara.sandbox_exports`.** Its relation name list is enumerated in the migration and asserted equal
+to the census's own list, so a relation added later cannot slip out of coverage. **It is a catalog
+census, not a text scan** — the free-text path is R-8's residual with B4.3's detective control, and
+the two are never conflated.
+
+---
+
+## Annex I · The second render entrance (design §3.5)
+
+**G-1 · every geometry export is shared.** Every function exported by `chart.mjs` is reachable from
+**both** entrances or from **neither**. An entrance-local geometry function fails the census — the
+"two mutually-unaware computations of the same fact" TA-P11 A forbids — and N3's three new chart
+kinds (`lineGeometry` / `areaGeometry` / `stackedBarGeometry`,
+`reporting-agency-design.md:377-380`) are exactly where it would happen.
+
+**G-2 · the sandbox mints no `render_jobs` row.** A prosrc census over the sandbox path plus a
+behavioural cell: the sandbox verbs, called end to end, leave `render_jobs` empty.
+
+**Ceremony discipline.** A sandbox entrance is a renderer change: a fresh image digest, the
+pre-change digest pullable for seven years, run as a ceremony from merged `main`. **It lands AFTER
+F-A5 PR-4** so two renderer ceremonies do not contend (C-16, R-6).
+
+---
+
+## Annex J · The minimal human doors (design §3.8, TA-P14 (2))
+
+`/reports` gains a **sandbox exports** panel: a list (view, recipient, client set, watermark version,
+state, sha256, when, by whom), the **recipient register** form (register / supersede, admin+), and
+every refusal rendered as text a bookkeeper can act on — `recipient_coverage_incomplete` names the
+uncovered clients, `watermark_policy_absent` says *"the owner has not signed the sandbox watermark"*
+rather than a token, and the fold's new refusals get the same treatment:
+`sandbox_view_basis_unknown` says *"a cited read does not belong to this firm"*,
+`sandbox_view_block_basis_absent` says *"part of this view cannot be traced to a read"*, and
+`sandbox_view_client_set_empty` says *"this firm has no clients to cover"*. Wave-G restyles them in
+place; it does not replace the verb (`frontend-handoff-2026-08-23.md` §0's rule).
+
+---
+
+## Annex K · Dependencies (design §6)
+
+| dependency | why | if it slips |
+|---|---|---|
+| **F-A5 PR-1** — `watermark_policy_versions` DDL | this lane adds ROWS to a table it does not own (U1). **If the payload's key set is CHECK-closed, this lane needs a CHECK EXTENSION on a shared surface** — routed to the `conductor` lane before authoring, never assumed. **It also owns the receipt-schema wall B4.1 forces** | PR-1 blocks; B4.1 skips, named and counted |
+| **F-A5 PR-4** — the sealed lane's renderer ceremony | two renderer ceremonies must not contend; F-A5's drill closes DR-render's unrun boundary first | PR-3 waits |
+| **F-A6 PR-1** — `freeform_read_log`'s hardened `scope`/`client_scope` **and its `firm_id` NOT NULL** | §3.2's derivation reads them (U2); until the NOT NULL lands, C-20's equality predicate is what refuses a NULL-firm row | the free-read basis kinds are unavailable; preview-cell bases still work |
+| **F-A6 v2** — the cross-client named read | **the only source of an EXACT client set for a multi-client narrative basis** (§3.2). Without it every such view derives `firm_closure` and only a firm-covering recipient may receive it | the capability is narrower, not wrong; stated, not hidden |
+| **F-A2 PR-1** — `interactive_client` (D34) | a client-pinned sandbox session's allowlist row | `('interactive', …)` rows only; HOME-scoped sandbox works |
+| **the owner's signing** (Q1) | X12 | **the lane ships dark** |
+| **owner card 1** (R-7; design §7) | it gates the `displayed_text` **figure path**, not the lane | prose-and-chart-label views without model-typed figures are still buildable; the figure path waits |

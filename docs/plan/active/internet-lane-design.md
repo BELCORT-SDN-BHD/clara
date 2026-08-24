@@ -428,11 +428,11 @@ blast radius and review lens instead.
    called BEFORE any model access · the scheduled job minting its own `'proactive'` credential ·
    a manual one-shot trigger · **the injection and network batteries C.11/C.12/C.15**. Tier 1
    goes live end-to-end on `fx_rates`, a table nobody reads yet.
-4. **PR-3 · the `sst_threshold_schedule` limb, alone** — unchanged from v2 (the surrogate-`id`
-   ALTER, the `source_note` rule, the closed set widened, the 0016 truing in reachable-closure
-   form, the `a21-watch.test.mjs:98-132` P1 re-cut, the `0016:882-886` cell) **plus C.4d, the
-   transition-day cell, which moves here because `fx_rates` no longer has a transition day**
-   (IL-D23). Rides a mechanism proven live in PR-2. **D1: none predicted.**
+4. **PR-3 · the `sst_threshold_schedule` limb — RE-CUT 2026-08-23 (OQ-14 RULED, `sst-engine-gate-record-part2.md`): F-A8 CONSUMES, no longer authors.** F-T1/PR-1 now owns the ALTER (the
+   surrogate-`id` ALTER, the `source_note` rule, the closed set widened, the 0016 truing in
+   reachable-closure form); PR-3 attaches the scheduled fetch to F-T1's table, the same
+   consume-only pattern PR-2 already proves live on `fx_rates`. **C.4d, the transition-day
+   cell, stays here** (`fx_rates` carries none). **D1: none predicted.**
 5. **PR-4 · Tier 2 — gated on OQ-A, not merely on leg 2.** `web_fetch_receipts`,
    `web_fetch_citations` **FK-bound to artifact + span**, the deferred trigger, the closed purpose
    world, `_web_text_is_client_free` **over the canonical `p_url` too** (IL-D29), the two wake
