@@ -114,8 +114,8 @@ never `wsl --shutdown`.
 - **`revoke all on <table|view> from public` is FORBIDDEN** — relations carry no default PUBLIC
   privileges; the no-op materializes the acl and reds the DR ACL round-trip (dr-verify 4.6).
   Functions-only (they default to PUBLIC EXECUTE).
-- **Live-gates e2es bind OS-assigned ports** (`tests/ephemeral-port.mjs`); never a fixed
-  default (the shared-runner-host 401 cross-wire class).
+- **Live-gates e2es bind OS-assigned ports** (`packages/runtime/tests/ephemeral-port.mjs`);
+  never a fixed default (the shared-runner-host 401 cross-wire class).
 - **Fixture labels must not look like secrets**: gitleaks scans EVERY ref, so one entropy-shaped
   `key='…'` constant on ANY branch reds every PR's lint. Adjudicate-then-allowlist by CAPTURED
   VALUE, never fingerprint (squash rewrites shas).
