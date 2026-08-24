@@ -91,7 +91,7 @@ verb existing in a design doc or an unmerged branch is not the same as it being 
 window** (`PROGRESS.md:85`, lane row: "merges at the W2 window"). Design enumeration:
 `docs/plan/active/bank-agency-design.md:122-128` ("Thirteen verbs"). Verified present, by exact
 `create function` line, in `f-a3/pr-1b@c623178` (full sha `c6231781266a326ca44e7a1b980af132fde2d7b5`,
-branch `f-a3/pr-1b`, file `packages/db/migrations/0120_f_a3_pr1b_agent_limb.sql`):
+branch `f-a3/pr-1b`, file `packages/db/migrations/0121_f_a3_pr1b_agent_limb.sql`):
 
 | Verb | Line |
 |---|---|
