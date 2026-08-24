@@ -409,6 +409,18 @@ const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_s
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// F-A7 pi [train position 1, `f_a7_pi_additive` at whatever number merge claimed]: the firm-
+// question door's two settle verbs and the identifier-promotion card's two settle verbs each
+// stamp `settled_at = now()` — a timestamptz audit column, the same shape as
+// WITNESS_F_A1_PR3_CLOCK_NAMES's finished_at above — and derive no DATE from the session clock
+// anywhere in their bodies. Lawful, and therefore rostered. GATED on the migration's stable
+// stem for the same reason its siblings above are: this battery also runs against pre-pi
+// frontiers where these four names do not exist yet.
+const F_A7_PI_CLOCK_NAMES = [
+  "resolve_firm_question", "dismiss_firm_question",
+  "confirm_identifier_promotion", "decline_identifier_promotion",
+];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -431,6 +443,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   return names.sort();
 }
 
