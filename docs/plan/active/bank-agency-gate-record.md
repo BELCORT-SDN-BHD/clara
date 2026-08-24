@@ -137,9 +137,11 @@ the mechanism it was covering for. Register **A17**.
 `_agent_propose_line_exception_core` (singular, `:69`), and `bank_agent_receipts.act_kind`
 (`:82-85`) enumerates ten values with no promotion act**. A builder following Annex A verbatim ships
 a permanently inert door and a dead CHECK value — after the D1 window has baked both CHECKs.
-**Fold (v2):** **`wake_propose_identifier_promotion`** + `_agent_propose_identifier_promotion_core`
-+ `act_kind='identifier_promotion_propose'` + H.6's end-to-end cell (register **A15**); design §3.1's
-verb count goes to thirteen and §3.9 carries the mechanism.
+**Fold (v2):** **`wake_propose_bank_identifier_promotion`** (renamed bank-scoped, conductor
+arbitration 2026-08-24 — F-A7's wave-f-contract.md:315-320 owns the unscoped name) +
+`_agent_propose_bank_identifier_promotion_core` + `act_kind='identifier_promotion_propose'` +
+H.6's end-to-end cell (register **A15**); design §3.1's verb count goes to thirteen and §3.9
+carries the mechanism.
 **PARTIALLY ESCALATED — owner item 2 / OQ-8** (§6): the estate keys client-owned bank accounts into
 `client_identifiers(kind='bank_account')` (`0007:227`, written at `0038:2743-2751`) and counterparties
 by `registration_normalized` (`0009:832-841`); **there is no counterparty-bank-account identifier

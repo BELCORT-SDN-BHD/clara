@@ -36,7 +36,8 @@ after(async () => { printLaneNotes("wave-a-attest"); printSkipCount("wave-a-atte
  *  high-stakes floor. Returns { entry_id, revision_token }. */
 async function agentHighStakesDraft(client, { amount = HIGH_STAKES_CENTS + 500000 } = {}) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 15,000.00" });
+  // F-A2 PR-1 (D11): the coded agent draft below needs a readable direction; state the supplier.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 15,000.00", direction: "purchase" });
   const cred = await mintInteractive(firm);
   return wakeBillDraft(world.users.alice, cred, { client, cited, amount, vendorName: "HIGHSTAKESCO SDN BHD", registration: "201801006000" });
 }
@@ -84,7 +85,7 @@ test("approve_routine_entry REFUSES an is_high_stakes row (CLR05 routine_refuses
   const { users, clients } = world;
   // A human-made high-stakes draft (last_human_editor set) — still refused by the routine path.
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 20,000.00" });
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 20,000.00", direction: "purchase" });
   const d = await draftEntryV3(users.alice, {
     client: clients.A2, resolution: await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256, lines: billLines(EXP, AP, HIGH_STAKES_CENTS + 1000000),

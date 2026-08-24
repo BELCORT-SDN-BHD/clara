@@ -1,5 +1,5 @@
 // Finding 4 — the redrive CLI (scripts/relay.mjs) must know EVERY registered spine consumer,
-// not just the matcher map, or `redrive sst_watch|facts_gate|rule_post <event>` is rejected as
+// not just the matcher map, or `redrive sst_watch|facts_gate <event>` is rejected as
 // an unknown consumer and /ready warns about dead-letters no operator can clear. This pins the
 // merged dispatch map + each entry's identity (the connection its redrive needs), PURE — it
 // reconstructs the exact spread scripts/relay.mjs performs (importing the script itself would
@@ -9,19 +9,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CONSUMERS as MATCHER } from "../lib/matcher.mjs";
-import { CONSUMERS as RULE_POST } from "../lib/rule-post.mjs";
 import { CONSUMERS as SST_WATCH } from "../lib/sst-watch.mjs";
 import { CONSUMERS as FACTS_GATE } from "../lib/facts-gate.mjs";
 
-const MERGED = { ...MATCHER, ...RULE_POST, ...SST_WATCH, ...FACTS_GATE };
+const MERGED = { ...MATCHER, ...SST_WATCH, ...FACTS_GATE };
 
 // The redrive connection each consumer's effect needs:
-//   runtime-login — the writer's EXECUTE lives on the login shell (matcher, rule_post)
+//   runtime-login — the writer's EXECUTE lives on the login shell (matcher)
 //   runtime-role  — a plain clara_runtime GROUP call (router, sst_watch, facts_gate)
+// (rule_post carried "runtime-login" here too, until F-A2 PR-3 retired the consumer.)
 const EXPECTED_IDENTITY = Object.freeze({
   router: "runtime-role",
   matcher: "runtime-login",
-  rule_post: "runtime-login",
   sst_watch: "runtime-role",
   facts_gate: "runtime-role",
 });
@@ -43,7 +42,7 @@ test("each consumer exposes a callable redrive seam (the CLI dispatch target)", 
   }
 });
 
-test("later spreads never clobber an earlier consumer (the four maps have disjoint keys)", () => {
-  const keys = [...Object.keys(MATCHER), ...Object.keys(RULE_POST), ...Object.keys(SST_WATCH), ...Object.keys(FACTS_GATE)];
+test("later spreads never clobber an earlier consumer (the three surviving maps have disjoint keys)", () => {
+  const keys = [...Object.keys(MATCHER), ...Object.keys(SST_WATCH), ...Object.keys(FACTS_GATE)];
   assert.equal(keys.length, new Set(keys).size, "no key collision across the consumer modules");
 });

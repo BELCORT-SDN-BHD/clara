@@ -5,9 +5,10 @@
 // ingest (no model/consent, WB-R10) — entry.approved with a source doc → record_wiki_source_ingest;
 // (b) MODEL synthesis (consent-gated, W9) — counterparty.created/merged → synthesize the counterparty
 // page, content-address in Storage, verify by re-download, THEN publish_wiki_page_version;
-// (c) DETERMINISTIC seeding fact (no model/consent/egress, R2 · F13) — a TICKED seeding.proposal_decided
-// of kind 'wiki_fact' publishes its page from the seeding proposal's payload VERBATIM (synthesis
-// 'deterministic', prior_gl_line citations, engine_id null); a declined or non-wiki_fact decision is a
+// (c) DETERMINISTIC seeding fact (no model/consent/egress, R2 · F13, widened by F-A2 PR-3 / D36) —
+// a TICKED seeding.proposal_decided of kind 'wiki_fact' OR 'vendor_account_rule' publishes its page
+// from the seeding proposal's payload VERBATIM (synthesis 'deterministic', prior_gl_line citations,
+// engine_id null); a declined or non-wiki-kind decision is a
 // checkpoint-only skip. A fact with NO concrete line/region anchor is skipped_no_citation — provenance
 // is NEVER fabricated (F-M12); (d) the STALE lane (WB-R21 / migration 0019 D3) — document.filing_retired
 // marks the citing client's live wiki sources stale via mark_wiki_citations_stale. The authority domain
@@ -96,7 +97,8 @@ export const WIKI_PROJECTION_CONSUMER = "wiki_projection";
 // of the source doc (carries the client, UNCHANGED); counterparty.* = two-phase model synthesis;
 // egress.consent_* = legacy, null-purpose, now CHECKPOINT-ONLY for wiki (0020 §4.2);
 // egress.purpose_* = the four typed 0020 events, subscribed for observability and ordering only;
-// seeding.proposal_decided = the deterministic wiki_fact lane (F13);
+// seeding.proposal_decided = the deterministic wiki lane (F13; widened by F-A2 PR-3 to
+// also cover 'vendor_account_rule' ticks);
 // document.filing_retired = the WB-R21 STALE lane (0019 D3) PLUS the 0020 re-drive — the authority
 // domain no longer vetoes a retirement under a live wiki citation, so the wiki converges by MARKING
 // its sources from the retirement EVENT, and 0020 then re-resolves the document for a surviving
@@ -538,22 +540,33 @@ function planConsentCheckpointOnly() {
   return skip("skipped_kind");
 }
 
-/** The DETERMINISTIC seeding wiki_fact lane (F13): a TICKED seeding.proposal_decided of kind
- *  'wiki_fact' publishes its page from the proposal payload VERBATIM. A declined or non-wiki_fact
- *  decision is a checkpoint-only skip. No model, no consent, no Storage egress — the content lives in
- *  the DB version column (the record_wiki_source_ingest deterministic precedent). Reads the ticked
- *  proposal (the event payload carries no wiki body) and cites the source prior-GL document. */
+/** The two seeding proposal kinds whose ticked payload carries {slug,title,page_kind,content}
+ *  under `payload.wiki` and rides this SAME deterministic publish lane, verbatim, no model:
+ *  'wiki_fact' (the original F13 shape, content authored at proposal-creation time) and
+ *  'vendor_account_rule' (F-A2 PR-3 / OQ-3 / D36 — clara.tick_seeding_proposal stages the wiki
+ *  object itself, since it stopped minting a signed clara.coding_rules row for this kind; see
+ *  the migration's own header for the three grounds this re-point rests on). Neither this
+ *  function nor the DB body it reads from ever calls a wiki write directly — only this async
+ *  consumer does, matching every other wiki-projection lane (WB-R6(1)). */
+const SEEDING_WIKI_PROPOSAL_KINDS = new Set(["wiki_fact", "vendor_account_rule"]);
+
+/** The DETERMINISTIC seeding wiki lane (F13, widened by F-A2 PR-3): a TICKED
+ *  seeding.proposal_decided of a kind in SEEDING_WIKI_PROPOSAL_KINDS publishes its page from
+ *  the proposal payload VERBATIM. A declined or non-wiki-kind decision is a checkpoint-only
+ *  skip. No model, no consent, no Storage egress — the content lives in the DB version column
+ *  (the record_wiki_source_ingest deterministic precedent). Reads the ticked proposal (the
+ *  event payload carries no wiki body) and cites the source prior-GL document. */
 async function planSeedingWikiFact(client, { firmId, ev }) {
   const payload = ev.payload || {};
   if (payload.decision !== "ticked") return skip("skipped_declined");
-  if (payload.proposal_kind !== "wiki_fact") return skip("skipped_non_wiki_kind");
+  if (!SEEDING_WIKI_PROPOSAL_KINDS.has(payload.proposal_kind)) return skip("skipped_non_wiki_kind");
   const clientId = ev.clientId;
   const proposalId = payload.proposal_id;
   const sourceDoc = ev.documentId; // the batch's source_document_id (event column)
   if (!clientId || !proposalId || !sourceDoc) return skip("skipped_kind");
   if (!(await isClientPublishable(client, { clientId, firmId }))) return skip("skipped_inactive_client");
   const sp = await readSeedingProposal(client, { proposalId, firmId });
-  if (!sp || sp.proposal_kind !== "wiki_fact" || sp.state !== "ticked") return skip("skipped_kind");
+  if (!sp || !SEEDING_WIKI_PROPOSAL_KINDS.has(sp.proposal_kind) || sp.state !== "ticked") return skip("skipped_kind");
   const wiki = (sp.payload && sp.payload.wiki) || {};
   const slug = typeof wiki.slug === "string" ? wiki.slug : "";
   const title = typeof wiki.title === "string" ? wiki.title.trim() : "";

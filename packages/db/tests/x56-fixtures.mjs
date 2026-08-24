@@ -46,6 +46,26 @@ export async function reopenSig() {
     : "clara.reopen_fiscal_year(uuid,text,jsonb,text)";
 }
 
+/** F-A4 PR-1b (close-key-1 Window B) frontier probe: has the entrance-seam body-move landed?
+ *  Read from a body only that window creates, never a migration number or filename (numbers
+ *  are claimed at merge; a renumber must never move what this probe answers). */
+export async function hasFA4PR1B() {
+  const r = await rootQuery(
+    "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='_begin_close_core'",
+  );
+  return r.rows.length > 0;
+}
+
+/** attest_close_exception's LIVE signature. F-A4 PR-1b appends p_from_proposal (defaulted) and
+ *  DROPs the 5-arg overload rather than leaving it to coexist (a bare CREATE OR REPLACE with an
+ *  added argument creates a second overload, not a replacement -- 42725 ambiguous-call otherwise)
+ *  -- so anything probing by regprocedure has to ask rather than hard-code. */
+export async function attestCloseSig() {
+  return (await hasFA4PR1B())
+    ? "clara.attest_close_exception(uuid,text,text,text,text,uuid)"
+    : "clara.attest_close_exception(uuid,text,text,text,text)";
+}
+
 export async function caught(fn) {
   try { await fn(); return null; } catch (e) { return e; }
 }
@@ -78,6 +98,12 @@ export async function setupCloseCoa(sub, client) {
   await upsertAccountClassed(sub, { client, code: EXPN, name: "Expense (x56)", type: "expense", opKey: opk("x56-exp") });
   await upsertAccountClassed(sub, { client, code: BANK1, name: "Bank (x56)", type: "asset", opKey: opk("x56-bank") });
   await recordClientFact(sub, { client, factKey: "trade_nature", factValue: "services", basis: "x56 rig: a service business by fixture design", basisKind: "owner_instruction" });
+  // F-A3/PR-1b's drawer-2 arm 4 (TA-P14, 2026-08-22 ratified): a client's banking posture is
+  // DECLARED, never inferred from absence (law 68) -- BANK1 above is a plain asset leg, never
+  // registered through add_bank_account, so this fixture's clients carry ZERO clara.bank_accounts
+  // rows. Without this declaration the drawer-2 gate reads the zero-registry case `not_evaluable`
+  // and the close gate fails `no_registered_account` -- exactly the wall arm 4 exists to raise.
+  await recordClientFact(sub, { client, factKey: "banking_arrangement", factValue: "no_accounts", basis: "x56 rig: a genuinely bank-less client by fixture design", basisKind: "owner_instruction" });
 }
 
 export async function recordClientFact(sub, { client, factKey, factValue, basis, basisKind, sourceDocument = null, opKey = null }) {

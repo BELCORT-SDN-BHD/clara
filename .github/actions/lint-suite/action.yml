@@ -1,8 +1,8 @@
 name: Lint + secrets + boundary gates
 description: >-
-  The full lint family — freeze-lint, leak-scan, the wiki gates, the vendor-binding
-  post-control gate, harness-links + the hook self-tests, the evaluator freeze family,
-  the render package drill, and the pinned gitleaks scan. Every step is moved from
+  The full lint family — freeze-lint, leak-scan, the wiki gates, harness-links + the hook
+  self-tests, the evaluator freeze family, the render package drill, and the pinned
+  gitleaks scan. (The vendor-binding post-control gate retired with F-A2 PR-3.) Every step is moved from
   ci.yml's lint job verbatim in every EXECUTABLE respect (ADR-0073 lever 5), with ONE
   documented delta: the gitleaks binary is cached version-keyed under $HOME/.cache so
   the release tarball is not re-downloaded on every run (lever 3).
@@ -31,11 +31,11 @@ runs:
         node scripts/check-wiki-dynamic-sql.mjs
         node scripts/check-wiki-dynamic-sql.selftest.mjs
 
-    # The 0029 Slot-C durable interlock: the current migration-tree definition
-    # of execute_rule_post must retain the binding live/unexpired gate.
-    - name: Vendor-binding post-control gate (0029 Slot C)
-      shell: bash -e {0}
-      run: node scripts/check-binding-post-control.mjs
+    # The 0029 Slot-C vendor-binding post-control gate RETIRED with F-A2 PR-3: the executor
+    # it certified (clara.execute_rule_post) is dropped, along with the rest of the rules
+    # execution tier (docs/plan/active/f-a2-agentic-posting-design.md §5 step 5, Annex B.4).
+    # scripts/check-binding-post-control.mjs and its selftest are deleted in the same PR —
+    # a gate certifying a function that no longer exists would itself be a false green.
 
     # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
     # (AGENTS.md, PROGRESS.md, docs/adr/README.md, docs/plan/index.md) has its markdown

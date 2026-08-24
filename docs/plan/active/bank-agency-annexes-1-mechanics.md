@@ -47,9 +47,10 @@ clara.wake_resolve_bank_line_exception(p_exception uuid, p_disposition text, p_n
 clara.wake_resolve_and_book_bank_line(p_client, p_exception uuid, …) returns jsonb
 clara.wake_propose_bank_line_exception(p_line uuid, p_kind text, p_reason text,
     p_evidence_document uuid, …) returns jsonb        -- writes a PROPOSAL, never an exception
-clara.wake_propose_identifier_promotion(p_client, p_counterparty uuid,          -- NEW at v2 (B5)
-    p_identifier_kind text, p_identifier_value text, p_times_seen int,
-    …) returns jsonb                                  -- writes a PROPOSAL, never a key
+clara.wake_propose_bank_identifier_promotion(p_client, p_counterparty uuid,     -- NEW at v2 (B5);
+    p_identifier_kind text, p_identifier_value text, p_times_seen int,          -- renamed bank-scoped,
+    …) returns jsonb   -- writes a PROPOSAL, never a key -- conductor arbitration 2026-08-24 (F-A7 owns
+                        -- the unscoped name, wave-f-contract.md:315-320; see annexes-2 H.6's own note)
 clara.wake_add_bank_account(p_client, p_proposal_id uuid, p_institution,        -- v2: proposal-anchored
     p_account_number text, p_coa_account_code text, …) returns jsonb
 clara.wake_upsert_account(p_client, p_code text, p_name text, p_type text, …) returns jsonb
@@ -90,7 +91,7 @@ identical for the human ctx (H.1's differential cell + the RED-first cell "a hum
 | `_agent_upsert_account_core` | `_upsert_account_core` | extracted from `0009:1460` (three-CoR lineage) | 1a |
 | `_agent_void_bank_statement_core` | `_void_bank_statement_core` | extracted from `0038:2211` | 1a |
 | `_agent_propose_line_exception_core` | — | new writer over `bank_agent_proposals` | 1b |
-| `_agent_propose_identifier_promotion_core` | — | **NEW at v2 (B5)** — second writer over `bank_agent_proposals` | 1b |
+| `_agent_propose_bank_identifier_promotion_core` | — | **NEW at v2 (B5)**, renamed bank-scoped (conductor arbitration 2026-08-24) — second writer over `bank_agent_proposals` | 1b |
 
 ¹ the ctx-derived `origin` literal · ² the CLR16 `detail.reason` · ³ the M11 waiver hook. **Nine
 pure extractions in PR-1a; the three marked cores are re-CoR'd in PR-1b once they are live.**
@@ -366,7 +367,10 @@ is real** — two lane slots against a per-client advisory rung means a clocked 
 the same client **queue**, they do not race; the battery has the two-session cell.
 
 **The extraction MOVES the estate's only instrument for this order — and PR-1a must move the pins
-with it (material M2).** Five live assertions read the lock rungs off the PUBLIC prosrc, and
+with it (material M2).** ~~Five~~ **SIX** live assertions read an extracted PUBLIC body's prosrc
+(corrected 2026-08-23 — the sixth is `x42-r8-seam.test.mjs:406-412`, the AF-2 composite's request-
+hash `'ack'` pin, which P-16's census missed; it moves to `_resolve_and_book_bank_line_core` on the
+same terms), and
 `fnSource` concatenates same-named overloads only (`a21-helpers.mjs:609-615`), so a thin delegate
 cannot mask the loss: `x38-wave-c-b-match.test.mjs:1483-1487` (`match_bank_line`: `order by je.id
 for update` → `pg_advisory_xact_lock(203005004` → `order by l.id for update`) · `:1542-1546`
@@ -376,7 +380,11 @@ acquires 203005006 directly) · `x40-wave-c-c-tieout.test.mjs:3053-3072`
 (`complete_bank_reconciliation`, `void_bank_reconciliation`, `resolve_bank_line_exception`).
 **Disposition, per site: MOVE the pin to the extracted core and ADD the wrapper pin** — "the public
 body acquires NOTHING and calls the core" — the precedent already sitting in the same file at
-`x38-match:1496-1538`, written when `0042` factored the settle body. **Never delete a pin**: Annex C's
+`x38-match:1496-1538`, written when `0042` factored the settle body. **Every wrapper pin reads a
+SPECIFIC OID, never `fnSource`** (2026-08-23): `fnSource` concatenates same-named overloads, PR-1a
+extracts `match_bank_line/6` only, and the still-fat `/7` rule arity kept `:1483` green while it
+measured nothing about the live human path — the vacuous pass this material exists to prevent, seen
+on the rig rather than reasoned about. **Never delete a pin**: Annex C's
 "the order is the DELEGATE'S OWN order" would become an unmeasured claim and the ABBA deadlock the
 R-L2/D40 lesson cost would be re-introducible in silence. `:1525`'s count changes to **one** with the
 `/13` drop **in PR-3**, and stays an exact count, never a `>=`. Apply-time twins to re-derive on any

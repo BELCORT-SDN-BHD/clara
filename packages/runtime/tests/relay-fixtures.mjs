@@ -209,6 +209,89 @@ async function activateOnboardingClient(sub, client) {
 }
 
 // ---------------------------------------------------------------------------
+// [Wave-F Track A, F-A7 gamma, CI #331 fold] the classify-lane typed-consent gate
+// (0123's own AT-ENQUEUE gate on _enqueue_invoice_facts_core): a NULL-kind document
+// filed to a client now needs that client's live 'document_processing' typed egress
+// consent+activation, or the classify task the enqueue mints comes back TERMINAL
+// 'failed' instead of 'queued'. Ported from packages/db/tests/rig-docs-fixtures.mjs's
+// ensureClassifyConsent — SAME shape: granted through the REAL governed verbs
+// (classify_consent_evidence_document -> grant_client_egress_purpose ->
+// activate_client_egress_purpose, never a raw table write), frontier-gated (a true
+// no-op below 0123 via a live catalog check, never a version-number string), and
+// scoped to fire ONLY where the wall actually binds — the caller decides that by
+// calling this ONLY when it is about to file/enqueue a NULL-kind document (this file
+// does not call it unconditionally from buildFirm/createClient, so a runtime test
+// exercising an unconsented firm on purpose is unaffected). `owner` is the caller's
+// own resolved firm owner (every call site in this package already passes one — no
+// internal firm-membership resolution is needed here, unlike the DB package's
+// version, which has to handle a non-owner `sub`).
+// ---------------------------------------------------------------------------
+
+let _classifyGammaReady = null;
+async function classifyGammaReady() {
+  if (_classifyGammaReady !== null) return _classifyGammaReady;
+  const r = await rootQuery(
+    `select
+       (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='clara' and p.proname='classify_consent_evidence_document') as fn,
+       (select pg_get_constraintdef(con.oid)
+          from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace
+         where n.nspname='clara' and c.relname='client_egress_purpose_consents' and con.contype='c'
+           and con.conname='ck_client_egress_purpose_consents_purpose_f_a1') as purpose_check`,
+  );
+  const row = r.rows[0];
+  _classifyGammaReady = Boolean(row.fn && row.purpose_check && /document_processing/.test(row.purpose_check));
+  return _classifyGammaReady;
+}
+
+/** Grant + activate 'document_processing' for (firm, client) through the real governed
+ *  verbs, as `owner`. Idempotent (a second call for the same firm+client is a no-op)
+ *  and a silent no-op below the gamma frontier. */
+export async function ensureClassifyConsent(owner, { firm, client }) {
+  if (!(await classifyGammaReady())) return;
+  const live = await rootQuery(
+    `select 1 from clara.client_egress_purpose_activations a
+       join clara.client_egress_purpose_consents c
+         on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
+      where a.firm_id=$1 and a.client_id=$2 and a.purpose='document_processing'
+        and a.deactivated_at is null and c.revoked_at is null`,
+    [firm, client],
+  );
+  if (live.rowCount > 0) return;
+  // Mint the consent-evidence document via a direct named call to _seed_verified_document
+  // (superuser lane — granted to no app role, matching packages/db's own rig path): the
+  // matcher-testkit's seedVerifiedDocument wrapper has no document_kind parameter.
+  const evSha = sha(`consent_ev_${opk("ce")}`);
+  const evidence = (
+    await rootQuery(
+      `select clara._seed_verified_document(p_firm=>$1,p_client=>null,p_sha256=>$2,p_filename=>'consent.pdf',
+         p_mime=>'application/pdf',p_bytes=>2048,p_storage_path=>$3,p_uploaded_by=>$4,p_page_count=>1,
+         p_document_kind=>'consent_evidence',p_financial_date=>null,p_resolution=>null) as r`,
+      [firm, evSha, `firms/${firm}/docs/${evSha}.pdf`, owner],
+    )
+  ).rows[0].r.document_id;
+  await rootQuery("update clara.documents set bytes_verified_at=coalesce(bytes_verified_at,now()) where id=$1", [evidence]);
+  await humanQuery(
+    owner,
+    "select clara.classify_consent_evidence_document(p_document=>$1,p_reason=>$2,p_op_key=>$3)",
+    [evidence, "rig fixture consent letter (F-A7 gamma runtime convenience)", opk("cce")],
+  );
+  const grant = await humanQuery(
+    owner,
+    `select clara.grant_client_egress_purpose(p_client=>$1,p_purpose=>'document_processing',
+       p_evidence_document=>$2,p_scope_note=>$3,p_op_key=>$4) as r`,
+    [client, evidence, "rig fixture classify consent", opk("gdp")],
+  );
+  const consentId = grant.rows[0].r.consent_id;
+  await humanQuery(
+    owner,
+    `select clara.activate_client_egress_purpose(p_client=>$1,p_purpose=>'document_processing',
+       p_consent=>$2,p_op_key=>$3)`,
+    [client, consentId, opk("adp")],
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Synthetic wake-bound event source (post-0007). Migration 0007 retired both SQL
 // ingest writers — clara.ingest_document / clara.wake_ingest_document now RAISE
 // (CLR13) with EXECUTE revoked — and taxonomy v2 routes document.ingested to

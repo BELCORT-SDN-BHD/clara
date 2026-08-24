@@ -361,14 +361,15 @@ test("…and the chat lane settles on that transcript, not on a derived outcome 
 // 6. Registry sanity.
 // ===========================================================================
 
-// The pin moved v10 -> v11 at the Wave-E eta cutover (2026-08-15), then v11 -> v12 at F-A1
-// PR-3a (the witness-pair consumer widening — chatTurn.v12.tools.ts). This battery still owns
+// The pin moved v10 -> v11 at the Wave-E eta cutover (2026-08-15), v11 -> v12 at F-A1
+// PR-3a, then v12 -> v13 at F-A2 PR-2. This battery still owns
 // v10's BODY, which is byte-untouched — v11 imports v10's infra and errors rather than
 // copying them, and v12 in turn overrides only read_document/draft_journal_entry on top of
-// v11's own imports — so everything above stays exactly as it was. Only the pin assertion
-// moves, and v11 joins the policy (c) roster it used to sit at the head of.
-test("registry.ts pins chatTurn: chatTurn_v12, and still exports the superseded v11/v10/v9/v8 (policy (c))", () => {
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v12");
+// v11's own imports; v13 is F-A2's new frozen export. Everything above stays exactly as it
+// was. Only the pin assertion moves, and v12 joins the policy (c) roster.
+test("registry.ts pins chatTurn_v13 and still exports superseded v12/v11/v10/v9/v8 (policy (c))", () => {
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v13");
+  assert.equal(typeof registryMod.chatTurn_v12, "function");
   assert.equal(typeof registryMod.chatTurn_v11, "function");
   assert.equal(typeof registryMod.chatTurn_v10, "function");
   assert.equal(typeof registryMod.chatTurn_v9, "function");

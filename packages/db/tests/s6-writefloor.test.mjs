@@ -84,7 +84,9 @@ function unready(t) {
  *  { draft, cited }. Amount → both legs; vendor proposed (born at approve). */
 async function supplierBillDraft(sub, { client, amount = ROUTINE_CENTS, vendor = { new: { name: "BRIGHTPATH SDN BHD", registration_no: "201801000123" } }, codingKind = CODING_KIND, lines = null } = {}) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client });
+  // F-A2 PR-1 (D11): the direction-family arm now binds every agent-lane coded draft, so this
+  // shared fixture states its supplier. Direction only — no arithmetic, so nothing corroborates.
+  const cited = await seedCitedDocument(sub, { firm, client, direction: "purchase" });
   const cred = await mintInteractive(firm);
   const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
   const draft = await wakeDraftEntry(cred, {

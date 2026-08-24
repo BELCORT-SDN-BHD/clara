@@ -46,6 +46,16 @@ export async function wakeClientOf(role, secret) {
 // Counterparty writers (human, bookkeeper+) — companion §2.
 // ---------------------------------------------------------------------------
 
+/** The product door for birthing a counterparty directly (registration/TIN optional) —
+ *  mirrors name-only-guard-fixtures.mjs's createCounterparty, the same audited call shape,
+ *  for callers that need a REAL counterparty without a draft+approve round-trip. */
+export async function createCounterparty(sub, { client, kind = "vendor", name, registration = null, tin = null, opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.create_counterparty(p_client => $1, p_kind => $2, p_name => $3, p_registration_no => $4, p_tin => $5, p_op_key => $6) as receipt",
+    [client, kind, name, registration, tin, opKey ?? opk("createcp")]);
+  return r.rows[0].receipt;
+}
+
 export async function addAlias(sub, { client, counterparty, alias, origin = "human", opKey = null }) {
   const r = await humanQuery(sub,
     "select clara.add_counterparty_alias(p_client => $1, p_counterparty => $2, p_alias => $3, p_origin => $4, p_op_key => $5) as r",
@@ -111,6 +121,19 @@ export async function settleAutodraft({ task, outcome, tokens, entry = null, ref
     [task, outcome, tokens, entry, j(refusal)]);
   return r.rows[0].r;
 }
+/** settle_autodraft_task's SIX-arity overload (…, p_workflow_run_id text) — the one the
+ *  producer actually calls. It carries its OWN copy of every guard, so a widening proven only
+ *  against the 5-arity form is proven on the wrong body. */
+export async function settleAutodraft6({ task, outcome, tokens, entry = null, refusal = null, workflowRunId = null }) {
+  const r = await roleQuery(
+    ROLES.runtime,
+    "select clara.settle_autodraft_task(p_task => $1, p_outcome => $2, p_tokens => $3::bigint, "
+    + "p_entry => $4, p_refusal => $5::jsonb, p_workflow_run_id => $6) as r",
+    [task, outcome, tokens, entry, j(refusal), workflowRunId ?? `rig-settle6-${randomUUID().slice(0, 8)}`],
+  );
+  return r.rows[0].r;
+}
+
 export async function openSweepRun({ firm, expected }) {
   const r = await roleQuery(ROLES.runtime, "select clara.open_sweep_run(p_firm => $1, p_expected => $2) as r", [firm, expected]);
   return r.rows[0].r;
@@ -145,30 +168,8 @@ export async function autodraftDraftEntry(sub, { task, rf, firm, client, vendorN
   return draft.entry_id ?? draft.entryId ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Coding rules (human, bookkeeper+) — companion §7.
-// ---------------------------------------------------------------------------
-
-export async function proposeCodingRule(sub, { client, counterparty, accountCode, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.propose_coding_rule(p_client => $1, p_counterparty => $2, p_account_code => $3, p_op_key => $4) as r",
-    [client, counterparty, accountCode, opKey ?? opk("proprule")]);
-  return r.rows[0].r;
-}
-export async function signCodingRule(sub, { rule, opKey = null }) {
-  const r = await humanQuery(sub, "select clara.sign_coding_rule(p_rule => $1, p_op_key => $2) as r", [rule, opKey ?? opk("signrule")]);
-  return r.rows[0].r;
-}
-export async function declineCodingRule(sub, { rule, reason = "rig decline", opKey = null }) {
-  const r = await humanQuery(sub, "select clara.decline_coding_rule(p_rule => $1, p_reason => $2, p_op_key => $3) as r", [rule, reason, opKey ?? opk("declrule")]);
-  return r.rows[0].r;
-}
-export async function retireCodingRule(sub, { rule, reason = "rig retire", conflictQuestion = null, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.retire_coding_rule(p_rule => $1, p_reason => $2, p_conflict_question => $3, p_op_key => $4) as r",
-    [rule, reason, conflictQuestion, opKey ?? opk("retrule")]);
-  return r.rows[0].r;
-}
+// proposeCodingRule/signCodingRule/declineCodingRule/retireCodingRule (companion §7)
+// RETIRED with F-A2 PR-3 (Annex B.1) — all four DB verbs are dropped.
 
 // ---------------------------------------------------------------------------
 // Open questions — split lanes (companion §8).
@@ -402,6 +403,65 @@ export async function primeReadyFiling(sub, { client, amount = 500000, vendorNam
   // TARGET filing — a fresh cited doc + facts citing the SAME vendor NAME (existing → not birth).
   const rf = await readyFiling(sub, { client, amount, vendorName, registration });
   return { ...rf, counterpartyId: cp?.id ?? null, firstEntry: d1.entry_id };
+}
+
+/**
+ * F-A2 PR-1 (D39, the claim split) — RESTATE the `rule_sightings` rows the retired breeding
+ * block used to write, for ONE already-approved entry.
+ *
+ * WHY THIS EXISTS. The eighth `clara._approve_entry_core` body excises `0037:2046-2100` whole,
+ * so approving a bill no longer accrues a sighting. Dozens of cells across this rig depend on a
+ * sighting POOL as a *precondition* — their claim is about the autopost floors, the executor,
+ * the sales lift or the preview, never about breeding — and with the pool empty those cells
+ * either refuse CLR27 or take an `if (!rule) return;` exit and pass VACUOUSLY, which is worse
+ * than failing. Per the claim-split ruling their fixtures change and their assertions do not;
+ * the breeding CLAIM itself moved to C.8's inverted twins, which assert the opposite.
+ *
+ * IT IS A RESTATEMENT, NOT AN INVENTION. The two inserts below are `0037:2049-2061` verbatim in
+ * shape — same columns, same `distinct`, same `is_active` join, same income-only credit arm,
+ * same `on conflict on constraint uq_rule_sightings_mapping do nothing` — and the writer's own
+ * gate is re-checked here (approved, not a reversal, no `checked_via_rule_id`, not a settlement
+ * kind) so this helper can never manufacture a row the retired writer would have withheld. The
+ * `rule_sightings` table survives KEEP-AS-HISTORY, and the entries these rows cite are the real
+ * approved entries, so the pool stays honest evidence — it is simply no longer a side effect.
+ *
+ * Returns the number of rows written (0 when the writer's own gate would have withheld them).
+ */
+export async function restateSightings(entry, { counterparty = null } = {}) {
+  const e = (await rootQuery(
+    `select id, firm_id, client_id, coding_kind, status, reversal_of, checked_via_rule_id
+       from clara.journal_entries where id=$1`, [entry])).rows[0];
+  if (!e) return 0;
+  // The retired writer's own conjunction (0037:2046-2048), re-checked rather than assumed.
+  if (e.status !== "approved" || e.reversal_of !== null || e.checked_via_rule_id !== null) return 0;
+  if (e.coding_kind === "customer_receipt" || e.coding_kind === "supplier_payment") return 0;
+  let cp = counterparty;
+  if (!cp) {
+    const legs = await rootQuery(
+      "select distinct counterparty_id from clara.journal_lines where entry_id=$1 and counterparty_id is not null",
+      [entry]);
+    if (legs.rows.length !== 1) return 0;   // no counterparty => v_counterparty is null => no breeding
+    cp = legs.rows[0].counterparty_id;
+  }
+  const canon = (await rootQuery(
+    "select clara._canonical_counterparty($1,$2) as c", [e.client_id, cp])).rows[0].c ?? cp;
+  const debit = await rootQuery(
+    `insert into clara.rule_sightings(firm_id,client_id,counterparty_id,account_code,entry_id,side)
+       select distinct $1::uuid,$2::uuid,$3::uuid,l.account_code,$4::uuid,'debit'
+       from clara.journal_lines l join clara.coa_accounts a
+         on a.client_id=l.client_id and a.account_code=l.account_code
+       where l.entry_id=$4::uuid and l.debit_cents>0 and a.is_active
+       on conflict on constraint uq_rule_sightings_mapping do nothing`,
+    [e.firm_id, e.client_id, canon, entry]);
+  const credit = await rootQuery(
+    `insert into clara.rule_sightings(firm_id,client_id,counterparty_id,account_code,entry_id,side)
+       select distinct $1::uuid,$2::uuid,$3::uuid,l.account_code,$4::uuid,'credit'
+       from clara.journal_lines l join clara.coa_accounts a
+         on a.client_id=l.client_id and a.account_code=l.account_code
+       where l.entry_id=$4::uuid and l.credit_cents>0 and a.is_active and a.account_type='income'
+       on conflict on constraint uq_rule_sightings_mapping do nothing`,
+    [e.firm_id, e.client_id, canon, entry]);
+  return (debit.rowCount ?? 0) + (credit.rowCount ?? 0);
 }
 
 export { AP, EXP };

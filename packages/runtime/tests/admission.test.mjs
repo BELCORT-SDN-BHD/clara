@@ -1,7 +1,10 @@
 // Admission + settlement (contract §3.6 / §0.4). begin_chat_turn is the atomic,
-// fail-closed gate: turn_key replay, one-live-turn (CLR13), fail-closed budget +
-// compute-cap (CLR14). settle_chat_turn is idempotent and records usage. These run
-// the REAL DB functions the runtime calls, as clara_runtime.
+// fail-closed gate: turn_key replay, one-live-turn (CLR13), and — since F-A9 PR-0 —
+// the COMPUTE-RUN CAP alone (CLR14). The daily token budget that used to share that
+// SQLSTATE is gone by owner ruling (TA-P12 = A; law 76 "meter, never cap"), so the
+// over-limit cell below is a positive-by-absence differential rather than a refusal.
+// settle_chat_turn is idempotent and records usage — the METER stays. These run the
+// REAL DB functions the runtime calls, as clara_runtime.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -35,19 +38,32 @@ test("admission: same-session concurrent turn is rejected CLR13", { skip }, asyn
   );
 });
 
-test("admission: daily token budget exhausted -> CLR14 (fail-closed)", { skip }, async () => {
+// F-A9 PR-0 INVERTED THIS CELL (law 31 — the pre-change half ran for real against the
+// pre-change body; this is the post-change half). It used to assert that a firm at/over
+// its daily token limit was REFUSED CLR14. The owner ruled that gate out (TA-P12 = A, the
+// 2026-08-22 Track-A sitting; digest law 76 "meter, never cap"), so the same fixture must
+// now ADMIT — and the absence is MEASURED, not merely unobserved: the firm's own limit is
+// read back at 1 and its recorded UTC-day usage is read back far above it, which is the
+// exact state that raised CLR14 before the hotfix.
+test("admission: the daily token budget gate is GONE — a firm far over its own daily_token_limit still admits (F-A9 PR-0)", { skip }, async () => {
   const { owner, client, firm } = await rig.buildFirm("adm3");
   const session = await rig.createChatSession({ author: owner, client });
-  // Owner-only ledger: set today's UTC usage at/over the default 1,000,000 limit.
-  await rig.rootQuery(
-    "insert into clara.firm_usage_daily (firm_id, usage_date, tokens_used) values ($1, (now() at time zone 'UTC')::date, 1000000) on conflict (firm_id, usage_date) do update set tokens_used=excluded.tokens_used",
+  // Owner-only ledger + limits row: pin a limit of 1 and a usage total 1,000,000× it.
+  const limit = await rig.rootQuery(
+    "insert into clara.firm_limits (firm_id, daily_token_limit) values ($1, 1) on conflict (firm_id) do update set daily_token_limit=1 returning daily_token_limit",
     [firm],
   );
-  await assert.rejects(
-    () => rig.beginChatTurn({ session, author: owner, turnKey: "b1" }),
-    (e) => e.code === "CLR14",
-    "over-budget admission is CLR14",
+  assert.equal(Number(limit.rows[0].daily_token_limit), 1, "the firm's daily_token_limit really is pinned to 1");
+  const used = await rig.rootQuery(
+    "insert into clara.firm_usage_daily (firm_id, usage_date, tokens_used) values ($1, (now() at time zone 'UTC')::date, 1000000) on conflict (firm_id, usage_date) do update set tokens_used=excluded.tokens_used returning tokens_used",
+    [firm],
   );
+  assert.ok(Number(used.rows[0].tokens_used) > 1, "the firm's recorded UTC-day usage really is far above its own limit");
+
+  const admitted = await rig.beginChatTurn({ session, author: owner, turnKey: "b1" });
+  assert.ok(admitted?.task_id, `an over-limit admission returns a task (got ${JSON.stringify(admitted)})`);
+  const task = await rig.readTask(admitted.task_id);
+  assert.equal(task?.status, "queued", "a real queued chat task stands behind the receipt");
 });
 
 test("admission: compute-run cap reached -> CLR14 (held/awaiting excluded)", { skip }, async () => {

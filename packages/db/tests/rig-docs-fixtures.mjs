@@ -91,10 +91,20 @@ export function idOf(receipt, ...keys) {
 
 /** Mint a verified document (+ optional filing) via _seed_verified_document as
  *  superuser (granted to no app role — companion §3.11). Returns { documentId,
- *  filingId, sha256 }. Signature contract-silent → adaptive named call. */
+ *  filingId, sha256 }. Signature contract-silent → adaptive named call.
+ *
+ *  [Wave-F Track A, F-A7 gamma] `_seed_verified_document`'s own filing write, when a `client`
+ *  is passed, bypasses `file_document` entirely (a raw superuser insert, never the audited
+ *  writer) and so never auto-enqueues a classify task — gamma's gate cannot see it either way.
+ *  An UNFILED document (`client: null`, the pre-activation class D-21) is the one shape a
+ *  caller can still hand straight to the classify lane themselves (`enqueue_invoice_facts` /
+ *  `clara._enqueue_invoice_facts_core`, as several TOCTOU/race cells do) — for exactly that
+ *  shape this also grants the firm's firm-narrow 'attribution' consent by default (opt out
+ *  with `grantClassifyConsent: false`), mirroring `fileDocument`'s client-scoped convenience. */
 export async function seedVerifiedDocument({
   firm, client = null, sha256 = null, filename = "rig.pdf", mime = "application/pdf",
   bytes = 2048, storagePath = null, pageCount = 1, kind = null, financialDate = null, resolution = null,
+  grantClassifyConsent = true,
 } = {}) {
   const digest = sha256 ?? sha(randomUUID());
   const path = storagePath ?? `firms/${firm}/docs/${digest}.pdf`;
@@ -103,6 +113,7 @@ export async function seedVerifiedDocument({
     storage_path: path, page_count: pageCount, document_kind: kind, financial_date: financialDate,
     resolution,
   }, { label: "seed_verified_document" });
+  if (grantClassifyConsent && client == null && firm) await ensureFirmNarrowAttribution({ firm });
   return {
     documentId: idOf(receipt, "document_id", "document"),
     filingId: idOf(receipt, "filing_id", "filing"),
@@ -122,14 +133,170 @@ export function claimOnlyUnsupportedPost0007() {
 }
 
 // ---------------------------------------------------------------------------
+// [Wave-F Track A, F-A7 gamma, D1-gamma] fixture convenience — ADR-0075's own framing: every
+// test firm is a CONSENTED fixture. `fileDocument` grants the filing client's
+// `document_processing` typed egress consent by default, through the REAL governed verbs
+// (classify_consent_evidence_document -> grant_client_egress_purpose ->
+// activate_client_egress_purpose — never a raw table write), so gamma's classify-lane
+// enqueue-time consent gate does not park every pre-existing fixture that files a null-kind
+// document (0009's own auto-enqueue). Pass `grantClassifyConsent: false` to construct a
+// deliberately UNCONSENTED firm/client for a cell that must prove the gate actually refuses —
+// mandatory for gamma's own differential pair (packages/db/tests/f-a7-gamma-egress.test.mjs).
+//
+// GATED, not unconditional: a database below gamma's frontier has neither the purpose value
+// nor classify_consent_evidence_document, so this checks liveness once (memoized) and is a
+// silent no-op below that frontier — the pre-gamma behaviour (classify always proceeds) is
+// unchanged for every earlier-frontier test in this estate.
+// ---------------------------------------------------------------------------
+
+let _gammaLive = null;
+async function gammaReady() {
+  if (_gammaLive !== null) return _gammaLive;
+  const r = await rootQuery(
+    `select to_regprocedure('clara.classify_consent_evidence_document(uuid,text,text)') is not null
+       and exists(select 1 from pg_constraint con join pg_class c on c.oid=con.conrelid
+                    join pg_namespace n on n.oid=c.relnamespace
+                   where n.nspname='clara' and c.relname='client_egress_purpose_consents'
+                     and con.contype='c' and con.conname='ck_client_egress_purpose_consents_purpose_f_a1'
+                     and pg_get_constraintdef(con.oid) like '%document_processing%') as ok`);
+  _gammaLive = r.rows[0]?.ok === true;
+  return _gammaLive;
+}
+
+const _classifyConsentGranted = new Set(); // dedupe within a process: `${firm}:${client}`
+
+/** Grant + activate 'document_processing' for (firm, client) through the real governed verbs,
+ *  mirroring wave-b/wb-0020-helpers.mjs's own consentEvidenceDoc/lightSynthesis idiom for the
+ *  wiki purpose. Idempotent (a second call for the same firm+client is a no-op) and a silent
+ *  no-op below gamma's frontier.
+ *
+ *  Grants as the FIRM'S OWNER, resolved internally — never as `sub`. `fileDocument`'s own floor
+ *  is `clara_authenticated` (filing is routine bookkeeper work), so `sub` there is very often a
+ *  bookkeeper/viewer, not an owner; the three consent-lane verbs this helper calls are all
+ *  owner-floored (`_human_ctx(role_rank('owner'))`), so using `sub` directly would raise CLR04
+ *  on exactly the fixtures this convenience exists to unblock. A firm with no active owner
+ *  membership is a fixture defect this helper surfaces loudly rather than swallowing. */
+export async function ensureClassifyConsent(sub, { firm, client }) {
+  if (!(await gammaReady())) return;
+  const key = `${firm}:${client}`;
+  if (_classifyConsentGranted.has(key)) return;
+  const live = await rootQuery(
+    `select 1 from clara.client_egress_purpose_activations a
+       join clara.client_egress_purpose_consents c
+         on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
+      where a.firm_id=$1 and a.client_id=$2 and a.purpose='document_processing'
+        and a.deactivated_at is null and c.revoked_at is null`,
+    [firm, client]);
+  if (live.rowCount > 0) { _classifyConsentGranted.add(key); return; }
+
+  // MEASURED (full-estate battery): grant_client_egress_purpose requires client.status=
+  // 'active' (a pre-existing 0020-era CLR11 check, unrelated to gamma). Many pre-existing
+  // fixtures deliberately file a document to a client that is not yet active (their own test
+  // intent has nothing to do with classify). This convenience is additive, never a NEW hard
+  // requirement: fail SOFT here — the classify gate still holds normally
+  // (document_processing_consent_inactive) for such a client, exactly as it would with no
+  // convenience at all; only an ACTIVE client is worth the grant attempt.
+  const clientActive = await rootQuery("select 1 from clara.clients where id=$1 and status='active'", [client]);
+  if (clientActive.rowCount === 0) return;
+
+  const ownerRow = await rootQuery(
+    `select user_id from clara.firm_memberships
+      where firm_id=$1 and role='owner' and status='active' order by created_at limit 1`,
+    [firm]);
+  const owner = ownerRow.rows[0]?.user_id;
+  if (!owner) throw new Error(`ensureClassifyConsent: firm ${firm} has no active owner membership — cannot grant document_processing consent`);
+
+  const { human } = await import("./rig-docs-helpers.mjs");
+  // grantClassifyConsent: false — evidence minting must NOT recurse into
+  // ensureFirmNarrowAttribution (an unfiled, client-null seed would otherwise re-trigger it).
+  const evidence = await seedVerifiedDocument({ firm, grantClassifyConsent: false });
+  await runAs(human(owner),
+    "select clara.classify_consent_evidence_document(p_document => $1, p_reason => $2, p_op_key => $3) as r",
+    [evidence.documentId, "rig fixture consent letter (F-A7 gamma classify convenience)", opk("cce-dp")]);
+  const grant = await runAs(human(owner),
+    `select clara.grant_client_egress_purpose(p_client => $1, p_purpose => 'document_processing',
+       p_evidence_document => $2, p_scope_note => $3, p_op_key => $4) as r`,
+    [client, evidence.documentId, "rig fixture classify consent", opk("gdp")]);
+  const consentId = grant.rows[0].r.consent_id;
+  await runAs(human(owner),
+    `select clara.activate_client_egress_purpose(p_client => $1, p_purpose => 'document_processing',
+       p_consent => $2, p_op_key => $3) as r`,
+    [client, consentId, opk("adp")]);
+  _classifyConsentGranted.add(key);
+}
+
+const _firmNarrowGranted = new Set(); // dedupe within a process: firm id
+
+/** Grant + activate the firm-narrow 'attribution' moment for `firm` through the real governed
+ *  verbs (grant/activate_firm_egress_purpose), the unfiled-document sibling of
+ *  ensureClassifyConsent above. Idempotent and a silent no-op below gamma's frontier. Grants as
+ *  the firm's owner, resolved internally. */
+export async function ensureFirmNarrowAttribution({ firm }) {
+  if (!(await gammaReady())) return;
+  if (_firmNarrowGranted.has(firm)) return;
+  const live = await rootQuery(
+    `select 1 from clara.firm_egress_purpose_activations a
+       join clara.firm_egress_purpose_consents c
+         on c.id=a.consent_id and c.firm_id=a.firm_id and c.purpose=a.purpose and c.moment=a.moment
+      where a.firm_id=$1 and a.purpose='firm_narrow_intake' and a.moment='attribution'
+        and a.deactivated_at is null and c.revoked_at is null`,
+    [firm]);
+  if (live.rowCount > 0) { _firmNarrowGranted.add(firm); return; }
+
+  const ownerRow = await rootQuery(
+    `select user_id from clara.firm_memberships
+      where firm_id=$1 and role='owner' and status='active' order by created_at limit 1`,
+    [firm]);
+  const owner = ownerRow.rows[0]?.user_id;
+  if (!owner) throw new Error(`ensureFirmNarrowAttribution: firm ${firm} has no active owner membership — cannot grant firm_narrow_intake consent`);
+
+  const { human } = await import("./rig-docs-helpers.mjs");
+  const evidence = await seedVerifiedDocument({ firm, grantClassifyConsent: false });
+  await runAs(human(owner),
+    "select clara.classify_consent_evidence_document(p_document => $1, p_reason => $2, p_op_key => $3) as r",
+    [evidence.documentId, "rig fixture consent letter (F-A7 gamma firm-narrow convenience)", opk("cce-fn")]);
+  const grant = await runAs(human(owner),
+    `select clara.grant_firm_egress_purpose(p_purpose => 'firm_narrow_intake', p_moment => 'attribution',
+       p_evidence_document => $1, p_scope_note => $2, p_op_key => $3) as r`,
+    [evidence.documentId, "rig fixture firm-narrow attribution consent", opk("gfn")]);
+  const consentId = grant.rows[0].r.consent_id;
+  await runAs(human(owner),
+    `select clara.activate_firm_egress_purpose(p_purpose => 'firm_narrow_intake', p_moment => 'attribution',
+       p_consent => $1, p_op_key => $2) as r`,
+    [consentId, opk("afn")]);
+  _firmNarrowGranted.add(firm);
+}
+
+// ---------------------------------------------------------------------------
 // §3.1 filings.
 // ---------------------------------------------------------------------------
 
 /** file_document (human lane): an uploader's explicit client choice IS a human
  *  attribution act; the writer records/uses a resolution ABOUT the document.
- *  Params contract-silent → adaptive. Returns the filing id. */
-export async function fileDocument(sub, { document, client, resolution = null, opKey = null }) {
+ *  Params contract-silent → adaptive. Returns the filing id.
+ *
+ *  [F-A7 gamma] Grants the filing client's classify consent first (see ensureClassifyConsent
+ *  above) unless `grantClassifyConsent: false` is passed — the opt-out a cell needs to
+ *  construct a deliberately unconsented firm and prove the gate refuses.
+ *
+ *  MEASURED (full-estate battery): the grant ONLY fires when the document's kind is still
+ *  NULL — the one condition under which 0009's auto-enqueue can ever reach the classify lane
+ *  at all (`_enqueue_invoice_facts_core`'s classify arm is `if d.document_kind is null`; a
+ *  document filed with a kind already set — an invoice, a receipt, whatever the caller
+ *  declared — never touches the classify gate, so granting consent for it is pure pollution:
+ *  it left an unexpected document_processing row for pre-existing 0020-era tests asserting an
+ *  EXACT closed-world count on client_egress_purpose_consents for a client that also happened
+ *  to file an already-kinded document via this same helper). */
+export async function fileDocument(sub, {
+  document, client, resolution = null, opKey = null, grantClassifyConsent = true,
+}) {
   const { human } = await import("./rig-docs-helpers.mjs");
+  if (grantClassifyConsent) {
+    const docRow = await rootQuery("select firm_id, document_kind from clara.documents where id=$1", [document]);
+    const firm = docRow.rows[0]?.firm_id;
+    const kind = docRow.rows[0]?.document_kind;
+    if (firm && kind == null) await ensureClassifyConsent(sub, { firm, client });
+  }
   const receipt = await callFnAdaptive("file_document", {
     document, client, resolution, op_key: opKey ?? opk("file"),
   }, { persona: human(sub), label: "file_document" });

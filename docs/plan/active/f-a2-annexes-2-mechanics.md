@@ -47,8 +47,14 @@ G1 draft cites G1's verified `invoice.total`, G2 settles with the SAME total and
 post carries the CURRENT token, so A5/B2/B3/B7 all pass and **B8 alone fails** ▣, while the negative twin
 re-cited onto G2 **posts** ▣ · the **`revision_token`-rotation-suppressed** twin ▣ · **mixed-generation (α):**
 the total off G2 and `invoice_id` off G1 **fails** ▣ *(the cell β scoping would have admitted)* ·
-**must-not-refuse:** a draft citing only OCR `pages.*` regions **posts clean** ▣ · **not_evaluable:** an
-unresolved TEXT evidence row never reads `pass` ▣ · B9 ×3 scope kinds, receipt naming the `question_id` ▣ · B9
+**must-refuse (AMENDED, R-L20 as ruled 2026-08-23 — the v6.1 text said "must-not-refuse: a draft citing
+only OCR `pages.*` regions posts clean", and that is FALSE at the bytes):** such a draft carries no VERIFIED
+amount anchor, so it never reaches B8 at all — it is refused upstream at B3 `anchor_unbound` / B7
+`unverified_evidence`, which is law 2 working exactly as intended (an OCR region is not a verified read).
+Admitting it at B8 would be fail-open on the rung that exists to catch a moved generation, so the OCR
+disjunct is REJECTED ▣ · **not_evaluable (D44):** B8 reports `not_evaluable` on ZERO in-scope citations —
+the as-built extension beyond D38, ratified as D44 — and an unresolved TEXT evidence row never reads
+`pass` ▣ · B9 ×3 scope kinds, receipt naming the `question_id` ▣ · B9
 negative: `origin='rule_proposal'` does not block (`0012:100`) ▣ · **B10/B11 on the PROJECTED state (GB-2): an
 agent sales draft whose receivable leg carries NO counterparty POSTS** ▣ *(the cell that goes RED against v4's
 form, which refused 100% of sales posts with the supplier token)*, while a genuinely mis-shaped supplier bill

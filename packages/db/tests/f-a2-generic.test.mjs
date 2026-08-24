@@ -1,0 +1,1021 @@
+// F-A2 PR-1 — Annex C.14: THE GENERIC LANE, and the two cells GB-1 minted.
+//
+// CONTRACT-BLIND, frontier-gated on `f_a2_posting_core$`.
+//
+// THE GENERIC LANE IS THE THINNEST-WALLED SHAPE IN THE ESTATE, and that is the premise of every
+// cell here. A NULL `coding_kind` SKIPS `0016:4020-4034`'s coded-kind preconditions, has no
+// direction arm, and reaches no shape floor. Three walls are all that stand between it and an
+// unanchored unattended post: B4-generic (`sum(debit_cents) = total_cents`, the weakest honest
+// anchor available), B14 (no AR/AP control leg) and B15 (no directional anchor). So its cells
+// are GATING, not illustrative.
+//
+// GB-1 IS THE SHARPEST FINDING OF PR-0, and the first cell below is the gate's own attack
+// fixture. `coding_kind` is a MODEL-SUPPLIED INPUT, so the kind SELECTS WHICH WALLS BIND: a
+// corroborated supplier invoice drafted `coding_kind=NULL` as `Dr Expense / Cr Bank` passed ALL
+// FOURTEEN of v4's rungs — B10/B11's kind gates are inert on NULL, B14 refuses only entries that
+// HAVE a control leg, and B5 is vacuous because the `amount_exception` stamp is itself
+// kind-gated. No wall tied the kind to the document's DIRECTION, so the lane admitted a WRONG
+// POST: a phantom payment with the payable suppressed, priced nowhere. B15 closes it, and the
+// cell is written so it goes RED with B15 removed, because that is the whole finding.
+//
+// AND D18 MUST SURVIVE ITS OWN NEW WALL. B15 narrows the generic lane; it must not close it.
+// The second GB-1 cell is a genuinely generic document — direction resolves to neither sales nor
+// purchase — which still POSTS when tied. Without that twin, "B15 works" would be
+// indistinguishable from "generic no longer posts at all", and the contract's ruling that EVERY
+// document class enters the lane (D18, superseding 7A-R7 / ADR-063) would have been quietly
+// reversed by a wall nobody meant to make total.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+// The GM-10 cells dynamically import packages/runtime/lib/pools.mjs, whose production mode
+// fails closed without CLARA_RUNTIME_DATABASE_URL; the runtime package's rig.mjs sets this
+// for every runtime test, but this db-package file must set it itself (the first db test to
+// cross-import the pool client).
+process.env.RELAY_TEST_MODE ??= "1";
+import {
+  endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
+  booksVersion, opk, entryRow, postingCoreReady, upsertAccountClassed,
+  gateCore, gateReadmit, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
+  unwitnessedFiling, admits, nonAdmitting, assertNonAdmitting, assertVectorShape,
+  genericLines, suppressedPayableLines, genericWithControlLeg, CHART,
+  RUNG_TOKEN, TIER_D_TOKENS, rootQuery, addClientIdentifier,
+  createClient, TIER_B_TOKENS, LETTER_THIRD_PARTY, LETTER_HELD_SSM,
+  ORIGIN, AP, EXP, billLines, primeReadyFiling, admitAutodraft, beginAutodraft,
+  settleAutodraft, mintAutodraftCred, wakeBillDraft, reviseAgentDraft, withdrawDraft,
+  roleQuery, ROLES,
+} from "./f-a2-post-world.mjs";
+
+let world = null;
+before(async () => { if (await postingCoreReady()) world = await buildWorld(); });
+after(async () => {
+  printLaneNotes("f-a2-generic");
+  printSkipCount("f-a2-generic");
+  await endPool();
+});
+
+const A1 = () => world.clients.A1;
+const A2 = () => world.clients.A2;
+const OWNER = () => world.users.alice;
+const post = (p, over = {}) => wakePostEntry(p.cred, { ...p.args, ...over });
+const readmitWithdrawal = async (event, model = "gpt-5.6-terra", reserve = 40000) => {
+  const r = await roleQuery(
+    ROLES.runtime,
+    "select clara.readmit_autodraft_after_withdrawal($1, $2, $3::bigint) as receipt",
+    [event, model, reserve],
+  );
+  return r.rows[0]?.receipt ?? {};
+};
+
+// ===========================================================================
+// The generic lane's own three walls.
+// ===========================================================================
+
+test("f-a2.c14.skips-yet-tied a generic JV SKIPS the coded-kind preconditions and STILL cannot post untied", async (t) => {
+  if (await gateCore(t)) return;
+  // Both halves matter. The skip is real — a generic JV needs no counterparty, no coded shape,
+  // no direction — and it is exactly why the anchor cannot also be optional.
+  const tied = await agentPostable(OWNER(), {
+    client: A1(), amount: 500000, codingKind: null, lines: genericLines(500000),
+  });
+  const good = await post(tied);
+  assert.equal(good?.posted, true,
+    `c14.skips-yet-tied: a document-anchored generic JV posts — the preconditions really are skipped (${JSON.stringify(good?.refusal)})`);
+  assert.equal((await entryRow(tied.args.entry))?.coding_kind ?? null, null,
+    "c14.skips-yet-tied: …with a NULL coding_kind, which is what makes it the generic lane rather than a coded one wearing no label");
+
+  const untied = await agentPostable(OWNER(), {
+    client: A1(), amount: 500000, codingKind: null, lines: genericLines(310000),
+  });
+  const bad = await post(untied);
+  assertNonAdmitting(assert, bad, "B4", "c14.skips-yet-tied untied");
+  assert.equal(bad.refusal.reason, RUNG_TOKEN.B4,
+    "c14.skips-yet-tied: the document total is the ONLY DB-owned figure a generic entry can be held to, so failing it is `anchor_untied` and nothing softer");
+});
+
+test("f-a2.c14.no-document a generic JV with NO document refuses at Tier B", async (t) => {
+  if (await gateCore(t)) return;
+  // No document ⇒ no fact state ⇒ no anchor. The refusal must be a TIER-B RECEIPT, because the
+  // reason has to be durable and readable: "I could not anchor this" is the single most common
+  // thing an operator needs to see, and a raise would leave it in a log.
+  await ensureChart(OWNER(), A1());
+  const cited = await unwitnessedFiling(OWNER(), { client: A1(), gross: 500000 });
+  const cred = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: null, lines: genericLines(500000),
+  });
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: d.revision_token, client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assert.equal(r?.posted, false, "c14.no-document: it does not post");
+  assert.equal(r?.refusal?.tier, "B", `c14.no-document: as a Tier-B RECEIPT, so the reason is durable (got ${JSON.stringify(r?.refusal)})`);
+  assert.ok(nonAdmitting(r.rung_vector).length > 0, "c14.no-document: with at least one named non-admitting rung");
+  assert.ok(!admits(r.rung_vector, "B2") || !admits(r.rung_vector, "B3") || !admits(r.rung_vector, "B4"),
+    `c14.no-document: and the failure is on the corroboration/anchor family, not somewhere incidental (${JSON.stringify(r.rung_vector)})`);
+});
+
+test("f-a2.c14.tier-d a generic JV on an ENROLLED FA or advance account ABORTS at commit and settles failed", async (t) => {
+  if (await gateCore(t)) return;
+  // RE-CUT from BL-1's receipt cell: Tier D is where those belts live now (GM-3). The difference
+  // is evidentiary, not safety — the belts still fire, they just fire at COMMIT, so the outcome
+  // is a loud task failure carrying a NAMED reason rather than a typed admission verdict.
+  const cost = "150-900";
+  await upsertAccountClassed(OWNER(), { client: A2(), code: cost, name: "Plant at cost (c14)", type: "asset", opKey: opk("c14fa") })
+    .catch((e) => noteLane(`c14.tier-d: chart seat (${e.code}: ${e.message})`));
+  const { upsertFaProfile } = await import("./x41-fa-fixtures.mjs");
+  const enrolled = await upsertFaProfile(OWNER(), { client: A2(), assetAccount: cost, opKey: opk("c14faprof") })
+    .then(() => true)
+    .catch((e) => ({ error: e }));
+  // C3: FORCED. "The abort cannot be forced this run" was a green for the run that forces
+  // nothing — and this cell is the only place the FA belt's Tier-D abort is exercised.
+  assert.equal(enrolled, true,
+    `c14.tier-d: the FA enrolment lands, so the belt has something to refuse (${enrolled?.error?.code}: ${enrolled?.error?.message})`);
+  // A movement the register never held: a CREDIT to the enrolled cost account with no disposal
+  // behind it. The lawful acquisition DEBIT is the shape that must POST (c3.D-fa proves that);
+  // this is the genuinely unregistered one.
+  const p = await agentPostable(OWNER(), {
+    client: A2(), amount: 200000, codingKind: null,
+    lines: [
+      { account_code: CHART.bank, debit_cents: 200000, credit_cents: 0, description: "c14 unregistered dr" },
+      { account_code: cost, debit_cents: 0, credit_cents: 200000, description: "c14 unregistered cr" },
+    ],
+  });
+  let raised = null; let receipt = null;
+  try { receipt = await post(p); } catch (e) { raised = e; }
+  // C3: FORCED. A movement that POSTED is precisely the failure this cell exists to catch —
+  // recording it as "the register may already account for it" greens the belt being absent.
+  assert.notEqual(receipt?.posted, true,
+    `c14.tier-d: the unregistered movement did NOT post. If the register already accounts for it the FIXTURE is wrong, and that is a finding, not a pass (${JSON.stringify(receipt?.refusal)})`);
+  assert.ok(raised || receipt?.posted === false, "c14.tier-d: the unregistered movement did not post");
+  if (raised) {
+    assert.equal(raised.code, "CLR40",
+      `c14.tier-d: a Tier-D abort raises the belt's own errcode and CANNOT be converted — an exception block opens a subtransaction and deferred triggers fire at COMMIT, outside it (got ${raised.code}: ${raised.message})`);
+    const reason = /"reason"\s*:\s*"([a-z_]+)"/.exec(raised.detail ?? "")?.[1] ?? null;
+    assert.ok(TIER_D_TOKENS.includes(reason),
+      `c14.tier-d: …carrying a token from the CLOSED Tier-D set (got ${JSON.stringify(reason)}; an unnamed reason is a finding)`);
+  } else {
+    assert.notEqual(receipt?.refusal?.tier, "C",
+      "c14.tier-d: a Tier-D belt is never CONVERTED into a Tier-C receipt — that would claim a catchability the deferred timing does not have");
+  }
+  assert.equal((await entryRow(p.args.entry))?.status, "draft",
+    "c14.tier-d: and the draft survives — the abort rolls back only the POST attempt, because the draft was written in an earlier transaction");
+});
+
+// ===========================================================================
+// GB-1's two cells.
+// ===========================================================================
+
+test("f-a2.c14.gb1-suppressed the SUPPRESSED-PAYABLE fixture refuses at B15 — the cell that must go RED with B15 removed", async (t) => {
+  if (await gateCore(t)) return;
+  // The gate's own attack fixture, rebuilt verbatim: a CORROBORATED SUPPLIER INVOICE, drafted
+  // `coding_kind = NULL`, as `Dr Expense / Cr Bank`. It ties (B4-generic passes — the debit sum
+  // IS the document total), it carries no control leg (B14 passes), its kind gates are inert on
+  // NULL (B10/B11 pass), and B5 is vacuous because the amount_exception stamp is kind-gated.
+  // Fourteen rungs, all green, one phantom payment with the payable suppressed.
+  const p = await agentPostable(OWNER(), {
+    client: A1(), amount: 500000, codingKind: null, kind: "invoice", typeCode: "01",
+    // DIRECTIONAL on purpose, and stated at the call site so the attack is visible: the document
+    // resolves to `purchase` (a named supplier who is not this client), which is exactly the
+    // shape B15 must refuse a NULL-`coding_kind` entry from anchoring to.
+    direction: "purchase",
+    lines: suppressedPayableLines(500000),
+  });
+  const r = await post(p);
+  assertVectorShape(assert, r?.rung_vector, "c14.gb1-suppressed");
+  // The RED-with-B15-removed proof, made explicit: every OTHER rung admits. If B15 were deleted
+  // the vector would be empty and this entry would POST — which is exactly what v4 did.
+  const others = nonAdmitting(r?.rung_vector).filter((x) => x !== "B15");
+  assert.deepEqual(others, [],
+    `c14.gb1-suppressed: every rung EXCEPT B15 admits (${others.join(",")} also failed). That is the finding: without B15 the vector is empty and the wrong post lands`);
+  assertNonAdmitting(assert, r, "B15", "c14.gb1-suppressed");
+  assert.equal(r.refusal.reason, RUNG_TOKEN.B15,
+    "c14.gb1-suppressed: and the receipt names generic_on_directional_document — the operator is told the KIND was wrong, not that some number failed");
+  assert.equal((await entryRow(p.args.entry))?.status, "draft", "c14.gb1-suppressed: the phantom payment did not land");
+});
+
+test("f-a2.c14.ssm-only-resolves an SSM-ONLY client's stated registration is now TESTABLE, both ways — and neither posts generic", async (t) => {
+  if (await gateCore(t)) return;
+  // C6 (owner ruling, 2026-08-22). `_document_direction`'s testability rule demanded the client
+  // hold BOTH a tin and an ssm before a stated supplier registration counted — and 0049's own
+  // comment concedes "a real Malaysian client typically has its ssm recorded and no LHDN TIN, so
+  // this limb will usually NOT fire". When it did not fire, a stated identity fell out as
+  // `evidence:"none"`, the tri-state flattened it to 'unresolved', and B15 admitted the generic
+  // lane. This cell is RED against that body in BOTH directions.
+  const client = A1();
+  await ensureChart(OWNER(), client);
+  // SSM ONLY — and the absence of the tin is ASSERTED, because it is the whole premise.
+  await addClientIdentifier(OWNER(), { client, kind: "ssm", value: "200501006001" }).catch(() => {});
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.deepEqual(kinds, ["ssm"],
+    `c14.ssm-only-resolves: the client holds SSM and no TIN — the exact shape the old both-kinds rule could not test (got ${JSON.stringify(kinds)})`);
+
+  // (a) THE CLIENT'S OWN SSM, with a matching name -> sales.
+  const sales = await agentPostable(OWNER(), {
+    client, amount: 310000, codingKind: null, lines: suppressedPayableLines(310000),
+    direction: "ssm-sales",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [sales.cited.documentId, client])).rows[0].v,
+    "sales", "c14.ssm-only-resolves: an SSM-only client CAN now test its own registration — the page resolves 'sales'");
+  const rs = await post(sales);
+  assert.equal(rs?.posted, false, `c14.ssm-only-resolves: …and a generic JV on it does not post (${JSON.stringify(rs?.refusal)})`);
+  assert.ok(!admits(rs?.rung_vector, "B15"), "c14.ssm-only-resolves: …refused at B15");
+
+  // (b) A THIRD PARTY's ssm-shaped registration -> testable, no match, purchase.
+  const purchase = await agentPostable(OWNER(), {
+    client, amount: 311000, codingKind: null, lines: suppressedPayableLines(311000),
+    direction: "ssm-purchase",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [purchase.cited.documentId, client])).rows[0].v,
+    "purchase", "c14.ssm-only-resolves: a third-party ssm is TESTED and misses — the page resolves 'purchase'");
+  const rp = await post(purchase, { booksVersion: await booksVersion(client) });
+  assert.equal(rp?.posted, false, `c14.ssm-only-resolves: …and that generic JV does not post either (${JSON.stringify(rp?.refusal)})`);
+  assert.ok(!admits(rp?.rung_vector, "B15"), "c14.ssm-only-resolves: …refused at B15");
+});
+
+test("f-a2.c14.untestable-refuses a stated registration of a kind the client has NOT recorded refuses generic_registration_untestable", async (t) => {
+  if (await gateCore(t)) return;
+  // C6-rider, fail-closed. The page states a TIN-SHAPED registration; the client records only an
+  // ssm, so the claim is neither a match nor a miss — it cannot be CHECKED. Under the old rule
+  // that fell out as `evidence:"none"` and B15 admitted it. It now has its own evidence class and
+  // its own refusal reason, because "this document is directional" and "this document states an
+  // identity nobody could check" are different findings with different remedies: the second is
+  // fixed by recording the client's TIN.
+  const client = A2();
+  await ensureChart(OWNER(), client);
+  await addClientIdentifier(OWNER(), { client, kind: "ssm", value: "200501006002" }).catch(() => {});
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.ok(kinds.includes("ssm") && !kinds.includes("tin"),
+    `c14.untestable-refuses: the client records an ssm and NO tin (got ${JSON.stringify(kinds)})`);
+
+  const p = await agentPostable(OWNER(), {
+    client, amount: 312000, codingKind: null, lines: suppressedPayableLines(312000),
+    direction: "untestable",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v,
+    "untestable",
+    "c14.untestable-refuses: the class is UNTESTABLE — distinct from 'absent', which is the whole point");
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.equal(r?.posted, false, `c14.untestable-refuses: it does not post (${JSON.stringify(r?.refusal)})`);
+  assert.ok(!admits(r?.rung_vector, "B15"), "c14.untestable-refuses: …refused at B15");
+  assert.equal(r?.refusal?.reason, "generic_registration_untestable",
+    `c14.untestable-refuses: …under its OWN reason, not the directional one — an operator has to be able to tell them apart (got ${JSON.stringify(r?.refusal)})`);
+});
+
+test("f-a2.c14.gb1-contradiction a document whose PARTIES CONTRADICT refuses at B15 — the second door GB-1 left open", async (t) => {
+  if (await gateCore(t)) return;
+  // C1, and it is the same class of hole as the suppressed payable one cell above. 0049 raises
+  // CLR30 for two entirely different reasons — "nobody is identified" (`evidence:"none"`) and
+  // "the parties CONTRADICT each other" (`evidence:"contradiction"`) — and
+  // `_autodraft_direction_tri` flattens both into the single string 'unresolved'. B15 passed
+  // everything that was not 'sales' or 'purchase', so a CORROBORATED document with contradictory
+  // parties posted as `Dr Expense / Cr Bank`: the client's own sales invoice booked as an
+  // expense, plus a phantom payment. Nothing else in the ladder reads identity — corroboration
+  // carries no identity term, the Tier-C identity pairs need a model-PROPOSED counterparty a
+  // generic entry does not supply, and the direction-family arm is kind-gated.
+  //
+  // THE FIXTURE IS THE ORDINARY CASE, not an exotic one: 0049:924 is a page stating a supplier
+  // REGISTRATION that IS this client's under a NAME that is not — "Rome Properties" against
+  // "Rome Properties Sdn Bhd".
+  await ensureChart(OWNER(), A2());
+  await addClientIdentifier(OWNER(), { client: A2(), kind: "ssm", value: "200301000924" }).catch(() => {});
+  await addClientIdentifier(OWNER(), { client: A2(), kind: "tin", value: "200301000924" }).catch(() => {});
+  const p = await agentPostable(OWNER(), {
+    client: A2(), amount: 300000, codingKind: null, lines: suppressedPayableLines(300000),
+    direction: "contradiction",
+  });
+  const r = await post(p);
+
+  // THE COLLAPSE IS THE CAUSE, asserted rather than described: the tri-state STILL answers
+  // 'unresolved' on this very document. Without this half the cell cannot say that B15's old
+  // reading was what let it through.
+  const tri = (await rootQuery(
+    "select clara._autodraft_direction_tri($1,$2) as v", [p.cited.documentId, A2()])).rows[0].v;
+  assert.equal(tri, "unresolved",
+    "c14.gb1-contradiction: _autodraft_direction_tri STILL flattens the contradiction to 'unresolved' — that collapse is exactly what B15 used to admit, and it is unchanged by this fix");
+  const klass = (await rootQuery(
+    "select clara._direction_class($1,$2,null) as v", [p.cited.documentId, A2()])).rows[0].v;
+  assert.equal(klass, "contradiction",
+    "c14.gb1-contradiction: …while the CLASS B15 now reads says 'contradiction' — the two readers disagree, and that difference is the whole fix");
+
+  assert.equal(r?.posted, false,
+    `c14.gb1-contradiction: a contradicted document NEVER posts as a generic JV (${JSON.stringify(r?.refusal)})`);
+  assert.ok(!admits(r?.rung_vector, "B15"),
+    `c14.gb1-contradiction: …and B15 is the rung that refuses it (vector ${JSON.stringify(r?.rung_vector)})`);
+  assert.equal(r?.refusal?.reason, RUNG_TOKEN.B15,
+    `c14.gb1-contradiction: …naming Annex E.2's B15 token (got ${JSON.stringify(r?.refusal)})`);
+});
+
+test("f-a2.c14.gb1-twin the DIRECTION-UNRESOLVED twin still POSTS when tied — D18 survives its own new wall", async (t) => {
+  if (await gateCore(t)) return;
+  const p = await agentPostable(OWNER(), {
+    client: A2(), amount: 505000, codingKind: null, direction: "unresolved",
+    lines: genericLines(505000),
+  });
+  const r = await post(p);
+  assert.ok(admits(r?.rung_vector, "B15"),
+    `c14.gb1-twin: B15 admits where the document's direction resolves to NEITHER sales nor purchase (got ${JSON.stringify(r?.rung_vector?.B15)})`);
+  assert.equal(r?.posted, true,
+    `c14.gb1-twin: and it POSTS. Without this twin, "B15 works" would be indistinguishable from "generic no longer posts at all" (${JSON.stringify(r?.refusal)}, non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
+});
+
+// ===========================================================================
+// R-L21 — THE POLARITY C6's FIRST CUT WAS MISSING. C6 inferred "leads with a letter ⇒ TIN".
+// The estate's own grammar says otherwise: `SA1234567-X` (state-prefixed ROB) and
+// `LLP0012345-LGN` (LLP/PLT) are SSM/BRN families that lead with letters
+// (packages/runtime/lib/malaysian-registration.mjs:105,108). Under the first cut a TIN-ONLY
+// client marked those TESTABLE against a kind the page never printed, the comparison missed,
+// and (P2) answered `purchase` — on the client's OWN sales invoice. These cells are the
+// missing half of annexes-4-build.md:118-121's both-polarities demand, and the first two are
+// RED against that body. The three ssm-only cells above are byte-unchanged.
+// ===========================================================================
+
+/** `ensureChart` + the bank leg. The five accounts `ensureChart` builds are the ones the SHAPE
+ *  floors need; `CHART.bank` is seeded by `buildWorld`'s own `buildCoa`, which these
+ *  freshly-minted clients never went through — and a generic JV with a suppressed payable
+ *  credits exactly that account. */
+async function rl21Chart(client) {
+  await ensureChart(OWNER(), client);
+  await upsertAccountClassed(OWNER(), {
+    client, code: CHART.bank, name: "Bank", type: "asset", opKey: opk("rl21bank"),
+  }).catch((e) => noteLane(`rl21Chart(bank) raised ${e.code}: ${e.message}`));
+}
+
+/** A client that records a TIN and NO ssm. Minted fresh rather than borrowed: every client in
+ *  `buildWorld` either holds nothing or is given an ssm by a cell above, and the premise here
+ *  is the ABSENCE of the ssm. */
+async function tinOnlyClient(tag) {
+  const client = await createClient(OWNER(), { name: `rl21_${tag}_${Math.random().toString(36).slice(2, 8)}`, opKey: opk(`rl21${tag}`) });
+  await rl21Chart(client);
+  await addClientIdentifier(OWNER(), { client, kind: "tin", value: `C${Math.floor(1e11 + Math.random() * 8e11)}` });
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.deepEqual(kinds, ["tin"],
+    `rl21: the client records a TIN and NO ssm — the absence is the premise (got ${JSON.stringify(kinds)})`);
+  return client;
+}
+
+test("f-a2.c14.rl21-ambiguous-refuses a LETTER-LEADING registration is AMBIGUOUS, so a TIN-only client cannot test it", async (t) => {
+  if (await gateCore(t)) return;
+  const client = await tinOnlyClient("amb");
+  const p = await agentPostable(OWNER(), {
+    client, amount: 312000, codingKind: null, lines: suppressedPayableLines(312000),
+    direction: "letter-3p",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v,
+    "untestable",
+    `c14.rl21-ambiguous-refuses: '${LETTER_THIRD_PARTY}' is an SSM family, not a TIN, so a tin-only client has tested NOTHING — it is untestable, not a miss. The pre-R-L21 body answers 'purchase' here`);
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.equal(r?.posted, false, `c14.rl21-ambiguous-refuses: …and the generic JV does not post (${JSON.stringify(r?.refusal)})`);
+  assert.equal(r?.rung_vector?.tokens?.B15 ?? r?.refusal?.tokens?.B15, TIER_B_TOKENS.B15_UNTESTABLE,
+    `c14.rl21-ambiguous-refuses: …under the untestable reason C6 minted (vector ${JSON.stringify(r?.rung_vector?.B15)})`);
+});
+
+test("f-a2.c14.rl21-own-sale-not-a-bill the client's OWN sales invoice is never coded as a supplier bill (the coded lane)", async (t) => {
+  if (await gateCore(t)) return;
+  // THE DAMAGE, ON THE LANE WHERE IT COSTS MONEY. The generic cell above proves the refusal;
+  // this one proves what the refusal PREVENTS. The page is the client's own sales invoice: it
+  // prints the client's real LLP registration — which the client has not recorded, because it
+  // records only a TIN — under a trading name the estate does not know. Name arm misses,
+  // registration arm misses, and the pre-R-L21 body called the value a TIN, found the client
+  // holds a TIN, declared the comparison real, and returned `purchase`. A supplier_bill coded
+  // on that page books the client's own SALE as a purchase: a wrong number in a client's books.
+  const client = await tinOnlyClient("own");
+  const p = await agentPostable(OWNER(), {
+    client, amount: 313000, codingKind: "supplier_bill", kind: "invoice", typeCode: "01",
+    direction: "letter-own-unnamed",
+  }).catch((e) => ({ error: e }));
+  if (p?.error) {
+    // The coded DRAFT door is where N1 moved the direction-family arm, so the refusal may
+    // arrive here rather than at the post. Either door is the wall; a THIRD outcome is not.
+    assert.equal(p.error.code, "CLR21",
+      `c14.rl21-own-sale-not-a-bill: the coded draft is refused by the direction family (got ${p.error.code}: ${p.error.message})`);
+    assert.match(`${p.error.detail ?? ""} ${p.error.message ?? ""}`, /direction_family_mismatch|direction/,
+      "c14.rl21-own-sale-not-a-bill: …and it is the DIRECTION arm answering");
+    return;
+  }
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.equal(r?.posted, false,
+    `c14.rl21-own-sale-not-a-bill: a supplier_bill on the client's own sales invoice NEVER posts (${JSON.stringify(r?.refusal)})`);
+});
+
+test("f-a2.c14.rl21-both-kinds-still-resolve a BOTH-KINDS client tests a letter-leading value both ways — R-L21 did not over-tighten", async (t) => {
+  if (await gateCore(t)) return;
+  // THE POSITIVE CONTROL, and it is load-bearing: without it the `>= 2` disjunct could be dead
+  // and every letter-leading page would simply refuse, which would look identical in the two
+  // cells above while quietly closing a lane the owner never closed.
+  const client = await createClient(OWNER(), { name: `rl21_both_${Math.random().toString(36).slice(2, 8)}`, opKey: opk("rl21both") });
+  await rl21Chart(client);
+  // The dash-free form: `value_normalized` keeps punctuation but the resolver strips it from the
+  // page, so a dashed identifier can never reg-hit (see LETTER_HELD_SSM's note).
+  await addClientIdentifier(OWNER(), { client, kind: "ssm", value: LETTER_HELD_SSM });
+  await addClientIdentifier(OWNER(), { client, kind: "tin", value: `C${Math.floor(1e11 + Math.random() * 8e11)}` });
+  const kinds = (await rootQuery(
+    `select coalesce(array_agg(distinct kind order by kind), '{}') as k
+       from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')`, [client])).rows[0].k;
+  assert.deepEqual(kinds, ["ssm", "tin"],
+    `c14.rl21-both-kinds-still-resolve: the client records BOTH kinds, and its ssm is itself letter-leading (got ${JSON.stringify(kinds)})`);
+
+  // (a) its OWN registration, under its own name -> the registration arm hits -> sales.
+  const own = await agentPostable(OWNER(), {
+    client, amount: 314000, codingKind: null, lines: suppressedPayableLines(314000),
+    direction: "letter-own-held",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [own.cited.documentId, client])).rows[0].v,
+    "sales", "c14.rl21-both-kinds-still-resolve: a held letter-leading registration still resolves 'sales'");
+
+  // (b) a third party's letter-leading value -> BOTH kinds are held, so the comparison covered
+  //     it whatever kind it was; it misses, and the answer is a TESTED purchase.
+  const third = await agentPostable(OWNER(), {
+    client, amount: 315000, codingKind: null, lines: suppressedPayableLines(315000),
+    direction: "letter-3p",
+  });
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [third.cited.documentId, client])).rows[0].v,
+    "purchase",
+    "c14.rl21-both-kinds-still-resolve: …and an unheld letter-leading value is TESTED, misses, and resolves 'purchase' — ambiguity only blocks a one-kind client");
+});
+
+// ===========================================================================
+// R5-B2 — THE UNRECOGNISED-EVIDENCE DEFAULT. `_direction_class` used to map every CLR30 detail
+// it could not read onto 'absent', which is the ONE class B15 admits. A blank payload, a
+// malformed one, a missing key, a JSON null, or an `evidence` value minted after this file was
+// written all became "nobody is identified" — the admitting answer — on a read that SAW nothing.
+// That is D26 backwards and law 2 ignored, and it was a forward-compat trapdoor: the next
+// evidence value anyone adds would post until somebody remembered to come back.
+// ===========================================================================
+
+const DIRECTION_AT = "clara._document_direction_at(uuid,uuid,uuid)";
+
+/** Replace `_document_direction_at` with a body that raises CLR30 carrying `detailSql`, run
+ *  `fn`, then put the SHIPPED definition back — unconditionally, in a finally, and verified.
+ *
+ *  THIS WINDOW COMMITS. `create or replace function` is DDL on a shared body: if the restore is
+ *  skipped the doctored body stays live and every later cell in the run measures it. So the
+ *  shipped definition is captured FIRST, restored in `finally`, and the restoration is then
+ *  asserted byte-for-byte — the same discipline T7 landed on for the trigger-body doctoring.
+ *
+ *  There is no live producer for these payloads: every CLR30 the estate raises today carries one
+ *  of the three named values. The branch is forward-compat fail-closure, and the only way to ask
+ *  it a question is to manufacture the answer it is meant to survive. */
+async function withDoctoredDetail(detailSql, fn) {
+  const shipped = (await rootQuery("select pg_get_functiondef($1::regprocedure) as d", [DIRECTION_AT])).rows[0].d;
+  try {
+    await rootQuery(`create or replace function clara._document_direction_at(p_document uuid, p_client uuid, p_extraction uuid)
+      returns text language plpgsql stable security definer set search_path = clara, pg_temp as $doc$
+      begin raise exception 'doctored direction' using errcode='CLR30', detail=${detailSql}; end $doc$;`);
+    return await fn();
+  } finally {
+    await rootQuery(shipped);
+    const back = (await rootQuery("select pg_get_functiondef($1::regprocedure) as d", [DIRECTION_AT])).rows[0].d;
+    assert.equal(back, shipped, "withDoctoredDetail: the SHIPPED resolver is back in place — this window COMMITS, so a missed restore would poison every later cell");
+  }
+}
+
+test("f-a2.c14.b2-unreadable an unrecognised CLR30 detail is NON-admitting, not 'absent'", async (t) => {
+  if (await gateCore(t)) return;
+  const client = A2();
+  const p = await agentPostable(OWNER(), {
+    client, amount: 316000, codingKind: null, direction: "unresolved", lines: genericLines(316000),
+  });
+  const classOf = async () => (await rootQuery(
+    "select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v;
+
+  // FIVE SHAPES, one per way the payload can fail to say `evidence:"none"`. Each is asserted
+  // separately: a loop that stopped at the first would leave the rest unproven, and they are
+  // different code paths (the jsonb cast throws for two of them and succeeds for three).
+  const SHAPES = [
+    ["a blank detail", "''"],
+    ["malformed JSON", "'{not json at all'"],
+    ["a missing evidence key", `'{"reason":"direction_unresolved"}'`],
+    ["a JSON-null evidence", `'{"reason":"direction_unresolved","evidence":null}'`],
+    ["an evidence value minted later", `'{"reason":"direction_unresolved","evidence":"some_future_class"}'`],
+  ];
+  for (const [label, detailSql] of SHAPES) {
+    const got = await withDoctoredDetail(detailSql, classOf);
+    assert.equal(got, "unreadable",
+      `c14.b2-unreadable: ${label} classes as 'unreadable' — the pre-R5 body answered 'absent', which is the class that POSTS (got '${got}')`);
+  }
+
+  // AND THE CONSEQUENCE, END TO END, because a class nobody acts on is not a wall. B15 needs no
+  // edit for this — `absent` passes and everything else fails — so this half proves the mapping
+  // is actually wired to the refusal rather than merely computed.
+  const bv = await booksVersion(client);
+  const r = await withDoctoredDetail(`'{"reason":"direction_unresolved","evidence":"some_future_class"}'`,
+    () => post(p, { booksVersion: bv }));
+  assert.ok(!admits(r?.rung_vector, "B15"),
+    `c14.b2-unreadable: …and B15 REFUSES it (got ${JSON.stringify(r?.rung_vector?.B15)})`);
+  assert.equal(r?.posted, false,
+    `c14.b2-unreadable: …so the generic JV does not post on a direction nobody could read (${JSON.stringify(r?.refusal)})`);
+});
+
+test("f-a2.c14.silent-posts C6's CONTROL — a page that prints NO registration is still SILENT, and still posts", async (t) => {
+  if (await gateCore(t)) return;
+  // THE BOUNDARY C6 MUST NOT CROSS. C6 narrows D18: a stated identity that cannot be checked now
+  // refuses. D18 itself stands — a document that says nothing about who supplied it is still
+  // 'absent', and a tied generic JV on it still posts. Without this control, "C6 works" would be
+  // indistinguishable from "the generic lane is closed", which is a different (and unruled)
+  // change. `c14.gb1-twin` posts on the same silence; this cell exists to assert the PREMISE the
+  // twin leaves implicit, so a fixture drift that starts printing a registration turns this red
+  // instead of quietly retargeting both cells at some other shape.
+  const client = A2();
+  const p = await agentPostable(OWNER(), {
+    client, amount: 507000, codingKind: null, direction: "unresolved", lines: genericLines(507000),
+  });
+  // THE PREMISE IS READ THROUGH THE RESOLVER'S OWN PROJECTION — the same `document_regions`
+  // rows, reached through the same `_document_facts_extraction` selector 0049 uses — rather
+  // than through some other table that merely sounds like the one it reads (law 3).
+  const stated = await rootQuery(
+    `select coalesce(array_agg(distinct r.field_path order by r.field_path), '{}') as f
+       from clara.document_regions r
+      where r.extraction_id = clara._document_facts_extraction($1)
+        and r.field_path in ('invoice.vendor_registration','invoice.vendor_name')`, [p.cited.documentId]);
+  assert.deepEqual(stated.rows[0].f, [],
+    `c14.silent-posts: the page states NO vendor identity at all — that is the premise, and it is asserted, not assumed (got ${JSON.stringify(stated.rows[0].f)})`);
+  assert.equal(
+    (await rootQuery("select clara._direction_class($1,$2,null) as v", [p.cited.documentId, client])).rows[0].v,
+    "absent",
+    "c14.silent-posts: silence classes as ABSENT — not 'untestable', which is what C6 added and what a page with nothing to test must never be given");
+  const r = await post(p, { booksVersion: await booksVersion(client) });
+  assert.ok(admits(r?.rung_vector, "B15"),
+    `c14.silent-posts: B15 admits it (got ${JSON.stringify(r?.rung_vector?.B15)})`);
+  assert.equal(r?.posted, true,
+    `c14.silent-posts: and it POSTS — D18 is narrowed by C6, not reversed (${JSON.stringify(r?.refusal)}, non-admitting ${nonAdmitting(r?.rung_vector).join(",")})`);
+});
+
+test("f-a2.c14.b14-interlock B14 and B15 are COHERENT — a directional invoice needs a control leg, and generic may carry none", async (t) => {
+  if (await gateCore(t)) return;
+  // "Both narrow the generic lane, and OQ-5 says so." B15 makes B14 coherent: a directional
+  // invoice NEEDS a control leg and B14 forbids generic entries from carrying one, so
+  // generic-on-directional was always a contradiction. The cell shows the contradiction being
+  // refused from BOTH ends rather than asserting the sentence.
+  const withLeg = await agentPostable(OWNER(), {
+    client: A1(), amount: 506000, codingKind: null, kind: "invoice", typeCode: "01",
+    direction: "purchase",
+    lines: genericWithControlLeg(506000),
+  });
+  const r = await post(withLeg);
+  const failed = nonAdmitting(r?.rung_vector);
+  assert.ok(failed.includes("B14") || failed.includes("B15"),
+    `c14.b14-interlock: a generic entry on a DIRECTIONAL document carrying a CONTROL LEG fails at least one of the two — it is a contradiction from both ends (non-admitting: ${failed.join(",")})`);
+  assert.equal(r?.posted, false, "c14.b14-interlock: and it does not post");
+  noteLane("c14: OQ-5's THREE populations §6 must report — (1) untieable generic JVs that land as drafts, (2) generic entries that would have carried a control leg (B14), (3) generic entries refused at B15 for anchoring to a directional document. These cells force one of each");
+});
+
+// ===========================================================================
+// GM-10's re-admit door — PR-2's cell, recorded here so the obligation is visible in a run.
+// ===========================================================================
+
+// admitAutodraft (wave-a-fixtures.mjs) opens a BRAND-NEW sweep_run per sweep-origin call
+// (run-bound admission, as-built) and neither GM-10 cell ever reconciles them, so they
+// accumulate as permanently-open runs on the shared world.firms.A — the exact fixture-
+// accumulation wave-a-budget.test.mjs:63-65 already names and works around ("the run-bound
+// admitAutodraft opens a sweep_run per call and these accumulate on the shared firm across
+// tests — only the cap test constrains it"). Left at the default max_concurrent_sweeps=2,
+// the first GM-10 cell's OWN two sweep-origin admissions (its `first` and `ordinaryRepeat`)
+// are enough to trip the concurrency cap on the second cell's very first admission —
+// measured directly: 3 sweep_runs open on this firm at the failure point, all state='open',
+// no firm_limits row (so max_concurrent_sweeps defaults to 2) and firm_usage_daily.tokens_used
+// at 2500 — nowhere near the 600,000/1,000,000 token ceilings, so this is the concurrency
+// gate, not the token-budget one. Bumped generously (999, matching the sibling file's own
+// value) rather than pinned to today's exact call count, since runAutodraftCycle's own
+// catch-up sweep pass (packages/runtime/lib/autodraft.mjs) can open further runs on this
+// firm too. No product code is touched — this only widens a resource-budget TEST fixture
+// that neither GM-10 cell exercises as its subject.
+async function raiseSweepConcurrencyCap(firm) {
+  await rootQuery(
+    `insert into clara.firm_limits (firm_id, max_concurrent_sweeps)
+     values ($1, 999)
+     on conflict (firm_id) do update set max_concurrent_sweeps = excluded.max_concurrent_sweeps`,
+    [firm],
+  );
+}
+
+test("f-a2.c14.readmit GM-10 re-reads after withdrawal while an ordinary repeat sweep stays already_done", async (t) => {
+  if (await gateCore(t)) return;
+  // F3 (opus review): gateCore alone proved false-clean on a numbered-only control DB that
+  // carries the F-A2 posting core but not GM-10's own migration file — the two cells below
+  // then hard-failed CI on "function readmit_autodraft_after_withdrawal does not exist"
+  // instead of a graceful, counted skip. GM-10 ships its OWN migration file on top of core
+  // (never inside it), so it needs its OWN stem gate.
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+
+  const amount = 500000;
+  const vendorName = `GM10 READY ${opk("vendor")}`;
+  const rf = await primeReadyFiling(OWNER(), {
+    client: A1(),
+    amount,
+    vendorName,
+    registration: `2026${opk("reg").replace(/[^a-z0-9]/gi, "").slice(-8)}`,
+  });
+
+  // Production-shaped first read: a real sweep task, a wake-authored agent draft, the
+  // coding_attempts task->entry identity link, and a completed autodraft attempt.
+  const first = await admitAutodraft({
+    filing: rf.filingId,
+    origin: ORIGIN.sweep,
+    reserveTokens: 40000,
+  });
+  assert.equal(first.outcome, "admitted", `GM-10 premise: first sweep admits (${JSON.stringify(first)})`);
+  await beginAutodraft({ task: first.task_id, workflowRunId: `gm10-first-${opk("wf")}` });
+  const firstCred = await mintAutodraftCred(world.firms.A, A1());
+  const firstDraft = await wakeBillDraft(OWNER(), firstCred, {
+    client: A1(),
+    cited: rf,
+    amount,
+    vendorName,
+    opKey: opk("gm10-first-draft"),
+    coding: { task_id: first.task_id, part_payload: { kind: "coding_card", source: "GM-10 first read" } },
+  });
+  const firstEntry = firstDraft.entry_id ?? firstDraft.entryId;
+  assert.ok(firstEntry, "GM-10 premise: the first agent read produced a real draft");
+  await settleAutodraft({ task: first.task_id, outcome: "drafted", tokens: 1200, entry: firstEntry });
+
+  // The human genuinely revises the agent draft (entry.revised is positive evidence), then
+  // deliberately withdraws it. Revision alone is not allowed to trigger the runtime lane.
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: firstEntry,
+    lines: billLines(EXP, AP, amount),
+    expectedRevision: firstDraft.revision_token,
+    vendorName,
+    document: rf.documentId,
+    opKey: opk("gm10-revise"),
+  });
+  await withdrawDraft(OWNER(), {
+    entry: firstEntry,
+    reason: "GM-10: ask the agent to re-derive after considering my revision",
+    expectedRevision: revised.revision_token,
+    opKey: opk("gm10-withdraw"),
+  });
+  assert.equal((await entryRow(firstEntry)).status, "withdrawn", "GM-10 premise: the human-edited draft is withdrawn");
+
+  const withdrawal = (await rootQuery(
+    `select id, seq from clara.domain_events
+      where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2
+      order by seq desc limit 1`,
+    [world.firms.A, firstEntry],
+  )).rows[0];
+  assert.ok(withdrawal?.id, "GM-10 premise: withdraw_draft emitted the exact entry.withdrawn trigger event");
+
+  // HALF 2, before opening the deliberate door: the ordinary background sweep still takes
+  // 0053's duplicate wall on this same completed, now-withdrawn filing. If somebody widens
+  // sweep admission to make HALF 1 pass, this exact assertion goes red.
+  const ordinaryRepeat = await admitAutodraft({
+    filing: rf.filingId,
+    origin: ORIGIN.sweep,
+    reserveTokens: 40000,
+  });
+  assert.equal(
+    ordinaryRepeat.outcome,
+    "already_done",
+    `GM-10 half 2: ordinary repeat sweep remains refused already_done (${JSON.stringify(ordinaryRepeat)})`,
+  );
+
+  // Put the consumer immediately before entry.revised so this run observes BOTH candidate
+  // events. Only the later entry.withdrawn is subscribed; keying on revision would fail the
+  // exact-event DB proof and enqueue nothing.
+  const revisedEvent = (await rootQuery(
+    `select seq from clara.domain_events
+      where firm_id=$1 and event_type='entry.revised' and entry_id=$2
+      order by seq desc limit 1`,
+    [world.firms.A, firstEntry],
+  )).rows[0];
+  assert.ok(revisedEvent?.seq, "GM-10 premise: revise_entry emitted entry.revised evidence");
+  await rootQuery(
+    `insert into clara.relay_checkpoints(consumer, firm_id, last_seq, updated_at)
+     values ('autodraft', $1, $2, now())
+     on conflict (consumer, firm_id) do update set last_seq=excluded.last_seq, updated_at=now()`,
+    [world.firms.A, Number(revisedEvent.seq) - 1],
+  );
+
+  const [{ runAutodraftCycle }, { makeRuntimeClient }] = await Promise.all([
+    import("../../runtime/lib/autodraft.mjs"),
+    import("../../runtime/lib/pools.mjs"),
+  ]);
+  const runtimeClient = makeRuntimeClient();
+  const enqueued = [];
+  let cycle;
+  await runtimeClient.connect();
+  try {
+    await runtimeClient.query("set role clara_runtime");
+    cycle = await runAutodraftCycle(runtimeClient, {
+      onlyFirm: world.firms.A,
+      enqueue: async (task) => enqueued.push(task),
+      model: "gpt-5.6-terra",
+      reserveTokens: 40000,
+      log: (message) => noteLane(`GM-10 runtime: ${message}`),
+    });
+  } finally {
+    await runtimeClient.end();
+  }
+
+  // HALF 1: the WITHDRAWAL event crossed the real consumer, the audited exact-event door
+  // minted a fresh one_click task, and that task can perform the fresh agent read/draft.
+  assert.equal(cycle.admitted, 1, `GM-10 half 1: one fresh task admitted (${JSON.stringify(cycle)})`);
+  assert.equal(enqueued.length, 1, `GM-10 half 1: one fresh task enqueued (${JSON.stringify(enqueued)})`);
+  assert.notEqual(enqueued[0], first.task_id, "GM-10 half 1: re-admission minted a new task identity");
+
+  const readmit = (await rootQuery(
+    `select aa.origin, aa.task_id, t.status
+       from clara.autodraft_attempts aa
+       join clara.agent_tasks t on t.id=aa.task_id
+      where aa.filing_id=$1 and aa.task_id=$2`,
+    [rf.filingId, enqueued[0]],
+  )).rows[0];
+  assert.deepEqual(
+    { origin: readmit.origin, task: readmit.task_id, status: readmit.status },
+    { origin: ORIGIN.oneClick, task: enqueued[0], status: "queued" },
+    "GM-10 half 1: the event path used the distinct deliberate door, not the sweep origin",
+  );
+
+  const audit = (await rootQuery(
+    `select actor, on_behalf_of, args
+      from clara.audit_log
+      where fn='readmit_autodraft_after_withdrawal' and entry_id=$1
+      order by at desc limit 1`,
+    [firstEntry],
+  )).rows[0];
+  assert.ok(audit, "GM-10 half 1: re-admission has its own audit row");
+  const agentId = (await rootQuery("select clara.agent_user_id() as id")).rows[0].id;
+  assert.equal(audit.actor, agentId, "GM-10 audit: the runtime action is recorded under agent identity");
+  assert.equal(audit.on_behalf_of, OWNER(), "GM-10 audit: machine act is on behalf of the withdrawing human");
+  assert.equal(audit.args?.withdrawal_event_id, withdrawal.id, "GM-10 audit: exact withdrawal event is receipted");
+  assert.equal(audit.args?.outcome, "re_admitted_after_withdrawal", "GM-10 audit: the distinct 0053 outcome is receipted");
+
+  await beginAutodraft({ task: enqueued[0], workflowRunId: `gm10-second-${opk("wf")}` });
+  const secondCred = await mintAutodraftCred(world.firms.A, A1());
+  const secondDraft = await wakeBillDraft(OWNER(), secondCred, {
+    client: A1(),
+    cited: rf,
+    amount,
+    vendorName,
+    opKey: opk("gm10-second-draft"),
+    coding: { task_id: enqueued[0], part_payload: { kind: "coding_card", source: "GM-10 fresh read" } },
+  });
+  const secondEntry = secondDraft.entry_id ?? secondDraft.entryId;
+  assert.ok(secondEntry, "GM-10 half 1: the re-admitted task produced a fresh agent draft");
+  assert.notEqual(secondEntry, firstEntry, "GM-10 half 1: the re-read owns a new entry, never the human-edited one");
+  await settleAutodraft({ task: enqueued[0], outcome: "drafted", tokens: 1300, entry: secondEntry });
+});
+
+test("f-a2.c14.readmit GM-10 retains a withdrawal that races the originating settle", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+
+  const amount = 500000;
+  const vendorName = `GM10 EARLY ${opk("vendor")}`;
+  const rf = await primeReadyFiling(OWNER(), {
+    client: A1(),
+    amount,
+    vendorName,
+    registration: `2026${opk("reg").replace(/[^a-z0-9]/gi, "").slice(-8)}`,
+  });
+  const first = await admitAutodraft({
+    filing: rf.filingId,
+    origin: ORIGIN.sweep,
+    reserveTokens: 40000,
+  });
+  assert.equal(first.outcome, "admitted", `GM-10 early premise: first sweep admits (${JSON.stringify(first)})`);
+  await beginAutodraft({ task: first.task_id, workflowRunId: `gm10-early-${opk("wf")}` });
+  const cred = await mintAutodraftCred(world.firms.A, A1());
+  const draft = await wakeBillDraft(OWNER(), cred, {
+    client: A1(),
+    cited: rf,
+    amount,
+    vendorName,
+    opKey: opk("gm10-early-draft"),
+    coding: { task_id: first.task_id, part_payload: { kind: "coding_card", source: "GM-10 early withdrawal" } },
+  });
+  const entry = draft.entry_id ?? draft.entryId;
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry,
+    lines: billLines(EXP, AP, amount),
+    expectedRevision: draft.revision_token,
+    vendorName,
+    document: rf.documentId,
+    opKey: opk("gm10-early-revise"),
+  });
+  await withdrawDraft(OWNER(), {
+    entry,
+    reason: "GM-10: early human withdrawal before the originating settle",
+    expectedRevision: revised.revision_token,
+    opKey: opk("gm10-early-withdraw"),
+  });
+  const event = (await rootQuery(
+    `select id from clara.domain_events
+      where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2
+      order by seq desc limit 1`,
+    [world.firms.A, entry],
+  )).rows[0]?.id;
+  assert.ok(event, "GM-10 early premise: the exact withdrawal event exists");
+
+  const pending = await readmitWithdrawal(event);
+  assert.equal(
+    pending.outcome,
+    "retry_pending_settlement",
+    `GM-10 race: a proved withdrawal is retained while its task is live (${JSON.stringify(pending)})`,
+  );
+  assert.equal(pending.prior_task_id, first.task_id, "GM-10 race: the deferral names the exact live owner task");
+
+  // Model the originating workflow's own settle landing AFTER the human's withdrawal, still
+  // reporting 'drafted' (the real production race this cell names) rather than 'failed'.
+  // F5 (opus review, measured): settling 'failed' instead reaches settle_autodraft_task's
+  // ORDINARY terminal branch and 0034's plain supersede arm in admit_autodraft_task, never
+  // 0053's own withdrawal exception (which requires task_status='completed', not 'failed') —
+  // a loose disjunction accepting either outcome token then passed even with 0053's specific
+  // arm silently broken. Settling 'drafted' here is SAFE even though the entry is already
+  // withdrawn: settle_autodraft_task's [0047 / SS7-A F1] ARM 3 recognises the identity match
+  // whose status left 'draft' the OTHER way (a human withdrew it) and settles TERMINALLY as
+  // 'superseded_by_human' -- agent_tasks.status still lands 'completed', which is exactly
+  // 0053's own task_status='completed' premise.
+  await settleAutodraft({
+    task: first.task_id,
+    outcome: "drafted",
+    tokens: 1000,
+    entry,
+  });
+  const retried = await readmitWithdrawal(event);
+  assert.equal(
+    retried.outcome,
+    "re_admitted_after_withdrawal",
+    `GM-10 race: the retained event admits through 0053's OWN withdrawal exception, not the ordinary supersede arm (${JSON.stringify(retried)})`,
+  );
+  assert.ok(retried.task_id, "GM-10 race: terminal replay minted a fresh task");
+  assert.notEqual(retried.task_id, first.task_id, "GM-10 race: the fresh task never reuses the failed owner task");
+
+  // Leave no live reservation behind in the shared file world.
+  await beginAutodraft({ task: retried.task_id, workflowRunId: `gm10-early-cleanup-${opk("wf")}` });
+  await settleAutodraft({
+    task: retried.task_id,
+    outcome: "failed",
+    tokens: 0,
+    refusal: { reason: "gm10_race_cell_cleanup" },
+  });
+});
+
+// ===========================================================================
+// GM-10 negative probes (opus review, F5 fold-in) — the identity chain refuses everything
+// that is not the exact proved human-withdrawal shape. Adapted from the reviewer's own
+// gm10-attack.test.mjs P1.a/b/c/d/f (this file's idiom substituted for the reviewer's
+// standalone rig helpers; the assertions and the six named scenarios are unchanged).
+// ===========================================================================
+
+/** Full eligible chain up to (but not including) revise/withdraw — a completed, drafted
+ *  agent read on a brand-new READY filing. Mirrors cells 1/2's own setup, factored so the
+ *  five negative cells below do not each re-duplicate it. */
+async function gm10BuildEligible(tag) {
+  const amount = 500000;
+  const vendorName = `GM10NEG ${tag} ${opk("v")}`;
+  const rf = await primeReadyFiling(OWNER(), {
+    client: A1(), amount, vendorName,
+    registration: `2026${opk("reg").replace(/[^a-z0-9]/gi, "").slice(-8)}`,
+  });
+  const first = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep, reserveTokens: 40000 });
+  assert.equal(first.outcome, "admitted", `GM-10 negative premise ${tag}: ${JSON.stringify(first)}`);
+  await beginAutodraft({ task: first.task_id, workflowRunId: `gm10neg-${tag}-${opk("wf")}` });
+  const cred = await mintAutodraftCred(world.firms.A, A1());
+  const draft = await wakeBillDraft(OWNER(), cred, {
+    client: A1(), cited: rf, amount, vendorName,
+    opKey: opk(`gm10neg-${tag}-draft`),
+    coding: { task_id: first.task_id, part_payload: { kind: "coding_card", source: tag } },
+  });
+  const entry = draft.entry_id ?? draft.entryId;
+  assert.ok(entry, `GM-10 negative premise ${tag}: agent draft exists`);
+  return { rf, first, entry, draft, amount, vendorName };
+}
+
+/** Revise then withdraw ctx.entry, returning the exact entry.withdrawn event row. */
+async function gm10ReviseAndWithdraw(ctx, tag) {
+  const revised = await reviseAgentDraft(OWNER(), {
+    entry: ctx.entry, lines: billLines(EXP, AP, ctx.amount),
+    expectedRevision: ctx.draft.revision_token, vendorName: ctx.vendorName,
+    document: ctx.rf.documentId, opKey: opk(`gm10neg-${tag}-rev`),
+  });
+  await withdrawDraft(OWNER(), {
+    entry: ctx.entry, reason: `gm10 negative ${tag}`,
+    expectedRevision: revised.revision_token, opKey: opk(`gm10neg-${tag}-wd`),
+  });
+  const ev = (await rootQuery(
+    `select id, seq from clara.domain_events
+      where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2 order by seq desc limit 1`,
+    [world.firms.A, ctx.entry],
+  )).rows[0];
+  assert.ok(ev?.id, `GM-10 negative premise ${tag}: withdrawal event exists`);
+  return ev;
+}
+
+test("f-a2.c14.readmit GM-10 negative: an entry.revised id must NOT open the door (revision is evidence, never the trigger)", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  const ctx = await gm10BuildEligible("p1a");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  await reviseAgentDraft(OWNER(), {
+    entry: ctx.entry, lines: billLines(EXP, AP, ctx.amount),
+    expectedRevision: ctx.draft.revision_token, vendorName: ctx.vendorName,
+    document: ctx.rf.documentId, opKey: opk("gm10neg-p1a-rev"),
+  });
+  const revEv = (await rootQuery(
+    `select id from clara.domain_events where firm_id=$1 and event_type='entry.revised' and entry_id=$2
+      order by seq desc limit 1`, [world.firms.A, ctx.entry])).rows[0];
+  assert.ok(revEv?.id, "premise: entry.revised exists");
+  const out = await readmitWithdrawal(revEv.id);
+  assert.equal(out.outcome, "not_eligible", `entry.revised must refuse: ${JSON.stringify(out)}`);
+  const reg = (await rootQuery(
+    "select task_id, origin from clara.autodraft_attempts where filing_id=$1", [ctx.rf.filingId])).rows[0];
+  assert.equal(reg.task_id, ctx.first.task_id, "registry never moved");
+  assert.equal(reg.origin, ORIGIN.sweep, "origin never flipped to one_click");
+});
+
+test("f-a2.c14.readmit GM-10 negative: an agent draft withdrawn with NO human revision is refused (no entry.revised evidence)", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  const ctx = await gm10BuildEligible("p1b");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  await withdrawDraft(OWNER(), {
+    entry: ctx.entry, reason: "gm10 negative p1b no revision",
+    expectedRevision: ctx.draft.revision_token, opKey: opk("gm10neg-p1b-wd"),
+  });
+  const ev = (await rootQuery(
+    `select id from clara.domain_events where firm_id=$1 and event_type='entry.withdrawn' and entry_id=$2
+      order by seq desc limit 1`, [world.firms.A, ctx.entry])).rows[0];
+  assert.ok(ev?.id, "premise: withdrawal event exists");
+  const out = await readmitWithdrawal(ev.id);
+  assert.equal(out.outcome, "not_eligible", `unrevised withdrawal must refuse: ${JSON.stringify(out)}`);
+});
+
+test("f-a2.c14.readmit GM-10 negative: a withdrawal event from filing X can never admit sibling filing Y", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  const x = await gm10BuildEligible("p1cx");
+  const y = await gm10BuildEligible("p1cy");
+  await settleAutodraft({ task: x.first.task_id, outcome: "drafted", tokens: 1000, entry: x.entry });
+  await settleAutodraft({ task: y.first.task_id, outcome: "drafted", tokens: 1000, entry: y.entry });
+  const ev = await gm10ReviseAndWithdraw(x, "p1cx");
+  const out = await readmitWithdrawal(ev.id);
+  assert.equal(out.outcome, "re_admitted_after_withdrawal", `premise: X admits (${JSON.stringify(out)})`);
+  assert.equal(out.filing_id, x.rf.filingId, "the receipt names X's filing");
+  const yReg = (await rootQuery(
+    "select task_id, origin from clara.autodraft_attempts where filing_id=$1", [y.rf.filingId])).rows[0];
+  assert.equal(yReg.task_id, y.first.task_id, "Y's registry never moved");
+  assert.equal(yReg.origin, ORIGIN.sweep, "Y's registry origin never flipped to one_click");
+});
+
+test("f-a2.c14.readmit GM-10 negative: null/blank/negative arguments and a non-event uuid all refuse", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  await assert.rejects(() => readmitWithdrawal(null), /event is required/i);
+  const ctx = await gm10BuildEligible("p1d");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  const ev = await gm10ReviseAndWithdraw(ctx, "p1d");
+  await assert.rejects(() => readmitWithdrawal(ev.id, "   ", 40000), /model is required/i);
+  await assert.rejects(() => readmitWithdrawal(ev.id, null, 40000), /model is required/i);
+  await assert.rejects(() => readmitWithdrawal(ev.id, "gpt-5.6-terra", 0), /reserve_tokens must be positive/i);
+  await assert.rejects(() => readmitWithdrawal(ev.id, "gpt-5.6-terra", -5), /reserve_tokens must be positive/i);
+  const bogus = (await rootQuery("select gen_random_uuid() as u")).rows[0].u;
+  assert.equal((await readmitWithdrawal(bogus)).outcome, "not_eligible", "a uuid that is no event at all refuses");
+  // and after all those refusals the registry is untouched
+  const reg = (await rootQuery(
+    "select task_id, origin from clara.autodraft_attempts where filing_id=$1", [ctx.rf.filingId])).rows[0];
+  assert.equal(reg.task_id, ctx.first.task_id);
+  assert.equal(reg.origin, ORIGIN.sweep);
+});
+
+test("f-a2.c14.readmit GM-10 negative: the filing registry having moved on kills a stale withdrawal event", async (t) => {
+  if (await gateCore(t)) return;
+  if (await gateReadmit(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
+  // W1 admits T2. T2 then drafts E2; the registry now points at T2, not T1. F1's own memo
+  // reorder (this file's migration fix) means the FIRST admission already wrote a memo, so
+  // this cell deletes it to force a fresh op-key path — measuring the CHAIN, not the memo.
+  const ctx = await gm10BuildEligible("p1f");
+  await settleAutodraft({ task: ctx.first.task_id, outcome: "drafted", tokens: 1000, entry: ctx.entry });
+  const ev = await gm10ReviseAndWithdraw(ctx, "p1f");
+  const first = await readmitWithdrawal(ev.id);
+  assert.equal(first.outcome, "re_admitted_after_withdrawal", JSON.stringify(first));
+  const t2 = (await rootQuery(
+    "select task_id from clara.autodraft_attempts where filing_id=$1", [ctx.rf.filingId])).rows[0].task_id;
+  assert.notEqual(t2, ctx.first.task_id, "registry advanced to the new task");
+
+  const del = await rootQuery(
+    `delete from clara.op_receipts where fn='readmit_autodraft_after_withdrawal' and op_key=$1`,
+    [`gm10-withdrawal:${ev.id}`],
+  );
+  assert.equal(del.rowCount, 1, "the door wrote exactly one op receipt");
+  const again = await readmitWithdrawal(ev.id);
+  assert.equal(again.outcome, "not_eligible",
+    `a stale withdrawal whose filing has moved on must refuse on the CHAIN, not only on the memo: ${JSON.stringify(again)}`);
+});

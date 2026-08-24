@@ -545,9 +545,44 @@ test("declined seeding decision → checkpoint-only skip (no publish)", async ()
   assert.equal(plan.mutate, null);
 });
 
-test("ticked NON-wiki_fact decision (vendor_account_rule) → checkpoint-only skip", async () => {
-  const plan = await planEvent(stubClient({ proposal: wikiFactProposal() }), {
+// RETIRED/REBUILT (F-A2 PR-3, OQ-3/D36): vendor_account_rule ticks WIDENED onto this SAME
+// deterministic lane (tick_seeding_proposal stages payload.wiki.* itself, since it stopped
+// minting a signed coding_rules row for this kind — see the migration's own header for the
+// three grounds). "checkpoint-only skip" is no longer this kind's behaviour; it is the
+// SAME dispatch a wiki_fact tick gets. A genuinely unrelated kind (counterparty_birth,
+// never added to SEEDING_WIKI_PROPOSAL_KINDS) is the cell that still proves the skip.
+const vendorAccountRuleProposal = (over = {}) => ({
+  proposal_kind: "vendor_account_rule", state: "ticked", client_id: CLIENT,
+  payload: { name: "ACME TRADING SDN BHD", account_code: "5000", wiki: {
+    slug: `vendor-account/${CLIENT}`, title: "Vendor account coding: ACME TRADING SDN BHD",
+    page_kind: "treatment", content: "ACME TRADING SDN BHD bills post to account 5000.",
+  } },
+  evidence: { occurrence_count: 14, date_span: { first: "2025-01-05", last: "2025-12-28" },
+    line_cites: [{ region_id: "reg-2", text: "2025-01-05 ACME TRADING SDN BHD 5000 RM 300.00 DR" }] },
+  ...over,
+});
+
+test("ticked vendor_account_rule decision → deterministic publish, the SAME lane a wiki_fact tick uses (OQ-3/D36)", async () => {
+  const plan = await planEvent(stubClient({ proposal: vendorAccountRuleProposal() }), {
     firmId: FIRM, ev: seedingEv({ proposal_kind: "vendor_account_rule" }), deps: {},
+  });
+  assert.equal(plan.status, "projected");
+  assert.equal(plan.lane, "deterministic");
+  const cap = stubClient({ proposal: vendorAccountRuleProposal() });
+  await plan.mutate(cap);
+  const call = cap.calls.find((x) => /publish_wiki_page_version/.test(x.sql));
+  assert.ok(call, "calls publish_wiki_page_version");
+  assert.equal(call.params[1], `vendor-account/${CLIENT}`, "slug from the staged payload verbatim");
+  assert.equal(call.params[2], "treatment", "page_kind is one already admitted by WIKI_FACT_PAGE_KINDS — no new kind added");
+  assert.equal(call.params[4], null, "counterparty is null — publishes as a treatment page, not a counterparty page");
+  assert.match(call.params[5], /ACME TRADING SDN BHD/, "content transcribes the admin's own decision verbatim");
+  assert.equal(call.params[10], "deterministic", "synthesis=deterministic — no model, matching the estate's WB-R6(1) authority-boundary wall");
+  assert.equal(call.params[11], null, "engine_id NULL (no model)");
+});
+
+test("ticked NON-wiki decision (counterparty_birth, genuinely unrelated) → checkpoint-only skip", async () => {
+  const plan = await planEvent(stubClient({ proposal: wikiFactProposal() }), {
+    firmId: FIRM, ev: seedingEv({ proposal_kind: "counterparty_birth" }), deps: {},
   });
   assert.equal(plan.status, "skipped_non_wiki_kind");
   assert.equal(plan.mutate, null);

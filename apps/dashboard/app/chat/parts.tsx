@@ -12,9 +12,7 @@ import { JeReviewCard } from "./JeReviewCard";
 import { DocReviewCard } from "../shared/cards/DocReviewCard";
 import { DiffCard } from "../shared/cards/DiffCard";
 import { SweepReceiptCard } from "../shared/cards/SweepReceiptCard";
-import { KbRuleProposalCard } from "../shared/cards/KbRuleProposalCard";
 import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
-import { RulePostReceiptCard } from "../shared/cards/RulePostReceiptCard";
 import { BankReconReceiptCard } from "../shared/cards/BankReconReceiptCard";
 import { BankRuleProposalCard } from "../shared/cards/BankRuleProposalCard";
 import { FixedAssetCard } from "../shared/cards/FixedAssetCard";
@@ -229,17 +227,11 @@ export function TranscriptParts({
         if (p.type === "sweep_receipt") {
           return <SweepReceiptCard key={`sweep:${p.run_id}:${i}`} token={token ?? null} part={p} />;
         }
-        if (p.type === "kb_rule_proposal") {
-          return <KbRuleProposalCard key={`rule:${p.rule_id}:${i}`} token={token ?? null} part={p} />;
-        }
         if (p.type === "open_question") {
           return <OpenQuestionCard key={`question:${p.question_id}:${i}`} token={token ?? null} part={p} />;
         }
-        // Wave-A2 (contract §6.4/§7): the posted-by-rule receipt; identifier-only, the
-        // card hydrates the rule_post_runs receipt on mount (like sweep_receipt).
-        if (p.type === "rule_post_receipt") {
-          return <RulePostReceiptCard key={`rulepost:${p.run_id}:${i}`} token={token ?? null} part={p} />;
-        }
+        // kb_rule_proposal and rule_post_receipt RETIRED with F-A2 PR-3 (GM-11) —
+        // both rendered rules-execution verbs the design drops whole.
         // Wave C-c (design v2.1 §7): identifier-only; each card hydrates on mount
         // (bank_recon_receipt keys on statement_id — parts.ts explains why).
         if (p.type === "bank_recon_receipt") {
