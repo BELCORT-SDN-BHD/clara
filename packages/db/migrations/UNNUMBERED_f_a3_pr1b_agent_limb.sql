@@ -12,6 +12,13 @@
 -- annexes-1-mechanics.md:369-382 / annexes-3-build.md:179-192 dated 2026-08-23) — TEN re-cut bodies
 -- total, unchanged in count from Annex J.2's headline number by coincidence, not by construction.
 --
+-- ELEVENTH BODY ADDED LATER (owner ruling, Track-A sitting, ADR-0074/law 78, this lane's
+-- reconciliation round): `_tf_bank_settled_authority_belt` (D-11) — likewise off Annex J.2's own
+-- list, a pre-existing 0040-era trigger function whose RESOLUTION floor the ruling widened to
+-- admit a receipted agent act (the MINTING floor in the same body is untouched — see D-11's own
+-- header for the split). Named separately from the ten above because it is genuinely a different
+-- provenance (a later, targeted owner ruling, not part of the original D1 scope-out).
+--
 -- ALSO IN THIS WINDOW: obligation X-1 (annexes-3-build.md:193-208, same PR-1a lane annex true) —
 -- the drawer-2 gate's arm (4) (`no_registered_account`) is vacuous on its own target population,
 -- because `coa_accounts.is_bank_account` is minted ONLY by registration writers
@@ -51,14 +58,14 @@
 --   §A  DDL 1  — bank_matches.origin CHECK gains 'agent'
 --   §B  DDL 2  — wake_credentials' two CHECKs gain the bank_agent disjuncts
 --   §C  DDL 3  — open_questions' CHECK family gains the bank_line scope / bank_ambiguity origin
---   §D  the ten CoR'd bodies (D1 — see the §0 inventory)
+--   §D  the ten CoR'd bodies (D1 — see the §0 inventory) plus D-11 (ADR-0074/law 78, off-D1)
 --   §E  the shared registry-ledger predicate (X-1) + the drawer-2 gate's repaired arm (4)
 --   §F..§G  DDL 4 (the three new tables + clara.set_bank_agency_hold, the hold's own writer)
 --       through DDL 6 (the proposal-accept trigger)
 --   §H  DDL 7 (partial) — the clara_wake_bank role, empty at creation
 --   §I  the shared registry-ledger predicate + drawer-2 arm 4 (X-1) — see §E; kept together in
 --       one window for locality
---   §J  TAIL CENSUS, part 1 — the ten bodies + seven DDL groups
+--   §J  TAIL CENSUS, part 1 — the ten D1 bodies + D-11 + seven DDL groups
 --   §K  the thirteen wake wrappers + agent cores (Tier-A + Tier-B M1-M15 + Tier-C)
 --   §L  DDL 7 completion — the 13-row bank_agent allowlist, clara_wake_bank_login, schema USAGE
 --   §M  TAIL CENSUS, part 2 — §K/§L
@@ -139,6 +146,16 @@ begin
     raise exception 'prestate: _resolve_and_book_bank_line_core drifted from its pinned sha (found %)', v_sha using errcode='CLR10';
   end if;
 
+  -- The ELEVENTH CoR'd body (owner ruling, Track-A sitting, ADR-0074/law 78 -- see the CoR's own
+  -- comment below for the full citation). Pinned at its 0040-era, byte-unmoved pre-ruling sha so
+  -- a later drift is caught rather than silently assumed compatible, the SAME discipline as
+  -- _approve_entry_core's P-14 pin above.
+  select encode(sha256(convert_to(prosrc,'UTF8')),'hex') into v_sha
+    from pg_proc where oid = 'clara._tf_bank_settled_authority_belt()'::regprocedure;
+  if v_sha is distinct from '291aa474ef746f7e5a971c02fc67e84407be982c28e61e8a67343064dfb01072' then
+    raise exception 'prestate: _tf_bank_settled_authority_belt drifted from its pinned pre-ruling sha (found %)', v_sha using errcode='CLR10';
+  end if;
+
   -- The P-14 pin: _approve_entry_core's NINTH generation, re-derived here so a later drift
   -- (a stray tenth generation landing between authoring and apply) is caught rather than
   -- silently assumed compatible. This file does NOT recut this body (P-14 cleared: no tenth
@@ -205,7 +222,7 @@ begin
     raise exception 'prestate: F-A3 PR-1b partial birth — one of the three new tables already exists' using errcode='CLR10';
   end if;
 
-  raise notice 'prestate: clean — ten target bodies pinned by prosrc sha at the F-A2/PR-1 + F-A3/PR-1a frontier, _approve_entry_core confirmed at its pinned NINTH-generation sha (P-14 cleared, no tenth body; a MANDATORY pre-merge re-derivation against F-A2/PR-1''s merged prosrc is still owed since that PR is unmerged), bank_matches.origin holds exactly {human,rule}, open_questions carries no bank_line reference yet, and none of the three new tables exist. wake_credentials'' two-predecessor check runs separately below and HARD-ABORTS on either missing.';
+  raise notice 'prestate: clean — ELEVEN target bodies pinned by prosrc sha at the F-A2/PR-1 + F-A3/PR-1a frontier (ten from Annex J.2 plus _tf_bank_settled_authority_belt, the owner-ruled ADR-0074/law 78 recut), _approve_entry_core confirmed at its pinned NINTH-generation sha (P-14 cleared, no tenth body; a MANDATORY pre-merge re-derivation against F-A2/PR-1''s merged prosrc is still owed since that PR is unmerged), bank_matches.origin holds exactly {human,rule}, open_questions carries no bank_line reference yet, and none of the three new tables exist. wake_credentials'' two-predecessor check runs separately below and HARD-ABORTS on either missing.';
 end $prestate$;
 
 -- ================================================================================================
@@ -3893,6 +3910,370 @@ begin
       'ack_period_exceptions', v_ack));
 end $function$;
 
+-- ------------------------------------------------------------------------------------------------
+-- D-11  clara._tf_bank_settled_authority_belt — the owner ruled this at the Track-A sitting
+-- (ADR-0074, law 78): the ratified F-A3 scope (PROGRESS.md's F-A3 row, verbatim) places "resolve
+-- exception incl. write-off" in the agent's OPEN register; law 71's reservation keeps only the
+-- MINTING act (`except_bank_line`, the red pen) human. The 0040-era owner-only floor on
+-- RESOLUTION was a pre-Charter wall this ruling supersedes. This CoR touches the RESOLUTION half
+-- of the belt ONLY — the piece guarding `x.resolved_by` below. The MINTING floor two screens up
+-- (guarding `x.created_by`, "the exception door is an owner act") is a DIFFERENT site in the same
+-- function body and is byte-unmoved: an agent still cannot open/mint an exception through any
+-- path, wake verb or direct write alike (f31w.q's twin cell proves this).
+--
+-- The widening is additive, not a replacement: the human path re-reads the SAME v_rank (the
+-- resolver's own firm-membership rank, `u.is_agent = false`-filtered so an agent actor can never
+-- BE the human branch) against the SAME owner floor, raises the SAME errcode/reason on the SAME
+-- null-stamp precondition. What is new is the OR — an agent actor additionally clears the floor
+-- only when `x.resolved_by = clara.agent_user_id()` AND an ADMITTED
+-- `clara.bank_agent_receipts` row already exists for `act_kind = 'exception_resolve',
+-- subject_id = x.id`. The receipt is the load-bearing half of that conjunct: `resolved_by`
+-- alone is a spelling (constraint law 3, "spelling is not identity") — an agent-shaped actor id
+-- on the row with no admitted receipt still falls through to the raise, so this cannot be
+-- satisfied by hand-crafting the column. The receipt is written by
+-- `_agent_resolve_bank_line_exception_core` inside the SAME transaction, strictly before this
+-- deferred constraint trigger fires at commit, so the read-back here always sees it when the
+-- agent path actually ran the receipted act.
+-- ------------------------------------------------------------------------------------------------
+create or replace function clara._tf_bank_settled_authority_belt() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  -- 0040 FIX WAVE A5: the statement record is v_st, NOT st. The settled predicate this belt now
+  -- shares byte-for-byte with unmatch_bank_match / complete_pending_match uses the SQL alias
+  -- `st`, and plpgsql resolves a qualified identifier against its DECLARED VARIABLES FIRST --
+  -- the sql_variable_conflict trap 0038:3185-3188 names and this file already sidesteps once
+  -- (the `q` alias in complete_bank_reconciliation). Renaming the variable is what lets the
+  -- predicate stay identical to the verbs' instead of drifting by one alias.
+  m record; x record; ln record; v_st record;
+  v_n int; v_ids uuid[]; v_rank int;
+  -- 0040 FIX WAVE A4-v2: the NEWEST covering receipt's cutoff. The resolved-then-booked door
+  -- admits only a resolution that post-dates it -- see the door's own note below.
+  v_cover_at timestamptz;
+begin
+  -- ---------------------------------------------------------------
+  -- ARM (a) -- THE MEMBER TABLES.
+  -- ---------------------------------------------------------------
+  if tg_table_name = 'bank_match_line_members' then
+    select * into m from clara.bank_match_line_members mm where mm.id = new.id;
+    if not found then return null; end if;
+    -- 0042 (as-built ladder round 4): AT MOST ONE STANDING BOOKING PER LINE, and the line's
+    -- exception state and match state may never disagree about whether it is booked. Both
+    -- halves live in ONE shared body (S4.6B) that reads ONE shared derivation (S4.6A) -- the
+    -- same derivation clara.resolve_and_book_bank_line refuses on and clara.unmatch_bank_match
+    -- reports from -- so no door can be walled by a rule another door does not know.
+    -- DELIBERATELY UNCONDITIONAL and deliberately ABOVE the settled-period machinery: this law
+    -- is not about reconciled periods.
+    -- ROUND 5: m.group_status travels too, because the law is asked on the parked FLIP as well
+    -- as on the INSERT (S4.6B carries the derivation). m.group_status is the row re-queried by
+    -- id at COMMIT, i.e. the NEW status -- `old` is deliberately not touched here, since it is
+    -- unassigned on the INSERT path this same line serves.
+    perform clara._wdb_assert_line_booking_lawful(m.line_id, m.match_id, tg_op, m.group_status);
+    -- 0040 FIX WAVE A5 [R5]: THE SETTLED SET IS ACCOUNT-SCOPED AND ALL-TIME, byte-identical to
+    -- the predicate the two verb splices use (unmatch_bank_match / complete_pending_match). The
+    -- old "a complete recon of the LINE'S OWN statement" scope made the structural backstop
+    -- strictly WEAKER than the door it backs -- a line whose own month carried no receipt but
+    -- which is priced into a LATER complete receipt on the same account was waved through here
+    -- while the verb refused it. TAIL 2 pins the three predicates identical.
+    --
+    -- 0040 FIX WAVE A6 [R4/CX4]: a receipt born in THIS transaction is not a settled period. The
+    -- belt is deferred and re-queries at COMMIT, so `match_bank_line(last line);
+    -- complete_bank_reconciliation(stmt)` in one transaction saw its own receipt and refused the
+    -- line it had just matched -- forbidding exactly the same-transaction book-then-reconcile act
+    -- complete_bank_reconciliation's own cutoff note says it supports.
+    --
+    -- 0040 FIX WAVE A6-v2 [the delta round's BLOCKER 1]: TIMESTAMPS WERE THE WRONG IDENTITY, and
+    -- the difference moved money. The first cut asked `br.completed_at < transaction_timestamp()`
+    -- -- "was this receipt completed before MY transaction started?" -- which is NOT the question.
+    -- A transaction that started an hour ago and idled sees EVERY receipt certified in the
+    -- meantime as "not yet settled": T1 begins and stalls; T2 certifies a +1,000 open-excepted
+    -- line; T1 then resolves it matched_booking and matches it, all in one transaction. T1's older
+    -- transaction timestamp made T2's freshly-certified receipt invisible to this belt, so
+    -- outstanding and excepted both fell by 1,000 AFTER certification -- the exact breach the
+    -- settled-period law exists to make impossible.
+    -- The identity that actually answers "born in THIS transaction" is the WRITER'S OWN
+    -- DECLARATION: complete_bank_reconciliation sets the transaction-local GUC
+    -- clara.completing_recon to its receipt's id immediately after the INSERT, and both arms here
+    -- exclude EXACTLY THAT ONE ID and nothing else. set_config(..., is_local => true) is
+    -- transaction-scoped and subtransaction-safe (it rolls back with the subxact that set it), so
+    -- there is no xid-wraparound, clock-skew or timestamp-collision class left. It is not a bypass
+    -- hatch either: the tables are SELECT-only for every human role (no DML grant anywhere), so
+    -- the only way to reach a member write is through a verb -- and unmatch_bank_match /
+    -- complete_pending_match carry the SAME settled predicate WITHOUT this exclusion (TAIL 4b
+    -- pins that asymmetry), so a hand-set GUC buys nothing.
+    select count(*)::int, max(br.completed_at) into v_n, v_cover_at
+      from clara.bank_statement_lines l
+      join clara.bank_statements st on st.id = l.statement_id
+      join clara.bank_reconciliations br
+        on br.bank_account_id = st.bank_account_id
+       and br.status = 'complete'
+       and br.period_end >= st.period_end
+      where l.id = m.line_id
+        and br.id is distinct from nullif(current_setting('clara.completing_recon', true), '')::uuid;
+    if v_n = 0 then return null; end if;
+    if tg_op = 'INSERT' then
+      -- 0040 FIX WAVE A4 [A14]: THE RESOLVED-THEN-BOOKED DOOR, AND ONLY THAT DOOR. The arm used
+      -- to admit ANY exception row ever -- open, or resolved as bank_corrective_line -- so the
+      -- only thing keeping an OPEN-excepted line out of a new match on a settled period was the
+      -- verb-side line_excepted re-check, which is precisely the verb-guards-the-belt layering
+      -- the ladder rejected. The ratified door is the resolved-then-booked case and nothing else.
+      --
+      -- 0040 FIX WAVE A4-v2 [the delta round, adjudicated]: ...AND THE RESOLUTION MUST POST-DATE
+      -- EVERY COVERING RECEIPT. A4's own neutrality claim -- "arithmetically neutral for every
+      -- completed receipt" -- is true only when the resolution happens AFTER certification, so
+      -- that the receipt's own as-of re-derivation cannot see it (excepted(P) is cutoff-gated:
+      -- resolved_at > cutoff still reads OPEN). A STALLED transaction breaks that silently:
+      -- resolve_bank_line_exception stamps resolved_at = now() = the TRANSACTION's start, and
+      -- bank_matches.created_at likewise, so a transaction that began before certification and
+      -- commits after it writes rows stamped BEFORE the cutoff. The receipt's re-derivation then
+      -- sees the resolution and the match, excepted(P) collapses to zero, outstanding follows,
+      -- and a certified receipt stops reproducing under its own cutoff -- measured, red-proved
+      -- (x40.z-A6v2 half (b)), and closed here. v_cover_at is the NEWEST covering receipt's
+      -- cutoff, drawn from the very rows the settled predicate above counted, so "post-dates
+      -- every covering receipt" is exactly what is asked. A null resolved_at cannot pass either
+      -- (null > x is null), which is correct: arm (b) below requires resolved rows to carry one.
+      -- 0042 (D-b SS4, ADMISSION SITE 2 OF 7 [WDB-G9]): THE PARK IS A SECOND DOOR beside
+      -- the 0040 A4-v2 resolved-then-booked door, never a widening of it. A parked resolution
+      -- writes its line member while the exception is deliberately still OPEN -- the checker
+      -- executes the declaration at the flip -- so no resolved row exists yet for the first
+      -- door to find. What DOES exist, in this same transaction and re-queried here at commit,
+      -- is the group: pending, carrying the owner's declaration, and naming an exception that
+      -- is open ON THIS LINE. That state is arithmetically neutral for every covering receipt,
+      -- because an open exception is precisely what excepted(P) already counted -- the park
+      -- changes nothing the receipt certified, which is the whole reason it is a park and not
+      -- a booking. The declaration's own exception_id must agree with the group's immutable
+      -- identity column, so a stamped id alone can never open this door.
+      if not exists (select 1 from clara.bank_line_exceptions ex
+                      where ex.line_id = m.line_id
+                        and ex.status = 'resolved'
+                        and ex.resolution_disposition in ('matched_booking','written_off_adjustment')
+                        and ex.resolved_at > v_cover_at)
+         and not exists (select 1 from clara.bank_matches bm
+                          join clara.bank_line_exceptions px on px.id = bm.resolution_exception_id
+                          where bm.id = m.match_id and bm.status = 'pending'
+                            and bm.pending_resolution is not null
+                            and (bm.pending_resolution->>'exception_id')::uuid = px.id
+                            and px.line_id = m.line_id and px.status = 'open') then
+        raise exception 'statement line % lies in a reconciled period; a new match on it would change what that receipt certified', m.line_id
+          using errcode='CLR10',
+            detail=jsonb_build_object('reason','recon_period_settled','line_id',m.line_id,
+              'match_id',m.match_id,'covering_cutoff',v_cover_at)::text;
+      end if;
+      return null;
+    end if;
+    -- 0042 (D-b SS4, ADMISSION SITES 4 AND 7 OF 7 [WDB-G9]): the two PARKED cascades pass.
+    -- pending->live is the flip executing the owner's declared resolution; pending->unmatched
+    -- is the cancel putting the line back exactly where the receipt found it. Everything else
+    -- -- above all a live->unmatched release, whose settlement HAS posted and IS priced into
+    -- the receipt -- keeps the unconditional refusal below.
+    if clara._bank_parked_cascade_admitted(m.match_id, m.line_id,
+         old.group_status, new.group_status) then
+      return null;
+    end if;
+    raise exception 'statement line % lies in a reconciled period; its match cannot be released or completed until that reconciliation is voided', m.line_id
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','recon_period_settled','line_id',m.line_id,
+          'match_id',m.match_id,'group_status',m.group_status)::text;
+  end if;
+
+  if tg_table_name = 'bank_match_entry_members' then
+    select * into m from clara.bank_match_entry_members mm where mm.id = new.id;
+    if not found then return null; end if;
+    -- The law is about the group's LINES: an entry member changes the tie of a group whose
+    -- lines may sit in a settled period, which is the same breach seen from the other side.
+    -- 0040 FIX WAVE A5 + A6/A6-v2: the same account-scoped all-time predicate, and the same
+    -- transaction-local-GUC same-transaction exclusion (see the line-member arm's own note for
+    -- why a timestamp was the wrong identity), as the line-member arm above.
+    select count(*)::int, coalesce(array_agg(distinct l.id), '{}'::uuid[]), max(br.completed_at)
+      into v_n, v_ids, v_cover_at
+      from clara.bank_match_line_members lm
+      join clara.bank_statement_lines l on l.id = lm.line_id
+      join clara.bank_statements st on st.id = l.statement_id
+      join clara.bank_reconciliations br
+        on br.bank_account_id = st.bank_account_id
+       and br.status = 'complete'
+       and br.period_end >= st.period_end
+      where lm.match_id = m.match_id
+        and br.id is distinct from nullif(current_setting('clara.completing_recon', true), '')::uuid;
+    if v_n = 0 then return null; end if;
+    if tg_op = 'INSERT' then
+      -- 0040 FIX WAVE A4 + A4-v2: the resolved-then-booked door, and only that door -- and only
+      -- for a resolution that post-dates every covering receipt (the line-member arm above
+      -- carries the full note). v_cover_at is the NEWEST cutoff over every covering receipt of
+      -- every line in this group, which is the conservative and correct reading of "every": a
+      -- group's lines share one account, and an entry member changes the tie of the whole group.
+      select count(*)::int into v_n
+        from unnest(v_ids) as u(line_id)
+        where not exists (select 1 from clara.bank_line_exceptions ex
+                           where ex.line_id = u.line_id
+                             and ex.status = 'resolved'
+                             and ex.resolution_disposition in ('matched_booking','written_off_adjustment')
+                             and ex.resolved_at > v_cover_at);
+      if v_n > 0 then
+        raise exception 'bank match % holds % statement line(s) in a reconciled period; a new entry member would change what that receipt certified', m.match_id, v_n
+          using errcode='CLR10',
+            detail=jsonb_build_object('reason','recon_period_settled','match_id',m.match_id,
+              'entry_id',m.entry_id,'settled_line_ids',to_jsonb(v_ids),
+              'covering_cutoff',v_cover_at)::text;
+      end if;
+      return null;
+    end if;
+    -- 0042 (D-b SS4, ADMISSION SITE 5 OF 7 [WDB-G9]): the parked FLIP's entry members pass.
+  -- clara.complete_pending_match writes the settlement (and any deferred ancillary) as
+  -- 'pending' members and then flips the group, so these rows cascade pending->live in the
+  -- same statement the line members do; admitting one cascade and refusing the other would
+  -- wedge the flip halfway. The predicate is the shared one, and it reads the group's
+  -- immutable identity plus the named exception's resolved-with-booking state at commit.
+  if clara._bank_parked_cascade_admitted(m.match_id, null,
+       old.group_status, new.group_status) then
+    return null;
+  end if;
+  raise exception 'bank match % holds statement line(s) in a reconciled period; it cannot be released or completed until that reconciliation is voided', m.match_id
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','recon_period_settled','match_id',m.match_id,
+          'entry_id',m.entry_id,'settled_line_ids',to_jsonb(v_ids))::text;
+  end if;
+
+  -- ---------------------------------------------------------------
+  -- ARMS (b) and (c) -- THE EXCEPTION TABLE.
+  -- ---------------------------------------------------------------
+  select * into x from clara.bank_line_exceptions ex where ex.id = new.id;
+  if not found then return null; end if;
+
+  -- Congruence the FKs cannot express because they cannot join: the line's own statement is the
+  -- statement this row names, and the account follows from the line.
+  select * into ln from clara.bank_statement_lines l where l.id = x.line_id;
+  if not found then
+    raise exception 'bank line exception % names no statement line', x.id
+      using errcode='CLR10',detail='{"reason":"exception_line_orphan"}';
+  end if;
+  if ln.firm_id <> x.firm_id or ln.client_id <> x.client_id then
+    raise exception 'bank line exception % names a line outside its own client', x.id
+      using errcode='CLR11',detail='{"reason":"tenancy_incongruent"}';
+  end if;
+  if ln.statement_id <> x.statement_id or ln.bank_account_id is distinct from x.bank_account_id then
+    raise exception 'bank line exception % does not name its line''s own statement or account', x.id
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','exception_congruence_broken','exception_id',x.id,
+          'line_id',x.line_id)::text;
+  end if;
+
+  -- (c) an OPEN exception's statement is live.
+  select * into v_st from clara.bank_statements bs where bs.id = x.statement_id;
+  if x.status = 'open' and (not found or v_st.status <> 'live') then
+    raise exception 'bank line exception % is open against a % statement; an open dispute needs a statement that still stands', x.id, coalesce(v_st.status,'missing')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','exception_statement_not_live','exception_id',x.id,
+          'statement_id',x.statement_id)::text;
+  end if;
+
+  -- (b) THE OWNER FLOOR, STRUCTURALLY. clara.actor_role_rank() answers for the SESSION; this
+  -- must answer for the ACTOR ON THE ROW, so the membership is read directly (0002:447-451's
+  -- shape, re-keyed from jwt_sub() to the stored actor).
+  --
+  -- THE MINTING FLOOR (this block) IS UNTOUCHED BY ADR-0074/law 78. Law 71's reservation keeps
+  -- the exception door itself -- the red pen, opening a dispute in the first place -- a human
+  -- act; no wake verb in this file can reach an INSERT on bank_line_exceptions at all (there is
+  -- no _agent_*_core for it), so this arm's only live caller is the human path today. It stays
+  -- exactly as 0040 shipped it, byte for byte.
+  select clara.role_rank(fm.role) into v_rank
+    from clara.firm_memberships fm
+    join clara.users u on u.id = fm.user_id
+   where fm.user_id = x.created_by and fm.firm_id = x.firm_id and fm.status = 'active'
+     and u.is_agent = false
+   limit 1;
+  if x.created_by is null or coalesce(v_rank, -1) < clara.role_rank('owner') then
+    raise exception 'bank line exception % was not written by a firm principal; the exception door is an owner act', x.id
+      using errcode='CLR04',
+        detail=jsonb_build_object('reason','exception_floor_breached','exception_id',x.id,
+          'created_by',x.created_by)::text;
+  end if;
+  if nullif(btrim(coalesce(x.reason,'')),'') is null then
+    raise exception 'bank line exception % carries no reason', x.id
+      using errcode='CLR10',detail='{"reason":"reason_required"}';
+  end if;
+
+  if x.status = 'resolved' then
+    select clara.role_rank(fm.role) into v_rank
+      from clara.firm_memberships fm
+      join clara.users u on u.id = fm.user_id
+     where fm.user_id = x.resolved_by and fm.firm_id = x.firm_id and fm.status = 'active'
+       and u.is_agent = false
+     limit 1;
+    -- ADR-0074/law 78 (owner ruling, Track-A sitting): the RESOLUTION floor -- and ONLY this
+    -- floor, see the D-11 header above -- now admits a second, additive path. The human path is
+    -- byte-identical to 0040: same v_rank read (agent-filtered, so an agent actor can never BE
+    -- the human branch), same null-stamp precondition, same errcode/reason on failure. The
+    -- resolved_by/resolved_at null-check is unconditional either way -- an agent act still stamps
+    -- both, so this does not loosen that half at all.
+    if x.resolved_by is null or x.resolved_at is null then
+      raise exception 'bank line exception % was not resolved by a firm principal; resolution is an owner act', x.id
+        using errcode='CLR04',
+          detail=jsonb_build_object('reason','exception_floor_breached','exception_id',x.id,
+            'resolved_by',x.resolved_by)::text;
+    end if;
+    if coalesce(v_rank, -1) < clara.role_rank('owner')
+       and not (
+         x.resolved_by = clara.agent_user_id()
+         and exists (select 1 from clara.bank_agent_receipts bar
+                      where bar.act_kind = 'exception_resolve' and bar.subject_id = x.id
+                        and bar.outcome = 'admitted')
+       )
+    then
+      raise exception 'bank line exception % was not resolved by a firm principal or a receipted agent act; resolution is an owner act or an agent act with an admitted receipt', x.id
+        using errcode='CLR04',
+          detail=jsonb_build_object('reason','exception_floor_breached','exception_id',x.id,
+            'resolved_by',x.resolved_by)::text;
+    end if;
+    if x.resolution_disposition is null
+       or nullif(btrim(coalesce(x.resolution_note,'')),'') is null then
+      raise exception 'bank line exception % is resolved without a disposition or a note', x.id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','exception_resolution_incomplete','exception_id',x.id)::text;
+    end if;
+    -- DISPOSITION-LINKED RESOLUTION, the authority half only [ladder row 2 + the delta round's
+    -- disposition hole]. matched_booking and written_off_adjustment both END WITH THE LINE
+    -- MATCHED -- that is what stops a resolved line falling out of every term. The corrective-
+    -- pair arithmetic (both legs excepted, netting to zero) is deliberately NOT asserted here:
+    -- this belt never computes money, and that assert belongs to the resolve verb.
+    if x.resolution_disposition in ('matched_booking','written_off_adjustment')
+       and not exists (select 1 from clara.bank_match_line_members lm
+                        join clara.bank_matches bm on bm.id = lm.match_id
+                       where lm.line_id = x.line_id and bm.status = 'live') then
+      raise exception 'bank line exception % is resolved as % but its line is in no live match; the booking must land in the same transaction', x.id, x.resolution_disposition
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','disposition_unbooked','exception_id',x.id,
+            'line_id',x.line_id,'disposition',x.resolution_disposition)::text;
+    end if;
+  else
+    if x.resolved_by is not null or x.resolved_at is not null
+       or x.resolution_disposition is not null or x.resolution_note is not null then
+      raise exception 'bank line exception % is open but carries resolution stamps', x.id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','exception_resolution_incomplete','exception_id',x.id)::text;
+    end if;
+    -- AN OPEN EXCEPTION AND A LIVE MATCH ARE MUTUALLY EXCLUSIVE, closed here as the structural
+    -- backstop behind the shared line FOR UPDATE the two verbs take [ladder row 38, the
+    -- cross-table write-skew: two transactions, both deferred checks passing]. The verb-side
+    -- refusals are line_excepted and line_already_matched; this is the law behind them.
+    if exists (select 1 from clara.bank_match_line_members lm
+                join clara.bank_matches bm on bm.id = lm.match_id
+               where lm.line_id = x.line_id and bm.status in ('pending','live')) then
+      raise exception 'statement line % carries an open exception and a live match at once', x.line_id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','line_already_matched','exception_id',x.id,
+            'line_id',x.line_id)::text;
+    end if;
+  end if;
+  return null;
+end $$;
+revoke all on function clara._tf_bank_settled_authority_belt() from public;
+-- No re-declaration of the three constraint triggers below: CREATE OR REPLACE FUNCTION repoints
+-- every existing trigger bound to this function in place (Postgres resolves a trigger's action by
+-- the function's OID, which CREATE OR REPLACE preserves) -- t_bmlm_settled_authority,
+-- t_bmem_settled_authority and t_bank_line_exceptions_settled_authority (0040:2713-2723) all pick
+-- up this body with no DDL of their own needed, and the D1 write-quiesce obligation in
+-- packages/db/README.md governs the live deploy exactly as it would for any other CoR in this file.
+
 -- ================================================================================================
 -- §E · DDL 4 — the three new tables (Annex A.3, A.4, Annex D — registers A26, A27). All three ship
 -- BEHAVIOURALLY INERT ON ARRIVAL, exactly as `UNNUMBERED_f_a2_posted_chain.sql`'s own header states
@@ -3906,9 +4287,9 @@ end $function$;
 -- trigger functions and the proposal-accept trigger function) is created as clara_fn_owner, the
 -- house convention for a NEW object's ownership (F-A2 part1's own §A does the identical
 -- set role/reset role wrap around clara.entry_post_receipts, posting_core.sql:471-1376) — a
--- CREATE OR REPLACE on an ALREADY-existing clara_fn_owner-owned body (the ten CoR'd functions
--- above) preserves its owner regardless of the current role, so only genuinely NEW objects need
--- this wrap.
+-- CREATE OR REPLACE on an ALREADY-existing clara_fn_owner-owned body (the eleven CoR'd functions
+-- above, D-11 included) preserves its owner regardless of the current role, so only genuinely NEW
+-- objects need this wrap.
 set role clara_fn_owner;
 
 -- clara.bank_agent_receipts — Annex A.3. Append-only via _tf_append_only + a no-truncate trigger
@@ -4648,23 +5029,28 @@ revoke all on function clara._agent_verify_inputs_digest(uuid, text) from public
 --   adjustment_account_invalid · tenancy_incongruent (CLR11) · adjustment_key_collision ·
 --   approve_key_collision
 -- `(CLR16, draft_anchor_moved)` -- B.4's own text: "PR-1b types" this one, already a member.
--- `recon_*` -- Tier-C adjudication FINAL (opus consolidated round, superseding this lane's own
--- H5 draft below): B.4's own row reads "(CLR10, recon_*) — the nine reconciliation reasons", and
--- its top line is unambiguous -- "Only PAIRS; no wildcards, no errcode-only members" -- so a LIKE
--- match on the bare prefix was never a legitimate transcription of a PAIRS-only annex (Codex's
--- own H5 finding: the opus probes proved an INVENTED pattern-matching unlisted name re-raises
--- only once the wildcard is actually gone, never against the LIKE). NINE exact-string literals,
--- ruled: the header comment's ten (0040:1538-1569) minus `recon_already_complete`, which is its
--- own idempotency-adjacent outcome (a DIFFERENT op_key hitting an already-complete statement --
--- _reserve_op's own dedupe already handles the SAME-op_key replay case, per the header's own
--- note), not a reconciliation-CONTENT rung the other nine all are. `recon_terms_underivable` --
--- this lane's own earlier measurement found it as a real, live, header-omitted raise -- is
--- DELIBERATELY left off this ruled list; it re-raises like any other unlisted reason (a narrower
--- Tier-C list is always the safe direction to be wrong in -- an over-eager conversion is the
--- unsafe one). The nine, transcribed verbatim as exact strings, closed-list, no prefix match:
---   recon_coa_shared · recon_period_gap · recon_prior_missing · recon_line_reserved ·
---   recon_line_unsettled · recon_uncleared_off_account · recon_opening_mismatch ·
---   recon_outstanding_stale · recon_difference_nonzero
+-- `recon_*` -- Tier-C adjudication, FINAL AS OF THE RECONCILIATION ROUND: B.4's own row reads
+-- "(CLR10, recon_*) — the nine reconciliation reasons", and its top line is unambiguous -- "Only
+-- PAIRS; no wildcards, no errcode-only members" -- so a LIKE match on the bare prefix was never a
+-- legitimate transcription of a PAIRS-only annex (Codex's own H5 finding: the opus probes proved
+-- an INVENTED pattern-matching unlisted name re-raises only once the wildcard is actually gone,
+-- never against the LIKE). The consolidated round first ruled NINE literals (the header comment's
+-- ten, 0040:1538-1569, minus `recon_already_complete`) -- but this lane's own live measurement
+-- against `_complete_bank_reconciliation_core`'s ACTUAL raise sites (0040:1587-2057, exhaustive,
+-- not the header comment's prose) found ELEVEN distinct `recon_` literals actually thrown,
+-- including BOTH `recon_already_complete` (a real, reachable outcome the header comment does
+-- list, and idempotency-adjacent framing does not make it unreachable -- it is still a business
+-- fact the wall must convert, not a code bug) AND `recon_terms_underivable` (real, live,
+-- header-comment-omitted, but genuinely thrown). The reconciliation round's ruling: "measurement
+-- beats prose" -- direct measurement against the live delegate's own raise sites supersedes BOTH
+-- the annex's prose "nine" and the consolidated round's derived nine; the annex's own text is
+-- flagged for the docs-truing batch as a divergence from what the code actually does, not
+-- silently reconciled away here. ELEVEN, transcribed verbatim as exact strings, closed-list,
+-- no prefix match:
+--   recon_already_complete · recon_coa_shared · recon_period_gap · recon_prior_missing ·
+--   recon_line_reserved · recon_line_unsettled · recon_uncleared_off_account ·
+--   recon_terms_underivable · recon_opening_mismatch · recon_outstanding_stale ·
+--   recon_difference_nonzero
 -- `(CLR10, stale_waiver_duplicate_risk)` -- M11's OWN new pair (Annex B.3's mechanism, built by
 -- THIS PR): B.4's own precedent for `draft_anchor_moved` is that a PR minting a new typed raise
 -- ADDS it to this list rather than leaving it unconvertible; M11's design text (§3.3) explicitly
@@ -4689,10 +5075,11 @@ begin
          'reversed_entry','reversal_mirror','line_excepted','orphaned_reservation_draft',
          'bank_account_unmapped','adjustment_account_invalid','adjustment_key_collision',
          'approve_key_collision','stale_waiver_duplicate_risk',
-         -- Tier-C FINAL: the nine ruled recon_ literals, exact strings, no prefix match.
-         'recon_coa_shared','recon_period_gap','recon_prior_missing',
+         -- Tier-C, reconciliation round: the eleven measured recon_ literals (measurement beats
+         -- prose -- see the header above), exact strings, no prefix match.
+         'recon_already_complete','recon_coa_shared','recon_period_gap','recon_prior_missing',
          'recon_line_reserved','recon_line_unsettled','recon_uncleared_off_account',
-         'recon_opening_mismatch','recon_outstanding_stale',
+         'recon_terms_underivable','recon_opening_mismatch','recon_outstanding_stale',
          'recon_difference_nonzero')
      ) then
     return v_reason;
@@ -5872,9 +6259,11 @@ grant execute on function clara.wake_settle_from_bank_line(uuid,uuid,uuid,jsonb,
 -- converts). M12 is subsumed by the delegate's own `status <> 'live'` -> `statement_not_live`
 -- raise, same law-31 ground as match/settle's M12. Every OTHER refusal this delegate can raise
 -- (recon_already_complete, recon_coa_shared, recon_period_gap, recon_prior_missing,
--- recon_line_reserved, recon_line_unsettled, recon_uncleared_off_account, recon_opening_mismatch,
--- recon_outstanding_stale, recon_difference_nonzero) is Annex B.4's own "(CLR10, recon_*) -- the
--- nine reconciliation reasons -- typed" Tier-C member, not a Tier-B rung at all (Annex B.2's table
+-- recon_line_reserved, recon_line_unsettled, recon_uncleared_off_account, recon_terms_underivable,
+-- recon_opening_mismatch, recon_outstanding_stale, recon_difference_nonzero) is Annex B.4's own
+-- "(CLR10, recon_*)" Tier-C member -- ELEVEN literals by this lane's own live measurement against
+-- the raise sites (the annex's own prose says "nine"; measurement beats prose -- see the Tier-C
+-- header a few hundred lines below), not a Tier-B rung at all (Annex B.2's table
 -- lists ONLY M11/M12 against this verb). This verb is therefore Tier-A + delegate + Tier-C, the
 -- SAME shape as the nine simple verbs in §K.4.
 create function clara._agent_complete_bank_reconciliation_core(p_statement uuid, p_ack_outstanding uuid[],
@@ -6094,8 +6483,9 @@ do $tail$
 declare
   v_n int; v_txt text; v_kind_def text; v_client_def text;
 begin
-  -- The ten CoR'd bodies still resolve at their pinned signatures and are owned/granted exactly
-  -- as before (no accidental ACL/owner/search_path drift from a CREATE OR REPLACE).
+  -- The ten D1 CoR'd bodies PLUS D-11 (_tf_bank_settled_authority_belt, ADR-0074/law 78, off-D1)
+  -- still resolve at their pinned signatures and are owned/granted exactly as before (no
+  -- accidental ACL/owner/search_path drift from a CREATE OR REPLACE).
   perform 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'clara' and p.oid in (
       'clara._bank_match_adjustment_entry(jsonb,uuid,text,text,bigint,date,text,jsonb,text,text)'::regprocedure,
@@ -6107,7 +6497,8 @@ begin
       'clara._match_bank_line_core(jsonb,uuid,jsonb,jsonb,jsonb,boolean,text)'::regprocedure,
       'clara._unmatch_bank_match_core(jsonb,uuid,uuid,text,text)'::regprocedure,
       'clara._complete_bank_reconciliation_core(jsonb,uuid,uuid[],text)'::regprocedure,
-      'clara._resolve_and_book_bank_line_core(jsonb,uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)'::regprocedure);
+      'clara._resolve_and_book_bank_line_core(jsonb,uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)'::regprocedure,
+      'clara._tf_bank_settled_authority_belt()'::regprocedure);
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'clara' and p.oid in (
       'clara._bank_match_adjustment_entry(jsonb,uuid,text,text,bigint,date,text,jsonb,text,text)'::regprocedure,
@@ -6119,26 +6510,29 @@ begin
       'clara._match_bank_line_core(jsonb,uuid,jsonb,jsonb,jsonb,boolean,text)'::regprocedure,
       'clara._unmatch_bank_match_core(jsonb,uuid,uuid,text,text)'::regprocedure,
       'clara._complete_bank_reconciliation_core(jsonb,uuid,uuid[],text)'::regprocedure,
-      'clara._resolve_and_book_bank_line_core(jsonb,uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)'::regprocedure)
+      'clara._resolve_and_book_bank_line_core(jsonb,uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)'::regprocedure,
+      'clara._tf_bank_settled_authority_belt()'::regprocedure)
       and p.prosecdef and p.proowner = 'clara_fn_owner'::regrole;
-  if v_n <> 10 then
-    raise exception 'tail: expected all 10 CoR''d bodies to resolve as SECURITY DEFINER owned by clara_fn_owner, found %', v_n using errcode='CLR10';
+  if v_n <> 11 then
+    raise exception 'tail: expected all 11 CoR''d bodies (ten D1 + D-11) to resolve as SECURITY DEFINER owned by clara_fn_owner, found %', v_n using errcode='CLR10';
   end if;
 
-  -- Zero-grant pin: none of the ten CoR'd bodies (all ungranted cores/triggers/the mint verb's
-  -- own floor) picked up a stray EXECUTE grant to any non-owner role as a side effect of
-  -- CREATE OR REPLACE (which preserves existing grants — this asserts none NEW were added by
-  -- this file, since this file issues no GRANT statement on any of the ten). M9 (cross-model
-  -- review, HEAD d5e5dc6, test honesty): the original predicate excluded `a.grantee = 0`
-  -- (PUBLIC) from the count, so a stray PUBLIC grant on any of these four would have been
-  -- INVISIBLE to this exact census -- the census's own job is "zero unexpected grantee", and
-  -- PUBLIC is a grantee. Removed; PUBLIC now counts like any named role.
+  -- Zero-grant pin: none of the ungranted cores/triggers/the mint verb's own floor (nor D-11)
+  -- picked up a stray EXECUTE grant to any non-owner role as a side effect of CREATE OR REPLACE
+  -- (which preserves existing grants — this asserts none NEW were added by this file, since this
+  -- file issues no GRANT statement on any of them). M9 (cross-model review, HEAD d5e5dc6, test
+  -- honesty): the original predicate excluded `a.grantee = 0` (PUBLIC) from the count, so a stray
+  -- PUBLIC grant on any of these would have been INVISIBLE to this exact census -- the census's
+  -- own job is "zero unexpected grantee", and PUBLIC is a grantee. Removed; PUBLIC now counts
+  -- like any named role. D-11 added to this list in the reconciliation round (ADR-0074/law 78):
+  -- its own `revoke all ... from public` is byte-preserved from 0040, and this proves the CoR
+  -- did not silently regrant it.
   select count(*)::int into v_n
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
       lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
     where n.nspname = 'clara' and p.proname in
       ('_bank_match_adjustment_entry','_settle_from_bank_line_core','_allocate_receipt_core',
-       '_allocate_payment_core')
+       '_allocate_payment_core','_tf_bank_settled_authority_belt')
       and a.grantee <> p.proowner;
   if v_n <> 0 then
     raise exception 'tail: % unexpected grantee(s) on the ungranted settle-limb cores', v_n using errcode='CLR10';
@@ -6275,7 +6669,7 @@ begin
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
    where n.nspname in ('workflow','graphile_worker','spike') and c.relkind='r';
 
-  raise notice 'F-A3 PR-1b tail (§0-§J, the ten CoR''d bodies + seven DDL groups): OK -- ten CoR''d bodies resolve at their pinned signatures, SECURITY DEFINER, owned by clara_fn_owner, no new grant on any of the four ungranted settle-limb cores. Three new tables carry FORCE RLS + exactly the owner/read policy pair (6 policies) + zero DML grant to any non-owner role. Two deferred agent-receipt walls installed DEFERRABLE INITIALLY DEFERRED. t_bank_agent_proposal_accept present on bank_line_exceptions; except_bank_line resolves and is untouched by this file (no CoR issued against it). wake_credentials'' two CHECKs admit bank_agent AND keep interactive_client. bank_matches.origin admits exactly {human,rule,agent}. entry_post_receipts'' two CHECKs admit bank_agent / op_key alongside the untouched invoice-domain paths. clara_wake_bank exists, cannot log in, holds zero TABLE grants (its function grants are §K/§L''s own, censused below). The shared registry-ledger predicate and the drawer-2 gate''s arm-4 recut both resolve as STABLE reads (no D1 term). % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file). The thirteen wake sibling verbs, their agent cores and DDL 7''s allowlist/login role are §K/§L''s own tail, immediately below.', v_n;
+  raise notice 'F-A3 PR-1b tail (§0-§J, the ten D1 CoR''d bodies + D-11 + seven DDL groups): OK -- all eleven CoR''d bodies resolve at their pinned signatures, SECURITY DEFINER, owned by clara_fn_owner, no new grant on any of the four ungranted settle-limb cores or D-11. Three new tables carry FORCE RLS + exactly the owner/read policy pair (6 policies) + zero DML grant to any non-owner role. Two deferred agent-receipt walls installed DEFERRABLE INITIALLY DEFERRED. t_bank_agent_proposal_accept present on bank_line_exceptions; except_bank_line resolves and is untouched by this file (no CoR issued against it). wake_credentials'' two CHECKs admit bank_agent AND keep interactive_client. bank_matches.origin admits exactly {human,rule,agent}. entry_post_receipts'' two CHECKs admit bank_agent / op_key alongside the untouched invoice-domain paths. clara_wake_bank exists, cannot log in, holds zero TABLE grants (its function grants are §K/§L''s own, censused below). The shared registry-ledger predicate and the drawer-2 gate''s arm-4 recut both resolve as STABLE reads (no D1 term). % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file). The thirteen wake sibling verbs, their agent cores and DDL 7''s allowlist/login role are §K/§L''s own tail, immediately below.', v_n;
 end $tail$;
 
 -- ================================================================================================

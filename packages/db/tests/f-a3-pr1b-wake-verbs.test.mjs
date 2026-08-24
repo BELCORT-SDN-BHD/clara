@@ -735,19 +735,30 @@ test("f31w.p the Tier-C wall: an unlisted-but-typed reason re-raises out of the 
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
     ["x", "CLR11", '{"reason":"already_matched"}']);
   assert.equal(wrongCode.rows[0].r, null, "a listed reason under the WRONG errcode still re-raises (pairs, not bare reasons)");
-  // Tier-C adjudication FINAL (opus consolidated round): the nine ruled recon_ literals are an
-  // EXACT-STRING closed list, not a `like 'recon\_%'` prefix match -- an invented, unlisted
-  // recon_-prefixed reason must re-raise exactly like any other unlisted reason, proving the
-  // wildcard is really gone and not merely narrowed to a smaller wildcard.
+  // Tier-C, reconciliation round (measurement beats prose -- migration §K's own Tier-C header):
+  // the ELEVEN measured recon_ literals are an EXACT-STRING closed list, not a `like 'recon\_%'`
+  // prefix match -- an invented, unlisted recon_-prefixed reason must re-raise exactly like any
+  // other unlisted reason, proving the wildcard is really gone and not merely narrowed to a
+  // smaller wildcard.
   const listedRecon = await rootQuery(
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
     ["x", "CLR10", '{"reason":"recon_difference_nonzero"}']);
   assert.equal(listedRecon.rows[0].r, "recon_difference_nonzero", "a real, listed recon_ literal still converts");
+  const listedReconAlreadyComplete = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR10", '{"reason":"recon_already_complete"}']);
+  assert.equal(listedReconAlreadyComplete.rows[0].r, "recon_already_complete",
+    "recon_already_complete converts -- one of the two literals the consolidated round's interim nine had dropped, restored by live measurement");
+  const listedReconTermsUnderivable = await rootQuery(
+    "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
+    ["x", "CLR10", '{"reason":"recon_terms_underivable"}']);
+  assert.equal(listedReconTermsUnderivable.rows[0].r, "recon_terms_underivable",
+    "recon_terms_underivable converts -- the other literal the interim nine had dropped, restored by live measurement");
   const unlistedRecon = await rootQuery(
     "select clara._agent_bank_tier_c_reason($1,$2,$3) as r",
     ["x", "CLR10", '{"reason":"recon_x_new"}']);
   assert.equal(unlistedRecon.rows[0].r, null,
-    "an INVENTED recon_-prefixed reason (recon_x_new), never one of the nine, re-raises -- the prefix match is gone, not just narrowed");
+    "an INVENTED recon_-prefixed reason (recon_x_new), never one of the eleven, re-raises -- the prefix match is gone, not just narrowed");
 });
 
 // C1 (cross-model review, HEAD d5e5dc6, CRITICAL): _resolve_and_book_bank_line_core creates an
@@ -765,20 +776,24 @@ test("f31w.p the Tier-C wall: an unlisted-but-typed reason re-raises out of the 
 //     t_je_agent_post_receipt (a DIFFERENT deferred wall, unrelated to C1's own bank-domain one)
 //     aborted every successful draft-leg resolve-and-book too. Fixed alongside C1 in the
 //     migration (the same _approve_entry_core call site, the SAME class of promise-broken bug).
-// (2) STILL RED, NOT MINE TO FIX: 0040's OWN pre-existing t_bank_recon_belt-family authority
-//     floor on clara.bank_line_exceptions ("bank line exception % was not resolved by a firm
-//     principal; resolution is an owner act", 0040:2664) joins clara.firm_memberships WITH
-//     `u.is_agent = false` -- structurally, an agent actor can NEVER satisfy this floor, no
-//     matter what ctx is threaded through. _resolve_bank_line_exception_core (byte-unmoved,
-//     PR-1a's own extraction, untouched by this file) stamps resolved_by = c.actor, and for the
-//     agent lane c.actor IS the agent's own user id. This means wake_resolve_bank_line_exception
-//     AND this composite's own exception-resolution step can NEVER actually commit an exception
-//     into 'resolved' status for the agent lane as currently built -- a genuine, pre-existing
-//     (0040-era) product/authority-model conflict with F-A3's own design (which built BOTH verbs
-//     assuming the agent COULD resolve), not a mechanical bug this lane can fix unilaterally.
-//     Left RED, on purpose, with the belt's own message asserted below: an owner ruling is owed
-//     on whether 0040's belt gets an agent carve-out, or whether these two verbs are refuse-only
-//     by design. Reported as its own finding, separate from the reviewed nine.
+// (2) FIXED, by owner ruling (ADR-0074/law 78, Track-A sitting): 0040's OWN pre-existing
+//     t_bank_settled_authority_belt RESOLUTION floor on clara.bank_line_exceptions ("bank line
+//     exception % was not resolved by a firm principal; resolution is an owner act", 0040:2664)
+//     joined clara.firm_memberships WITH `u.is_agent = false` -- structurally, an agent actor
+//     could never satisfy this floor, no matter what ctx was threaded through, which meant
+//     wake_resolve_bank_line_exception and this composite's own exception-resolution step could
+//     never actually commit an exception into 'resolved' status for the agent lane -- a genuine
+//     (0040-era, pre-Charter) product/authority-model conflict with F-A3's own design (which
+//     built BOTH verbs assuming the agent COULD resolve). Reported as its own finding and left
+//     RED on purpose pending a ruling, separate from the reviewed nine. The owner has since ruled:
+//     the ratified F-A3 scope (PROGRESS.md's F-A3 row) places "resolve exception incl. write-off"
+//     in the agent's OPEN register; law 71's reservation keeps only the MINTING act
+//     (except_bank_line, the red pen) human. The migration's D-11 CoR
+//     (clara._tf_bank_settled_authority_belt) widens the RESOLUTION floor ONLY -- an agent
+//     resolver additionally clears it when `resolved_by = clara.agent_user_id()` AND a same-
+//     subject ADMITTED `exception_resolve` receipt already exists in the same transaction; the
+//     MINTING floor (the `created_by` check, a screen above) is untouched, byte-identical to
+//     0040 -- see f31w.x, the twin cell right below, which proves an agent still cannot mint.
 test("f31w.q C1: resolve_and_book's draft leg genuinely COMMITS -- the deferred wall does not roll back a valid resolution", async (t) => {
   if (skipPurpose(t)) return;
   const firm = await firmOf(world.clients.A1);
@@ -833,4 +848,34 @@ test("f31w.q C1: resolve_and_book's draft leg genuinely COMMITS -- the deferred 
     "select act_kind, outcome, subject_id from clara.bank_agent_receipts where op_key=$1", [opKey]);
   assert.equal(exceptionReceipt.rows[0]?.act_kind, "exception_resolve", "f31w.q: the composite's own audit receipt also persisted, keyed to the exception");
   assert.equal(exceptionReceipt.rows[0]?.subject_id, exId);
+});
+
+// ADR-0074/law 78's TWIN, promised in f31w.q's own header: the D-11 CoR widens the RESOLUTION
+// floor ONLY. The MINTING floor -- a separate `x.created_by` check, a screen above the resolution
+// check in the SAME trigger body -- is byte-unmoved from 0040, and no wake verb in this file even
+// attempts an agent-authored INSERT on clara.bank_line_exceptions (there is no
+// _agent_mint_bank_line_exception_core; the only agent-callable exception verb is resolve). This
+// cell proves the backstop is STRUCTURAL, not merely "nothing happens to call it": a DIRECT write
+// (rootQuery, bypassing the verb layer entirely, exactly the shape law 71's minting reservation
+// must hold against) with an agent actor id in created_by still hits the belt and still refuses,
+// with the SAME message and reason 0040 always raised.
+test("f31w.x ADR-0074 twin: an agent actor still cannot MINT a bank line exception -- only resolution widened", async (t) => {
+  if (skipPurpose(t)) return;
+  const amount = 1900;
+  const stmt = await enterStatement(world.users.alice, {
+    client: world.clients.A1, bankAccount: bankAcct.A1.primary,
+    opening: 0, specs: [{ entryDate: "2026-07-21", amountCents: amount, description: "f31w.x mint-attempt line" }],
+  });
+  const firm = await firmOf(world.clients.A1);
+  const err = await caught(() => rootQuery(
+    `insert into clara.bank_line_exceptions(firm_id, client_id, line_id, kind, reason, created_by)
+     values ($1, $2, $3, 'bank_error', 'f31w.x an agent attempting to mint', clara.agent_user_id())`,
+    [firm, world.clients.A1, stmt.lines[0].id]));
+  assert.ok(err, "an agent-authored INSERT into bank_line_exceptions still refuses -- minting stays human-only");
+  assert.equal(err?.code, "CLR04", `expected CLR04 (the owner floor), got ${err?.code}: ${err?.message}`);
+  assert.match(err?.message ?? "", /exception door is an owner act/,
+    "the SAME minting-floor message 0040 always raised -- this screen was never touched by ADR-0074/law 78");
+  const notMinted = await rootQuery(
+    "select 1 from clara.bank_line_exceptions where line_id=$1", [stmt.lines[0].id]);
+  assert.equal(notMinted.rowCount, 0, "the refused INSERT left no row behind -- the deferred trigger's rollback is real, not cosmetic");
 });
