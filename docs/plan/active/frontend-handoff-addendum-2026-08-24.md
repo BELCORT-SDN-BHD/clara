@@ -139,7 +139,7 @@ as `6892033`, which is what this section cites. Treat `898da67` as a stale/misty
 not a second source — a name is not the thing it points at (`AGENTS.md`, review law 3).
 
 Sibling trains **γ** (`f-a7/pr-2-gamma`, file `0123_f_a7_gamma_egress.sql`) and **α**
-(`f-a7/pr-3-alpha`, files `UNNUMBERED_f_a7_alpha1_file_document_extraction.sql` +
+(`f-a7/pr-3-alpha`, files `0124_f_a7_alpha1_file_document_extraction.sql` +
 `_alpha2_judgement_recut.sql`) carry **zero** `create function clara.wake_*` statements between
 them (checked directly) — despite the filenames, the extraction and judgement-recut work they do
 is consumed BY beta's wrappers, not exposed as wake verbs of their own. Do not budget UI work

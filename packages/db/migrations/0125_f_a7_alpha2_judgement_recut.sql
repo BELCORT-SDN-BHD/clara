@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a7_alpha2_judgement_recut — F-A7 train alpha, file 2 of 2 (D1-alpha).
+-- 0125_f_a7_alpha2_judgement_recut — F-A7 train alpha, file 2 of 2 (D1-alpha).
 --
 -- THE CONSTITUTIONAL RECUT. Law 79 / TA-P7 C (docs/adr/README.md digest, RATIFIED by the
 -- owner 2026-08-22): invariant (a) client attribution is satisfied by a human click, an

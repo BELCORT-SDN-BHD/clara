@@ -1,7 +1,7 @@
 // F-A7 train alpha (D1-alpha) — the constitutional recut battery.
 //
-// Scope: the two-migration window (UNNUMBERED_f_a7_alpha1_file_document_extraction,
-// UNNUMBERED_f_a7_alpha2_judgement_recut) that widens client_resolutions.method/
+// Scope: the two-migration window (0124_f_a7_alpha1_file_document_extraction,
+// 0125_f_a7_alpha2_judgement_recut) that widens client_resolutions.method/
 // document_filings.basis to admit a fourth value, 'judgement', per digest law 79 / TA-P7 C.
 // The riders that actually MINT a judgement resolution (the attribution ladder, the four
 // walls) ship in later, independently-gated trains (pi/gamma/beta) — this file proves the
