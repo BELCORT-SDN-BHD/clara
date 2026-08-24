@@ -217,7 +217,12 @@ chat-fixture trues** and the **~8 N1 fixture re-routes** — while the battery-c
 `wb-s-seeding.test.mjs:217` (calls `proposeCodingRule` `:225` and `signCodingRule` `:230`; its
 `:221-222` comment marks the route **MUST-FAIL with no fallback**, so it breaks regardless — **OQ-3's
 ruling (D36) settles what the replacement IS, not whether the cell breaks**)
-· **`x42-producer-role.test.mjs`** (list line 48; `signedCodingRule` at `:79`, `:83`, `:149`).
+· ~~`x42-producer-role.test.mjs` (list line 48; `signedCodingRule` at `:79`, `:83`, `:149`)~~ —
+**CORRECTED (opus review, 594614f): a name-keyed false positive, law 3.** `signedCodingRule`
+(`x42-af2-world.mjs:295`) calls `proposeRule`/`signRule` against `clara.propose_bank_rule` — the
+BANK rule machinery, F-A3 territory, never retired by this PR — not `clara.sign_coding_rule`. Its
+name only LOOKS like the retired verb; the fixture never called it, so the build correctly left
+the file untouched. No breakage exists here.
 
 **DB rig, 38 files. Whole-file retire (10, ALL RETIRED WITH PR-3):** wave-a2-execute-rule-post.test.mjs ·
 wave-a2-autopost-rule.test.mjs · **the wave-a sightings battery — RETIRED IN PR-1, not PR-3**

@@ -176,13 +176,18 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "_tf_agent_task_insert", "_tf_agent_task_update", "_tf_autodraft_attempt_update", "_tf_coding_task_update", "_tf_counterparty_update_0011",
   "_tf_document_intake_update", "_tf_fa_movement_belt", "_tf_filing_correction_update", "_tf_firm_document_limits_upsert", "_tf_fixed_assets_immutable_0017",
   "_tf_processing_call_reservation_update", "_tf_processing_task_update", "_tf_reservation_update", "_tf_rotate_token", "_tf_wake_intent_consume",
-  // `acknowledge_rule_posts` LEFT this base array with F-A2 PR-3's retirement of the whole
-  // autopost-rule tier (Annex B.1) — dropped here rather than kept-and-subtracted, the same
-  // discipline `begin_chat_turn`'s F-A9 PR-0 departure below uses.
   // `begin_chat_turn` LEFT this base array at F-A9 PR-0 and is now a REVERSE-gated cohort
   // (CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES, below) — it is pushed back on any database that
   // has not applied the hotfix. Removed here rather than kept-and-subtracted so the base
   // array stays what it claims to be: the set measured at the CURRENT frontier.
+  //
+  // ELEVEN F-A2-PR-3-RETIRED NAMES do NOT leave this array the same way -- see
+  // RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES below, which pushes them back exactly like
+  // begin_chat_turn's reverse gate, one migration later in the estate's life instead of one
+  // earlier. Unconditional removal (what an earlier pass of this file did) breaks every
+  // `db-slice-frontiers` leg pinned before the cutover, where all eleven still carry a bare
+  // clock token by catalog read: the identical unconditional-append defect this file's own
+  // :153-164 comment already names, mirrored to the removal direction.
   "_wake_cred_full", "ack_compliance_watch", "acknowledge_sweep_run", "add_bank_account",
   "admit_autodraft_task", "answer_interruption", "approve_opening_correction", "approve_opening_seed", "approve_pair_reversal",
   "approve_wrong_client_correction", "begin_client_onboarding", "bootstrap_client_plan", "cancel_agent_task",
@@ -209,6 +214,21 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
 ].sort();
+
+// F-A2 PR-3 [the cutover, `f_a2_cutover_retirement` at whatever number merge claimed]: ELEVEN
+// names that ALL carried a bare clock token as part of the rules-execution tier, retired whole
+// (Annex B.1). Every one of them is present from EARLY in the estate's life (the coding-rule/
+// autopost-rule machinery is Wave-A2/A2.1-era, and _ocr_sales_floor is 0016's), so unlike a
+// born-late cohort this needs no LOWER gate at all -- only the same upper "not yet retired" gate
+// SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES uses, and the exact mirror image of
+// CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES's reverse-gate shape below (there the name is pushed back
+// on NOT-yet-applied; here it is pushed back on NOT-yet-retired). GATED ON THE STEM, never a
+// number, for the reason every other block in this file states.
+const RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES = [
+  "_ocr_sales_floor", "acknowledge_rule_posts", "decline_coding_rule", "execute_rule_post",
+  "list_autopost_rules", "propose_autopost_rule", "reconcile_autopost_rules", "retire_autopost_rule",
+  "retire_coding_rule", "sign_autopost_rule", "sign_coding_rule",
+];
 
 // ---------------------------------------------------------------------------
 // 0046 [§7-A] — THE THREE NAMES THIS MIGRATION ADDS, AND WHY THE ROSTER IS BIMODAL.
@@ -511,6 +531,9 @@ export async function s5BareTokenRoster(query) {
     `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
   const names = [...S5_25_BARE_TOKEN_ROSTER];
+  // REVERSE gate, no lower bound -- these eleven are early-born (see the array's own header),
+  // so they are expected everywhere the roster reaches UNTIL the cutover retires them.
+  if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES);
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
   if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) {
     names.push(...SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES);
@@ -554,11 +577,15 @@ const KL_ROSTER_BASE = [
   "ack_compliance_watch", "evaluate_sst_watch", "evaluate_sst_watches_all",
   "record_future_attestation", "reverse_entry",
 ];
-// _ocr_sales_floor + preview_ocr_sales_evidence: BOTH RETIRED with F-A2 PR-3 (Annex B.1,
-// OQ-3/D36) -- a WINDOW pair, present from 0046 until the cutover, not just born late (the
-// s5BareTokenRoster gate above states the general shape). _ocr_sales_floor moves out of
-// KL_ROSTER_BASE into this window array alongside preview_ocr_sales_evidence.
-const KL_ROSTER_0046 = ["_ocr_sales_floor", "preview_ocr_sales_evidence"];
+// clara._ocr_sales_floor is BORN AT 0016, not 0046 -- it lawfully needs its own array with
+// ONLY the F-A2 PR-3 cutover's upper gate, never a number-keyed lower one (B.3-forbidden: a
+// `like '0046_%'` bound would have been wrong on arrival and stays wrong on renumber). RETIRED
+// with F-A2 PR-3 (Annex B.1, OQ-3/D36), the same reverse shape RULE_MACHINERY_RETIRED_F_A2_PR3
+// _CLOCK_NAMES uses above for arm (D)'s roster.
+const KL_ROSTER_RETIRED_F_A2_PR3 = ["_ocr_sales_floor"];
+// preview_ocr_sales_evidence: genuinely 0046-born AND retired with F-A2 PR-3 -- a true WINDOW
+// name, present only from 0046 until the cutover (unlike _ocr_sales_floor above).
+const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
 
 // F-A4 PR-1a [close key 1, Window A, `f_a4_pr_1a_measurement_layer` at whatever number merge
 // claims]: clara._close_gate_undated spells the same MYT idiom (design close-key-1-design.md
@@ -580,8 +607,9 @@ export async function s5KlDuplicationRoster(query) {
     `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
   const names = [...KL_ROSTER_BASE];
-  // _ocr_sales_floor + preview_ocr_sales_evidence: a WINDOW cohort, present from 0046 until
-  // F-A2 PR-3's retirement (Annex B.1, OQ-3/D36) — see KL_ROSTER_0046's own header.
+  // _ocr_sales_floor: early-born (0016), no lower gate — reverse-gated only on the cutover.
+  if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...KL_ROSTER_RETIRED_F_A2_PR3);
+  // preview_ocr_sales_evidence: a true WINDOW name, present from 0046 until the cutover.
   if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) names.push(...KL_ROSTER_0046);
   if (await appliedStem("f_a4_pr_1a_measurement_layer$")) names.push(...KL_ROSTER_F_A4_PR1A);
   return names.sort().join(" ");

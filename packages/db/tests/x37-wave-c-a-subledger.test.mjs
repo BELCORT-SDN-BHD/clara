@@ -1693,11 +1693,12 @@ test("x37.t approve_entry still passes NO checked_via_rule_id, and execute_rule_
   // (law 27(2): absence is not evidence). The subject no longer exists at all, so it is now
   // asserted GONE by name, positively, rather than swallowed.
   const sig = "clara.execute_rule_post(uuid,text)";
+  // A positive read, not a belief: to_regprocedure returns NULL for a missing function (never
+  // raises, unlike the `::regprocedure` cast has() uses below), so this line IS the proof that
+  // execute_rule_post is gone -- F-A2 PR-3 retired it whole (Annex B.1) -- and there is nothing
+  // left for the assert below it to say that this read has not already said.
   const retired = (await rootQuery("select to_regprocedure($1) is null as gone", [sig])).rows[0].gone;
-  if (retired) {
-    assert.ok(retired, "execute_rule_post is GONE -- F-A2 PR-3 retired it whole (Annex B.1); its ACL has no subject left to check");
-    return;
-  }
+  if (retired) return;
   const has = async (role) => (await rootQuery("select pg_catalog.has_function_privilege($1,$2,'execute') as ok", [role, sig])).rows[0].ok;
   const login = await caught(() => has("clara_runtime_login"));
   if (login instanceof Error) {
