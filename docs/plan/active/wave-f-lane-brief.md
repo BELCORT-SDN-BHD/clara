@@ -106,3 +106,25 @@ never `wsl --shutdown`.
   measured error — never a guess), (3) DONE: branch + HEAD, files, the battery totals per package, every skip
   named, the D1 body inventory, what you could not build and why. Keep each report under 60 lines.
 - Models/effort are pinned by the orchestrator; never spawn sub-agents without an explicit `model`.
+
+## Rules minted on the 2026-08-24 train night (each cost real time; binding)
+- **An idle lane is NEVER woken by background-task completion — only SendMessage wakes you.**
+  Run long suites foreground with a generous timeout, or actively poll the output in-turn; do
+  not end your turn while a run you must report on is in flight. (Re-bitten twice this night.)
+- **`revoke all on <table|view> from public` is FORBIDDEN** — relations carry no default PUBLIC
+  privileges; the no-op materializes the acl and reds the DR ACL round-trip (dr-verify 4.6).
+  Functions-only (they default to PUBLIC EXECUTE).
+- **Live-gates e2es bind OS-assigned ports** (`tests/ephemeral-port.mjs`); never a fixed
+  default (the shared-runner-host 401 cross-wire class).
+- **Fixture labels must not look like secrets**: gitleaks scans EVERY ref, so one entropy-shaped
+  `key='…'` constant on ANY branch reds every PR's lint. Adjudicate-then-allowlist by CAPTURED
+  VALUE, never fingerprint (squash rewrites shas).
+- **Merge state is read from main's migration ledger** (`ls packages/db/migrations/` /
+  `schema_migrations`), never from the branch list — squash-merges leave branch history
+  un-contained forever.
+- **Squash-artifact conflicts**: classify each conflicted file against YOUR branch's own
+  merge-base; a file you never touched resolves to main's copy wholesale.
+- **Gate your chains**: `grep -c` exits 1 at zero — use `! grep -q` for marker gates; never
+  chain `rebase --continue`/push behind an unverified check.
+- **Docker hygiene is a settle obligation**: prune your rig container AND volume when your
+  stage finishes (the 2026-08-24 disk-zero event was 369 orphaned volumes / 100.8 GB).
