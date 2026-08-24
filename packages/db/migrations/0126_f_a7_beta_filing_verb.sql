@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a7_beta_filing_verb.sql -- Wave-F Track A, F-A7 (the filing verb + the interview
+-- 0126_f_a7_beta_filing_verb.sql -- Wave-F Track A, F-A7 (the filing verb + the interview
 -- model layer), PR-4, TRAIN BETA. Authored UNNUMBERED; the number is claimed at MERGE
 -- PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md). CI's PARTITION GATE
 -- (the mechanism deciding which battery a migration belongs to) keys on the CATALOG and on this
@@ -267,20 +267,18 @@
 -- WRITER side (a CHECK on document_regions.field_path, or a narrower producer-side vocabulary
 -- contract), never invented unilaterally by a reader train guessing at the writers' intent.
 --
--- CROSS-LANE NAME COLLISION, REPORTED, NOT ACTED ON (finding 3's second half): f-a3/pr-1b
--- (bank-agency, HEAD d44a4d8, unmerged) mints its OWN clara.wake_propose_identifier_promotion
--- with a DIFFERENT signature -- `(p_client, p_counterparty uuid, p_identifier_kind text,
--- p_identifier_value text, p_times_seen int, …)` (bank-agency-annexes-1-mechanics.md:50-52) --
--- against this file's `(p_client, p_kind, p_value, p_sightings int, p_citations jsonb,
--- p_rationale, p_model, p_op_key)` (filing-and-interview-annexes-1.md:29, byte-matching what
--- this file actually built). Archaeology (not a unilateral resolution -- reported to the
--- conductor for arbitration): docs/plan/active/wave-f-contract.md:285 assigns "F-A7 scope,
--- from TA-P7 · TA-P3 · TA-P8 · TA-P4 · TA-P14" explicitly, and :315-320 describes TA-P8 B's
--- "promotion door" in exactly this file's own shape (a typed proposal card, one human click
--- through the audited door). Bank-agency's own copy is dated "NEW at v2, blocker B5" (bank-
--- agency-annexes-2-record.md:166) -- a LATER addition to ITS OWN design, not an earlier claim.
--- This file does not touch f-a3/pr-1b's branch or negotiate the resolution; see this train's
--- settle report to the conductor for the full citations and the fold-vs-rename trade-offs.
+-- CROSS-LANE NAME COLLISION -- RESOLVED BY CONDUCTOR ARBITRATION (finding 3's second half,
+-- trued at this file's W2 number claim): f-a3/pr-1b once minted its own
+-- clara.wake_propose_identifier_promotion with a different signature; the arbitration (the
+-- archaeology below stood: wave-f-contract.md:285 assigns the promotion door to F-A7's scope,
+-- and bank-agency's copy was "NEW at v2, blocker B5" -- a later addition to its own design)
+-- ruled the BANK lane renames. f-a3/pr-1b renamed its verb to
+-- clara.wake_propose_bank_identifier_promotion (its commit c623178), and that shape is MERGED
+-- as 0121_f_a3_pr1b_agent_limb -- so THIS file's clara.wake_propose_identifier_promotion is
+-- the only bearer of the name, exactly as TA-P8 B's "promotion door" describes it
+-- (filing-and-interview-annexes-1.md:29). The long-run consolidation (folding the bank
+-- promotion onto pi's _identifier_promotion_core) is a ledgered post-W4 obligation, not
+-- this file's business.
 --
 -- =====================================================================================
 -- WHAT THIS FILE SHIPS
