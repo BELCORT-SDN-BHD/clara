@@ -13,7 +13,7 @@ process.env.RELAY_TEST_MODE ??= "1";
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, asRuntime, buildFirm, endPool } from "./relay-fixtures.mjs";
+import { rootQuery, asRuntime, buildFirm, endPool, ensureClassifyConsent } from "./relay-fixtures.mjs";
 import { seedVerifiedDocument, seedExtraction, seedRegion } from "./matcher-testkit.mjs";
 import { processClassifyTask, readExtractionText, classifyHealth, CLASSIFY_ENGINE_ID, CLASSIFY_CONSUMER } from "../lib/classify.mjs";
 import { mockObjectModel } from "./mockModel.mjs";
@@ -40,6 +40,11 @@ const withRuntime = asRuntime;
 // through the DB path (enqueue_invoice_facts → the classify lane for a NULL-kind pdf).
 async function seedClassifiable({ firm, owner, client, text = "TAX INVOICE\nInvoice No: INV-RIG-1\nTotal Due: RM 5,000.00" }) {
   const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  // [F-A7 gamma, CI #331 fold] this document is NULL-kind and about to be filed to `client` —
+  // exactly the shape 0123's classify consent gate binds on. Grant it here, scoped to this
+  // call site only (never unconditionally from buildFirm), through the real governed verbs;
+  // a silent no-op below the gamma frontier.
+  await ensureClassifyConsent(owner, { firm, client });
   // A minimal filing (basis legacy-0007 allows a null resolution) so classify_document can open
   // its per-filing review question on a low-confidence verdict.
   await rootQuery(
