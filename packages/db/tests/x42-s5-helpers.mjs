@@ -460,6 +460,34 @@ const REPORTING_AGENCY_F_A5_CLOCK_NAMES = ["_agent_approve_metric_definition_cor
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// F-A3 PR-1a [the nine pure core extractions]: SS1 moves each verb's WHOLE live body into a new
+// ungranted `_<verb>_core` and leaves the public name a thin ctx-unpack delegator (`c :=
+// clara._human_ctx(...); return clara._<verb>_core(...)`) — byte-identical machinery that carries
+// no clock token of its own (Annex A.2's "the extraction contract, one sentence"). The bare-clock
+// bodies this roster already carried therefore MOVE, not multiply: whichever of the nine already
+// matched arm (D) under its public name now matches it under `_<verb>_core` instead, and the
+// public name drops off (no clock token left behind for the detector to find).
+// MEASURED, not inferred: arm (D)'s own detector, re-run against the live post-extraction
+// catalog, drops seven public names and picks up eight `_core` twins. `match_bank_line` is
+// deliberately ABSENT from both lists below: the roster's own query aggregates DISTINCT proname
+// over every pg_proc ROW (one row per overload), and `match_bank_line` carries TWO live overloads
+// (Annex A.2's footnote 1 — the /6 human arity PR-1a extracts here, and the /7 rule arity PR-3
+// drops, untouched by this migration). PR-1a extracts /6 alone, so the bare name survives on the
+// UNEXTRACTED /7 overload regardless of what moved out of /6 — a fact about the query's grouping,
+// not a claim about which body carries the token. `upsert_account` never matched arm (D) either
+// way and needs no entry.
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states: PR-1a is
+// numbered at merge.
+const F_A3_PR1A_CLOCK_NAMES_ADDED = [
+  "_add_bank_account_core", "_complete_bank_reconciliation_core", "_match_bank_line_core",
+  "_resolve_and_book_bank_line_core", "_resolve_bank_line_exception_core", "_unmatch_bank_match_core",
+  "_void_bank_reconciliation_core", "_void_bank_statement_core",
+];
+const F_A3_PR1A_CLOCK_NAMES_REMOVED = [
+  "add_bank_account", "complete_bank_reconciliation", "resolve_and_book_bank_line",
+  "resolve_bank_line_exception", "unmatch_bank_match", "void_bank_reconciliation", "void_bank_statement",
+];
+
 // F-A2 PR-1 [the agentic posting lane, `f_a2_posting_core` at whatever number merge claimed]:
 // the SEAT for the posting lane's bare-clock cohort, wired and DELIBERATELY EMPTY.
 //
@@ -556,6 +584,13 @@ export async function s5BareTokenRoster(query) {
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
+  if (await appliedStem("f_a3_pr1a_core_extractions$")) {
+    names.push(...F_A3_PR1A_CLOCK_NAMES_ADDED);
+    for (const n of F_A3_PR1A_CLOCK_NAMES_REMOVED) {
+      const i = names.indexOf(n);
+      if (i !== -1) names.splice(i, 1);
+    }
+  }
   return names.sort();
 }
 
