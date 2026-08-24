@@ -99,7 +99,7 @@ export const WIKI_WHITELIST = new Set([
  * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
-  // F-A3 PR-1a (UNNUMBERED_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
+  // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
   // patches, one per public bank-agency verb, each reading its own LIVE prosrc via
   // `pg_get_functiondef('clara.<verb>(...)'::regprocedure)` — a LITERAL signature, so every
   // patch's target already resolves (`p.targets` carries no null) — and re-installing it under

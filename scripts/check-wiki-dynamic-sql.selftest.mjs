@@ -246,7 +246,7 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // (PR #226, full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named
   // S2): a pg_get_functiondef re-count outside the census grammar plus 'execute' as a
   // privilege-name literal and one raise-message word — nothing dynamic constructed or run.
-  // F-A3 PR-1a (UNNUMBERED_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder) adds nine: one
+  // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder) adds nine: one
   // per public bank-agency verb S1 extracts into a `_<verb>_core`, each an `unprovable` CoR
   // patch by construction (the installed body is the LIVE prosrc, read fresh from the catalog
   // at apply — never a literal in this file's own text) and each independently rig-measured to

@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a3_pr1a_core_extractions.sql -- Wave-F Track A, F-A3 PR-1a:
+-- 0119_f_a3_pr1a_core_extractions.sql -- Wave-F Track A, F-A3 PR-1a:
 -- THE NINE PURE CORE EXTRACTIONS. Authored UNNUMBERED; the number is claimed at MERGE
 -- PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md). The battery gates on
 -- the CATALOG (what the live bodies carry), never on this filename, so nothing moves with the

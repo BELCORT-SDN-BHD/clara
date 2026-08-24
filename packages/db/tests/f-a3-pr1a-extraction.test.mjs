@@ -1,5 +1,5 @@
 // F-A3 PR-1a — THE NINE PURE CORE EXTRACTIONS, battery for
-// migrations/UNNUMBERED_f_a3_pr1a_core_extractions.sql (the number is claimed at merge; this
+// migrations/0119_f_a3_pr1a_core_extractions.sql (the number was claimed at merge; this
 // file gates on CATALOG FACTS and never on a filename or a version string).
 //
 // Design of record: docs/plan/active/bank-agency-design.md v2 §4 with
