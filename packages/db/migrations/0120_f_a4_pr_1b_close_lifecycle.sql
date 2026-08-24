@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a4_pr_1b_close_lifecycle.sql — F-A4 PR-1b, WINDOW B: the close-lifecycle writers.
+-- 0120_f_a4_pr_1b_close_lifecycle.sql — F-A4 PR-1b, WINDOW B: the close-lifecycle writers.
 -- =================================================================================================
 -- Number claimed at MERGE time (hard constraint 10). Design of record:
 -- docs/plan/active/close-key-1-design.md v2 §3.4/§3.9/§3.10/§3.11 + Annex A (mechanism) +

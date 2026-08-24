@@ -1,5 +1,5 @@
 // F-A4 PR-1b -- task #17's OWN battery, riding the Window-B migration
-// (UNNUMBERED_f_a4_pr_1b_close_lifecycle.sql; numbered at merge). Design of record:
+// (0120_f_a4_pr_1b_close_lifecycle.sql; numbered at merge). Design of record:
 // `PROGRESS.md`'s task-#17 backlog block + `docs/plan/completed/progress-archive-2026-08-part2.md`
 // (the archived R1 ruling) + close-key-1-design.md §3.9/Annex D.5 ("PR-1b carries all thirteen
 // cells across, enumerated T1..T13 in the migration's battery file with their Track-B ids
