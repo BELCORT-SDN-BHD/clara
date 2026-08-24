@@ -434,8 +434,20 @@ which claims that chain first (gate record §7). (iv) F-A3 is an **acceptance** 
    this v2 is the fold.**
 2. **PR-1a — WINDOW A, the measurement layer.** `_measure_one_gate` extracted ·
    `_evaluate_one_gate` recut to delegate · the new `undated_documents` catalog row +
-   `_close_gate_undated` · `_gate_outstanding_items`'s new branch. **Touches no wake surface, no
+   `_close_gate_undated` · `_gate_outstanding_items`'s new branch · **`_close_dry_run_core`**
+   (additive, no window, nothing calls it until PR-1c's wrapper — Annex F.1 always listed it
+   here and v2's step 2 did not; **trued at build, 2026-08-23**). **Touches no wake surface, no
    receipt table, no wake kind.** Cells A-3/A-4/A-5/A-11.
+   **AS-BUILT FINDING (2026-08-23), a G1-class analogue on the dry-run path:**
+   `clara.fa_register_tie` — the `fa_register_tie_view` evaluator — opens `_human_ctx(viewer)`
+   as its first act, and it is the **only one of the fourteen** that does (closed-world census,
+   cell `f-a4.pr1a.human-ctx-census`). So a dry run reached from any session without an
+   authenticated human — PR-1c's `wake_dry_run_close_readiness` included — records
+   `state='error'`, `CLR04 no authenticated actor` for it. **It blocks nothing** (drawer 3 is
+   advisory and §3.2's rung B3 weighs only the measurable drawer-1 set), and the raise is
+   caught by the extracted body's own `begin…exception` block exactly as designed. Recorded
+   because if a *fourteenth-plus* gate ever joins that set in drawer 1 or 2, §3.5's honest-limit
+   list must be re-cut; the census cell fails loudly if it does.
 3. **PR-1b — WINDOW B, the close-lifecycle writers.** The ALTERs first (`segregation_mode`,
    `fy_end_source`, `authored_by`, `wake_credentials` ×2, `agent_tasks.kind`) · then
    **`finalize_close`** (Fix A + §3.9 changes 1-3) · **`reopen_fiscal_year`** (Fix A's mirror +

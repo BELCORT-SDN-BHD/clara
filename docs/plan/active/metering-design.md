@@ -49,10 +49,10 @@
   stop sharing the `refused_budget` string — history rows stay, read surfaces explain
   the two spellings.
 - **TA-P2 = A+ — calculations are automatic.** "Model spend = tokens × a versioned price
-  table" is the worked example of TA-P2's CALCULATION origin: Clara fetches official
-  pricing sources and DRAFTS a price row; it lands through an **audited owner one-click
-  door** (not a PR) with two mechanical checks (two independently-cited values agree;
-  the value sits within a plausibility band against the prior row). Rows are immutable +
+  table" is the worked example of TA-P2's CALCULATION origin. ~~Clara fetches official pricing sources and
+  DRAFTS a price row; it lands through an **audited owner one-click door** (not a PR) with two mechanical
+  checks.~~ **RULED 2026-08-23 (R-L19): price rows are DEVELOPER-SEEDED — a versioned, effective-dated
+  migration seed through the full PR ladder; a price change is a ticket/PR.** Rows are immutable +
   supersede; a missing row for the day REFUSES, never carries forward. Monthly per-firm
   AND per-client visibility; meter never cap (law 76, "per-call usage", no LLM
   qualifier).
@@ -171,13 +171,18 @@ every byte cite):
 | 3 · Unattended token-budget 60%/100% | `admit_autodraft_task`, `0011:2555-2566` / live text `0036:1408-1417` (both predictions; the tip is a rig-replay fact) | **REMOVE** the block | PR-1B |
 | 4 · Unattended concurrency floor | `admit_autodraft_task`, `0011:2543-2554` / live text `0036:1397-1407`, + `0048:172-192`'s own-run fix | **KEEP** the bound; **RENAME** the outcome/reason string `'refused_budget'` → `'refused_concurrency'` (new value on the `sweep_run_items.outcome` CHECK, drop+add, ACCESS EXCLUSIVE, validates trivially — every existing row keeps its historical string; only future rows use the new one) | PR-1B |
 | 5 · 15-drafts/day sales quota | `admit_autodraft_task`'s 0046 splice — **three constructs, not one range** (survey §A.5(5)'s table): REWRITE `0046:2223-2225`, UNTOUCHED `:2226-2242`, REMOVE `:2245-2259` (all predicted) | **REMOVE the cap only.** The shared select is rewritten to read `sales_admission_watermark` alone; the 7A-R5 backfill door keeps its `sales_backlog_held` refusal byte-for-byte. **Order-dependent**: the rewrite lands ahead of §3.4's column drop in the same file. **Untouched**: `sales_lane_active`, `sales_backfill_batches`, `sales_admission_watermark`, `sales_backlog_held` | PR-1B |
-| 6 · Document ingest per-UTC-day docs/pages | `_reserve_document_ingest`, `0007:1638-1650` (`docs_per_day`, `pages_per_day` on `firm_document_limits`) | **UNCLASSIFIED — owner item (§4).** Spend-shaped by its own comment, but outside the lanes TA-P12 enumerated. **Fail-closed default: the gate stays live**, and PR-3's acceptance does not claim a complete census until the owner rules | — |
-| 7 · Processing-call per-UTC-day pages | `_reserve_processing_call` live tip `0038:7063-7078`; its own comment (`:7056-7058`) calls the budget the firm's **vendor spend** | **UNCLASSIFIED — same owner item, same default** | — |
+| 6 · Document ingest per-UTC-day docs/pages | `_reserve_document_ingest`, `0007:1638-1650` (`docs_per_day`, `pages_per_day` on `firm_document_limits`) | ~~UNCLASSIFIED — owner item (§4)~~ **RULED 2026-08-23 (owner): KEEP, re-classified ENGINE PROTECTION** — it bounds how much work the intake engine takes at once, which is law 76's own carve-out, the same class as gates 2, 4 and 8. **MANDATORY RENAME with it:** the refusal must stop sharing the `refused_budget` string (law 22 — a visible record must not lie about why it refused) | PR-1B (rename only; the bound is byte-unchanged) |
+| 7 · Processing-call per-UTC-day pages | `_reserve_processing_call` live tip `0038:7063-7078`; its own comment (`:7056-7058`) calls the budget the firm's **vendor spend** | ~~UNCLASSIFIED — same owner item, same default~~ **RULED 2026-08-23 (owner): REMOVE** — its own author calls it the firm's vendor spend, so it is a SPEND brake and G8's meter-never-cap reaches it | PR-1B (the body joins the D1 list) |
 | 8 · Document-processing concurrency floors | `claim_document_processing_task`, `0090:421-428` (`ocr_concurrency`) and `:434-442` (`llm_witness_concurrency`) | **KEEP** — engine protection, law 76's own carve-out, the same class as gates 2 and 4. No `outcome` string is involved (raised CLR18 only), so no rename obligation | — |
 
-**If the owner rules gates 6/7 REMOVE**, two more live bodies join the D1 list
-(`_reserve_document_ingest`, `_reserve_processing_call`) and PR-1B's window grows from
-one body to three. That is why the classification is not this lane's to make.
+~~**If the owner rules gates 6/7 REMOVE**, two more live bodies join the D1 list…~~
+**RULED 2026-08-23, and the answer is SPLIT, so only ONE body joins:** gate 7's
+`_reserve_processing_call` is REMOVED and enters the D1 list; gate 6's `_reserve_document_ingest`
+is KEPT as engine protection and is recut only for the `refused_budget` rename. **PR-1B's window
+grows from one body to two, not three.** The census is now CLOSED-WORLD and complete: **eight gates,
+four REMOVE (1 · 3 · 5 · 7) and four KEEP (2 · 4 · 6 · 8)** — and **two of the four KEEPs carry the
+mandatory rename off `refused_budget`: gate 4 (`refused_concurrency`) and gate 6.** Gate 8 raises
+CLR18 only and writes no outcome string, so it carries no rename.
 
 **The rename's full surface** (law 22 — a visible record must not lie): the CHECK
 extension on `sweep_run_items.outcome`; the concurrency block's own literal strings
@@ -256,8 +261,9 @@ the five things gate 1 changed about it:
 **The door itself is the audited verb, not a screen** (TA-P2's "one-click" as this
 estate uses the term — the same shape TA-P8 ships for the counterparty key, and law 61's
 audited ceremony, which is screen-less by design). `propose_llm_price` returns the
-proposal's uuid so Clara can hand the owner the exact id to approve. **What is NOT
-settled is who may execute approve at the DB layer — §4, and PR-1E is severed for it.**
+proposal's uuid so Clara can hand the owner the exact id to approve. ~~**What is NOT settled is who may
+execute approve at the DB layer — §4, and PR-1E is severed for it.**~~ **RULED 2026-08-23 (R-L19): the whole
+propose/approve limb is DROPPED — price rows are developer-seeded migration data (§4).**
 
 **Missing-day discipline (TA-P2, a wall, not a convention):** the evaluator (§3.6) never
 carries a price past its `effective_to`; a call landing in a gap computes NULL spend,
@@ -407,31 +413,18 @@ PR-1:
 
 ## 4 · Owner questions not settled here (recommendation + fail-closed default)
 
-- **WHICH human may approve a price proposal, and how is that gated at the DB layer?**
-  A model's price is firm-agnostic, so `firm_capability_grants` (E-R11's per-FIRM shape)
-  has no natural "which firm's owner" answer — that half of the question is genuinely
-  open and is the owner's to rule. **The v1 recommendation is WITHDRAWN at gate 1
-  (GM-5).** It proposed EXECUTE granted to a named role (`clara_price_approver`) filled
-  by an ops ceremony — but **no human session ever holds a role other than
-  `clara_authenticated`**: PostgREST's single `authenticator` login SETs ROLE from the
-  JWT claim (`0006:72`, `deploy/storage-provision.sql:57-58`) and
-  `clara_authenticated` does not inherit (`0002:112`). A role-gated verb is therefore a
-  psql ceremony, not the owner's door — the "NOT a PR" shape TA-P2 chose, one
-  substitution removed — and battery cell C.17 would have proved only that nobody can
-  approve. **Revised recommendation**: the estate's own owner-door idiom —
-  `clara.grant_firm_capability` (`0056:1130-1176`) and the RS name-only lift
-  (`0063:24-33`): EXECUTE granted coarsely to `clara_authenticated`, with the REAL floor
-  a positive `firm_memberships` read for `role='owner' and status='active'` inside the
-  SECURITY DEFINER body, plus `_reserve_op` idempotency and an `_audit` row.
-  `rig-meta.mjs:63` states the rule: "coarse grant to `clara_authenticated`; role floors
-  are body-enforced". **The narrow question left for the owner**: an owner of WHICH firm
-  may approve a cross-tenant fact — any firm owner, one named platform firm, or a new
-  platform-level rank? (The role dodge did not answer this either; it hid it.)
-  **Fail-closed default while the ruling is pending**: **PR-1E is severed and does not
-  ship** (§5). `approve_llm_price_proposal` does not exist, no price row can be created,
-  the evaluator returns `spend_cents IS NULL` and the rollup publishes an *unpriced*
-  count — visible, never a guess. Nothing downstream is blocked; the money column simply
-  stays honestly empty.
+- ~~**WHICH human may approve a price proposal, and how is that gated at the DB layer?**~~
+  **RULED 2026-08-23 (owner) — R-L19. The question is DISSOLVED, not answered: price rows are
+  DEVELOPER-SEEDED PLATFORM DATA.** A price is a versioned, effective-dated **migration seed**
+  that lands through the **full PR ladder**; **a price change is a ticket and a PR**, reviewed
+  like any other migration. Consequences: **PR-1E (`approve_llm_price_proposal` + D17's owner
+  floor) is DROPPED, not deferred**, and **the "Clara drafts a price proposal" limb is dropped
+  with it** — with no proposal there is no approval door, and the cross-tenant "owner of WHICH
+  firm" question disappears rather than being settled. The **evaluator prices from the seeded
+  rows**, and the **unpriced-count rollup STAYS as the tripwire**: a call whose day has no
+  effective row still publishes as *unpriced*, never a guess. The withdrawn v1 recommendation
+  and GM-5's role-dodge finding are recorded in `metering-annexes.md` Annex A (D17) — the
+  reason the door was designed and then never built.
 - **Do TA-P12's REMOVE classes reach the document/processing lane's per-UTC-day doc and
   page budgets?** (§3.3 gates 6-7, new at gate 1.) The ruling enumerated three gates and
   opened with "at least three", so it reads as a floor, not an exhaustive list — and
@@ -439,13 +432,16 @@ PR-1:
   the firm's vendor spend"), the same shape as the already-REMOVE'd 15/day sales quota.
   But it also paces a lane the ruling never discussed, and REMOVING it puts two more live
   bodies (`_reserve_document_ingest`, `_reserve_processing_call`) into a D1 window.
-  **Recommendation**: rule them explicitly, in either direction — this lane will not
-  infer a removal the owner did not name, and will not quietly leave a live vendor-spend
-  brake out of a census the acceptance record calls complete. **Fail-closed default**:
-  both gates stay LIVE and byte-unchanged; §3.3 carries them as UNCLASSIFIED; PR-3's
-  acceptance says "six of eight gates classified, two pending an owner ruling" rather
-  than claiming a complete census. The concurrency pair (gate 8) is NOT part of this
-  question — it is KEEP by the ruling's own carve-out, decided here.
+  **RULED 2026-08-23 (owner), and SPLIT — the two gates are not the same animal.**
+  **Gate 6 (document ingest, `0007:1638-1650`) = KEEP, re-classified ENGINE PROTECTION**, the
+  same class as gates 2, 4 and 8; it bounds engine work, not spend. **Gate 7 (processing call,
+  `0038:7063-7078`) = REMOVE** — its own author calls the budget the firm's vendor spend, so
+  G8's meter-never-cap reaches it. Consequences: **only ONE extra body joins the D1 list**
+  (`_reserve_processing_call`), not two; **gate 6 carries the mandatory `refused_budget` rename**
+  with gate 4; and the census is now **CLOSED-WORLD and COMPLETE — eight gates, four REMOVE
+  (1·3·5·7), four KEEP (2·4·6·8)**, so **PR-3's acceptance says "eight of eight classified"**,
+  not "six of eight, two pending". The concurrency pair (gate 8) was never part of this question
+  — KEEP by the ruling's own carve-out, decided at gate 1.
 - **Is the initial `call_kind` roster (§3.1) complete?** It cannot be, by construction
   — F-A2/F-A6/F-A7b/F-A8 have not reached their own design stages yet.
   **Recommendation**: ship the roster above; each later item's own design adds its
@@ -482,16 +478,16 @@ review as a policy-table schema.
 | **PR-1B** | the brake census's DB half (§3.3 gates 3-5, §3.4) + the eight-file test repair + the roster edits | **yes — the ONE window in this item** | PR-0 landed; judgement logic, independent review (law 1) |
 | **PR-1C** | dashboard rename surface (§3.3): `reviewCardTypes.ts`, `SweepReceiptCard.tsx` | no | lands with or immediately after PR-1B |
 | **PR-1D** | price table + proposals + `propose_llm_price` + `reject_llm_price_proposal` + the priced view + the rollup read (§3.5-§3.7) | no | independent of PR-1B; needs no ruling |
-| **PR-1E** | **the approval door alone** — `approve_llm_price_proposal` and its grant/floor shape | no | **the owner's ruling on §4's first question (D17)**. Severed because it is the one limb not yet designed to a buildable point |
+| ~~**PR-1E**~~ | ~~the approval door alone — `approve_llm_price_proposal` and its grant/floor shape~~ | — | **DROPPED, not deferred — RULED 2026-08-23 (owner, R-L19): price rows are developer-seeded migration data, so there is no proposal and no approval door. The "Clara drafts a price proposal" limb is dropped with it; PR-1D's price table is populated by an effective-dated seed through the PR ladder.** |
 | **PR-2** | the chat retrofit, a new `chatTurn_vN` (§3.8) | no | **F-A2's PR-2 claims `chatTurn_v13` first** (Annex B) |
 | **PR-3** | acceptance on real BELCORT usage (constraint 13); the "unpriced calls" count published, not hidden; §3.9's three gate conditions recorded met-or-not | no | PR-1A…PR-2 |
 | **PR-4** | schema retirement — drops `firm_usage_daily`/`task_usage` and their write sites | **yes**, its own reviewed migration | §3.9's three conditions; deliberately undated |
 
-PR-1D ships a price table with no rows — the correct visible state, not a gap: the
-evaluator returns `spend_cents IS NULL` and the rollup publishes an *unpriced* count
-until the owner's first approval. The battery's price cells stage rows as the table
-owner in the rig (exactly what the FORCE-RLS owner policy allows), so no cell depends
-on PR-1E to be runnable.
+PR-1D ships the price table **with its first effective-dated seed** (R-L19). A day with no effective row is
+still the correct visible state, not a gap: the evaluator returns `spend_cents IS NULL` and the rollup
+publishes an *unpriced* count — the tripwire the ruling explicitly keeps. The battery's price cells stage rows
+as the table owner in the rig (exactly what the FORCE-RLS owner policy allows), so no cell ever depended on
+the dropped approval door to be runnable.
 
 ## 6 · Annex map
 

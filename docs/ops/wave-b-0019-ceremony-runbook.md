@@ -80,10 +80,12 @@ class, and the catch-up verbs. Confirm `/ready` 200.
 
 ## 5. Apply migration 0019 (live: 18 → 19 applied)
 
-From `packages/db` with the LIVE env — **DSN from the environment, never in argv**:
+From the **repo root** with the LIVE env — **DSN from the environment, never in argv**, piped
+through the committed CA-pinned bridge (`docs/ops/dsn-bridge.md`), never `sslmode=no-verify`:
 
-```
-pnpm migrate            # expect exactly: applied 0019_wiki_boundary · 19 total
+```sh
+<secret source> | node scripts/ops/dsn-pipe.mjs -- pnpm db:migrate
+# expect exactly: applied 0019_wiki_boundary · 19 total
 ```
 
 The migration is ONE transaction carrying its own in-txn tail battery. **Any failure aborts
@@ -101,8 +103,13 @@ Then: `NOTIFY pgrst, 'reload schema';`
 
 ## 6. Post-DB verify — run the probe file
 
-```
-psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0019-postverify.sql
+From the repo root, through the same bridge (`docs/ops/dsn-bridge.md`) — the bridge derives
+`PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` from the DSN, so `psql` needs no connection
+argument of its own (never `psql "$DATABASE_URL" -f ...`, which would put the DSN in `psql`'s
+own argv):
+
+```sh
+<secret source> | node scripts/ops/dsn-pipe.mjs -- psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0019-postverify.sql
 ```
 
 Ten read-only probes, raising on the first failure (see the file for the reasoning behind

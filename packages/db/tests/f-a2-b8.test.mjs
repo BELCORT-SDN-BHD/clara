@@ -408,6 +408,54 @@ test("f-a2.c3.B8-ocr an ORDINARY OCR citation is never read as stale — B8 read
   assert.equal(r?.posted, true, `c3.B8-ocr: …and the entry posts (${JSON.stringify(r?.refusal)})`);
 });
 
+test("f-a2.c3.B8-ocr-only an OCR-ONLY draft is REFUSED upstream — the annex's \"posts clean\" was false (R-L20/D44)", async (t) => {
+  if (await gateCore(t)) return;
+  // THE CLAIM THE ANNEX GOT BACKWARDS, NOW FORCED INSTEAD OF DESCRIBED. v6.1 listed a
+  // "must-not-refuse" case: a draft citing only OCR `pages.*` regions "posts clean". The cell
+  // above states in prose that this is unbuildable and cites the reason — but a comment is not a
+  // proof, and the annex's sentence stood unchallenged in the record because nothing executed
+  // against it. Codex read that sentence and proposed an OCR disjunct in B8 to satisfy it, which
+  // would have been fail-open on the one rung whose job is to prove the anchor is CURRENT.
+  //
+  // The truth is upstream of B8 and it is law 2: an OCR region is a READ OF A PAGE, not a
+  // verified fact. `_bind_evidence` stamps `verified` only on a corroborated `invoice.total`
+  // citation whose cents match the anchor (0009:462-466), so a draft citing nothing else has no
+  // verified amount anchor at all — and the DRAFT DOOR refuses it before B8 is ever asked.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: GROSS });
+  const ocrLine = await seedRegion({
+    firm: cited.firm, extraction: cited.extractionId, fieldPath: "pages.1.lines.7",
+    textContent: "TOTAL DUE RM 1,000.00", locator: { page: 1, polygon: [0, 0, 1, 1] },
+  }).catch((e) => ({ error: e }));
+  assert.ok(ocrLine && !ocrLine.error,
+    `c3.B8-ocr-only: the OCR line region seeds (got ${ocrLine?.error?.code}: ${ocrLine?.error?.message})`);
+  const cred = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(GROSS),
+    evidence: [ev(ocrLine, "TOTAL DUE RM 1,000.00", "pages.1.lines.7")],
+  }).catch((e) => ({ error: e }));
+
+  // FORCED BOTH WAYS. If the draft is refused, the refusal must be the ANCHOR one and not some
+  // other wall; if it is somehow accepted, the post must still refuse at B3 or B7 — and it must
+  // never be B8 admitting an unanchored entry, which is the outcome the rejected disjunct would
+  // have produced.
+  if (d?.error) {
+    assert.match(`${d.error.code} ${d.error.detail ?? ""} ${d.error.message ?? ""}`,
+      /anchor_unbound|unverified_evidence|evidence_invalid|verified/i,
+      `c3.B8-ocr-only: the refusal names the missing VERIFIED ANCHOR, not some unrelated wall (got ${d.error.code}: ${d.error.message} ${d.error.detail ?? ""})`);
+    return;
+  }
+  const r = await wakePostEntry(cred, {
+    entry: d.entry_id, expectedRevision: await currentToken(d.entry_id),
+    client: A1(), booksVersion: await booksVersion(A1()),
+  });
+  assert.equal(r?.posted, false,
+    `c3.B8-ocr-only: an OCR-only draft NEVER posts — "posts clean" is the annex's error, not the estate's behaviour (${JSON.stringify(r?.refusal)})`);
+  const failed = nonAdmitting(r?.rung_vector);
+  assert.ok(failed.includes("B3") || failed.includes("B7"),
+    `c3.B8-ocr-only: …and it is B3 (anchor unbound) or B7 (unverified evidence) that refuses — the rungs that read the ANCHOR (non-admitting: ${failed.join(",")})`);
+});
+
 // ===========================================================================
 // 4b · B8-OCR-ANCHOR — C2's pair: the ZERO-IN-SCOPE hole, and its positive twin.
 // ===========================================================================

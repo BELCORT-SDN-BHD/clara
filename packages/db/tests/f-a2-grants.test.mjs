@@ -12,12 +12,22 @@
 // exactly that door — and neither shows up in any behavioural cell, because behaviour through
 // the front door stays correct. That is what makes this file's cheap catalog reads load-bearing.
 
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   rootQuery, endPool, printLaneNotes, printSkipCount, noteLane, ROLES,
   gateGrants, gateCore, F_A2_POST_VERBS, F_A2_STEMS,
+  buildWorld, postingCoreReady, firmOf, ensureChart, witnessedFiling, autodraftCred, mintWake5,
+  interactiveCred, agentDraft, supplierLines,
 } from "./f-a2-post-world.mjs";
+
+// H1's three cells are BEHAVIOURAL, so this otherwise catalog-only battery needs a world. It is
+// built once, and only when the core is present — the cells gate on `gateCore` anyway.
+let world = null;
+before(async () => { if (await postingCoreReady()) world = await buildWorld(); });
+const OWNER = () => world.users.alice;
+const A1 = () => world.clients.A1;
+const A2 = () => world.clients.A2;
 
 after(async () => {
   printLaneNotes("f-a2-grants");
@@ -274,4 +284,127 @@ test("f-a2.c12.relations every relation the battery asserts against is NAMED FRO
     [["account_code", "account_class", "account_type", "special_acc_type"]]);
   assert.equal(col.rows[0].n, 4,
     "c12.relations: coa_accounts carries account_code / account_class / account_type / special_acc_type — there is no bare `code` column");
+});
+
+// ===========================================================================
+// H1 — THE DRAFT DOOR'S CLIENT PIN. `wake_post_entry` refuses a pinned credential aimed at
+// another client; `wake_draft_entry` — the door the SAME credentials use one step earlier —
+// never compared `p_client` to `w.client_id` at all. A draft is a durable write on the wrong
+// client's books with the wrong client's filing bound to it; the post refusing later does not
+// undo it. Three cells: the wall, and the two shapes it must NOT touch.
+// ===========================================================================
+
+test("f-a2.c12.draft-pin a credential pinned to ANOTHER client cannot open a draft (H1)", async (t) => {
+  if (await gateCore(t)) return;
+  // The two clients are in the SAME firm, so the firm boundary cannot be what refuses this —
+  // otherwise the cell would be green on a wall that was already there.
+  const firmA = await firmOf(A1());
+  const firmB = await firmOf(A2());
+  assert.equal(firmA, firmB,
+    "c12.draft-pin: A1 and A2 share a firm — the firm boundary is NOT what this cell measures");
+  await ensureChart(OWNER(), A2());
+  const cited = await witnessedFiling(OWNER(), { client: A2(), gross: 320000 });
+  const pinnedToA1 = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), pinnedToA1, {
+    client: A2(), cited, codingKind: "supplier_bill", lines: supplierLines(320000),
+  }).catch((e) => ({ error: e }));
+  assert.ok(d?.error,
+    `c12.draft-pin: a credential pinned to A1 CANNOT draft on A2 — pre-H1 this succeeded and only the post door refused (got ${JSON.stringify(d)})`);
+  assert.equal(d.error.code, "CLR11",
+    `c12.draft-pin: …with CLR11, the same code the firm boundary uses, because it is the same class of answer (got ${d.error.code}: ${d.error.message})`);
+  assert.match(String(d.error.detail ?? ""), /credential_client_pin/,
+    `c12.draft-pin: …and the reason names the PIN, not some other CLR11 (got ${d.error.detail})`);
+  // AND NOTHING LANDED. The whole point is that a draft is durable, so its absence is the claim.
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.journal_entries where filing_id=$1", [cited.filingId]);
+  assert.equal(drafted.rows[0].n, 0,
+    `c12.draft-pin: …and no entry was written on the other client's filing (got ${drafted.rows[0].n})`);
+});
+
+test("f-a2.c12.draft-pin-own the SAME credential drafts on its OWN client, unchanged (H1)", async (t) => {
+  if (await gateCore(t)) return;
+  // The positive control, and it is load-bearing: a guard that refused everything would satisfy
+  // the cell above while closing the lane the credential exists to serve.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 321000 });
+  const cred = await autodraftCred(A1());
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(321000),
+  }).catch((e) => ({ error: e }));
+  assert.ok(!d?.error && d?.entry_id,
+    `c12.draft-pin-own: a credential drafts on the client it is pinned to, exactly as before (got ${JSON.stringify(d?.error ?? d)})`);
+});
+
+test("f-a2.c12.draft-pin-null a CLIENT-LESS interactive credential is untouched by the pin (H1)", async (t) => {
+  if (await gateCore(t)) return;
+  // THE NARROWNESS IS THE OTHER HALF OF THE FIX. `ck_wake_credentials_client_0011` makes a plain
+  // `interactive` credential client-less by construction — the standing fact C-3 refused to
+  // weaken — so an unconditional pin check would have locked the chat lane out of every client
+  // it was always allowed to serve. The guard is `w.client_id is not null and …` for that
+  // reason, and the reason is asserted here rather than trusted.
+  await ensureChart(OWNER(), A1());
+  const cited = await witnessedFiling(OWNER(), { client: A1(), gross: 322000 });
+  const cred = await interactiveCred(A1(), OWNER());
+  const pin = await rootQuery(
+    "select client_id from clara.wake_credentials where id=$1", [cred.credentialId]);
+  assert.equal(pin.rows[0]?.client_id, null,
+    `c12.draft-pin-null: the interactive credential really is client-less — that is the premise (got ${JSON.stringify(pin.rows[0])})`);
+  const d = await agentDraft(OWNER(), cred, {
+    client: A1(), cited, codingKind: "supplier_bill", lines: supplierLines(322000),
+  }).catch((e) => ({ error: e }));
+  assert.ok(!d?.error && d?.entry_id,
+    `c12.draft-pin-null: …and it still drafts (got ${JSON.stringify(d?.error ?? d)})`);
+});
+
+// ===========================================================================
+// D34 - THE PINNED CHAT KIND. The migration's tail asserts that `interactive_client` exists and
+// holds EXACTLY ONE allowlist row. That is a CATALOG claim; these three cells are the
+// BEHAVIOURAL half, because a kind that cannot actually be minted is not a lane, and an
+// allowlist row nobody exercises is not a wall.
+// ===========================================================================
+
+test("f-a2.c12.d34-mintable the interactive_client kind is really MINTABLE through the verb (D34)", async (t) => {
+  if (await gateCore(t)) return;
+  // Reading the CHECK proves the string is in an enumeration. Minting proves the LANE exists -
+  // `mint_wake_credential` has its own gates, and a kind admitted by the constraint but refused
+  // by the verb would be a lane on paper only.
+  const cred = await mintWake5({
+    kind: "interactive_client", firm: await firmOf(A1()), client: A1(),
+  }).catch((e) => ({ error: e }));
+  assert.ok(cred?.credentialId && !cred?.error,
+    `c12.d34-mintable: the pinned chat kind mints (got ${cred?.error?.code}: ${cred?.error?.message})`);
+  const row = await rootQuery(
+    "select wake_kind, client_id from clara.wake_credentials where id=$1", [cred.credentialId]);
+  assert.equal(row.rows[0]?.wake_kind, "interactive_client",
+    "c12.d34-mintable: ...and the row carries the kind it was minted for");
+  assert.equal(row.rows[0]?.client_id, A1(),
+    "c12.d34-mintable: ...pinned to the client it names - the pin is the whole point of the kind");
+});
+
+test("f-a2.c12.d34-needs-client a CLIENT-LESS interactive_client mint is REFUSED at the verb (D34)", async (t) => {
+  if (await gateCore(t)) return;
+  // The other half of the pin, and the verb answers BEFORE the CHECK does: the constraint would
+  // catch it too, but a constraint violation is an untyped 23514, not an answer a caller can act
+  // on. Measured: CLR10 with its own sentence.
+  const bad = await mintWake5({
+    kind: "interactive_client", firm: await firmOf(A1()), client: null,
+  }).then((r) => ({ minted: r })).catch((e) => ({ error: e }));
+  assert.ok(bad?.error,
+    `c12.d34-needs-client: an unpinned chat-client credential is never minted (got ${JSON.stringify(bad?.minted)})`);
+  assert.equal(bad.error.code, "CLR10",
+    `c12.d34-needs-client: ...and it is a TYPED refusal from the verb, not a raw 23514 from the CHECK (got ${bad.error.code}: ${bad.error.message})`);
+  assert.match(bad.error.message, /interactive_client/,
+    "c12.d34-needs-client: ...naming the kind it refused");
+});
+
+test("f-a2.c12.d34-one-row the pinned chat kind may ask, and may NOT post or draft (D34)", async (t) => {
+  if (await gateCore(t)) return;
+  // THE WALL, READ AS A CLOSED SET. `wake_open_question` writes no entry, and every posting and
+  // drafting verb is absent for this kind. Asserting the EXACT row set rather than "post is not
+  // in it" is what makes a later addition - a fifth verb quietly allowlisted - turn this red.
+  const rows = await rootQuery(
+    `select function_name from clara.wake_fn_allowlist
+      where wake_kind='interactive_client' order by function_name`);
+  assert.deepEqual(rows.rows.map((r) => r.function_name), ["wake_open_question"],
+    `c12.d34-one-row: the pinned chat kind is allowlisted for EXACTLY one verb, and it is the one that posts nothing (got ${JSON.stringify(rows.rows.map((r) => r.function_name))})`);
 });
