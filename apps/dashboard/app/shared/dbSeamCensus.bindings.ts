@@ -269,7 +269,16 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   list_bank_rule_candidates: "direction tokens",
   list_bank_rules: "sighting_count withdrawn",
   list_depreciation_runs: "client_id",
-  list_review_queue: "attempts_cap attempts_remaining attempts_used autodraft blocked_reason corroborated corroboration_ineligible currency customer_name customer_registration explicit_non_myr extraction_id invoice_date invoice_id last_origin last_refusal last_run_id origin_attribution parked rounding_cents sweep_eligible tax_total_cents total_cents total_excl_tax_cents total_fact_hash total_region_id type_code updated_at version_n",
+  // `rule_backed` JOINED this line with F-A2 PR-3 (Annex B.1/B.6, OQ-2/D35): the badge and
+  // the QueueRow field that consumed it (queue/QueueRowView.tsx, shared/queueKindCatalog.ts)
+  // are DELETED, on purpose, per law 27(2) -- a permanently-false column is removed, not
+  // rendered. This is not a pending successor: `_draft_entry_core` stopped writing
+  // `rule_decisions` for every entry F-A2 posts, so no entry can ever be rule_backed again,
+  // and there is no future surface this key is waiting for. The DB projection
+  // (list_review_queue itself, 0011:3788) is UNTOUCHED and keeps publishing the key honestly
+  // over KEPT history -- only the dashboard stopped rendering it, so it is genuinely,
+  // permanently unconsumed rather than a gap to close.
+  list_review_queue: "attempts_cap attempts_remaining attempts_used autodraft blocked_reason corroborated corroboration_ineligible currency customer_name customer_registration explicit_non_myr extraction_id invoice_date invoice_id last_origin last_refusal last_run_id origin_attribution parked rounding_cents rule_backed sweep_eligible tax_total_cents total_cents total_excl_tax_cents total_fact_hash total_region_id type_code updated_at version_n",
   list_uncoded_filings: "basis document_kind extraction_status financial_date mime_type",
   list_unmatched_lines: "bank_account_display line_no value_date",
   supplier_statement: "closing_balance_cents counterparty_id domain from opening_balance_cents to",
