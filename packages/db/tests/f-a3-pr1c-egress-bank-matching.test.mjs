@@ -1,5 +1,5 @@
 // F-A3 (Wave-F Track A) PR-1c -- THE bank_matching EGRESS PURPOSE battery, for
-// migrations/UNNUMBERED_f_a3_egress_purpose_bank_matching.sql (number claimed at merge). NOT
+// migrations/0122_f_a3_egress_purpose_bank_matching.sql (number claimed at merge). NOT
 // contract-blind: this lane authored the migration, so every cell targets the ACTUAL installed
 // behaviour. Design: docs/plan/active/bank-agency-design.md v2 SS3.7 + Annex E
 // (bank-agency-annexes-4-surfaces.md).
@@ -32,7 +32,7 @@ let ready = false;
 let world = null;
 
 /** THE CAPABILITY, read from the catalog -- the instrument production itself uses. A single
- *  unambiguous marker for "has UNNUMBERED_f_a3_egress_purpose_bank_matching.sql landed on this
+ *  unambiguous marker for "has 0122_f_a3_egress_purpose_bank_matching.sql landed on this
  *  database": the purpose CHECK admits bank_matching nowhere before this migration. */
 async function f_a3_pr1cReady() {
   const r = await rootQuery(
@@ -79,7 +79,7 @@ after(async () => {
 });
 
 function mustBeReady() {
-  assert.ok(ready, "UNNUMBERED_f_a3_egress_purpose_bank_matching.sql is not applied on this database (the purpose CHECK does not yet admit bank_matching) -- this battery must FAIL, not skip, against a pre-F-A3/PR-1c chain");
+  assert.ok(ready, "0122_f_a3_egress_purpose_bank_matching.sql is not applied on this database (the purpose CHECK does not yet admit bank_matching) -- this battery must FAIL, not skip, against a pre-F-A3/PR-1c chain");
 }
 
 test("META: the bank_matching egress-purpose migration is applied", async () => {

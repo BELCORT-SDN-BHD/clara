@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a3_egress_purpose_bank_matching.sql -- Wave-F Track A, F-A3 (bank agency),
+-- 0122_f_a3_egress_purpose_bank_matching.sql -- Wave-F Track A, F-A3 (bank agency),
 -- PR-1c: THE bank_matching TYPED EGRESS PURPOSE. Number claimed at MERGE time (standing law,
 -- AGENTS.md + .claude/rules/db-migrations.md). Design of record: docs/plan/active/
 -- bank-agency-design.md v2 SS3.7 + Annex E (bank-agency-annexes-4-surfaces.md).
