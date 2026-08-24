@@ -34,22 +34,25 @@
 -- p_from_proposal arm (B1-9) reads clara.close_proposals — a table PR-1c creates, not this file.
 -- Splitting attest_close_exception's signature change across two windows would leave B1-9 half
 -- built in the window Annex F.2 assigns it, and moving close_proposals into this window would
--- hand PR-1c's own table to a lane that does not own it. Postgres's plpgsql body-checker resolves
--- every EMBEDDED (static) relation reference at CREATE time, and this repo's migration runner
--- mechanically refuses any file that touches `check_function_bodies` to route around that
--- (migration-lexer.mjs's own guard: "disabling function-body validation requires explicit owner
--- authorization and is never available to a migration body") — so the one query that reads
--- close_proposals is DYNAMIC SQL (`execute ... using`), which the compiler treats as an opaque
--- string and validates only when it runs. It runs only inside `if p_from_proposal is not null`,
--- which stays unreachable — for every call the estate has ever made — until PR-1c's table exists
--- and PR-2/PR-3 start passing a non-null value. Every existing caller passes NULL and is
--- byte-unaffected; this is the one hand-written SQL string in this file, and it is scoped to
--- exactly the branch that needs it.
+-- hand PR-1c's own table to a lane that does not own it. MEASURED (settle report, gate B3):
+-- Postgres's plpgsql compiler does NOT resolve an embedded relation at CREATE time, even with
+-- check_function_bodies=on — catalog references inside a plpgsql statement are validated at PLAN
+-- time, on first EXECUTION, never at function creation (confirmed live: CREATE FUNCTION over a
+-- body naming a genuinely absent table succeeds outright) — so the query reading close_proposals
+-- is PLAIN STATIC SQL, exactly like every other statement in this file. It runs only inside `if
+-- p_from_proposal is not null`, which stays unreachable — for every call the estate has ever made
+-- — until PR-1c's table exists and PR-2/PR-3 start passing a non-null value. Every existing
+-- caller passes NULL and is byte-unaffected. No dynamic SQL, no DYNAMIC_SQL_ALLOWLIST entry: the
+-- forward reference costs this file nothing beyond the one static statement.
 --
 -- D1 — WRITE-QUIESCE REQUIRED for this whole file (packages/db/README.md "Deploy contract"): ten
--- live bodies replaced (B1-7..B1-16, six of them audited writers/triggers on the close and task
--- surfaces) plus four live-table CHECK swaps a writer's own transaction may be mid-flight against
--- (B1-1/B1-2/B1-4/B1-6). Run from merged main only, after Window A (PR-1a) has settled.
+-- live bodies replaced (B1-7..B1-16) — seven audited writers (finalize_close, reopen_fiscal_year,
+-- attest_close_exception, begin_close, abandon_close, open_fiscal_year, mint_month_snapshot), two
+-- triggers on the task surface (_tf_agent_task_insert/_update), and ONE stable read
+-- (propose_fiscal_year) reached from a live writer's transaction (open_fiscal_year calls it
+-- in-body) rather than being a writer itself — plus four live-table CHECK swaps a writer's own
+-- transaction may be mid-flight against (B1-1/B1-2/B1-4/B1-6). Run from merged main only, after
+-- Window A (PR-1a) has settled.
 --
 -- Timeout is PRECAUTIONARY, not load-bearing: every statement here is DDL or CREATE OR REPLACE
 -- FUNCTION over a small, already-indexed catalog — no backfill, no table scan. The runner opens
@@ -145,21 +148,23 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- 0.2 · the wake_credentials CHECKs must ALREADY carry F-A2/PR-1's 'interactive_client' form.
-  -- This file authors against the POST-F-A2 four-kind text (design Annex C; gate GM-8) and
-  -- REFUSES to apply against the pre-F-A2 three-kind text rather than silently narrowing what it
-  -- means to extend (wave-f-lane-brief.md's own warning: "prestate probe aborts loudly if
-  -- interactive_client is absent").
+  -- 0.2 · the wake_credentials CHECKs, pinned EXACT (fail-closed BOTH ways, matching 0.3's
+  -- siblings — B1-4 gets the same idempotency guard the other three extended CHECKs already
+  -- carry). An exact-text match proves interactive_client IS present (F-A2/PR-1 merged onto
+  -- this chain; the POST-F-A2 four-kind text, design Annex C, gate GM-8) AND that close_prep is
+  -- ABSENT (this file has not already applied) in one pin -- a substring probe on close_prep's
+  -- own name alone would miss a drift in any OTHER disjunct (wave-f-lane-brief.md's own warning:
+  -- "prestate probe aborts loudly if interactive_client is absent"; "prove trued pins both ways").
   select pg_get_constraintdef(c.oid) into v_def from pg_constraint c
     where c.conrelid = 'clara.wake_credentials'::regclass and c.conname = 'ck_wake_credentials_kind_0011';
-  if v_def is null or position('interactive_client' in v_def) = 0 then
-    raise exception 'f_a4_pr_1b prestate: ck_wake_credentials_kind_0011 does not carry interactive_client yet -- F-A2 PR-1 has not merged onto this chain; this file authors against the POST-F-A2 four-kind text and refuses to extend the pre-F-A2 three-kind one (got: %)', v_def
+  if v_def is distinct from 'CHECK ((wake_kind = ANY (ARRAY[''interactive''::text, ''proactive''::text, ''autodraft''::text, ''interactive_client''::text])))' then
+    raise exception 'f_a4_pr_1b prestate: ck_wake_credentials_kind_0011 is not at its exact post-F-A2/pre-F-A4 text -- either F-A2 PR-1 has not merged onto this chain, or this file already applied (got: %)', v_def
       using errcode = 'CLR10';
   end if;
   select pg_get_constraintdef(c.oid) into v_def from pg_constraint c
     where c.conrelid = 'clara.wake_credentials'::regclass and c.conname = 'ck_wake_credentials_client_0011';
-  if v_def is null or position('interactive_client' in v_def) = 0 then
-    raise exception 'f_a4_pr_1b prestate: ck_wake_credentials_client_0011 does not carry interactive_client yet (got: %)', v_def
+  if v_def is distinct from 'CHECK ((((wake_kind = ''autodraft''::text) AND (client_id IS NOT NULL)) OR ((wake_kind = ANY (ARRAY[''interactive''::text, ''proactive''::text])) AND (client_id IS NULL)) OR ((wake_kind = ''interactive_client''::text) AND (client_id IS NOT NULL))))' then
+    raise exception 'f_a4_pr_1b prestate: ck_wake_credentials_client_0011 is not at its exact post-F-A2/pre-F-A4 text (got: %)', v_def
       using errcode = 'CLR10';
   end if;
 
@@ -514,10 +519,13 @@ begin
         -- TASK #17 FIX A: born marked. Before this fix the column stayed at its default false
         -- forever -- this entry is auto-approved in THIS SAME transaction, so it never sits as
         -- an editable draft revise_entry could later mark -- and the SST turnover evaluator's
-        -- `not (is_year_end and closing_transfer)` exclusion never fired: every year-end roll
-        -- inflated turnover. A single-body fix (this one alone, without the reopen mirror below)
-        -- would INVERT the defect into compounding inflation on any reopened-then-reclosed year,
-        -- which is why both bodies are marked in this one migration (D-23, GM-7).
+        -- `not (is_year_end and closing_transfer)` exclusion never fired: the entry's income-leg
+        -- DEBIT (zeroing the account the evaluator sums as credit-minus-debit) counted, and every
+        -- year-end roll DEFLATED the rolling figure -- permanent SUPPRESSION of the 80%
+        -- early-warning ladder, never a false alarm (measured direction, T7). A single-body fix
+        -- (this one alone, without the reopen mirror below) would leave the mirror's own debit
+        -- unmarked on every reopened-then-reclosed year, reproducing the SAME suppression a
+        -- second time -- which is why both bodies are marked in this one migration (D-23, GM-7).
         true);
     v_line := 0;
     for r in select * from jsonb_array_elements(v_pl_rows) x(el) loop
@@ -795,9 +803,10 @@ begin
         -- fresh true. A reversal of a PRE-FIX closing entry (born false) does not silently
         -- launder its own history; a reversal of a POST-FIX one (born true, per §B above) carries
         -- the fact forward. Either way the mirror's classification matches what it undoes -- a
-        -- single-body fix (marking only finalize_close) would leave the mirror false and INVERT
-        -- the defect into compounding SST-turnover inflation on every reopen/reclose cycle, which
-        -- is why both bodies are marked in this one migration (D-23, GM-7).
+        -- single-body fix (marking only finalize_close) would leave the mirror false, and the
+        -- mirror's own income-leg debit would then ALSO deflate the rolling figure, reproducing
+        -- task #17's suppression on every reopen/reclose cycle -- which is why both bodies are
+        -- marked in this one migration (D-23, GM-7).
         o.closing_transfer
         from clara.journal_entries o where o.id = v_entry;
     insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
@@ -887,9 +896,14 @@ end $function$;
 -- =================================================================================================
 -- §D · B1-9 — clara.attest_close_exception: authorship (+ p_from_proposal), OQ-A4-8.
 -- =================================================================================================
--- The p_from_proposal arm's ONE reference to clara.close_proposals (a PR-1c table) is DYNAMIC
--- SQL -- see the file header note. No `check_function_bodies` toggle; the migration runner
--- refuses those outright, mechanically, and correctly.
+-- The p_from_proposal arm's ONE reference to clara.close_proposals (a PR-1c table, not created by
+-- this file) is PLAIN STATIC SQL. MEASURED (settle report, gate B3): plpgsql does NOT resolve an
+-- embedded relation at CREATE time, even with check_function_bodies=on -- Postgres validates a
+-- plpgsql statement's catalog references at PLAN time, on first EXECUTION, never at function
+-- creation (confirmed live: CREATE FUNCTION over a body naming a genuinely absent table succeeds
+-- outright). A dynamic arm was never needed for this. The branch stays unreachable -- for every
+-- call the estate has ever made -- until PR-1c ships the table and a caller starts passing a
+-- non-null p_from_proposal; when it runs, it runs against a real table, no waiver surface owed.
 --
 -- DROP THE OLD 5-ARG OVERLOAD FIRST. Adding a trailing parameter changes the function's
 -- argument-type signature, so CREATE OR REPLACE does not replace the existing 5-arg body — it
@@ -909,6 +923,7 @@ declare
   c record; v_run record; v_chk record; v_result record; v_dedupe jsonb;
   v_prior uuid; v_new uuid; v_fresh uuid; v_items text[]; v_item text;
   v_authored_by text; v_adopted_verbatim boolean; v_drafted_text text;
+  v_proposal_state text; v_bound_digest text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if not clara._has_capability(c.firm, c.actor, 'close_and_attest') then
@@ -943,9 +958,12 @@ begin
         detail = jsonb_build_object('reason', 'drawer1_identity_failed',
           'check_key', p_check_key, 'drawer', v_chk.drawer)::text;
   end if;
+  -- The request hash includes p_from_proposal (Codex B2): a retried op_key whose PROPOSAL
+  -- identity changed between calls must never replay the prior result -- adopting proposal A's
+  -- text under a key minted for proposal B would silently misattribute authorship.
   v_dedupe := clara._reserve_op(c.firm, 'attest_close_exception', p_op_key,
     clara._hash(jsonb_build_object('run', p_close_run, 'check', p_check_key,
-      'reason', p_reason, 'item', p_item_key)));
+      'reason', p_reason, 'item', p_item_key, 'from_proposal', p_from_proposal)));
   if v_dedupe is not null then return v_dedupe; end if;
   v_fresh := (clara._evaluate_one_gate(p_close_run, p_check_key) ->> 'result_id')::uuid;
   select * into v_result from clara.close_gate_results g where g.id = v_fresh;
@@ -987,17 +1005,34 @@ begin
   -- transaction that measures the state being attested -- deriving adoption by string comparison
   -- AFTERWARDS is what law 27(2) refuses, not doing it here, once.
   if p_from_proposal is not null then
-    -- DYNAMIC: clara.close_proposals does not exist in this window (PR-1c's table); a static
-    -- reference would fail plpgsql's compile-time validation, which this repo's migration
-    -- runner will not let a file disable. Opaque to the compiler, unreachable until PR-1c ships
-    -- the table and a caller starts passing a non-null p_from_proposal.
-    execute 'select x.el ->> ''text'' from clara.close_proposals cp, '
-      || 'jsonb_array_elements(cp.drafted) x(el) where cp.id = $1 and cp.close_run_id = $2 '
-      || 'and (x.el ->> ''check_key'') = $3 and (x.el ->> ''item_key'') = $4 limit 1'
-      into v_drafted_text using p_from_proposal, p_close_run, p_check_key, v_item;
+    -- STATIC SQL naming clara.close_proposals -- see the §D header note. Reads the proposal's
+    -- state, its drafted text for this item, and the digest it bound (Annex E.4: bound_digests
+    -- is {check_key: measured_digest}) in ONE statement.
+    select cp.state, x.el ->> 'text', cp.bound_digests ->> p_check_key
+      into v_proposal_state, v_drafted_text, v_bound_digest
+      from clara.close_proposals cp, jsonb_array_elements(cp.drafted) x(el)
+      where cp.id = p_from_proposal and cp.close_run_id = p_close_run
+        and (x.el ->> 'check_key') = p_check_key and (x.el ->> 'item_key') = v_item
+      limit 1;
     if v_drafted_text is null then
       raise exception 'proposal % names no drafted text for %/%', p_from_proposal, p_check_key, v_item
         using errcode = 'CLR10', detail = '{"reason":"attest_proposal_text_missing"}';
+    end if;
+    -- Codex B1: an adoption must bind a LIVE, OPEN proposal whose gate digest has not moved
+    -- since it was proposed -- "a moved measurement invalidates it" (design close-key-1-
+    -- design.md §3.7). Checked against v_result.measured_digest, the SAME fresh measurement
+    -- this call already took above (never a second read that could itself drift).
+    if v_proposal_state is distinct from 'open' then
+      raise exception 'proposal % is % -- only an open proposal may be adopted', p_from_proposal, coalesce(v_proposal_state, 'unknown')
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'attest_proposal_not_open', 'state', v_proposal_state)::text;
+    end if;
+    if v_bound_digest is distinct from v_result.measured_digest then
+      raise exception 'proposal % bound a measurement for % that has since MOVED -- re-propose against the fresh measurement', p_from_proposal, p_check_key
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'attest_proposal_digest_stale',
+            'check_key', p_check_key, 'bound_digest', v_bound_digest,
+            'fresh_digest', v_result.measured_digest)::text;
     end if;
     v_authored_by := 'agent';
     v_adopted_verbatim := (p_reason = v_drafted_text);
@@ -1553,10 +1588,14 @@ begin
   -- T.2 · task #17 Fix A, FORWARD-ONLY, FAIL-CLOSED: BOTH writer bodies born marking
   -- closing_transfer, or this migration does not apply. A single-body fix inverts the defect,
   -- so this is a structural conjunction, not two independent checks.
+  -- POSITIONAL, not two independent substring hits (opus A-2): a mutant that keeps
+  -- closing_transfer in the column list but writes FALSE in the VALUES clause would still pass
+  -- two unlinked position() checks. Anchor on the column list's closing paren and require the
+  -- NEXT `true)` (no ';' between them, so the match cannot spill into a later statement) to be
+  -- the VALUES clause's own terminator -- the literal true this INSERT actually writes.
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara.finalize_close(uuid,text,text)'::regprocedure;
-  if position('close_receipt_id, closing_transfer)' in v_src) = 0
-     or position('c.actor, v_receipt,' in v_src) = 0 then
-    raise exception 'f_a4_pr_1b tail: task #17 Fix A -- finalize_close''s closing-entry INSERT does not carry closing_transfer' using errcode='CLR10';
+  if v_src !~ 'close_receipt_id, closing_transfer\)[^;]*\n\s*true\)' then
+    raise exception 'f_a4_pr_1b tail: task #17 Fix A -- finalize_close''s closing-entry INSERT does not write closing_transfer=true positionally in its VALUES clause' using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara.reopen_fiscal_year(uuid,text,jsonb,text,text)'::regprocedure;
   if position('reversal_of, reversal_reason, closing_transfer)' in v_src) = 0

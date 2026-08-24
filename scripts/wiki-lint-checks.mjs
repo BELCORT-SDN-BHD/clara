@@ -196,22 +196,6 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       "_subledger_outstanding", "_book_today", "_audit", "_append_event", "_finish_op",
       "_fa_today", "staff_advance_summary", "staff_advance_statement", "apply_open_items"],
   }],
-  ["attest_close_exception(uuid,text,text,text,text,uuid)", {
-    why: "F-A4 PR-1b (close-key-1 design.md, Annex D.5's p_from_proposal arm; OQ-A4-8). The "
-      + "ONE dynamic statement reads clara.close_proposals to find the drafted attestation "
-      + "text a review-card adoption cites, so the door can record whether the adopted text "
-      + "changed (TA-P4 (5)) inside the same transaction that measures the state being "
-      + "attested. close_proposals is a PR-1c table (Annex F.3, additive) that does not exist "
-      + "in this window's own migration, and plpgsql's compile-time body check would refuse a "
-      + "STATIC reference to it -- the migration runner mechanically forbids the alternative "
-      + "(disabling check_function_bodies), so this is dynamic SQL, not a static statement this "
-      + "gate could otherwise see. No wiki relation or wiki-touch call is named or reachable: "
-      + "close_proposals carries no wiki content and no wiki call sits behind it. The branch "
-      + "that runs this statement is unreachable (p_from_proposal defaults NULL) until PR-1c "
-      + "ships the table.",
-    relations: ["close_proposals"],
-    calls: [],
-  }],
 ]);
 
 /** Normalise a waiver value to {why, relations:Set, calls:Set}; a legacy string is a bare

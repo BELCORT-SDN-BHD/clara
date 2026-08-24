@@ -15,7 +15,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, reopenSig, caught, freshActiveClient, proposeFY, openFY,
+  has0056, reopenSig, caught, freshActiveClient, proposeFY, openFY, attestCloseSig,
 } from "./x56-fixtures.mjs";
 
 let ready = false;
@@ -138,10 +138,12 @@ test("A23 fy_end_source is honest: a client with NO fy_end set reads 'default_12
 // wake-pack, never a direct grant.
 // ===========================================================================
 
+// attest_close_exception is NOT in this static list -- F-A4 PR-1b changes its arity (a DROP +
+// re-CREATE, not a CoR-in-place), so like the reopen signature below it is asked via
+// attestCloseSig() at the point of use, never hard-coded.
 const CLOSE_VERBS = [
   "clara.begin_close(uuid,text)",
   "clara.finalize_close(uuid,text,text)",
-  "clara.attest_close_exception(uuid,text,text,text,text,uuid)",
   "clara.abandon_close(uuid,text,text)",
   "clara.open_fiscal_year(uuid,text,date,date,text,text)",
   "clara.grant_firm_capability(uuid,text,text,text)",
@@ -160,7 +162,7 @@ test("A9 the close/approve-class verb set (verbs + the three close readers, Code
 
   // [B3] the reopen signature is frontier-dependent (p_attestation is appended once B3 lands),
   // so it joins the sweep by ASKING the catalog rather than by a hard-coded regprocedure.
-  for (const sig of [...CLOSE_VERBS, await reopenSig()]) {
+  for (const sig of [...CLOSE_VERBS, await reopenSig(), await attestCloseSig()]) {
     const r = await rootQuery(
       `select has_function_privilege('clara_agent_ro', $1::regprocedure, 'EXECUTE') as agent_ro,
               has_function_privilege('clara_wake_proactive', $1::regprocedure, 'EXECUTE') as wake_proactive,

@@ -75,10 +75,15 @@ test("close-ordering: begin_close on FY2 refuses CLR41/close_ordering_violation 
   const wrapperBody = (await rootQuery(
     "select pg_get_functiondef('clara.begin_close(uuid,text)'::regprocedure) as def",
   )).rows[0].def;
-  assert.match(wrapperBody, /_begin_close_core/, "mandatory setup: begin_close delegates to the shared core (post-F-A4/PR-1b shape)");
   const coreExists = (await rootQuery(
     "select to_regprocedure('clara._begin_close_core(uuid,uuid,uuid,text)') is not null as ok",
   )).rows[0].ok;
+  // Frontier-gated (opus C-1): this assertion is only TRUE post-F-A4/PR-1b -- an unconditional
+  // match here would hard-fail (never gracefully fall through to the coreExists branch below)
+  // on any chain that has not yet applied the entrance-seam body-move.
+  if (coreExists) {
+    assert.match(wrapperBody, /_begin_close_core/, "post-F-A4/PR-1b: begin_close delegates to the shared core");
+  }
   const body = coreExists
     ? (await rootQuery(
         "select pg_get_functiondef('clara._begin_close_core(uuid,uuid,uuid,text)'::regprocedure) as def",

@@ -34,14 +34,15 @@ import {
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   has0056, caught, freshActiveClient, setupCloseCoa, openFY, beginClose,
-  finalizeClose, reopenFY, reopenerFor, plainEntry, addDaysStr, BANK1, REVN, EXPN, RE1,
+  finalizeClose, reopenFY, reopenerFor, plainEntry, BANK1, REVN, EXPN, RE1,
 } from "./x56-fixtures.mjs";
 import {
   a21EnsureReady, freshWatchClient, approvedTurnoverEntry, evaluateSstWatch,
   openWatchRow, setTurnoverClassification, mintInteractive, wakeDraftEntry, reviseEntry,
   approveEntry, mytMonthDate, mytLastDayOfMonth, INC, CASH,
 } from "./a21-helpers.mjs";
-import { receiptRow, entryRow } from "./er9-corpus-fixtures.mjs";
+import { receiptRow, entryRow, lineRows, tbAt } from "./er9-corpus-fixtures.mjs";
+import { withTxn } from "./rig-txn.mjs";
 
 async function hasF_A4_PR1B() {
   const r = await rootQuery(
@@ -80,15 +81,22 @@ before(async () => {
   // literal wall-clock now() (never the book clock) and evaluates a ROLLING 12 months ending
   // at the last COMPLETED month, so the closing entry -- which finalize_close always dates at
   // fy.ends_on -- must land INSIDE that window for T2/T4/T7 to test the closing_transfer
-  // mechanism itself rather than a date-based exclusion that would prove nothing. A calendar
-  // year starting 2025-08-01 gives ends_on = 2026-07-31, comfortably inside the window and
-  // safely in the past relative to today -- an explicit, non-default 12-month span (needs no
-  // length_reason; fy_end_source reads 'asserted' rather than 'default_1231', immaterial here).
-  const startsOn = "2025-08-01", endsOn = "2026-07-31";
+  // mechanism itself rather than a date-based exclusion that would prove nothing.
+  //
+  // SELF-RELATIVE, not hard-coded (opus A-3: a fixed "2025-08-01..2026-07-31" span walks OUT of
+  // the rolling-12-month window the moment real wall-clock time passes it -- a dated tripwire,
+  // exactly the class T7 already avoids by deriving its own dates from mytMonthDate /
+  // mytLastDayOfMonth). endsOn = the last day of the month 3 months back (a safely-completed
+  // month, T7's own margin); startsOn = the first day of the month 12 further back than THAT
+  // (month -15), giving an exact 12-calendar-month span -- no length_reason needed, and every
+  // date here is recomputed fresh against whenever this battery actually runs, never against
+  // whenever it was authored.
+  const endsOn = await mytLastDayOfMonth(-3);
+  const startsOn = await mytMonthDate(-15, 1);
+  const midYear = await mytMonthDate(-12, 15);
   const client = await freshActiveClient(world.users.alice, "t17");
   await setupCloseCoa(world.users.alice, client);
   const opened = await openFY(world.users.alice, { client, label: "t17 FY1", startsOn, endsOn });
-  const midYear = addDaysStr(startsOn, 90);
   const revenueEntry = await plainEntry(world.users.hana, { client, debit: BANK1, credit: REVN, cents: 500_000, postingDate: midYear, memo: "t17 revenue" });
   const expenseEntry = await plainEntry(world.users.hana, { client, debit: EXPN, credit: BANK1, cents: 200_000, postingDate: midYear, memo: "t17 expense" });
   W = { client, fy: opened.fiscal_year_id, startsOn, endsOn, revenueEntry, expenseEntry };
@@ -122,6 +130,13 @@ test("T1 finalize_close's closing entry is born closing_transfer=true (Fix A; al
   assert.equal(row.status, "approved", "mandatory setup: the closing entry auto-approves in the same transaction");
   assert.equal(row.is_year_end, true, "mandatory setup: still born is_year_end (unchanged by this fix)");
   assert.equal(row.closing_transfer, true, "T1/Fix A: born marked");
+  // Captured HERE, not re-read live inside T12: `trial_balance_as_of` is cumulative from
+  // account inception, not fiscal-year-bounded, and T11 later posts a real (deliberately
+  // pre-FY-dated, to dodge the period wall) entry against this same client's BANK1 --
+  // which a live re-read at T12's turn in the file would pick up, contaminating a
+  // cross-check that has nothing to do with T11's over-marking concern. Freezing the read
+  // at the moment the state it is meant to prove actually existed keeps T12 order-independent.
+  W.tbAfterClose1 = await tbAt(W.client, W.endsOn);
 });
 
 // =====================================================================================
@@ -284,8 +299,12 @@ test("T8 ▣ finalize_close's and reopen_fiscal_year's LIVE prosrc, read fresh b
   const fc = (await rootQuery(
     "select prosrc from pg_proc where oid='clara.finalize_close(uuid,text,text)'::regprocedure",
   )).rows[0].prosrc;
-  assert.match(fc, /closing_transfer\)[\s\S]{0,400}true\);/,
-    "T8: finalize_close's closing-entry INSERT column list carries closing_transfer, followed by a literal true in its VALUES");
+  // Re-anchored (opus A-1): the ORIGINAL {0,400}-char window matched inside the explanatory
+  // COMMENT between the VALUES clause's own literals, not the column list -- re-derive the
+  // SAME positional form the migration's own tail self-proof uses (no ';' between the column
+  // list's closing paren and the VALUES clause's own literal true).
+  assert.match(fc, /close_receipt_id, closing_transfer\)[^;]*\n\s*true\)/,
+    "T8: finalize_close's closing-entry INSERT column list carries closing_transfer, followed positionally by a literal true in its OWN VALUES clause");
   const rf = (await rootQuery(
     "select prosrc from pg_proc where oid='clara.reopen_fiscal_year(uuid,text,jsonb,text,text)'::regprocedure",
   )).rows[0].prosrc;
@@ -334,6 +353,8 @@ test("T10 R1b behavioural: an agent-authored (wake) draft carrying closing_trans
   }));
   assert.ok(err, "T10: an agent-authored draft carrying closing_transfer=true must refuse");
   assert.equal(err.code, "CLR03", `expected CLR03 (agent-authority family), got ${err.code} -- ${err.message}`);
+  assert.match(err.message, /human-lane marker/i,
+    "T10: the refusal names the WALL that fired (the human-lane-marker check) -- CLR03 alone is the whole agent-authority family, not specific to this predicate");
 });
 
 // =====================================================================================
@@ -358,14 +379,46 @@ test("T11 an ORDINARY posting (not a closing entry, not a reopen mirror) is neve
 // T12 -- accounting-correctness precedence (hard constraint 1): Fix A changes ONLY the
 // closing_transfer column's value. The books themselves are untouched.
 // =====================================================================================
-test("T12 the books are UNCHANGED by this fix: pl_net_cents, the retained-earnings account and the closing-position pin are exactly what an unmarked close would have produced", async (t) => {
+test("T12 the books are UNCHANGED by this fix: pl_net_cents, the retained-earnings account, the closing-position PIN and the closing entry's own LINES are exactly what an unmarked close would have produced -- read and cross-checked, not merely named", async (t) => {
   if (gate(t)) return;
   const r1 = await receiptRow(W.receipt1);
-  assert.equal(Number(r1.pl_net_cents), 500_000 - 200_000, "T12: pl_net_cents is the plain FY movement (revCents - expCents), unaffected by the marker");
+  const plNet = 500_000 - 200_000;
+  assert.equal(Number(r1.pl_net_cents), plNet, "T12: pl_net_cents is the plain FY movement (revCents - expCents), unaffected by the marker");
   assert.equal(r1.retained_earnings_account, RE1, "T12: the roll still names the chart's single retained-earnings marker");
   const e1 = await entryRow(W.entry1);
   assert.equal(e1.origin, "manual");
   assert.equal(e1.status, "approved");
+
+  // Codex T12: the title claims the CLOSING-POSITION PIN and read only four unrelated fields --
+  // actually READ the pin and the lines. BANK1 nets to the plain revenue-minus-expense movement
+  // (untouched by the closing entry, which never posts to it); RE1 absorbs the profit as a
+  // CREDIT (a positive pl_net_cents increases equity on its normal side).
+  const pin = r1.snapshot.closing_position;
+  assert.equal(Number(pin[BANK1]), plNet, "T12: the pin's BANK1 position is the plain revenue-minus-expense movement");
+  assert.equal(Number(pin[RE1]), -plNet, "T12: the pin's RE1 position is a CREDIT of the net profit (debit-credit convention, so the stored value is negative)");
+  // Cross-checked against an INDEPENDENT trial-balance read (never the receipt re-read against
+  // itself, matching R9.C4's own discipline) -- the pin is not merely internally consistent, it
+  // agrees with the books. Read at T1 (W.tbAfterClose1), not live here -- see the comment
+  // at the capture site: a live re-read at this point in the file would also see T11's
+  // later, deliberately pre-FY-dated ordinary posting against this same client's BANK1.
+  const tb = W.tbAfterClose1;
+  assert.equal(Number(pin[BANK1]), tb.get(BANK1) ?? 0, "T12: the pin agrees with an independent trial-balance read on BANK1");
+  assert.equal(Number(pin[RE1]), tb.get(RE1) ?? 0, "T12: the pin agrees with an independent trial-balance read on RE1");
+  assert.equal(tb.get(REVN) ?? 0, 0, "T12: REVN nets to zero at the year end -- the close rolled it, marker or not");
+  assert.equal(tb.get(EXPN) ?? 0, 0, "T12: EXPN nets to zero at the year end -- the close rolled it, marker or not");
+
+  // The closing entry's own LINES: three lines (REVN debited away, EXPN credited away, RE1
+  // credited the profit), balanced to the cent -- the closing_transfer marker is a column on
+  // the entry header, and touches not one line amount.
+  const lines = await lineRows(W.entry1);
+  assert.equal(lines.length, 3, "T12: two moved P&L accounts plus the retained-earnings roll line");
+  const byAccount = new Map(lines.map((l) => [l.account_code, l]));
+  assert.equal(Number(byAccount.get(REVN)?.debit_cents), 500_000, "T12: REVN's own line debits away its full credit balance");
+  assert.equal(Number(byAccount.get(EXPN)?.credit_cents), 200_000, "T12: EXPN's own line credits away its full debit balance");
+  assert.equal(Number(byAccount.get(RE1)?.credit_cents), plNet, "T12: RE1's own line credits exactly the net profit");
+  const totalDebits = lines.reduce((a, l) => a + Number(l.debit_cents), 0);
+  const totalCredits = lines.reduce((a, l) => a + Number(l.credit_cents), 0);
+  assert.equal(totalDebits, totalCredits, "T12: the closing entry balances to the cent");
 });
 
 // =====================================================================================
@@ -386,4 +439,125 @@ test("T13 census: across the whole close/reopen/reclose cycle, EXACTLY the closi
     "select count(*)::int as n from clara.journal_entries where client_id=$1 and is_year_end=true and closing_transfer=false", [W.client],
   );
   assert.equal(unmarkedButYearEnd.rows[0].n, 0, "T13: no is_year_end row on this client escaped marking -- the closed-world census is the wall, not a sample");
+});
+
+// =====================================================================================
+// T14 (both reviewers) -- the mirror's FALSE branch. T3 proves the copy-through in the ONE
+// direction Fix A ever produces (true -> true); the reopen body's own statement is
+// `o.closing_transfer` -- a COPY, not an assertion of true -- and that copy mechanism itself
+// needs its OTHER direction proven, or the "forward-only" claim rests on an untested branch.
+// =====================================================================================
+test("T14 the mirror's FALSE branch: a closing entry born in the pre-Fix-A shape (closing_transfer=false) reopens to a mirror that copies FALSE through too -- the o.closing_transfer copy-through proven in BOTH directions, not just the true case T3 covers", async (t) => {
+  if (gate(t)) return;
+  const endsOn = await mytLastDayOfMonth(-19);
+  const startsOn = await mytMonthDate(-31, 1);
+  const client = await freshActiveClient(world.users.alice, "t17unmark");
+  await setupCloseCoa(world.users.alice, client);
+  const opened = await openFY(world.users.alice, { client, label: "t17 unmarked FY", startsOn, endsOn });
+  const fy = opened.fiscal_year_id;
+  const midYear = await mytMonthDate(-28, 15);
+  await plainEntry(world.users.hana, { client, debit: BANK1, credit: REVN, cents: 100_000, postingDate: midYear, memo: "t14 revenue" });
+  await beginClose(world.users.alice, { fy });
+  const closed = await finalizeClose(world.users.alice, { fy });
+  assert.ok(closed.close_entry_id, "mandatory setup: a real closing entry exists as the copy template");
+  const realClose = (await rootQuery(
+    "select closing_transfer from clara.journal_entries where id=$1", [closed.close_entry_id],
+  )).rows[0];
+  assert.equal(realClose.closing_transfer, true, "mandatory setup: finalize_close (Fix A) bore it true, as T1 already proves");
+
+  // _tf_entry_immutable (0003:371-382) blocks EVERY column change on an approved row except
+  // the reversed_by/reversal_reason pair -- closing_transfer included, confirmed empirically
+  // on this rig: a raw UPDATE against the real closing entry above raises CLR08 ("approved
+  // entries are immutable except a complete reversal-linkage pair"). finalize_close (Fix A)
+  // never produces a false-marked row either, so no door -- governed or raw -- reaches a
+  // false-marked APPROVED closing entry once one already exists. close_receipts.close_entry_id
+  // is separately immutable (0056:1589), so the real receipt above cannot be repointed either.
+  //
+  // The only way to exercise the mirror's copy-through on its untested FALSE branch is to
+  // construct a closing-shaped entry+receipt pair entirely outside the writers: a synthetic
+  // entry inserted at 'draft' (closing_transfer is free pre-approval) and legally approved
+  // (draft->approved's own allow-set never touches closing_transfer, so the value set at
+  // INSERT rides the transition unchanged), plus a second close_receipts row naming it, with
+  // the real one above superseded first (its one legal transition) to free the fiscal year's
+  // one-active-close-receipt slot. Every OTHER column on both synthetic rows is copied
+  // verbatim from the real close's own output -- the only thing varied from a genuine close
+  // is the one bit this cell exists to prove: closing_transfer at birth.
+  // journal_entries.close_receipt_id -> close_receipts(id) is DEFERRABLE INITIALLY DEFERRED
+  // (0056:1620-1621, precisely for this birth-order problem: the real finalize_close mints
+  // the entry naming a receipt id before that receipt row exists either). Two separate
+  // autocommitting rootQuery() calls would each close their own one-statement transaction and
+  // trip the deferred check at that statement's own end, before the second row exists -- so
+  // the whole synthetic pair goes through ONE explicit transaction (db-tests.md: "a fixture
+  // built from several statements needs withTxn()"), exactly mirroring how the real writer
+  // gets away with the same forward reference: one PL/pgSQL call, one transaction.
+  // t_period_wall / t_period_wall_lines (0056:711-756) refuse an approved-class touch on
+  // journal_entries, and ANY journal_lines write, once the entry's own posting_date falls in
+  // a closing/closed fiscal year -- which this one already is, per the real close above --
+  // UNLESS a close_write_permits row THIS transaction created names the entry (purpose
+  // 'close_entry', target_entry_id = e2). Real finalize_close mints this same permit for its
+  // own closing entry (0056:510-513) before ever touching journal_entries/journal_lines; the
+  // synthetic entry needs the identical permit for the identical reason.
+  const e2 = randomUUID();
+  const r2 = randomUUID();
+  await withTxn(async (c) => {
+    await c.query(
+      `insert into clara.close_write_permits(firm_id, client_id, fiscal_year_id, close_run_id,
+          purpose, target_entry_id, entries_expected)
+        select firm_id, client_id, fiscal_year_id, close_run_id, 'close_entry', $1, 1
+          from clara.close_receipts where id = $2`,
+      [e2, closed.receipt_id],
+    );
+    await c.query("update clara.close_receipts set status='superseded' where id=$1", [closed.receipt_id]);
+    await c.query(
+      `insert into clara.journal_entries (id, client_id, status, posting_date, memo, origin,
+          is_year_end, maker_actor, last_human_editor, close_receipt_id, closing_transfer)
+        values ($1, $2, 'draft', $3, $4, 'manual', true, $5, $5, $6, false)`,
+      [e2, client, endsOn, "t14 synthetic pre-Fix-A-shaped closing entry", world.users.alice, r2],
+    );
+    await c.query(
+      `insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
+        select $1, line_no, account_code, debit_cents, credit_cents, description
+          from clara.journal_lines where entry_id=$2 order by line_no`,
+      [e2, closed.close_entry_id],
+    );
+    await c.query(
+      "update clara.journal_entries set status='approved', approved_at=now(), checker_actor=$1 where id=$2",
+      [world.users.alice, e2],
+    );
+    await c.query(
+      `insert into clara.close_receipts (id, firm_id, client_id, fiscal_year_id, close_run_id,
+          prior_close_receipt_id, kind, status, closed_by, closed_at, segregation_mode,
+          last_preparer_actor, self_attestation, pl_net_cents, retained_earnings_account,
+          closing_tb_digest, gate_digest, books_watermark, evaluator_version_ids, dataset_sha256,
+          close_entry_id, snapshot)
+        select $1, firm_id, client_id, fiscal_year_id, close_run_id,
+          prior_close_receipt_id, kind, 'active', closed_by, closed_at, segregation_mode,
+          last_preparer_actor, self_attestation, pl_net_cents, retained_earnings_account,
+          closing_tb_digest, gate_digest, books_watermark, evaluator_version_ids, dataset_sha256,
+          $2, snapshot
+          from clara.close_receipts where id = $3`,
+      [r2, e2, closed.receipt_id],
+    );
+  });
+  const synthetic = (await rootQuery(
+    "select closing_transfer, status from clara.journal_entries where id=$1", [e2],
+  )).rows[0];
+  assert.equal(synthetic.status, "approved", "mandatory setup: the synthetic entry is legally approved (draft->approved)");
+  assert.equal(synthetic.closing_transfer, false, "mandatory setup: the synthetic entry carries the pre-Fix-A shape (false), unchanged by the approval transition");
+
+  const reopener = await reopenerFor(world.users.alice, { closer: world.users.alice, alternate: world.users.hana });
+  const reopened = await reopenFY(reopener, {
+    fy, reason: "t17 T14: reopening a synthetic pre-Fix-A-shaped closing entry to prove the mirror's copy-through in the FALSE direction",
+    correctionTarget: { entry_ids: [e2] },
+  });
+  assert.equal(reopened.reversed_entry_id, e2, "mandatory setup: reversed_entry_id names the synthetic entry");
+  const mirrorId = reopened.reversal_entry_id;
+  assert.ok(mirrorId, "mandatory setup: the synthetic entry reopens to a real mirror");
+  const mirror = (await rootQuery(
+    "select closing_transfer, reversal_of, status from clara.journal_entries where id=$1", [mirrorId],
+  )).rows[0];
+  assert.equal(mirror.reversal_of, e2, "mandatory setup: the mirror names the synthetic entry");
+  assert.equal(mirror.status, "approved");
+  assert.equal(mirror.closing_transfer, false,
+    "T14: the mirror copies closing_transfer=FALSE through -- o.closing_transfer is a genuine copy of whatever the original carries, in both directions, not a value that happens to always read true because Fix A never produces false");
 });
