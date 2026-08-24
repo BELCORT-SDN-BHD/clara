@@ -69,7 +69,9 @@ function unready(t) {
 /** A wake supplier-bill draft on a freshly-cited doc. */
 async function wakeBill(sub, { client, amount = ROUTINE_CENTS, vendor = { new: { name: "REVCO SDN BHD", registration_no: "201801000321" } } }) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client });
+  // F-A2 PR-1 (D11): the direction-family arm now binds every agent-lane coded draft, so this
+  // shared fixture states its supplier. Direction only — no arithmetic, so nothing corroborates.
+  const cited = await seedCitedDocument(sub, { firm, client, direction: "purchase" });
   const cred = await mintInteractive(firm);
   const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
   const draft = await wakeDraftEntry(cred, {

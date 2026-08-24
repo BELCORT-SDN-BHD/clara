@@ -27,7 +27,7 @@ import {
   seedCorroboratingInvoiceFacts,
   approveEntry, ev, FIELD, counterpartyRows,
   mintInteractive, mintAutodraftCred, wakeDraftEntry, addClientIdentifier, addClientAlias, rm,
-  rlsFlags,
+  rlsFlags, restateSightings,
 } from "./a21-helpers.mjs";
 
 const REC = "300-A00";      // trade debtors (receivable control)
@@ -88,7 +88,13 @@ async function approvedSalesSighting(sub, cred, {
 }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
-  await seedStatedInvoiceFacts(cited, { firm });
+  // F-A2 PR-1 (D11): the SALES direction is now stated on the page. The draft core's
+  // direction-family arm binds every agent-lane coded draft (not just the autodraft wake kind),
+  // and this helper drafts through clara.wake_draft_entry — so a document naming nobody
+  // resolves `unresolved` and the sales_invoice draft is refused CLR21 before any floor is
+  // reached. The seller IS this client (the resolver's (S) arm); the field joins no
+  // corroboration term, so the tax-silent premise A3/A4 assert is untouched.
+  await seedStatedInvoiceFacts(cited, { firm, vendorName: await clientName(client) });
   const d = await wakeDraftEntry(cred, {
     client,
     resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
@@ -102,7 +108,16 @@ async function approvedSalesSighting(sub, cred, {
     postingDate: date, codingKind, opKey: opk("x46s"),
   });
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x46a") });
+  // F-A2 PR-1 (D39): the approval no longer breeds the credit sighting `_ocr_sales_floor`
+  // counts, so it is RESTATED from the real approved entry (0037:2049-2061 replayed). Every
+  // cell here claims something about the FLOOR, never about breeding.
+  await restateSightings(d.entry_id);
   return d.entry_id;
+}
+
+/** The client's own registered name — what a SALES page prints as its supplier (the (S) arm). */
+async function clientName(client) {
+  return (await rootQuery("select name from clara.clients where id=$1", [client])).rows[0]?.name ?? null;
 }
 
 /** The floor, read as the DB reads it (root; the function is definer + ungranted). */
@@ -304,7 +319,10 @@ test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices 
   const dates = ["2026-01-08", "2026-02-08", "2026-03-08", "2026-04-08", "2026-05-08", "2026-06-18"];
   for (const date of dates) {
     const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
-    await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents: 90000 });
+    // F-A2 PR-1 (D11): the seller IS this client — a SALES page. The helper's default vendor
+    // ("RIG SELLER SDN BHD") is a third party, which resolves `purchase` and refuses the
+    // sales_invoice draft at the door now that the direction arm binds every agent lane.
+    await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents: 90000, vendorName: await clientName(client) });
     const d = await wakeDraftEntry(cred, {
       client,
       resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
@@ -319,6 +337,7 @@ test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices 
     });
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x46a5a") });
     if (!cp) { cp = await cpOf(client); }
+    await restateSightings(d.entry_id, { counterparty: cp });   // D39: restated, not bred
   }
   // [lane-7a-db — REPORTED] STATED UNCONDITIONALLY. The premise used to live inside the
   // `if (!cp)` initializer, so it only ran on the loop's first pass — harmless today, but it

@@ -37,7 +37,7 @@ import {
   proposeAutopostRule, signAutopostRule, postViaRule, counterpartyRows,
   reasonOf, mintInteractive, wakeDraftEntry, ev, factsRegion, FIELD,
   admitAutodraft, ORIGIN, primeReadyFiling, beginAutodraft, settleAutodraft,
-  humanPersona, codingLane, lastSkipReason, entryStatusOf, assertRaises,
+  humanPersona, codingLane, lastSkipReason, entryStatusOf, assertRaises, restateSightings,
 } from "./a21-helpers.mjs";
 
 // ---------------------------------------------------------------------------
@@ -167,6 +167,10 @@ async function birthSalesCustomer(sub, { client, firm, name, date, stampKind = t
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("bsca") });
   const norm = name.toLowerCase().replace(/[^a-z0-9]/g, "");
   const cp = (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
+  // F-A2 PR-1 (D39): the eighth _approve_entry_core body no longer breeds, so the sighting the
+  // 7A-R4 floor reads is RESTATED from the real approved entry (0037:2049-2061's own inserts,
+  // replayed). Every cell in this file claims something about the FLOOR, never about breeding.
+  if (cp) await restateSightings(d.entry_id, { counterparty: cp });
   return { cp, entryId: d.entry_id, documentId: cited.documentId };
 }
 
@@ -193,6 +197,9 @@ async function salesSighting(sub, { client, firm, cp, date, stampKind = true, co
   // (see the post half of the 7A-R4 cell).
   if (approve) {
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ss46a") });
+    // F-A2 PR-1 (D39): restated, not bred — see birthSalesCustomer. An UNAPPROVED entry gets
+    // nothing: restateSightings re-checks the retired writer's own gate before writing.
+    await restateSightings(d.entry_id, { counterparty: cp });
   }
   return { entryId: d.entry_id, documentId: cited.documentId };
 }

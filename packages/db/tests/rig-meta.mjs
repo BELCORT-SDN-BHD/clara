@@ -223,6 +223,14 @@ const AUTHORING_0077_WAKE_FNS = [
   "wake_draft_report_spec", "wake_request_report_preview",
 ];
 const AUTHORING_0077_COHORT = [...AUTHORING_0077_WAKE_FNS];
+// [F-A2 PR-1] THE POSTING WRAPPER, and it is one name because that is the whole surface. The
+// ladder (clara._agent_post_entry_core), the extracted control-leg predicate, the projected
+// supplier floor, the counterparty projection and the receipt trigger function are ABSENT from
+// every roster in this file on purpose — granted to nobody, so the sweep's expected=false IS the
+// assertion that this wrapper is the only door, exactly as η's cores are handled above. No
+// cohort entry: this lane adds ONE granted function, and the sweep only ever consults names that
+// exist in the live catalog, so an earlier-frontier database never reads this row at all.
+const POSTING_F_A2_WAKE_FNS = ["wake_post_entry"];
 // 0090-0095 [Wave-F Track A, F-A1] the LLM witness-pair lane. Same closed-set discipline as the
 // blocks above, and its own cohort per the "wholly present or wholly absent" rule (0024's note):
 // folding these into an earlier migration's cohort would make a pre-F-A1 database report a
@@ -892,7 +900,7 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([

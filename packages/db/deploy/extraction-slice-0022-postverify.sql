@@ -304,8 +304,28 @@ begin
       raise exception 'POST-VERIFY 5: components leaked into the corroboration surface';
     end if;
   end if;
-  select prosrc into v_src from pg_proc
-   where oid = 'clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
+  -- THE FLOOR FOLLOWED ITS BODY (F-A2 PR-1, design D31/GB-2). The supplier floor's prologue
+  -- had to become callable against a PROJECTED counterparty, so the whole body moved ONCE into
+  -- clara._assert_supplier_bill_shape_at_projected(uuid,uuid,uuid) and the 2-arity public name
+  -- became a thin NULL-passing delegate. This probe therefore reads the body WHERE IT LIVES —
+  -- resolved from the catalog, never from a migration number (numbers are claimed at merge, so
+  -- a number-keyed gate is a guess that silently stops firing) — and, when the relocation is
+  -- present, additionally asserts that the public name still REACHES it. That is strictly
+  -- stronger than the original: the tie and the escape hatch must still exist, AND the door
+  -- callers use must still open onto them. Same HEAD-conditional idiom as probes 4 and 5 above.
+  if to_regprocedure('clara._assert_supplier_bill_shape_at_projected(uuid,uuid,uuid)') is not null then
+    select prosrc into v_src from pg_proc
+     where oid = 'clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
+    if v_src is null
+       or position('clara._assert_supplier_bill_shape_at_projected(p_entry, p_extraction, null)' in v_src)=0 then
+      raise exception 'POST-VERIFY 5: the 2-arity supplier-bill floor no longer delegates to the projected body';
+    end if;
+    select prosrc into v_src from pg_proc
+     where oid = 'clara._assert_supplier_bill_shape_at_projected(uuid,uuid,uuid)'::regprocedure;
+  else
+    select prosrc into v_src from pg_proc
+     where oid = 'clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
+  end if;
   if v_src is null or position('sst_purchase_cost' in v_src)=0
      or position('amount_override' in v_src)=0 then
     raise exception 'POST-VERIFY 5: the supplier-bill floor was disturbed';

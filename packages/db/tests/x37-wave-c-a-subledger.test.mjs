@@ -488,7 +488,13 @@ async function openApItem(sub, { client, cp, cents, control = AP1, memo = "x37 p
 /** A facts-complete purchase document (states a ZERO tax and a net equal to its
  *  total -- what such a bill actually prints, and what 0036's nonzero-tax belt
  *  requires of a 2-leg shape). */
-async function purchaseDoc(sub, { client, gross }) {
+// F-A2 PR-1 (D11): `vendorName` states WHOSE page this is, and therefore its DIRECTION. The
+// draft core's direction-family arm now binds every agent-lane coded draft rather than only the
+// autodraft wake kind, and this helper feeds clara.wake_draft_entry — so a SALES coding kind on
+// a page naming a third-party supplier is refused CLR21 `direction_family_mismatch`. The default
+// is the third party (purchase, the (P2) arm); a sales caller passes the CLIENT's own registered
+// name (the (S) arm). One stated field, and a real invoice states it.
+async function purchaseDoc(sub, { client, gross, vendorName = "X37 SUPPLIER SDN BHD" }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross), kind: "invoice" });
   // F-A1 PR-3 CUTOVER: the router's invoice-kind arm now mints llm_witness, never
@@ -500,7 +506,7 @@ async function purchaseDoc(sub, { client, gross }) {
   await persistInvoiceFacts(task.id, [
     factField(FIELD.total, rm(gross)),
     factField(FIELD.currency, "MYR"),
-    factField(FIELD.vendorName, "X37 SUPPLIER SDN BHD"),
+    factField(FIELD.vendorName, vendorName),
     factField(FIELD.invoiceId, `X37-${randomUUID().slice(0, 8)}`),
     ...statedIdentityFields(gross),
   ], { envelope: agreedEnvelope() });
@@ -1938,17 +1944,27 @@ test("x37.v the solo-firm high-stakes settlement rides the attestation path to a
 });
 
 // ===========================================================================
-// x37.w -- THE WCA-R8 EVIDENCE PIN. **This cell asserts a DEFECT, deliberately.**
-// The sighting pool is not segregated by posting shape or party role (design
-// debt section 5.3), so three approved employee claims -- a natural person
-// birthed as a 'vendor' because a NULL coding_kind defaults the birth that way --
-// still breed a vendor_account autopost proposal onto the claim expense account.
-// WCA-R8 rules that this is PINNED AS EVIDENCE, not fixed here: the human
-// signature gate is the standing defense, and wholesale pool segregation is a
-// later wave. THIS ASSERTION FLIPS (to "no proposal row") the day segregation
-// lands -- that is the intended failure, and the signal it carries.
+// x37.w -- THE WCA-R8 EVIDENCE PIN, **FLIPPED** (F-A2 PR-1, D39).
+//
+// THE RETIRED CLAIM, named rather than deleted: *"three employee claims STILL breed a
+// vendor_account proposal (the section 5.3 debt's live witness)"*. The cell asserted a DEFECT
+// on purpose -- the sighting pool was not segregated by posting shape or party role, so three
+// approved staff claims bred an autopost proposal binding a natural person to the claim expense
+// account -- and its own header said the assertion FLIPS the day the debt is paid: *"when pool
+// segregation lands this assertion must flip to 0 and this cell must be re-ruled."*
+//
+// IT IS PAID, THOUGH NOT BY SEGREGATION, AND THE GROUND MATTERS. The eighth
+// `clara._approve_entry_core` body excises `0037:2046-2100` whole (design 3.5), so approval
+// breeds nothing at all: no sighting, no vendor_account proposal, no `rule_proposal` question.
+// The section 5.3 vector is CLOSED BY REMOVAL rather than by segregation, and that is a
+// stronger closure than the one this pin was waiting for -- there is no pool to segregate.
+// The re-ruling the header demanded is D39's claim split, and this cell is now the
+// employee-claim arm of C.8's inverted twin set (`f-a2.c8.inv-employee` forces the same
+// inversion inside the F-A2 battery). The claim-shaped halves of the old cell -- the employee
+// really is birthed as a 'vendor', a staff claim mints no ap item, the books still tie --
+// survive verbatim, because none of them was ever about breeding.
 // ===========================================================================
-test("x37.w WCA-R8 evidence pin: three employee claims STILL breed a vendor_account proposal (the section 5.3 debt's live witness)", async (t) => {
+test("x37.w WCA-R8 evidence pin FLIPPED (D39): three employee claims no longer breed a vendor_account proposal -- the section 5.3 vector is closed by the excision", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A2; // its own client, so no other cell's sightings can interfere
@@ -1980,11 +1996,18 @@ test("x37.w WCA-R8 evidence pin: three employee claims STILL breed a vendor_acco
     [client, cp],
   );
   assert.equal(
-    proposal.rowCount, 1,
-    "WCA-R8 PIN: the vendor_account proposal row EXISTS -- three staff claims bred an autopost proposal binding a natural person to an expense account. This is the recorded debt (section 5.3), not a passing feature; when pool segregation lands this assertion must flip to 0 and this cell must be re-ruled.",
+    proposal.rowCount, 0,
+    `WCA-R8 PIN, FLIPPED (D39): NO vendor_account proposal row exists -- three approved staff claims no longer bind a natural person to an expense account, because the eighth _approve_entry_core body breeds nothing at all. The exact vector WC-R10(ii) named was the CLAIMX expense account; got ${JSON.stringify(proposal.rows.map((r) => [r.account_code, r.status]))}.`,
   );
-  assert.equal(proposal.rows[0].account_code, CLAIMX, "the proposal binds the CLAIM expense account -- the exact vector WC-R10(ii) named");
-  noteLane(`x37.w WCA-R8 evidence pin HOLDS: proposal ${proposal.rows[0].id} (status=${proposal.rows[0].status}) binds an employee-as-vendor to ${CLAIMX}. The human signature gate remains the only defense.`);
+  // …AND THE POOL ITSELF IS EMPTY, which is the reason rather than a second symptom. Reading
+  // only the proposal would leave a segregated-pool world (sightings accrue, proposals are
+  // withheld) indistinguishable from this one, and the two are different closures.
+  assert.equal(
+    (await rootQuery(
+      "select count(*)::int as n from clara.rule_sightings where client_id=$1 and counterparty_id=$2",
+      [client, cp])).rows[0].n,
+    0, "…and the sighting pool behind it is empty too -- the vector is closed by REMOVAL, not by segregation");
+  noteLane(`x37.w WCA-R8 evidence pin FLIPPED: the section 5.3 debt (an employee-as-vendor bound to ${CLAIMX} by three assisted approvals) is closed by F-A2's breeding excision. Successor cell: f-a2.c8.inv-employee.`);
   await assertTies(client, "x37.w employee claims");
 });
 
@@ -2531,7 +2554,14 @@ test("x37.ae a REAL sales_credit_note mints ONE negative ar `credit_note` item, 
   // A facts-complete document stating a ZERO tax and a net equal to its total -- the shape
   // the sales floor ties against for a 2-leg credit note (no type_code is stated, so the
   // type<->polarity binding is inert, exactly as it is for the live OCR corpus).
-  const cited = await purchaseDoc(sub, { client, gross: cents });
+  // F-A2 PR-1 (D11): a credit note is a SALES page, so the seller it names is THIS CLIENT (the
+  // resolver's (S) arm). With the direction arm now binding every agent lane, the third-party
+  // default would resolve `purchase` and the sales_credit_note draft would be refused at the
+  // door -- a fixture that states the wrong party, not a finding about the subledger.
+  const cited = await purchaseDoc(sub, {
+    client, gross: cents,
+    vendorName: (await rootQuery("select name from clara.clients where id=$1", [client])).rows[0].name,
+  });
   const cred = await mintInteractive(firm);
   const region = await factsRegion(cited.documentId, FIELD.total);
   const d = await wakeDraftEntry(cred, {
