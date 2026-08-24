@@ -1104,7 +1104,6 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
->>>>>>> 4d3fa03 (feat(db): F-A9 PR-1A — the llm_usage_events ledger reshape)
   return failures;
 }
 
