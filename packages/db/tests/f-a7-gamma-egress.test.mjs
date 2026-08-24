@@ -459,16 +459,25 @@ test("[cell 36, NEGATIVE TWIN — B/F1/F2 review fold] the wall's client-scoped 
     grantClassifyConsent: false,
   });
 
-  // The wall's EXACT live predicate (Section 7), reproduced standalone and evaluated for real.
-  const wallSatisfied = async () => (await rootQuery(
-    `select exists(
-       select 1 from clara.document_filings df
-         join clara.client_egress_purpose_activations a on a.client_id=df.client_id and a.firm_id=df.firm_id
-         join clara.client_egress_purpose_consents c
-           on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
-        where df.document_id=$1 and df.retired_at is null
-          and a.purpose='document_processing'
-          and a.deactivated_at is null and c.revoked_at is null) as ok`, [doc.documentId])).rows[0].ok;
+  // [B/F1/fold-A review fold] the wall's predicate, READ OUT OF THE LIVE BODY every call
+  // (not transcribed) so a live-body deletion of the purpose conjunct goes RED here: the
+  // earlier transcribed version stayed green when the reviewer deleted
+  // `and a.purpose='document_processing'` from the live persist_document_extraction, because
+  // this cell's own copy of the SQL never re-read the body it claims to prove.
+  const wallSatisfied = async () => {
+    const src = (await rootQuery(
+      "select prosrc from pg_proc where oid='clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure"
+    )).rows[0].prosrc;
+    const start = src.indexOf("v_client_scoped := exists(");
+    assert.ok(start > 0, "the wall's v_client_scoped assignment is present in the live body");
+    const openParen = src.indexOf("(", start + "v_client_scoped := exists".length);
+    const closeMarker = src.indexOf(");", openParen);
+    assert.ok(closeMarker > openParen, "the exists(...) block closes with the expected ');' marker");
+    const inner = src.slice(openParen + 1, closeMarker)
+      .replace(/t\.document_id/g, "$1::uuid"); // t is the function-local task row; parameterize it
+    const r = await rootQuery(`select exists(${inner}) as ok`, [doc.documentId]);
+    return r.rows[0].ok;
+  };
 
   assert.equal(await wallSatisfied(), false,
     "NEGATIVE: a live wiki_synthesis-only activation does not satisfy the document_processing wall");
@@ -591,4 +600,109 @@ test("[F4-D evidence-doc wall] grant_firm_egress_purpose refuses a NULL evidence
     `select clara.grant_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'onboarding_interview',
        p_evidence_document=>$1,p_scope_note=>'x',p_op_key=>$2) as r`, [ev.documentId, opk("e4")])).rows[0].r;
   assert.equal(r.status, "live", "POSITIVE CONTROL: a live, verified, same-firm consent_evidence doc succeeds");
+});
+
+// ===========================================================================
+// [Wave-F Track A, F-A7 gamma — independent γ delta-probe fold, 2026-08-25]
+// fold C (D4/D5): S12's new guard vs the REAL verbs it now sits under — deactivate/revoke's
+// own invalidation UPDATE on a live dispatch authorization must still succeed through the
+// guard, not just count triggers. fold B (D6): the two F3 tables' triggers FORCED in both
+// polarities, not merely counted (a no-op trigger body would still count 2).
+// ===========================================================================
+
+test("[D4 fold-C] deactivate_firm_egress_purpose's invalidation UPDATE on a LIVE dispatch authorization still succeeds through S12's new guard", async (t) => {
+  if (gate(t)) return;
+  // firm S's attribution moment is already live by this point — an EARLIER differential-pair
+  // cell's DEFAULT seedVerifiedDocument call lets the fixture convenience auto-grant it
+  // (ADR-0075's own framing) — reused here rather than re-granting (one-live-per-firm-purpose-
+  // moment), mirroring the update-guard cells above.
+  const firm = world.firms.S;
+  const preLive = await liveFirmNarrowConsent(firm, "attribution");
+  assert.ok(preLive, "PREMISE: firm S's attribution moment is already live");
+  const auth = await prepareFirmNarrowDispatch({ firm, moment: "attribution", sha: "f".repeat(64) });
+  assert.equal(auth.verdict, "granted", "PREMISE: a live open authorization exists");
+
+  await humanQuery(world.users.erin,
+    `select clara.deactivate_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'attribution',
+       p_reason=>'rev',p_op_key=>$1)`, [opk("dfn")]);
+  const row = (await rootQuery(
+    "select invalidated_at, invalidated_reason, consumed_at from clara.firm_egress_dispatch_authorizations where id=$1",
+    [auth.authorization_id])).rows[0];
+  assert.ok(row.invalidated_at, "the authorization WAS invalidated through the new guard");
+  assert.equal(row.invalidated_reason, "activation_deactivated");
+  assert.equal(row.consumed_at, null, "exactly one terminal");
+});
+
+test("[D5 fold-C] revoke_firm_egress_purpose's invalidation UPDATE on a LIVE dispatch authorization also succeeds through the same guard", async (t) => {
+  if (gate(t)) return;
+  // firm B's attribution moment is already live from the "prepare_firm_egress_dispatch:
+  // moment-scoped" cell above (its OTHER moment, onboarding_interview, was the one F4-B
+  // deactivated+revoked) — reused rather than re-granting.
+  const firm = world.firms.B;
+  const preLive = await liveFirmNarrowConsent(firm, "attribution");
+  assert.ok(preLive, "PREMISE: firm B's attribution moment is already live");
+  const auth = await prepareFirmNarrowDispatch({ firm, moment: "attribution", sha: "e".repeat(64) });
+  assert.equal(auth.verdict, "granted", "PREMISE: a live open authorization exists");
+
+  await humanQuery(world.users.dave,
+    `select clara.revoke_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'attribution',
+       p_reason=>'rev',p_op_key=>$1)`, [opk("rfn")]);
+  const row = (await rootQuery(
+    "select invalidated_at, invalidated_reason from clara.firm_egress_dispatch_authorizations where id=$1",
+    [auth.authorization_id])).rows[0];
+  assert.ok(row.invalidated_at, "the authorization WAS invalidated through the new guard");
+  assert.equal(row.invalidated_reason, "consent_revoked");
+});
+
+test("[D6 fold-B] all three firm_egress_* tables carry the update-guard + no-truncate pair FORCED in both polarities, not merely trigger-counted", async (t) => {
+  if (gate(t)) return;
+  const firm = world.firms.A;
+  const trg = (await rootQuery(
+    `select c.relname, count(*)::int n from pg_class c join pg_namespace ns on ns.oid=c.relnamespace and ns.nspname='clara'
+       join pg_trigger t on t.tgrelid=c.oid and not t.tgisinternal
+      where c.relname like 'firm_egress%' group by c.relname order by c.relname`)).rows;
+  assert.deepEqual(trg.map((r) => [r.relname, r.n]), [
+    ["firm_egress_dispatch_authorizations", 2],
+    ["firm_egress_purpose_activations", 2],
+    ["firm_egress_purpose_consents", 2],
+  ], "two triggers on each of the three tables");
+
+  // REUSE, not fresh-grant: firm A's attribution moment is already live+ACTIVE by this point
+  // (an early differential-pair cell's fixture-convenience side effect grants AND activates it,
+  // ensureFirmNarrowAttribution's own shape) — a fresh grant_firm_egress_purpose call would
+  // collide (one-live-per-firm-purpose-moment). onboarding_interview is NOT reusable here: F4-D
+  // above only GRANTS it (its own cell never activates), so it carries no live activation row
+  // for this cell's DELETE/UPDATE/TRUNCATE-on-the-activation-table probes to exercise.
+  const consentId = await liveFirmNarrowConsent(firm, "attribution");
+  assert.ok(consentId, "PREMISE: firm A's attribution moment is already live+active (the early fixture-convenience grant)");
+  const actId = (await rootQuery(
+    "select id from clara.firm_egress_purpose_activations where consent_id=$1 and deactivated_at is null", [consentId])).rows[0].id;
+
+  await assert.rejects(rootQuery("delete from clara.firm_egress_purpose_consents where id=$1", [consentId]),
+    /typed egress consents are historical/, "consent DELETE refused");
+  await assert.rejects(rootQuery("update clara.firm_egress_purpose_consents set scope_note='tampered' where id=$1", [consentId]),
+    /permits only one revocation/, "arbitrary consent UPDATE refused");
+  await assert.rejects(rootQuery("truncate clara.firm_egress_purpose_consents"),
+    /truncate/i, "consent TRUNCATE refused");
+
+  await assert.rejects(rootQuery("delete from clara.firm_egress_purpose_activations where id=$1", [actId]),
+    /typed egress activations are historical/, "activation DELETE refused");
+  await assert.rejects(rootQuery("update clara.firm_egress_purpose_activations set purpose='firm_narrow_intake', activated_at=now() where id=$1", [actId]),
+    /permits only one deactivation/, "arbitrary activation UPDATE refused");
+  await assert.rejects(rootQuery("truncate clara.firm_egress_purpose_activations"),
+    /truncate/i, "activation TRUNCATE refused");
+
+  // dispatch authorizations: TRUNCATE refused here (UPDATE polarity already covered by the
+  // two update-guard cells above + D4/D5's own invalidation-path proof).
+  await assert.rejects(rootQuery("truncate clara.firm_egress_dispatch_authorizations"),
+    /truncate/i, "dispatch-authorization TRUNCATE refused");
+
+  await humanQuery(world.users.alice,
+    `select clara.deactivate_firm_egress_purpose(p_purpose=>'firm_narrow_intake',p_moment=>'attribution',
+       p_reason=>'lawful',p_op_key=>$1)`, [opk("d6")]);
+  assert.ok((await rootQuery("select deactivated_at from clara.firm_egress_purpose_activations where id=$1", [actId]))
+    .rows[0].deactivated_at, "POSITIVE CONTROL: the lawful deactivation went through the guard");
+  await assert.rejects(rootQuery(
+    "update clara.firm_egress_purpose_activations set deactivated_at=now(), deactivated_by=deactivated_by, deactivation_reason='again' where id=$1", [actId]),
+    /permits only one deactivation/, "a SECOND deactivation is refused");
 });
