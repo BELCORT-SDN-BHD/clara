@@ -159,8 +159,31 @@ test("f-a3.1a-a every extracted core is the PRE-EXTRACTION body byte-for-byte: i
   assert.equal(rows.length, NINE.length,
     `all ${NINE.length} extracted cores are present (found ${rows.length})`);
   const byName = new Map(rows.map((r) => [r.proname, r]));
+  // F-A3/PR-1b (`f_a3_pr1b_agent_limb`, numbered at merge) legitimately RE-CoRs four of the
+  // nine cores to grow the agent limb's shared bodies — so the pure-extraction byte-inversion
+  // is a FROZEN-WINDOW claim: it holds from PR-1a's apply up to the first successor CoR, and
+  // each successor migration's own tail carries the byte-proof for its recut (the same
+  // frozen-window shape as x38/x42's moved pins). GATED ON THE MIGRATION STEM, never a number.
+  // The no-`_human_ctx` invariant is NOT windowed — it must survive every successor recut.
+  const SUPERSEDED_BY_PR1B = new Set([
+    "_match_bank_line_core", "_unmatch_bank_match_core",
+    "_complete_bank_reconciliation_core", "_resolve_and_book_bank_line_core",
+  ]);
+  const pr1bApplied = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ '^[0-9]{4}_f_a3_pr1b_agent_limb$'",
+  )).rows[0].n === 1;
+  let windowed = 0;
   for (const spec of NINE) {
     const row = byName.get(core(spec.fn));
+    if (pr1bApplied && SUPERSEDED_BY_PR1B.has(core(spec.fn))) {
+      // Presence (asserted above) + the un-windowed invariant still hold; the inversion is
+      // the successor's own tail's business now.
+      assert.ok(!row.prosrc.includes("clara._human_ctx("),
+        `clara.${core(spec.fn)} resolves NO human context of its own — an invariant every successor recut must keep`);
+      windowed += 1;
+      noteLane(`f-a3.1a-a clara.${core(spec.fn)}: recut by PR-1b (its migration tail carries the byte-proof) — the pure-extraction inversion is a pre-PR-1b-window claim for this core`);
+      continue;
+    }
     const block = ctxBlock(spec.fn);
     const occurrences = row.prosrc.split(block).length - 1;
     assert.equal(occurrences, 1,
@@ -176,7 +199,7 @@ test("f-a3.1a-a every extracted core is the PRE-EXTRACTION body byte-for-byte: i
     assert.ok(!row.prosrc.includes("clara._human_ctx("),
       `clara.${core(spec.fn)} resolves NO human context of its own — it takes one, which is the point of the extraction`);
   }
-  noteLane(`f-a3.1a-a ${NINE.length} cores inverted to their pinned pre-extraction shas`);
+  noteLane(`f-a3.1a-a ${NINE.length - windowed} cores inverted to their pinned pre-extraction shas${windowed ? ` (${windowed} recut by PR-1b, inversion windowed)` : ""}`);
 });
 
 // ===========================================================================
