@@ -413,6 +413,18 @@ const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_s
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// F-A7 pi [train position 1, `f_a7_pi_additive` at whatever number merge claimed]: the firm-
+// question door's two settle verbs and the identifier-promotion card's two settle verbs each
+// stamp `settled_at = now()` — a timestamptz audit column, the same shape as
+// WITNESS_F_A1_PR3_CLOCK_NAMES's finished_at above — and derive no DATE from the session clock
+// anywhere in their bodies. Lawful, and therefore rostered. GATED on the migration's stable
+// stem for the same reason its siblings above are: this battery also runs against pre-pi
+// frontiers where these four names do not exist yet.
+const F_A7_PI_CLOCK_NAMES = [
+  "resolve_firm_question", "dismiss_firm_question",
+  "confirm_identifier_promotion", "decline_identifier_promotion",
+];
+
 // F-A9 PR-0 [the chat token-cap hotfix, `f_a9_chat_token_cap` at whatever number merge
 // claimed]: THE FIRST *REVERSE* COHORT ON THIS ROSTER, and the direction is the whole point.
 // Every block above ADDS a name once a migration lands. This one SUBTRACTS one:
@@ -461,6 +473,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
@@ -487,11 +500,27 @@ const KL_ROSTER_BASE = [
 ];
 const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
 
+// F-A4 PR-1a [close key 1, Window A, `f_a4_pr_1a_measurement_layer` at whatever number merge
+// claims]: clara._close_gate_undated spells the same MYT idiom (design close-key-1-design.md
+// v2 §3.10 decision (i)) for its `filed_on` bound and payload key. It CANNOT call
+// clara._book_today() instead: the authority answers "what MYT date is today", while this body
+// needs "what MYT date does THIS document's filed_at timestamp fall on" — a per-row question
+// the authority does not answer, exactly the same shape that put _ocr_sales_floor and its
+// siblings on this roster rather than through the authority. Declared cost, not drift.
+// GATED on the migration's STABLE STEM, never its number — numbers are claimed at merge, and
+// this battery also runs against pre-PR-1a chains where the body does not exist yet.
+const KL_ROSTER_F_A4_PR1A = ["_close_gate_undated"];
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
-  const applied = (await query(
-    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  const applied = async (pat) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version like '${pat}'`
   )).rows[0].n === 1;
-  const names = applied ? [...KL_ROSTER_BASE, ...KL_ROSTER_0046] : [...KL_ROSTER_BASE];
+  const appliedStem = async (re) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
+  )).rows[0].n === 1;
+  const names = [...KL_ROSTER_BASE];
+  if (await applied("0046_%")) names.push(...KL_ROSTER_0046);
+  if (await appliedStem("f_a4_pr_1a_measurement_layer$")) names.push(...KL_ROSTER_F_A4_PR1A);
   return names.sort().join(" ");
 }
