@@ -368,3 +368,54 @@ record of their own — ADR-0072 ④ for the first, ADR-0073 for the second.*
   The question was real — the sitting record named "constraint 2" as a third home, but constraint 2
   is the DB-owns-every-authoritative-number law and no hard constraint states invariant (a) at all.
   One statement of a law, in one place, is the answer. **Closed; nothing was guessed in.**
+
+## The NEXT-ROUND QUEUE's measured detail, archived at the 2026-08-24 harness truing (verbatim; the compact queue stays in PROGRESS Known issues)
+
+- **MYR currency-code prompt fix — the largest measured refusal cause outside the arm, and a FALSE refusal
+  (2/20).** Both EZSEC documents answer `value("RINGGIT MALAYSIA")`; the rule reduces to letters and demands
+  `('RM','MYR')`, so `'RINGGITMALAYSIA'` lands outside and the document is judged **unproven, not foreign**.
+  Every other conjunct was read individually on both and holds. **Ask for the currency CODE, not the printed
+  rendering** (witnessFacts v3). *(Two undriven EZSEC documents share the layout.)*
+- **Dash-is-not-a-value clarification.** Vision reports a bare `-` as `state:'value'`, text as
+  `not_printed`; the mismatch sets `v_agree_ok := false` unconditionally and cost **both
+  BRIGHTPATH documents**. (`509e788d` also has a rounding SIGN split: text `+0.40` vs `- 0.40`.)
+- **Vision-prompt check against the bare SST-id shape** (`[A-Z]\d{2}-\d{4}-\d{8}`). Lock 3 caught
+  the one genuine registrant on the **text** channel alone — the margin was one channel, not two.
+- **`coverage.pages` is emitted EMPTY on every text row (20/20).** Well-formed, and **no lock reads it** (verified
+  against the live evaluator body), so nothing fails closed — but a field that always says `[]` cannot be promoted
+  into a lock without being fixed first. **Fix in the v2 behavior or drop it, before anything reads it.**
+- **The discount-no-net class counts 3, not 2** (`f48a8830`, `6f82065e`, `bd6d37fb` — all ROME
+  SECRETARY / D&D-family); the third came from a *changed read*, not a changed rule. **Trues the
+  number in the on-file owner trigger question** on whether sub-case (b) should admit a printed
+  discount — still the owner's, since the change would be the evaluator inventing structure.
+
+## Posture bullets archived at the 2026-08-24 harness truing (verbatim)
+
+- **THE TRACK-A SITTING IS CLOSED — ADR-0074, 2026-08-22: fourteen principle rulings (TA-P1 …
+  TA-P14) scope F-A3…F-A9 and widen F-A10.** **The four CONSTITUTIONAL AMENDMENTS were RATIFIED
+  by the owner 2026-08-22, together with laws 78-81 and the rider R-TA-P1-walls on law 78:** law
+  71's roster becomes an **OPEN REGISTER** (any act it does not reserve is the agent's, and it
+  ships WALLED — B6 · B14 · the entrance seam) · **invariant (a) becomes the agent's JUDGEMENT
+  under structural walls** · law 21 narrows to periodic POSTING belts · law 76's "LLM" drift is
+  trued. **The PRD §6.2(a) / ARCHITECTURE §0.1 product-text edits LANDED (#287), and the `AGENTS.md`
+  home question is DECIDED (b) 2026-08-23 — PRD §6 is the single home, no duplicate clause.** **Ruled ahead of PR-1 on
+  purpose:** the one-architecture TEST retires the **bank rules machine whole** (superseding
+  **WCC-R5**'s bank arm) and RECORDS **7A-R3 + E-R13 as dissolved** with it. Orchestrator
+  dissents on file: TA-P1, TA-P7. Mechanism of record: `docs/plan/active/wave-f-contract.md`
+  (amended in place) + the sitting record `docs/plan/active/track-a-sitting-1.md` (`-2`, `-3`).
+- **F-A2 IS DESIGNED AND ITS AUTHORITY QUESTIONS ARE RULED — ADR-0072.** Five ruling blocks:
+  opener ⑥ ratified plus the **"delete the old era" directive** (execution tier retires *inside*
+  Wave F; **the post-Window-A re-extraction is TWENTY documents, superseding the full-64
+  backfill** — so the legacy fallback arms' trigger falls through its own "whichever lands
+  first" clause to the Wave-G reset, where F-A10 closes; legacy DATA rows die at that reset;
+  the spike schemas DROP there after a cold archive, so **constraint 15's spike clause retires
+  THEN, not now**) · high-stakes **RE-CONFIRMED at any amount, no thresholds** (build's
+  fail-closed ceiling on file as dissent) · **OQ-4's three exits** and **OQ-6's
+  no-category-gate on the agent lane**, the human lane's gate **STANDING** · **R1 RULED** ·
+  the **corpus reshaped into TWO TIERS**. **Design set of record:
+  `docs/plan/active/f-a2-agentic-posting-design.md` + four annexes (Annex J is new).**
+- **THE WITNESS-PAIR CUTOVER (F-A1) IS LIVE — ceremonied 2026-08-20.** Every invoice-kind
+  document mints `llm_witness`; the Azure invoice engine survives only as the tombstone insert;
+  `witness_extraction` consents granted+activated for RS/BEE/RPR. **The F-A1 corpus measurement**
+  (`docs/plan/completed/f-a1-corpus-measurement.md`) is the 0/33 baseline the re-measure reads
+  against, and its live incident minted riders ③④⑤ — **all three now live-proven** (Known issues).

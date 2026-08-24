@@ -97,177 +97,11 @@ export function toOpenQuestion(raw: unknown): OpenQuestion {
   };
 }
 
-// --- get_coding_rule (WA-R9 dual-source sticky rules) --------------------------
-
-export type CodingRule = {
-  rule_id: string;
-  client_id: string | null;
-  counterparty_id: string | null;
-  counterparty_name: string | null;
-  account_code: string | null;
-  account_name: string | null;
-  status: "proposed" | "live" | "declined" | "retired" | string;
-  origin: string | null;
-  created_at: string | null;
-  signed_by: string | null;
-  signed_at: string | null;
-  reason: string | null;
-  sighting_count: number | null;
-};
-
-export function toCodingRule(raw: unknown): CodingRule {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  return {
-    rule_id: s(o.rule_id) ?? s(o.id) ?? "",
-    client_id: s(o.client_id),
-    counterparty_id: s(o.counterparty_id),
-    counterparty_name: s(o.counterparty_name),
-    account_code: s(o.account_code),
-    account_name: s(o.account_name),
-    status: s(o.status) ?? "proposed",
-    origin: s(o.origin),
-    created_at: s(o.created_at),
-    signed_by: s(o.signed_by),
-    signed_at: s(o.signed_at),
-    reason: s(o.reason),
-    sighting_count: numOrNull(o.sighting_count) ?? numOrNull(o.sightings),
-  };
-}
-
-// --- get_rule_post_run (WA2 §6.4: the posted-by-rule receipt) -------------------
-// ASSUMED read fn (`get_rule_post_run(p_run)`) — the 0015 companion S4 pins the
-// `rule_post_runs` table + `acknowledge_rule_posts` but does NOT name the hydrate
-// read; see LANE-D-NOTES. Defensive by design (the toSweepRun precedent): a run may
-// carry a batch of posted entries (`posts[]`) OR arrive as one flat per-entry receipt
-// — the mapper accepts both so the card renders either shape without a crash.
-
-export type RulePostEntry = {
-  entry_id: string;
-  posted_at: string | null;
-  amount_cents: number | null;
-  account_code: string | null;
-  counterparty_name: string | null;
-  period: string | null;
-  reversed: boolean;
-};
-export type RulePostRun = {
-  run_id: string;
-  rule_id: string | null;
-  direction: "purchase" | "sales" | string | null;
-  posted_at: string | null;
-  acknowledged_by: string | null;
-  acknowledged_at: string | null;
-  posts: RulePostEntry[];
-};
-
-function toRulePostEntry(raw: unknown): RulePostEntry {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  return {
-    entry_id: s(o.entry_id) ?? s(o.id) ?? "",
-    posted_at: s(o.posted_at) ?? s(o.created_at),
-    amount_cents: numOrNull(o.amount_cents) ?? numOrNull(o.total_cents),
-    account_code: s(o.account_code),
-    counterparty_name: s(o.counterparty_name),
-    period: s(o.period) ?? s(o.posting_date),
-    reversed: b(o.reversed) || s(o.status) === "reversed",
-  };
-}
-
-export function toRulePostRun(raw: unknown): RulePostRun {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  const postsRaw = arr(o.posts).length > 0 ? arr(o.posts) : arr(o.entries);
-  // Flat single-entry receipt: no `posts[]`, but the run row itself names an entry.
-  const posts = postsRaw.length > 0 ? postsRaw.map(toRulePostEntry) : (s(o.entry_id) ? [toRulePostEntry(o)] : []);
-  return {
-    run_id: s(o.run_id) ?? s(o.id) ?? "",
-    rule_id: s(o.rule_id),
-    direction: s(o.direction),
-    posted_at: s(o.posted_at) ?? s(o.created_at),
-    acknowledged_by: s(o.acknowledged_by) ?? s(o.acked_by),
-    acknowledged_at: s(o.acknowledged_at) ?? s(o.last_ack_at),
-    posts,
-  };
-}
-
-/** True once the receipt has been acknowledged (terminal — the action goes inert). */
-function b(v: unknown): boolean {
-  return v === true;
-}
-
-// --- get_coding_rule autopost tier (WA2 §6 / migration 0015 S3) -----------------
-// ASSUMED read fn (`list_autopost_rules(p_scope)`) — the companion names
-// sign/propose/reconcile writers + get_coding_rule (single, vendor_account tier) but
-// no autopost LIST read; see LANE-D-NOTES. Defensive: bound columns degrade to null.
-
-export type AutopostRule = {
-  rule_id: string;
-  client_id: string | null;
-  counterparty_id: string | null;
-  counterparty_name: string | null;
-  direction: "purchase" | "sales" | string | null;
-  account_code: string | null;
-  account_name: string | null;
-  amount_cap_cents: number | null;
-  frequency_window: string | null;
-  window_max_posts: number | null;
-  posts_in_window: number | null;
-  posts_remaining: number | null; // DB-emitted (list_autopost_rules) — the UI never recomputes it
-  expires_at: string | null;
-  status: "proposed" | "live" | "declined" | "retired" | "expired" | string;
-  signed_by: string | null;
-  signed_at: string | null;
-  supersedes_rule_id: string | null;
-  reason: string | null;
-  created_at: string | null;
-};
-
-export function toAutopostRule(raw: unknown): AutopostRule {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  return {
-    rule_id: s(o.rule_id) ?? s(o.id) ?? "",
-    client_id: s(o.client_id),
-    counterparty_id: s(o.counterparty_id),
-    counterparty_name: s(o.counterparty_name),
-    direction: s(o.direction),
-    account_code: s(o.account_code),
-    account_name: s(o.account_name),
-    amount_cap_cents: numOrNull(o.amount_cap_cents),
-    frequency_window: s(o.frequency_window),
-    window_max_posts: numOrNull(o.window_max_posts),
-    posts_in_window: numOrNull(o.posts_in_window) ?? numOrNull(o.window_posts),
-    posts_remaining: numOrNull(o.posts_remaining),
-    expires_at: s(o.expires_at),
-    status: s(o.status) ?? "proposed",
-    signed_by: s(o.signed_by),
-    signed_at: s(o.signed_at),
-    supersedes_rule_id: s(o.supersedes_rule_id),
-    reason: s(o.reason),
-    created_at: s(o.created_at),
-  };
-}
-
-// --- notifications (WA2 §6.2/L6: the renew-or-retire nudge) ---------------------
-// ASSUMED read fn (`list_notifications(p_scope, p_kinds)`) — see LANE-D-NOTES. The
-// nudge is written by the reconciler via record_notification; kind is FREE in the DB.
-
-export type Notification = {
-  id: string;
-  client_id: string | null;
-  kind: string;
-  payload: Record<string, unknown>;
-  created_at: string | null;
-};
-
-export function toNotification(raw: unknown): Notification {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  return {
-    id: s(o.id) ?? "",
-    client_id: s(o.client_id),
-    kind: s(o.kind) ?? "",
-    payload: (o.payload ?? {}) as Record<string, unknown>,
-    created_at: s(o.created_at),
-  };
-}
+// CodingRule/toCodingRule (get_coding_rule), RulePostEntry/RulePostRun/toRulePostRun
+// (get_rule_post_run), AutopostRule/toAutopostRule (list_autopost_rules) and
+// Notification/toNotification (the rule-nudge-scoped list_notifications wrapper — its
+// only caller, listRuleNotifications, retired with it) ALL RETIRED with F-A2 PR-3
+// (Annex B.1) — every DB verb they hydrated is on the RETIRE list.
 
 // --- coding_lane (FINAL reason vocabulary, §5a) --------------------------------
 
@@ -295,7 +129,15 @@ export const LANE_REASON_COPY: Record<string, string> = {
   multi_doc: "multi-document bundle",
   facts_pending: "extraction still in progress",
   parked: "parked after repeated auto-draft failures",
-  rule_backed: "a signed rule backs the account choice",
+  // rule_backed RETIRED (D35/OQ-2, F-A2 PR-3): the coding_lane DB body's rule_backed
+  // reason token is UNCHANGED code (out of scope of the ruling, Annex B.6 point 2 —
+  // "computation, not display") and its live projection still reads honestly over
+  // rule_decisions history, so an already-associated draft can still surface this
+  // token for a time; but no NEW entry can ever carry it once the write stopped, so
+  // per law 27(2) the human-readable label is removed with the boolean badge rather
+  // than kept for a reason that can only ever describe the past. A raw "rule_backed"
+  // token therefore falls through to laneReasonCopy()'s documented `?? reason`
+  // fallback rather than this map's polish — an honest degrade, not a crash.
   // 0049 — the first reason token that lands on a card because the DB ABSTAINED rather than
   // because something is missing. Without a line here laneReasonCopy() echoes the raw token
   // (its documented `?? reason` fallback), so the accountant would read the literal string

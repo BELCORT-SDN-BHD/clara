@@ -13,14 +13,15 @@ import { after, test } from "node:test";
 
 import { endPool, humanQuery, rootQuery } from "./epsilon-fixtures.mjs";
 import { artifactRows } from "./epsilon-world.mjs";
-import { asOwner, asRuntime, driftWording, parkQueue, sealArtifact, sealedRun, sealedStatutoryRun, skipUnlessZeta } from "./zeta-fixtures.mjs";
+import { asOwner, asRuntime, driftWording, sealArtifact, sealedRun, sealedStatutoryRun, skipUnlessZeta } from "./zeta-fixtures.mjs";
 
 after(async () => { await endPool(); });
 
 test("zeta: the fix round's four DB walls (codex B1/M1/M2/B5)", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { world, eps } = await sealedRun("walls");
-  await parkQueue();
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
   const id = job.render_job_id;
 
@@ -110,7 +111,8 @@ test("zeta: the replay door is FIRM-SCOPED — another firm's caller reads exact
 test("zeta: the FENCE protects a slow worker — the reap is immediate, and the two are not the same wall", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("slow-worker");
-  await parkQueue();
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
   const id = job.render_job_id;
 
@@ -160,7 +162,8 @@ test("zeta: the FENCE protects a slow worker — the reap is immediate, and the 
 test("zeta: a RUNNING job can never carry a null lease — the reap's arithmetic cannot go fail-open", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("lease-tie");
-  await parkQueue();
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
 
   // The reap compares `lease_expires_at < now()`. A `running` row with a NULL lease would make that
@@ -177,9 +180,10 @@ test("zeta: a RUNNING job can never carry a null lease — the reap's arithmetic
 
 test("zeta: one terminal job in a dispatch batch does not cost the others their receipt", async (t) => {
   if (await skipUnlessZeta(t)) return;
+  // TWO runs claimable at once, so only the FIRST seal parks: `park: false` on the second, or its
+  // park would swallow the job the first seal just enqueued (zeta-fixtures.mjs, sealedRun).
   const { eps: a } = await sealedRun("receipt-a");
-  const { eps: b } = await sealedRun("receipt-b");
-  await parkQueue();
+  const { eps: b } = await sealedRun("receipt-b", { park: false });
   const j1 = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [a.runId])).rows[0].r;
   const j2 = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [b.runId])).rows[0].r;
 
@@ -210,7 +214,8 @@ test("zeta: one terminal job in a dispatch batch does not cost the others their 
 test("zeta: a terminally failed job has a lawful successor, and only through the audited door", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { world, eps } = await sealedRun("requeue");
-  await parkQueue();
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
   const id = job.render_job_id;
 
@@ -286,7 +291,8 @@ test("zeta: a terminally failed job has a lawful successor, and only through the
 test("zeta: when the pins have MOVED, the requeue re-derives, refuses silently drifting, and records both digests", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { world, eps, profileKey } = await sealedStatutoryRun("drift");
-  await parkQueue();
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
   const id = job.render_job_id;
   await asOwner(`update clara.render_jobs set state='running', claimed_by='dead', claimed_at=now(),

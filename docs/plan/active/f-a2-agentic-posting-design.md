@@ -51,7 +51,7 @@
    (`0016:3957-3961`); **the identical chain exists for sales, untouched by v1**.
 4. **The generic kind** — a NULL `coding_kind` **skips** `0016:4020-4034`'s coded-kind preconditions, and the
    kind is a **model-supplied input, so it SELECTS which walls bind** (GB-1 → B15).
-5. **`check-binding-post-control.mjs` goes FALSE-GREEN** — it parses only `CREATE [OR REPLACE]`, so **a drop
+5. **check-binding-post-control.mjs (RETIRED with PR-3, docs/plan/active/f-a2-annexes-1-estate.md §B.4) goes FALSE-GREEN** — it parses only `CREATE [OR REPLACE]`, so **a drop
    is invisible to every failure path**.
 6. **Settlement kinds are unwalled on the agent post path** — the refusal (`0037:1826-1830`) and its durable
    half (`0037:519-522`) both key on a rule id **the agent never passes**. WCA-R6: *"Which of three open bills
@@ -440,7 +440,7 @@ train:
    and plain `interactive` everywhere else** (R-1). New frozen exports + registry repoints, never edits;
    bundle-grep after build.
 5. **PR-3 (cutover + retirement), only after PR-2's image is verified live.** The drops, the consumer file, the
-   roster edits, `apps/dashboard/app/rules/` (**relocate `AdjustmentTemplatePanel.tsx`**), the parts catalog
+   roster edits, apps/dashboard/app/rules/ (RETIRED whole, see docs/plan/active/f-a2-annexes-1-estate.md §B.6) — relocate `AdjustmentTemplatePanel.tsx` to `apps/dashboard/app/close/adjustments/`, the parts catalog
    **including the `kb_rule_proposal` part type (GM-11)**, the CI gate, WB-R2. **D1.**
    **Amended 2026-08-23 (owner, R1 relaxation, `wave-f-sprint-dag.md` §7):** binds the MERGE and the
    ceremony only now — authoring proceeds in wave 0, unchanged protection, only the serialization removed.

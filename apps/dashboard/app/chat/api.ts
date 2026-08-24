@@ -61,6 +61,23 @@ export type TurnResult =
 
 export type SseEvent = { event: string; data: unknown };
 
+/** The banner text for a `limit` turn result.
+ *
+ *  The runtime's message is the DB's own refusal text and already names WHICH limit and its
+ *  live numbers ("concurrent compute-run cap reached for firm (3 of 3 running)"). `resetCopy`
+ *  is the optional second sentence.
+ *
+ *  SINCE F-A9 PR-0 IT IS ALWAYS NULL, and that is the point: the daily token budget was
+ *  removed by owner ruling (TA-P12 = A; digest law 76 "meter, never cap"), so the only
+ *  refusal left is the concurrency floor — which has no reset instant to describe. This
+ *  helper exists as a named, testable seam because the failure it guards is silent: a
+ *  `[message, resetCopy].join(" ")` that forgets to drop a null renders the literal string
+ *  "null" into a user-facing banner, and a `?? ""` renders a trailing space. Both are
+ *  law-22 defects (a visible record must not lie) that no type check would catch. */
+export function limitBanner(message: string, resetCopy: string | null): string {
+  return [message, resetCopy].filter((s): s is string => typeof s === "string" && s.trim().length > 0).join(" ");
+}
+
 // ---------------------------------------------------------------------------
 // Config. Empty runtime base = same-origin (next.config.mjs proxies /api/chat +
 // /api/tasks to the runtime — it serves no CORS headers, so direct cross-origin

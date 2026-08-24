@@ -123,7 +123,8 @@ public    clara.match_bank_line(…6 args)         unchanged name/arity/ACL — 
 `wake_unmatch_bank_match` · `wake_settle_from_bank_line` · `wake_complete_bank_reconciliation` ·
 `wake_void_bank_reconciliation` · `wake_resolve_bank_line_exception` ·
 `wake_resolve_and_book_bank_line` · `wake_propose_bank_line_exception` ·
-**`wake_propose_identifier_promotion`** (TA-P8's promotion carrier — NEW at v2, blocker B5) ·
+**`wake_propose_bank_identifier_promotion`** (TA-P8's promotion carrier, renamed bank-scoped by
+conductor arbitration 2026-08-24 — NEW at v2, blocker B5) ·
 `wake_add_bank_account` — plus **two structural siblings** (`wake_upsert_account`,
 `wake_void_bank_statement`) and **one read** `wake_get_bank_pack` (§3.8). **Thirteen verbs.**
 
@@ -409,8 +410,10 @@ written to `client_identifiers` unpromoted.
 that could ever write its proposal row: Annex A.1 had no promotion sibling, Annex A.2's only new
 proposal writer was `_agent_propose_line_exception_core`, and `bank_agent_receipts.act_kind`
 enumerated ten values with no promotion act. At v2 the PROPOSING half is built —
-**`wake_propose_identifier_promotion`** + `_agent_propose_identifier_promotion_core` +
-`act_kind='identifier_promotion_propose'` + the per-kind payload CHECK + an end-to-end battery cell.
+**`wake_propose_bank_identifier_promotion`** (renamed bank-scoped, conductor arbitration
+2026-08-24 — collided with F-A7's own promotion door, wave-f-contract.md:315-320) +
+`_agent_propose_bank_identifier_promotion_core` + `act_kind='identifier_promotion_propose'` +
+the per-kind payload CHECK + an end-to-end battery cell.
 **The CONFIRMING half is scoped to the case the estate can key today and the rest is escalated**
 (Annex P, OQ-8): the promotion writes a `client_identifiers(kind='bank_account')` row through the
 audited path `add_bank_account` already uses (`0038:2743-2751`), which exists **only when the payer

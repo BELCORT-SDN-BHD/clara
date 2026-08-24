@@ -13,13 +13,13 @@ import {
   buildWaveBWorld, onboardingClient, seedOpeningCoa, WB_COA,
   filedDocument, setDocumentKind, docTasks, sightingRows, codingRuleRows,
   createSeedingBatch, tickProposal, declineProposal, completeSeedingBatch,
-  batchRow, proposalRows, eventsOf, ruleRowById,
+  batchRow, proposalRows, eventsOf,
   recordWikiIngest, setWikiHold, wikiLogRows,
   listDocumentAutodraftCandidates,
-  proposeCodingRule, signCodingRule,
 } from "./wb-fixtures.mjs";
-
-const CLR27 = "CLR27";
+// proposeCodingRule/signCodingRule/ruleRowById RETIRED-from-use with F-A2 PR-3 (Annex
+// B.1/OQ-3/D36): the first two wrap dropped verbs; ruleRowById has no more caller since no
+// coding_rules row is minted by this file's ticks anymore.
 
 let live = false;
 let w = null;
@@ -112,28 +112,56 @@ test("S1/S2: guards — a non-prior_gl source refuses; a duplicate OPEN batch re
   if (detailReason(e2)) assert.equal(detailReason(e2), "duplicate_batch");
 });
 
-test("S3/S4: an admin tick births the UNBIRTHED vendor FIRST, then signs ONE live rule (floors + lineage)", async () => {
+// REBUILT (F-A2 PR-3, OQ-3/D36): the original claim was "an admin tick births the vendor
+// FIRST, then signs ONE live rule" — no rule is ever signed now (tick_seeding_proposal
+// stopped minting a coding_rules row for vendor_account_rule ticks). The birth-first
+// order-of-operations law survives untouched; the "one live rule" half is replaced by its
+// designed successor: the tick stages a deterministic wiki payload instead, re-pointed onto
+// the SAME lane a wiki_fact tick already uses (packages/runtime/lib/wiki-projection.mjs).
+test("S3/S4: an admin tick births the UNBIRTHED vendor FIRST, then re-points to a knowledge-layer wiki payload (floors + lineage)", async () => {
   fail0017(live);
   assert.equal((await sightingRows(onb.client)).length, 0, "sighting pool EMPTY before the cycle");
   await assertRaises(CLR.authz, () => tickProposal(w.users.bob, { proposal: props["var:acme"].id }),
     "the WB-R2 tick floor is admin+ (deliberately above the bookkeeper sign floor)");
   const r = await tickProposal(w.users.hana, { proposal: props["var:acme"].id, opKey: opk("t1") });
   assert.ok(r, "tick receipt");
+  assert.equal(r.wiki_dispatch_required, true,
+    "OQ-3/D36: a vendor_account_rule tick now dispatches to the wiki, same as a wiki_fact tick");
+  assert.ok(r.wiki_payload?.payload?.wiki, "the tick receipt itself carries the staged wiki payload");
   const p = (await proposalRows(batch)).find((x) => x.proposal_key === "var:acme");
   assert.equal(p.state, "ticked", "proposal ticked");
-  assert.ok(p.resulting_rule_id, "lineage: resulting_rule_id stamped ON THE PROPOSAL");
-  assert.ok(p.resulting_counterparty_id, "the vendor was BIRTHED first (order-of-operations law)");
+  assert.equal(p.resulting_rule_id, null,
+    "OQ-3/D36: no more signed coding_rules row — resulting_rule_id stays NULL, same shape counterparty_birth already returned");
+  assert.ok(p.resulting_counterparty_id, "the vendor was BIRTHED first (order-of-operations law, UNCHANGED)");
   const cp = (await rootQuery("select to_jsonb(c) as r from clara.counterparties c where c.id=$1", [p.resulting_counterparty_id])).rows[0].r;
   assert.equal(cp.kind, "vendor", "born as a canonical VENDOR");
   assert.equal(cp.merged_into ?? null, null, "live canonical (the 0016 trigger floor's demand)");
-  const rule = await ruleRowById(p.resulting_rule_id);
-  assert.equal(rule.status, "live", "the rule is LIVE");
-  assert.equal(rule.signed_by, w.users.hana, "one tick = ONE real per-rule signature by the ticking admin");
-  assert.ok(rule.signed_at, "signed_at stamped (ck_coding_rules_terminal)");
-  assert.equal((await eventsOf(w.firms.A, "seeding.proposal_decided", p.id)).length, 1, "seeding.proposal_decided emitted");
+  // The knowledge-layer artifact: the proposal's OWN payload now carries the deterministic
+  // wiki object tick_seeding_proposal staged (extend-only — payload || v_wiki_patch).
+  const wiki = p.payload?.wiki;
+  assert.ok(wiki, "the proposal's payload was extended with a wiki object");
+  assert.match(wiki.slug, /^vendor-account\//, "the slug is deterministic and keyed on the counterparty");
+  assert.equal(wiki.page_kind, "treatment", "the page_kind is one already admitted by WIKI_FACT_PAGE_KINDS — no new kind added");
+  assert.match(wiki.content, /ACME TRADING SDN BHD/, "the content transcribes the admin's own decision, no interpretation");
+  assert.match(wiki.content, new RegExp(WB_COA.expense), "the content names the account the admin coded");
+  // NO coding_rules row was minted (OQ-3/D36's "no more signed-coding_rules minting").
+  const rules = (await codingRuleRows(onb.client)).filter((x) => x.counterparty_id === p.resulting_counterparty_id);
+  assert.equal(rules.length, 0, "zero coding_rules rows for this vendor — the write genuinely stopped, not merely unread");
+  const evs = await eventsOf(w.firms.A, "seeding.proposal_decided", p.id);
+  assert.equal(evs.length, 1, "seeding.proposal_decided emitted exactly once");
+  assert.equal(evs[0].payload.wiki_dispatch_required, true, "the durable event ALSO carries wiki_dispatch_required=true");
+  assert.equal(evs[0].payload.resulting_rule_id, null, "the durable event's resulting_rule_id is NULL");
 });
 
-test("S4: a duplicate live vendor mapping maps to CLR27 duplicate_live exactly like sign_coding_rule", async () => {
+// INVERTED (F-A2 PR-3, OQ-3/D36): CLR27 duplicate_live fired against the
+// uq_coding_rules_one_live_vendor unique index, which only ever mattered because a SECOND
+// signed rule for the same vendor was a data-integrity hazard for the (now-retired)
+// execution tier. Since no coding_rules row is minted at all anymore, there is nothing left
+// for a uniqueness constraint to protect — a second vendor_account_rule tick for the SAME
+// canonical vendor (a different account this time) now SUCCEEDS. The forced-cell law wants
+// both polarities named: this is the positive twin the retirement requires, not a silently
+// dropped assertion.
+test("S4: a SECOND vendor_account_rule tick for the same canonical vendor now SUCCEEDS — no more uq_coding_rules_one_live_vendor to collide with", async () => {
   fail0017(live);
   const r = await createSeedingBatch({
     client: onb.client, document: glDoc.documentId,
@@ -151,8 +179,14 @@ test("S4: a duplicate live vendor mapping maps to CLR27 duplicate_live exactly l
     w._b2 = r2.batch_id ?? r2.id;
   } else { w._b2 = r.batch_id ?? r.id; }
   const dup = (await proposalRows(w._b2)).find((x) => x.proposal_key === "var:acme2");
-  const err = await assertRaises(CLR27, () => tickProposal(w.users.hana, { proposal: dup.id }), "second live rule for one vendor");
-  if (detailReason(err)) assert.equal(detailReason(err), "duplicate_live");
+  const r2 = await tickProposal(w.users.hana, { proposal: dup.id, opKey: opk("t2") });
+  assert.ok(r2, "the second tick for the same vendor is admitted, not refused");
+  assert.equal(r2.wiki_dispatch_required, true, "it ALSO dispatches to the wiki — the same lane, every time");
+  const p2 = (await proposalRows(w._b2)).find((x) => x.proposal_key === "var:acme2");
+  assert.equal(p2.state, "ticked", "the second proposal ticked cleanly — no CLR27, no duplicate_live");
+  assert.equal(p2.resulting_rule_id, null, "still no coding_rules row minted");
+  assert.match(p2.payload.wiki.content, new RegExp(WB_COA.cash),
+    "the SECOND tick's content names the NEW account — the latest tick's judgement, not the first's");
 });
 
 test("S4: tick replay is byte-identical (one rule); decline + batch state machine; unticked STAYS proposed", async () => {
@@ -214,24 +248,30 @@ test("S5: structural negatives — ZERO sightings, ZERO autopost, ZERO new metri
   assert.ok(!sdef.includes("'candidate'"), "the C-11 candidate tier stays dead (status CHECK not swapped)");
 });
 
-test("S5/Gate R2: the ticked rule is INDISTINGUISHABLE from a hand-signed rule on the rule row", async () => {
+// REBUILT (F-A2 PR-3, OQ-3/D36 — the N-2 adjudication this cell's own [R1-F13d] comment
+// forced). The original comparator proved a ticked rule INDISTINGUISHABLE from a hand-signed
+// one on the coding_rules row — propose_coding_rule/sign_coding_rule are both dropped, so
+// there is no hand-signed rule row left to compare against, and no ticked rule row either
+// (D36: no more signed-coding_rules minting). D36 settles what the right comparator IS: not
+// a rule row, but the deterministic wiki artifact tick_seeding_proposal now stages. The
+// re-derived claim is the same shape, one level down — STRUCTURAL UNIFORMITY, not ad-hoc
+// content: every vendor_account_rule tick's staged wiki payload carries the identical KEY
+// SET, whichever vendor or account it names, so no marker on the payload distinguishes one
+// tick's judgement from another's — they differ only in content, never in shape.
+test("S5/Gate R2 (rebuilt, D36's N-2 adjudication): every vendor_account_rule tick's staged wiki payload carries the SAME key set — shape is structural, content is not", async () => {
   fail0017(live);
   const rows = await proposalRows(batch);
-  const ticked = await ruleRowById(rows.find((x) => x.proposal_key === "var:acme").resulting_rule_id);
-  // [R1-F13d] the hand-signed comparator is REQUIRED — no fallback. A refusal
-  // on this fixture route is a MUST-FAIL that forces the N-2 adjudication.
-  const gamma = (await proposalRows(w._b3)).find((x) => x.proposal_key === "birth:gamma")?.resulting_counterparty_id ?? null;
-  assert.ok(gamma, "the ticked gamma birth provides the rule-less comparator vendor");
-  const prop = await proposeCodingRule(w.users.alice, {
-    client: onb.client, counterparty: gamma, accountCode: WB_COA.expense, opKey: opk("hand"),
-  });
-  const id = prop?.rule_id ?? prop?.id;
-  assert.ok(id, `hand proposal minted (got ${JSON.stringify(prop)})`);
-  await signCodingRule(w.users.alice, { rule: id });
-  const hand = await ruleRowById(id);
-  assert.equal(hand?.status, "live", "the hand-signed comparator is LIVE");
-  assert.equal(JSON.stringify(Object.keys(ticked).sort()), JSON.stringify(Object.keys(hand).sort()),
-    "identical column sets — no marker distinguishes a seeded rule (lineage lives on the proposal)");
+  const ticked = rows.find((x) => x.proposal_key === "var:acme")?.payload?.wiki;
+  assert.ok(ticked, "var:acme's staged wiki payload exists (from the S3/S4 cell)");
+  const rows2 = await proposalRows(w._b2);
+  const second = rows2.find((x) => x.proposal_key === "var:acme2")?.payload?.wiki;
+  assert.ok(second, "var:acme2's staged wiki payload exists (from the duplicate-vendor cell)");
+  assert.equal(JSON.stringify(Object.keys(ticked).sort()), JSON.stringify(Object.keys(second).sort()),
+    "identical key sets across two independent ticks — the shape is structural, never ad-hoc per tick");
+  assert.deepEqual(Object.keys(ticked).sort(), ["content", "page_kind", "slug", "title"],
+    "the exact shape planSeedingWikiFact (packages/runtime/lib/wiki-projection.mjs) reads");
+  assert.notEqual(ticked.content, second.content,
+    "the two ticks' CONTENT differs (different account codes) — only the shape is uniform, never the judgement");
 });
 
 test("S6: deterministic wiki ingest of the prior_gl source works EVEN UNDER a synthesis hold", async () => {

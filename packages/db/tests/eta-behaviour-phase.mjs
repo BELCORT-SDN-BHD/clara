@@ -74,13 +74,23 @@ const COMPOSE_SQL = `select clara.wake_compose_metric_preview($1::uuid, $2::json
 
 /** Delta's evaluator versions are BORN undeployed and a ONE-WAY ceremony flips them; the composition
  *  preview cannot evaluate without it. Performed here only if it has not been, so this battery runs
- *  on its own pristine database as well as after delta's — epsilon-contract.test.mjs's idiom. */
+ *  on its own pristine database as well as after delta's — epsilon-contract.test.mjs's idiom.
+ *
+ *  ONE ROW IS EXCLUDED, on epsilon-contract.test.mjs's terms and for its reason: F-A5 PR-1's
+ *  clara.evaluate_fs_pack_agent v1 owns its own deploy ceremony (design §3.2 / F5-D28), and this
+ *  file runs before F-A5's battery, whose gate cell must be able to observe the refusal. Nothing
+ *  in this lane evaluates through that closure, so excluding it costs this battery nothing. The
+ *  exclusion's WIDTH is asserted in epsilon-contract.test.mjs, once, rather than in both places. */
+const CEREMONY_EXCLUDED = "evaluate_fs_pack_agent";
+
 async function ensureEvaluatorDeployed() {
   const pending = (await rootQuery(
-    "select count(*)::int n from clara.evaluator_versions where not deployed")).rows[0].n;
+    "select count(*)::int n from clara.evaluator_versions where not deployed and evaluator_name <> $1",
+    [CEREMONY_EXCLUDED])).rows[0].n;
   if (pending === 0) return;
   await withActor({ transaction: true }, (db) =>
-    db.query("update clara.evaluator_versions set deployed=true where not deployed"));
+    db.query("update clara.evaluator_versions set deployed=true where not deployed and evaluator_name <> $1",
+      [CEREMONY_EXCLUDED]));
 }
 
 // Fixed literals, never a derived date. This lane's doctrine is that an effective date is an

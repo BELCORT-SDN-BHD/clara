@@ -803,6 +803,11 @@ test("f-a2.o6.the three named exclusions were not taught the witness regime", as
   for (const sig of ["clara.execute_rule_post(uuid,text)",
     "clara.persist_invoice_facts(uuid,jsonb,text,text,integer,jsonb)",
     "clara._derive_vendor_binding_proposal(uuid,uuid,uuid)"]) {
+    // execute_rule_post RETIRED with F-A2 PR-3 (this cell's own comment named it: "retires in
+    // F-A2 main and must not have been taught anything here") — total absence is a STRONGER
+    // form of the same claim (it cannot have been taught anything, having nothing to teach),
+    // so a missing signature satisfies this cell rather than erroring it.
+    if ((await rootQuery("select to_regprocedure($1) as p", [sig])).rows[0].p === null) continue;
     const src = (await rootQuery(
       `select regexp_replace(p.prosrc,'--[^' || chr(10) || ']*','','g') s
          from pg_proc p where p.oid=$1::regprocedure`, [sig])).rows[0].s;

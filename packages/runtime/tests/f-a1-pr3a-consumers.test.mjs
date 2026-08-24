@@ -44,11 +44,11 @@ after(async () => {
 // 1. Registry sanity + the widened kind literal, in source.
 // ===========================================================================
 
-test("registry.ts pins autoDraft: autoDraft_v8 and chatTurn: chatTurn_v12, and still exports the superseded v7/v11 (policy (c))", () => {
-  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v8");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v12");
-  assert.equal(typeof registryMod.autoDraft_v7, "function");
-  assert.equal(typeof registryMod.chatTurn_v11, "function");
+test("registry.ts pins autoDraft_v9/chatTurn_v13 and still exports superseded v8/v12 (policy (c))", () => {
+  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v13");
+  assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v12, "function");
 });
 
 test("autoDraft.v8.tools.ts (source) carries the widened kind literal and never a bare cross-regime Math.max", async () => {

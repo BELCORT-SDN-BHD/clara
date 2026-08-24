@@ -40,13 +40,16 @@ const S6_RUNTIME_FNS = ["enqueue_invoice_facts", "persist_invoice_facts", "fail_
 // gains the client-pinned coding-lane reads + wake_client (+ the fix-round
 // _agent_read_admitted gate helper, granted clara_agent_ro only); the autodraft/sweep
 // runtime surface lands on clara_runtime; wake_interactive gains wake_open_question.
+// F-A2 PR-3 (docs/plan/active/f-a2-agentic-posting-design.md Annex B.1/B.2) retires the
+// rules-execution tier: propose_coding_rule, sign_coding_rule, decline_coding_rule,
+// retire_coding_rule and get_coding_rule are DROPped, so this WAVE-A-frontier roster —
+// consumed live below, not as a historical snapshot — loses those five names.
 const WAVE_A_HUMAN_FNS = [
   "rename_counterparty", "add_counterparty_alias", "retire_counterparty_alias", "merge_counterparties",
   "request_autodraft", "acknowledge_sweep_run",
-  "propose_coding_rule", "sign_coding_rule", "decline_coding_rule", "retire_coding_rule",
   "open_question", "resolve_open_question", "dismiss_open_question", "promote_clarify_to_question",
   "grant_client_egress", "revoke_client_egress", "approve_routine_entry",
-  "get_sweep_run", "get_open_question", "get_coding_rule", "list_review_queue",
+  "get_sweep_run", "get_open_question", "list_review_queue",
   "coding_lane", "list_coding_lanes", "get_entry_diff", "get_doc_entry_diff",
 ];
 const WAVE_A_AGENT_READS = [
@@ -62,14 +65,15 @@ const WAVE_A_WAKE_INTERACTIVE_FNS = ["wake_open_question"];
 // [WAVE-A2 §6/§7] posting-tier standing-rules human surfaces (PostgREST rpc, coarse
 // grant to clara_authenticated; role floors are body-enforced): sign (admin+),
 // propose/retire/acknowledge (bookkeeper+), and the rule/notification/receipt reads.
-const WAVE_A2_HUMAN_FNS = [
-  "sign_autopost_rule", "propose_autopost_rule", "retire_autopost_rule",
-  "acknowledge_rule_posts", "get_rule_post_run", "list_autopost_rules", "list_notifications",
-];
+// F-A2 PR-3 retires the whole autopost-rule verb family (sign/propose/retire/acknowledge/
+// list/get_run) — list_notifications is the ONE survivor, kept general-purpose.
+const WAVE_A2_HUMAN_FNS = ["list_notifications"];
 // [WAVE-A2 §6.2] the expiry/nudge sweep — runtime lane only (execute_rule_post is granted
 // LOGIN-DIRECT to clara_runtime_login, like record_rule_resolution, so it is deliberately
-// NOT in any of the five matrix roles).
-const WAVE_A2_RUNTIME_FNS = ["reconcile_autopost_rules"];
+// NOT in any of the five matrix roles). F-A2 PR-3 retires reconcile_autopost_rules, and
+// with it this cohort — kept as an explicit empty array (not deleted) so the ...spread
+// below stays a one-line diff against its Wave-A2 origin rather than a silent removal.
+const WAVE_A2_RUNTIME_FNS = [];
 // 0055 [Wave E lane α]: the ONE human door of the client-facts trio (admin floor,
 // body-enforced). Absent on pre-0055 frontiers — existence is the gate.
 const CLIENT_FACTS_0055_HUMAN_FNS = ["record_client_fact"];
@@ -223,6 +227,14 @@ const AUTHORING_0077_WAKE_FNS = [
   "wake_draft_report_spec", "wake_request_report_preview",
 ];
 const AUTHORING_0077_COHORT = [...AUTHORING_0077_WAKE_FNS];
+// [F-A2 PR-1] THE POSTING WRAPPER, and it is one name because that is the whole surface. The
+// ladder (clara._agent_post_entry_core), the extracted control-leg predicate, the projected
+// supplier floor, the counterparty projection and the receipt trigger function are ABSENT from
+// every roster in this file on purpose — granted to nobody, so the sweep's expected=false IS the
+// assertion that this wrapper is the only door, exactly as η's cores are handled above. No
+// cohort entry: this lane adds ONE granted function, and the sweep only ever consults names that
+// exist in the live catalog, so an earlier-frontier database never reads this row at all.
+const POSTING_F_A2_WAKE_FNS = ["wake_post_entry"];
 // 0090-0095 [Wave-F Track A, F-A1] the LLM witness-pair lane. Same closed-set discipline as the
 // blocks above, and its own cohort per the "wholly present or wholly absent" rule (0024's note):
 // folding these into an earlier migration's cohort would make a pre-F-A1 database report a
@@ -270,6 +282,86 @@ const STATEMENT_F_A1_PR4_UNGRANTED_FNS = ["_persist_statement_core_v2"];
 export const STATEMENT_F_A1_PR4_COHORT = [
   ...STATEMENT_F_A1_PR4_RUNTIME_FNS, ...STATEMENT_F_A1_PR4_UNGRANTED_FNS,
 ];
+// F-A3 PR-1a — THE NINE PURE CORE EXTRACTIONS (survey census rows C1/C2/C3, "extend with the new
+// ungranted cores; no name leaves"). Its OWN cohort rather than additions to BANK_0038_*,
+// TIEOUT_0040_* and AF2_0044_*, for exactly the reason the PR-4 block above records: a fold-in
+// would report a PARTIAL cohort on every database that has 0038/0040/0044 but not yet PR-1a — a
+// false failure on a chain that is simply short of this wave. The three parent cohorts keep
+// their names unchanged, which is the "no name leaves" half.
+//
+// All nine are UNGRANTED internal delegates (the one-ungranted-core law, 0004:6-12). Declaring
+// them here is what turns a future accidental grant into a FAILURE instead of a silent pass, and
+// it is the compensating assertion for the extraction: the public verbs kept their ACLs, so the
+// only way this factoring could widen the surface is a grant landing on a core.
+const EXTRACTION_F_A3_PR1A_UNGRANTED_FNS = [
+  "_match_bank_line_core", "_unmatch_bank_match_core", "_complete_bank_reconciliation_core",
+  "_void_bank_reconciliation_core", "_resolve_bank_line_exception_core",
+  "_resolve_and_book_bank_line_core", "_void_bank_statement_core", "_add_bank_account_core",
+  "_upsert_account_core",
+];
+export const EXTRACTION_F_A3_PR1A_COHORT = [...EXTRACTION_F_A3_PR1A_UNGRANTED_FNS];
+// F-A7 pi (train position 1, additive-only — 11 new functions, D1 inventory EMPTY): the
+// firm-open-questions door and the identifier-promotion card each get two human verbs
+// (bookkeeper+ floor body-enforced via `_human_ctx`), clara_authenticated ONLY; agent/wake/
+// runtime gain ZERO EXECUTE anywhere in this file (tail section 8 asserts it in-migration).
+// The name-family predicate (`name_family_token`/`_candidates`/`_is_ambiguous`), both `_core`s
+// and the receipt-surface introspection pair are UNGRANTED to every application role — declaring
+// them here is what makes a future accidental grant FAIL rather than pass silently.
+const F_A7_PI_HUMAN_FNS = [
+  "resolve_firm_question", "dismiss_firm_question",
+  "confirm_identifier_promotion", "decline_identifier_promotion",
+];
+const F_A7_PI_UNGRANTED_FNS = [
+  "_firm_question_core", "_identifier_promotion_core",
+  "name_family_token", "name_family_candidates", "name_family_is_ambiguous",
+  "_assert_receipt_surface_conforms", "agent_receipt_source_census", "agent_receipt_dark_rows",
+];
+export const F_A7_PI_COHORT = [...F_A7_PI_HUMAN_FNS, ...F_A7_PI_UNGRANTED_FNS];
+// F-A9 PR-1A — the LLM usage ledger reshape. Its OWN cohort per the "wholly present or wholly
+// absent" rule (0024's note): folding these into an earlier wave's cohort would make a
+// pre-PR-1A database report a PARTIAL cohort.
+//   record_agent_usage_event — the second door (design SS3.2): clara_runtime ONLY, mirrors
+//     record_llm_usage_event's own runtime-only shape (WITNESS_F_A1_RUNTIME_FNS above) —
+//     no human writes metering.
+//   get_llm_usage_summary — the monthly rollup (design SS3.7): clara_authenticated ONLY, its
+//     own jwt_firm() wall body-enforced (the estate's floor-body-enforced idiom).
+// UNGRANTED: clara._tf_llm_price_no_overlap, the price-table overlap wall's statement-level
+// trigger function — no application role, PUBLIC included, may reach it; the sweep's
+// expected=false on every role IS the assertion (0038's own trigger-fn revoke idiom).
+const F_A9_PR1A_RUNTIME_FNS = ["record_agent_usage_event"];
+const F_A9_PR1A_HUMAN_FNS = ["get_llm_usage_summary"];
+const F_A9_PR1A_UNGRANTED_FNS = ["_tf_llm_price_no_overlap"];
+export const F_A9_PR1A_COHORT = [
+  ...F_A9_PR1A_RUNTIME_FNS, ...F_A9_PR1A_HUMAN_FNS, ...F_A9_PR1A_UNGRANTED_FNS,
+];
+// F-A5 PR-2 [Wave F Track A, reporting agency] -- the GRANTED SURFACE annex A.1 enumerates.
+// Its own cohort (0090-0095's "wholly present or wholly absent" reasoning): folding these into
+// an earlier wave's list would red every pre-PR-2 database.
+//   the SEVENTEEN wrappers -- clara_wake_interactive ONLY, 'interactive' kind (never
+//   'proactive'); design SS3.1 A.1. wake_enqueue_render_job is NOT among them on purpose --
+//   _enqueue_render_job_core is reachable only internally (from _seal_report_dataset_core and
+//   the human clara.enqueue_render_job), so it carries no wrapper and no grant.
+//   the NINE new ungranted cores PR-2 mints (PR-1's own eight -- six extractions +
+//   evaluate_fs_pack_agent_v1 + _agent_approve_metric_definition_core -- carry no roster entry
+//   here either, by the same "expected false is the default" reasoning that let PR-1 land with
+//   no change to this file at all). Declaring them here turns a future accidental grant into a
+//   FAILING test rather than a silently-widened wall.
+const F_A5_PR2_WAKE_FNS = [
+  "wake_open_report_run", "wake_evaluate_report_pack", "wake_seal_report_dataset",
+  "wake_assess_report_claim", "wake_seal_report_artifact", "wake_requeue_render_job",
+  "wake_approve_metric_definition", "wake_supersede_metric_definition", "wake_reject_metric_definition",
+  "wake_create_account_set", "wake_mint_metric_input_snapshot",
+  "wake_publish_chart_template_version", "wake_publish_report_template_version",
+  "wake_report_run_state", "wake_report_claim_state", "wake_report_artifact_index",
+  "wake_metric_definition_index",
+];
+const F_A5_PR2_UNGRANTED_FNS = [
+  "_agent_reject_metric_definition_core", "_agent_supersede_metric_definition_core",
+  "_agent_mint_metric_input_snapshot_core", "_agent_create_account_set_core",
+  "_requeue_render_job_core", "_report_run_state_core", "_report_claim_state_core",
+  "_report_artifact_index_core", "_metric_definition_index_core",
+];
+export const F_A5_PR2_COHORT = [...F_A5_PR2_WAKE_FNS, ...F_A5_PR2_UNGRANTED_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -791,7 +883,9 @@ export const EXTRACTION_0022_COHORT = [...EXTRACTION_0022_HUMAN_FNS];
 // the signing-time evidence preview plus the recorded backfill door; the drafter itself
 // reaches the DB through verbs that already existed.
 const SALES_LANE_0046_HUMAN_FNS = ["open_sales_backfill", "set_sales_backfill_state"];
-const SALES_LANE_0046_READ_FNS = ["preview_ocr_sales_evidence", "list_sales_backfill_batches"];
+// preview_ocr_sales_evidence RETIRED with F-A2 PR-3 (Annex B.1) — it retires with the floor
+// it read (_ocr_sales_floor / _ocr_sales_floor_pop, both dropped in the same file).
+const SALES_LANE_0046_READ_FNS = ["list_sales_backfill_batches"];
 // The definer internals, named so their absence from every role set is a DECLARED
 // expectation the cohort carries rather than a silent default (the 0020 block's reasoning).
 //
@@ -800,13 +894,20 @@ const SALES_LANE_0046_READ_FNS = ["preview_ocr_sales_evidence", "list_sales_back
 // granted to NO application role — and the main sweep, which expects `false` for every role
 // not listed in ALLOWED, is what turns that ruling into a test. If a future migration ever
 // grants it, this file fails and somebody has to say so out loud.
+// _ocr_sales_floor_pop RETIRED with F-A2 PR-3 (Annex B.1), alongside _ocr_sales_floor itself.
 const SALES_LANE_0046_UNGRANTED_FNS = [
-  "_ocr_sales_floor_pop", "_sales_lane_active", "_autodraft_direction_tri",
+  "_sales_lane_active", "_autodraft_direction_tri",
   "_sales_admission_open", "set_sales_lane_activation",
 ];
 export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
+
+// F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold. A named cohort
+// (nit, opus consolidated round) rather than a bare inline string, so a future rename/retire
+// of this one function is caught by the closed-roster dead-exemption sweep like every other
+// wave's own cohort, instead of silently going stale as an unwrapped literal.
+export const BANK_AGENCY_F_A3_PR1B_COHORT = ["set_bank_agency_hold"];
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -869,11 +970,19 @@ export const ALLOWED = {
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
     ...RENDER_ZETA_HUMAN_FNS,
+    ...F_A7_PI_HUMAN_FNS, // F-A7 pi: the firm-question door + the identifier-promotion card,
+    // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
+    ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
+    // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
+    // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
+    // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
+    // something the agent lane can flip on itself).
+    ...BANK_AGENCY_F_A3_PR1B_COHORT,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
@@ -890,6 +999,10 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
+    // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
+    // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
+    // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
+    "readmit_autodraft_after_withdrawal",
     ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
@@ -912,6 +1025,7 @@ export const ALLOWED = {
     // and its consumer; F-A1 grants no human EXECUTE at all
     ...WITNESS_F_A1_PR3_RUNTIME_FNS, // F-A1 PR-3 cutover: fail_witness_facts, the running->failed
     // settle verb for the llm_witness lane (mirrors fail_invoice_facts, S6_RUNTIME_FNS above)
+    ...F_A9_PR1A_RUNTIME_FNS, // [Wave-F Track A, F-A9 PR-1A] the second door — see the block above
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1055,7 +1169,12 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0077-0078 wave E ad-hoc authoring wake surface", AUTHORING_0077_COHORT, liveNames));
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
+  failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
+  failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   return failures;
 }
 
