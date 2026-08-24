@@ -71,6 +71,24 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
   // header for why that is the sanctioned transition and not a back door.
   await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("osa") });
+  // F-A2 PR-1: THE SIGHTING IS NOW STATED, NOT BRED — the eighth clara._approve_entry_core body
+  // excises the breeding block, so the income-CREDIT row the OCR-sales floor counts no longer
+  // appears as a side effect of approving. The claim of every cell here is the FLOOR's
+  // arithmetic, not that approval breeds, so per the PR-1 claim rule the cells stay and the
+  // fixture states its own evidence, in the retired writer's own shape, citing the real entry.
+  const cpId = cp ?? (await rootQuery(
+    `select clara._canonical_counterparty($1, min(l.counterparty_id::text)::uuid) as id
+       from clara.journal_lines l join clara.coa_accounts a
+         on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=$2 and a.account_class='receivable' and l.counterparty_id is not null`,
+    [client, d.entry_id])).rows[0]?.id;
+  if (cpId) {
+    await rootQuery(
+      `insert into clara.rule_sightings(firm_id, client_id, counterparty_id, account_code, entry_id, side)
+         values ($1, $2, $3, $4, $5, 'credit')
+         on conflict on constraint uq_rule_sightings_mapping do nothing`,
+      [firm, client, cpId, REV, d.entry_id]);
+  }
   return d.entry_id;
 }
 

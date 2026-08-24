@@ -5,7 +5,8 @@
 // transits here (the dashboard talks to PostgREST as clara_authenticated).
 //
 // Admission is clara.begin_chat_turn (one atomic transaction — advisory lock,
-// turn_key replay, budget + compute-cap, user-message + task insert). AFTER it
+// turn_key replay, the compute-run cap, user-message + task insert; the daily
+// token budget was removed at F-A9 PR-0, see turnLimitPayload below). AFTER it
 // commits we enqueue the durable run and bind its id onto the task (the S4-V1
 // run-listing dedupe: the reconciler re-enqueues only unbound queued tasks).
 
@@ -17,11 +18,45 @@ import { workflows } from "../workflows/registry.js";
 
 const DEFAULT_MODEL = process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
 
-/** Next UTC midnight — the budget day boundary (08:00 MYT), for CLR14 copy. */
-function nextUtcResetIso(): string {
-  const now = new Date();
-  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-  return reset.toISOString();
+/** The 429 payload for a CLR14 admission refusal.
+ *
+ *  SINCE F-A9 PR-0 THERE IS EXACTLY ONE SUCH REFUSAL: the concurrent compute-run floor
+ *  (`max_concurrent_runs` — engine protection, digest law 76's carve-out). The daily token
+ *  budget that used to share this SQLSTATE was removed by owner ruling (TA-P12 = A, the
+ *  2026-08-22 Track-A sitting; "meter, never cap").
+ *
+ *  SO THE RESET PAIR IS GONE, AND BOTH HALVES GO TOGETHER. This route used to emit a
+ *  `reset_copy` sentence naming a firm-wide spend reset at the UTC/MYT day boundary, and a
+ *  `reset_utc` of the next UTC midnight. (The retired sentence is deliberately not repeated
+ *  here: it would survive into the shipped bundle as a comment and answer a future
+ *  substring sweep for it.) A concurrency floor has no reset instant — a slot frees
+ *  when a run finishes, not at midnight — so keeping either half would have the dashboard
+ *  render a confident, precise, wrong sentence on top of a correct one (law 22: a visible
+ *  record must not lie). Rewording the copy while still shipping the timestamp would have
+ *  been the worse half-fix, which is why they are decided as one unit here.
+ *
+ *  THE KEYS STAY, NULLED, rather than vanishing: `apps/dashboard/app/chat/api.ts`'s `postTurn`
+ *  429 branch maps them onto its `limit` TurnResult and `page.tsx` renders them through
+ *  `limitBanner`, both already `string | null`, so nulling is the
+ *  change the whole three-hop chain already handles — and the null keeps saying, explicitly,
+ *  "there is no reset for this refusal" instead of leaving a reader to infer it from a
+ *  missing field. `message` is the DB's own text, which already names the live numbers
+ *  ("concurrent compute-run cap reached for firm (3 of 3 running)").
+ *
+ *  Exported so the battery can read the produced payload without standing up a server —
+ *  the `documentRouteStatus` precedent in `documentRoutes.ts`. */
+export function turnLimitPayload(message: string | undefined): {
+  error: "limit";
+  message: string;
+  reset_copy: null;
+  reset_utc: null;
+} {
+  return {
+    error: "limit",
+    message: message && message.length > 0 ? message : "concurrent run limit reached",
+    reset_copy: null,
+    reset_utc: null,
+  };
 }
 
 function sendAuthError(res: express.Response, err: unknown): boolean {
@@ -152,12 +187,7 @@ export function chatRoutes(): express.Router {
       if (sendAuthError(res, err)) return;
       const code = (err as { code?: string })?.code;
       if (code === "CLR14") {
-        res.status(429).json({
-          error: "limit",
-          message: (err as Error).message || "usage limit reached",
-          reset_utc: nextUtcResetIso(),
-          reset_copy: "Your firm's daily budget resets at 00:00 UTC (08:00 Malaysia time).",
-        });
+        res.status(429).json(turnLimitPayload((err as Error).message));
         return;
       }
       if (code === "CLR13" || code === "23505") {

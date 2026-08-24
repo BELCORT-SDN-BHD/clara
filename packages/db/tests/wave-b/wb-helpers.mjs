@@ -223,6 +223,16 @@ export const WB_AUTHORITY_FNS = [
   "seed_fixed_asset", "_assert_opening_tie", "_assert_fa_baseline",
   "create_seeding_batch", "tick_seeding_proposal", "decline_seeding_proposal",
   "complete_seeding_batch",
+  // F-A2 — the THREE new post-path verbs (design §3.6 / §D.4; Annex C.11). F-A2 gives
+  // `get_context_pack` a fifth splice (an `approved_coding_patterns` block). The pack may
+  // lawfully INFORM the judgement that IS the posting authority; it may NEVER be read BY a gate,
+  // bound or floor, because a wall that consults learned history drifts with the books it judges.
+  // This roster is the mechanism that PROVES that, so the post path's three verbs join it while
+  // `get_context_pack` deliberately stays off (it sits on WB_WIKI_WHITELIST instead — the two
+  // lists are opposite ends of one law).
+  // ADDED, NEVER SUBSTITUTED: the eleven retirement REMOVALS are PR-3's, after PR-2's image is
+  // verified live. A roster that shrank before its verbs were dropped stops scanning live bodies.
+  "wake_post_entry", "_agent_post_entry_core", "_tf_assert_agent_post_receipt",
 ];
 
 /** G5(d) — the wiki-family whitelist: the ONLY fns whose prosrc may reference

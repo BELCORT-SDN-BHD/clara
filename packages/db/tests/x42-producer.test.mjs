@@ -14,6 +14,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   rootQuery, opk, reasonOf, endPool, printLaneNotes, printSkipCount, noteLane, ROLES,
+  restateSightings,
 } from "./a21-helpers.mjs";
 import { holdThenContend } from "./rig-docs-race.mjs";
 import {
@@ -304,7 +305,7 @@ test("x42.prod-21 accept refuses: an unsigned rule, a match_settle rule, another
 // account, approved through an ORDINARY draft, MUST move the counter. Measuring
 // only the carve-out would pass against a broken instrument.
 // ===========================================================================
-test("x42.prod-23 the sighting carve-out: an accepted suggestion accrues NO rule_sightings, while an ordinary approval on the same counterparty+account DOES", async (t) => {
+test("x42.prod-23 the sighting carve-out (control INVERTED, D39): an accepted suggestion accrues NO rule_sightings, and neither does an ordinary approval on the same counterparty+account", async (t) => {
   if (skipAf2(t, live)) return;
   const client = await freshAf2Client("carveout");
   const cp = await birthCounterparty(world.users.alice, {
@@ -335,8 +336,14 @@ test("x42.prod-23 the sighting carve-out: an accepted suggestion accrues NO rule
     noteLane("x42.prod-23: the suggested entry carries NO counterparty on any leg, so the carve-out is vacuous in this build — the accrual gate would have been closed by `v_counterparty is null` anyway (finding: the design's counterparty-bearing coding proposal does not reach the legs)");
   }
 
-  // THE CONTROL, through the instrument production uses: an ORDINARY draft with
-  // the same vendor and the same debit account MUST accrue.
+  // THE CONTROL, INVERTED (F-A2 PR-1, D39). §B.7 names this half by line: *"The CONTROL is the
+  // point of the cell: the same counterparty and the same account, approved through an ORDINARY
+  // draft, MUST move the counter"* — a POSITIVE witness that breeding happens on an ordinary
+  // approval, the same class as x37:1951, and *"the control half is exactly what the excision
+  // deletes."* Its disposition is an inverted twin, and the battery successors are
+  // `f-a2.c8.inv-ordinary` and `f-a2.c8.zero-heads`. The carve-out half above is now VACUOUS —
+  // `:335`'s noteLane already recorded it as such in this build — so this half is the only live
+  // evidence in the cell, and it is inverted rather than deleted.
   const d = await draftEntryV3(world.users.alice, {
     client, resolution: await manualRes(world.users.alice, client),
     memo: "x42 carve-out control: an ordinary coded bill", postingDate: w.period.mid,
@@ -349,8 +356,15 @@ test("x42.prod-23 the sighting carve-out: an accepted suggestion accrues NO rule
   await approveEntry(world.users.bob, {
     entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x42-carve-ctrla"),
   });
+  assert.equal(await ruleSightingCount(client), before,
+    "THE CONTROL, INVERTED (D39): an ordinary approval on the same counterparty+account no longer moves the sighting counter — the eighth _approve_entry_core body breeds nothing, on any lane");
+  // …and the counter itself still reads, which is what keeps the zero above evidence rather
+  // than an absence (review law 2). The restatement replays the retired writer's own inserts
+  // onto this very entry and the SAME counter moves.
+  assert.ok(await restateSightings(d.entry_id, { counterparty: cp }) > 0,
+    "the restatement wrote rows onto the ordinary approval");
   assert.ok(await ruleSightingCount(client) > before,
-    "THE CONTROL: an ordinary approval on the same counterparty+account DOES accrue a sighting — the counter is a live instrument");
+    "…and the SAME counter moves for them — the inverted zero is the door's answer, not a broken reader");
 });
 
 // ===========================================================================

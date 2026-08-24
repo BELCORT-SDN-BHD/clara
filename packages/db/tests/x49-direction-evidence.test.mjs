@@ -103,8 +103,14 @@ async function seedVendor(sub, client, { name, registration = null }) {
 async function direction(document, client) {
   try {
     const r = await rootQuery("select clara._document_direction($1,$2) as d", [document, client]);
-    return { value: r.rows[0].d, code: null };
-  } catch (e) { return { value: null, code: e.code }; }
+    return { value: r.rows[0].d, code: null, evidence: null };
+  } catch (e) {
+    // C6 added an evidence CLASS to the CLR30 detail, and a cell that reads only the errcode
+    // cannot tell "the page said nothing" from "the page said something nobody could check".
+    let evidence = null;
+    try { evidence = JSON.parse(e.detail ?? "{}").evidence ?? null; } catch { evidence = null; }
+    return { value: null, code: e.code, evidence };
+  }
 }
 async function tri(document, client) {
   return (await rootQuery(
@@ -143,6 +149,11 @@ test("D1 a stated supplier REGISTRATION the client cannot be compared against AB
     `an untestable hard identifier must NOT produce a confident direction (got '${d.value}')`);
   assert.equal(d.code, "CLR30",
     `it abstains with CLR30 direction_unresolved (got code=${d.code})`);
+  // C6 split the CLR30 detail into classes. A client holding NO hard identifier at all cannot
+  // test ANY stated registration, whatever its shape, so this is the untestable class — pinned
+  // here so the two D1/D2 shapes stay distinguishable at the detail, not just at the errcode.
+  assert.equal(d.evidence, "untestable",
+    `…and the reason is that it could not be TESTED, which C6 gave its own class (got ${JSON.stringify(d.evidence)})`);
   assert.equal(await tri(doc.documentId, client), "unresolved",
     "and the tri-state authority reports 'unresolved' — the value that never drafts");
 });
@@ -161,18 +172,43 @@ test("D2 the SAME document resolves 'purchase' once the client has a hard identi
   });
   assert.equal((await direction(doc.documentId, client)).code, "CLR30",
     "premise: with no client identifier the stated registration is untestable");
-  // ONE KIND IS NOT COVERAGE (the 2026-08-08 revision). `invoice.vendor_registration` carries
-  // a BRN or a TIN and never says which, so an ssm-only client still cannot test a stated
-  // registration: the value could be the TIN it has never recorded. This half of the cell is
-  // the reviewer's exact scenario, and before the revision it answered a confident 'purchase'.
+  // ONE KIND IS COVERAGE OF THAT KIND — AND ONLY THAT KIND (C6, owner ruling 2026-08-22,
+  // superseding the 2026-08-08 revision this limb used to encode). The 2026-08-08 rule demanded
+  // BOTH kinds before any stated registration could be tested, and its cost was named in 0049's
+  // own comment: the ordinary Malaysian client has an ssm and no LHDN TIN, so the limb never
+  // fired and every stated identity fell out as `evidence:"none"` — which the generic posting
+  // lane's B15 then admitted (F-A2 GB-1's second door). The reviewer's concern is UNCHANGED and
+  // still honoured; it is answered per-value instead of per-client:
+  //   * a DIGIT-shaped stated registration is an SSM/BRN, and an ssm-only client CAN test it —
+  //     it runs, it misses, and the answer is a TESTED purchase (this limb);
+  //   * a TIN-SHAPED stated registration against the same client is the reviewer's exact
+  //     scenario, and it still refuses to guess — now under its OWN evidence class rather than
+  //     borrowing the one that means silence (the limb below).
   await addClientIdentifier(sub, { client, kind: "ssm", value: "199901000777" });
   const partial = await direction(doc.documentId, client);
-  assert.equal(partial.code, "CLR30",
-    `an ssm-only client STILL cannot test a stated registration — the stated value may be the tin it does not hold (got '${partial.value}'/${partial.code})`);
+  assert.equal(partial.value, "purchase",
+    `an ssm-only client CAN test a digit-shaped (ssm) stated registration: it runs, misses, and answers a TESTED purchase (got '${partial.value}'/${partial.code})`);
+
+  // THE HALF THE OLD RULE WAS PROTECTING, kept as its own forced limb on a SEPARATE document so
+  // the two answers cannot be confused for one another.
+  const tinShaped = await evidenceDoc(sub, client, {
+    "invoice.vendor_registration": "C20180109999",
+    "invoice.vendor_name": "ACME SUPPLIES SDN BHD",
+  });
+  const untestable = await direction(tinShaped.documentId, client);
+  assert.equal(untestable.code, "CLR30",
+    `a TIN-shaped registration against an ssm-only client is still untestable and still abstains (got '${untestable.value}'/${untestable.code})`);
+  assert.equal(untestable.evidence, "untestable",
+    `…and it says so in its OWN evidence class, not the one that means the page was silent (got ${JSON.stringify(untestable.evidence)})`);
+  // AND WITH BOTH KINDS ON FILE, BOTH documents are testable — the shape inference stops
+  // mattering once the client can be compared against either kind.
   await addClientIdentifier(sub, { client, kind: "tin", value: "c99887766554" });
   const after = await direction(doc.documentId, client);
   assert.equal(after.value, "purchase",
     `with BOTH hard kinds on file the registration arm really runs, misses, and the answer is a TESTED purchase (got '${after.value}'/${after.code})`);
+  const afterTin = await direction(tinShaped.documentId, client);
+  assert.equal(afterTin.value, "purchase",
+    `…and the TIN-shaped document, untestable a moment ago, is now TESTED and misses too (got '${afterTin.value}'/${afterTin.code}/${JSON.stringify(afterTin.evidence)})`);
 });
 
 test("D3 an ACCEPTED VENDOR of this client is positive purchase evidence, even with no client identifier at all", async (t) => {

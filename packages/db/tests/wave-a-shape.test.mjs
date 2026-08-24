@@ -193,7 +193,18 @@ test("PIN-DELTA-1 the wake_kind 'autodraft' allowlist is EXACTLY the six pinned 
   const r = await rootQuery("select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind='autodraft'");
   const have = new Set(r.rows.map((x) => x.fn));
   for (const fn of WA_AUTODRAFT_ALLOWLIST) assert.ok(have.has(fn), `autodraft allowlist includes ${fn} (PIN-DELTA-1)`);
-  assert.equal(have.size, WA_AUTODRAFT_ALLOWLIST.length, `autodraft allowlist is EXACTLY six rows — no list fns, no approve-shaped anything (got: ${[...have].join(", ")})`);
+  // F-A2 PR-1: the posting verb joins the autodraft lane, as a LEDGER-GATED cohort for the same
+  // reason x42-s5's roster is one (B.3) — db-slice-frontiers runs this battery against databases
+  // pinned at EARLIER frontiers, where clara.wake_post_entry does not exist, and an
+  // unconditional entry would turn every one of those legs red while saying nothing about the
+  // allowlist. Gated on appliedStem, NEVER on a migration number: numbers are claimed at merge,
+  // so a number-keyed gate is a guess that silently never fires. Exact in BOTH directions at
+  // either frontier — a missing row still fails.
+  const postingLane = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'f_a2_posting_grants$'")).rows[0].n === 1;
+  const expected = postingLane ? [...WA_AUTODRAFT_ALLOWLIST, "wake_post_entry"] : [...WA_AUTODRAFT_ALLOWLIST];
+  if (postingLane) assert.ok(have.has("wake_post_entry"), "the autodraft lane carries wake_post_entry once F-A2 PR-1 is applied");
+  assert.equal(have.size, expected.length, `autodraft allowlist is EXACTLY the pinned rows — no list fns, no approve-shaped anything (got: ${[...have].join(", ")})`);
   // The two legacy kinds are byte-identical (no seeding risk) — interactive keeps wake_draft_entry.
   const legacy = await rootQuery("select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind='interactive'");
   assert.ok(legacy.rows.some((x) => x.fn === "wake_draft_entry"), "interactive lane still carries wake_draft_entry (legacy unchanged)");
@@ -202,5 +213,11 @@ test("PIN-DELTA-1 the wake_kind 'autodraft' allowlist is EXACTLY the six pinned 
   assert.ok(legacy.rows.some((x) => x.fn === "wake_open_question"), "the interactive lane carries wake_open_question (§5b D)");
   const woq = await rootQuery("select wake_kind from clara.wake_fn_allowlist where coalesce(fn_name, function_name)='wake_open_question' order by wake_kind");
   const woqKinds = new Set(woq.rows.map((x) => x.wake_kind));
-  assert.deepEqual([...woqKinds].sort(), ["autodraft", "interactive"], `wake_open_question is allowlisted for EXACTLY autodraft + interactive, never proactive (got ${[...woqKinds].join(", ")})`);
+  // F-A2 PR-1 (D34): the pinned chat kind joins THIS verb and nothing else. That single row is
+  // the whole of interactive_client's authority — it is why the kind can land a typed open
+  // question and can never carry a post — and asserting it here is the closed-world half.
+  // Still never proactive, at either frontier.
+  const woqExpected = postingLane
+    ? ["autodraft", "interactive", "interactive_client"] : ["autodraft", "interactive"];
+  assert.deepEqual([...woqKinds].sort(), woqExpected, `wake_open_question is allowlisted for EXACTLY ${woqExpected.join(" + ")}, never proactive (got ${[...woqKinds].join(", ")})`);
 });
