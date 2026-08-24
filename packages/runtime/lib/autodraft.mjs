@@ -22,6 +22,12 @@
 // authenticated + agent_ro), so a definer resolver is required; see REPORT-C.
 //
 // Connections come from the environment ONLY, via pools.makeRuntimeClient (the matcher idiom).
+//
+// F2-R (opus review, round 2): a GM-10 withdrawal deferred pending its owner task's
+// settlement is retained UNBOUNDED, never dead-lettered — the reconciler's own orphan-settle
+// window (30 minutes) is the recovery, and a bounded give-up would silently lose a human's
+// deliberate re-admission act. The deferral is made LOUD instead: autodraftHealth's
+// deferredWithdrawals count + a throttled log line, never a spent poison budget.
 
 import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
@@ -39,15 +45,20 @@ export const AUTODRAFT_EVENT_TYPES = Object.freeze([
 const AUTODRAFT_EVENT_SET = new Set(AUTODRAFT_EVENT_TYPES);
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_AUTODRAFT_MAX_ATTEMPTS || 5);
-// F2 (opus review): retry_pending_settlement (a LIVE owner task, GM-10) is a real, not-yet-
-// terminal fact -- never an error -- so it deliberately does NOT share MAX_ATTEMPTS' error
-// semantics or its counter. But left genuinely unbounded, a task that crashes stuck 'running'
-// (or a human review that never finishes) blocks this firm's WHOLE autodraft lane head-of-
-// line forever: the checkpoint can never advance past the retained event, so every later
-// event on the firm is stranded behind it too, and nothing ever signals an operator (measured
-// -- opus review F2: 3 cycles, checkpoint never moves, relay_dead_letters stays at 0 the
-// whole time). Its own dedicated cap, same order of magnitude as MAX_ATTEMPTS' spirit.
-const MAX_RETRY_PENDING_CYCLES = Number(process.env.CLARA_AUTODRAFT_MAX_RETRY_PENDING_CYCLES || 5);
+// F2-R (opus review, round 2 — SUPERSEDES the round-1 cycle-bound). retry_pending_settlement
+// (a LIVE owner task, GM-10) is a real, not-yet-terminal fact -- never an error -- and the
+// round-1 fix's MAX_RETRY_PENDING_CYCLES bound was measured to give up in ~10s of WALL-CLOCK
+// time (waitForNudge makes cycle rate a function of estate traffic -- 113ms/cycle under
+// nudge pressure), while the recovery this deferral races -- the reconciler's orphan settle
+// -- runs on a 30-MINUTE window. Once the round-1 fix's checkpoint advanced past the event,
+// the act was LOST exactly like F1's own bug: the door stays admissible, but the consumer
+// never asks it again, and the ordinary catch-up sweep answers already_done once the orphan
+// eventually settles. Accounting-correctness rules the tradeoff: a LOUD unbounded stall loses
+// nothing (the reconciler's own 30-minute window unblocks it); a quiet bounded give-up loses
+// a human's deliberate act. So the deferral is UNBOUNDED again -- retained, never
+// checkpointed, never dead-lettered -- and made LOUD instead: autodraftHealth's
+// deferredWithdrawals count (below) and the throttled log line are the signal.
+const DEFERRAL_LOG_INTERVAL_MS = Number(process.env.CLARA_AUTODRAFT_DEFERRAL_LOG_MS || 60000);
 const POLL_INTERVAL_MS = Number(process.env.CLARA_AUTODRAFT_POLL_MS || 2000);
 const CATCHUP_MS = Number(process.env.CLARA_AUTODRAFT_CATCHUP_SECONDS || 300) * 1000;
 const RESERVE_TOKENS = Number(process.env.CLARA_AUTODRAFT_RESERVE_TOKENS || 40000);
@@ -152,15 +163,22 @@ export async function admitWithdrawalEvent(client, { eventId }, deps = {}) {
 // ---------------------------------------------------------------------------
 // Dead-letter (consumer='autodraft') — its OWN transaction so the attempt count survives the
 // effect-transaction rollback (the matcher idiom). Returns the post-increment count.
+// ERROR PATH ONLY (F2-R): a retry_pending_settlement deferral no longer calls this at all —
+// see deferredWithdrawalState below.
 // ---------------------------------------------------------------------------
 async function recordAutodraftDeadLetter(client, { eventId, reason }) {
   await client.query("begin");
   try {
     const r = await client.query(
+      // F2-R hygiene fix (opus review): `reason` is now updated on every conflict too, not
+      // only `attempt_count` -- the ORIGINAL shape froze the FIRST error's text forever, so a
+      // LATER, DIFFERENT error on the same event still reported the stale first cause (a
+      // first-writer-wins lie an operator reading relay_dead_letters would trust).
       `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
          values ($1, $2, $3, null)
        on conflict (consumer, event_id) do update
-         set attempt_count = clara.relay_dead_letters.attempt_count + 1
+         set attempt_count = clara.relay_dead_letters.attempt_count + 1,
+             reason = excluded.reason
        returning attempt_count`,
       [AUTODRAFT_CONSUMER, eventId, String(reason).slice(0, 500)],
     );
@@ -174,6 +192,36 @@ async function recordAutodraftDeadLetter(client, { eventId, reason }) {
     }
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// F2-R — the retained-deferral signal (opus review, round 2). NOT persisted (deliberately: a
+// SQL-derived count would need journal_entries/coding_attempts/autodraft_attempts/agent_tasks
+// -- all 0011+ tables -- which autodraftHealth's own header specifically avoids so it stays
+// callable before 0011 is applied; the runtime role also has no direct SELECT grant on any of
+// them, by the SAME definer-only design this file's own header already notes for
+// document_filings). Process-local and keyed on event id: membership = "this process
+// currently sees this withdrawal retained pending its owner task's settlement";
+// `lastLoggedAt` throttles the log line to at most once per DEFERRAL_LOG_INTERVAL_MS so a
+// firm stuck for hours does not spam the log once per poll. Cleared the moment the SAME event
+// stops returning retry_pending_settlement (success OR error), so it always reflects the
+// CURRENT set, never a historical one. Re-derives from scratch after a restart (empty map,
+// first occurrence logs immediately) -- exactly as unbounded retention already behaves; this
+// is observability, not state the correctness of the deferral itself depends on.
+// ---------------------------------------------------------------------------
+const deferredWithdrawalState = new Map(); // eventId -> { lastLoggedAt: number }
+
+function noteDeferral(eventId, reason, log) {
+  const now = Date.now();
+  const prior = deferredWithdrawalState.get(eventId);
+  if (!prior || now - prior.lastLoggedAt >= DEFERRAL_LOG_INTERVAL_MS) {
+    log(`[autodraft] event=${eventId} deferred without checkpoint (owner task not yet settled): ${reason}`);
+    deferredWithdrawalState.set(eventId, { lastLoggedAt: now });
+  }
+}
+
+function clearDeferral(eventId) {
+  deferredWithdrawalState.delete(eventId);
 }
 
 // ---------------------------------------------------------------------------
@@ -219,18 +267,13 @@ async function runEffectTxn(client, { firmId, ev, deps }) {
       : await admitDocument(client, { firmId, documentId: ev.documentId }, deps);
     if (res.retry) {
       await client.query("rollback");
-      // F2 (opus review): a LIVE owner task is retained WITHOUT checkpointing (correct — the
-      // event is not consumed yet), but that retention must be BOUNDED across cycles, not just
-      // within one. relay_dead_letters is the retained-event pathway's own cross-cycle state
-      // (survives a process restart, unlike an in-memory counter) — reused here for its
-      // per-(consumer,event_id) attempt_count, in its OWN dedicated txn so the count persists
-      // even though THIS txn just rolled back. The row's status stays 'pending' the whole
-      // time (never silently resolved), so it is retention, not a silent drop, once exhausted.
-      const attempts = await recordAutodraftDeadLetter(client, {
-        eventId: ev.id,
-        reason: `retry_pending_settlement: ${res.receipt.outcome}`,
-      });
-      return { ok: false, retry: true, reason: res.receipt.outcome, attempts };
+      // F2-R: a LIVE owner task is retained WITHOUT checkpointing, UNBOUNDED — never
+      // dead-lettered, never skipped. The reconciler's own orphan-settle window (30 minutes)
+      // eventually unblocks a genuinely stuck task; advancing the checkpoint before that would
+      // lose the human's deliberate re-admission act permanently (measured, round 1's own
+      // regression). No relay_dead_letters write happens here at all — see
+      // deferredWithdrawalState for the (process-local, loud) signal instead.
+      return { ok: false, retry: true, reason: res.receipt.outcome };
     }
     await writeCheckpoint(client, { consumer: AUTODRAFT_CONSUMER, firmId, seq: ev.seq });
     await client.query("commit");
@@ -259,6 +302,7 @@ async function processAutodraftFirm(client, { firmId, lastSeq, batchSize, deps }
   for (const ev of evs) {
     if (!AUTODRAFT_EVENT_SET.has(ev.eventType)) continue; // checkpoint-only; coalesced below
     const res = await runEffectTxn(client, { firmId, ev, deps });
+    if (!res.retry) clearDeferral(ev.id); // no longer pending settlement, whatever the outcome
     if (res.ok) {
       cursor = ev.seq; // checkpoint already committed in the txn — the event is consumed
       for (const taskId of res.admitted) {
@@ -272,13 +316,10 @@ async function processAutodraftFirm(client, { firmId, lastSeq, batchSize, deps }
       continue;
     }
     if (res.retry) {
-      if (res.attempts >= MAX_RETRY_PENDING_CYCLES) {
-        log(`[autodraft] event=${ev.id} owner task never settled after ${MAX_RETRY_PENDING_CYCLES} cycles → dead-lettered + skipped: ${res.reason}`);
-        await checkpointOnly(client, { firmId, seq: ev.seq }); // advance past the stuck deferral
-        cursor = ev.seq;
-        continue;
-      }
-      log(`[autodraft] event=${ev.id} deferred without checkpoint (attempt ${res.attempts}/${MAX_RETRY_PENDING_CYCLES}): ${res.reason}`);
+      // F2-R: UNBOUNDED retention (see the constant's own comment) — the deferral is correct
+      // behavior, made LOUD instead of bounded: a throttled log line plus autodraftHealth's
+      // deferredWithdrawals count are the operator signal, never a checkpoint advance.
+      noteDeferral(ev.id, res.reason, log);
       return { readCount: evs.length, maxSeq: cursor, admitted: admittedCount, blocked: true };
     }
     if (res.attempts >= MAX_ATTEMPTS) {
@@ -407,6 +448,13 @@ export async function autodraftHealth(client) {
     lag: Number(r.rows[0].lag),
     pendingDeadLetters: r.rows[0].pending_dead_letters,
     firmsTracked: r.rows[0].firms_tracked,
+    // F2-R (opus review): distinct from generic lag/pending_dead_letters ON PURPOSE — a
+    // withdrawal deferred pending its owner task's settlement is neither poisoned (no
+    // relay_dead_letters row) nor merely "behind" (lag counts it, but so does every other
+    // unconsumed event on the firm). Process-local (deferredWithdrawalState), not a DB read,
+    // so it stays true to this invariant's own "safe before 0011" contract above and needs no
+    // grant this role does not already have.
+    deferredWithdrawals: deferredWithdrawalState.size,
   };
 }
 
