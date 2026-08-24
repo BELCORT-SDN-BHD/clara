@@ -85,6 +85,47 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- F4 (opus review): PRODUCER CENSUS for entry.withdrawn, proved from the live catalog
+  -- rather than assumed from the three names this file's own comments already cite. The
+  -- `de.document_id is not null` predicate the door's identity chain now carries is only a
+  -- safety property, never a NEW gate, precisely because the other two producers below can
+  -- never satisfy the door's join chain anyway (they never touch autodraft_attempts) -- but
+  -- "never" is worth proving, not asserting, so this reads their bodies and pins the exact
+  -- literal shape that makes it true: both call clara._append_event with a bare `null` in
+  -- the p_document position, never a real column.
+  declare
+    v_producers text[];
+    v_unmatch text;
+    v_cancel_pair text;
+  begin
+    select array_agg(p.proname order by p.proname) into v_producers
+      from pg_proc p
+     where p.pronamespace = 'clara'::regnamespace
+       and coalesce(p.prosrc, '') like '%''entry.withdrawn''%';
+    if v_producers is distinct from array['cancel_pair_reversal','unmatch_bank_match','withdraw_draft']::text[] then
+      raise exception 'GM-10 prestate: entry.withdrawn producers are no longer exactly {cancel_pair_reversal, unmatch_bank_match, withdraw_draft} (found %) -- the door''s document_id-not-null safety property is unproved against the new shape', v_producers
+        using errcode = 'CLR10';
+    end if;
+
+    select p.prosrc into v_unmatch
+      from pg_proc p
+     where p.oid = 'clara.unmatch_bank_match(uuid,uuid,text,text)'::regprocedure;
+    if v_unmatch is null or position('g.draft_entry_id, null, null, ''{}''::jsonb)' in v_unmatch) = 0 then
+      raise exception 'GM-10 prestate: unmatch_bank_match no longer proves a NULL document_id on its entry.withdrawn emission'
+        using errcode = 'CLR10';
+    end if;
+
+    select p.prosrc into v_cancel_pair
+      from pg_proc p
+     where p.oid = 'clara.cancel_pair_reversal(uuid,uuid,text,text)'::regprocedure;
+    if v_cancel_pair is null
+       or position('pr.occurrence_correction_id, null, null, ''{}''::jsonb)' in v_cancel_pair) = 0
+       or position('pr.mirror_correction_id, null, null, ''{}''::jsonb)' in v_cancel_pair) = 0 then
+      raise exception 'GM-10 prestate: cancel_pair_reversal no longer proves a NULL document_id on BOTH of its entry.withdrawn emissions'
+        using errcode = 'CLR10';
+    end if;
+  end;
+
   -- Before this migration the historical 0053 claim is still true: request_autodraft is the
   -- sole SQL producer of one_click. This file deliberately becomes the second producer, but
   -- only behind the positively-proved human withdrawal chain below; the tail enumerates both.
@@ -190,6 +231,17 @@ begin
      and at.client_id = aa.client_id
    where de.id = p_event
      and de.event_type = 'entry.withdrawn'
+     -- F4 (opus review): entry.withdrawn has THREE live producers -- withdraw_draft,
+     -- unmatch_bank_match, cancel_pair_reversal (prestate census below) -- and only
+     -- withdraw_draft ever names a real document_id; the other two always pass NULL
+     -- (they withdraw a bank-reconciliation/adjustment-pair draft, never a document-cited
+     -- one). The join chain below is ALREADY document-shaped end to end -- coding_attempts
+     -- -> autodraft_attempts only ever exist for a document-derived filing -- so a
+     -- bank/pair-reversal withdrawal could never satisfy it regardless. This predicate adds
+     -- no NEW admission; it makes the three-producer safety property EXPLICIT in the SQL
+     -- text so a future change to that join (or to either sibling producer) fails loud here
+     -- instead of relying on a structural coincidence nothing pins.
+     and de.document_id is not null
      and de.actor is not null
      and je.status = 'withdrawn'
      and je.withdrawn_by = de.actor
@@ -242,15 +294,6 @@ begin
   end if;
 
   v_op_key := 'gm10-withdrawal:' || p_event::text;
-  v_dedupe := clara._reserve_op(w.firm_id, 'readmit_autodraft_after_withdrawal',
-    v_op_key, clara._hash(jsonb_build_object(
-      'event', p_event,
-      'model', btrim(p_model),
-      'reserve_tokens', p_reserve_tokens
-    )));
-  if v_dedupe is not null then
-    return v_dedupe;
-  end if;
 
   -- 0053 remains the sole owner of duplicate/retry/budget/lane judgement. This explicit
   -- one_click call is NOT a generic unattended sweep: its eligibility was proved above from
@@ -269,6 +312,58 @@ begin
     'filing_id', w.filing_id,
     'prior_task_id', w.prior_task
   );
+
+  -- F1 (opus review) -- THE TRANSIENT-REFUSAL MEMO CLASS, one layer up from 0031's own
+  -- ledger #39 and 0048's O-round finding 2, both quoted VERBATIM in admit_autodraft_task's
+  -- own live prosrc: "the budget/concurrency-cap refusals below are EXACTLY the same class
+  -- of transient, state-dependent fact as the lane check ... caching either of them under
+  -- the same state-free key would freeze a refusal past a daily reset or a cleared
+  -- concurrency cap exactly as the lane bug did." refused_budget / refused_attempts /
+  -- lane_changed / skipped_direction / noop_existing / already_done are ALL facts about the
+  -- FIRM'S STATE at the instant admit_autodraft_task ran, never facts about the withdrawal
+  -- event itself -- a budget that later clears is the SAME class of change 0031 already
+  -- taught this codebase never to freeze past. The op-key reservation therefore moves to
+  -- AFTER the delegation and fires ONLY when a task was actually minted: a transient
+  -- outcome returns directly with NO op receipt written, so the identity chain above (still
+  -- true -- a non-admitting admit_autodraft_task call never advances the registry) re-proves
+  -- itself fresh on the next call and re-asks admit_autodraft_task fresh, exactly as an
+  -- ordinary sweep retry already does for every other transient refusal in this system.
+  if not (v_admission->>'outcome' = any(array['admitted', 're_admitted', 're_admitted_after_withdrawal'])) then
+    perform clara._audit(
+      w.firm_id,
+      clara.agent_user_id(),
+      w.withdrawn_by,
+      null,
+      'readmit_autodraft_after_withdrawal',
+      w.entry_id,
+      jsonb_build_object(
+        'op_key', v_op_key,
+        'withdrawal_event_id', p_event,
+        'filing_id', w.filing_id,
+        'prior_task_id', w.prior_task,
+        'task_id', v_admission->>'task_id',
+        'outcome', v_admission->>'outcome',
+        'model', btrim(p_model),
+        'reserve_tokens', p_reserve_tokens
+      )
+    );
+    return v_result;
+  end if;
+
+  -- ADMITTING: a real task was minted. Memoize NOW, after the fact rather than before, so a
+  -- REPLAY of this SAME event -- e.g. an at-least-once redelivery after a crash between this
+  -- commit and the consumer's own checkpoint advance -- returns THIS exact receipt (task_id
+  -- included) instead of falling through the identity chain to `not_eligible` once the
+  -- registry has moved on to the freshly-minted task (measured: opus review P1.f / P3.a).
+  v_dedupe := clara._reserve_op(w.firm_id, 'readmit_autodraft_after_withdrawal',
+    v_op_key, clara._hash(jsonb_build_object(
+      'event', p_event,
+      'model', btrim(p_model),
+      'reserve_tokens', p_reserve_tokens
+    )));
+  if v_dedupe is not null then
+    return v_dedupe;
+  end if;
 
   -- Actor = machine; OBO = the human whose deliberate withdrawal opened exit 2. This is the
   -- same two-identity audit shape used by other runtime workers, and it does not misreport a
@@ -358,6 +453,7 @@ begin
 
   for r in select * from (values
       ('de.event_type = ''entry.withdrawn''', 1),
+      ('de.document_id is not null', 1),
       ('drafted.event_type = ''entry.drafted''', 1),
       ('drafted.via_wake_kind = ''autodraft''', 1),
       ('revised.event_type = ''entry.revised''', 1),
@@ -366,7 +462,8 @@ begin
       ('''retry_pending_settlement''', 1),
       ('clara.admit_autodraft_task(', 1),
       ('p_origin => ''one_click''', 1),
-      ('''readmit_autodraft_after_withdrawal''', 3)
+      ('array[''admitted'', ''re_admitted'', ''re_admitted_after_withdrawal'']', 1),
+      ('''readmit_autodraft_after_withdrawal''', 4)
     ) as t(marker, want)
   loop
     if (length(v_src) - length(replace(v_src, r.marker, ''))) / length(r.marker) <> r.want then
