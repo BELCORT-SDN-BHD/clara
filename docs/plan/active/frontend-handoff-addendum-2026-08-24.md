@@ -161,11 +161,11 @@ enumeration: `docs/plan/active/close-key-1-design.md:105-117` (`wake_list_fiscal
 where the base task's framing overstates readiness.** `PROGRESS.md:86` shows PR-1a merged
 (measurement layer only — no wake verbs, see §3) and PR-1b "BUILT (three review flags on file)".
 Reading `f-a4/pr-1b@bc548e9` (branch `f-a4/pr-1b`, file
-`packages/db/migrations/UNNUMBERED_f_a4_pr_1b_close_lifecycle.sql`) directly: `grep -c` for
+`packages/db/migrations/0120_f_a4_pr_1b_close_lifecycle.sql`) directly: `grep -c` for
 `create function clara.wake_` returns **zero**, and the file's own header states this explicitly
 — *"WHAT THIS FILE DOES NOT SHIP (Annex F.3): the thirteen wake_\* wrappers, the agent cores...
 siblings (mint_wake_credential_for_task, _wake_task_id) and the read-core extractions"*
-(`UNNUMBERED_f_a4_pr_1b_close_lifecycle.sql:26-29`). What PR-1b *does* ship: the
+(`0120_f_a4_pr_1b_close_lifecycle.sql:26-29`). What PR-1b *does* ship: the
 `wake_credentials` schema extended for a new `close_prep` kind (`:235-252`) and five ungranted
 agent-judgement cores — `_begin_close_core`, `_abandon_close_core`, `_propose_fiscal_year_core`,
 `_open_fiscal_year_core`, `_mint_month_snapshot_core` (`:1050-1387`). **No branch for the

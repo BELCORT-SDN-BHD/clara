@@ -46,6 +46,26 @@ export async function reopenSig() {
     : "clara.reopen_fiscal_year(uuid,text,jsonb,text)";
 }
 
+/** F-A4 PR-1b (close-key-1 Window B) frontier probe: has the entrance-seam body-move landed?
+ *  Read from a body only that window creates, never a migration number or filename (numbers
+ *  are claimed at merge; a renumber must never move what this probe answers). */
+export async function hasFA4PR1B() {
+  const r = await rootQuery(
+    "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='_begin_close_core'",
+  );
+  return r.rows.length > 0;
+}
+
+/** attest_close_exception's LIVE signature. F-A4 PR-1b appends p_from_proposal (defaulted) and
+ *  DROPs the 5-arg overload rather than leaving it to coexist (a bare CREATE OR REPLACE with an
+ *  added argument creates a second overload, not a replacement -- 42725 ambiguous-call otherwise)
+ *  -- so anything probing by regprocedure has to ask rather than hard-code. */
+export async function attestCloseSig() {
+  return (await hasFA4PR1B())
+    ? "clara.attest_close_exception(uuid,text,text,text,text,uuid)"
+    : "clara.attest_close_exception(uuid,text,text,text,text)";
+}
+
 export async function caught(fn) {
   try { await fn(); return null; } catch (e) { return e; }
 }
