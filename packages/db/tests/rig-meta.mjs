@@ -312,6 +312,34 @@ const F_A9_PR1A_UNGRANTED_FNS = ["_tf_llm_price_no_overlap"];
 export const F_A9_PR1A_COHORT = [
   ...F_A9_PR1A_RUNTIME_FNS, ...F_A9_PR1A_HUMAN_FNS, ...F_A9_PR1A_UNGRANTED_FNS,
 ];
+// F-A5 PR-2 [Wave F Track A, reporting agency] -- the GRANTED SURFACE annex A.1 enumerates.
+// Its own cohort (0090-0095's "wholly present or wholly absent" reasoning): folding these into
+// an earlier wave's list would red every pre-PR-2 database.
+//   the SEVENTEEN wrappers -- clara_wake_interactive ONLY, 'interactive' kind (never
+//   'proactive'); design SS3.1 A.1. wake_enqueue_render_job is NOT among them on purpose --
+//   _enqueue_render_job_core is reachable only internally (from _seal_report_dataset_core and
+//   the human clara.enqueue_render_job), so it carries no wrapper and no grant.
+//   the NINE new ungranted cores PR-2 mints (PR-1's own eight -- six extractions +
+//   evaluate_fs_pack_agent_v1 + _agent_approve_metric_definition_core -- carry no roster entry
+//   here either, by the same "expected false is the default" reasoning that let PR-1 land with
+//   no change to this file at all). Declaring them here turns a future accidental grant into a
+//   FAILING test rather than a silently-widened wall.
+const F_A5_PR2_WAKE_FNS = [
+  "wake_open_report_run", "wake_evaluate_report_pack", "wake_seal_report_dataset",
+  "wake_assess_report_claim", "wake_seal_report_artifact", "wake_requeue_render_job",
+  "wake_approve_metric_definition", "wake_supersede_metric_definition", "wake_reject_metric_definition",
+  "wake_create_account_set", "wake_mint_metric_input_snapshot",
+  "wake_publish_chart_template_version", "wake_publish_report_template_version",
+  "wake_report_run_state", "wake_report_claim_state", "wake_report_artifact_index",
+  "wake_metric_definition_index",
+];
+const F_A5_PR2_UNGRANTED_FNS = [
+  "_agent_reject_metric_definition_core", "_agent_supersede_metric_definition_core",
+  "_agent_mint_metric_input_snapshot_core", "_agent_create_account_set_core",
+  "_requeue_render_job_core", "_report_run_state_core", "_report_claim_state_core",
+  "_report_artifact_index_core", "_metric_definition_index_core",
+];
+export const F_A5_PR2_COHORT = [...F_A5_PR2_WAKE_FNS, ...F_A5_PR2_UNGRANTED_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -918,7 +946,7 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
@@ -1104,6 +1132,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
   return failures;
 }
 
