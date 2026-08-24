@@ -26,7 +26,8 @@ transaction`, so `idle_in_transaction_session_timeout` (set on every runtime che
 **Run as the project admin identity** — the session-pooler DSN on **port 5432**, the same one
 `docs/ops/DR.md` §9 inventories as `DATABASE_URL`. **Never** as `clara_runtime_login` itself:
 that login cannot terminate its siblings, and it is the identity being cleaned up. The DSN comes
-from the environment only — never code, never argv.
+from the environment only — never code, never argv. TLS: pipe it through the committed CA-pinned
+bridge (`docs/ops/dsn-bridge.md`) — `sslmode=verify-full`, never `no-verify`.
 
 It is cheap and idempotent, so run it whenever a restart *might* have been hard rather than
 trying to establish that it was soft.

@@ -1,7 +1,7 @@
 # F-T2 · The payroll deadline calendar — the estate survey (as-found)
 
 > **Item:** Wave F Track B **F-T2** — *"the payroll deadline calendar (documents→JV flow stays;
-> no engine)"* (`wave-f-contract.md:405`). **PRD §8 non-goal:** *"A payroll engine → Code
+> no engine)"* (`wave-f-contract.md:424`). **PRD §8 non-goal:** *"A payroll engine → Code
 > PCB/EPF/SOCSO/EIS + calendar the deadlines."* (`PRD.md:210`; capability §4 item 16 at `:86`.)
 > **Companions:** `payroll-calendar-design.md` · `payroll-calendar-annexes.md`.
 > **Written under** digest laws **80 · 81 · 16 · 19 · 2 · 27(2) · 31**, TA-P4 · TA-P5 · TA-P14
@@ -389,9 +389,9 @@ implementation at all"* (`docs/audit/01-findings-report.md:3167-3174`).
   `clara.policy_drafts` → `_policy_sources_agree` / `_policy_value_plausible` → the owner
   one-click `decide_policy_draft` / `override_policy_draft` → `_policy_draft_commit_core`
   (`internet-lane-design.md:98,136-138,150,160,169,176`). **`p_table_key`'s closed set is
-  `{'fx_rates'}` at PR-1** (`:424`), and the **Wave-F Tier-1 list CLOSES at three tables** with
-  *"EPF/SOCSO/EIS … explicitly out until their own consumers land (F-T2/F-T3)"*
-  (`wave-f-contract.md:342-344`). **A fourth Tier-1 table inside Wave F is a contract amendment.**
+  `{'fx_rates'}` at PR-1** (`:424`), and the **Wave-F Tier-1 list CLOSED at three tables** with
+  *"EPF/SOCSO/EIS … explicitly out until their own consumers land (F-T2/F-T3)"* — **R-L25 later
+  reopened it for two more, F-T3's own, EPF/SOCSO/EIS still out** (folded, nit; `wave-f-contract.md:342-344`). An EPF/SOCSO/EIS rate table inside Wave F is still a **contract amendment.**
 - **F-T1 keeps its due dates in its own period model** — `clara.sst_taxable_periods` (computed
   `due_date`) and `clara.sst_returns` (`tb-ft1-sst`, 2026-08-23). Under R-L22 both lanes
   contribute **rows to one table**, not paths.
@@ -458,7 +458,7 @@ change what the design may build.
 | **F-P6** | `open_questions` can carry a payroll question at `scope_kind='client'`, but its `origin` closed world needs an extend-only widening — a shared surface with an F-A3 precedent. | SEEN(text) |
 | **F-P7** | **No public-holiday calendar and no business-day arithmetic exist**, and the four regulators are in **four different** measured states (§1.4). | NOT SEEN (structural) |
 | **F-P8** | There are **FOUR** wage bases, not three, and overtime and bonus move in **opposite** directions between EPF and SOCSO/EIS. Reproducing any of it is the forbidden engine. | A/B per §1.6 |
-| **F-P9** | Tier-1 **closes at three tables** for Wave F; an EPF/SOCSO/EIS rate table is a **contract amendment**. | SEEN(text) |
+| **F-P9** | Tier-1 **closed at three tables** for Wave F, **R-L25 reopened it for two more (F-T3's)**; an EPF/SOCSO/EIS rate table is still a **contract amendment** (folded, nit). | SEEN(text) |
 | **F-P10** | PRD §4.96 names **staff allowances**, **self-billed e-Invoice detection** and **WHT-as-a-mechanic** as Wave F behaviours; grep of `wave-f-contract.md` finds **none of the three**. | SEEN(text) |
 | **F-P11** | The audit's **`GAP2-6` (HIGH)** is this item's ancestry and states the same gap in the pre-rebuild system. There is **no `apps/dashboard/app/api/**/route.ts`**; a crude door is a client page over PostgREST `rpc()` on `/close`'s idiom. | SEEN(text) |
 | **F-P13** | **CP38 and CP39 ride PCB's own 15th**, inside Rule 10(1)(c) — they are calendar items, not free-floating events. | A |

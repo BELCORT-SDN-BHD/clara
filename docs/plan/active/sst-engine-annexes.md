@@ -1,21 +1,54 @@
-# F-T1 — the SST engine: annexes
+# F-T1 — the SST engine: annexes (v2, gate-folded 2026-08-23)
 
-> Companion to `sst-engine-design.md` (+ `-part2.md`) and `sst-engine-survey.md`. **Annex A** mechanics ·
-> **Annex B** decision register · **Annex C** predictions the rig replay must confirm · **Annex D** the
-> owner's questions · **Annex E** change log. Statutory row ids (`S-*` / `V-*` / `F-*` / `U-*` / `M1`)
-> resolve in survey §3.
+> Companion to `sst-engine-design.md` (**§1-§4**) + `-design-part2.md` (**§5-§12**) and
+> `sst-engine-survey.md`. **Annex A** mechanics · **Annex B** decision register (D-1 … D-21) ·
+> **Annex C** predictions the rig replay must confirm (C-1 … C-16) · **Annex D** the owner's questions ·
+> **Annex E** change log. Statutory row ids (`S-*` / `V-*` / `F-*` / `U-*` / `M1`) resolve in survey §3.
+>
+> ⚠ **`sst-engine-annexes-2.md` carries Annex F — the mechanisms the PR-0 gate fold added**, and it is
+> design-normative, not commentary: F.1 §3.2's three input conventions · F.2 the deferral interlock and its
+> writer census · F.3 the brown-field opening position · F.4 the differential control's operands · F.5 the
+> imported-services posting home · F.6 the `list_review_queue` splice · F.7 the `get_context_pack` splice.
+> The gate itself is `sst-engine-gate-record.md`.
 
 ## Annex A · Mechanics
 
 ### A.1 · Table DDL posture
 
 Every new table: `firm_id`/`client_id` with the **composite-FK tenant congruence** idiom (`0007:59`), RLS
-enabled **and FORCED**, an owner policy so the DEFINER writers reach it, **zero direct app-role grants**
-(tail-asserted, the `0011`/`0015` idiom `0016:401` uses), and `_tf_append_only` where the table is history.
-Reference tables (`sst_rate_schedule`) carry **no `firm_id`** — Tier-1 facts are firm-independent, the
-F-A8 `policy_drafts` finding.
+enabled **and FORCED**, an owner policy so the DEFINER writers reach it, **zero direct app-role grants**, and
+`_tf_append_only` where the table is history. Reference tables (`sst_rate_schedule`) carry **no `firm_id`** —
+Tier-1 facts are firm-independent, the F-A8 `policy_drafts` finding.
 
-**`sst_threshold_schedule`'s ALTER is ordered, and the order is not cosmetic.** (1) `id uuid not null
+⚠ **The grant-absence assertion has no `0016` precedent to copy, and v1's cite was wrong** (GN-1).
+`0016:398-412` is the RLS/owner-policy loop; it says nothing about grants, and `0016`'s tail asserts
+FUNCTION privileges heavily (`has_function_privilege` `:5031-5096`) but carries **no `has_table_privilege`
+check for any of its six tables** — they simply have no GRANT statement. The substantive posture is still
+fail-closed (FORCE RLS with only a `clara_fn_owner` policy denies every other role regardless of grants),
+so this is a citation defect, not a hole — but the shape actually worth copying is the estate's proven
+hardening census, **`packages/db/tests/epsilon-grants-phase.mjs:63-70`**, which reads
+`information_schema.table_privileges` **positively**. Absence read off the wrong instrument is not evidence
+(review law 2).
+
+### A.1a · `clara.sst_registrations` — the full column list
+
+v1's §2.1 promised "full columns in Annex A.1" and the annex did not carry them (GM-8). One row per
+(client, `tax_type`, episode), immutable + supersede on the `client_facts` (`0055:386-420`) pattern:
+
+`id uuid pk` · `firm_id` / `client_id` (composite-FK congruence) · **`tax_type`** CLOSED `('sales','service')` ·
+`registration_no` (shape-checked, never shape-inferred) · `status` (`applied`/`registered`/`ceased`) ·
+`effective_from` / `effective_to` · `registration_due_date` (the s.13(4) retroactive arm, §2.2) ·
+**`accounting_basis`** `('payment','invoice_issued_approved')` default `payment`, CHECK-forced against
+`tax_type` · `dg_approval_ref` / `dg_approval_effective` / `dg_conditions text` (the opaque s.11(1A) /
+s.25(3) trio) · `taxable_period_months` default 2 · **`period_anchor_month int`** and **`anchor_source`**
+`('rmcd_recorded','s25_1_derived')` — §2.2's recorded-then-sourced rule; a `s25_1_derived` row stands with an
+`sst_period_anchor_unconfirmed` watch until transcribed · `service_groups text[]` · `deferral_scope` (the
+s.11(1A) skip flag, Annex A.4) · `recorded_by` / `basis` / `basis_kind` with the governed-origin conjunct ·
+`superseded_by` / `superseded_at` + paired CHECK.
+
+**`sst_threshold_schedule`'s ALTER is ordered, and the order is not cosmetic.** ⚠ **WHOSE ALTER it is, is
+owner card OQ-14** — `internet-lane-design.md:431` still assigns the identical work to F-A8/PR-3. What
+follows is the specification of the work, not a claim on the lane that does it. (1) `id uuid not null
 default gen_random_uuid()` **plus `unique (id)`** — the self-referencing `superseded_by` FK cannot exist
 before a unique target, and the composite PK `(service_group, effective_from)` stays untouched so every
 existing reader keeps working. (2) `superseded_by uuid references clara.sst_threshold_schedule(id)
@@ -36,6 +69,18 @@ valid and a per-item row overrides by specificity.
 **The standing census `packages/db/tests/a21-watch.test.mjs:98-132` pins those two seed rows'
 `effective_to IS NULL`** — it is an estate-suite cell, not a one-time DO block, and any supersession that
 closes them fails it. The re-cut ships in the same PR.
+
+⚠ **`sst_threshold_schedule`'s `effective_to` is INCLUSIVE, and the writer must honour it** (GN-2). Every
+landed reader treats it that way — `0016:568-571` (`s.effective_to >= v_today`), `:618-623`, `:883-886`,
+`:1075-1080` — while §3.1 specifies `sst_rate_schedule` as **half-open** eight lines away. Both seed rows are
+open (`effective_to IS NULL`), so the closed branch has **never been exercised**: F-T1's supersession is what
+first activates it, and there is no writer convention on record. The rule: **the threshold table's end date
+is the last day the row applies**; the rate table stays half-open; nothing converts silently between them.
+*(The gate refuted the claimed one-day misprice — the rate step lives in the half-open table, and the
+inclusive readers all carry `order by effective_from desc limit 1`, which returns the successor row on the
+boundary day. The residual is real but narrow: a row closed with NO successor applies one extra day, and the
+`0016:882-886` schedule-note receipt has no limit or dedupe, so it double-lists on the boundary. Advisory
+watch effects, not posted numbers.)*
 
 ### A.2 · The SST-02 / SST-02A field inventory, and the scope-treatment closed set
 
@@ -66,19 +111,59 @@ closes them fails it. The re-cut ships in the same PR.
 9-13, Part C 14-18, Part D 19. ⚠ **item 10(a) prints only a 6% line** (F-7). Same `0`-fill NIL rule.
 **Monthly**, not two-monthly (V-10).
 
+**The six rules that govern the mapping** *(moved here whole from §5.3 at the v2 fold, so the inventory and
+the rules that read it sit together)* — these are the ones a builder gets wrong:
+
+**(1) Item 12 is an exclusive OR and the guide adds Part C to the sales arm** — *sales:* `[11(a)+11(b)] + 17`,
+*service:* `[11(c)+11(d)+11(e)]`; **the printed form omits the `+17`**. **(2) Item 14 differs between the form
+face and the guide, and the guide wins** (F-4) — *sales:* `(12) − 13(a) − 13(b) − 13(d) − 13A`, *service:*
+`(12) − 13(a) − 13(c) − 13(d)`; **the printed formula omits 13(d) and merges the tax types**, so a build
+reading the form face ships a wrong return. **(3) Item 15's penalty is NOT computed** — 10/+15/+15 capped at
+40%, *system-generated by CPPS on keying-in* (F-6) and charged on the amount still unpaid at each stage; it is
+emitted as **`externally_determined`** and item 16 is `not_evaluable` until supplied, because computing a
+penalty we do not own would be a fabricated number. **(4) Item 11(e) is counted in CARDS** (`__ UNIT × RM25`),
+and **items (9) and 11 carry own-use and disposals** — taxable events with no invoice and no AR item.
+**(5) Three line-groups are deliberately unbuilt** — 13(b)/13A (s.41A credit), 13(c) (s.39 deduction) and
+Part E (Schedule C purchases), each a separate RMCD approval regime with no consumer here; they emit **zero
+with a stated `not_in_scope` basis, never a blank**, so a reader can tell "we did not claim this" from "there
+was nothing to claim". **(6) Part F is human** and Part G is never populated; the **amendment window** (F-8)
+is unlimited before the due date *and* before payment, and closed after either — then it is MySST's
+*Supplement*.
+
+⚠ **A seventh rule is MISSING and is owner card OQ-11** (GM-10): nothing in §3 derives `taxable_value_sen`,
+and no rule assigns a figure to the 6% vs 8% (or 5% vs 10%) bucket. This annex **labels** items (8), (9),
+(10), 11(a)-(d) and Part D's 18(a)-(e); it does not derive them, and the ledger cannot be asked to — one
+`sst_output` account per client (`0003:58`), no rate or classification column on `journal_lines`. Until
+OQ-11 is ruled, those fields are `not_evaluable` and §5.4 makes the return non-materialisable.
+
 ### A.3 · The apportionment rounding rule, worked
 
-Invoice: net RM1,000.00, service tax 8% = RM80.00, gross RM1,080.00 → `invoice_tax_sen = 8000`,
-`invoice_gross_sen = 108000`. Three receipts of RM360.00, RM360.00, RM360.00 (36000 sen each).
+Invoice: net RM1,000.00, service tax 8% = RM80.00, gross RM1,080.00. The client is a **payment-basis service
+registrant**, so per §3.2 the invoice-time tax sits on **`sst_output_deferred`**, and that is where
+`invoice_tax_sen = 8000` is read — *not* `sst_output`, which is empty until the first transfer.
+`invoice_gross_sen = 108000` (the AR `open_items.amount_cents`, positive). Three receipts of RM360.00, each
+settling in full cash with **no discount and no bank charge**, so each allocation's cash-backed portion is
+the whole of it. At the bytes each writes **`-36000`** against the invoice item and `+36000` against the
+settlement item (`0037:1248-1257`); §3.2's convention negates the invoice-side row, giving
+`allocation_amount_sen = 36000`.
 
 `round_half_up(36000 × 8000 / 108000)` = `round_half_up(2666.67)` = **2667** for the first two.
 Naive third = 2667, total 8001 — **one sen more tax than was ever charged**. So the rule: the allocation
 that **fully settles** the item takes `invoice_tax_sen − Σ(prior realised)` = `8000 − 5334` = **2666**.
 
-**The rig cell proves it in both directions:** (a) full settlement in N tranches ⇒ `Σ realised_tax` equals
-`invoice_tax_sen` **exactly**, for N = 1, 2, 3, 7 and for a gross that divides unevenly; (b) partial
-settlement ⇒ `Σ realised_tax < invoice_tax_sen` and **never exceeds it**. A cell that only tests (a) is
-self-referential — (b) is the differential half.
+**The rig cell proves it in THREE directions, and the third is the one the gate added:**
+**(a)** full settlement in N tranches ⇒ `Σ realised_tax` equals `invoice_tax_sen` **exactly**, for N = 1, 2,
+3, 7 and for a gross that divides unevenly · **(b)** partial settlement ⇒ `Σ realised_tax < invoice_tax_sen`
+and **never exceeds it** · **(c) ⚠ each `realised_tax` is POSITIVE, and `allocation_amount_sen` equals the
+negation of the invoice-side row.** (c) exists because (a) and (b) are both **green on the wrong sign**: with
+`allocation_amount_sen = −36000` the first two tranches realise −2667 each and the residual rule hands the
+settling tranche `8000 − (−5334) = 13334`, so the sum is still exactly 8000 and (b) passes trivially on a
+negative total. A cell that only tests (a) is self-referential; (b) is the differential half; **(c) is the
+half that catches the sign**.
+
+**A fourth cell belongs to the interlock, not to rounding** — swept-at-month-12 then paid-at-month-18 must
+transfer the 80% **once**, not twice. It is specified in Annex F.2 because A.3's cells bound the allocation
+sum alone and cannot see a second writer adding on top.
 
 ### A.4 · The deferred-output-tax mechanism (RULED, owner 2026-08-23)
 
@@ -111,14 +196,20 @@ tie 5 (`:927-930`, *"sst_output total differs from the stated tax"*) must accept
 half-transferred invoice ties falsely. **`prosrc`-SHA prestate pin → DROP+CREATE in place → a tail
 self-proof that raises**, listed in the migration's §0 quiesce inventory. **D1.**
 
-**The second live body: `allocate_receipt`.** Live tip **`0044:1642`** (`create or replace`; born
-`0037:2584`) — the **wrapper**, and F-T1 CoRs the wrapper. ⚠ **An ordering edge that is not F-T1's to
-choose:** **F-A3/PR-1b CoRs `_allocate_receipt_core` (`0044:1034`)**, the inner **core**, and F-A3 lands
-first with certainty (train ~27 vs Track B). Different bodies, so **no byte collision** — but the wrapper
-calls the core, and F-A3's change adds an agent arm posting past `is_high_stakes`. **So both bodies are
-re-derived by rig replay against merged `main` AFTER F-A3 lands, and the core's POST-F-A3 sha is the one
-pinned.** Never the `0044` text: the wrapper is already one generation past its birth and the core will be
-two.
+**The second live body: `_allocate_receipt_core`, the CORE — ⚠ NOT the wrapper v1 named** (GM-5). Live tips:
+wrapper `allocate_receipt` at **`0044:1642`** (born `0037:2584`), core `_allocate_receipt_core` at
+**`0044:1034`**. v1 put the transfer in the wrapper. **That misses a whole settlement population:**
+`_settle_from_bank_line_core` calls the core **directly** at `0044:1927`, bypassing the wrapper entirely, and
+the estate pins that census as exactly `{_settle_from_bank_line_core, allocate_payment, allocate_receipt}`
+(`0055:243-244`). A wrapper-only CoR therefore posts **no deferred→payable transfer at all** on any receipt
+settled from a bank line — the successor-writer side-effect class. **The transfer lives in the core.**
+
+⚠ **Which makes the F-A3 edge a REAL byte collision, not the "different bodies" v1 recorded.**
+**F-A3/PR-1b CoRs `_allocate_receipt_core` too**, and F-A3 lands first with certainty (train ~27 vs Track B).
+So: **the core is re-derived by rig replay against merged `main` AFTER F-A3 lands, and its POST-F-A3 sha is
+the one pinned** — never the `0044` text, which by then is a generation stale. The two changes must be
+composed in one body, F-A3's agent arm intact; if replay shows F-A3's shape makes that unsafe, **stop and
+escalate to the conductor** rather than re-cutting F-A3's arm from this lane.
 
 **The twelve-month belt is ADOPTED, never minted.** R-L22 and law 80 both bind: **F-A4 owns the clock spine
 and there is no second clock.** F-T1's s.11(2) sweep is a *consumer* of F-A4's belt, exactly as F-T2's chase
@@ -127,14 +218,26 @@ notice is. **If it ever appears to need its own cadence machinery, stop and esca
 **Sequencing, non-negotiable:** **AFTER F-A2 PR-1 merges** (train position 5). **F-A2's B4-sales component
 tie moves with it** — "tax" becomes two possible legs, not one — and it ships as a **NEW generation inside
 F-T1's own migration**, never as an edit to F-A2's files (constraint 9's discipline applied to a shared
-body). **Ceremony: F-T1's own D1 window, or the designated overflow slot W3.**
+body). **Ceremony: F-T1's OWN, freshly-scheduled D1 window.** ⚠ **v1 offered "or the designated overflow
+slot W3" and that slot does not exist for this lane** (GM-14): W3 is a **one-time T0+22h window already
+fully allocated** to F-A5/PR-1, F-A9/PR-1B, F-A6/PR-1 and F-A7b/delta (`wave-f-sprint-dag.md:318`); its
+overflow role is scoped to **F-A7/alpha+beta on a W2 overrun** (`:378`); and F-T1's build sits in Wave 3,
+**outside the 48 h by construction** (`:260`), at +90 to +200 h (`:392-401`). **Track B is outside the
+current W1-W5 inventory** — the treatment the sibling Track-B design already applies in as many words
+(`tax-computation-design.md:269`, `:483`). A coordinator planning around W3 would be planning around a
+window closed and spent months earlier.
 
-**Constraint 12 binds harder here, because this arm touches the sales-invoice shape.** `tin` /
+**The name-only wall binds harder here, because this arm touches the sales-invoice shape.** `tin` /
 `ssm_registration` are scoped in the key description text as **the CLIENT's own**, and **the ladder must not
 read a counterparty's `tin` or `registration_no` anywhere**. ROME SECRETARY's customers are NAME-ONLY;
 `0062` walls it in the DB and `0063` makes lifting it an OWNER-only act through the audited door. **If the
 deferred-SST arm is ever found to need a counterparty identifier, the build stops and escalates** — it does
-not route around the wall.
+not route around the wall. *(⚠ **Cite re-anchored at the v2 fold** (GN-3): v1 named "Constraint 12", which
+**AGENTS.md records as VACANT** as of the same date this annex is dated — it retired on the owner's ADR-0075
+ruling, and the rule moved to **`docs/product/PRD.md` §6 invariant 2(b)** as a PRODUCT INVARIANT. `0062` /
+`0063` are untouched and the substance is unchanged; the invariant is also **broader** than the trigger, since
+it forbids enrichment by inference generally rather than only writes to `clara.counterparties` — which is why
+§3.5's B2B arm now carries the same discipline.)*
 
 **What the ruling accepts, stated:** a live judgement body is re-cut and a write-quiesce window is spent, to
 buy a balance sheet an auditor can read. **What it buys beyond that:** the SST-02 gains a *second*
@@ -181,6 +284,21 @@ remain non-taxable; breach it and the **intra-group** supplies become taxable �
 **⚠ U-1 is unresolved and it sits directly under this annex:** P.U.(A) 174/2025, the *Persons Exempted
 (Amendment) Order 2025*, is confirmed to exist by RMCD's own announcement but no lane could reach its text.
 It is the likely home of B2B relief for the five 2025 groups. **OQ-7 puts that to the owner.**
+
+⚠ **B2B needs a fact about the RECIPIENT, and for a name-only client that fact may not be recorded
+anywhere** (GM-12). "The recipient must be a registered person… the service must fall in the same
+First-Schedule item" is, in DB terms, a **registration number and a classification about a counterparty** —
+exactly what **PRD §6 invariant 2(b)** forbids inferring for a name-only client. The DB guard that discharges
+the invariant, `clara._tf_counterparty_name_only_guard`, is a BEFORE-row trigger on **`clara.counterparties`
+alone** (`0062:253-254`, unwidened through the `0102` frontier), so a builder who put the recipient's
+registration on the new `sst_scope_treatments` row instead would **break the invariant without tripping
+anything**. Several of A.2's treatment codes — `schedule_a_person`, `schedule_b_manufacturer`,
+`schedule_c_registered_mfr`, `b2b_exempt`, `intra_group_relieved` — are properties of a *specific recipient*,
+so that is a likely reading, not a stretch. **The design closes it by construction, not by leaning on the
+trigger:** `sst_scope_treatments` carries **no counterparty identifier column**; `b2b_exempt` on a name-only
+client's counterparty is **`not_evaluable`** (`b2b_recipient_unidentifiable`), never `taxable` and never
+`exempt`; and the build **stops and escalates** if the arm is ever found to need the identifier. `0063`'s
+OWNER-only audited door stays the only way to lift it.
 
 **Areas** — the five designated areas are **Labuan, Langkawi, Tioman, Pangkor and Pulau 1**, each defined by
 a statutory enumeration of named adjacent islands (Langkawi's is a *relative geographic* test: islands
@@ -229,34 +347,19 @@ a Federal weekly or public holiday moves to the next day (Guide V3 ¶18).
 | **D-11** | **Nothing is keyed on a description string.** | V-19: the gazette says *"complimentary"* and the Regulations *"complementary"* for the same item. Field keys and scope keys are codes; strings are display. |
 | **D-12** | **F-T1 files nothing in `open_questions`.** | `_open_question_blocks` (`0012:88`) makes a client-scoped question a hard posting gate; an SST advisory must never stop a client's posting lane. |
 | **D-13** | **The SST number lives on `sst_registrations`, not `client_identifiers`.** | It belongs to an episode, not the client; and `client_identifiers.kind` is a conductor-held closed set (`0007:227`). |
-| **D-14** | **The ownership reversal is adopted over `internet-lane-design.md`'s text.** | The conductor ruled F-T1 owns both SST reference tables (2026-08-23); F-A8's design §3.1/§7 is stale on the point until it re-cuts. |
-| **D-15** | **The design is split across two files.** | The repo enforces a 500-line ceiling per file; `wave-e-design-reporting.md`/`-part2.md` set the precedent in this same directory. |
+| **D-14** | ~~The ownership reversal is adopted over `internet-lane-design.md`'s text.~~ **RE-OPENED at the gate — OQ-14.** F-T1 owns the RATE table (corroborated: `wave-f-contract.md:340`, `PROGRESS.md:135`). The **threshold ALTER** is NOT corroborated outside this design set, and `internet-lane-design.md` — live, v3, same date, itself gated — still assigns it to F-A8/PR-3 (`:431`, with `internet-lane-annexes.md` Annex M/S-16 and `internet-lane-gate-record.md:378`). | A self-asserted citation is not positive evidence (review law 2). Two live docs authoring one ALTER means the second migration collides. **Fail-closed: F-T1 does not author it until ruled**; PR-1 ships the rate table alone. |
+| **D-15** | **The design is split across THREE files** (`-design.md` §1-§4, `-design-part2.md` §5-§12, plus `-annexes-2.md`). | The repo enforces a 500-line ceiling per file; `wave-e-design-reporting.md`/`-part2.md` and `internet-lane-annexes`/`-2` both set the precedent in this directory. **The v2 fold moved the boundary from §5 to §4; section numbers did not change**, so every `§5.x` cite still resolves. |
+| **D-16** | **§3.2's three inputs are a versioned CONVENTION, not a column read** — the basis-correct invoice account, the negated invoice-side allocation row, the cash-backed portion, the `effective_date` bound. | Each was wrong in v1 in a way the design's own acceptance net could not see (the sign passes A.3's cells; the empty account agrees with itself through the cross-check). `input_convention_version` makes a later correction a new version rather than a silent re-read. Annex F.1. |
+| **D-17** | **The differential control compares TRANSFER legs to REALISED-PLUS-DEEMED, not the payable account's whole movement.** | A bare equality refuses on any ordinary period carrying a credit note or a twelve-month sweep, while s.26(5) makes filing mandatory. Scoping both sides keeps it a differential control rather than a permanent refusal. Annex F.4. |
+| **D-18** | **`sst_deferred_realisation` is the INTERLOCK, read by both transfer writers**, not a passive record. | "Whichever comes first" with no mechanism double-posts, and both sides of the cross-check trace to the same allocation, so the control confirms the doubled figure instead of catching it. Annex F.2. |
+| **D-19** | **The taxable-period anchor is RECORDED; absent, S-7's sourced s.25(1) rule derives it and the row SAYS SO.** | v1's "the cycle follows the FYE" had no survey row, is contradicted by `design-saas.md:157`, and fixes every period boundary. A refusal would strand every registrant; a labelled sourced derivation plus a standing watch is correctable. |
+| **D-20** | **The imported-services reverse charge posts its OWN entry, Dr cost / Cr `sst_output`** — never deferred, never a leg on the supplier bill. | The OQ-4 ruling rejected the return-only arm, leaving §3.8's "separate entry or return-only line" pointing at nothing. s.11(1)(b) has no receipt condition, so there is nothing to defer; a separate entry is not a supplier bill, so `0036:686-693` is not routed around. |
+| **D-21** | **Every F-T1 CoR of a shared read surface reads the CATALOG body and censuses its markers.** | `list_review_queue` and `get_context_pack` are both patched in place by four-to-six later migrations; a `create or replace` grep sees none of them, which `0036`'s own header states outright. Annexes F.6/F.7. |
 
 ---
 
-## Annex C · Predictions the rig replay must confirm
-
-**None of these was replayed for this design** — the survey read migration TEXT, and this estate splices
-bodies across generations. **The first build PR replays each with `pg_get_functiondef` /
-`pg_get_constraintdef` at the frontier and records the `prosrc` sha256 it pins.** The `special_acc_type`
-case already proves the class: this design's own first draft cited `0016:123`'s three values when the live
-tip is `0017:673-677`'s five.
-
-| # | prediction | how it fails |
-|---|---|---|
-| **C-1** | `_assert_sales_invoice_shape_at`'s live body is `0022:714-930`, ties at `:867-872`, `:897-900`, `:913-925`, `:927-930`, and its closed leg world is `{receivable, income, sst_output, rounding}`. | A later CoR moved a tie or widened the world; §4/A.4 would then be derived against a superseded body — GM-1's exact defect. |
-| **C-2** | `coa_accounts_special_acc_type_check`'s live tip has **five** values (`0017:673-677`). | A later migration widened it again; arm (b)'s ALTER would collide. |
-| **C-3** | `compliance_watches.watch_kind` still admits exactly `'sst_registration'` and `service_group` is still `not null`. | A sibling lane widened it first; the merge order in the conductor's ledger decides. |
-| **C-4** | `sst_threshold_schedule` still has **no `id`**, a composite PK, `threshold_cents > 0`, and exactly two seed rows both with `effective_to IS NULL`. | F-A8's PR-3 landed the ALTER after all, despite the reversal — then F-T1's ALTER is a no-op or a conflict. |
-| **C-5** | `0016:5216-5228`'s assertion is still **granted-only** (it scans `prosrc` of granted functions). | Already trued by F-A8; then F-T1 only extends it to the new table. |
-| **C-6** | `get_context_pack`'s live body still emits the literal `sst_registration_watch`, and five migrations still assert it. | If a sixth has been added, PR-7's CoR list is short by one. |
-| **C-7** | `open_items` and `open_item_allocations` are still append-only by trigger, and `uq_oia_reverses_once` still forbids a double undo. | PR-4's ADD COLUMN and the allocation arithmetic both assume it. |
-| **C-8** | An `apply` allocation can produce a position exceeding the item's `amount_cents`. | If the estate already forbids over-allocation, §3.2's arm is dead code and should be replaced by a cite. |
-| **C-9** | No AR-side field anywhere carries a **service-performed date or range**. | If one exists, R10 shrinks from a schema change to a mapping. |
-| **C-10** | `client_identifiers.kind` is still `('tin','ssm','bank_account')`. | D-13's rationale would need re-stating if an SST kind has landed. |
-| **C-11** | `allocate_receipt`'s live tip is the **wrapper** at `0044:1642` (born `0037:2584`), and `_allocate_receipt_core`'s is `0044:1034`. | PR-4b CoRs the wrapper; if the generations have moved, the prestate pin is against the wrong bytes. |
-| **C-12** | **After F-A3/PR-1b merges**, `_allocate_receipt_core` carries F-A3's agent arm. | **The core's POST-F-A3 sha is the one PR-4b pins** — replay against merged `main`, never the `0044` text, which is already one to two generations stale for these two bodies. |
-| **C-13** | `ck_coa_obe_equity` (`0017:679-681`) and `uq_coa_special` (`0003:58`) are unchanged and need no edit for a sixth `special_acc_type` value. | If either has moved, the extend-only ALTER is no longer additive. |
+**Annex C — the rig-replay predictions (C-1 … C-16) — moved to `sst-engine-annexes-2.md` at the v2 fold**
+(part 1 crossed the 500-line ceiling). Every `C-n` citation still resolves; only the file changed.
 
 ---
 
@@ -271,6 +374,17 @@ cards.** Until each is
 ruled the build proceeds on the recommendation stated in its entry, and every one of those provisional
 positions is fail-closed — a refusal or a `not_evaluable`, never a silent assumption — so a ruling that
 goes the other way costs a PR, never a wrong number in a client's books.
+
+⚠ **The PR-0 gate added FOUR MORE, OQ-11 … OQ-14, and each of them BLOCKS a PR.** They are stated in full,
+with recommendation and fail-closed default, in **`sst-engine-gate-record.md` §6** — the gate record is their
+home, so they are not restated here. In one line each: **OQ-11** no evaluator produces the return's VALUE
+fields or the 6%/8% rate bucket (blocks PR-6) · **OQ-12** the `unallocated_credit_forbidden` wall is aimed at
+`apply_open_items`, which is the compliant named-pair verb, while the real CN→invoice reference gap is
+untouched (blocks the PR-4 CN limb; **supersedes OQ-6's framing**, whose two options both close the compliant
+path) · **OQ-13** a missing service-performed date has **no operator door**, and `open_items` is append-only,
+so the column is a birth fact and the return is unfileable (blocks PR-4's ADD COLUMN; **widens OQ-5**, whose
+three options all leave the return non-materialisable) · **OQ-14** two live designs each author the
+`sst_threshold_schedule` ALTER (blocks PR-1's threshold limb).
 
 **OQ-1 — "DG variations": which one did you mean?**
 大白话: 合同里写的 "DG variations" 有三种可能的意思，我们不确定是哪一种。
@@ -370,3 +484,4 @@ policy amendments landed in the five weeks before this design; one of them was d
 | v | date | change |
 |---|---|---|
 | v1 | 2026-08-23 | First annexes. Statutory content from the three verification lanes (survey §3); adopts R-L22 and the conductor's `sst_threshold_schedule` ownership reversal. |
+| **v2** | **2026-08-23** | **The PR-0 gate fold** (`sst-engine-gate-record.md`). **A.1** gains `sst_registrations`' promised column list (**A.1a**, incl. `period_anchor_month` / `anchor_source`), corrects the grant-assertion cite to `epsilon-grants-phase.mjs:63-70`, and pins `sst_threshold_schedule.effective_to` as **INCLUSIVE** · the threshold ALTER is re-labelled a **specification, not a claim** (OQ-14) · **A.2** receives §5.3's six producer rules whole and records **OQ-11** (no value-side or rate-bucket producer) · **A.3**'s worked example is re-cut against the **deferred** leg and the **negated** allocation, and gains a **third** cell asserting the sign · **A.4** re-aims the CoR from the `allocate_receipt` wrapper to **`_allocate_receipt_core`** (`_settle_from_bank_line_core` bypasses the wrapper, `0044:1927` / `0055:243-244`), which makes the F-A3 edge a **real byte collision**, strikes the **W3** ceremony affordance for F-T1's own future window, and re-anchors the retired "constraint 12" to **PRD §6 invariant 2(b)** · **A.7** carries the B2B name-only refusal · **B** gains **D-16 … D-21** and re-opens **D-14** · **C** moves to `sst-engine-annexes-2.md` and gains **C-14 … C-16** (C-6 superseded) · **D** records the four new owner cards by pointer. |
