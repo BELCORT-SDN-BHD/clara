@@ -574,8 +574,34 @@ test("f-a2.c14.b14-interlock B14 and B15 are COHERENT — a directional invoice 
 // GM-10's re-admit door — PR-2's cell, recorded here so the obligation is visible in a run.
 // ===========================================================================
 
+// admitAutodraft (wave-a-fixtures.mjs) opens a BRAND-NEW sweep_run per sweep-origin call
+// (run-bound admission, as-built) and neither GM-10 cell ever reconciles them, so they
+// accumulate as permanently-open runs on the shared world.firms.A — the exact fixture-
+// accumulation wave-a-budget.test.mjs:63-65 already names and works around ("the run-bound
+// admitAutodraft opens a sweep_run per call and these accumulate on the shared firm across
+// tests — only the cap test constrains it"). Left at the default max_concurrent_sweeps=2,
+// the first GM-10 cell's OWN two sweep-origin admissions (its `first` and `ordinaryRepeat`)
+// are enough to trip the concurrency cap on the second cell's very first admission —
+// measured directly: 3 sweep_runs open on this firm at the failure point, all state='open',
+// no firm_limits row (so max_concurrent_sweeps defaults to 2) and firm_usage_daily.tokens_used
+// at 2500 — nowhere near the 600,000/1,000,000 token ceilings, so this is the concurrency
+// gate, not the token-budget one. Bumped generously (999, matching the sibling file's own
+// value) rather than pinned to today's exact call count, since runAutodraftCycle's own
+// catch-up sweep pass (packages/runtime/lib/autodraft.mjs) can open further runs on this
+// firm too. No product code is touched — this only widens a resource-budget TEST fixture
+// that neither GM-10 cell exercises as its subject.
+async function raiseSweepConcurrencyCap(firm) {
+  await rootQuery(
+    `insert into clara.firm_limits (firm_id, max_concurrent_sweeps)
+     values ($1, 999)
+     on conflict (firm_id) do update set max_concurrent_sweeps = excluded.max_concurrent_sweeps`,
+    [firm],
+  );
+}
+
 test("f-a2.c14.readmit GM-10 re-reads after withdrawal while an ordinary repeat sweep stays already_done", async (t) => {
   if (await gateCore(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
 
   const amount = 500000;
   const vendorName = `GM10 READY ${opk("vendor")}`;
@@ -737,6 +763,7 @@ test("f-a2.c14.readmit GM-10 re-reads after withdrawal while an ordinary repeat 
 
 test("f-a2.c14.readmit GM-10 retains a withdrawal that races the originating settle", async (t) => {
   if (await gateCore(t)) return;
+  await raiseSweepConcurrencyCap(world.firms.A);
 
   const amount = 500000;
   const vendorName = `GM10 EARLY ${opk("vendor")}`;
