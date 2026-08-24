@@ -182,7 +182,27 @@ async function main() {
     // 2. THE REAL AGENT-LANE CHAIN -- open -> evaluate -> assess -> seal dataset, all through
     //    the WAKE DOOR (mirrors f-a5-reporting-agency-pr2-chain.test.mjs's B.2 cell), with the
     //    NOW-DEPLOYED evaluate_fs_pack_agent v1 closure doing the evaluation.
-    // ================================================================================
+    //
+    //    PREFLIGHT, NOT ASSUMED: a FRESH rig needs BOTH evaluator closures deployed, not just
+    //    the new one. `_agent_evaluate_fs_pack_core` resolves ITS OWN row (evaluate_fs_pack_agent
+    //    v1) AND calls the frozen `_metric_eval_node_v1` -- the SAME node the human lane's
+    //    `evaluate_metric` v1 entrypoint fronts (design SS3.2, S2's re-cut) -- so a rig that only
+    //    flipped the new row still refuses on the OLD one the moment a cell is actually minted.
+    //    MEASURED here (not read off the design): a fresh reset+migrate+seed with only
+    //    evaluate_fs_pack_agent flipped failed with "the agent pack evaluator closure is not
+    //    deployed" -- the human-lane row, unflipped, is what actually raised it. Checked
+    //    positively rather than left to a cryptic mid-chain failure three steps later.
+    const evalRows = (await rootQuery(
+      `select evaluator_name, deployed from clara.evaluator_versions
+        where (evaluator_name, version) in (('evaluate_fs_pack_agent', 1), ('evaluate_metric', 1))
+          and firm_id is null`)).rows;
+    const undeployed = evalRows.filter((r) => !r.deployed).map((r) => r.evaluator_name);
+    if (undeployed.length > 0) {
+      fail(`the deploy-flip ceremony has not run for: ${undeployed.join(", ")} -- both `
+        + `evaluate_fs_pack_agent v1 AND evaluate_metric v1 must be deployed on a fresh rig `
+        + `(update clara.evaluator_versions set deployed=true where evaluator_name=... and `
+        + `version=1 and firm_id is null; each admits exactly one undeployed->deployed transition)`);
+    }
     const cred = await mintWake({ kind: "interactive", firm: firmId, onBehalfOf: owner });
     const model = JSON.stringify(wakeModel());
     const open = await callWrapper(cred.secret, "wake_open_report_run", [
@@ -331,8 +351,15 @@ async function main() {
     const armA = renderArm("a", jobDescBase({ sourceDateEpoch: realEpoch }));
     const armB = renderArm("b", jobDescBase({ sourceDateEpoch: realEpoch }));
     const armC = renderArm("c", jobDescBase({ sourceDateEpoch: EPOCH_C }));
-    // ARM D -- FORCE A DIVERGENCE. A real DB-derived pinned value is tampered: the one dataset
-    // point's displayed_text is changed. This is the arm that proves the drill can say NO.
+    // ARM D -- FORCE A DIVERGENCE FOR A REASON THAT MATTERS. This must be a PINNED-INPUT
+    // MUTATION, never a way of breaking the comparator (a random nonce, an unrelated byte flip)
+    // that would prove nothing about the manifest actually reaching the bytes. `displayed_text`
+    // is exactly that pinned input: it is `report_dataset_points.value_text`, a DB column,
+    // immutable once the dataset is sealed, and layout.mjs's metric_ref case prints it VERBATIM
+    // (`s(${typstString(m.displayed_text)})`) -- no other transform sits between the sealed row
+    // and the typeset page. Tampering it here simulates the one thing arm D exists to catch: a
+    // sealed figure that silently drifted between seal and replay. Mirrors double-render-drill.mjs's
+    // own arm D (a changed `period_end`) -- a different real pinned input, the identical principle.
     const tamperedShaped = { ...shaped, metricsByKey: { ...shaped.metricsByKey } };
     const firstKey = Object.keys(tamperedShaped.metricsByKey)[0];
     if (!firstKey) fail("the real dataset carries no metric point to tamper -- arm D would be vacuous");
