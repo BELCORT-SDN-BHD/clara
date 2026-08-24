@@ -64,13 +64,22 @@
 -- above (one CoR'd body, mint_wake_credential) is UNCHANGED; the delta is entirely inside that
 -- one already-CoR'd-adjacent function's own body, authored fresh (this function did not exist
 -- on `main` before this train), rig-replayed against a freshly recreated rig before writing.
---   - B2, "union of cautions" (grade A+): the collision rung now reads TWO independent sources
---     and refuses if EITHER names more than one candidate -- (a) a SERVER-DERIVED tokenization
---     of the document's OWN extracted party names (a deterministic floor that cannot be starved
---     by an absent model verdict), and (b) the model's own `candidates` array (a RUNTIME/PROMPT-
---     layer obligation, NOT implemented here -- see the runtime counterpart note below). The
+--   - B2, "union of cautions" (grade A+): the collision rung reads THREE arms and refuses if ANY
+--     names more than one candidate -- (a) a SERVER-DERIVED tokenization of the document's OWN
+--     extracted party names (a deterministic floor that cannot be starved by an absent model
+--     verdict), (b) the model's own `candidates` array (a RUNTIME/PROMPT-layer obligation, NOT
+--     implemented here -- see the runtime counterpart note below), and (c) the pre-existing single
+--     matched_name check (D-4/D-19's original form, kept verbatim -- the ruling adds two sources,
+--     it does not retire this one). The owner's two named sources are arms (a)/(b); arm (c)
+--     predates the ruling and a union can only gain refusal opportunities by keeping it. "Names
+--     more than one candidate" is deliberately the RAW array/candidate-set length, not a
+--     de-duplicated distinct count -- e.g. a candidates array of ["A","A"] still refuses. This is
+--     a conscious choice, not an oversight (review finding 7): the ruling's own words are "may
+--     only ADD refusals, never remove ones the server-derived check would have caught", so the
+--     STRICTER reading (raw length) is the one consistent with the ruling; de-duplicating first
+--     would only ever make this rung MORE permissive, the direction the ruling forbids. The
 --     asymmetry is proved by battery: absence of the model list never opens the gate; its
---     presence may only add refusals.
+--     presence may only add refusals (never remove one another arm already caught).
 --   - B3, "the corroborated-anchor floor" (grade A): unattended filing now requires at least ONE
 --     corroborated anchor -- a hard-identifier match (v_confirms_client, unchanged) OR a
 --     witness-corroborated region, read as a typed STATUS from clara.evaluate_witness_identity_v1
@@ -91,6 +100,88 @@
 -- lands (pi/F-A1-successor scope) or a SAVEPOINT-based ladder restructure is independently
 -- reviewed (assessed and not attempted here -- clara._append_event's event_seq does not roll
 -- back with a SAVEPOINT). Carried to the conductor in this train's settle report.
+-- CONDUCTOR RULING (2026-08-24): arm-a-only accepted as the floor for now -- STRICTER not
+-- weaker (routes MORE to the ask path, never fewer), within conductor authority, no mechanism
+-- weakened. Path (i) (a candidate-parameterized evaluator) is on the forward-obligation ledger
+-- (pi/F-A1-successor scope, alongside F-A2/PR-2's own candidates-mandatory obligation above);
+-- path (ii) stays rejected for the reason measured. This train's own named-skip joins the B6
+-- honest-unreachable register in the annex divergences batch.
+--
+-- =====================================================================================
+-- THE CROSS-MODEL REVIEW ROUND (2026-08-24, Codex gpt-5.6-sol, static read-only, against
+-- 744e53f) -- SS0 GROWS AGAIN
+-- =====================================================================================
+-- BLOCKED, 7 findings. Every finding independently RIG-VERIFIED (proved or refuted at the bytes
+-- with a differential probe) before any fix landed, per this session's own standing law that a
+-- plausible-sounding finding is not itself evidence.
+--   1. CRITICAL, CONFIRMED, FIXED -- cross-client double-file: B3 arm (b)'s corroboration verdict
+--      was NOT bound to the wake's requested client. clara.evaluate_witness_identity_v1 self-
+--      derives its internal candidate client from WHATEVER client currently holds a live filing
+--      on the document (any client), and its 'corroborated' verdict is, in truth, a pure
+--      DOCUMENT-LAYOUT-SANITY check (is a registration region spatially closer to its own
+--      party's name label than the other party's) -- NOT bound to any identifier match at all.
+--      Rig-proven: a clean filing to A1 plus one well-laid-out invoice let a bare, evidence-free
+--      wake for a DIFFERENT client (A2) file cleanly as a second active filing on the same
+--      document. FIXED (see B3's own comment, SS5): the verdict is now trusted only when the
+--      document's live filing set is a single row whose client IS p_client -- independently
+--      derived (v_wc_n/v_wc_client), never read out of the evaluator. This is EXACTLY the case
+--      Tier A already refuses, so the fix does not merely patch the hole, it makes B3 arm (b)
+--      unreachable BY CONSTRUCTION -- the same eventual conclusion as before the finding, now for
+--      the actually-correct reason. This ALSO closes the finding's own note that it "collapses
+--      the named-skip premise and the arm-a-only ruling's grounding": the grounding is restored,
+--      corrected.
+--   2. HIGH, CONFIRMED, FIXED -- B8's identity-document wall read `document_kind = 'identity_
+--      document'` and coalesced a NULL comparison to false -- an UNCLASSIFIED document (a real,
+--      common, CHECK-admitted state; this train's own fixture default) read as "safely not an
+--      identity document" and could file unattended before classify_document ever ran. Review
+--      law 2 ("absence is not evidence... falls through to the fail-closed branch") applies
+--      directly. FIXED: NULL now refuses alongside 'identity_document' itself.
+--   3. HIGH, CONFIRMED, FIXED -- wake_reattribute_document's revision-token guard used `<>`
+--      against a NULL p_expected_revision, which evaluates to NULL and never raises -- a caller
+--      that never actually observed the revision could retire-and-refile blind. FIXED:
+--      `IS DISTINCT FROM`.
+--   4. HIGH, REPORTED, NOT UNILATERALLY FIXED (explicit instruction) -- an apparent tension
+--      between SS3.2's own two-tier language ("Tier A -- RAISE (CLR*)" vs "Tier B -- TYPED
+--      NON-FILING RECEIPT, no raise") and SS3.4's "written in the same transaction as the filing
+--      or the refusal (there is no filing without a receipt)". Read in isolation, SS3.4 could be
+--      misread as requiring EVERY refusal, Tier A raises included, to leave a durable
+--      agent_filing_receipts row -- structurally impossible for a RAISE (the abort undoes
+--      anything inserted earlier in the same transaction) without a SAVEPOINT-and-commit-
+--      separately pattern nowhere described in the design. Resolved by this train's own reading,
+--      carried to the conductor rather than acted on unilaterally: Annex A.2 draws the SAME
+--      two-tier line ("Tier A raises (existing SQLSTATE families)" vs "Tier B tokens (durable, on
+--      the receipt's failing_rungs[], never a raise)"), Annex B cell 5 explicitly expects a Tier A
+--      raise (blank rationale/incomplete p_model) to leave "op_receipts gained no row" (the
+--      idempotency-reservation table, not agent_filing_receipts itself, but evidencing the same
+--      no-durable-footprint intent), and the receipts table's own column shape
+--      (failing_rungs text[]) only makes sense for a Tier-B-reached outcome -- a Tier A raise
+--      happens before v_failing is ever populated. This train's reading: Tier A stays unreceipted
+--      (current, unchanged implementation), and SS3.4's phrase means the Tier B/C filing-or-
+--      typed-refusal dichotomy specifically, not Tier A's raises. Flagged for a ruling; not
+--      changed pending one.
+--   5. MEDIUM, CONFIRMED, FIXED -- `revoke all on clara.agent_filing_receipts from public` (SS3)
+--      was a relation-level revoke of a privilege PUBLIC never had by default (tables, unlike
+--      functions, carry no default PUBLIC grant) -- functionally a no-op, but MEASURED on this
+--      train's own rig to force pg_class.relacl to materialize explicitly instead of staying the
+--      clean default NULL, exactly the class that broke 0103's DR round-trip the same night this
+--      was found. FIXED: removed; functions-only stays the rule (SS9's function revokes untouched
+--      and correct).
+--   6. MEDIUM, battery hardening, ALL FOUR FIXED -- (a) the catalog-premise gate silently
+--      t.skip()'d all 33 cells to a green exit regardless of context; now fails loudly in a
+--      focused run via a CLARA_ALLOW_MISSING_F_A7_BETA preintegration-gate idiom, matching the
+--      estate's own established pattern. (b) the test's own grant census used information_
+--      schema.role_routine_grants, blind to a NULL-proacl default-PUBLIC leak (the SAME class a
+--      real leak was found under, on clara._file_document_write, the same night) -- now mirrors
+--      the migration tail's own has_function_privilege census. (c) B2 cell 3 seeded no party-name
+--      region at all, so it could never catch a false refusal on genuinely clean server-derived
+--      evidence -- now seeds a real, unambiguous name. (d) five new adversarial cells for the
+--      model's candidates field: non-array, JSON null, empty-string elements, duplicate names, a
+--      1000-element array.
+--   7. LOW, CONFIRMED, FIXED -- prose drift: this file's own SS0/verdict-shape prose said "two
+--      sources" while three arms exist (matched_name predates the ruling and was kept), and did
+--      not state that the collision check is RAW array/candidate-set length, not a de-duplicated
+--      distinct count (a deliberate choice consistent with the ruling's own "may only add, never
+--      remove" wording -- de-duplicating first could only make the rung more permissive). Trued.
 --
 -- =====================================================================================
 -- WHAT THIS FILE SHIPS
@@ -132,8 +223,10 @@
 --     "candidates": [ text|uuid, ... ]|absent,  -- OPTIONAL today, read defensively (B2 arm b) --
 --                                        -- the owner-ruling delta's runtime counterpart
 --                                        -- obligation is to make this MANDATORY (not built
---                                        -- here); >1 distinct entries adds a refusal, absence
---                                        -- adds none, and can NEVER remove one arm (a) caught
+--                                        -- here); >1 RAW array entries adds a refusal (length,
+--                                        -- not a de-duplicated distinct count -- deliberate,
+--                                        -- review finding 7), absence adds none, and can NEVER
+--                                        -- remove one arm (a) caught
 --     "confidence": numeric,            -- the model's own stated number, an ANNOTATION ONLY
 --                                        -- (D-2); never read by any rung
 --     "identifier_write_requested": boolean }   -- true only if the model asked to also mint an
@@ -480,7 +573,14 @@ create trigger t_agent_filing_receipts_append_only
 create trigger t_agent_filing_receipts_no_truncate
   before truncate on clara.agent_filing_receipts
   for each statement execute function clara._tf_no_truncate();
-revoke all on clara.agent_filing_receipts from public;
+-- MEDIUM->FIXED (independent cross-model review, 2026-08-24 -- finding 5): a first draft carried
+-- `revoke all on clara.agent_filing_receipts from public` here -- a RELATION-level revoke of a
+-- privilege PUBLIC never had (tables carry no default PUBLIC grant, unlike functions). Measured
+-- on this train's own rig: the revoke is a functional no-op (no grant changes) but it FORCES
+-- pg_class.relacl to materialize explicitly instead of staying the clean default NULL -- exactly
+-- the class that broke 0103's DR round-trip the same night this was found (a materialized
+-- default-equal ACL does not survive pg_dump/pg_restore identically). Functions-only is the
+-- rule here; the function-level revokes below (SS9) are correct and unaffected.
 
 -- SS3.2 The shim -- CoR's pi's typed-empty stub with a real projection, one statement, exactly
 -- pi's own documented mechanism ("that item's OWN migration runs exactly one statement").
@@ -578,10 +678,11 @@ declare
   v_server_names text[]; v_server_ambiguous boolean; v_candidates jsonb; v_model_list_ambiguous boolean;
   -- B3 delta (owner ruling, 2026-08-24, "the corroborated-anchor floor", grade A): a witness-
   -- corroboration STATUS read, never witness-engine-kind region CONTENT (0090 wall 8).
-  v_text_x uuid; v_ident jsonb; v_witness_corroborated boolean;
+  -- v_wc_n/v_wc_client (review finding 1 fix): the verdict is trusted only when bound to p_client.
+  v_text_x uuid; v_ident jsonb; v_witness_corroborated boolean; v_wc_n int; v_wc_client uuid;
   v_bad_region boolean; v_stale boolean; v_cross_firm boolean;
   v_auth record; v_purpose_mismatch boolean := false;
-  v_identity_kind boolean; v_enrichment_requested boolean;
+  v_identity_kind_text text; v_enrichment_requested boolean;
   v_receipt_id uuid; v_question_id uuid; v_write_delegate_exists boolean;
   v_judged_resolution uuid; v_write_result jsonb; v_filing_id uuid;
 begin
@@ -817,35 +918,58 @@ begin
   -- ('corroborated' | 'not_corroborated' | 'withdrawn_self_referential' | 'withdrawn_contest'),
   -- called here correctly, per its real (rig-replayed, not guessed) contract.
   --
-  -- MEASURED, NOT ASSUMED (independent finding, this train's own authoring session): the
-  -- evaluator self-derives its candidate client from LIVE clara.document_filings rows for
-  -- p_document -- it takes no candidate-client parameter of its own. This core's Tier A (above)
-  -- already raises CLR10 "document is already actively filed to this client" whenever a live
-  -- filing to p_client exists -- so the one case in which the evaluator could ever resolve its
-  -- internal v_client = p_client is exactly the case Tier A has already refused before this
-  -- rung runs. Arm (b) is therefore PROVABLY UNREACHABLE via any live call path in
-  -- wake_file_document today -- the same unreachability class as B6 and the SS7 congruence
-  -- trigger (both measured, not assumed, by independent review, and both kept as documented
-  -- defense-in-depth rather than removed unilaterally).
+  -- BLOCKER, FOUND AND FIXED (independent cross-model review, 2026-08-24 -- finding 1,
+  -- CRITICAL, rig-proven before this fix, not assumed): clara.evaluate_witness_identity_v1's
+  -- verdict is a DOCUMENT-WIDE layout-sanity check -- is the vendor/customer registration
+  -- region spatially closer to its OWN party's name label than the other party's -- and that
+  -- check is NOT, by itself, bound to any particular client. The evaluator self-derives its
+  -- internal candidate client from whichever client CURRENTLY holds a live
+  -- clara.document_filings row on this document (any client, not necessarily p_client). A first
+  -- draft of this rung read the verdict directly on that basis alone: whenever ANY client
+  -- already had a live filing on the document, a WHOLLY DIFFERENT client's wake_file_document
+  -- request inherited that verdict and could admit with ZERO evidence connecting the document
+  -- to the REQUESTED client -- reproduced on this train's own rig (a clean A1 filing plus one
+  -- well-laid-out invoice let a bare, evidence-free A2 request file cleanly as a SECOND active
+  -- filing on the same document).
   --
-  -- Making arm (b) reachable needs one of: (i) a new evaluator variant taking an explicit
-  -- candidate-client parameter (out of this train's scope -- pi/F-A1-successor's to own), or
-  -- (ii) restructuring this core's ladder-before-write ordering around a SAVEPOINT trial-insert-
-  -- then-rollback of the candidate filing. (ii) was assessed and NOT attempted unilaterally in
-  -- this train: clara._append_event mints event_seq from a sequence, which is NOT transactional
-  -- and does not roll back with a SAVEPOINT, so a trial call through the real write delegate
-  -- would leave a PERMANENT gap in the firm's event spine -- a correctness risk this train will
-  -- not introduce into judgement logic without its own independent review (hard constraint 1,
-  -- review law 1). Flagged to the conductor/design-register in this train's settle report,
-  -- battery cell "(2) witness-corroborated region admits" reported as a NAMED, MEASURED SKIP
-  -- rather than faked or silently dropped.
+  -- FIXED: the verdict is trusted only when the document's live filing set is a SINGLE row and
+  -- that row's client IS p_client -- v_wc_n/v_wc_client below, independently derived, never
+  -- read out of the evaluator (which does not expose its internal v_client at all). This is
+  -- exactly the one case Tier A already refuses (CLR10, "document is already actively filed to
+  -- this client") before this rung ever runs -- so the fix does not merely patch the hole, it
+  -- makes arm (b) STRUCTURALLY unreachable via wake_file_document BY CONSTRUCTION: the only
+  -- client this evaluator could ever legitimately vouch for is the one client Tier A has
+  -- already handled. Same unreachability class as B6 and the SS7 congruence trigger (both kept
+  -- as documented defense-in-depth, not removed unilaterally) -- but now for the CORRECT,
+  -- security-sound reason, not the pre-fix reasoning this comment replaces.
+  --
+  -- Making arm (b) reachable for real needs one of: (i) a new evaluator variant taking an
+  -- explicit candidate-client parameter (out of this train's scope -- pi/F-A1-successor's to
+  -- own), or (ii) restructuring this core's ladder-before-write ordering around a SAVEPOINT
+  -- trial-insert-then-rollback of the candidate filing. (ii) was assessed and NOT attempted
+  -- unilaterally in this train: clara._append_event mints event_seq from a sequence, which is
+  -- NOT transactional and does not roll back with a SAVEPOINT, so a trial call through the real
+  -- write delegate would leave a PERMANENT gap in the firm's event spine -- a correctness risk
+  -- this train will not introduce into judgement logic without its own independent review
+  -- (hard constraint 1, review law 1). Conductor-ruled (2026-08-24): arm-a-only accepted as the
+  -- floor for now, STRICTER not weaker (routes more to the ask path, never fewer), path (i) on
+  -- the forward-obligation ledger, path (ii) stays rejected. Battery cell "(2) witness-
+  -- corroborated region admits" stays a NAMED, MEASURED SKIP; a NEW cell proves the fixed bind
+  -- refuses the cross-client exploit this finding rig-proved.
   v_text_x := clara._document_facts_extraction(p_document);
   if v_text_x is not null then
-    v_ident := clara.evaluate_witness_identity_v1(p_document, v_text_x, false);
-    v_witness_corroborated :=
-      (v_ident->>'vendor_registration_verdict' = 'corroborated')
-      or (v_ident->>'customer_registration_verdict' = 'corroborated');
-    if v_witness_corroborated is null then v_witness_corroborated := false; end if;
+    select count(distinct f.client_id)::int, (array_agg(distinct f.client_id))[1]
+      into v_wc_n, v_wc_client
+      from clara.document_filings f where f.document_id = p_document and f.retired_at is null;
+    if v_wc_n = 1 and v_wc_client = p_client then
+      v_ident := clara.evaluate_witness_identity_v1(p_document, v_text_x, false);
+      v_witness_corroborated :=
+        (v_ident->>'vendor_registration_verdict' = 'corroborated')
+        or (v_ident->>'customer_registration_verdict' = 'corroborated');
+      if v_witness_corroborated is null then v_witness_corroborated := false; end if;
+    else
+      v_witness_corroborated := false;
+    end if;
   else
     v_witness_corroborated := false;
   end if;
@@ -961,9 +1085,21 @@ begin
   -- exists" as part of this rung. No owner is named for that work anywhere in this item's
   -- design set; it is NOT built here (an unscoped mechanism this train would otherwise have to
   -- invent unilaterally) and is carried to the conductor in this train's settle report.
-  select document_kind = 'identity_document' into v_identity_kind
+  --
+  -- HIGH, FOUND AND FIXED (independent cross-model review, 2026-08-24 -- finding 2): a first
+  -- draft read `document_kind = 'identity_document'` and `coalesce(..., false)` -- for an
+  -- UNCLASSIFIED document (document_kind IS NULL, a real and common state:
+  -- documents_document_kind_check explicitly admits NULL, and it is what this train's own
+  -- fixture default mints) the comparison is NULL and coalesce reads that NULL as "safely not
+  -- an identity document" -- an identity document that simply has not yet been through
+  -- classify_document could file unattended before classification ever runs. Review law 2
+  -- names this precisely: "absence is not evidence... every absence falls through to the
+  -- fail-closed branch." FIXED: NULL now refuses alongside 'identity_document' itself -- an
+  -- unclassified document is UNKNOWN, not proven safe, and this rung's job is to admit only
+  -- what is proven not to be an identity document.
+  select document_kind into v_identity_kind_text
     from clara.documents where id = p_document;
-  if coalesce(v_identity_kind, false) then
+  if v_identity_kind_text is null or v_identity_kind_text = 'identity_document' then
     v_failing := array_append(v_failing, 'attribution_identity_document');
   end if;
 
@@ -1238,7 +1374,15 @@ begin
     raise exception 'filing not in your firm' using errcode='CLR11';
   end if;
   if f.retired_at is not null then raise exception 'filing is already retired' using errcode='CLR17'; end if;
-  if f.revision_token <> p_expected_revision then raise exception 'stale filing revision' using errcode='CLR17'; end if;
+  -- HIGH, FOUND AND FIXED (independent cross-model review, 2026-08-24 -- finding 3): `<>`
+  -- against a NULL operand evaluates to NULL, and `if NULL then` never fires -- a caller that
+  -- never actually observed f.revision_token (passing NULL, whether deliberately or by
+  -- omission) bypassed this optimistic-concurrency guard entirely and could retire-and-refile
+  -- blind. IS DISTINCT FROM treats NULL as a real, comparable value: a NULL p_expected_revision
+  -- is DISTINCT FROM any live (never-null) revision_token and now correctly raises CLR17.
+  if f.revision_token is distinct from p_expected_revision then
+    raise exception 'stale filing revision' using errcode='CLR17';
+  end if;
 
   select status into v_to_status from clara.clients where id = p_to_client and firm_id = w.firm_id;
   if v_to_status is null or v_to_status not in ('active','onboarding') then

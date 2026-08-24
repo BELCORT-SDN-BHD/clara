@@ -71,6 +71,19 @@ before(async () => {
        to_regprocedure('clara._firm_question_core(uuid,uuid,uuid,text,uuid,text,text,jsonb,text)') is not null as pi`,
   );
   if (!catalog.rows[0].beta || !catalog.rows[0].pi) {
+    // Review finding 6a, FIXED: a first draft silently t.skip()'d all 33 cells to a green exit
+    // here regardless of context. CLARA_ALLOW_MISSING_F_A7_BETA (set only by this file's own
+    // preintegration gate, preloaded in the package-wide sweep) is the SAME allow-missing idiom
+    // the estate's other waves already use (delta/epsilon/eta/etc.) -- a FOCUSED run of this
+    // file alone leaves the variable unset and must FAIL LOUDLY on a missing premise, not skip.
+    if (process.env.CLARA_ALLOW_MISSING_F_A7_BETA !== "1") {
+      throw new Error(
+        `f-a7-beta premise missing (beta=${catalog.rows[0].beta}, pi=${catalog.rows[0].pi}) and ` +
+        "CLARA_ALLOW_MISSING_F_A7_BETA is unset -- this is a FOCUSED run and must fail loudly, " +
+        "not skip. Preload ./tests/f-a7-beta-preintegration-gate.mjs for an estate-sweep run " +
+        "against a pre-train chain.",
+      );
+    }
     ready = false;
     return;
   }
@@ -201,6 +214,38 @@ async function seedNameFamilyCollision() {
   return `${family} Trading Sdn Bhd`;
 }
 
+/** Seeds a full witness-regime pair (a document_processing_tasks row, lane='llm_witness',
+ *  status='done' + a matching document_extractions row, engine_kind='llm_text_facts') plus
+ *  vendor/customer registration+name regions whose GEOMETRY makes clara.evaluate_witness_
+ *  identity_v1 resolve 'corroborated' for BOTH sides -- the vendor_registration box sits right
+ *  next to vendor_name, and customer_registration sits right next to customer_name, far away
+ *  from the vendor pair. Review finding 1's reproduction fixture, kept as a named test helper:
+ *  this verdict is a pure document-LAYOUT-sanity check, not bound to any particular client. */
+async function seedWitnessCorroborationPair(doc) {
+  const task = await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id, document_id, lane, status, engine_id, version_n,
+        workflow_run_id, started_at, finished_at)
+       values ($1,$2,'llm_witness','done','clara-fixture:witness',1,'test-run',now(),now()) returning id`,
+    [world.firms.A, doc.documentId],
+  );
+  const extW = await rootQuery(
+    `insert into clara.document_extractions(firm_id, document_id, engine_id, engine_kind, version_n, status, page_count, envelope)
+       values ($1,$2,'clara-fixture:witness','llm_text_facts',1,'done',1,'{}'::jsonb) returning id`,
+    [world.firms.A, doc.documentId],
+  );
+  const wExtId = extW.rows[0].id;
+  const region = (fieldPath, text, box) => rootQuery(
+    `insert into clara.document_regions(firm_id, extraction_id, locator_kind, locator, field_path, text_content, engine_confidence)
+       values ($1,$2,'page_polygon',$3::jsonb,$4,$5,0.9)`,
+    [world.firms.A, wExtId, JSON.stringify({ page: 1, polygon: box }), fieldPath, text],
+  );
+  await region("invoice.vendor_registration", "VENDOR-REG-XYZ-999", [0, 0, 10, 0, 10, 10, 0, 10]);
+  await region("invoice.vendor_name", "Some Vendor Sdn Bhd", [1, 1, 11, 1, 11, 11, 1, 11]);
+  await region("invoice.customer_registration", "CUST-REG-ABC-111", [500, 500, 510, 500, 510, 510, 500, 510]);
+  await region("invoice.customer_name", "Some Customer Sdn Bhd", [501, 501, 511, 501, 511, 511, 501, 511]);
+  return { taskId: task.rows[0].id, extractionId: wExtId };
+}
+
 /** clara.wake_file_document(...) via a filing wake credential. */
 async function wakeFileDocument(secret, o) {
   const specs = [
@@ -319,18 +364,24 @@ test("filing allowlist twin: a filing credential cannot call wake_draft_entry", 
 
 test("grant census: wake_file_document reachable by clara_wake_filing + clara_wake_interactive only; the core is ungranted", async (t) => {
   if (unready(t)) return;
-  const r = await rootQuery(
-    `select g.grantee from information_schema.role_routine_grants g
-      where g.routine_schema='clara' and g.specific_name like 'wake_file_document%' and g.privilege_type='EXECUTE'
-        and g.grantee <> 'clara_fn_owner'
-      order by 1`,
-  );
-  assert.deepEqual(r.rows.map((x) => x.grantee).sort(), ["clara_wake_filing", "clara_wake_interactive"].sort());
-  const core = await rootQuery(
-    `select count(*)::int as n from information_schema.role_routine_grants g
-      where g.specific_name like '_agent_file_document_core%' and g.grantee <> 'clara_fn_owner'`,
-  );
-  assert.equal(core.rows[0].n, 0, "_agent_file_document_core holds zero APP-ROLE grants (the owner's implicit grant is not one)");
+  // Review finding 6b, FIXED: information_schema.role_routine_grants reads NOTHING for a role
+  // when a function's proacl is NULL (the Postgres DEFAULT ACL -- EXECUTE granted to PUBLIC by
+  // default) -- a row-count/row-list check against that view is BLIND to exactly that leak class
+  // (the fleet-wide lesson that found a real PUBLIC-EXECUTE leak on clara._file_document_write).
+  // has_function_privilege resolves the ACTUAL EFFECTIVE privilege regardless of whether proacl
+  // is NULL or customized -- the migration's own tail (SS10 item 6b) already does this correctly;
+  // this test now mirrors it rather than trusting the blind view.
+  const roster = ["public", "clara_authenticated", "clara_agent_ro", "clara_wake_interactive",
+    "clara_wake_proactive", "clara_wake_bank", "clara_runtime", "clara_wake_filing"];
+  const wfdSig = "clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)";
+  const coreSig = "clara._agent_file_document_core(uuid,uuid,uuid,text,text,text,uuid,uuid,jsonb,text,jsonb,uuid,text)";
+  for (const role of roster) {
+    const rr = await rootQuery("select has_function_privilege($1, $2, 'EXECUTE') as ok", [role, wfdSig]);
+    const expected = role === "clara_wake_filing" || role === "clara_wake_interactive";
+    assert.equal(rr.rows[0].ok, expected, `wake_file_document EXECUTE for role ${role}: expected ${expected}`);
+    const rc = await rootQuery("select has_function_privilege($1, $2, 'EXECUTE') as ok", [role, coreSig]);
+    assert.equal(rc.rows[0].ok, false, `_agent_file_document_core EXECUTE for role ${role}: must be false`);
+  }
 });
 
 // ===========================================================================
@@ -377,7 +428,7 @@ test("wake_file_document Tier A: document in another firm -> CLR11 (CB)", async 
 test("wake_file_document Tier A: target client not in the credential's firm -> CLR11", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   await assertRaises(
     CLR.notFound,
     () => wakeFileDocument(secret, { document: doc.documentId, client: world.clients.B1 }),
@@ -388,7 +439,7 @@ test("wake_file_document Tier A: target client not in the credential's firm -> C
 test("wake_file_document Tier A: document already actively filed to the target client -> CLR10, no second filing row", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1 });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
   const before = await activeFilings(doc.documentId);
   await assertRaises(
     CLR.badRequest,
@@ -402,7 +453,7 @@ test("wake_file_document Tier A: document already actively filed to the target c
 test("wake_file_document Tier A: blank rationale / incomplete model -> CLR10, and op_receipts gained no row", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const key1 = opk("blank-rationale");
   await assertRaises(
     CLR.badRequest,
@@ -427,7 +478,7 @@ test("wake_file_document Tier A: blank rationale / incomplete model -> CLR10, an
 test("wake_file_document Tier A: a verdict with no citations ARRAY key is malformed shape -> CLR10", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   await assertRaises(
     CLR.badRequest,
     () => wakeFileDocument(secret, { document: doc.documentId, client: world.clients.A1, verdict: { note: "no citations key at all" } }),
@@ -438,7 +489,7 @@ test("wake_file_document Tier A: a verdict with no citations ARRAY key is malfor
 test("wake_file_document Tier A rung A9: null authorization -> CLR28 (CB)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const err = await assertRaisesOneOf(
     ["CLR28"],
     () => wakeFileDocument(secret, { document: doc.documentId, client: world.clients.A1, authorization: null }),
@@ -450,7 +501,7 @@ test("wake_file_document Tier A rung A9: null authorization -> CLR28 (CB)", asyn
 test("wake_file_document Tier A rung A9 / Annex B cell 6: a foreign/nonexistent authorization -> CLR28, gamma's real branch this time", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   // Gamma is now staged: a randomUUID() authorization resolves NO row in the real
   // firm_egress_dispatch_authorizations table, so this now exercises cell 6's OWN branch
   // (`v_auth.id is null`), not the gamma-not-installed guard -- detail.class is absent (that
@@ -468,7 +519,7 @@ test("wake_file_document Tier A rung A9 / Annex B cell 6: a foreign/nonexistent 
 test("wake_file_document: FULL END-TO-END SUCCESS -- a live authorization + a well-cited verdict files, mints a judgement resolution, and consumes the authorization (also B3 cell 1: a hard-identifier match admits)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   // B3, the owner-ruling delta (2026-08-24): unattended filing now requires a corroborated
   // anchor. This test's OWN citation region (below, field_path='party_name') is deliberately
   // NOT one of B1/B3's allowlisted identifier field_paths, so it does not confirm the client by
@@ -510,7 +561,7 @@ test("wake_file_document: FULL END-TO-END SUCCESS -- a live authorization + a we
 test("wake_file_document Tier B3 cell 3+4: a BARE NAME-ONLY sighting -- no hard-id match, no witness corroboration -- refuses attribution_no_basis (the corroborated-anchor floor) and opens the ask path; the authorization is STILL consumed", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const authorization = await freshAuthorization(doc.sha256);
   // A genuine "bare name-only sighting" (owner ruling's own words): the model names a party but
   // supplies no citation, and no hard-identifier region exists anywhere on this document. A
@@ -544,7 +595,7 @@ test("wake_file_document Tier B3 cell 3+4: a BARE NAME-ONLY sighting -- no hard-
 test("wake_file_document Tier B2 cell 1: the SERVER-DERIVED tokenization floor fires with NO model candidate list -- 'a deterministic floor, cannot be starved'", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const familyName = await seedNameFamilyCollision();
   // This document's OWN extracted customer-name region is the colliding family's name --
   // sourced from an ocr/structured_parse engine, exactly B1's own AB-3 discipline.
@@ -565,7 +616,7 @@ test("wake_file_document Tier B2 cell 1: the SERVER-DERIVED tokenization floor f
 test("wake_file_document Tier B2 cell 2: the MODEL'S candidate list adds a refusal the server-derived floor alone would have missed", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   // NO ocr/structured_parse customer/vendor-name region on this document at all: the
   // server-derived floor (v_server_names) is empty and therefore cannot be ambiguous on its own
   // -- an otherwise-clean document, isolating the model-candidates arm.
@@ -580,11 +631,73 @@ test("wake_file_document Tier B2 cell 2: the MODEL'S candidate list adds a refus
     `the model's own candidate list did not add a refusal on otherwise-clean tokens: ${JSON.stringify(result.failing_rungs)}`);
 });
 
+// Review finding 6d: adversarial cells for the model's `candidates` field -- non-array, JSON
+// null, empty-string elements, duplicate names, a large array. Deliberately NO hard-identifier
+// anchor here: cell 12's hard case (v_confirms_client) suppresses B2's flag REGARDLESS of why
+// v_ambiguous became true, so an anchor would mask exactly the arm-(b) behaviour under test (a
+// first draft of these cells seeded one and could never observe B2 actually fire). Without an
+// anchor, B3 always refuses too (attribution_no_basis, no citations either) -- so `filed` is
+// false in every cell here regardless of B2; the assertions target `failing_rungs` membership
+// specifically, which isolates B2's own reaction cleanly either way.
+async function b2AdversarialAttempt(t, candidates) {
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  const authorization = await freshAuthorization(doc.sha256);
+  return wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    verdict: { citations: [], candidates },
+  });
+}
+
+test("wake_file_document Tier B2 adversarial: candidates is a NON-ARRAY (a string) -- degrades to no extra refusal, never raises", async (t) => {
+  if (unready(t)) return;
+  const r = await b2AdversarialAttempt(t, "not an array at all");
+  assert.equal(r.rows[0].result.filed, false, "no corroborated anchor either way -- B3 refuses regardless of B2");
+  assert.ok(!r.rows[0].result.failing_rungs.includes("attribution_name_family_collision"),
+    `a non-array candidates must not add a B2 refusal: ${JSON.stringify(r.rows[0].result.failing_rungs)}`);
+});
+
+test("wake_file_document Tier B2 adversarial: candidates is JSON null -- degrades to no extra refusal, never raises", async (t) => {
+  if (unready(t)) return;
+  const r = await b2AdversarialAttempt(t, null);
+  assert.equal(r.rows[0].result.filed, false);
+  assert.ok(!r.rows[0].result.failing_rungs.includes("attribution_name_family_collision"),
+    `a JSON-null candidates must not add a B2 refusal: ${JSON.stringify(r.rows[0].result.failing_rungs)}`);
+});
+
+test("wake_file_document Tier B2 adversarial: candidates has empty-string elements ([\"\",\"\"]) -- still fires (raw array length, more cautious not less)", async (t) => {
+  if (unready(t)) return;
+  const r = await b2AdversarialAttempt(t, ["", ""]);
+  assert.equal(r.rows[0].result.filed, false);
+  assert.ok(r.rows[0].result.failing_rungs.includes("attribution_name_family_collision"), JSON.stringify(r.rows[0].result.failing_rungs));
+});
+
+test("wake_file_document Tier B2 adversarial: candidates has DUPLICATE names ([\"A\",\"A\"]) -- still fires (raw array length is the deliberate, documented choice, SS0's own §7 note)", async (t) => {
+  if (unready(t)) return;
+  const r = await b2AdversarialAttempt(t, ["A", "A"]);
+  assert.equal(r.rows[0].result.filed, false);
+  assert.ok(r.rows[0].result.failing_rungs.includes("attribution_name_family_collision"), JSON.stringify(r.rows[0].result.failing_rungs));
+});
+
+test("wake_file_document Tier B2 adversarial: a LARGE candidates array (1000 elements) evaluates correctly, no crash/timeout", async (t) => {
+  if (unready(t)) return;
+  const many = Array.from({ length: 1000 }, (_, i) => `Candidate ${i}`);
+  const r = await b2AdversarialAttempt(t, many);
+  assert.equal(r.rows[0].result.filed, false);
+  assert.ok(r.rows[0].result.failing_rungs.includes("attribution_name_family_collision"), JSON.stringify(r.rows[0].result.failing_rungs));
+});
+
 test("wake_file_document Tier B2 cell 3: clean server tokens + a single-candidate model list admits (both arms clean)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   await seedHardIdentifierAnchor(doc, world.clients.A1); // B3's floor -- isolates this cell to B2
+  // Review finding 6c, FIXED: a first draft seeded NO party-name region at all, so v_server_names
+  // was empty and v_server_ambiguous was trivially false regardless of whether the ambiguity
+  // check itself had a bug -- the cell could never catch a FALSE refusal on genuinely clean
+  // evidence. A real, unambiguous name (its own token, sharing no family with any seeded client
+  // or counterparty) now flows through the SAME server-derived path cell 1 exercises.
+  await seedPartyNameRegion(doc, `Unambiguous Party ${randomUUID()}`, { role: "customer" });
   const authorization = await freshAuthorization(doc.sha256);
   const r = await wakeFileDocument(secret, {
     document: doc.documentId, client: world.clients.A1, authorization,
@@ -626,11 +739,78 @@ test("wake_file_document Tier B: an identity_document is refused with attributio
   assert.ok(r.rows[0].result.failing_rungs.includes("attribution_identity_document"), JSON.stringify(r.rows[0].result.failing_rungs));
 });
 
+test("wake_file_document Tier B8 review finding 2, FIXED: an UNCLASSIFIED document (document_kind IS NULL) refuses attribution_identity_document too -- absence of classification is not evidence of safety (review law 2)", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  // document_kind explicitly OMITTED -- documents_document_kind_check admits NULL, and this is
+  // exactly the state a document is in before classify_document ever runs. Pre-fix, coalesce
+  // read this NULL as "safely not an identity document" and B8 never fired.
+  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const row = await rootQuery("select document_kind from clara.documents where id=$1", [doc.documentId]);
+  assert.equal(row.rows[0].document_kind, null, "setup: this document is genuinely unclassified");
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    verdict: { citations: [] },
+  });
+  assert.equal(r.rows[0].result.filed, false, `an unclassified document must not file unattended: ${JSON.stringify(r.rows[0].result)}`);
+  assert.ok(r.rows[0].result.failing_rungs.includes("attribution_identity_document"),
+    `expected attribution_identity_document on a NULL-kind document: ${JSON.stringify(r.rows[0].result.failing_rungs)}`);
+});
+
+test("wake_file_document review finding 1, CRITICAL, FIXED: a live filing to ANOTHER client no longer lets a bare, evidence-free wake for a DIFFERENT client inherit its witness-corroboration verdict", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+
+  // STEP 1 -- an ACTIVE filing to A1 already exists, via a DIRECT write (root), deliberately
+  // leaving NO document_regions/client_identifiers evidence on this document at all -- so
+  // nothing here can trip B1's own contradiction wall for the later attempt at a DIFFERENT
+  // client. This isolates B3 arm (b) specifically.
+  const resA1 = await rootQuery(
+    `insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id, confidence, method, evidence, resolved_by)
+       values ($1,$2,'document',$3,1.0,'human','{}'::jsonb,$4) returning id`,
+    [world.firms.A, world.clients.A1, doc.documentId, world.users.alice],
+  );
+  await rootQuery(
+    "select clara._file_document_write($1::jsonb, $2, $3, $4, $5)",
+    [JSON.stringify({ firm: world.firms.A, actor: world.users.alice }), doc.documentId, world.clients.A1, resA1.rows[0].id, opk("f1-setup")],
+  );
+  const activeBefore = await activeFilings(doc.documentId);
+  assert.equal(activeBefore.length, 1);
+  assert.equal(activeBefore[0].client_id, world.clients.A1);
+
+  // STEP 2 -- seed the witness pair. Pre-fix, evaluate_witness_identity_v1's verdict (a pure
+  // layout-sanity check, not bound to A1's identity in any way) would have been read directly
+  // and trusted for WHOEVER the wake requests -- proven by direct call below.
+  const { extractionId } = await seedWitnessCorroborationPair(doc);
+  const ident = await rootQuery(
+    "select clara.evaluate_witness_identity_v1($1, $2, false) as v",
+    [doc.documentId, extractionId],
+  );
+  assert.equal(ident.rows[0].v.vendor_registration_verdict, "corroborated",
+    "setup: the raw evaluator DOES say corroborated (the verdict itself is document-layout-based, unchanged by the fix)");
+
+  // STEP 3 -- the exploit attempt: wake_file_document for A2 (a DIFFERENT client), ZERO
+  // evidence connecting the document to A2 at all.
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A2, authorization,
+    verdict: { citations: [] },
+  });
+  const result = r.rows[0].result;
+  assert.equal(result.filed, false, `A2's request must refuse -- zero evidence for A2 specifically: ${JSON.stringify(result)}`);
+  assert.ok(result.failing_rungs.includes("attribution_no_basis"), JSON.stringify(result.failing_rungs));
+  const activeAfter = await activeFilings(doc.documentId);
+  assert.equal(activeAfter.length, 1, "still exactly ONE active filing -- no cross-client double-file");
+  assert.equal(activeAfter[0].client_id, world.clients.A1);
+});
+
 test("wake_file_document Tier B7: an authorization minted for a DIFFERENT document refuses attribution_purpose_mismatch, AND -- the B-1 fix, proven -- the authorization stays LIVE (not consumed)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const docA = await seedVerifiedDocument({ firm: world.firms.A });
-  const docB = await seedVerifiedDocument({ firm: world.firms.A });
+  const docA = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  const docB = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const authorization = await freshAuthorization(docA.sha256); // minted for A...
   const r = await wakeFileDocument(secret, {
     document: docB.documentId, client: world.clients.A1, authorization, // ...presented for B
@@ -654,7 +834,7 @@ test("wake_file_document Tier B7: an authorization minted for a DIFFERENT docume
 test("wake_open_firm_question: full success -- receipt + firm_open_questions row exist", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const r = await wakeOpenFirmQuestion(secret, { document: doc.documentId, kind: "unattributed", question: "who owns this?" });
   const result = r.rows[0].result;
   assert.ok(result.question_id, "question_id returned");
@@ -675,7 +855,7 @@ test("wake_open_firm_question: full success -- receipt + firm_open_questions row
 test("wake_open_firm_question: blank rationale -> CLR10", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   await assertRaises(
     CLR.badRequest,
     () => wakeOpenFirmQuestion(secret, { document: doc.documentId, rationale: "" }),
@@ -705,7 +885,7 @@ test("wake_propose_identifier_promotion: writes a promotion card, zero client_id
 test("wake_reattribute_document: a live (approved, unreversed) citation refuses BEFORE any retire is visible -- reattribution_blocked_by_citation", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1 });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
   const filingRow = (await activeFilings(doc.documentId))[0];
   assert.ok(filingRow, "filing exists");
   const lines = balanced(world.coa.A1, ROUTINE_CENTS);
@@ -728,10 +908,29 @@ test("wake_reattribute_document: a live (approved, unreversed) citation refuses 
   assert.equal(stillActive.length, 1, "the filing was NOT retired -- the refusal precedes any write");
 });
 
+test("wake_reattribute_document review finding 3, FIXED: a NULL p_expected_revision no longer bypasses the optimistic-concurrency guard", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
+  const filingRow = (await activeFilings(doc.documentId))[0];
+  assert.ok(filingRow, "filing exists");
+  // Pre-fix, `revision_token <> NULL` evaluated to NULL and the raise never fired -- a caller
+  // that never actually observed the current revision (NULL, whether deliberate or by
+  // omission) could retire-and-refile blind. IS DISTINCT FROM now catches this.
+  await assertRaisesOneOf(
+    ["CLR17"],
+    () => wakeReattributeDocument(secret, { filing: filingRow.id, expectedRevision: null, toClient: world.clients.A2 }),
+    "NULL p_expected_revision",
+  );
+  const stillActive = await activeFilings(doc.documentId);
+  assert.equal(stillActive.length, 1, "the filing was NOT retired -- the NULL revision was refused before any write");
+  assert.equal(stillActive[0].id, filingRow.id);
+});
+
 test("wake_reattribute_document: no live citation -> FULL SUCCESS -- retires the old filing and refiles to the new client under a fresh judgement resolution", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1 });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
   const filingRow = (await activeFilings(doc.documentId))[0];
   const r = await wakeReattributeDocument(secret, {
     filing: filingRow.id, expectedRevision: filingRow.revision_token, toClient: world.clients.A2,
@@ -768,7 +967,7 @@ test("wake_reattribute_document: no live citation -> FULL SUCCESS -- retires the
 test("wake_propose_filing_correction: full propose -- filing_corrections + receipt + firm question + egress.misrouted event", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1 });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
   // The destination client needs its OWN human/rule attribution on THIS document for the
   // two-value destination-authority check (duplicated from propose_wrong_client_correction's
   // live predicate) to admit the proposal.
@@ -814,7 +1013,7 @@ test("wake_propose_filing_correction: full propose -- filing_corrections + recei
 test("wake_propose_filing_correction: cell 61's ACTUAL gap -- a JUDGED destination resolution now proposes AND approves cleanly (alpha2's live extension of approve_wrong_client_correction at 0027:268)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1 });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
   // The destination's ONLY authoritative resolution is method='judgement' -- unbuildable before
   // alpha landed; this is the fixture cell 61 could not construct until now.
   await rootQuery(
@@ -841,7 +1040,7 @@ test("wake_propose_filing_correction: cell 61's ACTUAL gap -- a JUDGED destinati
 test("wake_propose_filing_correction: destination client with no authoritative attribution -> CLR01", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1 });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, client: world.clients.A1, kind: "invoice" });
   await assertRaises(
     CLR.client,
     () => wakeProposeFilingCorrection(secret, { document: doc.documentId, fromClient: world.clients.A1, toClient: world.clients.A2 }),
@@ -870,7 +1069,7 @@ test("Tier C: both triggers exist on document_filings, DEFERRABLE INITIALLY DEFE
 
 test("Tier C cell 58 twin / receipt-existence trigger: a RAW judged filing with NO agent_filing_receipts row refuses at COMMIT", async (t) => {
   if (unready(t)) return;
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const res = await rootQuery(
     `insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id, confidence, method, evidence)
      values ($1,$2,'document',$3,1.0,'judgement','{}'::jsonb) returning id`,
@@ -896,7 +1095,7 @@ test("Tier C cell 58 twin / receipt-existence trigger: a RAW judged filing with 
 
 test("document_filings INSERT congruence: a judged filing whose resolution names a DIFFERENT client refuses BEFORE INSERT (the PRE-EXISTING stamp trigger, alpha2's own CoR -- this train's own t_document_filings_agent_congruence is a defense-in-depth twin, see its migration comment for why it cannot itself be reached on the live schema)", async (t) => {
   if (unready(t)) return;
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   // CORRECTED BY INDEPENDENT REVIEW: this does NOT isolate `_tf_document_filings_agent_
   // congruence` -- `t_document_filings_stamp` (BEFORE INSERT, PRE-EXISTING, alpha2's CoR) is a
   // STRICT SUPERSET check and refuses first, every time, on INSERT. This train's own congruence
@@ -928,7 +1127,7 @@ test("document_filings INSERT congruence: a judged filing whose resolution names
 test("agent_receipts_visible: a firm-question receipt is visible to a bookkeeper of the SAME firm, invisible to another firm's", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  const doc = await seedVerifiedDocument({ firm: world.firms.A });
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const r = await wakeOpenFirmQuestion(secret, { document: doc.documentId });
   const receiptId = r.rows[0].result.receipt_id;
   const own = await humanQuery(world.users.bob, "select count(*)::int as n from clara.agent_receipts_visible where receipt_id=$1", [receiptId]);
