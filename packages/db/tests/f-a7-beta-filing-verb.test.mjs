@@ -806,6 +806,115 @@ test("wake_file_document review finding 1, CRITICAL, FIXED: a live filing to ANO
   assert.equal(activeAfter[0].client_id, world.clients.A1);
 });
 
+// ---------------------------------------------------------------------------
+// B10 -- OTHER-CLIENT ACTIVE FILING (owner ruling, 2026-08-24, the compound-case sitting).
+// Finding 1's residual question, closed. Cell (a) is the EXACT scenario the conductor asked
+// for: pre-fix (commit 2f831ac) this scenario ADMITTED, rig-verified by direct execution
+// before the ruling was sought (filed=true, a second active filing minted with zero awareness
+// of the first). Cells (b)/(c) prove the new rung is SCOPED, not a blanket wall.
+// ---------------------------------------------------------------------------
+test("wake_file_document B10 cell (a), FIXED: a live filing to ANOTHER client refuses a GENUINE hard-identifier match for a DIFFERENT client -- routes to the ask path instead of admitting (pre-fix 2f831ac: this ADMITTED, rig-verified)", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+
+  // STEP 1 -- A1's filing exists via a DIRECT write (root), leaving NO document_regions/
+  // client_identifiers evidence on this document -- isolates the scenario: nothing here can
+  // trip B1's contradiction wall against A2 later.
+  const resA1 = await rootQuery(
+    `insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id, confidence, method, evidence, resolved_by)
+       values ($1,$2,'document',$3,1.0,'human','{}'::jsonb,$4) returning id`,
+    [world.firms.A, world.clients.A1, doc.documentId, world.users.alice],
+  );
+  await rootQuery(
+    "select clara._file_document_write($1::jsonb, $2, $3, $4, $5)",
+    [JSON.stringify({ firm: world.firms.A, actor: world.users.alice }), doc.documentId, world.clients.A1, resA1.rows[0].id, opk("b10a-setup")],
+  );
+  const activeBefore = await activeFilings(doc.documentId);
+  assert.equal(activeBefore.length, 1);
+  assert.equal(activeBefore[0].client_id, world.clients.A1);
+
+  // STEP 2 -- a GENUINE, independently-verified hard-identifier match for A2 (a real, distinct
+  // SSM number really registered to A2's own client_identifiers row).
+  const value = await seedHardIdentifierAnchor(doc, world.clients.A2);
+
+  // STEP 3 -- wake for A2, citing nothing beyond the document's own printed identifier.
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A2, authorization,
+    verdict: { citations: [] },
+  });
+  const result = r.rows[0].result;
+  assert.equal(result.filed, false, `must refuse -- another client already holds an active filing: ${JSON.stringify(result)}`);
+  assert.ok(result.failing_rungs.includes("attribution_other_client_active_filing"), JSON.stringify(result.failing_rungs));
+  assert.ok(result.question_id, "the refusal must open the ask path");
+
+  const q = await rootQuery(
+    "select kind, status, candidates from clara.firm_open_questions where id=$1",
+    [result.question_id],
+  );
+  assert.equal(q.rows[0].kind, "collision");
+  assert.equal(q.rows[0].status, "open");
+  const ctx = q.rows[0].candidates[0];
+  assert.equal(ctx.client_id, world.clients.A2, "the REQUESTING client is on record");
+  assert.equal(ctx.existing_filing_client_id, world.clients.A1, "the EXISTING filing's client is on record");
+  assert.equal(ctx.anchoring_identifier_kind, "ssm");
+  assert.equal(ctx.anchoring_identifier_value, value, "the ANCHORING identifier that made A2's own case is on record");
+
+  const activeAfter = await activeFilings(doc.documentId);
+  assert.equal(activeAfter.length, 1, "still exactly ONE active filing -- B10 closed the residual leak");
+  assert.equal(activeAfter[0].client_id, world.clients.A1);
+
+  // The human door stays open and unchanged: resolve_firm_question names the client the
+  // question answers to, per the owner's own ruled scope ("the HUMAN verb stays exactly as-is").
+  const resolved = await runAs(
+    human(world.users.alice),
+    namedCall("resolve_firm_question", [
+      { name: "p_question" }, { name: "p_resolution" }, { name: "p_client" }, { name: "p_op_key" },
+    ]),
+    [result.question_id, "confirmed: a genuine second-client transaction", world.clients.A2, opk("b10a-resolve")],
+  );
+  assert.equal(resolved.rows[0].result.status, "resolved");
+  assert.equal(resolved.rows[0].result.named_client, world.clients.A2);
+});
+
+test("wake_file_document B10 cell (b): the SAME-client Tier-A CLR10 raise stays unchanged (B10 is a Tier-B rung, never reached)", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  await seedHardIdentifierAnchor(doc, world.clients.A1);
+  const authorization = await freshAuthorization(doc.sha256);
+  await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    verdict: { citations: [] },
+  });
+  const auth2 = await freshAuthorization(doc.sha256);
+  const err = await assertRaises(
+    CLR.badRequest,
+    () => wakeFileDocument(secret, {
+      document: doc.documentId, client: world.clients.A1, authorization: auth2,
+      verdict: { citations: [] },
+    }),
+    "a second wake for the SAME already-filed client",
+  );
+  assert.equal(JSON.parse(err.detail).reason, "already_filed");
+});
+
+test("wake_file_document B10 cell (c): a hard-id admit with NO other client's active filing is unaffected -- B10 is scoped, not a blanket wall", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  await seedHardIdentifierAnchor(doc, world.clients.A1);
+  const authorization = await freshAuthorization(doc.sha256);
+  const r = await wakeFileDocument(secret, {
+    document: doc.documentId, client: world.clients.A1, authorization,
+    verdict: { citations: [] },
+  });
+  const result = r.rows[0].result;
+  assert.equal(result.filed, true, `expected admit -- no other client holds an active filing: ${JSON.stringify(result)}`);
+  assert.ok(!result.failing_rungs || result.failing_rungs.length === 0);
+});
+
 test("wake_file_document Tier B7: an authorization minted for a DIFFERENT document refuses attribution_purpose_mismatch, AND -- the B-1 fix, proven -- the authorization stays LIVE (not consumed)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();

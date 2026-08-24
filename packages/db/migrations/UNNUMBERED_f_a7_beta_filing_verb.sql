@@ -183,6 +183,47 @@
 --      distinct count (a deliberate choice consistent with the ruling's own "may only add, never
 --      remove" wording -- de-duplicating first could only make the rung more permissive). Trued.
 --
+-- FINDING 4 CONDUCTOR CLOSE (2026-08-24): NO CODE CHANGE. The "every refusal receipted" premise
+-- came from the review-prompt's own phrasing, not the design -- this file's harmonized reading
+-- (Tier A raises stay unreceipted; SS3.4's "the filing or the refusal" is the Tier B/C
+-- dichotomy) resolves the apparent tension without a structural incompatibility. Goes to the
+-- docs batch as an annex clarification with the owner seeing it there; this file's own argument
+-- (above) stays the in-file record.
+--
+-- =====================================================================================
+-- THE OWNER RULING ON FINDING 1'S RESIDUAL QUESTION (2026-08-24, the compound-case sitting) --
+-- SS0 GROWS AGAIN
+-- =====================================================================================
+-- Finding 1's fix (above) closed the WITNESS arm's cross-client leak. Its own residual
+-- question, raised by the conductor and rig-verified before any ruling was sought: a document
+-- live-filed to one client, plus a GENUINE, independently-verified hard-identifier match for a
+-- DIFFERENT client, admitted a SECOND active filing via the HARD-ID arm alone -- filed=true,
+-- zero awareness of the first filing. Confirmed by direct rig execution (a document filed to
+-- one client via a direct write, then a genuine second client's own SSM seeded and wake_file_
+-- document called for that second client with an empty verdict, files cleanly).
+--
+-- The design text does not address this compound case either way -- not "can a document belong
+-- to two clients" (yes, by long-standing design: annexes-1.md:103 / Annex B cell 4 states Tier
+-- A's duplicate-filing guard as SAME-client only; design.md:152 names its provenance as a REUSE
+-- of the pre-existing human verb's own check ("the 0007:1392 refusal reused"); survey.md:242
+-- confirms clara.file_document, the estate's long-standing human verb, "refuses a second active
+-- filing to the SAME client" -- same-client only) -- but "should the UNATTENDED path mint a
+-- second, independent judgement onto an already-filed document on hard-id evidence alone,
+-- uncorrelated with the existing filing."
+--
+-- OWNER RULING (2026-08-24, direct sitting): the compound case TIGHTENS. When ANY other client
+-- holds an ACTIVE filing on the document, the unattended path must NOT silently mint a second
+-- filing on hard-id evidence alone -- it refuses with a typed reason and routes to the ask path
+-- (a human's one-click confirm then files it). Rationale on the owner's own record: a genuine
+-- identifier proves the NUMBER is the client's, not that the transaction is genuinely theirs; a
+-- spurious second attribution seeds later double-booking, and the friction cost is one click on
+-- the relatively rare genuine multi-client document.
+--
+-- SCOPE, RULED EXPLICITLY: the HUMAN verb stays exactly as-is -- same-client-only guard,
+-- multi-client capability preserved through the human door (clara.file_document unchanged, not
+-- touched by this file). B10 (SS5) is the new rung; its own comment carries the full argument
+-- and the same three provenance citations.
+--
 -- =====================================================================================
 -- WHAT THIS FILE SHIPS
 -- =====================================================================================
@@ -193,7 +234,9 @@
 --     receipt contract (clara._agent_receipt_src_f_a7) + the conformance assertion.
 -- (C) The egress.misrouted event type (event_types + trigger_taxonomy, the 0090:635-657 idiom).
 -- (D) clara._agent_file_document_core -- the full SS3.2 ladder (Tier A raises, Tier B's nine
---     rungs, the receipt + firm-question refusal branch, the alpha-gated write branch).
+--     design-named rungs PLUS B10 (the owner's compound-case ruling, 2026-08-24 -- not in
+--     SS3.2's own table, this train's own addition), the receipt + firm-question refusal
+--     branch, the alpha-gated write branch).
 -- (E) FIVE wake wrappers, all gated on the `filing` kind (clara_wake_filing): wake_file_document
 --     (this train's own verb) plus FOUR siblings that pi's own file explicitly deferred here --
 --     pi's header states verbatim "wake_open_firm_question, wake_reattribute_document,
@@ -680,6 +723,10 @@ declare
   -- corroboration STATUS read, never witness-engine-kind region CONTENT (0090 wall 8).
   -- v_wc_n/v_wc_client (review finding 1 fix): the verdict is trusted only when bound to p_client.
   v_text_x uuid; v_ident jsonb; v_witness_corroborated boolean; v_wc_n int; v_wc_client uuid;
+  -- B10 delta (owner ruling, 2026-08-24, the compound-case sitting): the confirming identifier's
+  -- own kind/value (for the firm question's context) and the other client whose active filing
+  -- gates unattended admission.
+  v_confirms_kind text; v_confirms_value text; v_other_client_id uuid;
   v_bad_region boolean; v_stale boolean; v_cross_firm boolean;
   v_auth record; v_purpose_mismatch boolean := false;
   v_identity_kind_text text; v_enrichment_requested boolean;
@@ -847,6 +894,25 @@ begin
        and ci.client_id = p_client
   ) into v_confirms_client;
 
+  -- The confirming identifier's OWN kind/value (B10's firm-question context, owner ruling
+  -- 2026-08-24): captured whenever v_confirms_client is true, from the SAME hit that set it --
+  -- never a second, independently-reasoned read. NULL when v_confirms_client is false.
+  select ci.kind, ci.value_normalized into v_confirms_kind, v_confirms_value
+    from clara.document_extractions e
+    join clara.document_regions r on r.extraction_id = e.id and r.firm_id = p_firm
+    join clara.client_identifiers ci on ci.firm_id = p_firm
+      and ci.value_normalized = lower(regexp_replace(coalesce(r.text_content,''),'\s+','','g'))
+   where e.document_id = p_document and e.firm_id = p_firm and e.status = 'done'
+     and e.engine_kind in ('ocr','structured_parse')
+     and ((ci.kind='tin' and lower(coalesce(r.field_path,'')) like '%tin%')
+       or (ci.kind='ssm' and (lower(coalesce(r.field_path,'')) like '%ssm%'
+         or lower(coalesce(r.field_path,'')) like '%brn%'))
+       or (ci.kind='bank_account' and lower(coalesce(r.field_path,'')) like '%account%'))
+     and lower(regexp_replace(coalesce(r.text_content,''),'\s+','','g'))
+         not in ('ei00000000010','ei00000000020','ei00000000030')
+     and ci.client_id = p_client
+   limit 1;
+
   -- B2 -- THE UNION-OF-CAUTIONS COLLISION GUARD (owner ruling, 2026-08-24, grade A+, superseding
   -- the single-source form). >1 candidate means CLARIFY, never choose -- UNLESS an identifier
   -- hit disambiguates the family in p_client's favour (cell 12's hard case, unchanged, and
@@ -976,6 +1042,51 @@ begin
 
   if not v_confirms_client and not v_witness_corroborated then
     v_failing := array_append(v_failing, 'attribution_no_basis');
+  end if;
+
+  -- B10 -- OTHER-CLIENT ACTIVE FILING (owner ruling, 2026-08-24, the compound-case sitting).
+  -- Unattended filing refuses whenever ANY client OTHER than p_client already holds a live
+  -- filing on this document -- even when p_client's OWN evidence (arm (a)'s hard-identifier
+  -- match) is completely genuine. Owner's own rationale, on record: a genuine identifier
+  -- proves the NUMBER is p_client's, not that THIS TRANSACTION genuinely concerns p_client --
+  -- the registration could be a referenced third party (a guarantor, a distributor, a bank)
+  -- rather than a real party to this document, and a spurious second attribution seeds a
+  -- later double-booking rather than being one itself (filing mints a client_resolutions row a
+  -- later posting step may trust at face value). The friction cost (routing to the ask path)
+  -- falls only on the relatively rare genuine multi-client document.
+  --
+  -- MEASURED, RIG-PROVEN BEFORE this fix (finding 1's residual question): a document live-
+  -- filed to one client, with a GENUINE, independently-verified hard-identifier match for a
+  -- SECOND client, admitted a second active filing via arm (a) alone -- filed=true, zero
+  -- awareness of the first filing. Confirmed by direct rig execution, not assumed.
+  --
+  -- SCOPE, RULED EXPLICITLY: the HUMAN verb (clara.file_document) is UNCHANGED -- same-client-
+  -- only guard, multi-client capability preserved through the human door. This rung is
+  -- UNATTENDED-agent-specific; a human who has SEEN the existing filing (via this rung's own
+  -- firm question) and still chooses to file to a second client retains full authority to do
+  -- so through that door -- resolve_firm_question (pi) names the client, then the human's own
+  -- file_document call does the actual filing. No new mechanism is built here; this rung only
+  -- routes to the door that already exists.
+  --
+  -- PROVENANCE OF THE SCOPE CHOICE (why this is a NEW rung, not a widening of Tier A's existing
+  -- "already filed" check above): annexes-1.md:103 (Annex B cell 4) states that check as
+  -- SAME-client only -- "to a client already actively filed -> CLR10, and no second filing row
+  -- exists"; design.md:152 names its provenance directly as a REUSE of the pre-existing human
+  -- verb's own check ("the 0007:1392 refusal reused"); the survey (survey.md:242) confirms
+  -- what that reused check does on the human side: clara.file_document "refuses a second
+  -- active filing to the SAME client" -- same-client only. Multi-client document filing (one
+  -- document legitimately concerning two BELCORT clients -- a shared invoice, an intercompany
+  -- transaction) has been a permitted, pre-existing capability of the schema and the human
+  -- path since before F-A7 existed; Tier A's own rung is a direct copy of that scope and stays
+  -- untouched by this fix. B10 is a NEW, UNATTENDED-ONLY wall, layered on top, not a correction
+  -- of an existing one.
+  select f.client_id into v_other_client_id
+    from clara.document_filings f
+   where f.document_id = p_document and f.retired_at is null and f.client_id <> p_client
+   order by f.filed_at
+   limit 1;
+  if v_other_client_id is not null then
+    v_failing := array_append(v_failing, 'attribution_other_client_active_filing');
   end if;
 
   -- B4 -- region anchoring: every citation resolves to a LIVE document_regions row of THIS
@@ -1122,14 +1233,28 @@ begin
         p_model->>'model', p_model->>'version', p_rationale, p_verdict, v_failing, p_wake_kind,
         p_trigger_kind, p_trigger_id, p_authorization, p_actor, p_obo)
       returning id into v_receipt_id;
+    -- B10's kind maps to the closed vocabulary's 'collision' bucket (firm_open_questions_kind_
+    -- check, pi's own closed world -- no 'other_client'-shaped value exists there, and widening
+    -- it is not this rung's call): a competing client's active filing IS an attribution
+    -- collision, discovered by a different mechanism than B2's name-family one. Placed ahead of
+    -- the bare contradiction fallback -- a competing FILING is a more specific, more actionable
+    -- signal for the human than an unqualified 'unattributed'.
     v_question_id := clara._firm_question_core(p_actor, p_firm, p_obo, p_wake_kind,
       p_document,
       case when 'attribution_identity_document' = any(v_failing) then 'identity_document'
            when 'attribution_name_family_collision' = any(v_failing) then 'collision'
+           when 'attribution_other_client_active_filing' = any(v_failing) then 'collision'
            when 'attribution_contradicted' = any(v_failing) then 'contradiction'
            else 'unattributed' end,
       format('Clara could not file this document to %s: %s', p_client, array_to_string(v_failing, ', ')),
-      jsonb_build_array(jsonb_build_object('client_id', p_client, 'failing_rungs', to_jsonb(v_failing))),
+      -- B10's context (owner ruling): the existing filing's client, the requesting client, and
+      -- the anchoring identifier that made p_client's own case -- everything a human needs for
+      -- a one-click confirm via resolve_firm_question, then clara.file_document (unchanged).
+      jsonb_build_array(jsonb_build_object(
+        'client_id', p_client, 'failing_rungs', to_jsonb(v_failing),
+        'existing_filing_client_id', v_other_client_id,
+        'anchoring_identifier_kind', v_confirms_kind,
+        'anchoring_identifier_value', v_confirms_value)),
       v_receipt_id::text);
     perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind, 'agent_file_document_refused', null,
       jsonb_build_object('document', p_document, 'client', p_client, 'failing_rungs', to_jsonb(v_failing),
