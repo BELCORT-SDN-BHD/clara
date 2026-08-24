@@ -1,6 +1,6 @@
 // F-A7 gamma battery — Wave-F Track A, PR-gamma (the egress train, window D1-gamma).
 //
-// Proves the behaviors UNNUMBERED_f_a7_gamma_egress.sql adds: the 5th client purpose
+// Proves the behaviors 0123_f_a7_gamma_egress.sql adds: the 5th client purpose
 // 'document_processing' (document-tied); the firm-narrow family (one purpose,
 // firm_narrow_intake, two moments: attribution / onboarding_interview); the classify
 // consent gate AT ENQUEUE in _enqueue_invoice_facts_core (filed -> client document_processing,
@@ -24,7 +24,7 @@ let live = false;
 let world = null;
 
 /** Gamma-specific readiness: the 5-value purpose CHECK + the firm_egress_purpose_consents
- *  table, both live only once UNNUMBERED_f_a7_gamma_egress.sql has applied. */
+ *  table, both live only once 0123_f_a7_gamma_egress.sql has applied. */
 async function gammaReady() {
   const r = await rootQuery(`
     select

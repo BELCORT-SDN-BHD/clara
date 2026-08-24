@@ -236,7 +236,7 @@ function applyRestoreFA2Activation(member, src) {
 
 // =========================================================================
 // AMENDMENT F-A7 GAMMA (Wave-F Track A, the egress train, window D1-gamma,
-// UNNUMBERED_f_a7_gamma_egress.sql). The SAME §6 member -- _enqueue_invoice_facts_core
+// 0123_f_a7_gamma_egress.sql). The SAME §6 member -- _enqueue_invoice_facts_core
 // ("router") -- gains ONE more deliberately-changed layer, now the OUTERMOST of all (authored
 // latest): a brand-new `elsif v_lane='classify' then ... end if;` arm inserted into the
 // per-lane enqueue-time consent-gate chain, disjoint from every earlier layer's span (it sits
