@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a3_pr1b_agent_limb.sql — F-A3 PR-1b: the bank-agency AGENT LIMB.
+-- 0120_f_a3_pr1b_agent_limb.sql — F-A3 PR-1b: the bank-agency AGENT LIMB.
 -- ================================================================================================
 -- Number claimed at MERGE time (hard constraint 10). Design of record:
 -- docs/plan/active/bank-agency-design.md v2 §3 + annexes-1 (A verbs/receipt/carriers, B ladder,

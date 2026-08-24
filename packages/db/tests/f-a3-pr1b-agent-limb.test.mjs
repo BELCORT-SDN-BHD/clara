@@ -2,7 +2,7 @@
 //
 // CONTRACT-BLIND: written from docs/plan/active/bank-agency-design.md v2 + annexes-1..3 +
 // bank-agency-gate-record.md -- never from the migration's own SQL text. Scope: the TEN CoR'd
-// bodies + the DDL this file's own migration (UNNUMBERED_f_a3_pr1b_agent_limb.sql) ships. The
+// bodies + the DDL this file's own migration (0120_f_a3_pr1b_agent_limb.sql) ships. The
 // thirteen wake sibling verbs and their agent cores are a FOLLOW-UP WINDOW (not yet built), so
 // every agent-arm cell here calls the CORE directly via rootQuery with a hand-built ctx --
 // exactly the shape a future wrapper will build, exercised without the wrapper existing yet.
