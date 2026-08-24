@@ -243,9 +243,13 @@ function IssueForm({ token, artifact }: { token: string; artifact: ReportArtifac
       // THE SHA THE APPROVAL NAMES is the ROW'S OWN sha256 -- read, never recomputed in this
       // client (0072:87-92 refuses a mismatch either way, but the honest door shows what it will
       // send, not a value the human has to retype correctly from memory).
+      // S5: STABLE, never Date.now() -- the artifact id alone, so a lost-response retry (a
+      // network timeout after the RPC actually landed, a double-click) replays the SAME op_key
+      // and gets the ORIGINAL receipt back, exactly as the core's own idempotency contract
+      // documents, rather than minting a second op the door then has to disambiguate.
       const out = await issueReportForApproval(token, {
         reportRunId: artifact.report_run_id, expectedArtifactSha256: artifact.sha256,
-        reason, selfAttestation: attestation, opKey: `dash-issue-${artifact.id}-${Date.now()}`,
+        reason, selfAttestation: attestation, opKey: `dash-issue-${artifact.id}`,
       });
       setResult(JSON.stringify(out));
     } catch (e) {
@@ -288,10 +292,11 @@ function ArchiveForm({ token, artifact }: { token: string; artifact: ReportArtif
   const submit = async () => {
     setBusy(true); setResult(null); setError(null);
     try {
+      // S5: STABLE, never Date.now() -- see IssueForm's identical note above.
       const out = await archiveSignedOriginal(token, {
         reportRunId: artifact.report_run_id, sha256: sha.trim().toLowerCase(),
         byteSize: Number(byteSize), signatureEvidence: { kind: "wet_signature", signer_name: signer },
-        answersPreSignSha256: artifact.sha256, opKey: `dash-archive-${artifact.id}-${Date.now()}`,
+        answersPreSignSha256: artifact.sha256, opKey: `dash-archive-${artifact.id}`,
       });
       setResult(JSON.stringify(out));
     } catch (e) {
@@ -317,16 +322,22 @@ function ArchiveForm({ token, artifact }: { token: string; artifact: ReportArtif
 }
 
 /** The retrieval door for a `signed_original` row (design SS3.8/annex A.5). A null result is the
- *  door's own honest "nothing archived yet", rendered as a state -- never mistaken for an error. */
+ *  door's own honest "nothing archived yet", rendered as a state -- never mistaken for an error.
+ *  S6: `custody === null` alone cannot tell "never asked" from "asked, found nothing" apart --
+ *  both are the same value. `attempted` is the state this component's own comment always claimed
+ *  to render; before this fix a genuine miss rendered identically to never having clicked at all. */
 function RetrieveAction({ token, runId }: { token: string; runId: string }) {
   const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [custody, setCustody] = useState<SignedOriginalCustody | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const retrieve = async () => {
     setBusy(true); setError(null);
     try {
-      setCustody(await retrieveSignedOriginal(token, runId));
+      const out = await retrieveSignedOriginal(token, runId);
+      setCustody(out);
+      setAttempted(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -337,13 +348,18 @@ function RetrieveAction({ token, runId }: { token: string; runId: string }) {
   return (
     <div className={styles.rowMeta} style={{ flexDirection: "column", alignItems: "stretch", gap: "0.35rem" }}>
       <button className={styles.buttonSecondary} disabled={busy} onClick={retrieve}>{busy ? "Retrieving…" : "Retrieve"}</button>
-      {custody === null && !busy ? null : custody ? (
+      {!attempted ? null : custody ? (
         <>
           <span className={styles.mono}>{custody.storage_key}</span>
           <span className={styles.mono}>sha256 {custody.sha256} &middot; {custody.byte_size.toLocaleString()} bytes</span>
+          {/* S4: who sealed it (always a human, structural since the fold-in wall) and whether the
+              run it answers was Clara-prepared -- an audited retrieval names both. */}
+          <span className={styles.mono}>sealed by {shortId(custody.sealed_by)}{custody.prepared_by_agent ? " -- run prepared by Clara" : ""}</span>
           <span className={styles.muted}>{custody.retrieval_note}</span>
         </>
-      ) : null}
+      ) : (
+        <p className={styles.muted}>No signed original archived yet for this run.</p>
+      )}
       {error ? <p className={styles.banner}>{error}</p> : null}
     </div>
   );

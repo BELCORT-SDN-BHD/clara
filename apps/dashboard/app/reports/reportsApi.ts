@@ -147,6 +147,10 @@ export async function archiveSignedOriginal(
 export type SignedOriginalCustody = {
   artifact_id: string; report_run_id: string; storage_key: string; sha256: string;
   byte_size: number; sealed_by: string; sealed_at: string;
+  // S4: prepared_by_agent is the RUN's own provenance (0111, DB-derived), distinct on purpose from
+  // sealed_by -- an audited retrieval names BOTH who sealed the wet-signed pack (always a human,
+  // structural since the fold-in wall) and whether Clara prepared the run it answers.
+  prepared_by_agent: boolean;
   signature_evidence: unknown; answers_pre_sign_sha256: string | null; retrieval_note: string;
 };
 

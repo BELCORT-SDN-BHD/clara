@@ -15,9 +15,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, endPool } from "./rig-helpers.mjs";
-import { call, caught, errorDetail, firmIdOf } from "./epsilon-fixtures.mjs";
+import { rootQuery, endPool, opk } from "./rig-helpers.mjs";
+import { call, caught, errorDetail, firmIdOf, buildManifest, sha64 } from "./epsilon-fixtures.mjs";
 import { sealedRun, sealArtifact, asRuntime } from "./zeta-fixtures.mjs";
+import { pr2Ready, mintWake, wakeModel, RATIONALE, callWrapper } from "./f-a5-reporting-agency-pr2-fixtures.mjs";
 
 /** THE CAPABILITY GATE -- both new doors, or neither; a partial apply is drift. */
 async function pr3Ready() {
@@ -38,7 +39,8 @@ const retrieve = (sub, runId) => call(sub, "retrieve_signed_original", [["p_repo
 const evidence = (who = "Alice Tan") => ({ kind: "wet_signature", signer_name: who, signed_at: "2026-08-24T09:00:00Z" });
 
 let ready = false;
-before(async () => { ready = await pr3Ready(); });
+let pr2ready = false;
+before(async () => { ready = await pr3Ready(); pr2ready = await pr2Ready(); });
 after(async () => { await endPool(); });
 
 // =================================================================================================
@@ -71,6 +73,10 @@ test("PR-3.1 -- archive_signed_original writes a signed_original row chained to 
   assert.equal(row.manifest.pre_sign_pdf_sha256, presignSha, "the pre-sign pin the door copied forward is still the hash it answers");
   assert.equal(row.directed_by, null, "a plain human archive (no OBO) carries no director -- inherited from the run, not invented here");
   assert.equal(row.prepared_by_agent, false);
+  // THIS CELL IS ALSO THE FOLD-IN WALL'S ADMITTING DIFFERENTIAL TWIN (annex A.4, S3's live gap):
+  // the human door succeeds through the exact call shape PR-3.9 below proves the agent lane
+  // cannot reach -- sealed_by is the wall's discriminant, not this run's prepared_by_agent, so an
+  // ordinary human archive is untouched regardless of who prepared the run.
 });
 
 test("PR-3.2 -- archive_signed_original refuses when the run has no sealed pre-sign artifact yet", async (t) => {
@@ -143,6 +149,58 @@ test("PR-3.4 -- a second archive_signed_original on the same run refuses at the 
 });
 
 // =================================================================================================
+// THE FOLD-IN WALL -- A.4's human-act reservation, held mechanically by a BEFORE INSERT trigger on
+// clara.report_artifacts (S3, a review finding: the wake-lane grant existed, 0116, but the wall did
+// not). Exercised THROUGH THE WAKE WRAPPER on an agent-directed call, per the conductor's ruling,
+// because wake_seal_report_artifact -> _seal_report_artifact_core never touches
+// clara.archive_signed_original at all -- a wall inside this file's own new door would guard
+// nothing. Both polarities: PR-3.9 refuses kind='signed_original'; PR-3.10, the SAME wake call
+// shape, admits any OTHER kind -- proving the wall is specific to signed_original, not a blanket
+// refusal of the wake lane. PR-3.1 above is this wall's admitting twin from the OTHER side (the
+// human door, untouched).
+// =================================================================================================
+test("PR-3.9 -- wake_seal_report_artifact refuses kind='signed_original' (the fold-in wall; A.4's reservation held mechanically -- MEASURED: before this wall, this exact call was ACCEPTED on main)", async (t) => {
+  if (!ready) return t.skip("F-A5 PR-3 not applied");
+  if (!pr2ready) return t.skip("F-A5 PR-2 (the wake wrapper) not applied -- this wall is exercised THROUGH the wrapper, per the conductor's ruling");
+  const { eps, world } = await sealedRun("pr3-foldin-agent");
+  const { artifactId: presignId, sha256: presignSha } = await sealArtifact(eps, "pr3-foldin-worker", "pre_sign");
+  const cred = await mintWake({ kind: "interactive", firm: world.firms.A, onBehalfOf: null });
+
+  const sha = sha64("pr3-foldin-signed");
+  const manifest = await buildManifest({ runId: eps.runId, kind: "signed_original", sha256: sha, presignSha256: presignSha });
+  const e = await caught(() => callWrapper(cred.secret, "wake_seal_report_artifact", [
+    ["p_report_run_id", eps.runId], ["p_kind", "signed_original"], ["p_key_extension", "pdf"],
+    ["p_sha256", sha], ["p_byte_size", 4096], ["p_manifest", JSON.stringify(manifest)],
+    ["p_prior_artifact_id", presignId], ["p_rationale", RATIONALE], ["p_model", JSON.stringify(wakeModel())],
+    ["p_op_key", opk("pr3-foldin-agent")],
+  ], { p_byte_size: "bigint", p_manifest: "jsonb", p_model: "jsonb" }));
+  assert.equal(e?.code, "CLR04", `expected the fold-in wall's CLR04; got ${e?.code} ${e?.message}`);
+  assert.equal(errorDetail(e)?.reason, "signed_original_agent_seal_forbidden",
+    `expected the fold-in wall to refuse; got ${e?.code} ${e?.message}`);
+  const signedCount = (await rootQuery(
+    "select count(*)::int n from clara.report_artifacts where report_run_id=$1 and kind='signed_original'",
+    [eps.runId])).rows[0].n;
+  assert.equal(signedCount, 0, "no signed_original row exists after the refused agent-directed attempt -- the trigger fired BEFORE INSERT, not after");
+});
+
+test("PR-3.10 -- differential twin: the SAME wake wrapper sealing kind='draft_watermarked' still succeeds (the wall is specific to signed_original, not a blanket refusal of the wake lane)", async (t) => {
+  if (!ready) return t.skip("F-A5 PR-3 not applied");
+  if (!pr2ready) return t.skip("F-A5 PR-2 (the wake wrapper) not applied");
+  const { eps, world } = await sealedRun("pr3-foldin-twin");
+  const cred = await mintWake({ kind: "interactive", firm: world.firms.A, onBehalfOf: null });
+
+  const sha = sha64("pr3-foldin-twin-draft");
+  const manifest = await buildManifest({ runId: eps.runId, kind: "draft_watermarked", sha256: sha });
+  const out = await callWrapper(cred.secret, "wake_seal_report_artifact", [
+    ["p_report_run_id", eps.runId], ["p_kind", "draft_watermarked"], ["p_key_extension", "pdf"],
+    ["p_sha256", sha], ["p_byte_size", 2048], ["p_manifest", JSON.stringify(manifest)],
+    ["p_prior_artifact_id", null], ["p_rationale", RATIONALE], ["p_model", JSON.stringify(wakeModel())],
+    ["p_op_key", opk("pr3-foldin-twin")],
+  ], { p_byte_size: "bigint", p_manifest: "jsonb", p_model: "jsonb" });
+  assert.ok(out.report_artifact_id, "the SAME wake call shape succeeds for a non-signed_original kind -- the term under test is kind, nothing broader");
+});
+
+// =================================================================================================
 // RETRIEVE -- audited, and it regenerates nothing.
 // =================================================================================================
 test("PR-3.5 -- retrieve_signed_original returns the custody pointer and the evidence, never regenerating bytes", async (t) => {
@@ -165,6 +223,36 @@ test("PR-3.5 -- retrieve_signed_original returns the custody pointer and the evi
   assert.deepEqual(out.signature_evidence, ev);
   assert.equal(out.answers_pre_sign_sha256, presignSha);
   assert.ok(!("bytes" in out) && !("pdf" in out), "the retrieval carries a pointer only -- no byte payload, nothing regenerated");
+  // S4: sealed_by names the human who archived it (never the agent -- the fold-in wall makes that
+  // structural); prepared_by_agent is the RUN's own provenance, surfaced so a viewer can render
+  // "Clara prepared this run" without a second query.
+  assert.equal(out.sealed_by, owner, "sealed_by names the archiving human");
+  assert.equal(out.prepared_by_agent, false, "an ordinary sealedRun is human-prepared -- this run's own provenance, not the archiver's");
+});
+
+test("PR-3.12 -- archive_signed_original raises typed CLR10 for a NULL byte size or a blank op_key, not a raw not-null-violation (S8, both terms)", async (t) => {
+  if (!ready) return t.skip("F-A5 PR-3 not applied");
+  const { eps } = await sealedRun("pr3-s8-typed");
+  const { sha256: presignSha } = await sealArtifact(eps, "pr3-s8-worker", "pre_sign");
+  const owner = await ownerOf(eps);
+
+  const eByteSize = await caught(() => archive(owner, [
+    ["p_report_run_id", eps.runId], ["p_sha256", "c".repeat(64)], ["p_byte_size", null],
+    ["p_signature_evidence", JSON.stringify(evidence())], ["p_answers_pre_sign_sha256", presignSha],
+    ["p_op_key", "pr3-s8-bytesize-key"],
+  ]));
+  assert.equal(eByteSize?.code, "CLR10", `expected CLR10, not a raw not-null-violation; got ${eByteSize?.code} ${eByteSize?.message}`);
+  assert.equal(errorDetail(eByteSize)?.class, "byte_size");
+
+  const eOpKey = await caught(() => archive(owner, [
+    ["p_report_run_id", eps.runId], ["p_sha256", "d".repeat(64)], ["p_byte_size", 1024],
+    ["p_signature_evidence", JSON.stringify(evidence())], ["p_answers_pre_sign_sha256", presignSha],
+    ["p_op_key", null],
+  ]));
+  assert.equal(eOpKey?.code, "CLR10", `expected CLR10, not a raw not-null-violation; got ${eOpKey?.code} ${eOpKey?.message}`);
+  assert.equal(errorDetail(eOpKey)?.class, "op_key");
+
+  // THE DIFFERENTIAL TWIN IS ALREADY PR-3.1: the same shape, both fields present, succeeds.
 });
 
 test("PR-3.6 -- retrieve_signed_original returns null (and still audits) when no signed original has been archived", async (t) => {
@@ -205,6 +293,34 @@ test("PR-3.7 -- retrieve_signed_original writes its audit row for a successful r
     [eps.runId])).rows[0];
   assert.equal(found.outcome, "found");
   assert.ok(found.artifact_id, "the successful-read audit row names the artifact it answered");
+});
+
+test("PR-3.11 -- retrieve_signed_original's firm-scope term does something (MF2, MUTATION M6): firm B's caller gets null for firm A's signed original, and its OWN not_found_in_firm audit row lands under firm B -- deleting `and firm_id = c.firm` at the migration would leave every OTHER cell in this file green", async (t) => {
+  if (!ready) return t.skip("F-A5 PR-3 not applied");
+  const { eps, world } = await sealedRun("pr3-firmscope");
+  const { sha256: presignSha } = await sealArtifact(eps, "pr3-firmscope-worker", "pre_sign");
+  const owner = await ownerOf(eps);
+  await archive(owner, [
+    ["p_report_run_id", eps.runId], ["p_sha256", "a".repeat(64)], ["p_byte_size", 1024],
+    ["p_signature_evidence", JSON.stringify(evidence())], ["p_answers_pre_sign_sha256", presignSha],
+    ["p_op_key", "pr3-firmscope-archive"],
+  ]);
+
+  // THE ADMITTING TWIN IS ALREADY PR-3.5/PR-3.7: firm A's own owner retrieves this exact
+  // artifact successfully. This cell is the refusing half of the SAME firm_id term -- firm B's
+  // owner, asking about the SAME run id, must get nothing, not merely "a different answer" --
+  // and firm B's OWN audit trail (not firm A's) must show the refusal.
+  const before = (await rootQuery(
+    "select count(*)::int n from clara.audit_log where args->>'report_run_id'=$1 and fn='retrieve_signed_original' and firm_id=$2",
+    [eps.runId, world.firms.B])).rows[0].n;
+  const out = await retrieve(world.users.dave, eps.runId);
+  assert.equal(out, null, "firm B's caller must not see firm A's signed original -- a cross-firm existence oracle is exactly what this term prevents");
+  const after = (await rootQuery(
+    "select count(*)::int n, bool_or(args->>'outcome'='not_found_in_firm') any_not_found from clara.audit_log where args->>'report_run_id'=$1 and fn='retrieve_signed_original' and firm_id=$2",
+    [eps.runId, world.firms.B])).rows[0];
+  assert.ok(after.n > before, "firm B's refused retrieval still writes ITS OWN audit row, under firm B");
+  assert.equal(after.any_not_found, true,
+    "the audit row records not_found_in_firm -- M6 (deleting the firm_id term at the migration) would make this an ordinary miss rather than a cross-firm refusal, and every OTHER existing cell would stay green, which is exactly the blindness this cell closes");
 });
 
 // =================================================================================================

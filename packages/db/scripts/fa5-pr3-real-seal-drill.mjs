@@ -69,7 +69,46 @@ function docker(args, opts = {}) {
     { encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" }, ...opts });
 }
 
+// FAIL CLOSED ON ASSEMBLER STALENESS -- measured, not theorised. An earlier run of this drill
+// against `clara-render:spike` (a local dev-session image built before `assemble()` gained its
+// SOURCE_DATE_EPOCH-independent `#set document(date:...)` pin) reported the CLOCK arm as a real
+// defect: A vs C diverged. An independent review isolated it correctly by hand-comparing image
+// md5s and re-running against `clara-render:ci`, where all four arms pass (A==B==C, D diverges)
+// -- the divergence was `:spike`'s STALE baked layout.mjs, not a defect in the pinned code. CI
+// itself is immune (.github/workflows/ci.yml's render-drill job always `docker build`s fresh from
+// the Dockerfile and never trusts a cached tag) -- this script, run locally against a pre-built
+// image, is the one place staleness can hide. So: before anything else, extract the TARGET
+// image's baked lib/layout.mjs and md5-compare it against THIS repo's own copy; refuse loudly on
+// a mismatch rather than silently measuring last week's assembler. `clara-render:spike` stays the
+// default (unchanged) -- the guard is the wall, not the default.
+function assertAssemblerCurrent() {
+  const repoLayoutPath = join(HERE, "..", "..", "reporting-render", "lib", "layout.mjs");
+  const repoMd5 = createHash("md5").update(readFileSync(repoLayoutPath)).digest("hex");
+  const probe = docker(["run", "--rm", IMAGE, "md5sum", "/app/packages/reporting-render/lib/layout.mjs"]);
+  if (probe.status !== 0) {
+    fail(`could not read ${IMAGE}'s baked lib/layout.mjs to check staleness: ${(probe.stderr || probe.stdout || "").slice(0, 400)}`);
+  }
+  const imageMd5 = (probe.stdout || "").trim().split(/\s+/)[0];
+  if (!/^[0-9a-f]{32}$/.test(imageMd5)) {
+    fail(`could not parse ${IMAGE}'s layout.mjs md5 from: ${(probe.stdout || "").slice(0, 200)}`);
+  }
+  if (imageMd5 !== repoMd5) {
+    fail(`${IMAGE}'s baked lib/layout.mjs (md5 ${imageMd5}) does not match this repo's own copy `
+      + `(md5 ${repoMd5}) -- the image predates a change to the pinned assembler and any byte `
+      + `claim this drill makes would describe THAT image, not this commit. Rebuild the image `
+      + `from the current Dockerfile (docker build -f packages/reporting-render/Dockerfile -t `
+      + `<tag> ., matching .github/workflows/ci.yml's render-drill job) or point CLARA_DRILL_IMAGE `
+      + `at one that already does.`);
+  }
+  log(`assembler staleness check: PASS -- ${IMAGE}'s baked layout.mjs matches this repo's own (md5 ${repoMd5})`);
+}
+
 async function main() {
+  // FIRST, BEFORE ANY DB OR FIXTURE WORK: the assembler staleness guard. A drill that spends
+  // minutes building a real seal only to report a byte claim about a stale image has wasted the
+  // one thing worth protecting -- fail fast, before a single row is written.
+  assertAssemblerCurrent();
+
   const stage = process.env.CLARA_DRILL_STAGE
     ? (mkdirSync(process.env.CLARA_DRILL_STAGE, { recursive: true }), process.env.CLARA_DRILL_STAGE)
     : mkdtempSync(join(tmpdir(), "fa5-pr3-drill-"));
@@ -196,6 +235,17 @@ async function main() {
       `select evaluator_name, deployed from clara.evaluator_versions
         where (evaluator_name, version) in (('evaluate_fs_pack_agent', 1), ('evaluate_metric', 1))
           and firm_id is null`)).rows;
+    // ROW-COUNT FIRST, BEFORE THE FILTER -- review law 2, inverted: an ABSENT row is not evidence
+    // of "deployed", but `evalRows.filter(r => !r.deployed).length === 0` reads exactly that way
+    // when a row is simply MISSING (registration migration unapplied, or a firm_id drift on the
+    // `is null` term) -- 0 rows in means 0 undeployed out, and the preflight below would pass on
+    // a rig that cannot evaluate anything at all. Two names are named above; exactly two rows
+    // must come back, or the preflight has nothing to have checked.
+    if (evalRows.length !== 2) {
+      fail(`expected exactly 2 evaluator_versions rows (evaluate_fs_pack_agent v1, evaluate_metric v1, `
+        + `firm_id is null) -- got ${evalRows.length}: ${JSON.stringify(evalRows)}. An absent row is not `
+        + `a deployed row; this preflight cannot pass on silence.`);
+    }
     const undeployed = evalRows.filter((r) => !r.deployed).map((r) => r.evaluator_name);
     if (undeployed.length > 0) {
       fail(`the deploy-flip ceremony has not run for: ${undeployed.join(", ")} -- both `
@@ -385,30 +435,40 @@ async function main() {
     log(`CLOCK          ${clockInvariant ? "PASS" : "FAIL"} -- a changed SOURCE_DATE_EPOCH leaves the bytes`);
     log(`CAN-SAY-NO      ${saysNo ? "PASS" : "FAIL"} -- a tampered pinned value MOVES the bytes (arm D must differ)`);
 
-    // THE TWO LOAD-BEARING CLAIMS THIS DRILL EXISTS TO PROVE (Annex H acceptance item 2 / TA-P14's
-    // renderer clause): reproduction against a REAL sealed artifact, and the ability to say NO.
-    // Both are gated here.
+    // ALL FOUR ARMS ARE GATED (Annex H acceptance item 2 / TA-P14's renderer clause): reproduction
+    // against a REAL sealed artifact, determinism, clock-invariance, and the ability to say NO.
+    //
+    // RETRACTED FINDING, kept as the dated record of what was actually observed and why -- not
+    // deleted, per the same law this codebase applies to its own dated tripwires, and CORRECTED
+    // TWICE as the isolation sharpened (a misattribution is not settled by the first correction that
+    // sounds plausible). ROUND 1 (this drill's own first run, against the unguarded default
+    // `clara-render:spike`): CLOCK reported as a real defect -- SOURCE_DATE_EPOCH moved the bytes
+    // despite the pinned document date, deterministically and reproducibly. ROUND 2 (independent
+    // review, byte-grounded): isolated the true cause by hand -- `:spike`'s baked lib/layout.mjs
+    // (md5 07a624e850b792841257af839cd37402) PREDATES the commit that gave `assemble()` its
+    // date-pinning `#set document(...)` call (md5 9541589e0c4a04d49471318efe2e021d); against
+    // `clara-render:ci` all four arms passed. ROUND 3 (the SAME reviewer, re-probing after this
+    // guard landed): the true severity is WORSE than a clock nicety -- `:spike`'s stale layout.mjs
+    // drops BOTH `title/date` AND `keywords` from the emitted `#set document(...)` call (0.12's own
+    // four fields, see the header comment above `document()`), so `report_run:<uuid>` and
+    // `dataset:<sha256>` -- this drill's own identity pins, carried in `keywords` -- never reach the
+    // rendered bytes AT ALL under that image. Measured: two different databases, two different
+    // firms, two different runs -> BYTE-IDENTICAL sealed PDFs (1c919f49 both, 9954 bytes) against
+    // `:spike`, while `:ci` correctly differs run to run. The ROOT CAUSE was assembler staleness in
+    // every round -- not an engine clock defect, not a rendering-pipeline defect in current code --
+    // and it is ONE root cause with a symptom that reads differently depending which two renders you
+    // happen to diff. `assertAssemblerCurrent()` above is that root cause turned into a wall: this
+    // drill can no longer silently measure a stale image and report ANY of its symptoms (clock,
+    // cross-run identity collision, or otherwise) as a fact about current code. There is therefore NO
+    // live clock-invariance defect, no live identity-pin defect, and no PR-4 reconciliation
+    // obligation -- all retracted; the earlier reports to team-lead are the record of the
+    // misattribution and its correction, not a standing finding.
     if (!reproduced) fail("the real artifact is NOT reproducible from its own pinned inputs");
     if (!determinism) fail("two renders of the SAME real inputs produced different bytes");
+    if (!clockInvariant) fail("a changed wall clock moved the bytes of a real render (against an assembler already proven current -- this IS a live defect, not staleness)");
     if (!saysNo) fail("arm D matched arm A -- the drill cannot distinguish a tampered input from a faithful one, which is a worse finding than any mismatch");
 
-    // CLOCK IS MEASURED AND REPORTED, NOT GATED HERE -- and that is a finding, not a shrug.
-    // packages/reporting-render/scripts/double-render-drill.mjs already carries CI's own clock-
-    // invariance claim, proven on its FIXTURE document (drill-fixture.mjs), and DR-render.md
-    // records that fixture's arm as PASS (A==B==C, all three identical) as of 2026-08-15. THIS
-    // run, on a REAL layout with REAL DB-derived content, measures the OPPOSITE on the SAME
-    // pinned image/engine/font: re-run twice at each of two epochs gives a stable, deterministic,
-    // repeatable A1==A1b / C1==C1b / A1≠C1 -- so it is not environmental noise, it is a real
-    // divergence between what the fixture's document exercises and what THIS document does.
-    // Recorded here rather than silently dropped or forced green (absence is not evidence, and
-    // neither is a convenient one-arm reading); left OUT of this run's pass/fail gate because the
-    // claim it would be re-testing belongs to the fixture-level drill, not to this one, and this
-    // drill's OWN two claims (reproduction + can-say-no) are unaffected by it either way.
-    if (!clockInvariant) {
-      log("NOTE: the clock arm's divergence on a real document is reported to team-lead as a finding for the fixture-level drill/renderer lane to investigate -- not a PR-3 blocker.");
-    }
-
-    log(`fa5-pr3-drill: PASS -- real seal path + the drill's two load-bearing claims (reproduction, can-say-no); clock arm measured ${clockInvariant ? "PASS" : "FAIL (see NOTE)"}`);
+    log("fa5-pr3-drill: PASS -- real seal path + all four arms (reproduction, determinism, clock, can-say-no)");
     log(`ARTIFACT_ID=${artifact.id} REPORT_RUN_ID=${runId} FIRM_ID=${firmId} CLIENT_ID=${client}`);
   } finally {
     if (!process.env.CLARA_DRILL_STAGE) rmSync(stage, { recursive: true, force: true });
