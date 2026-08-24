@@ -228,6 +228,14 @@ test("R9.G2 an attestation that signed a state which has since MOVED refuses by 
   ]) {
     await upsertAccountClassed(world.users.alice, { client, code, name, type, ...opts, opKey: opk("er9-coa") });
   }
+  // F-A3/PR-1b drawer-2 arm 4 (TA-P14, ratified): this client's BANK1 is a plain asset leg,
+  // never registered through add_bank_account -- zero clara.bank_accounts rows. Declared
+  // truthfully through the governed door so this cell measures ITS OWN gate (closing_stock_present),
+  // not the unrelated bank-registry wall.
+  await recordClientFact(world.users.alice, {
+    client, factKey: "banking_arrangement", factValue: "no_accounts",
+    basis: "er9 rig: a genuinely bank-less client by fixture design", basisKind: "owner_instruction",
+  });
   const proposal = await proposeFY(world.users.alice, { client, startsOn: FY_START });
   const opened = await openFY(world.users.alice, { client, label: "er9 stale FY1", startsOn: FY_START, endsOn: proposal.ends_on });
   await plainEntry(world.users.bob, {
@@ -295,6 +303,14 @@ test("R9.G3 the closing-stock question for a SERVICES business, both directions:
   ]) {
     await upsertAccountClassed(world.users.alice, { client, code, name, type, ...opts, opKey: opk("er9-coa") });
   }
+  // F-A3/PR-1b drawer-2 arm 4 (TA-P14, ratified): same declaration as R9.G2's identical
+  // fixture shape -- a genuinely bank-less client, declared truthfully through the governed
+  // door, so this cell measures ITS OWN gate (closing_stock_present / trade_nature), not the
+  // unrelated bank-registry wall.
+  await recordClientFact(world.users.alice, {
+    client, factKey: "banking_arrangement", factValue: "no_accounts",
+    basis: "er9 rig: a genuinely bank-less client by fixture design", basisKind: "owner_instruction",
+  });
   const facts = (await rootQuery(
     `select count(*)::int as n from clara.client_facts
       where client_id=$1 and fact_key='trade_nature' and superseded_at is null`, [client])).rows[0].n;
@@ -447,12 +463,16 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
   // mandatory setup: today's estate (0002 six + 0006's two _login roles + 0009's
   // clara_wake_write_login) carries exactly seven non-sanctioned clara_ roles — the four the
   // old blacklist named PLUS clara_agent_read_login, clara_runtime_login, clara_wake_write_login,
-  // which it silently missed. A role invented later only grows this set; it is never re-hardcoded.
-  assert.equal(machineRoles.length, 7,
-    `mandatory setup: expected the seven known non-sanctioned clara_ roles (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
+  // which it silently missed. A role invented later only grows this set; it is never re-hardcoded
+  // -- ROSTER EXTENSION (F-A3/PR-1b, DDL 7): clara_wake_bank + clara_wake_bank_login grow it to
+  // nine. Both are already covered by this cell's OWN loop below (neither holds EXECUTE on any
+  // close verb) -- this is a census update, not a weakening; no close verb's grantee set changed.
+  assert.equal(machineRoles.length, 9,
+    `mandatory setup: expected the nine known non-sanctioned clara_ roles (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
   for (const expected of [
     "clara_agent_ro", "clara_agent_read_login", "clara_runtime", "clara_runtime_login",
     "clara_wake_interactive", "clara_wake_proactive", "clara_wake_write_login",
+    "clara_wake_bank", "clara_wake_bank_login",
   ]) {
     assert.ok(machineRoles.includes(expected), `mandatory setup: the derived census includes ${expected}`);
   }

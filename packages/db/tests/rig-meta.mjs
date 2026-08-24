@@ -903,6 +903,12 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
+// F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold. A named cohort
+// (nit, opus consolidated round) rather than a bare inline string, so a future rename/retire
+// of this one function is caught by the closed-roster dead-exemption sweep like every other
+// wave's own cohort, instead of silently going stale as an unwrapped literal.
+export const BANK_AGENCY_F_A3_PR1B_COHORT = ["set_bank_agency_hold"];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -967,6 +973,11 @@ export const ALLOWED = {
     ...F_A7_PI_HUMAN_FNS, // F-A7 pi: the firm-question door + the identifier-promotion card,
     // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
     ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
+    // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
+    // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
+    // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
+    // something the agent lane can flip on itself).
+    ...BANK_AGENCY_F_A3_PR1B_COHORT,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1163,6 +1174,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
+  failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   return failures;
 }
 

@@ -559,6 +559,14 @@ const F_A7_PI_CLOCK_NAMES = [
 // the train renumbers — and a silently-wrong roster is exactly the drift arm (D) catches.
 const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
 
+// F-A3 PR-1b [the bank-agency agent limb, `f_a3_pr1b_agent_limb` at whatever number merge
+// claimed]: two genuinely new bodies, neither a rename. `set_bank_agency_hold`'s `now()` is
+// the hold row's own `set_at` timestamptz default idiom — the same shape every other human
+// writer already on this roster uses. `_tf_bank_agent_proposal_accept`'s `now()` stamps
+// `decided_at` on the AFTER INSERT trigger (DDL 6) — the same "the audit stamp is the clock"
+// idiom every other `_tf_*` trigger already on this roster carries.
+const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set_bank_agency_hold"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -600,6 +608,7 @@ export async function s5BareTokenRoster(query) {
       if (i !== -1) names.splice(i, 1);
     }
   }
+  if (await appliedStem("f_a3_pr1b_agent_limb$")) names.push(...AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_1b_close_lifecycle$")) {
     // A SWAP, not an addition -- see F_A4_PR1B_CLOCK_NAMES's own header note.
     const i = names.indexOf("abandon_close");

@@ -98,6 +98,12 @@ export async function setupCloseCoa(sub, client) {
   await upsertAccountClassed(sub, { client, code: EXPN, name: "Expense (x56)", type: "expense", opKey: opk("x56-exp") });
   await upsertAccountClassed(sub, { client, code: BANK1, name: "Bank (x56)", type: "asset", opKey: opk("x56-bank") });
   await recordClientFact(sub, { client, factKey: "trade_nature", factValue: "services", basis: "x56 rig: a service business by fixture design", basisKind: "owner_instruction" });
+  // F-A3/PR-1b's drawer-2 arm 4 (TA-P14, 2026-08-22 ratified): a client's banking posture is
+  // DECLARED, never inferred from absence (law 68) -- BANK1 above is a plain asset leg, never
+  // registered through add_bank_account, so this fixture's clients carry ZERO clara.bank_accounts
+  // rows. Without this declaration the drawer-2 gate reads the zero-registry case `not_evaluable`
+  // and the close gate fails `no_registered_account` -- exactly the wall arm 4 exists to raise.
+  await recordClientFact(sub, { client, factKey: "banking_arrangement", factValue: "no_accounts", basis: "x56 rig: a genuinely bank-less client by fixture design", basisKind: "owner_instruction" });
 }
 
 export async function recordClientFact(sub, { client, factKey, factValue, basis, basisKind, sourceDocument = null, opKey = null }) {

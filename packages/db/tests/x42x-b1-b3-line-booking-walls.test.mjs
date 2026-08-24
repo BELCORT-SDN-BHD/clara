@@ -83,11 +83,10 @@ const V_B1 = "^[0-9]{4}_wave_d_b1_staff_advances$";
 const V_B3 = "^[0-9]{4}_wave_d_b3_af2_composite$";
 // eslint-disable-next-line no-unused-vars -- whole-roster invariant; see the note above
 const V_B2 = "^[0-9]{4}_wave_d_b2_recurring_adjustments$";
-// F-A3 PR-1a [the nine pure core extractions, numbered at merge like every slice above]: moves
-// resolve_and_book_bank_line's WHOLE body into an ungranted _resolve_and_book_bank_line_core,
-// leaving the public verb a thin ctx-unpack delegator. lw3 below reads whichever one actually
-// carries the wall call, MEASURED by which exists, never assumed by frontier.
-const V_A3_PR1A = "^[0-9]{4}_f_a3_pr1a_core_extractions$";
+// F-A3 PR-1a (0119) moves resolve_and_book_bank_line's WHOLE body into an ungranted
+// _resolve_and_book_bank_line_core, leaving the public verb a thin ctx-unpack delegator.
+// lw3 below reads whichever one actually carries the wall call, MEASURED by which exists
+// (catalog fact), never by a frontier or version-string check — so no V_ constant here.
 
 const caught = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
@@ -161,15 +160,26 @@ test("x42x.lw3 [POST arm] once 0044 is applied, BOTH D-b3 bodies reach the D-b1 
   }
   // COMMENT-STRIPPED on purpose (E19): every slice carries `[SPLIT D-bN]` notes that NAME the
   // bodies it does and does not ship, so raw text would read a mention as a call.
-  // F-A3 PR-1a moved the composite's WHOLE body into _resolve_and_book_bank_line_core, leaving
-  // resolve_and_book_bank_line a thin ctx-unpack delegator with no wall call of its own — read
-  // whichever body actually carries the logic today, MEASURED by which exists.
-  const pr1aLive = (await applied(V_A3_PR1A)) > 0;
-  const compositeName = pr1aLive ? "_resolve_and_book_bank_line_core" : "resolve_and_book_bank_line";
-  const composite = await strippedDef(compositeName);
-  assert.ok(composite, `clara.${compositeName} exists at D-b3`);
+  //
+  // FRONTIER-AWARE (F-A3/PR-1a core extraction): this cell's own gate above checks D-b3
+  // (0044) only, not the later extraction, so it is reachable at a frontier where the
+  // extraction has not landed -- "old shape still pinned for pre-PR frontiers". Pre-
+  // extraction, the public clara.resolve_and_book_bank_line IS the wall-calling body.
+  // Post-extraction, it becomes a thin delegator with no wall-calling logic of its own, and
+  // the extraction moves that body byte-for-byte into clara._resolve_and_book_bank_line_core
+  // instead. Read whichever body is actually live at THIS frontier rather than assuming
+  // either shape.
+  assert.ok(await fnExists("resolve_and_book_bank_line"), "clara.resolve_and_book_bank_line still exists at D-b3");
+  // strippedDef returns "" (not null/undefined) when a name resolves to nothing --
+  // stripSqlComments' own (src ?? "") coalesces a missing def to the empty string, which
+  // defeats a ?? fallback (only null/undefined trigger it) but not a || one (empty string
+  // is falsy too). || is the correct operator against this helper's actual contract.
+  const core = await strippedDef("_resolve_and_book_bank_line_core");
+  const composite = core || await strippedDef("resolve_and_book_bank_line");
+  assert.ok(composite,
+    `clara.${core ? "_resolve_and_book_bank_line_core" : "resolve_and_book_bank_line"} exists at D-b3`);
   assert.ok(/clara\._adv_assert_proposal\(/.test(composite),
-    `the composite (clara.${compositeName}) CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)`);
+    `the composite${core ? "'s core" : ""} CALLS clara._adv_assert_proposal — the D-b1 wall it is contractually bound to (census §2, legal edge 4)`);
 
   const block = await strippedDef("_wdb_line_booking_block");
   assert.ok(block, "clara._wdb_line_booking_block exists at D-b3");

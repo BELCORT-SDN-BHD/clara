@@ -47,9 +47,10 @@ clara.wake_resolve_bank_line_exception(p_exception uuid, p_disposition text, p_n
 clara.wake_resolve_and_book_bank_line(p_client, p_exception uuid, …) returns jsonb
 clara.wake_propose_bank_line_exception(p_line uuid, p_kind text, p_reason text,
     p_evidence_document uuid, …) returns jsonb        -- writes a PROPOSAL, never an exception
-clara.wake_propose_identifier_promotion(p_client, p_counterparty uuid,          -- NEW at v2 (B5)
-    p_identifier_kind text, p_identifier_value text, p_times_seen int,
-    …) returns jsonb                                  -- writes a PROPOSAL, never a key
+clara.wake_propose_bank_identifier_promotion(p_client, p_counterparty uuid,     -- NEW at v2 (B5);
+    p_identifier_kind text, p_identifier_value text, p_times_seen int,          -- renamed bank-scoped,
+    …) returns jsonb   -- writes a PROPOSAL, never a key -- conductor arbitration 2026-08-24 (F-A7 owns
+                        -- the unscoped name, wave-f-contract.md:315-320; see annexes-2 H.6's own note)
 clara.wake_add_bank_account(p_client, p_proposal_id uuid, p_institution,        -- v2: proposal-anchored
     p_account_number text, p_coa_account_code text, …) returns jsonb
 clara.wake_upsert_account(p_client, p_code text, p_name text, p_type text, …) returns jsonb
@@ -90,7 +91,7 @@ identical for the human ctx (H.1's differential cell + the RED-first cell "a hum
 | `_agent_upsert_account_core` | `_upsert_account_core` | extracted from `0009:1460` (three-CoR lineage) | 1a |
 | `_agent_void_bank_statement_core` | `_void_bank_statement_core` | extracted from `0038:2211` | 1a |
 | `_agent_propose_line_exception_core` | — | new writer over `bank_agent_proposals` | 1b |
-| `_agent_propose_identifier_promotion_core` | — | **NEW at v2 (B5)** — second writer over `bank_agent_proposals` | 1b |
+| `_agent_propose_bank_identifier_promotion_core` | — | **NEW at v2 (B5)**, renamed bank-scoped (conductor arbitration 2026-08-24) — second writer over `bank_agent_proposals` | 1b |
 
 ¹ the ctx-derived `origin` literal · ² the CLR16 `detail.reason` · ³ the M11 waiver hook. **Nine
 pure extractions in PR-1a; the three marked cores are re-CoR'd in PR-1b once they are live.**
