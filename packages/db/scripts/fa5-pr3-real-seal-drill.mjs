@@ -22,8 +22,9 @@
 //   CLARA_DRILL_FONT              path to a real .ttf on THIS host (default: the WSL DejaVu path)
 //   CLARA_DRILL_STAGE             a host directory to stage storage + render workdirs in
 //     (default: a fresh temp dir, removed at the end)
-//   CLARA_DRILL_RENDER_ONE_SRC    path to the render-one.mjs helper (staged outside the repo;
-//     see the header note on why this is not committed alongside this script)
+//   CLARA_DRILL_RENDER_ONE_SRC    override for the render-one helper's path (default: the
+//     COMMITTED packages/reporting-render/scripts/fa5-pr3-render-one.mjs, resolved relative to
+//     this file -- so the drill is runnable from a fresh clone with no external staging)
 
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -31,7 +32,11 @@ import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, existsSync, rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_RENDER_ONE = join(HERE, "..", "..", "reporting-render", "scripts", "fa5-pr3-render-one.mjs");
 
 import { rootQuery, roleQuery, ROLES, endPool } from "../tests/rig-helpers.mjs";
 import { buildWorld } from "../tests/rig-fixtures.mjs";
@@ -46,8 +51,10 @@ import { mintWake, callWrapper, wakeModel, RATIONALE, opk } from "../tests/f-a5-
 
 const DOCKER_CMD = (process.env.CLARA_DRILL_DOCKER || "docker").split(/\s+/);
 const IMAGE = process.env.CLARA_DRILL_IMAGE || "clara-render:spike";
-const FONT_HOST = process.env.CLARA_DRILL_FONT
-  || "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"; // resolved INSIDE the docker command's own shell (WSL), not by this Node process
+// readFileSync(FONT_HOST) runs in THIS process, not inside docker -- so on a Windows host running
+// this script directly (as opposed to inside WSL), the default WSL path below will not resolve;
+// CLARA_DRILL_FONT must name a path this Node process can itself read (a Windows path is fine).
+const FONT_HOST = process.env.CLARA_DRILL_FONT || "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 const EPOCH_C = 1234567890; // deliberately a different wall-clock read, for the clock-invariance arm only -- arms A/B/D all use THIS RUN's own derived epoch (see realEpoch below)
 
 function log(msg) { process.stdout.write(`fa5-pr3-drill: ${msg}\n`); }
@@ -457,9 +464,9 @@ function toDockerPath(p) {
 }
 
 function RENDER_ONE_SCRIPT() {
-  const p = process.env.CLARA_DRILL_RENDER_ONE_SRC;
-  if (p && existsSync(p)) return p;
-  fail("CLARA_DRILL_RENDER_ONE_SRC must point at the render-one.mjs helper (staged outside the repo)");
+  const p = process.env.CLARA_DRILL_RENDER_ONE_SRC || DEFAULT_RENDER_ONE;
+  if (existsSync(p)) return p;
+  fail(`render-one helper not found at ${p} (packages/reporting-render/scripts/fa5-pr3-render-one.mjs, or set CLARA_DRILL_RENDER_ONE_SRC)`);
 }
 
 main().catch((err) => { process.stderr.write(`fa5-pr3-drill: ${err?.stack ?? err}\n`); process.exitCode = 1; });

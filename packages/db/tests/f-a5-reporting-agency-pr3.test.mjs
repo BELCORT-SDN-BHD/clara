@@ -3,13 +3,12 @@
 //
 // SCOPE. PR-3's real substance -- the first real seal path exercised end to end through the wake
 // door, and the byte-reproduction drill against that real artifact -- is a Docker+Typst drill,
-// not a `node --test` cell (packages/reporting-render is not a workspace member and this package's
-// rig carries no rendering engine): see docs/plan/completed/f-a5-pr3-real-seal-drill.md for that
-// run's transcript and packages/reporting-render/scripts/real-artifact-drill.mjs for the reusable
-// drill. This file covers the two NEW human doors annex B.11 names (archive_signed_original,
-// retrieve_signed_original) plus their differential refusals -- the part that fits the rig's own
-// battery shape. Design of record: docs/plan/active/reporting-agency-design.md (v2) SS3.8, annex
-// A.5, battery B.11.
+// not a `node --test` cell (this package's rig carries no rendering engine): see
+// scripts/fa5-pr3-real-seal-drill.mjs (this package) and its companion engine helper
+// packages/reporting-render/scripts/fa5-pr3-render-one.mjs. This file covers the two NEW human
+// doors annex B.11 names (archive_signed_original, retrieve_signed_original) plus their
+// differential refusals -- the part that fits the rig's own battery shape. Design of record:
+// docs/plan/active/reporting-agency-design.md (v2) SS3.8, annex A.5, battery B.11.
 //
 // EVERY WALL IS FORCED IN BOTH POLARITIES (law 31): each refusal below has an admitting twin, and
 // the two differ in exactly the term under test.
