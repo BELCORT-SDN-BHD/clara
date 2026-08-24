@@ -220,9 +220,12 @@ ruling (D36) settles what the replacement IS, not whether the cell breaks**)
 · **`x42-producer-role.test.mjs`** (list line 48; `signedCodingRule` at `:79`, `:83`, `:149`).
 
 **DB rig, 38 files. Whole-file retire (10):** `wave-a2-execute-rule-post.test.mjs` ·
-`wave-a2-autopost-rule.test.mjs` · **`wave-a-sightings.test.mjs`** (the breeding block's own
-witness) · `a21-prestate` · `a21-ocr-envelope` · `a21-sightings-lift` · `a21-reconcile` ·
-`x1-anchor` · `x36-vendor-binding-executor` · `x36-q-round-regressions`.
+`wave-a2-autopost-rule.test.mjs` · **the wave-a sightings battery — RETIRED IN PR-1, not PR-3**
+(the breeding block's own witness: its CLAIM *is* breeding behaviour, so the claim-split ruling
+retires it with the excision and C.8's inverted twins replace it; the file no longer exists, and
+this line is deliberately not a path any more) · `a21-prestate` · `a21-ocr-envelope` ·
+`a21-sightings-lift` · `a21-reconcile` · `x1-anchor` · `x36-vendor-binding-executor` ·
+`x36-q-round-regressions`.
 **Helper/roster surgery (10):** `a21-helpers.mjs` · `rig-meta.mjs` · `wave-a-fixtures.mjs:152-171`
 · `wave-a-helpers.mjs` · `wave-a-reads.mjs:62-65,106-114` · `x1-helpers.mjs:390-392` ·
 `wave-b/wb-calls.mjs:355-367` · `wave-b/wb-helpers.mjs:212-226` · `x42-af2-world.mjs:101-105` ·

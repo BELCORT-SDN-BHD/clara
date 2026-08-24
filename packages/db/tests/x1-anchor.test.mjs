@@ -29,7 +29,7 @@ import {
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, draftEntryV3,
   classifyDocument, postViaRule, lastSkipReason, entryStatusOf, counterpartyRows,
   proposeAutopostRule, signAutopostRule, ruleRowById, seedCorroboratingInvoiceFacts, FIELD,
-  has0022, fail0022, ocrAnchorDarkGuard, componentFields, LAI_LOU_MEI, factField,
+  has0022, fail0022, ocrAnchorDarkGuard, componentFields, LAI_LOU_MEI, factField, restateSightings,
 } from "./x1-helpers.mjs";
 
 const REC = "300-X04";
@@ -69,6 +69,11 @@ async function approvedSales({ cp = null, newName = null, date, cents = 90000 })
   // The human draft verb cannot set one — see stampCodingKind's header.
   await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("osa") });
+  // F-A2 PR-1 (D39): the eighth _approve_entry_core body no longer breeds, so the credit
+  // sighting `_ocr_sales_floor` counts is RESTATED from the real approved entry
+  // (0037:2049-2061 replayed). This file's claim is the X4/X5 ANCHOR block, never breeding —
+  // without the pool the ocr_sales rule never goes live and both anchor cells die on setup.
+  await restateSightings(d.entry_id);
   return d.entry_id;
 }
 

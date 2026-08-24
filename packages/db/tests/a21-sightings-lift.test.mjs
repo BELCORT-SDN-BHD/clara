@@ -29,6 +29,7 @@ import {
   proposeAutopostRule, signAutopostRule, ruleRowById,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, stampCodingKind, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
+  restateSightings,
   checkDefs, uniqueIndexDefs, reasonOf,
   AP, EXP,
 } from "./a21-helpers.mjs";
@@ -43,8 +44,15 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — credit-sigh
 
 /** A customer counterparty born through an approved sales entry (Dr REC / Cr REV).
  *  NOTE: the birth approval itself records ONE credit sighting — floor cells count
- *  from 1, not 0. Returns { cp, firstEntry }. */
-async function makeCustomer(sub, { client, name, date = undefined }) {
+ *  from 1, not 0. Returns { cp, firstEntry }.
+ *
+ *  F-A2 PR-1 (D39): the approval no longer BREEDS that sighting — the eighth
+ *  `clara._approve_entry_core` body excises the block — so the row is RESTATED from the real
+ *  approved entry through `restateSightings`, which replays `0037:2049-2061`'s own two inserts.
+ *  Every floor cell below claims something about the FLOORS, never about breeding, so per the
+ *  claim-split ruling their fixtures change and their assertions do not. `restate:false` is for
+ *  the one cell whose claim IS breeding — it is inverted in place, below. */
+async function makeCustomer(sub, { client, name, date = undefined, restate = true }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00" });
   // 0046: the BIRTH entry is floor evidence too — it needs the same corroboration and the
@@ -67,13 +75,14 @@ async function makeCustomer(sub, { client, name, date = undefined }) {
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("custa") });
   const norm = name.toLowerCase().replace(/[^a-z0-9]/g, "");
   const cp = (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
+  if (restate && cp) await restateSightings(d.entry_id, { counterparty: cp });
   return { cp, firstEntry: d.entry_id };
 }
 
 /** One approved sales entry for an EXISTING customer, citing its own fresh doc.
  *  `date` controls the posting date (the OCR floor's ≥60-day span). Returns
  *  { entryId, documentId }. `reuseDoc` cites a caller-provided doc instead. */
-async function salesSighting(sub, { client, cp, date = "2026-06-10", cents = 90000, reuseDoc = null }) {
+async function salesSighting(sub, { client, cp, date = "2026-06-10", cents = 90000, reuseDoc = null, restate = true }) {
   const firm = await firmOf(client);
   const cited = reuseDoc ?? await seedCitedDocument(sub, { firm, client, quote: "RM 900.00" });
   // 0046: the floor now also needs `corroborated >= 6` (a reused doc keeps its one facts lane).
@@ -98,6 +107,8 @@ async function salesSighting(sub, { client, cp, date = "2026-06-10", cents = 900
   // header for why that is the sanctioned transition and not a back door.
   await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ssa") });
+  // F-A2 PR-1 (D39): restated, not bred — see makeCustomer's header.
+  if (restate) await restateSightings(d.entry_id, { counterparty: cp });
   return { entryId: d.entry_id, documentId: cited.documentId, cited };
 }
 
@@ -174,25 +185,28 @@ test("P2 coding_rules.evidence_class: CHECK ('structured','ocr_sales'); a sales 
 // Recording — credit sightings on approved income credit legs; scoping.
 // ===========================================================================
 
-test("P2 an approved sales entry records a CREDIT sighting (side='credit', the income account); bills keep recording side='debit'", async (t) => {
+// F-A2 PR-1 (D39, the claim split) — THE INVERTED TWIN, in place.
+//
+// THE RETIRED CLAIM, named rather than deleted: *"P2 an approved sales entry records a CREDIT
+// sighting (side='credit', the income account); bills keep recording side='debit'."* Its claim
+// IS breeding behaviour, so it retires WITH the excision rather than in PR-3, and this cell now
+// asserts the opposite on the same fixture. The positive claim's successor is C.8's twin set —
+// `f-a2.c8.zero`, `c8.zero-heads` and `c8.inv-ordinary` — which forces the same inversion on the
+// agent-post and human-approve doors; this cell is the CREDIT-SIDE arm of it, which those cells
+// (vendor-shaped) do not reach. `restate:false` is load-bearing: it withholds the fixture's own
+// restatement so the cell measures the DOOR, not the helper.
+test("P2 (INVERTED, D39) an approved sales entry no longer breeds a CREDIT sighting — and a bill breeds no debit one", async (t) => {
   if (skipHere(t)) return;
   const { users, clients } = world;
-  const { cp, firstEntry } = await makeCustomer(users.alice, { client: clients.A1, name: `CREDITCO ${randomUUID().slice(0, 6)}` });
+  const { cp, firstEntry } = await makeCustomer(users.alice, { client: clients.A1, name: `CREDITCO ${randomUUID().slice(0, 6)}`, restate: false });
   assert.ok(cp, "the customer counterparty was born through the audited path (mandatory setup)");
-  const rows = (await sightingRows(clients.A1)).filter((s) => s.counterparty_id === cp);
-  const credit = rows.find((s) => s.side === "credit" && s.entry_id === firstEntry);
-  assert.ok(credit, `the approved sales entry recorded a credit sighting (rows: ${JSON.stringify(rows.map((r) => [r.side, r.account_code])).slice(0, 200)})`);
-  assert.equal(credit.account_code, REV, "the credit sighting keys on the INCOME account of the credit leg");
-  // INTEGRATION (CLASS T, ratified as-built): the 0015 debit pool is preserved
-  // VERBATIM by the pin (additive credit recorder; H2 carve-out + reversal guard
-  // verbatim) — it records side='debit' for ANY debit leg with an active account,
-  // so a sales entry's AR control debit ALSO records a sighting. The pins never
-  // scope the debit recorder; asserting zero contradicted the preserved baseline.
-  // Flagged for the adversarial pass: customers accrue debit sightings on the
-  // receivable control account (see the vendor_account-breeding test below).
-  const debits = rows.filter((s) => s.side === "debit");
-  assert.ok(debits.every((s) => s.account_code === REC), `a pure sales entry's debit sightings key ONLY on the AR control leg (0015-verbatim pool; got ${JSON.stringify(debits.map((d) => d.account_code))})`);
-  // The purchase side still records debit sightings (regression).
+  assert.equal(
+    (await rootQuery("select status from clara.journal_entries where id=$1", [firstEntry])).rows[0].status,
+    "approved", "mandatory setup: the sales entry really was APPROVED — only the accrual is withheld");
+  const rows = (await sightingRows(clients.A1)).filter((s) => s.entry_id === firstEntry);
+  assert.equal(rows.length, 0,
+    `the approved sales entry bred NOTHING — neither the income credit sighting nor the AR-control debit one (got ${JSON.stringify(rows.map((r) => [r.side, r.account_code]))})`);
+  // The purchase side is the same door and inverts with it.
   const firm = await firmOf(clients.A1);
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, quote: "RM 500.00" });
   const d = await draftEntryV3(users.alice, {
@@ -202,9 +216,15 @@ test("P2 an approved sales entry records a CREDIT sighting (side='credit', the i
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("bill"),
   });
   await approveEntry(users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("billa") });
-  const deb = (await sightingRows(clients.A1)).find((s) => s.entry_id === d.entry_id);
-  assert.ok(deb, "the approved supplier bill recorded a sighting");
-  assert.equal(deb.side, "debit", "the bill sighting is side='debit'");
+  assert.equal((await sightingRows(clients.A1)).filter((s) => s.entry_id === d.entry_id).length, 0,
+    "the approved supplier bill bred no debit sighting either — the excision is kind-blind");
+  // …AND THE INSTRUMENT IS LIVE. Without this half the cell would be green against a broken
+  // reader (review law 2): the restatement writes the very rows the door no longer writes, and
+  // they are visible through the SAME `sightingRows` read that returned zero above.
+  assert.ok(await restateSightings(d.entry_id) > 0, "the restatement wrote rows (the counter is a live instrument)");
+  const after = (await sightingRows(clients.A1)).filter((s) => s.entry_id === d.entry_id);
+  assert.ok(after.some((s) => s.side === "debit" && s.account_code === EXP),
+    `the restated pool keys on the expense debit leg exactly as 0037:2049-2055 did (got ${JSON.stringify(after.map((r) => [r.side, r.account_code]))})`);
 });
 
 test("P2 the 3-sighting vendor_account auto-proposal stays DEBIT-scoped — 3 credit sightings breed NO vendor_account rule", async (t) => {
@@ -270,6 +290,8 @@ test("§3.1 the floors are DIRECTION-AWARE: a purchase floor is not satisfied by
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("xv"),
   });
   await approveEntry(users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("xva") });
+  // F-A2 PR-1 (D39): the debit pool this half needs is RESTATED, not bred — see makeCustomer.
+  await restateSightings(d.entry_id);
   const vcp = (await sightingRows(clients.A2)).find((s) => s.entry_id === d.entry_id)?.counterparty_id;
   assert.ok(vcp, "the vendor holds a debit sighting (mandatory setup)");
   const sales = await proposeAutopostRule(users.alice, { client: clients.A2, cp: vcp, accountCode: REV, direction: "sales", evidenceClass: "structured" });

@@ -223,6 +223,14 @@ const AUTHORING_0077_WAKE_FNS = [
   "wake_draft_report_spec", "wake_request_report_preview",
 ];
 const AUTHORING_0077_COHORT = [...AUTHORING_0077_WAKE_FNS];
+// [F-A2 PR-1] THE POSTING WRAPPER, and it is one name because that is the whole surface. The
+// ladder (clara._agent_post_entry_core), the extracted control-leg predicate, the projected
+// supplier floor, the counterparty projection and the receipt trigger function are ABSENT from
+// every roster in this file on purpose — granted to nobody, so the sweep's expected=false IS the
+// assertion that this wrapper is the only door, exactly as η's cores are handled above. No
+// cohort entry: this lane adds ONE granted function, and the sweep only ever consults names that
+// exist in the live catalog, so an earlier-frontier database never reads this row at all.
+const POSTING_F_A2_WAKE_FNS = ["wake_post_entry"];
 // 0090-0095 [Wave-F Track A, F-A1] the LLM witness-pair lane. Same closed-set discipline as the
 // blocks above, and its own cohort per the "wholly present or wholly absent" rule (0024's note):
 // folding these into an earlier migration's cohort would make a pre-F-A1 database report a
@@ -270,6 +278,23 @@ const STATEMENT_F_A1_PR4_UNGRANTED_FNS = ["_persist_statement_core_v2"];
 export const STATEMENT_F_A1_PR4_COHORT = [
   ...STATEMENT_F_A1_PR4_RUNTIME_FNS, ...STATEMENT_F_A1_PR4_UNGRANTED_FNS,
 ];
+// F-A7 pi (train position 1, additive-only — 11 new functions, D1 inventory EMPTY): the
+// firm-open-questions door and the identifier-promotion card each get two human verbs
+// (bookkeeper+ floor body-enforced via `_human_ctx`), clara_authenticated ONLY; agent/wake/
+// runtime gain ZERO EXECUTE anywhere in this file (tail section 8 asserts it in-migration).
+// The name-family predicate (`name_family_token`/`_candidates`/`_is_ambiguous`), both `_core`s
+// and the receipt-surface introspection pair are UNGRANTED to every application role — declaring
+// them here is what makes a future accidental grant FAIL rather than pass silently.
+const F_A7_PI_HUMAN_FNS = [
+  "resolve_firm_question", "dismiss_firm_question",
+  "confirm_identifier_promotion", "decline_identifier_promotion",
+];
+const F_A7_PI_UNGRANTED_FNS = [
+  "_firm_question_core", "_identifier_promotion_core",
+  "name_family_token", "name_family_candidates", "name_family_is_ambiguous",
+  "_assert_receipt_surface_conforms", "agent_receipt_source_census", "agent_receipt_dark_rows",
+];
+export const F_A7_PI_COHORT = [...F_A7_PI_HUMAN_FNS, ...F_A7_PI_UNGRANTED_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -869,11 +894,13 @@ export const ALLOWED = {
     // STABLE and writes nothing, while requeue_render_job is plpgsql, INSERTS a successor job and
     // writes an audit row. Both are clara_authenticated ONLY.
     ...RENDER_ZETA_HUMAN_FNS,
+    ...F_A7_PI_HUMAN_FNS, // F-A7 pi: the firm-question door + the identifier-promotion card,
+    // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
@@ -1056,6 +1083,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   return failures;
 }
 

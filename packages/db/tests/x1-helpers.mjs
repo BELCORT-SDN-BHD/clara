@@ -344,6 +344,7 @@ export function componentFields({
   gross, net = null, tax = null, rounding = null,
   serviceCharge = null, discount = null, delivery = null,
   currency = "MYR", invoiceId = null, invoiceDate = "2026-06-15",
+  vendorName = null,
 }) {
   const f = [
     factField("invoice.total", rm(gross)),
@@ -351,6 +352,13 @@ export function componentFields({
     factField("invoice.invoice_id", invoiceId ?? `RIG-${randomUUID().slice(0, 8)}`),
     factField("invoice.invoice_date", invoiceDate, { polygon: [], confidence: 0.9 }),
   ];
+  // F-A2 PR-1 (D11): a SUPPLIER IDENTITY makes the document's direction readable. The draft
+  // core's direction-family arm now binds every agent-lane coded draft rather than only the
+  // autodraft wake kind, and a page that names nobody has no testable direction — the resolver
+  // raises CLR30 and the tri-state answers 'unresolved', which is a refusal. Callers pass the
+  // CLIENT's own registered name for a sales document (the resolver's (S) arm) and a third
+  // party's for a purchase. It is one stated field, and a real invoice states it.
+  if (vendorName) f.push(factField("invoice.vendor_name", vendorName));
   const add = (path, cents) => {
     if (cents === null || cents === undefined) return;
     f.push(factField(path, rm(cents), { polygon: [], confidence: 0.9 }));

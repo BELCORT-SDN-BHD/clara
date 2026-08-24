@@ -246,7 +246,8 @@ test("§6.2 queue entry rows carry coding_kind (the direction-aware vocabulary f
   await upsertPayableAccount(sub, { client, code: AP, name: "Trade Creditors", opKey: opk("ap") }).catch(() => {});
   await upsertAccountClassed(sub, { client, code: EXP, name: "Prof Fees", type: "expense", opKey: opk("exp") }).catch(() => {});
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 500.00" });
+  // F-A2 PR-1 (D11): the coded agent draft below needs a readable direction; state the supplier.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 500.00", direction: "purchase" });
   const cred = await mintInteractive(firm);
   const d = await wakeDraftEntry(cred, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
