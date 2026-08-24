@@ -403,12 +403,51 @@ test("x42.r8s-k2 the acknowledgement is IN the request hash, and it never manufa
   // in clara.match_bank_line's audit payload and in this verb's). A hash that omitted it
   // would serve an ack=true replay the ack=false call's receipt on any verb whose dedup IS
   // reachable — which is the defect clara.match_bank_line's own header records.
-  const src = (await rootQuery(
+  //
+  // (Provenance, F-A3 PR-1a review: THIS SITE WAS NOT ON THE DESIGN'S M2 LIST -- it is the
+  // sixth prosrc pin on an extracted public body, found by re-running the census P-16
+  // predicted was complete; the correction is recorded in the annexes.)
+  // FRONTIER-AWARE (F-A3/PR-1a core extraction): this file's own gate (af2SubstrateReady,
+  // just 0037/0038/0040's bank substrate) does NOT require PR-1a's extraction, so this cell
+  // is reachable at a frontier where the extraction has not landed yet -- exactly the
+  // "old shape still pinned for pre-PR frontiers" case. Once it lands, the public
+  // clara.resolve_and_book_bank_line becomes a thin delegator (its own comment says so
+  // verbatim -- "the prosrc pins that measure it moved with the body") and carries NO
+  // _hash(...) call of its own; the request-hash construction this cell reads moves,
+  // byte-for-byte, into clara._resolve_and_book_bank_line_core. Read whichever body is
+  // actually live rather than assuming either shape. The FIRST _hash(jsonb_build_object(...))
+  // in the live body is the request hash (the second, extraction-only, is the draft leg's
+  // derived approve-key hash, a different act); [0] pins that ordering rather than leaving
+  // the regex to match whichever comes first by accident.
+  const coreRow = (await rootQuery(
     `select p.prosrc as s from pg_proc p
-      where p.pronamespace='clara'::regnamespace and p.proname='resolve_and_book_bank_line'`)).rows[0].s;
-  const hashArgs = /clara\._hash\(jsonb_build_object\(([\s\S]*?)\)\)\)/.exec(src)?.[1] ?? "";
-  assert.match(hashArgs, /'ack'/,
+      where p.pronamespace='clara'::regnamespace and p.proname='_resolve_and_book_bank_line_core'`)).rows[0];
+  const src = coreRow
+    ? coreRow.s
+    : (await rootQuery(
+        `select p.prosrc as s from pg_proc p
+          where p.pronamespace='clara'::regnamespace and p.proname='resolve_and_book_bank_line'`)).rows[0].s;
+  const hashCalls = [...src.matchAll(/clara\._hash\(jsonb_build_object\(([\s\S]*?)\)\)\)/g)];
+  assert.ok(hashCalls.length >= 1,
+    `the ${coreRow ? "core" : "public verb"} still constructs at least one request hash`);
+  assert.match(hashCalls[0][1], /'ack'/,
     "the composite's request hash must carry the acknowledgement");
+  // THE WRAPPER TWIN: the public verb keeps its owner floor and delegates, and reserves NOTHING
+  // of its own — so the hash pin above is measuring the only body that computes one. Written as
+  // its own assertion because a moved pin with no wrapper twin is how a re-inlined body walks
+  // out from under the pin that was supposed to cover it (Annex C / M2). FRONTIER-GUARDED on
+  // the core's existence, same reasoning as the hash read above: pre-extraction chains have no
+  // wrapper to measure, and the hash pin's fallback arm already covers the old shape there.
+  if (coreRow) {
+    const publicSrc = (await rootQuery(
+      `select p.prosrc as s from pg_proc p
+        where p.pronamespace='clara'::regnamespace and p.proname='resolve_and_book_bank_line'`)).rows[0].s;
+    assert.ok(publicSrc.includes("clara._human_ctx(clara.role_rank('owner'))")
+      && publicSrc.includes("clara._resolve_and_book_bank_line_core("),
+    "clara.resolve_and_book_bank_line keeps its owner floor and delegates to the core");
+    assert.ok(!publicSrc.includes("clara._hash(") && !publicSrc.includes("clara._reserve_op("),
+      "clara.resolve_and_book_bank_line computes NO request hash and takes NO reservation of its own — the composite's op-key discipline lives entirely in the core");
+  }
 
   // …and the AUDIT records the caller's answer, which is the other half of that law.
   const audit = (await rootQuery(

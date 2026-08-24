@@ -100,7 +100,7 @@ test("T1 the plan document tracks not_yet_measured -> measured/fail -> attested(
 
   const fx = await cleanCloseableFY(owner, { tag: "theta-t1", prepSub: prep, startsOn });
 
-  // BEFORE any close run: every one of the 13 catalog checks reads
+  // BEFORE any close run: every one of the 14 catalog checks reads
   // 'not_yet_measured' (an honest absence, never a fabricated 'unknown'); every
   // check's sole '__gate__' item carries an explicit attestation absence; no
   // close run, no receipt.
@@ -109,7 +109,11 @@ test("T1 the plan document tracks not_yet_measured -> measured/fail -> attested(
   assert.equal(pre.fiscal_year.status, "open");
   assert.equal(pre.close_run.state, "absent", "no close run has begun yet");
   assert.equal(pre.receipt.state, "absent", "no receipt before any close");
-  assert.equal(pre.checks.length, 13, "all 13 catalog checks ride the plan, unfiltered by applies_when");
+  // CENSUS C15 (F-A4 PR-1a): thirteen became fourteen when `undated_documents` was added as
+  // its own drawer-2 row (D-18). The key is named, never absorbed into a bare count.
+  assert.equal(pre.checks.length, 14, "all 14 catalog checks ride the plan, unfiltered by applies_when");
+  assert.ok(pre.checks.some((c) => c.check_key === "undated_documents"),
+    "the fourteenth is undated_documents");
   for (const c of pre.checks) {
     assert.equal(c.result.state, "not_yet_measured", `${c.check_key}: unmeasured before any close run`);
     assert.ok(Array.isArray(c.items) && c.items.length >= 1, `${c.check_key}: carries at least the __gate__ item`);

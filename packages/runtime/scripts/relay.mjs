@@ -20,7 +20,7 @@
 //   node scripts/relay.mjs            → run the relay loop
 //   node scripts/relay.mjs redrive <eventId> [--consumer <name>]
 //                                     → one-shot idempotent dead-letter redrive; <name> is any
-//                                       registered consumer (router|matcher|rule_post|
+//                                       registered consumer (router|matcher|
 //                                       sst_watch|facts_gate|wiki_projection), default router
 //   node scripts/relay.mjs wiki-backfill [--sources <path.json>]
 //                                     → Wave B ceremony: deterministic wiki ingest of pre-0017
@@ -62,7 +62,6 @@ import {
   runRelayCycle,
 } from "../lib/relay.mjs";
 import { CONSUMERS as MATCHER_CONSUMERS } from "../lib/matcher.mjs";
-import { CONSUMERS as RULE_POST_CONSUMERS } from "../lib/rule-post.mjs";
 import { CONSUMERS as SST_WATCH_CONSUMERS } from "../lib/sst-watch.mjs";
 import { CONSUMERS as FACTS_GATE_CONSUMERS } from "../lib/facts-gate.mjs";
 import { CONSUMERS as WIKI_PROJECTION_CONSUMERS } from "../lib/wiki-projection.mjs";
@@ -75,14 +74,14 @@ import {
 import { makeRuntimeClient } from "../lib/pools.mjs";
 
 // Every registered spine consumer's redrive seam, merged. Each module owns its own entry
-// (name + identity + redrive), so the CLI never hardcodes a consumer's identity: matcher and
-// rule_post need the raw runtime LOGIN (their writers' EXECUTE lives on the login shell, not
+// (name + identity + redrive), so the CLI never hardcodes a consumer's identity: matcher
+// needs the raw runtime LOGIN (its writers' EXECUTE lives on the login shell, not
 // the clara_runtime group); router, sst_watch and facts_gate are plain runtime-role calls.
-// Without the merge, `redrive sst_watch|facts_gate|rule_post <event>` was rejected as an
-// unknown consumer and /ready warned about dead-letters no operator could clear.
+// (The rule_post consumer RETIRED with F-A2 PR-3 — matcher is now the sole LOGIN-shell
+// consumer in this merge.) Without the merge, `redrive sst_watch|facts_gate <event>` was
+// rejected as an unknown consumer and /ready warned about dead-letters no operator could clear.
 const CONSUMERS = Object.freeze({
   ...MATCHER_CONSUMERS,
-  ...RULE_POST_CONSUMERS,
   ...SST_WATCH_CONSUMERS,
   ...FACTS_GATE_CONSUMERS,
   ...WIKI_PROJECTION_CONSUMERS,

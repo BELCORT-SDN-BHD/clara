@@ -344,6 +344,7 @@ export function componentFields({
   gross, net = null, tax = null, rounding = null,
   serviceCharge = null, discount = null, delivery = null,
   currency = "MYR", invoiceId = null, invoiceDate = "2026-06-15",
+  vendorName = null,
 }) {
   const f = [
     factField("invoice.total", rm(gross)),
@@ -351,6 +352,13 @@ export function componentFields({
     factField("invoice.invoice_id", invoiceId ?? `RIG-${randomUUID().slice(0, 8)}`),
     factField("invoice.invoice_date", invoiceDate, { polygon: [], confidence: 0.9 }),
   ];
+  // F-A2 PR-1 (D11): a SUPPLIER IDENTITY makes the document's direction readable. The draft
+  // core's direction-family arm now binds every agent-lane coded draft rather than only the
+  // autodraft wake kind, and a page that names nobody has no testable direction — the resolver
+  // raises CLR30 and the tri-state answers 'unresolved', which is a refusal. Callers pass the
+  // CLIENT's own registered name for a sales document (the resolver's (S) arm) and a third
+  // party's for a purchase. It is one stated field, and a real invoice states it.
+  if (vendorName) f.push(factField("invoice.vendor_name", vendorName));
   const add = (path, cents) => {
     if (cents === null || cents === undefined) return;
     f.push(factField(path, rm(cents), { polygon: [], confidence: 0.9 }));
@@ -364,29 +372,11 @@ export function componentFields({
   return f;
 }
 
-// ---------------------------------------------------------------------------
-// X4 — the dark guard, read off the LIVE catalog
-// ---------------------------------------------------------------------------
-
-/** Is the OCR-sales anchor lane held shut by the extraction-slice DARK GUARD?
- *
- *  0022 adds a leading `if true` disjunct to the executor's multi-anchor block so
- *  `anchor_missing` keeps firing for EVERY ocr_sales draft until X5 (corroboration by
- *  two-reader agreement) removes it deliberately. Contract §2 X4 / gate XG5: emitting the
- *  net + tax facts (X2) would otherwise switch a LIVE posting barrier off as a side effect,
- *  which is the ground on which the naive Gate-P build was refused
- *  (docs/plan/research/wave-b/gate-p-build-refused-2026-07-27.md, FATAL 2).
- *
- *  Derived from the live catalog rather than from a migration number ON PURPOSE: the day X5
- *  deletes that disjunct, every cell that consults this flips back to asserting the post
- *  with NO test edit. A hard-coded expectation would have to be re-litigated at exactly the
- *  moment the pressure is to make the test agree with whatever shipped.
- *
- *  NOT OBVIOUS, SO STATED: the anchor block sits BEFORE controls (d) `customer_unresolved`
- *  and (e2) `floor_lost`. While the guard is armed those two skips are SHADOWED — still
- *  present, still re-derived, but unreachable THROUGH THE EXECUTOR, because the anchor block
- *  returns first. Cells naming them assert the shadowing explicitly rather than pretending
- *  the control was exercised. */
-export async function ocrAnchorDarkGuard() {
-  return (await fnSource("execute_rule_post")).includes("X4 DARK GUARD");
-}
+// X4 — the dark guard helper (ocrAnchorDarkGuard) RETIRED (F-A2 PR-3, Annex B.1/C.15's
+// "the two SOFT-failing helpers are deleted"). It read `fnSource("execute_rule_post")` for a
+// marker string; with execute_rule_post dropped, fnSource returns "" for the missing function
+// and the check would silently stop proving its own claim without going red (the same soft-
+// fail shape x37.t's caught()-wrapped ACL probe had, fixed in the same round). Its only two
+// callers (a21-adversarial.test.mjs's ADV-3/ADV-5) were already `{skip: ...}`-gated for the
+// same retirement, so the fix is deletion, not a positive-absence rewrite: the guard's whole
+// subject — the OCR-sales anchor lane inside execute_rule_post — no longer exists to probe.
