@@ -21,7 +21,7 @@ import { after, test } from "node:test";
 import { endPool, rootQuery, withActor } from "./epsilon-fixtures.mjs";
 import { artifactRows, buildEpsilonWorld } from "./epsilon-world.mjs";
 import {
-  asOwner, asRuntime, parkQueue, sealedRun, sharedWorld, skipUnlessZeta,
+  asOwner, asRuntime, sealedRun, sharedWorld, skipUnlessZeta,
 } from "./zeta-fixtures.mjs";
 
 after(async () => { await endPool(); });
@@ -55,9 +55,20 @@ test("zeta: the enqueue is idempotent on (run, request manifest) and builds its 
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("idem");
 
+  // THE SEAL IS THE CREATOR NOW — S9's integration line, landed by F-A5 PR-1 (survey R-N5), stated
+  // in words at `0080:225-236` since this lane shipped. So the first arm is no longer "an enqueue
+  // creates a job"; it is "the job is ALREADY THERE, made inside the sealing transaction", read off
+  // the row before anything else touches the queue. The idempotence this cell is named for is
+  // proven by the two explicit enqueues below, which must both be no-ops returning that same job.
+  const sealEnqueued = (await rootQuery(
+    "select id, kind from clara.render_jobs where report_run_id = $1", [eps.runId])).rows;
+  assert.equal(sealEnqueued.length, 1, "sealing the dataset enqueued exactly one render job");
+  assert.equal(sealEnqueued[0].kind, "pre_sign", "of the kind the contract names");
+
   const first = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
   const second = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
-  assert.equal(first.created, true);
+  assert.equal(first.created, false, "the seal already created it — a re-enqueue is a no-op");
+  assert.equal(first.render_job_id, sealEnqueued[0].id, "and it returns the SEAL's job, not a second one");
   assert.equal(second.created, false, "a duplicate enqueue is a no-op that returns the existing job");
   assert.equal(first.render_job_id, second.render_job_id);
   assert.equal(first.manifest_sha256, second.manifest_sha256,
@@ -78,7 +89,8 @@ test("zeta: the enqueue is idempotent on (run, request manifest) and builds its 
 test("zeta A33 arm (i): two concurrent claims, ONE winner — read at the claim, not inferred", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("claim");
-  await parkQueue();   // isolate: exactly one claimable job must exist for this case to mean anything
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
 
   // Two SEPARATE sessions racing the same claim. The first HOLDS ITS TRANSACTION OPEN while the
@@ -111,7 +123,8 @@ test("zeta A33 arm (i): two concurrent claims, ONE winner — read at the claim,
 test("zeta A33 arm (ii): with no leader the job stays CLAIMABLE — delayed, never stranded", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("outage");
-  await parkQueue();   // isolate: "the wake picked up MY job" is only meaningful on an empty queue
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   const job = (await asOwner("select clara.enqueue_render_job($1, 'pre_sign') r", [eps.runId])).rows[0].r;
 
   // No dispatch is ever run: this is the leader outage. The job must remain claimable, and the
@@ -139,7 +152,8 @@ test("zeta A33 arm (ii): with no leader the job stays CLAIMABLE — delayed, nev
 test("zeta: dispatch stamps its attempt BEFORE the start call, and records the outcome", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("dispatch");
-  await parkQueue();   // isolate: `due == 1` is an assertion about THIS job, not about the backlog
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
 
   const due = (await asRuntime("select clara.render_dispatch_begin(interval '10 minutes', 5) r")).rows[0].r;
@@ -169,9 +183,39 @@ test("zeta: dispatch stamps its attempt BEFORE the start call, and records the o
     "'we could not start the renderer' is a recorded fact, not a lost log line");
 });
 
-test("zeta: the fallback sweep enqueues a sealed run that nobody enqueued", async (t) => {
+test("zeta: the fallback sweep is now a BELT — the seal enqueues, and the sweep does not double it", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("fallback");
+  // RE-CUT BY F-A5 PR-1, and the re-cut is the finding, not a repair. This lane shipped saying
+  // (0080's Z3 header, in its own words): "Until that line lands, Z4's fallback sweep enqueues the
+  // same job from the leader within its cadence -- so a missing call DELAYS a render, it never
+  // loses one." THE LINE HAS NOW LANDED. `clara._seal_report_dataset_core` enqueues the pre_sign
+  // job inside the sealing transaction, so on a post-F-A5 database a run sealed THROUGH THE VERB
+  // can never be a run "nobody enqueued" — and this cell's old positive arm (`enqueued >= 1` for a
+  // freshly sealed run) is not merely false, it is UNREACHABLE through the audited path.
+  //
+  // NAMED RATHER THAN QUIETLY WEAKENED: the arm this cell can no longer force is "the sweep
+  // enqueues for a run with no job". Constructing it would need a `dataset_sealed` run whose seal
+  // did not enqueue, and the only rows of that shape are HISTORICAL ones sealed before F-A5 — the
+  // very population the belt still exists for on the live database. A `render_jobs` row cannot be
+  // deleted to fake it (`_tf_render_job_lifecycle`: "a render job is never deleted"), and a run
+  // row inserted by hand would fail the sweep's own manifest build and land in `errors`, which
+  // would prove something about the fixture rather than about the belt.
+  //
+  // What IS forced here: the seal created exactly one job, the sweep does not double it, and this
+  // run is not among the sweep's failures.
+  const sealed = (await rootQuery(
+    "select count(*)::int n from clara.render_jobs where report_run_id = $1 and kind = 'pre_sign'",
+    [eps.runId])).rows[0].n;
+  assert.equal(sealed, 1, "the SEAL enqueued this run's pre_sign job (S9, landed by F-A5 PR-1)");
+  const examined = (await asRuntime("select clara.enqueue_missing_render_jobs(500) r")).rows[0].r;
+  const notPicked = (await rootQuery(
+    `select count(*)::int n from clara.report_runs rr
+      where rr.id = $1 and rr.state = 'dataset_sealed'
+        and not exists (select 1 from clara.render_jobs j where j.report_run_id = rr.id and j.kind = 'pre_sign')`,
+    [eps.runId])).rows[0].n;
+  assert.equal(notPicked, 0,
+    `this run is outside the sweep's population precisely because the seal enqueued it (${JSON.stringify(examined)})`);
   // THE SWEEP IS GLOBAL, SO THIS CELL READS ITS OWN RUN RATHER THAN A GLOBAL COUNTER, and asks for
   // the function's own cap rather than 25. Run against a database holding only this battery's
   // fixtures both were the same thing; run inside the full suite they are not — other lanes leave
@@ -179,7 +223,6 @@ test("zeta: the fallback sweep enqueues a sealed run that nobody enqueued", asyn
   // enqueue is their fact, not this cell's. `failed = 0` asserted the whole database's tidiness
   // and would have gone red on a neighbour's fixture while this run was enqueued perfectly.
   const swept = (await asRuntime("select clara.enqueue_missing_render_jobs(500) r")).rows[0].r;
-  assert.ok(swept.enqueued >= 1, "a sealed run with no artifact and no job must be picked up");
   const mine = (swept.errors ?? []).filter((e) => e.report_run_id === eps.runId);
   assert.deepEqual(mine, [], `this run must not be among the sweep's failures: ${JSON.stringify(mine)}`);
   const n = (await rootQuery("select count(*)::int n from clara.render_jobs where report_run_id = $1",
@@ -276,7 +319,7 @@ test("zeta: the seal gate MOVED into the core — it did not multiply", async (t
   // assertion stays in ζ's battery on purpose: ζ's completion path is the thing that breaks if
   // the gate is ever duplicated back into the wrapper, so ζ is the lane that should notice.
   const core = (await rootQuery(
-    `select pg_get_functiondef('clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure) d`)).rows[0].d;
+    `select pg_get_functiondef('clara._seal_report_artifact_core(uuid,uuid,uuid,text,text,text,bigint,jsonb,uuid,text,uuid,text,jsonb)'::regprocedure) d`)).rows[0].d;
   const wrapper = (await rootQuery(
     `select pg_get_functiondef('clara.seal_report_artifact(uuid,text,text,text,bigint,jsonb,uuid,text)'::regprocedure) d`)).rows[0].d;
   for (const token of ["claim_assessment_absent", "claim_assessment_failed",
@@ -306,7 +349,8 @@ test("zeta: the seal gate MOVED into the core — it did not multiply", async (t
 test("zeta A33 arm (iii): a second completion of the same bytes yields ONE artifact", async (t) => {
   if (await skipUnlessZeta(t)) return;
   const { eps } = await sealedRun("dup");
-  await parkQueue();   // isolate, or the claim below hands back an EARLIER case's job
+  // ISOLATION IS sealedRun's NOW: since F-A5 PR-1 the SEAL enqueues this run's pre_sign job, so a
+  // park HERE would swallow the very job this case needs (zeta-fixtures.mjs, sealedRun).
   await asOwner("select clara.enqueue_render_job($1, 'pre_sign')", [eps.runId]);
   const job = (await asRuntime("select clara.claim_render_job('worker-dup') j")).rows[0].j;
   // Bind the claim to THIS run explicitly. Without this the case silently completed some other

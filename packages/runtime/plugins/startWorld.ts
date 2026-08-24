@@ -2,6 +2,7 @@ import { definePlugin } from "nitro";
 import {
   mintWakeCredential,
   mintWakeCredentialObo,
+  mintWakeCredentialClientObo,
   withReadWakeScoped,
   withWriteWakeScoped,
   withRuntime,
@@ -61,6 +62,7 @@ export default definePlugin(() => {
   (globalThis as unknown as { __claraPools?: unknown }).__claraPools = {
     mintWakeCredential,
     mintWakeCredentialObo,
+    mintWakeCredentialClientObo,
     withReadWakeScoped,
     withWriteWakeScoped,
     withRuntime,

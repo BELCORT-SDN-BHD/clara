@@ -99,6 +99,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
+| Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
 | The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
 | The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |

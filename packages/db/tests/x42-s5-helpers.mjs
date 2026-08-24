@@ -27,8 +27,12 @@ export async function x42Has0042() {
     const r = await rootQuery(
       "select version from clara.schema_migrations where version ~ '^0042_'");
     return r.rows.length > 0;
-  } catch {
-    return false;
+  } catch (e) {
+    // NARROWED, NOT BLANKET. 42P01 (clara.schema_migrations itself absent) is the one honest
+    // "not ready yet" case — a pre-0001 database. Any other error (a typo, a permission change,
+    // a renamed column) is a real bug and must propagate, not be read as "0042 isn't live".
+    if (e.code === "42P01") return false;
+    throw e;
   }
 }
 
@@ -172,9 +176,16 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "_tf_agent_task_insert", "_tf_agent_task_update", "_tf_autodraft_attempt_update", "_tf_coding_task_update", "_tf_counterparty_update_0011",
   "_tf_document_intake_update", "_tf_fa_movement_belt", "_tf_filing_correction_update", "_tf_firm_document_limits_upsert", "_tf_fixed_assets_immutable_0017",
   "_tf_processing_call_reservation_update", "_tf_processing_task_update", "_tf_reservation_update", "_tf_rotate_token", "_tf_wake_intent_consume",
+  // `acknowledge_rule_posts` LEFT this base array with F-A2 PR-3's retirement of the whole
+  // autopost-rule tier (Annex B.1) — dropped here rather than kept-and-subtracted, the same
+  // discipline `begin_chat_turn`'s F-A9 PR-0 departure below uses.
+  // `begin_chat_turn` LEFT this base array at F-A9 PR-0 and is now a REVERSE-gated cohort
+  // (CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES, below) — it is pushed back on any database that
+  // has not applied the hotfix. Removed here rather than kept-and-subtracted so the base
+  // array stays what it claims to be: the set measured at the CURRENT frontier.
   "_wake_cred_full", "ack_compliance_watch", "acknowledge_sweep_run", "add_bank_account",
   "admit_autodraft_task", "answer_interruption", "approve_opening_correction", "approve_opening_seed", "approve_pair_reversal",
-  "approve_wrong_client_correction", "begin_chat_turn", "begin_client_onboarding", "bootstrap_client_plan", "cancel_agent_task",
+  "approve_wrong_client_correction", "begin_client_onboarding", "bootstrap_client_plan", "cancel_agent_task",
   "cancel_client_onboarding", "cancel_opening_seed", "cancel_pair_reversal", "cancel_seeding_batch", "claim_document_intake_upload",
   "claim_document_processing_task", "classify_document", "commit_client_onboarding", "complete_bank_reconciliation", "complete_coding_task",
   "complete_fixed_asset_particulars", "complete_pending_match", "complete_seeding_batch", "complete_stored_document_task", "confirm_attribution_candidate",
@@ -410,6 +421,16 @@ const WITNESS_F_A1_CLOCK_NAMES = ["persist_witness_facts"];
 // PR-4 still measures the roster it actually has.
 const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_statement_facts_v2"];
 
+// F-A5 PR-1 [`f_a5_reporting_agency_pr1` at whatever number merge claimed]:
+// clara._agent_approve_metric_definition_core stamps `approved_at = statement_timestamp()` — the
+// SAME bare timestamptz stamp its human sibling clara.approve_metric_definition already carries
+// and which is already on this roster. It is an approval INSTANT written to a timestamptz column,
+// never a business DATE, so arm (D)'s standing advice ("call the date authority instead") does not
+// apply: clara._book_today() would answer a different question. Joining the roster is the declared
+// cost of the stamp, exactly as the sibling's was. Gated on the migration STEM like every group
+// above, so a chain stopped short of F-A5 measures the roster it actually has.
+const REPORTING_AGENCY_F_A5_CLOCK_NAMES = ["_agent_approve_metric_definition_core"];
+
 // F-A1 PR-3 [the cutover, `f_a1_cutover` at whatever number merge claimed]:
 // clara.fail_witness_facts stamps `finished_at=now()` — the SAME timestamptz column its
 // siblings fail_invoice_facts / fail_statement_facts already stamp bare, no ::date suffix and
@@ -443,6 +464,44 @@ const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 // one-line fill instead of a re-derivation.
 const POSTING_F_A2_PR1_CLOCK_NAMES = [];
 
+// F-A7 pi [train position 1, `f_a7_pi_additive` at whatever number merge claimed]: the firm-
+// question door's two settle verbs and the identifier-promotion card's two settle verbs each
+// stamp `settled_at = now()` — a timestamptz audit column, the same shape as
+// WITNESS_F_A1_PR3_CLOCK_NAMES's finished_at above — and derive no DATE from the session clock
+// anywhere in their bodies. Lawful, and therefore rostered. GATED on the migration's stable
+// stem for the same reason its siblings above are: this battery also runs against pre-pi
+// frontiers where these four names do not exist yet.
+const F_A7_PI_CLOCK_NAMES = [
+  "resolve_firm_question", "dismiss_firm_question",
+  "confirm_identifier_promotion", "decline_identifier_promotion",
+];
+
+// F-A9 PR-0 [the chat token-cap hotfix, `f_a9_chat_token_cap` at whatever number merge
+// claimed]: THE FIRST *REVERSE* COHORT ON THIS ROSTER, and the direction is the whole point.
+// Every block above ADDS a name once a migration lands. This one SUBTRACTS one:
+// clara.begin_chat_turn is on the roster ONLY because of `v_today`
+// (`v_today date := (now() at time zone 'UTC')::date`, 0006:930), whose only two uses were
+// inside the daily-token-budget refusal that F-A9 PR-0 removes on an owner ruling (law 76,
+// "meter, never cap"; TA-P12 = A). Drop the block and the declaration dies with it, so the
+// body stops matching arm (D)'s detector — MEASURED, not predicted: the hotfix migration's
+// own tail runs this file's detector expression against the recut body and refuses to
+// succeed if it still flags.
+//
+// WHY REVERSE-GATED RATHER THAN JUST DELETED. The roster is an exact set equality in BOTH
+// directions, and `db-slice-frontiers` runs this battery against databases pinned at
+// 0042-0045 — where begin_chat_turn still carries `v_today` and still flags. An
+// unconditional deletion would turn every one of those legs red with a one-name diff that
+// says nothing about clock discipline, which is the identical failure mode the 0046/0055/
+// 0056/0057/0059/0072 blocks above exist to prevent, just mirrored. It also keeps the census
+// honest on THIS frontier: if a future edit reintroduced a bare clock into begin_chat_turn,
+// the name would be missing from the expected set and the equality would fail — the roster
+// did not stop watching the function, it moved to the other side of the gate.
+//
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason B3's and F-A1's blocks state:
+// the file is numbered at MERGE, so a `like '0103_%'` gate would silently invert the moment
+// the train renumbers — and a silently-wrong roster is exactly the drift arm (D) catches.
+const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -469,6 +528,11 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
+  if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
+  if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
+  // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
+  // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
+  if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
   return names.sort();
 }
 
@@ -496,14 +560,29 @@ const KL_ROSTER_BASE = [
 // KL_ROSTER_BASE into this window array alongside preview_ocr_sales_evidence.
 const KL_ROSTER_0046 = ["_ocr_sales_floor", "preview_ocr_sales_evidence"];
 
+// F-A4 PR-1a [close key 1, Window A, `f_a4_pr_1a_measurement_layer` at whatever number merge
+// claims]: clara._close_gate_undated spells the same MYT idiom (design close-key-1-design.md
+// v2 §3.10 decision (i)) for its `filed_on` bound and payload key. It CANNOT call
+// clara._book_today() instead: the authority answers "what MYT date is today", while this body
+// needs "what MYT date does THIS document's filed_at timestamp fall on" — a per-row question
+// the authority does not answer, exactly the same shape that put _ocr_sales_floor and its
+// siblings on this roster rather than through the authority. Declared cost, not drift.
+// GATED on the migration's STABLE STEM, never its number — numbers are claimed at merge, and
+// this battery also runs against pre-PR-1a chains where the body does not exist yet.
+const KL_ROSTER_F_A4_PR1A = ["_close_gate_undated"];
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
-  const applied = (await query(
-    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  const applied = async (pat) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version like '${pat}'`
   )).rows[0].n === 1;
-  const retired = (await query(
-    "select count(*)::int as n from clara.schema_migrations where version ~ 'f_a2_cutover_retirement$'"
+  const appliedStem = async (re) => (await query(
+    `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
-  const names = applied && !retired ? [...KL_ROSTER_BASE, ...KL_ROSTER_0046] : [...KL_ROSTER_BASE];
+  const names = [...KL_ROSTER_BASE];
+  // _ocr_sales_floor + preview_ocr_sales_evidence: a WINDOW cohort, present from 0046 until
+  // F-A2 PR-3's retirement (Annex B.1, OQ-3/D36) — see KL_ROSTER_0046's own header.
+  if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) names.push(...KL_ROSTER_0046);
+  if (await appliedStem("f_a4_pr_1a_measurement_layer$")) names.push(...KL_ROSTER_F_A4_PR1A);
   return names.sort().join(" ");
 }

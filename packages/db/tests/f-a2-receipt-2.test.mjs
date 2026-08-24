@@ -126,7 +126,15 @@ test("f-a2.c7.t3-human a HUMAN approval on a two-generation document still succe
   // A SECOND generation on the same document — a later OCR pass. The fact state still names the
   // witness pair, so this is a two-generation document without a moved fact state.
   await seedExtraction({ firm: cited.firm, document: cited.documentId, engineKind: "ocr", status: "done", versionN: 2 })
-    .catch((e) => noteLane(`c7.t3-human: could not seed a second generation (${e.code}: ${e.message})`));
+    .catch((e) => noteLane(`c7.t3-human: second generation raised ${e.code}: ${e.message}`));
+  // THE PREMISE IS RE-READ. Without a REAL second generation this cell measures an ordinary
+  // single-generation human approval, which ALSO writes no pin — proving nothing about T3's
+  // multi-generation handling, which is the entire point of this cell's title.
+  const generations = await rootQuery(
+    "select count(*)::int as n from clara.document_extractions where document_id=$1",
+    [cited.documentId]).catch(() => ({ rows: [{ n: 0 }] }));
+  assert.ok(generations.rows[0].n >= 2,
+    `c7.t3-human precondition: the document REALLY carries two extraction generations (got ${generations.rows[0].n}) — without both this is not a two-generation cell`);
   const region = await factsRegion(cited.documentId, "invoice.total");
   const d = await draftEntryV3(OWNER(), {
     client: A1(),
@@ -314,9 +322,11 @@ test("f-a2.c7.chat-direction the direction-family arm now fires on the CHAT lane
   await ensureChart(OWNER(), A2());
   const cited = await witnessedFiling(OWNER(), { client: A2(), gross: 540000, typeCode: "01" });
   const chat = await interactiveCred(A2(), BOB());
-  const d = await agentDraft(OWNER(), chat, { client: A2(), cited, codingKind: "supplier_bill", lines: supplierLines(540000) })
-    .catch((e) => { noteLane(`c7.chat-direction: the chat draft raised ${e.code}: ${e.message}`); return null; });
-  if (d) assert.ok(d.entry_id, "c7.chat-direction: a well-directed chat draft still lands — the arm narrows nothing lawful");
+  // NO CATCH. A well-directed chat draft succeeding IS the claim this cell exists to prove — a
+  // swallowed error behind `if (d)` let an actual regression (the arm narrowing something
+  // lawful, or breaking entirely) pass silently with zero assertions run.
+  const d = await agentDraft(OWNER(), chat, { client: A2(), cited, codingKind: "supplier_bill", lines: supplierLines(540000) });
+  assert.ok(d?.entry_id, "c7.chat-direction: a well-directed chat draft still lands — the arm narrows nothing lawful");
 });
 
 // ===========================================================================
@@ -339,7 +349,14 @@ test("f-a2.c7b.one a successful post writes EXACTLY ONE entry_post_receipts row"
 test("f-a2.c7b.tierA a TIER-A raise leaves ZERO rows", async (t) => {
   if (await gateCore(t)) return;
   const p = await agentPostable(OWNER(), { client: A1() });
-  await wakePostEntry(await proactiveCred(A1()), p.args).catch(() => null);
+  // THE INTENDED IDENTITY, ASSERTED. A `proactive` credential is not in wake_post_entry's
+  // allowlist ('autodraft'/'interactive' only) — clara.assert_wake_allowed (0004:114-121)
+  // raises CLR03 'wake kind % may not call %'. A bare `.catch(() => null)` let ANY error
+  // (including an unrelated bug) satisfy "zero rows", which proves nothing about Tier A
+  // specifically.
+  const err = await wakePostEntry(await proactiveCred(A1()), p.args).then(() => null, (e) => e);
+  assert.equal(err?.code, "CLR03",
+    `c7b.tierA: the wake-kind allowlist refuses a proactive credential specifically (assert_wake_allowed) — the Tier-A raise this cell is named for (got ${err?.code}: ${err?.message})`);
   assert.equal(await postReceiptCount(p.args.entry), 0,
     "c7b.tierA: a Tier-A raise kills the whole transaction — nothing durable, receipt included");
 });

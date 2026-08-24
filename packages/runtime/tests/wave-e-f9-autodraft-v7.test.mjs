@@ -417,8 +417,13 @@ test("the tool set wires the gate: read_document RECORDS the snapshot it showed,
 // autoDraft.v8.tools.ts). This battery still owns v7's BODY, byte-untouched — v8 is a new
 // closure beside it, widening only readInvoiceFactState — so everything above stays exactly
 // as it was. Only the pin assertion moves, and v7 joins the policy (c) roster.
-test("registry.ts pins autoDraft: autoDraft_v8, and still exports the superseded autoDraft_v7/v6 (policy (c))", () => {
-  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v8");
+// F-A2 PR-2 moved the pin to autoDraft_v9 (the agentic posting lane). This cell's CLAIM was
+// never "v8 is the newest" — it is "the pin is the newest, and every superseded body is still
+// exported" (Appendix A policy (c)). v8 therefore JOINS the policy-(c) list rather than the
+// assertion being deleted, which is the same trueing v7 and v6 got before it.
+test("registry.ts pins autoDraft: autoDraft_v9, and still exports the superseded autoDraft_v8/v7/v6 (policy (c))", () => {
+  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
+  assert.equal(typeof registryMod.autoDraft_v8, "function");
   assert.equal(typeof registryMod.autoDraft_v7, "function");
   assert.equal(typeof registryMod.autoDraft_v6, "function");
   assert.equal(typeof registryMod.autoDraft_v5, "function");

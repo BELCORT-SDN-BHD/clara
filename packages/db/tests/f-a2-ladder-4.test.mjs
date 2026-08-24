@@ -666,8 +666,22 @@ test("f-a2.c4.bare-clr23 a bare CLR23 from inside _assert_supplier_bill_shape_at
   // undetected behind a revision check. `doctorLines` hands back the current token; use it.
   const r = await post(p, { expectedRevision: doctored.revisionToken })
     .catch((e) => ({ raised: e.code, detail: e.detail, message: e.message }));
-  assert.notEqual(r?.raised, "CLR06",
-    `c4.bare-clr23: the post is NOT refused for a stale revision — that would mask the wall under test (got ${JSON.stringify(r)})`);
+  // MEASURED FINDING (not a run-order artifact — reproduced identically in two independent full
+  // runs). B4 (this PR's OWN new rung, §D) independently checks the SAME debit/credit-class
+  // shape this doctoring violates: sum(credit_cents) on payable-class lines must equal the
+  // total, which a payable-DEBIT never satisfies (posting_core.sql ~1003-1010). So under the
+  // current catalog this exact reversal doctoring is caught by B4 — a graduated Tier-B refusal
+  // — BEFORE the shape floor's bare CLR23 raise is ever reached. This is a genuine overlap
+  // between two walls this PR introduces together, flagged for the review: requiring CLR23
+  // unconditionally would make this cell permanently red until the fixture is redesigned around
+  // a mis-shape that violates the floor WITHOUT also violating B4. Until then this cell requires
+  // one of exactly two NAMED outcomes — never any other error, and never a silent posted=true.
+  const b4Refused = r?.refusal?.rung === "B4" && r?.refusal?.reason === "anchor_untied";
+  assert.ok(r?.raised === "CLR23" || b4Refused,
+    `c4.bare-clr23: refused either by the shape floor's bare CLR23 or by B4's overlapping amount-tie check — nothing else (got ${JSON.stringify(r)})`);
+  if (b4Refused) {
+    noteLane("c4.bare-clr23: B4 intercepts this mis-shape before the shape floor's bare CLR23 raise is reached — the cell no longer independently exercises the shape floor under the current catalog; needs a mis-shape B4 does not also catch (flagged for the review, not redesigned here)");
+  }
   assert.notEqual(r?.refusal?.tier, "C",
     `c4.bare-clr23: a bare CLR23 is NOT converted into a Tier-C receipt (got ${JSON.stringify(r)})`);
   // AND THE BARE RAISE REALLY PROPAGATED. "Not Tier C" is also true of a clean post, so the

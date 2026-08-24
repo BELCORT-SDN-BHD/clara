@@ -151,8 +151,10 @@ export async function checkReadiness() {
             checks.autodraft = { ok: true, ...ah };
             const aDead = Number(ah.pendingDeadLetters ?? ah.pending_dead_letters ?? 0);
             const aLag = Number(ah.lag ?? 0);
+            const aDeferred = Number(ah.deferredWithdrawals ?? 0);
             if (aDead > 0) warnings.push(`${aDead} autodraft dead-letter(s)`);
             if (aLag > 1000) warnings.push(`autodraft lag ${aLag}`);
+            if (aDeferred > 0) warnings.push(`${aDeferred} deferred withdrawal(s) awaiting owner-task settle`);
           } catch (err) {
             warnings.push(`autodraft_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }

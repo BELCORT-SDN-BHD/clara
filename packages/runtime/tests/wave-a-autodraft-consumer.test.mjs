@@ -5,7 +5,17 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { admissionNeedsStart, admitDocument, resolveDocumentFilings, runCatchupPass, AUTODRAFT_CONSUMER, AUTODRAFT_EVENT_TYPES } from "../lib/autodraft.mjs";
+import {
+  admissionNeedsStart,
+  admitDocument,
+  admitWithdrawalEvent,
+  autodraftHealth,
+  resolveDocumentFilings,
+  runAutodraftCycle,
+  runCatchupPass,
+  AUTODRAFT_CONSUMER,
+  AUTODRAFT_EVENT_TYPES,
+} from "../lib/autodraft.mjs";
 
 // A scripted mock pg client: open_sweep_run returns a fixed run id; admit_autodraft_task
 // returns the next scripted receipt. Captures the calls so the assertions can inspect args.
@@ -36,7 +46,12 @@ const twoFilings = async () => [
 
 test("consumer name + subscribed event types are the fixed spine identity", () => {
   assert.equal(AUTODRAFT_CONSUMER, "autodraft");
-  assert.deepEqual([...AUTODRAFT_EVENT_TYPES], ["document.invoice_facts_completed", "document.invoice_facts_failed"]);
+  assert.deepEqual([...AUTODRAFT_EVENT_TYPES], [
+    "document.invoice_facts_completed",
+    "document.invoice_facts_failed",
+    "entry.withdrawn",
+  ]);
+  assert.ok(!AUTODRAFT_EVENT_TYPES.includes("entry.revised"), "GM-10 is triggered by withdrawal; revision is evidence only");
 });
 
 test("admissionNeedsStart enqueues on ALL THREE task-minting outcomes — every no-op/refusal outcome does not", () => {
@@ -122,9 +137,257 @@ test("admitDocument passes the sweep origin, run id, model, and reserve tokens t
   assert.deepEqual(client.calls.admits[0], ["fil-1", "sweep", "run-9", "gpt-x", 12345]);
 });
 
-test("runCatchupPass admits with origin 'sweep' — the UNATTENDED pass may never take the one_click door", async () => {
+test("GM-10 withdrawal events use the audited exact-event door and enqueue only a minted task", async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      assert.match(sql, /readmit_autodraft_after_withdrawal/);
+      return {
+        rows: [{ receipt: { outcome: "re_admitted_after_withdrawal", task_id: "task-fresh" } }],
+        rowCount: 1,
+      };
+    },
+  };
+
+  const out = await admitWithdrawalEvent(
+    client,
+    { eventId: "withdrawal-event" },
+    { model: "gpt-x", reserveTokens: 24680 },
+  );
+
+  assert.deepEqual(calls[0].params, ["withdrawal-event", "gpt-x", 24680]);
+  assert.deepEqual(out.admitted, ["task-fresh"]);
+  assert.equal(out.retry, false);
+  assert.equal(out.receipt.outcome, "re_admitted_after_withdrawal");
+});
+
+test("GM-10 near-miss withdrawal evidence is consumed without inventing an admission", async () => {
+  const client = {
+    query: async () => ({ rows: [{ receipt: { outcome: "not_eligible" } }], rowCount: 1 }),
+  };
+  const out = await admitWithdrawalEvent(client, { eventId: "manual-draft-withdrawal" });
+  assert.deepEqual(out.admitted, []);
+  assert.equal(out.retry, false);
+  assert.equal(out.receipt.outcome, "not_eligible");
+});
+
+test("GM-10 retains an early withdrawal until its originating task has settled", async () => {
+  const client = {
+    query: async () => ({
+      rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-running" } }],
+      rowCount: 1,
+    }),
+  };
+  const out = await admitWithdrawalEvent(client, { eventId: "early-withdrawal" });
+  assert.deepEqual(out.admitted, []);
+  assert.equal(out.retry, true, "the effect transaction must retain this event without checkpointing");
+  assert.equal(out.receipt.prior_task_id, "task-running");
+});
+
+test("F2-R GM-10 cycle rolls back and retains a pending-settlement withdrawal — no dead-letter, no checkpoint", async () => {
+  // F2-R (opus review, round 2 — SUPERSEDES round 1's bounded-attempt test): round 1's own
+  // cycle-denominated bound was measured to give up in ~10s of wall-clock time under nudge
+  // pressure while the recovery it raced (the reconciler's orphan settle) runs on a 30-minute
+  // window — after the drop the human's deliberate re-admission act was permanently lost,
+  // exactly like F1's bug one layer up. The deferral is UNBOUNDED again: retained, never
+  // checkpointed, and — this cell's whole point — NEVER dead-lettered either.
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      const normalized = sql.trim().toLowerCase();
+      if (normalized === "begin" || normalized === "rollback" || normalized === "commit") return { rows: [], rowCount: 0 };
+      if (/from clara\.firm_event_seq/.test(sql)) {
+        return { rows: [{ firm_id: "F", head_seq: 6, last_seq: 5 }], rowCount: 1 };
+      }
+      if (/from clara\.domain_events/.test(sql)) {
+        return {
+          rows: [{ seq: 6, id: "early-withdrawal-r2", event_type: "entry.withdrawn", document_id: "D" }],
+          rowCount: 1,
+        };
+      }
+      if (/readmit_autodraft_after_withdrawal/.test(sql)) {
+        return {
+          rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-running" } }],
+          rowCount: 1,
+        };
+      }
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  const enqueued = [];
+  const logs = [];
+  const out = await runAutodraftCycle(client, {
+    onlyFirm: "F",
+    enqueue: async (task) => enqueued.push(task),
+    log: (message) => logs.push(message),
+  });
+
+  assert.deepEqual(
+    calls.filter(({ sql }) => /^(begin|commit|rollback)$/i.test(sql.trim())).map(({ sql }) => sql.trim().toLowerCase()),
+    ["begin", "rollback"],
+    "the effect transaction rolls back and NOTHING else opens a transaction — no dead-letter write at all",
+  );
+  assert.equal(
+    calls.some(({ sql }) => /insert into clara\.relay_dead_letters/i.test(sql)),
+    false,
+    "F2-R: a live owner task spends NO poison budget",
+  );
+  assert.equal(
+    calls.some(({ sql }) => /insert into clara\.relay_checkpoints/i.test(sql)),
+    false,
+    "the withdrawal checkpoint is retained",
+  );
+  assert.deepEqual(enqueued, [], "no task exists to enqueue before terminal settlement");
+  assert.deepEqual(out, { firms: 1, admitted: 0, capped: false });
+  assert.ok(logs.some((message) => /deferred without checkpoint \(owner task not yet settled\)/.test(message)));
+});
+
+test("F2-R a stuck owner task defers without dead-letter and without checkpoint advance across many nudge-driven cycles", async () => {
+  // The unbounded retention itself, proved across FAR more cycles than round 1's cap (5) ever
+  // allowed — simulating waitForNudge firing rapidly under estate traffic. No cycle count, of
+  // any size, ever spends a poison budget or advances the checkpoint.
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      const normalized = sql.trim().toLowerCase();
+      if (normalized === "begin" || normalized === "rollback" || normalized === "commit") return { rows: [], rowCount: 0 };
+      if (/from clara\.firm_event_seq/.test(sql)) {
+        return { rows: [{ firm_id: "F", head_seq: 6, last_seq: 5 }], rowCount: 1 };
+      }
+      if (/from clara\.domain_events/.test(sql)) {
+        return {
+          rows: [{ seq: 6, id: "stuck-withdrawal-r2", event_type: "entry.withdrawn", document_id: "D" }],
+          rowCount: 1,
+        };
+      }
+      if (/readmit_autodraft_after_withdrawal/.test(sql)) {
+        return {
+          rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-stuck" } }],
+          rowCount: 1,
+        };
+      }
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  const logs = [];
+  for (let cycle = 0; cycle < 50; cycle++) {
+    await runAutodraftCycle(client, { onlyFirm: "F", enqueue: async () => {}, log: (m) => logs.push(m) });
+  }
+  assert.equal(
+    calls.some(({ sql }) => /insert into clara\.relay_dead_letters/i.test(sql)),
+    false,
+    "F2-R: unbounded retention spends NO poison budget, ever, no matter how many cycles",
+  );
+  assert.equal(
+    calls.some(({ sql }) => /insert into clara\.relay_checkpoints/i.test(sql)),
+    false,
+    "F2-R: the checkpoint never advances past a genuinely stuck deferral",
+  );
+  // Time-throttled logging (DEFERRAL_LOG_INTERVAL_MS, default 60s): 50 cycles running near-
+  // instantaneously in this mock must NOT produce 50 log lines for the SAME event.
+  const deferralLogs = logs.filter((m) => /deferred without checkpoint/.test(m));
+  assert.equal(deferralLogs.length, 1, `expected exactly one throttled log line across 50 rapid cycles, got ${deferralLogs.length}`);
+});
+
+test("F2-R deferredWithdrawals is visible in autodraftHealth while a withdrawal is deferred", async () => {
+  const client = {
+    query: async (sql) => {
+      const normalized = sql.trim().toLowerCase();
+      if (normalized === "begin" || normalized === "rollback" || normalized === "commit") return { rows: [], rowCount: 0 };
+      // autodraftHealth's own combined SELECT names pending_dead_letters — check this FIRST,
+      // since its query text also contains "from clara.firm_event_seq" as a subquery.
+      if (/pending_dead_letters/i.test(sql)) {
+        return { rows: [{ lag: 1, pending_dead_letters: 0, firms_tracked: 1 }], rowCount: 1 };
+      }
+      if (/from clara\.firm_event_seq/.test(sql)) {
+        return { rows: [{ firm_id: "F", head_seq: 6, last_seq: 5 }], rowCount: 1 };
+      }
+      if (/from clara\.domain_events/.test(sql)) {
+        return {
+          rows: [{ seq: 6, id: "health-deferred-r2", event_type: "entry.withdrawn", document_id: "D" }],
+          rowCount: 1,
+        };
+      }
+      if (/readmit_autodraft_after_withdrawal/.test(sql)) {
+        return {
+          rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-stuck" } }],
+          rowCount: 1,
+        };
+      }
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  await runAutodraftCycle(client, { onlyFirm: "F", enqueue: async () => {}, log: () => {} });
+  const health = await autodraftHealth(client);
+  assert.ok(health.deferredWithdrawals >= 1, `expected deferredWithdrawals >= 1, got ${health.deferredWithdrawals}`);
+  assert.equal(health.pendingDeadLetters, 0, "distinct from pendingDeadLetters — the deferral is NOT a dead letter");
+});
+
+test("F2-R when the owner task settles, the SAME withdrawal event unblocks end-to-end", async () => {
+  let settled = false;
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      const normalized = sql.trim().toLowerCase();
+      if (normalized === "begin" || normalized === "rollback" || normalized === "commit") return { rows: [], rowCount: 0 };
+      if (/pending_dead_letters/i.test(sql)) {
+        return { rows: [{ lag: 0, pending_dead_letters: 0, firms_tracked: 1 }], rowCount: 1 };
+      }
+      if (/from clara\.firm_event_seq/.test(sql)) {
+        return { rows: [{ firm_id: "F", head_seq: 6, last_seq: 5 }], rowCount: 1 };
+      }
+      if (/from clara\.domain_events/.test(sql)) {
+        return {
+          rows: [{ seq: 6, id: "unblock-withdrawal-r2", event_type: "entry.withdrawn", document_id: "D" }],
+          rowCount: 1,
+        };
+      }
+      if (/readmit_autodraft_after_withdrawal/.test(sql)) {
+        return settled
+          ? { rows: [{ receipt: { outcome: "re_admitted_after_withdrawal", task_id: "task-unblocked" } }], rowCount: 1 }
+          : { rows: [{ receipt: { outcome: "retry_pending_settlement", prior_task_id: "task-stuck" } }], rowCount: 1 };
+      }
+      if (/insert into clara\.relay_checkpoints/i.test(sql)) {
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error("unexpected query: " + sql);
+    },
+  };
+  const enqueued = [];
+  // Cycle 1: the owner task is still running -- deferred, no checkpoint, nothing enqueued.
+  const before = await runAutodraftCycle(client, { onlyFirm: "F", enqueue: async (id) => enqueued.push(id), log: () => {} });
+  assert.equal(before.admitted, 0);
+  assert.deepEqual(enqueued, []);
+  const healthBefore = await autodraftHealth(client);
+  assert.ok(healthBefore.deferredWithdrawals >= 1, "deferred before settlement");
+  // deferredWithdrawalState is a MODULE-LEVEL map, shared with earlier cells in this same file
+  // that deliberately leave their own stuck event un-settled — so the count is compared as a
+  // DELTA (this test's own event clearing), never asserted against an absolute zero.
+  const countBefore = healthBefore.deferredWithdrawals;
+
+  // The owner task settles. Replaying the SAME event id now reaches 0053's own exception.
+  settled = true;
+  const after = await runAutodraftCycle(client, { onlyFirm: "F", enqueue: async (id) => enqueued.push(id), log: () => {} });
+  assert.equal(after.admitted, 1, "the SAME withdrawal now admits — this is the unblock, not a fresh event");
+  assert.deepEqual(enqueued, ["task-unblocked"]);
+  assert.ok(
+    calls.some(({ sql }) => /insert into clara\.relay_checkpoints/i.test(sql)),
+    "the checkpoint finally advances once the withdrawal actually processes",
+  );
+  const healthAfter = await autodraftHealth(client);
+  assert.equal(healthAfter.deferredWithdrawals, countBefore - 1, "THIS event's deferral clears the moment it resolves");
+});
+
+test("runCatchupPass admits with origin 'sweep' — the generic unattended pass may never take the one_click door", async () => {
   // 0053 / §7-A F8: the re-admit-after-withdrawal arm is gated on p_origin='one_click', which
-  // is what makes a human's withdrawal STICKY AGAINST AUTOMATION. That gate is runtime-layer
+  // is what makes a human's withdrawal STICKY AGAINST ORDINARY AUTOMATION. GM-10 has one
+  // separately named path: the current entry.withdrawn event goes through the audited DB door,
+  // which proves the exact human act before it delegates to 0053. The generic catch-up pass has
+  // no such evidence and must stay sweep. That gate is runtime-layer
   // discipline, NOT a privilege boundary: clara_runtime can call admit_autodraft_task with
   // 'one_click' directly, and 0053's prestate producer census reads pg_proc, which the runtime
   // is not in. So the property has to be pinned HERE, on the one production call site that

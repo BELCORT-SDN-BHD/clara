@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-frozen-evaluators.mjs && node scripts/check-frozen-evaluators.selftest.mjs && node scripts/check-leaks.mjs && node scripts/check-wiki-dynamic-sql.mjs && node scripts/check-wiki-dynamic-sql.selftest.mjs && node scripts/check-harness-links.mjs && node scripts/check-harness-links.selftest.mjs && node scripts/hooks/pinned-ids-guard.selftest.mjs && node scripts/hooks/dispatch-model-guard.selftest.mjs && eslint scripts eslint.config.mjs && pnpm -r --if-present lint && pnpm --dir packages/reporting-render run lint",
+    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-frozen-evaluators.mjs && node scripts/check-frozen-evaluators.selftest.mjs && node scripts/check-leaks.mjs && node scripts/check-wiki-dynamic-sql.mjs && node scripts/check-wiki-dynamic-sql.selftest.mjs && node scripts/check-harness-links.mjs && node scripts/check-harness-links.selftest.mjs && node scripts/ops/dsn-pipe.ca.selftest.mjs && node scripts/ops/dsn-pipe.selftest.mjs && node scripts/ops/dsn-pipe.pgpath.selftest.mjs && node scripts/hooks/pinned-ids-guard.selftest.mjs && node scripts/hooks/dispatch-model-guard.selftest.mjs && eslint scripts eslint.config.mjs && pnpm -r --if-present lint && pnpm --dir packages/reporting-render run lint",
     "freeze:evaluators": "node scripts/check-frozen-evaluators.mjs",
     "freeze:evaluators:update": "node scripts/check-frozen-evaluators.mjs --update",
     "render:check": "pnpm --dir packages/reporting-render run check && pnpm --dir packages/reporting-render run lint && pnpm --dir packages/reporting-render test",
@@ -31,13 +31,16 @@
     "wiki:dynsql": "node scripts/check-wiki-dynamic-sql.mjs",
     "wiki:dynsql:selftest": "node scripts/check-wiki-dynamic-sql.selftest.mjs",
     "harness-links:check": "node scripts/check-harness-links.mjs",
-    "harness-links:selftest": "node scripts/check-harness-links.selftest.mjs"
+    "harness-links:selftest": "node scripts/check-harness-links.selftest.mjs",
+    "dsn-pipe:selftest": "node scripts/ops/dsn-pipe.ca.selftest.mjs && node scripts/ops/dsn-pipe.selftest.mjs && node scripts/ops/dsn-pipe.pgpath.selftest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@types/node": "20.19.0",
     "eslint": "9.39.5",
     "globals": "17.7.0",
+    "pg": "8.20.0",
+    "pg-connection-string": "2.14.0",
     "tsx": "4.23.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.64.0"

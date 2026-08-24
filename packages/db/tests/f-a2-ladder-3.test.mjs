@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
-  booksVersion, opk, counterpartyRows, openQuestion, postingCoreReady,
+  booksVersion, opk, openQuestion, dismissOpenQuestion, createCounterparty, postingCoreReady,
   gateCore, wakePostEntry, agentPostable, agentDraft, autodraftCred, ensureChart,
   witnessedFiling, admits, admitsAll, nonAdmitting, assertVectorShape, assertNonAdmitting,
   supplierLines, salesLines, genericLines, genericWithControlLeg, CHART,
@@ -104,17 +104,33 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
   if (await gateCore(t)) return;
   let probed = 0;
   for (const scope of ["client", "document", "vendor"]) {
-    const p = await agentPostable(OWNER(), { client: A2() });
-    const cps = await counterpartyRows(A2());
+    // VENDOR SCOPE IS SEEDED, NOT ORGANIC. Every iteration of this loop is refused by B9 by
+    // design (that is the cell's whole point), and clara.counterparties rows are birthed by
+    // draft+APPROVE, not by drafting alone — so a purely organic read (the last row of
+    // counterpartyRows(A2())) can never reliably find one from inside this same test: nothing
+    // here ever posts. That made the population-dependent precondition structurally
+    // unsatisfiable rather than merely fragile — the round-5 hardening correctly turned a
+    // vacuous pass into a loud failure, but the fix is to give B9 a REAL counterparty to test
+    // against, not to relax back to a skip. Birthed through the audited door directly
+    // (clara.create_counterparty via createCounterparty), the same product door a human uses.
+    const vendorCp = scope === "vendor"
+      ? await createCounterparty(OWNER(), { client: A2(), kind: "vendor", name: `c3.B9 vendor ${randomUUID().slice(0, 8)}` })
+      : null;
+    // THE DRAFT MUST CITE THE SAME COUNTERPARTY THE QUESTION BLOCKS. agentPostable's default
+    // vendor shape ({new:{name: cited.vendorName}}) births its OWN, separately-named
+    // counterparty — a blocking question opened against the seeded one would then scope to a
+    // party the draft never cites, and B9 would find no match and wrongly ADMIT. Pass
+    // {existing_id, kind} (the same proposal shape 0011/0028's binding doors use) so the draft
+    // is attributed to the exact row the question blocks.
+    const p = await agentPostable(OWNER(), {
+      client: A2(),
+      ...(scope === "vendor" ? { vendor: { existing_id: vendorCp.counterparty_id, kind: "vendor" } } : {}),
+    });
     const scopeId = scope === "document" ? p.cited.documentId
-      : scope === "vendor" ? (cps[cps.length - 1]?.id ?? null) : null;
-    // BOTH ESCAPES WERE `noteLane` + `continue`, AND `noteLane` IS NOT A SKIP — it appends to an
-    // array and the cell still reports PASS. If all three scopes took either escape the loop body
-    // never ran a single assertion, and this cell (the one that proves B9 refuses on every scope
-    // kind) was green having asked nothing. The file's own note records a zero/degenerate
-    // population today, so that was not hypothetical.
+      : scope === "vendor" ? (vendorCp?.counterparty_id ?? null)
+      : A2();
     assert.ok(scope !== "vendor" || scopeId,
-      "c3.B9 vendor: a counterparty was born on the draft — without one the vendor arm has no input and the scope is UNPROVEN, not skippable");
+      "c3.B9 vendor: the seeded counterparty carries an id — without one the vendor arm has no input and the scope is UNPROVEN, not skippable");
     const q = await openQuestion(OWNER(), {
       client: A2(), scopeKind: scope, scopeId, question: `c3.B9 ${scope}-scoped blocker`, opKey: opk("c3B9"),
     });
@@ -127,6 +143,11 @@ test("f-a2.c3.B9 all THREE blocking scope kinds refuse, and the receipt names th
     const qid = q?.question_id ?? q?.id ?? q;
     assert.ok(JSON.stringify(r).includes(String(qid)),
       `c3.B9 ${scope}: the receipt names the question_id ${qid} — a refusal that cannot say WHICH question blocks is not actionable`);
+    // DISMISSED, NOT LEFT OPEN. A 'client' scope blocker is CLIENT-WIDE (clara.open_questions,
+    // status='open') and outlives this iteration — left open it blocks every later A2() post in
+    // this file (B9-neg's rule_proposal admit, D-fa, D-adv), which would then measure this
+    // leftover row instead of what each cell claims to. Dismissed for all three scopes uniformly.
+    await dismissOpenQuestion(OWNER(), { question: qid, reason: `c3.B9 ${scope} probe complete`, opKey: opk("c3B9dismiss") });
     probed += 1;
   }
   // ALL THREE, COUNTED. The claim in the title is "all THREE blocking scope kinds"; a loop that
@@ -265,8 +286,8 @@ test("f-a2.c3.D-fa an FA ACQUISITION DEBIT posts — the cell that would have go
   // pre-hook. So the cell could pass without the FA belt ever being in the picture, which is the
   // one thing it exists to prove. The enrolment is now read back from the catalog.
   const enrolled = await rootQuery(
-    `select count(*)::int as n from clara.fa_profiles
-      where client_id=$1 and asset_account=$2`, [A2(), cost]).catch(() => ({ rows: [{ n: 0 }] }));
+    `select count(*)::int as n from clara.fa_account_profiles
+      where client_id=$1 and asset_account_code=$2 and active`, [A2(), cost]).catch(() => ({ rows: [{ n: 0 }] }));
   assert.ok(enrolled.rows[0].n >= 1,
     `c3.D-fa precondition: the asset account is REALLY enrolled in the FA register (got ${enrolled.rows[0].n}) — without it this cell measures an unenrolled account and proves nothing about B12`);
   const p = await agentPostable(OWNER(), {
@@ -285,7 +306,16 @@ test("f-a2.c3.D-adv a STAFF-ADVANCE DISBURSEMENT DEBIT posts — the same proof 
   await upsertAccountClassed(OWNER(), { client: A2(), code: adv, name: "Staff advances", type: "asset", opKey: opk("c3adv") })
     .catch((e) => noteLane(`c3.D-adv: chart seat (${e.code}: ${e.message})`));
   await enrolStaffAdvanceAccount(OWNER(), { client: A2(), accountCode: adv, opKey: opk("c3advenrol") })
-    .catch((e) => noteLane(`c3.D-adv: advance enrolment refused (${e.code}: ${e.message}) — precondition unbuilt; the cell measures an UNENROLLED account and says so`));
+    .catch((e) => noteLane(`c3.D-adv: advance enrolment raised (${e.code}: ${e.message})`));
+  // THE PREMISE IS RE-READ, NOT ASSUMED — the c3.D-fa sibling's exact lesson: the enrolment
+  // call was wrapped in a catch that only noted the failure, and B12/B13 are cut PRE-hook, so
+  // an ordinary asset/bank JV posts whether or not the account is really enrolled. Without this
+  // read-back the cell could measure an UNENROLLED account and prove nothing about B13.
+  const enrolled = await rootQuery(
+    `select count(*)::int as n from clara.staff_advance_accounts
+      where client_id=$1 and account_code=$2 and active`, [A2(), adv]).catch(() => ({ rows: [{ n: 0 }] }));
+  assert.ok(enrolled.rows[0].n >= 1,
+    `c3.D-adv precondition: the account is REALLY enrolled in the staff-advance register (got ${enrolled.rows[0].n}) — without it this cell measures an unenrolled account and proves nothing about B13`);
   const p = await agentPostable(OWNER(), {
     client: A2(), amount: 300000, codingKind: null,
     lines: genericLines(300000, { debitCode: adv, creditCode: CHART.bank }),

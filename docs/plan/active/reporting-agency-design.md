@@ -92,7 +92,7 @@ sixteen and enumerated eighteen): **seventeen NEW wrappers** after the sandbox s
 | chain | `wake_assess_report_claim` | `_assess_report_claim_core` (**extracted from `0070:279`**) | a standalone human verb today, so it gets a 1:1 sibling (F5-D2); also called internally by the seal (`0070:593`) |
 | chain | `wake_seal_report_dataset` | `_seal_report_dataset_core` (**extracted from `0070:449`**) | calls `_assess_report_claim_core` + the S9 enqueue |
 | chain | `wake_seal_report_artifact` | `_seal_report_artifact_core` (`0071:121`) — **EXTENDED to the identity quadruple** | **D1 #6**: it is the only writer of `report_artifacts`, so ARM 1's artifact-side arm is armed here or nowhere |
-| chain | `wake_requeue_render_job` | `_requeue_render_job_core` (extracted from `0083:169`) | **`p_accept_drift` passes through** — drift consent is Clara's (TA-P1 C; ADR-0074:33; contract:214) |
+| chain | `wake_requeue_render_job` | `_requeue_render_job_core` (extracted from `0083:169`) | **`p_accept_drift` passes through** — drift consent is Clara's (TA-P1 C; ADR-0074:33; contract:220) |
 | definitions | `wake_approve_metric_definition` | `_agent_approve_metric_definition_core` | S3's new evidence kind + the **re-aimed maker/checker wall** (§3.5) |
 | definitions | `wake_supersede_metric_definition` | `_agent_supersede_metric_definition_core` | |
 | definitions | `wake_reject_metric_definition` | `_agent_reject_metric_definition_core` | rejecting a HUMAN's draft is allowed (TA-P1 C) and is receipted as such |
@@ -130,6 +130,16 @@ use typed reads — which is exactly what these are — while the freeform read 
   template publishers duplicates judgement `0069:261-266` forbids duplicating (material 9). The
   extraction is byte-preserving but for the context line and §3.3's identity writes — proven by
   **rig replay of the human lane before and after**, never by reading a diff.
+  *(**Trued at PR-1, and the method is stronger than "moves verbatim" reads.** Nothing is
+  retyped: each core is DERIVED AT APPLY TIME from the live catalog by substitutions with an
+  anchor-uniqueness assertion on each, then PROVEN by REVERSING them and comparing byte for byte
+  against the original — so "byte-preserving but for the context line" is a MEASUREMENT that
+  aborts the migration when it is false, not a claim the replay has to catch afterwards. And the
+  read is of the **whole definition** by literal signature, never `prosrc` plus a hand-typed
+  header: the header is derived too, which removes the one class this file's own PARAMETER-ORDER
+  WARNING says type-checks, and it is the form the wiki dynamic-SQL gate can attribute — see
+  **F5-D34** and **F5-D35**. The derived body's wiki-boundary is asserted at apply on the exact
+  string executed, which no static reader can do.)*
 - **evaluate:** not recut (S2) — **and not routed through `evaluate_metric_v1` either.** That
   entrypoint's own first statement is `c := clara._human_ctx(clara.role_rank('bookkeeper'))`
   (`0059:112`) and it is **ordinal 0** of the same frozen closure (`0059:246`): a wake credential
@@ -174,13 +184,23 @@ computation of any reported figure would be two. Annex C.4 is the census that ke
 **The rule.** Identity is recorded honestly AND the wall is re-aimed — doing only one created S5.
 
 1. `report_runs` gains **`directed_by uuid references clara.users(id)`** (nullable) and
-   **`prepared_by_agent boolean not null default false`**, both written at INSERT (so
-   `_tf_report_run_lifecycle`'s frozen-column list at `0066:415-425` needs **no** recut — it refuses
-   only *changes*). `report_artifacts` gains the same pair **and its INSERT is extended to write
-   them** (`0071:432-435`, the estate's only `insert into clara.report_artifacts`): a column ARM 1
-   reads with no writer is a wall drawn and not armed — the exact S5 shape this section closes.
-   `_seal_report_artifact_core` therefore takes the identity quadruple and its `_audit`
-   (`0071:438`) carries `(p_obo, p_wake_kind)` instead of `(null, null)`.
+   **`prepared_by_agent boolean not null default false`**, both written at INSERT, so
+   `_tf_report_run_lifecycle` needs **no** recut. *(**Trued at PR-1, and the ground is stronger than
+   v2 stated.** The array at `0066:415-425` is not a "frozen-column list" — it is the list of seven
+   columns **EXEMPT** from the freeze, subtracted from both sides of a WHOLE-ROW jsonb diff:
+   `(to_jsonb(new) - v_frozen) is distinct from (to_jsonb(old) - v_frozen)`. New columns therefore
+   join the frozen set **automatically**, and the trigger is `BEFORE DELETE OR UPDATE` — never
+   INSERT — so a column written at INSERT cannot reach it at all. P6 CONFIRMED at the bytes.)*
+   `report_artifacts` gains the same pair **and its INSERT is extended to write them**
+   (`0071:432-435`, the estate's only `insert into clara.report_artifacts`): a column ARM 1 reads
+   with no writer is a wall drawn and not armed — the exact S5 shape this section closes.
+   **The artifact pair is DB-DERIVED from the run row, not taken from the caller** (ruling R-L23,
+   F5-D32): every `pre_sign` artifact in production is sealed by `clara.complete_render_job`, so a
+   caller-supplied pair would have left `report_artifacts.directed_by`/`prepared_by_agent`
+   NULL/false on exactly the artifact the issue binds to. An explicit non-NULL `p_obo` that
+   disagrees with the run refuses `artifact_identity_mismatch`. `_seal_report_artifact_core`
+   therefore takes `(p_obo, p_wake_kind, p_agent)` **appended at the TAIL with NULL defaults**
+   (F5-D32) and its `_audit` (`0071:438`) carries `(p_obo, p_wake_kind)` instead of `(null, null)`.
 2. **`requested_by` carries the DIRECTING human when there is one.** The OBO core writes
    `coalesce(p_obo, clara.agent_user_id())` into `requested_by`, `p_obo` into `directed_by`, and
    `true` into `prepared_by_agent`. `wake_context()` has already re-validated that the director is
@@ -420,7 +440,7 @@ enqueue on it. P10 is re-cut accordingly.
 | 3 | `clara.seal_report_dataset` (`0070:437`) | body moves to `_seal_report_dataset_core`; **S9's enqueue line lands here**; `sealed_by`/`directed_by` |
 | 4 | `clara.approve_report_for_issue` (`0072:49`) | §3.3's ARM 0 + the four-identity comparison + `agent_prepared` |
 | 5 | `clara._tf_metric_definition_lifecycle_v1` (`0059:26`) | S3's `agent_self_approval` arm — **a live trigger body** |
-| 6 | `clara._seal_report_artifact_core` (`0071:121`) + its delegate (`0071:450`) | **blocker 2** — the estate's ONLY `insert into clara.report_artifacts` (`0071:432`); it gains `(p_obo, p_wake_kind)`, writes `directed_by`/`prepared_by_agent`, writes the F-A5 receipt, and audits with the pair (`0071:438`). The public signature is unchanged; the human delegate passes NULLs |
+| 6 | `clara._seal_report_artifact_core` (`0071:121`) — **the core ALONE** | **blocker 2** — the estate's ONLY `insert into clara.report_artifacts` (`0071:432`); it gains `(p_obo, p_wake_kind, p_agent)` **at the TAIL with NULL defaults** (R-L23 / F5-D32), DB-derives `directed_by`/`prepared_by_agent` from the run, writes the F-A5 receipt, and audits with the pair (`0071:438`). **Trued at PR-1: the delegate (`0071:450`) is NOT on this list** — under a tail-append it passes no new argument and its body is byte-unmoved (re-proven by prosrc sha in the migration tail) |
 | 7 | `clara.publish_report_template_version` (`0069:109`) | **material 9** — body moves to `_publish_report_template_core`; the statutory/management floor branch (`0069:121`) is judgement that exists ONCE (`0069:261-266`), not twice |
 | 8 | `clara.publish_chart_template_version` (`0069:214`) | **material 9** — body moves to `_publish_chart_template_core`, carrying `_validate_chart_spec_semantics_v1` (`:224`), the effective-window overlap/reversal refusal (`:236-239`), the supersede (`:241-242`) and the content-hash derivation (`:243`) |
 | 9 | `clara.enqueue_render_job` (`0080:254`) | **material 6** — body moves to `_enqueue_render_job_core(firm, actor, obo, wake_kind, …)`; the public name stays the delegate the leader sweep calls, with `prepared_by_agent`-aware attribution |
@@ -428,7 +448,15 @@ enqueue on it. P10 is re-cut accordingly.
 | DDL 2 | `ALTER TABLE clara.report_runs` — the `issue_mode` CHECK and `ck_rr_solo_attested`, drop+add; and `ADD COLUMN directed_by, prepared_by_agent` | **ACCESS EXCLUSIVE**. **The `issue_mode` CHECK is ANONYMOUS** (`0065:384` — `issue_mode text check (...)`, unlike its named siblings `ck_rr_issue_paired` `:398` and `ck_rr_solo_attested` `:403`); `ck_rr_issue_mode` **does not exist anywhere in the repo** (v1's DDL 2 named it and the drop would have errored). The migration drops PostgreSQL's generated name — expected `report_runs_issue_mode_check`, **read from `pg_constraint` at PR-0 rather than asserted** (P13) — and adds a NAMED replacement `ck_rr_issue_mode` so the next extension has a stable handle |
 | DDL 3 | `ALTER TABLE clara.report_artifacts` — `ADD COLUMN directed_by, prepared_by_agent` | **ACCESS EXCLUSIVE**, same; written by #6 at INSERT |
 
-**Not on the list, each for a stated reason.** `clara.evaluate_fs_pack_v1` — **never touched** (S2).
+**Not on the list, each for a stated reason.** **`clara.complete_render_job` (added at PR-1, and it
+nearly WAS on the list).** PR-0's caller census found it is the SECOND live caller of
+`_seal_report_artifact_core` and that it is EXECUTE-granted to `clara_runtime`, calling the core
+**positionally with ten arguments** — so prediction P15's "the zeta worker's ungranted path" was
+wrong on the grant and A.1's `(firm, actor, **obo, wake_kind**, …)` parameter position would have
+broken the call site and pulled a live render worker into this D1 window. Under R-L23 the pair is
+appended at the TAIL with NULL defaults, `complete_render_job` is byte-unmoved, **the render worker
+is NOT quiesced, and the count stays NINE.**
+`clara.evaluate_fs_pack_v1` — **never touched** (S2).
 `clara.evaluate_metric_v1` — never touched and never CALLED from this lane (§3.2). `clara._audit`,
 `_human_ctx`, `_reserve_op`, `_finish_op`, `_hash`, `mint_metric_input_snapshot_v1` — frozen closure
 members (S8). Every `wake_*` wrapper and `_agent_*` core — **new objects**, adding nothing to the
