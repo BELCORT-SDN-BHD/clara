@@ -1,6 +1,6 @@
 // Gate G1 — the universal wake-execution engine, DB-half battery. Design of record:
-// docs/plan/active/g1-wake-engine-{survey,design,annexes}.md; migration UNNUMBERED_g1_wake_engine
-// (numbered at merge). Cells below mirror Annex D's own numbering (D1-D3, D9) plus the registry
+// docs/plan/active/g1-wake-engine-{survey,design,annexes}.md; migration 0133_g1_wake_engine
+// (number claimed at merge, hard constraint 10). Cells below mirror Annex D's own numbering (D1-D3, D9) plus the registry
 // writer/credential-gate/dead-letter-table cells the design names but does not itself enumerate as
 // D-cells. Both-polarity throughout (db-tests.md): every GREEN cell has a RED-first inverted twin.
 //
@@ -55,10 +55,13 @@ before(async () => {
   // which assume the birth state (this file never touches close_prep's flag).
   await rootQuery("update clara.wake_engine_sources set enabled=false, enabled_by=null, enabled_at=null, disabled_by=null, disabled_at=null, disabled_reason=null where source_key='bank_agent'");
   // Defensive (MUST B): uq_firms_one_operator allows AT MOST ONE true across the WHOLE database
-  // — a prior partial/aborted run of THIS file (the only place that ever sets this column) may
-  // have left its old OP firm marked operator, which would block this run's OWN OP firm from
-  // ever being markable. Nothing else in the estate ever sets is_operator (grepped clean).
-  await rootQuery("update clara.firms set is_operator=false where is_operator");
+  // — a prior partial/aborted run of THIS file may have left its old OP firm marked operator,
+  // which would block this run's OWN OP firm from ever being markable. S6 (both legs): SCOPED
+  // to this file's own `g1op_` fixture-name prefix — an UNSCOPED estate-wide clear would also
+  // silently strip a genuinely-set BELCORT operator flag on a shared/persistent rig (constraint
+  // 13's real ceremony fact, not this file's own residue) were one ever present. Only a firm
+  // this file itself could have created is ever touched.
+  await rootQuery("update clara.firms set is_operator=false where is_operator and name like 'g1op\\_%'");
   W = await seedFreshFirm(`g1_${randomUUID().slice(0, 8)}`, "w");
   OP = await seedFreshFirm(`g1op_${randomUUID().slice(0, 8)}`, "op");
   await rootQuery("update clara.firms set is_operator=true where id=$1", [OP.firm]);
@@ -515,6 +518,69 @@ test("NOTE C: a re-settle replay with a null error_code never ERASES an earlier 
 });
 
 // =====================================================================================
+// S2 (both legs) — widens NOTE C: a plain coalesce() over-corrected in TWO ways a plain
+// null-replay test alone never caught. Both polarities, both proven live.
+// =====================================================================================
+test("S2 (a): FIRST-WRITE-WINS — a LATER replay carrying a DIFFERENT non-null error_code must NOT overwrite the first cause", async (t) => {
+  if (gate(t)) return;
+  const task = await rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [W.firm, W.client],
+  );
+  const taskId = task.rows[0].id;
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "internal"]);
+  assert.equal((await readRow("agent_tasks", taskId)).error_code, "internal", "mandatory setup: the first settle stamps 'internal'");
+
+  // A plain coalesce() would have picked THIS non-null value and clobbered the first cause —
+  // that is exactly the bug S2 closes: only the FIRST non-null write may ever land.
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "timeout"]);
+  const after = await readRow("agent_tasks", taskId);
+  assert.equal(after.error_code, "internal", "S2(a): a LATER replay's DIFFERENT error_code ('timeout') must be discarded — the FIRST cause ('internal') is the one that survives, forever");
+});
+
+test("S2 (b): GUARD COMPLETED — a 'completed' outcome NEVER carries an error_code, even if one is (erroneously) passed", async (t) => {
+  if (gate(t)) return;
+  const task = await rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [W.firm, W.client],
+  );
+  const taskId = task.rows[0].id;
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+
+  // A caller bug (or a stale retry racing a real success) passes a stray error_code alongside
+  // a 'completed' outcome — the settle verb must refuse to let it land regardless.
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", "stray_error_that_must_never_land"]);
+  const row = await readRow("agent_tasks", taskId);
+  assert.equal(row.status, "completed");
+  assert.equal(row.error_code, null, "S2(b): 'completed' NEVER carries an error_code — a plain coalesce()/first-write-wins alone would have let this stray value land on an otherwise-successful task");
+});
+
+test("S3: wake_engine_sources.task_kind refuses an out-of-domain value (e.g. 'autodraft') — _settle_wake_task can never be handed authority over a kind it does not own", async (t) => {
+  if (gate(t)) return;
+  const err = await assertRaises(
+    "23514", // Postgres CHECK-violation SQLSTATE — this is a raw catalog wall, not a CLRxx application refusal
+    () => rootQuery(
+      `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
+         values ($1,'direct_queue',null,'autodraft','proactive','g1TestWorkflow','runtime')`,
+      [`g1_test_s3_${randomUUID().slice(0, 8)}`],
+    ),
+    "registering a wake_engine_sources row with task_kind='autodraft' (out of the wake-owned domain)",
+  );
+  assert.match(err.message ?? "", /ck_wes_task_kind_wake_owned/i, "S3: the refusal names the S3 wall specifically");
+
+  // The two LEGITIMATE values are unaffected.
+  const legit = await rootQuery(
+    `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
+       values ($1,'direct_queue',null,'close_prep','close_prep','g1TestWorkflow','runtime') returning task_kind`,
+    [`g1_test_s3_legit_${randomUUID().slice(0, 8)}`],
+  );
+  assert.equal(legit.rows[0].task_kind, "close_prep", "S3: the wall admits the real, legitimate direct_queue kind without friction");
+});
+
+// =====================================================================================
 // MUST D (opus/Codex review) — the estate-wide switch broadcasts a receipt to every OTHER
 // firm's own audit_log, so a tenant firm can discover its automation posture changed even
 // though only the OPERATOR firm can ever flip it (T2z proves the flip itself refuses).
@@ -532,10 +598,8 @@ test("MUST D: set_wake_source_enabled broadcasts an estate-wide receipt into eve
     [W.firm],
   )).rows[0];
   assert.ok(afterOn, "MUST D: W's OWN audit_log gained a receipt row, though W never called this function and never could (T2z)");
-  assert.equal(afterOn.actor, OP.owner, "MUST D: the receipt names the OPERATOR's identity as actor — a reader can tell this was not W's own act");
   assert.equal(afterOn.args.source, "bank_agent");
   assert.equal(afterOn.args.on, true);
-  assert.equal(afterOn.args.set_by_operator_firm, OP.firm, "MUST D: the receipt names WHICH firm acted");
 
   const afterCount = (await rootQuery(
     "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1",
@@ -545,4 +609,57 @@ test("MUST D: set_wake_source_enabled broadcasts an estate-wide receipt into eve
 
   // Cleanup for hygiene (matches T2b's own convention) — restore the birth default.
   await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "MUST D receipt probe cleanup", opk("g1-mustd-off")]);
+});
+
+// =====================================================================================
+// M3 (Codex MUST / opus NOTE-4, folded into MUST D) — the FIRST draft of the estate-wide
+// broadcast leaked the operator's user uuid, the operator firm's own uuid, and an unbounded
+// free-text reason into EVERY other firm's bookkeeper-readable audit_log, and amplified
+// arbitrarily on repeated no-op flips (a DIFFERENT op_key re-asserting the SAME already-current
+// state is not caught by _reserve_op's replay dedup). Two cells: payload minimality/actor
+// nulling, and no-op non-amplification.
+// =====================================================================================
+test("M3: the broadcast payload carries ONLY {source, on} — no reason, no operator-firm uuid, no operator-user uuid (actor is NULL)", async (t) => {
+  if (gate(t)) return;
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "M3 payload-minimality probe — this exact reason text must NEVER appear in any other firm's audit_log", opk("g1-m3-payload-on")]);
+  const row = (await rootQuery(
+    "select actor, args from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1 order by id desc limit 1",
+    [W.firm],
+  )).rows[0];
+  assert.ok(row, "mandatory setup: W's audit_log gained the receipt");
+  assert.equal(row.actor, null, "M3: actor is NULL on the broadcast copy — a receiving firm has no legitimate need to know WHICH operator-firm user acted");
+  assert.deepEqual(Object.keys(row.args).sort(), ["on", "source"], "M3: the payload carries EXACTLY {source, on} — closed-world, nothing else");
+  assert.equal(row.args.reason, undefined, "M3: the free-text reason never lands in another firm's audit_log");
+  assert.equal(row.args.set_by_operator_firm, undefined, "M3: the operator firm's own uuid never lands in another firm's audit_log");
+
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "M3 payload-minimality probe cleanup", opk("g1-m3-payload-off")]);
+});
+
+test("M3: a repeated NO-OP flip (a DIFFERENT op_key re-asserting the SAME already-current state) does NOT amplify — zero new broadcast rows", async (t) => {
+  if (gate(t)) return;
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "M3 no-op probe: first real flip", opk("g1-m3-noop-on1")]);
+  const afterFirstFlip = (await rootQuery(
+    "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1",
+    [W.firm],
+  )).rows[0].n;
+
+  // Re-assert the SAME state (already true) THREE more times, each with a genuinely DIFFERENT
+  // op_key — _reserve_op's replay dedup does not catch this (different op_keys are different
+  // "operations" to that ledger); only the M3 state-change check must suppress the broadcast.
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "M3 no-op probe: repeat 1", opk("g1-m3-noop-on2")]);
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "M3 no-op probe: repeat 2", opk("g1-m3-noop-on3")]);
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "M3 no-op probe: repeat 3", opk("g1-m3-noop-on4")]);
+  const afterNoops = (await rootQuery(
+    "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1",
+    [W.firm],
+  )).rows[0].n;
+  assert.equal(afterNoops, afterFirstFlip, "M3: three genuinely-distinct-op_key no-op re-assertions of the SAME state broadcast ZERO new rows — the pre-fix version amplified every OTHER firm's audit_log arbitrarily here");
+
+  // A REAL flip (the state actually changes) still broadcasts exactly one.
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "M3 no-op probe: real flip back off", opk("g1-m3-noop-off")]);
+  const afterRealFlip = (await rootQuery(
+    "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1",
+    [W.firm],
+  )).rows[0].n;
+  assert.equal(afterRealFlip, afterFirstFlip + 1, "M3: a GENUINE state change still broadcasts exactly one new row — the fix suppresses no-ops only, never a real transition");
 });

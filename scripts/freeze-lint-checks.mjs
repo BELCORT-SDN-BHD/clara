@@ -283,7 +283,27 @@ export function checkRegistryViewIntegrity(headSrc, label = "registry@HEAD") {
   const exportsFound = extractTopLevelConstExports(blanked);
   const byName = new Map(exportsFound.map((e) => [e.name, e]));
 
+  // M8(b) (opus R2 + Codex review): the check below only recognizes `export const
+  // workflowsByName = ...` — an ALIASED RE-EXPORT (`export { fake as workflowsByName }`) or
+  // any other export syntax carrying the name is a COMPLETELY different shape that
+  // extractTopLevelConstExports was never built to see, so `view` below would be undefined
+  // and the whole check would silently return ZERO violations — a clean pass for a name that
+  // is not provably anything. Fail CLOSED instead: any occurrence of the bare identifier
+  // "workflowsByName" that is NOT explained by exactly one recognized declaration is a
+  // violation, never a silent skip (absence of the recognized shape is not evidence of safety
+  // — this codebase's own review law 2, now enforced in its own linter).
+  const occurrences = blanked.match(/\bworkflowsByName\b/g) ?? [];
   const view = byName.get("workflowsByName");
+  if (occurrences.length > 0 && !view) {
+    violations.push(
+      `REGISTRY-VIEW-INTEGRITY  ${label}: "workflowsByName" appears in this file (${occurrences.length} occurrence(s)) but NOT as a recognized \`export const workflowsByName = ...\` declaration — an aliased re-export (\`export { x as workflowsByName }\`) or any other export shape is REJECTED, never silently trusted (fail-closed).`,
+    );
+  } else if (occurrences.length > 1) {
+    violations.push(
+      `REGISTRY-VIEW-INTEGRITY  ${label}: "workflowsByName" appears ${occurrences.length} times — exactly ONE declaration is ever trusted; a second occurrence anywhere (a duplicate export, a re-export, a later reassignment) is REJECTED, never silently ignored.`,
+    );
+  }
+
   if (view) {
     const collapsed = view.exprText.replace(/\s+/g, "");
     if (collapsed !== "Object.freeze(workflows)") {

@@ -25,7 +25,7 @@
 
 import { terminalFor } from "./reconciler.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
-import { recordTaskDeadLetter } from "./wake-engine.mjs";
+import { recordTaskDeadLetter, readDeadLetterAttempts } from "./wake-engine.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 
@@ -34,30 +34,62 @@ function isLeaderHalt(err) {
 }
 
 /** Resolve a stuck row's own wake-engine source (by event_type for kind='wake', by task_kind
- *  for a direct_queue kind) — null if the source has since been dropped/disabled. */
+ *  for a direct_queue kind) — null only if the source ROW ITSELF has since been dropped
+ *  (deleted from the registry). M2 (Codex review): this deliberately does NOT filter on
+ *  `enabled` — a task in this belt was already LEGITIMATELY claimed while its source was
+ *  enabled (the claim transaction's own fresh enabled-recheck, wake-engine.mjs's M2 half,
+ *  proves that); a disable stops NEW claims, it does not retroactively abandon in-flight work.
+ *  Filtering on enabled here made a mid-flight disable strand an already-running task FOREVER
+ *  — invisible, never dead-lettered, never retried (the exact defect this fix closes). The
+ *  claimed-but-disabled recovery contract is: VISIBLE (this function still resolves it) and
+ *  NEVER STRANDED (re-enqueue/settle proceeds to completion regardless of current enabled
+ *  state) — proven by a dedicated battery cell. */
 async function resolveSource(client, taskRow) {
   if (taskRow.kind === "wake") {
+    // Not filtered on `enabled` (M2, see above) -- deliberately admits a since-disabled source
+    // so a claimed-but-disabled task is still recoverable. This means MORE than one row can
+    // legally match the same event_type over a registry's lifetime (an old disabled source and
+    // its later replacement, e.g.) -- ORDER BY makes the pick DETERMINISTIC and semantically the
+    // best available answer, rather than whatever order Postgres happens to return with no
+    // ORDER BY at all: prefer a currently-ENABLED source (the live, authoritative answer for
+    // this event_type today) and, among ties or if none is enabled, the MOST RECENTLY
+        // registered one (closest in time to whichever source this task was actually claimed
+    // under). Found reproducing M6 in the full-file battery, not a review finding: every
+    // wake_outbox test in this file registers a source sharing ONE global event_type constant,
+    // and none of them ever delete their own row -- by the time a later test's assertions
+    // depend on WHICH source answers, several disabled-or-superseded rows already share the
+    // same event_type, and `.rows[0]` with no ORDER BY was silently arbitrary.
     const r = await client.query(
       `select s.source_key, s.workflow_export, s.max_attempts
          from clara.agent_tasks at
          join clara.wake_intents wi on wi.id = at.origin_intent_id
          join clara.domain_events de on de.id = wi.event_id
          join clara.wake_engine_sources s on s.event_type = de.event_type and s.carrier = 'wake_outbox'
-        where at.id = $1 and s.enabled`,
+        where at.id = $1
+        order by s.enabled desc, s.created_at desc`,
       [taskRow.id],
     );
     return r.rows[0] ?? null;
   }
   const r = await client.query(
     `select source_key, workflow_export, max_attempts from clara.wake_engine_sources
-      where task_kind = $1 and carrier = 'direct_queue' and enabled`,
+      where task_kind = $1 and carrier = 'direct_queue'`,
     [taskRow.kind],
   );
   return r.rows[0] ?? null;
 }
 
 /** §A — running-with-no-run past grace: re-mint + re-enqueue. Own txn per row (mirrors
- *  reconcileTasks §A's isolation — one un-enqueueable row must never block the rest). */
+ *  reconcileTasks §A's isolation — one un-enqueueable row must never block the rest).
+ *  S1 (Codex review): the grace window keys off `updated_at`, NOT `created_at`. A held row can
+ *  sit for a long time before its source enables (created_at stays old the whole while) — keying
+ *  grace off created_at meant a task claimed only SECONDS ago (held->running, an old row) was
+ *  IMMEDIATELY past the grace window on the very next sweep, triggering an unnecessary
+ *  re-enqueue before the claim's own enqueue() call had any real chance to bind workflow_run_id
+ *  — a repeated DURABLE start() every poll for perfectly healthy claims. `updated_at` is
+ *  unconditionally re-stamped by _tf_agent_task_update's own trailing `new.updated_at:=now();`
+ *  on EVERY write to the row (including the claim's own held->running UPDATE), so it correctly
+ *  reflects "time since this row was last touched", not "time since it was first created". */
 async function reenqueueStuckRows(client, deps) {
   const { enqueue, onlyFirm = null, graceInterval = GRACE_REENQUEUE, log = () => {} } = deps;
   let reenqueued = 0;
@@ -67,16 +99,37 @@ async function reenqueueStuckRows(client, deps) {
     `select id, kind from clara.agent_tasks
       where kind = any(select task_kind from clara.wake_engine_sources)
         and status = 'running' and workflow_run_id is null
-        and created_at < now() - ($1)::interval
+        and updated_at < now() - ($1)::interval
         and ($2::uuid is null or firm_id = $2)
-      order by created_at limit 20`,
+      order by updated_at limit 20`,
     [graceInterval, onlyFirm],
   );
   for (const t of stuck.rows) {
     try {
       const source = await resolveSource(client, t);
       if (!source) {
-        log(`[reconcile] wake-engine stuck task=${t.id} kind=${t.kind}: source no longer registered/enabled — leaving for a future cycle`);
+        log(`[reconcile] wake-engine stuck task=${t.id} kind=${t.kind}: source row no longer registered (deleted) — leaving for a future cycle`);
+        continue;
+      }
+      // M6 (opus+Codex review): CHECK attempt history FIRST, before touching enqueue() at all.
+      // Pre-fix, enqueue() was attempted UNCONDITIONALLY every sweep — once genuinely
+      // exhausted, a settle FAILURE (the _settle_wake_task call itself erroring, e.g. a
+      // transient DB error) left the row 'running', so the NEXT sweep re-attempted enqueue()
+      // again — wasting budget on a call already proven to keep failing for the SAME reason,
+      // and pushing the dead-letter counter arbitrarily past its own cap instead of the cap
+      // actually stopping anything. Exhaustion is now STICKY: once recorded, every later sweep
+      // skips straight to (re-)settling and never touches enqueue() again — a hard cap in
+      // EITHER direction, not just the first time it is reached.
+      const priorAttempts = await readDeadLetterAttempts(client, { taskId: t.id });
+      if (priorAttempts >= source.max_attempts) {
+        try {
+          await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
+          deadLettered += 1;
+          log(`[reconcile] wake-engine task=${t.id} already exhausted (${priorAttempts}/${source.max_attempts}) — re-settling failed (idempotent by _settle_wake_task's own construction), enqueue NOT re-attempted`);
+        } catch (settleErr) {
+          if (isLeaderHalt(settleErr)) throw settleErr;
+          log(`[reconcile] wake-engine settle-retry failed for already-exhausted task=${t.id}: ${settleErr?.message ?? settleErr}`);
+        }
         continue;
       }
       try {
@@ -93,9 +146,17 @@ async function reenqueueStuckRows(client, deps) {
         // poison-skip shape, never a silent forever-loop.
         const attempts = await recordTaskDeadLetter(client, { taskId: t.id, reason: enqErr?.message ?? String(enqErr) });
         if (attempts >= source.max_attempts) {
-          await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
-          deadLettered += 1;
-          log(`[reconcile] wake-engine re-enqueue for task=${t.id} exhausted ${source.max_attempts} attempts -> settled failed`);
+          try {
+            await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
+            deadLettered += 1;
+            log(`[reconcile] wake-engine re-enqueue for task=${t.id} exhausted ${source.max_attempts} attempts -> settled failed`);
+          } catch (settleErr) {
+            if (isLeaderHalt(settleErr)) throw settleErr;
+            // M6: the settle itself failed — do NOT re-attempt enqueue on the next sweep. The
+            // dead-letter row's attempt_count is already >= max_attempts, so the check-first
+            // branch above will catch this task next time and retry ONLY the settle.
+            log(`[reconcile] wake-engine settle failed for freshly-exhausted task=${t.id} — will retry the settle-only path next sweep, enqueue will not be attempted again: ${settleErr?.message ?? settleErr}`);
+          }
         } else {
           log(`[reconcile] wake-engine re-enqueue failed task=${t.id} attempt=${attempts}/${source.max_attempts}: ${enqErr?.message ?? enqErr}`);
         }

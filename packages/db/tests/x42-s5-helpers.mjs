@@ -591,7 +591,7 @@ const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set
 // the clock" idiom every other core already on this roster carries.
 const FILING_VERB_F_A7_BETA_CLOCK_NAMES = ["_agent_file_document_core", "wake_reattribute_document"];
 
-// [Gate G1, `g1_wake_engine` at whatever number merge claimed]: ONE genuinely new body.
+// [Gate G1, `0133_g1_wake_engine` — number claimed at merge]: ONE genuinely new body.
 // clara.set_wake_source_enabled's two `now()` calls stamp enabled_at/disabled_at on the
 // registry row it flips — the SAME "the audit stamp is the clock" idiom every other human
 // writer already on this roster carries (cancel_agent_task's cancelled_at, set_bank_agency_

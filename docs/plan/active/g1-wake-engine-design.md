@@ -96,13 +96,19 @@ Postgres advisory locks do not close instantaneously across a network partition 
 engine mirrors THAT precedent exactly: the advisory lock is the primary exclusion; `SKIP LOCKED` on
 the row claim is belt-and-braces, not the exclusion mechanism itself.
 
-**b) Dispatch.** For an ENABLED source: mint a per-fire `wake_credentials` row via
-`mint_wake_credential(wake_kind, firm, on_behalf_of=NULL, ttl=default 15min, client)` (§2), then
-transition the claimed row `held→running` (carrier 1) or `queued→running` (carrier 2, unchanged —
-already legal) inside the SAME transaction as the credential mint, then `enqueue(taskId)` the named
-`workflow_export` — the identical dependency-injected `enqueue` shape `autodraft.mjs` already uses
-(`autodraft.mjs:297`, `:311`), so the WDK engine takes over from there exactly as it does for every
-other kind.
+**b) Dispatch.** For an ENABLED source: transition the claimed row `held→running` (carrier 1) or
+`queued→running` (carrier 2, unchanged — already legal), then `enqueue(workflow_export, taskId)` —
+the identical dependency-injected `enqueue` shape `autodraft.mjs` already uses (`autodraft.mjs:297`,
+`:311`), so the WDK engine takes over from there exactly as it does for every other kind. **The
+consumer mints no credential at any point in this transaction, or ever** — `enqueue` receives exactly
+those two plain identifiers, the named `workflow_export` and the claimed row's `taskId`, never a
+secret. Plaintext wake credentials must never transit WDK step inputs, returns, or workflow state,
+because step IO is durably persisted (`docs/plan/completed/slice4-durable-runtime-contract.md:270`'s
+own LAW); a consumer-side mint would put the secret on exactly that path, on the way into `enqueue`.
+The mint happens downstream instead, inside the dispatched workflow's own first `"use step"` attempt
+(§2): the step itself calls `mint_wake_credential(wake_kind, firm, on_behalf_of=NULL, ttl=default
+15min, client)` and consumes the returned secret only within that one step's local, non-persisted
+execution — never an input to the step, never a value the step returns.
 
 **c) A DISABLED source's held rows are left held, untouched, LOUDLY.** The consumer's health
 function counts them (`heldForDisabledSource` in `wakeEngineHealth`'s payload) so a disabled source
@@ -171,9 +177,14 @@ crash-recovery. New file from the start, matching the estate's own module-size-b
 **Per-fire, short-TTL, never long-lived or cached — the estate's own existing pattern for every
 kind except `proactive`** (the one one-shot kind, `consumed_at` set only there, per research-bytes'
 confirmation). `mint_wake_credential(wake_kind, firm, on_behalf_of=NULL, ttl interval default
-'00:15:00', client)` is called by the CONSUMER, not the workflow, at the moment of dispatch (§1.2b)
-— one mint per claimed task, immediately before the `held→running`/`queued→running` transition, in
-the same transaction. This needs **zero change to `mint_wake_credential`'s shape**: its per-kind
+'00:15:00', client)` is called by the DISPATCHED WORKFLOW's own first `"use step"` attempt, never by
+the consumer/engine (§1.2b) — plaintext wake credentials must never transit WDK step inputs, returns,
+or workflow state, because step IO is durably persisted
+(`docs/plan/completed/slice4-durable-runtime-contract.md:270`'s own LAW: credentials are minted
+inside the step that uses them). One mint per execution attempt of that step, decoupled from the
+claim transaction entirely — a retried attempt (crash recovery, a transient step failure) mints fresh
+rather than trying to reuse a credential that may already have aged past its own TTL. This needs
+**zero change to `mint_wake_credential`'s shape**: its per-kind
 gating chain already has live arms for `bank_agent` (`0126:655-663`) and `filing` (`:664-670`); it
 is MISSING an arm for `close_prep` only (survey §4's table — the gate arm falls through to the
 `elsif p_client is not null` catch-all and refuses `'legacy wake kinds do not accept a client

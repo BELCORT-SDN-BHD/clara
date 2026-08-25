@@ -99,15 +99,18 @@ export const workflows = {
 //
 // `Object.freeze` is the mechanical guarantee an unchecked mutable alias lacked: it freezes AND
 // returns the SAME object `workflows` already is (never a copy), so `workflowsByName === workflows`
-// is a true statement at runtime, not merely by construction. (An earlier draft asserted this via
-// a dedicated tests/registry-view.test.mjs that imported this file directly — DELETED: this
-// package's test infra never TS-compiles workflows/*.ts for `node --test`, only lib/*.mjs is
-// directly importable by a test [confirmed: every OTHER test importing from workflows/ targets a
-// .mjs sibling, zero import a .ts file] — so that file could never actually run under `pnpm test`.
-// The runtime property is instead proven by (a) TypeScript's own type system — this declaration's
-// annotation only type-checks because `Object.freeze(workflows)`'s inferred type IS assignable to
-// it, which typecheck proves every PR, and (b) the REGISTRY-VIEW-INTEGRITY static check below,
-// which is real, wired into freeze-lint, and runs on every PR.) Because freeze operates on the
+// is a true statement at runtime, not merely by construction — asserted directly by
+// tests/registry-view.test.mjs, which imports this file via the SAME tsx/esm/api register()
+// idiom f-a1-pr3a-consumers.test.mjs / f-a2-pr2-post.test.mjs / f-a2-statement-activation.
+// test.mjs already establish as this suite's own precedent for reaching a .ts workflow module
+// directly (M8(a), opus R2 + Codex review: an earlier draft of this comment claimed that test
+// could never run and deleted it — FALSE, caught by an independent review, not by this build's
+// own re-check; the claim's own grep only matched static `.mjs` imports and never searched for
+// this dynamic-import idiom). The runtime property is ALSO proven by (a) TypeScript's own type
+// system — this declaration's annotation only type-checks because `Object.freeze(workflows)`'s
+// inferred type IS assignable to it, which typecheck proves every PR, and (b) the
+// REGISTRY-VIEW-INTEGRITY static check below, wired into freeze-lint and run on every PR — the
+// runtime test is not a replacement for either, it is the third, independent leg. Because freeze operates on the
 // shared object, `workflows` itself becomes runtime-immutable too (harmless: nothing ever
 // reassigns its own properties) — so `workflowsByName.someKey = maliciousFn` THROWS (ES modules
 // are always strict mode) rather than silently succeeding. scripts/check-frozen-workflows.mjs's own

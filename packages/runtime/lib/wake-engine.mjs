@@ -117,6 +117,25 @@ async function recordEventDeadLetter(client, { eventId, reason }) {
 
 /** Exported for reconciler-wake.mjs's own re-enqueue attempt cap (SHOULD I, opus/Codex review)
  *  — the SAME direct_queue dead-letter home, one shared attempt-count ledger per task. */
+/** M6 (opus+Codex review): read-only — has this task's dead-letter row (if any) already
+ *  reached its source's max_attempts? reconciler-wake.mjs's own re-enqueue path checks this
+ *  FIRST, before touching enqueue() at all, so exhaustion is STICKY: once the cap is reached,
+ *  every later sweep skips straight to (re-)settling and never re-attempts enqueue again, even
+ *  if a settle attempt itself fails and the row shows up 'running' again next sweep. Shared
+ *  budget with carrier-2's own claim-failure dead-lettering is INTENTIONAL, not a bug needing
+ *  split counters (argued in place, M6's own "either/or"): a task that fails enough CLAIMS is
+ *  settled 'failed' directly inside processDirectQueueSource's own poison-exhaustion path
+ *  without ever reaching 'running', so it can never ALSO appear in this belt's own `stuck`
+ *  query (which requires status='running') — the two failure modes are mutually exclusive per
+ *  task_id in practice, never cumulative against the same budget. */
+export async function readDeadLetterAttempts(client, { taskId }) {
+  const r = await client.query(
+    "select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2",
+    [WAKE_ENGINE_CONSUMER, taskId],
+  );
+  return r.rows[0]?.attempt_count ?? 0;
+}
+
 export async function recordTaskDeadLetter(client, { taskId, reason }) {
   await client.query("begin");
   try {
@@ -182,16 +201,33 @@ async function readHeldWakeRows(client, { firmId, lastSeq, batchSize }) {
  *  Codex review): the read's `FOR UPDATE SKIP LOCKED` is decorative outside an explicit
  *  transaction (proven by a two-session differential — the row lock releases at statement end,
  *  before this transaction even opens); the CAS (`and status='held'`) below is the REAL
- *  exclusion. A zero rowCount means the row raced out from under us (claimed/changed by
- *  something else between the read and here) — `claimed:false` tells the caller to advance the
- *  checkpoint (this seq is spoken for) without dispatching a SECOND time. */
-async function claimWakeOutboxRow(client, { row, firmId }) {
+ *  exclusion. M2 (Codex review): `sources` is loaded ONCE per cycle (loadEnabledSources, at the
+ *  top of runWakeEngineCycle) — a mid-cycle disable would otherwise keep claiming the REST of
+ *  an already-in-flight batch against a stale in-memory snapshot. The CAS now ALSO re-checks
+ *  `enabled` fresh, inside this same claim transaction, against the live catalog. A zero
+ *  rowCount is now AMBIGUOUS between two different causes with OPPOSITE safe responses, so this
+ *  distinguishes them: genuinely raced by another claimant (the row is no longer 'held' at all
+ *  — safe to advance the checkpoint past it, it is spoken for) vs disabled mid-cycle (the row is
+ *  STILL 'held', untouched — advancing the checkpoint past it would strand it exactly like M1,
+ *  just via a different door; the caller must block instead, leaving both the row and the
+ *  checkpoint visibly in place until the source re-enables). */
+async function claimWakeOutboxRow(client, { row, firmId, sourceKey }) {
   await client.query("begin");
   try {
-    const upd = await client.query("update clara.agent_tasks set status='running' where id=$1 and status='held'", [row.taskId]);
+    const upd = await client.query(
+      `update clara.agent_tasks set status='running'
+        where id=$1 and status='held'
+          and exists (select 1 from clara.wake_engine_sources where source_key=$2 and enabled)`,
+      [row.taskId, sourceKey],
+    );
+    if (upd.rowCount === 0) {
+      const still = await client.query("select 1 from clara.agent_tasks where id=$1 and status='held'", [row.taskId]);
+      await client.query("commit");
+      return { ok: true, claimed: false, stillHeld: still.rowCount > 0 };
+    }
     await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: row.eventSeq });
     await client.query("commit");
-    return { ok: true, claimed: upd.rowCount > 0 };
+    return { ok: true, claimed: true };
   } catch (err) {
     try {
       await client.query("rollback");
@@ -219,28 +255,94 @@ async function checkpointOnlyWake(client, { firmId, seq }) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// M1 (opus+Codex independent review, both legs) — the ORIGINAL MUST-F(liveness) fix coalesced
+// straight to `discoverWork`'s raw firm_event_seq head, which is UNSAFE: an event can COMMIT
+// (bumping firm_event_seq) before the router has turned it into a wake_intents row, or after
+// the router but before drain.mjs has turned that wake_intent into the held agent_tasks row
+// this consumer actually reads. NOTIFY can fire and wake this cycle in EITHER gap. Coalescing
+// past a seq whose wake-bound row has not materialized YET strands it FOREVER: writeCheckpoint
+// uses greatest(), so a later drain-completion at the SAME seq can never rewind the cursor back
+// to find it, and wakeEngineHealth's own signals stay blind (lag=0 by construction —
+// heldForDisabledSource only counts rows whose SOURCE is disabled, not rows the checkpoint has
+// already sailed past).
+//
+// THE FIX: never coalesce past a seq that is not PROVABLY fully materialized. Two independent
+// bounds, take the tighter:
+//   1. The ROUTER's own checkpoint (`relay_checkpoints` consumer='router') — router has not
+//      even LOOKED at anything past this seq, so a wake-bound intent could still be minted
+//      there. This is a positive proof of "processed", not an absence-based guess.
+//   2. The earliest still-PENDING (undrained) wake_intent — drain has not yet projected its
+//      held task, so its seq (and everything after it, since it may not be the firm's ONLY
+//      backlog) is not safe either. Absence of a pending row is NOT proof nothing will ever
+//      land there (the router may not have reached it yet — bound 1 already covers that half);
+//      presence of one is a hard stop.
+// A third gap (the "skip-locked variant", M1 acceptance): a held row can EXIST (already fully
+// materialized) yet be invisible to THIS cycle's own `readHeldWakeRows` because another
+// transaction holds its row lock right now (a concurrent cancel_agent_task, or another leader's
+// overlapping claim) — SKIP LOCKED means "not visible to me this instant," never "does not
+// exist." `hasHiddenHeldRow` is a lock-free existence check (no FOR UPDATE at all) closing that
+// gap independently of the two bounds above.
+// ---------------------------------------------------------------------------
+
+/** The tightest seq this firm's wake_outbox checkpoint may PROVABLY advance to right now —
+ *  never the raw firm_event_seq head. See the module-level comment above for the two bounds. */
+async function safeCoalesceBound(client, firmId) {
+  const r = await client.query(
+    `select least(
+        coalesce((select last_seq from clara.relay_checkpoints where consumer='router' and firm_id=$1), 0),
+        coalesce((select min(wi.event_seq) - 1 from clara.wake_intents wi where wi.firm_id=$1 and wi.status='pending'), 9223372036854775807)
+      )::bigint as bound`,
+    [firmId],
+  );
+  return Number(r.rows[0].bound);
+}
+
+/** Lock-free (no FOR UPDATE / SKIP LOCKED) existence check for a held wake row in
+ *  (fromSeqExclusive, toSeqInclusive] — closes the skip-locked variant of M1: a row this
+ *  cycle's own locking read could not see is still a row that must not be coalesced past. */
+async function hasHiddenHeldRow(client, { firmId, fromSeqExclusive, toSeqInclusive }) {
+  const r = await client.query(
+    `select exists(
+       select 1 from clara.agent_tasks at
+       join clara.wake_intents wi on wi.id = at.origin_intent_id
+      where at.kind = 'wake' and at.status = 'held' and wi.firm_id = $1
+        and wi.event_seq > $2 and wi.event_seq <= $3
+     ) as hidden`,
+    [firmId, fromSeqExclusive, toSeqInclusive],
+  );
+  return r.rows[0].hidden;
+}
+
+/** M1: compute the safe bound and, ONLY if it clears both checks, advance the checkpoint to it.
+ *  Returns the new cursor (unchanged if nothing was safe to coalesce). */
+async function coalesceIfSafe(client, { firmId, from }) {
+  const bound = await safeCoalesceBound(client, firmId);
+  if (bound <= from) return from;
+  if (await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: from, toSeqInclusive: bound })) return from;
+  await checkpointOnlyWake(client, { firmId, seq: bound });
+  return bound;
+}
+
 /** Walk one firm's held wake_outbox rows in event_seq order. Stops (never advances the
  *  checkpoint past) the first row whose source is absent/disabled or still retrying — see the
  *  module header for why. Poisoned rows (repeated claim failure) dead-letter and skip past
  *  ONLY once max_attempts is exhausted, exactly like autodraft.mjs's own poison-skip. */
-async function processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSize, sources, deps }) {
+async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sources, deps }) {
   const log = deps.log ?? (() => {});
   const enqueue = deps.enqueue ?? (async () => {});
   const counts = { claimed: 0, dispatched: 0, failed: 0, deadLettered: 0 };
   const rows = await readHeldWakeRows(client, { firmId, lastSeq, batchSize });
   if (rows.length === 0) {
-    // MUST F(liveness), opus/Codex review: no held wake row past lastSeq right now does not mean
-    // nothing happened — ordinary (non-wake) traffic still advances firm_event_seq, and with no
-    // coalescing this checkpoint sits at its last CLAIM forever (measured on a healthy rig:
-    // lag=170 against ordinary traffic, autodraft's own lag=0 on the identical traffic).
-    // Coalesce straight to headSeq — discoverWork's own live head for this firm, captured before
-    // this read — safe because any row minted AFTER that snapshot carries a seq > headSeq and is
-    // found on a LATER cycle, never skipped.
-    if (headSeq > lastSeq) {
-      await checkpointOnlyWake(client, { firmId, seq: headSeq });
-      return { maxSeq: headSeq, blocked: false, counts, readCount: 0 };
-    }
-    return { maxSeq: lastSeq, blocked: false, counts, readCount: 0 };
+    // MUST F(liveness): no held wake row past lastSeq right now does not mean nothing happened
+    // — ordinary (non-wake) traffic still advances firm_event_seq, and with no coalescing this
+    // checkpoint sits at its last CLAIM forever (measured on a healthy rig: lag=170 against
+    // ordinary traffic, autodraft's own lag=0 on the identical traffic). M1 (opus+Codex review):
+    // coalesce ONLY to the provably-safe bound (coalesceIfSafe), never the raw firm_event_seq
+    // head — see the module-level comment above safeCoalesceBound for why that was a real
+    // stranding bug, reproduced and fixed this round.
+    const newCursor = await coalesceIfSafe(client, { firmId, from: lastSeq });
+    return { maxSeq: newCursor, blocked: false, counts, readCount: 0 };
   }
 
   let cursor = lastSeq;
@@ -251,10 +353,10 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSi
       // module header). Nothing is wrong — the source simply has not shipped/enabled yet.
       return { maxSeq: cursor, blocked: true, counts, readCount: rows.length };
     }
-    const res = await claimWakeOutboxRow(client, { row, firmId });
+    const res = await claimWakeOutboxRow(client, { row, firmId, sourceKey: source.sourceKey });
     if (res.ok) {
-      cursor = row.eventSeq;
       if (res.claimed) {
+        cursor = row.eventSeq;
         counts.claimed += 1;
         try {
           // MUST F: only plain identifiers cross into durable WDK state — never a credential. The
@@ -265,10 +367,18 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSi
         } catch (e) {
           log(`[wake-engine] enqueue failed task=${row.taskId} source=${source.sourceKey} (reconciler will re-enqueue): ${e?.message ?? e}`);
         }
+      } else if (res.stillHeld) {
+        // M2: the source was disabled MID-CYCLE, between loadEnabledSources' snapshot and this
+        // claim — the row is untouched. BLOCK here (never advance the checkpoint past it) so it
+        // stays visibly discoverable the instant the source re-enables, exactly like the
+        // unregistered-source block above.
+        log(`[wake-engine] task=${row.taskId} source=${source.sourceKey} disabled mid-cycle — leaving held, not advancing checkpoint`);
+        return { maxSeq: cursor, blocked: true, counts, readCount: rows.length };
       } else {
         // SHOULD H: the CAS found this row no longer 'held' — someone/something else already
         // moved it (e.g. a concurrent claim, or a human's cancel_agent_task racing us). Advance
         // the checkpoint (this seq IS spoken for) but never dispatch a second time.
+        cursor = row.eventSeq;
         log(`[wake-engine] task=${row.taskId} raced (no longer 'held' at claim) — checkpoint advances, no dispatch`);
       }
       continue;
@@ -287,12 +397,12 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSi
     return { maxSeq: cursor, blocked: true, counts, readCount: rows.length }; // retry next cycle
   }
   // Nothing in this batch blocked. If we drained fewer than batchSize rows, nothing more exists
-  // right now: coalesce past trailing non-wake traffic too (MUST F liveness). If we hit the
-  // limit, more held rows may exist beyond `cursor` that this read never saw — must NOT skip
-  // past them (the module header's own "never advance past an unclaimable row" law, generalised).
-  if (rows.length < batchSize && headSeq > cursor) {
-    await checkpointOnlyWake(client, { firmId, seq: headSeq });
-    cursor = headSeq;
+  // right now: coalesce past trailing non-wake traffic too (MUST F liveness), but ONLY to the
+  // M1 safe bound. If we hit the limit, more held rows may exist beyond `cursor` that this read
+  // never saw — must NOT skip past them (the module header's own "never advance past an
+  // unclaimable row" law, generalised).
+  if (rows.length < batchSize) {
+    cursor = await coalesceIfSafe(client, { firmId, from: cursor });
   }
   return { maxSeq: cursor, blocked: false, counts, readCount: rows.length };
 }
@@ -323,7 +433,18 @@ async function processDirectQueueSource(client, { firmId, source, batchSize, dep
       // its own fresh credential (see the module header's security law). This transaction claims
       // ONLY the row. SHOULD H: rowCount, not just the CAS predicate, is the proof — the SELECT's
       // own SKIP LOCKED is decorative outside an explicit txn (see claimWakeOutboxRow's comment).
-      const upd = await client.query("update clara.agent_tasks set status='running' where id=$1 and status='queued'", [row.id]);
+      // M2 (Codex review): `source` is a stale per-cycle snapshot (loadEnabledSources runs once
+      // at cycle start) — re-check `enabled` fresh, in this same claim transaction, so a
+      // mid-cycle disable stops claiming the REST of an in-flight batch. Carrier 2 has no
+      // checkpoint to strand (unlike carrier 1's M2 half): a refused claim just leaves the row
+      // 'queued', naturally rediscovered next cycle once the source re-enables — no separate
+      // "still queued" branch needed.
+      const upd = await client.query(
+        `update clara.agent_tasks set status='running'
+          where id=$1 and status='queued'
+            and exists (select 1 from clara.wake_engine_sources where source_key=$2 and enabled)`,
+        [row.id, source.sourceKey],
+      );
       claimed = upd.rowCount > 0;
       await client.query("commit");
     } catch (e) {
@@ -338,10 +459,21 @@ async function processDirectQueueSource(client, { firmId, source, batchSize, dep
       const attempts = await recordTaskDeadLetter(client, { taskId: row.id, reason: err?.message ?? String(err) });
       if (attempts >= source.maxAttempts) {
         // Poison-skip's terminal: settle the TASK (there is no checkpoint to advance past for a
-        // direct_queue row — Annex C's own note).
-        await client.query("update clara.agent_tasks set status='failed', error_code='internal' where id=$1 and status='queued'", [row.id]);
-        counts.deadLettered += 1;
-        log(`[wake-engine] task=${row.id} source=${source.sourceKey} exhausted ${source.maxAttempts} attempts -> failed`);
+        // direct_queue row — Annex C's own note). M4 (both legs, found by the battery's own
+        // poison-trigger cell): this write touches the SAME row the claim attempt above just
+        // failed on — a genuine claim failure (a poisoned trigger, a transient DB error) can
+        // fire on THIS statement too, and pre-fix it was bare: an exception here propagated all
+        // the way out of runWakeEngineCycle, crashing the whole cycle (including every OTHER
+        // firm/source still to be processed) instead of the row simply staying 'queued' for a
+        // later retry — the exact "cycle does not crash" acceptance M4 requires.
+        try {
+          await client.query("update clara.agent_tasks set status='failed', error_code='internal' where id=$1 and status='queued'", [row.id]);
+          counts.deadLettered += 1;
+          log(`[wake-engine] task=${row.id} source=${source.sourceKey} exhausted ${source.maxAttempts} attempts -> failed`);
+        } catch (termErr) {
+          counts.failed += 1;
+          log(`[wake-engine] task=${row.id} source=${source.sourceKey} exhausted ${source.maxAttempts} attempts but the terminal settle ITSELF failed — leaving 'queued' for a later sweep (reconciler-wake's own check-first sticky-exhaustion path is the direct_queue analogue for the reconciler belt; this carrier's own next cycle retries the settle here): ${termErr?.message ?? termErr}`);
+        }
       } else {
         counts.failed += 1;
         log(`[wake-engine] claim-error task=${row.id} source=${source.sourceKey} attempt=${attempts}/${source.maxAttempts}: ${err?.message ?? err}`);
@@ -380,8 +512,8 @@ function mergeCounts(a, b) {
   };
 }
 
-async function processFirm(client, { firmId, lastSeq, headSeq, batchSize, sources, deps }) {
-  const outbox = await processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSize, sources, deps });
+async function processFirm(client, { firmId, lastSeq, batchSize, sources, deps }) {
+  const outbox = await processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sources, deps });
   let counts = outbox.counts;
   for (const source of sources.directQueue) {
     const c = await processDirectQueueSource(client, { firmId, source, batchSize, deps });
@@ -394,9 +526,16 @@ async function processFirm(client, { firmId, lastSeq, headSeq, batchSize, source
  *  carrier 1's round-robin — a firm with direct_queue work but no wake_outbox backlog never
  *  appears in discoverWork's result (direct_queue rides no domain event at all). Bounded like
  *  readHeldWakeRows' own batchSize discipline. */
+/** S5 (both legs): a bare `DISTINCT ... LIMIT` with no ORDER BY has UNDEFINED result ordering —
+ *  Postgres is free to return whatever subset its plan happens to touch first, which can
+ *  starve the SAME firms cycle after cycle once the distinct-firm count exceeds `limit`.
+ *  ORDER BY firm_id makes the selection deterministic and fair across cycles (not a full
+ *  round-robin cursor, but no longer arbitrary). The supporting partial index is on the
+ *  migration's own DDL (ix_agent_tasks_kind_queued) — this query was a full sequential scan
+ *  of agent_tasks before it. */
 async function discoverDirectQueueFirms(client, { taskKind, limit }) {
   const r = await client.query(
-    `select distinct firm_id from clara.agent_tasks where kind = $1 and status = 'queued' limit $2`,
+    `select distinct firm_id from clara.agent_tasks where kind = $1 and status = 'queued' order by firm_id limit $2`,
     [taskKind, limit],
   );
   return r.rows.map((row) => row.firm_id);
@@ -411,14 +550,14 @@ export async function runWakeEngineCycle(client, opts = {}) {
   const deps = { ...opts, log };
   const sources = await loadEnabledSources(client);
   const work = await discoverWork(client, { consumer: WAKE_ENGINE_CONSUMER, onlyFirm });
-  const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, headSeq: w.headSeq, active: true }));
+  const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, active: true }));
   let totals = { claimed: 0, dispatched: 0, failed: 0, deadLettered: 0 };
 
   for (let round = 0; round < maxBatchesPerFirm; round++) {
     let anyActive = false;
     for (const cur of cursors) {
       if (!cur.active) continue;
-      const res = await processFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, headSeq: cur.headSeq, batchSize, sources, deps });
+      const res = await processFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, batchSize, sources, deps });
       totals = mergeCounts(totals, res.counts);
       if (res.blocked || res.maxSeq <= cur.lastSeq) {
         cur.active = false; // blocked (unclaimable/retrying) or caught up

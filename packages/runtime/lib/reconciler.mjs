@@ -198,13 +198,25 @@ export async function reconcileTasks(client, deps) {
     [onlyFirm],
   );
   for (const t of cancels.rows) {
+    // M5 (Codex review, merges with the G1 branch since this loop's own kind-dispatch below now
+    // ALSO reaches wake/close_prep — the bug's blast radius widened with that change): a
+    // cancel() FAILURE was logged-and-ignored, then the task settled 'cancelled' UNCONDITIONALLY
+    // regardless — a FALSE durable receipt while the run may still be LIVE and keep acting
+    // (writing data, calling tools) under books that now say it stopped. Settle 'cancelled' only
+    // once the abort is CONFIRMED (no run to abort at all counts as trivially confirmed); on a
+    // genuine cancel() failure, skip settling entirely and leave the row in cancel_requested for
+    // the next sweep to retry — never fabricate a receipt for something that may not have
+    // happened.
+    let abortConfirmed = true;
     if (t.workflow_run_id) {
       try {
         await getRun(t.workflow_run_id).cancel();
       } catch (err) {
-        log(`[reconcile] cancel run ${t.workflow_run_id} noop: ${err?.message ?? err}`);
+        abortConfirmed = false;
+        log(`[reconcile] cancel run ${t.workflow_run_id} FAILED — NOT settling as cancelled, leaving task=${t.id} for the next sweep: ${err?.message ?? err}`);
       }
     }
+    if (!abortConfirmed) continue;
     try {
       if (t.kind === "autodraft") {
         // settle_autodraft_task (0036 CoR) has NO 'cancelled' outcome — its outcome
@@ -519,7 +531,7 @@ export { reconcileFaRuns };
 // The Wave D-b adjustment belt (design §2.3/§2.7 / migration 0045) lives in reconciler-adjustments.mjs.
 export { reconcileAdjustmentRuns };
 
-// Gate G1's own belt (design Annex C / migration UNNUMBERED_g1_wake_engine) lives in
+// Gate G1's own belt (design Annex C / migration 0133_g1_wake_engine) lives in
 // reconciler-wake.mjs under the same module-size budget. Registered UNCONDITIONALLY (every
 // cycle, not a daily flag) — mirrors reconcileAutoDraftTasks's own registration exactly, since
 // crash-recovery for a wake-engine-owned task is not a cadence concern the way the SST/lint/FA/

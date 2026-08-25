@@ -1,6 +1,7 @@
--- UNNUMBERED_g1_wake_engine.sql — Gate G1: the universal wake-execution engine, DB half.
+-- 0133_g1_wake_engine.sql — Gate G1: the universal wake-execution engine, DB half.
 -- =================================================================================================
--- Number claimed at MERGE time (hard constraint 10). Design of record:
+-- Number claimed at MERGE time (hard constraint 10) — 0133 (block state: W4 0129-0130, F-A6 0131,
+-- F-A5b 0132). Design of record:
 -- docs/plan/active/g1-wake-engine-survey.md (facts, as-found, at frontier 0127) +
 -- g1-wake-engine-design.md (the ruled shape) + g1-wake-engine-annexes.md (exact DDL/bodies,
 -- battery). Owner ruling 2026-08-25: mechanism (b) — the existing kind='wake' held projection
@@ -43,6 +44,31 @@
 --                                                registers/enables in its OWN follow-up PR, "rows
 --                                                only" exactly as the design's rollout section (§5)
 --                                                names it)
+--   G1-10 clara.firms.is_operator      ALTER   round-2 (Codex-round MUST B / opus-round MUST D)
+--                                                — see the item's own header below, §G1-10.
+--
+-- ROUND 3 (opus + Codex, both legs independently, after round 2 shipped) — this file's own DB-side
+-- share of that round; the runtime-side items (M1/M2/M5/M6/S1/S6) and the doc items (M7/M8/DOC) are
+-- companion changes outside this migration, in packages/runtime and docs/. Each is documented in
+-- full at its own fix site below (search the item's own label); this is the index, not the proof:
+--   M3  set_wake_source_enabled's estate-wide broadcast — narrowed to a MINIMAL, NON-AMPLIFYING
+--       payload: {source, on} only (no operator user/firm uuid, no free-text reason), routed
+--       through clara._audit (the sole-writer convention) instead of a direct audit_log insert, and
+--       suppressed entirely on a repeated no-op flip. §G1-10's writer body, T.5d census.
+--   M4  the close_prep matrix arm (§C, _tf_agent_task_update) admits queued->failed — the
+--       poison-exhaustion terminal that pre-fix raised CLR13 (illegal transition), aborting the
+--       WHOLE wake-engine cycle on every poisoned direct_queue claim. T.1 census.
+--   S2  _settle_wake_task's error_code write is first-write-wins (a later replay's error_code
+--       never overwrites an earlier cause) and refuses to attach an error_code to an already-
+--       completed row — replacing the pre-fix coalesce(), which let a later non-null replay clobber
+--       the first cause. §C, T.8 census.
+--   S3  wake_engine_sources.task_kind gains ck_wes_task_kind_wake_owned — extend-only CHECK closing
+--       the domain to ('wake','close_prep'), so a future registry row can never hand
+--       _settle_wake_task authority over a kind it has no business touching (e.g. autodraft).
+--       T.5e census.
+--   S5  a partial index (kind) WHERE status='queued' on agent_tasks, backing
+--       discoverDirectQueueFirms' own new ORDER BY (a runtime-side S5 half, indexed here). T.5f
+--       census.
 --
 -- WHAT THIS FILE DOES NOT SHIP: clara.bank_agent_run_due, clara.close_prep_due, any
 -- bankAgent.v1/closePrep.v1 workflow, any wake_fn_allowlist row for close_prep (F-A4's own
@@ -198,7 +224,18 @@ create table clara.wake_engine_sources (
     or (carrier = 'direct_queue' and event_type is null)),
   constraint ck_wes_enabled_audit check (
     (enabled = true and enabled_by is not null and enabled_at is not null)
-    or (enabled = false))
+    or (enabled = false)),
+  -- S3 (both legs) -- CONSTRAIN task_kind to the WAKE-OWNED domain, extend-only. Without this,
+  -- _settle_wake_task's own registry-driven kind filter (MUST B: `kind in (select task_kind
+  -- from clara.wake_engine_sources)`) trusts WHATEVER is in this column -- a future registry
+  -- row that (by mistake or otherwise) named task_kind='autodraft' would hand
+  -- _settle_wake_task authority over autodraft tasks too, a domain it has no business touching
+  -- (autodraft owns its own dedicated settlement path, settleAutoDraftTerminal). This CHECK is
+  -- the closed-world floor for that trust: only 'wake' (carrier=wake_outbox) and 'close_prep'
+  -- (carrier=direct_queue, the one live direct kind today) are admitted. EXTEND-ONLY: a future
+  -- migration that registers a genuinely new direct_queue kind widens this CHECK explicitly, in
+  -- the open, rather than the column silently accepting anything a plain INSERT supplies.
+  constraint ck_wes_task_kind_wake_owned check (task_kind in ('wake','close_prep'))
 );
 alter table clara.wake_engine_sources enable row level security;
 alter table clara.wake_engine_sources force row level security;
@@ -247,14 +284,15 @@ create or replace function clara.set_wake_source_enabled(p_source_key text, p_on
     p_reason text, p_op_key text) returns jsonb
  language plpgsql security definer set search_path to 'clara', 'pg_temp'
 as $function$
-declare c record; v_dedupe jsonb; v_reason text;
+declare c record; v_dedupe jsonb; v_reason text; v_was_enabled boolean; v_now_on boolean; v_firm_id uuid;
 begin
   c := clara._human_ctx(clara.role_rank('owner'));
   if not exists(select 1 from clara.firms where id = c.firm and is_operator) then
     raise exception 'set_wake_source_enabled is an operator-only door -- % is not the operator firm', c.firm
       using errcode='CLR04';
   end if;
-  if not exists(select 1 from clara.wake_engine_sources where source_key = p_source_key) then
+  select enabled into v_was_enabled from clara.wake_engine_sources where source_key = p_source_key;
+  if not found then
     raise exception 'unknown wake-engine source %', p_source_key using errcode='CLR10';
   end if;
   v_reason := nullif(btrim(coalesce(p_reason,'')),'');
@@ -265,35 +303,50 @@ begin
     clara._hash(jsonb_build_object('source', p_source_key, 'on', p_on, 'reason', v_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
 
+  v_now_on := coalesce(p_on,false);
   update clara.wake_engine_sources set
-      enabled = coalesce(p_on,false),
-      enabled_by = case when coalesce(p_on,false) then c.actor else enabled_by end,
-      enabled_at = case when coalesce(p_on,false) then now() else enabled_at end,
-      disabled_by = case when not coalesce(p_on,false) then c.actor else disabled_by end,
-      disabled_at = case when not coalesce(p_on,false) then now() else disabled_at end,
-      disabled_reason = case when not coalesce(p_on,false) then v_reason else disabled_reason end
+      enabled = v_now_on,
+      enabled_by = case when v_now_on then c.actor else enabled_by end,
+      enabled_at = case when v_now_on then now() else enabled_at end,
+      disabled_by = case when not v_now_on then c.actor else disabled_by end,
+      disabled_at = case when not v_now_on then now() else disabled_at end,
+      disabled_reason = case when not v_now_on then v_reason else disabled_reason end
     where source_key = p_source_key;
 
   perform clara._audit(c.firm, c.actor, null, null, 'set_wake_source_enabled', null,
-    jsonb_build_object('source', p_source_key, 'on', coalesce(p_on,false), 'reason', v_reason));
+    jsonb_build_object('source', p_source_key, 'on', v_now_on, 'reason', v_reason));
 
   -- MUST D (opus/Codex review, owner-ruled defect): this is an ESTATE-WIDE switch -- every
   -- firm's automation posture on this source changes the instant this call commits, not just
   -- the operator's own. audit_log is firm-scoped RLS, so without this only BELCORT's own trail
   -- would EVER show the flip happened -- every OTHER firm would have zero receipt that its
-  -- automation was just switched on/off. Broadcast an informational receipt into every OTHER
-  -- firm's OWN audit_log (actor=c.actor, the OPERATOR's identity -- never blank -- so a reader
-  -- can tell this was not a self-service act); the acting firm's own op-key-scoped receipt above
-  -- is untouched (that ledger stays firm-scoped by the idempotency design, _reserve_op/_finish_op).
-  insert into clara.audit_log (firm_id, actor, on_behalf_of, via_wake_kind, fn, entry_id, args, outcome)
-  select f.id, c.actor, null, null, 'set_wake_source_enabled_estate_notice', null,
-    jsonb_build_object('source', p_source_key, 'on', coalesce(p_on,false), 'reason', v_reason, 'set_by_operator_firm', c.firm),
-    'ok'
-  from clara.firms f
-  where f.id <> c.firm;
+  -- automation was just switched on/off.
+  --
+  -- M3 (Codex MUST / opus NOTE-4, folded in) -- THREE fixes to the broadcast itself, all real
+  -- findings against the FIRST draft of this block: (a) BROADCAST ONLY ON ACTUAL STATE CHANGE.
+  -- _reserve_op's op_key dedup only catches the SAME op_key replayed -- a DIFFERENT op_key
+  -- re-asserting the SAME already-current state (a habitual re-run, a periodic desired-state
+  -- reassertion script) is not a dedup hit, so the pre-fix version broadcast EVERY time
+  -- regardless, amplifying every OTHER firm's audit_log arbitrarily on pure no-ops. (b) THE
+  -- PAYLOAD CARRIES ONLY {source, on} -- both already ESTATE-READABLE facts (p_wes_read grants
+  -- every clara_authenticated member SELECT on wake_engine_sources directly, so neither is a
+  -- new disclosure) -- never the free-text `reason` (unbounded, operator-authored prose with no
+  -- business reason to land in a firm that did not ask for it) and never the operator firm's
+  -- own uuid (a receiving firm has no legitimate use for it). (c) ROUTED THROUGH clara._audit,
+  -- the SAME sole-writer convention the acting firm's own receipt above already uses, never a
+  -- direct multi-row INSERT into audit_log -- with actor=NULL, since the receiving firm has no
+  -- legitimate need to know WHICH specific operator-firm user flipped an estate-wide switch,
+  -- only that it changed (the acting firm's own op-key-scoped receipt above, actor=c.actor,
+  -- stays exactly as informative as before -- only the BROADCAST copy is stripped).
+  if v_now_on is distinct from coalesce(v_was_enabled, false) then
+    for v_firm_id in (select id from clara.firms where id <> c.firm) loop
+      perform clara._audit(v_firm_id, null, null, null, 'set_wake_source_enabled_estate_notice', null,
+        jsonb_build_object('source', p_source_key, 'on', v_now_on));
+    end loop;
+  end if;
 
   return clara._finish_op(c.firm, 'set_wake_source_enabled', p_op_key,
-    jsonb_build_object('source_key', p_source_key, 'on', coalesce(p_on,false)));
+    jsonb_build_object('source_key', p_source_key, 'on', v_now_on));
 end $function$;
 revoke all on function clara.set_wake_source_enabled(text,boolean,text,text) from public;
 grant execute on function clara.set_wake_source_enabled(text,boolean,text,text) to clara_authenticated;
@@ -349,8 +402,18 @@ begin
         when 'cancel_requested' then new.status in ('completed','failed','cancelled')
         else false end
       when old.kind='close_prep' then case old.status
-        -- The autodraft lifecycle, verbatim (D-27) -- not the 'wake' arm's held-only rule.
-        when 'queued' then new.status in ('running','cancel_requested','cancelled')
+        -- The autodraft lifecycle (D-27) -- not the 'wake' arm's held-only rule -- PLUS ONE
+        -- extend-only leg M4 (Codex+opus review) adds: queued->failed. wake-engine.mjs's own
+        -- direct_queue carrier poison-skips a CLAIM attempt (not an event admission, unlike
+        -- autodraft's own poison-exhaustion, which only ever advances a checkpoint and never
+        -- moves an autodraft TASK straight from queued) -- Annex D8's own note is that there is
+        -- NO checkpoint to advance past for a direct_queue row, so the wake-engine's own design
+        -- terminal-izes the TASK itself once max_attempts exhausts. Pre-fix, that terminal write
+        -- (queued->failed) was ILLEGAL here, raised CLR13, and crashed the WHOLE cycle every
+        -- time it fired -- the row stayed queued forever and the dead-letter count overran its
+        -- own cap on every subsequent cycle's re-attempt. This is the ONE truthful terminal the
+        -- design already needed; nothing else in this arm moves.
+        when 'queued' then new.status in ('running','cancel_requested','cancelled','failed')
         when 'running' then new.status in ('completed','failed','cancel_requested')
         when 'cancel_requested' then new.status in ('completed','failed','cancelled')
         else false end
@@ -427,11 +490,23 @@ begin
   if p_outcome not in ('completed','failed','cancelled') then
     raise exception 'unknown wake settlement outcome %', p_outcome using errcode='CLR10';
   end if;
-  -- NOTE C (opus/Codex review): coalesce, never overwrite -- a re-settle REPLAY that (for
-  -- whatever caller reason) carries a null p_error_code must not ERASE a real error_code an
-  -- earlier call already stamped. A genuine transition always supplies its own real value or
-  -- null consistently, so this changes nothing on the honest path, only the erasure on replay.
-  update clara.agent_tasks set status = p_outcome, error_code = coalesce(p_error_code, error_code)
+  -- NOTE C (opus/Codex review), widened by S2 (both legs demanded first-write-wins, not just
+  -- coalesce): a re-settle REPLAY that (for whatever caller reason) carries a null
+  -- p_error_code must not ERASE a real error_code an earlier call already stamped -- but a
+  -- plain coalesce() over-corrected: it let a LATER replay carrying a DIFFERENT non-null
+  -- error_code overwrite the FIRST cause (coalesce(newNonNull, old) picks newNonNull every
+  -- time), and it let a 'completed' outcome attach a stray error_code at all if one happened
+  -- to be passed. TWO real rules now, in priority order: (1) 'completed' NEVER carries an
+  -- error_code, full stop, regardless of what p_error_code the caller passes -- a completed
+  -- task has no error to guard; (2) otherwise FIRST-WRITE-WINS -- once error_code is non-null,
+  -- no LATER call (same or different p_error_code) may ever overwrite it; only a task whose
+  -- error_code is still null takes the incoming value.
+  update clara.agent_tasks set status = p_outcome,
+      error_code = case
+        when p_outcome = 'completed' then null
+        when error_code is not null then error_code
+        else p_error_code
+      end
     where id = p_task and kind in (select task_kind from clara.wake_engine_sources)
     returning origin_intent_id into v_intent;
   get diagnostics v_n = row_count;
@@ -703,6 +778,17 @@ comment on column clara.wake_engine_sources.event_type is
    and something emits it; the registry row itself is pure configuration and needs neither.';
 
 -- =================================================================================================
+-- §H · S5 (both legs) — the supporting index for wake-engine.mjs's discoverDirectQueueFirms
+-- (MUST E's own production-shape discovery query, `where kind=$1 and status='queued'`), which
+-- was a full sequential scan of clara.agent_tasks on every production cycle that has ANY
+-- direct_queue source registered. PARTIAL on status='queued' -- that predicate is a fixed
+-- literal in the query, and 'queued' is a small, transient minority of the table's overall
+-- rows (most rows settle to a terminal status and stay there), so the partial form stays small
+-- and cheap to maintain relative to a full (kind,status) composite index.
+-- =================================================================================================
+create index ix_agent_tasks_kind_queued on clara.agent_tasks (kind) where status = 'queued';
+
+-- =================================================================================================
 -- §TAIL · census + self-proofs. This is the evidence a reviewer reads, not "OK".
 -- =================================================================================================
 do $tail$
@@ -715,11 +801,19 @@ begin
   if v_src !~ 'when old\.kind=''wake'' then case old\.status\s*\n\s*when ''held'' then new\.status in \(''running'',''cancelled''\)\s*\n\s*when ''running'' then new\.status in \(''completed'',''failed'',''cancel_requested''\)\s*\n\s*when ''cancel_requested'' then new\.status in \(''completed'',''failed'',''cancelled''\)' then
     raise exception 'g1_wake_engine tail: _tf_agent_task_update''s wake arm does not carry the exact matrix delta' using errcode='CLR10';
   end if;
-  -- every OTHER kind's arm is byte-present, unmoved.
+  -- every OTHER kind's arm is byte-present. chat_turn/autodraft stay UNMOVED; close_prep gains
+  -- exactly ONE extend-only leg (M4, opus+Codex review) -- proven positionally below, not a
+  -- bare substring hit.
   if position('when old.kind=''chat_turn''' in v_src) = 0
      or position('when old.kind=''autodraft''' in v_src) = 0
      or position('when old.kind=''close_prep''' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: _tf_agent_task_update lost a sibling kind arm' using errcode='CLR10';
+  end if;
+  -- M4's own leg, checked as a plain positional substring (not a regex spanning the arm's own
+  -- explanatory comment above it, which would be fragile to reformat) — the exact tuple close_
+  -- prep's queued state now admits, unchanged from every OTHER kind's own quoting style.
+  if position('when ''queued'' then new.status in (''running'',''cancel_requested'',''cancelled'',''failed'')' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: _tf_agent_task_update''s close_prep arm does not carry the M4 queued->failed extend-only leg' using errcode='CLR10';
   end if;
 
   -- T.2 · wakes_outbox: the trigger admits held->settled, and the CHECK admits the value.
@@ -817,6 +911,24 @@ begin
     raise exception 'g1_wake_engine tail: set_wake_source_enabled reachable by PUBLIC' using errcode='CLR10';
   end if;
 
+  -- T.5e · S3: wake_engine_sources.task_kind is CONSTRAINED to the wake-owned domain -- a real
+  -- catalog read of the CHECK's own definition, not merely "an insert of an out-of-domain value
+  -- was refused" (that would be the battery's own job; this is the migration's own proof the
+  -- WALL exists at all).
+  select pg_get_constraintdef(c.oid) into v_def from pg_constraint c
+    where c.conrelid = 'clara.wake_engine_sources'::regclass and c.conname = 'ck_wes_task_kind_wake_owned';
+  if v_def is null then
+    raise exception 'g1_wake_engine tail: ck_wes_task_kind_wake_owned constraint is missing' using errcode='CLR10';
+  end if;
+  if position('''wake''' in v_def) = 0 or position('''close_prep''' in v_def) = 0 then
+    raise exception 'g1_wake_engine tail: ck_wes_task_kind_wake_owned does not admit exactly {wake, close_prep}: %', v_def using errcode='CLR10';
+  end if;
+
+  -- T.5f · S5: the supporting partial index for discoverDirectQueueFirms exists.
+  if not exists (select 1 from pg_indexes where schemaname='clara' and tablename='agent_tasks' and indexname='ix_agent_tasks_kind_queued') then
+    raise exception 'g1_wake_engine tail: ix_agent_tasks_kind_queued index missing (S5)' using errcode='CLR10';
+  end if;
+
   -- T.5b · clara_runtime can ACTUALLY READ the registry -- a REAL row-count read under SET
   -- ROLE, never has_table_privilege alone: FORCE RLS means a role can hold the table-level
   -- GRANT and still see ZERO rows if no POLICY admits it (measured, this exact gap, by this
@@ -847,13 +959,25 @@ begin
 
   -- T.5d · MUST D: set_wake_source_enabled's body carries BOTH halves -- the operator-firm gate
   -- AND the estate-wide receipt broadcast to every OTHER firm -- positionally, not a bare
-  -- substring hit.
+  -- substring hit. M3 (Codex MUST / opus NOTE-4): also proves the broadcast is CONDITIONAL on
+  -- an actual state change, routed through clara._audit (never a direct multi-row INSERT), and
+  -- the payload carries no reason/operator-firm-uuid field.
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara.set_wake_source_enabled(text,boolean,text,text)'::regprocedure;
   if position('is not the operator firm' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its operator-firm gate' using errcode='CLR10';
   end if;
-  if position('set_wake_source_enabled_estate_notice' in v_src) = 0 or position('where f.id <> c.firm' in v_src) = 0 then
+  if position('set_wake_source_enabled_estate_notice' in v_src) = 0
+     or position('for v_firm_id in (select id from clara.firms where id <> c.firm) loop' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its MUST-D estate-wide receipt broadcast' using errcode='CLR10';
+  end if;
+  if position('v_now_on is distinct from coalesce(v_was_enabled, false)' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled''s broadcast is not conditioned on an actual state change (M3)' using errcode='CLR10';
+  end if;
+  if position('insert into clara.audit_log' in v_src) > 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled writes audit_log directly -- M3 requires routing through clara._audit, the sole-writer convention' using errcode='CLR10';
+  end if;
+  if position('set_by_operator_firm' in v_src) > 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled''s broadcast payload still carries the operator-firm uuid M3 requires stripped' using errcode='CLR10';
   end if;
 
   -- T.7 · MUST A: cancel_agent_task's wakes_outbox cascade now carries the t.status='held'
@@ -866,8 +990,8 @@ begin
 
   -- T.8 · MUST B (opus-round; distinct from the Codex-round MUST B renamed to MUST D above):
   -- _settle_wake_task's kind filter is now the REGISTRY's own task_kind column (never a literal
-  -- 'wake'), and GET DIAGNOSTICS proves row_count -- never the v_intent-is-null conflation NOTE C
-  -- also touches (coalesce on error_code).
+  -- 'wake'), and GET DIAGNOSTICS proves row_count -- never the v_intent-is-null conflation. S2
+  -- (widening NOTE C): error_code is first-write-wins, and 'completed' NEVER carries one.
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara._settle_wake_task(uuid,text,text)'::regprocedure;
   if position('kind in (select task_kind from clara.wake_engine_sources)' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: _settle_wake_task does not filter on the registry''s task_kind domain' using errcode='CLR10';
@@ -875,8 +999,9 @@ begin
   if position('get diagnostics v_n = row_count' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: _settle_wake_task does not use GET DIAGNOSTICS row_count' using errcode='CLR10';
   end if;
-  if position('coalesce(p_error_code, error_code)' in v_src) = 0 then
-    raise exception 'g1_wake_engine tail: _settle_wake_task does not coalesce error_code (NOTE C)' using errcode='CLR10';
+  if position('when p_outcome = ''completed'' then null' in v_src) = 0
+     or position('when error_code is not null then error_code' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: _settle_wake_task does not carry S2''s first-write-wins + guard-completed error_code logic' using errcode='CLR10';
   end if;
 
   -- T.6 · THE STRANDED-ROW CURE'S OWN PROOF: this file's held-wake-row count is UNCHANGED by its
@@ -896,5 +1021,5 @@ begin
   end if;
   drop table g1_wake_engine_census;
 
-  raise notice 'g1_wake_engine tail: OK -- G1-1..G1-8 applied. wake arm carries held->running->{completed,failed,cancel_requested}->{completed,failed,cancelled} plus held->cancelled, every sibling kind arm unmoved; wakes_outbox admits held->settled on both the trigger and the CHECK; _settle_wake_task now settles BOTH kind=''wake'' AND kind=''close_prep'' via the registry''s own task_kind domain, uses GET DIAGNOSTICS (never the v_intent-is-null conflation), coalesces error_code on replay (MUST B + NOTE C), reachable by clara_runtime ONLY (zero human/wake role, zero PUBLIC), and clara_runtime can ACTUALLY READ wake_engine_sources (T.5b, a real SET ROLE row-count, not has_table_privilege alone); mint_wake_credential''s early gate AND per-kind chain both admit close_prep (the ANNEX-B CORRECTION applied, not merely claimed), every sibling per-kind arm unmoved; cancel_agent_task''s wakes_outbox cascade now guards on t.status=''held'' too, never diverging a running-then-cancelled wake task from its outbox twin (MUST A); wake_engine_sources is FORCE RLS with exactly 2 rows (bank_agent/wake_outbox, close_prep/direct_queue), BOTH enabled=false; set_wake_source_enabled is clara_authenticated-reachable, PUBLIC-refused, gated on clara.firms.is_operator (MUST D/Codex-MUST-B) -- the column exists NOT NULL DEFAULT false, uq_firms_one_operator enforces at most one operator firm ever, ZERO firms are marked operator by this migration (a raw ops act does that later, never an app RPC) -- AND broadcasts an estate-wide receipt to every OTHER firm''s own audit_log on every successful flip (MUST D). % held wake row(s) exist now, byte-compared equal to the persisted prestate count (NOTE L -- a REAL comparison, not a dead local). No table in workflow/graphile_worker/spike touched. No new PostgreSQL role minted (clara_wake_bank/clara_wake_bank_login already exist, 0121).', v_held_after;
+  raise notice 'g1_wake_engine tail: OK -- G1-1..G1-8 applied. wake arm carries held->running->{completed,failed,cancel_requested}->{completed,failed,cancelled} plus held->cancelled, every sibling kind arm unmoved; close_prep arm ADDITIONALLY admits queued->failed (M4, round 3 -- the poison-exhaustion terminal that pre-fix raised CLR13 and aborted the whole wake-engine cycle); wakes_outbox admits held->settled on both the trigger and the CHECK; _settle_wake_task now settles BOTH kind=''wake'' AND kind=''close_prep'' via the registry''s own task_kind domain (a domain now CLOSED to (''wake'',''close_prep'') by ck_wes_task_kind_wake_owned, S3 round 3), uses GET DIAGNOSTICS (never the v_intent-is-null conflation), is FIRST-WRITE-WINS on error_code and refuses to attach one to an already-completed row (S2, round 3 -- replacing the pre-fix coalesce() a later replay could clobber the first cause through), reachable by clara_runtime ONLY (zero human/wake role, zero PUBLIC), and clara_runtime can ACTUALLY READ wake_engine_sources (T.5b, a real SET ROLE row-count, not has_table_privilege alone); mint_wake_credential''s early gate AND per-kind chain both admit close_prep (the ANNEX-B CORRECTION applied, not merely claimed), every sibling per-kind arm unmoved; cancel_agent_task''s wakes_outbox cascade now guards on t.status=''held'' too, never diverging a running-then-cancelled wake task from its outbox twin (MUST A); wake_engine_sources is FORCE RLS with exactly 2 rows (bank_agent/wake_outbox, close_prep/direct_queue), BOTH enabled=false; set_wake_source_enabled is clara_authenticated-reachable, PUBLIC-refused, gated on clara.firms.is_operator (MUST D/Codex-MUST-B) -- the column exists NOT NULL DEFAULT false, uq_firms_one_operator enforces at most one operator firm ever, ZERO firms are marked operator by this migration (a raw ops act does that later, never an app RPC) -- AND broadcasts a MINIMAL, NON-AMPLIFYING estate-wide receipt ({source,on} only, actor NULL, routed through clara._audit, suppressed on a no-op re-flip) to every OTHER firm''s own audit_log on every actual state-changing flip (MUST D, narrowed by M3 round 3). agent_tasks gains ix_agent_tasks_kind_queued (kind) WHERE status=''queued'' (S5 round 3). % held wake row(s) exist now, byte-compared equal to the persisted prestate count (NOTE L -- a REAL comparison, not a dead local). No table in workflow/graphile_worker/spike touched. No new PostgreSQL role minted (clara_wake_bank/clara_wake_bank_login already exist, 0121).', v_held_after;
 end $tail$;

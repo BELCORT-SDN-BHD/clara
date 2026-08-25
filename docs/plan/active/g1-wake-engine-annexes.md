@@ -267,11 +267,10 @@ processFirm(client, firm, sources, deps):
     if source is None: continue        # unregistered event_type -- checkpoint-only advance, no dead-letter (nothing is wrong; the source simply has not shipped its registry row yet)
     try:
       begin txn
-        credential = mint_wake_credential(source.wake_kind, firm, null, '15 min', row.client_id)
         UPDATE agent_tasks SET status='running' WHERE id=row.id   # legal per Annex B's delta
         writeCheckpoint(consumer=WAKE_ENGINE_CONSUMER, firm, seq=row.event_seq)
       commit
-      enqueue(source.workflow_export, row.id, credential)   # same DI shape as autodraft.mjs's enqueue(taskId)
+      enqueue(source.workflow_export, row.id)   # same DI shape as autodraft.mjs's enqueue(taskId) -- no credential minted here or ever by the consumer; the dispatched workflow's own first "use step" attempt mints it (design §2)
     except err:
       rollback
       attempts = recordDeadLetter(relay_dead_letters, consumer=WAKE_ENGINE_CONSUMER, event_id=<via wi.event_id>, reason=err)
@@ -287,10 +286,9 @@ processFirm(client, firm, sources, deps):
     for row in rows:
       try:
         begin txn
-          credential = mint_wake_credential(source.wake_kind, firm, null, '15 min', row.client_id)
           UPDATE agent_tasks SET status='running' WHERE id=row.id   # already-legal autodraft-shaped transition, unchanged
         commit
-        enqueue(source.workflow_export, row.id, credential)
+        enqueue(source.workflow_export, row.id)   # no credential minted here either -- the dispatched workflow's own first "use step" attempt mints it (design §2), never the consumer
       except err:
         rollback
         attempts = recordTaskDeadLetter(wake_engine_task_dead_letters, consumer=WAKE_ENGINE_CONSUMER, task_id=row.id, reason=err)
@@ -349,10 +347,12 @@ Owns `bank-agency-annexes-3-build.md:58`'s M4 seam, explicitly "GATED ON G1." Mi
    dedicated bank login and silently misroute onto a shared identity.
 6. A lazy singleton pool getter, mirroring `getWritePool()` (`pools.mjs:171-177`).
 7. A scoped-transaction helper, mirroring `withWriteWakeScoped` (`pools.mjs:411-438`) — the
-   engine's `mint_wake_credential`+claim transaction runs under `clara_wake_bank`'s own connection
-   for a `bank_agent`-sourced dispatch, never the shared runtime pool (least-privilege: the
-   engine's OWN claim/checkpoint bookkeeping runs as `clara_runtime`; the actual bank-scoped work
-   the dispatched workflow does runs as `clara_wake_bank`, via this pool).
+   dispatched workflow's own first `"use step"` attempt calls `mint_wake_credential` under
+   `clara_wake_bank`'s own connection for a `bank_agent`-sourced dispatch, never the shared runtime
+   pool and never the engine's claim transaction (least-privilege: the engine's OWN claim/checkpoint
+   bookkeeping runs as `clara_runtime`, per Annex C's `processFirm`; the actual bank-scoped work,
+   credential mint included, runs as `clara_wake_bank`, via this pool, inside the workflow the
+   engine dispatched).
 8. DB side: `clara_wake_bank_login` created `NOLOGIN` in this gate's own migration (or F-A3's
    follow-up, whichever lands the row); granted `LOGIN` + password + the DSN secret at the operator
    ceremony — must be present before the image boots or the world fails closed, matching step 5's

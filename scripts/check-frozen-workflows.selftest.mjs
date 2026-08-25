@@ -128,6 +128,10 @@ testCase("a second unverified view export mentioning workflows -> REJECT (REGIST
   expectCodes(checkRegistryViewIntegrity(fixture("registry-view-altview.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
 });
 
+testCase("M8(b) an ALIASED RE-EXPORT (`export { x as workflowsByName }`, a shape the export-const scanner never sees) -> REJECT, never a silent pass (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-aliased-reexport.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
 testCase("REAL repo registry's workflowsByName + workflowNames -> OK (canary)", () => {
   const real = readFileSync(join(HERE, "..", "packages", "runtime", "workflows", "registry.ts"), "utf8");
   expectClean(checkRegistryViewIntegrity(real, "registry@working-tree"));
