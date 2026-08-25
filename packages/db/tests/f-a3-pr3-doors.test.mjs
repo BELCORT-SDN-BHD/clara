@@ -773,3 +773,50 @@ test("f-a3pr3.c1.outcome-mismatch a same-op_key retry with a DIFFERENT outcome r
   const rec2 = await rootQuery(`select outcome from clara.bank_agent_receipts where id = $1`, [r2.rows[0].id]);
   assert.equal(rec2.rows[0].outcome, "admitted", "c1: the fresh receipt truthfully names the real outcome");
 });
+
+// ===========================================================================
+// C2 (review finding, Codex, MUST -- seam split with lane-chatturn-v14) -- every OTHER cell in
+// this file mints its op_keys through opk() (rig-helpers.mjs), an underscore-joined shape with
+// no colon at all, so 0129's task-binding arm (`v_task is null or split_part(r.op_key, ':', 2)
+// = v_task`) always takes its `v_task is null` fallback in this whole battery -- the bound
+// branch itself has run in NO cell until this one. Proven directly against
+// clara._agent_verify_inputs_digest (superuser call, matching c3c.c/c1's own ungranted-core
+// precedent -- the function reads no wake_context(), so no wake_secret binding is needed)
+// using a colon-shaped op_key in lane-chatturn-v14's actual documented format
+// (bank-{verb}:{taskId}:{segment}:{payload}), both polarities.
+// ===========================================================================
+
+test("f-a3pr3.c2.task-binding a same-task pack-read grounds an act; a different-task pack-read refuses", async (t) => {
+  if (skipHere(t)) return;
+  const { client } = await freshAdvClient("c2task");
+  const w = await advWorld();
+  const firm = await firmOf(client);
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `C2TB${randomUUID().slice(0, 6)}` });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  await grantBankMatching({ client, firm, actor: w.users.alice });
+  const cred = await mintCred("bank_agent", firm, client);
+
+  const taskA = `c2ta-${randomUUID().slice(0, 8)}`;
+  const taskB = `c2tb-${randomUUID().slice(0, 8)}`;
+  // The pack-read's own op_key names taskA in the real chat shape -- never opk()'s
+  // underscore-joined form, which is exactly why the bound branch goes unexercised elsewhere.
+  const digest = await realDigest(cred.secret, client, bankAccountId, `bank-get_bank_pack:${taskA}:0:{}`);
+
+  // Same task as the pack-read: admits (returns void, no exception).
+  await rootQuery(`select clara._agent_verify_inputs_digest($1,$2,$3)`,
+    [client, digest, `bank-add_bank_account:${taskA}:0:{}`]);
+
+  // A DIFFERENT task: the digest is real and the client matches, but the task field diverges --
+  // must refuse, not silently fall back to the client+digest-only match (that fallback is
+  // reserved for op_keys carrying NO parseable task field at all, never for one naming a WRONG
+  // task).
+  let err = null;
+  try {
+    await rootQuery(`select clara._agent_verify_inputs_digest($1,$2,$3)`,
+      [client, digest, `bank-add_bank_account:${taskB}:0:{}`]);
+  } catch (e) { err = e; }
+  assert.ok(err, "c2.task-binding: a different-task op_key refuses, not silently grounds on a stale task's pack-read");
+  assert.equal(err?.code, "CLR10", `c2.task-binding: expected CLR10, got ${err?.code}: ${err?.message}`);
+  assert.match(String(err?.detail ?? ""), /inputs_digest_unverified/,
+    `c2.task-binding: names inputs_digest_unverified (got ${err?.detail ?? "(none)"})`);
+});

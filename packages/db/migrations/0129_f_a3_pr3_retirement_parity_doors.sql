@@ -36,9 +36,11 @@
 --     is recut mid-flight): the eleven SS1 names
 --   newly created (no prior body, no quiesce owed): _book_staff_advance_application_core,
 --     wake_book_staff_advance_application, _agent_book_staff_advance_application_core
---     (authored to call clara._agent_wake_ctx and clara._agent_verify_inputs_digest's NEW
---     3-arg form directly from birth -- never itself CoR-patched), confirm_bank_identifier_
---     promotion, _confirm_bank_identifier_promotion_core, clara._agent_wake_ctx itself
+--     (authored to call clara._agent_wake_ctx directly from birth -- but its own
+--     clara._agent_verify_inputs_digest call is authored 2-arg, the SAME H2 shape every other
+--     agent core uses, and IS one of C2's thirteen CoR-patched call sites below, not exempt from
+--     it: this body is BOTH newly-created AND CoR-patched, in the same migration), confirm_bank_
+--     identifier_promotion, _confirm_bank_identifier_promotion_core, clara._agent_wake_ctx itself
 --   SCHEMA-LOCKED, not a body recut (SHOULD 5b): SS1b takes ACCESS EXCLUSIVE on
 --     clara.bank_agent_receipts to drop+re-add bank_agent_receipts_act_kind_check (widened
 --     to admit 'staff_advance_application'), and re-validates every existing row against the
