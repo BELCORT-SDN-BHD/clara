@@ -170,14 +170,21 @@
 --   with evidence, not a request for a ruling that has already been made.
 -- B-2 (blocker) · `query_to_xml` is a second execution engine past the cursor, the census and the
 --   caps. FIXED as far as a mechanism can: §6.1 promotes the plan census from a RELATION census
---   to a RELATION + FUNCTION census. MEASURED REACH, stated so nobody over-reads it —
---   `explain (format json, verbose)` emits `Function Name` for a FUNCTION SCAN and NOT for a
---   scalar call in a target list, so `select * from query_to_xml(…)` and `pg_settings` (which is
---   a Function Scan on `pg_show_all_settings`) are REFUSED, while `select query_to_xml(…)` as a
---   scalar is not. The scalar form's residual is bounded and named: RLS still applies inside SPI,
---   so no firm and no client boundary moves — what it can do is make `relations_read` and
---   `row_count` understate the read. That is a receipt-accuracy residual, it is real, and it
---   closes with B-1's owner ceremony and not before.
+--   to a RELATION + FUNCTION census, KEYED ON `Node Type` (CORRECTED, narrow re-review round:
+--   the census originally keyed on the presence of a `Function Name` key, which a multi-function
+--   `ROWS FROM (...)` clause escapes — MEASURED, `Node Type: "Function Scan"` with no `Function
+--   Name` key at all — and which `XMLTABLE`'s `Table Function Scan` node never carried in the
+--   first place. `Node Type` is the one key every plan node carries unconditionally, so this
+--   form of escape is structurally closed, not just the one payload shape that surfaced it).
+--   MEASURED REACH, stated so nobody over-reads it — `select * from query_to_xml(…)`, the ROWS
+--   FROM form, XMLTABLE, and `pg_settings` (a Function Scan on `pg_show_all_settings`) are all
+--   REFUSED, while `select query_to_xml(…)` as a scalar is not — MEASURED, a scalar call
+--   produces `Subquery Scan`/`Result` nodes, never a Function Scan of any kind, so no node-type
+--   census can reach it BY CONSTRUCTION. The scalar form's residual is bounded and named: RLS
+--   still applies inside SPI, so no firm and no client boundary moves — what it can do is make
+--   `relations_read` and `row_count` understate the read. That is a receipt-accuracy residual,
+--   it is real, and it closes with B-1's owner ceremony (folded above, #340: NO-GO on managed
+--   Supabase, ruled with measurements) and not before.
 -- B-3 (blocker) · `cross_client_unavailable` has no producer. **REFUTED IN PART — as built there
 --   IS a producer** (§6.3(a): the credential pin vs the turn's session client, raised and forced
 --   live) — but the finding's deeper half is RIGHT and is fixed: a client-pinned session asking a
@@ -222,28 +229,30 @@
 --   release the freeform pool with `DISCARD ALL` rather than `reset all`.
 -- M-2 · census C12 for both new roles (schema privileges, database TEMP, superuser/bypassrls) —
 --   built into the tail below (§10, "C12"), via `aclexplode`'s EXPLICIT-grantee entries rather
---   than `has_*_privilege` (which reports PUBLIC-inherited privilege too). NOTE (independent
---   review, re-derivation this PR): there is **no separate battery file** — `f-a6-freeform-
---   read.test.mjs` carries only the two π receipt-contract cells; the Annex F admission-ladder
---   battery does not exist yet (its own header says so). C12 is proven by the migration's OWN
---   tail asserting and raising on it, re-run on every rig apply — that is real, rig-replayed
---   evidence (law 2), just not a `.test.mjs` cell; "and into the battery" below was FALSE and is
---   struck everywhere it appeared. M-3 · the EXECUTE half of C12 goes CLUSTER-WIDE (no
---   `nspname='clara'` filter — verified: `packages/db/migrations/UNNUMBERED_f_a6_freeform_
---   read.sql` §10 "(c) EXPLICIT EXECUTE, CLUSTER-WIDE"), not the schema-scoped check (2) it
---   supersedes. M-4 · the INVOKER verb pins `search_path` (verified: `set search_path = clara,
---   pg_temp` on the verb, line ~898) — and so does every OTHER function this file creates,
---   DEFINER or INVOKER (verified by grep: 10 function/trigger bodies, 10 `search_path = clara,
---   pg_temp` pins, one-to-one); **NOT** battery-forced — a structural fact read directly off the
---   bodies, not a test cell, and named as such. M-5 · "every exit settles" is a structural
+--   than `has_*_privilege` (which reports PUBLIC-inherited privilege too). CORRECTED, twice now:
+--   the FIRST correction (independent review, prior round) said "there is no separate battery
+--   file" — TRUE then, no longer true. `f-a6-freeform-read.test.mjs` now carries a both-polarity
+--   floor for the round-2 census fix (`f-a6.mf2-*` cells) and the S-2/NOTE-2 judgement branches
+--   (`f-a6.s2-*`, `f-a6.note2-*`) — the narrow re-review round's own minimum, NOT the full Annex F
+--   admission-ladder battery, which still does not exist as a file (the test file's own header
+--   says so precisely). C12 itself remains proven by the migration's OWN tail asserting and
+--   raising on it, re-run on every rig apply (real, rig-replayed evidence, law 2), not by a test
+--   cell — the two instruments are complementary, not substitutes. M-3 · the EXECUTE half of C12
+--   goes CLUSTER-WIDE (no `nspname='clara'` filter — verified: `packages/db/migrations/
+--   UNNUMBERED_f_a6_freeform_read.sql` §10 "(c) EXPLICIT EXECUTE, CLUSTER-WIDE"), not the
+--   schema-scoped check (2) it supersedes. M-4 · the INVOKER verb pins `search_path` (verified:
+--   `set search_path = clara, pg_temp` on the verb) — and so does every OTHER function this file
+--   creates, DEFINER or INVOKER (verified by grep: 10 function/trigger bodies, 10 `search_path =
+--   clara, pg_temp` pins, one-to-one); **NOT** battery-forced — a structural fact read directly
+--   off the bodies, not a test cell, and named as such. M-5 · "every exit settles" is a structural
 --   property of `wake_freeform_read`'s OWN body, not a battery-forced invariant: the whole
 --   statement-shape/census/fetch cascade (§6.1) sets `v_reason` and falls through on every
 --   branch — no exception handler returns or re-raises — so there is exactly ONE call to
 --   `clara._freeform_settle` in the function and no code path before it, verified by reading the
 --   body (single settle call, no early `return` precedes it). Both M-4 and M-5's proofs are
---   THIS PARAGRAPH'S grep/read, not a cell in a battery that does not exist — the honest label,
---   per the owner's re-derivation order, is "verified by direct read," not "forced in the
---   battery."
+--   THIS PARAGRAPH'S grep/read, not a cell in the battery floor above — the honest label is
+--   "verified by direct read," not "forced in the battery," and it stays that way even now that
+--   a battery floor exists, because neither claim is what these two cells would test.
 -- WHAT THE PASS FOUND HOLDING, cited because a later reader deserves the credit as well as the
 --   debts: all 177 `create policy` statements in 0001-0102 are role-pinned (a `TO`-less policy
 --   would have OR'd straight past `_freeform_admitted()`); no dblink/postgres_fdw/file_fdw/http/
@@ -454,8 +463,12 @@ grant usage on schema clara to clara_freeform_ro;
 --       (nor EXECUTE on pg_catalog fns like pg_notify/pg_sleep/query_to_xml — MEASURED, §0.1c's
 --       own paragraph). Full confinement needs the DB-wide ACL baseline (acl-baseline.sql,
 --       MF-4 this PR: both roles now join all three of its load-bearing `confined` arrays, not
---       only the display `\echo`) plus the pg_catalog residual's owner ceremony (still
---       registered, unclosable from a migration — B-1 stands as written on that half). Runs
+--       only the display `\echo`) plus the pg_catalog residual's owner ceremony — CORRECTED
+--       (narrow re-review round): no longer "still registered, unclosable from a migration",
+--       that framing is retired; the ceremony has been RULED (owner, 2026-08-25, #340,
+--       structurally NO-GO on managed Supabase, measured — see §0.1c's B-1 paragraph for the
+--       full disposition). Confinement from a migration alone remains unclosable BY
+--       CONSTRUCTION on this platform, unrelated to whether the ceremony was ever run. Runs
 --       BEFORE `set role clara_fn_owner` — needs the DEPLOY role's own privileges, same as
 --       0002's block. Best-effort: a non-superuser deploy role may not own `public`/an
 --       extension schema, so a revoke may be denied and must not abort the migration.
@@ -979,21 +992,40 @@ begin
   -- the whole of R-3's text identity: `_freeform_arm` recorded p_sql, and p_sql is what is
   -- wrapped here. There is no second string.
   --
-  -- S-1 (independent review, this PR) — THE RESIDUAL R-3 DOES NOT CLOSE. `_freeform_arm` and
-  -- `_freeform_settle` are GRANTED to clara_freeform_ro, forced by the INVOKER chain (D-20; §0.2
-  -- names why there is no ungranted seam here). That grant means anyone who can authenticate as
-  -- clara_freeform_login can call EITHER directly, outside this verb entirely — `select clara.
-  -- _freeform_arm(...)` from a plain client, never touching this function's own cursor/census/
-  -- fetch sequence. R-3's "one body, one variable" guarantee is therefore a property of THIS
-  -- verb's own internals, not of the receipt as a whole: a caller that skips the verb can still
-  -- arm (and, in its own separate transaction, settle) a receipt describing a read the walls
-  -- above never ran. D-20's forgery-closure (one arm/one settle PER TRANSACTION, a second call
-  -- aborting) still holds against a PAYLOAD riding inside this verb's own composed SQL — that is
-  -- what D-20 was built to close, and it does. It does NOT hold against a caller who never enters
-  -- the verb at all. NAMED OBLIGATION FOR PR-2: `withFreeformRead` must call ONLY `wake_freeform_
-  -- read`, never `_freeform_arm` or `_freeform_settle` directly, on every code path — this is a
-  -- runtime-wiring discipline the DB layer cannot itself enforce (the grant is structural, not a
-  -- string check), so it belongs in the PR-2 brief and the runtime's own review, not assumed here.
+  -- S-1 (independent review, this PR; wording CORRECTED + one primitive ADDED, narrow re-review
+  -- round) — THE RESIDUAL R-3 DOES NOT CLOSE. `_freeform_arm` and `_freeform_settle` are GRANTED
+  -- to clara_freeform_ro, forced by the INVOKER chain (D-20; §0.2 names why there is no ungranted
+  -- seam here). That grant means anyone who can authenticate as clara_freeform_login can call
+  -- EITHER directly, outside this verb entirely — `select clara._freeform_arm(...)` from a plain
+  -- client, never touching this function's own cursor/census/fetch sequence. R-3's "one body, one
+  -- variable" guarantee is therefore a property of THIS verb's own internals, not of the receipt
+  -- as a whole: a caller that skips the verb can still arm and settle a receipt describing a read
+  -- the walls above never ran. CORRECTED: arm and settle must be the SAME transaction, not "its
+  -- own separate transaction" as an earlier cut of this note said — `_freeform_settle` has no read
+  -- id argument and keys on `where arm_txid = pg_current_xact_id_if_assigned() and settled_at is
+  -- null` (§4), so a settle call in a LATER transaction matches no row at all and no-ops; the
+  -- forgery this residual actually permits is arm-then-settle inside ONE caller-controlled
+  -- transaction that never entered the verb.
+  --
+  -- A SECOND, NARROWER PRIMITIVE, MEASURED this round: the SAME grant lets a payload call
+  -- `clara._freeform_settle(...)` from INSIDE its own composed SQL — a row expression evaluated
+  -- at FETCH, inside the verb's own cursor, that itself invokes the settle function. This does
+  -- NOT let the payload forge or complete anything: it settles the row `_freeform_arm` already
+  -- armed for THIS call, so when the verb's own single settle call runs moments later it collides
+  -- with D-20's own forgery-closure (one settle per transaction — `double_settle` — §5.1/§6) and
+  -- the WHOLE transaction aborts. Net effect: a payload can DENY its own receipt (self-sabotage,
+  -- Tier-D family — the transaction dies, no DB receipt, the runtime's task record is the honest
+  -- home) but cannot use this path to describe a read that did not happen; D-20's own guarantee is
+  -- exactly what turns the attempt into an abort instead of a forgery.
+  --
+  -- D-20's forgery-closure (one arm/one settle PER TRANSACTION, a second call aborting) still
+  -- holds against a PAYLOAD riding inside this verb's own composed SQL — that is what D-20 was
+  -- built to close, and it does, for BOTH primitives above. It does NOT hold against a caller who
+  -- never enters the verb at all. NAMED OBLIGATION FOR PR-2: `withFreeformRead` must call ONLY
+  -- `wake_freeform_read`, never `_freeform_arm` or `_freeform_settle` directly, on every code
+  -- path — this is a runtime-wiring discipline the DB layer cannot itself enforce (the grant is
+  -- structural, not a string check), so it belongs in the PR-2 brief and the runtime's own
+  -- review, not assumed here.
   v_composed := format('select to_jsonb(t) from (%s) t', p_sql);
 
   -- ---- 1. THE SINGLE-STATEMENT WALL — the cursor OPENS FIRST (D-18, folding GB-3). ---------
@@ -1100,23 +1132,33 @@ begin
     else
       b_rel := 'pass';
 
-      -- MF-2 (independent review, this PR) — THE FUNCTION CENSUS. `explain (format json,
-      -- verbose)` emits `Function Name` for a FUNCTION SCAN and NOT for a scalar call in a
-      -- target list (B-2's own measured reach, §0.1c). No function scan is ever legitimate
-      -- here: the enumerated surface is 35 RELATIONS, never a table-returning function, so
-      -- ANY function scan refuses — there is no allow-list to compare against, unlike the
-      -- relation census. MEASURED (the reviewer's own probe): `select * from
-      -- query_to_xml(...)` reads the WHOLE relation through SPI with `relations_read=[]` and
-      -- `row_count=1` — the RELATION census cannot see it, because it never scans a relation;
-      -- it scans a FUNCTION. This closes that door the same way the relation census closes
-      -- its own. The scalar-call residual (`select query_to_xml(...)`, `pg_get_functiondef`)
-      -- is unmoved and named (H-3): a scalar call emits no `Function Name` node at all, which
-      -- is exactly why B-1's owner ceremony and H-1's clearing carry the confidentiality claim
-      -- and this rung does not try to.
-      select coalesce(array_agg(distinct (x->>'Function Name')), '{}')
+      -- MF-2 (independent review, this PR; CORRECTED in the narrow re-review round below).
+      -- THE FUNCTION CENSUS keys on `Node Type`, not on the presence of a `Function Name`
+      -- key. MEASURED ESCAPE the re-review found, live: `select a::text from rows from
+      -- (query_to_xml(...), generate_series(1,1)) t(a,b)` emits `Node Type: "Function Scan"`
+      -- with NO `Function Name` key at all (a multi-function ROWS FROM clause names its
+      -- functions differently in the plan) — the original name-keyed census returned {} for
+      -- this exact payload and let query_to_xml materialize the whole relation into one
+      -- scalar, escaping the row cap, the byte cap and the fetch-loop deadline, all at once.
+      -- `Node Type` is the one key EVERY plan node carries unconditionally, by definition —
+      -- there is no plan node without one, so a node-type census cannot be name-shaped past
+      -- the way `Function Name`'s absence was. Both `Function Scan` (the ordinary FROM-clause
+      -- form, ROWS FROM included) and `Table Function Scan` (XMLTABLE's own node type, which
+      -- carries `Table Function Name` instead of `Function Name` and was equally invisible to
+      -- the old walk) are covered. No function scan of any shape is ever legitimate here: the
+      -- enumerated surface is 35 RELATIONS, never a table-returning function, so ANY function
+      -- scan refuses — there is no allow-list to compare against, unlike the relation census.
+      -- The scalar-call residual (`select query_to_xml(...)`, `pg_get_functiondef`) is
+      -- UNMOVED and named (H-3): MEASURED, a scalar call in a target list produces `Subquery
+      -- Scan` / `Result` nodes, never `Function Scan` or `Table Function Scan` — no node-type
+      -- census can reach it, by construction, which is exactly why B-1's owner ceremony
+      -- (folded above, #340, NO-GO on managed Supabase) and H-1's clearing carry the
+      -- confidentiality claim for that one residual and this rung does not try to.
+      select coalesce(array_agg(distinct coalesce(x->>'Table Function Name', x->>'Function Name', x->>'Node Type')), '{}')
         into v_fns_bad
         from jsonb_path_query(to_jsonb(v_plan), '$.**') as x
-       where jsonb_typeof(x) = 'object' and (x->>'Function Name') is not null;
+       where jsonb_typeof(x) = 'object'
+         and (x->>'Node Type') in ('Function Scan', 'Table Function Scan');
 
       if array_length(v_fns_bad, 1) is not null then
         b_fn := 'fail'; v_reason := 'function_not_enumerated';
@@ -1428,8 +1470,16 @@ insert into clara.wake_fn_allowlist (wake_kind, function_name) values
 --   6 acting_actor    r.acting_actor — NOT NULL.
 --   7 on_behalf_of    r.on_behalf_of — the director, NULL only where the credential carried none.
 --   8 occurred_at     r.at — the base table's own pre-F-A6 timestamptz column (0002:314).
---   9 model           r.model_snapshot->>'model'.
---  10 model_version   r.model_snapshot->>'version'.
+--   9 model           r.model_snapshot->>'model'. NOTED (narrow re-review round): v1 has NO
+--                     WRITER for `model_snapshot` — neither `_freeform_arm` nor
+--                     `_freeform_settle`'s column lists ever set it, and the CHECK permits NULL,
+--                     so this ordinal is PERMANENTLY NULL on every v1 receipt. Correctly typed
+--                     (`text`, matching pi's contract) and correctly projected (a real column
+--                     read, not a lie), just always empty — v1 has no model-identity carrier to
+--                     write it from (the credential names a wake_kind, not a model). PR-2's
+--                     runtime pool is the natural writer, once one exists; documented here
+--                     rather than built as a fake writer with nothing real to populate it.
+--  10 model_version   r.model_snapshot->>'version'. Same v1-NULL/PR-2-populated note as 9.
 --  11 rationale       r.purpose — TA-P4's bound purpose IS the agent's stated reasoning for
 --                     this read; there is no second free-text field to prefer over it.
 --  12 verdict         r.rung_vector — the three-valued gate vector IS "what the DB saw" here.

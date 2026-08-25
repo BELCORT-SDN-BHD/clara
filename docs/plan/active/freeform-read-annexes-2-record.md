@@ -390,17 +390,26 @@ should see the deferral rather than infer it from the words "OCR text or regions
   holds; the invariant is that it has exactly ONE caller (`_freeform_arm`), not that it is absent.
   If either belt is dropped the receipt can describe a read that did not happen — the audit
   control's worst failure.
-  **S-1 residual (independent review, this PR) — R-3 DOES NOT CLOSE outside the verb.**
-  `_freeform_arm`/`_freeform_settle` are GRANTED directly to `clara_freeform_ro` (forced by the
-  INVOKER chain, D-20/§0.2), so anyone who can authenticate as `clara_freeform_login` can call
-  either DIRECTLY, skipping `wake_freeform_read`'s own cursor/census/fetch sequence entirely, and
-  arm (then, in a separate transaction, settle) a receipt describing a read the walls above never
-  ran. D-20's one-arm/one-settle-per-transaction forgery closure still holds against a payload
-  riding inside the verb's own composed SQL; it does NOT hold against a caller that never enters
-  the verb at all. **NAMED OBLIGATION FOR PR-2**: `withFreeformRead` must call ONLY
-  `wake_freeform_read`, never `_freeform_arm`/`_freeform_settle` directly, on every code path —
-  a runtime-wiring discipline the DB layer cannot itself enforce (the grant is structural, not a
-  string check). Full text: the migration body, right before `v_composed := format(...)`.
+  **S-1 residual (independent review, this PR; wording CORRECTED + one primitive ADDED, narrow
+  re-review round) — R-3 DOES NOT CLOSE outside the verb.** `_freeform_arm`/`_freeform_settle` are
+  GRANTED directly to `clara_freeform_ro` (forced by the INVOKER chain, D-20/§0.2), so anyone who
+  can authenticate as `clara_freeform_login` can call either DIRECTLY, skipping
+  `wake_freeform_read`'s own cursor/census/fetch sequence entirely, and arm and settle a receipt
+  describing a read the walls above never ran. CORRECTED: arm and settle must be the SAME
+  transaction — `_freeform_settle` keys on `arm_txid = pg_current_xact_id_if_assigned()` with no
+  read-id argument, so a settle call in a later transaction matches no row and no-ops; "its own
+  separate transaction" (an earlier cut of this note) was wrong. A second, narrower primitive,
+  measured this round: a payload can call `_freeform_settle` from INSIDE its own composed SQL at
+  FETCH, which settles the row `_freeform_arm` already armed and collides with the verb's own
+  single settle call — `double_settle`, whole transaction aborts. Net effect is DENIAL, not
+  forgery: the payload can make its own read leave no receipt (Tier-D family) but cannot describe
+  a read that did not happen through this path. D-20's one-arm/one-settle-per-transaction forgery
+  closure holds against a payload riding inside the verb's own composed SQL for BOTH primitives;
+  it does NOT hold against a caller that never enters the verb at all. **NAMED OBLIGATION FOR
+  PR-2**: `withFreeformRead` must call ONLY `wake_freeform_read`, never
+  `_freeform_arm`/`_freeform_settle` directly, on every code path — a runtime-wiring discipline
+  the DB layer cannot itself enforce (the grant is structural, not a string check). Full text:
+  the migration body, right before `v_composed := format(...)`.
 - **R-4 — a fourth pool costs connections and a password ceremony.** +2 against a budget of 19 whose
   ceiling is unmeasured (P-8), and a new fail-closed DSN in `assertProductionPoolConfig`: a world
   that boots without it must refuse to start, so the ceremony precedes the image.

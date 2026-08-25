@@ -934,18 +934,31 @@ export const SALES_LANE_0046_COHORT = [
 // ungranted core is named among the internals so its ABSENCE from every role set is a DECLARED
 // expectation rather than a silent default — v1's GB-2 defect was exactly a core that was
 // described as ungranted in one place and granted in another.
+// CORRECTED (narrow re-review round, MF-1's own fix): the register's original 5+2 split --
+// 5 genuinely granted plus wake_firm/shares_my_firm_wake as "shared, policy-only, unprobed" --
+// went stale the moment MF-1 swapped all 35 policies off those two 0004/0011 helpers onto
+// _freeform_firm()/_freeform_shares_firm() and cleared the wake secret before either old
+// reader could fire. `wake_firm`/`shares_my_firm_wake` are no longer called by ANY F-A6 object
+// (policy or body) and are no longer granted -- keeping them in this expected set would have
+// made the roster the ONLY thing NOT re-derived when the fix landed, silently green only
+// because `policyHelperNames()` launders policy-referenced functions into allowedBroadly
+// regardless of which functions those actually are.
 const FREEFORM_F_A6_GRANTED_FNS = [
   "wake_freeform_read", "_freeform_arm", "_freeform_settle",
   "_freeform_scope_clients", "_freeform_admitted",
+  "_freeform_firm", "_freeform_shares_firm",
 ];
 const FREEFORM_F_A6_UNGRANTED_FNS = [
   "_freeform_core", "_tf_freeform_settle_once", "_tf_freeform_must_settle",
 ];
 export const FREEFORM_F_A6_COHORT = [...FREEFORM_F_A6_GRANTED_FNS, ...FREEFORM_F_A6_UNGRANTED_FNS];
-// The two shared helpers the freeform policies call. They are NOT in the cohort (they are
-// 0004/0011 objects that predate F-A6), but they ARE in the role's expected EXECUTE set, and
-// wake_firm is a policy helper besides — which is why the strict matrix skips it.
-const FREEFORM_F_A6_SHARED_FNS = ["wake_firm", "shares_my_firm_wake"];
+// No shared-but-ungranted helper remains: the two functions that once filled this role
+// (wake_firm, shares_my_firm_wake) are gone from both the grant AND every F-A6 policy.
+// _freeform_firm()/_freeform_shares_firm() replaced them as GENUINELY GRANTED members of
+// FREEFORM_F_A6_GRANTED_FNS above, not as a second unprobed category -- so this set is now
+// empty on purpose, kept as a named export rather than deleted so a future re-introduction of
+// a policy-only helper has an obvious place to land instead of a fresh ad hoc array.
+const FREEFORM_F_A6_SHARED_FNS = [];
 
 // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold. A named cohort
 // (nit, opus consolidated round) rather than a bare inline string, so a future rename/retire
@@ -1041,9 +1054,13 @@ export const ALLOWED = {
   // GM-6): `grantMatrixFailures` iterates Object.keys(ALLOWED), so a role that is not a key is
   // never probed by the exact-EXECUTE census AT ALL.
   //
-  // `wake_firm` and `shares_my_firm_wake` are in the group's set but never probed: both are RLS
-  // policy helpers, so `allowedBroadly` skips them. They are listed anyway so this roster reads
-  // as the SEVEN of Annex A.2 rather than as five names and a footnote.
+  // CORRECTED (narrow re-review round): this used to be five genuinely-granted functions plus
+  // wake_firm/shares_my_firm_wake read as unprobed RLS policy helpers, "so this roster reads as
+  // the SEVEN of Annex A.2 rather than as five names and a footnote". MF-1's own fix retired
+  // both helpers from every F-A6 policy and from the grant; the roster now reads as the SEVEN
+  // it always meant to assert, but all seven are genuinely granted and genuinely probed --
+  // `FREEFORM_F_A6_SHARED_FNS` is an empty set, kept only as the landing spot for a future
+  // policy-only helper (see its own definition above).
   "clara_freeform_ro": new Set([...FREEFORM_F_A6_GRANTED_FNS, ...FREEFORM_F_A6_SHARED_FNS]),
   // THE LOGIN SHELL'S SET IS EMPTY, AND THAT IS THE ASSERTION — measured, not assumed. The first
   // cut of this entry mirrored the group's, on the reasoning that has_function_privilege answers

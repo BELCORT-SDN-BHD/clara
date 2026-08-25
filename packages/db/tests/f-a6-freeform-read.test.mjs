@@ -1,13 +1,17 @@
-// F-A6 PR-1 — the audited freeform read: the π receipt-contract projection.
+// F-A6 PR-1 — the audited freeform read: the π receipt-contract projection, plus (added in the
+// narrow re-review round) the both-polarity floor for this round's own judgement branches.
 //
-// SCOPE, DELIBERATELY NARROW. This proves ONLY that clara._agent_receipt_src_f_a6's REAL
-// projection (migration §9.5, folded in at merge once 0103_f_a7_pi_additive.sql landed first)
-// conforms to pi's contract and does not leak the base table's own `scope` column (client|firm,
-// what the READ touched) into the contract's `scope` column (firm|platform, receipt
-// VISIBILITY) — the exact footgun the F-A6 completion report named. It is NOT the item's full
-// Annex F battery (the admission ladder, the injection payloads, the wake-credential-driven
-// arm/settle path) — that battery does not exist as a file yet; it is a separate, larger
-// obligation and is out of scope for this completion round.
+// SCOPE, DELIBERATELY NARROW. The first two cells prove ONLY that
+// clara._agent_receipt_src_f_a6's REAL projection (migration §9.5, folded in at merge once
+// 0103_f_a7_pi_additive.sql landed first) conforms to pi's contract and does not leak the base
+// table's own `scope` column (client|firm, what the READ touched) into the contract's `scope`
+// column (firm|platform, receipt VISIBILITY) — the exact footgun the F-A6 completion report
+// named. The cells after them (headed "NARROW RE-REVIEW ROUND" below) are the minimum
+// both-polarity floor an independent review demanded for the judgement branches this fix round
+// touched: the MF-2 census's Node Type fix, the two S-2 when-others arms, and NOTE-2's
+// check-before-count. None of this is the item's full Annex F battery (the whole admission
+// ladder, the full injection-payload corpus, every arm/settle interaction) — that battery does
+// not exist as a file yet; it remains a separate, larger obligation, PR-2 scope.
 //
 // pi's own f-a7-pi.test.mjs ALREADY proves the checker's mechanism generically (the arity and
 // type walls), using clara._agent_receipt_src_f_a6's STUB as its example subject inside a
@@ -29,6 +33,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { rootQuery, endPool, insertUser } from "./rig-fixtures.mjs";
+import { createChatSession, beginChatTurn } from "./rig-runtime-fixtures.mjs";
+import { getPool } from "./rig-helpers.mjs";
 
 let live = false;
 
@@ -102,4 +108,164 @@ test("f-a6.pi-scope-footgun — the contract's scope (firm|platform) is never th
   assert.equal(row.client_id, client, "client_id derives from client_scope[1], the credential's compiled pin");
   assert.deepEqual(row.failing_rungs, ["relation_not_enumerated"],
     `failing_rungs must list every rung whose vector value is the literal 'fail', and nothing else (the reason token is a string, never 'fail', so it never leaks in) — got ${JSON.stringify(row.failing_rungs)}`);
+});
+
+// =============================================================================================
+// NARROW RE-REVIEW ROUND (independent review, live probes) — the minimum both-polarity floor
+// for every judgement branch this round touched. NOT the full Annex F battery (still PR-2 scope,
+// still absent as a file — see the header above); this is the floor the register's own honest
+// gap demands now that the gap has a live-measured shape. Every cell below calls the REAL verb
+// through a real armed credential, because the defect this round found (the MF-2 census escape)
+// only exists inside the verb's own plan-census step — a direct table INSERT (like the two cells
+// above) cannot exercise it at all.
+// =============================================================================================
+
+let mf2World = null;
+
+async function buildMf2World() {
+  if (mf2World) return mf2World;
+  const firm = randomUUID();
+  const client = randomUUID();
+  const user = await insertUser("f_a6_mf2", "u1");
+  await rootQuery("insert into clara.firms (id, name) values ($1, $2)", [firm, "f_a6 mf2 firm"]);
+  await rootQuery("insert into clara.clients (id, firm_id, name, status) values ($1, $2, $3, 'active')", [client, firm, "f_a6 mf2 client"]);
+  await rootQuery(
+    "insert into clara.firm_memberships (id, firm_id, user_id, role, status) values (gen_random_uuid(), $1, $2, 'owner', 'active')",
+    [firm, user],
+  );
+  const session = await createChatSession({ firm, author: user, client });
+  const beginR = await beginChatTurn({
+    session,
+    author: user,
+    turnKey: `f-a6-mf2-${randomUUID()}`,
+    parts: [{ type: "text", text: "F-A6 MF-2 re-review battery turn" }],
+  });
+  const task = beginR?.task_id ?? beginR?.id ?? beginR;
+  const credR = await rootQuery(
+    "select * from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)",
+    ["interactive_client", firm, null, client],
+  );
+  mf2World = { firm, client, user, task, secret: credR.rows[0].secret };
+  return mf2World;
+}
+
+/** Calls the real verb as clara_freeform_ro, with the world's armed credential, one payload
+ *  per call. Returns the verb's own jsonb result (never throws for a within-verb refusal —
+ *  only for a genuine unhandled abort, which some cells below deliberately probe for). */
+async function callFreeformVerb(sql, { rowCap = 100 } = {}) {
+  const world = await buildMf2World();
+  const pool = getPool();
+  const c = await pool.connect();
+  try {
+    await c.query("begin");
+    await c.query("set role clara_freeform_ro");
+    await c.query("select set_config('clara.wake_secret',$1,true)", [world.secret]);
+    let result, error;
+    try {
+      const r = await c.query(
+        "select clara.wake_freeform_read(p_sql => $1, p_purpose => $2, p_task => $3, p_op_key => $4, p_row_cap => $5) as r",
+        [sql, "mf2 re-review battery", world.task, `f-a6-mf2-${randomUUID()}`, rowCap],
+      );
+      result = r.rows[0].r;
+    } catch (e) {
+      error = e;
+    }
+    await c.query("reset role");
+    await c.query("commit");
+    return { result, error };
+  } catch (e) {
+    try { await c.query("rollback"); } catch { /* best-effort cleanup only */ }
+    return { error: e };
+  } finally {
+    c.release();
+  }
+}
+
+test("f-a6.mf2-rows-from-refused — a multi-function ROWS FROM(...) Function Scan is refused (the escape the census's Node Type fix closes)", async (t) => {
+  if (gate(t)) return;
+  const { result } = await callFreeformVerb(
+    "select a::text as a from rows from (query_to_xml('select id from clara.journal_entries',true,false,''), generate_series(1,1)) t(a,b)",
+  );
+  assert.equal(result?.outcome, "refused", `expected refused, got ${JSON.stringify(result)}`);
+  assert.equal(result?.refusal_reason, "function_not_enumerated");
+  assert.deepEqual(result?.relations_read, [], "a refused function-scan read names no relation");
+});
+
+test("f-a6.mf2-xmltable-refused — XMLTABLE's Table Function Scan is refused (the second escape the same fix closes)", async (t) => {
+  if (gate(t)) return;
+  const { result } = await callFreeformVerb(
+    "select x.v from xmltable('/x' passing query_to_xml('select id from clara.journal_entries',true,false,'') columns v text path '.') x",
+  );
+  assert.equal(result?.outcome, "refused", `expected refused, got ${JSON.stringify(result)}`);
+  assert.equal(result?.refusal_reason, "function_not_enumerated");
+});
+
+test("f-a6.mf2-scalar-residual-unmoved — the SCALAR query_to_xml call is NOT refused (H-3's named, bounded, unmoved residual — the census cannot reach a call with no Function Scan node, by construction)", async (t) => {
+  if (gate(t)) return;
+  // MEASURED, this exact payload: `explain (format json, verbose)` on a scalar function call in
+  // a target list produces `Subquery Scan`/`Result` nodes, never `Function Scan` or `Table
+  // Function Scan` — so the Node-Type census (this round's own fix) cannot see it, structurally,
+  // the same way the old name-keyed census could not. This is NOT a gap in this round's fix; it
+  // is H-3's own residual, explicitly bounded (RLS still holds inside SPI — no tenancy moves,
+  // only relations_read/row_count understate) and explicitly closed only by B-1's owner ceremony
+  // (folded, #340, NO-GO on managed Supabase), never by the plan census. Asserting the TRUE
+  // current behaviour here, not a hoped-for one: this cell is the boundary marker between "the
+  // census's scope" and "the ceremony's scope" — a future change that makes this refuse would be
+  // closing H-3 for real and should update this cell's own name and assertion, not silently pass.
+  const { result } = await callFreeformVerb(
+    "select query_to_xml('select id from clara.journal_entries',true,false,'') as x",
+  );
+  assert.equal(result?.outcome, "ok", `expected ok (the residual, unmoved), got ${JSON.stringify(result)}`);
+  assert.deepEqual(result?.relations_read, [], "the receipt-accuracy residual: the census cannot see the relation SPI read, exactly as H-3 names");
+});
+
+test("f-a6.mf2-pg-settings-refused — pg_settings (a Function Scan on pg_show_all_settings) is refused, positive control from the original B-2 finding", async (t) => {
+  if (gate(t)) return;
+  const { result } = await callFreeformVerb("select name, setting from pg_settings");
+  assert.equal(result?.outcome, "refused", `expected refused, got ${JSON.stringify(result)}`);
+  assert.equal(result?.refusal_reason, "function_not_enumerated");
+});
+
+test("f-a6.mf2-allowed-read-passes — an ordinary enumerated relation read still passes with correct relations_read (the census's fix must not over-refuse)", async (t) => {
+  if (gate(t)) return;
+  const world = await buildMf2World();
+  const { result } = await callFreeformVerb(`select id, name from clara.clients where id = '${world.client}'`);
+  assert.equal(result?.outcome, "ok", `expected ok, got ${JSON.stringify(result)}`);
+  assert.deepEqual(result?.relations_read, ["clara.clients"]);
+  assert.equal(result?.row_count, 1);
+});
+
+test("f-a6.s2-open-time-runtime-error — a plan-time constant-foldable error (select 1/0) settles at the cursor-OPEN when-others arm, not FETCH", async (t) => {
+  if (gate(t)) return;
+  // The root-cause payload from this round's earlier fix: PostgreSQL constant-folds `1/0`
+  // while planning the OPEN'd portal, one step before the plan census and two before FETCH.
+  const { result } = await callFreeformVerb("select 1/0 as x");
+  assert.equal(result?.outcome, "refused");
+  assert.equal(result?.refusal_reason, "runtime_error");
+  assert.equal(result?.rung_vector?.statement_shape, "not_evaluable",
+    "OPEN never reached b_shape:='pass' -- every downstream rung stays not_evaluable, law 68");
+});
+
+test("f-a6.s2-fetch-time-runtime-error — a genuinely data-dependent runtime error (not plan-time foldable) settles at the FETCH-loop's own when-others arm", async (t) => {
+  if (gate(t)) return;
+  // MEASURED, isolated before this cell was written: `char_length(name) - char_length(name)`
+  // depends on each row's actual column value, so the planner cannot constant-fold it away --
+  // OPEN succeeds cleanly, and the division-by-zero only fires once FETCH evaluates a real row.
+  // This is the payload class the FETCH loop's when-others arm actually exists to catch, distinct
+  // from the OPEN-time arm the cell above proves.
+  const { result } = await callFreeformVerb(
+    "select 10 / (char_length(name) - char_length(name)) as x from clara.clients",
+  );
+  assert.equal(result?.outcome, "refused");
+  assert.equal(result?.refusal_reason, "runtime_error");
+  assert.equal(result?.rung_vector?.statement_shape, "pass", "OPEN succeeded this time -- the FETCH arm fired, not the OPEN one");
+});
+
+test("f-a6.note2-cap-boundary — row_count stops exactly at the cap, never overcounts the discarded row, and rows[] stays empty on refusal", async (t) => {
+  if (gate(t)) return;
+  const { result } = await callFreeformVerb("select * from (values (1),(2),(3),(4),(5)) as t(n)", { rowCap: 3 });
+  assert.equal(result?.outcome, "refused");
+  assert.equal(result?.refusal_reason, "result_row_cap");
+  assert.equal(result?.row_count, 3, "the check-before-count fix: exactly the cap, not cap+1");
+  assert.deepEqual(result?.rows, [], "a refusal never carries a partial rows[] leak");
 });
