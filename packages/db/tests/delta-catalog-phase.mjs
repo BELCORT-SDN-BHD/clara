@@ -333,6 +333,7 @@ await t.test("undeployed evaluators refuse execution and do not claim an ineffec
     const receipt = await evaluateMetricHuman(owner, { client, definitionVersion: version, periodIds: [fx.period.id], snapshotId: fx.snapshotId });
     const cell = await cellRow(receipt);
     assert.equal(cell.definition_version_id, version, "the deployed evaluator persisted a real cell for this definition");
+    assert.equal(cell.cell_status, "ok", "genuinely EVALUATE means the cell settled ok, not merely that a row of ANY status exists (a refused cell would satisfy the row check alone)");
     const packReceipt = await evaluateFsPackHuman(owner, { client, definitionVersions: [version], periodIds: [fx.period.id], snapshotId: fx.snapshotId });
     assert.ok(packReceipt, "evaluate_fs_pack_v1 must actually evaluate once its closure is deployed (re-run shape)");
     const assessReceipt = await assessMetricIndependentHuman(owner, { cell: cell.id });
@@ -455,7 +456,7 @@ await t.test("snapshots, contexts, cells, assessments, and provenance are insert
     assert.equal(err?.code, "CLR08");
   }
 });
-await t.test("both evaluator closures are exact, independent, and registered undeployed", async () => {
+await t.test("both evaluator closures are exact, independent, and registered — undeployed (fresh) or deployed, monotone (re-run)", async () => {
   const independentSignatures = ["clara.assess_metric_cell_independent_v1(uuid,uuid,text)", "clara._metric_recheck_node_v1(uuid,uuid,uuid,uuid,jsonb,boolean,text,date)"];
   // CLOSED-WORLD by design: this census pins EVERY registered closure, so a new evaluator has to
   // be named here rather than slipping past a count. F-A1 (Wave-F Track A, migrations 0091/0092)
@@ -585,7 +586,7 @@ await t.test("producer-helper changes are inside the producer freeze closure", a
   assert.deepEqual(member.body_sha256, liveHash, "the registered producer-helper hash equals its live body");
   assert.equal((await rootQuery("select clara.verify_metric_input_producer_freeze() r")).rows[0].r.ok, true);
 });
-await t.test("freeze verifier positively reads registered live bodies while deployment count is zero", async () => {
+await t.test("freeze verifier positively reads registered live bodies, deployment count exact for either witness shape", async () => {
   const freeze = await exactEntrypoint("verify_evaluator_freeze");
   assert.match(freeze.definition, /evaluator_versions/i);
   assert.match(freeze.definition, /pg_get_functiondef/i);

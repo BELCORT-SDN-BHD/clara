@@ -357,6 +357,21 @@ test("D -- the agent evaluator refuses while its closure row is undeployed, and 
   // designed, not a defect -- and the pre-ceremony refusal can never be re-witnessed. The re-run
   // arm proves the MIRROR strong truth instead: monotone (still deployed) and a second flip
   // attempt is ITSELF refused by the one-way wall, never a bare skip.
+  //
+  // REUSE MUST BE DECLARED, NEVER INFERRED. There is no `deployed_at` column, so `row.deployed`
+  // alone cannot distinguish "a prior run of THIS file already witnessed it" from "some OTHER
+  // fixture illegitimately flipped it early, destroying the born-undeployed witness" -- so an
+  // already-deployed row is a HARD FAILURE unless the operator has explicitly acknowledged a
+  // reused database via CLARA_ESTATE_REUSED_DB=1 (documented in packages/db/README.md; the
+  // estate sweep's second-run protocol sets it).
+  const reusedDeclared = process.env.CLARA_ESTATE_REUSED_DB === "1";
+  if (row.deployed && !reusedDeclared) {
+    assert.fail(
+      "evaluate_fs_pack_agent v1 is already deployed but CLARA_ESTATE_REUSED_DB is not set to "
+      + "\"1\" -- either this database is not actually fresh (reset it: "
+      + "pnpm --filter @clara/db reset, then re-migrate/seed) or the reuse is deliberate "
+      + "(export CLARA_ESTATE_REUSED_DB=1 to acknowledge a re-run against this same database)");
+  }
   if (!row.deployed) {
     assert.equal(row.deployed, false, "and it is BORN UNDEPLOYED -- the flip is a ceremony act");
     const pre = await caught(() => rootQuery(sql, args));
@@ -368,9 +383,12 @@ test("D -- the agent evaluator refuses while its closure row is undeployed, and 
     // must MOVE PAST the gate. Without this the cell above passes on a body that refuses everything.
     await rootQuery("update clara.evaluator_versions set deployed=true where id=$1", [row.id]);
   } else {
+    // row.deployed === true AND reusedDeclared === true (the only way past the assert.fail
+    // above) -- prove the MIRROR strong truth instead of a bare skip.
     const redeploy = await caught(() => rootQuery(
       "update clara.evaluator_versions set deployed=true where id=$1", [row.id]));
     assert.equal(redeploy?.code, "CLR08", `${redeploy?.code} ${redeploy?.message}`);
+    assert.match(redeploy.message, /one undeployed-to-deployed transition/i);
     assert.equal((await rootQuery(
       "select deployed from clara.evaluator_versions where id=$1", [row.id])).rows[0].deployed,
       true, "still deployed -- monotone (re-run shape)");

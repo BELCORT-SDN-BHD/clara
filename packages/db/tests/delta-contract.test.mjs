@@ -43,11 +43,15 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
     // actually reads, never skipped -- rather than assuming a precondition that a re-run makes
     // honestly false.
     const fresh = await evaluatorCeremonyUnwitnessed();
-    const cellsCount = (await rootQuery("select count(*)::int n from clara.metric_cells")).rows[0].n;
+    // metric_cells is corroborating evidence ONLY on the fresh arm. On a re-run it is NOT honest
+    // evidence of a PRIOR invocation: registerCatalogPhase's own re-run arm (above) already mints
+    // a cell in THIS SAME invocation before this subtest ever runs, so `count > 0` would be
+    // trivially true regardless of whether the database is actually reused. `fresh` (from
+    // evaluatorCeremonyUnwitnessed(), read before anything in this pass could have minted a cell)
+    // is the real signal; no honest corroboration is available from this table on the other arm.
     if (fresh) {
+      const cellsCount = (await rootQuery("select count(*)::int n from clara.metric_cells")).rows[0].n;
       assert.equal(cellsCount, 0, "a reused/consumed database is not valid evidence for this one-shot contract");
-    } else {
-      assert.ok(cellsCount > 0, "a reused database's own evidence: a prior run's metric_cells persist (re-run shape)");
     }
     const fsPackDeployed = fresh ? false : (await rootQuery(
       "select deployed from clara.evaluator_versions where evaluator_name=$1 and version=1", [CEREMONY_EXCLUDED],
@@ -62,8 +66,13 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
     // read the two as one row and silently stopped counting. All of them are BORN UNDEPLOYED
     // like delta's on a fresh witness; on a re-run the five delta/epsilon covers are deployed
     // (monotone), and F-A5 PR-1's own row carries whatever cell D has separately witnessed.
+    // firm_id is null: SCOPED to the global registered closures, the model f-a5:344 already uses
+    // -- a firm-scoped evaluator_versions row (this table carries the column; some OTHER lane's
+    // fixture could mint one) would otherwise silently widen this exact-array comparison past
+    // six rows. order by evaluator_name,version is then fully DETERMINISTIC: with firm_id scoped
+    // to null, (evaluator_name, version) is unique, so no tie-break is needed.
     assert.deepEqual((await rootQuery(
-      "select evaluator_name,version,deployed from clara.evaluator_versions order by evaluator_name,version",
+      "select evaluator_name,version,deployed from clara.evaluator_versions where firm_id is null order by evaluator_name,version",
     )).rows, [
       { evaluator_name: "assess_metric_cell_independent", version: 1, deployed: !fresh },
       { evaluator_name: "evaluate_fs_pack_agent", version: 1, deployed: fsPackDeployed },

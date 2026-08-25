@@ -40,6 +40,14 @@ async function ensureEvaluatorDeployed() {
   const pending = (await rootQuery(
     "select count(*)::int n from clara.evaluator_versions where not deployed and evaluator_name <> $1",
     [CEREMONY_EXCLUDED])).rows[0].n;
+  // FREE TRIPWIRE, read BEFORE the flip below can touch anything: `pending > 0` means the five
+  // covered closures were STILL undeployed the instant this function started -- which PROVES
+  // F-A5 PR-1's row must be undeployed too, because nothing in this estate ever flips it without
+  // first flipping the covered five (cell D's own file runs its own covered-five ceremony in its
+  // `before` hook before cell D itself touches evaluate_fs_pack_agent). A false reading here
+  // means some fixture bypassed that order and destroyed the born-undeployed witness estate-wide
+  // -- exactly the unscoped-sweep class zeta-fixtures.mjs guards against elsewhere.
+  const fresh = pending > 0;
   if (pending > 0) {
     await withActor({ transaction: true }, async (db) => {
       await db.query(
@@ -59,14 +67,18 @@ async function ensureEvaluatorDeployed() {
   const notDeployed = (await rootQuery(
     "select evaluator_name, version from clara.evaluator_versions where not deployed order by 1,2")).rows;
   const fsPackPending = notDeployed.some((row) => row.evaluator_name === CEREMONY_EXCLUDED);
-  assert.equal(verified.verified_deployed, fsPackPending ? 5 : 6,
+  if (fresh) {
+    assert.equal(fsPackPending, true,
+      "a fresh witness (the covered five were undeployed BEFORE this ceremony ran) requires F-A5 PR-1's row to still be undeployed too");
+  }
+  assert.equal(verified.verified_deployed, (fresh || fsPackPending) ? 5 : 6,
     "the one-way evaluator ceremony committed every registered closure it covers"
-    + (fsPackPending ? "" : " (F-A5 PR-1's own row was already flipped by a prior run's cell D)"));
+    + ((fresh || fsPackPending) ? "" : " (F-A5 PR-1's own row was already flipped by a prior run's cell D)"));
   // AND THE EXCLUSION IS EXACTLY ONE NAMED ROW WHEN STILL PENDING, EMPTY OTHERWISE — read back,
   // never assumed. Without this, a later lane's closure would silently inherit the exemption and
   // go un-deployed with no cell noticing.
-  assert.deepEqual(notDeployed, fsPackPending ? [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }] : [],
-    fsPackPending
+  assert.deepEqual(notDeployed, (fresh || fsPackPending) ? [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }] : [],
+    (fresh || fsPackPending)
       ? "the only closure this ceremony leaves undeployed is F-A5 PR-1's, which owns its own flip"
       : "F-A5 PR-1's row was already flipped by a prior run — nothing remains undeployed");
   return `deployed ${pending}`;
