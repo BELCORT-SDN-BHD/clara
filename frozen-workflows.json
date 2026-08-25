@@ -892,6 +892,26 @@
       "sha256": "010260db802b72be5ee6387f869fbb02270055b4c1e38c8a439957b4d1ec8d7e",
       "note": "F-A2 openers ①② — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v1's, unchanged; everything that moved is inside the closure. UNDEPLOYED: the deploy-lock is the ceremony's act.",
       "deployed": true
+    },
+    "packages/runtime/workflows/witnessFacts.v3.behavior.mjs": {
+      "sha256": "2f48aa4590246c0699076d75857814d7121379048600c40949c2f377ef6ea707",
+      "note": "debt/prompts-v3 — the NEXT-ROUND QUEUE fold's behavioural closure: byte-for-byte v2's apart from the v3 prompt/envelope imports and no longer passing `pages` into witnessTextCoverage (finding 3). Reuses v2's own engine snapshot — no answer key added, so no provenance-guard change. UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/witnessFacts.v3.envelope.mjs": {
+      "sha256": "98451d06f4b6171acea806f6320a397e3fdd3ce28f307a039c9aa768e05c76a7",
+      "note": "debt/prompts-v3 — wire->writer normalization plus the coverage receipt, byte-for-byte v2's except witnessTextCoverage no longer accepts or emits `pages` (finding 3: emitted empty on every text row in the 2026-08-21 re-measure, no lock reads it). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/witnessFacts.v3.impl.ts": {
+      "sha256": "95272f8271909d435b9e7931e7921b95761ee17612c10a5357d70bd804991ef6",
+      "note": "debt/prompts-v3 — the four steps. DELIBERATELY reads infrastructure from v2's OWN global slot (__claraWitnessFactsServicesV2) rather than minting a new one: no answer key or wire-schema change rides this version, so v2's engine snapshot is exactly right and no coupled DB migration is needed. UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/witnessFacts.v3.prompts.mjs": {
+      "sha256": "96f4999fbfaf55eabb5ea83bae8f61f0701607f96c01c2546ca631594f06f9cb",
+      "note": "debt/prompts-v3 — the prompt closure carrying the NEXT-ROUND QUEUE's five ruled fixes: the MYR currency-code carve-out, the dash-is-not-a-value rule, a vision-only SST-shape reinforcement, and the owner's 2026-08-24 discount-no-net ruling (the fifth, coverage.pages, lives in the envelope file). Wire schema byte-identical to v2's. FROZEN BY DECISION (design M8). UNDEPLOYED."
+    },
+    "packages/runtime/workflows/witnessFacts.v3.ts": {
+      "sha256": "75dc1b90912657ec5f37a8acefebcffa92e85f847645091dc75d909915ba8602",
+      "note": "debt/prompts-v3 — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v2's (and v1's), unchanged; everything that moved is inside the closure. No coupled DB migration. UNDEPLOYED: the deploy-lock is the ceremony's act."
     }
   }
 }
