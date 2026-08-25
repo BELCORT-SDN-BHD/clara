@@ -1,5 +1,5 @@
 // F-A5 PR-3 -- the signed-original archive doors' battery, for
-// migrations/UNNUMBERED_f_a5_pr3_signed_original_archive.sql.
+// migrations/0127_f_a5_pr3_signed_original_archive.sql.
 //
 // SCOPE. PR-3's real substance -- the first real seal path exercised end to end through the wake
 // door, and the byte-reproduction drill against that real artifact -- is a Docker+Typst drill,
