@@ -5,17 +5,19 @@
 // test cannot load an AI SDK workflow closure):
 //
 //   v14.reach   -- a client-pinned `interactive_client` credential, minted OBO a real human, can
-//                  now EXECUTE a bank wake_* wrapper end to end (the Postgres grant this PR's
-//                  sibling migration adds, 0130_chatturn_v14_bank_interactive_grants.sql).
-//   v14.provenance (todo, BLOCKED on lane-fa3-pr1a) -- the resulting bank_agent_receipts row
-//                  SHOULD name the real human and the real credential kind. It does not yet:
-//                  every `_agent_<verb>_core` (0121) hardcodes is_agent=true/on_behalf_of=null/
-//                  wake_kind='bank_agent' when building the ctx it hands to the human-shape core,
-//                  regardless of the caller's REAL wake context. This cell asserts what SHOULD be
-//                  true post-fix (never weakened to pass early) and is marked `todo` so a red
-//                  assertion here does not fail the suite -- it goes GREEN, and stays green, the
-//                  moment lane-fa3-pr1a's threading lands; that flip is the joint acceptance proof
-//                  for the owner's ruling.
+//                  now EXECUTE a bank wake_* wrapper end to end (the sibling grant migration
+//                  this PR ships makes `clara_wake_interactive` reach all 13 bank wake_*
+//                  wrappers -- an extend-only Postgres ACL widening, argued in that file's own
+//                  header).
+//   v14.provenance -- the resulting bank_agent_receipts row names the real human and the real
+//                  credential kind. RE-VERIFIED GREEN 2026-08-25 (from THIS instrument,
+//                  independently, on the combined tree carrying lane-fa3-pr1a's SS5 provenance
+//                  threading -- `clara._agent_wake_ctx` + the `_agent_bank_receipt` VALUES
+//                  recut, 0129_f_a3_pr3_retirement_parity_doors.sql). This cell was a `{ todo:
+//                  ... }` cell before SS5 landed (every `_agent_<verb>_core`, 0121, hardcoded
+//                  is_agent=true/on_behalf_of=null/wake_kind='bank_agent' regardless of the real
+//                  wake context) -- the flip to a genuine, unweakened GREEN is the joint
+//                  acceptance proof the owner's ruling asked for.
 //   v14.negative-twin -- an AUTONOMOUS bank_agent-kind call is completely unaffected: it still
 //                  writes the exact agent-shaped receipt it always has. Proves the grant/allowlist
 //                  widening this PR makes is additive, not a change to the existing unattended
@@ -115,25 +117,29 @@ test("v14.reach a client-pinned interactive_client credential, OBO a real human,
   assert.ok(r.rows[0]?.r?.digest, "the admitted pack read returns a digest (the receipt this closure's own mint path proves out)");
 });
 
-test(
-  "v14.provenance the receipt from a chat-driven act should name the real human and the real credential kind, not the agent",
-  { todo: "BLOCKED on lane-fa3-pr1a: _agent_bank_receipt and its ~13 callers still hardcode is_agent=true/on_behalf_of=null/wake_kind='bank_agent' regardless of the real wake context (measured directly in 0121's live bodies). Goes green the moment that threading lands -- do not weaken this assertion to make it pass early." },
-  async (t) => {
-    if (skipHere(t)) return;
-    const firm = await firmOf(world.clients.A1);
-    const cred = await mintCred("interactive_client", firm, world.clients.A1, world.users.bob);
-    const key = opk("v14-provenance");
-    await chatGetPack(cred.secret, world.clients.A1, bankAccount, key);
-    const receipt = await rootQuery(
-      `select acting_actor, on_behalf_of, via_wake_kind, approval_arm from clara.bank_agent_receipts
-        where op_key = $1 and firm_id = $2`,
-      [key, firm],
-    );
-    assert.equal(receipt.rows[0]?.via_wake_kind, "interactive_client", "the receipt should name the REAL credential kind the chat lane used, not the agent's own kind");
-    assert.equal(receipt.rows[0]?.on_behalf_of, world.users.bob, "the receipt should name the REAL acting human (the credential's OBO subject)");
-    assert.notEqual(receipt.rows[0]?.acting_actor, AGENT_USER_ID, "a chat-driven act must not be attributed to the autonomous agent identity");
-  },
-);
+test("v14.provenance the receipt from a chat-driven act names the real human and the real credential kind, not the agent -- the joint acceptance proof for the owner's 2026-08-25 ruling", async (t) => {
+  // FORMERLY a `{ todo: ... }` cell, BLOCKED on lane-fa3-pr1a's own half: every `_agent_<verb>_
+  // core` (0121) hardcoded is_agent=true/on_behalf_of=null/wake_kind='bank_agent' regardless of
+  // the real wake context, and `_agent_bank_receipt` hardcoded the same again in the receipt row
+  // it wrote. FIXED by SS5 (F-A3 PR-3, this same migration file, `clara._agent_wake_ctx` +
+  // the `_agent_bank_receipt` VALUES recut) -- re-verified GREEN here, independently, on the
+  // combined tree: this cell flipping from `not ok ... # TODO` to a genuine `ok` (confirmed on
+  // this rig before the annotation was dropped) IS the joint acceptance proof the owner's ruling
+  // asked for. Never weaken this assertion; if it ever regresses, that is real news.
+  if (skipHere(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("interactive_client", firm, world.clients.A1, world.users.bob);
+  const key = opk("v14-provenance");
+  await chatGetPack(cred.secret, world.clients.A1, bankAccount, key);
+  const receipt = await rootQuery(
+    `select acting_actor, on_behalf_of, via_wake_kind, approval_arm from clara.bank_agent_receipts
+      where op_key = $1 and firm_id = $2`,
+    [key, firm],
+  );
+  assert.equal(receipt.rows[0]?.via_wake_kind, "interactive_client", "the receipt should name the REAL credential kind the chat lane used, not the agent's own kind");
+  assert.equal(receipt.rows[0]?.on_behalf_of, world.users.bob, "the receipt should name the REAL acting human (the credential's OBO subject)");
+  assert.notEqual(receipt.rows[0]?.acting_actor, AGENT_USER_ID, "a chat-driven act must not be attributed to the autonomous agent identity");
+});
 
 test("v14.negative-twin an AUTONOMOUS bank_agent-kind call still writes the exact agent-shaped receipt it always has -- unaffected by this PR's grant/allowlist widening", async (t) => {
   if (skipHere(t)) return;
