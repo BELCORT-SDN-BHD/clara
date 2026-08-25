@@ -48,6 +48,28 @@ const CONFIRM_DOOR = "clara.confirm_bank_identifier_promotion(uuid,text)";
 
 let ready = false;
 
+/** C1-bis (migration 0134) lands SEPARATELY from 0129's SS5 doors, so its cell needs its own
+ *  gate: on a database migrated to 0129/0130 but not yet 0134, the SS2/SS3 doors above are all
+ *  present (`ready` is true) while the widened conflict-identity comparison is not. Probed the
+ *  way this file probes everything else -- against the LIVE catalog, on text 0134 itself
+ *  installs and nothing else does -- never on a schema_migrations row, which records that a file
+ *  RAN, not that this body carries the change. */
+let c1bisReady = false;
+/** ...and the PRE-0134 shape, read separately. A gate that only asks "is the new text there?"
+ *  turns a REGRESSION (a later recut silently dropping the widened comparison) into a quiet
+ *  skip -- proof deletion wearing a skip's clothes. So both shapes are probed, and the cell
+ *  skips only when the body positively carries the OLD one. A body carrying NEITHER is not a
+ *  pre-0134 chain, it is a body nobody understands: that falls through to the fail-closed
+ *  branch (review law 2 -- absence is not evidence). */
+let c1PreShape = false;
+const C1BIS_MARKER =
+  "acting_actor, on_behalf_of, via_wake_kind, model_snapshot, rationale, approval_arm into v_existing";
+// 0129's C1 error wording. The C1-bis body says ".../digest/outcome/who'", so the two markers
+// are mutually exclusive by construction, not by convention.
+const C1_MARKER = "digest/outcome', p_op_key";
+const RECEIPT_FN =
+  "clara._agent_bank_receipt(uuid,uuid,text,text,uuid,text,jsonb,text,text,jsonb,timestamptz)";
+
 /** PR-1c's own pre-PR gate, exactly as f-a3-pr1b-wake-verbs.test.mjs's before() does it: a raw
  *  consent+activation insert (never through grant_client_egress_purpose/activate_client_egress_
  *  purpose, each of which carries its own in-body enum raise independent of the table CHECK and
@@ -71,6 +93,20 @@ function skipHere(t) {
   return false;
 }
 
+/** Gate for the C1-bis cell: the SS2/SS3 doors AND migration 0134's widened comparison. Skips
+ *  LOUDLY (a counted skip + a lane note), never silently, on a pre-0134 chain. */
+function skipC1bis(t) {
+  if (skipHere(t)) return true;
+  if (c1bisReady) return false;
+  if (c1PreShape) {
+    markSkip();
+    t.skip("F-A3 PR-3 C1-bis (0134) widened receipt identity not present -- dormant");
+    return true;
+  }
+  // Neither shape: do NOT skip. Fall through so the cell runs and fails loudly.
+  return false;
+}
+
 before(async () => {
   const base = await a21EnsureReady();
   const r = await rootQuery(
@@ -83,6 +119,22 @@ before(async () => {
   ready = Boolean(base.base) && row.core != null && row.verb != null && row.wake != null
     && row.agent != null && row.confirm != null && row.login != null;
   if (!ready) noteLane("F-A3 PR-3 SS2/SS3 doors absent -- f-a3-pr3-doors suite dormant");
+
+  // C1-bis (0134): read the LIVE body and look for the text 0134 installs. `position(...) > 0`
+  // on a NULL prosrc (function absent) yields NULL, so the Boolean() falls to false -- a body
+  // this probe could not read never reports ready.
+  const c = await rootQuery(
+    `select position($1 in p.prosrc) > 0 as has_bis, position($2 in p.prosrc) > 0 as has_c1
+       from pg_proc p where p.oid = to_regprocedure($3)`,
+    [C1BIS_MARKER, C1_MARKER, RECEIPT_FN]);
+  c1bisReady = Boolean(c.rows[0]?.has_bis);
+  c1PreShape = Boolean(c.rows[0]?.has_c1);
+  if (ready && !c1bisReady && c1PreShape) {
+    noteLane("F-A3 PR-3 C1-bis (0134) absent -- the c1bis identity cell is dormant");
+  }
+  if (ready && !c1bisReady && !c1PreShape) {
+    noteLane("F-A3 PR-3 C1-bis: _agent_bank_receipt carries NEITHER the C1 nor the C1-bis conflict block -- the c1bis cell will RUN and fail rather than skip");
+  }
 });
 
 after(async () => {
@@ -778,7 +830,11 @@ test("f-a3pr3.c1.outcome-mismatch a same-op_key retry with a DIFFERENT outcome r
 
 // ===========================================================================
 // C1-bis (review finding, Codex final leg, MUST -- the concrete-scenario tiebreak between the
-// opus leg's MERGE-READY and Codex's NOT-merge-ready) -- C1 alone left acting_actor/on_behalf_of/
+// opus leg's MERGE-READY and Codex's NOT-merge-ready). Landed as its OWN migration, 0134, NOT as
+// an edit to 0129: 0129 is applied history and applied migrations are immutable
+// (.claude/rules/db-migrations.md -- fix forward with a new file). This cell therefore proves
+// 0134's body and carries its own 0134 gate, skipping loudly on a pre-0134 chain.
+// C1 alone left acting_actor/on_behalf_of/
 // via_wake_kind/model_snapshot/rationale/approval_arm (every OTHER column _agent_bank_receipt
 // WRITES) out of the conflict-identity comparison. Concretely: a bank_agent act gets Tier-B
 // refused on op_key K; an interactive_client human INDEPENDENTLY produces the SAME
@@ -789,7 +845,7 @@ test("f-a3pr3.c1.outcome-mismatch a same-op_key retry with a DIFFERENT outcome r
 // ===========================================================================
 
 test("f-a3pr3.c1bis.identity-mismatch a bank_agent-refused op_key retried via interactive_client (same outcome, different WHO) refuses op_key_identity_mismatch", async (t) => {
-  if (skipHere(t)) return;
+  if (skipC1bis(t)) return;
   const { client } = await freshAdvClient("c1bisident");
   const firm = await firmOf(client);
   const w = await advWorld();
