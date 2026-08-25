@@ -89,6 +89,29 @@ export const CLARA_ROLE_ROSTER = [
     why: "F-A6 survey F7: the fourth login. The read pool's transactions are read-only at "
       + "SESSION level, so the receipt could not be written there.",
   },
+  // The next three landed on main WHILE F-A6 PR-1 was building — registered here rather than
+  // left for a fifth bare-count re-bump (er9-gates-boundaries.test.mjs's own merge-true note).
+  {
+    role: "clara_wake_bank",
+    stem: "f_a3_pr1b_agent_limb",
+    applied: fnExists("clara.wake_unmatch_bank_match(uuid,uuid,text,text,jsonb,text,text)"),
+    why: "F-A3/PR-1b DDL 7: the bank-agency agent limb's own EXECUTE surface, granted the wake_* "
+      + "bank wrappers alone — the human /bank verbs stay off it.",
+  },
+  {
+    role: "clara_wake_bank_login",
+    stem: "f_a3_pr1b_agent_limb",
+    applied: roleExists("clara_wake_bank"),
+    why: "F-A3/PR-1b DDL 7 completion: the login shell PR-2's DSN/pool wiring reaches, member of "
+      + "clara_wake_bank alone.",
+  },
+  {
+    role: "clara_wake_filing",
+    stem: "f_a7_beta_filing_verb",
+    applied: fnExists("clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)"),
+    why: "F-A7 beta SS2.1: the filing wake kind's own group role — group only, no login shell "
+      + "and no postgres membership (reached via wake_credentials rows alone).",
+  },
 ];
 
 /** Resolve a roster to the entries whose owning migration is applied on THIS database. */

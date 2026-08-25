@@ -70,11 +70,15 @@ const gateWaveA = (t) => (waveA ? false : skipHere(t, "the Wave-A wake surface (
  *  `gateGrants` as well. (Measured by mapping every cell in this file to its gate and to whether
  *  it calls the post verb: three, not two.) */
 async function chatParityLive() {
+  // NO CATCH. This reads pg_catalog (pg_constraint/pg_class/pg_namespace), which exists at
+  // every frontier — a genuine query error here is a real bug, not "the constraint isn't
+  // live yet", and swallowing it made a broken query indistinguishable from a pre-PR-1b
+  // database: both silently skipped this file's three post-calling cells.
   const r = await rootQuery(
     `select count(*)::int as n from pg_constraint c join pg_class t on t.oid=c.conrelid
        join pg_namespace n on n.oid=t.relnamespace
       where n.nspname='clara' and t.relname='wake_credentials' and c.contype='c'
-        and pg_get_constraintdef(c.oid) like '%interactive\\_client%'`).catch(() => ({ rows: [{ n: 0 }] }));
+        and pg_get_constraintdef(c.oid) like '%interactive\\_client%'`);
   return r.rows[0].n > 0;
 }
 const gateChatParity = async (t) => ((await chatParityLive()) ? false : skipHere(t, CHAT_PARITY_PENDING));
@@ -361,9 +365,18 @@ test("f-a2.c13.reg-unassigned list_unassigned_documents still ADMITS a plain int
   // (b) THE PINNED CREDENTIAL — still refused by the admission gate, which is what makes (a) a
   // measurement of the ADMISSION rather than of a reader that admits everybody.
   const pinned = await mintWake5({ kind: NEW_KIND, firm, onBehalfOf: BOB(), client: A1() });
-  const blocked = await read(pinned.secret).catch((e) => ({ error: e }));
-  assert.ok(Array.isArray(blocked) ? blocked.length === 0 : !!blocked.error,
-    `c13.reg-unassigned CONTROL: a CLIENT-PINNED credential gets nothing from a p_client => null call — _agent_read_admitted refuses it (got ${JSON.stringify(blocked)?.slice(0, 160)})`);
+  // THE INTENDED IDENTITY, RE-READ FROM THE LIVE BODY (a correction: my first pass here read
+  // only _agent_read_admitted's tail and missed its own middle line). 0011:3922-3939 —
+  // `if w.wake_kind not in ('interactive','proactive') then perform
+  // clara.assert_wake_allowed(w.wake_kind,p_fn); end if;` — runs BEFORE the client-match check,
+  // and NEW_KIND ('interactive_client') is not in that fast-path pair. So for THIS credential
+  // kind the call always raises CLR03 via assert_wake_allowed (not allowlisted for
+  // list_unassigned_documents) and never reaches the false-return path at all. The empty-array
+  // shape is real for 'interactive'/'proactive' credentials but not reachable here; asserting it
+  // for interactive_client made this cell provably wrong the moment it stopped swallowing errors.
+  const err = await read(pinned.secret).then(() => null, (e) => e);
+  assert.equal(err?.code, "CLR03",
+    `c13.reg-unassigned CONTROL: an interactive_client credential is refused by the wake-kind allowlist specifically (assert_wake_allowed, not allowlisted for list_unassigned_documents) — got ${err?.code}: ${err?.message}`);
 });
 
 test("f-a2.c13.reg-coding-lane coding_lane returns EXACTLY what it returns today for a plain interactive credential", async (t) => {

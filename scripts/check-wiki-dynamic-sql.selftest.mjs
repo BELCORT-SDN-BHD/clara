@@ -241,25 +241,37 @@ testCase("an `execute` inside a comment or a string literal is not dynamic SQL",
 });
 
 testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
-  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry.
-  //
-  // FIRST ENTRY — 0055 S7's TAIL ASSERTION block on the apply_open_items key (PR #226, full
-  // ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named S2): a
-  // pg_get_functiondef re-count outside the census grammar plus 'execute' as a privilege-name
-  // literal and one raise-message word — nothing dynamic constructed or run.
-  //
-  // SECOND ENTRY — F-A6 PR-1's `wake_freeform_read`, and it tripped this pin exactly as the
-  // comment above demanded. Its justification is DIFFERENT IN KIND from the first, which is why
-  // it needed its own review rather than a widened pattern: the first entry runs nothing
-  // dynamic at all, while this one is the estate's ONE genuinely unreconstructible statement —
+  // THE RATCHET: this pin moves ONLY together with a reviewed allowlist entry. The first entry
+  // stood alone until F-A3 PR-1a: 0055 S7's TAIL ASSERTION block on the apply_open_items key
+  // (PR #226, full ADR-061 ladder; round 3 corrected the entry's first cut, which mis-named
+  // S2): a pg_get_functiondef re-count outside the census grammar plus 'execute' as a
+  // privilege-name literal and one raise-message word — nothing dynamic constructed or run.
+  // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder) adds nine: one
+  // per public bank-agency verb S1 extracts into a `_<verb>_core`, each an `unprovable` CoR
+  // patch by construction (the installed body is the LIVE prosrc, read fresh from the catalog
+  // at apply — never a literal in this file's own text) and each independently rig-measured to
+  // carry no word-bounded "wiki" token anywhere in its body. F-A6 PR-1's `wake_freeform_read`
+  // is DIFFERENT IN KIND from all ten: the estate's ONE genuinely unreconstructible statement —
   // the SQL is a parameter the model composed, which is the shape ADR-0071 fixed. What upholds
-  // 0017:1424-1426 there is the ACL, not the text: the statement executes as
-  // `clara_freeform_ro`, which holds SELECT on 35 enumerated relations and on NO wiki relation,
-  // so a wiki payload is refused by Postgres at planning with `(42501, relation_denied)`. The
-  // full why, and the reason both declared target sets are deliberately EMPTY, are in
-  // wiki-lint-checks.mjs. A THIRD entry must trip this pin in its turn.
+  // 0017:1424-1426 there is the ACL, not the text: the statement executes as `clara_freeform_ro`,
+  // which holds SELECT on 35 enumerated relations and on NO wiki relation, so a wiki payload is
+  // refused by Postgres at planning with `(42501, relation_denied)`. Why + the full declared
+  // target set per key live in wiki-lint-checks.mjs. F-A4 PR-1b's attest_close_exception arm
+  // does NOT add a twelfth: MEASURED (gate B3), plpgsql does not resolve an embedded relation at
+  // CREATE time even with check_function_bodies=on, so that arm ships as plain static SQL and
+  // never needed a waiver at all — a dynamic-SQL entry proposed, tested, and correctly NOT
+  // taken. The NEXT entry must trip this pin and earn its own reviewed justification.
   const expectedKeys = [
+    "add_bank_account(uuid,text,text,text,text,uuid,text)",
     "apply_open_items(uuid,jsonb,text,text)",
+    "complete_bank_reconciliation(uuid,uuid[],text)",
+    "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
+    "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",
+    "resolve_bank_line_exception(uuid,text,text,uuid,text)",
+    "unmatch_bank_match(uuid,uuid,text,text)",
+    "upsert_account(uuid,text,text,text,text,text,text)",
+    "void_bank_reconciliation(uuid,text,text)",
+    "void_bank_statement(uuid,uuid,text,text)",
     "wake_freeform_read(text,text,uuid,text,integer)",
   ].sort();
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();

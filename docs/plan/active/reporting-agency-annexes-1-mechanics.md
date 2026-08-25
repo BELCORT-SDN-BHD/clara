@@ -20,6 +20,16 @@
 **seventeen** new wrappers after the sandbox severance; `wake_export_sandbox_view` left with §3.6.
 Every downstream count — design §3.1, PR-2, census C.2 — reads THIS list, never a number.)*
 
+> **PARAMETER-ORDER WARNING, added at PR-1 because the estate carries TWO conventions and a
+> transposition between them TYPE-CHECKS.** `clara._draft_report_spec_core` is
+> `(p_actor, p_firm, p_obo, p_wake_kind, …)`; `clara._seal_report_artifact_core` is
+> `(p_firm, p_actor, …)`. **Every core F-A5 mints takes `(p_firm, p_actor, p_obo, p_wake_kind, …)`
+> — firm first.** The ONE exception is the artifact core, whose new triple is appended at the TAIL
+> with NULL defaults so its two live positional callers do not move (F5-D32 / ruling R-L23); the
+> reason is in design §4's "not on the list" paragraph. PR-2's wrappers must read this before they
+> are authored — eta's own battery header records that a transposed `(p_firm, p_actor)` pair
+> satisfies every catalog assertion while writing the FIRM id into an actor column.
+
 Every wrapper: `SECURITY DEFINER` · `set search_path = clara, pg_temp` · `wake_context()` then
 `assert_wake_allowed` · blank `p_op_key` / `p_rationale` / incomplete `p_model` refuse before any
 work · **no DML text in the wrapper body** · `revoke all … from public` then a single
@@ -32,7 +42,7 @@ work · **no DML text in the wrapper body** · `revoke all … from public` then
 | `wake_evaluate_report_pack(run, definition_version_ids, period_ids, snapshot, rationale, model, op_key)` | `_agent_evaluate_fs_pack_core(firm, actor, obo, wake_kind, …)` | **new** orchestrator over the frozen **`_metric_eval_node_v1`** (`0077:222-226`'s idiom) — **never `evaluate_metric_v1`**, which opens with `_human_ctx` (`0059:112`) | no |
 | `wake_seal_report_dataset(run, chart_template_version_ids, rationale, model, op_key)` | `_seal_report_dataset_core(firm, actor, obo, wake_kind, …)` | **extracted** from `0070:437` | **yes — D1 #3** |
 | `wake_assess_report_claim(run, rationale, model, op_key)` | `_assess_report_claim_core(firm, actor, obo, wake_kind, …)` | **extracted** from `0070:279` | **yes — D1 #2** |
-| `wake_seal_report_artifact(run, kind, ext, sha256, byte_size, manifest, prior, rationale, model, op_key)` | `_seal_report_artifact_core(firm, actor, **obo, wake_kind**, …)` (`0071:121`) | **EXTENDED** — the estate's only `insert into clara.report_artifacts` (`0071:432`) now writes `directed_by`/`prepared_by_agent` and the receipt | **yes — D1 #6** |
+| `wake_seal_report_artifact(run, kind, ext, sha256, byte_size, manifest, prior, rationale, model, op_key)` | `_seal_report_artifact_core(firm, actor, …, op_key, **obo, wake_kind, agent**)` (`0071:121`) — **the pair is at the TAIL, with NULL defaults** | **EXTENDED** — the estate's only `insert into clara.report_artifacts` (`0071:432`) now writes `directed_by`/`prepared_by_agent`, **DB-derived from the run row**, and the receipt | **yes — D1 #6 (the core alone; the delegate is byte-unmoved)** |
 | `wake_requeue_render_job(job, why, **accept_drift**, rationale, model, op_key)` | `_requeue_render_job_core(...)` extracted from `0083:169` | extracted; **`p_accept_drift` passes through** (TA-P1 C) | yes (non-D1: no live writer displaced mid-flight — **[PREDICTION]** P7) |
 | `wake_approve_metric_definition(version, expected_formula_sha256, reason, rationale, model, op_key)` | `_agent_approve_metric_definition_core` | new | no (but see D1 #5, the trigger) |
 | `wake_supersede_metric_definition(version, successor, reason, rationale, model, op_key)` | `_agent_supersede_metric_definition_core` | new | no |
@@ -128,7 +138,7 @@ never absent"* — the door column says what PR-3 ships; anything richer is Wave
 | **Issue the pack** (`approve_report_for_issue`) | bookkeeper+ **and** the `close_and_attest` key-2 capability (`0072:61-63`); ≥2 humans ⇒ approver ∉ {requester, director, sealer}; solo ⇒ attestation text | the `/reports` **issue card**: run + period, the **sealed `pre_sign` sha256 the approval must name** (`0072:87-92`), claim status, the `agent_prepared` disclosure, the attestation box, the reason field |
 | **Archive the signed original** | bookkeeper+ | the **archive form** over `clara.archive_signed_original` (design §3.8): signed-PDF sha256, byte size, signature evidence, the `pre_sign` hash it answers |
 | **Retrieve a signed original** | bookkeeper+, audited | a **retrieve** action on the run row → `clara.retrieve_signed_original`; it returns key + hash and **regenerates nothing** (`0080:258-261`) |
-| **Consent to render drift** | **NO LONGER a reserved human act** — TA-P1 C devolved it (ADR-0074:33; `wave-f-contract.md:214`), and law 70's digest text is a mechanism description, not a reservation | the **requeue** card keeps the human's own drift checkbox; Clara reaches the same consent through `wake_requeue_render_job(p_accept_drift)`, receipted with model + rationale (TA-P4). *v1 hard-refused this and was narrower than the ruling — corrected, no dissent recorded.* |
+| **Consent to render drift** | **NO LONGER a reserved human act** — TA-P1 C devolved it (ADR-0074:33; `wave-f-contract.md:220`), and law 70's digest text is a mechanism description, not a reservation | the **requeue** card keeps the human's own drift checkbox; Clara reaches the same consent through `wake_requeue_render_job(p_accept_drift)`, receipted with model + rationale (TA-P4). *v1 hard-refused this and was narrower than the ruling — corrected, no dissent recorded.* |
 | **Sign the watermark wording** (en/ms/zh) | owner, once | not a UI act — a migration seeded from the owner's returned text (§3.6.1, OQ-1) |
 | **Publish a statutory template / house style; enter MASB statutory wording; mint a `canonical` definition** | admin / owner / migration-only | **no agent door at all** — the existing human verbs; statutory wording stays *manually extracted and manually verified* |
 | **Grant the agent's new capabilities + allowlist rows** | owner, as a ceremony from merged `main` | not a UI act — PR-2's grants plus the PR-2→PR-3 **evaluator deploy-flip ceremony** |
@@ -143,13 +153,29 @@ TA-P1 C and becomes `wake_mint_metric_input_snapshot`. Its human verb stays for 
 - **`clara.archive_signed_original(p_report_run_id, p_sha256, p_byte_size, p_signature_evidence,
   p_answers_pre_sign_sha256, p_op_key)`** — a thin **human** door (bookkeeper+) over
   `_seal_report_artifact_core`, so the archive act has a named verb rather than a raw RPC call. It
-  passes NULLs for `(obo, wake_kind)` like every other human delegate; `report_artifacts`'
-  one-`signed_original`-per-run constraint (`0066:308-311`) is the wall that makes a second attempt
-  refuse.
+  passes NULLs for `(obo, wake_kind)` like every other human delegate. **A second attempt refuses
+  at the core's CHAIN LAW, not the unique index directly** — MEASURED (F-A5 PR-3's battery, cell
+  PR-3.4, not assumed from the schema): the core's chain check requires a `signed_original` to
+  point at the run's currently-latest artifact, and after the first archive that latest artifact
+  IS the signed original, so a second call's unchanged `p_prior_artifact_id` disagrees with it and
+  refuses before any index is ever reached. `report_artifacts`' one-`signed_original`-per-run
+  partial unique index (`0066:308-311`) still exists as defence-in-depth, but is structurally
+  unreachable through this door's own call shape — the chain law above it already closes every
+  path to a second row, which is the stronger property to have measured.
+- **THE AGENT LANE CANNOT PRODUCE A SIGNED ORIGINAL (A.4's human-act reservation, held
+  mechanically).** A `BEFORE INSERT` trigger on `report_artifacts` refuses `kind='signed_original'`
+  whenever `sealed_by = clara.agent_user_id()` — the row's own call-time actor, deliberately NOT
+  the run's `prepared_by_agent` provenance (which would misfire both ways: an agent-PREPARED run's
+  signed original, archived by a human through this very door, must still succeed, and
+  `wake_seal_report_artifact` acting on a human-opened run must still refuse). Found live and
+  unwalled on `main` by an independent review (F-A5 PR-3, finding S3 — the wake-lane grant landed
+  in 0116 before this wall existed); closed in the SAME migration as these two doors because a
+  table-level trigger needs no D1 write-quiesce window — neither `_seal_report_artifact_core` nor
+  `wake_seal_report_artifact` is ever recut to hold it.
 - **`clara.retrieve_signed_original(p_report_run_id)`** — an **audited retrieval**: it writes its own
-  audit row (who asked, when, which artifact) **before** returning `storage_key` + `sha256`, and
-  **regenerates nothing** — *"retained and retrieved, never regenerated"*, which `0080:258-261`
-  already states as the render lane's refusal.
+  audit row (who asked, when, which artifact) **before** returning `storage_key` + `sha256` +
+  `sealed_by` + `prepared_by_agent`, and **regenerates nothing** — *"retained and retrieved, never
+  regenerated"*, which `0080:258-261` already states as the render lane's refusal.
 - **Storage + retention:** the `reports/` prefix keeps its no-UPDATE policy pair
   (`PROGRESS.md:69-71`); **seven years for artifacts and for every renderer image digest** (E-R14)
   is written into `docs/ops/DR-render.md` as part of PR-4. **UI is Wave G** (F5-OQ-12's ruled
@@ -158,6 +184,46 @@ TA-P1 C and becomes `wake_mint_metric_input_snapshot`. Its human verb stays for 
 ---
 
 ## Annex B · The battery (design §6; contract-blind cells marked ▣)
+
+> **B.0 · AS BUILT AT PR-1 — `packages/db/tests/f-a5-reporting-agency-pr1.test.mjs`, 16 cells,
+> all forced.** PR-1 ships no wrapper, no grant and no allowlist row, so every agent-lane cell
+> calls the UNGRANTED CORE directly as its owner — the only caller that exists yet. The
+> wake-credential half (CLR03, the allowlist, the `proactive` refusal, the op-key replay: B.1 and
+> most of B.2 above) is **PR-2's**, because the doors it tests do not exist in PR-1 and a cell that
+> cannot fail is not a cell. What PR-1 does carry, and what changed in the finishing pass:
+>
+> - **H and H2 were SOURCE-TEXT cells over the sharpest judgement logic in the item** — four
+>   regex matches against `prosrc`, which prove the words are present and nothing about what the
+>   bodies do with them (law: spelling is not identity). Both are now behavioural, each refusing
+>   arm carrying an admitting twin ONE TERM away. H forces the lifecycle trigger's four refusals
+>   and two admissions, including PR-1's new anti-fabrication arm (`human_approval` signed by
+>   `clara.agent_user_id()` → `human_evidence_for_machine_act`) and its human twin, which is what
+>   makes "extend-never-weaken" a measurement. H2 forces the re-aimed maker/checker against the
+>   DIRECTOR (`p_actor` is the agent on every call, so a wall measured against it would measure
+>   nothing — precisely how v1 removed the wall while appearing to keep one), reads the receipt's
+>   **three-valued** rung vector off the row, and forces ARM 0′ at TA-P5's rider's stated width:
+>   a DIRECTED approval of an agent-authored orphan needs an adoption attestation, an UNDIRECTED
+>   one does not. The orphan is a NAMED fixture row — PR-1 ships no agent propose door, and that
+>   is said rather than dressed up.
+> - **J and J2 are new, and they are what makes R-L23 (F5-D32) a measurement.** J drives the REAL
+>   production lane: park the queue, seal through the agent core so S9's line enqueues, then claim
+>   and complete the job as `clara_runtime` — `clara.complete_render_job`'s **ten positional
+>   arguments** resolving against the thirteen-argument core, and the sealed artifact carrying its
+>   RUN's `directed_by`/`prepared_by_agent`, **DB-derived on the lane that supplies no identity at
+>   all**. It then shows the wall is armed BY that derivation: the run's director is refused on the
+>   artifact-side term. J2 forces `artifact_identity_mismatch` in both polarities. Without these,
+>   gate-2 blocker 2 was re-created one level over and cell C still passed — C seals through the
+>   agent lane, which does pass an identity.
+> - **Cell C swallowed its control's premise** in a `.catch`: the control sealed through
+>   `clara.seal_report_dataset` as the OWNER, which resolves no JWT, so it raised CLR04 every time
+>   and the control ran against an UNSEALED run — passing anyway, because the verb under test
+>   refused later for its own reasons. It now seals through the human door and reads the state back.
+> - **B2's admitting half poked a column on a `drafting` run.** `_tf_report_run_lifecycle` runs a
+>   whole-row diff AND a state-transition dispatch, so an update that moves no state is refused
+>   whatever the identity diff thinks. The admitting half is now the audited
+>   `drafting → dataset_sealed` transition; the refusing half proves BOTH new columns are frozen
+>   with no trigger edit, which is P6 behaviourally and the reason `_tf_report_run_lifecycle` is
+>   not on the D1 list.
 
 **B.1 · The wrappers** (every cell runs over the **enumerated A.1 list**, never a count). No credential → CLR03 ▣ · a kind without its allowlist row → CLR03 ▣ · **a
 `'proactive'` credential ATTEMPTING each verb is refused** ▣ *(the call is made and refused — a

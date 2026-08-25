@@ -105,20 +105,12 @@ export const PART_CATALOG = {
     renderBranch: true,
     fixtures: [{ type: "sweep_receipt", run_id: "run-6666" }],
   },
-  kb_rule_proposal: {
-    renderBranch: true,
-    fixtures: [{ type: "kb_rule_proposal", rule_id: "rule-7777", question_id: "q-7777", client_id: "client-1111" }],
-  },
   open_question: {
     renderBranch: true,
     fixtures: [{ type: "open_question", question_id: "q-8888", client_id: "client-1111" }],
   },
-  // --- Wave-A2 addition (contract §6.4/§7): identifier-only; the card hydrates the
-  // rule_post_runs receipt on mount. Fixture renders the id-only (no-token) state.
-  rule_post_receipt: {
-    renderBranch: true,
-    fixtures: [{ type: "rule_post_receipt", run_id: "run-9999" }],
-  },
+  // kb_rule_proposal and rule_post_receipt RETIRED with F-A2 PR-3 (GM-11) —
+  // both rendered rules-execution verbs the design drops whole.
   // --- Wave C-c additions (design v2.1 §7): identifier-only; each card
   // hydrates authoritative state on mount. bank_recon_receipt keys on
   // statement_id (parts.ts explains why, not recon_id).

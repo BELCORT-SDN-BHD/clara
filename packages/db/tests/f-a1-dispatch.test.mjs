@@ -314,11 +314,13 @@ test("the CALLER CENSUS is non-vacuous: the resolver's consumers are the live bo
   // F-A2 PR-1 (D31): the supplier floor's BODY moved into
   // clara._assert_supplier_bill_shape_at_projected and the 2-arity entry point became a thin
   // delegate passing NULL, so the name that reaches the resolver moves with the body. The census
-  // still demands SEVEN bodies and still names each one — it is re-pointed, never shortened, and
-  // the pre-F-A2 name is what a frontier database must show.
+  // still names every body — it is re-pointed, never shortened, and the pre-F-A2 name is what a
+  // frontier database must show. F-A2 PR-3 (Annex B.1/B.2) drops execute_rule_post whole, so the
+  // census drops SEVEN bodies to SIX; 0093:373 (`_invoice_fact_state`'s own definition) is
+  // immutable, and this file is the one that moves with the recut resolver's consumer set.
   const floorName = names.includes("_assert_supplier_bill_shape_at_projected")
     ? "_assert_supplier_bill_shape_at_projected" : "_assert_supplier_bill_shape_at";
-  for (const must of ["_write_entry_evidence", "execute_rule_post", "_approve_entry_core",
+  for (const must of ["_write_entry_evidence", "_approve_entry_core",
     floorName, "_coding_lane_core", "_draft_entry_core", "revise_entry"]) {
     assert.ok(names.includes(must), `${must} reaches corroboration through the recut resolver`);
   }

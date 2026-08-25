@@ -95,9 +95,10 @@ runs:
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_source'
         PGDATABASE=drci_source pnpm db:migrate
         PGDATABASE=drci_source pnpm db:seed
-        # roles-bootstrap the SOURCE too: the migrations create only the 9 clara group/login
-        # roles — clara_storage_docs comes from storage-provision.sql / roles-bootstrap, NOT a
-        # migration. Running it here gives cluster A the SAME 10-role census cluster B gets, so
+        # roles-bootstrap the SOURCE too: the migrations create only the 12 clara group/login
+        # roles (9 through 0009, + clara_wake_bank/_login from 0121, + clara_wake_filing from 0126) —
+        # clara_storage_docs comes from storage-provision.sql / roles-bootstrap, NOT a
+        # migration. Running it here gives cluster A the SAME 13-role census cluster B gets, so
         # role/membership parity is genuine and not a deterministic clara_storage_docs mismatch
         # (Codex re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
         # fresh-target-only preflight cannot abort here.

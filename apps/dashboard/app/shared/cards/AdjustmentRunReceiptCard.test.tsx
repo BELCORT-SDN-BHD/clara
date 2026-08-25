@@ -15,7 +15,7 @@ import {
   type RunCorrectionState,
 } from "./AdjustmentRunReceiptCard";
 import type { PairReversalResult } from "../adjustmentApi";
-import type { AdjustmentRunRow } from "../../rules/adjustmentModel";
+import type { AdjustmentRunRow } from "../../close/adjustments/adjustmentModel";
 import type { AdjustmentRunReceiptPart } from "../parts";
 
 const PART: AdjustmentRunReceiptPart = {

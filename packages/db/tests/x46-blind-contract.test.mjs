@@ -278,8 +278,8 @@ test("META x46: migration 0046 present, exactly once", async (t) => {
   assert.equal(mig.rows.length, 1, `exactly one applied 0046_* migration (got ${mig.rows.map((x) => x.version).join(",")})`);
 });
 
-test("STRUCTURAL _ocr_sales_floor returns (qualifying,distinct_invoices,corroborated,span_days) — doc defect 2 (distinct_docs) is gone", async (t) => {
-  if (skip46(t)) return;
+test("STRUCTURAL _ocr_sales_floor returns (qualifying,distinct_invoices,corroborated,span_days) — doc defect 2 (distinct_docs) is gone", { skip: "_ocr_sales_floor retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): _ocr_sales_floor itself is dropped.
   const r = await rootQuery(
     "select pg_get_function_result(oid) as ret from pg_proc where proname='_ocr_sales_floor' and pronamespace='clara'::regnamespace",
   );
@@ -291,8 +291,10 @@ test("STRUCTURAL _ocr_sales_floor returns (qualifying,distinct_invoices,corrobor
   assert.doesNotMatch(ret, /distinct_docs/i, "the never-read distinct_docs column is dropped (doc defect 2)");
 });
 
-test("STRUCTURAL the exact live caller set: propose/sign/post/preview each reference _ocr_sales_floor (caller four is the preview verb)", async (t) => {
-  if (skip46(t)) return;
+test("STRUCTURAL the exact live caller set: propose/sign/post/preview each reference _ocr_sales_floor (caller four is the preview verb)", { skip: "the whole caller/callee set retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): all four named callers (propose_autopost_rule,
+  // sign_autopost_rule, execute_rule_post, preview_ocr_sales_evidence) AND the callee
+  // (_ocr_sales_floor) are dropped whole.
   for (const fn of ["propose_autopost_rule", "sign_autopost_rule", "execute_rule_post", "preview_ocr_sales_evidence"]) {
     const src = await rootQuery(
       "select string_agg(prosrc,' ~~ ') as s from pg_proc where proname=$1 and pronamespace='clara'::regnamespace",
@@ -308,8 +310,8 @@ test("STRUCTURAL the exact live caller set: propose/sign/post/preview each refer
 // coding_kind='sales_invoice' entries, on top of the corroborated>=6 ROOT fix.
 // ===========================================================================
 
-test("7A-R4 floor purity: 6 corroborating sightings with coding_kind LEFT NULL (generic) yield qualifying=0 — the same evidence tagged sales_invoice counts", async (t) => {
-  if (skip46(t)) return;
+test("7A-R4 floor purity: 6 corroborating sightings with coding_kind LEFT NULL (generic) yield qualifying=0 — the same evidence tagged sales_invoice counts", { skip: "_ocr_sales_floor/propose_autopost_rule retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): _ocr_sales_floor and propose_autopost_rule are dropped.
   const { users, clients } = world;
   const client = clients.A1;
   const firm = firmA;
@@ -347,8 +349,9 @@ test("7A-R4 floor purity: 6 corroborating sightings with coding_kind LEFT NULL (
   assert.ok(!proposedTagged.error, `the tagged pool is ADMITTED (got ${proposedTagged.error?.code}/${proposedTagged.error ? reasonOf(proposedTagged.error) : ""})`);
 });
 
-test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is REFUSED at propose, sign, AND post", async (t) => {
-  if (skip46(t)) return;
+test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is REFUSED at propose, sign, AND post", { skip: "the OCR sales floor + rule-post executor + autopost-rule tier retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): _ocr_sales_floor, propose_autopost_rule,
+  // sign_autopost_rule and execute_rule_post (via postViaRule) are all dropped.
   const { users, clients } = world;
   const client = clients.A2;
   const firm = firmA;
@@ -422,8 +425,17 @@ test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is
 // bypass) but EVERY posting path keeps the full corroboration gate.
 // ===========================================================================
 
-test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admission; corroboration remains necessary to post it under ANY rule", async (t) => {
+test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admission and is APPROVABLE by a human", async (t) => {
   if (skip46(t)) return;
+  // RETITLED + NARROWED (F-A2 PR-3, Annex B.1). This cell used to prove 7A-R3's two halves
+  // in one entry: the draft/approval half (still live, kept below) AND the autopost-refusal
+  // half ("corroboration remains necessary to post it under ANY rule", via a raw-inserted
+  // 'live' coding_rules row + postViaRule/execute_rule_post). The second half's entire
+  // subject retired whole with F-A2 PR-3 -- there is no more rule-posting path for a
+  // tax-silent draft to be refused BY, so asserting its refusal would assert a fact about
+  // machinery that no longer exists. Per the file's own law ("a title that overstates its
+  // probe is how a suite comes to be believed for coverage it does not have"), the title
+  // now states only what this cell still measures.
   const { users, clients } = world;
   const client = clients.A1;
   // [lane-7a-db, terminal proof — REPORTED] THE COUNTERPARTY IS BIRTHED FIRST, AND THE DOCUMENT
@@ -484,27 +496,12 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
   // will EVER carry that stamp, and no fixture change could have produced one through the
   // audited path.
   //
-  // WHAT THE EXECUTOR ACTUALLY READS is clara.entries.proposed_counterparty, not the line
-  // stamp: execute_rule_post refuses 'ineligible_no_counterparty' when it is null, then
-  // re-resolves it via _resolve_counterparty with the kind FORCED from the direction
-  // ('customer' for sales). So the fix is to give the entry a proposal that resolves — the
-  // customer is birthed above, the document names that same customer, and the draft proposes
-  // it by existing_id — and to point the rule at that identity.
-  const cp = birth.cp;
-  assert.ok(cp,
-    "mandatory premise: the sales customer counterparty exists before the draft is proposed — "
-    + "without it execute_rule_post refuses at counterparty resolution and never reaches the "
-    + "corroboration gate this cell exists to prove");
-  const liveRow = await rawRule(users.alice, { client, firm: firmA, cp, accountCode: REV, status: "live" });
-  void liveRow;
-  await postViaRule(draft.entry_id);
-  const skip = await lastSkipReason(draft.entry_id);
-  assert.notEqual(await entryStatusOf(draft.entry_id), "checked", "the tax-silent draft is never posted via a rule, live or not");
-  assert.equal(skip, "not_corroborated",
-    `the executor refusal is TERMINAL at corroboration (got '${skip}') — an earlier token`
-    + ` means the post never reached the gate 7A-R3 says EVERY posting path keeps`);
-  // 7A-R3's OTHER half, measured only after the posting gate has been: the human approval
-  // this contract sanctions still succeeds on the very entry no rule would post.
+  // The RETIRED half used to continue here: birth the customer's counterparty, raw-insert a
+  // 'live' coding_rules row pointed at it, run postViaRule (execute_rule_post) on the draft,
+  // and assert a TERMINAL 'not_corroborated' skip. clara.execute_rule_post is gone (Annex
+  // B.1); there is no posting path left to refuse the draft, so that proof is dropped rather
+  // than asserted against nothing.
+  // 7A-R3's surviving half: the human approval this contract sanctions.
   await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("r3app") });
   assert.equal(await entryStatusOf(draft.entry_id), "approved",
     "the tax-silent sales draft is APPROVABLE by a human — 7A-R3 sanctions the DRAFT, never the autopost");
@@ -803,8 +800,9 @@ test("7A-R5 a daily admission cap binds (refused_sales_cap) once the firm's per-
 // the floor, tax_silent_documents = qualifying - corroborated.
 // ===========================================================================
 
-test("PREVIEW advisory shape carries evaluated_at + required + floor_met; matches the floor's own counts; tax_silent_documents = qualifying - corroborated", async (t) => {
-  if (skip46(t)) return;
+test("PREVIEW advisory shape carries evaluated_at + required + floor_met; matches the floor's own counts; tax_silent_documents = qualifying - corroborated", { skip: "preview_ocr_sales_evidence retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1/OQ-3/D36): preview_ocr_sales_evidence retires with the
+  // floor it read.
   const { users, clients } = world;
   const client = clients.A1;
   const name = `X46 PREVIEW CO ${randomUUID().slice(0, 6)}`;
@@ -839,8 +837,8 @@ test("PREVIEW advisory shape carries evaluated_at + required + floor_met; matche
   assert.ok(p.tax_silent_documents >= 2, `at least the 2 deliberately tax-silent extras are counted (got ${p.tax_silent_documents})`);
 });
 
-test("PREVIEW returns not-applicable (never an error) for a non-sales rule and for a wrong-evidence-class rule", async (t) => {
-  if (skip46(t)) return;
+test("PREVIEW returns not-applicable (never an error) for a non-sales rule and for a wrong-evidence-class rule", { skip: "preview_ocr_sales_evidence retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1/OQ-3/D36): preview_ocr_sales_evidence is dropped.
   const { users, clients } = world;
   const client = clients.A2;
   await upsertPayableAccount(users.alice, { client, code: AP, name: "Trade Creditors", opKey: opk("napap") }).catch(() => {});
@@ -872,8 +870,8 @@ test("PREVIEW returns not-applicable (never an error) for a non-sales rule and f
   assert.equal(preview3.rows[0].r.applicable, false, "a nonexistent rule id is not-applicable, never an error");
 });
 
-test("PREVIEW CROSS-FIRM: a viewer in firm A probing firm B's rule id gets not-applicable — never an existence oracle", async (t) => {
-  if (skip46(t)) return;
+test("PREVIEW CROSS-FIRM: a viewer in firm A probing firm B's rule id gets not-applicable — never an existence oracle", { skip: "preview_ocr_sales_evidence retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1/OQ-3/D36): preview_ocr_sales_evidence is dropped.
   const { users, clients } = world;
   // A real 'live'-shaped rule row that genuinely exists — but in firm B.
   await upsertAccountClassed(users.dave, { client: clients.B1, code: REV, name: "Revenue", type: "income", opKey: opk("xfirmrev") }).catch(() => {});

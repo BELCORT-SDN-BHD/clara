@@ -5,8 +5,9 @@
 // figure is computed here, the DB owns every cents value. Every writer carries
 // a FRESH op_key per call (the /assets `opKey()` idiom — the DB is idempotent
 // on firm,fn,op_key; never reuse one across retries or mint one at module load).
-// Row types + mappers live in ../rules/adjustmentModel.ts (the agingApi.ts/
-// agingModel.ts split precedent).
+// Row types + mappers live in ../close/adjustments/adjustmentModel.ts (the agingApi.ts/
+// agingModel.ts split precedent). Relocated from ../rules/ by F-A2 PR-3, which retires
+// /rules whole except this family (design §5 step 5).
 //
 // READ NAMES — RESOLVED (as-built ladder round 2, 2026-08-03). Every WRITE verb
 // name + arg name below is copied LITERALLY from the ABI §A. The THREE reads
@@ -37,7 +38,7 @@ import {
   toListAdjustmentTemplatesRead, toAdjustmentRunDue, toAdjustmentRunRow, toListAdjustmentRunsRead,
   type ListAdjustmentTemplatesRead, type AdjustmentTemplateLine, type AdjustmentCadence,
   type AdjustmentRunDue, type AdjustmentRunRow, type AdjustmentRunMode, type ListAdjustmentRunsRead,
-} from "../rules/adjustmentModel";
+} from "../close/adjustments/adjustmentModel";
 
 const opKey = () => crypto.randomUUID();
 

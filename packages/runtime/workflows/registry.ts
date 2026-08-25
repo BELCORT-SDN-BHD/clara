@@ -19,6 +19,7 @@ import { chatTurn_v9 } from "./chatTurn.v9.js";
 import { chatTurn_v10 } from "./chatTurn.v10.js";
 import { chatTurn_v11 } from "./chatTurn.v11.js";
 import { chatTurn_v12 } from "./chatTurn.v12.js";
+import { chatTurn_v13 } from "./chatTurn.v13.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -34,6 +35,7 @@ import { autoDraft_v5 } from "./autoDraft.v5.js";
 import { autoDraft_v6 } from "./autoDraft.v6.js";
 import { autoDraft_v7 } from "./autoDraft.v7.js";
 import { autoDraft_v8 } from "./autoDraft.v8.js";
+import { autoDraft_v9 } from "./autoDraft.v9.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { firmInterview_v3 } from "./firmInterview.v3.js";
@@ -43,7 +45,9 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v12,
+  // F-A2 CHAT PARITY (owner ruling D34): REPOINTED v12 -> v13. See the note near the bottom of
+  // this file for what v13 is and the ORDER its deploy must take against PR-1's migration.
+  chatTurn: chatTurn_v13,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -67,7 +71,8 @@ export const workflows = {
   // `:stmt-witness-v1` statement literal (0102). Neither guard can see the other's lane, so a
   // half-deployed window stalls the affected lane only — it never crosses.
   witnessFacts: witnessFacts_v2,
-  autoDraft: autoDraft_v8,
+  // F-A2 (the agentic posting lane): REPOINTED v8 -> v9. Same note, same deploy order.
+  autoDraft: autoDraft_v9,
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
 } as const;
@@ -383,6 +388,37 @@ export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
 export { clientOnboarding_v2 };
+// F-A2 — THE AGENTIC POSTING LANE (PR-2, the runtime half) repointed `chatTurn:` v12->v13 and
+// `autoDraft:` v8->v9. Design: docs/plan/active/f-a2-agentic-posting-design.md §3/§5, its four
+// annexes, and the PR-0 gate record. Owner rulings OQ-1/OQ-4/OQ-6 and D34-D37; orchestrator
+// rulings D38-D43.
+//
+// WHAT CHANGES, IN ONE PARAGRAPH. v8 drafted and stopped; a human approved every entry. v9 keeps
+// that first act byte-for-byte and adds a second: after a successful draft the agent may POST
+// the entry under her own identity through `clara.wake_post_entry` — a granted wake wrapper over
+// an ungranted core whose thirteen-rung ladder, four tiers and posting receipt are the SOLE
+// authority on whether the post is lawful. v9 also opens the unattended lane to the GENERIC
+// document class (`journal_entry`, superseding 7A-R7 / ADR-063's "no journal_entry in the
+// unattended lane" scoping stated further down this file — said in those words because a live
+// ruling is being overturned, not drifted past; D18 widens DOCUMENT CLASS and nothing else).
+// v13 is the same post verb on the attended lane (chat parity, D34), plus the fail-closed half
+// the contract requires: a typed OPEN QUESTION, reached through the new `interactive_client`
+// wake kind that PR-1 adds as an EXTENSION of the kind enumeration — never the client-CHECK
+// weakening C-3 reversed — and minted for the `wake_open_question` call ALONE (R-1).
+//
+// THE DEPLOY ORDER, AND IT IS THE OPPOSITE OF THE STATEMENT-ACTIVATION ONE ABOVE. Those two
+// repoints had to be the LAST step of their ceremony because the lane's ROUTER moved with them.
+// These two are the reverse: PR-1's migration must be applied FIRST, and the image may deploy
+// only after. The reason is asymmetric failure, not preference — a v9/v13 image against a
+// pre-PR-1 database calls a `clara.wake_post_entry` that does not exist and every post attempt
+// fails loudly with 42883, while a post-PR-1 database under the old v8/v12 image simply never
+// posts (the verb sits there uncalled, and the whole `posted` chain is behaviourally inert until
+// something emits the outcome). One of those is a visibly broken lane; the other is the status
+// quo. So: PR-1's D1 window closes, THEN this image ships.
+//
+// v8 AND v12 STAY FROZEN, BUILT AND EXPORTED so no parked run is stranded (policy (c)) — both
+// gained an explicit `export` below, which they had not needed while they were the pinned
+// versions.
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
@@ -394,6 +430,8 @@ export { chatTurn_v8 };
 export { chatTurn_v9 };
 export { chatTurn_v10 };
 export { chatTurn_v11 };
+export { chatTurn_v12 };
+export { chatTurn_v13 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -402,5 +440,7 @@ export { autoDraft_v4 };
 export { autoDraft_v5 };
 export { autoDraft_v6 };
 export { autoDraft_v7 };
+export { autoDraft_v8 };
+export { autoDraft_v9 };
 
 export const workflowNames: string[] = Object.keys(workflows);

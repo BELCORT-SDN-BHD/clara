@@ -106,3 +106,76 @@ never `wsl --shutdown`.
   measured error — never a guess), (3) DONE: branch + HEAD, files, the battery totals per package, every skip
   named, the D1 body inventory, what you could not build and why. Keep each report under 60 lines.
 - Models/effort are pinned by the orchestrator; never spawn sub-agents without an explicit `model`.
+
+## Rules minted on the 2026-08-24 train night (each cost real time; binding)
+- **An idle lane is NEVER woken by background-task completion — only SendMessage wakes you.**
+  Run long suites foreground with a generous timeout, or actively poll the output in-turn; do
+  not end your turn while a run you must report on is in flight. (Re-bitten twice this night.)
+- **`revoke all on <table|view> from public` is FORBIDDEN** — relations carry no default PUBLIC
+  privileges; the no-op materializes the acl and reds the DR ACL round-trip (dr-verify 4.6).
+  Functions-only (they default to PUBLIC EXECUTE).
+- **Live-gates e2es bind OS-assigned ports** (`packages/runtime/tests/ephemeral-port.mjs`);
+  never a fixed default (the shared-runner-host 401 cross-wire class).
+- **Fixture labels must not look like secrets**: gitleaks scans EVERY ref, so one entropy-shaped
+  `key='…'` constant on ANY branch reds every PR's lint. Adjudicate-then-allowlist by CAPTURED
+  VALUE, never fingerprint (squash rewrites shas).
+- **Merge state is read from main's migration ledger** (`ls packages/db/migrations/` /
+  `schema_migrations`), never from the branch list — squash-merges leave branch history
+  un-contained forever.
+- **Squash-artifact conflicts**: classify each conflicted file against YOUR branch's own
+  merge-base; a file you never touched resolves to main's copy wholesale.
+- **Gate your chains**: `grep -c` exits 1 at zero — use `! grep -q` for marker gates; never
+  chain `rebase --continue`/push behind an unverified check.
+- **Docker hygiene is a settle obligation**: prune your rig container AND volume when your
+  stage finishes (the 2026-08-24 disk-zero event was 369 orphaned volumes / 100.8 GB).
+
+## Rules minted on the 2026-08-25 W2/W3 close
+
+- **① A migration minting a NEW CLUSTER ROLE joins `packages/db/deploy/roles-bootstrap.sql`
+  SAME-COMMIT.** `pg_dump` carries no roles — a DR restore replays the migration's `GRANT`s into
+  a fresh cluster whose roles come only from the bootstrap script, so a role minted only in the
+  migration makes restore-full FAIL with `role does not exist` (found at F-A3 PR-1b's `0121`,
+  `clara_wake_bank` + `clara_wake_bank_login`). **Plain-grant mirroring must be EXACT**, not
+  restyled: PG16+ plain `GRANT` takes `INHERIT` from the member's own `rolinherit`, so writing
+  `inherit false, set true` in the bootstrap when the migration used a plain grant desyncs
+  `dr-verify` §4.5's membership differential (`(f,t,f)` restored vs `(t,t,f)` source). Same
+  family as new-grants-join-rig-meta.
+- **② The FROZEN-WINDOW law, cross-PR face: a battery that byte-pins another PR's body must
+  window the pin at the first successor CoR.** A battery written against a body at one frontier
+  can legitimately need that body to change again later (F-A3 PR-1a's `f-a3.1a-a` byte-inversion
+  cell reds the first time it runs on a chain containing `0121`, because PR-1b legitimately
+  re-CoRs 4 of PR-1a's 9 cores). The fix is stem-gated: a `SUPERSEDED_BY_<PR>` set plus a stem
+  gate turns the inversion check into a pre-successor-window claim, while presence and
+  no-`_human_ctx` checks stay un-windowed. The successor's own §0 pre-state pins are the machine
+  proof of where that boundary sits — read them, don't guess.
+- **③ The VACUOUS-RELAXATION class: a "relaxed" guard that a pre-existing CHECK already subsumes
+  is proof DELETION in disguise.** F-A7 β's first fix-round rewrite of CLR01 was judged vacuous
+  because `ck_agent_filing_receipts_filed_iff_clean` already subsumed the congruence it claimed
+  to add — the "relaxation" would have deleted the only proof of a real property, not narrowed an
+  over-broad one. The adopted fix scopes the EXISTENCE mandate to agent-sourced filings instead
+  (discriminator: `client_resolutions.evidence->>'source'`) rather than relaxing the guard's
+  reach. When a proposed fix makes a guard redundant with something already enforced, check
+  whether the guard was carrying independent weight before relaxing it.
+- **④ A wall-introducing PR's shared-fixture remedy must reach EVERY package whose fixtures walk
+  the walled path.** γ's `ensureClassifyConsent` fixture remedy landed only in
+  `packages/db/tests/rig-docs-fixtures.mjs`; `packages/runtime`'s own fixtures create NULL-kind
+  documents without the consent, so 4 runtime cells born `failed` — first surfaced on the estate
+  leg, the only place all packages meet on one chain. **A lane verification that runs one
+  package's suite is not estate verification.** Any wall-introducing PR enumerates the packages
+  whose fixtures exercise the walled path and trues them all same-branch.
+- **⑤ Closed-world censuses extend same-branch.** Four separate W2 cars re-learned this: a
+  census that enumerates a closed world (roles, event types, clock rosters, seam ledgers) must be
+  extended in the SAME migration/branch that adds the new member, never left for a later PR to
+  discover the gap (er9 R9.H3's role census missing `clara_wake_filing` was the sharpest
+  instance, caught only on the first-chain-meeting estate leg).
+- **⑥ Pattern note — candidate future mechanism.** Four of the six W2 cars (pr-1b: DR roles +
+  frozen-window · γ: cross-package fixture · β: three failure classes) needed a fix round found
+  only when their closed, individually-green ladders met each other for the first time on the
+  estate leg. Closed ladders built on stale bases prove nothing about how they behave once
+  merged together. Candidate mechanism for a future wave: a pre-merge TRAIN RIG that applies the
+  whole queued batch to one chain before car 1 merges, so this class of red surfaces before the
+  ceremony window rather than during it.
+- **⑦ `clara._tf_processing_task_update` joins the shared-surface list** beside `agent_tasks`
+  triggers (≥6 lanes CoR'd it across the W2/W3 window — read its live body via
+  `pg_get_functiondef` before authoring against it, per the shared-surfaces rule above; SendMessage
+  the surface owner first).

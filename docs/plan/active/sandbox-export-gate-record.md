@@ -362,11 +362,36 @@ file and a record; who sends it and how is out of scope"*).
 **The fold did NOT edit Q4.** Rewriting an owner question's argument is the thing this card exists to
 ask permission for; the card carries the missing instruments in hand, per the standing posture.
 
+**Owner ruling 2026-08-23 (the sitting) — Card 1 (B1) and Card 2 (M5/Q4) are BOTH RULED.** Each
+card's text above stands as written; these are the dispositions.
+
+- **Card 1 → RULED: the SUBSTITUTION SEAM**, the recommendation as written — the model writes
+  **placeholders**; the render substitutes DB-read values from the pinned basis row at mint time;
+  **no model-typed numeral reaches the sealed bytes.** This reconciles TA-P10 C′ (4)'s export
+  permission with PRD §6 invariant 1 without amending either. Design mechanism recorded:
+  `sandbox-export-design.md` §3.6b. **The figure path unblocks** — the seam ships in place of v1's
+  `displayed_text` type-assertion shape. R-7's early warning is discharged.
+- **Card 2 → RULED: a FIRM-level disclosure authorization register**, alongside the already-ruled
+  mechanical recipient-covers-every-`client_id` wall (§3.2/§3.3) — Q4's recommendation, adopted as
+  written, with the brief's missing citations (R114.2(a)/R114.3(b), `PRD.md:171`) now on record
+  above. **A per-client STRICT MODE stays a future OPTIONAL TIER** — the architecture keeps the
+  seam for it (the recipient-coverage model is not narrowed to force it now). The external export
+  path unblocks on the firm-level register landing in PR-1. Design mechanism recorded:
+  `sandbox-export-design-part2.md` §7.
+
+**Also SIGNED at the same sitting, discharging a separate lane obligation (not a gate card, but
+recorded here for one source of truth): the `sandbox_watermark` trio (Q1/OQ-1/OQ-2)** — EN/BM/ZH
+text verbatim in `sandbox-export-design.md` §3.6a. The lane's DARK condition (survey X12) lifts at
+build once PR-1 seeds the three rows.
+
 ## 7 · What binds before PR-1
 
-1. **The law-28 cross-model adversarial pass, against v2** (Annex G, eight arms). Outstanding.
-2. **Owner card 1 ruled**, or the figure path stays unbuilt.
-3. **Owner card 2 ruled**, or Q4's brief re-cut and re-put, before the external path is walked.
+1. **The law-28 cross-model adversarial pass, against v2** (Annex G, eight arms). Outstanding —
+   **NOT discharged by the 2026-08-23 rulings**, which settled accounting/architecture cards only.
+2. ~~Owner card 1 ruled, or the figure path stays unbuilt.~~ **RULED 2026-08-23 — the substitution
+   seam** (above). Discharged.
+3. ~~Owner card 2 ruled, or Q4's brief re-cut and re-put, before the external path is walked.~~
+   **RULED 2026-08-23 — the firm-level register** (above). Discharged.
 4. **F-A5 PR-1 merged** — it owns both the `watermark_policy_versions` DDL and the receipt-schema
    wall B4.1 forces; until then B4.1 skips, named and counted.
 5. **PR-1's rig replay** confirms every migration-source read in this set (survey U3).

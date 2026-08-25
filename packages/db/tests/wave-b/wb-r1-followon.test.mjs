@@ -78,7 +78,8 @@ test("[R1-F5a]: list_uncoded_filings never lists an onboarding client's filing (
     "the SAME shape on an active client is listed (the guard, not the shape, excluded it)");
 });
 
-test("[R1-F5b]: list_autopost_rules excludes non-active clients; the reconciler never touches their rules", async () => {
+test("[R1-F5b]: list_autopost_rules excludes non-active clients; the reconciler never touches their rules", { skip: "list_autopost_rules retired with F-A2 PR-3 — this cell's claim has no subject left" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): list_autopost_rules is dropped whole.
   fail0017(live);
   const cpOnb = await rawVendor(onb.client, "F5 ONB VENDOR SDN BHD");
   const cpAct = await rawVendor(w.clients.A1, "F5 ACT VENDOR SDN BHD");

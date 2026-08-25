@@ -118,6 +118,11 @@ export const NON_PATH_ALLOWLIST = new Set([
   "//run", // DR.md's own illustration of a DOUBLED-slash mount path, quoted to show the bug shape
   "mint_session_jwt.mjs", // an owner-side ceremony helper kept outside the repo (it handles a live secret)
   "wave-7a-acceptance-h1/h2.md", // the "-h1/-h2" pair shorthand: two files named once (completed/wave-7a-acceptance-h1.md and -h2.md)
+
+  // --- Paths named by a CLOSED wave's frozen design prose that retired after the doc closed.
+  // Append-only per the ADR log's own law: the doc's bytes do not change to chase a later
+  // retirement, so its dead reference is named here instead.
+  "apps/dashboard/app/rules/page.tsx", // wave-e-design-skeleton-part4.md's closed Wave-E design prose; the /rules surface retired whole with F-A2 PR-3 (relocated to /close/adjustments)
 ]);
 
 /**

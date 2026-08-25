@@ -35,8 +35,7 @@
 > that F-A7a's other pieces (the firm-scoped question carrier, the correction path, the collision
 > guard) may proceed meanwhile, and v1's packaging destroyed that permission; **π and γ are
 > unblocked** (§6). If the owner declines either amendment, §3.2's B-tier collapses to TA-P7's
-> option B (nominate + one-click human confirm) — the fail-closed default, and §8 states what
-> changes.
+> option B (nominate + one-click human confirm) — the fail-closed default; §8 states what changes.
 >
 > **Method lessons, now four:** an unsettleable claim is a **PREDICTION a rig replay must
 > confirm**, never a design assertion · **line numbers come from the instrument that prints them**
@@ -246,10 +245,17 @@ consumed), `adopted_verbatim boolean` for the human-confirmation path.
 
 **The common receipt contract, and why not one mega-table.** TA-P4 A extends receipts across
 F-A2/F-A4/F-A5/F-A6/F-A8, and one physical table would make five items co-own one live body — the
-opposite of the wake-sibling rider. **A COMMON COLUMN CONTRACT** (the ten names above) plus **one
+opposite of the wake-sibling rider. **A COMMON COLUMN CONTRACT** plus **one
 read surface** — the bookkeeper+ view `clara.agent_receipts_visible`, unioning the per-act tables
 with a `receipt_kind` discriminator — satisfies TA-P11's test (shared contract, one entrance per
 surface). Registered as **D-6**; the view ships in **train π**.
+
+**[BUILT 2026-08-23, PR-1 π — measured deltas; annexes-2 §I.5 states them and GOVERNS.]** The
+contract is a **PROJECTION** contract, not a physical-column one; it is **nineteen** columns,
+`scope` last (R-L26); the union is over **seven per-item SHIM VIEWS**, not the base tables (zero of
+the seven member tables exist yet), so a member wires its own shim and this view is never re-cut —
+D-6's promise. **Member onboarding, the one sentence that matters: `scope` is not optional; a NULL
+there hides all your rows.**
 
 ### 3.5 Egress governance (TA-P3 A)
 
@@ -291,8 +297,18 @@ consent+activation, an **unfiled** one requires the firm-narrow `attribution` mo
 verdict writes the terminal never-claimed **failed receipt** (the `skipped_kind` idiom) — **never a
 raise**, because that function runs inside `file_document` / `finalize_document_intake` /
 `confirm_attribution_candidate` / `approve_wrong_client_correction` and a raise would abort an
-unrelated filing transaction. The lane's comment (`0090:346`) and the worker's header
-(`classify.mjs:12-14`) are corrected in the same PR — **the comment is part of the finding**.
+unrelated filing transaction. ~~The lane's comment (`0090:346`) and the worker's header
+(`classify.mjs:12-14`) are corrected in the same PR — the comment is part of the finding.~~
+**CORRECTED (F-A7 gamma, independent γ review, 2026-08-25): this instruction is unsatisfiable
+under this SAME paragraph's own AB-4 discipline.** `0090` is an already-applied migration;
+db-migrations.md's "Applied files are immutable... fix forward with a new file" (and hard
+constraint 9's freeze law) forbid editing its committed text in place — the runner checksums
+each file, so touching `0090:346` trips a checksum-drift error at apply. The comment's own claim
+("classify … never hold[s]") is ALSO still literally true post-gamma in the sense it was written
+(the kill-switch's `held_egress` status) — gamma's enqueue-time gate flips straight to a terminal
+`failed` receipt, never `held_egress`, so no live text is actually wrong. The worker's header
+(`classify.mjs:12-14`, runtime, PR-rho's territory per R1 above) is left for that lane. No
+migration text changes as a result of this correction.
 
 **The admissible-document list and the IC refusal.** The closed list rides the **onboarding intake
 door**, where a human declares the kind as they hand the file in:
@@ -423,16 +439,17 @@ sweep, `PG*` vars for rig runs, and the reconciler herd against two lane slots.
 | # | PR | ceremony | gated on | review leg beyond the ADR-061 ladder |
 |---|---|---|---|---|
 | 0 | **gate — DONE** (`filing-and-interview-gate-record.md`) | — | nothing | this record |
-| 1 | **PR-π** — the contract's named three + the promotion card + `agent_receipts_visible` | none | nothing (`wave-f-contract.md:411-413`) | law 1 on the family predicate |
+| 1 | **PR-π** — the carrier + the promotion card + the family predicate + `agent_receipts_visible`; **relations, UNGRANTED cores, the pure predicate, human verbs and the read surface only** (†) | none | nothing (`wave-f-contract.md:411-413`) | law 1 on the family predicate |
 | 2 | **PR-γ** — the egress train | **D1-γ** | **C6** | **law 28 cross-model, mandatory** (consent boundary + injection surface) |
 | 3 | **PR-α** — the constitutional train, TWO files | **D1-α** | the **digest sign-off** | law 1, reading ONE change; revert is one file |
-| 4 | **PR-β** — the filing verb + the `filing` kind | **D1-β** | α, γ, **F-A2 PR-1** | law 1 over §3.2's rungs and §3.3's riders |
+| 4 | **PR-β** — the filing verb + the `filing` kind + **π's four `wake_*` wrappers and both correction siblings** (†) | **D1-β** | α, γ, **F-A2 PR-1** | law 1 over §3.2's rungs and §3.3's riders |
 | 5 | **PR-ρ** — runtime: triage lane (D-5), classify plumbing, the kind, `matcher.mjs`'s comment | none | γ, β | bundle-grep after build (WDK lesson) |
 | 6 | **PR-ε** — chat parity, as the next free `chatTurn` `_vN` | none | **F-A2 PR-2 lands `chatTurn_v13`** | registry prestate check (constraint 9) |
 | 7 | **PR-dash** · **PR-acc** (zero code) | none | ρ | re-measure as-run; the F-A10 census |
 | 8 | **F-A7b — its own item** | **D1-δ** | F-A7a's acceptance | its own design doc, seeded by annexes-2 §K |
 
 α and β may share ONE ceremony night as two sequential windows, each independently revertable.
+**(†) [BUILT 2026-08-23]** `clara_wake_filing` is NOT a role — annexes-2 §I.5.
 
 **Acceptance (TA-P14 A clause 4).** A full synthetic round on **ROME PUBLIC ADVISORY** — a mixed
 pile of unattributed documents through triage → verdict → filing → posting, including a deliberate
@@ -457,32 +474,24 @@ agent verdicts — both re-measured; a gate that goes vacuous-green is repaired 
 it and proceeds fail-closed:
 
 - ~~**OW-1 — may Clara reverse a POSTED misattribution herself?**~~ **RULED 2026-08-22 (gate AM-8,
-  widened at landing): YES.** TA-P6 A's member OQ-A7-4 and TA-P7's rider (3) had already granted
-  the reversal and reserved only the cross-client re-home, so §3.3 now puts the reversal on her
-  lane. Build obligation: a reverse-only sibling plus a legal reversed-but-unfiled half-state.
-  **No longer an owner item — only OW-2 below is.**
+  widened at landing): YES** — full reasoning in §5 item 2. Build obligation: a reverse-only
+  sibling plus a legal reversed-but-unfiled half-state. **Only OW-2 below is still an owner item.**
 - **OW-2 — dual attribution: a CONTRACT severance ask.** `wave-f-contract.md:296` requires
   dual-attributed related-party documents to be read once under both sides' authorization; the
   design severs it past v1. *Fail-closed default:* a dual verdict refuses at B2 and asks. (Not an
   open ruling — TA-P3's member OQ-A7-5 is design-layer residue, agenda §R-B.)
 
-**Four stay under the standing delegation** — the design proceeds on the recommendation, each
-naming its fail-closed default: **OQ-A7-a** one receipt table or a common contract → the common
-column contract + one union view (§3.4) · **OQ-A7-b** identity fields in the witness pair → not in
-F-A7; register the widening against F-A1; human confirmation only · **OQ-A7-c** one firm-narrow
-purpose with two moments → one purpose, one signature ("signs ONCE"), the `moment` column keeps
-the audit line honest · **OQ-A7-d** may a judged attribution file to an `onboarding` client → yes,
-filing only, posting still blocked by the status gates; fail-closed default: active clients only.
+**Four stay under the standing delegation** — the design proceeds on the recommendation, each naming its fail-closed default: **OQ-A7-a** one receipt table or a common contract → the common column contract + one union view (§3.4) · **OQ-A7-b** identity fields in the witness pair → not in F-A7; register the widening against F-A1; human confirmation only · **OQ-A7-c** one firm-narrow purpose with two moments → one purpose, one signature ("signs ONCE"), the `moment` column keeps the audit line honest · **OQ-A7-d** may a judged attribution file to an `onboarding` client → yes, filing only, posting still blocked by the status gates; fail-closed default: active clients only.
 
 ## 9 · Registered risks and named non-goals
 
 **Risks.** (R1) The constitutional recut is the highest-blast-radius change in Wave F, and the gate
-made it **larger, not smaller**: it is **seven live bodies re-deriving the predicate**
-(annexes-2 §H), not one, and its callers are **three live bodies** (`_draft_entry_core`,
-`finalize_document_intake`, `_draft_opening_item_core`), not twelve — the eleven grep hits were
-successive CoRs of three functions, and `pg_proc` holds one row each. Mitigated by extend-only,
-by train α's isolation and single-file revert, by F-A7's **own** re-runnable postcheck block
-(§5), and by a rig-replay census in both directions. (R2) Classify re-gating will make some
+made it **larger, not smaller**: **seven live bodies re-deriving the predicate** (annexes-2 §H), not
+one, and **three live** callers (`_draft_entry_core`, `finalize_document_intake`,
+`_draft_opening_item_core`), not twelve — the eleven grep hits were successive CoRs of three
+functions and `pg_proc` holds one row each. Mitigated by extend-only, train α's isolation and
+single-file revert, F-A7's own postcheck block (§5), and a rig-replay census both ways.
+(R2) Classify re-gating will make some
 clients' classify lane **hold** until their supplementary consent line exists — visible,
 intended, the fail-closed posture TA-P3 A chose; it now holds at ENQUEUE, so no task is even
 queued in an unauthorized client's name. (R3) The family predicate is new judgement logic on live
@@ -496,4 +505,5 @@ migration text silently deletes live safety properties (annexes-2 §G).
 · dual attribution (OQ-A7-e) · extending the name-only DB wall beyond RS (TA-P8: the general rule generalizes, the wall does not; **[ADR-0075 2026-08-23]** was "constraint 12's DB wall" — retired as a *named* constraint, `0062`/`0063` untouched) · admitting `method='agent'` (survey finding 2) · a model-supplied
 confidence anywhere in the wall · web-found identity facts entering the knowledge base (TA-P8's
 F-A8-M4 A) · carrying client identity onto the open web (F-A8-OQ-2 A) · any per-firm capability
-dial (TA-P1 C: capabilities are default-on).
+dial (TA-P1 C: capabilities are default-on) · **[BUILT 2026-08-23]** a firm-INDEPENDENT arm on
+`agent_receipts_visible` (annexes-2 §I.5's registered escalation).

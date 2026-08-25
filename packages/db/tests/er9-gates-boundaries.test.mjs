@@ -15,7 +15,7 @@ import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   has0056, hasB3, caught, cleanCloseableFY, freshActiveClient, recordClientFact,
   proposeFY, openFY, beginClose, attestClose, abandonClose, finalizeClose, verifyClose, reopenFY,
-  listFiscalYears, grantCapability, plainEntry,
+  listFiscalYears, grantCapability, plainEntry, attestCloseSig,
   AR1, AP1, RE1, REVN, EXPN, BANK1, addDaysStr,
 } from "./x56-fixtures.mjs";
 import {
@@ -228,6 +228,14 @@ test("R9.G2 an attestation that signed a state which has since MOVED refuses by 
   ]) {
     await upsertAccountClassed(world.users.alice, { client, code, name, type, ...opts, opKey: opk("er9-coa") });
   }
+  // F-A3/PR-1b drawer-2 arm 4 (TA-P14, ratified): this client's BANK1 is a plain asset leg,
+  // never registered through add_bank_account -- zero clara.bank_accounts rows. Declared
+  // truthfully through the governed door so this cell measures ITS OWN gate (closing_stock_present),
+  // not the unrelated bank-registry wall.
+  await recordClientFact(world.users.alice, {
+    client, factKey: "banking_arrangement", factValue: "no_accounts",
+    basis: "er9 rig: a genuinely bank-less client by fixture design", basisKind: "owner_instruction",
+  });
   const proposal = await proposeFY(world.users.alice, { client, startsOn: FY_START });
   const opened = await openFY(world.users.alice, { client, label: "er9 stale FY1", startsOn: FY_START, endsOn: proposal.ends_on });
   await plainEntry(world.users.bob, {
@@ -295,6 +303,14 @@ test("R9.G3 the closing-stock question for a SERVICES business, both directions:
   ]) {
     await upsertAccountClassed(world.users.alice, { client, code, name, type, ...opts, opKey: opk("er9-coa") });
   }
+  // F-A3/PR-1b drawer-2 arm 4 (TA-P14, ratified): same declaration as R9.G2's identical
+  // fixture shape -- a genuinely bank-less client, declared truthfully through the governed
+  // door, so this cell measures ITS OWN gate (closing_stock_present / trade_nature), not the
+  // unrelated bank-registry wall.
+  await recordClientFact(world.users.alice, {
+    client, factKey: "banking_arrangement", factValue: "no_accounts",
+    basis: "er9 rig: a genuinely bank-less client by fixture design", basisKind: "owner_instruction",
+  });
   const facts = (await rootQuery(
     `select count(*)::int as n from clara.client_facts
       where client_id=$1 and fact_key='trade_nature' and superseded_at is null`, [client])).rows[0].n;
@@ -421,7 +437,7 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
     "clara.propose_fiscal_year(uuid,date)",
     "clara.open_fiscal_year(uuid,text,date,date,text,text)",
     "clara.begin_close(uuid,text)",
-    "clara.attest_close_exception(uuid,text,text,text,text)",
+    await attestCloseSig(),
     "clara.abandon_close(uuid,text,text)",
     "clara.finalize_close(uuid,text,text)",
     "clara.verify_close(uuid)",
@@ -444,19 +460,12 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
   const machineRoles = (await rootQuery(
     "select rolname from pg_roles where rolname ~ '^clara_' order by rolname",
   )).rows.map((r) => r.rolname).filter((r) => !sanctioned.has(r));
-  // mandatory setup: the non-sanctioned clara_ roles are a REGISTERED ROSTER, not a count.
-  //
-  // TRUED BY F-A6 PR-1. This used to read `assert.equal(machineRoles.length, 7)` plus a
-  // seven-name presence loop, and the sentence above it said "a role invented later only grows
-  // this set; it is never re-hardcoded" — which the hard-equal made false in practice: F-A6's
-  // two new roles turn it red, and the only way past a bare 7 is to retype an 9. A number
-  // carries no owner, so a bump is indistinguishable from a leak. The roster does carry one:
-  // each role names the migration that creates it and a probe for whether that migration has
-  // applied HERE, so this cell is bimodal-green across frontiers without ever being re-cut.
-  //
-  // Both directions still hold, and one of them is new: a LIVE role nobody registered fails
-  // (the closed world), and a REGISTERED role whose migration is applied but which is MISSING
-  // fails too (the direction a count could never express).
+  // mandatory setup: the non-sanctioned clara_ roles are a REGISTERED ROSTER, not a count
+  // (TRUED BY F-A6 PR-1: a bare equal-count is a number nobody owns; each entry names its
+  // owning migration and probes for it, bimodal-green, never re-cut). MERGE TRUE: main
+  // re-bumped this to `assert.equal(..., 10)` for F-A3/PR-1b's clara_wake_bank/_login and
+  // F-A7 beta's clara_wake_filing — the defect the roster retires; REGISTERED below instead.
+  // Both directions hold: live-unregistered fails, registered-but-missing fails too.
   const { CLARA_ROLE_ROSTER, appliedEntries, rosterFailures } =
     await import("./fixtures/wake-allowlist-roster.mjs");
   const appliedRoles = await appliedEntries(CLARA_ROLE_ROSTER, rootQuery);

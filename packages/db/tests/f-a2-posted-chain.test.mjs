@@ -203,10 +203,19 @@ async function liveAutopostRule(client) {
   if (RULE.has(client)) return RULE.get(client);
   const vendorName = await primedVendor(client);
   const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [client])).rows[0]?.firm_id;
+  // BY NAME, NOT BY RECENCY. This read was `order by id desc limit 1` — "the newest
+  // counterparty", which is a PROXY for "the primed vendor" and stops being the same thing the
+  // moment any other cell in this file births one (measured: `c9.rule-needs-sightings` does
+  // exactly that, and the rule was then built against the wrong counterparty, so
+  // `execute_rule_post` answered `no_live_rule` and c9-B's setup failed). The vendor is resolved
+  // by the name it was primed under, matched the way the estate normalises names.
   const cp = (await rootQuery(
-    `select id from clara.counterparties where client_id=$1 and merged_into is null
-       and retired_at is null order by id desc limit 1`, [client])).rows[0]?.id;
-  assert.ok(cp, "liveAutopostRule: mandatory setup — the primed vendor is a live counterparty");
+    `select id from clara.counterparties
+      where client_id=$1 and merged_into is null and retired_at is null
+        and name_normalized = lower(regexp_replace($2,'[^a-zA-Z0-9]','','g'))
+      order by id desc limit 1`, [client, vendorName])).rows[0]?.id;
+  assert.ok(cp,
+    `liveAutopostRule: mandatory setup — the PRIMED vendor '${vendorName}' is a live counterparty (resolved by name, not by recency)`);
   for (let i = 0; i < 3; i++) {
     const sighting = await postedSweep(client, 30000 + i, { post: false });
     await approveEntry(OWNER(), {
@@ -423,9 +432,51 @@ test("f-a2.c9.posted-needs-receipt-A a REFUSED draft settled 'posted' is REFUSED
     "c9.posted-needs-receipt-A: the task did NOT land completed — a completed task is what makes admit answer already_done and abandons the filing");
 });
 
-test("f-a2.c9.posted-needs-receipt-B an APPROVED entry with a rule id and NO receipt is refused under 'posted' (C4)", async (t) => {
-  if (await gateChain(t)) return;
-  if (await gateCore(t)) return;
+test("f-a2.c9.rule-needs-sightings the autopost proposer REFUSES without three congruent sightings", { skip: "propose_autopost_rule retired with F-A2 PR-3 — the autopost proposer no longer exists" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): propose_autopost_rule — the verb this cell's whole claim is
+  // about — is dropped whole along with the rest of the autopost-rule tier. There is no
+  // proposer left to refuse anything, so the claim is unreconstructable, not merely unproven.
+  // `liveAutopostRule` earns three human-approved sightings before proposing, and it costs three
+  // extra sweeps to do it. A reader is entitled to ask whether that scaffolding is load-bearing
+  // or superstition, and "I remember it failing once" is not an answer a later author can check.
+  //
+  // MEASURED: a counterparty with ZERO sightings is refused `insufficient_evidence`. So the
+  // sightings are a real precondition of the fixture above, and if the proposer ever relaxes
+  // that requirement this cell goes red and the scaffolding can be deleted deliberately rather
+  // than discovered to be pointless.
+  const client = A1();
+  const vendorName = await primedVendor(client);
+  const fresh = await agentPostable(OWNER(), {
+    client, amount: 45000, vendor: { new: { name: `${vendorName} SIGHTLESS ${Date.now().toString(36)}` } },
+  });
+  const wire = await wakePostEntry(fresh.cred, { ...fresh.args, booksVersion: await booksVersion(client) });
+  assert.equal(wire?.posted, true,
+    `c9.rule-needs-sightings: mandatory setup - the vendor-birthing post lands (${JSON.stringify(wire?.refusal)})`);
+  const cp = (await rootQuery(
+    `select id from clara.counterparties where client_id=$1 and merged_into is null
+       and retired_at is null order by id desc limit 1`, [client])).rows[0]?.id;
+  assert.ok(cp, "c9.rule-needs-sightings: mandatory setup - the fresh counterparty exists");
+  const sightings = await rootQuery(
+    "select count(*)::int as n from clara.rule_sightings where counterparty_id=$1", [cp]);
+  assert.equal(sightings.rows[0].n, 0,
+    `c9.rule-needs-sightings: it carries NO sightings - that is the premise (got ${sightings.rows[0].n})`);
+
+  const proposed = await proposeAutopostRule(OWNER(), {
+    client, cp, accountCode: CHART.expense, cap: 200000, windowMax: 3,
+  });
+  assert.ok(proposed?.error,
+    `c9.rule-needs-sightings: the proposer REFUSES a rule with no evidence behind it (got ${JSON.stringify(proposed)})`);
+  assert.match(`${proposed.error.detail ?? ""} ${proposed.error.message ?? ""}`, /insufficient_evidence/,
+    `c9.rule-needs-sightings: ...by name, so the sightings in liveAutopostRule are a real precondition and not scaffolding-by-superstition (got ${proposed.error.code}: ${proposed.error.message} ${proposed.error.detail ?? ""})`);
+});
+
+test("f-a2.c9.posted-needs-receipt-B an APPROVED entry with a rule id and NO receipt is refused under 'posted' (C4)", { skip: "the real producer (propose_autopost_rule/sign_autopost_rule) retired with F-A2 PR-3 — forging checked_via_rule_id was already rejected by this cell's own history" }, async () => {
+  // RETIRED (F-A2 PR-3, Annex B.1): this cell's own comment says it must be BUILT THROUGH THE
+  // REAL PRODUCER, NOT FORGED — a raw UPDATE was tried and refused CLR10 (skips subledger
+  // materialisation). The real producer, liveAutopostRule (propose_autopost_rule +
+  // sign_autopost_rule), is dropped whole with the rest of the autopost-rule tier, and forging
+  // the state is exactly what this cell's own history says not to do — so it is skipped, not
+  // reconstructed with a fixture its author already rejected.
   // C4's must-fail B. The other unconditional arm: `e.status='approved' and checked_via_rule_id
   // is not null` is the RULE-POST shape, lawful for a `drafted` settle and never evidence of a
   // post. Under the partition it must not satisfy the posted arm.

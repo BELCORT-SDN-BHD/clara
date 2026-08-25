@@ -3,8 +3,9 @@
 -- >>> NEVER RUN ON A LIVE PROJECT. <<< This recreates the clara-custom roles for a DR
 -- restore into a FRESH target (a new Supabase project, or a throwaway for a drill),
 -- BEFORE restoring the full-profile dump — it is step (a) of scripts/restore-full.mjs.
--- On a LIVE project the three login shells (clara_runtime_login, clara_agent_read_login,
--- clara_wake_write_login) have been flipped to LOGIN out of band; re-running here would
+-- On a LIVE project the login shells (clara_runtime_login, clara_agent_read_login,
+-- clara_wake_write_login; clara_wake_bank_login once F-A3/PR-2's ceremony flips it)
+-- have been flipped to LOGIN out of band; re-running here would
 -- set them back to NOLOGIN and cut EVERY runtime / read-pool / wake-write connection.
 -- The preflight below FAILS CLOSED if any login shell is already LOGIN, unless the
 -- operator supplies `-v allow_relogin_reset=1` for a deliberate DR reset into a fresh
@@ -14,9 +15,11 @@
 --
 -- Mirrors: migration 0002 (the 6 group roles + the clara_agent_ro read-only belt +
 -- the deploy-role SET grants), 0006 (the 2 login shells), 0009 (the write-login
--- shell), and deploy/storage-provision.sql (clara_storage_docs). Derived and
+-- shell), 0121 (clara_wake_bank + its clara_wake_bank_login shell — F-A3/PR-1b's
+-- bank wake lane), 0126 (clara_wake_filing — F-A7 β's filing wake kind, group only),
+-- and deploy/storage-provision.sql (clara_storage_docs). Derived and
 -- cross-checked against a live-shaped rig (apply 0001..0010 to a scratch DB → query
--- pg_roles / pg_auth_members) — the census is reproduced exactly (9 clara_% roles +
+-- pg_roles / pg_auth_members) — the census is reproduced exactly (12 clara_% roles +
 -- clara_storage_docs). CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
 -- role and it does NOT normalize NOLOGIN over a pre-existing login shell — so it is
@@ -82,11 +85,15 @@ declare
   grp text[] := array[
     'clara_fn_owner', 'clara_authenticated', 'clara_agent_ro',
     'clara_wake_interactive', 'clara_wake_proactive', 'clara_runtime',
-    'clara_freeform_ro'
+    'clara_freeform_ro',
+    'clara_wake_bank',  -- 0121 (F-A3/PR-1b): the bank wake lane's own group role
+    'clara_wake_filing' -- 0126 (F-A7 β): the filing wake kind's role — group only, no login
+                        -- shell and no postgres membership (reached via wake_credentials rows)
   ];
   -- Login SHELLS: created NOLOGIN here; a LIVE project flips them to LOGIN out of band.
   logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
-                         'clara_freeform_login'];
+                         'clara_freeform_login',
+    'clara_wake_bank_login'];  -- 0121: nologin shell until PR-2's DSN/pool ceremony
 begin
   -- Fail closed: never run on a live project (a login shell already LOGIN) w/o override.
   foreach r in array logins loop
@@ -171,6 +178,9 @@ grant clara_runtime         to clara_runtime_login     with inherit false, set t
 grant clara_agent_ro        to clara_agent_read_login  with inherit false, set true;
 grant clara_wake_interactive to clara_wake_write_login with inherit false, set true;
 grant clara_freeform_ro      to clara_freeform_login   with inherit false, set true;
+-- 0121's own membership is INHERIT-style, deliberately unlike the trio above — the plain
+-- grant mirrors the migration's exact statement (clara_wake_bank_login is created `inherit`).
+grant clara_wake_bank       to clara_wake_bank_login;
 
 -- 2b. Deploy-role membership. The restoring role must be a member of clara_fn_owner
 --     WITH INHERIT + SET so it can restore object ownership — the full dump emits
@@ -195,6 +205,9 @@ begin
     grant clara_wake_write_login to postgres with inherit false, set true;
     grant clara_freeform_ro      to postgres with inherit false, set true;
     grant clara_freeform_login   to postgres with inherit false, set true;
+    -- 0121's own postgres membership is a plain grant (rig-testability parity with the
+    -- wake_write_login precedent) — mirrored exactly, not restyled.
+    grant clara_wake_bank_login  to postgres;
   else
     raise notice 'postgres role absent — skipping the deploy-role SET grants (bare throwaway); the restoring role gets clara_fn_owner below';
   end if;

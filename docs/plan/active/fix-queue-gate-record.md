@@ -178,6 +178,17 @@ explicit FY-end cut-off clause; B: ship as drafted and accept the risk), with a 
 rules — matching OQ-1/OQ-2/OQ-7's own treatment. This is an MPERS policy call, not a build defect;
 this lane does not decide it.
 
+**Owner ruling 2026-08-23 (the sitting) — M4/OQ-9 is RULED: option (A), realized as a close-time
+scan and draft, not a build-time cut-off clause.** Recognition stays at APPROVAL operationally —
+§8.2/§8.3 post unchanged, item C's employee row SHIPS. **At close, Clara scans claims with
+in-FY incur dates approved post-FYE and DRAFTS the accrual for human approval** — the ratified
+TA-P6 split (judgement accruals draft, never auto-post) supplies the mechanism, so no new
+build-time cut-off clause is needed in the posting path itself; the correction lands as a
+close-time proposal instead. **Widening trigger REGISTERED: after the first real closes provide
+data, revisit auto-post for deterministic-dated claims** (the 60-day-waiver pattern) — a
+Backlog-weight follow-up, not a build blocker. Item C's employee row unblocks; the fail-closed
+"does not ship until ruled" default is DISCHARGED.
+
 **M17 · PR-1's urgency is not matched by an actual fast path — RULED, severance approved.**
 *(build.)* §1's "PR-1 first... nothing gates it" is contradicted by the design's own sequencing:
 PR-1 (item F) rides the SAME joint Track-B PR-0 gate + owner sitting as three multi-week
@@ -236,7 +247,7 @@ the individual claims or grounds — no further detail is available to record he
 | 1 | B1 | blocker | live-truth | folded — D-14 |
 | 2 | B2 | blocker | accounting | folded — D-15 |
 | 3 | — | nit | accounting | not folded (out of scope) |
-| 4 | M4 | material | accounting | **owner-reserved — OQ-9** |
+| 4 | M4 | material | accounting | **RULED 2026-08-23 — option (A), close-time scan+draft — OQ-9** |
 | 5 | — | nit | accounting | not folded (out of scope) |
 | 6 | — | nit | accounting | not folded (out of scope) |
 | 7 | M7 | material | accounting | folded — D-16 |

@@ -46,6 +46,16 @@ export async function wakeClientOf(role, secret) {
 // Counterparty writers (human, bookkeeper+) — companion §2.
 // ---------------------------------------------------------------------------
 
+/** The product door for birthing a counterparty directly (registration/TIN optional) —
+ *  mirrors name-only-guard-fixtures.mjs's createCounterparty, the same audited call shape,
+ *  for callers that need a REAL counterparty without a draft+approve round-trip. */
+export async function createCounterparty(sub, { client, kind = "vendor", name, registration = null, tin = null, opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.create_counterparty(p_client => $1, p_kind => $2, p_name => $3, p_registration_no => $4, p_tin => $5, p_op_key => $6) as receipt",
+    [client, kind, name, registration, tin, opKey ?? opk("createcp")]);
+  return r.rows[0].receipt;
+}
+
 export async function addAlias(sub, { client, counterparty, alias, origin = "human", opKey = null }) {
   const r = await humanQuery(sub,
     "select clara.add_counterparty_alias(p_client => $1, p_counterparty => $2, p_alias => $3, p_origin => $4, p_op_key => $5) as r",
@@ -158,30 +168,8 @@ export async function autodraftDraftEntry(sub, { task, rf, firm, client, vendorN
   return draft.entry_id ?? draft.entryId ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Coding rules (human, bookkeeper+) — companion §7.
-// ---------------------------------------------------------------------------
-
-export async function proposeCodingRule(sub, { client, counterparty, accountCode, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.propose_coding_rule(p_client => $1, p_counterparty => $2, p_account_code => $3, p_op_key => $4) as r",
-    [client, counterparty, accountCode, opKey ?? opk("proprule")]);
-  return r.rows[0].r;
-}
-export async function signCodingRule(sub, { rule, opKey = null }) {
-  const r = await humanQuery(sub, "select clara.sign_coding_rule(p_rule => $1, p_op_key => $2) as r", [rule, opKey ?? opk("signrule")]);
-  return r.rows[0].r;
-}
-export async function declineCodingRule(sub, { rule, reason = "rig decline", opKey = null }) {
-  const r = await humanQuery(sub, "select clara.decline_coding_rule(p_rule => $1, p_reason => $2, p_op_key => $3) as r", [rule, reason, opKey ?? opk("declrule")]);
-  return r.rows[0].r;
-}
-export async function retireCodingRule(sub, { rule, reason = "rig retire", conflictQuestion = null, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.retire_coding_rule(p_rule => $1, p_reason => $2, p_conflict_question => $3, p_op_key => $4) as r",
-    [rule, reason, conflictQuestion, opKey ?? opk("retrule")]);
-  return r.rows[0].r;
-}
+// proposeCodingRule/signCodingRule/declineCodingRule/retireCodingRule (companion §7)
+// RETIRED with F-A2 PR-3 (Annex B.1) — all four DB verbs are dropped.
 
 // ---------------------------------------------------------------------------
 // Open questions — split lanes (companion §8).

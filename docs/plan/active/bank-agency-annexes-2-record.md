@@ -163,8 +163,10 @@ calls `except_bank_line` verbatim and `t_bank_agent_proposal_accept` flips the p
 writer existed and `ck_bap_terminal` could not be satisfied)* · **an exception inserted on a line
 with NO proposal is a no-op, and a proposal for a DIFFERENT line does not flip** ▣ · **`except_bank_line`'s
 own `pg_proc` row and prosrc are byte-unchanged after every PR in this train** ▣ · **no `accept_*`
-verb exists in the catalog** ▣ · **NEW at v2 (blocker B5) — `wake_propose_identifier_promotion`
-writes an `identifier_promotion` proposal with an `identifier_promotion_propose` receipt; the human
+verb exists in the catalog** ▣ · **NEW at v2 (blocker B5) — `wake_propose_bank_identifier_promotion`
+(RENAMED bank-scoped, conductor arbitration 2026-08-24 -- collided with F-A7's door, wave-f-
+contract.md:315-320, which the wave-level contract assigns the unscoped name to) writes an
+`identifier_promotion` proposal with an `identifier_promotion_propose` receipt; the human
 confirm door writes the `client_identifiers` key and flips the proposal, recording the confirmer ▣;
 and where the payer is NOT a client of the firm the door reports `promotion_target_unavailable` and
 the proposal stays OPEN** ▣ · the due predicate returns `chase_statement` and the belt writes a
@@ -272,7 +274,7 @@ in PR-1a**, per Annex C, never retired.
 | **A12** | **One shared time-triggered SOURCE, one kind per authority scope.** F-A4/F-A5 reuse the belt idiom and the due-predicate shape. **v2: this is precisely why G1 is cross-item — one item lands the execution mechanism, the others extend it.** | derived (TA-P5) |
 | **A13** | **`bank_matching` is a new named purpose with a NULL doc-sha conjunct**; an unconsented client's lane does not run. **v2: its five live bodies and four CHECK swaps are PR-1c, their own PR, blocked on C6.** | TA-P3 A; **B3** |
 | **A14** | **ONE typed, receipted read (`wake_get_bank_pack`), zero table grants.** | TA-P9 + survey F1 |
-| **A15** | **Learned payer accounts are context; the promotion door proposes and a human click writes the key.** **v2: the PROPOSING verb now exists** (`wake_propose_identifier_promotion` + its core + the `identifier_promotion_propose` act_kind); **the CONFIRM target is scoped to client-payers and escalated (OQ-8).** | TA-P8 B; **blocker B5** |
+| **A15** | **Learned payer accounts are context; the promotion door proposes and a human click writes the key.** **v2: the PROPOSING verb now exists** (`wake_propose_bank_identifier_promotion`, renamed bank-scoped by conductor arbitration 2026-08-24 + its core + the `identifier_promotion_propose` act_kind); **the CONFIRM target is scoped to client-payers and escalated (OQ-8).** | TA-P8 B; **blocker B5** |
 | **A16** | **`bank_line` scope + `bank_ambiguity` origin extend `open_questions`, and `_open_question_blocks` gets an EXPLICIT disposition.** | derived (TA-P14 clause 3) |
 | **A17** | **`bank_agent_proposals` is the proposal carrier; no `accept_*` verb is minted.** **v2: the `accepted` flip is written by `t_bank_agent_proposal_accept`, an AFTER-INSERT trigger on `bank_line_exceptions` — declared judgement logic, on the D1 list — so `except_bank_line` stays byte-untouched; `declined`/`stale` are dropped from the CHECK for want of a writer (law 31).** | A3-M-propose; **blocker B4** |
 | **A18** | **The drawer-2 bank gate is repaired on FOUR counts at v2** (registry origin · unmatched lines enumerated · a new basis literal · **a `no_registered_account` fail arm**); drawer-1's P-3 stays F-T4's **by ownership, not absence** — one predicate, two call sites. | TA-P14 / A3-OQ-12 / R-F 1; **material M1** |
@@ -432,8 +434,9 @@ eligibility filter in Annex G property 5.
 
 **F5 (B5) — TA-P8's granted promotion door had a schema, a human door and NO writer.** `kind`
 admitted `identifier_promotion`, §3.9 narrated raising one and §3.13 built the door — and no verb in
-Annex A could ever write the row. **Fold:** `wake_propose_identifier_promotion` + its core + the
-`identifier_promotion_propose` act_kind + H.6's end-to-end cell (**A15**). **PARTIALLY ESCALATED**
+Annex A could ever write the row. **Fold:** `wake_propose_bank_identifier_promotion` (renamed
+bank-scoped, arbitration 2026-08-24 — H.6's note) + its core + the `identifier_promotion_propose`
+act_kind + H.6's end-to-end cell (**A15**). **PARTIALLY ESCALATED**
 (OQ-8 / owner item 2): the estate has no counterparty-bank-account identifier relation, so the
 CONFIRM half is scoped to client-payers and reports `promotion_target_unavailable` otherwise —
 inventing an identity relation next door to constraint 12 is not a design-lane act.
