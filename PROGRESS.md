@@ -7,26 +7,30 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-24 — **THE WAVE-F MERGE TRAIN IS LANDED AND W1-CEREMONIED**; trued at every
-clock-out)*
+*(as of 2026-08-25 — **W2+W3 MERGED AND CEREMONIED — LIVE 122/`0127`, TRACK A BACKEND FULLY
+LIVE**; trued at every clock-out)*
 
-- **THE WAVE-F TRAIN + W1 — 2026-08-24 (~16:03-16:10 MYT apply window).** All four train cars
-  merged and LIVE: #313 `0103_f_a7_pi_additive` (agent-receipts contract layer) · #310
-  `0104_f_a4_pr_1a_measurement_layer` (close-gate measurement, three D1 rows) · #312
-  `0105_f_a9_chat_token_cap` (`begin_chat_turn` recut — law 76 "meter never cap" is live) ·
-  #311 `0106-0108` (the F-A2 agentic posting core + grants + posted chain). **Live DB: 103
-  migrations, frontier `0108_f_a2_posted_chain`; runtime still v66** (the next image is
-  F-A2/PR-2's D-a deploy). As-run: `docs/plan/completed/wave-f-w1-ceremony-asrun.md` (#315).
-  Two mechanism-level CI fixes landed with the train: **#314** (live-gates e2es bind
-  OS-assigned ports — the fixed-port cross-job 401 class) and the 0103 no-op relation-revoke
-  deletion (the DR ACL round-trip class; **functions-only is now the revoke rule**). The
-  post-W1 cascade (0109 #316 · 0110 #317 · 0111 #318 · PR-2 + GM-10) is in flight — see Lanes.
-- **F-A7 β's full double-review ladder CLOSED 2026-08-24 @ `6892033`** — Codex cross-model
-  (BLOCKED → 7 findings, all rig-verified then fixed, incl. a CRITICAL cross-client
-  double-file) + opus native (M-W-F → 4 more, incl. two production-data-shape inerts, fixed)
-  + delta re-probe CLEAN; **one owner ruling minted (B10**, 2026-08-24: any OTHER client's
-  active filing → refuse + ask path; human verb unchanged**)**; battery 33→47 cells. β waits
-  its W2/W3 merge slot.
+- **W2+W3 MERGED AND CEREMONIED — 2026-08-25 (~10:47-11:05 MYT combined apply window).** Nine
+  cars merged and LIVE (eight PRs tonight + 0118 pre-merged): F-A2 PR-3 cutover+retirement (`0118`, #324) · F-A3 PR-1a (`0119`, #327) ·
+  F-A4 PR-1b (`0120`, #329) · F-A3 PR-1b (`0121`, #328) · F-A3 PR-1c (`0122`, #330) · F-A7 γ
+  (`0123`, #331) · F-A7 α (`0124`/`0125`, #332) · F-A7 β (`0126`, #333) · F-A5 PR-3 (`0127`,
+  #334). **Live DB: 122 migrations, frontier `0127_f_a5_pr3_signed_original_archive`.** As-run:
+  `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`. **Track A's backend is now fully LIVE**
+  (F-A2, F-A3, F-A4, F-A5 through the seal drill, and F-A7's full π/γ/α/β family); the only
+  Track-A backend item left is **F-A3/PR-3, the clock train (W4)**. The full manual-dispatch CI
+  sweep ran ALL-GREEN on the `0127` frontier *before* the window opened (run `32801086161`,
+  including the closed-wave drills and the D-b frontier matrix — this is the measured basis for
+  striking the earlier d-b2-under-floor known issue, see Known issues). **The owner-mandated
+  debt-clearing sprint runs next** — see Backlog.
+- **THE WAVE-F TRAIN + W1 — 2026-08-24 (~16:03-16:10 MYT).** Four train cars merged + live
+  (agent-receipts layer · close-gate measurement · the `begin_chat_turn` law-76 recut · the
+  F-A2 posting core), live 103/`0108`. Full detail (car-by-car, the two CI mechanism fixes
+  #314/0103) in `docs/plan/completed/wave-f-w1-ceremony-asrun.md` (#315). The post-W1 cascade
+  (0109-0111 + PR-2 + GM-10) completed via the D-a deploy window (live 112/`0117`) ahead of
+  the W2+W3 window above.
+- **F-A7 β's full double-review ladder** (Codex 7 + opus 4 findings fixed, delta CLEAN; owner
+  ruling B10) **CLOSED 2026-08-24 @ `6892033`, MERGED + CEREMONIED 2026-08-25** as part of the
+  W2+W3 window (`0126`, #333) — full ladder detail in the F-A7 lane row.
 
 - **THE TEST-DATA AUTHORITY IS WIDENED — ADR-0075 (digest law 82), owner-ruled 2026-08-23.**
   Every client is a resettable TEST fixture until go-live: **DATA is free** (live DB included);
@@ -35,10 +39,8 @@ clock-out)*
   clause on any collision. Constraints 12 retired / 13 rewritten / 14's beta expiry stands.
   A Known-issues or Backlog row is the only lawful home for a deferral.
 
-- **The F-A2 opener train (2026-08-21, live 97/`0102`, v66) and its 0/20 → 12/20 re-measure**
-  (denominator rule binds; witness-verdict, not posted-entry) — superseded in posture by the
-  Wave-F train above; full records: `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`
-  (ceremony + re-measure §§9-12) and the F-A2-openers lane row.
+- **The F-A2 opener train (2026-08-21) and its 0/20 → 12/20 re-measure** — superseded in
+  posture by the Wave-F/W2+W3 trains above; records: `f-a2-window-ab-ceremony-asrun.md` + lane row.
 
 - **The Track-A sitting (ADR-0074, fourteen TA-P rulings + the four ratified constitutional
   amendments + laws 78-81), ADR-0072's five F-A2 ruling blocks, and the F-A1 witness-pair
@@ -81,15 +83,15 @@ clock-out)*
 |---|---|---|---|
 | Wave F · Track A | **F-A1 IS DELIVERED (2026-08-20)** — PR-1 #263 (0089-0095) · PR-2 #265 (witnessFacts.v1, v64) · PR-3a #266 (autoDraft_v8 + chatTurn_v12) · **PR-3 #267 (0096 + 0097 CUTOVER, ceremonied 2026-08-20)** · **PR-4 #268 (0098, shipped UNPOINTED — activated at the 2026-08-21 window)**. Consents granted+activated RS/BEE/RPR. **Corpus MEASURED**: witness 0/33 vs legacy 28/92 on two named conjuncts (NIL-TAX; the type_code prompt-intent mismatch) — **both fixed by the openers and re-measured 2026-08-21**. D12 identity gate PASSES. | ceremonied | #263 #265 #266 #267 #268 |
 | Wave F · Track A — **the F-A2 openers ①-⑥ + the statement activation** | **CEREMONIED 2026-08-21** (combined Windows A+B; as-run `docs/plan/completed/f-a2-window-ab-ceremony-asrun.md`). ③④⑤ #270 `a36044bb` · ①② DB #271 `e330f421` (0099/0100) · ⑥ #273 `90073b14` (0101) · ①② runtime #272 `c695a675` (witnessFacts.v2) · activation #274 `7f5617e0` (0102). **Live 97/`0102`, runtime v66**; both freeze manifests deploy-locked. **Re-measure 12/20 vs 0/20 like-for-like** (denominator rule binds). | **ceremonied** | #270 #271 #272 #273 #274 |
-| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design at v6.1** (#282, `cfa0710` — the PR-1 build trues, six orchestrator rulings under the standing delegation, **R-L1..R-L6 ledgered as D38-D43**: **D38** B8 resolved from the sources — no citation names a SUPERSEDED fact generation, α scoping, C.3 becomes a five-cell set · **D39** the retirement CLAIM SPLIT — breeding-claim tests retire in PR-1 with the 8th body, verb-existence tests in PR-3 · **D40** lock order is the delegate's own (filing `FOR SHARE` → entry row → vendor `203005003` → client `203005004`), closing an ABBA against a concurrent human approve · **D41** the D1 list stays TEN and the supplier floor's BODY moves · **D42** B7's amount-bearing evidence is `field_path='invoice.total'` · **D43** `sweep_runs.posted_count` is a FOURTH counter, so finalize is drafted + skipped + refused + posted = expected). Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole → **B15** · B10/B11's pre-stamp counterparty raise → projected-state predicate · the unbuildable-as-written `interactive_client` limb → corrected, both CHECKs extend) + **11 materials** (headline: B4-sales derived against a body superseded at `0022` — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width: B12/B13 CUT on correctness grounds · PR-1 = THREE files, one D1 window · chat parity RIDES THE TRAIN — owner-ruled 2026-08-22 (方案二, D34), overriding the gate's severance; orchestrator's dissent on file.** **OQ-2/3/5 RULED 2026-08-22** (owner, per recommendations: stop-write-keep-table + drop the permanently-false `rule_backed` column · preview verb retires + the seeding tick re-points to the knowledge layer · B4-generic adopted with both costs priced and MEASURED at PR-4). Build NOT started — PR-1 authoring is next. **R1 relaxation approved 2026-08-23.** **BUILT AND LANDED 2026-08-24: PR-1 MERGED (0106-0108, #311, five review rounds + cross-model) and W1-CEREMONIED (live 103)**; PR-1b = 0109 (#316, cascade) · PR-2 runtime (autoDraft_v9/chatTurn_v13, WDK registrations bundle-proven; **GM-10 re-admit door found missing by the verify lane and in Codex build** + two stale pin bumps) · PR-3 next after PR-2's D-a deploy. | **PR-1 merged + ceremonied** | #311 |
-| Wave F · Track A — **F-A3 bank agency** | **DESIGN v2, GATED 2026-08-22** — the seven `bank-agency-*` files (survey · design · four annexes · gate record [`bank-agency-gate-record.md`](docs/plan/active/bank-agency-gate-record.md)); gate 1 ran two lenses, 5 blockers / 6 materials folded, width severed into PR-1a pure extraction · PR-1b agent limb · PR-1c egress · the clock PR (which sequences AFTER F-A4 mints the wake kind, R-L7). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): open-register verbs (enter/void statement · certify · unmatch ANY pair · resolve exception incl. write-off · **the 60-day waiver, running at 60 until F-A3's battery gives the owner data**) + a duplicate-payment wall + `add_bank_account`'s COA-binding check · new `bank_matching` purpose, per client · clock-driven under law 71 · **the bank rules machine retires whole and 7A-R3/E-R13 are recorded dissolved** · owns drawer-2's vacuous-green gate. **BUILT 2026-08-24: PR-1a/1b/1c authored + reviewed (1b's D-11 near-erasure caught and rebuilt from the live catalog); 1b's promotion verb RENAMED `wake_propose_bank_identifier_promotion` (c623178, conductor arbitration — F-A7 owns the door per TA-P8; consolidation onto pi's `_identifier_promotion_core` is a ledgered forward obligation)**; merges at the W2 window. | built | — |
-| Wave F · Track A — **F-A4 close key ①** | **DESIGN v2, GATED 2026-08-22** — the five `close-key-1-*` files; gate record [`close-key-1-gate-record.md`](docs/plan/active/close-key-1-gate-record.md) (3 blockers / 10 materials folded; **OQ-7/OQ-8/OQ-9 ruled by R-L12/R-L13/R-L11**). **OWNS the clock spine** (R-L7 — F-A3/F-A5/F-A8 consume it) and **OWNS task #17 Fix A at PR-1b** (R-L9/GM-7/D-23). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): mints the product's FIRST calendar wake source (new wake kind, CHECK pair, six rosters; law 71 posture, no ramp) · open-year / abandon-any / re-freeze / snapshot-mint pass to her · **the minimal human doors are IN SCOPE** (finalize · abandon · a "Clara proposes close" card + its durable carrier) · evaluator-backed adjustments post, judgement accruals draft · owns the uncoded-voucher gate · **shares ONE D1 window with task #17 and TA-P6 on `finalize_close`**. **BUILT AND LANDED 2026-08-24: PR-1a MERGED (0104, #310) and W1-CEREMONIED** — the measurement layer's first live census fired as designed (4 clients / 28 undated filings, R-3/P2); PR-1b BUILT (three review flags on file); PR-1c (`statutory_deadlines` DDL, F-T2's unblock) next. | **PR-1a merged + ceremonied** | #310 |
-| Wave F · Track A — **F-A5 reporting agency** | **DESIGN v2, GATED 2026-08-22** — the five `reporting-agency-*` files (renamed from `fa5-agency-*` at landing); gate record [`reporting-agency-gate-record.md`](docs/plan/active/reporting-agency-gate-record.md) (3 blockers / 7 materials / 1 nit folded; **OQ-5 ruled by R-L14** — the solo self-attestation arm on the agent lane; **the sandbox EXPORT path severed to lane F-A5b, R-L15**). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): **"end to end" rewritten open→evaluate→seal→render — ISSUE IS HUMAN** · the issue wall re-arms on the DIRECTING human, self-run fails closed to a human, `agent_prepared` receipts, a solo arm · self-run packs exempt from `0084`'s orphan-adoption · sandbox exports with a **byte-burned watermark** + the covered-recipient cross-client test · **the first real seal + byte-reproduction drill precedes N3**. **BUILT; LANDING 2026-08-24: PR-1 = 0111 (#318, in CI — `clara._hash`'s 55 call sites freeze at its merge)**; PR-2 (0112) stacked; then the C-flip ceremony → PR-3 (the 11 h seal + byte-repro drill, Track A's last unbuilt item) → PR-4 renderer. | **PR-1 in CI** | #318 |
+| Wave F · Track A — **F-A2 proper** | **PR-0 GATE RAN 2026-08-21/22; design at v6.1** (#282, `cfa0710` — the PR-1 build trues, six orchestrator rulings under the standing delegation, **R-L1..R-L6 ledgered as D38-D43**: **D38** B8 resolved from the sources — no citation names a SUPERSEDED fact generation, α scoping, C.3 becomes a five-cell set · **D39** the retirement CLAIM SPLIT — breeding-claim tests retire in PR-1 with the 8th body, verb-existence tests in PR-3 · **D40** lock order is the delegate's own (filing `FOR SHARE` → entry row → vendor `203005003` → client `203005004`), closing an ABBA against a concurrent human approve · **D41** the D1 list stays TEN and the supplier floor's BODY moves · **D42** B7's amount-bearing evidence is `field_path='invoice.total'` · **D43** `sweep_runs.posted_count` is a FOURTH counter, so finalize is drafted + skipped + refused + posted = expected). Gate record `docs/plan/active/f-a2-pr0-gate-record.md`: 8-lens independent review + Codex cross-model pass, every finding adversarially verified — **3 blockers** (the generic-on-directional hole → **B15** · B10/B11's pre-stamp counterparty raise → projected-state predicate · the unbuildable-as-written `interactive_client` limb → corrected, both CHECKs extend) + **11 materials** (headline: B4-sales derived against a body superseded at `0022` — 4 independent confirmations) + nits; **S1 seam and T3's pin held every attack**. **Width: B12/B13 CUT on correctness grounds · PR-1 = THREE files, one D1 window · chat parity RIDES THE TRAIN — owner-ruled 2026-08-22 (方案二, D34), overriding the gate's severance; orchestrator's dissent on file.** **OQ-2/3/5 RULED 2026-08-22** (owner, per recommendations: stop-write-keep-table + drop the permanently-false `rule_backed` column · preview verb retires + the seeding tick re-points to the knowledge layer · B4-generic adopted with both costs priced and MEASURED at PR-4). Build NOT started — PR-1 authoring is next. **R1 relaxation approved 2026-08-23.** **BUILT AND LANDED 2026-08-24: PR-1 MERGED (0106-0108, #311, five review rounds + cross-model) and W1-CEREMONIED (live 103)**; PR-1b = 0109 (#316, cascade) · PR-2 runtime (autoDraft_v9/chatTurn_v13, WDK registrations bundle-proven; **GM-10 re-admit door found missing by the verify lane and in Codex build** + two stale pin bumps) shipped via the D-a deploy window. **PR-3 (cutover + rules-tier retirement, 17 verbs) MERGED (0118, #324) and CEREMONIED 2026-08-25** as part of the W2+W3 window — as-run `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`. F-A2 proper is now fully live end to end. | **merged + ceremonied** | #311 #324 |
+| Wave F · Track A — **F-A3 bank agency** | **DESIGN v2, GATED 2026-08-22** — the seven `bank-agency-*` files (survey · design · four annexes · gate record [`bank-agency-gate-record.md`](docs/plan/active/bank-agency-gate-record.md)); gate 1 ran two lenses, 5 blockers / 6 materials folded, width severed into PR-1a pure extraction · PR-1b agent limb · PR-1c egress · the clock PR (which sequences AFTER F-A4 mints the wake kind, R-L7). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): open-register verbs (enter/void statement · certify · unmatch ANY pair · resolve exception incl. write-off · **the 60-day waiver, running at 60 until F-A3's battery gives the owner data**) + a duplicate-payment wall + `add_bank_account`'s COA-binding check · new `bank_matching` purpose, per client · clock-driven under law 71 · **the bank rules machine retires whole and 7A-R3/E-R13 are recorded dissolved** · owns drawer-2's vacuous-green gate. **BUILT 2026-08-24: PR-1a/1b/1c authored + reviewed (1b's D-11 near-erasure caught and rebuilt from the live catalog); 1b's promotion verb RENAMED `wake_propose_bank_identifier_promotion` (c623178, conductor arbitration — F-A7 owns the door per TA-P8; consolidation onto pi's `_identifier_promotion_core` is a ledgered forward obligation)**. **ALL THREE MERGED + CEREMONIED 2026-08-25 as part of the W2+W3 window**: PR-1a (`0119`, #327, nine pure core extractions) · PR-1b (`0121`, #328, the agent limb — a first-chain-meeting fix round found + fixed the DR-roles omission and the frozen-window cross-PR pin, see lane-brief) · PR-1c (`0122`, #330, `bank_matching` admitted to the egress-purpose family). As-run `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`. **Remaining: PR-3, the clock train (W4), sequenced after F-A4.** | **merged + ceremonied (PR-1a/1b/1c); PR-3 remains** | #327 #328 #330 |
+| Wave F · Track A — **F-A4 close key ①** | **DESIGN v2, GATED 2026-08-22** — the five `close-key-1-*` files; gate record [`close-key-1-gate-record.md`](docs/plan/active/close-key-1-gate-record.md) (3 blockers / 10 materials folded; **OQ-7/OQ-8/OQ-9 ruled by R-L12/R-L13/R-L11**). **OWNS the clock spine** (R-L7 — F-A3/F-A5/F-A8 consume it) and **OWNS task #17 Fix A at PR-1b** (R-L9/GM-7/D-23). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): mints the product's FIRST calendar wake source (new wake kind, CHECK pair, six rosters; law 71 posture, no ramp) · open-year / abandon-any / re-freeze / snapshot-mint pass to her · **the minimal human doors are IN SCOPE** (finalize · abandon · a "Clara proposes close" card + its durable carrier) · evaluator-backed adjustments post, judgement accruals draft · owns the uncoded-voucher gate · **shares ONE D1 window with task #17 and TA-P6 on `finalize_close`**. **BUILT AND LANDED 2026-08-24: PR-1a MERGED (0104, #310) and W1-CEREMONIED** — the measurement layer's first live census fired as designed (4 clients / 28 undated filings, R-3/P2). **PR-1b (Window-B close-lifecycle writers + task #17 Fix A) went through a MUST-FIX cross-model round (Codex + opus, 11-item fix order, all closed 6bcba5c) and MERGED + CEREMONIED 2026-08-25** (`0120`, #329) as part of the W2+W3 window — as-run `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`. **Owner card parked (not blocking): Annex A.4 row 7 vs invariant (i)** — `finalize_close` stamps `segregation_mode='agent_prepared'` whenever no human preparer exists even when the probe reads false; both reviewers agree it is design-conformant-as-built and fail-closed, recommend conditioning the label on the actual probe with the owner's segregation-table ruling, then a follow-up CoR in the debt sprint (see Known issues). PR-1c (`statutory_deadlines` DDL, F-T2's unblock) next. | **PR-1a + PR-1b merged + ceremonied** | #310 #329 |
+| Wave F · Track A — **F-A5 reporting agency** | **DESIGN v2, GATED 2026-08-22** — the five `reporting-agency-*` files (renamed from `fa5-agency-*` at landing); gate record [`reporting-agency-gate-record.md`](docs/plan/active/reporting-agency-gate-record.md) (3 blockers / 7 materials / 1 nit folded; **OQ-5 ruled by R-L14** — the solo self-attestation arm on the agent lane; **the sandbox EXPORT path severed to lane F-A5b, R-L15**). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): **"end to end" rewritten open→evaluate→seal→render — ISSUE IS HUMAN** · the issue wall re-arms on the DIRECTING human, self-run fails closed to a human, `agent_prepared` receipts, a solo arm · self-run packs exempt from `0084`'s orphan-adoption · sandbox exports with a **byte-burned watermark** + the covered-recipient cross-client test · **the first real seal + byte-reproduction drill precedes N3**. **BUILT AND LANDED 2026-08-24: PR-1 MERGED (0111, #318 — `clara._hash`'s 55 call sites froze at its merge)**; PR-2 (0112) and the C-flip ceremony landed via the D-a deploy window (live 112/`0117`). **PR-3 (the 11 h seal + byte-reproduction drill, Track A's last unbuilt item) went through a full cross-model ladder (MF1/MF2/fold-in/S4-S8 all fixed with mutation proofs, D1 NONE confirmed by catalog differential) and MERGED + CEREMONIED 2026-08-25** (`0127`, #334) as part of the W2+W3 window — as-run `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`. Three debt-sprint items named at review (N1 seal-drill CI leg decision, N2 drill/cell-D doc line, N3 defence-in-depth cell — see Backlog). PR-4 renderer next. | **PR-1/PR-3 merged + ceremonied** | #318 #334 |
 | Wave F · Track A — **F-A6 audited freeform read** | **DESIGN v2, GATED 2026-08-22** — the five `freeform-read-*` files; gate record [`freeform-read-gate-record.md`](docs/plan/active/freeform-read-gate-record.md) (4 blockers / 5 materials folded; **GB-1 ruled by R-L16** — the default SHIPS with grant + one-arm/one-settle and its three required cells; **the cross-client sibling verb severed to lane F-A6 v2, R-L17**; **XLSX/DOCX structured-parse excluded in v1, R-L18** — a named contract deviation). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): a **DECIDED** read surface: server-side client scoping, cross-client as a named receipted action, HOME chat firm-wide, an **enumerated table list printed as an audit line (closes audit GAP5-5, HIGH)**, `interactive` only at first, no RBAC tiering, no per-firm signature gate · a **DEFINER read wrapper** — no receipt, no read · bookkeeper+ human read surface · law 28's cross-model pass still mandatory. **PR-1 BUILT 2026-08-24** (battery + censuses + closed-world roster maps; P-12 measured FALSE — 57014 untrappable → Tier D); the law-28 pass runs via a native fresh-context lane (Codex's cyber filter refused the prompt); merges post-W2. | **PR-1 built** | — |
-| Wave F · Track A — **F-A7 filing + interview** | **DESIGN v2, GATED 2026-08-22** — the five `filing-and-interview-*` files; gate record [`filing-and-interview-gate-record.md`](docs/plan/active/filing-and-interview-gate-record.md) (6 blockers / 8 materials folded; severed into five trains — π additive · γ egress · α constitutional; **AM-8 WIDENED at landing**: Clara reverses her own posted misattribution herself and raises the question, only the cross-client re-home stays the human's). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED** — the α train's judgement half was gated on the ratification and is now unblocked on that axis. Ruled scope (ADR-0074): **attribution becomes her JUDGEMENT under structural walls — CONSTITUTIONAL, and RATIFIED as digest law 79 on 2026-08-22, so the judgement half is no longer signature-blocked**; four riders ship with it (contradiction wall · ROME-family collision guard · correction path + misrouted-egress event · the firm-scoped unattributed-document carrier) · the firm-level NARROW purpose with its closed document list, **gated on C6** · `classify` must come under governance first · the promotion door · F-A7b = CLIENT onboarding only. **BUILT AND (π) LANDED 2026-08-24: π MERGED (0103, #313 — after the conductor's no-op-revoke DR fix) and W1-CEREMONIED**; γ/α BUILT (reviews owed before W2); **β BUILT, full double ladder CLOSED @ `6892033`** — Codex 7 findings (1 CRITICAL cross-client double-file, rig-confirmed then fixed) + opus 4 (two production-shape inerts fixed) + delta re-probe CLEAN; **owner ruling B10 minted 2026-08-24** (other-client active filing → refuse + ask; human verb untouched); 47-cell battery. β waits W2/W3. | **π merged + ceremonied; β ladder closed** | #313 |
+| Wave F · Track A — **F-A7 filing + interview** | **DESIGN v2, GATED 2026-08-22** — the five `filing-and-interview-*` files; gate record [`filing-and-interview-gate-record.md`](docs/plan/active/filing-and-interview-gate-record.md) (6 blockers / 8 materials folded; severed into five trains — π additive · γ egress · α constitutional; **AM-8 WIDENED at landing**: Clara reverses her own posted misattribution herself and raises the question, only the cross-client re-home stays the human's). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED** — the α train's judgement half was gated on the ratification and is now unblocked on that axis. Ruled scope (ADR-0074): **attribution becomes her JUDGEMENT under structural walls — CONSTITUTIONAL, and RATIFIED as digest law 79 on 2026-08-22, so the judgement half is no longer signature-blocked**; four riders ship with it (contradiction wall · ROME-family collision guard · correction path + misrouted-egress event · the firm-scoped unattributed-document carrier) · the firm-level NARROW purpose with its closed document list, **gated on C6** · `classify` must come under governance first · the promotion door · F-A7b = CLIENT onboarding only. **BUILT AND (π) LANDED 2026-08-24: π MERGED (0103, #313 — after the conductor's no-op-revoke DR fix) and W1-CEREMONIED**. **γ, α AND β ALL MERGED + CEREMONIED 2026-08-25** as part of the W2+W3 window (as-run `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`): **γ** — firm-narrow typed-egress governance (`0123`, #331), independent review CLEAN + a fold round for three findings, closed 2425b61; a cross-package fixture gap found and fixed (see lane-brief). **α** — judgement-basis admission + the congruence wall (`0124`/`0125`, #332), delta-probe CLEAR-TO-MERGE with 4 should-fixes landed and 8 prestate sha pins matching. **β** — the filing verb + interview wake surface (`0126`, #333); Codex 7 findings (1 CRITICAL cross-client double-file, rig-confirmed then fixed) + opus 4 (two production-shape inerts fixed) + delta re-probe CLEAN; **owner ruling B10** (other-client active filing → refuse + ask; human verb untouched); a first-chain-meeting fix round closed three failure classes (c5e8e10, reviewer's formal verdict CLEAR-TO-MERGE); 47-cell battery. F-A7's π/γ/α/β family is now fully live. | **π/γ/α/β merged + ceremonied** | #313 #331 #332 #333 |
 | Wave F · Track A — **F-A8 internet lane** | **DESIGN v2, GATED 2026-08-22** — the four `internet-lane-*` files; gate record [`internet-lane-gate-record.md`](docs/plan/active/internet-lane-gate-record.md) (6 blockers / 9 materials folded; the annex was reconciled wholesale, PR-1 is greenfield **Tier-1 only**). **Two obligations still open before PR-2:** the law-28 cross-model pass on the Tier-2 injection surface, and the unnamed Tier-2 search VENDOR (`wake_web_search` does not ship until named). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): **depends on F-T1 for the SST rate table** (F-A8 only attaches the fetch) · Tier-1 closes to `fx_rates` + SST rate + SST threshold · rows land through an **audited owner one-click door, not a PR** (two mechanical checks; `0016`'s assertion relaxed for Tier-1 only) · immutable+supersede, backdate triggers an impact scan, **missing row REFUSES** · no client identity on Tier 2 in v1 · **citation enforced at the tool boundary** | design | — |
 | Wave F · Track A — **F-A9 metering** | **DESIGN v2, GATED 2026-08-22** — the four `metering-*` files; gate record [`metering-gate-record.md`](docs/plan/active/metering-gate-record.md) (4 blockers / 6 materials folded; **PR-0 = the chat-cap hotfix FIRST**, then PR-1A the ledger reshape with no D1; **`llm_usage_events.firm_id` becomes NULLABLE for platform-level calls, R-L10** — a NULL firm is a platform call, never an unmetered one). **PR-1 prerequisite SATISFIED 2026-08-22** — the owner RATIFIED laws 78-81 + the rider R-TA-P1-walls (TA-P1 · TA-P5's law-21 narrowing · TA-P7 · law 76); **the remaining prerequisite is F-A2's PR-1 MERGED**. Ruled scope (ADR-0074): ONE ledger: `llm_usage_events` reshaped for any call kind, **`client_id` + triggering actor added NOW (irreversible if missed)**; the Slice-4 ledger + reserve/reconcile machinery retire — **that deletes live real data, and the owner's ruling is recorded as that sentence** · the brake census is design's first deliverable (one page, one owner signature) · **the chat token cap ships as a HOTFIX ahead of F-A9** · the `refused_budget` rename is mandatory. **PR-4 re-homed to the Wave-G reset, W5 removed, ruling 2026-08-23.** **BUILT AND LANDED 2026-08-24: PR-0 MERGED (0105, #312) and W1-CEREMONIED — the `begin_chat_turn` recut is LIVE, law 76 is structural**; PR-1A = 0110 (#317, cascade; the reshaped writer `record_agent_usage_event` is F-A2/PR-2's chat-usage dependency). | **PR-0 merged + ceremonied** | #312 |
-| Wave F · Track A — **F-A5b sandbox export** | **DESIGN v2, GATE-FOLDED 2026-08-23, ALL CARDS RULED 2026-08-23 (dispositions in the gate records); BUILD-READY subject to each item's structural gates** — `sandbox-export-survey.md` · `-design.md` · `-annexes.md` · gate record [`sandbox-export-gate-record.md`](docs/plan/active/sandbox-export-gate-record.md) (four blockers / six materials / one nit folded; two OWNER CARDS stay open). **The lane ships DARK until the owner signs the `sandbox_watermark` trio** (design §3.6, owner question 1; survey X12): the default that stands is *no row seeded*, and a missing row for the locale REFUSES the render — so the export path is built and inert until one signing. **REGISTERED 2026-08-22 (R-L15)** — severed out of F-A5's v2 as SEQUENCING, explicitly **not** a narrowing of TA-P10 C′. Its own design pass and its own PR-0 **carrying the law-28 cross-model pass**, plus OQ-1/OQ-2's `sandbox_watermark` trio and OQ-3's recipient-scope model (the mechanical "recipient covers every `client_id` in the file" check that lets a group owner see a multi-company comparison). F-A5 proper keeps the sealed lane's `artifact_watermark` trio. Default on the wording: no row seeded, literals stay, R-N1 registered. | design | — |
+| Wave F · Track A — **F-A5b sandbox export** | **DESIGN v2, GATE-FOLDED 2026-08-23, ALL CARDS RULED 2026-08-23 (dispositions in the gate records); BUILD-READY subject to each item's structural gates** — `sandbox-export-survey.md` · `-design.md` · `-annexes.md` · gate record [`sandbox-export-gate-record.md`](docs/plan/active/sandbox-export-gate-record.md) (four blockers / six materials / one nit folded). **The `sandbox_watermark` trio was SIGNED 2026-08-23** (design §3.6a, owner question 1/OQ-2; survey X12) and B1's substitution seam likewise ruled (§3.6b/OQ-3's recipient-scope model) — **the lane is now BUILD-READY, no longer dark**; build rides the debt-clearing sprint. Default on the wording stands: no row seeded, and a missing row for the locale REFUSES the render. **REGISTERED 2026-08-22 (R-L15)** — severed out of F-A5's v2 as SEQUENCING, explicitly **not** a narrowing of TA-P10 C′; F-A5 proper keeps the sealed lane's `artifact_watermark` trio. | **design (build-ready)** | — |
 | Wave F · Track A — **F-A6 v2 cross-client named read** | **DESIGN v2, GATE-FOLDED 2026-08-23, ALL CARDS RULED 2026-08-23 (dispositions in the gate records); BUILD-READY subject to each item's structural gates** — `freeform-read-v2-survey.md` · `-design.md` · `-annexes.md` · gate record [`freeform-read-v2-gate-record.md`](docs/plan/active/freeform-read-v2-gate-record.md) (two blockers / twelve materials folded; four OWNER CARDS stay open). **Hard prerequisite: F-A2 PR-1 MERGED** — the verb cannot function until `interactive_client` and both `wake_credentials` CHECKs land (design §6, survey U2). **Owner confirmation 2026-08-23: v1 waits for v2** (D-22 / R-L17) — recorded here because the lane's own survey (U4) and annexes flagged that the repo did not yet carry it. **REGISTERED 2026-08-22 (R-L17)** — severed out of F-A6 v1 as SEQUENCING, explicitly **not** a narrowing of TA-P9 A(2): the cross-client sibling verb cannot function until **F-A2's `interactive_client` limb merges**. v1's refusal `cross_client_unavailable` must NAME the deferred action (the battery cell forcing the naming stays in v1); HOME chat is unaffected. **Also carries R-L18's deferral** — XLSX/DOCX `structured_parse` content, excluded from v1 because `document_extractions`/`document_regions` carry no `client_id`, so a client pin would leak a sibling's document body (`get_document_extract` stays the door). | design | — |
 | Wave G · frontend (Codex session, parallel) | **HANDOFF LANDED 2026-08-23** — `docs/plan/active/frontend-handoff-2026-08-23.md`: the complete enterprise frontend (signup/invite · onboarding · the two-pane Agentic OS shell · documents · drafts · bank · close · reports · receipts · admin) built in THIS repo as the new **apps/web** package on branch **frontend/web**, replacing `apps/dashboard` at cutover. **ALIGN BEFORE CODE** — §8's grill-first list goes to the owner (visual direction · two-pane IA · card-catalog extensions · mobile scope · i18n EN/BM/中文 · the a11y bar above the legal floor · per-journey "done") before product code, per constraint 6. Settled and closed in §0: Cloudflare Workers via `@opennextjs/cloudflare` · Supabase cookie auth, invite-only first · Resend carrying no client data · Tailwind + shadcn adopted · the LIVE project as the data (ADR-0075) · crude Track-A doors replaced IN PLACE with the same verb, never a new gate. | design | — |
 | Wave F · Track B — **F-T1 SST engine** | **DESIGN v2, GATE-FOLDED 2026-08-23, ALL CARDS RULED 2026-08-23 (dispositions in the gate records); BUILD-READY subject to each item's structural gates** — the six `sst-engine-*` files (survey · design §1-§4 · design-part2 §5-§12 · annexes · annexes-2 · gate record [`sst-engine-gate-record.md`](docs/plan/active/sst-engine-gate-record.md)); five fresh-context lenses + independent re-attack (two blockers / sixteen materials / five nits confirmed, eight refuted). Fourteen findings folded into v2; **four reserved to the owner as OQ-11…OQ-14**, each blocking a PR. **OWNS the SST rate table F-A8 depends on** (ADR-0074/TA-P2). **OQ-4 RULED (owner, 2026-08-23): the GL carries the deferral** — `sst_output_deferred` credited at invoice for every payment-basis service-tax registrant, transfers to `sst_output` on allocation or the twelve-month day, whichever comes first; lands as PR-4b, a new D1 window sequenced after F-A2 PR-1. **PR-1 BUILT + REVIEWED 2026-08-24** (the F2 semantic inversion — predecessors seeded already-superseded — fixed at `0c46d2b`, reviewer re-probed 11/11); lands pre-beta if it fits, else opens the beta window (owner's B-variant re-scope, 2026-08-24). | **PR-1 built + reviewed** | — |
@@ -123,21 +125,16 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    Wave F. Then: the first real render/seal round-trip (closes DR-render's unrun-drill
    boundary) → RPR historical MPERS pack → RS snapshot witness; the ms/zh claim-policy copy;
    the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
-3. **F-A2 BUILD per its design** (`docs/plan/active/f-a2-agentic-posting-design.md` + the three
-   annexes, v4, DONE): PR-0 the judgement-logic + cross-model gate → PR-1 (two DB files, ONE D1
-   window) → PR-1b the pack splice → PR-2 the runtime (`autoDraft_v9`, `chatTurn_v13`, the new
-   frozen infra `_vN`) → PR-3 cutover + retirement (D1) → PR-4 acceptance. **Two more ceremony
-   windows, from merged `main`.** Track B runs in parallel; **task #17 is unblocked** (ADR-0072 ④). **RULED 2026-08-23 (owner, `wave-f-sprint-dag.md` §9): every Track-A item's acceptance splits into a mechanism-smoke leg right after its own ceremony (hours, proves post/refuse/receipt on live) plus SCALE legs (the full 20-document re-extraction, denominator measurement, bank volume rounds) that FOLD INTO the Wave-G e2e corpus run instead of standing as their own Track-A acceptance — Track A's p50 moves ~T0+48h → ~T0+36h.**
-4. ~~**THE TRACK-A DESIGN FAN-OUT**~~ — **DONE 2026-08-22: all seven design sets are at v2, each
-   GATED with its own PR-0 gate record** (see the lane rows; the member tables in
-   `docs/plan/active/track-a-sitting-1.md` (`-2`, `-3`) stay the per-item consequence map, and R-B
-   the 71 design-layer questions). **What remains is BUILD**, in this order: ~~the digest re-sign~~
-   **SATISFIED 2026-08-22** · **F-A4 mints the clock spine first** (R-L7; F-A3's clock PR,
-   F-A5 and F-A8 consume it) · two items ship AHEAD of their parent (TA-P12's chat token-cap
-   hotfix before F-A9; the first real seal + byte-reproduction drill before N3 in F-A5) · **three
-   lines share ONE D1 window on `finalize_close`** (task #17 Fix A, **owned by F-A4 PR-1b** ·
-   TA-P4's receipt columns · TA-P6's `segregation_mode`) · two severed lanes are registered but
-   unscheduled (**F-A5b** sandbox export, **F-A6 v2** cross-client named read).
+3. ~~**F-A2 BUILD per its design**~~ — **DONE: PR-0 → PR-1 (W1) → PR-2 (D-a deploy) → PR-3
+   cutover+retirement (W2+W3, #324) all merged + ceremonied.** PR-4 acceptance remains, folded
+   into the Wave-G e2e corpus run per the owner's 2026-08-23 ruling (`wave-f-sprint-dag.md` §9 —
+   mechanism-smoke right after ceremony, SCALE legs fold into Wave-G; p50 ~T0+48h → ~T0+36h).
+4. ~~**THE TRACK-A DESIGN FAN-OUT**~~ — **DONE 2026-08-22** (all seven design sets v2, gated;
+   see the lane rows, `docs/plan/active/track-a-sitting-1.md` (`-2`,`-3`) for the consequence
+   map). ~~**BUILD**~~ is now DONE for F-A2/F-A3/F-A4/F-A5/F-A7 (W1 + D-a + W2+W3); F-A8,
+   F-A9's PR-1A and Track B remain. Two severed lanes registered but unscheduled: **F-A5b**
+   sandbox export (BUILD-READY, the `sandbox_watermark` trio signed 2026-08-23) · **F-A6 v2**
+   cross-client named read.
 5. ~~**THE OWNER'S DIGEST SIGN-OFF is the next constitutional gate.**~~ **GIVEN 2026-08-22 — laws
    78-81 and the four annotated laws (2, 21, 71, 76) are RATIFIED, law 78 carrying the rider
    R-TA-P1-walls; F-A7a's judgement half is unblocked.** The two follow-ups the signature did not
@@ -156,6 +153,22 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 Registered but not scheduled. Sources of record in brackets.
 
+**THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B
+clears in the 磨合 window.** New items folded in from the W2/W3 review ladders (2026-08-25) —
+the forward-obligations block and the F-A5b/W4 items below also ride this sprint:
+- **π-E1's `betaLanded` check is SELF-REFERENTIAL** (blind at n ∈ {0,6}) — gate on the
+  `schema_migrations` stem like `wb-0020`'s idiom; covered twice already, not a hole.
+- **N1** — `fa5-pr3-real-seal-drill.mjs` has no CI leg, decision item: weekly sweep or not.
+  **N2** — the drill and F-A5 PR-1 cell D can't share a database (one-way evaluator flip).
+  **N3** — no cell for "human archives `signed_original` on an agent-prepared run"; shipped
+  behaviour measured correct, candidate cell for a future touch.
+- ~~The F-A5/PR-3 scanner nit~~ — **MOOT**: the vendor-binding post-control checker script it
+  named was itself DELETED by F-A2 PR-3's rules-tier retirement (`0118`, same window; verified
+  via git history, no successor) — see the AGENTS.md staleness flag in Known issues.
+- **Wiki-lint's unprovable-kind waiver is function-wide, not per-target** (Codex B4 on F-A4
+  PR-1b, `0055`-shared design) — harden it. **Three stale `UNNUMBERED_f_a2_*.sql`** beside
+  0106-0108 — cleanup-queue deletion.
+
 **Forward obligations minted at the 2026-08-24 β review ladder + train night** (each named at
 its finding; none blocks beta):
 - **The candidate-parameterized `evaluate_witness_identity` variant → pi/F-A1-successor scope.**
@@ -171,17 +184,15 @@ its finding; none blocks beta):
 - **Consolidate `wake_propose_bank_identifier_promotion` onto pi's `_identifier_promotion_core`**
   (post-W4/beta-era; fa3-pr1b's own analysis: fold is the correct long-run shape,
   `bank_account` already an enumerated kind; the rename stands meanwhile).
-- **Tier-A raises leave NO durable trace** (no receipt, no audit row — design-consistent per
-  §3.2/A.2, conductor-closed with reviewer concurrence 2026-08-24) — an OBSERVABILITY gap
-  candidate, not a wall gap.
-- **β's §0 collision note re f-a3 goes stale at W2 rebase** (the rename resolved it) — true it
-  in the rebase commit.
+- **Tier-A raises leave NO durable trace** (no receipt, no audit row — design-consistent,
+  conductor-closed with reviewer concurrence) — an OBSERVABILITY gap candidate, not a wall gap.
+- ~~β's §0 collision note re f-a3 goes stale at W2 rebase~~ — **RESOLVED**, the rename (c623178)
+  landed with pr-1b at the W2+W3 close.
 
 **Unowned gaps found by the 2026-08-23 alignment scan — now OWNED** (each was real work with no home;
 the owner is named so none of them drifts back into nobody's queue):
 - **Manual journal-entry compose UI → the Codex frontend build.** The verb exists
-  (`wake_draft_entry`); no surface composes a JE by hand, so a bookkeeper cannot enter one without
-  a document. Not a DB gap — a UI gap, and the new app package owns it.
+  (`wake_draft_entry`); no surface composes a JE by hand. Not a DB gap — a UI gap, new app owns it.
 - **`coding_rules` propose/sign retirement → F-A2 PR-4's closing criterion.** TA-P11 retired the bank rules
   machine whole; the CODING rules machine's propose/sign path has no equivalent retirement date. Writes stop,
   history stays as knowledge fuel — the same treatment, consistent with OQ-2's ruling.
@@ -191,53 +202,45 @@ the owner is named so none of them drifts back into nobody's queue):
 - **Payroll document ingestion as a first-class product capability** (own purpose class + sensitivity walls) — owner decision, future scope. *(F-T2 B1/B14 ruling, 2026-08-23: `payroll-calendar-gate-record.md` OC-1.)*
 
 **Named build debts (deadline-triggered):**
-- **The `closing_transfer`/SST-turnover latent (0056) — R1 RULED 2026-08-20 (ADR-0072 ④), task #17 UNBLOCKED;
-  the full argument moved 2026-08-22 to `docs/plan/completed/progress-archive-2026-08-part2.md`.** State:
-  **Fix A's OWNER is F-A4 PR-1b** (R-L9 / GM-7 / close-key-1 D-23 — the double claim between F-A4 and Track B
-  is resolved to one owner); **Track B's 13-cell battery rides it.** Shape unchanged: BOTH writer bodies
-  (`finalize_close` + the `0085:379-386` B3 reopen mirrors) marked at birth in ONE migration — a single-body
-  fix INVERTS the defect into compounding inflation — D1 on the `0085` template, a forward-only proof asserted
-  fail-closed at apply. Blast radius advisory-only (a suppressed 80% early-warning ladder, never a wrong
-  book). Fix B stays STRUCTURALLY BLOCKED. **OD-7 discharged by the same ruling.** *(task #17)*
-- **Reconciler follow-ups (#255's law-1 review — all pre-existing, none blocking, each its own PR):** the
-  `expired` key collision (`reconciler.mjs:633` spreads `intakeRecovery` unconditionally after `expiry`, always
-  clobbering `expireClarifies`' count — unread by `leader.mjs` today; clarify-expiry survives the rules-machine
-  retirement, so the Charter does not reach it) · the leader render-pair try/catch (`leader.mjs:200-211`) still
-  swallows halt-class errors — unreachable today, but the one remaining halt-eating catch on that path ·
-  `wiki-projection.mjs:333-346`/`:594-599` carry three bare `to_regprocedure` probes.
-- **`high_stakes_amount_cents` has no governed self-serve verb** (found by the 2026-08-21 client-naming
-  audit): the RM100k threshold was set by a one-time hand-run deploy script (ADR-0044's ceremony); a future
-  SaaS firm cannot configure its own threshold through an audited door. Not a defect today (the column and
-  its `is_high_stakes` reader are fully generic and per-firm); a **Wave-G OS-surface item** — the governed
-  verb ships with the firm-setup flow. *(audit record: session log 2026-08-21)*
+- **The `closing_transfer`/SST-turnover latent (0056) — task #17 Fix A SHIPPED LIVE 2026-08-25**
+  as part of F-A4 PR-1b (`0120`, #329, the W2+W3 window): both writer bodies (`finalize_close` +
+  the `0085:379-386` B3 reopen mirrors) marked in ONE migration, D1 on the `0085` template,
+  forward-only proof fail-closed at apply. Track B's 13-cell battery rides it. Fix B stays
+  STRUCTURALLY BLOCKED; **OD-7 discharged.** Full argument archived 2026-08-22 to `-part2.md`.
+  *(task #17 — CLOSED)*
+- **Reconciler follow-ups (#255's law-1 review — all pre-existing, none blocking, each its own
+  PR):** the `expired` key collision (`reconciler.mjs:633` clobbers `expireClarifies`' count,
+  unread today) · the leader render-pair try/catch (`leader.mjs:200-211`) still swallows
+  halt-class errors, unreachable today · `wiki-projection.mjs:333-346`/`:594-599`'s three bare
+  `to_regprocedure` probes.
+- **`high_stakes_amount_cents` has no governed self-serve verb** (2026-08-21 client-naming
+  audit): the RM100k threshold was set by a one-time hand-run deploy script (ADR-0044); not a
+  defect today (fully generic/per-firm) — a **Wave-G OS-surface item**, ships with firm-setup.
 - **`closing_stock` producer verb** — before any real goods-trader close. **Wave G does NOT
   schedule it:** ADR-0072 ⑤ defaulted OD-2 to "not in the first pass". *(PR #228 residual 5)*
 - **`opening_tb.line` producer + the K-doc door** — Phase-5, review-gated. The Wave-G corpus
   does not need it: its run script seeds brown-field openings by key, not by document. *(ADR-043)*
-- **δ NAMED RESIDUALS — all five STAND, none scheduled; the full text moved 2026-08-22 to
-  `docs/plan/completed/progress-archive-2026-08-part2.md`** (F10's `transaction_timeout` · the
-  B4 dollar-quoted sandwich · the 57014 `caller_reported` label · the RS guard's
-  between-transactions lift window · the Supavisor headroom re-measure). **η — not δ — owns the
-  production human/OBO/wake caller**; direct wake/runtime evaluator grants and synthetic human
-  JWTs stay forbidden — a law statement, and it next matters at **F-A5's OBO closure**.
+- **δ NAMED RESIDUALS — all five STAND, none scheduled; full text archived to `-part2.md`**
+  (F10's `transaction_timeout` · the B4 dollar-quoted sandwich · the 57014 `caller_reported`
+  label · the RS guard's lift window · Supavisor headroom re-measure). **η — not δ — owns the
+  production human/OBO/wake caller**; direct grants + synthetic human JWTs stay forbidden — next
+  matters at **F-A5's OBO closure**.
 
 **Structured-format lanes (event-triggered; registered 2026-08-20 so they live here, not only in
 code comments). Both were verified at the bytes, and both differ from how the lane gets casually
 described — each disposition is what the read SAW:**
-- **OFX/QFX — the parser is BUILT and UNEXERCISED, not unbuilt.** Intake canonicalizes four spellings
-  to one mime (`intake.mjs:44-48`), `scan.mjs` detects both dialects, intake is deliberately
-  **STORE-ONLY** (`intake-lanes.mjs:54`), and `parseStatementOfx` (`statement-parse.mjs:331`) maps
-  identity, currency, period, `LEDGERBAL` and every `STMTTRN` behind the same interface as CSV — with a
-  named limitation (OFX prints no opening and no totals, so it corroborates only where continuity
-  supplies the opening). **Missing: a runtime battery over the parser body, and a real client file.
-  Trigger: the first client whose bank exports OFX.** *(Wave C-b §4.3)*
+- **OFX/QFX — the parser is BUILT and UNEXERCISED, not unbuilt.** Intake canonicalizes four
+  spellings to one mime (`intake.mjs:44-48`), `scan.mjs` detects both dialects, intake is
+  **STORE-ONLY** (`intake-lanes.mjs:54`), and `parseStatementOfx` (`statement-parse.mjs:331`)
+  maps identity/currency/period/`LEDGERBAL`/every `STMTTRN` behind CSV's interface (OFX prints
+  no opening/totals, so it corroborates only where continuity supplies the opening). **Missing:
+  a runtime battery + a real client file. Trigger: the first OFX-exporting bank.** *(Wave C-b §4.3)*
 - **XLSX/DOCX — parsed VALUES-ONLY; the gap is SEMANTICS, not a parser.** They route to
-  `structured_parse` (`intake-lanes.mjs:55`) and `structured-worker.mjs` reads them, but every region
-  carries **`monetary_cents: null`** and a structural `field_path` (`sheets.0.B7`), never an accounting
-  one: **no facts**, content reachable only by AI-assisted read. **NOW OWNED by lane F-A6 v2** (R-L18 —
-  excluded from F-A6 v1 because `document_extractions`/`document_regions` carry no `client_id`).
-  **The design decision is not the parser:** unattended posting from a spreadsheet needs its **own
-  corroboration anchor** — *which cell is the total is a judgement, not a structure.*
+  `structured_parse` (`intake-lanes.mjs:55`)/`structured-worker.mjs`, but every region carries
+  **`monetary_cents: null`** and a structural `field_path` (`sheets.0.B7`), never accounting —
+  **no facts**, AI-assisted read only. **NOW OWNED by F-A6 v2** (R-L18 — no `client_id` on
+  `document_extractions`/`document_regions`). Unattended posting needs its own corroboration
+  anchor — *which cell is the total is a judgement, not a structure.*
 
 **The VACUOUS-GREEN-GATE class (2026-08-16) — ALL THREE INSTANCES NOW HAVE HOMES (TA-P14, 2026-08-22).** The
 class RULE was already DISCHARGED (Wave-G corpus §7.4 adopts it verbatim). The repair assignment, ruled by
@@ -256,93 +259,69 @@ currently-green clients red — accepted at the sitting.
 
 **Beta-boundary instruments (ADR-0069):** a quality-score document, A–D per domain/layer · the
 doc-gardening recurring agent · a tool/interface-design pass over the custom MCP surfaces.
-~~The monthly harness ablation~~ **STALE** (G7 declined its benchmark); ~~the system-prompt investment pass~~ **RE-HOMED to F-A2**.
+~~The monthly harness ablation~~ **STALE**; ~~the system-prompt investment pass~~ **RE-HOMED to F-A2**.
 
-**The F6–F9 register (ADR-0066), trued 2026-08-20:** **C1 `failed_retry` unwitnessed live** — drill unrun,
-but **the door is reachable on live data for the first time** (`v_lane` is now `llm_witness` and the corpus
-run left real terminally-failed witness tasks) · **the `internal` lane has no self-service door**,
-live-relevant for the same reason · admission-time envelope label · mint-time-only ocr reclaim bound (both
-survive on the surviving OCR lane) · ~~the 401/403 split~~ **RE-HOMED to F-T4** · **F8's single-use door +
-two 0034 inherits + the landscape-refresh autonomy class — re-examine at F-A2**, which replaces F8's host
-lane · F9 no-unpark path + parked-residual acceptance. ~~X7's five residuals~~, ~~`in_vendor_block`/
-`is_vendor_name` unproven live~~ and ~~the parked 6/6/6/85 floor~~ — **all three STALE**, the first two
-closing as *retired unproven*.
+**The F6–F9 register (ADR-0066), trued 2026-08-20:** **C1 `failed_retry` unwitnessed live** —
+drill unrun, the door now reachable on live data (`v_lane`=`llm_witness`, real terminally-failed
+witness tasks exist) · the `internal` lane has no self-service door, live-relevant · admission-
+time envelope label · mint-time-only ocr reclaim bound (both survive) · ~~401/403 split~~
+**RE-HOMED to F-T4** · **F8's single-use door + two 0034 inherits + landscape-refresh autonomy —
+re-examine at F-A2** · F9 no-unpark path + parked-residual acceptance. ~~X7's five residuals~~,
+~~`in_vendor_block`/`is_vendor_name` unproven live~~, ~~the parked 6/6/6/85 floor~~ — all STALE.
 
-**Gates on the operating runway:** **Gate P** (first native-MYR SST-stated supplier bill, or the Wave-G reset;
-reminders RETIRED per ADR-0068). Restated so it is not re-derived: ADR-0066 **measured the waiting population
-at seven documents**, all newest-`ocr`-task failed/`bad_type` with NULL `document_kind` — **F6 does NOT unblock
-them**; the only honest remedies are an owner re-export or the 401/403 split above. The capitalised/
-mixed-purchase tax-allocation question and the Gate D residuals ride it · **Gate S**'s real-XML leg,
-UNSCHEDULED, waiting on the world · **FINCARE RSINV-2510/02** needs a human coding decision, **but its
-recorded blocker is stale** (ADR-0066 pinned it on Azure typing no `CustomerName` region; the witness pair
-needs none) — re-ask after the F-A2 re-extraction.
+**Gates on the operating runway:** **Gate P** (first native-MYR SST-stated supplier bill, or
+Wave-G reset; reminders RETIRED). ADR-0066 measured the waiting population at **seven
+documents**, all newest-`ocr` failed/`bad_type` with NULL `document_kind` — F6 does NOT unblock
+them; remedies are an owner re-export or the 401/403 split. The capitalised/mixed-purchase
+tax-allocation question + Gate D residuals ride it · **Gate S**'s real-XML leg, UNSCHEDULED ·
+**FINCARE RSINV-2510/02** needs a human coding decision (recorded blocker is STALE — Azure
+typing gap, the witness pair needs none) — re-ask after the F-A2 re-extraction.
 
-**η residuals (Wave-E close, PRs #240/#242) — all four STAND, none scheduled; the full text
-moved 2026-08-22 to `docs/plan/completed/progress-archive-2026-08-part2.md`:** the estate-wide
-whitespace-blind blank-op-key idiom (one uniform pass, never per-lane) · the co-effective policy
-seed-test's fixture design (append-only `clara.edge_policy_sets`) · the δ-family window-blind
-wall-side policy resolution (**a false refusal, never a false preview**; retires when wall and
-writer resolve by window together) · `0084`'s out-of-tree tooling at `C:\ct\` (see Tooling).
+**η residuals (Wave-E, PRs #240/#242) — all four STAND, none scheduled; full text archived to
+`-part2.md`:** the estate-wide whitespace-blind blank-op-key idiom · the co-effective policy
+seed-test's fixture design (`clara.edge_policy_sets`) · the δ-family window-blind wall-side
+policy resolution (**a false refusal, never a false preview**) · `0084`'s `C:\ct\` tooling.
 
-**CI economics overhaul — BUILT 2026-08-21, ADR-0073; the block moved 2026-08-22 to
-`docs/plan/completed/progress-archive-2026-08-part2.md`** (the ADR is the record). **Surviving
-residuals, unchanged:** lever (4) HYBRID runners **DECLINED** ($0 preference) · **the operating
-practice — after any PR touching a closed drill or the pipeline, run `gh workflow run ci.yml` by
-hand** (`docs/ops/ci-runner.md`) · a stale PR needs `gh pr update-branch` + re-green, **never
-`--admin`** (#277) · batch-CI-per-wave stays REJECTED.
+**CI economics overhaul — BUILT 2026-08-21, ADR-0073; block archived to `-part2.md`** (the ADR
+is the record). **Surviving residuals:** lever (4) HYBRID runners **DECLINED** · the operating
+practice (`gh workflow run ci.yml` by hand after any closed-drill/pipeline PR, `docs/ops/ci-runner.md`)
+· a stale PR needs `gh pr update-branch`, **never `--admin`** (#277) · batch-CI-per-wave REJECTED.
 
-**Wave-F planning inputs — DISPOSED by ADR-0071/contract:** #25 SUPERSEDED · E-R13 ABSORBED (F-A3) · FX-lite
-principle pre-seeded (P-FX; timing stays a sitting item) · claims (E-R10) → F-T4 · **staff allowances /
-self-billed detection / WHT are UNSCHEDULED** — F-T1..F-T4 name none of the three, and "Track-B candidate" is
-not a schedule. **Wave-G:** the OS surface + the UX-debt backlog (E-R10) + design trio population + **the
-factory reset + full E2E rebuild from raw documents** (ADR-0072 ⑤ rules its shape; ADR-0075 makes the whole
-estate resettable). **Roadmaps, risks, Phase-5:** `docs/plan/active/roadmap.md`.
+**Wave-F planning inputs — DISPOSED by ADR-0071/contract:** #25 SUPERSEDED · E-R13 ABSORBED
+(F-A3) · FX-lite principle pre-seeded (P-FX; timing stays a sitting item) · claims (E-R10) →
+F-T4 · **staff allowances/self-billed detection/WHT are UNSCHEDULED** (F-T1..F-T4 name none).
+**Wave-G:** the OS surface + UX-debt backlog (E-R10) + design trio population + **the factory
+reset + full E2E rebuild from raw documents** (ADR-0072 ⑤; ADR-0075 makes the estate
+resettable). **Roadmaps, risks, Phase-5:** `docs/plan/active/roadmap.md`.
 
-**Wave-D/C carried deferrals:** ~~FA carry-down's first real firing~~ and ~~one real
-reducing-balance asset~~ — **ABSORBED into the Wave-G corpus** (§6 puts both on the bank-volume
-slot's opening register) · first live real recurring template (event-triggered; the corpus slot
-matrix names no recurring-template slot) · C-a residuals (§5.3 pool segregation · the Section-I
-wedge remedy · the real-PG dead-letter battery, declined) · C-c F-3 documented-as-is.
+**Wave-D/C carried deferrals:** ~~FA carry-down's first real firing~~ / ~~one real
+reducing-balance asset~~ — **ABSORBED into the Wave-G corpus** · first live real recurring
+template (event-triggered) · C-a residuals (§5.3 pool segregation · Section-I wedge remedy ·
+real-PG dead-letter battery, declined) · C-c F-3 documented-as-is.
 
-**Slice-era standing residuals — the full block moved 2026-08-23 to
-`docs/plan/completed/progress-archive-2026-08-part2.md`** (verbatim; none has a PR, every row carries its
-disposition). Live pointers only: the **Supabase non-superuser deploy-role CI** leg is DESIGNATED to the
-weekly sweep by ADR-0073, its own PR · the **Slice-4** residuals (compliance export · trace-debug surface ·
-chat-visibility toggle · the S4-V2 engine-hook-lifetime canary watch · job-level liveness) stand ·
-**Slice-2/3/6 and Wave-A** rows are deferred, declined, event-triggered or absorbed (F-A2 · F-A7a · Wave G).
+**Slice-era standing residuals — full block archived to `-part2.md`** (verbatim, 2026-08-23;
+none has a PR, every row carries its disposition). Live pointers: the **Supabase non-superuser
+deploy-role CI** leg DESIGNATED to the weekly sweep (ADR-0073) · **Slice-4** residuals
+(compliance export · trace-debug surface · chat-visibility toggle · S4-V2 canary watch ·
+job-level liveness) stand · **Slice-2/3/6 and Wave-A** deferred/declined/event-triggered/absorbed.
 
-**Interview v3 residuals — ALL THREE RE-HOMED TO F-A7b, and TA-P14 makes that binding** (the contract now
-names them): `readClearsError` never checks `runId` · **the concurrent-submitter receipt gap** — a RUNTIME
-CONTRACT change, the fix being a server-authored per-(run, park, submission) receipt · **the interview e2e
-de-pin**, whose own text calls it a dated tripwire "stale at the next core bump" — **F-A7b IS that bump**.
+**Interview v3 residuals — ALL THREE RE-HOMED TO F-A7b** (TA-P14 binding): `readClearsError`
+never checks `runId` · **the concurrent-submitter receipt gap** (RUNTIME CONTRACT change — a
+server-authored per-(run, park, submission) receipt) · **the interview e2e de-pin** — F-A7b IS
+its "next core bump".
 
-**Owner/legal:** **C6 legal pack DRAFTED + CITATION-VERIFIED 2026-08-22** — the three documents
-ADR-0074/TA-P3 put ahead of F-A7's firm-level narrow purpose are on disk in
-[`docs/ops/legal/`](docs/ops/legal/) (OpenAI DPA brief · the client AI-authorization letter
-template en/ms/zh whose purpose list IS the future onboarding click-through · the PDPA s.129
-cross-border basis memo), each carrying a DRAFT / not-legal-advice banner. **Owner items: NONE**
-— the training-share toggle was confirmed OFF by the owner 2026-08-22, the DPA auto-incorporates
-through the Business Terms (no click), and ZDR / the entity note / the Malaysian-lawyer pass are
-record-keeping or post-beta. **They gate nothing.** **The real-data egress gate is the CLIENT's own
-onboarding click (F-A7b), which is product work, not paperwork** · tracing stays OFF · **the OpenAI
-processor bundle — NON-BLOCKING by the 2026-08-18 direct-release ruling; the DPA-first
-recommendation on file as dissent (F-A1 design §5)**, live-relevant because the witness pair
-ships real client documents daily · the first monthly LIGHT DR sitting (WB-R26) · PITR
-(deferred) · **WB-R22's target capability**, still the only route by which B3's
-`distinct_checker` arm gets exercised on real books · PRD §9 · the old SGD-document clarify.
+**Owner/legal:** **C6 legal pack DRAFTED + CITATION-VERIFIED 2026-08-22**, on disk in
+[`docs/ops/legal/`](docs/ops/legal/) (OpenAI DPA brief · client AI-authorization letter en/ms/zh ·
+PDPA s.129 memo). **Owner items: NONE** — they gate nothing (real-data egress gates on F-A7b's
+client onboarding click instead). Full text (the OpenAI processor bundle dissent, WB-R26/PITR,
+WB-R22, the old SGD clarify) archived verbatim 2026-08-25 to `-part2.md`.
 
-**Tooling follow-ups. RE-HOMED to the F-A2 / F-T4 fix queues by the 2026-08-20 audit — four items:**
-**(1) the ceremony DSN bridge belongs IN-REPO** (commit the pooler CA + a dsn-pipe successor; the 2026-08-19
-ceremony ran `sslmode=no-verify` because the prior sessions' pinned-CA tooling was session-local and gone —
-the handoffs-rule failure shape **twice now**, and the highest-value item here: every remaining Wave-F/G
-ceremony walks it) · **(2) the wiki CoR-comment gate** · **(3) `0057` §11's writer-roster successor** ·
-**(4) `0007`'s firm-limits pseudo-upsert**. **Still unscheduled:** the dr-verify trio (UTC hashing · the
-STRICT canary probe's stale expectation · the AP-gate ILIKE example) · the runtime boot line should name its
-bundle version (the positive-read law's second leg, hand-assembled at four ceremonies now) · Supavisor
-headroom re-measure (**one item registered twice** — the δ residual above) · the local disposable Supabase
-stack · the ComplianceWatchCard `acknowledged_at` echo · the unreverted-admin-grant lint watch · **`0084`'s
-derivation tooling retained only at `C:\ct\`** — the machine-local-custody shape that bit the DSN bridge
-twice; worth pricing for in-repo custody.
+**Tooling follow-ups** (RE-HOMED to the F-A2 / F-T4 fix queues, 2026-08-20 audit): the ceremony
+DSN bridge belongs IN-REPO (highest-value — done, see F-T4 PR-1) · the wiki CoR-comment gate ·
+`0057` §11's writer-roster successor · `0007`'s firm-limits pseudo-upsert. Still unscheduled:
+the dr-verify trio · the runtime boot line's bundle version · Supavisor headroom re-measure ·
+the local disposable Supabase stack · the ComplianceWatchCard echo · the unreverted-admin-grant
+lint watch · `0084`'s `C:\ct\`-only tooling. Full text archived verbatim 2026-08-25 to `-part2.md`.
 
 - **The unrecorded-obligation backlog (harness audit, 2026-08-23 — `docs/plan/active/harness-audit-2026-08-23.md`).**
   The audit measured that this file is NOT the only home for forward-looking obligations: ~18 carry no row here at
@@ -356,6 +335,17 @@ twice; worth pricing for in-repo custody.
 
 ## Known issues
 
+- **OWNER CARD (parked, not blocking): Annex A.4 row 7 vs invariant (i) — `agent_prepared` label
+  on preparation-less closes** (F-A4 PR-1b cross-model review, 2026-08-25). `finalize_close`
+  stamps `segregation_mode='agent_prepared'` whenever no human preparer exists, even when the
+  `v_agent_prepared` probe reads false (a dormant year with zero entries gets a permanent
+  receipt saying `agent_prepared`). Both reviewers agree: design-conformant as built,
+  fail-closed direction, receipts on test data resettable pre-beta. **Recommend:** condition
+  the label on the actual probe and give the no-preparation case its own truthful mode — needs
+  the owner's segregation-table ruling, then a follow-up CoR in the debt-clearing sprint.
+  Related: preparation-authorship ≠ approval — an all-agent-drafted, human-approved-without-
+  revision year yields no distinct-checker raise; A.4 row 7 becomes the common shape once
+  F-A2's lane lands, not a regression.
 - ~~**R-OWNER — B15's second door**~~ — **RULED 2026-08-22 (owner, option C), now a PR-1 BUILD OBLIGATION**; full record archived in `-part2.md`, obligation at `0074-annex-a-mechanisms.md` R-OWNER + `f-a2-annexes-4-build.md` J.4 (D18 now stands for direction-SILENT documents only).
 - ~~**The `AGENTS.md` home for invariant (a)**~~ — **DECIDED (b) 2026-08-23 (owner): PRD §6.2(a) is the single home; no duplicate clause in `AGENTS.md`.** Record verbatim in `docs/plan/completed/progress-archive-2026-08-part2.md`.
 - **The wiki dynamic-SQL gate reads CoR-block comments UN-MASKED** (found 2026-08-20 on 0097):
@@ -478,31 +468,27 @@ version + ceremony):**
 `docs/plan/completed/progress-archive-2026-08.md` + `-part2.md`, alongside F-A1's operative
 records: its ceremony as-runs and the corpus measurement.)*
 
-- **2026-08-24 (THE TRAIN NIGHT + W1)** — two CI root causes fixed at the mechanism (the
-  fixed-port 401 class → #314 OS-assigned ports; the no-op relation-revoke DR ACL class →
-  0103 fix); four train cars merged in number order under strict protection; **W1 ceremonied
-  live 97→103** (as-run #315); the post-W1 cascade opened (0109/0110/0111 + PR-2); F-A7 β's
-  double review ladder run and CLOSED (Codex 7 + opus 4 findings fixed; owner ruling B10;
-  the cross-lane promotion-verb collision arbitrated → fa3 rename c623178); GM-10 found as a
-  genuine missed PR-2 obligation (verify lane) → Codex build; the gitleaks all-refs class
-  found and allowlisted (#319); **the disk-zero incident** (WSL EIO, 4 runners down ~40 min;
-  101 GB pruned; keeper re-armed; owner granted the compact); the 529 storm bridged by the
-  Codex cross-model substitution per the availability ruling.
-- **2026-08-22 (the TRACK-A SITTING · the TRACK-A v2 DESIGN LANDING)** — fourteen rulings TA-P1…TA-P14
-  with four constitutional amendments, then all seven design sets to gated v2 (36 files), rulings
-  R-L11…R-L18, the C6 pack and the owner's ratification. **Both entries ARCHIVED VERBATIM** to
-  `docs/plan/completed/progress-archive-2026-08-part2.md`; the governing minute is
-  `docs/adr/0074-the-track-a-sitting.md` (+ `0074-annex-a-mechanisms.md`), the design sets in
-  `docs/plan/active/` are the operative record. Merged as #284/#285/#286/#287.
-- **2026-08-23 (the ALIGNMENT GRILL — ADR-0075; the SPLIT PASS)** — **the owner widened the test-data
-  authority** (posture above carries it in full: data free · gates walked by the delegate through the real
-  audited doors · mechanisms never move · constraints 12/13/14 re-scoped · digest law 82). Same session: the
-  numbers law re-confirmed with Clara authoring rules/evaluators through the TA-P8 promotion door; **digest
-  law 77 ratified** (#286); the **invariant-(a) product text** amended in PRD §6.2(a)/§6-3 and ARCHITECTURE
-  §0.1 (#287). **The SPLIT PASS ran the same day** — nine files had reached exactly 500 and every added line
-  was being bought by re-wrapping: `docs/adr/README.md` → `README-log.md` (the six dated re-truing minutes),
-  `0074` → `0074-annex-a-mechanisms.md` (the exact register, the residue, TA-P1's dissent), and this file
-  swept again. **F-A9's D17 ruled (R-L19): price rows are developer-seeded migration data; PR-1E dropped.**
+- **2026-08-25 (THE W2+W3 COMBINED CLOSE)** — the six-car train (F-A2 PR-3 · F-A3 PR-1a/1b/1c ·
+  F-A4 PR-1b · F-A7 γ/α/β · F-A5 PR-3) merged and **CEREMONIED live 112→122/`0127`** (as-run
+  `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`); Track A's backend is now fully live.
+  Four of six cars needed a first-chain-meeting fix round (DR-roles+frozen-window on pr-1b,
+  cross-package fixture on γ, three failure classes on β) — new lane-brief rules ①-⑦ minted.
+  The full manual-dispatch sweep ran ALL-GREEN pre-window (run `32801086161`). Owner card parked
+  on F-A4 PR-1b's Annex A.4 row 7 (Known issues). Debt-clearing sprint opens next (Backlog).
+- **2026-08-24 (THE TRAIN NIGHT + W1)** — two CI mechanism fixes (#314 OS-assigned ports; the
+  no-op relation-revoke DR fix); four train cars merged, **W1 ceremonied live 97→103** (as-run
+  #315); F-A7 β's double review ladder CLOSED (owner ruling B10); GM-10 found + Codex-built; the
+  gitleaks all-refs class allowlisted (#319); **the disk-zero incident** (WSL EIO, ~40 min
+  outage, 101 GB pruned, keeper re-armed, owner granted the VHDX compact); the 529 storm bridged
+  by the Codex cross-model substitution.
+- **2026-08-22 (the TRACK-A SITTING · v2 DESIGN LANDING)** — fourteen rulings TA-P1…TA-P14 +
+  all seven design sets to gated v2 (36 files); governing minute
+  `docs/adr/0074-the-track-a-sitting.md`; full entries archived verbatim to `-part2.md`. Merged
+  #284/#285/#286/#287.
+- **2026-08-23 (the ALIGNMENT GRILL — ADR-0075; the SPLIT PASS)** — the owner widened the
+  test-data authority (posture above carries it in full; digest law 82); digest law 77 ratified
+  (#286); the invariant-(a) product text amended (#287); the SPLIT PASS moved nine at-cap files
+  to their `-part2`/`-log` companions. **F-A9's D17 ruled (R-L19).**
 
 ---
 
