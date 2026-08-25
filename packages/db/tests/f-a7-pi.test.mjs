@@ -98,18 +98,27 @@ async function inRolledBackTx(fn) {
 // A · THE CONTRACT AND THE ONE READ SURFACE
 // ---------------------------------------------------------------------------------------
 
-test("pi-A1 · the seven shims are registered, present, conforming and ALL UNWIRED at rest", async (t) => {
+test("pi-A1 · the seven shims are registered, present, conforming, and unwired except where a "
+  + "later train has since landed", async (t) => {
   if (gate(t)) return;
   const r = await rootQuery("select * from clara.agent_receipt_source_census() order by item");
   assert.deepEqual(r.rows.map((x) => x.item),
     ["f_a2", "f_a3", "f_a4", "f_a5", "f_a6", "f_a7", "f_a8"],
     "the closed world is TA-P4 A's five plus F-A3 and F-A7 itself");
+  // F-A7/PR-4 beta (0126) wires f_a7's shim to its real `agent_filing_receipts` table. At pi's
+  // OWN frontier every shim was an unwired stub, but this file runs against the merged chain
+  // where beta is real, so f_a7 is the one legitimately-wired exception to the closed world below.
   for (const row of r.rows) {
     assert.equal(row.shim_exists, true, `${row.item}: shim exists`);
     assert.equal(row.conforms, true, `${row.item}: shim conforms to the contract`);
     assert.equal(row.column_count, (await contract()).length, `${row.item}: contract arity`);
-    assert.equal(row.wired, false, `${row.item}: UNWIRED — no member receipt table has landed yet`);
-    assert.deepEqual(row.actual_sources, [], `${row.item}: reaches no relation`);
+    if (row.item === "f_a7") {
+      assert.equal(row.wired, true, "f_a7: WIRED — F-A7/PR-4 beta (0126) landed its own member table");
+      assert.deepEqual(row.actual_sources, ["agent_filing_receipts"], "f_a7: reaches its real member table");
+    } else {
+      assert.equal(row.wired, false, `${row.item}: UNWIRED — no member receipt table has landed yet`);
+      assert.deepEqual(row.actual_sources, [], `${row.item}: reaches no relation`);
+    }
   }
 });
 
@@ -400,13 +409,21 @@ test("pi-A10 · DARK ROWS — a shim projecting a NULL scope is invisible to eve
           : c.column_name === "receipt_kind" ? "'bank_agent'::text as receipt_kind"
             : c.column_name === "receipt_id" ? "d.id::text as receipt_id"
               : `null::${c.data_type} as ${c.column_name}`)).join(", ");
+      // Baseline BEFORE the dark row lands: F-A7 beta wires f_a7's shim to the real
+      // `agent_filing_receipts` table, so by the time this runs in the full estate suite other
+      // files' fixtures may already have real (non-dark) rows in the union — the six remaining
+      // stub shims still contribute nothing, but the raw union is no longer provably empty. The
+      // dark-row claim is about the DELTA this cell itself introduces, not an absolute count.
+      const baseline = (await client.query(
+        "select count(*)::int as n from clara._agent_receipts_all")).rows[0].n;
       await client.query(
         `create or replace view clara._agent_receipt_src_f_a3 as select ${proj} from clara._rig_pi_dark d`);
       // The checker is HAPPY — that is the whole point of this cell.
       await client.query("select clara._assert_receipt_surface_conforms('_agent_receipt_src_f_a3')");
       // The row is real and reaches the raw union...
       assert.equal((await client.query(
-        "select count(*)::int as n from clara._agent_receipts_all")).rows[0].n, 1);
+        "select count(*)::int as n from clara._agent_receipts_all")).rows[0].n, baseline + 1,
+        "the union grows by exactly the one dark row this cell inserted");
       // ...and is visible to NOBODY, including the firm that owns it.
       await client.query("select set_config('request.jwt.claims', $1, true)",
         [JSON.stringify({ sub: world.users.bob, role: "authenticated" })]);
@@ -776,20 +793,30 @@ test("pi-D4 · the card's kind vocabulary MIRRORS client_identifiers' closed wor
 // E · WHAT PI DID NOT SHIP — the reachability census
 // ---------------------------------------------------------------------------------------
 
-test("pi-E1 · pi minted NO wake authority: no filing kind, no wrapper, no reachable core", async (t) => {
+test("pi-E1 · pi itself minted NO wake authority — any filing-kind rows, wrappers, or reachable "
+  + "cores present on this chain are train beta's, not pi's", async (t) => {
   if (gate(t)) return;
+  // Catalog-derived per this file's own gating law (SS0): beta is real on this chain now, so
+  // "pi minted nothing" is asserted as a DELTA against beta's own known, tail-census-pinned
+  // footprint (0126: exactly six filing-kind allowlist rows, five wake wrappers) rather than as
+  // an absolute zero — the boundary claim under test is pi's OWN scope, not beta's absence.
   const rows = await rootQuery(
     "select count(*)::int as n from clara.wake_fn_allowlist where wake_kind = 'filing'");
-  assert.equal(rows.rows[0].n, 0, "the filing kind and its seven rows are train beta's");
+  const betaLanded = rows.rows[0].n > 0;
+  assert.equal(rows.rows[0].n, betaLanded ? 6 : 0,
+    "the filing kind and its rows are train beta's — zero if beta is absent, exactly beta's own "
+    + "pinned six if beta has landed (0126 tail census)");
   const wrappers = await rootQuery(
     `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='clara' and p.proname = any($1)`,
     [["wake_open_firm_question", "wake_reattribute_document",
       "wake_propose_filing_correction", "wake_propose_identifier_promotion", "wake_file_document"]]);
-  assert.equal(wrappers.rowCount, 0,
-    `pi ships no wake wrapper — clara_wake_filing does not exist, so one would be reachable by `
-    + `no principal: ${wrappers.rows.map((r) => r.proname).join(", ")}`);
-  // ...and the cores it DOES ship are reachable by no app role, which is why beta is cheap.
+  assert.equal(wrappers.rowCount, betaLanded ? 5 : 0,
+    `every wake wrapper here is beta's — pi ships none of its own: `
+    + `${wrappers.rows.map((r) => r.proname).join(", ")}`);
+  // ...and the cores PI ITSELF ships are reachable by no app role, which is why beta is cheap —
+  // true whether or not beta has since landed alongside it (beta's own wake_* wrappers delegate
+  // to beta's OWN cores, granted only to clara_wake_filing, never to the four roles probed here).
   for (const role of [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.runtime]) {
     for (const sig of [
       "clara._firm_question_core(uuid,uuid,uuid,text,uuid,text,text,jsonb,text)",
@@ -805,13 +832,22 @@ test("pi-E1 · pi minted NO wake authority: no filing kind, no wrapper, no reach
   assert.equal(human.rows[0].ok, true);
 });
 
-test("pi-E2 · the wake role set is unchanged — clara_wake_filing was NOT minted", async (t) => {
+test("pi-E2 · pi itself minted no wake role — a clara_wake_filing role present on this chain is "
+  + "train beta's own machine role, not pi's", async (t) => {
   if (gate(t)) return;
   const r = await rootQuery(
     "select rolname from pg_roles where rolname like 'clara%' order by rolname");
   const names = r.rows.map((x) => x.rolname);
-  assert.ok(!names.includes("clara_wake_filing"),
-    "annexes-1 A.1's floor name is a KIND gated by assert_wake_allowed, not a role; pi mints nothing");
+  // Same DELTA shape as pi-E1: beta (0126) is real on this chain and mints clara_wake_filing as
+  // its own machine role, so pi's "mints nothing" claim is checked against beta's OWN presence
+  // rather than as an absolute absence.
+  const betaFilingRows = await rootQuery(
+    "select count(*)::int as n from clara.wake_fn_allowlist where wake_kind = 'filing'");
+  const betaLanded = betaFilingRows.rows[0].n > 0;
+  assert.equal(names.includes("clara_wake_filing"), betaLanded,
+    betaLanded
+      ? "clara_wake_filing exists — F-A7/PR-4 beta (0126) minted it as its own machine role"
+      : "annexes-1 A.1's floor name is a KIND gated by assert_wake_allowed; pi itself mints no role");
   assert.ok(names.includes("clara_wake_interactive") && names.includes("clara_wake_proactive"),
-    "and the two wake roles that do exist are still there — the probe can see roles");
+    "and the two wake roles that do exist either way are still there — the probe can see roles");
 });

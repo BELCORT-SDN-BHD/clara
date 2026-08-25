@@ -276,6 +276,15 @@ const CLOSE_MODEL_0056_CLOCK_NAMES = [
   "grant_firm_capability", "revoke_firm_capability",
 ];
 
+// F-A4 PR-1b [close-key-1 Window B, `f_a4_pr_1b_close_lifecycle` at whatever number merge
+// claims]: the entrance-seam body-move (design D-15, Annex A.8) relocates abandon_close's own
+// `ended_at = now()` stamp into the shared core it now delegates to -- clara._abandon_close_core.
+// abandon_close's OWN prosrc no longer calls now() directly (it is a thin _human_ctx + capability
+// delegate), so this is a SWAP, not an addition: the name moves, the lawful class (a timestamptz
+// audit stamp, never a derived DATE) does not. begin_close's own body never called now() directly
+// either before or after its matching body-move, so it names nothing here in both shapes.
+const F_A4_PR1B_CLOCK_NAMES = ["_abandon_close_core"];
+
 // 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps
 // `'verified_at', now()` on the jsonb payload it RETURNS — a display timestamptz that says
 // when the recomputation ran, and it lands in no column and in no date-typed accounting
@@ -460,6 +469,51 @@ const REPORTING_AGENCY_F_A5_CLOCK_NAMES = ["_agent_approve_metric_definition_cor
 // on the migration's STABLE STEM, never its number — numbers are claimed at merge.
 const WITNESS_F_A1_PR3_CLOCK_NAMES = ["fail_witness_facts"];
 
+// [Wave-F Track A, F-A7 gamma, D1-gamma / B3(a) review fold] deactivate_firm_egress_purpose /
+// revoke_firm_egress_purpose / prepare_firm_egress_dispatch: the firm-narrow typed-egress
+// family's deactivate/revoke (now()-stamped deactivated_at/revoked_at) and its dispatch
+// preparer (now()/clock_timestamp()-derived expires_at, mirroring prepare_egress_dispatch's own
+// TTL shape) carry date-shaped code, exactly like their client-scoped siblings
+// deactivate_client_egress_purpose / revoke_client_egress_purpose / prepare_egress_dispatch
+// already on the unconditional roster. grant_firm_egress_purpose / activate_firm_egress_purpose
+// stay OFF entirely for the same reason their client-scoped siblings do: no date-shaped code.
+// GATED, not appended to the unconditional roster above: these three are born in this
+// migration, and `db-slice-frontiers` runs this battery against earlier-frontier databases
+// where they do not exist (the same appliedStem class as WITNESS_F_A1_PR3_CLOCK_NAMES above —
+// an unconditional entry would red every such leg on a one-name diff that says nothing about
+// clock discipline). Keyed on the migration's STABLE STEM, never its number.
+const F_A7_GAMMA_CLOCK_NAMES = [
+  "deactivate_firm_egress_purpose", "prepare_firm_egress_dispatch", "revoke_firm_egress_purpose",
+];
+
+// F-A3 PR-1a [the nine pure core extractions]: SS1 moves each verb's WHOLE live body into a new
+// ungranted `_<verb>_core` and leaves the public name a thin ctx-unpack delegator (`c :=
+// clara._human_ctx(...); return clara._<verb>_core(...)`) — byte-identical machinery that carries
+// no clock token of its own (Annex A.2's "the extraction contract, one sentence"). The bare-clock
+// bodies this roster already carried therefore MOVE, not multiply: whichever of the nine already
+// matched arm (D) under its public name now matches it under `_<verb>_core` instead, and the
+// public name drops off (no clock token left behind for the detector to find).
+// MEASURED, not inferred: arm (D)'s own detector, re-run against the live post-extraction
+// catalog, drops seven public names and picks up eight `_core` twins. `match_bank_line` is
+// deliberately ABSENT from both lists below: the roster's own query aggregates DISTINCT proname
+// over every pg_proc ROW (one row per overload), and `match_bank_line` carries TWO live overloads
+// (Annex A.2's footnote 1 — the /6 human arity PR-1a extracts here, and the /7 rule arity PR-3
+// drops, untouched by this migration). PR-1a extracts /6 alone, so the bare name survives on the
+// UNEXTRACTED /7 overload regardless of what moved out of /6 — a fact about the query's grouping,
+// not a claim about which body carries the token. `upsert_account` never matched arm (D) either
+// way and needs no entry.
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states: PR-1a is
+// numbered at merge.
+const F_A3_PR1A_CLOCK_NAMES_ADDED = [
+  "_add_bank_account_core", "_complete_bank_reconciliation_core", "_match_bank_line_core",
+  "_resolve_and_book_bank_line_core", "_resolve_bank_line_exception_core", "_unmatch_bank_match_core",
+  "_void_bank_reconciliation_core", "_void_bank_statement_core",
+];
+const F_A3_PR1A_CLOCK_NAMES_REMOVED = [
+  "add_bank_account", "complete_bank_reconciliation", "resolve_and_book_bank_line",
+  "resolve_bank_line_exception", "unmatch_bank_match", "void_bank_reconciliation", "void_bank_statement",
+];
+
 // F-A2 PR-1 [the agentic posting lane, `f_a2_posting_core` at whatever number merge claimed]:
 // the SEAT for the posting lane's bare-clock cohort, wired and DELIBERATELY EMPTY.
 //
@@ -522,6 +576,21 @@ const F_A7_PI_CLOCK_NAMES = [
 // the train renumbers — and a silently-wrong roster is exactly the drift arm (D) catches.
 const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
 
+// F-A3 PR-1b [the bank-agency agent limb, `f_a3_pr1b_agent_limb` at whatever number merge
+// claimed]: two genuinely new bodies, neither a rename. `set_bank_agency_hold`'s `now()` is
+// the hold row's own `set_at` timestamptz default idiom — the same shape every other human
+// writer already on this roster uses. `_tf_bank_agent_proposal_accept`'s `now()` stamps
+// `decided_at` on the AFTER INSERT trigger (DDL 6) — the same "the audit stamp is the clock"
+// idiom every other `_tf_*` trigger already on this roster carries.
+const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set_bank_agency_hold"];
+
+// [Wave-F Track A, F-A7 beta, 0126] two genuinely new bodies (measured on the live rig sweep,
+// not assumed from the first one's shape). `_agent_file_document_core`'s bare
+// `statement_timestamp()` calls gate the authorization window. `wake_reattribute_document`'s bare
+// `now()` stamps `retired_at` on its own retire-and-refile path -- the same "the audit stamp is
+// the clock" idiom every other core already on this roster carries.
+const FILING_VERB_F_A7_BETA_CLOCK_NAMES = ["_agent_file_document_core", "wake_reattribute_document"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -550,12 +619,28 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_writer$")) names.push(...WITNESS_F_A1_CLOCK_NAMES);
   if (await appliedStem("f_a1_cutover$")) names.push(...WITNESS_F_A1_PR3_CLOCK_NAMES);
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
+  if (await appliedStem("f_a7_gamma_egress$")) names.push(...F_A7_GAMMA_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
+  if (await appliedStem("f_a3_pr1a_core_extractions$")) {
+    names.push(...F_A3_PR1A_CLOCK_NAMES_ADDED);
+    for (const n of F_A3_PR1A_CLOCK_NAMES_REMOVED) {
+      const i = names.indexOf(n);
+      if (i !== -1) names.splice(i, 1);
+    }
+  }
+  if (await appliedStem("f_a3_pr1b_agent_limb$")) names.push(...AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES);
+  if (await appliedStem("f_a7_beta_filing_verb$")) names.push(...FILING_VERB_F_A7_BETA_CLOCK_NAMES);
+  if (await appliedStem("f_a4_pr_1b_close_lifecycle$")) {
+    // A SWAP, not an addition -- see F_A4_PR1B_CLOCK_NAMES's own header note.
+    const i = names.indexOf("abandon_close");
+    if (i !== -1) names.splice(i, 1);
+    names.push(...F_A4_PR1B_CLOCK_NAMES);
+  }
   return names.sort();
 }
 

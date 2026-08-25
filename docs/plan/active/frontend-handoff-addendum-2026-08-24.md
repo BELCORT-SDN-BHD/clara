@@ -91,7 +91,7 @@ verb existing in a design doc or an unmerged branch is not the same as it being 
 window** (`PROGRESS.md:85`, lane row: "merges at the W2 window"). Design enumeration:
 `docs/plan/active/bank-agency-design.md:122-128` ("Thirteen verbs"). Verified present, by exact
 `create function` line, in `f-a3/pr-1b@c623178` (full sha `c6231781266a326ca44e7a1b980af132fde2d7b5`,
-branch `f-a3/pr-1b`, file `packages/db/migrations/UNNUMBERED_f_a3_pr1b_agent_limb.sql`):
+branch `f-a3/pr-1b`, file `packages/db/migrations/0121_f_a3_pr1b_agent_limb.sql`):
 
 | Verb | Line |
 |---|---|
@@ -120,7 +120,7 @@ wake verbs themselves and merge in the same W2 window.
 **F-A7 β — five verbs, all in ONE file, merge slot W2/W3 (not yet fixed —
 `PROGRESS.md:89`: "β waits its W2/W3 merge slot")**. Verified present in
 `f-a7/pr-4-beta@6892033` (full sha `6892033822101d578e2806bd5d49efdbecf2b483`, file
-`packages/db/migrations/UNNUMBERED_f_a7_beta_filing_verb.sql`):
+`packages/db/migrations/0126_f_a7_beta_filing_verb.sql`):
 
 | Verb | Line |
 |---|---|
@@ -138,8 +138,8 @@ this remote to a merge commit on **`f-a2/pr-2`**, not `f-a7/pr-4-beta` — verif
 as `6892033`, which is what this section cites. Treat `898da67` as a stale/mistyped reference,
 not a second source — a name is not the thing it points at (`AGENTS.md`, review law 3).
 
-Sibling trains **γ** (`f-a7/pr-2-gamma`, file `UNNUMBERED_f_a7_gamma_egress.sql`) and **α**
-(`f-a7/pr-3-alpha`, files `UNNUMBERED_f_a7_alpha1_file_document_extraction.sql` +
+Sibling trains **γ** (`f-a7/pr-2-gamma`, file `0123_f_a7_gamma_egress.sql`) and **α**
+(`f-a7/pr-3-alpha`, files `0124_f_a7_alpha1_file_document_extraction.sql` +
 `_alpha2_judgement_recut.sql`) carry **zero** `create function clara.wake_*` statements between
 them (checked directly) — despite the filenames, the extraction and judgement-recut work they do
 is consumed BY beta's wrappers, not exposed as wake verbs of their own. Do not budget UI work
@@ -161,11 +161,11 @@ enumeration: `docs/plan/active/close-key-1-design.md:105-117` (`wake_list_fiscal
 where the base task's framing overstates readiness.** `PROGRESS.md:86` shows PR-1a merged
 (measurement layer only — no wake verbs, see §3) and PR-1b "BUILT (three review flags on file)".
 Reading `f-a4/pr-1b@bc548e9` (branch `f-a4/pr-1b`, file
-`packages/db/migrations/UNNUMBERED_f_a4_pr_1b_close_lifecycle.sql`) directly: `grep -c` for
+`packages/db/migrations/0120_f_a4_pr_1b_close_lifecycle.sql`) directly: `grep -c` for
 `create function clara.wake_` returns **zero**, and the file's own header states this explicitly
 — *"WHAT THIS FILE DOES NOT SHIP (Annex F.3): the thirteen wake_\* wrappers, the agent cores...
 siblings (mint_wake_credential_for_task, _wake_task_id) and the read-core extractions"*
-(`UNNUMBERED_f_a4_pr_1b_close_lifecycle.sql:26-29`). What PR-1b *does* ship: the
+(`0120_f_a4_pr_1b_close_lifecycle.sql:26-29`). What PR-1b *does* ship: the
 `wake_credentials` schema extended for a new `close_prep` kind (`:235-252`) and five ungranted
 agent-judgement cores — `_begin_close_core`, `_abandon_close_core`, `_propose_fiscal_year_core`,
 `_open_fiscal_year_core`, `_mint_month_snapshot_core` (`:1050-1387`). **No branch for the
@@ -236,7 +236,7 @@ promotion-confirm card, not two.
 
 **The B10 flow, walked end to end** (owner ruling, 2026-08-24, the compound-filing case —
 `PROGRESS.md:27-28`; mechanism at
-`f-a7/pr-4-beta@6892033:packages/db/migrations/UNNUMBERED_f_a7_beta_filing_verb.sql:1169-1390`):
+`f-a7/pr-4-beta@6892033:packages/db/migrations/0126_f_a7_beta_filing_verb.sql:1169-1390`):
 when Clara's filing judgement finds the document's identifying evidence points at client A, but
 a *different* client B already has an **active** filing for the same document, unattended filing
 refuses. The refusal opens a `firm_open_questions` row with **`kind = 'collision'`** — the same

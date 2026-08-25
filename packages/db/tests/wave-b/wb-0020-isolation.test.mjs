@@ -170,10 +170,21 @@ test("[0020 §9.2 — RPR's exact production shape]: a client with ONLY a live l
   assert.equal(facts.status, "running", "invoice_facts is authorized (the legacy gate accepts the live row)");
   assert.equal(canonical(await prepareForLatestEvent({ firm: w.firms.A, client })), canonical(UNKNOWN_VERDICT),
     "…while wiki synthesis stays HELD — a legacy grant is not a typed grant (fail-closed PER PURPOSE)");
+  // [Wave-F Track A, F-A7 gamma] narrowed to purpose <> 'document_processing', not "any typed
+  // row": `grantConsent`'s own evidence upload is a null-kind filing, which is exactly the
+  // shape gamma's classify-consent fixture convenience fires on (rig-docs-fixtures.mjs
+  // `fileDocument`, mirroring production's classify auto-enqueue) — so a `document_processing`
+  // typed row is now an EXPECTED side effect of establishing the legacy grant, not pollution.
+  // The invariant this cell actually proves — a legacy grant never touches ANY typed state
+  // OTHER than the one purpose it is known to collaterally touch — still holds and is what is
+  // asserted below. [SMALL review fold] the negative filter (not the WIKI_PURPOSE positive
+  // literal) so the closed-world guard also catches a FUTURE third purpose leaking here, not
+  // only a wiki-specific regression.
   assert.equal(await rootQuery(
-    "select count(*)::int n from clara.client_egress_purpose_consents where client_id=$1", [client]
-  ).then((r) => r.rows[0].n), 0, "…and no typed row was created for it by anything");
-  noteLane("RPR non-regression: legacy-live + no-typed-row → invoice-facts LIVE, wiki DARK — the production posture 0020 must preserve through the ceremony");
+    "select count(*)::int n from clara.client_egress_purpose_consents where client_id=$1 and purpose <> 'document_processing'",
+    [client]
+  ).then((r) => r.rows[0].n), 0, "…and no typed row OTHER than the known document_processing side effect was created for it by anything");
+  noteLane("RPR non-regression: legacy-live + no-typed-WIKI-row → invoice-facts LIVE, wiki DARK — the production posture 0020 must preserve through the ceremony");
 });
 
 test("[0020 §9.2]: the MULTI-FILING partial-consent rule is unchanged — a document filed to a legacy-consented client AND a typed-only client still HOLDS (every active filing's client must hold a LEGACY consent)", async () => {
