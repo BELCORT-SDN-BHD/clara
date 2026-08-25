@@ -363,6 +363,29 @@ export async function listOpenBankLineExceptionProposals(
   return rows.map(toBankAgentProposal);
 }
 
+/** Every OPEN `identifier_promotion` proposal for this client (Annex M.2 row
+ *  4, OQ-8). `payload` carries `counterparty_id`/`identifier_kind`/
+ *  `identifier_value`/`times_seen` (0121's `_agent_propose_bank_identifier_
+ *  promotion_core`); `subject_id` is the counterparty itself. */
+export async function listOpenBankIdentifierPromotionProposals(
+  token: string, clientId: string,
+): Promise<BankAgentProposalRow[]> {
+  const rows = await pgrestSelect<Record<string, unknown>>(
+    `bank_agent_proposals?client_id=eq.${enc(clientId)}&kind=eq.identifier_promotion&status=eq.open`
+    + `&select=id,kind,subject_id,payload,rationale,status,created_at`,
+    token,
+  );
+  return rows.map(toBankAgentProposal);
+}
+
+/** confirm_bank_identifier_promotion(proposal, op_key), bookkeeper floor
+ *  (F-A3 PR-3 SS3). Writes through the audited `add_client_identifier` door
+ *  when the payer is itself a client of this firm; refuses
+ *  `promotion_target_unavailable` (proposal left OPEN) otherwise. */
+export async function confirmBankIdentifierPromotion(token: string, proposalId: string): Promise<void> {
+  await rpc("confirm_bank_identifier_promotion", { p_proposal: proposalId, p_op_key: opKey() }, token);
+}
+
 // ---------------------------------------------------------------------------
 // clara.bank_agency_holds (F-A3 Annex D, blocker B3) — the per-client brake on
 // the bank agent lane. Human SELECT-only, zero machine grants (0121) — read

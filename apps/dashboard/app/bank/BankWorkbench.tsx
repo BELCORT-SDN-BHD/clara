@@ -11,6 +11,7 @@ import {
   listBankAccounts, listBankAccountProposals, listBankStatements, getBanksInterviewAnswer,
   addBankAccount, deactivateBankAccount, reactivateBankAccount, remapBankAccountCoa,
   getBankAgencyHold, setBankAgencyHold, type BankAgencyHoldRow,
+  listOpenBankIdentifierPromotionProposals, confirmBankIdentifierPromotion, type BankAgentProposalRow,
 } from "../shared/bankApi";
 import { listAccounts, type AccountRow } from "../accounts/api";
 import {
@@ -38,6 +39,9 @@ export function BankWorkbench({ token, clientId, clientName }: { token: string; 
   const [holdReason, setHoldReason] = useState("");
   const [holdBusy, setHoldBusy] = useState(false);
   const [holdErr, setHoldErr] = useState<{ message: string; reason: string | null } | null>(null);
+  const [promotions, setPromotions] = useState<BankAgentProposalRow[]>([]);
+  const [promotionBusy, setPromotionBusy] = useState<string | null>(null);
+  const [promotionErr, setPromotionErr] = useState<{ id: string; message: string; reason: string | null } | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -87,6 +91,30 @@ export function BankWorkbench({ token, clientId, clientName }: { token: string; 
       setHoldErr({ message: pe.message ?? String(e), reason: pe.reason ?? null });
     } finally {
       setHoldBusy(false);
+    }
+  }
+
+  const reloadPromotions = useCallback(async () => {
+    setPromotions(await listOpenBankIdentifierPromotionProposals(token, clientId).catch(() => []));
+  }, [token, clientId]);
+  useEffect(() => { void reloadPromotions(); }, [reloadPromotions]);
+
+  /** M.2 row 4 (OQ-8) — one click confirms a payer's proposed identifier
+   *  through `confirm_bank_identifier_promotion`; the DB refuses
+   *  `promotion_target_unavailable` (proposal stays OPEN) when the payer is
+   *  not itself a client of this firm — rendered via describeBankRefusal
+   *  like every other bank refusal, never a fabricated remedy. */
+  async function confirmPromotion(proposalId: string) {
+    setPromotionBusy(proposalId);
+    setPromotionErr(null);
+    try {
+      await confirmBankIdentifierPromotion(token, proposalId);
+      await reloadPromotions();
+    } catch (e) {
+      const pe = e as PgrestError;
+      setPromotionErr({ id: proposalId, message: pe.message ?? String(e), reason: pe.reason ?? null });
+    } finally {
+      setPromotionBusy(null);
     }
   }
 
@@ -171,6 +199,25 @@ export function BankWorkbench({ token, clientId, clientName }: { token: string; 
                   ? runAccountAction(p.id, () => reactivateBankAccount(token, clientId, p.existing_bank_account_id!))
                   : undefined
               }
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {/* M.2 row 4 (OQ-8) — every OPEN identifier_promotion proposal for this
+          client: Clara learned a payer's tax id / bank account from a
+          statement pattern and proposes writing it onto that payer's own
+          client record, when the payer is itself a client of this firm. */}
+      {promotions.length > 0 ? (
+        <div className={styles.section}>
+          <p className={styles.sectionTitle}>Identifier promotion proposals ({promotions.length})</p>
+          {promotions.map((p) => (
+            <IdentifierPromotionCard
+              key={p.id}
+              proposal={p}
+              busy={promotionBusy === p.id}
+              err={promotionErr?.id === p.id ? promotionErr : null}
+              onConfirm={() => void confirmPromotion(p.id)}
             />
           ))}
         </div>
@@ -313,6 +360,39 @@ function ProposalCard({
           <p className={styles.hint}>No eligible account? Add one in "Add a bank account" below, then return here.</p>
         </>
       )}
+      {err ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason) ? ` — ${describeBankRefusal(err.reason)}` : ""}</p> : null}
+    </div>
+  );
+}
+
+/** M.2 row 4 (OQ-8) — a proposed `client_identifiers` write for the payer
+ *  named at `proposal.subject_id` (a counterparty). Identifier-only render:
+ *  the payload's own kind/value/times_seen, never a fabricated counterparty
+ *  name lookup this door does not need. */
+function IdentifierPromotionCard({
+  proposal, busy, err, onConfirm,
+}: {
+  proposal: BankAgentProposalRow;
+  busy: boolean;
+  err: { message: string; reason: string | null } | null;
+  onConfirm: () => void;
+}) {
+  const kind = typeof proposal.payload.identifier_kind === "string" ? proposal.payload.identifier_kind : "—";
+  const value = typeof proposal.payload.identifier_value === "string" ? proposal.payload.identifier_value : "—";
+  const timesSeen = typeof proposal.payload.times_seen === "number" ? proposal.payload.times_seen : null;
+  return (
+    <div className={styles.proposalCard}>
+      <div className={styles.proposalHead}>
+        <span style={{ fontWeight: 600 }}>{kind.toUpperCase()} · {value}</span>
+        <span className={styles.idChip}>counterparty {shortId(proposal.subject_id)}</span>
+      </div>
+      <p className={styles.muted}>
+        {proposal.rationale || "No rationale recorded."}
+        {timesSeen !== null ? ` · seen ${timesSeen}×` : ""}
+      </p>
+      <button className={styles.button} disabled={busy} onClick={onConfirm}>
+        {busy ? "Confirming…" : "Confirm — write this identifier"}
+      </button>
       {err ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason) ? ` — ${describeBankRefusal(err.reason)}` : ""}</p> : null}
     </div>
   );

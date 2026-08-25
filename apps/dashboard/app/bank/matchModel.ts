@@ -248,6 +248,10 @@ export const BANK_REFUSAL_COPY: Record<string, string> = {
   suggestion_outstanding: "A rule suggestion is already drafted-or-approved-and-unmatched for this line.",
   suggestion_stale: "This suggestion no longer re-matches (the rule, the line, or the statement has changed) — reload and re-check.",
   approve_key_collision: "A derived approval key already resolved to a different outcome — reload before retrying.",
+  // F-A3 PR-3 (Annex M.2 row 4, OQ-8) — confirm_bank_identifier_promotion.
+  promotion_target_unavailable: "The payer named in this proposal is not itself a client of this firm, so there is no identifier home to write to — the proposal stays open.",
+  already_settled: "This promotion proposal is no longer open — reload the list.",
+  cross_firm: "This promotion proposal was not found for your firm — reload the list.",
 };
 
 /** [round-3 fix] Some governed refusals carry a second discriminant — an AXIS —
