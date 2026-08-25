@@ -376,6 +376,16 @@ const F_A5_PR2_UNGRANTED_FNS = [
   "_report_artifact_index_core", "_metric_definition_index_core",
 ];
 export const F_A5_PR2_COHORT = [...F_A5_PR2_WAKE_FNS, ...F_A5_PR2_UNGRANTED_FNS];
+// F-A5 PR-3 [Wave F Track A, reporting agency] -- the signed-original archive doors (design
+// SS3.8, annex A.5). Its OWN cohort, same "wholly present or wholly absent" reasoning as PR-2's
+// block above: folding these into PR-2's list would red every pre-PR-3 database.
+//   archive_signed_original  -- bookkeeper+, over the unmodified F-A5 PR-1 seal core
+//   retrieve_signed_original -- bookkeeper+, audited BEFORE it returns, regenerates nothing
+// Both are clara_authenticated ONLY -- neither is a wake-sibling verb (TA-P14 (2)'s human-act
+// roster, A.4): agent/wake/runtime gain ZERO EXECUTE, asserted in-migration by the file's own
+// tail census over all seven named roles.
+const F_A5_PR3_HUMAN_FNS = ["archive_signed_original", "retrieve_signed_original"];
+export const F_A5_PR3_COHORT = [...F_A5_PR3_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -989,6 +999,8 @@ export const ALLOWED = {
     ...F_A7_PI_HUMAN_FNS, // F-A7 pi: the firm-question door + the identifier-promotion card,
     // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
     ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
+    ...F_A5_PR3_HUMAN_FNS, // [Wave-F Track A, F-A5 PR-3] the signed-original archive doors —
+    // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
     // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
     // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
@@ -1198,6 +1210,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A5 PR-3 signed-original archive doors", F_A5_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   return failures;
 }

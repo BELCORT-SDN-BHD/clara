@@ -153,13 +153,29 @@ TA-P1 C and becomes `wake_mint_metric_input_snapshot`. Its human verb stays for 
 - **`clara.archive_signed_original(p_report_run_id, p_sha256, p_byte_size, p_signature_evidence,
   p_answers_pre_sign_sha256, p_op_key)`** — a thin **human** door (bookkeeper+) over
   `_seal_report_artifact_core`, so the archive act has a named verb rather than a raw RPC call. It
-  passes NULLs for `(obo, wake_kind)` like every other human delegate; `report_artifacts`'
-  one-`signed_original`-per-run constraint (`0066:308-311`) is the wall that makes a second attempt
-  refuse.
+  passes NULLs for `(obo, wake_kind)` like every other human delegate. **A second attempt refuses
+  at the core's CHAIN LAW, not the unique index directly** — MEASURED (F-A5 PR-3's battery, cell
+  PR-3.4, not assumed from the schema): the core's chain check requires a `signed_original` to
+  point at the run's currently-latest artifact, and after the first archive that latest artifact
+  IS the signed original, so a second call's unchanged `p_prior_artifact_id` disagrees with it and
+  refuses before any index is ever reached. `report_artifacts`' one-`signed_original`-per-run
+  partial unique index (`0066:308-311`) still exists as defence-in-depth, but is structurally
+  unreachable through this door's own call shape — the chain law above it already closes every
+  path to a second row, which is the stronger property to have measured.
+- **THE AGENT LANE CANNOT PRODUCE A SIGNED ORIGINAL (A.4's human-act reservation, held
+  mechanically).** A `BEFORE INSERT` trigger on `report_artifacts` refuses `kind='signed_original'`
+  whenever `sealed_by = clara.agent_user_id()` — the row's own call-time actor, deliberately NOT
+  the run's `prepared_by_agent` provenance (which would misfire both ways: an agent-PREPARED run's
+  signed original, archived by a human through this very door, must still succeed, and
+  `wake_seal_report_artifact` acting on a human-opened run must still refuse). Found live and
+  unwalled on `main` by an independent review (F-A5 PR-3, finding S3 — the wake-lane grant landed
+  in 0116 before this wall existed); closed in the SAME migration as these two doors because a
+  table-level trigger needs no D1 write-quiesce window — neither `_seal_report_artifact_core` nor
+  `wake_seal_report_artifact` is ever recut to hold it.
 - **`clara.retrieve_signed_original(p_report_run_id)`** — an **audited retrieval**: it writes its own
-  audit row (who asked, when, which artifact) **before** returning `storage_key` + `sha256`, and
-  **regenerates nothing** — *"retained and retrieved, never regenerated"*, which `0080:258-261`
-  already states as the render lane's refusal.
+  audit row (who asked, when, which artifact) **before** returning `storage_key` + `sha256` +
+  `sealed_by` + `prepared_by_agent`, and **regenerates nothing** — *"retained and retrieved, never
+  regenerated"*, which `0080:258-261` already states as the render lane's refusal.
 - **Storage + retention:** the `reports/` prefix keeps its no-UPDATE policy pair
   (`PROGRESS.md:69-71`); **seven years for artifacts and for every renderer image digest** (E-R14)
   is written into `docs/ops/DR-render.md` as part of PR-4. **UI is Wave G** (F5-OQ-12's ruled
