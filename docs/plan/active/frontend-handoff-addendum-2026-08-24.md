@@ -120,7 +120,7 @@ wake verbs themselves and merge in the same W2 window.
 **F-A7 β — five verbs, all in ONE file, merge slot W2/W3 (not yet fixed —
 `PROGRESS.md:89`: "β waits its W2/W3 merge slot")**. Verified present in
 `f-a7/pr-4-beta@6892033` (full sha `6892033822101d578e2806bd5d49efdbecf2b483`, file
-`packages/db/migrations/UNNUMBERED_f_a7_beta_filing_verb.sql`):
+`packages/db/migrations/0126_f_a7_beta_filing_verb.sql`):
 
 | Verb | Line |
 |---|---|
@@ -236,7 +236,7 @@ promotion-confirm card, not two.
 
 **The B10 flow, walked end to end** (owner ruling, 2026-08-24, the compound-filing case —
 `PROGRESS.md:27-28`; mechanism at
-`f-a7/pr-4-beta@6892033:packages/db/migrations/UNNUMBERED_f_a7_beta_filing_verb.sql:1169-1390`):
+`f-a7/pr-4-beta@6892033:packages/db/migrations/0126_f_a7_beta_filing_verb.sql:1169-1390`):
 when Clara's filing judgement finds the document's identifying evidence points at client A, but
 a *different* client B already has an **active** filing for the same document, unattended filing
 refuses. The refusal opens a `firm_open_questions` row with **`kind = 'collision'`** — the same

@@ -261,17 +261,28 @@ test("[0020 §8]: the four purpose-discriminated event types are registered — 
   const gammaApplied = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ 'f_a7_gamma_egress$'"
   )).rows[0].n === 1;
+  // [Wave-F Track A, F-A7 beta, D1] widens the same closed set again: SS4 mints ONE more
+  // `egress.`-prefixed name, `egress.misrouted` (client_scoped, decision=ignore against the
+  // active taxonomy — the 0090:635-657 idiom) — design SS3.3 rider 3, "EITHER arm emits
+  // egress.misrouted". Same gating discipline as gamma's fold above: keyed on the migration's
+  // STABLE STEM so a pre-beta frontier leg (`db-slice-frontiers`) still sees the closed set as
+  // it was before beta, rather than reding on a one-name diff that says nothing about 0020.
+  const betaApplied = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'f_a7_beta_filing_verb$'"
+  )).rows[0].n === 1;
   const expected = [
     "egress.consent_granted", "egress.consent_revoked",
     ...(gammaApplied ? [
       "egress.firm_purpose_activated", "egress.firm_purpose_consent_granted",
       "egress.firm_purpose_consent_revoked", "egress.firm_purpose_deactivated",
     ] : []),
+    ...(betaApplied ? ["egress.misrouted"] : []),
     "egress.purpose_activated", "egress.purpose_consent_granted",
     "egress.purpose_consent_revoked", "egress.purpose_deactivated",
   ].sort();
   assert.deepEqual(egress, expected,
-    `the two legacy + four 0020 typed${gammaApplied ? " + four F-A7-gamma firm-narrow" : ""} egress event types (got ${egress.join(",")})`);
+    `the two legacy + four 0020 typed${gammaApplied ? " + four F-A7-gamma firm-narrow" : ""}`
+    + `${betaApplied ? " + one F-A7-beta egress.misrouted" : ""} egress event types (got ${egress.join(",")})`);
   for (const n of PURPOSE_EVENT_TYPES) assert.ok(egress.includes(n), `${n} registered`);
 });
 
