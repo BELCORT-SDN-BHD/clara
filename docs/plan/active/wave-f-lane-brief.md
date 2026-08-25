@@ -75,6 +75,11 @@ never `wsl --shutdown`.
   version — the raise lands at YOUR apply. Keep closures single-member where you can. HALF-FREEZE: the review-time lint
   (`check-frozen-evaluators.mjs`) sees only `clara.evaluate_*` names — an underscore-named member is catalog-frozen but
   source-unfrozen; name new members `clara.evaluate_*` unless you state why not.
+- **The PR-3 byte-reproduction drill (`packages/db/scripts/fa5-pr3-real-seal-drill.mjs`) and F-A5/PR-1 cell D
+  cannot share a database** — the drill's preflight requires `evaluate_fs_pack_agent v1` already DEPLOYED, while
+  PR-1 cell D's refusing half needs that SAME row still UNDEPLOYED; `_tf_evaluator_deploy_once` (0060) makes the
+  flip one-way, so running the drill against a rig PR-1's battery (or the estate suite) also runs on permanently
+  reds cell D there. Give the drill its own throwaway rig, never the estate/shared one.
 - Three-valued evaluation where the design says so (pass / fail / not_evaluable); fail-closed on the missing,
   the malformed and the unknown; a rung's own evaluation may never raise out of the ladder.
 - Shared surfaces (extend-only, merge-ordered): `wake_credentials` CHECK pairs (re-read live text with
