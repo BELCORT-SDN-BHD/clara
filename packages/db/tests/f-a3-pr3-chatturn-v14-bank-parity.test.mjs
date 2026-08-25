@@ -171,3 +171,50 @@ test("v14.negative-twin an AUTONOMOUS bank_agent-kind call still writes the exac
   assert.equal(receipt.rows[0]?.acting_actor, AGENT_USER_ID, "the autonomous lane's receipt still attributes to the agent identity, exactly as before this PR");
   assert.equal(receipt.rows[0]?.approval_arm, "agent_unattended", "the autonomous lane's approval_arm is unchanged");
 });
+
+test("v14.reread the same-segment fresh-read seam: two reads of the same account within one segment both admit (readSeq), and an act reaches PAST digest verification citing either digest (C2's task-scoped binding)", async (t) => {
+  // MUST fix, split finding (Codex adversarial round 2026-08-25): the runtime half
+  // (chatTurn.v14.bank.ts's readSeq counter) and the DB half (lane-fa3-pr1a's
+  // _agent_verify_inputs_digest recut, split_part(op_key, ':', 2) task-id binding) were built
+  // and reviewed separately by design -- this cell is the ONE place that proves the seam as a
+  // WHOLE, since neither f-a3-pr3-doors.test.mjs (the DB half's own battery) nor this file's
+  // other cells exercise two reads of the SAME account within what would be one segment.
+  if (skipHere(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const cred = await mintCred("interactive_client", firm, world.clients.A1, world.users.bob);
+  const taskId = opk("v14-reread-task");
+  const segment = 0;
+  const readOpKey = (seq) => `bank-get_bank_pack:${taskId}:${segment}:${JSON.stringify({ bank_account_id: bankAccount, readSeq: seq })}`;
+  const read = (seq) =>
+    wakeQuery(ROLES.wakeInteractive, cred.secret,
+      callWrapper("wake_get_bank_pack", [
+        { name: "p_client", cast: "uuid" }, { name: "p_bank_account", cast: "uuid" },
+        { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" }]),
+      [world.clients.A1, bankAccount, RATIONALE, JSON.stringify(MODEL), readOpKey(seq)]);
+
+  const read1 = await read(1);
+  assert.notEqual(read1.rows[0]?.r?.status, "refused", `read 1 (readSeq=1) must be admitted: ${JSON.stringify(read1.rows[0]?.r)}`);
+  const read2 = await read(2);
+  assert.notEqual(read2.rows[0]?.r?.status, "refused", `read 2 (readSeq=2, SAME account, SAME segment) must be admitted -- if this refuses op_key_identity_mismatch, the same-segment re-read bug is back: ${JSON.stringify(read2.rows[0]?.r)}`);
+  assert.notEqual(read1.rows[0].r.digest, undefined, "read 1 returns a digest");
+  assert.notEqual(read2.rows[0].r.digest, undefined, "read 2 returns a digest");
+
+  // Cite read 1's digest in a same-task act. A nonexistent match_id makes the ACT itself refuse
+  // (CLR11, not found) -- the point is proving it gets PAST _agent_verify_inputs_digest first,
+  // never that the act succeeds.
+  const actOpKey = `bank-unmatch_bank_match:${taskId}:${segment}:${JSON.stringify({ match_id: "00000000-0000-0000-0000-000000000000" })}`;
+  await assert.rejects(
+    () => wakeQuery(ROLES.wakeInteractive, cred.secret,
+      callWrapper("wake_unmatch_bank_match", [
+        { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
+        { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
+      [world.clients.A1, "00000000-0000-0000-0000-000000000000", "v14.reread", RATIONALE, JSON.stringify(MODEL), read1.rows[0].r.digest, actOpKey]),
+    (e) => {
+      // Must fail on the NOT-FOUND match, never on digest verification -- a CLR10/
+      // inputs_digest_unverified here means the task-scoped binding rejected a digest from the
+      // SAME task, which is exactly the seam this cell exists to prove closed.
+      assert.notEqual(e.detail && String(e.detail).includes("inputs_digest_unverified"), true, `the act must not be refused on digest verification: ${e.code} ${e.message} ${e.detail}`);
+      return true;
+    },
+  );
+});
