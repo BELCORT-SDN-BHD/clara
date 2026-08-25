@@ -105,7 +105,31 @@ function parseImportBindingsAst(headSrc) {
     } else if (named && ts.isNamedImports(named)) {
       for (const el of named.elements) {
         if (el.isTypeOnly) continue; // `import { type X, real } from "..."` — X carries no runtime binding
-        const imported = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text;
+        // round-9 (native adversarial leg, MUST) — `el.propertyName` PRESENT is authoritative: an
+        // ES2022 string-literal import alias (`import { "evil" as chatTurn_v1 } from "./x.js"`)
+        // parses with ZERO diagnostics, and propertyName is then a StringLiteral, not an
+        // Identifier. The OLD ternary's `ts.isIdentifier(propertyName)` guard failed on exactly
+        // this shape and silently fell back to `el.name.text` (the LOCAL name) — pretending no
+        // alias existed at all, so `b.imported === item.exported` passed downstream and the
+        // round-8 import-alias pin never fired (N2/N5). Take `.text` from propertyName whenever
+        // it is EITHER valid ModuleExportName kind the grammar allows (Identifier | StringLiteral)
+        // — both carry the real, normalized name the source module actually exports under. Any
+        // OTHER node kind (none should exist for valid TypeScript, but this is exactly the class
+        // of assumption a parser upgrade or malformed input could break) is FAIL-CLOSED: skip
+        // this element entirely rather than guess, so a downstream re-export naming this local
+        // ends up with NO binding at all — REJECTED, matching this module's own catch-all
+        // fail-closed convention throughout (parseRegistryExports' own `rejected` list, the
+        // resolvesInsideWorkflowsDir check, etc.).
+        let imported;
+        if (el.propertyName) {
+          if (ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)) {
+            imported = el.propertyName.text;
+          } else {
+            continue; // fail-closed — unrecognized propertyName node kind, bind nothing
+          }
+        } else {
+          imported = el.name.text; // no propertyName at all — the plain, unaliased shorthand
+        }
         bindings.set(el.name.text, { source, imported });
       }
     }
@@ -398,8 +422,28 @@ export function parseRegistryExports(headSrc, label = "registry@HEAD") {
       // NamedExports — `export { a, b as c }` or `export { a, b as c } from "..."`.
       for (const el of stmt.exportClause.elements) {
         if (el.isTypeOnly) continue; // `export { type X, real }` — X is a per-element type-only specifier
+        // round-9 (native adversarial leg, symmetry rider) — the SAME propertyName-kind ternary
+        // bug as the import side (see parseImportBindingsAst's own comment) sits here too. It is
+        // INERT today only because the neighbouring `aliased: !!el.propertyName` line below
+        // rejects any propertyName-bearing re-export UNCONDITIONALLY, regardless of what `local`
+        // even computes to (proven by fixture N4 — the aliased check fires before `local` is ever
+        // consulted for anything). A protection that only holds because of a NEIGHBOURING check
+        // is not a defense of this line's own — fixed the identical fail-closed way (propertyName
+        // present -> Identifier or StringLiteral only, else null -> the aliased branch above
+        // rejects it regardless) so the protection does not depend on the `aliased` rule
+        // surviving some future relaxation.
+        let local;
+        if (el.propertyName) {
+          if (ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)) {
+            local = el.propertyName.text;
+          } else {
+            local = null; // fail-closed — unrecognized propertyName node kind
+          }
+        } else {
+          local = el.name.text;
+        }
         reexports.push({
-          local: el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text,
+          local,
           exported: el.name.text,
           aliased: !!el.propertyName,
           fromModuleSpecifier,

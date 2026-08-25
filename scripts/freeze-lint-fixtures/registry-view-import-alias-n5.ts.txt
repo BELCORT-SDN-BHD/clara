@@ -1,0 +1,23 @@
+// Fixture: round-9 (native adversarial leg, MUST, N5) — P-D's own defeat (a REAL frozen export,
+// chatTurn_v13, aliased on import to impersonate chatTurn_v14) RE-REACHED by the string-literal
+// syntax N2 proves is otherwise invisible: `import { "chatTurn_v13" as chatTurn_v1 } from
+// "./chatTurn.v13.js"; export { chatTurn_v1 };`. Under the OLD ternary, `propertyName` being a
+// StringLiteral ("chatTurn_v13") made `ts.isIdentifier(propertyName)` fail, falling back to
+// `el.name.text` ("chatTurn_v1") — so the census believed `chatTurn_v1` was imported AS
+// `chatTurn_v1` (no alias at all), when the source module actually calls this export
+// "chatTurn_v13". registry.ts's own export surface would then claim `chatTurn_v1` exists as a
+// frozen body, when the bytes are actually chatTurn_v13's own closure under a different, invented
+// name — the sharpest form of the honest-naming defeat constraint 9 exists to prevent, reached by
+// a DIFFERENT syntax than P-D's own plain-identifier alias. Must REJECT
+// (REGISTRY-EXPORTS-CLOSED-WORLD).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { "chatTurn_v13" as chatTurn_v1 } from "./chatTurn.v13.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { chatTurn_v1 };

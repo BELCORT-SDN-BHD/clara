@@ -248,6 +248,20 @@ testCase("round-8 P-E (lowest severity, typecheck backstops): two imports claim 
   expectClean(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-e.ts.txt")));
 });
 
+// round-9 (native adversarial leg, MUST) — round-8's own P-series pin (`b.imported ===
+// item.exported`) was itself bypassable: an ES2022 STRING-LITERAL import alias
+// (`import { "evil" as x }`) makes `propertyName` a StringLiteral, not an Identifier — the old
+// `ts.isIdentifier(propertyName)` ternary guard failed on exactly this shape and silently fell
+// back to the local name, never detecting an alias at all. N2/N5, the two proof shapes the leg
+// reproduced live.
+testCase("round-9 N2: an ES2022 STRING-LITERAL import alias (`import { \"evil\" as chatTurn_v1 }`) -> REJECT, propertyName being a StringLiteral must not defeat the round-8 pin (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-n2.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-9 N5: P-D's own defeat (chatTurn_v13 impersonating chatTurn_v1) re-reached via a STRING-LITERAL import alias (`import { \"chatTurn_v13\" as chatTurn_v1 }`) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-n5.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 
