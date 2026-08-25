@@ -772,7 +772,21 @@ test("#1 (round-7, native adversarial leg): redrive() rewinds a checkpoint it ad
   await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
 
   const origVersion = await rig.activeTaxonomyVersion();
-  const uncoveredType = `g1.round7a.uncov.${Date.now().toString(36)}`;
+  // round-9b (db-estate fallout, "two cars first meeting" — the checkpoint-durability family's
+  // own test residue meets packages/db's full-coverage census for the first time in the shared
+  // estate suite): this custom type is deliberately UNCOVERED for part of this test's own
+  // lifetime, and its event_types row is NEVER deleted afterward (matching this file's own D6
+  // cell and relay-taxonomy.test.mjs's sibling X5/flip cells, none of which clean up either) —
+  // the reserved `rig.%` namespace is the established, house-wide convention EVERY db-side
+  // full-coverage test (rig-events-structure.test.mjs §7, s6-tasks.test.mjs P5/P6,
+  // wave-a-shape.test.mjs §3, rig-docs-events.test.mjs §3.7 — all four explicitly comment on and
+  // exclude it) relies on to tolerate exactly this residue on a SHARED estate DB. This literal
+  // was minted `g1.round7a.uncov.*` — outside that namespace — so it silently broke all four the
+  // first time CI's own db-estate leg ran packages/runtime's tests and packages/db's tests
+  // against the SAME migrated+seeded database with no reset between them (pnpm -r, no per-
+  // package isolation). Fixed to match this file's own sibling pattern
+  // (relay-taxonomy.test.mjs's `rig.uncov2.`/`rig.uncovered.`) exactly.
+  const uncoveredType = `rig.g1round7a.uncov.${Date.now().toString(36)}`;
 
   try {
     // A CUSTOM event type, genuinely uncovered by the CURRENT taxonomy — the only way to reach
