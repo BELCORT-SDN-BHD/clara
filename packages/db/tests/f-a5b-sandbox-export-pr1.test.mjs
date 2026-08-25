@@ -8,8 +8,23 @@
 //
 // SCOPE. PR-1 is DB-only. The second render entrance is F-A5b's own PR-3 -- B3.1/B3.4/B3.5/B3.6
 // (watermark bytes) and B5.* (one architecture) are out of scope here, named and skipped. B1.3
-// (cross_client) skips until F-A6 v2 merges and B1.2/B1.4/B1.6/B1.9(firm leg) skip until F-A6 PR-1
-// merges (measured at runtime on this chain, not assumed). B4.1 skips per the annex's own framing.
+// (cross_client) skips until F-A6 v2 merges. B1.2/B1.4/B1.6/B1.9(firm leg) are LIVE as of
+// migration 0136 and skip only on a chain that lacks it. B4.1 skips per the annex's own framing.
+//
+// A CORRECTION THIS FILE OWES ITS OWN RECORD (fix/freeform-basis, 2026-08-26). The line above
+// used to end "...skip until F-A6 PR-1 merges (measured at runtime on this chain, not assumed)".
+// It was NOT measured at runtime. B1.2's gate was written as a `{ skip: fa6 ? false : "..." }`
+// OPTIONS OBJECT, and `fa6` is assigned inside before() -- which node:test runs AFTER it has
+// already evaluated every options object at module load. `fa6` was therefore ALWAYS false at
+// registration, so that cell skipped on every chain, F-A6 merged or not, and its body was a
+// bare placeholder besides. Green by absence, in test form.
+//
+// That is why nothing here caught migration 0132's dead freeform arm: 0132 cut the basis arm
+// against pre-0131 main, forcing every freeform_read_log id (a bigint identity, 0002:309)
+// through a uuid regex, so EVERY free-read basis refused 'a basis element carries a malformed
+// id'. Migration 0136 fixes the arm; this cell is now a real both-polarity proof of it, and the
+// skip decision happens INSIDE the test body against the live catalog. No gate in this file may
+// be a load-time options object reading before()-assigned state.
 //
 // THE FAIL-SAFE INTERIM (TIER A A1(iii)). Every block kind this PR-1 admits is free text
 // (kind='text'), and the substitution seam is unbuilt, so `_sandbox_client_set` now ALWAYS widens
@@ -78,8 +93,25 @@ async function fa6ScopePresent() {
   return r.rows[0].present;
 }
 
+/** Migration 0136's recut of clara._sandbox_client_set, read off the LIVE catalog -- never a
+ *  filename and never a schema_migrations row, which records that a FILE ran, not that THIS body
+ *  carries the change (and numbers are claimed at merge, so a number proves nothing). Both shapes
+ *  are probed: a gate that only asks "is the new text there?" turns a REGRESSION into a quiet
+ *  skip, which is proof deletion wearing a skip's clothes. */
+const FR_FN = "clara._sandbox_client_set(uuid,jsonb,jsonb)";
+const FR_FIXED_MARKER = "clara.freeform_read_log where id = v_label_id::bigint";
+const FR_PRE_MARKER = "clara.freeform_read_log where id = v_label_id::uuid";
+async function freeformArmShape() {
+  const r = await rootQuery(
+    `select (select position($1 in p.prosrc) > 0 from pg_proc p where p.oid = to_regprocedure($3)) as fixed,
+            (select position($2 in p.prosrc) > 0 from pg_proc p where p.oid = to_regprocedure($3)) as pre`,
+    [FR_FIXED_MARKER, FR_PRE_MARKER, FR_FN]);
+  return { fixed: Boolean(r.rows[0]?.fixed), pre: Boolean(r.rows[0]?.pre) };
+}
+
 let ready = false;
 let fa6 = false;
+let frArm = { fixed: false, pre: false };
 let world = null;
 /** Pre-minted, REAL metric_cells (via delta's own audited pipeline -- an evaluator-originated
  *  cell, never a hand-rolled row, since metric_input_snapshots carries a reconstruct-from-facts
@@ -124,10 +156,30 @@ async function asSandboxWake(firm, obo, fn) {
   return asWake(ROLES.wakeInteractive, secret, fn);
 }
 
+const freeformBasis = (label, id) => ({ label, kind: "freeform_read", id: String(id) });
+
+/** A REAL, fully-settled freeform receipt. Written straight to the table: the wake verb's own
+ *  credential/pool machinery is F-A6's to exercise, and what a BASIS needs from a receipt is only
+ *  its durable arm-phase columns, which are exactly what _sandbox_client_set reads. */
+async function mintFreeformReceipt({ firm, scope, clients = null, actor, wakeKind = "interactive_client" }) {
+  const r = await rootQuery(
+    `insert into clara.freeform_read_log
+       (firm_id, credential_id, query_text, purpose, verb, scope, client_scope, acting_actor,
+        via_wake_kind, task_id, op_key, arm_txid, settled_at, outcome, rung_vector,
+        relations_read, row_count, byte_count, duration_ms)
+     values ($1, $2, 'select id from clara.clients', 'B1.2 free-read basis fixture',
+             'wake_freeform_read', $3, $4::uuid[], $5, $6, $7, $8, pg_current_xact_id(), now(),
+             'ok', '{"statement_shape":"pass"}'::jsonb, array['clara.clients']::text[], 1, 64, 3)
+     returning id`,
+    [firm, randomUUID(), scope, clients, actor, wakeKind, randomUUID(), `b12-${randomUUID()}`]);
+  return String(r.rows[0].id);
+}
+
 before(async () => {
   ready = await fa5bReady();
   if (!ready) return;
   fa6 = await fa6ScopePresent();
+  frArm = await freeformArmShape();
   world = await buildWorld();
   await ensureEvaluatorDeployed();
   const clientA1 = await freshDeltaClient(world.users.alice, "a1sbx");
@@ -138,6 +190,15 @@ before(async () => {
     A2: await mintRealCell(world.users.alice, clientA2, "a2"),
     B1: await mintRealCell(world.users.dave, clientB1, "b1"),
   };
+  if (!fa6) return;
+  // Free-read basis fixtures. Minted only when F-A6's hardened shape exists -- the columns below
+  // do not exist before 0131, so this INSERT is the measurement, not an assumption.
+  fx.frClientA1 = await mintFreeformReceipt({
+    firm: world.firms.A, scope: "client", clients: [clientA1], actor: world.users.alice });
+  fx.frFirmA = await mintFreeformReceipt({
+    firm: world.firms.A, scope: "firm", clients: null, actor: world.users.alice, wakeKind: "interactive" });
+  fx.frAbsentId = String(
+    BigInt((await rootQuery("select coalesce(max(id),0)::text as m from clara.freeform_read_log")).rows[0].m) + 1_000_000n);
 });
 after(async () => { await endPool(); });
 
@@ -163,9 +224,56 @@ test("B1.1 -- a preview-cell basis derives -- with the A1(iii) fail-safe, the re
     "the EXACT (pre-widening) derivation for a single preview-cell basis is exactly that one client, not the roster");
 });
 
-test("B1.2/B1.4/B1.6/B1.9(firm leg) -- free-read basis kinds", { skip: fa6 ? false : "F-A6 PR-1 not merged on this chain: free-read basis kinds are unavailable (Annex K); preview-cell bases only" }, async (t) => {
+// The gate for this cell lives INSIDE the body, deliberately. Its previous form was a
+// `{ skip: fa6 ? false : "..." }` options object, and node:test evaluates every options object at
+// MODULE LOAD -- before before() assigns `fa6`. The cell therefore skipped on every chain ever
+// run, F-A6 merged or not, and never executed its (placeholder) body. See this file's header.
+// Three states, and the third is the one that matters: F-A6 absent -> skip; the pre-0136 ::uuid
+// arm present -> skip, LOUDLY, naming it; NEITHER shape -> do NOT skip, run and fail, because a
+// body nobody recognises is not evidence of anything (review law 2).
+test("B1.2/B1.4/B1.6/B1.9(firm leg) -- free-read basis kinds derive, in both polarities", async (t) => {
   if (!ready) return skipHere(t, "not applied");
-  t.skip("free-read fixtures require F-A6 PR-1's hardened freeform_read_log shape -- placeholder for when it lands");
+  if (!fa6) return skipHere(t, "F-A6 PR-1 not merged on this chain: free-read basis kinds are unavailable (Annex K); preview-cell bases only");
+  if (!frArm.fixed && frArm.pre) {
+    return skipHere(t, "migration 0136 absent -- clara._sandbox_client_set still carries the pre-0136 ::uuid basis arm against a bigint id column, so EVERY free-read basis refuses sandbox_view_basis_unknown; the arm is dormant, not passing");
+  }
+  if (!frArm.fixed && !frArm.pre) {
+    // Neither marker: fall through and let the assertions below speak.
+    console.log("B1.2: clara._sandbox_client_set carries NEITHER the pre-0136 ::uuid arm nor 0136's ::bigint arm -- this cell RUNS rather than skipping.");
+  }
+
+  // --- B1.2/B1.4: a client-pinned free read derives EXACTLY its own client. ---
+  const pinned = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5) as r",
+      [textBody([textBlock("fr")]), basisArr(freeformBasis("fr", fx.frClientA1)),
+        "b1.2-client-pinned", model(), opk("b12c")]))
+    .then((r) => r.rows[0].r);
+  assert.deepEqual(pinned.client_set_exact, [fx.A1.clientId],
+    "a client-pinned free read contributes client_scope -- exact (design 3.2); NT-1's pre-widening set is where that claim is assertable");
+  assert.equal(pinned.client_set_basis, "firm_closure", "A1(iii)'s free-text fail-safe still widens the RETURNED set");
+  assert.ok(pinned.client_set.includes(fx.A1.clientId));
+
+  // --- B1.6/B1.9(firm leg): a firm-wide free read derives the WHOLE roster, at ANY status. ---
+  const firmWide = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5) as r",
+      [textBody([textBlock("fr")]), basisArr(freeformBasis("fr", fx.frFirmA)),
+        "b1.2-firm-wide", model(), opk("b12f")]))
+    .then((r) => r.rows[0].r);
+  const roster = (await rootQuery("select id from clara.clients where firm_id=$1", [world.firms.A]))
+    .rows.map((r) => r.id).sort();
+  assert.deepEqual([...firmWide.client_set_exact].sort(), roster,
+    "firm_closure is every clara.clients row for the firm, with NO status conjunct (design 3.2, gate M2/C-21)");
+  assert.equal(firmWide.client_set_basis, "firm_closure");
+
+  // --- THE REFUSAL POLARITY (law 31): identical in every term but the id, and refused. ---
+  const absent = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5) as r",
+      [textBody([textBlock("fr")]), basisArr(freeformBasis("fr", fx.frAbsentId)),
+        "b1.2-absent", model(), opk("b12a")]))
+    .then(() => null, (e) => e);
+  assert.ok(absent, "a free-read id that resolves to no row must refuse the mint");
+  assert.equal(absent.code, "CLR11", `expected the typed CLR11, got ${absent.code} (${absent.message})`);
+  assert.match(absent.detail || "", /sandbox_view_basis_unknown/);
 });
 
 test("B1.3 -- cross_client basis skips until F-A6 v2 merges", async (t) => {
