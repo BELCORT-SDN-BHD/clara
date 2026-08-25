@@ -753,7 +753,9 @@ test("A6 -- wake_sandbox_export_state is volatile (not stable), writes its own a
   if (!ready) return skipHere(t, "not applied");
   const vol = await rootQuery(
     "select provolatile from pg_proc where oid='clara.wake_sandbox_export_state(uuid)'::regprocedure");
-  assert.notEqual(vol.rows[0].provolatile, "s", "a receipted reader is volatile in this estate -- no precedent for stable+audit");
+  // Codex final confirm: notEqual('s') also admits 'i' (IMMUTABLE), which no receipted reader
+  // could ever legitimately be either -- assert the exact expected value, not merely "not stable".
+  assert.equal(vol.rows[0].provolatile, "v", "a receipted reader is volatile in this estate -- no precedent for stable+audit");
 
   const cellId = await Promise.resolve(fx.A1.id);
   const viewId = await mintView(world.firms.A, world.users.alice, cellId, "a6");

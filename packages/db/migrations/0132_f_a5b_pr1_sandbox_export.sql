@@ -2,7 +2,7 @@
 -- lane's DB layer. Three new relations, five ungranted cores, nine verbs (six wake, three
 -- clara_runtime worker verbs, three human), one CoR (clara.watermark_policy_for, 0111 -- delegates
 -- to the new shared resolver core rather than losing its own body), the wake_fn_allowlist rows,
--- the signed `sandbox_watermark` trio (en/ms/zh), and the closed-world censuses this lane owns.
+-- the owner-ratified `sandbox_watermark` trio (en/ms/zh), and the closed-world censuses this lane owns.
 --
 -- Number is claimed at MERGE by the conductor (standing law); this file names none.
 --
@@ -378,12 +378,12 @@ do $s3done$ begin
 end $s3done$;
 
 -- =====================================================================================
--- SECTION 4 -- THE SIGNED sandbox_watermark TRIO. Rows only, no DDL (R-L15's scope). Verbatim,
+-- SECTION 4 -- THE OWNER-RATIFIED sandbox_watermark TRIO. Rows only, no DDL (R-L15's scope). Verbatim,
 -- owner-ratified 2026-08-23 (design SS3.6a; A11/Codex #13's naming half -- "ratified wording", not
 -- a cryptographic signature). One key per locale -- Q2's "two keys" question is moot; this is a
 -- single string, never a stamp/footer pair. The lane's DARK condition (survey X12) lifts for
 -- en/ms/zh the instant this section commits; every other locale still refuses until its own row is
--- signed (watermark_policy_absent, via clara._watermark_policy_version_for -- SECTION 5b).
+-- owner-ratified (watermark_policy_absent, via clara._watermark_policy_version_for -- SECTION 5b).
 -- A8/S5.25: effective_from is clara._book_today() (0042), NEVER current_date -- a UTC session
 -- between 00:00-07:59 MYT would otherwise seed YESTERDAY's date, the exact ships-dark scenario
 -- TA-P10 C' (3) exists to prevent.
@@ -1282,8 +1282,14 @@ begin
 
   -- (a3) Codex re-review followup: polname alone proves a LABEL, not a POLICY -- a rename-only
   -- drift (right name, wrong roles/command/predicate) would pass the census above silently. Read
-  -- polroles, polcmd and polqual/polwithcheck for every one of the six policies too (epsilon-
-  -- grants-phase.mjs:34-70's polroles-exact-match idiom, extended here to the full shape).
+  -- polroles, polcmd, polpermissive and polqual/polwithcheck for every one of the six policies
+  -- too (epsilon-grants-phase.mjs:34-70's polroles-exact-match idiom, extended here to the full
+  -- shape). Codex final confirm followup: the human qual was matched by a PATTERN
+  -- (`firm_id.*jwt_firm\(\)`) that would have accepted `firm_id = jwt_firm() OR true` -- an exact
+  -- match against the byte-for-byte deparsed text this file actually ships closes that. polroles
+  -- for a PERMISSIVE policy still combine with OR across policies of the same command, so a stray
+  -- RESTRICTIVE-flagged row on either policy would silently change the access shape without any
+  -- other column here catching it -- polpermissive is now checked explicitly, both must be true.
   foreach v_sig in array array['sandbox_views','sandbox_exports','export_recipients']
   loop
     if not exists(select 1 from pg_policy p
@@ -1291,18 +1297,20 @@ begin
           and p.polname = 'p_' || replace(v_sig, '_', '') || '_owner'
           and p.polroles = array['clara_fn_owner'::regrole]::oid[]
           and p.polcmd = '*'
+          and p.polpermissive
           and pg_get_expr(p.polqual, p.polrelid) = 'true'
           and pg_get_expr(p.polwithcheck, p.polrelid) = 'true') then
-      raise exception 'f_a5b pr1 tail: clara.%''s owner policy does not match the expected {clara_fn_owner, ALL, using(true), with check(true)} shape', v_sig using errcode = 'CLR10';
+      raise exception 'f_a5b pr1 tail: clara.%''s owner policy does not match the expected {clara_fn_owner, ALL, PERMISSIVE, using(true), with check(true)} shape', v_sig using errcode = 'CLR10';
     end if;
     if not exists(select 1 from pg_policy p
         where p.polrelid = ('clara.' || v_sig)::regclass
           and p.polname = 'p_' || replace(v_sig, '_', '') || '_human'
           and p.polroles = array['clara_authenticated'::regrole]::oid[]
           and p.polcmd = 'r'
-          and pg_get_expr(p.polqual, p.polrelid) ~ 'firm_id.*jwt_firm\(\)'
+          and p.polpermissive
+          and pg_get_expr(p.polqual, p.polrelid) = '(firm_id = clara.jwt_firm())'
           and p.polwithcheck is null) then
-      raise exception 'f_a5b pr1 tail: clara.%''s human policy does not match the expected {clara_authenticated, SELECT, firm_id=jwt_firm(), no with-check} shape', v_sig using errcode = 'CLR10';
+      raise exception 'f_a5b pr1 tail: clara.%''s human policy does not match the expected {clara_authenticated, SELECT, PERMISSIVE, firm_id=clara.jwt_firm(), no with-check} shape', v_sig using errcode = 'CLR10';
     end if;
   end loop;
 
