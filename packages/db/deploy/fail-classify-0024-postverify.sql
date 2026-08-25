@@ -131,9 +131,15 @@ begin
   if v_have is null then
     raise exception 'POST-VERIFY 2: clara_runtime does NOT hold EXECUTE on % — the grant is vacuous', v_sig;
   end if;
+  -- CORRECTED (narrow F-A6 re-review round): must track roles-bootstrap.sql's `grp`/`logins`
+  -- sets — three wake lanes landed after this file was authored and were missing here
+  -- (clara_wake_bank/_login, clara_wake_filing, F-A6's clara_freeform_ro/_login). Absence is
+  -- skipped via `to_regrole` below, never asserted.
   foreach v_role in array array['clara_authenticated', 'clara_agent_ro',
       'clara_wake_interactive', 'clara_wake_proactive',
-      'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'] loop
+      'clara_wake_bank', 'clara_wake_filing', 'clara_freeform_ro',
+      'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
+      'clara_wake_bank_login', 'clara_freeform_login'] loop
     if to_regrole(v_role) is null then continue; end if;
     if has_function_privilege(v_role, v_sig, 'execute') then
       raise exception 'POST-VERIFY 2: % holds EFFECTIVE EXECUTE on % — this verb is clara_runtime-only', v_role, v_sig;
@@ -226,9 +232,15 @@ begin
   if v_have is null then
     raise exception 'POST-VERIFY 5: clara_runtime does NOT hold EXECUTE on % — the grant is vacuous', v_sig;
   end if;
+  -- CORRECTED (narrow F-A6 re-review round): must track roles-bootstrap.sql's `grp`/`logins`
+  -- sets — three wake lanes landed after this file was authored and were missing here
+  -- (clara_wake_bank/_login, clara_wake_filing, F-A6's clara_freeform_ro/_login). Absence is
+  -- skipped via `to_regrole` below, never asserted.
   foreach v_role in array array['clara_authenticated', 'clara_agent_ro',
       'clara_wake_interactive', 'clara_wake_proactive',
-      'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'] loop
+      'clara_wake_bank', 'clara_wake_filing', 'clara_freeform_ro',
+      'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
+      'clara_wake_bank_login', 'clara_freeform_login'] loop
     if to_regrole(v_role) is null then continue; end if;
     if has_function_privilege(v_role, v_sig, 'execute') then
       raise exception 'POST-VERIFY 5: % holds EFFECTIVE EXECUTE on % — this verb is clara_runtime-only', v_role, v_sig;

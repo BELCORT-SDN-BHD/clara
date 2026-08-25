@@ -4,33 +4,25 @@
 // (the DB is idempotent on firm,fn,op_key). No figure is computed here — the
 // DB owns every cents value (AGENTS.md law).
 //
-// READ/WRITE SHAPE HONESTY NOTE (mirrors bankApi.ts's own header). Migration
-// 0040 is still-to-merge as this file is written. The verb table (design §5)
-// states most write-verb ARG NAMES loosely ("statement, p_ack_outstanding
-// uuid[], op_key") — this file normalizes every arg to the house p_*
-// convention. CORRECTED AT ASSEMBLY against the shipped 0040: only
-// propose_bank_rule takes a leading p_client; the other seven C-c verbs are
-// anchored by the object they name (statement / recon / line / exception /
-// rule / counterparty), exactly as the design's §5 verb table writes them, so
-// sending p_client would 404 the RPC on a name PostgREST cannot resolve. The
-// original note below is kept for the record.
-// (original) a leading p_client (every governed writer this repo has ever
-// shipped takes p_client explicitly — grep-verified across bankApi.ts/
-// openingApi.ts/counterpartyApi.ts/reviewApi.ts). The six read RPCs (§6) are
-// named with a bare arg list in the design; this file supplies p_-prefixed
-// names on the same convention. Every mapper is DEFENSIVE (the model.ts toXxx
-// idiom). CORRECT AT INTEGRATION against the real migration (see this lane's
-// build-0040/u1-notes.md for the full assumed-name register).
+// READ/WRITE SHAPE HONESTY NOTE (mirrors bankApi.ts's own header). The verbs
+// here are anchored by the object they name (statement / recon / line /
+// exception / counterparty), not by a leading p_client — this file normalizes
+// every arg to the house p_* convention on that basis. Every mapper is
+// DEFENSIVE (the model.ts toXxx idiom).
+//
+// F-A3 (Annex I): the bank-rules learn loop (propose/sign/retire_bank_rule,
+// list_bank_rule_candidates, list_bank_rules, list_bank_line_suggestions,
+// accept_bank_rule_suggestion) RETIRED WHOLE — the machine, not merely a
+// surface. clara.bank_rules and its historical rows stay KEEP-AS-HISTORY at
+// the DB layer (Annex I); nothing in this file reads or writes them anymore.
 
 import { rpc, type PgrestError } from "./wire";
 import { af2Admission, type Af2DraftInput } from "../bank/resolveBookModel";
 import type { SettleAllocationInput, BankAdjustmentInput } from "./bankApi";
 import {
-  toBankReconciliationView, toBankLineException, toBankRule, toBankRuleCandidate,
-  toBankLineSuggestion, toUnmatchedLine, toResolveAndBookBankLineResult,
+  toBankReconciliationView, toBankLineException, toUnmatchedLine, toResolveAndBookBankLineResult,
   type BankReconciliationView, type BankLineExceptionRow, type BankLineExceptionKind,
-  type BankLineExceptionDisposition, type BankRuleRow, type BankRuleKind,
-  type BankRuleCandidateRow, type BankLineSuggestionRow, type UnmatchedLineRow,
+  type BankLineExceptionDisposition, type UnmatchedLineRow,
   type ResolveAndBookBankLineResult,
 } from "../bank/reconModel";
 
@@ -57,40 +49,6 @@ export async function getBankReconciliation(token: string, statementId: string):
 export async function listUnmatchedLines(token: string, clientId: string): Promise<UnmatchedLineRow[]> {
   const out = await rpc("list_unmatched_lines", { p_client: clientId }, token);
   return (Array.isArray(out) ? out : []).map(toUnmatchedLine);
-}
-
-export async function listBankLineSuggestions(token: string, statementId: string): Promise<BankLineSuggestionRow[]> {
-  const out = await rpc("list_bank_line_suggestions", { p_statement: statementId }, token);
-  return (Array.isArray(out) ? out : []).map(toBankLineSuggestion);
-}
-
-export async function listBankRuleCandidates(token: string, clientId: string): Promise<BankRuleCandidateRow[]> {
-  const out = await rpc("list_bank_rule_candidates", { p_client: clientId }, token);
-  return (Array.isArray(out) ? out : []).map(toBankRuleCandidate);
-}
-
-/** [D4/A9 fix] `get_bank_rule` does not exist on the server — grep-verified
- *  against every `create function clara.<name>(` in packages/db/migrations:
- *  it is the only rpc() name this dashboard calls with no matching function,
- *  so the `bank_rule_proposal` ClaraPart card (shared/cards/
- *  BankRuleProposalCard.tsx) 404'd on every mount. `list_bank_rules(p_client)`
- *  already returns everything the card needs (client-scoped, one row per
- *  rule); this reads through THAT and picks the one row by id — no RPC is
- *  missing, only this wire fn was calling the wrong name. `retired_reason`
- *  is expected on the list_bank_rules envelope (a DB-lane addition landing
- *  alongside this fix, tracked separately from this dashboard change) — if
- *  it is absent when this runs, `toBankRule` degrades it to null, same as
- *  any other missing key, never a crash. */
-export async function getBankRule(token: string, clientId: string, ruleId: string): Promise<BankRuleRow | null> {
-  const out = await rpc("list_bank_rules", { p_client: clientId }, token);
-  const row = (Array.isArray(out) ? out : []).find(
-    (r) => rec(r).rule_id === ruleId || rec(r).id === ruleId,
-  );
-  return row ? toBankRule(row) : null;
-}
-
-function rec(v: unknown): Record<string, unknown> {
-  return (v ?? {}) as Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,35 +126,6 @@ export async function resolveBankLineException(
   if (args.counterpartLineId) body.p_counterpart_line = args.counterpartLineId;
   const out = await rpc("resolve_bank_line_exception", body, token);
   return toBankLineException(out);
-}
-
-/** propose_bank_rule(kind, pattern, proposal, op_key), bookkeeper floor.
- *  Evidence is DERIVED IN-VERB (design §4.3/§5) — never a caller arg here;
- *  refuses rule_evidence_insufficient (<3 sightings) / rule_pattern_already_
- *  signed. */
-export async function proposeBankRule(
-  token: string,
-  args: { clientId: string; kind: BankRuleKind; pattern: unknown; proposal: unknown },
-): Promise<BankRuleRow> {
-  const out = await rpc(
-    "propose_bank_rule",
-    { p_client: args.clientId, p_kind: args.kind, p_pattern: args.pattern, p_proposal: args.proposal, p_op_key: opKey() },
-    token,
-  );
-  return toBankRule(out);
-}
-
-/** sign_bank_rule(rule, op_key), OWNER floor. Refuses rule_not_proposed. */
-export async function signBankRule(token: string, clientId: string, ruleId: string): Promise<void> {
-  await rpc("sign_bank_rule", { p_rule: ruleId, p_op_key: opKey() }, token);
-}
-
-/** retire_bank_rule(rule, reason, op_key), OWNER floor. `reason` follows the
- *  house retire/decline convention (declineCodingRule, unmatchBankMatch) —
- *  bank_rules carries retired_by/at/reason columns (design §4.3). Refuses
- *  rule_not_signed. */
-export async function retireBankRule(token: string, clientId: string, ruleId: string, reason: string): Promise<void> {
-  await rpc("retire_bank_rule", { p_rule: ruleId, p_op_key: opKey(), p_reason: reason }, token);
 }
 
 /** set_counterparty_terms(cp, days, op_key), bookkeeper floor. Refuses
@@ -299,19 +228,4 @@ export async function resolveAndBookBankLine(
     token,
   );
   return toResolveAndBookBankLineResult(out);
-}
-
-/** accept_bank_rule_suggestion(...) — bookkeeper+ (ABI §A/§5, design S4): the
- *  suggestion chip's upgraded action. Direct-INSERT drafts a
- *  `flags.bank_rule_suggested` entry; the approve-time re-validation is
- *  `_adj_on_approve` arm (3) — refusals surface `suggestion_outstanding`
- *  (propose-time dedup) / `suggestion_stale` (approve-time), ABI §F. */
-export async function acceptBankRuleSuggestion(token: string, clientId: string, lineId: string, ruleId: string): Promise<{ entry_id: string | null }> {
-  const out = await rpc(
-    "accept_bank_rule_suggestion",
-    { p_client: clientId, p_line: lineId, p_rule: ruleId, p_op_key: opKey() },
-    token,
-  );
-  const o = (out ?? {}) as Record<string, unknown>;
-  return { entry_id: typeof o.entry_id === "string" ? o.entry_id : null };
 }

@@ -1,0 +1,16 @@
+// Fixture: Gate G1 MUST D — a correctly-shaped `workflowsByName` PLUS a
+// second, unverified "view" export (`backdoor`) that also carries workflow
+// values by spreading `workflows` and mixing in an extra entry. The
+// enqueue-provenance check (e) would trust `backdoor` equally to
+// `workflowsByName` purely by import source — this is exactly the class of
+// export the REGISTRY-VIEW-INTEGRITY check must reject.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export const backdoor = { ...workflows, evil: evilFn };

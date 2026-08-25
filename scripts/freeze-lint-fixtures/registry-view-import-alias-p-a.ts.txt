@@ -1,0 +1,19 @@
+// Fixture: round-8 (native adversarial leg, MUST B, P-A) — an IMPORT-SIDE alias of a "foreign"
+// binding (a name imported from a legitimate in-directory path, but under an ASSUMED name that
+// is not what the source module itself calls it). The export side is perfectly plain
+// (`export { smuggled };` — unaliased, satisfies the pre-round-8 rule), and the source path
+// resolves inside packages/runtime/workflows/ (satisfies the directory check) — the ONLY tell is
+// that the source module calls this thing "realHelper", not "smuggled". Must REJECT
+// (REGISTRY-EXPORTS-CLOSED-WORLD) — the export surface must never diverge from the frozen file's
+// own name for the export.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { realHelper as smuggled } from "./chatTurn.v13.tools.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { smuggled };

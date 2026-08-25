@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { redrive, TaxonomyHaltError, CONSUMER } from "../lib/relay.mjs";
+import { redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } from "../lib/relay.mjs";
 import * as fx from "./relay-fixtures.mjs";
 import { skip, drainInProcess, assertExactlyOnce, runRedriveCli } from "./relay-testkit.mjs";
 
@@ -103,6 +103,102 @@ test("(X5) redrive: missing dead-letter throws; still-uncovered reopens a resolv
 });
 
 // ===========================================================================
+// #1 (round-6, Codex) — redrive() now takes the SAME per-firm advisory lock
+// (wake-engine.mjs's own advanceCheckpointIfClear, 'wake_coalesce:'||firm_id) BEFORE either of
+// its own exit branches, closing a TOCTOU: the wake-engine's own checkpoint-writer bounds
+// itself on THIS dead-letter's live status, and without serialization a reopen landing between
+// that bound read and the checkpoint write would go unseen. Proven here the SAME way N1 proves
+// wake_source_gate's own JS/SQL pairing (packages/db/tests/g1-wake-engine.test.mjs) — a real
+// cross-session block via pg_blocking_pids, never a spelling comparison: hold the EXACT literal
+// wake-engine.mjs uses open on one session, call the REAL redrive() on another, prove it
+// genuinely blocks behind the holder regardless of which of redrive()'s own two branches it is
+// about to take.
+// ===========================================================================
+test("#1 (round-6, Codex): redrive() takes the SAME wake_coalesce advisory lock wake-engine.mjs's own checkpoint-writer does — a real cross-session block, not a spelling match", { skip }, async () => {
+  const { firm, owner, client } = await fx.buildFirm("x1lock");
+
+  // Any legitimate dead-letter works — the lock is acquired before redrive() ever branches on
+  // covered-vs-uncovered, so this cell does not need to construct the uncovered-type fixture
+  // the X5 cell above does.
+  await fx.pumpDocuments(owner, client, 1, "x1lock-cov");
+  const eventId = await fx.asRoot(async (c) => {
+    const r = await c.query(
+      "select id from clara.domain_events where firm_id = $1 and event_type = $2 order by seq limit 1",
+      [firm, fx.WAKE_EVENT_TYPE],
+    );
+    return r.rows[0].id;
+  });
+  await fx.asRuntime((c) =>
+    c.query(
+      `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status)
+         select $1, id, firm_id, seq, event_type, 'x1lock battery: forced dead-letter for the lock-pairing probe', 'pending'
+           from clara.domain_events where id = $2`,
+      [CONSUMER, eventId],
+    ),
+  );
+
+  let holderPid;
+  let releaseLock;
+  const lockHeld = new Promise((resolve) => { releaseLock = resolve; });
+  let lockAcquired;
+  const lockIsHeld = new Promise((resolve) => { lockAcquired = resolve; });
+  const c1 = await fx.getPool().connect();
+  const holderDone = (async () => {
+    await c1.query("begin");
+    holderPid = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+    // The EXACT literal wake-engine.mjs's own advanceCheckpointIfClear uses — a mismatch here
+    // would silently defeat the whole #1 fix, so this string is deliberately not factored
+    // through a shared helper that could drift independently on either side.
+    await c1.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_coalesce:${firm}`]);
+    lockAcquired();
+    await lockHeld;
+    await c1.query("rollback");
+  })();
+  await lockIsHeld;
+
+  let redriveDone = false;
+  let redrivePid;
+  let redrivePidKnown;
+  const redrivePidPromise = new Promise((resolve) => { redrivePidKnown = resolve; });
+  const redrivePromise = fx
+    .asRuntime(async (c) => {
+      // round-7 NOTE rider (native adversarial leg): capture THIS specific connection's own
+      // backend pid before calling redrive() on it, so the wait below can require exactly THIS
+      // pid be blocked — not "some backend, somewhere" (the original check counted ANY backend
+      // blocked by holderPid, sound here only because nothing else concurrent existed, not
+      // because the check itself pinned down WHICH backend was waiting).
+      redrivePid = (await c.query("select pg_backend_pid() as pid")).rows[0].pid;
+      redrivePidKnown();
+      return redrive(c, CONSUMER, eventId);
+    })
+    .then((r) => { redriveDone = true; return r; });
+  await redrivePidPromise;
+
+  let blocked = false;
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const r = await fx.rootQuery(
+      "select count(*)::int as n from pg_stat_activity where pid = $1 and wait_event_type = 'Lock' and $2 = any(pg_blocking_pids(pid))",
+      [redrivePid, holderPid],
+    );
+    if (r.rows[0].n > 0) {
+      blocked = true;
+      break;
+    }
+    await new Promise((res) => setTimeout(res, 25));
+  }
+
+  releaseLock();
+  await holderDone;
+  c1.release();
+  const result = await redrivePromise;
+
+  assert.equal(blocked, true, "#1 (round-6): THE CORE ASSERTION — redrive() must be observably BLOCKED behind the JS-side's own held wake_coalesce lock; if the two literals ever desync, this call would race straight through instead");
+  assert.equal(redriveDone, true, "mandatory: once the lock released, redrive() actually completed");
+  assert.equal(result.resolved, true, "mandatory setup: this dead-letter's own event type IS covered (wake-bound), so redrive resolves it — proving the lock acquisition happens before EITHER branch, not just the reopen one");
+});
+
+// ===========================================================================
 // (f) REDRIVE + (D4) TAXONOMY FLIP — uncovered ⇒ dead-letter ⇒ cover ⇒ redrive;
 //     batches straddling the repoint each carry exactly one version.
 // ===========================================================================
@@ -191,4 +287,74 @@ test("(f) uncovered ⇒ dead-letter, redrive after coverage; flip stamps one ver
     // a no-op UPDATE when already there).
     await fx.rootQuery("update clara.taxonomy_active set version = $1 where singleton = true", [origVersion]);
   }
+});
+
+// ===========================================================================
+// SHOULD C (round-8, native adversarial leg) — the checkpoint rewind used to fire on EVERY call
+// to redrive() that reached the wake-bound branch, even an IDEMPOTENT re-redrive of an
+// already-drained event whose own insertWakeIntent call hits its own ON CONFLICT DO NOTHING arm
+// (no new row, nothing changed) — a harmless but pointless rescan every single time. Fixed:
+// insertWakeIntent now reports whether it actually inserted (rowCount > 0); redrive()'s own
+// rewind is gated on that flag, so a second (or Nth) redrive of the SAME already-resolved event
+// touches the checkpoint not at all.
+// ===========================================================================
+test("SHOULD C: an idempotent re-redrive of an already-drained event does NOT rewind the wake_engine checkpoint a second time", { skip }, async () => {
+  const { firm, owner, client } = await fx.buildFirm("should-c");
+  await fx.pumpDocuments(owner, client, 1, "should-c-cov");
+  const eventId = await fx.asRoot(async (c) => {
+    const r = await c.query(
+      "select id from clara.domain_events where firm_id = $1 and event_type = $2 order by seq limit 1",
+      [firm, fx.WAKE_EVENT_TYPE],
+    );
+    return r.rows[0].id;
+  });
+  await fx.asRuntime((c) =>
+    c.query(
+      `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status, resolved_at)
+         select $1, id, firm_id, seq, event_type, 'should-c battery: simulated already-resolved dead-letter', 'resolved', now()
+           from clara.domain_events where id = $2`,
+      [CONSUMER, eventId],
+    ),
+  );
+
+  // Seed the wake_engine checkpoint AT/PAST this event's own seq, so a rewind (if it fired)
+  // would be an observable write — the same "trap is set" idiom every MUST A cell above uses.
+  const eventSeq = await fx.asRoot(async (c) => {
+    const r = await c.query("select seq from clara.domain_events where id = $1", [eventId]);
+    return Number(r.rows[0].seq);
+  });
+  await fx.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ($1,$2,$3)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [WAKE_ENGINE_CONSUMER, firm, eventSeq + 1000],
+  );
+
+  // FIRST redrive: a genuine mint. The rewind fires (checkpoint is at/past eventSeq) — this half
+  // is round-7's own mechanism, re-confirmed here only as mandatory setup for what follows.
+  const res1 = await fx.asRuntime((c) => redrive(c, CONSUMER, eventId));
+  assert.equal(res1.resolved, true);
+  assert.equal(res1.wakeBound, true, "mandatory setup: this event's own type IS wake-bound");
+  const cpAfterFirst = (await fx.rootQuery("select last_seq from clara.relay_checkpoints where consumer=$1 and firm_id=$2", [WAKE_ENGINE_CONSUMER, firm])).rows[0];
+  assert.equal(Number(cpAfterFirst.last_seq), eventSeq - 1, "mandatory setup: the FIRST redrive's own genuine mint DID rewind the checkpoint");
+
+  // Raise the checkpoint back up past eventSeq again — simulating a LATER, legitimate advance
+  // (the row drained and dispatched normally, and the checkpoint caught back up through ordinary
+  // operation) — so THE PROBE below has something observable to NOT disturb.
+  await fx.rootQuery(
+    `update clara.relay_checkpoints set last_seq = $3 where consumer=$1 and firm_id=$2`,
+    [WAKE_ENGINE_CONSUMER, firm, eventSeq + 500],
+  );
+
+  // THE PROBE: redrive the SAME event again. insertWakeIntent's own ON CONFLICT DO NOTHING means
+  // this call mints NOTHING new — the rewind must not fire at all.
+  const res2 = await fx.asRuntime((c) => redrive(c, CONSUMER, eventId));
+  assert.equal(res2.resolved, true);
+  assert.equal(res2.wakeBound, true);
+
+  const cpAfterSecond = (await fx.rootQuery("select last_seq from clara.relay_checkpoints where consumer=$1 and firm_id=$2", [WAKE_ENGINE_CONSUMER, firm])).rows[0];
+  assert.equal(
+    Number(cpAfterSecond.last_seq),
+    eventSeq + 500,
+    "SHOULD C: THE CORE ASSERTION — an idempotent re-redrive (no new insert) must leave the wake_engine checkpoint UNTOUCHED, not rewind it a second time for nothing",
+  );
 });

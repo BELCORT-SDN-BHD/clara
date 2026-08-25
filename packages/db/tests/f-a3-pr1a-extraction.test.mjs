@@ -49,7 +49,10 @@ import {
  *  `_human_ctx` anchor line the extraction replaced. Measured on a rig at frontier 0102. */
 const NINE = [
   { fn: "match_bank_line", sig: "clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
-    floor: "bookkeeper", overloads: 2, rung: true,
+    // overloads: 1 as of F-A3 PR-3 -- the /7 rule arity (the bank-rules machine's own overload)
+    // dropped with the rest of the retired machine (Annex I). Was 2 pre-PR-3; the drop is
+    // deliberately visible HERE rather than absorbed, per this cell's own exact-count law below.
+    floor: "bookkeeper", overloads: 1, rung: true,
     anchor: "  c := clara._human_ctx(clara.role_rank('bookkeeper'));",
     sha: "493cdd27cf8dad42a48e210f2514660fa4c17a5d1c03aad91355feeadc771744" },
   { fn: "unmatch_bank_match", sig: "clara.unmatch_bank_match(uuid,uuid,text,text)",

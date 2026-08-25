@@ -250,15 +250,27 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // per public bank-agency verb S1 extracts into a `_<verb>_core`, each an `unprovable` CoR
   // patch by construction (the installed body is the LIVE prosrc, read fresh from the catalog
   // at apply — never a literal in this file's own text) and each independently rig-measured to
-  // carry no word-bounded "wiki" token anywhere in its body. Why + the full declared target set
-  // per key live in wiki-lint-checks.mjs. F-A4 PR-1b's attest_close_exception arm does NOT add
-  // a twelfth: MEASURED (gate B3), plpgsql does not resolve an embedded relation at CREATE time
-  // even with check_function_bodies=on, so that arm ships as plain static SQL and never needed
-  // a waiver at all — a dynamic-SQL entry proposed, tested, and correctly NOT taken. The NEXT
-  // entry must trip this pin and earn its own reviewed justification, exactly as these ten did.
+  // carry no word-bounded "wiki" token anywhere in its body. F-A3 PR-3
+  // (0129_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder) adds an ELEVENTH core:
+  // SS2 factors book_staff_advance_application onto the exact same PR-1a idiom (OQ-7's
+  // staff-advance sibling), an `unprovable` CoR patch by construction for the same reason as
+  // the first nine. F-A6 PR-1's `wake_freeform_read` is DIFFERENT IN KIND from all eleven: the
+  // estate's ONE genuinely unreconstructible statement — the SQL is a parameter the model
+  // composed, which is the shape ADR-0071 fixed. What upholds 0017:1424-1426 there is the ACL,
+  // not the text: the statement executes as `clara_freeform_ro`, which holds SELECT on 35
+  // enumerated relations and on NO wiki relation, so a wiki payload is refused by Postgres at
+  // planning with `(42501, relation_denied)`. Why + the full declared target set per key live
+  // in wiki-lint-checks.mjs. F-A4 PR-1b's attest_close_exception arm does NOT add an entry:
+  // MEASURED (gate B3), plpgsql does not resolve an embedded relation at CREATE time even with
+  // check_function_bodies=on, so that arm ships as plain static SQL and never needed a waiver
+  // at all — a dynamic-SQL entry proposed, tested, and correctly NOT taken. Twelve pinned keys
+  // total: the eleven CoR-idiom cores plus the one ACL-walled composed statement. The NEXT
+  // entry must trip this pin and earn its own reviewed justification, exactly as these
+  // twelve did.
   const expectedKeys = [
     "add_bank_account(uuid,text,text,text,text,uuid,text)",
     "apply_open_items(uuid,jsonb,text,text)",
+    "book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)",
     "complete_bank_reconciliation(uuid,uuid[],text)",
     "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
     "resolve_and_book_bank_line(uuid,uuid,text,text,jsonb,jsonb,jsonb,jsonb,bigint,text,text,text,boolean)",
@@ -267,7 +279,8 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
     "upsert_account(uuid,text,text,text,text,text,text)",
     "void_bank_reconciliation(uuid,text,text)",
     "void_bank_statement(uuid,uuid,text,text)",
-  ];
+    "wake_freeform_read(text,text,uuid,text,integer)",
+  ].sort();
   const actualKeys = [...DYNAMIC_SQL_ALLOWLIST.keys()].sort();
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
     throw new Error(`the allowlist is pinned to exactly ${JSON.stringify(expectedKeys)}; it now carries ${JSON.stringify(actualKeys)} — each entry needs its own reviewed justification`);

@@ -1,0 +1,17 @@
+// Fixture: round-6 (Codex #11, probe 1) — the declared NAME `workflowsByName` is written with
+// a unicode escape sequence on its first letter (w = "w"). A plain ASCII regex over the
+// raw source text never sees the literal string "workflowsByName" here at all (it sees the
+// escape sequence), so round-5's own text-pattern extractor was BLIND to this declaration
+// entirely — the fake alternate view below would have been silently invisible to the census,
+// neither recognized as (and verified against) `workflowsByName`'s required exact shape, nor
+// flagged as a second unverified view. The real TypeScript parser resolves `Identifier.text`
+// to the fully NORMALIZED name — `workflowsByName` — structurally, so this must be caught as a
+// REGISTRY-VIEW-INTEGRITY violation (the initializer is not `Object.freeze(workflows)`).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const \u0077orkflowsByName = { closeExample: () => ({ evil: true }) };

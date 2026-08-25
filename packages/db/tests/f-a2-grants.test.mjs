@@ -399,12 +399,29 @@ test("f-a2.c12.d34-needs-client a CLIENT-LESS interactive_client mint is REFUSED
 
 test("f-a2.c12.d34-one-row the pinned chat kind may ask, and may NOT post or draft (D34)", async (t) => {
   if (await gateCore(t)) return;
-  // THE WALL, READ AS A CLOSED SET. `wake_open_question` writes no entry, and every posting and
-  // drafting verb is absent for this kind. Asserting the EXACT row set rather than "post is not
-  // in it" is what makes a later addition - a fifth verb quietly allowlisted - turn this red.
-  const rows = await rootQuery(
+  // THE WALL, READ AS A REGISTERED ROSTER, not a hard-coded row set. `wake_open_question`
+  // writes no entry and every posting/drafting verb is absent for this kind — that wall is
+  // real and stays asserted below (the posting-verb filter). What must NOT stay a literal is
+  // the row SET itself: F-A6 PR-1 landed the SAME `deepEqual(..., ["wake_open_question"])`
+  // shape in f-a2-chat-limb.test.mjs's c13.one-row and hit exactly this — a later, LAWFUL
+  // registration (wake_freeform_read) turning red is the closed-world-by-hardcode defect the
+  // roster fixture exists to retire, not a regression to chase with a second literal. Registered
+  // in packages/db/tests/fixtures/wake-allowlist-roster.mjs's WAKE_ALLOWLIST_ROSTER, same
+  // shared fixture c13.one-row already uses.
+  const { WAKE_ALLOWLIST_ROSTER, appliedEntries, rosterFailures } =
+    await import("./fixtures/wake-allowlist-roster.mjs");
+  const roster = WAKE_ALLOWLIST_ROSTER.interactive_client;
+  const live = (await rootQuery(
     `select function_name from clara.wake_fn_allowlist
-      where wake_kind='interactive_client' order by function_name`);
-  assert.deepEqual(rows.rows.map((r) => r.function_name), ["wake_open_question"],
-    `c12.d34-one-row: the pinned chat kind is allowlisted for EXACTLY one verb, and it is the one that posts nothing (got ${JSON.stringify(rows.rows.map((r) => r.function_name))})`);
+      where wake_kind='interactive_client' order by function_name`)).rows.map((r) => r.function_name);
+  const applied = await appliedEntries(roster, rootQuery);
+  const { failures } = rosterFailures(
+    "c12.d34-one-row", live, applied.map((e) => e.fn), roster.map((e) => e.fn),
+  );
+  assert.deepEqual(failures, [], failures.join(" | "));
+  // POSTING IS STILL THE WALL: no row of this kind may name a posting or drafting verb, whoever
+  // registers it — this half stays a literal because it is not a roster.
+  const posting = live.filter((fn) => /^wake_(post_entry|draft_entry|approve|record_client_resolution)$/.test(fn));
+  assert.deepEqual(posting, [],
+    `c12.d34-one-row: the pinned chat kind must never carry a posting/drafting verb (got ${JSON.stringify(posting)})`);
 });

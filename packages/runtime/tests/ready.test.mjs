@@ -6,6 +6,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import * as rig from "./rig.mjs";
 import { checkReadiness } from "../lib/health.mjs";
 
@@ -61,6 +62,55 @@ test("ready: world ON with a STALE world beat FAILS (world dead)", { skip }, asy
     const r = await checkReadiness();
     assert.equal(r.ready, false, "not ready when the world beat is stale");
     assert.equal(r.checks.world.ok, false, "world check failed");
+  } finally {
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+// round-8 (SHOULD D, native adversarial leg) — wakeEngineHealth's own heldBelowCheckpoint
+// counter (round-7's defense-in-depth for the checkpoint-durability hole family) was computed
+// but INERT: every sibling wake-engine signal gets wired into a /ready WARN, this one alone did
+// not, so the docstring's own "surfaces on /ready" claim was false as shipped. This cell
+// constructs the strand shape DIRECTLY (a held wake row whose own event_seq sits at its firm's
+// wake_engine checkpoint) rather than via a full engine cycle — proving the WIRING specifically,
+// not the mechanism that produces the shape (wake-engine.test.mjs's own cells own that).
+test("ready: a held wake-engine row at/below its firm's own checkpoint WARNs on /ready (never a FAIL)", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    const w = await rig.buildFirm("ready-strand");
+    const intent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+    const seq = Number(
+      (await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [intent.intentId])).rows[0].event_seq,
+    );
+    const taskId = (
+      await rig.rootQuery(
+        "insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id",
+        [intent.intentId],
+      )
+    ).rows[0].id;
+    await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [
+      intent.intentId,
+    ]);
+    await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intent.intentId, randomUUID()]);
+    assert.ok(taskId, "mandatory setup: the held row exists");
+    // Seed the wake_engine checkpoint directly AT this row's own seq — the exact strand shape
+    // heldBelowCheckpoint exists to catch (readHeldWakeRows' own event_seq > lastSeq gate would
+    // never surface this row again), constructed directly rather than via a full engine cycle.
+    await rig.rootQuery(
+      `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('wake_engine',$1,$2)
+         on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+      [w.firm, seq],
+    );
+    const r = await checkReadiness();
+    assert.equal(r.ready, true, "a strand is a WARN, never a /ready FAIL — the load-balancer must keep routing");
+    assert.ok(
+      r.warnings.some((x) => /held wake-engine row\(s\) sitting AT OR BELOW/.test(x)),
+      `expected a heldBelowCheckpoint WARN line, got: ${JSON.stringify(r.warnings)}`,
+    );
   } finally {
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;

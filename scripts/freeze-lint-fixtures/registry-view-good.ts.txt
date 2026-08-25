@@ -1,0 +1,15 @@
+// Fixture: Gate G1 MUST D — a correctly-shaped `workflowsByName` view (the
+// generic+arrow-typed annotation is deliberate: it is what broke a naive
+// "first bare `=`" scanner during development, since `(x: any) => Y` itself
+// contains a `=`) plus a pre-existing SAFE derivation export (`workflowNames`,
+// matching the real repo's own shape) that must NOT be flagged.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export const workflowNames: string[] = Object.keys(workflows);

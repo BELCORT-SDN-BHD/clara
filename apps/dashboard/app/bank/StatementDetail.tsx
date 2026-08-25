@@ -8,28 +8,22 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
-import { getBankStatement, voidBankStatement, unmatchBankMatch, completePendingMatch } from "../shared/bankApi";
-import { getBankReconciliation, listBankLineSuggestions, exceptBankLine, acceptBankRuleSuggestion } from "../shared/reconApi";
+import {
+  getBankStatement, voidBankStatement, unmatchBankMatch, completePendingMatch,
+  listOpenBankLineExceptionProposals, type BankAgentProposalRow,
+} from "../shared/bankApi";
+import { getBankReconciliation, exceptBankLine } from "../shared/reconApi";
 import { DocViewer } from "../shared/cards/DocViewer";
 import {
   statementStatusLabel, tieBannerState, tieVarianceCents, lineMatchLabel,
   type BankStatementLineRow, type BankStatementRow,
 } from "./model";
 import { describeBankRefusal, toggleInSet } from "./matchModel";
-import {
-  bankRuleProposalLabel, exceptionKindLabel, EXCEPTION_KINDS,
-  type BankLineSuggestionRow, type BankLineExceptionKind,
-} from "./reconModel";
-import type { CounterpartyKind } from "../shared/counterpartyApi";
+import { exceptionKindLabel, EXCEPTION_KINDS, type BankLineExceptionKind } from "./reconModel";
 import { fmtCents, fmtDeltaCents } from "../shared/fmt";
 import { MatchingWorkspace } from "./MatchingWorkspace";
 import { ReconciliationPanel, voidUnwindCountFor } from "./ReconciliationPanel";
 import styles from "./bank.module.css";
-
-/** A confirmed match/settle suggestion chip's pre-fill (design §7) — cleared
- *  whenever the selection changes so a stale rule id can never ride a
- *  different line into the write call. */
-type PendingSuggestion = { lineId: string; ruleId: string; counterpartyId: string; kind: CounterpartyKind };
 
 export function StatementDetail({
   token, clientId, statementId, statements, onChanged,
@@ -54,8 +48,7 @@ export function StatementDetail({
   const [voidReason, setVoidReason] = useState("");
   const [voidBusy, setVoidBusy] = useState(false);
   const [voidErr, setVoidErr] = useState<{ message: string; reason: string | null } | null>(null);
-  const [suggestions, setSuggestions] = useState<BankLineSuggestionRow[]>([]);
-  const [pendingSuggestion, setPendingSuggestion] = useState<PendingSuggestion | null>(null);
+  const [exceptionProposals, setExceptionProposals] = useState<BankAgentProposalRow[]>([]);
   const [exceptOpenLineId, setExceptOpenLineId] = useState<string | null>(null);
   const [exceptBusy, setExceptBusy] = useState(false);
   const [exceptErr, setExceptErr] = useState<{ id: string; message: string; reason: string | null } | null>(null);
@@ -66,13 +59,13 @@ export function StatementDetail({
     setErr(null);
     try {
       setStatement(await getBankStatement(token, statementId));
-      setSuggestions(await listBankLineSuggestions(token, statementId).catch(() => []));
+      setExceptionProposals(await listOpenBankLineExceptionProposals(token, clientId).catch(() => []));
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [token, statementId]);
+  }, [token, statementId, clientId]);
 
   useEffect(() => { setSelected(new Set()); void reload(); }, [reload]);
 
@@ -114,6 +107,37 @@ export function StatementDetail({
     try {
       await exceptBankLine(token, { clientId, lineId, kind, reason });
       setExceptOpenLineId(null);
+      await reload();
+      onChanged();
+    } catch (e) {
+      const pe = e as PgrestError;
+      setExceptErr({ id: lineId, message: pe.message ?? String(e), reason: pe.reason ?? null });
+    } finally {
+      setExceptBusy(false);
+    }
+  }
+
+  /** M.2's exception-proposal door: one click that calls the SAME `except_bank_line`
+   *  the manual form below uses, pre-filled from an OPEN `bank_agent_proposals` row
+   *  (kind='line_exception') — `t_bank_agent_proposal_accept` (0121 DDL 6) stamps the
+   *  proposal `accepted` as a side effect of that insert, so no separate confirm verb
+   *  exists or is needed. Fails closed on an unreadable payload rather than guessing
+   *  a kind/reason the DB core did not actually write. */
+  async function doApproveProposal(lineId: string, proposal: BankAgentProposalRow) {
+    const kind = proposal.payload.kind;
+    const reason = proposal.payload.reason;
+    if ((kind !== "bank_error" && kind !== "disputed") || typeof reason !== "string") {
+      setExceptErr({ id: lineId, message: "Clara's proposed exception carries an unreadable payload — use the manual form below instead.", reason: null });
+      return;
+    }
+    const evidenceDocumentId = proposal.payload.evidence_document;
+    setExceptBusy(true);
+    setExceptErr(null);
+    try {
+      await exceptBankLine(token, {
+        clientId, lineId, kind, reason,
+        evidenceDocumentId: typeof evidenceDocumentId === "string" ? evidenceDocumentId : null,
+      });
       await reload();
       onChanged();
     } catch (e) {
@@ -195,18 +219,14 @@ export function StatementDetail({
         <LinesTable
           lines={lines}
           selected={selected}
-          onToggle={(id) => { setPendingSuggestion(null); setSelected((s) => toggleInSet(s, id)); }}
+          onToggle={(id) => setSelected((s) => toggleInSet(s, id))}
           lineBusy={lineBusy}
           lineErr={lineErr}
           onUnmatch={(matchId, id) => runLine(id, () => unmatchBankMatch(token, clientId, matchId, "unmatched from /bank"))}
           onCompletePending={(matchId, id) => runLine(id, () => completePendingMatch(token, clientId, matchId))}
           voidUnwindCount={voidUnwindCount}
-          suggestions={suggestions}
-          onChipSelect={(lineId, ruleId, counterpartyId, kind) => {
-            setSelected(new Set([lineId]));
-            setPendingSuggestion({ lineId, ruleId, counterpartyId, kind });
-          }}
-          onAcceptSuggestion={(lineId, ruleId) => runLine(lineId, () => acceptBankRuleSuggestion(token, clientId, lineId, ruleId))}
+          exceptionProposals={exceptionProposals}
+          onApproveProposal={(lineId, proposal) => void doApproveProposal(lineId, proposal)}
           exceptOpenLineId={exceptOpenLineId}
           onToggleExceptForm={(lineId) => { setExceptErr(null); setExceptOpenLineId((cur) => (cur === lineId ? null : lineId)); }}
           onExcept={(lineId, kind, reason) => void doExcept(lineId, kind, reason)}
@@ -221,10 +241,7 @@ export function StatementDetail({
           clientId={clientId}
           statement={st}
           selectedLines={selectedLines}
-          onDone={() => { setSelected(new Set()); setPendingSuggestion(null); void reload(); onChanged(); }}
-          viaRuleId={pendingSuggestion && selectedLines.length === 1 && selectedLines[0]!.id === pendingSuggestion.lineId ? pendingSuggestion.ruleId : null}
-          suggestedCounterpartyId={pendingSuggestion && selectedLines.length === 1 && selectedLines[0]!.id === pendingSuggestion.lineId ? pendingSuggestion.counterpartyId : null}
-          suggestedKind={pendingSuggestion && selectedLines.length === 1 && selectedLines[0]!.id === pendingSuggestion.lineId ? pendingSuggestion.kind : null}
+          onDone={() => { setSelected(new Set()); void reload(); onChanged(); }}
         />
       ) : null}
     </div>
@@ -233,7 +250,7 @@ export function StatementDetail({
 
 function LinesTable({
   lines, selected, onToggle, lineBusy, lineErr, onUnmatch, onCompletePending, voidUnwindCount,
-  suggestions, onChipSelect, onAcceptSuggestion, exceptOpenLineId, onToggleExceptForm, onExcept, exceptBusy, exceptErr,
+  exceptionProposals, onApproveProposal, exceptOpenLineId, onToggleExceptForm, onExcept, exceptBusy, exceptErr,
 }: {
   lines: BankStatementLineRow[];
   selected: Set<string>;
@@ -246,9 +263,10 @@ function LinesTable({
    *  later, same-account receipts are also complete — chain order would
    *  force voiding all N before an unmatch/cancel here is even reachable. */
   voidUnwindCount: number | null;
-  suggestions: BankLineSuggestionRow[];
-  onChipSelect: (lineId: string, ruleId: string, counterpartyId: string, kind: CounterpartyKind) => void;
-  onAcceptSuggestion: (lineId: string, ruleId: string) => void;
+  /** M.2 — every OPEN `bank_agent_proposals` row of kind='line_exception' for
+   *  this client, matched to a line by `subject_id`. */
+  exceptionProposals: BankAgentProposalRow[];
+  onApproveProposal: (lineId: string, proposal: BankAgentProposalRow) => void;
   exceptOpenLineId: string | null;
   onToggleExceptForm: (lineId: string) => void;
   onExcept: (lineId: string, kind: BankLineExceptionKind, reason: string) => void;
@@ -264,7 +282,7 @@ function LinesTable({
         </thead>
         <tbody>
           {lines.map((l) => {
-            const lineSuggestions = suggestions.filter((sg) => sg.line_id === l.id);
+            const proposal = exceptionProposals.find((p) => p.subject_id === l.id);
             return (
               <Fragment key={l.id}>
                 <tr className={selected.has(l.id) ? styles.lineRowSelected : undefined}>
@@ -300,13 +318,14 @@ function LinesTable({
                     {lineErr?.id === l.id ? <div className={styles.errorText}>{lineErr.message}{describeBankRefusal(lineErr.reason) ? ` — ${describeBankRefusal(lineErr.reason)}` : ""}</div> : null}
                   </td>
                 </tr>
-                {l.match_state === "unmatched" && lineSuggestions.length > 0 ? (
+                {l.match_state === "unmatched" && proposal ? (
                   <tr>
                     <td></td>
                     <td colSpan={7}>
-                      <SuggestionChips
-                        line={l} suggestions={lineSuggestions} onSelect={onChipSelect}
-                        onAccept={onAcceptSuggestion} busy={lineBusy === l.id}
+                      <ExceptionProposalChip
+                        proposal={proposal} busy={exceptBusy}
+                        err={exceptErr?.id === l.id ? exceptErr : null}
+                        onApprove={() => onApproveProposal(l.id, proposal)}
                       />
                     </td>
                   </tr>
@@ -328,57 +347,33 @@ function LinesTable({
   );
 }
 
-/** design §7 + Wave D-b design §5 (the `bank_rule_suggested` producer): "suggestion
- *  chips on unmatched lines (match/settle chip pre-fills the existing panels +
- *  passes via_rule; coding chip opens a pre-filled generic draft flow...)". A
- *  `match_settle` chip selects the line and hands the rule id + proposed
- *  counterparty up to StatementDetail, which threads it through
- *  MatchingWorkspace → SettleLinePanel. [Wave D-b: the span→button upgrade]
- *  a `coding` chip now calls `accept_bank_rule_suggestion` directly — the
- *  producer direct-INSERTs the coding draft itself (design §5), so there is
- *  no separate generic-draft form to open; refusals (`suggestion_outstanding`
- *  at accept time, `suggestion_stale` at approve time) surface through the
- *  same lineErr/describeBankRefusal idiom every other line action uses. */
-function SuggestionChips({
-  line, suggestions, onSelect, onAccept, busy,
+/** M.2's exception-proposal door (Annex I: "its slot becomes the exception-
+ *  proposal door", replacing the retired rule-suggestion coding chip). An
+ *  unmatched line with an OPEN `bank_agent_proposals` row of kind=
+ *  'line_exception' gets one button, pre-filled from that row's own payload
+ *  (kind/reason) — clicking it calls the SAME `except_bank_line` the manual
+ *  form below uses; `t_bank_agent_proposal_accept` (0121 DDL 6) resolves the
+ *  proposal as a side effect of that insert. No separate confirm verb exists
+ *  or is needed. A line with no open proposal renders nothing here (the
+ *  manual "except…" link in the row above is the only door for it). */
+function ExceptionProposalChip({
+  proposal, busy, err, onApprove,
 }: {
-  line: BankStatementLineRow;
-  suggestions: BankLineSuggestionRow[];
-  onSelect: (lineId: string, ruleId: string, counterpartyId: string, kind: CounterpartyKind) => void;
-  onAccept: (lineId: string, ruleId: string) => void;
+  proposal: BankAgentProposalRow;
   busy: boolean;
+  err: { message: string; reason: string | null } | null;
+  onApprove: () => void;
 }) {
+  const kind = typeof proposal.payload.kind === "string" ? proposal.payload.kind : null;
+  const reason = typeof proposal.payload.reason === "string" ? proposal.payload.reason : null;
+  const label = kind ? exceptionKindLabel(kind) : "(exception)";
   return (
-    <div className={styles.actions} style={{ marginTop: 0 }}>
-      {suggestions.map((sg) => {
-        const label = bankRuleProposalLabel(sg);
-        if (sg.kind === "match_settle") {
-          const domain = sg.proposal.domain;
-          const counterpartyId = typeof sg.proposal.counterparty_id === "string" ? sg.proposal.counterparty_id : "";
-          const kind: CounterpartyKind = domain === "ap" ? "vendor" : "customer";
-          return (
-            <button
-              key={`${sg.kind}:${sg.rule_id}`}
-              className={styles.buttonSecondary}
-              disabled={!counterpartyId}
-              onClick={() => onSelect(line.id, sg.rule_id, counterpartyId, kind)}
-            >
-              suggested — {label}
-            </button>
-          );
-        }
-        return (
-          <button
-            key={`${sg.kind}:${sg.rule_id}`}
-            className={styles.buttonSecondary}
-            disabled={busy}
-            title="Accepts the coding rule — direct-drafts a generic entry from it (bookkeeper+; a checker approves it like any other draft)."
-            onClick={() => onAccept(line.id, sg.rule_id)}
-          >
-            {busy ? "Accepting…" : `suggested coding — ${label}`}
-          </button>
-        );
-      })}
+    <div className={styles.actions} style={{ marginTop: 0, flexDirection: "column", alignItems: "stretch" }}>
+      <button className={styles.buttonSecondary} disabled={busy} onClick={onApprove}>
+        {busy ? "Approving…" : `Approve Clara's proposed exception — ${label}`}
+      </button>
+      {reason ? <p className={styles.hint}>{reason}</p> : null}
+      {err ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason) ? ` — ${describeBankRefusal(err.reason)}` : ""}</p> : null}
     </div>
   );
 }

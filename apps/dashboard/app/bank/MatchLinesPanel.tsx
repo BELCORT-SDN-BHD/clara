@@ -18,17 +18,13 @@ import { fmtCents } from "../shared/fmt";
 import styles from "./bank.module.css";
 
 export function MatchLinesPanel({
-  token, clientId, statement, selectedLines, onDone, viaRuleId,
+  token, clientId, statement, selectedLines, onDone,
 }: {
   token: string;
   clientId: string;
   statement: BankStatementRow;
   selectedLines: BankStatementLineRow[];
   onDone: () => void;
-  /** Wave C-c (design §5 splice #4): a confirmed `match_settle` suggestion's
-   *  signed rule id (shared/reconApi.ts's list_bank_line_suggestions chip) —
-   *  omitted on an ordinary human match. */
-  viaRuleId?: string | null;
 }) {
   const [candidates, setCandidates] = useState<MatchCandidateEntryRow[]>([]);
   const [coaAccounts, setCoaAccounts] = useState<AccountRow[]>([]);
@@ -76,7 +72,6 @@ export function MatchLinesPanel({
         clientId, lineIds: selectedLines.map((l) => l.id),
         entries: allocations, adjustments: adjustments.length ? adjustments : null,
         ackPeriodExceptions: ack,
-        viaRuleId: viaRuleId ?? null,
       });
       setAllocations([]);
       setAdjustments([]);
@@ -92,7 +87,6 @@ export function MatchLinesPanel({
 
   return (
     <div>
-      {viaRuleId ? <p className={styles.hint}>Confirming a suggested rule match — submitting will stamp this match &lsquo;via rule&rsquo; (design §4.3).</p> : null}
       <p className={styles.sectionTitle}>Candidate entries on this account</p>
       {candidates.length === 0 ? (
         <p className={styles.muted}>No approved candidate entries touching this bank account.</p>

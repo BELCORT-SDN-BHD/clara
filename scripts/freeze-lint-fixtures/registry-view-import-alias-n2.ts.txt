@@ -1,0 +1,21 @@
+// Fixture: round-9 (native adversarial leg, MUST, N2) — an ES2022 STRING-LITERAL import alias
+// (`import { "evil" as chatTurn_v1 } from "./chatTurn.v1.js"`). TypeScript 5.9.3 parses this with
+// ZERO diagnostics; `propertyName` is a StringLiteral node, not an Identifier. The OLD
+// `ts.isIdentifier(propertyName)` ternary guard failed on exactly this shape and silently fell
+// back to the LOCAL name — pretending no alias existed at all — so `b.imported === item.exported`
+// passed and the round-8 import-alias pin never fired. The source module ("./chatTurn.v1.js")
+// almost certainly does not export anything literally named "evil" at all (this is a smuggling
+// attempt, not a legitimate re-export of a real export under a string name) — but even setting
+// that aside, "evil" != "chatTurn_v1" is exactly the import-side alias mismatch round-8 exists to
+// catch. Must REJECT (REGISTRY-EXPORTS-CLOSED-WORLD).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { "evil" as chatTurn_v1 } from "./chatTurn.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { chatTurn_v1 };

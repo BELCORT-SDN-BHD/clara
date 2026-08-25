@@ -26,18 +26,20 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  opk, reasonOf, endPool, printLaneNotes, printSkipCount, noteLane, entryStatusOf,
+  opk, rootQuery, endPool, printLaneNotes, printSkipCount, noteLane, entryStatusOf,
 } from "./a21-helpers.mjs";
 import {
-  af2SubstrateReady, skipAf2, refusesWithCode, caught,
+  af2SubstrateReady, skipAf2, refusesWithCode,
   acceptBankRuleSuggestion, enrolStaffAdvanceAccount, withdrawDraft,
   CLR10, CLR39, T,
   ADVCODE, CODEACC,
   af2World, freshAf2Client, signedCodingRule,
   entryRowOf, entryLinesOf, entriesWithFlag, advanceRowsOf, approveEntry,
 } from "./x42-af2-world.mjs";
+import { stageSuggestionDraft } from "./x42-producer-retired-fixtures.mjs";
 
 let live = false;
+let live3 = false; // arm (3), review round SHOULD A3 -- see x42.prod-27's own header
 let world = null;
 
 /** The two tokens this file pins. Neither is in the ABI §F table yet — that is a
@@ -46,11 +48,33 @@ let world = null;
 const T_INELIGIBLE = "suggestion_line_ineligible";
 const AXIS_ELIGIBILITY = "line_eligibility";
 
+/** F-A3 PR-3 (Annex I) drops clara.accept_bank_rule_suggestion whole -- x42.prod-26's entire
+ *  subject (the eligibility census applied at the ACCEPT door). `db-slice-frontiers` still
+ *  runs x42.prod-26 at the D-b2 frontier (test-list-d-b2.txt), where the accept door is exactly
+ *  as designed. REVERSE/upper gate, the x42-s5-helpers.mjs `pr3Landed` precedent: skip loudly
+ *  once the producer is retired on the frontier this rig is running against, never fail.
+ *
+ *  x42.prod-27 is DIFFERENT (review round SHOULD A3): its subject is arm (3)'s SEPARATE
+ *  re-check at APPROVE time, which the drop does NOT retire (0129 SS0's own KEEP finding) --
+ *  only the fixture-construction path needed a successor
+ *  (x42-producer-retired-fixtures.mjs). `live3` gates ONLY on the base substrate, never on
+ *  producerRetired(), so x42.prod-27 runs at HEAD on either side of the retirement. */
+async function producerRetired() {
+  return (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
+}
+
 before(async () => {
   live = await af2SubstrateReady();
+  live3 = live;
   if (!live) {
     noteLane("0037/0038/0040 bank substrate absent — the x42 PRODUCER role-eligibility battery is dormant");
     return;
+  }
+  if (await producerRetired()) {
+    live = false;
+    noteLane("F-A3 PR-3 retires clara.accept_bank_rule_suggestion whole (Annex I) — x42.prod-26 (the accept door's own eligibility check) is dormant on this frontier; db-slice-frontiers still proves it green at D-b2 (0041_asm..0045). x42.prod-27 (arm (3)) is unaffected -- see its own header.");
   }
   world = await af2World();
 });
@@ -141,24 +165,29 @@ test("x42.prod-26 accept refuses a rule proposing an ENROLLED staff-advance acco
 // NAMES ("withdraw the draft") must actually work: a refusal whose named remedy
 // is itself refused is the walled-corridor class this ladder has already ruled a
 // defect twice.
+//
+// F-A3 PR-3 (Annex I) review round successor: the fixture (a signed rule + an
+// outstanding suggestion) is staged by x42-producer-retired-fixtures.mjs
+// (propose/sign/accept_bank_rule_suggestion all retire; arm (3) itself does
+// not). ONE sub-claim of the original cell retires WITH the accept door and is
+// NOT replaced here, same class as x42.prod-26 itself: "the door now refuses a
+// fresh accept on the same line by name" tested the ACCEPT DOOR's own
+// eligibility check (T_INELIGIBLE), which no longer exists to test.
 // ===========================================================================
 test("x42.prod-27 arm (3): an account ENROLLED after the accept refuses suggestion_stale (axis line_eligibility) at approve, no advance is born, and the named remedy works", async (t) => {
-  if (skipAf2(t, live)) return;
+  if (skipAf2(t, live3)) return;
   const client = await freshAf2Client("prodrole2");
   const owner = world.users.alice;
-  const w = await signedCodingRule({
+  const s = await stageSuggestionDraft({
     client, owner, proposer: world.users.bob, accountCode: ADVCODE,
     tokens: ["petty", "advance"], narration: "PETTY ADVANCE TRANSFER",
   });
 
-  // Accepted while the account is still an ordinary asset code — this half MUST
-  // succeed, or the cell would be proving the accept door instead of arm (3).
-  const receipt = await acceptBankRuleSuggestion(world.users.bob, {
-    client, line: w.lines[0].id, rule: w.rule, opKey: opk("x42-role2-accept"),
-  });
-  const ent = await entryRowOf(receipt.entry_id);
+  // Staged while the account is still an ordinary asset code — this half MUST
+  // hold, or the cell would be proving something other than arm (3).
+  const ent = await entryRowOf(s.entry);
   assert.equal(ent.status, "draft", "mandatory setup: the suggestion is an outstanding DRAFT");
-  const legs = await entryLinesOf(receipt.entry_id);
+  const legs = await entryLinesOf(s.entry);
   const advLeg = legs.find((l) => l.account_code === ADVCODE);
   assert.ok(advLeg && Number(advLeg.debit_cents) > 0,
     "…whose DEBIT leg sits on the account about to be enrolled (the soft-birth door)");
@@ -169,7 +198,7 @@ test("x42.prod-27 arm (3): an account ENROLLED after the accept refuses suggesti
 
   const err = await refusesWithCode(
     () => approveEntry(owner, {
-      entry: receipt.entry_id, expectedRevision: ent.revision_token, opKey: opk("x42-role2-apr"),
+      entry: s.entry, expectedRevision: s.token, opKey: opk("x42-role2-apr"),
     }),
     CLR39, T.suggestionStale,
     "x42.prod-27 approving a suggestion whose account was enrolled underneath it",
@@ -180,28 +209,19 @@ test("x42.prod-27 arm (3): an account ENROLLED after the accept refuses suggesti
   assert.ok(detail.includes("account_reserved"),
     `…carrying the shared census's finer eligibility_axis (got detail=${detail || "(none)"})`);
 
-  assert.equal(await entryStatusOf(receipt.entry_id), "draft",
+  assert.equal(await entryStatusOf(s.entry), "draft",
     "the refused approval leaves the suggestion a DRAFT — nothing half-posted");
   assert.equal((await advanceRowsOf(client)).length, 0,
     "THE MONEY ASSERTION: no staff advance was soft-birthed, so no named person owes anything");
 
   // THE NAMED REMEDY, EXERCISED. The message says "withdraw the draft"; it works,
   // and the line is free for a corrected rule afterwards.
-  const stillDraft = await entryRowOf(receipt.entry_id);
+  const stillDraft = await entryRowOf(s.entry);
   const withdrawn = await withdrawDraft(owner, {
-    entry: receipt.entry_id, reason: "x42 role: the account is a staff-advance control now",
+    entry: s.entry, reason: "x42 role: the account is a staff-advance control now",
     expectedRevision: stillDraft.revision_token, opKey: opk("x42-role2-wd"),
   });
   assert.ok(withdrawn, "the named remedy (withdraw_draft) is reachable for a suggestion draft");
-  assert.equal(await entryStatusOf(receipt.entry_id), "withdrawn",
+  assert.equal(await entryStatusOf(s.entry), "withdrawn",
     "…and it really withdraws it — the corridor is not walled");
-
-  // And the door now refuses a fresh accept on the same line by name, so the
-  // human is told the same thing at both altitudes rather than looping.
-  const again = await caught(() => acceptBankRuleSuggestion(world.users.bob, {
-    client, line: w.lines[0].id, rule: w.rule, opKey: opk("x42-role2-again"),
-  }));
-  assert.ok(again, "a re-accept of the same rule is refused now that the account is enrolled");
-  assert.equal(reasonOf(again), T_INELIGIBLE,
-    `…by the accept door's own token (got '${reasonOf(again) ?? "(none)"}' — ${again.message})`);
 });

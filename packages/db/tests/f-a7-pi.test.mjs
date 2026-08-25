@@ -105,16 +105,20 @@ test("pi-A1 · the seven shims are registered, present, conforming, and unwired 
   assert.deepEqual(r.rows.map((x) => x.item),
     ["f_a2", "f_a3", "f_a4", "f_a5", "f_a6", "f_a7", "f_a8"],
     "the closed world is TA-P4 A's five plus F-A3 and F-A7 itself");
-  // F-A7/PR-4 beta (0126) wires f_a7's shim to its real `agent_filing_receipts` table. At pi's
-  // OWN frontier every shim was an unwired stub, but this file runs against the merged chain
-  // where beta is real, so f_a7 is the one legitimately-wired exception to the closed world below.
+  // F-A7/PR-4 beta (0126) wires f_a7's shim to its real `agent_filing_receipts` table, and
+  // F-A6 PR-1 wires f_a6's shim to its real `freeform_read_log` table (folded in at merge,
+  // once pi's own contract landed first — pi's header names this exact obligation on every
+  // member item). At pi's OWN frontier every shim was an unwired stub, but this file runs
+  // against the merged chain where both are real, so f_a6/f_a7 are the two legitimately-wired
+  // exceptions to the closed world below.
+  const WIRED = { f_a6: "freeform_read_log", f_a7: "agent_filing_receipts" };
   for (const row of r.rows) {
     assert.equal(row.shim_exists, true, `${row.item}: shim exists`);
     assert.equal(row.conforms, true, `${row.item}: shim conforms to the contract`);
     assert.equal(row.column_count, (await contract()).length, `${row.item}: contract arity`);
-    if (row.item === "f_a7") {
-      assert.equal(row.wired, true, "f_a7: WIRED — F-A7/PR-4 beta (0126) landed its own member table");
-      assert.deepEqual(row.actual_sources, ["agent_filing_receipts"], "f_a7: reaches its real member table");
+    if (row.item in WIRED) {
+      assert.equal(row.wired, true, `${row.item}: WIRED — its own member table has landed`);
+      assert.deepEqual(row.actual_sources, [WIRED[row.item]], `${row.item}: reaches its real member table`);
     } else {
       assert.equal(row.wired, false, `${row.item}: UNWIRED — no member receipt table has landed yet`);
       assert.deepEqual(row.actual_sources, [], `${row.item}: reaches no relation`);

@@ -8,21 +8,134 @@
 //   (e) ENQUEUE-SITE PROVENANCE (freeze-lint-enqueue.mjs) — a WDK enqueue call
 //       must receive a workflow reference whose import provenance traces to
 //       workflows/registry.ts.
+//   (f) REGISTRY-VIEW-INTEGRITY (this module, Gate G1 MUST D) — the
+//       enqueue-provenance check in (e) accepts ANY identifier imported from
+//       registry.ts as a proven-safe root, by name alone. That is only sound
+//       because exactly one dynamic-dispatch view exists (`workflowsByName`)
+//       and it is PROVABLY the same object as `workflows` (Object.freeze
+//       returns its argument, so `workflowsByName === workflows`). This check
+//       enforces both halves structurally at HEAD: `workflowsByName`, if
+//       present, must be declared as EXACTLY `Object.freeze(workflows)` — no
+//       spread copy, no fresh literal, no unfrozen alias — and no SECOND
+//       top-level const export may exist whose initializer mentions
+//       `workflows` (a second, unverified "view" would be silently trusted by
+//       (e) merely for living in this file). Fail-closed: an unparseable
+//       `workflowsByName` declaration is a violation, never a skip.
 //
 // Everything is PURE (source strings in, violation strings out — no git, no
 // fs) so the self-test (check-frozen-workflows.selftest.mjs) can inject
 // simulated base/head pairs and fixture files; check-frozen-workflows.mjs
 // wires these to the real working tree + base ref. Both checks fail CLOSED:
 // an unparseable registry or an untraceable enqueue argument is a violation,
-// never a skip. No dependencies — Node built-ins only. This module is also
-// the FACADE: consumers import every checker from here (the split across
-// freeze-lint-lex.mjs / freeze-lint-enqueue.mjs honors the repo's 500-line
-// file gate, not a public module boundary).
+// never a skip. This module is also the FACADE: consumers import every
+// checker from here (the split across freeze-lint-lex.mjs /
+// freeze-lint-enqueue.mjs honors the repo's 500-line file gate, not a public
+// module boundary).
+//
+// round-6 (Codex #11) — "stop regex-parsing TypeScript; parse it": the export-surface census
+// below (parseRegistryExports / checkRegistryExportsClosedWorld) now runs on the REAL
+// TypeScript compiler API (`typescript`, already the repo's own pinned toolchain — package.json
+// + packages/runtime/package.json both carry it; nothing new added), not a regex generation.
+// Three concrete probes beat round-5's own regex scanner: an ESCAPED identifier
+// (`export const workflowsByName = ...` — a plain-text regex sees the escape sequence
+// literally and never recognizes it as `workflowsByName`; ts.Identifier.text comes out of the
+// real parser ALREADY NORMALIZED, so the trick dies structurally, not by pattern-matching
+// harder), a MULTI-DECLARATOR statement (`export const a = X, b = Y;` — the regex scanner's own
+// lastIndex bookkeeping only ever found the FIRST declarator; ts.VariableDeclarationList.
+// declarations enumerates every one), and an UNVERIFIED re-export TARGET (round-5 accepted a
+// relative re-export on `startsWith(".")` alone, never checking the resolved path actually
+// stays inside packages/runtime/workflows/ — `import {x} from "../../../etc/passwd"` starts
+// with a dot too). The old regex path (findTopLevelExportPositions / parseExportBraceList /
+// extractTopLevelConstExports) is DELETED, not kept as a fallback — this is the third round of
+// regex-vs-TypeScript on this exact surface, and a fallback would just be the next arms-race
+// entry waiting to be found.
 
-import { blankSource, parseImportBindings, REGISTRY_REL } from "./freeze-lint-lex.mjs";
+import ts from "typescript";
+import { blankSource, REGISTRY_REL } from "./freeze-lint-lex.mjs";
 
-export { blankSource, parseImportBindings, REGISTRY_REL };
+export { blankSource, REGISTRY_REL };
 export { checkEnqueueSites, isTestPath, ENQUEUE_MODULES, ENQUEUE_CALLABLES } from "./freeze-lint-enqueue.mjs";
+
+// round-7 (native adversarial leg, MUST #11) — the closed-world census's EXPORT half moved to
+// the TypeScript compiler API in round-6; its ACCEPTANCE half (resolving a re-export's local
+// name, or a `workflows={...}` entry's identifier, back to the import that actually bound it)
+// still ran on freeze-lint-lex.mjs's own regex-based `parseImportBindings`, over a blank that
+// deliberately PRESERVES string literals (it has to — it reads the import specifier's own quoted
+// path). That combination is bypassable: `importRe` matches ANY text shaped like an import
+// statement, including one sitting inside an ordinary string literal — e.g. `const NOTE =
+// "import { backdoor } from './evil.js'"` — and since `bindings` is a plain Map, a decoy landing
+// after the real import for the same local name silently WINS (last-write-wins), so a locally-
+// declared or genuinely-unrelated-import binding gets accepted as if it were the real one.
+// Reproduced live against the real exported checker (round-7 finding). Fixed the same way the
+// export half was: a real AST walk over `ts.isImportDeclaration` nodes. A string literal is
+// never re-parsed as a statement by a real parser — the decoy trick dies structurally, not by
+// pattern-matching harder. `parseImportBindings`/`blankSource(...,{strings:false})` is RETIRED
+// from this module's own registry.ts-facing use entirely (both call sites below); `blankSource`
+// itself stays imported only because parseRegistrySource's own pass2 (locating the `workflows =
+// {...}` object literal, an unrelated concern to import-binding resolution) still needs it.
+// `parseImportBindings` keeps its OWN separate life in freeze-lint-enqueue.mjs — that module scans
+// arbitrary `packages/runtime/src/**` files for enqueue call sites, a materially different, wider
+// surface the round-4 canonical-name pin already backstops (this finding's own "blast radius
+// limited" note) and which round-7 did not ask this pass to rebuild.
+/**
+ * AST-based import-binding resolver for registry.ts — the drop-in structural replacement for
+ * freeze-lint-lex.mjs's own regex-based `parseImportBindings`, scoped to what THIS module needs
+ * (a Map<localName, {source, imported}>; registry.ts never re-exports another module's exports
+ * or uses a dynamic import, so the old function's `reexports`/`dynamics` fields have no analogue
+ * here — checkRegistryExportsClosedWorld reads registry.ts's OWN re-export statements straight
+ * off parseRegistryExports instead). A type-only import (`import type {...}`, or a per-specifier
+ * `import { type X, real }`) carries no runtime binding and is skipped, exactly like a type-only
+ * EXPORT is skipped on the other half of this same census.
+ */
+function parseImportBindingsAst(headSrc) {
+  const bindings = new Map();
+  const sourceFile = ts.createSourceFile("registry.ts", headSrc, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    const clause = stmt.importClause;
+    if (!clause || clause.isTypeOnly) continue; // side-effect-only import, or `import type {...}` — no runtime binding
+    const source = stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : null;
+    if (source === null) continue; // an unparseable/non-string specifier — nothing to bind
+    if (clause.name && ts.isIdentifier(clause.name)) {
+      bindings.set(clause.name.text, { source, imported: "default" });
+    }
+    const named = clause.namedBindings;
+    if (named && ts.isNamespaceImport(named)) {
+      bindings.set(named.name.text, { source, imported: "*" });
+    } else if (named && ts.isNamedImports(named)) {
+      for (const el of named.elements) {
+        if (el.isTypeOnly) continue; // `import { type X, real } from "..."` — X carries no runtime binding
+        // round-9 (native adversarial leg, MUST) — `el.propertyName` PRESENT is authoritative: an
+        // ES2022 string-literal import alias (`import { "evil" as chatTurn_v1 } from "./x.js"`)
+        // parses with ZERO diagnostics, and propertyName is then a StringLiteral, not an
+        // Identifier. The OLD ternary's `ts.isIdentifier(propertyName)` guard failed on exactly
+        // this shape and silently fell back to `el.name.text` (the LOCAL name) — pretending no
+        // alias existed at all, so `b.imported === item.exported` passed downstream and the
+        // round-8 import-alias pin never fired (N2/N5). Take `.text` from propertyName whenever
+        // it is EITHER valid ModuleExportName kind the grammar allows (Identifier | StringLiteral)
+        // — both carry the real, normalized name the source module actually exports under. Any
+        // OTHER node kind (none should exist for valid TypeScript, but this is exactly the class
+        // of assumption a parser upgrade or malformed input could break) is FAIL-CLOSED: skip
+        // this element entirely rather than guess, so a downstream re-export naming this local
+        // ends up with NO binding at all — REJECTED, matching this module's own catch-all
+        // fail-closed convention throughout (parseRegistryExports' own `rejected` list, the
+        // resolvesInsideWorkflowsDir check, etc.).
+        let imported;
+        if (el.propertyName) {
+          if (ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)) {
+            imported = el.propertyName.text;
+          } else {
+            continue; // fail-closed — unrecognized propertyName node kind, bind nothing
+          }
+        } else {
+          imported = el.name.text; // no propertyName at all — the plain, unaliased shorthand
+        }
+        bindings.set(el.name.text, { source, imported });
+      }
+    }
+  }
+  return bindings;
+}
 
 // --- (d) registry-version monotonicity --------------------------------------
 
@@ -50,8 +163,7 @@ export function specVersion(spec) {
 export function parseRegistrySource(src, label) {
   const problems = [];
   const classes = new Map();
-  const pass1 = blankSource(src, { comments: true, strings: false, templates: true });
-  const { bindings } = parseImportBindings(pass1);
+  const bindings = parseImportBindingsAst(src);
   const pass2 = blankSource(src, { comments: true, strings: true, templates: true });
   const declM = /\bexport\s+const\s+workflows\s*=\s*\{/.exec(pass2);
   if (!declM) {
@@ -169,5 +281,364 @@ export function checkRegistryMonotonicity(baseSrc, headSrc, baseLabel = "base") 
       );
     }
   }
+  return violations;
+}
+
+// --- (f) registry-view integrity (Gate G1 MUST D) ---------------------------
+
+/** RHS forms that derive PURELY and ONLY from `workflows`, with nothing else
+ * mixed in, so their values (if any) are provably the real frozen originals
+ * — never an alternate/fake collection. Anything else that mentions
+ * `workflows` (a spread copy, a fresh literal, a second `Object.freeze`
+ * under a different name, ...) is an unverified alternate view. */
+const SAFE_WORKFLOWS_DERIVATIONS = new Set([
+  "workflows",
+  "Object.keys(workflows)",
+  "Object.values(workflows)",
+  "Object.entries(workflows)",
+]);
+
+const WORKFLOWS_DIR = REGISTRY_REL.replace(/\/[^/]+$/, ""); // "packages/runtime/workflows"
+
+/** Pure path resolution (no fs) — resolves `spec` (a relative import specifier) against
+ *  `fromRel`'s own directory, extension-insensitive. The SAME algebra freeze-lint-enqueue.mjs's
+ *  own resolveRelPure uses (kept as a separate local copy rather than a shared import — each
+ *  module in this split keeps its own small pure helpers, an existing repo pattern). */
+function resolveRelPure(fromRel, spec) {
+  const parts = fromRel.split("/").slice(0, -1);
+  for (const seg of spec.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join("/").replace(/\.(?:[cm]?[jt]sx?)$/, "");
+}
+
+/** round-6 (Codex #11, probe 3) — "relative" alone (startsWith(".")) is not "inside
+ *  packages/runtime/workflows/": `import {x} from "../../../etc/passwd"` starts with a dot
+ *  too. Resolve the specifier PURELY against registry.ts's own known location and require the
+ *  result to land inside WORKFLOWS_DIR — never trust relativity alone. */
+function resolvesInsideWorkflowsDir(spec) {
+  if (typeof spec !== "string" || !spec.startsWith(".")) return false;
+  const resolved = resolveRelPure(REGISTRY_REL, spec);
+  return resolved === WORKFLOWS_DIR || resolved.startsWith(`${WORKFLOWS_DIR}/`);
+}
+
+function hasModifier(node, kind) {
+  if (!ts.canHaveModifiers(node)) return false;
+  const mods = ts.getModifiers(node);
+  return mods ? mods.some((m) => m.kind === kind) : false;
+}
+
+/** round-6 (Codex #11) — the ONE AST-based enumeration of every top-level export in
+ *  registry.ts, replacing the prior regex generation entirely (see this module's own header
+ *  for the three probes that beat it). `ts.createSourceFile` parses REAL TypeScript; every
+ *  identifier read off the tree (`.text`) is already unicode-escape-NORMALIZED by the parser
+ *  itself — the escape trick dies structurally, not by pattern-matching harder.
+ *
+ *  Returns:
+ *    consts:    [{name, initializerText}] — every declarator of every exported
+ *               const/let/var statement (ALL of them, not just the first — probe 2).
+ *    reexports: [{local, exported, aliased, fromModuleSpecifier}] — every element of every
+ *               `export { ... }` / `export { ... } from "..."` NamedExports clause.
+ *    rejected:  [violation strings, already fully formed] — every export shape with NO
+ *               legitimate use in registry.ts at all (function/class/enum, default,
+ *               wildcard re-export, namespace re-export, anything unrecognized) — a true
+ *               fail-closed catch-all: an export statement this walk does not explicitly
+ *               recognize as const/let/var, type/interface, or a NamedExports clause falls
+ *               into `rejected` by construction, never silently passed.
+ *  Parse failure (invalid TypeScript) is itself fail-closed: `sourceFile.parseDiagnostics` (via
+ *  a syntactic-only check) becoming non-empty is reported as its own rejected entry rather than
+ *  silently walking a best-effort/garbage tree. */
+export function parseRegistryExports(headSrc, label = "registry@HEAD") {
+  const consts = [];
+  const reexports = [];
+  const rejected = [];
+  const sourceFile = ts.createSourceFile("registry.ts", headSrc, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  // @ts-expect-error — parseDiagnostics is an internal-but-stable field TS itself populates on
+  // every createSourceFile call; used here only as a cheap syntactic-validity signal, fail-open
+  // toward "no diagnostics field" (an older/newer TS shape) rather than crash the whole checker.
+  const syntaxErrors = sourceFile.parseDiagnostics ?? [];
+  if (syntaxErrors.length > 0) {
+    rejected.push(
+      `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: registry.ts did not parse as valid TypeScript (${syntaxErrors.length} syntax error(s)) — the closed-world census cannot run against an unparseable file; REJECTED, fail-closed rather than best-effort.`,
+    );
+    return { consts, reexports, rejected };
+  }
+
+  for (const stmt of sourceFile.statements) {
+    if (ts.isVariableStatement(stmt)) {
+      if (!hasModifier(stmt, ts.SyntaxKind.ExportKeyword)) continue;
+      for (const decl of stmt.declarationList.declarations) {
+        if (!ts.isIdentifier(decl.name)) {
+          rejected.push(
+            `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: an exported declarator ("${decl.getText(sourceFile).slice(0, 60)}") is a destructuring pattern, not a plain identifier — REJECTED, fail-closed rather than guessed at.`,
+          );
+          continue;
+        }
+        consts.push({ name: decl.name.text, initializerText: decl.initializer ? decl.initializer.getText(sourceFile) : "" });
+      }
+      continue;
+    }
+    if (ts.isTypeAliasDeclaration(stmt) || ts.isInterfaceDeclaration(stmt)) continue; // erased at compile time — zero runtime existence, safe regardless of export modifier
+    if (ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt) || ts.isEnumDeclaration(stmt)) {
+      if (!hasModifier(stmt, ts.SyntaxKind.ExportKeyword)) continue;
+      const kind = ts.isFunctionDeclaration(stmt) ? "function" : ts.isClassDeclaration(stmt) ? "class" : "enum";
+      const name = stmt.name && ts.isIdentifier(stmt.name) ? stmt.name.text : "?";
+      rejected.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export ${kind} ${name}\` — registry.ts's own closed world admits only \`workflows\`/\`workflowsByName\`, SAFE_WORKFLOWS_DERIVATIONS-shaped consts, and bare unaliased workflow re-exports; a ${kind} declared and exported directly in this file is none of those and is REJECTED on sight.`,
+      );
+      continue;
+    }
+    if (ts.isExportAssignment(stmt)) {
+      rejected.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`${stmt.isExportEquals ? "export =" : "export default"}\` — registry.ts's closed world has no legitimate use for a default export; REJECTED on sight.`,
+      );
+      continue;
+    }
+    if (ts.isExportDeclaration(stmt)) {
+      // round-6 (novel probe, self-devised): `export type { X } from "..."` / `export { type
+      // X, real }` are TYPE-ONLY — erased at compile time (same rationale as the
+      // isTypeAliasDeclaration/isInterfaceDeclaration skip above), so they carry ZERO runtime
+      // export surface. Neither round-5's regex nor a naive first-draft AST walk distinguishes
+      // this from a real re-export; treating a type-only specifier as a value re-export needing
+      // workflows/-directory verification is a FALSE-POSITIVE risk (a legitimate type import
+      // would be rejected), not a bypass either way — but the correct, precise behavior is to
+      // recognize it and skip it, exactly like any other erased-at-compile-time declaration.
+      if (stmt.isTypeOnly) continue; // `export type { ... } from "..."` — the WHOLE clause is types only
+      const fromModuleSpecifier = stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : null;
+      if (!stmt.exportClause) {
+        rejected.push(
+          `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export * from "${fromModuleSpecifier ?? "?"}"\` — a wildcard re-export carries an UNBOUNDED, unverifiable set of names; REJECTED unconditionally.`,
+        );
+        continue;
+      }
+      if (ts.isNamespaceExport(stmt.exportClause)) {
+        rejected.push(
+          `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export * as ${stmt.exportClause.name.text} from "${fromModuleSpecifier ?? "?"}"\` — a namespace wildcard re-export carries an UNBOUNDED, unverifiable set of names; REJECTED unconditionally, never inspected shape-by-shape.`,
+        );
+        continue;
+      }
+      // NamedExports — `export { a, b as c }` or `export { a, b as c } from "..."`.
+      for (const el of stmt.exportClause.elements) {
+        if (el.isTypeOnly) continue; // `export { type X, real }` — X is a per-element type-only specifier
+        // round-9 (native adversarial leg, symmetry rider) — the SAME propertyName-kind ternary
+        // bug as the import side (see parseImportBindingsAst's own comment) sits here too. It is
+        // INERT today only because the neighbouring `aliased: !!el.propertyName` line below
+        // rejects any propertyName-bearing re-export UNCONDITIONALLY, regardless of what `local`
+        // even computes to (proven by fixture N4 — the aliased check fires before `local` is ever
+        // consulted for anything). A protection that only holds because of a NEIGHBOURING check
+        // is not a defense of this line's own — fixed the identical fail-closed way (propertyName
+        // present -> Identifier or StringLiteral only, else null -> the aliased branch above
+        // rejects it regardless) so the protection does not depend on the `aliased` rule
+        // surviving some future relaxation.
+        let local;
+        if (el.propertyName) {
+          if (ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)) {
+            local = el.propertyName.text;
+          } else {
+            local = null; // fail-closed — unrecognized propertyName node kind
+          }
+        } else {
+          local = el.name.text;
+        }
+        reexports.push({
+          local,
+          exported: el.name.text,
+          aliased: !!el.propertyName,
+          fromModuleSpecifier,
+        });
+      }
+      continue;
+    }
+    // Fail-closed catch-all: any OTHER exported top-level statement (a module/namespace
+    // declaration, an exported `import X = require(...)`, or any future TS syntax this walk
+    // has not been taught) is REJECTED, never silently passed — the closed-world claim depends
+    // on this branch existing, not on the enumerated shapes above being exhaustive by inspection.
+    if (hasModifier(stmt, ts.SyntaxKind.ExportKeyword) || hasModifier(stmt, ts.SyntaxKind.DefaultKeyword)) {
+      rejected.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: an \`export\` statement did not match any recognized shape (const/let/var, type/interface, default, function/class/enum, or \`export {...}\` with or without \`from\`/wildcard) — REJECTED, fail-closed on the unrecognized syntax rather than silently passed: \`${stmt.getText(sourceFile).slice(0, 60).trim()}\``,
+      );
+    }
+  }
+  return { consts, reexports, rejected };
+}
+
+/**
+ * Gate G1 MUST D — REGISTRY-VIEW-INTEGRITY. Structural, HEAD-only (a standing
+ * shape policy, not a base-diff monotonicity check): the enqueue-provenance
+ * check (e) trusts ANY identifier imported from registry.ts as a proven-safe
+ * dispatch root, by IMPORT SOURCE alone — that trust is only sound because
+ * exactly one dynamic-dispatch view exists (`workflowsByName`) and it is
+ * PROVABLY `workflows` itself, not merely a same-shaped copy. Enforces:
+ *
+ *   1. If `workflowsByName` is exported, its initializer (whitespace-
+ *      collapsed) must be EXACTLY `Object.freeze(workflows)` — a spread
+ *      copy, a fresh object literal, or an unfrozen alias all LOOK like a
+ *      view but prove nothing about reference identity or mutability.
+ *   2. No OTHER top-level `export const` (besides `workflows` itself and a
+ *      correctly-shaped `workflowsByName`) may have an initializer
+ *      mentioning the `workflows` identifier — a second, differently-shaped
+ *      "view" would be silently trusted by (e) merely for living in this
+ *      file, without ever being proven to alias the real registry.
+ *
+ * Pure: registry.ts being entirely absent from a change is fine (no
+ * violations); an unparseable/wrong-shaped `workflowsByName` when the name
+ * IS present is fail-closed, never a skip.
+ */
+export function checkRegistryViewIntegrity(headSrc, label = "registry@HEAD") {
+  const violations = [];
+  if (headSrc == null) return violations;
+  const parsed = parseRegistryExports(headSrc, label);
+  const byName = new Map(parsed.consts.map((e) => [e.name, e]));
+
+  // M8(b) (opus R2 + Codex review), round-6-safe: the check below only recognizes `export
+  // const workflowsByName = ...` — an ALIASED RE-EXPORT (`export { fake as workflowsByName }`)
+  // or any other export syntax carrying the name is a COMPLETELY different shape. Build the
+  // "does this name appear anywhere in the export surface" signal from the SAME AST parse
+  // (consts + reexports' own exported names) — round-5's own bare-text regex would itself be
+  // fooled by an escaped identifier, exactly the class of bug round-6 exists to close; the
+  // parser has already normalized every name by the time it reaches here.
+  const declaredExportedNames = [...parsed.consts.map((e) => e.name), ...parsed.reexports.map((e) => e.exported)];
+  const occurrences = declaredExportedNames.filter((n) => n === "workflowsByName").length;
+  const view = byName.get("workflowsByName");
+  if (occurrences > 0 && !view) {
+    violations.push(
+      `REGISTRY-VIEW-INTEGRITY  ${label}: "workflowsByName" appears in this file's own export surface (${occurrences} occurrence(s)) but NOT as a recognized \`export const workflowsByName = ...\` declaration — an aliased re-export (\`export { x as workflowsByName }\`) or any other export shape is REJECTED, never silently trusted (fail-closed).`,
+    );
+  } else if (occurrences > 1) {
+    violations.push(
+      `REGISTRY-VIEW-INTEGRITY  ${label}: "workflowsByName" is exported ${occurrences} times — exactly ONE declaration is ever trusted; a second occurrence anywhere (a duplicate export, a re-export) is REJECTED, never silently ignored.`,
+    );
+  }
+
+  if (view) {
+    const collapsed = view.initializerText.replace(/\s+/g, "");
+    if (collapsed !== "Object.freeze(workflows)") {
+      violations.push(
+        `REGISTRY-VIEW-INTEGRITY  ${label}: "workflowsByName" must be declared as EXACTLY \`Object.freeze(workflows)\` — found \`${view.initializerText.trim().slice(0, 120)}\` instead. Anything else (a spread copy, a fresh literal, an unfrozen alias) is not provably the same object as \`workflows\`, so the enqueue-provenance check's trust in registry.ts exports would no longer be sound (Gate G1 MUST D, fail-closed).`,
+      );
+    }
+  }
+
+  // #11 (round-4 review, REOPENED) — every OTHER top-level const/let/var export must collapse
+  // to a SAFE_WORKFLOWS_DERIVATIONS shape, whether or not it references `workflows` in its own
+  // text (a plain `export const alternateView = {evil:fn};` mentions nothing about `workflows`
+  // at all and must still be caught).
+  for (const e of parsed.consts) {
+    if (e.name === "workflows" || e.name === "workflowsByName") continue;
+    const collapsed = e.initializerText.replace(/\s+/g, "");
+    if (!SAFE_WORKFLOWS_DERIVATIONS.has(collapsed)) {
+      violations.push(
+        `REGISTRY-VIEW-INTEGRITY  ${label}: a second top-level export "${e.name}" is declared as \`${e.initializerText.trim().slice(0, 120)}\`, which is not one of the provably-safe derivations (a bare alias, Object.keys/values/entries, or exactly \`Object.freeze(workflows)\`). Only \`workflowsByName\` (declared as exactly \`Object.freeze(workflows)\`) may be trusted as a dynamic-dispatch view of the registry — any other shape is an ALTERNATE, unverified view that the enqueue-provenance check (e) would trust by import source alone; rename/remove it or fold it into \`workflowsByName\` (Gate G1 MUST D, fail-closed).`,
+      );
+    }
+  }
+
+  violations.push(...checkRegistryExportsClosedWorld(headSrc, parsed, label));
+
+  return violations;
+}
+
+/** #11 (round-4 review, both legs, REOPENED; round-6, Codex — rebuilt on the TypeScript
+ *  compiler API, see this module's own header) — a CLOSED-WORLD census of EVERY export shape
+ *  registry.ts can carry, closing what the checks above (built to catch a suspicious REFERENCE
+ *  to `workflows`, or a specific `workflowsByName` mis-declaration) were never built to see.
+ *  freeze-lint-enqueue.mjs's own provenance check (classifyWorkflowArg) trusts ANY name
+ *  imported FROM registry.ts by CANONICAL NAME (round-4's own fix, pinned to `workflows`/
+ *  `workflowsByName` only) — this census is the OTHER half: a bare re-export is legitimate
+ *  ONLY if it is UNALIASED (the exported name equals the imported local name) AND names a
+ *  binding this file ACTUALLY imported via a path that resolves INSIDE
+ *  packages/runtime/workflows/ (round-6, Codex probe 3 — relativity alone,
+ *  `spec.startsWith(".")`, does not prove the target stays in-directory; `../../../etc/passwd`
+ *  is relative too) — the real, individual frozen workflow exports every class needs for
+ *  check-frozen-workflows.mjs's own golden-hash tracking (every historical `chatTurn_v1`..
+ *  `chatTurn_v13`, not just whichever is CURRENTLY pointed to inside the `workflows` object —
+ *  constraint 9 requires every one of them to stay exported). A DIRECT `export {x} from "..."`
+ *  is rejected unconditionally regardless of target — `x` is never bound locally in that
+ *  shape, so there is nothing to verify it against; registry.ts's own real pattern is always
+ *  import-then-bare-re-export, never this one. Everything else `parseRegistryExports` could not
+ *  place in `consts`/`reexports` is already a fully-formed violation in its own `rejected`
+ *  list. */
+function checkRegistryExportsClosedWorld(headSrc, parsedIn, label) {
+  const violations = [];
+  const parsed = parsedIn ?? parseRegistryExports(headSrc, label);
+  violations.push(...parsed.rejected);
+
+  // round-7 (native adversarial leg, MUST #11) — AST-based, not the regex-based
+  // parseImportBindings this used to call (see this module's own header): a decoy string
+  // literal shaped like an import statement can no longer be mistaken for a real one.
+  const bindings = parseImportBindingsAst(headSrc);
+
+  for (const item of parsed.reexports) {
+    if (item.exported === "workflows" || item.exported === "workflowsByName") continue; // covered by checkRegistryViewIntegrity above
+    if (item.aliased) {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.local} as ${item.exported} }${item.fromModuleSpecifier ? ` from "${item.fromModuleSpecifier}"` : ""}\` is an ALIASED re-export — even if "${item.local}" is itself a legitimate workflow implementation, exporting it under a DIFFERENT name is indistinguishable from smuggling an unrelated binding out under a plausible-looking one. Re-export under its OWN name only.`,
+      );
+      continue;
+    }
+    if (item.fromModuleSpecifier !== null) {
+      // `export { x } from "somewhere"` — x is never a local binding at all in THIS file
+      // (bindings only tracks THIS file's own `import` statements — a direct re-export never
+      // creates one), so there is nothing here to verify it against even when the target DOES
+      // resolve inside workflows/. registry.ts's own real pattern is always
+      // import-THEN-bare-re-export, never a direct `from` re-export.
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} } from "${item.fromModuleSpecifier}"\` is a DIRECT re-export from another module — "${item.local}" is never bound locally in this file at all, so there is nothing to verify it against; registry.ts's own real pattern is always import-then-bare-re-export, never this shape. REJECTED unconditionally.`,
+      );
+      continue;
+    }
+    const b = bindings.get(item.local);
+    if (!b) {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` does not name a binding imported from a path that resolves inside ${WORKFLOWS_DIR}/ — registry.ts's closed world admits only \`workflows\`/\`workflowsByName\`, a SAFE_WORKFLOWS_DERIVATIONS-shaped const, or a bare re-export of an actually-imported workflow file IN THIS DIRECTORY; a freshly-declared local, a non-relative (package) import, or a relative import that escapes ${WORKFLOWS_DIR}/ (round-6, Codex probe 3 — relativity alone is not target verification) is REJECTED on sight (fail-closed).`,
+      );
+      continue;
+    }
+    // round-8 (native adversarial leg, MUST B) — the UNALIASED rule above ("the exported name
+    // equals the imported local name") only ever pinned the EXPORT-SIDE half of the identity: it
+    // never checked what the SOURCE MODULE itself calls the thing. An import-side alias
+    // (`import { real as alias } from "./real.js";` then a perfectly plain, unaliased
+    // `export { alias };`) sails straight through both checks — item.local === item.exported
+    // (satisfies the export-side rule above) and b.source resolves inside workflows/ (satisfies
+    // the directory check below) — while registry.ts's own export surface now offers a name
+    // ("alias") that is NOT what the frozen file actually calls its own export ("real"),
+    // defeating constraint-9's honest-naming census exactly the way an export-side alias would.
+    // Fix: pin the IMPORTED name too, not just the local one — `b.imported` (round-6's own
+    // parseImportBindingsAst already resolves it: the real export name for a named import, "*"
+    // for a namespace import, "default" for a default import) must equal `item.exported`
+    // EXACTLY. A namespace import used as a bare re-export target reaches the same unbounded,
+    // unverifiable-by-shape territory `export * as ns from "..."` is already rejected for
+    // unconditionally on the export side (this module's own header) — rejected here the same way,
+    // never inspected member-by-member. A default import re-exported as a NAMED export is
+    // rejected too: registry.ts's own real pattern is always a named `export const chatTurn_vN`
+    // in the source file, never a default export, so accepting one here would admit a shape the
+    // real workflow files never actually use.
+    if (b.imported === "*") {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` names a binding imported as a NAMESPACE (\`import * as ${item.local}\`) — an unbounded, unverifiable-by-shape import, rejected unconditionally, exactly like \`export * as ns from "..."\` already is on the export side.`,
+      );
+      continue;
+    }
+    if (b.imported === "default") {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` names a binding imported as a DEFAULT import — registry.ts's own real pattern is always a named export in the source file; a default import re-exported as a named one is REJECTED on sight.`,
+      );
+      continue;
+    }
+    if (b.imported !== item.exported) {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` imports a binding the SOURCE MODULE itself calls "${b.imported}" (\`import { ${b.imported} as ${item.local} } from "${b.source}"\`) — an IMPORT-SIDE alias is exactly as unverifiable as an export-side one (both make the exported name diverge from the frozen file's own name for the thing): re-export under the name the source module actually uses, or not at all.`,
+      );
+      continue;
+    }
+    if (!resolvesInsideWorkflowsDir(b.source)) {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` does not name a binding imported from a path that resolves inside ${WORKFLOWS_DIR}/ — registry.ts's closed world admits only \`workflows\`/\`workflowsByName\`, a SAFE_WORKFLOWS_DERIVATIONS-shaped const, or a bare re-export of an actually-imported workflow file IN THIS DIRECTORY; a freshly-declared local, a non-relative (package) import, or a relative import that escapes ${WORKFLOWS_DIR}/ (round-6, Codex probe 3 — relativity alone is not target verification) is REJECTED on sight (fail-closed).`,
+      );
+    }
+  }
+
   return violations;
 }
