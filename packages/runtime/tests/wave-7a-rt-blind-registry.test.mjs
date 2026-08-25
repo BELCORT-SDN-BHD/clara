@@ -20,6 +20,7 @@ register();
 const registry = await import("../workflows/registry.ts");
 const entryAutoDraftV9 = await import("../workflows/autoDraft.v9.ts");
 const entryChatTurnV13 = await import("../workflows/chatTurn.v13.ts");
+const entryChatTurnV14 = await import("../workflows/chatTurn.v14.ts");
 const entryAutoDraftV8 = await import("../workflows/autoDraft.v8.ts");
 const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
@@ -43,16 +44,24 @@ const promptV8 = await import("../workflows/chatTurn.v8.prompt.ts");
 // became policy (c) assertions in turn. F-A2 PR-2 (the agentic posting lane, plus
 // chat parity on owner ruling D34) has now moved both pins again — autoDraft_v9 /
 // chatTurn_v13 — and v8's and v12's assertions became policy (c) assertions in
-// their turn. The ladder of assertions is the point: each one records that a body
-// which USED to be the pin is still reachable for its parked runs.
+// their turn. F-A3 PR-3 (OQ-6, chatTurn_v14) has now moved the chatTurn pin again —
+// v13 -> v14, autoDraft untouched — and v13's own assertion below becomes a policy
+// (c) assertion in its turn. The ladder of assertions is the point: each one
+// records that a body which USED to be the pin is still reachable for its parked
+// runs.
 // ===========================================================================
 
 test("registry pins autoDraft to the v9 export", () => {
   assert.equal(registry.workflows.autoDraft, entryAutoDraftV9.autoDraft_v9);
 });
 
-test("registry pins chatTurn to the v13 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV13.chatTurn_v13);
+test("registry pins chatTurn to the v14 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV14.chatTurn_v14);
+});
+
+test("registry still EXPORTS chatTurn_v13 so no parked v13 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v13, "function");
+  assert.equal(registry.chatTurn_v13, entryChatTurnV13.chatTurn_v13);
 });
 
 test("registry still EXPORTS autoDraft_v8 so no parked v8 run is stranded (Appendix A policy (c))", () => {
