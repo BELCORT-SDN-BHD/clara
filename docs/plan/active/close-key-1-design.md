@@ -346,7 +346,7 @@ priority ("`agent_prepared` wins whenever `v_agent_prepared`" was never true on 
 The owner ruled the label follows the real probe there too: `no_preparation` is the fourth,
 truthful value for that case, review requirements **at least as strict as `agent_prepared`'s**
 by construction (the row's own self-attestation gate, for a solo firm, governs both outcomes
-identically). Migration `UNNUMBERED_f_a4_pr_1b2_a4_truth.sql` — full mechanism, invariants and
+identically). Migration `0128_f_a4_pr_1b2_a4_truth.sql` — full mechanism, invariants and
 the reopen non-participation finding: `close-key-1-annexes-1-mechanics.md` Annex A.4.
 
 **The solo arm auto-upgrades.** At `eligible_checker_count(firm) = 1` the self-attestation

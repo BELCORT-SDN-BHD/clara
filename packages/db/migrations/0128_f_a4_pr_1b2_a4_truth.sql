@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a4_pr_1b2_a4_truth.sql — F-A4 PR-1b2: Annex A.4 row 7's truthful segregation_mode.
+-- 0128_f_a4_pr_1b2_a4_truth.sql — F-A4 PR-1b2: Annex A.4 row 7's truthful segregation_mode.
 -- =================================================================================================
 -- Number claimed at MERGE time (hard constraint 10). Owner ruling: PROGRESS.md "Known issues" ·
 -- Annex A.4 row 7 vs invariant (i), F-A4 PR-1b cross-model review 2026-08-25, RULED by the owner

@@ -185,7 +185,7 @@ agent-authored one at a glance. Its review requirements are **at least as strict
 requirement (fires when H is false) sits ABOVE the A-conditioned label assignment in the body
 and governs both outcomes identically — there is no code path where `no_preparation` clears a
 bar `agent_prepared` would not also have cleared on the same input. Migration:
-`packages/db/migrations/UNNUMBERED_f_a4_pr_1b2_a4_truth.sql`. `finalize_close` alone was CoR'd; `reopen_fiscal_year` was
+`packages/db/migrations/0128_f_a4_pr_1b2_a4_truth.sql`. `finalize_close` alone was CoR'd; `reopen_fiscal_year` was
 investigated and found to share none of this — see the reopen paragraph below, corrected in the
 same pass.
 

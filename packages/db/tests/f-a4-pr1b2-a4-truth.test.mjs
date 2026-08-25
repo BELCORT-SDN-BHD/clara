@@ -2,7 +2,7 @@
 // The behavioral half of the tail proof the migration's own §TAIL names: three fresh fiscal
 // years, one per shape, each closed for real through the governed writers, each read back for
 // the segregation_mode the ruling says it must carry. Migration:
-// UNNUMBERED_f_a4_pr_1b2_a4_truth.sql. NEVER LIVE: disposable rig only.
+// 0128_f_a4_pr_1b2_a4_truth.sql. NEVER LIVE: disposable rig only.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
