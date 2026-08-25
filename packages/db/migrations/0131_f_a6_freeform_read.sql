@@ -1,4 +1,4 @@
--- UNNUMBERED_f_a6_freeform_read.sql — F-A6 PR-1: THE AUDITED FREEFORM READ (DB).
+-- 0131_f_a6_freeform_read.sql — F-A6 PR-1: THE AUDITED FREEFORM READ (DB).
 -- =====================================================================================
 -- Number claimed at MERGE time (standing law; never named here). Design of record:
 -- docs/plan/active/freeform-read-design.md **v2** §3 + Annexes A-E
@@ -238,8 +238,8 @@
 --   says so precisely). C12 itself remains proven by the migration's OWN tail asserting and
 --   raising on it, re-run on every rig apply (real, rig-replayed evidence, law 2), not by a test
 --   cell — the two instruments are complementary, not substitutes. M-3 · the EXECUTE half of C12
---   goes CLUSTER-WIDE (no `nspname='clara'` filter — verified: `packages/db/migrations/
---   UNNUMBERED_f_a6_freeform_read.sql` §10 "(c) EXPLICIT EXECUTE, CLUSTER-WIDE"), not the
+--   goes CLUSTER-WIDE (no `nspname='clara'` filter — verified: this file's own §10 "(c)
+--   EXPLICIT EXECUTE, CLUSTER-WIDE"), not the
 --   schema-scoped check (2) it supersedes. M-4 · the INVOKER verb pins `search_path` (verified:
 --   `set search_path = clara, pg_temp` on the verb) — and so does every OTHER function this file
 --   creates, DEFINER or INVOKER (verified by grep: 10 function/trigger bodies, 10 `search_path =

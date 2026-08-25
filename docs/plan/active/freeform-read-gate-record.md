@@ -19,7 +19,7 @@
 > **TRUED 2026-08-23 — the pass RAN, against v2, before PR-1's build.** Record:
 > `freeform-read-law28-review.md` (Codex refused the prompt under its cyber-content filter; a
 > native fresh-context lane substituted, per `wave-f-lane-brief.md`'s standing rule). Its blockers
-> B-1/B-2/B-3 and highs H-1..H-5 are folded into `UNNUMBERED_f_a6_freeform_read.sql` §0.1c, with
+> B-1/B-2/B-3 and highs H-1..H-5 are folded into `0131_f_a6_freeform_read.sql` §0.1c, with
 > the two places the review's own recommended wall did not work (a per-role `REVOKE EXECUTE` on
 > the pg_catalog residual, and a `SET LOCAL statement_timeout` before each FETCH) named rather
 > than papered over. Every sentence below that still reads "outstanding" predates this.
