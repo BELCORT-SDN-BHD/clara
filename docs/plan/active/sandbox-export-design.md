@@ -305,9 +305,12 @@ Every wake wrapper is `SECURITY DEFINER`, `search_path=clara, pg_temp`, resolves
 69), asserts `clara.assert_wake_allowed(w.wake_kind, '<name>')`, refuses a blank `p_op_key`, refuses
 a blank `p_rationale` or an incomplete `p_model`, and delegates to an **ungranted** core.
 **No wrapper body carries DML text** — F-A5's C1-at-four-by-construction rule (`0077:23-29`),
-inherited. Allowlist rows are `('interactive', …)` and, once F-A2's D34 limb merges,
-`('interactive_client', …)`; **never a `'proactive'` row** (law 71's proactive-says-nothing posture)
-and never an unattended kind — an export is a deliberate act with a named recipient.
+inherited. Allowlist rows are `('interactive', …)` ONLY — PERMANENTLY, not pending a future merge
+(A11/PR-1 truing, 2026-08-25: F-A2's D34 limb IS merged, but the live estate's own GB-3/D34
+closed-world wall caps `interactive_client` at exactly one verb, `wake_open_question`, so this
+lane does not widen it; Annex K's own fallback shipped instead). **Never a `'proactive'` row** (law
+71's proactive-says-nothing posture) and never an unattended kind — an export is a deliberate act
+with a named recipient.
 
 ### 3.5 The second render entrance — one geometry library, and a census that proves it
 
@@ -380,7 +383,11 @@ cell that only observed "the string is there" would have a meaningless YES. **Th
 owner's** (Q1) — the default is *no row seeded* (`gate-record:260-261`), which for this lane means
 **the export path ships dark** (X12); the migration seeds only what the owner returns.
 
-### 3.6a The watermark trio — SIGNED 2026-08-23 (the owner sitting)
+### 3.6a The watermark trio — owner-ratified 2026-08-23 (the owner sitting)
+
+*(A11/PR-1 truing, 2026-08-25: "SIGNED" retitled "owner-ratified" throughout this section and its
+cross-references — the wording is an owner-approved text ratification, not a cryptographic or
+legal signature; Codex #13's naming half.)*
 
 **Q1 (OQ-1 + OQ-2) is CLOSED.** The owner signed the `sandbox_watermark` trio at the 2026-08-23
 sitting, superseding the Annex E Q1 draft above; this is the row text the PR-1 migration seeds,
@@ -422,5 +429,5 @@ unchanged.
 
 **Continued in `sandbox-export-design-part2.md`** — §3.7 (the narrative-authority wall), §3.8 (the
 human doors), §3.9 (law 28's pass, still owed), §4 (walls/censuses), §5 (judgement logic), §6 (the
-train — the watermark trio SIGNED and the substitution seam RULED, both discharging their §6
+train — the watermark trio owner-ratified and the substitution seam RULED, both discharging their §6
 dependency rows) and §7 (non-goals, incl. both owner cards' 2026-08-23 RULED dispositions).

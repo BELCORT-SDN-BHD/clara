@@ -88,7 +88,7 @@ out of the ladder.**
 
 **PR-0** (this design + **the law-28 pass, still owed**) → **PR-1** (DB: three relations, the verbs,
 the coverage check, the derivation, the allowlist rows, the censuses, the `sandbox_watermark` rows
-**— SIGNED 2026-08-23, seeded at build; §3.6 carries the trio verbatim**) → **PR-2** (grants +
+**— owner-ratified 2026-08-23, seeded at build; §3.6 carries the trio verbatim**) → **PR-2** (grants +
 census) → **PR-3** (renderer: the second entrance, the byte-burn via the SUBSTITUTION SEAM §3.6
 now specifies, the render-time watermark refusal, G-1/G-2 — **a ceremony**) → **PR-4** (human doors
 + acceptance).
@@ -137,3 +137,13 @@ that was adopted, in `sandbox-export-gate-record.md` §6's 2026-08-23 addendum):
    architecture (§3.2's recipient-coverage model) keeps the seam for it without building it now.
    The admin+ register and §7's delivery non-goal carry the boundary meanwhile, unchanged. **The
    external export path unblocks** on the firm-level register landing in PR-1.
+
+   **PR-1 builds the enforcing wall for this dark condition, not the register itself (A9,
+   fix-round 2026-08-25).** `_sandbox_export_request_core` resolves the target recipient's `kind`
+   before the coverage check and refuses outright when `kind = 'external'`, typed
+   `sandbox_export_external_unavailable` (errcode `CLR10`) — a firm_member recipient is
+   unaffected and walks the ordinary coverage path. This is Codex law-28 finding #4 against the
+   already-ruled disposition above, not new law: it makes the "unblocks on the register landing"
+   sentence true by construction instead of by omission. The refusal lifts the moment the
+   firm-level disclosure authorization register (TIER B, owner card, not built in this PR) lands
+   and the request core is updated to check it instead of hard-refusing the recipient kind.

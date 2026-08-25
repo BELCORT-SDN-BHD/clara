@@ -49,12 +49,19 @@ body** (gate B6): `clara_fn_owner`'s own policy is `using (true)`, so every rela
 is scoped by an **explicit predicate in the body** against `p_firm`, which the wrapper resolves from
 `clara.wake_context()` and never reads off a basis row (design §3.2; the `0083:102-108` precedent).
 
-**Allowlist rows: exactly two per read/write wake verb per admitted kind** —
-`('interactive','wake_mint_sandbox_view')`, `('interactive','wake_request_sandbox_export')`,
-`('interactive','wake_sandbox_export_state')`, and the `interactive_client` triple once F-A2's D34
-limb merges. **Six rows when complete; never a `'proactive'` or unattended row.** The closed-world
-cell asserts the count **in both directions** (F5-D30: a roster that can only find extras cannot
-find omissions).
+**Allowlist rows: `('interactive', <name>)` for each of the three wrappers — three rows, not six**
+(A11/PR-1 truing, 2026-08-25). This text originally read "and the `interactive_client` triple once
+F-A2's D34 limb merges" — WRONG, discovered by rig replay at PR-1 authoring: the live estate carries
+its own deliberate, independently-tested closed-world invariant (GB-3/D34,
+`f-a2-chat-limb.test.mjs` + `f-a2-grants.test.mjs`) capping `interactive_client` at EXACTLY ONE verb
+(`wake_open_question`), specifically so that kind can never quietly become a posting kind. Widening
+it for this lane would be an owner-ruling-class change to the D34 wall ITSELF, not a seeding
+decision this design may make. **This posture is PERMANENT unless the D34 wall is re-ruled** — never
+a placeholder pending a merge that already happened. Annex K's own dependency row already priced
+this exact fallback (`('interactive', …)` rows only; HOME-scoped sandbox works); PR-1 shipped it.
+Never a `'proactive'` or unattended row. The closed-world cell asserts the count **in both
+directions** (F5-D30: a roster that can only find extras cannot find omissions) and additionally
+proves `interactive_client`'s own one-row invariant is UNTOUCHED.
 
 ### A.3 · The token vocabulary — every refusal is typed, none is a bare string
 
@@ -433,6 +440,6 @@ place; it does not replace the verb (`frontend-handoff-2026-08-23.md` §0's rule
 | **F-A5 PR-4** — the sealed lane's renderer ceremony | two renderer ceremonies must not contend; F-A5's drill closes DR-render's unrun boundary first | PR-3 waits |
 | **F-A6 PR-1** — `freeform_read_log`'s hardened `scope`/`client_scope` **and its `firm_id` NOT NULL** | §3.2's derivation reads them (U2); until the NOT NULL lands, C-20's equality predicate is what refuses a NULL-firm row | the free-read basis kinds are unavailable; preview-cell bases still work |
 | **F-A6 v2** — the cross-client named read | **the only source of an EXACT client set for a multi-client narrative basis** (§3.2). Without it every such view derives `firm_closure` and only a firm-covering recipient may receive it | the capability is narrower, not wrong; stated, not hidden |
-| **F-A2 PR-1** — `interactive_client` (D34) | a client-pinned sandbox session's allowlist row | `('interactive', …)` rows only; HOME-scoped sandbox works |
+| **F-A2 PR-1** — `interactive_client` (D34) | **RESOLVED at PR-1 authoring, 2026-08-25 — merged, but PERMANENTLY NOT what this row assumed.** F-A2 PR-1 IS merged; `interactive_client` itself is real. But the live estate ALSO carries its own deliberate, independently-tested closed-world wall (GB-3/D34) capping `interactive_client` at exactly the one `wake_open_question` verb, discovered by rig replay. Widening it is an owner-ruling-class change to that wall, never a seeding decision this design makes. | `('interactive', …)` rows only shipped in PR-1; HOME-scoped sandbox works; a client-pinned session cannot mint/request an export. **Permanent, not contingent on a future merge.** |
 | **the owner's signing** (Q1) | X12 | **the lane ships dark** |
 | **owner card 1** (R-7; design §7) | it gates the `displayed_text` **figure path**, not the lane | prose-and-chart-label views without model-typed figures are still buildable; the figure path waits |
