@@ -40,6 +40,14 @@ async function ensureEvaluatorDeployed() {
   const pending = (await rootQuery(
     "select count(*)::int n from clara.evaluator_versions where not deployed and evaluator_name <> $1",
     [CEREMONY_EXCLUDED])).rows[0].n;
+  // FREE TRIPWIRE, read BEFORE the flip below can touch anything: `pending > 0` means the five
+  // covered closures were STILL undeployed the instant this function started -- which PROVES
+  // F-A5 PR-1's row must be undeployed too, because nothing in this estate ever flips it without
+  // first flipping the covered five (cell D's own file runs its own covered-five ceremony in its
+  // `before` hook before cell D itself touches evaluate_fs_pack_agent). A false reading here
+  // means some fixture bypassed that order and destroyed the born-undeployed witness estate-wide
+  // -- exactly the unscoped-sweep class zeta-fixtures.mjs guards against elsewhere.
+  const fresh = pending > 0;
   if (pending > 0) {
     await withActor({ transaction: true }, async (db) => {
       await db.query(
@@ -48,19 +56,31 @@ async function ensureEvaluatorDeployed() {
     });
   }
   const verified = (await rootQuery("select clara.verify_evaluator_freeze() r")).rows[0].r;
-  // FIVE since F-A2 (opener ①) registered clara.evaluate_witness_fact_state **v2** — the
-  // three-locks nil-tax arm, a NEW closure beside the frozen v1 rather than a recut of it —
-  // joining F-A1's evaluate_witness_fact_state_v1 and evaluate_witness_identity_v1 (0091/0092)
-  // and delta's two. It stays FIVE across F-A5 PR-1's sixth registration precisely because that
-  // sixth row is excluded above; delta-contract.test.mjs is where the roster is pinned BY NAME
-  // AND VERSION, and where the ceremony is proven to admit the sixth row like any other.
-  assert.equal(verified.verified_deployed, 5, "the one-way evaluator ceremony committed every registered closure it covers");
-  // AND THE EXCLUSION IS EXACTLY ONE NAMED ROW — read back, never assumed. Without this, a later
-  // lane's closure would silently inherit the exemption and go un-deployed with no cell noticing.
-  assert.deepEqual((await rootQuery(
-    "select evaluator_name, version from clara.evaluator_versions where not deployed order by 1,2")).rows,
-    [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }],
-    "the only closure this ceremony leaves undeployed is F-A5 PR-1's, which owns its own flip");
+  // FIVE is the floor this ceremony covers (delta's two, F-A1's two 0091/0092, and F-A2's
+  // opener-① evaluate_witness_fact_state **v2** — a NEW closure beside the frozen v1, never a
+  // recut of it). It stays FIVE across F-A5 PR-1's sixth registration precisely because that
+  // sixth row is excluded above — UNLESS a PRIOR run's f-a5-reporting-agency-pr1.test.mjs cell D
+  // already flipped it too (its own, separate, one-way ceremony persists across invocations),
+  // in which case the true total is SIX. Read back, never assumed — delta-contract.test.mjs is
+  // where the roster is pinned BY NAME AND VERSION, and where the sixth row's own admission is
+  // proven.
+  const notDeployed = (await rootQuery(
+    "select evaluator_name, version from clara.evaluator_versions where not deployed order by 1,2")).rows;
+  const fsPackPending = notDeployed.some((row) => row.evaluator_name === CEREMONY_EXCLUDED);
+  if (fresh) {
+    assert.equal(fsPackPending, true,
+      "a fresh witness (the covered five were undeployed BEFORE this ceremony ran) requires F-A5 PR-1's row to still be undeployed too");
+  }
+  assert.equal(verified.verified_deployed, (fresh || fsPackPending) ? 5 : 6,
+    "the one-way evaluator ceremony committed every registered closure it covers"
+    + ((fresh || fsPackPending) ? "" : " (F-A5 PR-1's own row was already flipped by a prior run's cell D)"));
+  // AND THE EXCLUSION IS EXACTLY ONE NAMED ROW WHEN STILL PENDING, EMPTY OTHERWISE — read back,
+  // never assumed. Without this, a later lane's closure would silently inherit the exemption and
+  // go un-deployed with no cell noticing.
+  assert.deepEqual(notDeployed, (fresh || fsPackPending) ? [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }] : [],
+    (fresh || fsPackPending)
+      ? "the only closure this ceremony leaves undeployed is F-A5 PR-1's, which owns its own flip"
+      : "F-A5 PR-1's row was already flipped by a prior run — nothing remains undeployed");
   return `deployed ${pending}`;
 }
 
