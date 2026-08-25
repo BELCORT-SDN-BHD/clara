@@ -15,7 +15,6 @@
 > gap number; the M11/B2.3 reconciliation and the N2 `client_set_exact` assertions on BOTH
 > B1.4 and B1.5, as instructed. This is **the final design fold before build** — the gate
 > reviewer's narrow re-check runs against this complete set.
-> doc's own front matter, not silently treated as satisfied.
 
 ---
 

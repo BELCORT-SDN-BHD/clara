@@ -164,7 +164,7 @@ for v_block in select * from jsonb_array_elements(v_blocks) loop
   v_kind := v_block ->> 'kind';
 
   if v_kind = 'text' then
-    -- UNCHANGED from 0132.sql:636-639 (M3: the non-blank displayed_text check stays HERE,
+    -- UNCHANGED from 0132.sql:636-640 (M3: the non-blank displayed_text check stays HERE,
     -- in the text arm, and nowhere else — it must never run against a placeholder block,
     -- which carries no displayed_text field at all).
     v_has_free_text := true;
