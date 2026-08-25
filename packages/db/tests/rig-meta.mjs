@@ -1032,7 +1032,19 @@ export const ALLOWED = {
     // clara_wake_interactive; one allowlist row per kind" (chat parity). The other four filing
     // wrappers (wake_open_firm_question, wake_propose_identifier_promotion, wake_reattribute_document,
     // wake_propose_filing_correction) are clara_wake_filing ONLY -- deliberately absent here.
-    "wake_file_document"]),
+    "wake_file_document",
+    // [Wave-F Track A, F-A3 PR-3, chatTurn_v14, OQ-6, owner ruling 2026-08-25] the SAME
+    // "clara_wake_bank + clara_wake_interactive; one allowlist row per kind" chat-parity shape
+    // the F-A7 beta precedent above already established -- ALL THIRTEEN bank wake_* wrappers,
+    // never a subset, because OQ-6's own ruling admits chat to the full bank verb surface (four
+    // of which post to the books), not a read-only slice. The grant is
+    // UNNUMBERED_chatturn_v14_bank_interactive_grants.sql, extend-only, reviewed as its own
+    // deliberate act -- see that file's header for the reachability argument and the grant/role
+    // choice this cell's own expected=true flip records.
+    "wake_get_bank_pack", "wake_add_bank_account", "wake_upsert_account", "wake_match_bank_line",
+    "wake_settle_from_bank_line", "wake_unmatch_bank_match", "wake_complete_bank_reconciliation",
+    "wake_void_bank_reconciliation", "wake_resolve_bank_line_exception", "wake_propose_bank_line_exception",
+    "wake_void_bank_statement", "wake_propose_bank_identifier_promotion", "wake_resolve_and_book_bank_line"]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
