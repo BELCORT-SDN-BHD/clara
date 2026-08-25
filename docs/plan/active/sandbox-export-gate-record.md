@@ -240,11 +240,11 @@ own rather than through the first.
 
 - **Q1's second key had no emitter.** Annex E Q1 hands the owner a **two-key** payload (stamp +
   footer line) and §3.6 consumed one, so the footer was unbuilt by construction. *(Raised material,
-  **downgraded to nit** by the verifier: the stamp string is itself disclaiming and owner-signed, on
-  every page, with the request refusing when the row is absent — the recipient does not receive "a
-  clean statement of figures", and "the reader cannot see an 8% wash" is a perception assertion, not
-  repo evidence, against a marking the estate already ships.)* **Folded, with the verifier's
-  mechanical correction:** the stamp is what §3.6 emits, per page; a signed footer emits **once in
+  **downgraded to nit** by the verifier: the stamp string is itself disclaiming and owner-ratified,
+  on every page, with the request refusing when the row is absent — the recipient does not receive
+  "a clean statement of figures", and "the reader cannot see an 8% wash" is a perception assertion,
+  not repo evidence, against a marking the estate already ships.)* **Folded, with the verifier's
+  mechanical correction:** the stamp is what §3.6 emits, per page; a ratified footer emits **once in
   flow** in the `layout.mjs:152` idiom — that box sits before the sections loop, so **B3.1's per-page
   assertion applies to the stamp alone**, and no cell is written that cannot pass.
 - **`firm_id` was prose, not schema.** Two of the three relation sketches omitted it, while every
@@ -377,9 +377,13 @@ card's text above stands as written; these are the dispositions.
   above. **A per-client STRICT MODE stays a future OPTIONAL TIER** — the architecture keeps the
   seam for it (the recipient-coverage model is not narrowed to force it now). The external export
   path unblocks on the firm-level register landing in PR-1. Design mechanism recorded:
-  `sandbox-export-design-part2.md` §7.
+  `sandbox-export-design-part2.md` §7. **PR-1's own build enforces this darkness structurally**
+  (A9, fix-round 2026-08-25): the request core refuses any `kind='external'` recipient with a
+  typed `sandbox_export_external_unavailable` refusal before the coverage check runs;
+  firm_member recipients are unaffected. The refusal is this dark condition's mechanism, not a
+  narrowing of the ruling — it lifts when the register lands and the check is swapped in.
 
-**Also SIGNED at the same sitting, discharging a separate lane obligation (not a gate card, but
+**Also owner-ratified at the same sitting, discharging a separate lane obligation (not a gate card, but
 recorded here for one source of truth): the `sandbox_watermark` trio (Q1/OQ-1/OQ-2)** — EN/BM/ZH
 text verbatim in `sandbox-export-design.md` §3.6a. The lane's DARK condition (survey X12) lifts at
 build once PR-1 seeds the three rows.
