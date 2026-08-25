@@ -317,6 +317,23 @@ severance and ruled parity stays in the train.
    *(b)* one consumer for the existing held-wake projection, plus a settlement path the current
    matrix does not express. **Default while unruled: nothing bakes a kind; PR-2 does not open;
    PR-1a…PR-1d proceed.** Already on the sitting's owner-facing list.
+
+   **RULED 2026-08-25 (owner): mechanism (b) — build the universal wake-execution engine.** The
+   existing `kind='wake'` held projection gains its ONE consumer plus a settlement path; one engine
+   serves every wake source (F-A3 bank_agent, F-A4 close_prep, F-A7 filing, F-A5's wake sources) and
+   future sources become rows-only, zero per-item surgery. **Mechanism (a) was heard and
+   OVERRULED** — its case, honestly: autodraft (and, before this gate existed to rule between them,
+   close_prep — `close-key-1-gate-record.md §7 item 3`, "F-A3 and F-A5 adopt that arm rather than
+   each minting their own") had already proven the per-kind-matrix shape TWICE, working, while
+   `kind='wake'`'s matrix had proven nothing (it cannot execute at all); its priced cost — a D1
+   recut of two live judgement-logic trigger bodies, repeated per item, forever, with no
+   convergence — is why it lost. **Design of record: `g1-wake-engine-design.md`** (+
+   `g1-wake-engine-survey.md`, `g1-wake-engine-annexes.md`). **close_prep is GRANDFATHERED, not
+   retrofitted**: its already-shipped (`0120`) `agent_tasks.kind='close_prep'` matrix stands
+   unchanged — no defect justifies a D1 recut of a correct, tested body — but its unbuilt RUNTIME
+   consumption folds into this same engine as a second, closed-world carrier shape, exactly as this
+   ruling names it among the four served sources (survey §6 carries the full argument, both
+   rulings' reasoning shown honestly). PR-2 (the clock/runtime PR) is now unblocked on this item.
 2. **The identifier-promotion target (OQ-8, from B5).** TA-P8's granted door has no relation for a
    non-client payer. Mint a counterparty-identifier relation (a new identity surface beside
    constraint 12), or keep promotion scoped to client-payers until the Wave-G reset?
