@@ -29,9 +29,9 @@ import {
   rootQuery, humanQuery, opk, endPool, printLaneNotes, printSkipCount, noteLane, markSkip,
   a21EnsureReady, firmOf,
 } from "./a21-helpers.mjs";
-import { addBankAccount } from "./x38-match-fixtures.mjs";
+import { addBankAccount, enterStatement } from "./x38-match-fixtures.mjs";
 import { wakeQuery, roleQuery } from "./rig-helpers.mjs";
-import { WAKE_ROLE, RATIONALE, MODEL, mintCred, callWrapper, realDigest } from "./f-a3-pr1b-wake-fixtures.mjs";
+import { WAKE_ROLE, RATIONALE, MODEL, mintCred, callWrapper, realDigest, approvedEntry } from "./f-a3-pr1b-wake-fixtures.mjs";
 import { freshAdvClient, disburse, applicationLines, ADV1, BANKV, advWorld } from "./x42-adv-world.mjs";
 
 // The pre-extraction sha256(prosrc) of clara.book_staff_advance_application, measured on a rig
@@ -122,10 +122,22 @@ test("f-a3pr3.mfA.pos a real bank_agent credential now reaches wake_book_staff_a
   assert.ok(res.entry_id ?? res.id, "mfA.pos: the receipt names an entry");
 
   const receipts = await rootQuery(
-    `select act_kind, outcome from clara.bank_agent_receipts where op_key = $1`, [opKey]);
+    `select act_kind, outcome, acting_actor, on_behalf_of, via_wake_kind, approval_arm
+       from clara.bank_agent_receipts where op_key = $1`, [opKey]);
   assert.equal(receipts.rows.length, 1, "mfA.pos: exactly one bank_agent_receipts row for this op_key");
   assert.equal(receipts.rows[0].act_kind, "staff_advance_application");
   assert.equal(receipts.rows[0].outcome, "admitted");
+  // SS5 provenance-threading regression twin, scoped to THIS core: staff-advance never gains an
+  // interactive_client allowlist row (the ordering decision, SS4's own header), so it can only
+  // ever be reached under a bank_agent credential -- _agent_book_staff_advance_application_core
+  // is authored to call clara._agent_wake_ctx directly (never CoR-patched, SS5's own header), and
+  // this proves that call site resolves the SAME unattended identity as before the fix.
+  const agentUserRow = await rootQuery(`select clara.agent_user_id() as id`);
+  assert.equal(receipts.rows[0].acting_actor, agentUserRow.rows[0].id,
+    "mfA.pos: acting_actor is the SYSTEM agent user -- staff-advance has no interactive_client path");
+  assert.equal(receipts.rows[0].on_behalf_of, null, "mfA.pos: on_behalf_of stays NULL for an unattended act");
+  assert.equal(receipts.rows[0].via_wake_kind, "bank_agent", "mfA.pos: via_wake_kind is bank_agent, unchanged");
+  assert.equal(receipts.rows[0].approval_arm, "agent_unattended", "mfA.pos: approval_arm is agent_unattended, unchanged");
 
   const appRows = await rootQuery(
     `select count(*)::int as n from clara.staff_advance_applications where advance_id = $1`, [advance.id]);
@@ -251,7 +263,7 @@ test("f-a3pr3.c3c.c the core called with no actor or firm in its context refuses
  *  ck_counterparties_registration_normalized demands (lower + strip non-alnum) -- null skips
  *  the registration entirely (both columns null, the trap2 shape). Returns
  *  { proposalId, counterpartyId }. */
-async function realPromotionProposal({ client, firm, regNo, identifierValue }) {
+async function realPromotionProposal({ client, firm, regNo, identifierValue, kind = "bank_account" }) {
   const w = await advWorld();
   const normalized = regNo == null ? null : regNo.toLowerCase().replace(/[^a-z0-9]/g, "");
   const cp = await rootQuery(
@@ -269,7 +281,7 @@ async function realPromotionProposal({ client, firm, regNo, identifierValue }) {
       { name: "p_client", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
       { name: "p_identifier_kind" }, { name: "p_identifier_value" }, { name: "p_times_seen", cast: "int" },
       { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
-    [client, counterpartyId, "ssm", identifierValue, 3, RATIONALE, JSON.stringify(MODEL), digest, opk("c3b-propose")]);
+    [client, counterpartyId, kind, identifierValue, 3, RATIONALE, JSON.stringify(MODEL), digest, opk("c3b-propose")]);
   const proposalId = r.rows[0].r.proposal_id;
   assert.ok(proposalId, `realPromotionProposal: the propose door names a proposal (got ${JSON.stringify(r.rows[0].r)})`);
   return { proposalId, counterpartyId };
@@ -300,7 +312,7 @@ test("f-a3pr3.c3b.pos a promoted payer that IS itself a different client of this
   assert.notEqual(res.status, "refused", `c3b.pos: confirms when the payer is genuinely a different client (got ${JSON.stringify(res)})`);
 
   const idRows = await rootQuery(
-    `select count(*)::int as n from clara.client_identifiers where client_id = $1 and kind='ssm' and value_normalized='201599112233'`,
+    `select count(*)::int as n from clara.client_identifiers where client_id = $1 and kind='bank_account' and value_normalized='201599112233'`,
     [target.client]);
   assert.equal(idRows.rows[0].n, 1, "c3b.pos: add_client_identifier wrote onto the TARGET client");
 
@@ -376,4 +388,200 @@ test("f-a3pr3.c3b.trap2 a counterparty with NO registration_normalized at all mu
   assert.ok(err, "c3b.trap2: a null registration_normalized refuses rather than matching vacuously");
   assert.match(String(err?.detail ?? ""), /promotion_target_unavailable/,
     `c3b.trap2: names promotion_target_unavailable (got ${err?.detail ?? "(none)"})`);
+});
+
+// ===========================================================================
+// MUST 2b -- the two normalizations must agree, PUNCTUATED forms included
+// ===========================================================================
+
+test("f-a3pr3.must2b a PUNCTUATED registration (hyphen) still resolves -- the two normalizations agree", async (t) => {
+  if (skipHere(t)) return;
+  const w = await advWorld();
+  const { client } = await freshAdvClient("must2bpos");
+  const firm = await firmOf(client);
+  const target = await freshAdvClient("must2bposTarget", { enrol: false });
+  // The RAW registration carries a hyphen; ci.value_normalized only strips whitespace
+  // (add_client_identifier's own rule), so it is stored WITH the hyphen, lowercased.
+  const reg = `1234567-A${randomUUID().slice(0, 4)}`;
+  await rootQuery(
+    `insert into clara.client_identifiers(firm_id, client_id, kind, value_normalized, added_by)
+       values ($1,$2,'ssm',$3,$4)`,
+    [firm, target.client, reg.toLowerCase(), w.users.alice]);
+  const { proposalId } = await realPromotionProposal({
+    client, firm, regNo: reg, identifierValue: "201599112244",
+  });
+  const r = await confirmAs(w.users.alice, { proposalId });
+  assert.notEqual(r.rows[0].r.status, "refused",
+    `must2b: a punctuated registration resolves the same target both normalizations agree on (got ${JSON.stringify(r.rows[0].r)})`);
+});
+
+test("f-a3pr3.must2b.neg a DIFFERENT normalization (only after re-deriving from raw) correctly still refuses when nothing matches", async (t) => {
+  if (skipHere(t)) return;
+  const w = await advWorld();
+  const { client } = await freshAdvClient("must2bneg");
+  const firm = await firmOf(client);
+  const reg = `9-ZZ${randomUUID().slice(0, 6)}`; // matches nobody
+  const { proposalId } = await realPromotionProposal({
+    client, firm, regNo: reg, identifierValue: "201500000099",
+  });
+  let err = null;
+  try { await confirmAs(w.users.alice, { proposalId }); } catch (e) { err = e; }
+  assert.ok(err, "must2b.neg: a punctuated form matching nobody still refuses cleanly");
+  assert.match(String(err?.detail ?? ""), /promotion_target_unavailable/,
+    `must2b.neg: names promotion_target_unavailable (got ${err?.detail ?? "(none)"})`);
+});
+
+// ===========================================================================
+// MUST 2c -- the door confirms a promoted payer BANK ACCOUNT only
+// ===========================================================================
+
+test("f-a3pr3.must2c a non-bank_account identifier_kind (ssm) refuses identifier_kind_out_of_scope, never writes", async (t) => {
+  if (skipHere(t)) return;
+  const w = await advWorld();
+  const { client } = await freshAdvClient("must2c");
+  const firm = await firmOf(client);
+  const target = await freshAdvClient("must2cTarget", { enrol: false });
+  const reg = `MUST2C${randomUUID().slice(0, 8)}`;
+  await rootQuery(
+    `insert into clara.client_identifiers(firm_id, client_id, kind, value_normalized, added_by)
+       values ($1,$2,'ssm',$3,$4)`,
+    [firm, target.client, reg.toLowerCase(), w.users.alice]);
+  // An agent-minted 'ssm' proposal (the exact live-proven exploit shape) -- the propose door
+  // itself admits tin/ssm/bank_account; the WALL must be at the confirm door.
+  const { proposalId } = await realPromotionProposal({
+    client, firm, regNo: reg, identifierValue: "000000-MODEL-INVENTED", kind: "ssm",
+  });
+  let err = null;
+  try { await confirmAs(w.users.alice, { proposalId }); } catch (e) { err = e; }
+  assert.ok(err, "must2c: an ssm-kind confirm is refused");
+  assert.match(String(err?.detail ?? ""), /identifier_kind_out_of_scope/,
+    `must2c: names identifier_kind_out_of_scope (got ${err?.detail ?? "(none)"})`);
+  const written = await rootQuery(
+    `select count(*)::int as n from clara.client_identifiers where client_id = $1 and value_normalized = $2`,
+    [target.client, "000000-model-invented"]);
+  assert.equal(written.rows[0].n, 0, "must2c: THE MONEY ASSERTION -- no model-invented identifier was ever written");
+  const pr = await rootQuery(`select status from clara.bank_agent_proposals where id = $1`, [proposalId]);
+  assert.equal(pr.rows[0].status, "open", "must2c: the proposal stays open, not silently accepted or dropped");
+});
+
+// ===========================================================================
+// MUST 2d -- ambiguity: two clients carrying the same identifier refuses, never guesses
+// ===========================================================================
+
+test("f-a3pr3.must2d two clients carrying the SAME identifier refuses promotion_target_ambiguous, never picks one", async (t) => {
+  if (skipHere(t)) return;
+  const w = await advWorld();
+  const { client } = await freshAdvClient("must2d");
+  const firm = await firmOf(client);
+  const targetA = await freshAdvClient("must2dTargetA", { enrol: false });
+  const targetB = await freshAdvClient("must2dTargetB", { enrol: false });
+  const reg = `MUST2D${randomUUID().slice(0, 8)}`;
+  for (const t2 of [targetA, targetB]) {
+    await rootQuery(
+      `insert into clara.client_identifiers(firm_id, client_id, kind, value_normalized, added_by)
+         values ($1,$2,'ssm',$3,$4)`,
+      [firm, t2.client, reg.toLowerCase(), w.users.alice]);
+  }
+  const { proposalId } = await realPromotionProposal({
+    client, firm, regNo: reg, identifierValue: "201599887755",
+  });
+  let err = null;
+  try { await confirmAs(w.users.alice, { proposalId }); } catch (e) { err = e; }
+  assert.ok(err, "must2d: an ambiguous match (two clients) is refused, not silently resolved to one");
+  assert.match(String(err?.detail ?? ""), /promotion_target_ambiguous/,
+    `must2d: names promotion_target_ambiguous (got ${err?.detail ?? "(none)"})`);
+  const pr = await rootQuery(`select status from clara.bank_agent_proposals where id = $1`, [proposalId]);
+  assert.equal(pr.rows[0].status, "open", "must2d: the proposal stays open");
+});
+
+// ===========================================================================
+// SS5 -- provenance threading (owner ruling, 2026-08-25): an interactive_client act writes
+// the real human's identity, the real kind, the attended arm; a bank_agent act is UNCHANGED.
+// Both polarities, real wake calls, real fixtures -- the class F-A5/PR-3's fold-in wall exists
+// to prevent, proven the same way that one was.
+// ===========================================================================
+
+/** A statement line + an approved candidate entry ready for wake_match_bank_line, plus the
+ *  bank_matching consent this file's OTHER cells already stage via grantBankMatching. */
+async function provFixture(label) {
+  const { client } = await freshAdvClient(label);
+  const w = await advWorld();
+  const firm = await firmOf(client);
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `PROV${randomUUID().slice(0, 6)}` });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  await grantBankMatching({ client, firm, actor: w.users.alice });
+  const stmt = await enterStatement(w.users.alice, {
+    client, bankAccount: bankAccountId,
+    opening: 0, specs: [{ entryDate: "2026-07-16", amountCents: 33300, description: `${label} deposit` }],
+  });
+  const line = stmt.lines[0].id;
+  // OTHERV ("620-V42", an ordinary expense) is explicitly provisioned by freshAdvClient's own
+  // chart build (x42-adv-world.mjs's buildAdvChart) -- a real, guaranteed-present counter-leg,
+  // never a guessed code.
+  const entry = await approvedEntry({
+    client, actor: w.users.alice, postingDate: "2026-07-16",
+    memo: `${label} entry`, bankCoa: BANKV, otherCoa: "620-V42", cents: 33300,
+  });
+  return { client, firm, bankAccountId, line, entry, alice: w.users.alice };
+}
+
+test("f-a3pr3.ss5.interactive an interactive_client act writes the REAL human identity, kind, and attended arm", async (t) => {
+  if (skipHere(t)) return;
+  const { client, firm, bankAccountId, line, entry, alice } = await provFixture("ss5int");
+  const cred = await mintCred("interactive_client", firm, client, alice);
+  const digest = await realDigest(cred.secret, client, bankAccountId, opk("ss5int-pack"));
+  const opKey = opk("ss5int-match");
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_lines", cast: "jsonb" }, { name: "p_entries", cast: "jsonb" },
+    { name: "p_adjustments", cast: "jsonb" }, { name: "p_ack_period_exceptions" },
+    { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_match_bank_line", specs),
+    [client, JSON.stringify([line]), JSON.stringify([{ entry_id: entry, matched_cents: 33300 }]),
+     null, true, RATIONALE, JSON.stringify(MODEL), digest, opKey]);
+  const matchId = r.rows[0].r.match_id ?? r.rows[0].r.id;
+  assert.notEqual(r.rows[0].r.status, "refused", `ss5.interactive: the match admits (got ${JSON.stringify(r.rows[0].r)})`);
+
+  const m = await rootQuery(`select origin from clara.bank_matches where id = $1`, [matchId]);
+  assert.equal(m.rows[0].origin, "human",
+    "ss5.interactive: bank_matches.origin reads 'human' -- an attended act, not agent-stamped");
+
+  const receipts = await rootQuery(
+    `select acting_actor, on_behalf_of, via_wake_kind, approval_arm from clara.bank_agent_receipts where op_key = $1`,
+    [opKey]);
+  assert.equal(receipts.rows.length, 1, "ss5.interactive: exactly one receipt for this op_key");
+  const rec = receipts.rows[0];
+  assert.equal(rec.acting_actor, alice, "ss5.interactive: acting_actor is the REAL human, never the system agent user");
+  assert.equal(rec.on_behalf_of, alice, "ss5.interactive: on_behalf_of is populated with the same human");
+  assert.equal(rec.via_wake_kind, "interactive_client", "ss5.interactive: via_wake_kind names the REAL credential kind");
+  assert.equal(rec.approval_arm, "interactive_client_attended", "ss5.interactive: approval_arm is an ATTENDED value, never agent_unattended");
+});
+
+test("f-a3pr3.ss5.regression a bank_agent (unattended) act is BYTE-UNCHANGED by the provenance fix", async (t) => {
+  if (skipHere(t)) return;
+  const { client, firm, bankAccountId, line, entry } = await provFixture("ss5reg");
+  const cred = await mintCred("bank_agent", firm, client);
+  const digest = await realDigest(cred.secret, client, bankAccountId, opk("ss5reg-pack"));
+  const opKey = opk("ss5reg-match");
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_lines", cast: "jsonb" }, { name: "p_entries", cast: "jsonb" },
+    { name: "p_adjustments", cast: "jsonb" }, { name: "p_ack_period_exceptions" },
+    { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_match_bank_line", specs),
+    [client, JSON.stringify([line]), JSON.stringify([{ entry_id: entry, matched_cents: 33300 }]),
+     null, true, RATIONALE, JSON.stringify(MODEL), digest, opKey]);
+  const matchId = r.rows[0].r.match_id ?? r.rows[0].r.id;
+  assert.notEqual(r.rows[0].r.status, "refused", `ss5.regression: the match admits (got ${JSON.stringify(r.rows[0].r)})`);
+
+  const m = await rootQuery(`select origin from clara.bank_matches where id = $1`, [matchId]);
+  assert.equal(m.rows[0].origin, "agent", "ss5.regression: bank_matches.origin still reads 'agent' -- unchanged");
+
+  const receipts = await rootQuery(
+    `select acting_actor, on_behalf_of, via_wake_kind, approval_arm from clara.bank_agent_receipts where op_key = $1`,
+    [opKey]);
+  const rec = receipts.rows[0];
+  assert.equal(rec.on_behalf_of, null, "ss5.regression: on_behalf_of stays NULL, exactly as before the fix");
+  assert.equal(rec.via_wake_kind, "bank_agent", "ss5.regression: via_wake_kind is still bank_agent");
+  assert.equal(rec.approval_arm, "agent_unattended", "ss5.regression: approval_arm is still agent_unattended");
+  const actorRow = await rootQuery(`select is_agent from clara.users where id = $1`, [rec.acting_actor]);
+  assert.equal(actorRow.rows[0]?.is_agent, true, "ss5.regression: acting_actor still resolves to the SYSTEM agent user, never a human");
 });

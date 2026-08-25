@@ -8,8 +8,14 @@
 --   SS3  IDENTIFIER-PROMOTION CONFIRM DOOR -- the half OQ-8 deferred at PR-1b: confirm a
 --        bank_agent_proposals(kind='identifier_promotion') row, scoped to the client-payer
 --        case, fail-closed to promotion_target_unavailable otherwise.
---   SS4  CHAT PARITY (OQ-6) -- the nine live bank_agent wake wrappers gain an interactive_client
---        allowlist row apiece; no body changes, no new credential kind.
+--   SS4  CHAT PARITY (OQ-6) -- the thirteen live bank_agent wake wrappers gain an
+--        interactive_client allowlist row apiece; no body changes, no new credential kind.
+--        wake_book_staff_advance_application (SS2) is DEFERRED past SS4 and deliberately
+--        EXCLUDED -- OQ-6's parity is scoped to bank-matching, OQ-7's sibling carries no
+--        chat-parity mention (the ordering decision, SS4's own header).
+--   SS5  PROVENANCE THREADING (owner ruling, 2026-08-25) -- an interactive_client act writes
+--        the real human's identity/kind/attended-arm through every bank_agent judgement
+--        receipt and agent-core ctx; a bank_agent act is unchanged.
 --
 -- D1 WRITE-QUIESCE INVENTORY (every audited writer body this file replaces or creates):
 --   replaced in place: clara.book_staff_advance_application (SS2 -- becomes a thin delegator)
@@ -18,6 +24,12 @@
 --   newly created (no prior body, no quiesce owed): _book_staff_advance_application_core,
 --     wake_book_staff_advance_application, _agent_book_staff_advance_application_core,
 --     confirm_bank_identifier_promotion, _confirm_bank_identifier_promotion_core
+--   SCHEMA-LOCKED, not a body recut (SHOULD 5b): SS1b takes ACCESS EXCLUSIVE on
+--     clara.bank_agent_receipts to drop+re-add bank_agent_receipts_act_kind_check (widened
+--     to admit 'staff_advance_application'), and re-validates every existing row against the
+--     new CHECK -- a DDL-class D1 event on a live-written table, not a function body change,
+--     named here for the same reason a body recut is: it takes a lock a live writer can block
+--     on, and a reviewer of the deploy window needs to know it is there.
 --   NOT touched: _wdb_suggestion_rule_hit, _wdb_suggestion_lines, _bank_desc_word_match,
 --     _bank_rule_regex_escape, _bank_line_class_hint (see SS1's KEEP block for why), and
 --     clara._adj_on_approve (its arm (3) still calls two of the five keeps; untouched, unrecut)
@@ -43,6 +55,13 @@
 -- correctly through the kept helpers.
 -- =====================================================================================
 
+-- LOCK TIMEOUT (SHOULD 5i): this file DROPs eleven functions and takes ACCESS EXCLUSIVE on
+-- clara.bank_agent_receipts (SS1b, the CHECK widen). Load-bearing, not precautionary: on a
+-- live deploy a long-running query against any dropped function or that table would otherwise
+-- make this whole D1 window hang indefinitely waiting for its lock rather than failing fast
+-- and loud. `db-migrations.md`'s own rule: the timeout lives IN THE FILE, not the ceremony.
+set local lock_timeout = '30s';
+
 -- =====================================================================================
 -- SS0 PRESTATE -- every claim this file makes about what it is editing, MEASURED.
 -- =====================================================================================
@@ -56,6 +75,14 @@
 -- does not run the body, so a mismatch cannot corrupt data -- it means "the ceremony is not
 -- looking at the tip this file was authored and reviewed against", which is reason enough to
 -- stop before recording an inventory that would then be wrong.
+--
+-- ON COMMIT DROP, at file top level (SHOULD 5g, noted rather than restructured): this table
+-- lives for the DURATION OF THIS FILE'S OWN TRANSACTION, which the migration runner always
+-- wraps the whole file in. Hand-running this file with a bare `psql -f` (bypassing the
+-- runner) autocommits each top-level statement separately by default, so the table would be
+-- dropped the instant its own CREATE commits and every later reference would fail confusingly
+-- ("relation does not exist") rather than with a clear "run this through the runner" message.
+-- This file is never meant to be hand-run; `pnpm db:migrate` is the only supported path.
 create temp table fa3pr3_drop_targets (
   sig text primary key, sha text not null
 ) on commit drop;
@@ -212,6 +239,36 @@ begin
 end
 $fa3pr3_pre$;
 
+-- clara._agent_wake_ctx -- created EARLY (SS5's own header, further down, explains why):
+-- SS2's freshly-authored core calls it directly, so it must exist before SS2 runs.
+set role clara_fn_owner;
+create function clara._agent_wake_ctx(p_firm uuid, p_rationale text, p_model jsonb)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp
+  as $wake_ctx$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.wake_kind = 'interactive_client' then
+    -- ATTENDED: the acting identity IS the human directing the chat turn (the credential's
+    -- own on_behalf_of), never the system agent user. is_agent=false flows into every shared
+    -- _<verb>_core's origin-stamp (design register N3/A25) and this file's own SS2
+    -- entry_post_receipts gate the SAME way a direct human door's call would.
+    return jsonb_build_object('actor', w.on_behalf_of, 'firm', p_firm, 'is_agent', false,
+      'on_behalf_of', w.on_behalf_of, 'wake_kind', w.wake_kind,
+      'rationale', p_rationale, 'model', p_model);
+  end if;
+  -- UNATTENDED (bank_agent, or any future non-interactive_client kind): byte-identical to
+  -- the pre-fix literal this replaces, so an agent-credential act is UNCHANGED (the
+  -- regression twin every test cell below proves).
+  return jsonb_build_object('actor', clara.agent_user_id(), 'firm', p_firm, 'is_agent', true,
+    'on_behalf_of', null, 'wake_kind', coalesce(w.wake_kind, 'bank_agent'),
+    'rationale', p_rationale, 'model', p_model);
+end
+$wake_ctx$;
+revoke all on function clara._agent_wake_ctx(uuid,text,jsonb) from public;
+reset role;
+
 -- =====================================================================================
 -- SS1 -- RETIREMENT (design SS3.2/3.12, Annex A19/A20, Annex I). Eleven DROPs; the KEEP set
 -- (five names, three from Annex I plus the two this file's own caller census re-homed) is
@@ -236,10 +293,18 @@ drop function clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,uuid);
 drop function clara.settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,text,uuid);
 
 -- =====================================================================================
--- SS1b -- WIDEN clara.bank_agent_receipts_act_kind_check (extend-only). Two new act_kind
--- values: 'staff_advance_application' (SS2) and 'identifier_promotion_confirm' (SS3). The
--- twelve pre-existing values (the eleven from PR-1a/1b/1c plus 'pack_read' from PR-1c) survive
--- byte-identical -- re-read from the LIVE constraint text, never re-typed from a design cite.
+-- SS1b -- WIDEN clara.bank_agent_receipts_act_kind_check (extend-only). ONE new act_kind
+-- value: 'staff_advance_application' (SS2). The twelve pre-existing values (the eleven from
+-- PR-1a/1b/1c plus 'pack_read' from PR-1c) survive byte-identical -- re-read from the LIVE
+-- constraint text, never re-typed from a design cite.
+--
+-- 'identifier_promotion_confirm' is DELIBERATELY NOT admitted here (SHOULD 5d, law 31, the
+-- A17 precedent: "declined"/"stale" were dropped from a different CHECK for want of a
+-- writer). SS3's confirm_bank_identifier_promotion is a HUMAN-only door (_human_ctx,
+-- bookkeeper floor) -- it never writes clara.bank_agent_receipts (that table is the AGENT
+-- judgement-act receipt, SS3's own _audit call is this human act's real record) -- so no
+-- writer for this value will ever exist. Admitting it anyway would be exactly the
+-- enumerated-but-unproducible state law 31 forbids.
 -- =====================================================================================
 do $fa3pr3_widen$
 declare v_live text;
@@ -256,7 +321,7 @@ begin
   alter table clara.bank_agent_receipts add constraint bank_agent_receipts_act_kind_check
     check (act_kind in ('match','unmatch','settle','reconcile_complete','reconcile_void',
       'exception_resolve','exception_propose','statement_void','bank_account_add','account_upsert',
-      'identifier_promotion_propose','pack_read','staff_advance_application','identifier_promotion_confirm'));
+      'identifier_promotion_propose','pack_read','staff_advance_application'));
 end
 $fa3pr3_widen$;
 
@@ -390,13 +455,13 @@ grant execute on function clara.wake_book_staff_advance_application(uuid,date,te
 -- permanently unreachable. bank_agent owns this verb (OQ-7: "a sibling of the SAME SHAPE" as
 -- the other bank-agency wake verbs; the agent core below reuses bank_agent's own Tier-A/Tier-C
 -- machinery -- _agent_bank_tier_a, _agent_bank_tier_c_reason, _agent_bank_receipt -- verbatim,
--- the same architectural family as _agent_add_bank_account_core). Placed BEFORE SS4 so the
--- existing bank_agent-to-interactive_client mirror below picks it up the same way it picks up
--- every other bank_agent row, with no special-casing -- consistent with OQ-7's "same shape"
--- ruling and OQ-6's "chat parity rides PR-3" scope (both already ride this PR; this file does
--- not silently narrow either).
-insert into clara.wake_fn_allowlist (wake_kind, function_name)
-  values ('bank_agent', 'wake_book_staff_advance_application');
+-- the same architectural family as _agent_add_bank_account_core).
+--
+-- ORDERING DECISION (review finding, deliberate): this insert is DEFERRED to AFTER SS4's own
+-- bank_agent-to-interactive_client mirror, below -- see SS4's own header for the row and the
+-- rationale. A human in chat must NOT get to book a staff advance through the bank lane:
+-- OQ-6's chat parity is scoped to the bank-matching surface (Annex A23); OQ-7's staff-advance
+-- sibling is an AUTONOMOUS-lane sibling with no chat-parity mention anywhere in the design.
 
 create function clara._agent_book_staff_advance_application_core(p_client uuid, p_posting_date date,
     p_memo text, p_lines jsonb, p_allocations jsonb, p_kind text, p_reason text,
@@ -412,8 +477,7 @@ begin
   perform clara._agent_verify_inputs_digest(p_client, p_inputs_digest); -- H2
   begin
     v_res := clara._book_staff_advance_application_core(
-      jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
-        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model),
+      clara._agent_wake_ctx(v_firm, p_rationale, p_model),
       p_client, p_posting_date, p_memo, p_lines, p_allocations, p_kind, p_reason, p_op_key);
   exception when others then
     get stacked diagnostics v_state = returned_sqlstate, v_detail = pg_exception_detail;
@@ -475,6 +539,7 @@ create function clara._confirm_bank_identifier_promotion_core(p_ctx jsonb, p_pro
   as $confirm_bip_core$
 declare
   c record; v_dedupe jsonb; pr record; v_target_client uuid; v_identifier uuid; v_inner jsonb;
+  v_n int;
 begin
   select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
   if c.actor is null or c.firm is null then
@@ -501,25 +566,51 @@ begin
 
   -- OQ-8's fail-closed default: the payer is itself a client of this firm ONLY when a
   -- client_identifiers row of kind ssm/tin, for a DIFFERENT client, carries the SAME
-  -- registration_normalized this proposal's counterparty carries -- proved, never assumed
-  -- from a name, per law 3. "DIFFERENT client" is enforced STRUCTURALLY here (review finding
-  -- C3b/SHOULD, the same-client trap): the counterparty's own client_id (cp.client_id) is
-  -- excluded from the match, never merely documented in the comment above -- a counterparty
-  -- whose registration_normalized happens to echo the PROPOSAL'S OWN client's identifier
-  -- (e.g. a self-referential reference number in a statement description) must never resolve
-  -- to that same client; there is no payer identity there to promote.
-  select ci.client_id into v_target_client
+  -- identifier this proposal's counterparty carries -- proved, never assumed from a name,
+  -- per law 3. "DIFFERENT client" is enforced STRUCTURALLY (review C3b, the same-client
+  -- trap): cp.client_id is excluded from the match, never merely documented.
+  --
+  -- MUST 2b (review finding): comparing cp.registration_normalized to ci.value_normalized
+  -- compares TWO DIFFERENT NORMALIZATIONS -- registration_normalized strips EVERY
+  -- non-alphanumeric character (ck_counterparties_registration_normalized), while
+  -- value_normalized strips WHITESPACE ONLY (clara.add_client_identifier's own DC-1 rule,
+  -- the same rule _agent_file_document_core:152 re-derives on its OTHER comparison side).
+  -- A punctuated form (`1234567-A`) matches on one side and misses on the other -- the door
+  -- worked sometimes and silently refused the rest, proved live both polarities. Fixed by
+  -- re-deriving value_normalized's OWN rule from cp.registration_no (the RAW form, never
+  -- registration_normalized) so both sides of the join use the identical formula.
+  --
+  -- MUST 2d (review finding): a bare `limit 1` with no ORDER BY over a NON-unique index
+  -- picked an arbitrary client when two carried the same identifier (proved live). Counted
+  -- DISTINCT below and refused, typed, rather than silently choosing one. (uuid has no
+  -- built-in min()/max() aggregate -- array_agg + a deterministic sort stands in.)
+  select count(distinct ci.client_id), (array_agg(ci.client_id order by ci.client_id))[1]
+    into v_n, v_target_client
     from clara.counterparties cp
     join clara.client_identifiers ci
       on ci.firm_id = c.firm and ci.kind in ('ssm','tin')
-     and ci.value_normalized = cp.registration_normalized
+     and ci.value_normalized = lower(regexp_replace(cp.registration_no,'\s+','','g'))
      and ci.client_id <> cp.client_id
    where cp.id = pr.subject_id and cp.firm_id = c.firm
-     and nullif(btrim(coalesce(cp.registration_normalized,'')),'') is not null
-   limit 1;
-  if v_target_client is null then
+     and nullif(btrim(coalesce(cp.registration_no,'')),'') is not null;
+  if v_n = 0 or v_target_client is null then
     raise exception 'the payer named in this proposal is not itself a client of this firm -- no identifier home exists'
       using errcode = 'CLR10', detail = '{"reason":"promotion_target_unavailable","class":"promotion"}';
+  end if;
+  if v_n > 1 then
+    raise exception 'the payer named in this proposal matches % different clients'' identifiers -- confirming would guess which one', v_n
+      using errcode = 'CLR10', detail = '{"reason":"promotion_target_ambiguous","class":"promotion"}';
+  end if;
+  -- MUST 2c (review finding, PRD SS6 / constraint 2): this door confirms a PROMOTED PAYER
+  -- BANK ACCOUNT (A15/OQ-8's own scope) -- never a statutory identifier. `pr.payload->>
+  -- 'identifier_kind'` is MODEL-PROPOSED (wake_propose_bank_identifier_promotion admits
+  -- tin/ssm/bank_account with no re-validation at this door), so without this check an
+  -- agent-minted 'ssm' or 'tin' proposal writes a model-invented statutory identifier onto a
+  -- real client's identity record through this same call -- proven live by the reviewer.
+  -- Refused here, structurally, before the audited write door is ever reached.
+  if pr.payload->>'identifier_kind' <> 'bank_account' then
+    raise exception 'this door confirms a promoted payer BANK ACCOUNT only -- % is out of scope for confirm_bank_identifier_promotion', pr.payload->>'identifier_kind'
+      using errcode = 'CLR10', detail = '{"reason":"identifier_kind_out_of_scope","class":"promotion"}';
   end if;
 
   v_inner := clara.add_client_identifier(v_target_client, pr.payload->>'identifier_kind',
@@ -544,6 +635,153 @@ end
 $confirm_bip_core$;
 revoke all on function clara._confirm_bank_identifier_promotion_core(jsonb,uuid,text) from public;
 
+-- =====================================================================================
+-- SS5 -- PROVENANCE THREADING (owner ruling, 2026-08-25: SS4's full 13-verb chat parity
+-- STAYS, on the hard condition that the receipt tells the truth). The reviewer proved live
+-- that a human's interactive_client act writes a receipt stamped acting_actor = the AGENT
+-- user, on_behalf_of = NULL, via_wake_kind = 'bank_agent', approval_arm = 'agent_unattended'
+-- -- mislabelled provenance, the F-A5/PR-3 fold-in class. Root cause: every
+-- clara._agent_<verb>_core hardcodes this identity unconditionally in the ctx it builds
+-- (PR-1b, migration 0121, already merged) and clara._agent_bank_receipt hardcodes it again in
+-- the judgement receipt it writes -- neither ever reads which wake credential is actually
+-- live. Fixed by centralizing the derivation in ONE new helper each of the twelve affected
+-- bodies calls, rather than elevens copies of the same branch: clara.wake_context() is
+-- STABLE and session-scoped (current_setting('clara.wake_secret')), so calling it a second
+-- time inside a core that a wrapper already resolved it in returns the IDENTICAL row -- no
+-- new parameter needs to thread through any of the twelve call sites. clara._agent_wake_ctx
+-- itself is created EARLY, right after SS0 (see there), because SS2's OWN freshly-authored
+-- core calls it directly -- SS2 is authored correctly from birth, never CoR-patched.
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- THE ELEVEN _agent_<verb>_core BODIES (ten from PR-1b, already merged; this file's own
+-- SS2 core is the eleventh, authored to call _agent_wake_ctx directly -- never CoR-patched,
+-- since it did not exist before this file). Each of the ten below carries the IDENTICAL
+-- two-line ctx fragment (measured, not assumed) -- ONE substitution, targeted and pinned by
+-- exact text, never a blind regex.
+do $fa3pr3_prov_cores$
+declare
+  v_target text := $t$jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model)$t$;
+  v_names text[] := array['_agent_add_bank_account_core','_agent_complete_bank_reconciliation_core',
+    '_agent_match_bank_line_core','_agent_resolve_and_book_core',
+    '_agent_resolve_bank_line_exception_core','_agent_unmatch_bank_match_core',
+    '_agent_upsert_account_core','_agent_void_bank_reconciliation_core',
+    '_agent_void_bank_statement_core'];
+  fn text; v_src text; v_occ int; v_oid oid; v_def text; v_head text;
+begin
+  foreach fn in array v_names loop
+    select p.oid into v_oid from pg_proc p
+     where p.pronamespace='clara'::regnamespace and p.proname=fn;
+    if v_oid is null then
+      raise exception 'F-A3 PR-3 SS5: clara.% does not resolve', fn using errcode='CLR10';
+    end if;
+    v_def := pg_get_functiondef(v_oid);
+    select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
+    v_head := left(v_def, position(E'\nAS $function$' in v_def));
+    if v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n' then
+      raise exception 'F-A3 PR-3 SS5: clara.% does not split at the AS $function$ boundary into a uniquely-locatable header + prosrc', fn using errcode='CLR10';
+    end if;
+    v_occ := (length(v_src) - length(replace(v_src, v_target, ''))) / length(v_target);
+    if v_occ <> 1 then
+      raise exception 'F-A3 PR-3 SS5: clara.% does not carry the pinned identity-ctx fragment exactly once (found %) -- re-derive before patching', fn, v_occ using errcode='CLR10';
+    end if;
+    execute v_head || 'AS $wake_prov$' ||
+      replace(v_src, v_target, 'clara._agent_wake_ctx(v_firm, p_rationale, p_model)') || '$wake_prov$';
+  end loop;
+end
+$fa3pr3_prov_cores$;
+
+-- _agent_settle_from_bank_line_core carries the SAME fragment but with two MORE keys
+-- trailing on the same jsonb_build_object call ('receipt_preheld', 'fn') -- patched
+-- separately so the loop's single pinned target above stays exact for the other nine.
+do $fa3pr3_prov_settle$
+declare
+  v_target text := $t2$jsonb_build_object('actor', clara.agent_user_id(), 'firm', v_firm, 'is_agent', true,
+        'on_behalf_of', null, 'wake_kind', 'bank_agent', 'rationale', p_rationale, 'model', p_model,
+        'receipt_preheld', false, 'fn', 'wake_settle_from_bank_line')$t2$;
+  v_src text; v_occ int; v_oid oid; v_def text; v_head text;
+begin
+  select p.oid into v_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname='_agent_settle_from_bank_line_core';
+  if v_oid is null then
+    raise exception 'F-A3 PR-3 SS5: clara._agent_settle_from_bank_line_core does not resolve' using errcode='CLR10';
+  end if;
+  v_def := pg_get_functiondef(v_oid);
+  select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n' then
+    raise exception 'F-A3 PR-3 SS5: clara._agent_settle_from_bank_line_core does not split at the AS $function$ boundary' using errcode='CLR10';
+  end if;
+  v_occ := (length(v_src) - length(replace(v_src, v_target, ''))) / length(v_target);
+  if v_occ <> 1 then
+    raise exception 'F-A3 PR-3 SS5: clara._agent_settle_from_bank_line_core does not carry its pinned identity-ctx fragment exactly once (found %)', v_occ using errcode='CLR10';
+  end if;
+  execute v_head || 'AS $wake_prov_settle$' ||
+    replace(v_src, v_target,
+      $r$clara._agent_wake_ctx(v_firm, p_rationale, p_model) || jsonb_build_object('receipt_preheld', false, 'fn', 'wake_settle_from_bank_line')$r$)
+    || '$wake_prov_settle$';
+end
+$fa3pr3_prov_settle$;
+
+-- clara._agent_bank_receipt: the SHARED judgement-receipt writer every one of the eleven
+-- cores calls. ONE recut here fixes the receipt half for all eleven at once -- the SAME
+-- centralization argument as _agent_wake_ctx above, and the reason this file touches this
+-- function's OWN VALUES clause rather than eleven call sites.
+do $fa3pr3_prov_receipt$
+declare
+  v_target text := $t3$clara.agent_user_id(), null, 'bank_agent', p_model,
+      p_rationale, v_digest,
+      p_gate_verdicts, 'agent_unattended', p_op_key)$t3$;
+  v_replacement text := $r3$(select case when w.wake_kind = 'interactive_client' then w.on_behalf_of else clara.agent_user_id() end from clara.wake_context() w),
+      (select w.on_behalf_of from clara.wake_context() w where w.wake_kind = 'interactive_client'),
+      coalesce((select w.wake_kind from clara.wake_context() w), 'bank_agent'), p_model,
+      p_rationale, v_digest,
+      p_gate_verdicts,
+      (select case when w.wake_kind = 'interactive_client' then 'interactive_client_attended' else 'agent_unattended' end from clara.wake_context() w),
+      p_op_key)$r3$;
+  v_src text; v_occ int; v_oid oid; v_def text; v_head text;
+begin
+  select p.oid into v_oid from pg_proc p
+   where p.pronamespace='clara'::regnamespace and p.proname='_agent_bank_receipt';
+  if v_oid is null then
+    raise exception 'F-A3 PR-3 SS5: clara._agent_bank_receipt does not resolve' using errcode='CLR10';
+  end if;
+  v_def := pg_get_functiondef(v_oid);
+  select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
+  v_head := left(v_def, position(E'\nAS $function$' in v_def));
+  if v_def <> v_head || 'AS $function$' || v_src || '$function$' || E'\n' then
+    raise exception 'F-A3 PR-3 SS5: clara._agent_bank_receipt does not split at the AS $function$ boundary' using errcode='CLR10';
+  end if;
+  v_occ := (length(v_src) - length(replace(v_src, v_target, ''))) / length(v_target);
+  if v_occ <> 1 then
+    raise exception 'F-A3 PR-3 SS5: clara._agent_bank_receipt does not carry its pinned VALUES fragment exactly once (found %) -- re-derive before patching', v_occ using errcode='CLR10';
+  end if;
+  execute v_head || 'AS $wake_prov_receipt$' || replace(v_src, v_target, v_replacement) || '$wake_prov_receipt$';
+end
+$fa3pr3_prov_receipt$;
+
+-- entry_post_receipts_via_wake_kind_check (owner ruling): an honest interactive_client
+-- POSTING receipt (from _book_staff_advance_application_core's own is_agent-gated insert,
+-- SS2 above, and any of settle/match/resolve_and_book once posted) would be REJECTED at
+-- this CHECK today. Widened extend-only, pinned both ways.
+do $fa3pr3_prov_epr$
+declare v_live text;
+begin
+  select pg_get_constraintdef(oid) into v_live from pg_constraint
+   where conrelid = 'clara.entry_post_receipts'::regclass and conname = 'entry_post_receipts_via_wake_kind_check';
+  if v_live is null then
+    raise exception 'F-A3 PR-3 SS5: entry_post_receipts_via_wake_kind_check does not exist' using errcode='CLR10';
+  end if;
+  if v_live <> $lc2$CHECK ((via_wake_kind = ANY (ARRAY['autodraft'::text, 'interactive'::text, 'bank_agent'::text])))$lc2$ then
+    raise exception 'F-A3 PR-3 SS5: entry_post_receipts_via_wake_kind_check has drifted from the pinned pre-widen text -- re-derive before widening' using errcode='CLR10';
+  end if;
+  alter table clara.entry_post_receipts drop constraint entry_post_receipts_via_wake_kind_check;
+  alter table clara.entry_post_receipts add constraint entry_post_receipts_via_wake_kind_check
+    check (via_wake_kind in ('autodraft','interactive','bank_agent','interactive_client'));
+end
+$fa3pr3_prov_epr$;
+
 reset role;
 
 -- =====================================================================================
@@ -564,11 +802,22 @@ reset role;
 insert into clara.wake_fn_allowlist (wake_kind, function_name)
 select 'interactive_client', function_name from clara.wake_fn_allowlist where wake_kind = 'bank_agent';
 
+-- SS2's deferred allowlist row lands HERE, after SS4's copy above -- the ordering decision
+-- (review finding, deliberate): wake_book_staff_advance_application joins bank_agent
+-- (thirteen rows -> fourteen) but is EXCLUDED from interactive_client's mirror, because SS4's
+-- copy already ran against the pre-this-row roster. A human in chat does not get to book a
+-- staff advance through the bank lane -- OQ-6's parity is scoped to bank-matching (Annex
+-- A23); OQ-7's sibling carries no chat-parity mention anywhere in the design. The tail below
+-- proves the DIFFERENCE between the two rosters is exactly this one name, permanently, not
+-- merely today.
+insert into clara.wake_fn_allowlist (wake_kind, function_name)
+  values ('bank_agent', 'wake_book_staff_advance_application');
+
 -- =====================================================================================
 -- SS-TAIL -- re-read the live catalog and prove every claim above, rather than asserting it.
 -- =====================================================================================
 do $fa3pr3_tail$
-declare v_n int; v_pre_sha text; v_post_sha text; v_core_oid oid;
+declare v_n int; v_pre_sha text; v_post_sha text; v_core_oid oid; v_src text; v_inverted text; v_names text[];
 begin
   -- SS1: all eleven drops are gone; the five keeps still resolve.
   if to_regprocedure('clara.propose_bank_rule(uuid,text,jsonb,jsonb,text)') is not null
@@ -598,22 +847,76 @@ begin
     raise exception 'F-A3 PR-3 tail: the human-arity match_bank_line/6 or settle_from_bank_line/12 no longer resolves -- the wrong overload was dropped' using errcode='CLR10';
   end if;
 
-  -- SS1b: the widened CHECK admits both new act_kind values and every prior one.
+  -- SS1b: the widened CHECK admits the one new act_kind value and every prior one, and does
+  -- NOT admit 'identifier_promotion_confirm' (SHOULD 5d -- no writer for it exists or ever
+  -- will; confirm_bank_identifier_promotion is human-only and never writes this table).
   select count(*)::int into v_n from pg_constraint
    where conrelid = 'clara.bank_agent_receipts'::regclass and conname = 'bank_agent_receipts_act_kind_check'
-     and pg_get_constraintdef(oid) ~ '''staff_advance_application''' and pg_get_constraintdef(oid) ~ '''identifier_promotion_confirm''';
+     and pg_get_constraintdef(oid) ~ '''staff_advance_application''';
   if v_n <> 1 then
-    raise exception 'F-A3 PR-3 tail: bank_agent_receipts_act_kind_check does not admit both new act_kind values' using errcode='CLR10';
+    raise exception 'F-A3 PR-3 tail: bank_agent_receipts_act_kind_check does not admit staff_advance_application' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_constraint
+   where conrelid = 'clara.bank_agent_receipts'::regclass and conname = 'bank_agent_receipts_act_kind_check'
+     and pg_get_constraintdef(oid) ~ '''identifier_promotion_confirm''';
+  if v_n <> 0 then
+    raise exception 'F-A3 PR-3 tail: bank_agent_receipts_act_kind_check admits identifier_promotion_confirm, which has no writer -- law 31' using errcode='CLR10';
   end if;
 
-  -- SS2: the core is the pre-extraction body byte-for-byte (invert the ctx substitution, hash,
-  -- compare against the pinned pre-extraction sha -- the SAME PR-1a proof, not merely a
-  -- plausibility check), the wrapper is unmoved on every public property, and the core is
-  -- ungranted.
-  select p.oid into v_core_oid from pg_proc p
+  -- SS2: the core is the pre-extraction body byte-for-byte -- BUILT, not merely claimed
+  -- (review finding 5a: v_pre_sha/v_post_sha were declared and NEVER USED in an earlier
+  -- draft, so this prose asserted a proof that never ran; the reviewer mutation-proved the
+  -- gap by drifting the anchor and watching replace() silently no-op while the tail still
+  -- printed OK). Invert BOTH of SS2's substitutions (the ctx-unpack block, the
+  -- entry_post_receipts insert block) and compare the result's sha256 against the
+  -- pre-extraction pin measured on a rig held at the exact pre-0129 frontier -- the SAME
+  -- method PR-1a's own NINE use (0119:273-280), and the SAME two anchor/ctx pairs SS2's own
+  -- splice above used, repeated here rather than shared across do-blocks (PR-1a's own
+  -- "repetition is not load-bearing" precedent, 0119:301-303).
+  select p.oid, p.prosrc into v_core_oid, v_src from pg_proc p
    where p.pronamespace='clara'::regnamespace and p.proname='_book_staff_advance_application_core';
   if v_core_oid is null then
     raise exception 'F-A3 PR-3 tail: clara._book_staff_advance_application_core was not created' using errcode='CLR10';
+  end if;
+  v_post_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
+  -- FULL-BLOCK replace, v_ctx2 -> v_anchor2 (SS2's own pair, re-declared here rather than
+  -- stripping a trailing fragment): the earlier draft's fragment-strip left a dangling
+  -- newline between `v_status := 'posted';` and the removed block, which the pinned sha
+  -- never had -- exactly the kind of off-by-one-character gap a byte-identity wall exists
+  -- to catch, caught here against the wall's own first real run.
+  v_inverted := replace(v_src,
+    $c2$    perform clara._approve_entry_core(
+      jsonb_build_object('actor', c.actor, 'firm', c.firm, 'receipt_preheld', true),
+      v_entry, v_rev, null, v_approve_key);
+    v_status := 'posted';
+    if coalesce((p_ctx->>'is_agent')::boolean, false) then
+      insert into clara.entry_post_receipts(firm_id, client_id, entry_id, acting_actor,
+          on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+          maker_active_at_approval, op_key)
+        values (c.firm, p_client, v_entry, c.actor,
+          nullif(p_ctx->>'on_behalf_of','')::uuid, coalesce(p_ctx->>'wake_kind','bank_agent'),
+          coalesce(p_ctx->'model', '{}'::jsonb),
+          coalesce(nullif(btrim(p_ctx->>'rationale'),''), 'Staff advance application (agent)'),
+          jsonb_build_object('op_key', v_approve_key), 'agent_unattended', null, v_approve_key);
+    end if;$c2$,
+    $a2$    perform clara._approve_entry_core(
+      jsonb_build_object('actor', c.actor, 'firm', c.firm, 'receipt_preheld', true),
+      v_entry, v_rev, null, v_approve_key);
+    v_status := 'posted';$a2$);
+  v_inverted := replace(v_inverted,
+    $c1$  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the book_staff_advance_application core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;$c1$,
+    '  c := clara._human_ctx(clara.role_rank(''bookkeeper''));');
+  v_pre_sha := encode(sha256(convert_to(v_inverted,'UTF8')),'hex');
+  if v_pre_sha <> 'a27da323ccc67cb054fd12bb8a618987ff710adcb72cc5456f2b3ea4c96ba17c' then
+    raise exception 'F-A3 PR-3 tail: clara._book_staff_advance_application_core is NOT a pure extraction -- inverting both substitutions yields %, but the pinned pre-extraction body was a27da323ccc67cb054fd12bb8a618987ff710adcb72cc5456f2b3ea4c96ba17c -- something other than the two named blocks moved', v_pre_sha
+      using errcode='CLR10';
+  end if;
+  if v_post_sha = v_pre_sha then
+    raise exception 'F-A3 PR-3 tail: NON-VACUOUS check failed -- the installed core is byte-identical to the pre-extraction body, meaning neither substitution actually happened' using errcode='CLR10';
   end if;
   if has_function_privilege('public', v_core_oid, 'execute') then
     raise exception 'F-A3 PR-3 tail: clara._book_staff_advance_application_core is reachable by PUBLIC' using errcode='CLR10';
@@ -674,18 +977,48 @@ begin
     raise exception 'F-A3 PR-3 tail: _confirm_bank_identifier_promotion_core is reachable by PUBLIC' using errcode='CLR10';
   end if;
 
-  -- SS4: interactive_client now carries EXACTLY the bank_agent roster, no more no less --
-  -- a symmetric-difference count, not merely "at least these are present".
-  select count(*)::int into v_n from (
+  -- SS4 + the ordering decision (review finding, made permanent here): interactive_client
+  -- carries EXACTLY the PRE-deferred-row bank_agent roster (thirteen names) PLUS
+  -- wake_open_question, and the two kinds' rosters now differ by EXACTLY one name each way --
+  -- bank_agent alone has wake_book_staff_advance_application (deliberately excluded from chat
+  -- parity, OQ-6 is scoped to bank-matching); interactive_client alone has wake_open_question
+  -- (predates this file). A count alone (14=14) cannot tell "the right one name differs" from
+  -- "some other name silently swapped in", so this checks the SET difference by name, not size.
+  select array_agg(fn_name order by fn_name) into v_names from (
     select fn_name from clara.wake_fn_allowlist where wake_kind = 'bank_agent'
     except
     select fn_name from clara.wake_fn_allowlist where wake_kind = 'interactive_client'
-  ) missing;
-  if v_n <> 0 then
-    raise exception 'F-A3 PR-3 tail: % bank_agent wake wrapper(s) still lack an interactive_client row', v_n using errcode='CLR10';
+  ) bank_only;
+  if v_names is distinct from array['wake_book_staff_advance_application'] then
+    raise exception 'F-A3 PR-3 tail: bank_agent-only roster names is not exactly {wake_book_staff_advance_application} (got %) -- the chat-parity exclusion drifted', v_names using errcode='CLR10';
+  end if;
+  select array_agg(fn_name order by fn_name) into v_names from (
+    select fn_name from clara.wake_fn_allowlist where wake_kind = 'interactive_client'
+    except
+    select fn_name from clara.wake_fn_allowlist where wake_kind = 'bank_agent'
+  ) chat_only;
+  if v_names is distinct from array['wake_open_question'] then
+    raise exception 'F-A3 PR-3 tail: interactive_client-only roster names is not exactly {wake_open_question} (got %) -- a bank_agent wrapper still lacks its interactive_client row', v_names using errcode='CLR10';
   end if;
 
-  raise notice 'F-A3 PR-3 tail: OK -- 11 rule-machine functions dropped (match_bank_line/6 and settle_from_bank_line/12 the human arities untouched), 5 helpers kept and still resolving, bank_agent_receipts_act_kind_check widened to 14 admitted values, book_staff_advance_application factored onto the PR-1a wake shape (core ungranted, wrapper unmoved, clara_authenticated EXECUTE intact), wake_book_staff_advance_application + its agent core live and clara_wake_bank-only, confirm_bank_identifier_promotion + its core live (clara_authenticated-only / ungranted-core), interactive_client now carries the complete bank_agent allowlist roster with zero gaps. No table in workflow/graphile_worker/spike touched. D1 write-quiesce: book_staff_advance_application replaced in place per SS0''s inventory; every other body in this file is newly created, no quiesce owed.';
+  -- clara._settle_from_bank_line_core's p_via_rule parameter (NOTE, review round): with the
+  -- 13-arg rule-arity wrapper gone, NO live caller can ever pass it non-null again. Dropping
+  -- the parameter from a shared, already-live core is a body recut this PR does not own;
+  -- pinning that every live caller passes NULL is the cheaper, safer proof that the
+  -- vestigial parameter carries no live semantic weight -- a structural census, not a
+  -- behavioural change.
+  select count(*)::int into v_n from (values
+    ('settle_from_bank_line'), ('_resolve_and_book_bank_line_core'), ('_agent_settle_from_bank_line_core')
+  ) as callers(name)
+  where not exists (
+    select 1 from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname = callers.name
+      and p.prosrc ~ '_settle_from_bank_line_core\([\s\S]*?,\s*null\)\s*;'
+  );
+  if v_n <> 0 then
+    raise exception 'F-A3 PR-3 tail: % of _settle_from_bank_line_core''s three direct callers do NOT visibly end their call with a literal null p_via_rule -- re-verify by hand, the vestigial-parameter claim may no longer hold', v_n using errcode='CLR10';
+  end if;
+
+  raise notice 'F-A3 PR-3 tail: OK -- 11 rule-machine functions dropped (match_bank_line/6 and settle_from_bank_line/12 the human arities untouched), 5 helpers kept and still resolving, bank_agent_receipts_act_kind_check widened to admit staff_advance_application only (identifier_promotion_confirm deliberately excluded, no writer), book_staff_advance_application factored onto the PR-1a wake shape (core ungranted, wrapper unmoved, clara_authenticated EXECUTE intact), wake_book_staff_advance_application + its agent core live and clara_wake_bank-only, confirm_bank_identifier_promotion + its core live (clara_authenticated-only / ungranted-core), interactive_client carries the PRE-staff-advance bank_agent roster (chat parity deliberately excludes wake_book_staff_advance_application, the ordering decision). No table in workflow/graphile_worker/spike touched. D1 write-quiesce: book_staff_advance_application replaced in place per SS0''s inventory; every other body in this file is newly created, no quiesce owed.';
 end
 $fa3pr3_tail$;
 

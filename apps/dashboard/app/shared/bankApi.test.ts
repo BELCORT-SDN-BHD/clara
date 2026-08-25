@@ -9,6 +9,8 @@ import {
   listBankAccounts, listBankAccountProposals, getBankStatement, getBanksInterviewAnswer,
   addBankAccount, enterBankStatement, deactivateBankAccount, remapBankAccountCoa,
   matchBankLine, unmatchBankMatch, settleFromBankLine, completePendingMatch, voidBankStatement,
+  listOpenBankLineExceptionProposals, listOpenBankIdentifierPromotionProposals,
+  confirmBankIdentifierPromotion, getBankAgencyHold, setBankAgencyHold,
 } from "./bankApi";
 import type { PgrestError } from "./wire";
 
@@ -242,4 +244,91 @@ test("completePendingMatch posts p_match under complete_pending_match", async (t
   const receipt = await completePendingMatch("jwt", "c1", "m1");
   assert.ok(seenUrl.includes("/rpc/complete_pending_match"));
   assert.equal(receipt.status, "live");
+});
+
+// ---------------------------------------------------------------------------
+// F-A3 PR-3 review round (addendum SHOULD): the three new bank-agency doors
+// shipped with zero wire coverage. Each cell below pins the exact request this
+// lane sends — the URL query for a pgrestSelect read, the exact body key SET
+// for an rpc writer — in the file's own idiom (counterpartyApi.test.ts's
+// assert.match(url, ...) for a select; adjustmentApi.test.ts's
+// assert.deepEqual(Object.keys(body).sort(), [...]) for a writer's full shape).
+// ---------------------------------------------------------------------------
+
+test("listOpenBankLineExceptionProposals scopes by client, kind and open status", async (t) => {
+  let url = "";
+  t.mock.method(globalThis, "fetch", async (u: string) => { url = String(u); return jsonRes([]); });
+  setup();
+  await listOpenBankLineExceptionProposals("jwt", "client-1");
+  assert.ok(url.includes("/bank_agent_proposals?"), "reads the table directly — no list_/get_ RPC exists for it");
+  assert.match(url, /client_id=eq\.client-1/);
+  assert.match(url, /kind=eq\.line_exception/, "never returns identifier_promotion proposals to this door");
+  assert.match(url, /status=eq\.open/, "an already-accepted proposal must not reappear");
+  assert.match(url, /select=id,kind,subject_id,payload,rationale,status,created_at/);
+});
+
+test("listOpenBankIdentifierPromotionProposals scopes by client, kind and open status", async (t) => {
+  let url = "";
+  t.mock.method(globalThis, "fetch", async (u: string) => { url = String(u); return jsonRes([]); });
+  setup();
+  await listOpenBankIdentifierPromotionProposals("jwt", "client-1");
+  assert.ok(url.includes("/bank_agent_proposals?"));
+  assert.match(url, /client_id=eq\.client-1/);
+  assert.match(url, /kind=eq\.identifier_promotion/, "never returns line_exception proposals to this door");
+  assert.match(url, /status=eq\.open/);
+});
+
+test("confirmBankIdentifierPromotion posts exactly p_proposal and a fresh p_op_key -- nothing else", async (t) => {
+  let seenUrl = "";
+  let body: Record<string, unknown> = {};
+  t.mock.method(globalThis, "fetch", async (u: string, init?: RequestInit) => {
+    seenUrl = u;
+    body = JSON.parse(String(init?.body));
+    return jsonRes({ status: "confirmed" });
+  });
+  setup();
+  await confirmBankIdentifierPromotion("jwt", "prop-1");
+  assert.ok(seenUrl.includes("/rpc/confirm_bank_identifier_promotion"));
+  assert.equal(body.p_proposal, "prop-1");
+  assert.equal(typeof body.p_op_key, "string");
+  assert.deepEqual(Object.keys(body).sort(), ["p_op_key", "p_proposal"],
+    "no identifier_kind/identifier_value/client leaks onto this wire -- the DB, not the dashboard, decides what this door confirms");
+});
+
+test("getBankAgencyHold reads client_id-scoped and returns null when no row has ever been set", async (t) => {
+  let url = "";
+  t.mock.method(globalThis, "fetch", async (u: string) => { url = String(u); return jsonRes([]); });
+  setup();
+  const hold = await getBankAgencyHold("jwt", "client-1");
+  assert.ok(url.includes("/bank_agency_holds?"));
+  assert.match(url, /client_id=eq\.client-1/);
+  assert.match(url, /limit=1/);
+  assert.equal(hold, null, "no row is the honest 'never held' state, never fabricated as on_hold:false");
+});
+
+test("getBankAgencyHold maps a live row", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    jsonRes([{ client_id: "client-1", on_hold: true, reason: "suspicious statement", set_by: "u1", set_at: "2026-08-25T00:00:00Z" }]));
+  setup();
+  const hold = await getBankAgencyHold("jwt", "client-1");
+  assert.equal(hold?.on_hold, true);
+  assert.equal(hold?.reason, "suspicious statement");
+});
+
+test("setBankAgencyHold posts exactly p_client/p_on/p_reason/p_op_key -- nothing else", async (t) => {
+  let seenUrl = "";
+  let body: Record<string, unknown> = {};
+  t.mock.method(globalThis, "fetch", async (u: string, init?: RequestInit) => {
+    seenUrl = u;
+    body = JSON.parse(String(init?.body));
+    return jsonRes({});
+  });
+  setup();
+  await setBankAgencyHold("jwt", "client-1", true, "suspicious statement");
+  assert.ok(seenUrl.includes("/rpc/set_bank_agency_hold"));
+  assert.equal(body.p_client, "client-1");
+  assert.equal(body.p_on, true);
+  assert.equal(body.p_reason, "suspicious statement");
+  assert.equal(typeof body.p_op_key, "string");
+  assert.deepEqual(Object.keys(body).sort(), ["p_client", "p_on", "p_op_key", "p_reason"]);
 });
