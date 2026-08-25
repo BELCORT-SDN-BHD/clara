@@ -17,8 +17,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, endPool, opk } from "./rig-helpers.mjs";
 import { call, caught, errorDetail, firmIdOf, buildManifest, sha64 } from "./epsilon-fixtures.mjs";
-import { sealedRun, sealArtifact, asRuntime } from "./zeta-fixtures.mjs";
-import { pr2Ready, mintWake, wakeModel, RATIONALE, callWrapper } from "./f-a5-reporting-agency-pr2-fixtures.mjs";
+import { sealedRun, sealArtifact, asRuntime, parkQueue } from "./zeta-fixtures.mjs";
+import { pr2Ready, mintWake, wakeModel, RATIONALE, callWrapper, buildPr2World } from "./f-a5-reporting-agency-pr2-fixtures.mjs";
 
 /** THE CAPABILITY GATE -- both new doors, or neither; a partial apply is drift. */
 async function pr3Ready() {
@@ -198,6 +198,74 @@ test("PR-3.10 -- differential twin: the SAME wake wrapper sealing kind='draft_wa
     ["p_op_key", opk("pr3-foldin-twin")],
   ], { p_byte_size: "bigint", p_manifest: "jsonb", p_model: "jsonb" });
   assert.ok(out.report_artifact_id, "the SAME wake call shape succeeds for a non-signed_original kind -- the term under test is kind, nothing broader");
+});
+
+// =================================================================================================
+// N3 -- DEFENCE IN DEPTH, the misfire direction A the fold-in wall's own header note names but
+// never forces mechanically (0127:14-25): a wall keyed on prepared_by_agent (the RUN's provenance)
+// instead of sealed_by (the CALL's own actor) would wrongly REFUSE this cell -- an ordinary human,
+// through the ordinary door, archiving a signed original onto a run the AGENT prepared. PR-3.1 is
+// this cell's own admitting twin from the human-prepared side; PR-3.9/PR-3.10 prove the wall's
+// OTHER discriminant (kind); this cell proves the wall does not misfire on the RUN's provenance --
+// the discriminant it deliberately does NOT read.
+// =================================================================================================
+test("N3 -- defence in depth: a HUMAN archives a signed_original on an AGENT-PREPARED run -- ACCEPTED, sealed_by names the human, not the run's own prepared_by_agent", async (t) => {
+  if (!ready) return t.skip("F-A5 PR-3 not applied");
+  if (!pr2ready) return t.skip("F-A5 PR-2 (the wake wrapper) not applied -- the agent-prepared run is opened through it");
+  await parkQueue();
+  const { world, eps, cred } = await buildPr2World("n3-agentprep");
+  const model = JSON.stringify(wakeModel());
+
+  const open = await callWrapper(cred.secret, "wake_open_report_run", [
+    ["p_client", eps.client], ["p_report_spec_version_id", eps.spec.report_spec_version_id],
+    ["p_books_snapshot_id", eps.snapshotId], ["p_reporting_period_id", eps.period.id],
+    ["p_rationale", RATIONALE], ["p_model", model], ["p_op_key", opk("n3-open")],
+  ], { p_model: "jsonb" });
+  const runId = open.report_run_id;
+  const runRow = (await rootQuery(
+    "select prepared_by_agent from clara.report_runs where id=$1", [runId])).rows[0];
+  assert.equal(runRow.prepared_by_agent, true, "the premise this cell needs: the run really is agent-prepared");
+
+  await callWrapper(cred.secret, "wake_evaluate_report_pack", [
+    ["p_report_run_id", runId], ["p_definition_version_ids", [eps.definitionVersionId]],
+    ["p_period_ids", [eps.period.id]], ["p_snapshot_id", eps.snapshotId],
+    ["p_rationale", RATIONALE], ["p_model", model], ["p_op_key", opk("n3-eval")],
+  ], { p_definition_version_ids: "uuid[]", p_period_ids: "uuid[]", p_model: "jsonb" });
+
+  await callWrapper(cred.secret, "wake_assess_report_claim", [
+    ["p_report_run_id", runId], ["p_op_key", opk("n3-assess")],
+    ["p_rationale", RATIONALE], ["p_model", model],
+  ], { p_model: "jsonb" });
+
+  await callWrapper(cred.secret, "wake_seal_report_dataset", [
+    ["p_report_run_id", runId], ["p_chart_template_version_ids", []],
+    ["p_op_key", opk("n3-seal-ds")], ["p_rationale", RATIONALE], ["p_model", model],
+  ], { p_chart_template_version_ids: "uuid[]", p_model: "jsonb" });
+
+  // The pre-sign artifact: sealed through the render WORKER's own S9-enqueued job, the ordinary
+  // path every other archive cell in this file uses -- who/what seals pre_sign is not the term
+  // under test here, only the RUN's own provenance and the archiving actor are.
+  const { sha256: presignSha } = await sealArtifact({ runId }, "n3-worker", "pre_sign");
+
+  // THE CALL UNDER TEST: an ordinary HUMAN, through clara.archive_signed_original, archiving a
+  // signed original onto the AGENT-PREPARED run above.
+  const owner = world.users.alice;
+  const ev = evidence("N3 admitting twin");
+  const signedSha = "b".repeat(64);
+  const out = await archive(owner, [
+    ["p_report_run_id", runId], ["p_sha256", signedSha], ["p_byte_size", 4096],
+    ["p_signature_evidence", JSON.stringify(ev)], ["p_answers_pre_sign_sha256", presignSha],
+    ["p_op_key", opk("n3-archive")],
+  ]);
+  assert.ok(out.report_artifact_id, "the human's archive is ACCEPTED on an agent-prepared run -- a wall keyed on prepared_by_agent would wrongly refuse this");
+
+  const row = (await rootQuery(
+    "select kind, sealed_by, prepared_by_agent from clara.report_artifacts where id=$1",
+    [out.report_artifact_id])).rows[0];
+  assert.equal(row.kind, "signed_original");
+  assert.equal(row.sealed_by, owner, "sealed_by names the archiving HUMAN -- the call's own actor, 0127's real discriminant");
+  assert.equal(row.prepared_by_agent, true,
+    "prepared_by_agent stays true (the RUN's own provenance, untouched by who archived it) -- proving the wall's admission turned on sealed_by, not this column");
 });
 
 // =================================================================================================
