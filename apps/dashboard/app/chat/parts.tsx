@@ -14,7 +14,6 @@ import { DiffCard } from "../shared/cards/DiffCard";
 import { SweepReceiptCard } from "../shared/cards/SweepReceiptCard";
 import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
 import { BankReconReceiptCard } from "../shared/cards/BankReconReceiptCard";
-import { BankRuleProposalCard } from "../shared/cards/BankRuleProposalCard";
 import { FixedAssetCard } from "../shared/cards/FixedAssetCard";
 import { DepreciationRunReceiptCard } from "../shared/cards/DepreciationRunReceiptCard";
 import { AdjustmentRunReceiptCard } from "../shared/cards/AdjustmentRunReceiptCard";
@@ -230,15 +229,13 @@ export function TranscriptParts({
         if (p.type === "open_question") {
           return <OpenQuestionCard key={`question:${p.question_id}:${i}`} token={token ?? null} part={p} />;
         }
-        // kb_rule_proposal and rule_post_receipt RETIRED with F-A2 PR-3 (GM-11) —
-        // both rendered rules-execution verbs the design drops whole.
-        // Wave C-c (design v2.1 §7): identifier-only; each card hydrates on mount
+        // kb_rule_proposal and rule_post_receipt RETIRED with F-A2 PR-3 (GM-11);
+        // bank_rule_proposal RETIRED with F-A3 (Annex I) — the bank-rules learn
+        // loop it rendered is dropped whole.
+        // Wave C-c (design v2.1 §7): identifier-only; the card hydrates on mount
         // (bank_recon_receipt keys on statement_id — parts.ts explains why).
         if (p.type === "bank_recon_receipt") {
           return <BankReconReceiptCard key={`recon:${p.statement_id}:${i}`} token={token ?? null} part={p} />;
-        }
-        if (p.type === "bank_rule_proposal") {
-          return <BankRuleProposalCard key={`bankrule:${p.rule_id}:${i}`} token={token ?? null} part={p} />;
         }
         // Wave D-a (design v2.1 §6/§7): identifier-only; each card hydrates on
         // mount via get_fixed_asset / get_depreciation_run.

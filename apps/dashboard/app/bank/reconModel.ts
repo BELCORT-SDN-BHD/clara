@@ -361,120 +361,14 @@ export function deriveVoidUnwindCount(
   ).length;
 }
 
-// ---------------------------------------------------------------------------
-// bank_rules (design §4.3) — the learn loop's proposal/signature lifecycle.
-// ---------------------------------------------------------------------------
-
-export type BankRuleKind = "match_settle" | "coding";
-export type BankRuleStatus = "proposed" | "signed" | "retired";
-
-export type BankRuleMatchSettleProposal = {
-  domain: "ar" | "ap" | string;
-  counterparty_id: string;
-  counterparty_name?: string | null;
-};
-
-export type BankRuleCodingProposal = {
-  account_code: string;
-  narration_template?: string | null;
-  counterparty_id?: string | null;
-};
-
-export type BankRuleRow = {
-  id: string;
-  client_id: string | null;
-  kind: BankRuleKind | string;
-  status: BankRuleStatus | string;
-  pattern: unknown;
-  proposal: Record<string, unknown>;
-  evidence: unknown;
-  created_by: string | null;
-  created_at: string | null;
-  signed_by: string | null;
-  signed_at: string | null;
-  retired_by: string | null;
-  retired_at: string | null;
-  retired_reason: string | null;
-};
-
-export function toBankRule(raw: unknown): BankRuleRow {
-  const o = rec(raw);
-  return {
-    id: s(o.id) ?? s(o.rule_id) ?? "",
-    client_id: s(o.client_id),
-    kind: s(o.kind) ?? "coding",
-    status: s(o.status) ?? "proposed",
-    pattern: o.pattern ?? null,
-    proposal: rec(o.proposal),
-    evidence: o.evidence ?? null,
-    created_by: s(o.created_by),
-    created_at: s(o.created_at),
-    signed_by: s(o.signed_by),
-    signed_at: s(o.signed_at),
-    retired_by: s(o.retired_by),
-    retired_at: s(o.retired_at),
-    retired_reason: s(o.retired_reason),
-  };
-}
-
-/** A rule proposal's headline, pattern-matching the shape §4.3 names for each
- *  kind — degrades to the raw account/domain keys if the shape near-misses. */
-export function bankRuleProposalLabel(rule: Pick<BankRuleRow, "kind" | "proposal">): string {
-  const p = rule.proposal;
-  if (rule.kind === "match_settle") {
-    const domain = s(p.domain) ?? "?";
-    const name = s(p.counterparty_name) ?? s(p.counterparty_id) ?? "(counterparty)";
-    return `match/settle → ${domain.toUpperCase()} · ${name}`;
-  }
-  const code = s(p.account_code) ?? "(account)";
-  const cp = s(p.counterparty_id);
-  return `code → ${code}${cp ? ` · counterparty ${cp.slice(0, 8)}` : ""}`;
-}
-
-export type BankRuleCandidateRow = {
-  kind: BankRuleKind | string;
-  pattern: unknown;
-  proposal: Record<string, unknown>;
-  sighting_count: number | null;
-  sample_line_ids: string[];
-};
-
-export function toBankRuleCandidate(raw: unknown): BankRuleCandidateRow {
-  const o = rec(raw);
-  return {
-    kind: s(o.kind) ?? "coding",
-    pattern: o.pattern ?? null,
-    proposal: rec(o.proposal),
-    sighting_count: numOrNull(o.sighting_count),
-    sample_line_ids: strArr(o.sample_line_ids),
-  };
-}
-
-export type BankLineSuggestionRow = {
-  line_id: string;
-  kind: BankRuleKind | string;
-  rule_id: string;
-  proposal: Record<string, unknown>;
-};
-
-export function toBankLineSuggestion(raw: unknown): BankLineSuggestionRow {
-  const o = rec(raw);
-  return {
-    line_id: s(o.line_id) ?? "",
-    kind: s(o.kind) ?? "coding",
-    rule_id: s(o.rule_id) ?? "",
-    proposal: rec(o.proposal),
-  };
-}
-
-/** design §5 `propose_bank_rule`'s evidence floor: breeding needs ≥3 DB-
- *  derived sightings — a client-side PREVIEW only (the verb re-derives and
- *  refuses `rule_evidence_insufficient` below 3 regardless of this check). */
-export const RULE_EVIDENCE_FLOOR = 3;
-
-export function candidateMeetsEvidenceFloor(c: Pick<BankRuleCandidateRow, "sighting_count">): boolean {
-  return (c.sighting_count ?? 0) >= RULE_EVIDENCE_FLOOR;
-}
+// bank_rules (design §4.3, the learn loop's proposal/signature lifecycle) RETIRED with
+// F-A3 PR-3 (Annex I): the whole rules machine — propose/sign/retire_bank_rule,
+// accept_bank_rule_suggestion, list_bank_rule_candidates, list_bank_rules,
+// list_bank_line_suggestions — drops, and this section's types/mappers had no other
+// consumer (BankWorkbench's RuleCandidatesCard.tsx, StatementDetail's suggestion chips and
+// SettleLinePanel/MatchLinesPanel's viaRuleId plumbing were all removed in the same PR).
+// clara.bank_rules stays KEEP-AS-HISTORY at the DB layer; only this dead client-side shape
+// retires alongside it.
 
 // ---------------------------------------------------------------------------
 // list_unmatched_lines (design §6) — the cross-statement unmatched report.
