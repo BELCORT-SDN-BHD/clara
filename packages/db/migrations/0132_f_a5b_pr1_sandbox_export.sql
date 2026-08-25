@@ -485,6 +485,15 @@ begin
      and w.effective_from <= p_as_of and (w.effective_to is null or w.effective_to >= p_as_of)
    order by w.version desc limit 1;
   if v_id is null then
+    -- opus F2 nuance (final round): 0111's ORIGINAL watermark_policy_for carried a fourth key,
+    -- 'fix' -- 'the owner signs the wording once, in three languages, and a migration seeds it
+    -- (OQ-1)'. Dropped here DELIBERATELY, not lost: that text is now factually WRONG on this very
+    -- chain (OQ-1 is resolved, the trio is owner-ratified and seeded by SECTION 4 above) -- keeping
+    -- a stale "the owner needs to sign" instruction in a live refusal would be actively misleading,
+    -- strictly worse than dropping it. No consumer reads the key (grepped, none found). The tail
+    -- census below positively compares this refusal's payload against the pre-CoR body's shape on
+    -- every OTHER key, so "only the intended change moved" is proven, not assumed, for the one key
+    -- that did move too.
     raise exception 'no watermark policy row is effective for this locale' using errcode = 'CLR10',
       detail = jsonb_build_object('reason','watermark_policy_absent','policy_key',p_policy_key,
         'locale',p_locale,'as_of',p_as_of)::text;
@@ -526,12 +535,17 @@ revoke all on function clara.watermark_policy_for(text,text,date) from public;
 --   (iii) the fail-safe interim: since every block kind this PR-1 admits is free text
 --         (model-authored prose, kind='text'), and the numeral-substitution seam is not built
 --         (this file's own header), the derived set ALWAYS widens to firm_closure -- the exact
---         per-basis-kind derivation below still runs (it is what the label/basis_ref wall proves,
---         and what B1.9's narrowing differential still forces), but the RETURNED client_set is the
---         full firm roster whenever the body carries free text, which is every body this PR-1 can
---         mint. Reversible the day a non-free-text block kind exists (PR-3's chart_ref, or a future
---         placeholder block once the substitution seam lands) -- coverage can only widen while free
---         text is present, never narrow it below what the exact derivation already proved.
+--         per-basis-kind derivation below still runs (it is what the label/basis_ref wall proves),
+--         but the RETURNED `client_set` is the full firm roster whenever the body carries free
+--         text, which is every body this PR-1 can mint. Reversible the day a non-free-text block
+--         kind exists (PR-3's chart_ref, or a future placeholder block once the substitution seam
+--         lands) -- coverage can only widen while free text is present, never narrow it below what
+--         the exact derivation already proved. NT-1 (opus, final round): the exact derivation is
+--         ALSO returned separately as `client_set_exact` (never widened) precisely so B1.9's
+--         narrowing differential and B1.1 can assert the real per-basis-kind claim on it -- the
+--         widened `client_set` alone cannot distinguish a correct {A,B} derivation from a silently
+--         narrowed {A}, since both satisfy `client_set.includes(A) && client_set.includes(B)` once
+--         widened to the full roster.
 create function clara._sandbox_client_set(p_firm uuid, p_basis jsonb, p_body jsonb)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
@@ -547,6 +561,7 @@ declare
   v_fr_scope text; v_fr_client_scope uuid;
   v_firm_roster uuid[];
   v_firm_all uuid[];
+  v_client_set_exact uuid[];
 begin
   if p_basis is null or jsonb_typeof(p_basis) <> 'array' or jsonb_array_length(p_basis) = 0 then
     raise exception 'a sandbox view needs at least one cited basis row' using errcode = 'CLR10',
@@ -691,6 +706,14 @@ begin
     raise exception 'the derived client set is empty' using errcode = 'CLR10',
       detail = '{"reason":"sandbox_view_client_set_empty"}';
   end if;
+  -- NT-1 (opus, final round): captured HERE, before (iii)'s widening can touch v_client_set --
+  -- this is the true per-basis-kind EXACT derivation the "exact derivation is still computed"
+  -- header claim below refers to. A1's own fail-safe widens the RETURNED client_set to
+  -- firm_closure whenever free text is present, which made B1.9's positive assertion (and B1.1's)
+  -- vacuous: `client_set.includes(A) && client_set.includes(B)` passes on the full firm roster
+  -- whether the exact derivation produced {A,B} or narrowed to {A} alone. Returning this exact set
+  -- SEPARATELY from the widened one lets a caller assert the real claim on the real value.
+  v_client_set_exact := v_client_set;
 
   -- (iii) THE FAIL-SAFE INTERIM: every admitted block kind is free text, so the exact derivation
   -- above is superseded by the full firm roster for coverage purposes -- widen, never narrow.
@@ -705,7 +728,8 @@ begin
   end if;
 
   return jsonb_build_object('client_set', to_jsonb(v_client_set),
-    'client_set_basis', case when v_uses_firm_closure then 'firm_closure' else 'exact' end);
+    'client_set_basis', case when v_uses_firm_closure then 'firm_closure' else 'exact' end,
+    'client_set_exact', to_jsonb(v_client_set_exact));
 end $$;
 revoke all on function clara._sandbox_client_set(uuid,jsonb,jsonb) from public;
 
@@ -718,6 +742,7 @@ create function clara._sandbox_view_mint_core(p_firm uuid, p_actor uuid, p_obo u
     p_body jsonb, p_basis jsonb, p_model jsonb, p_rationale text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_req_hash bytea; v_reserved jsonb; v_derived jsonb; v_client_set uuid[];
+        v_client_set_exact uuid[];
         v_basis_kind text; v_sha text; v_id uuid; v_result jsonb; v_model jsonb;
 begin
   v_req_hash := clara._hash(jsonb_build_object('body', p_body, 'basis', p_basis,
@@ -727,6 +752,9 @@ begin
 
   v_derived := clara._sandbox_client_set(p_firm, p_basis, p_body);
   select array(select jsonb_array_elements_text(v_derived -> 'client_set'))::uuid[] into v_client_set;
+  -- NT-1: the pre-widening exact derivation, threaded through unchanged so a caller can assert
+  -- the real per-basis-kind claim (B1.1/B1.9) rather than the widened client_set alone.
+  select array(select jsonb_array_elements_text(v_derived -> 'client_set_exact'))::uuid[] into v_client_set_exact;
   v_basis_kind := v_derived ->> 'client_set_basis';
   v_sha := encode(sha256(convert_to(p_body::text, 'UTF8')), 'hex');
   v_model := jsonb_build_object('provider', p_model->>'provider', 'model', p_model->>'model',
@@ -743,7 +771,8 @@ begin
       'op_key', p_op_key, 'model', v_model, 'rationale', p_rationale));
 
   v_result := jsonb_build_object('sandbox_view_id', v_id, 'body_sha256', v_sha,
-    'client_set', to_jsonb(v_client_set), 'client_set_basis', v_basis_kind);
+    'client_set', to_jsonb(v_client_set), 'client_set_basis', v_basis_kind,
+    'client_set_exact', to_jsonb(v_client_set_exact));
   return clara._finish_op(p_firm, 'wake_mint_sandbox_view', p_op_key, v_result);
 end $$;
 revoke all on function clara._sandbox_view_mint_core(uuid,uuid,uuid,text,jsonb,jsonb,jsonb,text,text) from public;
@@ -908,9 +937,15 @@ reset role;
 -- =====================================================================================
 set role clara_fn_owner;
 
+-- Codex #14: the worker payload previously handed back only the pinned watermark_policy_version_id
+-- UUID -- PR-3's renderer has no other door to the pinned TEXT (clara_runtime holds no table grant
+-- on watermark_policy_versions; humans-only per 0111). One join, resolved by the row's OWN frozen
+-- id (never re-derived from "today's effective policy"), so a policy bump AFTER the request was
+-- made cannot leak into an already-requested export's payload -- the pin is what request time
+-- proved effective, and the payload must reproduce exactly that, not whatever is effective now.
 create function clara.sandbox_export_payload(p_export uuid, p_worker text)
   returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp as $$
-declare e record; v record;
+declare e record; v record; v_watermark jsonb;
 begin
   select * into e from clara.sandbox_exports
     where id = p_export and state = 'running' and claimed_by = p_worker and lease_expires_at >= now();
@@ -919,9 +954,12 @@ begin
       detail = '{"reason":"sandbox_export_lease_not_held"}';
   end if;
   select * into v from clara.sandbox_views where id = e.sandbox_view_id;
+  select watermark into v_watermark from clara.watermark_policy_versions
+    where id = e.watermark_policy_version_id;
   return jsonb_build_object('sandbox_export_id', e.id, 'firm_id', e.firm_id,
     'sandbox_view_id', e.sandbox_view_id, 'body', v.body, 'body_sha256', v.body_sha256,
-    'locale', e.locale, 'watermark_policy_version_id', e.watermark_policy_version_id);
+    'locale', e.locale, 'watermark_policy_version_id', e.watermark_policy_version_id,
+    'watermark', v_watermark);
 end
 $$;
 
@@ -1213,7 +1251,7 @@ reset role;
 do $tail$
 declare
   v_n int; v_grantees text[]; v_owner_check boolean; v_policy_names text[];
-  v_verb text; v_expected_grantee text;
+  v_verb text; v_expected_grantee text; v_sig text;
   v_search_path_ok boolean;
 begin
   -- (a) The three relations: FORCE RLS, exactly the owner+human policy pair, correct triggers.
@@ -1242,6 +1280,32 @@ begin
     raise exception 'f_a5b pr1 tail: export_recipients policy set is %, expected exactly {p_exportrecipients_human, p_exportrecipients_owner}', v_policy_names using errcode = 'CLR10';
   end if;
 
+  -- (a3) Codex re-review followup: polname alone proves a LABEL, not a POLICY -- a rename-only
+  -- drift (right name, wrong roles/command/predicate) would pass the census above silently. Read
+  -- polroles, polcmd and polqual/polwithcheck for every one of the six policies too (epsilon-
+  -- grants-phase.mjs:34-70's polroles-exact-match idiom, extended here to the full shape).
+  foreach v_sig in array array['sandbox_views','sandbox_exports','export_recipients']
+  loop
+    if not exists(select 1 from pg_policy p
+        where p.polrelid = ('clara.' || v_sig)::regclass
+          and p.polname = 'p_' || replace(v_sig, '_', '') || '_owner'
+          and p.polroles = array['clara_fn_owner'::regrole]::oid[]
+          and p.polcmd = '*'
+          and pg_get_expr(p.polqual, p.polrelid) = 'true'
+          and pg_get_expr(p.polwithcheck, p.polrelid) = 'true') then
+      raise exception 'f_a5b pr1 tail: clara.%''s owner policy does not match the expected {clara_fn_owner, ALL, using(true), with check(true)} shape', v_sig using errcode = 'CLR10';
+    end if;
+    if not exists(select 1 from pg_policy p
+        where p.polrelid = ('clara.' || v_sig)::regclass
+          and p.polname = 'p_' || replace(v_sig, '_', '') || '_human'
+          and p.polroles = array['clara_authenticated'::regrole]::oid[]
+          and p.polcmd = 'r'
+          and pg_get_expr(p.polqual, p.polrelid) ~ 'firm_id.*jwt_firm\(\)'
+          and p.polwithcheck is null) then
+      raise exception 'f_a5b pr1 tail: clara.%''s human policy does not match the expected {clara_authenticated, SELECT, firm_id=jwt_firm(), no with-check} shape', v_sig using errcode = 'CLR10';
+    end if;
+  end loop;
+
   select count(*) into v_n from pg_trigger t join pg_class c on c.oid = t.tgrelid
     join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'clara' and c.relname = 'sandbox_views' and not t.tgisinternal;
@@ -1269,17 +1333,24 @@ begin
     raise exception 'f_a5b pr1 tail: clara_agent_ro must hold zero table grants on the three relations, found %', v_n using errcode = 'CLR10';
   end if;
 
-  -- (c) The five ungranted cores: zero EXECUTE to any application role.
-  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    cross join lateral unnest(array['clara_authenticated','clara_agent_ro','clara_runtime',
-      'clara_wake_interactive','clara_wake_proactive']) app(rolname)
-    join pg_roles g on g.rolname = app.rolname
-    where n.nspname = 'clara'
-      and p.proname in ('_sandbox_client_set','_recipient_covers','_watermark_policy_version_for',
-        '_sandbox_view_mint_core','_sandbox_export_request_core')
-      and has_function_privilege(g.oid, p.oid, 'EXECUTE');
-  if v_n <> 0 then
-    raise exception 'f_a5b pr1 tail: an ungranted core is reachable by an application role, count %', v_n using errcode = 'CLR10';
+  -- (c) The five ungranted cores: zero EXECUTE to any role but the owner. Codex re-review
+  -- followup, same class as (e) below -- a five-name candidate list can only find EXTRAS among
+  -- names it thought to ask about; derive the grantee universe from each core's own ACL instead.
+  select coalesce(array_agg(distinct rolname order by rolname), '{}') into v_grantees
+    from (
+      select case when a.grantee = 0 then 'public' else r.rolname end as rolname
+        from pg_proc p, lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        left join pg_roles r on r.oid = a.grantee
+       where p.oid in ('clara._sandbox_client_set(uuid,jsonb,jsonb)'::regprocedure,
+           'clara._recipient_covers(uuid,uuid[],uuid)'::regprocedure,
+           'clara._watermark_policy_version_for(text,text,date)'::regprocedure,
+           'clara._sandbox_view_mint_core(uuid,uuid,uuid,text,jsonb,jsonb,jsonb,text,text)'::regprocedure,
+           'clara._sandbox_export_request_core(uuid,uuid,uuid,text,uuid,uuid,text,jsonb,text,text)'::regprocedure)
+         and a.privilege_type = 'EXECUTE'
+    ) g
+   where g.rolname <> 'clara_fn_owner';
+  if coalesce(array_length(v_grantees,1),0) <> 0 then
+    raise exception 'f_a5b pr1 tail: an ungranted core is reachable by an unexpected role: %', v_grantees using errcode = 'CLR10';
   end if;
 
   -- (d) The wake grant roster, BOTH directions (F5-D30): exactly 3 allowlist rows, exactly these
@@ -1303,6 +1374,23 @@ begin
     raise exception 'f_a5b pr1 tail: interactive_client''s one-row D34 invariant no longer holds -- this file must not have touched it' using errcode = 'CLR10';
   end if;
 
+  -- F5-D30 followup (Codex re-review): wake_fn_allowlist's own PK is (wake_kind, function_name) --
+  -- BARE NAME, no argument-type column (0002:247-251, an estate-wide foundational shape this file
+  -- cannot alter). assert_wake_allowed() therefore checks by name alone, so an allowlist row is only
+  -- as precise as its name is UNAMBIGUOUS: if Postgres ever held a SECOND overload of the same bare
+  -- name, the allowlist row could not say which one it means, and the (e) ACL checks below pinning
+  -- full signatures would prove nothing about which overload the allowlist actually authorizes. Pin
+  -- exact-signature discipline here too: for each of this lane's three allowlisted names, prove
+  -- exactly one regprocedure in schema clara answers to that bare name.
+  foreach v_sig in array array['wake_mint_sandbox_view','wake_request_sandbox_export','wake_sandbox_export_state']
+  loop
+    select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = v_sig;
+    if v_n <> 1 then
+      raise exception 'f_a5b pr1 tail: wake_fn_allowlist row "%" is ambiguous -- % overload(s) share this bare name in schema clara, but the allowlist''s own PK cannot disambiguate which one it authorizes', v_sig, v_n using errcode = 'CLR10';
+    end if;
+  end loop;
+
   -- (e) EXECUTE grantees, exact sets, no PUBLIC, no extra grantee -- ALL NINE verbs (A10: no longer
   -- a 3-verb sample), plus the search_path pin read directly from proconfig for each.
   for v_verb, v_expected_grantee in
@@ -1318,13 +1406,28 @@ begin
       ('list_sandbox_exports(uuid,int)', 'clara_authenticated')
     ) t(sig, grantee)
   loop
-    select coalesce(array_agg(distinct grantee.rolname order by grantee.rolname), '{}') into v_grantees
-      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      cross join lateral (values ('clara_authenticated'),('clara_agent_ro'),('clara_runtime'),
-        ('clara_runtime_login'),('clara_wake_interactive'),('clara_wake_proactive'),('public'))
-        as grantee(rolname)
-      where n.nspname = 'clara' and p.oid = ('clara.' || v_verb)::regprocedure
-        and has_function_privilege(case when grantee.rolname = 'public' then 'public' else grantee.rolname end, p.oid, 'EXECUTE');
+    -- Codex re-review followup: a fixed 7-role candidate list can only find EXTRAS among names it
+    -- already thought to ask about -- a grant to an UNLISTED role (any lane's own wake_* /
+    -- runtime_login role this census never named) would silently evade the "exact" claim. Derive
+    -- the grantee universe from the function's OWN ACL instead (aclexplode over proacl), so every
+    -- role that has ever actually been granted EXECUTE surfaces, not just the ones this file
+    -- thought to probe.
+    -- clara_fn_owner excluded (not just unlisted): the owner ALWAYS implicitly holds every
+    -- privilege regardless of any ACL entry, and the moment ANY revoke/grant touches an object
+    -- Postgres materialises that implicit privilege into an EXPLICIT `owner=X/owner` aclitem (the
+    -- default-ACL materialisation) -- so aclexplode surfaces the owner for essentially every
+    -- function this file touches, exactly like a hand-probed candidate list never would have (it
+    -- never named clara_fn_owner as a candidate to begin with). The "exact grantee" claim is about
+    -- APPLICATION roles; the owner was never part of that universe.
+    select coalesce(array_agg(distinct rolname order by rolname), '{}') into v_grantees
+      from (
+        select case when a.grantee = 0 then 'public' else r.rolname end as rolname
+          from pg_proc p, lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+          left join pg_roles r on r.oid = a.grantee
+         where p.oid = ('clara.' || v_verb)::regprocedure
+           and a.privilege_type = 'EXECUTE'
+      ) g
+     where g.rolname <> 'clara_fn_owner';
     if v_grantees is distinct from array[v_expected_grantee] then
       raise exception 'f_a5b pr1 tail: clara.% grantees are %, expected exactly %', v_verb, v_grantees, v_expected_grantee using errcode = 'CLR10';
     end if;
@@ -1359,6 +1462,48 @@ begin
     v_via_public := clara.watermark_policy_for('sandbox_watermark','en',clara._book_today());
     if v_direct is distinct from v_via_public then
       raise exception 'f_a5b pr1 tail: watermark_policy_for''s CoR does not delegate to the shared core -- direct % vs public %', v_direct, v_via_public using errcode = 'CLR10';
+    end if;
+  end;
+
+  -- (f3) opus F2 nuance (final round): the REFUSAL path too, byte-compared -- proves the CoR
+  -- moved ONLY the intended thing (dropping the stale 'fix' key), nothing else. Both bodies raise
+  -- CLR10 on the same unresolvable (policy_key, locale, as_of); their detail payloads must match
+  -- on every key the ORIGINAL 0111 body carried except 'fix', which must be deliberately, provably
+  -- absent from BOTH the direct core and the public CoR (not merely absent from one and present on
+  -- the other, which would mean the delegation itself dropped something the core still carries).
+  declare
+    v_refuse_direct jsonb; v_refuse_public jsonb; v_raised boolean;
+    v_detail text; v_unresolvable date := '1900-01-01'::date;
+  begin
+    v_raised := false;
+    begin
+      perform clara._watermark_policy_version_for('sandbox_watermark', 'en', v_unresolvable);
+    exception when sqlstate 'CLR10' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_refuse_direct := v_detail::jsonb;
+      v_raised := true;
+    end;
+    if not v_raised then
+      raise exception 'f_a5b pr1 tail: the direct core unexpectedly resolved an unresolvable window' using errcode = 'CLR10';
+    end if;
+
+    v_raised := false;
+    begin
+      perform clara.watermark_policy_for('sandbox_watermark', 'en', v_unresolvable);
+    exception when sqlstate 'CLR10' then
+      get stacked diagnostics v_detail = pg_exception_detail;
+      v_refuse_public := v_detail::jsonb;
+      v_raised := true;
+    end;
+    if not v_raised then
+      raise exception 'f_a5b pr1 tail: the public CoR unexpectedly resolved an unresolvable window' using errcode = 'CLR10';
+    end if;
+
+    if (v_refuse_direct - 'fix') is distinct from (v_refuse_public - 'fix') then
+      raise exception 'f_a5b pr1 tail: refusal payloads differ beyond the deliberately-dropped fix key -- direct % vs public %', v_refuse_direct, v_refuse_public using errcode = 'CLR10';
+    end if;
+    if (v_refuse_direct ? 'fix') or (v_refuse_public ? 'fix') then
+      raise exception 'f_a5b pr1 tail: the fix key resurfaced -- direct % vs public %', v_refuse_direct, v_refuse_public using errcode = 'CLR10';
     end if;
   end;
 

@@ -240,11 +240,11 @@ own rather than through the first.
 
 - **Q1's second key had no emitter.** Annex E Q1 hands the owner a **two-key** payload (stamp +
   footer line) and §3.6 consumed one, so the footer was unbuilt by construction. *(Raised material,
-  **downgraded to nit** by the verifier: the stamp string is itself disclaiming and owner-signed, on
-  every page, with the request refusing when the row is absent — the recipient does not receive "a
-  clean statement of figures", and "the reader cannot see an 8% wash" is a perception assertion, not
-  repo evidence, against a marking the estate already ships.)* **Folded, with the verifier's
-  mechanical correction:** the stamp is what §3.6 emits, per page; a signed footer emits **once in
+  **downgraded to nit** by the verifier: the stamp string is itself disclaiming and owner-ratified,
+  on every page, with the request refusing when the row is absent — the recipient does not receive
+  "a clean statement of figures", and "the reader cannot see an 8% wash" is a perception assertion,
+  not repo evidence, against a marking the estate already ships.)* **Folded, with the verifier's
+  mechanical correction:** the stamp is what §3.6 emits, per page; a ratified footer emits **once in
   flow** in the `layout.mjs:152` idiom — that box sits before the sections loop, so **B3.1's per-page
   assertion applies to the stamp alone**, and no cell is written that cannot pass.
 - **`firm_id` was prose, not schema.** Two of the three relation sketches omitted it, while every

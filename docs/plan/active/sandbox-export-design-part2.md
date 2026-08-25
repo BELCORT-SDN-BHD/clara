@@ -96,8 +96,8 @@ now specifies, the render-time watermark refusal, G-1/G-2 — **a ceremony**) �
 **The dependency table moved to Annex K** at the fold. Six rows, unchanged in substance: F-A5 PR-1
 (the `watermark_policy_versions` DDL, U1) · F-A5 PR-4 (ceremony contention) · F-A6 PR-1 (the
 hardened `scope`/`client_scope`, U2) · **F-A6 v2** (the only source of an exact multi-client set) ·
-F-A2 PR-1 (`interactive_client`) · **the owner's signing — DISCHARGED 2026-08-23** (the trio is
-signed; the lane's DARK condition lifts at build, §3.6).
+F-A2 PR-1 (`interactive_client`) · **the owner's ratification — DISCHARGED 2026-08-23** (the trio
+is owner-ratified; the lane's DARK condition lifts at build, §3.6).
 **Owner card 1 was a seventh gating the figure path — RULED 2026-08-23, discharged below (§7).**
 
 **No D1 write-quiesce window and no train claim.** This lane CoRs no live body: `layout.mjs` gains a
@@ -116,7 +116,7 @@ it and how is out of scope**, and owner question 4 asks whether that stays true)
 
 **Not a narrowing of TA-P10 C′ — and, after the fold, not a claim of completeness either.** Built:
 free export (§3.1, §3.5), the byte-burn (§3.6), the export record (§3.1), cross-client behind a
-mechanical covered-recipient check (§3.1-§3.3), the owner-signed three-language row whose absence
+mechanical covered-recipient check (§3.1-§3.3), the owner-ratified three-language row whose absence
 refuses (§3.6), narrative-only aggregates (§3.7). **The one place narrower than a naive reading is
 §3.2's `firm_closure` rule** — the ruling's own coverage test applied to a log that cannot name its
 clients, owner question 3. **Both OWNER CARDS are now RULED** (in full, with the recommendation

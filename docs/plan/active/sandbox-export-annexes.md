@@ -33,7 +33,7 @@ inherited). The agent reaches them through the typed readers in A.2 and nowhere 
 |---|---|---|---|
 | 1 | `clara.wake_mint_sandbox_view(jsonb, jsonb, text, jsonb, text)` | wake wrapper → ungranted core | the wake role |
 | 2 | `clara.wake_request_sandbox_export(uuid, uuid, text, text, jsonb, text)` | wake wrapper → ungranted core | the wake role |
-| 3 | `clara.wake_sandbox_export_state(uuid)` | `stable` definer reader, own receipt | the wake role |
+| 3 | `clara.wake_sandbox_export_state(uuid)` | definer reader (VOLATILE — a receipted reader cannot be `stable`, A6), own receipt | the wake role |
 | 4 | `clara.sandbox_export_payload(uuid, text)` | `stable` definer, **lease-scoped** (`0081:162-168`) | `clara_runtime` |
 | 5 | `clara.complete_sandbox_export(uuid, text, text, bigint, text)` | definer, **hash IN**, set-once | `clara_runtime` |
 | 6 | `clara.fail_sandbox_export(uuid, text, jsonb)` | definer, attempts/backoff | `clara_runtime` |
@@ -127,7 +127,7 @@ A wall's proof is a cell that makes the wall REFUSE — never a substring match 
 
 | cell | forces |
 |---|---|
-| B3.1 | **the extracted text of the produced PDF contains the signed STAMP on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export. *(The footer line, if the owner signs one, emits ONCE in flow — `layout.mjs:152`'s box sits before the sections loop — so it is asserted per DOCUMENT, never per page: design §3.6.)* |
+| B3.1 | **the extracted text of the produced PDF contains the ratified STAMP on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export. *(The footer line, if the owner ratifies one, emits ONCE in flow — `layout.mjs:152`'s box sits before the sections loop — so it is asserted per DOCUMENT, never per page: design §3.6.)* |
 | B3.2 | with the policy row absent, the **request** refuses (`watermark_policy_absent`) and **no bytes exist** — never unwatermarked bytes |
 | B3.3 | the pinned `watermark_policy_version_id` is what the bytes carry: supersede the row, re-render the same export, bytes unchanged |
 | B3.4 | a hostile label cannot remove the background — the law-28 payloads run and B3.1 still passes (P-2) |
@@ -423,7 +423,7 @@ F-A5 PR-4** so two renderer ceremonies do not contend (C-16, R-6).
 `/reports` gains a **sandbox exports** panel: a list (view, recipient, client set, watermark version,
 state, sha256, when, by whom), the **recipient register** form (register / supersede, admin+), and
 every refusal rendered as text a bookkeeper can act on — `recipient_coverage_incomplete` names the
-uncovered clients, `watermark_policy_absent` says *"the owner has not signed the sandbox watermark"*
+uncovered clients, `watermark_policy_absent` says *"the owner has not ratified the sandbox watermark"*
 rather than a token, and the fold's new refusals get the same treatment:
 `sandbox_view_basis_unknown` says *"a cited read does not belong to this firm"*,
 `sandbox_view_block_basis_absent` says *"part of this view cannot be traced to a read"*, and

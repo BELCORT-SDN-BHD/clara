@@ -26,13 +26,14 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
 import {
-  rootQuery, endPool, asWake, asHuman, ROLES, opk,
+  rootQuery, endPool, asWake, asHuman, ROLES, opk, roleQuery,
 } from "./rig-helpers.mjs";
 import { buildWorld, mintWake } from "./rig-fixtures.mjs";
 import {
   freshDeltaClient, createStandardSets, mintPeriodWithMovement, proposeMetricDefinition,
   approveMetricDefinition, evaluateMetricHuman, metricAst, measure, cellRow, pastMonthStart,
 } from "./delta-fixtures.mjs";
+import { withTxn, truncateGuardError } from "./rig-txn.mjs";
 
 const sha256hex = (s) => createHash("sha256").update(String(s)).digest("hex");
 
@@ -153,8 +154,12 @@ test("B1.1 -- a preview-cell basis derives -- with the A1(iii) fail-safe, the re
     db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5) as r",
       [body, basis, "b1.1", model(), opk("b11")]));
   const out = r.rows[0].r;
-  assert.ok(out.client_set.includes(fx.A1.clientId), "the cited client is in the derived set");
+  assert.ok(out.client_set.includes(fx.A1.clientId), "the cited client is in the derived (widened) set");
   assert.equal(out.client_set_basis, "firm_closure", "the fail-safe interim always widens while free text is present");
+  // NT-1 (opus, final round): client_set alone is vacuous once widened to the full firm roster --
+  // assert the REAL, pre-widening exact derivation instead.
+  assert.deepEqual([...out.client_set_exact].sort(), [fx.A1.clientId].sort(),
+    "the EXACT (pre-widening) derivation for a single preview-cell basis is exactly that one client, not the roster");
 });
 
 test("B1.2/B1.4/B1.6/B1.9(firm leg) -- free-read basis kinds", { skip: fa6 ? false : "F-A6 PR-1 not merged on this chain: free-read basis kinds are unavailable (Annex K); preview-cell bases only" }, async (t) => {
@@ -226,6 +231,11 @@ test("B1.9 -- the narrowing differential: dropping a cited block's basis_ref REF
     db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5) as r",
       [twoBlock, basis, "b1.9-two", model(), opk("b19two")]));
   assert.ok(ok.rows[0].r.client_set.includes(fx.A1.clientId) && ok.rows[0].r.client_set.includes(fx.A2.clientId));
+  // NT-1 (opus, final round): the widened client_set above passes trivially whether the exact
+  // derivation actually produced {A1,A2} or silently narrowed to {A1} alone -- the real positive
+  // claim is on client_set_exact.
+  assert.deepEqual([...ok.rows[0].r.client_set_exact].sort(), [fx.A1.clientId, fx.A2.clientId].sort(),
+    "the EXACT derivation for two preview-cell blocks is precisely {A1,A2}, not a narrowed subset");
 
   const droppedRefBlock = { blocks: [textBlock("a"), { kind: "text", displayed_text: "block b, no ref" }] };
   await assert.rejects(
@@ -328,31 +338,20 @@ test("B1.12 -- firm_closure covers non-active clients too (archived/onboarding) 
   t.skip("named: no onboarding/archived fixture client available in this battery's world builders (A10)");
 });
 
-test("B1.13 -- a firm_closure mint on a firm with zero clients refuses sandbox_view_client_set_empty (A10: this label was previously mis-used for a body_malformed cell, renamed there, real B1.13 built here)", async (t) => {
-  if (!ready) return skipHere(t, "not applied");
-  // A fresh firm with a fresh admin and ZERO clients -- the real zero-roster case.
-  const admissionToken = randomUUID();
-  await rootQuery("insert into clara.firm_admissions (token, note) values ($1,$2)", [admissionToken, "b1.13 zero-client firm"]);
-  const ownerId = randomUUID();
-  await rootQuery("insert into clara.users (id, display_name, email, is_agent) values ($1,$2,$3,false)",
-    [ownerId, "b113owner", `b113owner_${randomUUID().slice(0, 8)}@rig.test`]);
-  const emptyFirm = await asHuman(ownerId, (db) =>
-    db.query("select clara.create_firm($1,$2,$3) as r", [`b113_firm_${randomUUID().slice(0, 8)}`, admissionToken, opk("b113firm")]))
-    .then((r) => r.rows[0].r.firm_id ?? r.rows[0].r.id);
-  assert.ok(emptyFirm, "the fresh firm was created");
-  const zeroCount = await rootQuery("select count(*)::int n from clara.clients where firm_id=$1", [emptyFirm]);
-  assert.equal(zeroCount.rows[0].n, 0, "mandatory setup: the fresh firm truly has zero clients");
-  const derived = await rootQuery("select clara._sandbox_client_set($1,$2,$3)", [emptyFirm,
-    basisArr(previewBasis("x", randomUUID())), textBody([textBlock("x")])]).catch((e) => e);
-  // The basis element itself won't resolve (no metric_cells row in this empty firm either), which
-  // ALSO refuses sandbox_view_basis_unknown -- a distinct arm from client_set_empty. To force the
-  // REAL empty-roster arm we need a basis that DOES resolve; the cleanest is a preview cell from
-  // fx.A1 pointed at a DIFFERENT (empty) firm, which correctly refuses basis_unknown (cross-firm,
-  // B1.11's own wall) rather than reaching the empty-set arm -- proving the two walls are properly
-  // ordered (basis resolution before emptiness) is itself useful evidence, so assert that instead.
-  assert.equal(derived.code, "CLR11");
-  assert.match(derived.detail || "", /sandbox_view_basis_unknown/,
-    "an empty firm with an unresolvable basis refuses basis_unknown BEFORE any emptiness check is reached -- ordering proof");
+test("B1.13 -- the mint-side sandbox_view_client_set_empty arm, for a preview_cell basis, is structurally unreachable in this PR-1 -- named skip, like B1.12 (opus final round: the prior body asserted basis_unknown under a title claiming client_set_empty, a title/body mismatch, never a real B1.13 witness)", async (t) => {
+  // metric_cells FKs to clara.clients (not-null, referencing). A preview_cell basis element can
+  // therefore only ever RESOLVE to a real, existing client of the firm it belongs to -- so a firm
+  // whose preview_cell basis element resolves at all cannot simultaneously have zero clients (the
+  // resolved cell's own client is proof of at least one), and a firm with zero clients can only
+  // ever produce sandbox_view_basis_unknown for a preview_cell basis (no cell can exist there to
+  // resolve), never reaching the empty-derived-set check downstream. The prior attempt at this
+  // cell (this file's own history) tried exactly the zero-client-firm construction and landed on
+  // basis_unknown, mislabelling that as B1.13 rather than recognising it as the STRUCTURAL reason
+  // no preview_cell path can ever witness client_set_empty in this build. The CHECK constraint
+  // ck_sandbox_views_client_set_nonempty and the belt raise inside _sandbox_view_mint_core remain
+  // in place as defence-in-depth for a future basis kind (a chart_ref or a freeform_read row whose
+  // OWN client can be legitimately absent) that this PR-1 does not ship.
+  t.skip("named: the preview_cell-only empty-set arm is structurally unreachable in this build (metric_cells FKs clients) -- see comment");
 });
 
 test("A10: body_malformed -- no blocks / non-text kind refuses (the cell PREVIOUSLY mis-labelled B1.13)", async (t) => {
@@ -409,6 +408,64 @@ test("A3 -- an op_key replayed with CHANGED provenance (model/rationale) CONFLIC
       [textBody([textBlock("x")]), basis, "DIFFERENT rationale", model(), key])).catch((e) => e);
   assert.equal(conflict.code, "CLR10", `expected op_key reuse to conflict, got ${conflict.code}`);
   assert.match(conflict.message || "", /op_key reused with different args/i);
+});
+
+// =============================================================================================
+// opus F8, final round -- THE WRAPPER GUARDS. Every wrapper's OWN pre-core validation (blank
+// op_key, blank rationale, an unrecognised locale) had no direct cell, and assert_wake_allowed's
+// fine-grained per-wake_kind refusal (the mechanism the whole allowlist census in the migration
+// tail exists to prove is load-bearing) had none either.
+// =============================================================================================
+test("wrapper guard -- a blank p_op_key refuses at wake_mint_sandbox_view before the core ever runs", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const cellId = await Promise.resolve(fx.A1.id);
+  const e = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5)",
+      [textBody([textBlock("x")]), basisArr(previewBasis("x", cellId)), "rat", model(), "   "])).catch((err) => err);
+  assert.equal(e.code, "CLR10");
+  assert.match(e.detail || "", /"class":"op_key"/);
+});
+
+test("wrapper guard -- a blank p_rationale refuses at wake_mint_sandbox_view before the core ever runs", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const cellId = await Promise.resolve(fx.A1.id);
+  const e = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5)",
+      [textBody([textBlock("x")]), basisArr(previewBasis("x", cellId)), "  ", model(), opk("wgblankrat")])).catch((err) => err);
+  assert.equal(e.code, "CLR10");
+  assert.match(e.detail || "", /"class":"rationale"/);
+});
+
+test("wrapper guard -- an unrecognised p_locale refuses at wake_request_sandbox_export before the core ever runs", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const cellId = await Promise.resolve(fx.A1.id);
+  const viewId = await mintView(world.firms.A, world.users.alice, cellId, "wglocale");
+  const member = await registerFirmMember(world.firms.A, world.users.alice, { user: world.users.bob, displayName: "WG-locale" });
+  const e = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_request_sandbox_export($1,$2,$3,$4,$5,$6)",
+      [viewId, member, "fr", "wglocale", model(), opk("wglocale")])).catch((err) => err);
+  assert.equal(e.code, "CLR10");
+  assert.match(e.detail || "", /"class":"locale"/);
+});
+
+test("wrapper guard -- assert_wake_allowed refuses a non-allowlisted wake_kind (interactive_client, mintable but not allowlisted for this lane's verbs)", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  // interactive_client credentials dispatch under the SAME clara_wake_interactive role as
+  // interactive credentials (0107's role-vs-allowlist split, this migration's own SECTION 6
+  // header) -- so a call under one reaches this wrapper's SQL-level EXECUTE grant just fine, and
+  // it is assert_wake_allowed's OWN per-wake_kind check (not the coarser role grant) that must
+  // refuse it. interactive_client requires a non-null client_id (wake_credentials' own CHECK).
+  const clientId = fx.A1.clientId;
+  const cred = await roleQuery(ROLES.runtime,
+    "select * from clara.mint_wake_credential(p_wake_kind => $1, p_firm => $2, p_on_behalf_of => $3, p_ttl => $4::interval, p_client => $5)",
+    ["interactive_client", world.firms.A, world.users.alice, "15 minutes", clientId]);
+  const secret = cred.rows[0].secret;
+  const cellId = await Promise.resolve(fx.A1.id);
+  const e = await asWake(ROLES.wakeInteractive, secret, (db) =>
+    db.query("select clara.wake_mint_sandbox_view($1,$2,$3,$4,$5)",
+      [textBody([textBlock("x")]), basisArr(previewBasis("x", cellId)), "wg-kind", model(), opk("wgkind")])).catch((err) => err);
+  assert.equal(e.code, "CLR03",
+    `an interactive_client credential must be refused by assert_wake_allowed (not allowlisted for wake_mint_sandbox_view), got ${e.code}: ${e.message}`);
 });
 
 // =============================================================================================
@@ -492,6 +549,72 @@ test("B2.4 -- a recipient of another firm answers export_recipient_unknown, neve
       [viewId, foreignRecipient, "en", "b2.4", model(), opk("b24")])).catch((err) => err);
   assert.equal(e.code, "CLR11");
   assert.match(e.detail || "", /export_recipient_unknown/);
+});
+
+// =============================================================================================
+// F5 (opus, final round) -- THE HUMAN FLOORS. Every human caller elsewhere in this battery is an
+// owner (alice/dave/adminSub) -- bob (bookkeeper) and carol (viewer) appear only as REGISTRATION
+// ARGUMENTS, never as CALLERS, so the rank floor on the two admin+ verbs and the bookkeeper+ floor
+// on the read verb were never actually exercised by a caller who could fail them. C-8: covered_
+// clients IS the wall (design SS3.3) -- its authorship floor merges unproven without these cells.
+// =============================================================================================
+test("F5 -- register_export_recipient refuses a bookkeeper (needs admin+)", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const e = await asHuman(world.users.bob, (db) =>
+    db.query("select clara.register_export_recipient($1,$2,$3,$4,$5,$6)",
+      ["firm_member", world.users.carol, "F5-bk", "bk floor", null, opk("f5reg")])).catch((err) => err);
+  assert.equal(e.code, "CLR04", "a bookkeeper is below register_export_recipient's admin+ floor");
+});
+
+test("F5 -- supersede_export_recipient refuses a bookkeeper (needs admin+)", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const original = await registerFirmMember(world.firms.A, world.users.alice, { user: world.users.carol, displayName: "F5-sup-target" });
+  const e = await asHuman(world.users.bob, (db) =>
+    db.query("select clara.supersede_export_recipient($1,$2,$3,$4)",
+      [original, "F5 bookkeeper attempt", null, opk("f5sup")])).catch((err) => err);
+  assert.equal(e.code, "CLR04", "a bookkeeper is below supersede_export_recipient's admin+ floor");
+});
+
+test("F5 -- list_sandbox_exports refuses a viewer (below bookkeeper+) and succeeds for a bookkeeper (positive read)", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const refused = await asHuman(world.users.carol, (db) =>
+    db.query("select clara.list_sandbox_exports($1,$2)", [null, 10])).catch((err) => err);
+  assert.equal(refused.code, "CLR04", "a viewer is below list_sandbox_exports' bookkeeper+ floor");
+
+  const cellId = await Promise.resolve(fx.A1.id);
+  const viewId = await mintView(world.firms.A, world.users.alice, cellId, "f5list");
+  const member = await registerFirmMember(world.firms.A, world.users.alice, { user: world.users.bob, displayName: "F5-list-recipient" });
+  await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_request_sandbox_export($1,$2,$3,$4,$5,$6)",
+      [viewId, member, "en", "f5list", model(), opk("f5listreq")]));
+  const allowed = await asHuman(world.users.bob, (db) =>
+    db.query("select clara.list_sandbox_exports($1,$2) as r", [viewId, 10]));
+  assert.ok(Array.isArray(allowed.rows[0].r) && allowed.rows[0].r.length >= 1,
+    "a bookkeeper meets the floor and reads at least the export just requested");
+});
+
+test("F5 -- register_export_recipient refuses a covered_clients id from another firm", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const e = await asHuman(world.users.alice, (db) =>
+    db.query("select clara.register_export_recipient($1,$2,$3,$4,$5,$6)",
+      ["external", null, "F5-cross-firm-reg", "cross-firm test", [fx.B1.clientId], opk("f5regcf")])).catch((err) => err);
+  assert.equal(e.code, "CLR11");
+  // jsonb serialises keys SORTED (by length then lexicographically), never in jsonb_build_object's
+  // insertion order -- a regex assuming "reason" precedes "class" broke on the real {"class":...,
+  // "reason":...,"unknown":...} ordering. Match each fact independently instead of assuming order.
+  assert.match(e.detail || "", /"reason":\s*"invalid_request"/);
+  assert.match(e.detail || "", /"class":\s*"covered_clients"/);
+  assert.match(e.detail || "", new RegExp(fx.B1.clientId), "the refusal names the offending foreign-firm id");
+});
+
+test("F5 -- supersede_export_recipient refuses a covered_clients id from another firm", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const original = await registerExternal(world.firms.A, world.users.alice, { displayName: "F5-cross-firm-sup", coveredClients: [fx.A1.clientId] });
+  const e = await asHuman(world.users.alice, (db) =>
+    db.query("select clara.supersede_export_recipient($1,$2,$3,$4)",
+      [original, "F5 cross-firm attempt", [fx.B1.clientId], opk("f5supcf")])).catch((err) => err);
+  assert.equal(e.code, "CLR11");
+  assert.match(e.detail || "", new RegExp(fx.B1.clientId), "the refusal names the offending foreign-firm id");
 });
 
 test("B2.5 / A4 -- a superseded recipient refuses; the successor covers; basis is PRESERVED (never overwritten by the reason); covered_clients is EXPLICIT, never a silent clone", async (t) => {
@@ -639,6 +762,71 @@ test("A6 -- wake_sandbox_export_state is volatile (not stable), writes its own a
   const foreign = await asSandboxWake(world.firms.B, world.users.dave, (db) =>
     db.query("select clara.wake_sandbox_export_state($1)", [exportId])).catch((e) => e);
   assert.equal(foreign.code, "CLR11");
+});
+
+// =============================================================================================
+// Codex #14 -- sandbox_export_payload previously handed the worker only the pinned
+// watermark_policy_version_id UUID, never the watermark TEXT -- clara_runtime holds no table grant
+// on watermark_policy_versions (0111 grants humans only), so PR-3's renderer had no door to it.
+// One join now resolves the pinned TEXT at payload time. This cell forces the harder claim: the
+// resolved text is the REQUEST-time pin, not whatever the policy resolves to NOW.
+// =============================================================================================
+test("A-payload -- sandbox_export_payload returns the REQUEST-time pinned watermark text, unaffected by a later policy bump", async (t) => {
+  if (!ready) return skipHere(t, "not applied");
+  const cellId = await Promise.resolve(fx.A1.id);
+  const viewId = await mintView(world.firms.A, world.users.alice, cellId, "wmpin");
+  const member = await registerFirmMember(world.firms.A, world.users.alice, { user: world.users.bob, displayName: "Bob-wmpin" });
+  const requested = await asSandboxWake(world.firms.A, world.users.alice, (db) =>
+    db.query("select clara.wake_request_sandbox_export($1,$2,$3,$4,$5,$6) as r",
+      [viewId, member, "en", "wmpin", model(), opk("wmpin")]));
+  const exportId = requested.rows[0].r.sandbox_export_id;
+  const pinnedId = requested.rows[0].r.watermark_policy_version_id;
+  assert.ok(pinnedId, "the request pins a watermark_policy_version_id");
+
+  const pinnedRow = await rootQuery("select watermark from clara.watermark_policy_versions where id=$1", [pinnedId]);
+  const pinnedText = pinnedRow.rows[0].watermark;
+
+  // watermark_policy_versions is append-only (0111) -- a bump row, once committed, can never be
+  // taken back and would permanently move fa5bReady()'s own exact "3 seeded rows" drift-detector
+  // to 4 for every future invocation against this database. The bump, the positive control, the
+  // claim simulation and the payload call therefore all run on ONE never-committed transaction
+  // (withTxn, commit:false): the bump is fully visible to every read inside it, and vanishes on
+  // rollback, so this cell proves the same properties without leaving a permanent mark.
+  const bumpText = { watermark: "BUMPED TEXT -- must never appear in an already-requested export's payload" };
+  await withTxn(async (c) => {
+    // Bump the policy AFTER the request: a NEW, LATER version for the same (policy_key, locale),
+    // effective from today -- the resolver's own version-desc-limit-1 ordering would favour this
+    // new row for any FRESH request made after this point. This ALREADY-REQUESTED export must not
+    // see it.
+    const nextVersion = await c.query(
+      "select coalesce(max(version),0)+1 as v from clara.watermark_policy_versions where policy_key='sandbox_watermark' and locale='en'");
+    await c.query(
+      `insert into clara.watermark_policy_versions (firm_id, policy_key, version, locale, watermark, effective_from, source_note)
+       values (null, 'sandbox_watermark', $1, 'en', $2::jsonb, clara._book_today(), 'A-payload test bump')`,
+      [nextVersion.rows[0].v, JSON.stringify(bumpText)]);
+    // Confirm the bump really is what a FRESH resolution would now pick (positive control --
+    // proves the bump is not a no-op that this cell would pass vacuously). _watermark_policy_
+    // version_for returns TABLE(id, watermark) -- unpack columns directly rather than wrapping in
+    // `as r`, which would hand the pg driver a raw composite-row string, not a JS object.
+    const freshResolve = await c.query("select watermark from clara._watermark_policy_version_for('sandbox_watermark','en',clara._book_today())");
+    assert.deepEqual(freshResolve.rows[0].watermark, bumpText,
+      "positive control: a FRESH resolution now picks the bumped version -- the bump is live, not inert");
+
+    await c.query(
+      "update clara.sandbox_exports set state='running', claimed_by=$2, claimed_at=now(), lease_expires_at=now()+interval '20 minutes' where id=$1",
+      [exportId, "worker-wmpin"]);
+    const payload = await c.query("select clara.sandbox_export_payload($1,$2) as r", [exportId, "worker-wmpin"]);
+    assert.deepEqual(payload.rows[0].r.watermark, pinnedText,
+      "the payload's watermark is the REQUEST-time pinned text, not whatever resolves now");
+    assert.notDeepEqual(payload.rows[0].r.watermark, bumpText,
+      "and specifically not the later bump's text");
+  }, { commit: false });
+
+  // Rolled back: the bump row, the claim and the (uncommitted) payload call are all gone --
+  // fa5bReady()'s own drift-detector still sees exactly 3 sandbox_watermark rows.
+  const afterRollback = await rootQuery(
+    "select count(*)::int n from clara.watermark_policy_versions where policy_key='sandbox_watermark'");
+  assert.equal(afterRollback.rows[0].n, 3, "the bump did not survive the rollback -- append-only stays append-free of test residue");
 });
 
 // =============================================================================================
@@ -814,6 +1002,17 @@ test("B6.5 -- sandbox_views refuses UPDATE/DELETE (append-only) and TRUNCATE (no
   await assert.rejects(
     rootQuery("delete from clara.sandbox_views where id=$1", [viewId]),
     (e) => { assert.equal(e.code, "CLR08"); return true; });
+  // opus, final round: the title claimed TRUNCATE coverage the body never actually exercised
+  // (a title/body mismatch class). truncateGuardError() (rig-txn.mjs) per the db-tests.md rule --
+  // never a bare TRUNCATE, which can lose a lock race before the BEFORE TRUNCATE guard ever fires.
+  // CASCADE is required here for a DIFFERENT reason than the usual lock race: sandbox_exports FKs
+  // to sandbox_views, so a plain TRUNCATE sandbox_views hits Postgres' own native referential-
+  // integrity check (0A000, "cannot truncate a table referenced in a foreign key constraint")
+  // before the BEFORE TRUNCATE trigger even gets a chance to fire -- CASCADE resolves that
+  // dependency-order concern; the trigger still fires and still aborts the whole statement (the
+  // trigger raising means CASCADE never actually gets to truncate anything either).
+  const trunc = await truncateGuardError("truncate clara.sandbox_views cascade");
+  assert.equal(trunc.code, "CLR08", `TRUNCATE must be refused by the no-truncate trigger, got ${trunc.code}: ${trunc.message}`);
 });
 
 test("B6.6 -- cross-firm isolation: firm A's session sees zero of firm B's sandbox rows (positive read)", async (t) => {
@@ -858,12 +1057,22 @@ test("G-3 -- no FK / uuid column in posting, reporting or knowledge layers refer
   assert.equal(fkCensus.rows[0].n, 0, "no FK OUTSIDE this lane's own relations points at sandbox_views/sandbox_exports");
 
   // uuid-column arm (A10, Codex #11): a bare uuid column NAMED for this lane, with no FK at all,
-  // would evade the arm above entirely. Positive control FIRST -- prove the detector can fire.
+  // would evade the arm above entirely. opus law 3 (final round): matching by a loose SUBSTRING
+  // ("sandbox" anywhere in the name) reads a projection, not the thing -- an unrelated column
+  // merely CONTAINING that substring (a "sandboxed" flag, a future "sandbox_theme_id") would false-
+  // positive, while the pattern proves nothing about actual reference either way (a bare uuid
+  // column carries no catalog-provable identity without a FK; only DATA could ever prove that, and
+  // a DDL census cannot read data). Tightened to the EXACT two column-name shapes this lane's own
+  // legitimate FK'd columns use (sandbox_view_id, sandbox_export_id) -- this narrows false
+  // positives on an unrelated name while staying honest that it is still a NAME heuristic, now the
+  // most precise one available, paired below with the reverse arm's independent per-table
+  // enumeration rather than relying on this filtered scan alone. Positive control FIRST -- prove
+  // the detector can fire.
   await rootQuery(`create temp table t_g3_probe (id uuid primary key default gen_random_uuid(),
     sandbox_view_id uuid)`);
   const positiveControl = await rootQuery(
     `select count(*)::int n from information_schema.columns
-       where table_schema ~ '^pg_temp' and table_name = 't_g3_probe' and column_name ~ 'sandbox'`);
+       where table_schema ~ '^pg_temp' and table_name = 't_g3_probe' and column_name ~ '^sandbox_(view|export)_id$'`);
   assert.equal(positiveControl.rows[0].n, 1, "the uuid-name detector DOES catch a deliberately-planted column -- not vacuous");
   await rootQuery("drop table t_g3_probe");
 
@@ -871,7 +1080,47 @@ test("G-3 -- no FK / uuid column in posting, reporting or knowledge layers refer
     `select count(*)::int n from information_schema.columns c
        join pg_namespace n on n.nspname = c.table_schema
       where c.table_schema = 'clara' and c.data_type = 'uuid'
-        and c.column_name ~ 'sandbox'
+        and c.column_name ~ '^sandbox_(view|export)_id$'
         and c.table_name not in ('sandbox_views','sandbox_exports','export_recipients')`);
   assert.equal(uuidCensus.rows[0].n, 0, "no uuid column OUTSIDE this lane's own relations is named for sandbox_views/sandbox_exports");
+
+  // A10-followup (Codex re-review): the REVERSE / list-equality arm. The two arms above scan FROM
+  // pg_constraint/information_schema.columns FILTERED to sandbox_* as the target -- a filter-driven
+  // scan can only ever report matches it looked for; a table with a silently-broken join condition
+  // or an unexpected schema would simply never appear, and "0 rows" would look identical whether
+  // nothing referenced sandbox_* or the scan quietly examined nothing. F5-D30: "a roster that can
+  // only find extras cannot find omissions." The reverse arm inverts the derivation: enumerate the
+  // FULL universe of base tables in schema clara (excluding this lane's own three) FRESH from the
+  // live catalog every run -- never a frozen hardcoded list, so a table ANY future migration adds
+  // automatically enters the universe and cannot slip out of coverage -- then, independently of the
+  // two arms above (a per-table predicate, not the global JOIN those use), prove each one individually
+  // carries neither an FK nor a uuid column referencing this lane.
+  const universe = await rootQuery(
+    `select table_name from information_schema.tables
+      where table_schema = 'clara' and table_type = 'BASE TABLE'
+        and table_name not in ('sandbox_views','sandbox_exports','export_recipients')
+      order by table_name`);
+  // Floor, not a frozen count: proves the universe itself is not accidentally empty or narrow (the
+  // filter-driven arms above would read as "0 violations" identically whether this reverse
+  // enumeration found 3 tables or 300 -- this is what tells them apart). ~130 migrations have landed
+  // by this PR; 50 is a conservative floor nowhere near the live count, chosen so the assertion never
+  // needs revisiting as the estate grows.
+  assert.ok(universe.rows.length >= 50,
+    `G-3 reverse arm: the live-catalog universe (${universe.rows.length} tables) must be non-trivially large, or this arm is silently scanning nothing`);
+  const offenders = [];
+  for (const { table_name: tbl } of universe.rows) {
+    // A per-table catalog probe; the universe is a few hundred rows at most and this only runs
+    // once per suite invocation.
+    const hit = await rootQuery(
+      `select
+         exists(select 1 from pg_constraint c where c.conrelid = $1::regclass and c.contype = 'f'
+           and c.confrelid in ('clara.sandbox_views'::regclass, 'clara.sandbox_exports'::regclass)) as fk_hit,
+         exists(select 1 from pg_attribute a where a.attrelid = $1::regclass and a.attnum > 0
+           and not a.attisdropped and format_type(a.atttypid, a.atttypmod) = 'uuid'
+           and a.attname ~ '^sandbox_(view|export)_id$') as uuid_hit`,
+      [`clara.${tbl}`]);
+    if (hit.rows[0].fk_hit || hit.rows[0].uuid_hit) offenders.push(tbl);
+  }
+  assert.deepEqual(offenders, [],
+    `G-3 reverse arm: independently-derived per-table check found reference(s) outside the filter-driven arms' own denominator: ${offenders.join(", ")}`);
 });

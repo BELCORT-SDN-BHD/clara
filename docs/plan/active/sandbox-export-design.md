@@ -281,6 +281,16 @@ row**, and nothing else — that kind's coverage is computed from live membershi
 (below), so an agent writing the row still could not widen coverage. Devolving **`external`** is the
 one that touches the wall, since `covered_clients` is authored there; priced only as Q2's alternative.
 
+**The retirement lever is a registered gap, an owner card, not a silent omission (opus F4's deeper
+half, TIER B).** `supersede_export_recipient` is a REPLACEMENT primitive — a successor row is
+always minted, carrying the predecessor's own `basis` forward — never a pure RETIREMENT (marking a
+recipient dead with no successor). A firm that genuinely wants "Bob no longer receives exports, and
+nobody else does either" has no verb for that today: the closest available act is superseding Bob
+with a successor whose `basis` still reads as if coverage continues, which is not the same claim.
+PR-1 builds the truth half of supersession (A4: basis preserved verbatim, `covered_clients`
+explicit and kind-validated, never silently cloned) but does not invent a retirement lever — that
+is a distinct verb/shape decision for the owner, not a seeding choice this PR makes unilaterally.
+
 **Superseded and removed recipients refuse** (`export_recipient_superseded`,
 `export_recipient_membership_inactive`) — three-valued, never two: absent → refuse, superseded →
 refuse, inactive → refuse. A coverage change is a **new row**, so an old export's `coverage_proof`
@@ -297,7 +307,14 @@ presence check (§3.6) **before a job exists** · the three **worker** verbs are
 lease-scoped exactly as `0081:152-168`, with **the hash coming IN** at completion (X5) and terminal
 failure through the audited door (`0080:280-292`) · **register/supersede** is admin+ (§3.3) ·
 `list_sandbox_exports` is bookkeeper+, the `0002:518-520` idiom, TA-P14's minimal door ·
-`wake_sandbox_export_state` is a `stable` definer reader with its own receipt (TA-P4 A).
+`wake_sandbox_export_state(p_export)` is a definer reader with its own receipt (TA-P4 A) — ONE
+argument, matching Annex A.2's own enumeration exactly (no op_key/rationale/model: a status read
+is not itself a durable act needing idempotency, unlike the mint and request verbs above). *(A11/
+PR-1 truing, opus final round: earlier text here called it `stable` — self-contradictory alongside
+"with its own receipt", since a function marked `stable` may not legitimately perform the write
+a receipt is. The shipped body is VOLATILE, matching every other receipted reader in this estate
+— A6. The one-argument signature was always the design's own shape; stated explicitly here now
+so it does not read as elided.)*
 **`_sandbox_client_set` takes the caller's firm as its first argument** (§3.2).
 
 Every wake wrapper is `SECURITY DEFINER`, `search_path=clara, pg_temp`, resolves
@@ -371,7 +388,7 @@ every other DB-sourced string in that file already gets:
 **Q1's second key** (gate nit). Annex E Q1 hands the owner a **two-key** payload — a **stamp** (the
 page background) and a **footer line** (the boxed sentence) — and v1's §3.6 consumed only the first,
 leaving the footer unbuilt by construction. The design of record decides it: **the stamp is what
-§3.6 emits, unconditionally, on every page.** A signed footer line emits **once in flow**, in the
+§3.6 emits, unconditionally, on every page.** A ratified footer line emits **once in flow**, in the
 `layout.mjs:152` idiom — that box sits before the sections loop, so it is a page-1 element by
 construction and **B3.1's per-page assertion applies to the stamp alone.** Said so the Q1 payload and
 this section agree either way, and so no cell is written that cannot pass.
@@ -389,11 +406,11 @@ owner's** (Q1) — the default is *no row seeded* (`gate-record:260-261`), which
 cross-references — the wording is an owner-approved text ratification, not a cryptographic or
 legal signature; Codex #13's naming half.)*
 
-**Q1 (OQ-1 + OQ-2) is CLOSED.** The owner signed the `sandbox_watermark` trio at the 2026-08-23
+**Q1 (OQ-1 + OQ-2) is CLOSED.** The owner ratified the `sandbox_watermark` trio at the 2026-08-23
 sitting, superseding the Annex E Q1 draft above; this is the row text the PR-1 migration seeds,
 verbatim:
 
-| locale | signed text |
+| locale | owner-ratified text |
 |---|---|
 | en | WORKING ANALYSIS — FOR DISCUSSION ONLY. Not an audited financial statement, not a statutory report. |
 | ms | ANALISIS KERJA — UNTUK PERBINCANGAN SAHAJA. Bukan penyata kewangan beraudit, bukan laporan berkanun. |
@@ -401,7 +418,7 @@ verbatim:
 
 **The lane's DARK condition (X12) LIFTS AT BUILD** — once PR-1 seeds these three rows, the
 fail-closed *"no row seeded"* default this section and Annex E Q1 both describe no longer applies
-for `en`/`ms`/`zh`; every other locale still refuses by the same rule until its own row is signed.
+for `en`/`ms`/`zh`; every other locale still refuses by the same rule until its own row is owner-ratified.
 One sitting, one key (Q2's "two keys" question is moot — the trio is a single string per locale,
 not a stamp/footer pair) — Q1's second-key note above stays historical text describing v1's shape.
 
@@ -422,6 +439,16 @@ resolvable basis row"*) — the guard now polices the seam, not the string shape
 value is DB-read, never model-supplied — R-7's early warning is discharged. **PR-1 (the
 result-carrying row on the free-read lane) and PR-3 (the renderer's substitution step) both
 unblock; the `displayed_text` figure path as v1 built it is replaced, not resumed.**
+
+**Codex #2 — the coverage consequence while the seam itself is unbuilt.** PR-1 (this lane's own
+DB layer) ships before the substitution engine does, and every block kind it admits is free text
+(model-authored prose, `kind='text'` — a placeholder-typed block is second-render-entrance
+territory, PR-3's own). Its fail-safe interim is therefore conservative in one direction only:
+the derived client set ALWAYS widens to `firm_closure` whenever free text is present in the body,
+regardless of what the exact per-basis-kind derivation would have proven narrower — coverage can
+widen while the seam is unbuilt, never narrow below the exact derivation. The mechanism is
+`_sandbox_client_set`'s own SECTION 5c(iii) in the PR-1 migration; this sentence is its
+design-level registration, so the interim's shape does not live only in a migration comment.
 
 **Split boundary (2026-08-23, the 500-line ceiling): §3.7 onward, incl. §4-§7 and the RULED
 disposition of both owner cards, continues in `sandbox-export-design-part2.md`.** Section numbers
