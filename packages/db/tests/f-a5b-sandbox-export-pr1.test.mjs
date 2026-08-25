@@ -1,5 +1,5 @@
 // F-A5b PR-1 -- THE SANDBOX EXPORT LANE'S DB LAYER, for
-// migrations/UNNUMBERED_f_a5b_pr1_sandbox_export.sql.
+// migrations/0132_f_a5b_pr1_sandbox_export.sql.
 //
 // Design of record: docs/plan/active/sandbox-export-design.md (v2, gate-folded 2026-08-23) +
 // -design-part2.md + -annexes.md (Annex A surface, B battery, C decisions) + the gate record's
