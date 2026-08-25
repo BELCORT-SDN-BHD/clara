@@ -370,6 +370,19 @@ Stated here because they bind more than one item and no single item's design can
    `agent_task` is born `held` (`0011:1230`) with `held→cancelled` its only transition (`:1271`) —
    nothing executes it. F-A4 mints the `close_prep` arm on the `autodraft` lifecycle; **F-A3 and
    F-A5 adopt that arm rather than each minting their own** (TA-P11).
+
+   **SUPERSEDED 2026-08-25 by gate G1's owner ruling** (`bank-agency-gate-record.md §6 item 1`,
+   design of record `g1-wake-engine-design.md`): F-A3 and F-A5 do **NOT** adopt the `close_prep`
+   arm — they ride `kind='wake'` through a new shared consumer/settlement path instead, per
+   mechanism (b), ruled over mechanism (a) (which this obligation's own recommendation was, argued
+   before G1 existed to weigh it against the alternative — the honest tension is recorded in
+   `g1-wake-engine-survey.md §6`, not hidden). **`close_prep`'s own shape is unaffected** — this
+   item's `0120` build stands exactly as shipped, byte-unchanged; it is GRANDFATHERED as a second,
+   closed-world carrier shape inside the G1 engine, one of the four sources that engine names as
+   served, never retrofitted onto `kind='wake'`. F-A4's own remaining obligation (`close_prep_due`,
+   `close_prep_holds`, `closePrep.v1`) is unchanged by this — only WHICH RUNTIME CONSUMER claims and
+   dispatches the resulting tasks moves, from a bespoke seventh leader belt to a registry row in the
+   G1 engine (`g1-wake-engine-design.md §5`).
 4. **chatTurn `_vN` chains are claimed by F-A2's PR-2 first.** F-A4's directed close ask (§3.4's
    "a human asks in chat") needs a chat tool, so it queues behind F-A2's runtime PR — named in §5's
    prerequisite (iii). Never a second live `chatTurn` chain.

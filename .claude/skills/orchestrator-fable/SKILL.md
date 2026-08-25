@@ -31,6 +31,8 @@ Heavy implementation may require detailed technical reasoning. The orchestrator 
 
 - **Methodlogy/Philosophy: Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** Delegate when parallelism or specialist-isolation materially benefits the task; do a bounded, well-specified step yourself rather than dispatch as ceremony.
 
+***在不牺牲品质的原则下用最effective, 适合, 经济and 经济的agent model.***
+
 - Dispatch lanes **All lanes get explicit model overrides, FORBID to Overuse model `fable` as lane's model.**:
  1. **Claude native lane:** select the most suitable native `subagents`, `agent-teammates` or `dynamicworkflow` dispatch that can cover the task. **Model discipline is structural, not habitual: the main model (Fable) is mostly the orchestrator.** Select model + effort by capability:
  - Default worker: claude-sonnet-5, effort xhigh. Use default scoped generalist.

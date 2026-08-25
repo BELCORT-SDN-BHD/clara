@@ -168,20 +168,59 @@ Inputs: **H** = at least two eligible human checkers (`eligible_checker_count(fi
 | 4 | yes | **yes** | **yes** | **RAISE** CLR41 `close_segregation_violation` — the human who prepared may not close, and Clara's involvement does not excuse it *(today: the raise is REACHED only if the last entry happens to be the human's; F2 makes it a coin flip)* |
 | 5 | no | no | — | `att` required, else RAISE CLR41 `close_self_attestation_required` · `solo_self_attested` — byte-unchanged |
 | 6 | no | **yes** | — | `att` **still** required, same raise · **`agent_prepared`** — the sole human signs, and the label says who prepared |
-| 7 | — | — | `v_human_preparer is null` (no human ever touched the year) | if H: proceed · `agent_prepared`. If not H: `att` required · `agent_prepared`. **Never a raise on the distinct-checker arm** — there is no human preparer to be distinct from, and inventing one is law 68's ARM-0 failure |
+| 7 | — | — | `v_human_preparer is null` (no human ever touched the year) | if H: proceed. If not H: `att` required (unmoved by the ruling below — it governs both row-7 outcomes identically). Either way: A alone decides the label — **`agent_prepared`** if A, else **`no_preparation`** (RULED 2026-08-25, F-A4 PR-1b2). **Never a raise on the distinct-checker arm** — there is no human preparer to be distinct from, and inventing one is law 68's ARM-0 failure |
 | 8 | H moves 1 → 2 between two closes | any | — | nothing migrates; the next close simply measures the new count. **This is the auto-upgrade** — no dial, no backfill |
 
-**The two invariants the table encodes.** (i) `agent_prepared` is decided by **A alone** and
-outranks both other labels; (ii) the **raise** is decided by **H and S alone** and is untouched
-by A — Clara's participation never excuses a human self-check, and never creates one.
+**RULING, 2026-08-25 (owner, debt-clearing sprint; F-A4 PR-1b cross-model review).** Row 7 as
+originally built (F-A4 PR-1b, `0120`) stamped `agent_prepared` on BOTH its sub-branches
+unconditionally, never reading A at all — a year no human AND no agent ever touched (most
+commonly a dormant year that mints zero entries) received a *permanent* receipt claiming Clara
+prepared it, and invariant (i) below was false on its own terms the moment row 7 existed. The
+owner ruled: the stamp follows the real probe here too. **`no_preparation`** is the new, fourth
+`segregation_mode` value (`close_receipts.segregation_mode` CHECK widened, extend-only) — named
+in the same register as the other three (each names WHO did the segregation-relevant work; this
+one names that nobody did), chosen so a reviewer never mistakes an untouched year for an
+agent-authored one at a glance. Its review requirements are **at least as strict as
+`agent_prepared`'s** by construction, not by a second gate: row 7's existing self-attestation
+requirement (fires when H is false) sits ABOVE the A-conditioned label assignment in the body
+and governs both outcomes identically — there is no code path where `no_preparation` clears a
+bar `agent_prepared` would not also have cleared on the same input. Migration:
+`packages/db/migrations/0128_f_a4_pr_1b2_a4_truth.sql`. `finalize_close` alone was CoR'd; `reopen_fiscal_year` was
+investigated and found to share none of this — see the reopen paragraph below, corrected in the
+same pass.
 
-**The reopen twin** (design §3.9 change 4, gate GM-5). `reopen_fiscal_year` computes the same
-label from its own two-value case at `0085:344-345`. Its re-aim adds the SAME `v_agent_prepared`
-probe with the SAME priority, so rows 3/4/6/7 of the table above read identically on a reopen
-receipt. What does **not** move: the CLR05 arms at `0085:328-340` (`no_eligible_human`,
-`attestation_required`, `distinct_checker`, `self_attestation`) — they measure the **reversal
-act's** signer against the closer, a different question from who prepared the year, and TA-P6
-touched neither. Cell **A-10**.
+**D-2 (checked, not assumed): preparation-authorship ≠ approval.** An all-agent-drafted,
+human-approved-**without-revision** year is NOT the `no_preparation` case, and this ruling does
+not touch it. The human's only touch is an APPROVAL, which never sets `last_human_editor` —
+`v_human_preparer` still resolves to nobody (row 7 fires) but `v_agent_prepared` reads TRUE (an
+approved, agent-made, still-unedited row exists), so the year stamps `agent_prepared` with no
+distinct-checker raise, in BOTH the pre-ruling and post-ruling body — proven behaviorally by
+cell A of `packages/db/tests/f-a4-pr1b2-a4-truth.test.mjs`. Row 7 becomes this shape's common case once
+F-A2's wake-drafting lane is in ordinary use, not a regression this ruling introduces or a gap
+it leaves open — approval-without-revision earning no raise was always the design's intent
+(rows 5/6 already work this way for a SOLE human's self-approval; row 7 mirrors it for the
+agent).
+
+**The two invariants the table encodes.** (i) `agent_prepared` is decided by **A alone** and
+outranks both other labels — literally true across every proceeding row now, row 7 included
+(pre-ruling it held everywhere EXCEPT row 7, which is exactly the defect the 2026-08-25 ruling
+corrects); (ii) the **raise** is decided by **H and S alone** and is untouched by A — Clara's
+participation never excuses a human self-check, and never creates one.
+
+**The reopen twin, CHECKED not assumed (F-A4 PR-1b2 investigation).** `reopen_fiscal_year`
+computes its label from its own two-value case at `0120:776-777` (`case when v_agent_prepared
+then 'agent_prepared' when v_self then 'solo_self_attested' else 'two_person' end`) — TA-P6's
+re-aim added the SAME `v_agent_prepared` probe with the SAME priority, so rows 3/4/6 of the
+table above read identically on a reopen receipt. **Row 7 does NOT carry over**: reopen has no
+branch keyed to "no preparer exists at all" — its four CLR05 arms (`0120:750-762`:
+`no_eligible_human`, `attestation_required`, `distinct_checker`, `self_attestation`) already
+require `v_checked` or `v_attest` to be non-null before `v_mode` is ever computed, so the
+"nobody at all" state row 7 exists to label can never arise on a reopen. `reopen_fiscal_year`
+therefore needed no CoR for this ruling — F-A4 PR-1b2 pins its prosrc sha at both prestate and
+tail to prove "checked, not touched" rather than merely claim it. What does **not** move on the
+CLR05 arms themselves: they measure the **reversal act's** signer against the closer, a
+different question from who prepared the year, and neither TA-P6 nor this ruling touched them.
+Cell **A-10**.
 
 ### A.5 · The NEW undated-document gate (design §3.10)
 
