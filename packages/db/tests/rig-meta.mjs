@@ -1038,7 +1038,7 @@ export const ALLOWED = {
     // the F-A7 beta precedent above already established -- ALL THIRTEEN bank wake_* wrappers,
     // never a subset, because OQ-6's own ruling admits chat to the full bank verb surface (four
     // of which post to the books), not a read-only slice. The grant is
-    // UNNUMBERED_chatturn_v14_bank_interactive_grants.sql, extend-only, reviewed as its own
+    // 0130_chatturn_v14_bank_interactive_grants.sql, extend-only, reviewed as its own
     // deliberate act -- see that file's header for the reachability argument and the grant/role
     // choice this cell's own expected=true flip records.
     "wake_get_bank_pack", "wake_add_bank_account", "wake_upsert_account", "wake_match_bank_line",

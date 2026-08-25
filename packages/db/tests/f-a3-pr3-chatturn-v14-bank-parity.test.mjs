@@ -6,7 +6,7 @@
 //
 //   v14.reach   -- a client-pinned `interactive_client` credential, minted OBO a real human, can
 //                  now EXECUTE a bank wake_* wrapper end to end (the Postgres grant this PR's
-//                  sibling migration adds, UNNUMBERED_chatturn_v14_bank_interactive_grants.sql).
+//                  sibling migration adds, 0130_chatturn_v14_bank_interactive_grants.sql).
 //   v14.provenance (todo, BLOCKED on lane-fa3-pr1a) -- the resulting bank_agent_receipts row
 //                  SHOULD name the real human and the real credential kind. It does not yet:
 //                  every `_agent_<verb>_core` (0121) hardcodes is_agent=true/on_behalf_of=null/

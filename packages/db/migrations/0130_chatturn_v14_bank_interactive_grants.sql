@@ -5,7 +5,7 @@
 -- write pool SET ROLEs to on every checkout (packages/runtime/lib/pools.mjs,
 -- `withWriteWakeScoped`), for BOTH the `interactive` and `interactive_client` wake kinds alike --
 -- held EXECUTE on 0 of the 13 bank `wake_*` wrapper functions. That grant, not anything in F-A3
--- PR-3's own migration (UNNUMBERED_f_a3_pr3_retirement_parity_doors.sql, SS4), is what keeps
+-- PR-3's own migration (0129_f_a3_pr3_retirement_parity_doors.sql, SS4), is what keeps
 -- chat/bank parity inert: SS4 widens `wake_fn_allowlist` (an APPLICATION-level table
 -- `assert_wake_allowed` reads) to admit `interactive_client` for the bank roster, but the
 -- Postgres ACL is an entirely separate mechanism keyed on the CONNECTING ROLE, and SS4 never

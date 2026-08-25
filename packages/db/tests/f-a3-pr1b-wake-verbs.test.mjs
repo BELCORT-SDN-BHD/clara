@@ -213,7 +213,7 @@ test("f31w.f the ACL cell, UPDATED for OQ-6 (chatTurn_v14, owner ruling 2026-08-
   // clara_wake_interactive held ZERO EXECUTE on any bank wrapper, material M4's own isolation).
   // The owner's 2026-08-25 ruling (a human in chat may drive the bank lane's 13 verbs) made that
   // isolation a wall nothing asked for; chatTurn_v14's own migration
-  // (UNNUMBERED_chatturn_v14_bank_interactive_grants.sql) grants clara_wake_interactive EXECUTE
+  // (0130_chatturn_v14_bank_interactive_grants.sql) grants clara_wake_interactive EXECUTE
   // on exactly the 13 named bank wake_* wrappers -- an extend-only widening, reviewed and
   // deliberate, never a blanket grant. What this cell proves now instead: the ACL grant ALONE is
   // not capability. A bare SET ROLE with no `clara.wake_secret` GUC bound reaches past the ACL

@@ -50,7 +50,7 @@ export const workflows = {
   // F-A3 PR-3 (OQ-6, BANK CHAT PARITY, owner ruling 2026-08-25): REPOINTED v13 -> v14. See the
   // note near the bottom of this file for what v14 is and the ORDER its deploy must take against
   // this PR's migrations (the SS4 allowlist widening AND the sibling grant migration this
-  // runtime half ships, `UNNUMBERED_chatturn_v14_bank_interactive_grants.sql`).
+  // runtime half ships, `0130_chatturn_v14_bank_interactive_grants.sql`).
   chatTurn: chatTurn_v14,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
