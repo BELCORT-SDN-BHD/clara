@@ -52,12 +52,20 @@ import { answerAcrossDeadline } from "./rig-runtime-race.mjs";
 import { truncateGuardError } from "./rig-txn.mjs";
 
 let ready = false;
+let hasG1 = false;
 let W = null; // { owner, firm, client, coa }
 
 before(async () => {
   await ensureReady();
   ready = await runtimeReady();
   if (ready) W = await seedFreshFirm(`s4lc_${Date.now().toString(36)}_${randomUUID().slice(0, 4)}`, "lc");
+  // Gate G1 (the universal wake-execution engine) widens the wake arm's matrix —
+  // held->cancelled ONLY (the original Slice-4 contract, asserted below when absent) becomes
+  // held->{running,cancelled}, running->{completed,failed,cancel_requested},
+  // cancel_requested->{completed,failed,cancelled} once G1's migration lands. Feature-detected
+  // (never a migration filename/number) so this file stays true on BOTH sides of that merge.
+  const g1 = await rootQuery("select to_regclass('clara.wake_engine_sources') as t");
+  hasG1 = g1.rows[0].t != null;
 });
 after(async () => {
   printLaneNotes("lifecycle");
@@ -359,7 +367,9 @@ test("§3.5 chat messages: parts immutable once written; turn_key NOT NULL for u
 //   chat_turn: queued→running|cancel_requested|cancelled; running→awaiting_input
 //   |cancel_requested|completed|failed; awaiting_input→running|cancel_requested
 //   |expired|cancelled; cancel_requested→completed|failed|cancelled.
-//   wake: held→cancelled ONLY.
+//   wake: held→cancelled ONLY pre-Gate-G1; held->{running,cancelled},
+//   running->{completed,failed,cancel_requested}, cancel_requested->{completed,failed,
+//   cancelled} once G1's migration applies (feature-detected below, never a filename/number).
 // ===========================================================================
 
 test("S4-AB11 transition matrix: the legal chat/wake graphs drive through; the representative illegal set raises CLR13", async (t) => {
@@ -401,12 +411,31 @@ test("S4-AB11 transition matrix: the legal chat/wake graphs drive through; the r
   await legal(t4, "awaiting_input");
   await legal(t4, "expired");
 
-  // wake: held→cancelled ONLY.
-  const { intentId } = await makeConsumableIntent({ sub: W.owner, client: W.client });
-  await consumeIntent(intentId);
-  const wt = await insertWakeTask({ intent: intentId, firm: W.firm });
-  await illegal(wt, "running", "wake held→running (wake tasks never compute in Slice 4)");
-  await legal(wt, "cancelled");
+  // wake: held→cancelled ONLY pre-G1; held->{running,cancelled}, running->{completed,failed,
+  // cancel_requested}, cancel_requested->{completed,failed,cancelled} once G1 applies (see the
+  // hasG1 feature-detect in `before`).
+  if (hasG1) {
+    const { intentId: wIntent } = await makeConsumableIntent({ sub: W.owner, client: W.client });
+    await consumeIntent(wIntent);
+    const wt2 = await insertWakeTask({ intent: wIntent, firm: W.firm });
+    await illegal(wt2, "completed", "G1: wake held->completed directly (skipping running) is still illegal");
+    await legal(wt2, "running");
+    await illegal(wt2, "cancelled", "G1: wake running->cancelled directly (skipping cancel_requested) is still illegal");
+    await legal(wt2, "cancel_requested");
+    await legal(wt2, "cancelled");
+    await illegal(wt2, "running", "G1: terminal cancelled->running (terminal is terminal)");
+
+    const { intentId: wIntent2 } = await makeConsumableIntent({ sub: W.owner, client: W.client });
+    await consumeIntent(wIntent2);
+    const wt3 = await insertWakeTask({ intent: wIntent2, firm: W.firm });
+    await legal(wt3, "cancelled"); // held->cancelled (an operator cancel of a never-claimed wake) STILL legal
+  } else {
+    const { intentId } = await makeConsumableIntent({ sub: W.owner, client: W.client });
+    await consumeIntent(intentId);
+    const wt = await insertWakeTask({ intent: intentId, firm: W.firm });
+    await illegal(wt, "running", "wake held→running (wake tasks never compute pre-G1)");
+    await legal(wt, "cancelled");
+  }
 });
 
 // ===========================================================================

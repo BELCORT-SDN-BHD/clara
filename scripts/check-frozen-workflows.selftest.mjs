@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   checkRegistryMonotonicity,
+  checkRegistryViewIntegrity,
   checkEnqueueSites,
   parseRegistrySource,
 } from "./freeze-lint-checks.mjs";
@@ -108,6 +109,159 @@ testCase("REAL repo registry parses structurally (canary)", () => {
   }
 });
 
+// --- (f) registry-view integrity (Gate G1 MUST D) ----------------------------
+console.log("registry-view integrity:");
+
+testCase("correctly-shaped workflowsByName + safe workflowNames derivation -> OK", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-good.ts.txt")));
+});
+
+testCase("workflowsByName absent (pre-G1 registry shape) -> OK (not a skip; genuinely N/A)", () => {
+  expectClean(checkRegistryViewIntegrity(v1));
+});
+
+testCase("workflowsByName as an unfrozen spread copy -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-mutated.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("a second unverified view export mentioning workflows -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-altview.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("M8(b) an ALIASED RE-EXPORT (`export { x as workflowsByName }`, a shape the export-const scanner never sees) -> REJECT, never a silent pass (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-aliased-reexport.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("REAL repo registry's workflowsByName + workflowNames -> OK (canary)", () => {
+  const real = readFileSync(join(HERE, "..", "packages", "runtime", "workflows", "registry.ts"), "utf8");
+  expectClean(checkRegistryViewIntegrity(real, "registry@working-tree"));
+});
+
+// #11 (round-4 review, REOPENED) — the closed-world exports census.
+testCase("#11 aliased bare re-export of a LOCAL (non-imported) declaration -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-alternate-export-bypass.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("#11 bare re-export of a NON-RELATIVE (package) import -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-nonrelative-reexport.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("#11 a function declared and exported directly in registry.ts -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-function-export.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("#11 a second const export that never references `workflows` at all -> REJECT (REGISTRY-VIEW-INTEGRITY, the now-unconditional half)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-bare-const-no-ref.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("#11 control: a LEGITIMATE bare re-export of an actually-imported, relatively-sourced workflow -> OK, never a false positive", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-legit-reexport.ts.txt")));
+});
+
+// SHOULD-2 (round-5, opus reviewer's own probes) — the closed-world census previously matched
+// only an ENUMERATED set of shapes (reject-known); these five probes each proved a real shape
+// invisible to it, matching nothing and reporting zero violations.
+testCase("SHOULD-2 `export * from \"...\"` (unbounded wildcard re-export) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-star-reexport.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export * as ns from \"...\"` (namespace wildcard re-export) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-star-as-reexport.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export {x} from \"./rel\"` (direct re-export, relative source, x never locally bound) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-brace-from-relative.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export {x} from \"pkg\"` (direct re-export, package source) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-brace-from-package.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export let alternateView = {...}` (the const-only name regex's own blind spot) -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-export-let.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+// round-6 (Codex #11) — "stop regex-parsing TypeScript; parse it": three probes that beat
+// round-5's own regex census, now on the real TypeScript compiler API. Plus one novel probe.
+testCase("round-6 probe 1: `workflowsByName` declared with an escaped identifier (\\u0077orkflowsByName) -> REJECT, the escape trick does not hide it from a real parser (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-escaped-identifier.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("round-6 probe 2: `export const workflows = {...} as const, workflowsByName = {...}` (multi-declarator; the second declarator is invisible to a first-match regex) -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-multi-declarator.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("round-6 probe 3: bare re-export of a RELATIVE import that resolves OUTSIDE packages/runtime/workflows/ (`../../evil.js`) -> REJECT, relativity alone is not target verification (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-reexport-escapes-directory.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-6 novel probe (self-devised): TYPE-ONLY exports (`export type {...} from \"../outside.js\"` and `export { type X, real }`) carry zero runtime surface -> OK, never a false REGISTRY-EXPORTS-CLOSED-WORLD reject", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-type-only-reexport.ts.txt")));
+});
+
+// round-7 (native adversarial leg, MUST #11) — the ACCEPTANCE half of the closed-world census
+// (resolving a bare re-export's local name back to its real import) still ran on the regex-based
+// parseImportBindings, over a blank that PRESERVES string literals — a decoy string shaped like
+// an import statement could be trusted as a real one. D1-D4: the four decoy shapes reproduced
+// live against the exported checker (D2) plus three more of the same class.
+testCase("round-7 D1 (control): a decoy import-shaped string BEFORE the real import for the same name -> OK, safe by construction not by ordering luck", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-before.ts.txt")));
+});
+
+testCase("round-7 D2 (live-reproduced finding): a decoy import-shaped STRING for a locally-declared function, positioned AFTER it -> REJECT, the decoy must never be trusted as a real binding (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-after.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-7 D3: the same decoy inside a REGEX LITERAL (blankSource's own documented blind spot for regex literals) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-regex.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-7 D4: the same decoy inside an Error() diagnostic message string -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-error-message.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+// round-8 (native adversarial leg, MUST B) — round-7 pinned the EXPORT side's identity
+// (`item.aliased`) but never checked what the SOURCE MODULE calls the thing being re-exported —
+// an import-side alias, a namespace import, or a default import all sail through a perfectly
+// plain `export { x };`. P-A..P-F, the six proof shapes the leg named.
+testCase("round-8 P-A: import-side alias of a foreign binding (`import { real as alias }` then `export { alias }`) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-a.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-D: import-side alias of a REAL frozen export renamed to impersonate another version (chatTurn_v13 as chatTurn_v14) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-d.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-B: namespace import (`import * as X`) then `export { X }` -> REJECT, the direct asymmetry with round-6's unconditional `export * as ns` rejection (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-b.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-C: default import bare-re-exported as a named export -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-c.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-F: combined default+named import in one statement, the DEFAULT half smuggled out -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-f.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-E (lowest severity, typecheck backstops): two imports claim the same local name, the SAFE unaliased one last -> OK, last-write-wins lands on the safe binding (never a false reject on a shape tsc itself would refuse to compile)", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-e.ts.txt")));
+});
+
+// round-9 (native adversarial leg, MUST) — round-8's own P-series pin (`b.imported ===
+// item.exported`) was itself bypassable: an ES2022 STRING-LITERAL import alias
+// (`import { "evil" as x }`) makes `propertyName` a StringLiteral, not an Identifier — the old
+// `ts.isIdentifier(propertyName)` ternary guard failed on exactly this shape and silently fell
+// back to the local name, never detecting an alias at all. N2/N5, the two proof shapes the leg
+// reproduced live.
+testCase("round-9 N2: an ES2022 STRING-LITERAL import alias (`import { \"evil\" as chatTurn_v1 }`) -> REJECT, propertyName being a StringLiteral must not defeat the round-8 pin (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-n2.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-9 N5: P-D's own defeat (chatTurn_v13 impersonating chatTurn_v1) re-reached via a STRING-LITERAL import alias (`import { \"chatTurn_v13\" as chatTurn_v1 }`) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-n5.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 
@@ -117,6 +271,10 @@ const entry = (name) => [{ rel: `packages/runtime/src/${name.replace(/\.txt$/, "
 
 testCase("enqueue via registry export -> OK", () => {
   expectClean(checkEnqueueSites(entry("enqueue-via-registry.ts.txt")));
+});
+
+testCase("#11 (round-4 review, REOPENED) enqueue via a NON-CANONICAL name imported FROM registry.ts -> REJECT (ENQUEUE-BYPASS)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-noncanonical-name-from-registry.ts.txt")), ["ENQUEUE-BYPASS"]);
 });
 
 testCase("direct workflow-module import -> REJECT (ENQUEUE-BYPASS)", () => {

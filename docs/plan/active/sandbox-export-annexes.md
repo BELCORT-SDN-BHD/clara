@@ -33,7 +33,7 @@ inherited). The agent reaches them through the typed readers in A.2 and nowhere 
 |---|---|---|---|
 | 1 | `clara.wake_mint_sandbox_view(jsonb, jsonb, text, jsonb, text)` | wake wrapper → ungranted core | the wake role |
 | 2 | `clara.wake_request_sandbox_export(uuid, uuid, text, text, jsonb, text)` | wake wrapper → ungranted core | the wake role |
-| 3 | `clara.wake_sandbox_export_state(uuid)` | `stable` definer reader, own receipt | the wake role |
+| 3 | `clara.wake_sandbox_export_state(uuid)` | definer reader (VOLATILE — a receipted reader cannot be `stable`, A6), own receipt | the wake role |
 | 4 | `clara.sandbox_export_payload(uuid, text)` | `stable` definer, **lease-scoped** (`0081:162-168`) | `clara_runtime` |
 | 5 | `clara.complete_sandbox_export(uuid, text, text, bigint, text)` | definer, **hash IN**, set-once | `clara_runtime` |
 | 6 | `clara.fail_sandbox_export(uuid, text, jsonb)` | definer, attempts/backoff | `clara_runtime` |
@@ -49,12 +49,19 @@ body** (gate B6): `clara_fn_owner`'s own policy is `using (true)`, so every rela
 is scoped by an **explicit predicate in the body** against `p_firm`, which the wrapper resolves from
 `clara.wake_context()` and never reads off a basis row (design §3.2; the `0083:102-108` precedent).
 
-**Allowlist rows: exactly two per read/write wake verb per admitted kind** —
-`('interactive','wake_mint_sandbox_view')`, `('interactive','wake_request_sandbox_export')`,
-`('interactive','wake_sandbox_export_state')`, and the `interactive_client` triple once F-A2's D34
-limb merges. **Six rows when complete; never a `'proactive'` or unattended row.** The closed-world
-cell asserts the count **in both directions** (F5-D30: a roster that can only find extras cannot
-find omissions).
+**Allowlist rows: `('interactive', <name>)` for each of the three wrappers — three rows, not six**
+(A11/PR-1 truing, 2026-08-25). This text originally read "and the `interactive_client` triple once
+F-A2's D34 limb merges" — WRONG, discovered by rig replay at PR-1 authoring: the live estate carries
+its own deliberate, independently-tested closed-world invariant (GB-3/D34,
+`f-a2-chat-limb.test.mjs` + `f-a2-grants.test.mjs`) capping `interactive_client` at EXACTLY ONE verb
+(`wake_open_question`), specifically so that kind can never quietly become a posting kind. Widening
+it for this lane would be an owner-ruling-class change to the D34 wall ITSELF, not a seeding
+decision this design may make. **This posture is PERMANENT unless the D34 wall is re-ruled** — never
+a placeholder pending a merge that already happened. Annex K's own dependency row already priced
+this exact fallback (`('interactive', …)` rows only; HOME-scoped sandbox works); PR-1 shipped it.
+Never a `'proactive'` or unattended row. The closed-world cell asserts the count **in both
+directions** (F5-D30: a roster that can only find extras cannot find omissions) and additionally
+proves `interactive_client`'s own one-row invariant is UNTOUCHED.
 
 ### A.3 · The token vocabulary — every refusal is typed, none is a bare string
 
@@ -120,7 +127,7 @@ A wall's proof is a cell that makes the wall REFUSE — never a substring match 
 
 | cell | forces |
 |---|---|
-| B3.1 | **the extracted text of the produced PDF contains the signed STAMP on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export. *(The footer line, if the owner signs one, emits ONCE in flow — `layout.mjs:152`'s box sits before the sections loop — so it is asserted per DOCUMENT, never per page: design §3.6.)* |
+| B3.1 | **the extracted text of the produced PDF contains the ratified STAMP on EVERY page** (P-1). A per-document assertion would pass a one-page stamp on a ten-page export. *(The footer line, if the owner ratifies one, emits ONCE in flow — `layout.mjs:152`'s box sits before the sections loop — so it is asserted per DOCUMENT, never per page: design §3.6.)* |
 | B3.2 | with the policy row absent, the **request** refuses (`watermark_policy_absent`) and **no bytes exist** — never unwatermarked bytes |
 | B3.3 | the pinned `watermark_policy_version_id` is what the bytes carry: supersede the row, re-render the same export, bytes unchanged |
 | B3.4 | a hostile label cannot remove the background — the law-28 payloads run and B3.1 still passes (P-2) |
@@ -416,7 +423,7 @@ F-A5 PR-4** so two renderer ceremonies do not contend (C-16, R-6).
 `/reports` gains a **sandbox exports** panel: a list (view, recipient, client set, watermark version,
 state, sha256, when, by whom), the **recipient register** form (register / supersede, admin+), and
 every refusal rendered as text a bookkeeper can act on — `recipient_coverage_incomplete` names the
-uncovered clients, `watermark_policy_absent` says *"the owner has not signed the sandbox watermark"*
+uncovered clients, `watermark_policy_absent` says *"the owner has not ratified the sandbox watermark"*
 rather than a token, and the fold's new refusals get the same treatment:
 `sandbox_view_basis_unknown` says *"a cited read does not belong to this firm"*,
 `sandbox_view_block_basis_absent` says *"part of this view cannot be traced to a read"*, and
@@ -433,6 +440,6 @@ place; it does not replace the verb (`frontend-handoff-2026-08-23.md` §0's rule
 | **F-A5 PR-4** — the sealed lane's renderer ceremony | two renderer ceremonies must not contend; F-A5's drill closes DR-render's unrun boundary first | PR-3 waits |
 | **F-A6 PR-1** — `freeform_read_log`'s hardened `scope`/`client_scope` **and its `firm_id` NOT NULL** | §3.2's derivation reads them (U2); until the NOT NULL lands, C-20's equality predicate is what refuses a NULL-firm row | the free-read basis kinds are unavailable; preview-cell bases still work |
 | **F-A6 v2** — the cross-client named read | **the only source of an EXACT client set for a multi-client narrative basis** (§3.2). Without it every such view derives `firm_closure` and only a firm-covering recipient may receive it | the capability is narrower, not wrong; stated, not hidden |
-| **F-A2 PR-1** — `interactive_client` (D34) | a client-pinned sandbox session's allowlist row | `('interactive', …)` rows only; HOME-scoped sandbox works |
+| **F-A2 PR-1** — `interactive_client` (D34) | **RESOLVED at PR-1 authoring, 2026-08-25 — merged, but PERMANENTLY NOT what this row assumed.** F-A2 PR-1 IS merged; `interactive_client` itself is real. But the live estate ALSO carries its own deliberate, independently-tested closed-world wall (GB-3/D34) capping `interactive_client` at exactly the one `wake_open_question` verb, discovered by rig replay. Widening it is an owner-ruling-class change to that wall, never a seeding decision this design makes. | `('interactive', …)` rows only shipped in PR-1; HOME-scoped sandbox works; a client-pinned session cannot mint/request an export. **Permanent, not contingent on a future merge.** |
 | **the owner's signing** (Q1) | X12 | **the lane ships dark** |
 | **owner card 1** (R-7; design §7) | it gates the `displayed_text` **figure path**, not the lane | prose-and-chart-label views without model-typed figures are still buildable; the figure path waits |

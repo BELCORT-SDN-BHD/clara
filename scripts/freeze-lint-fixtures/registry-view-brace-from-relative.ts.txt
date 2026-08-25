@@ -1,0 +1,17 @@
+// Fixture: SHOULD-2 (round-5, opus reviewer's own probe) — `export {x} from "./rel"` re-exports
+// DIRECTLY from another module without ever binding `x` locally in THIS file — the pre-fix
+// census's reexportRe required `}` immediately followed by `;`, which the trailing `from "..."`
+// clause breaks, so this shape was fully invisible to it. `x` here is NOT a name this file
+// actually imports (it is not one of the real workflow implementations), so this must reject
+// regardless of the source being relative — the closed-world census cannot verify a name it
+// never sees bound to anything.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { alternateView } from "./someOtherModule.js";

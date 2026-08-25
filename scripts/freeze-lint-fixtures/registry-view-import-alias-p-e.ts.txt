@@ -1,0 +1,19 @@
+// Fixture: round-8 (native adversarial leg, MUST B, P-E — lowest severity, typecheck backstops)
+// — TWO import statements both attempting to bind the SAME local name ("dup"): the FIRST aliases
+// an illegitimate/foreign binding to "dup"; the SECOND, appearing LAST in source order, plainly
+// (unaliased) imports "dup" from a real, in-directory workflow file. `ts.createSourceFile` is a
+// SYNTACTIC parser only — it does not reject the duplicate declaration the way `tsc`'s own
+// binder/checker would (this exact file would never compile for real; a genuine attacker cannot
+// ship it). `bindings` is a plain Map, so last-write-wins: the SAFE, legitimate second import is
+// what parseImportBindingsAst's own census actually sees for "dup", so this construction is
+// harmless even though it is syntactically representable — proving the census does not FALSELY
+// reject something real tooling already backstops. Must stay CLEAN (no violations).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { evilThing as dup } from "./some-illegitimate-source.js";
+import { dup } from "./closeExample.v1.js";
+
+export const workflows = {} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { dup };

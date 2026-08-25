@@ -1,0 +1,16 @@
+// Fixture: #11 (round-4 review, REOPENED) — a bare re-export under an ARBITRARY exported name,
+// naming a LOCAL declaration (never an import at all) as its source. freeze-lint-enqueue.mjs's
+// own provenance check used to trust ANY name imported from registry.ts by source-module alone;
+// this fixture is the export-side half of closing that: registry.ts's own closed-world census
+// must refuse to let `alternateView` exist here in the first place.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+const fake = { evilThing: (x: unknown) => Promise.resolve(x) };
+export { fake as alternateView };

@@ -1,0 +1,18 @@
+// Fixture: round-8 (native adversarial leg, MUST B, P-D) — an IMPORT-SIDE alias of a REAL,
+// legitimately-frozen export, renamed to IMPERSONATE a different one. `chatTurn_v13` is a real
+// frozen class name; aliasing it on import to `chatTurn_v14` and bare-re-exporting THAT name
+// would make registry.ts's own export surface claim a v14 body exists under that name, when the
+// bytes are actually v13's own frozen closure — the sharpest form of the honest-naming defeat
+// constraint 9 exists to prevent (an evaluator or a human reading the export surface would be
+// told the wrong version is live). Must REJECT (REGISTRY-EXPORTS-CLOSED-WORLD).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { chatTurn_v13 as chatTurn_v14 } from "./chatTurn.v13.ts";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { chatTurn_v14 };

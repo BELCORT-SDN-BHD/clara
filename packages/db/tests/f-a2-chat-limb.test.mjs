@@ -232,27 +232,39 @@ test("f-a2.c13.mint the new kind mints only with a firm-congruent active client,
   noteLane("c13.mint: the mint verifies FIRM-CONGRUENT AND ACTIVE, not that this human is authorised for that client — the estate's existing firm-scoped model, stated rather than implied");
 });
 
-test("f-a2.c13.roster GB-3's closed-world cell — interactive_client holds EXACTLY wake_open_question plus F-A3 PR-3's ruled bank-agency parity roster (OQ-6, Annex A23)", async (t) => {
+test("f-a2.c13.one-row GB-3's closed-world cell — interactive_client's allowlist is EXACTLY its registered roster", async (t) => {
   if (gateWaveA(t)) return;
   if (await gateChatParity(t)) return;
-  // F-A3 PR-3 (OQ-6, Annex A23) is a NAMED, RULED widening of this kind past the original
-  // wake_open_question-only pin — see f-a2-grants.test.mjs's sibling cell (c12.d34-roster) for
-  // the full citation. wake_book_staff_advance_application (SS2's own staff-advance sibling) is
-  // DELIBERATELY EXCLUDED from this mirror — the review round's ordering decision, migration
-  // 0129's own SS4 header: OQ-6's chat parity is scoped to the bank-matching surface, OQ-7's
-  // staff-advance sibling carries no chat-parity mention anywhere in the design. Still a closed
-  // set: asserting the EXACT row list is what makes a FUTURE, un-ruled addition turn this red.
-  const r = await rootQuery(
-    "select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind=$1 order by 1", [NEW_KIND]);
-  const fns = r.rows.map((x) => x.fn);
-  assert.deepEqual(fns, [
-    "wake_add_bank_account",
-    "wake_complete_bank_reconciliation", "wake_get_bank_pack",
-    "wake_match_bank_line", "wake_open_question", "wake_propose_bank_identifier_promotion",
-    "wake_propose_bank_line_exception", "wake_resolve_and_book_bank_line",
-    "wake_resolve_bank_line_exception", "wake_settle_from_bank_line", "wake_unmatch_bank_match",
-    "wake_upsert_account", "wake_void_bank_reconciliation", "wake_void_bank_statement",
-  ], `c13.roster: interactive_client's allowlist is not the ruled fourteen-row set (got ${fns.join(", ")})`);
+  // TRUED BY F-A6 PR-1, and the literal is GONE ON PURPOSE. The wall this cell defends is real —
+  // a row this kind acquires unnoticed is how it would quietly become a posting kind — but
+  // `deepEqual(fns, ["wake_open_question"])` made every later claimant RE-CUT the cell, and a
+  // re-cut closed world is one nobody can audit: an intentional widening and a merge that lost
+  // an entry look identical afterwards. The roster is now registered, per row, keyed by the
+  // owning migration's stem and gated on that migration's OWN presence probe.
+  //
+  // The wall is not weakened, it is doubled. Direction (a): every LIVE row must be rostered, so
+  // an unregistered row still fails here. Direction (b), which the literal could not express:
+  // every rostered row whose migration IS applied must be LIVE, so a row that goes MISSING fails
+  // too. What no longer fails is a lane landing its own registered row.
+  const { WAKE_ALLOWLIST_ROSTER, appliedEntries, rosterFailures } =
+    await import("./fixtures/wake-allowlist-roster.mjs");
+  const roster = WAKE_ALLOWLIST_ROSTER[NEW_KIND];
+  const live = (await rootQuery(
+    "select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind=$1 order by 1",
+    [NEW_KIND],
+  )).rows.map((x) => x.fn);
+  const applied = await appliedEntries(roster, rootQuery);
+  const { failures, dormant } = rosterFailures(
+    `c13.one-row (${NEW_KIND})`, live, applied.map((e) => e.fn), roster.map((e) => e.fn),
+  );
+  assert.deepEqual(failures, [], failures.join(" | "));
+  // POSTING IS STILL THE THING BEING WALLED, and this half stays a literal because it is not a
+  // roster: NO row of this kind may name a posting verb, whoever registers it.
+  const posting = live.filter((fn) => /^wake_(post_entry|draft_entry|approve|record_client_resolution)$/.test(fn));
+  assert.deepEqual(posting, [],
+    `c13.one-row: the pinned chat kind must never carry a posting verb (got ${posting.join(", ")})`);
+  noteLane(`c13.one-row: ${NEW_KIND} carries ${live.length} allowlist row(s) — ${live.join(", ") || "(none)"}`
+    + `; registered-but-not-yet-applied: ${dormant.join(", ") || "(none)"}`);
 });
 
 test("f-a2.c13.woq wake_open_question succeeds from the pinned kind, and still REFUSES an unpinned credential", async (t) => {

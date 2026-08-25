@@ -1,0 +1,15 @@
+// Fixture: #11 (round-4 review, REOPENED) — a bare, UNALIASED re-export whose local name IS an
+// import, but not one sourced from a relative path within this file's own directory (a package
+// import). registry.ts has no legitimate reason to re-export a package binding as if it were a
+// workflow implementation.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { readFile } from "node:fs/promises";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { readFile };

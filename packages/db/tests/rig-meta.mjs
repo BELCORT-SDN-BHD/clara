@@ -386,6 +386,16 @@ export const F_A5_PR2_COHORT = [...F_A5_PR2_WAKE_FNS, ...F_A5_PR2_UNGRANTED_FNS]
 // tail census over all seven named roles.
 const F_A5_PR3_HUMAN_FNS = ["archive_signed_original", "retrieve_signed_original"];
 export const F_A5_PR3_COHORT = [...F_A5_PR3_HUMAN_FNS];
+
+// F-A5b PR-1 [Wave-F Track A, the sandbox export lane's DB layer]: three grant tiers -- the wake
+// wrappers (mint/request/state), the clara_runtime worker verbs (payload/complete/fail, lease-
+// scoped), and the human doors (register/supersede recipient, admin+; list, bookkeeper+). No
+// claim_sandbox_export verb ships here (design annex A.2 enumerates none; presumed PR-3's own
+// dispatch-wiring, flagged in the migration's own header).
+const F_A5B_PR1_WAKE_FNS = ["wake_mint_sandbox_view", "wake_request_sandbox_export", "wake_sandbox_export_state"];
+const F_A5B_PR1_RUNTIME_FNS = ["sandbox_export_payload", "complete_sandbox_export", "fail_sandbox_export"];
+const F_A5B_PR1_HUMAN_FNS = ["register_export_recipient", "supersede_export_recipient", "list_sandbox_exports"];
+export const F_A5B_PR1_COHORT = [...F_A5B_PR1_WAKE_FNS, ...F_A5B_PR1_RUNTIME_FNS, ...F_A5B_PR1_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -933,11 +943,56 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
+// ---------------------------------------------------------------------------
+// F-A6 PR-1 [Wave-F Track A] — the audited freeform read. The ENUMERATED EXECUTE surface of
+// clara_freeform_ro, and the reason it is a cohort rather than a loose list: A.2 is a CLOSED
+// SEVEN, cemented by the migration's own tail, and this roster is the test-side twin. The
+// ungranted core is named among the internals so its ABSENCE from every role set is a DECLARED
+// expectation rather than a silent default — v1's GB-2 defect was exactly a core that was
+// described as ungranted in one place and granted in another.
+// CORRECTED (narrow re-review round, MF-1's own fix): the register's original 5+2 split --
+// 5 genuinely granted plus wake_firm/shares_my_firm_wake as "shared, policy-only, unprobed" --
+// went stale the moment MF-1 swapped all 35 policies off those two 0004/0011 helpers onto
+// _freeform_firm()/_freeform_shares_firm() and cleared the wake secret before either old
+// reader could fire. `wake_firm`/`shares_my_firm_wake` are no longer called by ANY F-A6 object
+// (policy or body) and are no longer granted -- keeping them in this expected set would have
+// made the roster the ONLY thing NOT re-derived when the fix landed, silently green only
+// because `policyHelperNames()` launders policy-referenced functions into allowedBroadly
+// regardless of which functions those actually are.
+const FREEFORM_F_A6_GRANTED_FNS = [
+  "wake_freeform_read", "_freeform_arm", "_freeform_settle",
+  "_freeform_scope_clients", "_freeform_admitted",
+  "_freeform_firm", "_freeform_shares_firm",
+];
+const FREEFORM_F_A6_UNGRANTED_FNS = [
+  "_freeform_core", "_tf_freeform_settle_once", "_tf_freeform_must_settle",
+];
+export const FREEFORM_F_A6_COHORT = [...FREEFORM_F_A6_GRANTED_FNS, ...FREEFORM_F_A6_UNGRANTED_FNS];
+// No shared-but-ungranted helper remains: the two functions that once filled this role
+// (wake_firm, shares_my_firm_wake) are gone from both the grant AND every F-A6 policy.
+// _freeform_firm()/_freeform_shares_firm() replaced them as GENUINELY GRANTED members of
+// FREEFORM_F_A6_GRANTED_FNS above, not as a second unprobed category -- so this set is now
+// empty on purpose, kept as a named export rather than deleted so a future re-introduction of
+// a policy-only helper has an obvious place to land instead of a fresh ad hoc array.
+const FREEFORM_F_A6_SHARED_FNS = [];
+
 // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold. A named cohort
 // (nit, opus consolidated round) rather than a bare inline string, so a future rename/retire
 // of this one function is caught by the closed-roster dead-exemption sweep like every other
 // wave's own cohort, instead of silently going stale as an unwrapped literal.
 export const BANK_AGENCY_F_A3_PR1B_COHORT = ["set_bank_agency_hold"];
+
+// Gate G1 [the universal wake-execution engine] the one human door: set_wake_source_enabled, an
+// OWNER-floor idempotent upsert on a wake_engine_sources row (body-enforced floor; the estate-wide
+// analogue of set_bank_agency_hold's own per-client bookkeeper-floor cohort above — a named cohort
+// for the identical reason, so a future rename/retire is caught by the dead-exemption sweep rather
+// than going silently stale). clara._settle_wake_task is deliberately ABSENT from every roster
+// (zero grants to any role) — the sweep's expected=false for it needs no entry.
+export const G1_WAKE_ENGINE_COHORT = ["set_wake_source_enabled"];
+// clara._settle_wake_task is clara_runtime ONLY (its one real caller — the reconciler belt and
+// the engine's own claim path, the settle_chat_turn precedent) — a separate cohort since it
+// lands in ALLOWED[ROLES.runtime], not the human-lane roster above.
+export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
 
 // F-A3/PR-3 [retirement + parity + doors] the one NEW human door: confirm_bank_identifier_promotion
 // (OQ-8's deferred confirm half — bookkeeper floor, body-enforced; agent + both wake roles gain
@@ -1015,11 +1070,18 @@ export const ALLOWED = {
     ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
     ...F_A5_PR3_HUMAN_FNS, // [Wave-F Track A, F-A5 PR-3] the signed-original archive doors —
     // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
+    ...F_A5B_PR1_HUMAN_FNS, // [Wave-F Track A, F-A5b PR-1] register/supersede_export_recipient
+    // (admin+) + list_sandbox_exports (bookkeeper+) — clara_authenticated ONLY, every floor
+    // body-enforced; agent + both wake roles gain ZERO (covered_clients IS the coverage wall)
     // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
     // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
     // something the agent lane can flip on itself).
     ...BANK_AGENCY_F_A3_PR1B_COHORT,
+    // Gate G1: set_wake_source_enabled, the registry's own owner-floor writer (body-enforced;
+    // agent + both wake roles gain ZERO — this is an estate-wide engineering switch, never
+    // something the agent lane can flip on itself).
+    ...G1_WAKE_ENGINE_COHORT,
     // F-A3/PR-3 [retirement + parity + doors] confirm_bank_identifier_promotion — see the block
     // above (OQ-8's deferred confirm half; agent + both wake roles gain ZERO).
     ...BANK_AGENCY_F_A3_PR3_COHORT,
@@ -1027,7 +1089,7 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS,
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS,
     // [Wave-F Track A, F-A7 beta, 0126] wake_file_document ONLY -- annexes-1 "clara_wake_filing +
     // clara_wake_interactive; one allowlist row per kind" (chat parity). The other four filing
     // wrappers (wake_open_firm_question, wake_propose_identifier_promotion, wake_reattribute_document,
@@ -1046,6 +1108,26 @@ export const ALLOWED = {
     "wake_void_bank_reconciliation", "wake_resolve_bank_line_exception", "wake_propose_bank_line_exception",
     "wake_void_bank_statement", "wake_propose_bank_identifier_promotion", "wake_resolve_and_book_bank_line"]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
+  // F-A6 PR-1 — BOTH new roles are KEYS, and that is the whole point of adding them (E.2/C11,
+  // GM-6): `grantMatrixFailures` iterates Object.keys(ALLOWED), so a role that is not a key is
+  // never probed by the exact-EXECUTE census AT ALL.
+  //
+  // CORRECTED (narrow re-review round): this used to be five genuinely-granted functions plus
+  // wake_firm/shares_my_firm_wake read as unprobed RLS policy helpers, "so this roster reads as
+  // the SEVEN of Annex A.2 rather than as five names and a footnote". MF-1's own fix retired
+  // both helpers from every F-A6 policy and from the grant; the roster now reads as the SEVEN
+  // it always meant to assert, but all seven are genuinely granted and genuinely probed --
+  // `FREEFORM_F_A6_SHARED_FNS` is an empty set, kept only as the landing spot for a future
+  // policy-only helper (see its own definition above).
+  "clara_freeform_ro": new Set([...FREEFORM_F_A6_GRANTED_FNS, ...FREEFORM_F_A6_SHARED_FNS]),
+  // THE LOGIN SHELL'S SET IS EMPTY, AND THAT IS THE ASSERTION — measured, not assumed. The first
+  // cut of this entry mirrored the group's, on the reasoning that has_function_privilege answers
+  // through membership; it went RED on all five verbs. `grant … with inherit false` means the
+  // BARE login holds nothing at all until it explicitly SET ROLEs, and has_function_privilege
+  // reports exactly that. So this key now buys the strongest statement available: across EVERY
+  // function in schema clara, the fourth login's ambient EXECUTE surface is ZERO — the S4-AB1
+  // property, asserted over the whole catalog instead of over one probe.
+  "clara_freeform_login": new Set([]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
@@ -1065,6 +1147,10 @@ export const ALLOWED = {
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
     "readmit_autodraft_after_withdrawal",
+    // Gate G1: _settle_wake_task — clara_runtime ONLY (the reconciler belt + the engine's own
+    // claim path, the settle_chat_turn precedent above). Declared here so any wider grant FAILS
+    // the matrix.
+    ...G1_WAKE_ENGINE_RUNTIME_COHORT,
     ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
@@ -1090,6 +1176,9 @@ export const ALLOWED = {
     ...F_A7_GAMMA_RUNTIME_FNS, // [Wave-F Track A, F-A7 gamma] prepare_firm_egress_dispatch,
     // mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch (see the block above)
     ...F_A9_PR1A_RUNTIME_FNS, // [Wave-F Track A, F-A9 PR-1A] the second door — see the block above
+    ...F_A5B_PR1_RUNTIME_FNS, // [Wave-F Track A, F-A5b PR-1] the sandbox export worker verbs —
+    // payload (stable, lease-scoped read), complete (hash IN, set-once) and fail — the 0081:162-
+    // 168 lease shape; clara_runtime holds no table privilege on the two new relations either
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1199,8 +1288,20 @@ export async function grantMatrixFailures() {
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara'`,
   );
-  const roles = Object.keys(ALLOWED);
+  // A role key whose role does not exist on THIS frontier is skipped, not probed:
+  // has_function_privilege RAISES on an unknown role, which would turn "F-A6 has not applied
+  // here" into a torrent of unrelated failures. The skip is NAMED below rather than silent —
+  // a key that never resolves anywhere is a dead roster entry and must be visible as one.
+  const allKeys = Object.keys(ALLOWED);
+  const live = await rootQuery(
+    "select r as rolname, to_regrole(r) is not null as ok from unnest($1::text[]) r", [allKeys],
+  );
+  const roles = live.rows.filter((r) => r.ok).map((r) => r.rolname);
+  const absent = live.rows.filter((r) => !r.ok).map((r) => r.rolname);
   const failures = [];
+  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform"))) {
+    failures.push(`ALLOWED names role(s) that do not exist on this database: ${absent.join(", ")}`);
+  }
   for (const f of fns.rows) {
     if (f.public_exec) failures.push(`PUBLIC has EXECUTE on clara.${f.proname}`);
     if (allowedBroadly.has(f.proname)) continue;
@@ -1235,13 +1336,22 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
+  // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
+  // cohort is a half-applied migration and is reported as one.
+  const freeformLive = FREEFORM_F_A6_COHORT.filter((n) => liveNames.has(n));
+  if (freeformLive.length !== 0) {
+    failures.push(...cohortFailures("F-A6 PR-1 audited freeform read", FREEFORM_F_A6_COHORT, liveNames));
+  }
   failures.push(...cohortFailures("wave F F-A7 gamma egress train", F_A7_GAMMA_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A7 pi (receipts layer train position 1)", F_A7_PI_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A9 PR-1A LLM usage ledger reshape", F_A9_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-3 signed-original archive doors", F_A5_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
+  failures.push(...cohortFailures("Gate G1 wake-execution engine", G1_WAKE_ENGINE_COHORT, liveNames));
+  failures.push(...cohortFailures("Gate G1 wake-execution engine (runtime lane)", G1_WAKE_ENGINE_RUNTIME_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-3 retirement + parity + doors", BANK_AGENCY_F_A3_PR3_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
   return failures;
 }
 
