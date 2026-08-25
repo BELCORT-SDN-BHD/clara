@@ -892,6 +892,26 @@
       "sha256": "010260db802b72be5ee6387f869fbb02270055b4c1e38c8a439957b4d1ec8d7e",
       "note": "F-A2 openers ①② — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v1's, unchanged; everything that moved is inside the closure. UNDEPLOYED: the deploy-lock is the ceremony's act.",
       "deployed": true
+    },
+    "packages/runtime/workflows/witnessFacts.v3.behavior.mjs": {
+      "sha256": "2f48aa4590246c0699076d75857814d7121379048600c40949c2f377ef6ea707",
+      "note": ""
+    },
+    "packages/runtime/workflows/witnessFacts.v3.envelope.mjs": {
+      "sha256": "98451d06f4b6171acea806f6320a397e3fdd3ce28f307a039c9aa768e05c76a7",
+      "note": ""
+    },
+    "packages/runtime/workflows/witnessFacts.v3.impl.ts": {
+      "sha256": "95272f8271909d435b9e7931e7921b95761ee17612c10a5357d70bd804991ef6",
+      "note": ""
+    },
+    "packages/runtime/workflows/witnessFacts.v3.prompts.mjs": {
+      "sha256": "96f4999fbfaf55eabb5ea83bae8f61f0701607f96c01c2546ca631594f06f9cb",
+      "note": ""
+    },
+    "packages/runtime/workflows/witnessFacts.v3.ts": {
+      "sha256": "75dc1b90912657ec5f37a8acefebcffa92e85f847645091dc75d909915ba8602",
+      "note": ""
     }
   }
 }
