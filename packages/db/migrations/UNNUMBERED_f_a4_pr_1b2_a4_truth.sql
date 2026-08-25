@@ -109,14 +109,21 @@ alter table clara.close_receipts add constraint close_receipts_segregation_mode_
   check (segregation_mode = any (array['two_person', 'solo_self_attested', 'agent_prepared', 'no_preparation']));
 
 -- =================================================================================================
--- §2 · clara.finalize_close CoR -- row 7's ONE line. What this estate actually pins is
--- prosrc, not the full CREATE statement: the RETURNS/LANGUAGE/SECURITY DEFINER header below is
--- typed in this file's own house casing, so it and the trailing `;` will never literally match
+-- §2 · clara.finalize_close CoR. What this estate actually pins is prosrc, not the full
+-- CREATE statement: the RETURNS/LANGUAGE/SECURITY DEFINER header below is typed in this
+-- file's own house casing, so it and the trailing `;` will never literally match
 -- pg_get_functiondef's canonical uppercase, no-trailing-semicolon rendering -- that is
--- pg_get_functiondef's own artifact on every such CoR in this estate, not a drift here. The
--- PROSRC BODY -- declare through end, the part the prestate sha actually measures -- is the
--- live pull verbatim, diffed line-for-line against the catalog read this file's prestate sha
--- was taken from: one statement changed (the row-7 assignment below), nothing else moved.
+-- pg_get_functiondef's own artifact on every such CoR in this estate, not a drift here.
+-- Inside the PROSRC BODY (declare through end -- the part the prestate sha actually
+-- measures, and a PL/pgSQL comment is stored prosrc same as any statement, so it counts):
+-- exactly ONE CODE line changed (the row-7 assignment) and ONE comment block was INSERTED
+-- (the twelve-line owner-ruling note immediately above it, explaining the change). Nothing
+-- else moved -- diffed line-for-line against 0120_f_a4_pr_1b_close_lifecycle.sql on disk
+-- (not a re-derivation from memory) to confirm, including an earlier round's own accidental
+-- one-line reflow in the D-23/GM-7 comment (caught on cross-model review, reverted here to
+-- its exact original wrap). The tail pins the resulting NEW body's own full sha, so the
+-- next CoR on this function has an exact byte base to diff against, the same courtesy this
+-- file's own prestate sha received from 0120.
 -- =================================================================================================
 create or replace function clara.finalize_close(p_fy uuid, p_self_attestation text, p_op_key text)
  returns jsonb
@@ -391,8 +398,8 @@ begin
         -- early-warning ladder, never a false alarm (measured direction, T7). A single-body fix
         -- (this one alone, without the reopen mirror below) would leave the mirror's own
         -- income-leg CREDIT unmarked on every reopened-then-reclosed year -- the mirror swaps
-        -- debit/credit, so an unmarked mirror INVERTS the defect into compounding INFLATION
-        -- of the rolling figure -- which is why both bodies are marked in this one migration
+        -- debit/credit, so an unmarked mirror INVERTS the defect into compounding INFLATION of
+        -- the rolling figure -- which is why both bodies are marked in this one migration
         -- (D-23, GM-7).
         true);
     v_line := 0;
@@ -513,12 +520,17 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- T.2 · finalize_close's row-7 branch now conditions on v_agent_prepared, positionally (not two
-  -- independent substring hits -- a mutant that kept the literal 'no_preparation' ELSEWHERE in the
-  -- body but left row 7 hard-coded would still pass two unlinked position() checks). Anchor on the
-  -- exact conditional statement this file installs.
+  -- T.2 · finalize_close's row-7 branch now conditions on v_agent_prepared. BOTH anchors are
+  -- position() on the statement's OWN exact text at its REAL four-space indent -- never a free
+  -- regex, and never a bare substring search -- so a mutant that "comments out" either line by
+  -- prefixing `-- ` cannot fool either check: the commented text no longer starts with four
+  -- spaces immediately followed by code (it starts with four spaces then `--`), so it no
+  -- longer contains the pinned substring at all. Codex's concrete mutant (old line kept +
+  -- the new line re-added only as a trailing comment) is exactly this shape, and both anchors
+  -- below were re-verified against it live on the rig, alongside the original full-revert
+  -- mutant -- both refuse.
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara.finalize_close(uuid,text,text)'::regprocedure;
-  if v_src !~ 'v_mode := case when v_agent_prepared then ''agent_prepared'' else ''no_preparation'' end;' then
+  if position('    v_mode := case when v_agent_prepared then ''agent_prepared'' else ''no_preparation'' end;' in v_src) = 0 then
     raise exception 'f_a4_pr_1b2_a4_truth tail: finalize_close row 7 does not condition segregation_mode on v_agent_prepared' using errcode = 'CLR10';
   end if;
   -- and the OLD unconditional stamp is genuinely GONE, not merely shadowed by the new line
@@ -532,6 +544,14 @@ begin
   if position('    v_mode := ''agent_prepared'';' in v_src) > 0 then
     raise exception 'f_a4_pr_1b2_a4_truth tail: finalize_close still carries the unconditional row-7 stamp' using errcode = 'CLR10';
   end if;
+  -- and the resulting NEW body's own full sha, pinned here -- so the NEXT CoR on this function
+  -- gets the same exact byte base this file's own prestate sha was handed by 0120, rather than
+  -- having to re-derive it from a live pull.
+  select encode(sha256(convert_to(v_src, 'UTF8')), 'hex') into v_sha;
+  if v_sha is distinct from '59ebaa4fe7ff49c90ff6f3d5c9a73d7c6b853b042368f0c20b8c2ce2c8173bf4' then
+    raise exception 'f_a4_pr_1b2_a4_truth tail: finalize_close''s post-fix prosrc sha does not match the pin this tail expects to hand the next CoR (got %)', v_sha
+      using errcode = 'CLR10';
+  end if;
 
   -- T.3 · reopen_fiscal_year re-pinned to the SAME sha as the prestate -- "checked, not touched"
   -- proven, not merely claimed. The real behavioral three-mode proof (agent-prepared year ->
@@ -544,6 +564,6 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'f_a4_pr_1b2_a4_truth tail: OK -- segregation_mode CHECK widened to four values (prior three byte-carried), finalize_close row 7 now conditions its label on v_agent_prepared (the old unconditional stamp confirmed absent), reopen_fiscal_year re-pinned byte-unmoved at the same prosrc sha as prestate. Behavioral three-mode proof: tests/f-a4-pr1b2-a4-truth.test.mjs, same commit.';
+  raise notice 'f_a4_pr_1b2_a4_truth tail: OK -- segregation_mode CHECK widened to four values (prior three byte-carried), finalize_close row 7 now conditions its label on v_agent_prepared (the old unconditional stamp confirmed absent, both comment-robust anchors verified against Codex''s comment mutant), the new body''s full prosrc sha pinned for the next CoR, reopen_fiscal_year re-pinned byte-unmoved at the same prosrc sha as prestate. Behavioral three-mode proof: tests/f-a4-pr1b2-a4-truth.test.mjs, same commit.';
 end
 $tail$;
