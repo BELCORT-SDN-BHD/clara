@@ -40,22 +40,24 @@
 >
 > **Grounding — restated precisely (M1).** Read from `main` at this worktree's checkout,
 > **except for everything F-A5b PR-1 itself touches, minted, or supersedes** — every such fact
-> is read from `origin/f-a5b/pr-1` at tip `ee76f70` (F-A5b PR-1, not yet merged), never from
-> `main`, because `main` does not yet carry PR-1's own additions and a `main`-only read would
-> silently under-report what already exists on that tip (M1's own headline correction: the
-> survey's S13 claim that the estate "carries ZERO entries for F-A5b/sandbox" is **true of
-> `main` and FALSE of `origin/f-a5b/pr-1`**, which already carries its own
+> is read from *the f-a5b/pr-1 branch* at tip `ee76f70` (F-A5b PR-1, not yet merged), never
+> from `main`, because `main` does not yet carry PR-1's own additions and a `main`-only read
+> would silently under-report what already exists on that tip (M1's own headline correction:
+> the survey's S13 claim that the estate "carries ZERO entries for F-A5b/sandbox" is **true of
+> `main` and FALSE of the f-a5b/pr-1 branch**, which already carries its own
 > `F_A5B_PR1_COHORT`/`SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES` rosters — §7 corrects every
-> downstream claim that inherited the `main`-only reading uncritically). `0077.sql`/`0059.sql`/
-> `0058.sql`/`0060.sql`/`0079.sql`/`0081.sql`/`layout.mjs`/`leader.mjs`/`reconciler-render.mjs`
-> citations are read from `main` directly, since none of them is F-A5b PR-1's own object.
+> downstream claim that inherited the `main`-only reading uncritically). Migrations 0077/0059/
+> 0058/0060/0079/0081 (all under `packages/db/migrations/`, full stems in §7) plus `layout.mjs`/
+> `leader.mjs`/`reconciler-render.mjs` are read from `main` directly, since none is F-A5b PR-1's
+> own object.
 
 ---
 
 ## §1 · What, why, and the honest B-mapping
 
 **What.** Card 1 is the substitution seam: the mechanism by which a narrative sandbox export
-(F-A5b's `sandbox_views`/`sandbox_exports`, `0132.sql`) can carry a FIGURE — not just prose —
+(F-A5b's `sandbox_views`/`sandbox_exports`, minted by migration 0132 on f-a5b/pr-1) can carry
+a FIGURE — not just prose —
 without a model ever typing that figure into `displayed_text`. Two stages, both in this
 session's scope:
 
@@ -128,10 +130,9 @@ injection surface X11 already worries about. A typed block reuses the SAME valid
 discipline every other block/basis element already gets.
 
 **N1 — wording precision.** 0132's own block-kind check today (`0132.sql:632-635`) is a
-single, plain `if v_kind is distinct from 'text' then raise ...` — an `if`, not an `elsif`,
-since there is only ONE kind to check (the survey's own S24 prose says "elsif" beside this same
-quoted `if`; a small wording slip left as-is per the survey's verbatim status). §2.2's widened
-version is a genuine three-armed `if`/`elsif`/`else` chain.
+single, plain `if v_kind is distinct from 'text' then raise ...` — an `if`, not an `elsif`
+(the survey's own S24 prose says "elsif" beside this same quoted `if`; a slip left as-is per
+its verbatim status). §2.2's widened version is a genuine three-armed `if`/`elsif`/`else` chain.
 
 **Shape**, closed:
 

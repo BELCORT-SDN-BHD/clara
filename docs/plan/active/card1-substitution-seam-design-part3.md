@@ -170,7 +170,7 @@ rediscovery:**
 ## §7 · Migration + runtime + census move list — corrected in full at the fold
 
 **M1 — the grounding rule, restated precisely.** Every citation below that names an object
-F-A5b PR-1 itself mints, touches, or supersedes is read from `origin/f-a5b/pr-1` at tip
+F-A5b PR-1 itself mints, touches, or supersedes is read from *the f-a5b/pr-1 branch* at tip
 `ee76f70`, never from `main` — `main` does not yet carry PR-1's own additions, and reading it
 alone silently under-reports what already exists on the tip this design actually builds on top
 of (this is the correction M1 forces on the survey's own S13, which was accurate for `main` and
@@ -271,7 +271,7 @@ gives the lint a direct, honest target.
 
 17. **M1/M9 — `packages/db/tests/rig-meta.mjs`'s cohort pattern, corrected.** The pre-fold
     draft's claim that the estate "carries ZERO entries for F-A5b/sandbox" was read from
-    `main` only; `origin/f-a5b/pr-1`'s own `rig-meta.mjs` already exports `F_A5B_PR1_WAKE_FNS`
+    `main` only; the f-a5b/pr-1 branch's own `rig-meta.mjs` already exports `F_A5B_PR1_WAKE_FNS`
     (`["wake_mint_sandbox_view", "wake_request_sandbox_export", "wake_sandbox_export_state"]`),
     `F_A5B_PR1_RUNTIME_FNS` (the three worker verbs), `F_A5B_PR1_HUMAN_FNS` (the three human
     doors), and `F_A5B_PR1_COHORT = [...WAKE_FNS, ...RUNTIME_FNS, ...HUMAN_FNS]`
@@ -301,7 +301,7 @@ gives the lint a direct, honest target.
     e.g. `f-a5-reporting-agency-pr2-census.test.mjs:100-116`'s shape) for this migration's own
     allowlist rows — no single shared file exists to add rows to instead.
 23. **BL-7 — the x42 "non-finding" is DELETED, and replaced with its own actual finding.**
-    `packages/db/tests/x42-s5-helpers.mjs` (read on `origin/f-a5b/pr-1`'s tip for this fold,
+    `packages/db/tests/x42-s5-helpers.mjs` (read on *the f-a5b/pr-1 branch's* tip for this fold,
     diffed against `main`'s own copy) already carries `SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES =
     ["_recipient_covers", "sandbox_export_payload", "complete_sandbox_export",
     "fail_sandbox_export", "supersede_export_recipient"]`, gated `appliedStem(
@@ -348,10 +348,13 @@ gives the lint a direct, honest target.
 29. `docs/references/codebase-memory-graph.md` re-index after the code lands (AGENTS.md
     clock-out step 5).
 
-**Non-finding, stated so it is not silently re-assumed** (survey item 21, narrowed by BL-7):
-`packages/db/tests/x42-r7-fa-stamp.test.mjs`/`x42-blind-contract.test.mjs` (the advances/
-adjustments/period-close residuals test FILES the survey's item 21 originally meant) remain
-unrelated to this seam and gain no entries from this work — **but `x42-s5-helpers.mjs`
+**Non-finding, stated so it is not silently re-assumed** (survey item 21, narrowed by BL-7).
+**Correction on re-verify: this design's own earlier draft cited a file, `x42-blind-
+contract.test.mjs`, that does not exist** — `packages/db/tests/x42-r7-fa-stamp.test.mjs` is
+real and representative of the family meant; the rest of the x42-prefixed advances/
+adjustments/period-close residuals test SUITE (`packages/db/tests/x42-*.test.mjs`, dozens of
+files, none named `x42-blind-contract`) remains unrelated to this seam and gains no entries
+from this work — **but `x42-s5-helpers.mjs`
 specifically, a shared HELPER file the x42 test files import, is not "unrelated"**: it already
 carries F-A5b PR-1's own clock-names roster and now gains card 1's, per item 23 above. The
 distinction is between the x42 TEST SUITE (still unrelated) and the x42-prefixed HELPER FILE

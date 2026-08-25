@@ -65,7 +65,7 @@ let a NEW formula read an ALREADY-COMPUTED fact from the SAME reporting moment, 
 second, parallel time-travel primitive competing with `lag`.
 
 **BL-4 — DECISION, ruled: the AST document tag (`clara.metric/v1`) and the composition schema
-tag (`clara.metric-composition-inputs/v1`) stay UNCHANGED.** The AST GRAMMAR is extended (a
+tag (*clara.metric-composition-inputs/v1*, a contract name, not a path) stay UNCHANGED.** The AST GRAMMAR is extended (a
 twelfth node kind admitted); the DOCUMENT FORMAT is not — every existing field of the top-level
 `{ast, unit, temporality, result_scale, edge_policy_set, root}` object (`0059.sql:44`) keeps
 its exact shape and its exact literal string comparisons (`a->>'ast' <> 'clara.metric/v1'`
@@ -76,7 +76,7 @@ identity model is `(evaluator_name, version)`, not a document-format string, and
 `_eta_compose_metric_preview_core_v2` resolves `('evaluate_metric', 2)` explicitly rather than
 inferring grammar version from anything inside the AST body. A future genuinely NEW AST
 document shape (a different top-level key set, not merely a wider node vocabulary) would be the
-occasion for a `clara.metric/v2` tag; admitting one more closed node kind under the SAME
+occasion for a *clara.metric/v2* tag; admitting one more closed node kind under the SAME
 top-level shape is not that occasion.
 
 **Validation** — a NEW function, `clara._validate_metric_node_v2(n jsonb, d int default 1,
@@ -215,7 +215,7 @@ through, not merely one, and this design mints no `_v2` sibling for either.
 `evaluator_versions` row `('evaluate_metric', 1)`, minted by the freeze DO block at
 `0059.sql:246`. `evaluate_metric` v1 is `deployed:true` (S23's cross-checked roster read).
 Once deployed, `clara.verify_evaluator_freeze()` (`0059.sql:248`) — invoked between every
-migration body and its commit by `scripts/migrate.mjs` (S22) — **re-derives
+migration body and its commit by `packages/db/scripts/migrate.mjs` (S22) — **re-derives
 `sha256(pg_get_functiondef(member_signature))` LIVE from the catalog for every member and
 refuses on any mismatch.** This is a mechanical block, independent of the repo-side
 `check-frozen-evaluators.mjs`'s narrower, exact-name-pattern scope (S23).
@@ -333,8 +333,9 @@ design's):**
    loosened CHECK, the preview path's existing "not_applicable" provenance stamp IS the (b)
    provenance, exactly as the brief specifies. **The allowlist row is `('interactive',
    'wake_compose_metric_preview_v2')` alone, permanently** (M2, §2.6).
-6. **`clara._tf_metric_cell_integrity` is `create or replace`d** (the FILE `0060.sql` stays
-   immutable; the LIVE function it defines is replaced by a new migration —
+6. **`clara._tf_metric_cell_integrity` is `create or replace`d** (the FILE
+   `packages/db/migrations/0060_wave_e_delta_metrics_security.sql` stays immutable; the LIVE
+   function it defines is replaced by a new migration —
    `packages/db/README.md`'s "applied files are immutable" governs the file, not the object) to
    branch on the inserted cell's evaluator identity — via BL-4 item 3's retargeted literal
    comparison — before choosing which pair of functions re-derives it. When the composition's
@@ -377,7 +378,8 @@ insert into clara.metric_primitives(primitive_key, structural_integer_fields)
 
 `clara.metric_primitives` widens **11→12, extend-only** — the new migration reproduces (not
 edits) `0059.sql:251`'s tail-census shape with the count assertion updated to `12`, **never
-editing `0059.sql`'s own `if n<>11` line**, which stays exactly as printed forever (migration
+editing `packages/db/migrations/0059_wave_e_delta_metrics_behavior.sql`'s own `if n<>11`
+line**, which stays exactly as printed forever (migration
 immutability). The new migration's own tail similarly reproduces (not edits) the
 `primary_members`/`checker_members` closure-census shape at `0059.sql:251`, extended to also
 assert the new `evaluate_metric` v2 row's member count (BL-2's real closure, item 3's helper
