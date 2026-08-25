@@ -421,7 +421,10 @@ export { clientOnboarding_v2 };
 //
 // v8 AND v12 STAY FROZEN, BUILT AND EXPORTED so no parked run is stranded (policy (c)) — both
 // gained an explicit `export` below, which they had not needed while they were the pinned
-// versions.
+// versions. v13 joins them here for the same reason at F-A3 PR-3's own repoint (v13 -> v14,
+// OQ-6 bank chat parity, owner ruling 2026-08-25): it is no longer the pinned version, so it
+// needs the explicit export a directly-importing consumer (and the rollback preflight,
+// packages/runtime/README.md) relies on.
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
@@ -435,6 +438,7 @@ export { chatTurn_v10 };
 export { chatTurn_v11 };
 export { chatTurn_v12 };
 export { chatTurn_v13 };
+export { chatTurn_v14 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
