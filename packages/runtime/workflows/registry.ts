@@ -20,6 +20,7 @@ import { chatTurn_v10 } from "./chatTurn.v10.js";
 import { chatTurn_v11 } from "./chatTurn.v11.js";
 import { chatTurn_v12 } from "./chatTurn.v12.js";
 import { chatTurn_v13 } from "./chatTurn.v13.js";
+import { chatTurn_v14 } from "./chatTurn.v14.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -45,9 +46,11 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  // F-A2 CHAT PARITY (owner ruling D34): REPOINTED v12 -> v13. See the note near the bottom of
-  // this file for what v13 is and the ORDER its deploy must take against PR-1's migration.
-  chatTurn: chatTurn_v13,
+  // F-A3 PR-3 (OQ-6, BANK CHAT PARITY, owner ruling 2026-08-25): REPOINTED v13 -> v14. See the
+  // note near the bottom of this file for what v14 is and the ORDER its deploy must take against
+  // this PR's migrations (the SS4 allowlist widening AND the sibling grant migration this
+  // runtime half ships, `UNNUMBERED_chatturn_v14_bank_interactive_grants.sql`).
+  chatTurn: chatTurn_v14,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
