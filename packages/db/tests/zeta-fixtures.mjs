@@ -89,13 +89,24 @@ export async function sharedWorld() {
     _world = await buildWorld();
     // Delta's evaluator versions are BORN undeployed and a one-way ceremony flips them; epsilon's
     // battery performs it if nobody has. ζ evaluates nothing itself but its worlds do, so the same
-    // precondition applies — and it is asserted here rather than assumed, because a battery that
-    // silently ran against an undeployed evaluator would be measuring the wrong database.
+    // precondition applies — and it is ENSURED here (swept, never left to chance) rather than
+    // assumed, because a battery that silently ran against an undeployed evaluator would be
+    // measuring the wrong database. NOTE: this only SWEEPS (a conditional UPDATE); it does not
+    // itself assert anything about the resulting state -- delta-contract.test.mjs and
+    // epsilon-contract.test.mjs are where that precondition is actually proven.
+    //
+    // SCOPED, on delta/epsilon's own terms: F-A5 PR-1's evaluate_fs_pack_agent is EXCLUDED by
+    // name -- that row's deploy flip is f-a5-reporting-agency-pr1.test.mjs cell D's OWN separate
+    // ceremony (design SS3.2, gate-2 material 8), which measures the row's pre-flip refusal. z
+    // sorts after f-a5 alphabetically, so this is a no-op in normal estate order -- but on a
+    // partial-migration or focused run where f-a5's battery never reaches cell D while zeta's
+    // does, an UNSCOPED sweep here would flip that row first and permanently steal cell D's only
+    // witness window. Scoped exactly like its delta/epsilon/eta siblings.
     const pending = (await rootQuery(
-      "select count(*)::int n from clara.evaluator_versions where not deployed")).rows[0].n;
+      "select count(*)::int n from clara.evaluator_versions where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'")).rows[0].n;
     if (pending > 0) {
       await withActor({ transaction: true }, async (db) => {
-        await db.query("update clara.evaluator_versions set deployed=true where not deployed");
+        await db.query("update clara.evaluator_versions set deployed=true where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'");
       });
     }
   }
