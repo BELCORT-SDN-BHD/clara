@@ -173,9 +173,11 @@ the forward-obligations block and the F-A5b/W4 items below also ride this sprint
 its finding; none blocks beta):
 - **The candidate-parameterized `evaluate_witness_identity` variant → pi/F-A1-successor scope.**
   Widens B3's corroborated-anchor floor beyond hard-id; ALSO the exact event that makes β's B2
-  collision wall outcome-bearing (today B2 is rung-vector/label quality — everything it flags,
-  B3 already refuses; the reviewer's structural derivation is in the β ladder record) AND the
-  β named-skip's path (i).
+  collision wall outcome-bearing (today B2 is rung-vector/label quality — everything it flags, B3
+  already refuses) AND the β named-skip's path (i). **DESIGN v1 LANDED 2026-08-25** — see
+  `witness-identity-variant-survey.md` (+`-design`/`-annex`): a firm-guarded candidate-uuid array
+  on `evaluate_witness_identity_v2`, plus a homoglyph gap the same pass closed (`R0ME PROPERTIES`
+  had zero `name_family_candidates` coverage — new confusables fold); ship as one unit (cell W2).
 - **F-A2/PR-2-successor prompt: `candidates` becomes MANDATORY** (B2 arm (b)'s feed — the
   runtime does not supply it today, by design).
 - **`document_regions.field_path` is caller-supplied and un-CHECKed** — a future producer
