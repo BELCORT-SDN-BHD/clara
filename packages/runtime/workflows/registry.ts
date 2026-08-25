@@ -77,6 +77,17 @@ export const workflows = {
   clientOnboarding: clientOnboarding_v3,
 } as const;
 
+// Gate G1: a loosely-typed VIEW of the SAME `workflows` object above (not a copy, not a second
+// source of truth) — for the wake engine's dynamic dispatch, where `clara.wake_engine_sources.
+// workflow_export` names a registry KEY at RUNTIME (a plain string column), which no single
+// overload of workflow/api's `start()` can type statically. Every static enqueue site keeps
+// using `workflows` unchanged; this export exists ONLY so a runtime-string-keyed lookup type-
+// checks without an inline cast at the call site (an inline cast there would strip past the
+// bracket access under the freeze-lint enqueue-provenance checker's own TS-cast-stripping rule
+// and read as untraceable — see packages/runtime/plugins/startWorld.ts's own comment).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see the comment block above.
+export const workflowsByName: Record<string, (input: any) => Promise<unknown>> = workflows;
+
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
 // park-resume re-sent collected stream output as an assistant INPUT message,
 // which fails model-input validation after a WDK replay — v3 sanitizes the park

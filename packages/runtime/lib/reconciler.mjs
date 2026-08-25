@@ -29,6 +29,7 @@ import { reconcileSstWatches } from "./reconciler-sst.mjs";
 import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
 import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
+import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -181,12 +182,15 @@ export async function reconcileTasks(client, deps) {
   // of reconcileTasks -> runReconcilerSweep and aborted the ENTIRE sweep cycle (sections
   // C/D below and every other sweeper in runReconcilerSweep never ran) — the row stayed
   // 'cancel_requested' forever, got re-selected next poll, and re-threw: the two-day
-  // Section-I zombie that also starved the document reconciler. NB: kind='wake' can never
-  // reach 'cancel_requested' in the first place — clara._tf_agent_task_update's transition
-  // matrix (0006:465-472) gives wake only held->cancelled DIRECTLY, and cancel_agent_task
-  // (0006:845-849) only sets 'cancel_requested' when the task is running/awaiting_input,
-  // neither of which a wake task (always created 'held', 0006:422) ever is — so this query
-  // structurally only ever sees chat_turn/autodraft rows.
+  // Section-I zombie that also starved the document reconciler.
+  // SUPERSEDED BY GATE G1 (matrix delta on clara._tf_agent_task_update): the note this comment
+  // used to carry — "kind='wake' can never reach cancel_requested" — was true only up to G1's
+  // own migration, which widens the wake arm to held->{running,cancelled},
+  // running->{completed,failed,cancel_requested}, cancel_requested->{completed,failed,
+  // cancelled}. A 'wake' or 'close_prep' row (close_prep's own matrix has allowed
+  // cancel_requested since 0120, though nothing could drive it there before a runtime existed)
+  // now legitimately reaches this query — the `kind === "wake" || kind === "close_prep"` branch
+  // below settles it through clara._settle_wake_task, never the chat_turn-only settle_chat_turn.
   const cancels = await client.query(
     `select id, kind, workflow_run_id from clara.agent_tasks
       where status = 'cancel_requested' and ($1::uuid is null or firm_id = $1)
@@ -208,6 +212,14 @@ export async function reconcileTasks(client, deps) {
         // cancelled autodraft settles 'failed' with the cancellation named in the
         // refusal, matching terminalForAutodraft's own engine==='cancelled' arm below.
         await settleAutoDraftTerminal(client, t.id, "failed", null, { code: "internal", reason: "cancelled" });
+      } else if (t.kind === "wake" || t.kind === "close_prep") {
+        // Gate G1: the comment above this section was true UP TO this gate's own matrix delta —
+        // 'wake' (and close_prep, already-live since 0120 but never actually reachable until a
+        // runtime exists to drive it there) can now legitimately reach cancel_requested via
+        // running->cancel_requested. settle_chat_turn refuses CLR10 for any kind<>'chat_turn', so
+        // falling through to the generic branch below would raise on every such row — settle
+        // through clara._settle_wake_task instead, which keeps wakes_outbox in sync too.
+        await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "cancelled", null]);
       } else {
         await settleTaskTerminal(client, t.id, "cancelled", null);
       }
@@ -507,6 +519,13 @@ export { reconcileFaRuns };
 // The Wave D-b adjustment belt (design §2.3/§2.7 / migration 0045) lives in reconciler-adjustments.mjs.
 export { reconcileAdjustmentRuns };
 
+// Gate G1's own belt (design Annex C / migration UNNUMBERED_g1_wake_engine) lives in
+// reconciler-wake.mjs under the same module-size budget. Registered UNCONDITIONALLY (every
+// cycle, not a daily flag) — mirrors reconcileAutoDraftTasks's own registration exactly, since
+// crash-recovery for a wake-engine-owned task is not a cadence concern the way the SST/lint/FA/
+// adjustment belts are.
+export { reconcileWakeEngineTasks };
+
 // ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
@@ -625,11 +644,12 @@ export async function runReconcilerSweep(client, deps) {
   const lint = deps.lintBelt ? await belt("lint belt", () => reconcileLintBelt(client, { log }), { lintOk: false }) : {};
   const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
   const adj = deps.adjRuns ? await belt("adjustment runs", () => reconcileAdjustmentRuns(client, { log }), { adjOk: false }) : {}; // Wave D-b belt (0045)
+  const wake = await belt("wake engine reconcile", () => reconcileWakeEngineTasks(client, deps)); // Gate G1 belt — unconditional, like autodraft reconcile
   const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
   // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
   // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...prune };
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...wake, ...prune };
 }

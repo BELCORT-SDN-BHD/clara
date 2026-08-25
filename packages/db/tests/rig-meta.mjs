@@ -933,6 +933,18 @@ export const SALES_LANE_0046_COHORT = [
 // wave's own cohort, instead of silently going stale as an unwrapped literal.
 export const BANK_AGENCY_F_A3_PR1B_COHORT = ["set_bank_agency_hold"];
 
+// Gate G1 [the universal wake-execution engine] the one human door: set_wake_source_enabled, an
+// OWNER-floor idempotent upsert on a wake_engine_sources row (body-enforced floor; the estate-wide
+// analogue of set_bank_agency_hold's own per-client bookkeeper-floor cohort above — a named cohort
+// for the identical reason, so a future rename/retire is caught by the dead-exemption sweep rather
+// than going silently stale). clara._settle_wake_task is deliberately ABSENT from every roster
+// (zero grants to any role) — the sweep's expected=false for it needs no entry.
+export const G1_WAKE_ENGINE_COHORT = ["set_wake_source_enabled"];
+// clara._settle_wake_task is clara_runtime ONLY (its one real caller — the reconciler belt and
+// the engine's own claim path, the settle_chat_turn precedent) — a separate cohort since it
+// lands in ALLOWED[ROLES.runtime], not the human-lane roster above.
+export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1006,6 +1018,10 @@ export const ALLOWED = {
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
     // something the agent lane can flip on itself).
     ...BANK_AGENCY_F_A3_PR1B_COHORT,
+    // Gate G1: set_wake_source_enabled, the registry's own owner-floor writer (body-enforced;
+    // agent + both wake roles gain ZERO — this is an estate-wide engineering switch, never
+    // something the agent lane can flip on itself).
+    ...G1_WAKE_ENGINE_COHORT,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1036,6 +1052,10 @@ export const ALLOWED = {
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
     "readmit_autodraft_after_withdrawal",
+    // Gate G1: _settle_wake_task — clara_runtime ONLY (the reconciler belt + the engine's own
+    // claim path, the settle_chat_turn precedent above). Declared here so any wider grant FAILS
+    // the matrix.
+    ...G1_WAKE_ENGINE_RUNTIME_COHORT,
     ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
@@ -1212,6 +1232,8 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-3 signed-original archive doors", F_A5_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
+  failures.push(...cohortFailures("Gate G1 wake-execution engine", G1_WAKE_ENGINE_COHORT, liveNames));
+  failures.push(...cohortFailures("Gate G1 wake-execution engine (runtime lane)", G1_WAKE_ENGINE_RUNTIME_COHORT, liveNames));
   return failures;
 }
 

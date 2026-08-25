@@ -52,10 +52,15 @@ export const READ_POOL_MAX = Number(process.env.CLARA_READ_POOL_MAX || 5);
 // pool (max 2 — inside the connection budget) that reaches the EXISTING
 // wake_draft_entry writer. NOT read-only; SET ROLE clara_wake_interactive; COMMITs.
 export const WRITE_POOL_MAX = Number(process.env.CLARA_WRITE_POOL_MAX || 2);
+// Gate G1 Annex E, step 1: the bank_agent wake source's own dedicated pool (mirrors the write
+// floor's shape exactly — a small pool, least-privilege). GATED ON G1 (bank-agency-annexes-3-
+// build.md:58's M4 seam) — this wiring is inert until the DB-side clara_wake_bank_login gains
+// LOGIN+password+the DSN secret at the operator ceremony (already NOLOGIN-created, 0121).
+export const BANK_POOL_MAX = Number(process.env.CLARA_BANK_POOL_MAX || 2);
 
 // The dedicated login each pool connects AS in production (the two-login law, N10):
 // the pool connects as this login, then SET ROLEs to its one group on every checkout.
-const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login" };
+const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login", bank: "clara_wake_bank_login" }; // step 2
 const STATEMENT_TIMEOUT_MS = Number(process.env.CLARA_STATEMENT_TIMEOUT_MS || 30000);
 const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS || 15000);
 const CONNECT_TIMEOUT_MS = Number(process.env.CLARA_CONNECT_TIMEOUT_MS || 5000);
@@ -77,28 +82,35 @@ export const READ_CREDENTIAL_TTL = process.env.CLARA_READ_CREDENTIAL_TTL || "5 m
 function dsnVarFor(which) {
   if (which === "runtime") return "CLARA_RUNTIME_DATABASE_URL";
   if (which === "write") return "CLARA_WRITE_DATABASE_URL";
+  if (which === "bank") return "CLARA_BANK_DATABASE_URL"; // Gate G1 Annex E, step 3
   return "CLARA_READ_DATABASE_URL";
 }
 
 function poolMaxFor(which) {
   if (which === "runtime") return RUNTIME_POOL_MAX;
   if (which === "write") return WRITE_POOL_MAX;
+  if (which === "bank") return BANK_POOL_MAX; // Gate G1 Annex E, step 4
   return READ_POOL_MAX;
 }
 
 /**
  * Assert the production pool config is present — call once at boot (serve.mjs). In
- * production (RELAY_TEST_MODE !== '1') ALL THREE dedicated login DSNs are REQUIRED;
+ * production (RELAY_TEST_MODE !== '1') ALL FOUR dedicated login DSNs are REQUIRED;
  * the runtime must never fall back to a shared/base identity (S4-AB8, fail-closed).
  * The write DSN (CLARA_WRITE_DATABASE_URL) joins this fail-closed set (contract §5 /
  * C-18): a coding-floor world must never boot without a wired write floor. NOTE
  * (deploy ordering): the clara_wake_write_login is created NOLOGIN in 0009 and given
  * LOGIN+password + this secret at the operator ceremony — the secret must be present
  * BEFORE the Slice-6 image boots, or the world fails closed.
+ * The bank DSN (CLARA_BANK_DATABASE_URL) joins this set for the SAME reason (Gate G1 Annex
+ * E, step 5 — REQUIRED, not optional: omitting it would let the wake engine boot in
+ * production without a dedicated bank login and silently misroute a bank_agent-sourced
+ * dispatch onto a shared identity). clara_wake_bank_login is already NOLOGIN-created (0121);
+ * LOGIN+password land at the same kind of operator ceremony.
  */
 export function assertProductionPoolConfig() {
   if (TEST_MODE) return;
-  for (const which of ["runtime", "read", "write"]) {
+  for (const which of ["runtime", "read", "write", "bank"]) {
     const v = dsnVarFor(which);
     if (!process.env[v]) {
       throw new Error(
@@ -144,6 +156,7 @@ function setupSql(role, readOnly) {
 let _runtimePool = null;
 let _readPool = null;
 let _writePool = null;
+let _bankPool = null;
 
 /** Lazy singleton runtime pool (clara_runtime). */
 export function getRuntimePool() {
@@ -174,6 +187,19 @@ export function getWritePool() {
     _writePool.on("error", (err) => console.error("[clara-runtime] write pool error:", err.message));
   }
   return _writePool;
+}
+
+/** Gate G1 Annex E, step 6: lazy singleton bank pool (clara_wake_bank). Connects as
+ * clara_wake_bank_login and SET ROLEs to clara_wake_bank — NOT read-only (bank_agent's wrapper
+ * verbs write). Small (max 2, BANK_POOL_MAX), least-privilege: the wake engine's OWN claim/
+ * checkpoint bookkeeping runs as clara_runtime; only the DISPATCHED bank_agent workflow's actual
+ * bank-scoped work runs as clara_wake_bank, via this pool. */
+export function getBankPool() {
+  if (!_bankPool) {
+    _bankPool = new pg.Pool(loginConfig("bank"));
+    _bankPool.on("error", (err) => console.error("[clara-runtime] bank pool error:", err.message));
+  }
+  return _bankPool;
 }
 
 /**
@@ -438,6 +464,32 @@ export function withWriteWakeScoped(secret, fn) {
 }
 
 /**
+ * Gate G1 Annex E, step 7: run fn on a clara_wake_bank WRITE connection — the bank_agent wake
+ * source's own scoped-transaction helper, byte-shaped after withWriteWakeScoped. The checkout
+ * SET ROLEs to clara_wake_bank (NOT read-only); this binds the wake secret TXN-LOCALLY, runs the
+ * write, and COMMITs. A thrown fn rolls back; checkout()'s shared cleanup + P4 destroy-on-
+ * connection-error then apply, identically to the write floor.
+ * @template T
+ * @param {string} secret  a live bank_agent wake-credential secret (never persisted/returned)
+ * @param {(c: pg.PoolClient) => Promise<T>} fn
+ */
+export function withBankWakeScoped(secret, fn) {
+  return checkout(getBankPool(), setupSql("clara_wake_bank", false), async (c) => {
+    await c.query("begin");
+    // Parameterised SET LOCAL — the secret never enters SQL text; txn-scoped.
+    await c.query("select set_config('clara.wake_secret', $1, true)", [secret]);
+    try {
+      const result = await fn(c);
+      await c.query("commit");
+      return result;
+    } catch (err) {
+      await c.query("rollback").catch(() => {});
+      throw err;
+    }
+  });
+}
+
+/**
  * A dedicated long-lived clara_runtime client for LISTEN (the control listener
  * and the relay leader each hold one — the "LISTEN 2" of the §4.1 budget). The
  * caller owns its lifecycle (connect/end) and reconnect policy. SET ROLE is
@@ -465,10 +517,13 @@ export async function endPools() {
   const runtime = _runtimePool;
   const read = _readPool;
   const write = _writePool;
+  const bank = _bankPool;
   _runtimePool = null;
   _readPool = null;
   _writePool = null;
+  _bankPool = null;
   if (runtime) await runtime.end().catch(() => {});
   if (read) await read.end().catch(() => {});
   if (write) await write.end().catch(() => {});
+  if (bank) await bank.end().catch(() => {});
 }

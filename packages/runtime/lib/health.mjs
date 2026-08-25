@@ -16,6 +16,7 @@ import { scannerReachable } from "./scan.mjs";
 import { listTaskMetas, spoolHealth } from "./spool.mjs";
 import { matcherHealth } from "./matcher.mjs";
 import { autodraftHealth } from "./autodraft.mjs";
+import { wakeEngineHealth } from "./wake-engine.mjs";
 import { localFactsHealth } from "./local-facts.mjs";
 import { sstWatchHealth } from "./sst-watch.mjs";
 import { factsGateHealth } from "./facts-gate.mjs";
@@ -157,6 +158,23 @@ export async function checkReadiness() {
             if (aDeferred > 0) warnings.push(`${aDeferred} deferred withdrawal(s) awaiting owner-task settle`);
           } catch (err) {
             warnings.push(`autodraft_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // wake-engine consumer health -> warnings only (Gate G1 design §6's own RED-first cell:
+          // "an engine death that does not show up in /ready as a WARN within one poll interval
+          // is a defect" — this wiring IS that assertion's positive half, mirroring autodraft's
+          // own warn-only law: a stalled wake engine must never take chat traffic down).
+          try {
+            const weh = await wakeEngineHealth(c);
+            checks.wakeEngine = { ok: true, ...weh };
+            const weDead = Number(weh.pendingDeadLetters ?? 0);
+            const weLag = Number(weh.lag ?? 0);
+            const weHeld = Number(weh.heldForDisabledSource ?? 0);
+            if (weDead > 0) warnings.push(`${weDead} wake-engine dead-letter(s)`);
+            if (weLag > 1000) warnings.push(`wake-engine lag ${weLag}`);
+            if (weHeld > 0) warnings.push(`${weHeld} held/queued wake-engine row(s) awaiting a disabled/unregistered source`);
+          } catch (err) {
+            warnings.push(`wake_engine_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
 
           // local_facts consumer health -> warnings only (Wave A2): a stalled MyInvois
