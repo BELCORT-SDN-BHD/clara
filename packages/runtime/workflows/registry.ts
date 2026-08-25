@@ -20,6 +20,7 @@ import { chatTurn_v10 } from "./chatTurn.v10.js";
 import { chatTurn_v11 } from "./chatTurn.v11.js";
 import { chatTurn_v12 } from "./chatTurn.v12.js";
 import { chatTurn_v13 } from "./chatTurn.v13.js";
+import { chatTurn_v14 } from "./chatTurn.v14.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -46,9 +47,11 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  // F-A2 CHAT PARITY (owner ruling D34): REPOINTED v12 -> v13. See the note near the bottom of
-  // this file for what v13 is and the ORDER its deploy must take against PR-1's migration.
-  chatTurn: chatTurn_v13,
+  // F-A3 PR-3 (OQ-6, BANK CHAT PARITY, owner ruling 2026-08-25): REPOINTED v13 -> v14. See the
+  // note near the bottom of this file for what v14 is and the ORDER its deploy must take against
+  // this PR's migrations (the SS4 allowlist widening AND the sibling grant migration this
+  // runtime half ships, `0130_chatturn_v14_bank_interactive_grants.sql`).
+  chatTurn: chatTurn_v14,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -86,6 +89,50 @@ export const workflows = {
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
 } as const;
+
+// Gate G1 (opus/Codex review, MUST D): a loosely-typed VIEW of the SAME `workflows` object above
+// — NOT a copy, NOT a second source of truth, and now PROVABLY so — for the wake engine's dynamic
+// dispatch, where `clara.wake_engine_sources.workflow_export` names a registry KEY at RUNTIME (a
+// plain string column), which no single overload of workflow/api's `start()` can type statically.
+// Every static enqueue site keeps using `workflows` unchanged; this export exists ONLY so a
+// runtime-string-keyed lookup type-checks without an inline cast at the call site (an inline cast
+// there would strip past the bracket access under the freeze-lint enqueue-provenance checker's own
+// TS-cast-stripping rule and read as untraceable — see packages/runtime/plugins/startWorld.ts's own
+// comment).
+//
+// `Object.freeze` is the mechanical guarantee an unchecked mutable alias lacked: it freezes AND
+// returns the SAME object `workflows` already is (never a copy), so `workflowsByName === workflows`
+// is a true statement at runtime, not merely by construction — asserted directly by
+// tests/registry-view.test.mjs, which imports this file via the SAME tsx/esm/api register()
+// idiom f-a1-pr3a-consumers.test.mjs / f-a2-pr2-post.test.mjs / f-a2-statement-activation.
+// test.mjs already establish as this suite's own precedent for reaching a .ts workflow module
+// directly (M8(a), opus R2 + Codex review: an earlier draft of this comment claimed that test
+// could never run and deleted it — FALSE, caught by an independent review, not by this build's
+// own re-check; the claim's own grep only matched static `.mjs` imports and never searched for
+// this dynamic-import idiom). The runtime property is ALSO proven by (a) TypeScript's own type
+// system — this declaration's annotation only type-checks because `Object.freeze(workflows)`'s
+// inferred type IS assignable to it, which typecheck proves every PR, and (b) the
+// REGISTRY-VIEW-INTEGRITY static check below, wired into freeze-lint and run on every PR — the
+// runtime test is not a replacement for either, it is the third, independent leg. Because freeze operates on the
+// shared object, `workflows` itself becomes runtime-immutable too (harmless: nothing ever
+// reassigns its own properties) — so `workflowsByName.someKey = maliciousFn` THROWS (ES modules
+// are always strict mode) rather than silently succeeding. scripts/check-frozen-workflows.mjs's own
+// REGISTRY-VIEW-INTEGRITY check (capability (f)) parses this declaration structurally and rejects
+// anything BUT `Object.freeze(workflows)` on the right-hand side, and rejects a second view export.
+// NOTE J (opus/Codex review) — TRIED, REVERTED: narrowing the VALUE type to the per-class union
+// `(typeof workflows)[keyof typeof workflows]` broke typecheck at the real call site
+// (startWorld.ts) — a union of DIFFERENT workflow classes' input types is not callable with a
+// dynamically-picked argument (a `{taskId}` input does not satisfy every arm of the union
+// simultaneously; TypeScript overload resolution needs the argument to satisfy ALL arms, not
+// just the one actually selected at runtime — inherent to a Record<string,...>'s dynamic-key
+// dispatch, not a lint gap). More fundamentally, the note's own claim does not hold: what would
+// catch a typo'd class name is narrowing the KEY type to `keyof typeof workflows`, never the
+// VALUE type — and the key here MUST stay `string` (a DB-driven `workflow_export` column value,
+// never known at compile time), so no value-type narrowing can add that protection. SHOULD I's
+// actual fix (a bounded re-enqueue attempt cap, reconciler-wake.mjs) is what closes this gap —
+// not a type change. `any` stays; the eslint-disable stays too.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see the comment above (NOTE J).
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
 // park-resume re-sent collected stream output as an assistant INPUT message,
@@ -433,7 +480,10 @@ export { clientOnboarding_v2 };
 //
 // v8 AND v12 STAY FROZEN, BUILT AND EXPORTED so no parked run is stranded (policy (c)) — both
 // gained an explicit `export` below, which they had not needed while they were the pinned
-// versions.
+// versions. v13 joins them here for the same reason at F-A3 PR-3's own repoint (v13 -> v14,
+// OQ-6 bank chat parity, owner ruling 2026-08-25): it is no longer the pinned version, so it
+// needs the explicit export a directly-importing consumer (and the rollback preflight,
+// packages/runtime/README.md) relies on.
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
@@ -447,6 +497,7 @@ export { chatTurn_v10 };
 export { chatTurn_v11 };
 export { chatTurn_v12 };
 export { chatTurn_v13 };
+export { chatTurn_v14 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };

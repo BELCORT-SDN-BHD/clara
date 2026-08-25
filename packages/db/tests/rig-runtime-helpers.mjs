@@ -265,7 +265,12 @@ export async function observedNewTables() {
 // Always restores the session identity before releasing the client.
 // ---------------------------------------------------------------------------
 
-const LOGIN_ROLES = new Set(["clara_runtime_login", "clara_agent_read_login"]);
+// F-A6 PR-1 adds the FOURTH login. `withSessionAuth` is the only instrument that measures a
+// login shell the way production does — SET SESSION AUTHORIZATION, so the session USER is the
+// login and `SET ROLE` succeeds only for a real SET-TRUE membership. A freeform cell that used
+// `set role` from a superuser session instead would prove nothing: a superuser may set any role,
+// so the role-escape payload would appear to succeed against a wall that in fact holds.
+const LOGIN_ROLES = new Set(["clara_runtime_login", "clara_agent_read_login", "clara_freeform_login"]);
 
 export async function withSessionAuth(login, fn) {
   if (!LOGIN_ROLES.has(login)) throw new Error(`withSessionAuth: not a known login shell: ${login}`);

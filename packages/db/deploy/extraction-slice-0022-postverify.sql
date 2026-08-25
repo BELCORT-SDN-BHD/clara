@@ -134,9 +134,17 @@ begin
     -- runtime call this". Absent roles are SKIPPED via to_regrole (the probe-9 idiom — the
     -- login shells are not on every database), but a role that EXISTS and holds the
     -- privilege fails. Skipping is for absence only; never fail open.
+    -- CORRECTED (narrow F-A6 re-review round): this array must track roles-bootstrap.sql's
+    -- `grp`/`logins` sets (minus clara_fn_owner/clara_authenticated, the human/owner lanes this
+    -- check is verifying stay EXCLUSIVE) — it had gone stale by three wake lanes that landed
+    -- after this file was authored (clara_wake_bank/_login, clara_wake_filing, and F-A6's own
+    -- clara_freeform_ro/_login). Absence is skipped via `to_regrole` below, never asserted, so
+    -- listing a lane that does not exist on THIS database is harmless.
     foreach v_role in array array['clara_runtime', 'clara_agent_ro',
         'clara_wake_interactive', 'clara_wake_proactive',
-        'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'] loop
+        'clara_wake_bank', 'clara_wake_filing', 'clara_freeform_ro',
+        'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
+        'clara_wake_bank_login', 'clara_freeform_login'] loop
       if to_regrole(v_role) is null then continue; end if;
       if has_function_privilege(v_role, v_sig, 'execute') then
         raise exception 'POST-VERIFY 3: % holds EFFECTIVE EXECUTE on % — a machine lane can reach a human-only verb', v_role, v_sig;

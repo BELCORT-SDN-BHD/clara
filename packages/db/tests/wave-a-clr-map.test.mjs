@@ -100,14 +100,21 @@ test("acknowledge_sweep_run structurally refuses a non-human (agent/runtime) ide
 
 test("multi-gate precedence: a wake/agent identity calling a human-only writer is refused on IDENTITY first (CLR03/ACL), never the downstream business code", async (t) => {
   if (skipUnready(t, ready)) return;
-  // sign_bank_rule is human-only (sign_coding_rule, the original illustration, RETIRED
-  // with F-A2 PR-3 — this cell's claim is generic identity precedence, not this specific
-  // verb, so it re-points to another human-only writer with the same p_rule/p_op_key
-  // shape); an agent_ro role calling it → 42501 (identity/ACL), never a business
-  // (CLR27) code — identity precedence.
-  const err = await codeOf(() => roleQuery(ROLES.agentRo, "select clara.sign_bank_rule(p_rule => $1, p_op_key => $2)", ["00000000-0000-4000-8000-0000000051c0", opk("s")]));
+  // This cell's claim is generic identity precedence, never one specific verb, so it
+  // re-points whenever its current target retires. History: sign_coding_rule (the original
+  // illustration) retired at F-A2 PR-3 -> re-pointed to sign_bank_rule; sign_bank_rule itself
+  // now retires at F-A3 PR-3 (Annex I, the bank-rules machine drops whole) -> re-pointed
+  // AGAIN, this time to sign_vendor_identity_binding(p_binding uuid, p_op_key text) — the
+  // exact same (uuid, text) arity, a genuinely DIFFERENT human-only writer with no relation
+  // to the bank-rules machine, so a third bank-side retirement cannot orphan this cell again.
+  // TIGHTENED per the review round: a bare `assert.ok(err)` plus `notEqual(CLR27)` passes
+  // just as happily on a MISSING function (42883) as on the real ACL refusal this cell
+  // claims to prove — the exact vacuous-pass class this re-point is fixing. Assert the LITERAL
+  // 42501 (Postgres's own insufficient_privilege) so a fourth retirement fails LOUD, not quiet.
+  const err = await codeOf(() => roleQuery(ROLES.agentRo, "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2)", ["00000000-0000-4000-8000-0000000051c0", opk("s")]));
   // (the bogus uuid is malformed; the point is the ACL/identity refusal precedes any body work)
   assert.ok(err, "the agent call to a human-only writer refused");
+  assert.equal(err.code, "42501", `identity precedence is a real 42501 ACL refusal, not a substitute code (got ${err?.code})`);
   assert.notEqual(err.code, CLR27, "an identity-refused call never reaches the business (CLR27) layer");
 });
 

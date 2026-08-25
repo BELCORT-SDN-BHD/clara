@@ -193,21 +193,32 @@ test("x42.r8.tails.4d TAIL 6(a) flags-key writer census, widened, matches the pi
     )).rows[0].n;
   };
   assert.equal(await widenedWriters("recurring_adjustment"), "_adj_on_approve, _adj_run_occurrence_core");
-  // FRONTIER-AWARE (F-A3/PR-1a core extraction): this file's own gate (x42S5Ready) does not
-  // require the extraction, so this cell is reachable at a frontier where it has not landed
-  // yet -- "old shape still pinned for pre-PR frontiers". Pre-extraction, the
-  // jsonb_build_object('staff_advance_application', ...) key lives in the public
-  // clara.resolve_and_book_bank_line. Once the extraction lands, that body becomes a thin
-  // delegator (its own comment: "the prosrc pins that measure it moved with the body") and
-  // the key moves, byte-for-byte, into clara._resolve_and_book_bank_line_core instead. The
-  // stem check reads the SAME migration name the extraction census in x42-s5-helpers.mjs
-  // gates on, so both cells agree about which frontier is live.
+  // FRONTIER-AWARE (F-A3/PR-1a core extraction, F-A3/PR-3 retirement + staff-advance sibling):
+  // this file's own gate (x42S5Ready) does not require either, so this cell is reachable at a
+  // frontier where neither has landed yet -- "old shape still pinned for pre-PR frontiers".
+  // Pre-PR-1a, the jsonb_build_object('staff_advance_application', ...) key lives in the public
+  // clara.resolve_and_book_bank_line. PR-1a moves it into clara._resolve_and_book_bank_line_core
+  // (a thin delegator's own comment: "the prosrc pins that measure it moved with the body").
+  // PR-3 then extracts clara.book_staff_advance_application THE SAME way (OQ-7, the PR-1a
+  // idiom), moving ITS half of the key into clara._book_staff_advance_application_core. The stem
+  // checks read the SAME migration names the extraction censuses in x42-s5-helpers.mjs gate on,
+  // so every cell agrees about which frontier is live.
   const pr1aLanded = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ $1",
     ["^[0-9]{4}_f_a3_pr1a_core_extractions$"])).rows[0].n === 1;
+  const pr3Landed = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
   assert.equal(await widenedWriters("staff_advance_application"),
-    pr1aLanded
+    pr3Landed
+      ? "_book_staff_advance_application_core, _resolve_and_book_bank_line_core"
+      : pr1aLanded
       ? "_resolve_and_book_bank_line_core, book_staff_advance_application"
       : "book_staff_advance_application, resolve_and_book_bank_line");
-  assert.equal(await widenedWriters("bank_rule_suggested"), "accept_bank_rule_suggestion");
+  // bank_rule_suggested's ONLY writer, clara.accept_bank_rule_suggestion, is RETIRED whole at
+  // F-A3 PR-3 (Annex I) -- no successor writes this key (no new draft can ever be flagged
+  // again), so the post-PR-3 answer is the EMPTY writer set, not a renamed one. The inverted
+  // twin of "accept_bank_rule_suggestion writes this key" is "nothing does" -- proven here,
+  // never assumed.
+  assert.equal(await widenedWriters("bank_rule_suggested"), pr3Landed ? "" : "accept_bank_rule_suggestion");
 });

@@ -1,0 +1,17 @@
+// Fixture: round-8 (native adversarial leg, MUST B, P-C) — a DEFAULT import, bare-re-exported as
+// a NAMED export. registry.ts's own real pattern is always a named `export const chatTurn_vN` in
+// the source file — no workflow file ships a default export — so accepting a default import
+// re-exported as a named one would admit a shape the real, frozen files never actually use, with
+// no way to verify what the default export even IS from the import site alone. Must REJECT
+// (REGISTRY-EXPORTS-CLOSED-WORLD).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import DefaultThing from "./chatTurn.v13.impl.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { DefaultThing };

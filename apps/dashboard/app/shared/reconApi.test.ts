@@ -13,7 +13,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getBankReconciliation, getBankRule, resolveBankLineException, resolveAndBookBankLine, acceptBankRuleSuggestion } from "./reconApi";
+import { getBankReconciliation, resolveBankLineException, resolveAndBookBankLine } from "./reconApi";
 import type { PgrestError } from "./wire";
 
 function jsonRes(body: unknown, status = 200): Response {
@@ -168,33 +168,6 @@ test("[fail-closed] getBankReconciliation degrades an absent/malformed voided_re
   assert.equal(garbage?.voided_receipt, null);
 });
 
-// --- [D4/A9 fix] getBankRule reads via list_bank_rules(p_client) ----------------
-
-test("[D4 fix] getBankRule posts p_client to list_bank_rules (not the nonexistent get_bank_rule) and picks the row by id", async (t) => {
-  let seenUrl = "";
-  let seenBody: Record<string, unknown> = {};
-  t.mock.method(globalThis, "fetch", async (u: string, init?: RequestInit) => {
-    seenUrl = u;
-    seenBody = JSON.parse(String(init?.body));
-    return jsonRes([
-      { rule_id: "r1", client_id: "c1", kind: "coding", status: "proposed", pattern: {}, proposal: { account_code: "620-000" }, sighting_count: 3 },
-      { rule_id: "r2", client_id: "c1", kind: "match_settle", status: "signed", pattern: {}, proposal: {}, sighting_count: 5, retired_reason: null },
-    ]);
-  });
-  setup();
-  const rule = await getBankRule("jwt", "c1", "r2");
-  assert.ok(seenUrl.includes("/rpc/list_bank_rules"));
-  assert.equal(seenBody.p_client, "c1");
-  assert.equal(rule?.status, "signed");
-  assert.equal(rule?.kind, "match_settle");
-});
-
-test("[D4 fix] getBankRule returns null when the rule id is not in this client's register (never throws)", async (t) => {
-  t.mock.method(globalThis, "fetch", async () => jsonRes([{ rule_id: "r1" }]));
-  setup();
-  assert.equal(await getBankRule("jwt", "c1", "r-missing"), null);
-});
-
 // --- [D5/A12 fix] resolveBankLineException never sends p_booking_entries -------
 
 test("[D5 fix] resolveBankLineException never sends p_booking_entries — the verb has no such parameter", async (t) => {
@@ -287,52 +260,7 @@ test("[F-F2] a CLR40 advance_application_missing refusal from the DB is never sw
   );
 });
 
-// --- [D-b2] acceptBankRuleSuggestion — the SECOND reconApi wrapper, deferred from D-b3 with
-// the producer's clara_authenticated grant (CF-B3-1/CX1). The coding chip's upgraded action
-// (StatementDetail.tsx's span->button change): direct-INSERTs a `bank_rule_suggested` draft
-// from a live suggestion, in one call, no separate generic-draft composer.
-
-test("acceptBankRuleSuggestion posts p_client/p_line/p_rule + a fresh p_op_key, and maps entry_id straight off the receipt", async (t) => {
-  let seenUrl = "";
-  let seenBody: Record<string, unknown> = {};
-  t.mock.method(globalThis, "fetch", async (u: string, init?: RequestInit) => {
-    seenUrl = u;
-    seenBody = JSON.parse(String(init?.body));
-    return jsonRes({ entry_id: "e42" });
-  });
-  setup();
-  const out = await acceptBankRuleSuggestion("jwt", "c1", "line1", "rule1");
-  assert.ok(seenUrl.includes("/rpc/accept_bank_rule_suggestion"));
-  assert.equal(seenBody.p_client, "c1");
-  assert.equal(seenBody.p_line, "line1");
-  assert.equal(seenBody.p_rule, "rule1");
-  assert.equal(typeof seenBody.p_op_key, "string", "every write carries a fresh op_key (firm,fn,op_key idempotency)");
-  assert.ok((seenBody.p_op_key as string).length > 0);
-  assert.deepEqual(out, { entry_id: "e42" });
-});
-
-test("acceptBankRuleSuggestion returns entry_id:null on a receipt shape that carries no string id (defensive, never throws on this)", async (t) => {
-  t.mock.method(globalThis, "fetch", async () => jsonRes({}));
-  setup();
-  assert.deepEqual(await acceptBankRuleSuggestion("jwt", "c1", "line1", "rule1"), { entry_id: null });
-});
-
-test("acceptBankRuleSuggestion: a role-level 42501 refusal (the producer's grant withheld, e.g. mid-rollout before 0045's S2.9-b3 lands) reaches the caller as a plain PgrestError — no CLR, no reason, honest pass-through", async (t) => {
-  t.mock.method(globalThis, "fetch", async () => new Response(
-    JSON.stringify({ message: "permission denied for function accept_bank_rule_suggestion", code: "42501" }),
-    { status: 403, headers: { "content-type": "application/json" } },
-  ));
-  setup();
-  await assert.rejects(
-    () => acceptBankRuleSuggestion("jwt", "c1", "line1", "rule1"),
-    (e: unknown) => {
-      const pe = e as PgrestError;
-      assert.equal(pe.pgCode, "42501");
-      assert.equal(pe.status, 403);
-      assert.equal(pe.clr, null, "42501 is a role-level denial, not a governed CLRxx business refusal — never coerced into looking like one");
-      assert.equal(pe.reason, null, "no reason token: a bare role denial carries no DETAIL json for describeBankRefusal to map");
-      assert.match(pe.message ?? "", /permission denied/i, "the DB's own message reaches the caller verbatim");
-      return true;
-    },
-  );
-});
+// acceptBankRuleSuggestion (the coding-chip suggestion accept action) RETIRED
+// whole with the bank-rules learn loop (F-A3, Annex I) — the verb, its wire
+// wrapper, and these pinning tests all retire together (the drop IS the
+// cutover, Annex I's own discipline: no intermediate unused-verb state).

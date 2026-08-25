@@ -52,10 +52,15 @@ export const READ_POOL_MAX = Number(process.env.CLARA_READ_POOL_MAX || 5);
 // pool (max 2 — inside the connection budget) that reaches the EXISTING
 // wake_draft_entry writer. NOT read-only; SET ROLE clara_wake_interactive; COMMITs.
 export const WRITE_POOL_MAX = Number(process.env.CLARA_WRITE_POOL_MAX || 2);
+// Gate G1 Annex E step 1: bank_agent's own dedicated pool (write-floor shape, least-privilege).
+// Inert until clara_wake_bank_login (NOLOGIN-created, 0121) gains LOGIN+password+DSN at the
+// operator ceremony — assertProductionPoolConfig deliberately does NOT require this DSN eagerly
+// (MUST G below): that ceremony is itself gated on G1 merging first.
+export const BANK_POOL_MAX = Number(process.env.CLARA_BANK_POOL_MAX || 2);
 
 // The dedicated login each pool connects AS in production (the two-login law, N10):
 // the pool connects as this login, then SET ROLEs to its one group on every checkout.
-const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login" };
+const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login", bank: "clara_wake_bank_login" }; // step 2
 const STATEMENT_TIMEOUT_MS = Number(process.env.CLARA_STATEMENT_TIMEOUT_MS || 30000);
 const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS || 15000);
 const CONNECT_TIMEOUT_MS = Number(process.env.CLARA_CONNECT_TIMEOUT_MS || 5000);
@@ -77,24 +82,32 @@ export const READ_CREDENTIAL_TTL = process.env.CLARA_READ_CREDENTIAL_TTL || "5 m
 function dsnVarFor(which) {
   if (which === "runtime") return "CLARA_RUNTIME_DATABASE_URL";
   if (which === "write") return "CLARA_WRITE_DATABASE_URL";
+  if (which === "bank") return "CLARA_BANK_DATABASE_URL"; // Gate G1 Annex E, step 3
   return "CLARA_READ_DATABASE_URL";
 }
 
 function poolMaxFor(which) {
   if (which === "runtime") return RUNTIME_POOL_MAX;
   if (which === "write") return WRITE_POOL_MAX;
+  if (which === "bank") return BANK_POOL_MAX; // Gate G1 Annex E, step 4
   return READ_POOL_MAX;
 }
 
 /**
  * Assert the production pool config is present — call once at boot (serve.mjs). In
- * production (RELAY_TEST_MODE !== '1') ALL THREE dedicated login DSNs are REQUIRED;
+ * production (RELAY_TEST_MODE !== '1') ALL FOUR dedicated login DSNs are REQUIRED;
  * the runtime must never fall back to a shared/base identity (S4-AB8, fail-closed).
  * The write DSN (CLARA_WRITE_DATABASE_URL) joins this fail-closed set (contract §5 /
  * C-18): a coding-floor world must never boot without a wired write floor. NOTE
  * (deploy ordering): the clara_wake_write_login is created NOLOGIN in 0009 and given
  * LOGIN+password + this secret at the operator ceremony — the secret must be present
  * BEFORE the Slice-6 image boots, or the world fails closed.
+ * CLARA_BANK_DATABASE_URL is DELIBERATELY NOT eager here (MUST G, opus/Codex review — an
+ * earlier draft put it in this set, which would refuse to BOOT the whole server+worker until
+ * the bank ceremony ran, and that ceremony is itself gated on G1 merging first). `getBankPool()`
+ * below still fails CLOSED, just LAZILY, at first actual bank use (its own `loginConfig("bank")`
+ * throws if the DSN is absent) — no shared-identity fallback, only a deferred failure point that
+ * cannot fire before bank_agent is registered+enabled regardless.
  */
 export function assertProductionPoolConfig() {
   if (TEST_MODE) return;
@@ -144,6 +157,7 @@ function setupSql(role, readOnly) {
 let _runtimePool = null;
 let _readPool = null;
 let _writePool = null;
+let _bankPool = null;
 
 /** Lazy singleton runtime pool (clara_runtime). */
 export function getRuntimePool() {
@@ -174,6 +188,17 @@ export function getWritePool() {
     _writePool.on("error", (err) => console.error("[clara-runtime] write pool error:", err.message));
   }
   return _writePool;
+}
+
+/** Gate G1 Annex E step 6: lazy singleton bank pool. clara_wake_bank_login -> SET ROLE
+ * clara_wake_bank (NOT read-only, small/least-privilege) — only a DISPATCHED bank_agent
+ * workflow's own bank-scoped work uses this; the engine's claim/checkpoint stays clara_runtime. */
+export function getBankPool() {
+  if (!_bankPool) {
+    _bankPool = new pg.Pool(loginConfig("bank"));
+    _bankPool.on("error", (err) => console.error("[clara-runtime] bank pool error:", err.message));
+  }
+  return _bankPool;
 }
 
 /**
@@ -346,12 +371,26 @@ export function mintWakeCredentialObo(firmId, oboUserId, ttl = READ_CREDENTIAL_T
  * PIN BLOCKER comment at 0011:1980-1983). The three existing kinds keep byte-identical
  * semantics and no plain `interactive` credential ever gains a client.
  *
- * NARROWED TO ONE CALL PATH (R-1, verified sound at the PR-0 gate). This credential is minted
- * for the fail-closed `wake_open_question` call and NOTHING else — every other chat read and
- * write, INCLUDING the post, keeps plain `interactive` with its NULL-client guarantee, which is
- * what makes the census findings genuinely not arise rather than merely be argued around. The
- * DB backs the narrowing independently: `interactive_client` holds EXACTLY ONE
- * `wake_fn_allowlist` row, for `wake_open_question`, which posts nothing.
+ * NARROWED TO ONE CALL PATH IN v13 (R-1, verified sound at the PR-0 gate). Frozen chatTurn_v13
+ * mints this credential for the fail-closed `wake_open_question` call and NOTHING else — every
+ * other v13 chat read and write, INCLUDING the post, keeps plain `interactive` with its
+ * NULL-client guarantee, which is what made the v13-era census findings genuinely not arise
+ * rather than merely be argued around.
+ *
+ * THE DB-SIDE NARROWING THIS PARAGRAPH USED TO CLAIM IS GONE, DELIBERATELY (F-A3 PR-3 SS4,
+ * owner ruling 2026-08-25): `interactive_client` no longer holds exactly one `wake_fn_allowlist`
+ * row. Full OQ-6 chat parity mirrors the thirteen live `bank_agent` bank-matching wrappers onto
+ * `interactive_client` (fourteen rows total: those thirteen, plus `wake_open_question`), on the
+ * hard condition that the receipt tells the truth about who acted — see `clara._agent_wake_ctx`
+ * and the recut `_agent_bank_receipt` (migration `0129`, SS5). Those thirteen verbs DO post,
+ * unlike `wake_open_question`; "posts nothing" is no longer a property of the kind as a whole.
+ * `wake_book_staff_advance_application` is the one live `bank_agent` verb deliberately EXCLUDED
+ * from the mirror — no chat-parity design exists for it, so it never gains an
+ * `interactive_client` row (the two kinds' rosters differ by exactly one name each way; see
+ * `0129`'s SS-TAIL). What remains true here is v13-caller-side only: this function is generic
+ * (it mints `interactive_client` for whatever call site invokes it with a client id), and it is
+ * chatTurn_v14's own infra file, not this one, that states which of the fourteen allowlisted
+ * verbs v14 actually drives through it.
  *
  * IT KEEPS `on_behalf_of` (unlike `autodraft`, which forbids it), so the question is opened
  * under the initiating bookkeeper's live authority. The DB mint verifies the client is
@@ -438,6 +477,29 @@ export function withWriteWakeScoped(secret, fn) {
 }
 
 /**
+ * Gate G1 Annex E step 7: clara_wake_bank WRITE scoped-txn helper (shaped after
+ * withWriteWakeScoped) — binds the wake secret TXN-LOCALLY, writes, COMMITs; throw -> rollback.
+ * @template T
+ * @param {string} secret  a live bank_agent wake-credential secret (never persisted/returned)
+ * @param {(c: pg.PoolClient) => Promise<T>} fn
+ */
+export function withBankWakeScoped(secret, fn) {
+  return checkout(getBankPool(), setupSql("clara_wake_bank", false), async (c) => {
+    await c.query("begin");
+    // Parameterised SET LOCAL — the secret never enters SQL text; txn-scoped.
+    await c.query("select set_config('clara.wake_secret', $1, true)", [secret]);
+    try {
+      const result = await fn(c);
+      await c.query("commit");
+      return result;
+    } catch (err) {
+      await c.query("rollback").catch(() => {});
+      throw err;
+    }
+  });
+}
+
+/**
  * A dedicated long-lived clara_runtime client for LISTEN (the control listener
  * and the relay leader each hold one — the "LISTEN 2" of the §4.1 budget). The
  * caller owns its lifecycle (connect/end) and reconnect policy. SET ROLE is
@@ -465,10 +527,13 @@ export async function endPools() {
   const runtime = _runtimePool;
   const read = _readPool;
   const write = _writePool;
+  const bank = _bankPool;
   _runtimePool = null;
   _readPool = null;
   _writePool = null;
+  _bankPool = null;
   if (runtime) await runtime.end().catch(() => {});
   if (read) await read.end().catch(() => {});
   if (write) await write.end().catch(() => {});
+  if (bank) await bank.end().catch(() => {});
 }

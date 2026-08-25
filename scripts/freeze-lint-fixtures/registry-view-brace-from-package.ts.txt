@@ -1,0 +1,13 @@
+// Fixture: SHOULD-2 (round-5, opus reviewer's own probe) — `export {x} from "pkg"` re-exports
+// directly from a NON-RELATIVE (package) source without ever binding `x` locally — same shape
+// as the relative case, rejected unconditionally either way.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { readFile } from "node:fs/promises";

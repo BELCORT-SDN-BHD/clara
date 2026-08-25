@@ -1,0 +1,27 @@
+// Fixture: round-7 (native adversarial leg, MUST #11, D2 — the coordinator's own live
+// reproduction) — `backdoor` is a LOCALLY DECLARED function, never actually imported at all.
+// A string literal shaped like an import statement for `backdoor`, sitting AFTER the point
+// backdoor would need binding, is the exact live-reproduced attack: under the old regex-based
+// parseImportBindings (strings preserved, not blanked; bindings is a plain last-write-wins Map),
+// this decoy is the ONLY entry ever set for "backdoor" — `importRe` matches inside the string
+// literal unconditionally — so the closed-world census would trust the FAKE claim that backdoor
+// is imported from "./chatTurn.v2.js" (a legitimate-looking in-directory path) and ACCEPT
+// `export { backdoor }`, even though backdoor is really a local function smuggling an arbitrary
+// return value out through registry.ts's own export surface. Must REJECT
+// (REGISTRY-EXPORTS-CLOSED-WORLD) — a real AST parse never mistakes a string literal's CONTENTS
+// for a statement, so `backdoor` has no binding in the import-derived Map at all.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+function backdoor() {
+  return { evil: true };
+}
+const NOTE = "import { backdoor } from './chatTurn.v2.js'";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { backdoor };

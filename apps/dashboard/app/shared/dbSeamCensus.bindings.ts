@@ -131,11 +131,10 @@ export const PHANTOM_BRANCHING_ALLOW: Record<string, Record<string, string>> = {
   },
   // get_rule_post_run and list_autopost_rules RETIRED with F-A2 PR-3 (Annex B.1) —
   // both verbs are dropped and neither has a dashboard caller anymore.
+  // list_bank_rule_candidates RETIRED with F-A3 (Annex I) — the bank-rules
+  // learn loop it belonged to is dropped whole; no dashboard caller remains.
   list_bank_match_candidates: {
     counterparty_name: "hydrated from the counterparty join in some shapes; degrades to null when absent",
-  },
-  list_bank_rule_candidates: {
-    proposal: "candidate rows carry an optional proposal envelope; degrades to null when absent",
   },
 };
 
@@ -271,8 +270,9 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // [round-9 fix wave, lane N2] same story as get_adjustment_run above (list_
   // adjustment_runs' own closure reaches clara._adj_correction_door too).
   list_adjustment_runs: "entry verb wall wall_advice",
-  list_bank_rule_candidates: "direction tokens",
-  list_bank_rules: "sighting_count withdrawn",
+  // list_bank_rule_candidates and list_bank_rules RETIRED with F-A3 (Annex I) —
+  // the bank-rules learn loop both belonged to is dropped whole; no dashboard
+  // caller remains for either.
   list_depreciation_runs: "client_id",
   // `rule_backed` JOINED this line with F-A2 PR-3 (Annex B.1/B.6, OQ-2/D35): the badge and
   // the QueueRow field that consumed it (queue/QueueRowView.tsx, shared/queueKindCatalog.ts)
