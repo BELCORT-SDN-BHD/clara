@@ -155,9 +155,19 @@
 --   `REVOKE … FROM PUBLIC`, which needs ownership of pg_catalog, is cluster-wide (it would break
 --   `pg_notify` for the estate's own event relay at 0005:489 unless clara_fn_owner is re-granted),
 --   and is exactly the superuser block acl-baseline.sql:129-145 keeps commented out. That is an
---   owner ceremony. **REGISTERED FOR OWNER RE-ACCEPTANCE AGAINST THIS SURFACE** (the design's
---   own escalation shape): the residual's justifying sentence is no longer true, and it may not
---   be inherited silently.
+--   owner ceremony — **AND IT HAS NOW BEEN RULED, WITH MEASUREMENTS** (owner ruling, 2026-08-25,
+--   `docs/ops/pgcatalog-hardening-rehearsal.md` + `scripts/ops/pgcatalog-hardening.sql`, #340).
+--   Rehearsed on four throwaway rigs: **structurally NO-GO on the current managed Supabase
+--   cluster** — the deploy role owns none of the residual pg_catalog functions and is not
+--   superuser, so the ownership-gated `REVOKE`/`GRANT` fails exactly as `0002:142-147`'s own
+--   additivity finding predicts, reproduced fresh rather than assumed. The rehearsal also
+--   measured the tractable target precisely (32 functions, not the 11 acl-baseline.sql's
+--   commented block names) and its full re-grant allowlist (6 grants / 2 roles, caught by
+--   diffing a hardened rig's estate-suite run against an unhardened control — two grants were
+--   missed by grep alone and found only that way). This paragraph is therefore no longer
+--   "REGISTERED FOR OWNER RE-ACCEPTANCE" — that framing is retired; the disposition is GO on a
+--   target where the deploy role owns the residual functions or is superuser, NO-GO here, both
+--   with evidence, not a request for a ruling that has already been made.
 -- B-2 (blocker) · `query_to_xml` is a second execution engine past the cursor, the census and the
 --   caps. FIXED as far as a mechanism can: §6.1 promotes the plan census from a RELATION census
 --   to a RELATION + FUNCTION census. MEASURED REACH, stated so nobody over-reads it —
