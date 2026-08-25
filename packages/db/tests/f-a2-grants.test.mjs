@@ -397,31 +397,31 @@ test("f-a2.c12.d34-needs-client a CLIENT-LESS interactive_client mint is REFUSED
     "c12.d34-needs-client: ...naming the kind it refused");
 });
 
-test("f-a2.c12.d34-roster the pinned chat kind's allowlist is EXACTLY wake_open_question plus F-A3 PR-3's ruled bank-agency parity roster (D34, OQ-6, Annex A23)", async (t) => {
+test("f-a2.c12.d34-one-row the pinned chat kind may ask, and may NOT post or draft (D34)", async (t) => {
   if (await gateCore(t)) return;
-  // THE WALL, READ AS A CLOSED SET, extended by a NAMED, RULED widening rather than silently.
-  // D34 originally pinned this kind to `wake_open_question` alone -- posts nothing, drafts
-  // nothing. F-A3 PR-3 (OQ-6) is the first deliberate widening past that: Annex A23 rules chat
-  // parity for the bank-agency lane explicitly ("D34 named and distinguished in OQ-6 itself...
-  // OQ-6 grants no authority that then goes unfulfilled"), and the roster below is EXACTLY the
-  // PRE-staff-advance bank_agent allowlist (SS4 of F-A3 PR-3's migration mirrors it) plus the
-  // original wake_open_question row. wake_book_staff_advance_application -- SS2's own
-  // staff-advance sibling -- is DELIBERATELY EXCLUDED from this mirror (the review round's
-  // ordering decision, migration 0129's own SS4 header): OQ-6's chat parity is scoped to the
-  // bank-matching surface, OQ-7's staff-advance sibling is an autonomous-lane sibling with no
-  // chat-parity mention anywhere in the design, so its allowlist insert is deferred to AFTER
-  // SS4's copy runs and never joins this roster. Asserting the EXACT row set rather than "post
-  // is not in it" is still what makes a FUTURE, UN-ruled addition -- a FIFTEENTH verb quietly
-  // allowlisted -- turn this red.
-  const rows = await rootQuery(
+  // THE WALL, READ AS A REGISTERED ROSTER, not a hard-coded row set. `wake_open_question`
+  // writes no entry and every posting/drafting verb is absent for this kind — that wall is
+  // real and stays asserted below (the posting-verb filter). What must NOT stay a literal is
+  // the row SET itself: F-A6 PR-1 landed the SAME `deepEqual(..., ["wake_open_question"])`
+  // shape in f-a2-chat-limb.test.mjs's c13.one-row and hit exactly this — a later, LAWFUL
+  // registration (wake_freeform_read) turning red is the closed-world-by-hardcode defect the
+  // roster fixture exists to retire, not a regression to chase with a second literal. Registered
+  // in packages/db/tests/fixtures/wake-allowlist-roster.mjs's WAKE_ALLOWLIST_ROSTER, same
+  // shared fixture c13.one-row already uses.
+  const { WAKE_ALLOWLIST_ROSTER, appliedEntries, rosterFailures } =
+    await import("./fixtures/wake-allowlist-roster.mjs");
+  const roster = WAKE_ALLOWLIST_ROSTER.interactive_client;
+  const live = (await rootQuery(
     `select function_name from clara.wake_fn_allowlist
-      where wake_kind='interactive_client' order by function_name`);
-  assert.deepEqual(rows.rows.map((r) => r.function_name), [
-    "wake_add_bank_account",
-    "wake_complete_bank_reconciliation", "wake_get_bank_pack",
-    "wake_match_bank_line", "wake_open_question", "wake_propose_bank_identifier_promotion",
-    "wake_propose_bank_line_exception", "wake_resolve_and_book_bank_line",
-    "wake_resolve_bank_line_exception", "wake_settle_from_bank_line", "wake_unmatch_bank_match",
-    "wake_upsert_account", "wake_void_bank_reconciliation", "wake_void_bank_statement",
-  ], `c12.d34-roster: the pinned chat kind's allowlist is not the ruled fourteen-row set (got ${JSON.stringify(rows.rows.map((r) => r.function_name))})`);
+      where wake_kind='interactive_client' order by function_name`)).rows.map((r) => r.function_name);
+  const applied = await appliedEntries(roster, rootQuery);
+  const { failures } = rosterFailures(
+    "c12.d34-one-row", live, applied.map((e) => e.fn), roster.map((e) => e.fn),
+  );
+  assert.deepEqual(failures, [], failures.join(" | "));
+  // POSTING IS STILL THE WALL: no row of this kind may name a posting or drafting verb, whoever
+  // registers it — this half stays a literal because it is not a roster.
+  const posting = live.filter((fn) => /^wake_(post_entry|draft_entry|approve|record_client_resolution)$/.test(fn));
+  assert.deepEqual(posting, [],
+    `c12.d34-one-row: the pinned chat kind must never carry a posting/drafting verb (got ${JSON.stringify(posting)})`);
 });

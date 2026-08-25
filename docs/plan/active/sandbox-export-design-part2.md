@@ -88,7 +88,7 @@ out of the ladder.**
 
 **PR-0** (this design + **the law-28 pass, still owed**) → **PR-1** (DB: three relations, the verbs,
 the coverage check, the derivation, the allowlist rows, the censuses, the `sandbox_watermark` rows
-**— SIGNED 2026-08-23, seeded at build; §3.6 carries the trio verbatim**) → **PR-2** (grants +
+**— owner-ratified 2026-08-23, seeded at build; §3.6 carries the trio verbatim**) → **PR-2** (grants +
 census) → **PR-3** (renderer: the second entrance, the byte-burn via the SUBSTITUTION SEAM §3.6
 now specifies, the render-time watermark refusal, G-1/G-2 — **a ceremony**) → **PR-4** (human doors
 + acceptance).
@@ -96,8 +96,8 @@ now specifies, the render-time watermark refusal, G-1/G-2 — **a ceremony**) �
 **The dependency table moved to Annex K** at the fold. Six rows, unchanged in substance: F-A5 PR-1
 (the `watermark_policy_versions` DDL, U1) · F-A5 PR-4 (ceremony contention) · F-A6 PR-1 (the
 hardened `scope`/`client_scope`, U2) · **F-A6 v2** (the only source of an exact multi-client set) ·
-F-A2 PR-1 (`interactive_client`) · **the owner's signing — DISCHARGED 2026-08-23** (the trio is
-signed; the lane's DARK condition lifts at build, §3.6).
+F-A2 PR-1 (`interactive_client`) · **the owner's ratification — DISCHARGED 2026-08-23** (the trio
+is owner-ratified; the lane's DARK condition lifts at build, §3.6).
 **Owner card 1 was a seventh gating the figure path — RULED 2026-08-23, discharged below (§7).**
 
 **No D1 write-quiesce window and no train claim.** This lane CoRs no live body: `layout.mjs` gains a
@@ -116,7 +116,7 @@ it and how is out of scope**, and owner question 4 asks whether that stays true)
 
 **Not a narrowing of TA-P10 C′ — and, after the fold, not a claim of completeness either.** Built:
 free export (§3.1, §3.5), the byte-burn (§3.6), the export record (§3.1), cross-client behind a
-mechanical covered-recipient check (§3.1-§3.3), the owner-signed three-language row whose absence
+mechanical covered-recipient check (§3.1-§3.3), the owner-ratified three-language row whose absence
 refuses (§3.6), narrative-only aggregates (§3.7). **The one place narrower than a naive reading is
 §3.2's `firm_closure` rule** — the ruling's own coverage test applied to a log that cannot name its
 clients, owner question 3. **Both OWNER CARDS are now RULED** (in full, with the recommendation
@@ -137,3 +137,13 @@ that was adopted, in `sandbox-export-gate-record.md` §6's 2026-08-23 addendum):
    architecture (§3.2's recipient-coverage model) keeps the seam for it without building it now.
    The admin+ register and §7's delivery non-goal carry the boundary meanwhile, unchanged. **The
    external export path unblocks** on the firm-level register landing in PR-1.
+
+   **PR-1 builds the enforcing wall for this dark condition, not the register itself (A9,
+   fix-round 2026-08-25).** `_sandbox_export_request_core` resolves the target recipient's `kind`
+   before the coverage check and refuses outright when `kind = 'external'`, typed
+   `sandbox_export_external_unavailable` (errcode `CLR10`) — a firm_member recipient is
+   unaffected and walks the ordinary coverage path. This is Codex law-28 finding #4 against the
+   already-ruled disposition above, not new law: it makes the "unblocks on the register landing"
+   sentence true by construction instead of by omission. The refusal lifts the moment the
+   firm-level disclosure authorization register (TIER B, owner card, not built in this PR) lands
+   and the request core is updated to check it instead of hard-refusing the recipient kind.

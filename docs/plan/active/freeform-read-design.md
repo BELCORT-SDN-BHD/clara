@@ -104,7 +104,9 @@ verb      clara.wake_freeform_read(p_sql text, p_purpose text, p_task uuid, p_op
                                    p_row_cap int)  returns jsonb
           SECURITY INVOKER; granted to clara_freeform_ro and nothing else; allowlist rows per
           read wake kind; holds the whole ladder and opens the cursor, so the SQL runs with the
-          CALLER's privileges. ONE body — there is no shared core and NO p_scope argument in v1.
+          CALLER's privileges. NOTE-3 TRUE: the body factors the ladder into a shared core,
+          `clara._freeform_core` (§0.1b(7), v2-readiness), called from this one verb only. NO
+          p_scope argument in v1 stands; v2 widens `client_scope` as a SET, not a new param.
 arm       clara._freeform_arm(p_sql text, p_purpose text, p_task uuid, p_op_key text)
           SECURITY DEFINER owned by clara_fn_owner, search_path pinned (T18-clean); granted to
           clara_freeform_ro. INSERTs the ARMED receipt, arms the txn-local capability, refuses a
@@ -241,7 +243,7 @@ create policy p_<t>_freeform on clara.<t> for select to clara_freeform_ro
   **S-2 excluded from v1** — `document_extractions`/`document_regions` carry no `client_id`
   (survey §3.5), so under a client pin they would leak sibling clients' OCR text. **Named cost, in
   the contract's own words (D-28, OQ-E):** the contract says *"XLSX/DOCX content (values-only today,
-  `monetary_cents: null`) becomes reachable by AI-assisted read here"* (`wave-f-contract.md:257-259`)
+  `monetary_cents: null`) becomes reachable by AI-assisted read here"* (`wave-f-contract.md:263-265`)
   — and it is **not**, through this door, in v1: structured-parse output lands in exactly those two
   tables. It stays reachable through the existing typed door (`read_document` →
   `clara.get_document_extract`, `0011:3232-3260`); v2's shape is the EXISTS join to
@@ -305,10 +307,13 @@ an unknown future value or a missing key — as non-admitting.
 ### 3.6 The receipt, and the human who reads it (TA-P4)
 
 `clara.freeform_read_log` is ALTERed in place (zero rows predicted, P-1): `firm_id` /
-`query_text` / `purpose` set NOT NULL, and it gains `client_scope uuid`, `scope text` (`client` /
+`query_text` / `purpose` set NOT NULL, and it gains `client_scope uuid[]` (NOTE-3 TRUE,
+independent review: a SET, not a scalar `uuid` — §0.1b(6)), `scope text` (`client` /
 `firm` — **`cross_client` is NOT in v1's enumeration and v2 EXTENDS it**, the D34 extend-never-
 weaken precedent), `acting_actor`, `on_behalf_of`, `via_wake_kind`, `task_id`, `op_key`, `verb`,
-`settled_at`, `outcome`, `refusal_reason`, `rung_vector jsonb`, `relations_read text[]`,
+`arm_txid xid8` (NOTE-3 TRUE: the unforgeable txn-scoped arm key, §0.1(4) — absent from earlier
+annex drafts; not a GUC, so a payload cannot overwrite it), `settled_at`, `outcome`,
+`refusal_reason`, `rung_vector jsonb`, `relations_read text[]`,
 `row_count`, `byte_count`, `duration_ms`, `model_snapshot jsonb` — full column list and CHECKs in
 Annex C. `outcome` is its **own** domain (`ok` / `refused` / `error`), because `audit_log`'s is
 closed to `'ok'` by CHECK (`0002:285`) and records committed successes only.
@@ -419,7 +424,7 @@ an F-A2 ceremony's train it rides that window for free; **the lead rules the tra
    adversarial pass has NOT yet been run and must now run against THIS shape** — the injection
    surface's execution order (D-18) and its granted-function set (D-20/D-21) both changed, so a pass
    run against v1 would have been run against a body nobody will build. The rig replay answers
-   **P-1..P-20**.
+   **P-1..P-20**. **TRUED 2026-08-23 — it ran** (`freeform-read-law28-review.md`), folded into §0.1c.
 2. **PR-1 (DB).** The two roles; the enumerated grants (35 relations, **7** functions); the
    policies; the `freeform_read_log` ALTER + the settle-once and must-settle triggers + the human
    grant and policy; **ONE verb** plus `_freeform_arm` / `_freeform_settle` /
@@ -428,8 +433,14 @@ an F-A2 ceremony's train it rides that window for free; **the lead rules the tra
    the migration tail itself.
 3. **PR-1b (DB, no ceremony).** `clara.list_freeform_reads` + its floor.
 4. **PR-2 (runtime).** The fourth pool + login wiring (`LOGIN_NAMES`, `assertProductionPoolConfig`,
-   `withFreeformRead` opening the txn, binding the wake secret txn-locally, calling the verb,
-   committing, **and resetting session state on release** — R-9); a new `chatTurn_vN` **numbered at
+   `withFreeformRead` opening the txn, binding the wake secret txn-locally, calling the verb ONLY
+   (S-1: never `_freeform_arm`/`_freeform_settle` directly), committing, **and resetting session
+   state on release with `DISCARD ALL`, not `reset all`** (S-4/H-5, independent review: `reset all`
+   does not release a session advisory lock a payload took on a well-known firm-derived key) —
+   R-9; **and setting a session-level `statement_timeout` before issuing the call** (S-4/H-4: a
+   `SET LOCAL` inside the verb cannot bound a single FETCH — PG arms the statement timer once, at
+   the top-level statement's start — so the pool-set session timeout is the only wall that fires
+   inside a stalled fetch and is load-bearing, not optional); a new `chatTurn_vN` **numbered at
    MERGE time, not here** (tip is `chatTurn_v12`, `registry.ts:46`; F-A2's PR-2 claims `_v13` first
    — obligation 4 below) plus a **new frozen `chatTurn.v10.infra` `_vN`** minting
    `interactive_client` for the freeform call path ALONE; the tool definition with its caps. **The

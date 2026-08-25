@@ -2,7 +2,7 @@
 
 **Status: REHEARSED on a throwaway. NOT applied anywhere live. Verdict: GO on a target where the
 deploy role owns the residual functions or is superuser; structurally NO-GO on the current managed
-Supabase cluster (evidence in §7) — that half of the finding is itself the deliverable, per the
+Supabase cluster (evidence in §9) — that half of the finding is itself the deliverable, per the
 owner's own framing ("a real-cluster ceremony ONLY if provably safe").**
 
 Owner ruling, 2026-08-25: F-A6's law-28 review (`docs/plan/active/freeform-read-law28-review.md`)

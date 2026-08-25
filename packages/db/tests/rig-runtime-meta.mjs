@@ -160,7 +160,20 @@ export async function loginRoleAudit() {
     clara_runtime_login: ROLES.runtime,
     clara_agent_read_login: ROLES.agentRo,
   };
+  // F-A6 PR-1 — THE FOURTH LOGIN, added bimodally so this audit stays green at every frontier:
+  // present once F-A6 has applied, simply not audited before that. It is a member of
+  // clara_freeform_ro ALONE, and the loop below proves that in both directions (the wanted
+  // membership must exist; every other one is a finding).
+  const freeformLive = (await rootQuery(
+    "select to_regrole('clara_freeform_login') is not null and to_regrole('clara_freeform_ro') is not null as ok",
+  )).rows[0].ok;
+  if (freeformLive) expect.clara_freeform_login = "clara_freeform_ro";
+  // EXTEND-NEVER-WEAKEN, and this is the half that matters for the EXISTING logins: the new
+  // group joins the forbidden set, so clara_runtime_login and clara_agent_read_login are now
+  // proved NOT to reach the freeform read surface. Adding a login without adding its group here
+  // would have left every older login silently un-probed against it.
   const forbidden = new Set([ROLES.authenticated, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.fnOwner]);
+  if (freeformLive) forbidden.add("clara_freeform_ro");
   const problems = [];
   for (const [login, want] of Object.entries(expect)) {
     const r = await rootQuery("select rolcanlogin, rolsuper, rolbypassrls from pg_roles where rolname = $1", [login]);
