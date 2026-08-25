@@ -31,10 +31,32 @@ import {
 let live = false;
 let world = null;
 
+/** F-A3 PR-3 (Annex I) drops clara.accept_bank_rule_suggestion whole -- this file's entire
+ *  subject. `db-slice-frontiers` (the weekly sweep + manual dispatch, AGENTS.md CI/CD;
+ *  packages/db/tests/split-lists/test-list-d-b2.txt's own `#!cells-floor:` count) still
+ *  runs this file at the D-b2 frontier (0041_asm + the chain through 0045) -- NOT D-b3
+ *  (test-list-d-b3.txt does not name it; review round fix, this comment previously claimed
+ *  both) -- where the producer is exactly as designed and this whole battery must stay
+ *  green. So this is a
+ *  REVERSE/upper gate (the x42-s5-helpers.mjs `pr3Landed` / x42b2-r8-tails.test.mjs `pr3Landed`
+ *  precedent, both already ruled this way): once the producer is retired on the LIVE/estate
+ *  frontier this file's own rig runs against, the battery skips LOUDLY rather than failing --
+ *  it never asserts a stale claim, and it is never silently deleted either. */
+async function producerRetired() {
+  return (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
+}
+
 before(async () => {
   live = await af2SubstrateReady();
   if (!live) {
     noteLane("0037/0038/0040 bank substrate absent — the x42 PRODUCER battery is dormant");
+    return;
+  }
+  if (await producerRetired()) {
+    live = false;
+    noteLane("F-A3 PR-3 retires clara.accept_bank_rule_suggestion whole (Annex I) — the x42 PRODUCER battery is dormant on this frontier; db-slice-frontiers still proves it green at D-b2 (0041_asm..0045)");
     return;
   }
   world = await af2World();

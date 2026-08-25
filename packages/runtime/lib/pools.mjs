@@ -346,12 +346,26 @@ export function mintWakeCredentialObo(firmId, oboUserId, ttl = READ_CREDENTIAL_T
  * PIN BLOCKER comment at 0011:1980-1983). The three existing kinds keep byte-identical
  * semantics and no plain `interactive` credential ever gains a client.
  *
- * NARROWED TO ONE CALL PATH (R-1, verified sound at the PR-0 gate). This credential is minted
- * for the fail-closed `wake_open_question` call and NOTHING else — every other chat read and
- * write, INCLUDING the post, keeps plain `interactive` with its NULL-client guarantee, which is
- * what makes the census findings genuinely not arise rather than merely be argued around. The
- * DB backs the narrowing independently: `interactive_client` holds EXACTLY ONE
- * `wake_fn_allowlist` row, for `wake_open_question`, which posts nothing.
+ * NARROWED TO ONE CALL PATH IN v13 (R-1, verified sound at the PR-0 gate). Frozen chatTurn_v13
+ * mints this credential for the fail-closed `wake_open_question` call and NOTHING else — every
+ * other v13 chat read and write, INCLUDING the post, keeps plain `interactive` with its
+ * NULL-client guarantee, which is what made the v13-era census findings genuinely not arise
+ * rather than merely be argued around.
+ *
+ * THE DB-SIDE NARROWING THIS PARAGRAPH USED TO CLAIM IS GONE, DELIBERATELY (F-A3 PR-3 SS4,
+ * owner ruling 2026-08-25): `interactive_client` no longer holds exactly one `wake_fn_allowlist`
+ * row. Full OQ-6 chat parity mirrors the thirteen live `bank_agent` bank-matching wrappers onto
+ * `interactive_client` (fourteen rows total: those thirteen, plus `wake_open_question`), on the
+ * hard condition that the receipt tells the truth about who acted — see `clara._agent_wake_ctx`
+ * and the recut `_agent_bank_receipt` (migration `0129`, SS5). Those thirteen verbs DO post,
+ * unlike `wake_open_question`; "posts nothing" is no longer a property of the kind as a whole.
+ * `wake_book_staff_advance_application` is the one live `bank_agent` verb deliberately EXCLUDED
+ * from the mirror — no chat-parity design exists for it, so it never gains an
+ * `interactive_client` row (the two kinds' rosters differ by exactly one name each way; see
+ * `0129`'s SS-TAIL). What remains true here is v13-caller-side only: this function is generic
+ * (it mints `interactive_client` for whatever call site invokes it with a client id), and it is
+ * chatTurn_v14's own infra file, not this one, that states which of the fourteen allowlisted
+ * verbs v14 actually drives through it.
  *
  * IT KEEPS `on_behalf_of` (unlike `autodraft`, which forbids it), so the question is opened
  * under the initiating bookkeeper's live authority. The DB mint verifies the client is

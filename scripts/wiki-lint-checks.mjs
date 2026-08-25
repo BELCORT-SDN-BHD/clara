@@ -95,8 +95,9 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * ONE ENTRY TODAY (it was empty until 0055). Adding an entry is a contract-level decision,
- * exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR with its why printed.
+ * TWO ENTRIES TODAY (it was empty until 0055; F-A6 PR-1 added the second). Adding an entry is a
+ * contract-level decision, exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR
+ * with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
   // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
@@ -174,6 +175,22 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
     relations: [],
     calls: ["_human_ctx", "_upsert_account_core", "role_rank"],
   }],
+  // F-A3 PR-3 (0129_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder). ONE more
+  // CoR patch of the exact same family as the nine above: SS2 factors book_staff_advance_
+  // application onto the PR-1a idiom (a thin human delegator + an ungranted
+  // _book_staff_advance_application_core), reading the LIVE prosrc via
+  // `pg_get_functiondef('clara.book_staff_advance_application(...)'::regprocedure)` — a
+  // LITERAL signature, so the patch's target already resolves — and re-installing it via the
+  // same unprovable `execute replace(...) || 'AS $fa3pr3_core$' || replace(v_src, v_anchor,
+  // v_ctx) || '$fa3pr3_core$'` shape (a migration-time-only variable, never a literal in this
+  // file's own text). `relations`/`calls` are the EXACT `clara.*` token set the live installed
+  // body was MEASURED to reference (a rig read, 2026-08-25), and the body was independently
+  // confirmed to contain no word-bounded "wiki" substring (`prosrc !~* '\ywiki'`, same read).
+  ["book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)", {
+    why: "F-A3 PR-3 SS2 — see the family note above.",
+    relations: [],
+    calls: ["_book_staff_advance_application_core", "_human_ctx", "role_rank"],
+  }],
   ["apply_open_items(uuid,jsonb,text,text)", {
     why: "0055 S7 — the TAIL ASSERTION block (PR #226, full ADR-061 ladder; the round-3 "
       + "scoped review corrected this entry's first cut, which mis-attributed the finding "
@@ -195,6 +212,39 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
     calls: ["_human_ctx", "role_rank", "_reserve_op", "_hash", "_canonical_counterparty",
       "_subledger_outstanding", "_book_today", "_audit", "_append_event", "_finish_op",
       "_fa_today", "staff_advance_summary", "staff_advance_statement", "apply_open_items"],
+  }],
+  ["wake_freeform_read(text,text,uuid,text,integer)", {
+    why: "F-A6 PR-1 — the audited freeform read (design v2 §3.3, D-3/D-18; full ADR-061 ladder "
+      + "plus law 28's named cross-model adversarial pass). This is the ONE function in the "
+      + "estate whose statement is UNRECONSTRUCTIBLE BY CONSTRUCTION: the SQL is a parameter the "
+      + "model composed, so `EXECUTE v_composed` (the cursor open) and `EXECUTE 'explain (format "
+      + "json, verbose true) ' || v_composed` (the plan census) can never be proven non-wiki "
+      + "from literals. That is the shape ADR-0071 fixed and the sitting re-confirmed as already "
+      + "ruled, so it is not open to being written as plain SQL.\n"
+      + "WHAT UPHOLDS 0017:1424-1426 INSTEAD, and it is an ACL fact rather than a text fact: the "
+      + "statement executes as `clara_freeform_ro` (the verb is SECURITY INVOKER, which is the "
+      + "entire mechanism), and that role holds SELECT on exactly 35 enumerated relations, NONE "
+      + "of them a wiki relation — the migration's own tail derives the set from the catalog and "
+      + "RAISES if it ever reaches one. So a wiki payload does not slip past this gate; it is "
+      + "refused by Postgres at planning with `(42501, relation_denied)`, MEASURED on the rig, "
+      + "and the refusal is recorded on the read's receipt. The seven wiki relations reach the "
+      + "agent ONLY through the FORK-6-gated context pack, exactly as 0017 decided; F-A6 does "
+      + "not reverse that decision, it inherits it.\n"
+      + "THE DECLARED SETS BELOW ARE EMPTY ON PURPOSE. This waiver is the 'genuinely non-wiki but "
+      + "not reconstructible' case the doctrine above provides for: there are no static targets "
+      + "to declare, because there is no static statement. Declaring a relation here would be "
+      + "worse than declaring none — it would imply a reviewed static target that does not "
+      + "exist. S-3 CORRECTION (independent review, F-A6 PR-1): a prior cut of this paragraph "
+      + "cited 'f-a6.wall.wiki', a battery cell that was never written — the citation is struck. "
+      + "The enforcement lives in the GRANT, and the migration's OWN tail (§10 check (1)) is what "
+      + "forces it non-vacuously: it derives clara_freeform_ro's SELECT set from the catalog on "
+      + "EVERY apply and RAISES if any relation named there matches `wiki%` — a real, executed "
+      + "assertion, re-proven by every rig replay, not a narrated claim. That is a grant-level "
+      + "proof (no wiki relation is ever enumerated); it does not itself exercise the verb "
+      + "against a live wiki payload — the wake-credential/task path a live exercise needs is "
+      + "PR-2's, not built in this DB-only PR.",
+    relations: [],
+    calls: [],
   }],
 ]);
 

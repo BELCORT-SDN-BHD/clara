@@ -60,6 +60,18 @@ function unready(t) {
   return false;
 }
 
+/** The group roles a login shell must NOT be able to SET ROLE into. `swap` names the group this
+ *  particular login legitimately owns and which is therefore asserted POSITIVELY elsewhere in
+ *  the cell — it is excluded here so the negative loop never contradicts the positive arm.
+ *  clara_freeform_ro (F-A6 PR-1) joins the set as soon as it exists, so the two older logins are
+ *  probed against it from its first day rather than from whenever someone remembers. */
+async function otherGroups(swap = ROLES.agentRo) {
+  const base = [ROLES.authenticated, ROLES.runtime, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.fnOwner];
+  const live = (await rootQuery("select to_regrole('clara_freeform_ro') is not null as ok")).rows[0].ok;
+  if (live) base.push("clara_freeform_ro");
+  return base.filter((r) => r !== swap);
+}
+
 // ===========================================================================
 // §3.0 — roles + the runtime's only membership surface.
 // ===========================================================================
@@ -84,8 +96,11 @@ test("S4-AB1 real session authorization: bare logins hold NO ambient privilege; 
       bare = e.code;
     }
     assert.equal(bare, PG.insufficientPrivilege, `bare clara_runtime_login cannot read clara tables (got ${bare ?? "SUCCESS"})`);
-    // (d) no lateral movement to any OTHER group role.
-    for (const other of [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.fnOwner]) {
+    // (d) no lateral movement to any OTHER group role. F-A6 PR-1 adds clara_freeform_ro to the
+    // set — extend-never-weaken: every EXISTING login gains the negative arm against the new
+    // group the same day the group is born, or the freeform surface would be the one group no
+    // older login was ever probed against.
+    for (const other of await otherGroups(ROLES.runtime)) {
       let denied = null;
       try {
         await c.query(`set role ${other}`);
@@ -119,7 +134,7 @@ test("S4-AB1 real session authorization: bare logins hold NO ambient privilege; 
       bare = e.code;
     }
     assert.equal(bare, PG.insufficientPrivilege, `bare clara_agent_read_login cannot read clara tables (got ${bare ?? "SUCCESS"})`);
-    for (const other of [ROLES.authenticated, ROLES.runtime, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.fnOwner]) {
+    for (const other of await otherGroups(ROLES.agentRo)) {
       let denied = null;
       try {
         await c.query(`set role ${other}`);

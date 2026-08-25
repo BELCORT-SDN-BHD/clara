@@ -40,7 +40,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { opk, endPool, printLaneNotes, printSkipCount, noteLane, HIGH_STAKES_CENTS } from "./a21-helpers.mjs";
+import { opk, rootQuery, endPool, printLaneNotes, printSkipCount, noteLane, HIGH_STAKES_CENTS } from "./a21-helpers.mjs";
 import {
   af2SubstrateReady, skipAf2, caught, resolveAndBookBankLine,
   CLR10, BANKCOA, AR1, ADJX, REVN,
@@ -55,10 +55,28 @@ import { bankLines, bankMovements, blockDetail } from "./x42-af2-rebook3-kit.mjs
 let live = false;
 let world = null;
 
+/** F-A3 PR-3 (Annex I) drops clara.accept_bank_rule_suggestion whole -- this file's ONE cell
+ *  (x42.af2-15e) is entirely about a suggestion THAT producer mints. `db-slice-frontiers` still
+ *  runs this fork at the D-b2 frontier (test-list-d-b2.txt), where the producer is exactly as
+ *  designed. REVERSE/upper gate, the x42-s5-helpers.mjs `pr3Landed` precedent: skip loudly once
+ *  the producer is retired on the frontier this rig runs against, never fail -- and never
+ *  delete the file, since the frozen frontier drill still needs it (Annex I's "nothing is
+ *  deleted without a successor claim" — the successor here is this same file, gated). */
+async function producerRetired() {
+  return (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
+}
+
 before(async () => {
   live = await af2SubstrateReady();
   if (!live) {
     noteLane("0037/0038/0040 bank substrate absent — the x42 AF-2 ROUND-5 part-2 battery is dormant");
+    return;
+  }
+  if (await producerRetired()) {
+    live = false;
+    noteLane("F-A3 PR-3 retires clara.accept_bank_rule_suggestion whole (Annex I) — x42.af2-15e is dormant on this frontier; db-slice-frontiers still proves it green at D-b2 (0041_asm..0045)");
     return;
   }
   world = await af2World();

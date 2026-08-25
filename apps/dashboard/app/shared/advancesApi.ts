@@ -78,8 +78,9 @@ export type GetStaffAdvanceRead = {
 
 /** [D4-precedent fix, restated] there is no single-row `get_staff_advance` in
  *  the ABI (§A names only summary/statement/tie) — this reads THROUGH
- *  `staff_advance_summary` and picks the one row by `advance_id`, exactly
- *  mirroring `reconApi.ts`'s `getBankRule` reading through `list_bank_rules`.
+ *  `staff_advance_summary` and picks the one row by `advance_id` (the "pick by
+ *  id from a list" idiom this house convention uses wherever no single-row
+ *  getter exists).
  *
  *  [round-3 fix — THE DB OWNS THE DATE, NEVER THE BROWSER] this used to compute
  *  `new Date().toISOString().slice(0, 10)` — the BROWSER's **UTC** date — and

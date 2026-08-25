@@ -1520,17 +1520,21 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
   assert.ok(!settleSrc.includes("pg_advisory_xact_lock(203005003") && !settleSrc.includes("pg_advisory_xact_lock(203005004"),
     "_settle_from_bank_line_core takes NO advisory rung in its own body (the allocation cores own it)");
 
-  // THE WRAPPER PIN -- BOTH live overloads (the 12-arg form and the 13-arg p_via_rule form).
-  // Each must be a real delegator: the bookkeeper+ floor, then the core call, and NOTHING that
-  // acquires. Without this, a future build could re-inline the ladder into one overload and
-  // walk out from under the core pin above. Per-oid, because fnSource() concatenates overloads
-  // and a delegating twin would mask an inlined one.
+  // THE WRAPPER PIN -- the one live overload (the 12-arg human form; F-A3 PR-3 drops the
+  // 13-arg p_via_rule form with the rest of the retired rules machine, Annex I -- this cell
+  // pinned BOTH overloads pre-PR-3, review round truing). It must be a real delegator: the
+  // bookkeeper+ floor, then the core call, and NOTHING that acquires. Without this, a future
+  // build could re-inline the ladder into the overload and walk out from under the core pin
+  // above. Per-oid, because fnSource() concatenates overloads and a delegating twin would mask
+  // an inlined one.
   const settleOverloads = await rootQuery(
     `select p.oid::regprocedure::text as sig, p.prosrc as src
        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname='settle_from_bank_line' order by 1`,
   );
-  assert.equal(settleOverloads.rows.length, 2, "clara.settle_from_bank_line still has exactly the two live overloads (12-arg + 13-arg p_via_rule)");
+  // F-A3 PR-3 drops the 13-arg p_via_rule overload with the rest of the retired rules machine
+  // (Annex I) -- the count is exact, never >=, so the drop is visible HERE rather than absorbed.
+  assert.equal(settleOverloads.rows.length, 1, "clara.settle_from_bank_line has exactly the one live overload (the 12-arg human form; PR-3 drops the 13-arg p_via_rule form)");
   for (const { sig, src } of settleOverloads.rows) {
     ordered(src, [
       "clara._human_ctx(clara.role_rank('bookkeeper'))",  // the floor stays in the wrapper ...
@@ -1556,9 +1560,14 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname='match_bank_line' order by p.pronargs`,
   );
-  assert.deepEqual(matchOverloads.rows.map((r) => r.nargs), [6, 7],
-    "clara.match_bank_line still has exactly the two live arities (the 6-arg human form and the 7-arg p_via_rule form PR-3 drops)");
-  const [match6, match7] = matchOverloads.rows;
+  // F-A3 PR-3 drops the 7-arg p_via_rule overload with the rest of the retired rules machine
+  // (Annex I) -- its own claim (that it was live and unfactored) is retired WITH it, per the
+  // test-breakage-split-by-claim law (Annex I): a verb-existence claim retires in the drop PR,
+  // not as a stub. The inverted twin -- the /7 arity is now ABSENT -- is exactly what the
+  // single-row count above already proves; no separate differential is owed.
+  assert.deepEqual(matchOverloads.rows.map((r) => r.nargs), [6],
+    "clara.match_bank_line has exactly the one live arity (the 6-arg human form; PR-3 drops the 7-arg p_via_rule form)");
+  const [match6] = matchOverloads.rows;
   ordered(match6.src, [
     "clara._human_ctx(clara.role_rank('bookkeeper'))", // the floor stays in the wrapper ...
     "clara._match_bank_line_core(",                    // ... above the delegation
@@ -1568,14 +1577,6 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
     assert.ok(!match6.src.includes(rung),
       `${match6.sig} must acquire NOTHING in its own body — found the rung "${rung}", so the ladder has been re-inlined above the core and the core's pin no longer covers the live path`);
   }
-  // The DIFFERENTIAL half: the rule arity is UNTOUCHED by PR-1a and still carries the full
-  // order itself. Without this the two assertions above could both be satisfied by a build that
-  // quietly factored /7 as well, and the /7 drop in PR-3 would then be measuring a stub.
-  ordered(match7.src, [
-    "order by je.id for update",
-    "pg_advisory_xact_lock(203005004",
-    "order by l.id for update",
-  ], `${match7.sig} lock order (the rule arity is NOT extracted by PR-1a)`);
 
   // void_bank_statement: 004 -> 203005006 (the NEW per-account chain rung) ->
   // line rows FOR UPDATE -> the live-member probe (the void-vs-match race).

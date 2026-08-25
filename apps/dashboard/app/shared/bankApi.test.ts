@@ -9,6 +9,8 @@ import {
   listBankAccounts, listBankAccountProposals, getBankStatement, getBanksInterviewAnswer,
   addBankAccount, enterBankStatement, deactivateBankAccount, remapBankAccountCoa,
   matchBankLine, unmatchBankMatch, settleFromBankLine, completePendingMatch, voidBankStatement,
+  listOpenBankLineExceptionProposals, listOpenBankIdentifierPromotionProposals,
+  confirmBankIdentifierPromotion, getBankAgencyHold, setBankAgencyHold,
 } from "./bankApi";
 import type { PgrestError } from "./wire";
 
@@ -176,19 +178,23 @@ test("matchBankLine passes adjustments + the ack flag through when supplied", as
   assert.equal(seenBody.p_ack_period_exceptions, true);
 });
 
-test("matchBankLine omits p_via_rule on a plain human match, sends it when confirmed from a suggestion (C-c splice #4)", async (t) => {
-  const bodies: Record<string, unknown>[] = [];
+// F-A3 PR-3 (Annex I): the bank-rules machine and its C-c splice #4 `p_via_rule` overload on
+// match_bank_line/settle_from_bank_line RETIRED WHOLE — `viaRuleId` no longer exists on either
+// function's TypeScript signature, so the two tests that once sent it are simply gone, not
+// replaced. This successor assertion is the half of the old coverage that is STILL a live
+// claim, restored per Annex I's "test breakage split by claim" law (nothing retires without a
+// named successor): matchBankLine must NEVER put `p_via_rule` on the wire — the retired 0040
+// overload no longer resolves, so a stray key here would be a live 42883 in production, not a
+// harmless no-op.
+test("matchBankLine never sends p_via_rule -- the 0040 overload it once selected is retired", async (t) => {
+  const seen: Record<string, unknown>[] = [];
   t.mock.method(globalThis, "fetch", async (_u: string, init?: RequestInit) => {
-    bodies.push(JSON.parse(String(init?.body)));
+    seen.push(JSON.parse(String(init?.body)));
     return jsonRes({ match_id: "m1" });
   });
   setup();
   await matchBankLine("jwt", { clientId: "c1", lineIds: ["l1"], entries: [{ entry_id: "e1", matched_cents: -1000 }] });
-  assert.ok(!("p_via_rule" in (bodies[0] ?? {})), "the 0038 arity is untouched when no rule was confirmed");
-  await matchBankLine("jwt", {
-    clientId: "c1", lineIds: ["l1"], entries: [{ entry_id: "e1", matched_cents: -1000 }], viaRuleId: "rule1",
-  });
-  assert.equal(bodies[1]?.p_via_rule, "rule1", "the 0040 overload resolves when a suggestion was confirmed");
+  assert.ok(!("p_via_rule" in seen[0]!), "matchBankLine's body carries no p_via_rule key at all");
 });
 
 test("unmatchBankMatch posts p_reason under unmatch_bank_match", async (t) => {
@@ -223,21 +229,9 @@ test("settleFromBankLine sends the full pinned arg list with its stated defaults
   assert.equal(seenBody.p_attestation, null);
   assert.equal(seenBody.p_control_account, null);
   assert.equal(receipt.status, "approved");
-  assert.ok(!("p_via_rule" in seenBody), "the 0038 arity is untouched when no rule was confirmed");
-});
-
-test("settleFromBankLine sends p_via_rule when confirmed from a suggestion (C-c splice #4)", async (t) => {
-  let seenBody: Record<string, unknown> = {};
-  t.mock.method(globalThis, "fetch", async (_u: string, init?: RequestInit) => {
-    seenBody = JSON.parse(String(init?.body));
-    return jsonRes({ entry_id: "e1", match_id: "m1", status: "approved" });
-  });
-  setup();
-  await settleFromBankLine("jwt", {
-    clientId: "c1", lineId: "l1", counterpartyId: "cp1",
-    allocations: [{ item_id: "i1", amount_cents: 10000 }], memo: "settle inv-1", viaRuleId: "rule1",
-  });
-  assert.equal(seenBody.p_via_rule, "rule1");
+  // Review round restore (Annex I successor, same claim as matchBankLine's own above): the
+  // retired 0040 p_via_rule overload no longer resolves, so this must stay a live guard.
+  assert.ok(!("p_via_rule" in seenBody), "settleFromBankLine's body carries no p_via_rule key at all");
 });
 
 test("completePendingMatch posts p_match under complete_pending_match", async (t) => {
@@ -250,4 +244,91 @@ test("completePendingMatch posts p_match under complete_pending_match", async (t
   const receipt = await completePendingMatch("jwt", "c1", "m1");
   assert.ok(seenUrl.includes("/rpc/complete_pending_match"));
   assert.equal(receipt.status, "live");
+});
+
+// ---------------------------------------------------------------------------
+// F-A3 PR-3 review round (addendum SHOULD): the three new bank-agency doors
+// shipped with zero wire coverage. Each cell below pins the exact request this
+// lane sends — the URL query for a pgrestSelect read, the exact body key SET
+// for an rpc writer — in the file's own idiom (counterpartyApi.test.ts's
+// assert.match(url, ...) for a select; adjustmentApi.test.ts's
+// assert.deepEqual(Object.keys(body).sort(), [...]) for a writer's full shape).
+// ---------------------------------------------------------------------------
+
+test("listOpenBankLineExceptionProposals scopes by client, kind and open status", async (t) => {
+  let url = "";
+  t.mock.method(globalThis, "fetch", async (u: string) => { url = String(u); return jsonRes([]); });
+  setup();
+  await listOpenBankLineExceptionProposals("jwt", "client-1");
+  assert.ok(url.includes("/bank_agent_proposals?"), "reads the table directly — no list_/get_ RPC exists for it");
+  assert.match(url, /client_id=eq\.client-1/);
+  assert.match(url, /kind=eq\.line_exception/, "never returns identifier_promotion proposals to this door");
+  assert.match(url, /status=eq\.open/, "an already-accepted proposal must not reappear");
+  assert.match(url, /select=id,kind,subject_id,payload,rationale,status,created_at/);
+});
+
+test("listOpenBankIdentifierPromotionProposals scopes by client, kind and open status", async (t) => {
+  let url = "";
+  t.mock.method(globalThis, "fetch", async (u: string) => { url = String(u); return jsonRes([]); });
+  setup();
+  await listOpenBankIdentifierPromotionProposals("jwt", "client-1");
+  assert.ok(url.includes("/bank_agent_proposals?"));
+  assert.match(url, /client_id=eq\.client-1/);
+  assert.match(url, /kind=eq\.identifier_promotion/, "never returns line_exception proposals to this door");
+  assert.match(url, /status=eq\.open/);
+});
+
+test("confirmBankIdentifierPromotion posts exactly p_proposal and a fresh p_op_key -- nothing else", async (t) => {
+  let seenUrl = "";
+  let body: Record<string, unknown> = {};
+  t.mock.method(globalThis, "fetch", async (u: string, init?: RequestInit) => {
+    seenUrl = u;
+    body = JSON.parse(String(init?.body));
+    return jsonRes({ status: "confirmed" });
+  });
+  setup();
+  await confirmBankIdentifierPromotion("jwt", "prop-1");
+  assert.ok(seenUrl.includes("/rpc/confirm_bank_identifier_promotion"));
+  assert.equal(body.p_proposal, "prop-1");
+  assert.equal(typeof body.p_op_key, "string");
+  assert.deepEqual(Object.keys(body).sort(), ["p_op_key", "p_proposal"],
+    "no identifier_kind/identifier_value/client leaks onto this wire -- the DB, not the dashboard, decides what this door confirms");
+});
+
+test("getBankAgencyHold reads client_id-scoped and returns null when no row has ever been set", async (t) => {
+  let url = "";
+  t.mock.method(globalThis, "fetch", async (u: string) => { url = String(u); return jsonRes([]); });
+  setup();
+  const hold = await getBankAgencyHold("jwt", "client-1");
+  assert.ok(url.includes("/bank_agency_holds?"));
+  assert.match(url, /client_id=eq\.client-1/);
+  assert.match(url, /limit=1/);
+  assert.equal(hold, null, "no row is the honest 'never held' state, never fabricated as on_hold:false");
+});
+
+test("getBankAgencyHold maps a live row", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    jsonRes([{ client_id: "client-1", on_hold: true, reason: "suspicious statement", set_by: "u1", set_at: "2026-08-25T00:00:00Z" }]));
+  setup();
+  const hold = await getBankAgencyHold("jwt", "client-1");
+  assert.equal(hold?.on_hold, true);
+  assert.equal(hold?.reason, "suspicious statement");
+});
+
+test("setBankAgencyHold posts exactly p_client/p_on/p_reason/p_op_key -- nothing else", async (t) => {
+  let seenUrl = "";
+  let body: Record<string, unknown> = {};
+  t.mock.method(globalThis, "fetch", async (u: string, init?: RequestInit) => {
+    seenUrl = u;
+    body = JSON.parse(String(init?.body));
+    return jsonRes({});
+  });
+  setup();
+  await setBankAgencyHold("jwt", "client-1", true, "suspicious statement");
+  assert.ok(seenUrl.includes("/rpc/set_bank_agency_hold"));
+  assert.equal(body.p_client, "client-1");
+  assert.equal(body.p_on, true);
+  assert.equal(body.p_reason, "suspicious statement");
+  assert.equal(typeof body.p_op_key, "string");
+  assert.deepEqual(Object.keys(body).sort(), ["p_client", "p_on", "p_op_key", "p_reason"]);
 });

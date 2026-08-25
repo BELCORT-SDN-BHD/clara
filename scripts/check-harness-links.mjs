@@ -102,6 +102,13 @@ export const NON_PATH_ALLOWLIST = new Set([
   "/etc/sudoers.d/runner", // an absolute path on the CI RUNNER host, not in this repo
   "/run/secrets/clara_storage_service_key", // a container secret mount path, not in this repo
 
+  // --- Files RETIRED (deleted) by a landed lane. The design docs that named them are the
+  // retirement checklist's own historical record of what was removed and why (Annex I,
+  // AGENTS.md constraint 9's append-only ethos) — never rewritten to erase the citation, per
+  // the same law that keeps the "unbuilt" block below in future tense rather than deleted.
+  "apps/dashboard/app/bank/RuleCandidatesCard.tsx", // F-A3 PR-3 (Annex I, the bank-rules machine retires whole): deleted with its BankWorkbench.tsx mount
+  "apps/dashboard/app/shared/cards/BankRuleProposalCard.tsx", // F-A3 PR-3 (Annex I): deleted; its StatementDetail.tsx slot becomes the exception-proposal door (Annex M.2)
+
   // --- Instruments and packages the ACTIVE design docs specify but that are not built yet. They
   // are named in future tense in docs/plan/active/; they become real paths when their lane lands,
   // and the entry then comes back out of this list.

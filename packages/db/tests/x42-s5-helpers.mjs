@@ -529,6 +529,23 @@ const F_A3_PR1A_CLOCK_NAMES_REMOVED = [
   "resolve_bank_line_exception", "unmatch_bank_match", "void_bank_reconciliation", "void_bank_statement",
 ];
 
+// F-A3 PR-3 [retirement + parity + doors]: `_confirm_bank_identifier_promotion_core` stamps
+// `decided_at = now()` on the accepted proposal row -- a bare timestamptz audit instant, the
+// same shape every other confirm/settle core on this roster already carries -- so it MATCHES
+// arm (D) and joins. `propose_bank_rule` / `sign_bank_rule` / `retire_bank_rule` (base-roster
+// members since 0042) and `match_bank_line` (base-roster member since 0042, kept alive after
+// PR-1a's own extraction ONLY by its then-untouched /7 rule-arity overload's own bare token,
+// per F_A3_PR1A_CLOCK_NAMES_REMOVED's own comment above) all leave the live catalog or lose
+// their last matching overload with PR-3's retirement (Annex I: propose/sign/retire_bank_rule
+// DROPPED whole; match_bank_line's /7 DROPPED, leaving only the byte-unmoved /6 wrapper, which
+// carries no bare token of its own). MEASURED, not inferred: arm (D)'s own detector, re-run
+// against the live post-retirement catalog.
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states.
+const F_A3_PR3_CLOCK_NAMES_ADDED = ["_confirm_bank_identifier_promotion_core"];
+const F_A3_PR3_CLOCK_NAMES_REMOVED = [
+  "match_bank_line", "propose_bank_rule", "retire_bank_rule", "sign_bank_rule",
+];
+
 // F-A2 PR-1 [the agentic posting lane, `f_a2_posting_core` at whatever number merge claimed]:
 // the SEAT for the posting lane's bare-clock cohort, wired and DELIBERATELY EMPTY.
 //
@@ -552,6 +569,15 @@ const F_A3_PR1A_CLOCK_NAMES_REMOVED = [
 // gate now — rather than leaving it to be remembered later — is what makes the integration step a
 // one-line fill instead of a re-derivation.
 const POSTING_F_A2_PR1_CLOCK_NAMES = [];
+
+// F-A6 PR-1 [`f_a6_freeform_read` at whatever number merge claimed]: re-run arm (D) against the
+// migration's own bodies (the F-A2 seat's obligation, stated in full above) — two names flag,
+// both lawful, neither a date derivation: `_freeform_settle` stamps `settled_at = now()`, the
+// same timestamptz shape as every settle stamp already rostered above; `wake_freeform_read`
+// reads `clock_timestamp()` to measure WALL-CLOCK ELAPSED TIME for the read's deadline loop
+// (design §3.3), an interval measurement that writes no date/timestamptz column. Gated on the
+// migration stem, never a number, exactly like every seat above.
+const F_A6_FREEFORM_READ_CLOCK_NAMES = ["_freeform_settle", "wake_freeform_read"];
 
 // F-A7 pi [train position 1, `f_a7_pi_additive` at whatever number merge claimed]: the firm-
 // question door's two settle verbs and the identifier-promotion card's two settle verbs each
@@ -636,6 +662,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   if (await appliedStem("f_a7_gamma_egress$")) names.push(...F_A7_GAMMA_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
+  if (await appliedStem("f_a6_freeform_read$")) names.push(...F_A6_FREEFORM_READ_CLOCK_NAMES);
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
   if (await appliedStem("f_a5b_pr1_sandbox_export$")) names.push(...SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES);
@@ -645,6 +672,13 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a3_pr1a_core_extractions$")) {
     names.push(...F_A3_PR1A_CLOCK_NAMES_ADDED);
     for (const n of F_A3_PR1A_CLOCK_NAMES_REMOVED) {
+      const i = names.indexOf(n);
+      if (i !== -1) names.splice(i, 1);
+    }
+  }
+  if (await appliedStem("f_a3_pr3_retirement_parity_doors$")) {
+    names.push(...F_A3_PR3_CLOCK_NAMES_ADDED);
+    for (const n of F_A3_PR3_CLOCK_NAMES_REMOVED) {
       const i = names.indexOf(n);
       if (i !== -1) names.splice(i, 1);
     }
