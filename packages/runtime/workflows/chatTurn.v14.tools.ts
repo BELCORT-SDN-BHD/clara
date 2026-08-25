@@ -85,12 +85,22 @@ export const BANK_ACT_TOOLS: readonly string[] = [
 export function buildToolsV14(ctx: ToolCtx, modelId: string, segment: number) {
   const base = buildToolsV13(ctx, modelId);
   const taskId = ctx.taskId;
+  // MUST fix (Codex adversarial round 2026-08-25) — chatTurn.v14.bank.ts's runGetBankPack header
+  // has the full rationale: a per-segment, per-account read counter so a genuine re-read within
+  // one segment gets its own op_key rather than colliding with its own prior read. Rebuilt fresh
+  // every buildToolsV14 call (i.e. every segment) — a WDK replay of this segment starts the
+  // counter over, which is what makes it deterministic under replay.
+  const bankPackReadSeq = new Map<string, number>();
   return {
     ...base,
     [BANK_GET_PACK_TOOL]: tool({
-      description: "Read one bank account's unmatched statement lines, match candidates, open items and open proposals. Call this BEFORE any bank act — every act needs the digest this returns.",
+      description: "Read one bank account's unmatched statement lines, match candidates, open items and open proposals. Call this BEFORE any bank act — every act needs the digest this returns. Safe to call again for the same account if state may have changed since your last read.",
       inputSchema: getBankPackInputSchema,
-      execute: (input: import("./chatTurn.v14.bank.js").GetBankPackInput) => runGetBankPack(ctx, input, modelId, taskId, segment),
+      execute: (input: import("./chatTurn.v14.bank.js").GetBankPackInput) => {
+        const readSeq = (bankPackReadSeq.get(input.bank_account_id) ?? 0) + 1;
+        bankPackReadSeq.set(input.bank_account_id, readSeq);
+        return runGetBankPack(ctx, input, modelId, taskId, segment, readSeq);
+      },
     }),
     [BANK_ADD_ACCOUNT_TOOL]: tool({
       description: "Register a new bank account against a confirmed proposal from the bank pack, binding it to a COA account.",
@@ -103,7 +113,10 @@ export function buildToolsV14(ctx: ToolCtx, modelId: string, segment: number) {
       execute: (input: import("./chatTurn.v14.bankSchemas.js").UpsertBankCoaAccountInput) => runUpsertBankCoaAccount(ctx, input, modelId, taskId, segment),
     }),
     [BANK_MATCH_LINE_TOOL]: tool({
-      description: "Match one or more statement lines to existing approved journal entries, with optional adjustment legs closing any difference. Does not mint a new entry.",
+      description:
+        "Match one or more statement lines to existing approved journal entries. Matching ALONE, with no adjustment leg, mints nothing. " +
+        "But if you supply an adjustment leg to close a difference, this POSTS a new, already-approved journal entry for that adjustment — " +
+        "treat that arm with the same care as post_journal_entry: only when the human has asked for the difference to be booked.",
       inputSchema: matchBankLineInputSchema,
       execute: (input: import("./chatTurn.v14.bankSchemas.js").MatchBankLineInput) => runMatchBankLine(ctx, input, modelId, taskId, segment),
     }),

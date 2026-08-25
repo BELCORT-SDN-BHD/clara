@@ -60,7 +60,7 @@
 // needs `GRANT EXECUTE` on each of the thirteen bank `wake_*` functions, and SS4 does not grant it
 // (SS4 only touches `wake_fn_allowlist`). Measured live at review time: `clara_wake_interactive`
 // held EXECUTE on 0 of the 13. The grant that makes this file's mint reach anything at all ships
-// as its own migration, `UNNUMBERED_chatturn_v14_bank_interactive_grants.sql`, an EXTEND-ONLY ACL
+// as its own migration, `0130_chatturn_v14_bank_interactive_grants.sql`, an EXTEND-ONLY ACL
 // widening scoped to exactly these thirteen named functions — never a blanket grant, and reviewed
 // as its own deliberate act rather than folded silently into this runtime change.
 

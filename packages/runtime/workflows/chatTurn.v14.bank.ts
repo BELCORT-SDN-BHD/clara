@@ -14,7 +14,7 @@
 // names the agent, not the human. This file's job is the reach: mint the right credential
 // (client-pinned `interactive_client` OBO the human — chatTurn.v14.infra.ts's `bankScoped`),
 // the Postgres grant that makes the mint able to execute anything
-// (`UNNUMBERED_chatturn_v14_bank_interactive_grants.sql`), and a faithful translation of the DB's
+// (`0130_chatturn_v14_bank_interactive_grants.sql`), and a faithful translation of the DB's
 // own answer. The receipt naming the real human is the DB half's contract to keep.
 //
 // NO PER-RUNG FRIENDLY-SENTENCE TABLE (unlike chatTurn.v13.post.ts's TIER_B_MESSAGES). The bank
@@ -134,12 +134,21 @@ export const getBankPackInputSchema = z.object({
 });
 export type GetBankPackInput = z.infer<typeof getBankPackInputSchema>;
 
-export async function runGetBankPack(ctx: ToolCtx, input: GetBankPackInput, modelId: string, taskId: string, segment: number): Promise<BankPackToolResult> {
+export async function runGetBankPack(ctx: ToolCtx, input: GetBankPackInput, modelId: string, taskId: string, segment: number, readSeq: number): Promise<BankPackToolResult> {
   const clientId = ctx.clientId;
   if (!clientId) {
     return { ok: false, refusal: { type: "refusal", code: "CLR03", reason: "bank_act_needs_client_pin", message: "This conversation is not bound to a client, so there is no bank pack to read." } };
   }
-  const opKey = bankOpKey(taskId, segment, "get_bank_pack", { bank_account_id: input.bank_account_id });
+  // MUST fix (Codex adversarial round 2026-08-25): a bare (taskId, segment, account) key made a
+  // SECOND read of the SAME account within ONE segment collide with the first -- a legitimate
+  // re-ground after state changed (act, then re-read) would find its own prior op_key already
+  // claimed by a DIFFERENT digest and refuse op_key_identity_mismatch, a raw DB error the model
+  // cannot recover from. `readSeq` closes it: a per-segment, per-account counter (buildToolsV14's
+  // own closure, rebuilt fresh every segment -- the SAME "a WDK replay rebuilds it empty" law
+  // v13's draftedHere/postedHere already rely on) that increments on every call, so each genuine
+  // re-read gets its own fresh op_key and its own fresh receipt row. Deterministic under a
+  // same-segment WDK replay (the counter replays identically); distinct across successive reads.
+  const opKey = bankOpKey(taskId, segment, "get_bank_pack", { bank_account_id: input.bank_account_id, readSeq });
   try {
     const receipt = await bankScoped(ctx, async (c: PgExec) => {
       const r = await c.query("select clara.wake_get_bank_pack($1::uuid, $2::uuid, $3::text, $4::jsonb, $5::text) as receipt", [

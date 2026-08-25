@@ -40,7 +40,7 @@ export type UpsertBankCoaAccountInput = z.infer<typeof upsertBankCoaAccountInput
 export const matchBankLineInputSchema = z.object({
   lines: z.array(z.unknown()).min(1).describe("The statement line id(s) being matched — from get_bank_pack's `lines`."),
   entries: z.array(z.record(z.string(), z.unknown())).default([]).describe("Candidate journal entries being tied, each {entry_id, matched_cents} — from get_bank_pack's `candidates`."),
-  adjustments: z.array(z.record(z.string(), z.unknown())).default([]).describe("Any adjustment legs {account_code, amount_cents} closing the difference."),
+  adjustments: z.array(z.record(z.string(), z.unknown())).default([]).describe("Any adjustment legs {account_code, amount_cents} closing the difference. Supplying even one POSTS a new, already-approved journal entry — omit this entirely for a plain match that mints nothing."),
   ack_period_exceptions: z.boolean().default(false).describe("Set true only when knowingly acknowledging a posting-date-after-period-end exception."),
   rationale: z.string().min(1).max(4000),
   inputs_digest: z.string().min(1),
