@@ -1,0 +1,1177 @@
+-- UNNUMBERED_f_a5b_pr1_sandbox_export.sql -- Wave F Track-A item F-A5b, PR-1: the sandbox export
+-- lane's DB layer. Three new relations, four ungranted cores, nine verbs (six wake, three
+-- clara_runtime worker verbs, three human), the wake_fn_allowlist rows, the signed
+-- `sandbox_watermark` trio (en/ms/zh), and the closed-world censuses this lane owns.
+--
+-- Number is claimed at MERGE by the conductor (standing law); this file names none.
+--
+-- DESIGN OF RECORD: docs/plan/active/sandbox-export-design.md (v2, gate-folded 2026-08-23) SS3.1-
+-- SS3.4, SS3.6-SS3.6b · sandbox-export-design-part2.md SS3.7-SS7 · sandbox-export-annexes.md
+-- (Annex A surface, B battery, C decisions, H/J/K). Gate record: sandbox-export-gate-record.md
+-- (both owner cards RULED 2026-08-23 -- the substitution seam, SS3.6b; the firm-level disclosure
+-- register, SS7 card 2). Estate survey: sandbox-export-survey.md (X1-X12, U1-U6).
+--
+-- ============================ D1 -- NONE ============================================================
+-- This file CoRs NO live body. Every relation, function and grant below is new; `layout.mjs` gains
+-- a sibling entry in a LATER PR (F-A5b PR-3), never a rewrite of the sealed lane's own body. No
+-- write-quiesce window applies (design SS6: "This lane CoRs no live body ... every DB object is
+-- new").
+--
+-- ============================ SCOPE OF THIS FILE, AND WHAT IT DOES NOT BUILD =======================
+-- PR-1 per the design's own train (SS6): three relations, the coverage check, the derivation, the
+-- verbs (wrappers minted here; EXECUTE + allowlist rows land in the SAME file per this lane's own
+-- Annex A.2 -- unlike F-A5's five-file PR-2 split, this lane has no D1 obligation forcing a
+-- part-2/grants separation, so wrapper + grant + allowlist ship together, same commit, same
+-- discipline as F-A5's own PR-1 DDL-plus-resolver shipping). The renderer's second entrance
+-- (`layoutSandbox`, the byte-burn, G-1/G-2) is F-A5b's OWN PR-3, which lands AFTER F-A5 PR-4 (not
+-- yet landed at authoring time) -- out of scope here.
+--
+-- ============================ THE SUBSTITUTION SEAM (SS3.6b) -- WHAT PR-1 BUILDS OF IT =============
+-- Card 1 was RULED 2026-08-23: the model writes PLACEHOLDERS, never a typed numeral; a durable
+-- result row's basis_ref pin is what a later render step (F-A5b PR-3, per the design's own SS3.6b:
+-- "PR-3 (the renderer's substitution step)") resolves into bytes. What THIS file builds is the
+-- PROVENANCE HALF that ruling requires now: `sandbox_view_body_malformed` is the SS3.6b-recut
+-- "provenance assertion" (a block whose `basis_ref` does not resolve to a label of this view's own
+-- `basis` refuses), never a numeral-substitution engine -- that machinery reads back an actual
+-- computed VALUE from a durable free-read result row, and `freeform_read_log` stores query text and
+-- no result today (survey SS2 X6, X11; `0002:308-315`). Building a resolver against a result column
+-- that does not exist would be building ahead of a dependency neither this design's Annex K nor
+-- F-A6's own lane has landed. So `body` blocks in THIS file carry `displayed_text` -- a string, per
+-- E-R8 floor 1 (X6) -- addressed by a `basis_ref` label; no block has a numeric literal slot at all,
+-- and the mint core's job is the label-resolves-to-a-durable-row wall (SS3.1-SS3.2, gate B0/B6),
+-- never a value substitution. This is a narrower, conservative reading of SS3.6b's PR-1/PR-3 split,
+-- flagged in this file's header and in the build report so the conductor can correct it if a fuller
+-- PR-1 mechanism was intended.
+--
+-- ============================ F-A6 PR-1 -- CHECKED AT AUTHORING, RE-CHECKED BEFORE SS3.2 BELOW =====
+-- `clara.freeform_read_log` on `origin/main` at authoring time (fresh fetch) is still the bare 0002
+-- shape: id, firm_id (nullable), credential_id, query_text, purpose, at -- no `scope`, no
+-- `client_scope`. Annex K's own dependency row prices this: "the free-read basis kinds are
+-- unavailable; preview-cell bases still work." Per the conductor's ruling (build now, sequence
+-- SS3.2-dependent parts last, re-check before writing them), `_sandbox_client_set` below is
+-- authored LAST and re-verifies the live column set in ITS OWN prestate before choosing which
+-- branches to build -- see SECTION 6 below for the measured outcome.
+--
+-- ============================ SECTION 0 -- PRESTATE =================================================
+do $s0$
+declare
+  v_missing text[] := '{}';
+  v_present text[] := '{}';
+  v_sig text;
+  v_wpv_check text;
+begin
+  -- (a) The three relations and the ungranted cores/verbs this file mints must not already exist.
+  foreach v_sig in array array['clara.sandbox_views','clara.sandbox_exports','clara.export_recipients']
+  loop
+    if to_regclass(v_sig) is not null then v_present := v_present || v_sig; end if;
+  end loop;
+  foreach v_sig in array array[
+      'clara._sandbox_client_set(uuid,jsonb,jsonb)',
+      'clara._recipient_covers(uuid,uuid[],uuid)',
+      'clara._sandbox_view_mint_core(uuid,uuid,uuid,text,jsonb,jsonb,text)',
+      'clara._sandbox_export_request_core(uuid,uuid,uuid,text,uuid,uuid,text,text)',
+      'clara.wake_mint_sandbox_view(jsonb,jsonb,text,jsonb,text)',
+      'clara.wake_request_sandbox_export(uuid,uuid,text,text,jsonb,text)',
+      'clara.wake_sandbox_export_state(uuid)',
+      'clara.sandbox_export_payload(uuid,text)',
+      'clara.complete_sandbox_export(uuid,text,text,bigint,text)',
+      'clara.fail_sandbox_export(uuid,text,jsonb)',
+      'clara.register_export_recipient(text,uuid,text,text,uuid[],text)',
+      'clara.supersede_export_recipient(uuid,text,text)',
+      'clara.list_sandbox_exports(uuid,int)'
+    ] loop
+    if to_regprocedure(v_sig) is not null then v_present := v_present || v_sig; end if;
+  end loop;
+  if coalesce(array_length(v_present,1),0) > 0 then
+    raise exception 'f_a5b pr1 prestate: object(s) this file mints already exist: %', array_to_string(v_present,' | ') using errcode = 'CLR10';
+  end if;
+
+  -- (b) Prerequisite objects this file calls must already exist (F-A5 PR-1's DDL, the wake spine,
+  -- the human-ctx/op-key/audit helpers, the triggers, the estate's core tables).
+  foreach v_sig in array array[
+      'clara.watermark_policy_versions','clara.firms','clara.users','clara.firm_memberships',
+      'clara.clients'
+    ] loop
+    if to_regclass(v_sig) is null then v_missing := v_missing || v_sig; end if;
+  end loop;
+  foreach v_sig in array array[
+      'clara.wake_context()', 'clara.assert_wake_allowed(text,text)',
+      'clara._human_ctx(int)', 'clara._reserve_op(uuid,text,text,bytea)',
+      'clara._finish_op(uuid,text,text,jsonb)', 'clara._hash(jsonb)',
+      'clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)', 'clara.agent_user_id()',
+      'clara.role_rank(text)', 'clara.jwt_firm()', 'clara.jwt_sub()', 'clara.actor_role_rank()',
+      'clara._tf_append_only()', 'clara._tf_no_truncate()',
+      'clara.watermark_policy_for(text,text,date)', 'clara._book_today()'
+    ] loop
+    if to_regprocedure(v_sig) is null then v_missing := v_missing || v_sig; end if;
+  end loop;
+  if coalesce(array_length(v_missing,1),0) > 0 then
+    raise exception 'f_a5b pr1 prestate: prerequisite object(s) absent: %', array_to_string(v_missing,' | ') using errcode = 'CLR10';
+  end if;
+
+  -- (c) X7/U1's hazard, MEASURED not assumed: watermark_policy_versions must admit the
+  -- 'sandbox_watermark' policy_key (F-A5 PR-1 minted this closed-world CHECK already carrying it --
+  -- confirmed at the bytes, `0111:381`). If it does not, this file must not proceed silently: the
+  -- fix is a CHECK EXTENSION on a shared surface, routed to the conductor, never assumed here.
+  select pg_get_constraintdef(oid) into v_wpv_check
+    from pg_constraint where conrelid = 'clara.watermark_policy_versions'::regclass
+      and conname = 'ck_wpv_policy_key';
+  if v_wpv_check is null then
+    raise exception 'f_a5b pr1 prestate: ck_wpv_policy_key not found on clara.watermark_policy_versions -- has F-A5 PR-1 applied on this chain?' using errcode = 'CLR10';
+  end if;
+  if v_wpv_check !~ 'sandbox_watermark' then
+    raise exception 'f_a5b pr1 prestate: clara.watermark_policy_versions.ck_wpv_policy_key does not admit sandbox_watermark -- this is a shared-surface CHECK extension (R-2/U1), not assumed here. Live: %', v_wpv_check using errcode = 'CLR10';
+  end if;
+  -- No sandbox_watermark row may already exist (a re-apply is a defect, not an upsert).
+  if exists (select 1 from clara.watermark_policy_versions where policy_key = 'sandbox_watermark') then
+    raise exception 'f_a5b pr1 prestate: a sandbox_watermark row already exists' using errcode = 'CLR10';
+  end if;
+
+  raise notice 'f_a5b pr1 prestate: clean -- 3 relations + 13 functions absent, prerequisites present, ck_wpv_policy_key admits sandbox_watermark, no sandbox_watermark rows yet';
+end
+$s0$;
+
+create temporary table _fa5bpr1_pre (k text primary key, v text);
+insert into _fa5bpr1_pre values ('deploy_user', current_user), ('deploy_role', current_role);
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- SECTION 1 -- clara.export_recipients (OQ-3's mint; minted first since sandbox_exports FKs to it).
+-- Firm-scoped, FORCE RLS, immutable + supersede (the claim_policy_versions habit, 0066:66-85, minus
+-- the curated firm_id-is-null wall -- this IS firm data, design SS3.3).
+-- =====================================================================================
+create table clara.export_recipients (
+  id              uuid primary key default gen_random_uuid(),
+  firm_id         uuid not null references clara.firms(id),
+  kind            text not null check (kind in ('firm_member','external')),
+  -- user_id: NOT NULL iff kind='firm_member'. A plain FK to users, not a composite FK into
+  -- firm_memberships -- that table carries no unique(user_id, firm_id) target (a user may hold
+  -- historical removed rows, only the ACTIVE one is partial-unique, 0002:221-222), so "this user is
+  -- a member of this firm" is a VALUE-LEVEL check in the register core at write time, the same
+  -- treatment covered_clients gets below.
+  user_id         uuid references clara.users(id),
+  display_name    text not null check (btrim(display_name) <> ''),
+  basis           text not null check (btrim(basis) <> ''),
+  -- covered_clients: NOT NULL iff kind='external'; cardinality >= 1; every element validated at
+  -- write against clara.clients of THIS firm, AT ANY STATUS (design SS3.3 -- the same reason
+  -- SS3.2's firm_closure carries no status filter: an active-only validation would make the wall
+  -- UNSATISFIABLE for a client the recipient legitimately covers but who is onboarding/archived).
+  -- An array element cannot be a declarative FK; the register/supersede cores validate it.
+  covered_clients uuid[],
+  registered_by   uuid not null references clara.users(id),
+  registered_at   timestamptz not null default now(),
+  superseded_by   uuid references clara.export_recipients(id),
+  superseded_at   timestamptz,
+  constraint ck_export_recipients_kind_shape check (
+    (kind = 'firm_member' and user_id is not null and covered_clients is null)
+    or (kind = 'external' and user_id is null and covered_clients is not null
+        and cardinality(covered_clients) >= 1)),
+  constraint ck_export_recipients_superseded_paired check ((superseded_by is null) = (superseded_at is null)),
+  -- A row may not supersede itself.
+  constraint ck_export_recipients_supersede_not_self check (superseded_by is distinct from id),
+  constraint uq_export_recipients_id_firm unique (id, firm_id)
+);
+alter table clara.export_recipients enable row level security;
+alter table clara.export_recipients force row level security;
+create policy p_exportrecipients_owner on clara.export_recipients
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_exportrecipients_human on clara.export_recipients
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.export_recipients to clara_authenticated;
+revoke insert, update, delete, truncate on clara.export_recipients
+  from clara_authenticated, clara_agent_ro, clara_runtime, clara_wake_interactive, clara_wake_proactive;
+
+-- Immutable + supersede: no UPDATE/DELETE except the one lawful transition (marking superseded),
+-- enforced as a trigger rather than left to the core's own discipline (belt, house style 0079:183-
+-- 215's shape) -- every OTHER column is frozen once written; superseded_by/superseded_at may move
+-- exactly once, from null to non-null, and never back.
+create function clara._tf_export_recipients_lifecycle() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare mutable text[] := array['superseded_by', 'superseded_at'];
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'an export recipient is never deleted' using errcode = 'CLR08',
+      detail = '{"reason":"export_recipient_never_deleted"}';
+  end if;
+  if (to_jsonb(new) - mutable) is distinct from (to_jsonb(old) - mutable) then
+    raise exception 'an export recipient''s registration is immutable' using errcode = 'CLR08',
+      detail = '{"reason":"export_recipient_registration_immutable","fix":"supersede this row and register a successor"}';
+  end if;
+  if old.superseded_by is not null then
+    raise exception 'a superseded export recipient is immutable' using errcode = 'CLR08',
+      detail = '{"reason":"export_recipient_already_superseded"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_export_recipients_lifecycle() from public;
+create trigger t_exportrecipients_lifecycle before update or delete on clara.export_recipients
+  for each row execute function clara._tf_export_recipients_lifecycle();
+create trigger t_exportrecipients_no_truncate before truncate on clara.export_recipients
+  for each statement execute function clara._tf_no_truncate();
+
+-- =====================================================================================
+-- SECTION 2 -- clara.sandbox_views. Firm-scoped, FORCE RLS, append-only + no-truncate (the
+-- 0005:280-298 idiom). The thing that is exported (design SS3.1, gate defect 1's answer).
+-- =====================================================================================
+create table clara.sandbox_views (
+  id                uuid primary key default gen_random_uuid(),
+  firm_id           uuid not null references clara.firms(id),
+  -- Frozen. No definition_version_id, no cell_id -- there is no column for one (design SS3.7,
+  -- gate B4.4): the narrative-authority wall at the export boundary is structural, not a check.
+  authority         text not null default 'narrative' check (authority = 'narrative'),
+  -- Typed blocks; every block carries a `basis_ref` label (gate B0/C-18) and every figure a
+  -- `displayed_text` STRING (E-R8 floor 1, X6) -- no numeric literal slot exists in this shape.
+  -- Validated structurally by _sandbox_view_mint_core (sandbox_view_body_malformed).
+  body              jsonb not null check (jsonb_typeof(body) = 'object'),
+  -- DB-computed from canonical json, never supplied by the caller.
+  body_sha256       text not null check (body_sha256 ~ '^[0-9a-f]{64}$'),
+  client_set        uuid[] not null,
+  client_set_basis  text not null check (client_set_basis in ('exact','firm_closure')),
+  -- The labelled map: [{label, kind, id}, ...] -- the freeform_read_log ids and/or preview cell ids
+  -- a body block's basis_ref names (design SS3.1).
+  basis             jsonb not null check (jsonb_typeof(basis) = 'array'),
+  acting_actor      uuid not null references clara.users(id),
+  on_behalf_of      uuid references clara.users(id),
+  model_snapshot    text not null default '',
+  created_at        timestamptz not null default now(),
+  constraint uq_sandbox_views_id_firm unique (id, firm_id),
+  -- Belt: the mint core refuses an empty derived set before insert (sandbox_view_client_set_empty);
+  -- this CHECK makes the row itself unable to carry one even if a future writer forgets the refusal.
+  constraint ck_sandbox_views_client_set_nonempty check (cardinality(client_set) > 0)
+);
+alter table clara.sandbox_views enable row level security;
+alter table clara.sandbox_views force row level security;
+create policy p_sandboxviews_owner on clara.sandbox_views
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_sandboxviews_human on clara.sandbox_views
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.sandbox_views to clara_authenticated;
+revoke insert, update, delete, truncate on clara.sandbox_views
+  from clara_authenticated, clara_agent_ro, clara_runtime, clara_wake_interactive, clara_wake_proactive;
+create trigger t_sandboxviews_append_only before update or delete on clara.sandbox_views
+  for each row execute function clara._tf_append_only();
+create trigger t_sandboxviews_no_truncate before truncate on clara.sandbox_views
+  for each statement execute function clara._tf_no_truncate();
+
+-- =====================================================================================
+-- SECTION 3 -- clara.sandbox_exports. Firm-scoped, FORCE RLS, LIFECYCLE WALL freezing the request
+-- half (the render_jobs idiom, 0079:136-140, :183-215). REQUEST + LIFECYCLE + COMPLETION in one row
+-- -- gate defect 2's answer is the split the estate already ships (immutable view / lifecycle
+-- export), never a third artifact relation (law 74, C-3).
+-- =====================================================================================
+create table clara.sandbox_exports (
+  id                          uuid primary key default gen_random_uuid(),
+  -- FROZEN (the request half).
+  firm_id                     uuid not null references clara.firms(id),
+  sandbox_view_id             uuid not null,
+  recipient_id                uuid not null,
+  -- Recorded at request time: the coverage predicate's evidence, plus body_sha256 so the proof
+  -- names the exact body it covered (C-19).
+  coverage_proof              jsonb not null check (jsonb_typeof(coverage_proof) = 'object'),
+  watermark_policy_version_id uuid not null references clara.watermark_policy_versions(id),
+  locale                      text not null check (locale in ('en','ms','zh')),
+  requested_by                uuid not null references clara.users(id),
+  on_behalf_of                uuid references clara.users(id),
+  op_key                      text not null,
+  created_at                  timestamptz not null default now(),
+  -- MOVING (the lifecycle half -- claim, dispatch, fail, complete).
+  state                       text not null default 'claimable'
+                                 check (state in ('claimable', 'running', 'done', 'failed')),
+  attempts                    int not null default 0 check (attempts >= 0),
+  claimed_by                  text,
+  claimed_at                  timestamptz,
+  lease_expires_at            timestamptz,
+  last_error                  jsonb,
+  finished_at                 timestamptz,
+  -- SET ONCE at completion (X5: the hash comes IN; the DB never renders, never re-hashes).
+  artifact_sha256             text check (artifact_sha256 ~ '^[0-9a-f]{64}$'),
+  byte_size                   bigint check (byte_size > 0),
+  storage_key                 text,
+  foreign key (sandbox_view_id, firm_id) references clara.sandbox_views (id, firm_id),
+  foreign key (recipient_id, firm_id) references clara.export_recipients (id, firm_id),
+  unique (id, firm_id),
+  unique (firm_id, op_key),
+  -- A running row always has a lease (the render_jobs precedent, 0079:155-159's ck_rj_lease_paired
+  -- shape) -- a ONE-DIRECTION implication, not a full equality: claimed_by/lease_expires_at are
+  -- set once at claim and PERSIST as historical fact through done/failed (who last held it, and
+  -- until when), the same way render_jobs never clears them either. An equality would forbid a
+  -- completed row from keeping that history -- caught live by B6.1/B6.3's own completion cells.
+  constraint ck_sandboxexports_lease_paired check (
+    state <> 'running' or (claimed_by is not null and lease_expires_at is not null)),
+  constraint ck_sandboxexports_completion_paired check (
+    (state = 'done') = (artifact_sha256 is not null and byte_size is not null and storage_key is not null))
+);
+alter table clara.sandbox_exports enable row level security;
+alter table clara.sandbox_exports force row level security;
+create policy p_sandboxexports_owner on clara.sandbox_exports
+  for all to clara_fn_owner using (true) with check (true);
+create policy p_sandboxexports_human on clara.sandbox_exports
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+grant select on clara.sandbox_exports to clara_authenticated;
+revoke insert, update, delete, truncate on clara.sandbox_exports
+  from clara_authenticated, clara_agent_ro, clara_runtime, clara_wake_interactive, clara_wake_proactive;
+
+-- The narrow lifecycle trigger, not the generic append-only wall -- a queue row is legitimately
+-- UPDATEd (claim, dispatch, fail, complete). Whole-row terminal freeze once done/failed (the
+-- 0079:198-213 codex-M2 shape): a completed or failed row is immutable in full, not just its state
+-- value, so a definer-path defect cannot rewrite which artifact a completed export produced.
+create function clara._tf_sandbox_export_lifecycle() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare mutable text[] := array['state', 'attempts', 'claimed_by', 'claimed_at',
+  'lease_expires_at', 'last_error', 'finished_at', 'artifact_sha256', 'byte_size', 'storage_key'];
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'a sandbox export is never deleted' using errcode = 'CLR08',
+      detail = '{"reason":"sandbox_export_never_deleted"}';
+  end if;
+  if (to_jsonb(new) - mutable) is distinct from (to_jsonb(old) - mutable) then
+    raise exception 'a sandbox export''s request is immutable' using errcode = 'CLR08',
+      detail = '{"reason":"sandbox_export_request_immutable","fix":"request a new export; a changed request is a different export"}';
+  end if;
+  if old.state in ('done', 'failed') then
+    if to_jsonb(new) is distinct from to_jsonb(old) then
+      raise exception 'a terminal sandbox export is immutable' using errcode = 'CLR08',
+        detail = jsonb_build_object('reason', 'sandbox_export_terminal', 'state', old.state,
+          'fix', 'a finished export records what happened; request a new one rather than editing a closed one')::text;
+    end if;
+    return new;
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_sandbox_export_lifecycle() from public;
+create trigger t_sandboxexports_no_truncate before truncate on clara.sandbox_exports
+  for each statement execute function clara._tf_no_truncate();
+create trigger t_sandboxexports_lifecycle before update or delete on clara.sandbox_exports
+  for each row execute function clara._tf_sandbox_export_lifecycle();
+
+reset role;
+
+do $s3done$ begin
+  raise notice 'f_a5b pr1 section 1-3: 3 relations created (export_recipients, sandbox_views, sandbox_exports), forced RLS + lifecycle walls attached';
+end $s3done$;
+
+-- =====================================================================================
+-- SECTION 4 -- THE SIGNED sandbox_watermark TRIO. Rows only, no DDL (R-L15's scope). Verbatim,
+-- SIGNED 2026-08-23 (design SS3.6a). One key per locale -- Q2's "two keys" question is moot; this
+-- is a single string, never a stamp/footer pair. The lane's DARK condition (survey X12) lifts for
+-- en/ms/zh the instant this section commits; every other locale still refuses until its own row is
+-- signed (watermark_policy_absent, via clara.watermark_policy_for -- already shipped, F-A5 PR-1).
+-- =====================================================================================
+set role clara_fn_owner;
+insert into clara.watermark_policy_versions
+  (firm_id, policy_key, version, locale, watermark, effective_from, source_note)
+values
+  (null, 'sandbox_watermark', 1, 'en',
+   jsonb_build_object('watermark', 'WORKING ANALYSIS — FOR DISCUSSION ONLY. Not an audited financial statement, not a statutory report.'),
+   current_date, 'Owner-signed 2026-08-23, sandbox-export-design.md SS3.6a, en row.'),
+  (null, 'sandbox_watermark', 1, 'ms',
+   jsonb_build_object('watermark', 'ANALISIS KERJA — UNTUK PERBINCANGAN SAHAJA. Bukan penyata kewangan beraudit, bukan laporan berkanun.'),
+   current_date, 'Owner-signed 2026-08-23, sandbox-export-design.md SS3.6a, ms row.'),
+  (null, 'sandbox_watermark', 1, 'zh',
+   jsonb_build_object('watermark', '工作分析稿 — 仅供讨论。非经审计财务报表,非法定报告。'),
+   current_date, 'Owner-signed 2026-08-23, sandbox-export-design.md SS3.6a, zh row.');
+reset role;
+
+do $s4done$
+declare v_n int;
+begin
+  select count(*) into v_n from clara.watermark_policy_versions where policy_key = 'sandbox_watermark';
+  if v_n <> 3 then
+    raise exception 'f_a5b pr1 section 4: expected exactly 3 sandbox_watermark rows, found %', v_n using errcode = 'CLR10';
+  end if;
+  raise notice 'f_a5b pr1 section 4: sandbox_watermark trio seeded (en/ms/zh) -- the lane''s DARK condition lifts for these three locales';
+end
+$s4done$;
+
+-- =====================================================================================
+-- SECTION 5 -- THE UNGRANTED CORES. Granted to NOBODY, reached as internal calls under
+-- clara_fn_owner (the 0004:749-750 containment, 0077:22-29's rule). Every table these cores read is
+-- scoped by an EXPLICIT predicate against p_firm in the body -- clara_fn_owner's own policy is
+-- `using (true)` (0002:485-491), and the estate has one recorded fail-open of exactly this class
+-- (0083:102-108, gate B6).
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- --- 5a. _recipient_covers(p_firm, p_client_set, p_recipient) -- SS3.3, gate M10 -----------------
+-- Returns jsonb: {covered: boolean, missing: uuid[]}. NEVER answers YES on an empty client_set --
+-- the explicit named zero-cardinality branch AHEAD of the general comparison (the 0020:640-643
+-- idiom), because containment over {} is vacuously TRUE and would pass every recipient alive.
+create function clara._recipient_covers(p_firm uuid, p_client_set uuid[], p_recipient uuid)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare r record; v_missing uuid[]; v_active boolean;
+begin
+  if p_client_set is null or cardinality(p_client_set) = 0 then
+    raise exception 'a client set with no clients cannot be covered by any recipient' using errcode = 'CLR10',
+      detail = '{"reason":"sandbox_view_client_set_empty"}';
+  end if;
+  select * into r from clara.export_recipients where id = p_recipient and firm_id = p_firm;
+  if not found then
+    raise exception 'no such export recipient in your firm' using errcode = 'CLR11',
+      detail = '{"reason":"export_recipient_unknown"}';
+  end if;
+  if r.superseded_by is not null then
+    raise exception 'this export recipient has a successor' using errcode = 'CLR10',
+      detail = '{"reason":"export_recipient_superseded"}';
+  end if;
+  if r.kind = 'firm_member' then
+    -- Computed, never stored (C-7): a firm member already reads every client of his firm under
+    -- RLS, so coverage is total by construction -- gated only on ACTIVE membership NOW.
+    select exists(select 1 from clara.firm_memberships m
+      where m.user_id = r.user_id and m.firm_id = p_firm and m.status = 'active') into v_active;
+    if not v_active then
+      raise exception 'this recipient''s firm membership is not active' using errcode = 'CLR10',
+        detail = '{"reason":"export_recipient_membership_inactive"}';
+    end if;
+    return jsonb_build_object('covered', true, 'missing', '[]'::jsonb, 'kind', 'firm_member',
+      'checked_at', now());
+  else
+    select array_agg(c) into v_missing from unnest(p_client_set) c
+      where c <> all(r.covered_clients);
+    if coalesce(array_length(v_missing,1),0) > 0 then
+      raise exception 'the recipient does not cover every client in this file' using errcode = 'CLR10',
+        detail = jsonb_build_object('reason','recipient_coverage_incomplete','missing_clients',to_jsonb(v_missing))::text;
+    end if;
+    return jsonb_build_object('covered', true, 'missing', '[]'::jsonb, 'kind', 'external',
+      'covered_clients', to_jsonb(r.covered_clients), 'checked_at', now());
+  end if;
+end $$;
+revoke all on function clara._recipient_covers(uuid,uuid[],uuid) from public;
+
+-- --- 5b. _sandbox_client_set(p_firm, p_basis, p_body) -- SS3.2, gate B0/B6/M2/M10 ----------------
+-- BODY SHAPE THIS FILE DEFINES (no prior schema for it -- SS3.1 leaves the exact block grammar to
+-- the builder beyond "typed blocks, every figure a displayed_text STRING, every block a
+-- basis_ref"): p_body = {"blocks": [{"kind":"text","basis_ref":"<label>","displayed_text":"<str>"}]}
+-- -- kind='text' ONLY in this PR-1 (a chart-referencing block kind is second-render-entrance
+-- territory, PR-3's own; refused here as malformed rather than half-built against a census that
+-- does not exist yet). p_basis = [{"label":"<str>","kind":"preview_cell"|"freeform_read","id":"<uuid>"}].
+--
+-- THE SUBSTITUTION SEAM (SS3.6b) -- WHAT THIS FUNCTION DOES AND DOES NOT DO. It re-cuts
+-- sandbox_view_body_malformed from a type assertion to the PROVENANCE half the ruling requires now:
+-- every block's basis_ref must resolve to a label of THIS view's own basis (gate B0), and every
+-- resolved label must resolve to a durable row IN THIS FIRM (gate B6/C-20). It does NOT read back a
+-- computed VALUE and substitute it into displayed_text -- that is SS3.6b's own "PR-3 (the
+-- renderer's substitution step)", and reading a numeral back needs a durable RESULT row on the
+-- free-read lane that does not exist yet (freeform_read_log stores query text and no result,
+-- survey X6/X11, 0002:308-315). Flagged in this file's header for the conductor to correct if a
+-- fuller PR-1 mechanism was intended.
+create function clara._sandbox_client_set(p_firm uuid, p_basis jsonb, p_body jsonb)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_blocks jsonb; v_block jsonb; v_ref text; v_kind text;
+  v_basis_elem jsonb; v_found boolean;
+  v_used_labels text[] := '{}';
+  v_client_set uuid[] := '{}';
+  v_basis_kind text;
+  v_uses_firm_closure boolean := false;
+  v_fa6_scope_present boolean;
+  v_preview_client uuid;
+  v_fr_scope text; v_fr_client_scope uuid;
+  v_firm_roster uuid[];
+begin
+  if p_basis is null or jsonb_typeof(p_basis) <> 'array' or jsonb_array_length(p_basis) = 0 then
+    raise exception 'a sandbox view needs at least one cited basis row' using errcode = 'CLR10',
+      detail = '{"reason":"sandbox_view_basis_absent"}';
+  end if;
+  if p_body is null or jsonb_typeof(p_body) <> 'object' or (p_body -> 'blocks') is null
+     or jsonb_typeof(p_body -> 'blocks') <> 'array' or jsonb_array_length(p_body -> 'blocks') = 0 then
+    raise exception 'a sandbox view body must carry at least one typed block' using errcode = 'CLR10',
+      detail = '{"reason":"sandbox_view_body_malformed","class":"blocks"}';
+  end if;
+
+  -- F-A6 PR-1's hardened freeform_read_log shape is MEASURED, never assumed (Annex K: "the
+  -- free-read basis kinds are unavailable; preview-cell bases still work" until it lands).
+  select exists(select 1 from information_schema.columns
+    where table_schema = 'clara' and table_name = 'freeform_read_log' and column_name = 'scope')
+    into v_fa6_scope_present;
+
+  v_blocks := p_body -> 'blocks';
+  for v_block in select * from jsonb_array_elements(v_blocks) loop
+    if jsonb_typeof(v_block) <> 'object' then
+      raise exception 'a sandbox view body block must be an object' using errcode = 'CLR10',
+        detail = '{"reason":"sandbox_view_body_malformed","class":"block_shape"}';
+    end if;
+    v_kind := v_block ->> 'kind';
+    if v_kind is distinct from 'text' then
+      raise exception 'this PR-1 build admits only text blocks' using errcode = 'CLR10',
+        detail = jsonb_build_object('reason','sandbox_view_body_malformed','class','block_kind_unsupported','kind',v_kind)::text;
+    end if;
+    if nullif(btrim(coalesce(v_block ->> 'displayed_text', '')), '') is null then
+      raise exception 'a text block must carry non-blank displayed_text' using errcode = 'CLR10',
+        detail = '{"reason":"sandbox_view_body_malformed","class":"displayed_text"}';
+    end if;
+    v_ref := v_block ->> 'basis_ref';
+    if nullif(btrim(coalesce(v_ref, '')), '') is null then
+      raise exception 'a sandbox view body block cites no basis' using errcode = 'CLR10',
+        detail = '{"reason":"sandbox_view_block_basis_absent"}';
+    end if;
+
+    v_found := false;
+    for v_basis_elem in select * from jsonb_array_elements(p_basis) loop
+      if v_basis_elem ->> 'label' = v_ref then v_found := true; exit; end if;
+    end loop;
+    if not v_found then
+      raise exception 'this block''s basis_ref names no label of this view''s own basis' using errcode = 'CLR11',
+        detail = jsonb_build_object('reason','sandbox_view_block_basis_unknown','basis_ref',v_ref)::text;
+    end if;
+    if not (v_ref = any(v_used_labels)) then
+      v_used_labels := v_used_labels || v_ref;
+    end if;
+  end loop;
+
+  foreach v_ref in array v_used_labels loop
+    v_basis_elem := null;
+    for v_basis_elem in select * from jsonb_array_elements(p_basis) loop
+      exit when v_basis_elem ->> 'label' = v_ref;
+    end loop;
+    v_basis_kind := v_basis_elem ->> 'kind';
+
+    if v_basis_kind = 'preview_cell' then
+      -- A preview cell's OWN client_id -- exact (SS3.2 row 1). Explicit firm_id = p_firm conjunct,
+      -- equality (gate B6/C-20): absent, foreign and (should the column ever go nullable) NULL-firm
+      -- rows all fail this predicate identically and fall through to the same refusal below.
+      select client_id into v_preview_client from clara.metric_cells
+        where id = nullif(v_basis_elem ->> 'id', '')::uuid and firm_id = p_firm;
+      if v_preview_client is null then
+        raise exception 'a cited preview cell does not resolve in your firm' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref)::text;
+      end if;
+      v_client_set := v_client_set || v_preview_client;
+
+    elsif v_basis_kind = 'freeform_read' then
+      if not v_fa6_scope_present then
+        raise exception 'a freeform-read basis cannot be resolved on this chain yet' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref,
+            'note','free-read basis kinds are unavailable until F-A6 PR-1 lands (Annex K dependency row); preview-cell bases still work')::text;
+      end if;
+      -- Reached ONLY once the columns are measured present, so this static reference is safe
+      -- (plpgsql binds embedded SQL at first EXECUTION, never at CREATE FUNCTION time). Equality on
+      -- firm_id, never IS NOT DISTINCT FROM: absent id, foreign firm and NULL firm_id all fail this
+      -- predicate and fall through to the same sandbox_view_basis_unknown refusal (gate B6/C-20,
+      -- the 0083:109-111 no-oracle rule, B1.11's three indistinguishable arms).
+      select scope, client_scope into v_fr_scope, v_fr_client_scope
+        from clara.freeform_read_log
+        where id = nullif(v_basis_elem ->> 'id', '')::uuid and firm_id = p_firm;
+      if not found then
+        raise exception 'a cited freeform read does not resolve in your firm' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref)::text;
+      end if;
+      if v_fr_scope = 'client' then
+        v_client_set := v_client_set || v_fr_client_scope;
+      elsif v_fr_scope = 'firm' then
+        -- firm_closure: EVERY row of clara.clients for the firm, AT ANY STATUS (gate M2/C-21 --
+        -- deliberately the estate's house form's opposite; no status conjunct).
+        v_uses_firm_closure := true;
+        select array_agg(id) into v_firm_roster from clara.clients where firm_id = p_firm;
+        v_client_set := v_client_set || coalesce(v_firm_roster, '{}'::uuid[]);
+      else
+        -- cross_client: F-A6 v2's own named-set verb is what makes this row's set exist (Annex K);
+        -- not landed by F-A6 PR-1 alone. Same no-oracle token.
+        raise exception 'a cross-client named basis cannot be resolved until F-A6 v2 lands' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref,
+            'note','cross-client named reads are F-A6 v2''s own verb, a separate dependency (Annex K)')::text;
+      end if;
+
+    else
+      raise exception 'this block''s basis element has an unrecognised kind' using errcode = 'CLR11',
+        detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref)::text;
+    end if;
+  end loop;
+
+  select array_agg(distinct c) into v_client_set from unnest(v_client_set) c;
+  if coalesce(array_length(v_client_set, 1), 0) = 0 then
+    raise exception 'the derived client set is empty' using errcode = 'CLR10',
+      detail = '{"reason":"sandbox_view_client_set_empty"}';
+  end if;
+
+  return jsonb_build_object('client_set', to_jsonb(v_client_set),
+    'client_set_basis', case when v_uses_firm_closure then 'firm_closure' else 'exact' end);
+end $$;
+revoke all on function clara._sandbox_client_set(uuid,jsonb,jsonb) from public;
+
+-- --- 5c. _sandbox_view_mint_core(p_firm, p_actor, p_obo, p_wake_kind, p_body, p_basis, p_op_key) -
+create function clara._sandbox_view_mint_core(p_firm uuid, p_actor uuid, p_obo uuid, p_wake_kind text,
+    p_body jsonb, p_basis jsonb, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_req_hash bytea; v_reserved jsonb; v_derived jsonb; v_client_set uuid[];
+        v_basis_kind text; v_sha text; v_id uuid; v_result jsonb;
+begin
+  v_req_hash := clara._hash(jsonb_build_object('body', p_body, 'basis', p_basis));
+  v_reserved := clara._reserve_op(p_firm, 'wake_mint_sandbox_view', p_op_key, v_req_hash);
+  if v_reserved is not null then return v_reserved; end if;
+
+  v_derived := clara._sandbox_client_set(p_firm, p_basis, p_body);
+  select array(select jsonb_array_elements_text(v_derived -> 'client_set'))::uuid[] into v_client_set;
+  v_basis_kind := v_derived ->> 'client_set_basis';
+  v_sha := encode(sha256(convert_to(p_body::text, 'UTF8')), 'hex');
+
+  insert into clara.sandbox_views
+    (firm_id, body, body_sha256, client_set, client_set_basis, basis, acting_actor, on_behalf_of, model_snapshot)
+  values (p_firm, p_body, v_sha, v_client_set, v_basis_kind, p_basis, p_actor, p_obo, '')
+  returning id into v_id;
+
+  perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind, 'wake_mint_sandbox_view', v_id,
+    jsonb_build_object('client_set_basis', v_basis_kind, 'client_count', cardinality(v_client_set), 'op_key', p_op_key));
+
+  v_result := jsonb_build_object('sandbox_view_id', v_id, 'body_sha256', v_sha,
+    'client_set', to_jsonb(v_client_set), 'client_set_basis', v_basis_kind);
+  return clara._finish_op(p_firm, 'wake_mint_sandbox_view', p_op_key, v_result);
+end $$;
+revoke all on function clara._sandbox_view_mint_core(uuid,uuid,uuid,text,jsonb,jsonb,text) from public;
+
+-- --- 5d. _sandbox_export_request_core(p_firm, p_actor, p_obo, p_wake_kind, p_view, p_recipient,
+--         p_locale, p_op_key) -- SS3.3/SS3.6, the coverage check AND the watermark presence check,
+--         BOTH before a job exists (design SS3.4).
+create function clara._sandbox_export_request_core(p_firm uuid, p_actor uuid, p_obo uuid,
+    p_wake_kind text, p_view uuid, p_recipient uuid, p_locale text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_req_hash bytea; v_reserved jsonb; v_view record; v_cover jsonb;
+        v_wpv_id uuid; v_id uuid; v_result jsonb; v_today date;
+begin
+  v_req_hash := clara._hash(jsonb_build_object('view', p_view, 'recipient', p_recipient, 'locale', p_locale));
+  v_reserved := clara._reserve_op(p_firm, 'wake_request_sandbox_export', p_op_key, v_req_hash);
+  if v_reserved is not null then return v_reserved; end if;
+
+  select * into v_view from clara.sandbox_views where id = p_view and firm_id = p_firm;
+  if not found then
+    raise exception 'no such sandbox view in your firm' using errcode = 'CLR11',
+      detail = '{"reason":"sandbox_view_not_found"}';
+  end if;
+
+  -- SS3.3's coverage predicate (raises its own typed refusal on failure -- propagates as-is).
+  v_cover := clara._recipient_covers(p_firm, v_view.client_set, p_recipient);
+
+  -- SS3.6's presence check at REQUEST time (never render time), pinned into the frozen half.
+  -- THE FORBIDDEN-CLOCK WALL (x42 S5.25, round 6-9): no clara function may derive a `date` from
+  -- the SESSION's ambient clock/timezone -- current_date included, since its calendar day
+  -- depends on the connection's TimeZone GUC and is therefore non-deterministic across replay.
+  -- clara._book_today() (0042) is THE ONE body that answers "what day is it" for every
+  -- money/legally-dated column, Asia/Kuala_Lumpur, sampled per statement -- caught live by
+  -- x42.r7.s5.census.2 and x42.s5c.5 on first authoring (an inline zoned cast here would have
+  -- been a SECOND body owning the house legal date); calling the authority instead of
+  -- reinventing its expression is the fix, not a local workaround.
+  v_today := clara._book_today();
+  select id into v_wpv_id from clara.watermark_policy_versions
+    where policy_key = 'sandbox_watermark' and locale = p_locale and firm_id is null
+      and effective_from <= v_today and (effective_to is null or effective_to >= v_today)
+    order by version desc limit 1;
+  if v_wpv_id is null then
+    raise exception 'no sandbox_watermark row is effective for this locale' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason','watermark_policy_absent','locale',p_locale)::text;
+  end if;
+
+  insert into clara.sandbox_exports
+    (firm_id, sandbox_view_id, recipient_id, coverage_proof, watermark_policy_version_id, locale,
+     requested_by, on_behalf_of, op_key)
+  values (p_firm, p_view, p_recipient,
+    v_cover || jsonb_build_object('body_sha256', v_view.body_sha256, 'checked_client_set', to_jsonb(v_view.client_set)),
+    v_wpv_id, p_locale, p_actor, p_obo, p_op_key)
+  returning id into v_id;
+
+  perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind, 'wake_request_sandbox_export', v_id,
+    jsonb_build_object('sandbox_view_id', p_view, 'recipient_id', p_recipient, 'locale', p_locale, 'op_key', p_op_key));
+
+  v_result := jsonb_build_object('sandbox_export_id', v_id, 'state', 'claimable',
+    'watermark_policy_version_id', v_wpv_id);
+  return clara._finish_op(p_firm, 'wake_request_sandbox_export', p_op_key, v_result);
+end $$;
+revoke all on function clara._sandbox_export_request_core(uuid,uuid,uuid,text,uuid,uuid,text,text) from public;
+
+reset role;
+
+-- =====================================================================================
+-- SECTION 6 -- THE WAKE WRAPPERS. SECURITY DEFINER, search_path=clara,pg_temp, resolves
+-- clara.wake_context() then clara.assert_wake_allowed(w.wake_kind, '<name>'), refuses a blank
+-- op_key before any work, delegates to an ungranted core. No wrapper body carries DML text
+-- (F-A5's C1-at-four-by-construction rule, 0077:23-29, inherited).
+-- =====================================================================================
+set role clara_fn_owner;
+
+create function clara.wake_mint_sandbox_view(p_body jsonb, p_basis jsonb, p_rationale text,
+    p_model jsonb, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_mint_sandbox_view');
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then raise exception 'a wake sandbox act needs its idempotency key' using errcode='CLR10', detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}'; end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then raise exception 'a wake sandbox act states its rationale' using errcode='CLR10', detail='{"reason":"invalid_request","class":"rationale"}'; end if;
+  if p_model is null or nullif(btrim(coalesce(p_model->>'model','')),'') is null or nullif(btrim(coalesce(p_model->>'model_version','')),'') is null then
+    raise exception 'a wake sandbox act names its model' using errcode='CLR10', detail='{"reason":"invalid_request","class":"model"}';
+  end if;
+  return clara._sandbox_view_mint_core(w.firm_id, clara.agent_user_id(), w.on_behalf_of, w.wake_kind,
+    p_body, p_basis, p_op_key);
+end
+$$;
+
+create function clara.wake_request_sandbox_export(p_view uuid, p_recipient uuid, p_locale text,
+    p_rationale text, p_model jsonb, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare w record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_request_sandbox_export');
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then raise exception 'a wake sandbox act needs its idempotency key' using errcode='CLR10', detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}'; end if;
+  if nullif(btrim(coalesce(p_rationale,'')),'') is null then raise exception 'a wake sandbox act states its rationale' using errcode='CLR10', detail='{"reason":"invalid_request","class":"rationale"}'; end if;
+  if p_model is null or nullif(btrim(coalesce(p_model->>'model','')),'') is null or nullif(btrim(coalesce(p_model->>'model_version','')),'') is null then
+    raise exception 'a wake sandbox act names its model' using errcode='CLR10', detail='{"reason":"invalid_request","class":"model"}';
+  end if;
+  if p_locale is null or p_locale not in ('en','ms','zh') then
+    raise exception 'unrecognised locale' using errcode='CLR10', detail='{"reason":"invalid_request","class":"locale"}';
+  end if;
+  return clara._sandbox_export_request_core(w.firm_id, clara.agent_user_id(), w.on_behalf_of, w.wake_kind,
+    p_view, p_recipient, p_locale, p_op_key);
+end
+$$;
+
+-- stable definer reader, its own receipt (TA-P4 A) -- one argument only per Annex A.2; no
+-- op_key/rationale/model, since a status read is not itself a durable act needing idempotency.
+create function clara.wake_sandbox_export_state(p_export uuid)
+  returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare w record; e record;
+begin
+  select * into w from clara.wake_context();
+  if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
+  perform clara.assert_wake_allowed(w.wake_kind, 'wake_sandbox_export_state');
+  select * into e from clara.sandbox_exports where id = p_export and firm_id = w.firm_id;
+  if not found then
+    raise exception 'no such sandbox export in your firm' using errcode = 'CLR11',
+      detail = '{"reason":"sandbox_view_not_found"}';
+  end if;
+  perform clara._audit(w.firm_id, clara.agent_user_id(), w.on_behalf_of, w.wake_kind,
+    'wake_sandbox_export_state', e.id, '{}'::jsonb);
+  return jsonb_build_object('id', e.id, 'state', e.state, 'attempts', e.attempts,
+    'artifact_sha256', e.artifact_sha256, 'byte_size', e.byte_size, 'storage_key', e.storage_key,
+    'locale', e.locale, 'created_at', e.created_at, 'finished_at', e.finished_at,
+    'last_error', e.last_error);
+end
+$$;
+
+reset role;
+
+-- =====================================================================================
+-- SECTION 7 -- THE clara_runtime WORKER VERBS. Lease-scoped exactly as 0081:152-168; the hash
+-- comes IN at completion (X5); terminal failure through the audited door (0080:280-292 shape).
+-- No CLAIM verb ships in this PR-1: Annex A.2 enumerates exactly these three worker verbs and none
+-- of them transitions claimable -> running. That is presumed to be PR-3's own dispatch-wiring (P-5,
+-- "the leader/dispatch path ... measured at PR-3") reusing or extending zeta's existing claim loop
+-- for the sandbox job family, not a PR-1 mint. Flagged for confirmation in the build report -- a
+-- worker verb built and unreachable is honest (0078's own "the absence of part 2 is the absence of
+-- the feature, never a half-open door" shape), never a half-open door.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create function clara.sandbox_export_payload(p_export uuid, p_worker text)
+  returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare e record; v record;
+begin
+  select * into e from clara.sandbox_exports
+    where id = p_export and state = 'running' and claimed_by = p_worker and lease_expires_at >= now();
+  if not found then
+    raise exception 'this worker does not hold the lease on this sandbox export' using errcode = 'CLR43',
+      detail = '{"reason":"sandbox_export_lease_not_held"}';
+  end if;
+  select * into v from clara.sandbox_views where id = e.sandbox_view_id;
+  return jsonb_build_object('sandbox_export_id', e.id, 'firm_id', e.firm_id,
+    'sandbox_view_id', e.sandbox_view_id, 'body', v.body, 'body_sha256', v.body_sha256,
+    'locale', e.locale, 'watermark_policy_version_id', e.watermark_policy_version_id);
+end
+$$;
+
+create function clara.complete_sandbox_export(p_export uuid, p_worker text, p_sha256 text,
+    p_byte_size bigint, p_storage_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare e record;
+begin
+  select * into e from clara.sandbox_exports
+    where id = p_export and state = 'running' and claimed_by = p_worker and lease_expires_at >= now();
+  if not found then
+    raise exception 'this worker does not hold the lease on this sandbox export' using errcode = 'CLR43',
+      detail = '{"reason":"sandbox_export_lease_not_held"}';
+  end if;
+  if e.artifact_sha256 is not null then
+    raise exception 'this sandbox export is already completed' using errcode = 'CLR08',
+      detail = '{"reason":"sandbox_export_already_completed"}';
+  end if;
+  if p_sha256 is null or p_sha256 !~ '^[0-9a-f]{64}$' or p_byte_size is null or p_byte_size <= 0
+     or nullif(btrim(coalesce(p_storage_key,'')),'') is null then
+    raise exception 'invalid completion arguments' using errcode = 'CLR10',
+      detail = '{"reason":"invalid_request","class":"completion"}';
+  end if;
+  update clara.sandbox_exports
+     set state = 'done', artifact_sha256 = p_sha256, byte_size = p_byte_size,
+         storage_key = p_storage_key, finished_at = now()
+   where id = p_export;
+  perform clara._audit(e.firm_id, clara.agent_user_id(), e.on_behalf_of, null,
+    'complete_sandbox_export', e.id, jsonb_build_object('worker', p_worker, 'sha256', p_sha256));
+  return jsonb_build_object('sandbox_export_id', e.id, 'state', 'done');
+end
+$$;
+
+create function clara.fail_sandbox_export(p_export uuid, p_worker text, p_error jsonb)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare e record;
+begin
+  select * into e from clara.sandbox_exports
+    where id = p_export and state = 'running' and claimed_by = p_worker and lease_expires_at >= now();
+  if not found then
+    raise exception 'this worker does not hold the lease on this sandbox export' using errcode = 'CLR43',
+      detail = '{"reason":"sandbox_export_lease_not_held"}';
+  end if;
+  update clara.sandbox_exports
+     set state = 'failed', last_error = coalesce(p_error, '{}'::jsonb), finished_at = now()
+   where id = p_export;
+  perform clara._audit(e.firm_id, clara.agent_user_id(), e.on_behalf_of, null,
+    'fail_sandbox_export', e.id, jsonb_build_object('worker', p_worker, 'error', p_error));
+  return jsonb_build_object('sandbox_export_id', e.id, 'state', 'failed');
+end
+$$;
+
+reset role;
+
+-- =====================================================================================
+-- SECTION 8 -- THE HUMAN VERBS. register/supersede_export_recipient are admin+ (design SS3.3 --
+-- covered_clients IS the wall; this design's fail-closed DEFAULT pending Annex E Q2, not a ruled
+-- reservation -- SS1's fold note). list_sandbox_exports is bookkeeper+ (the 0002:518-520 idiom,
+-- TA-P14's minimal door).
+-- =====================================================================================
+set role clara_fn_owner;
+
+create function clara.register_export_recipient(p_kind text, p_user uuid, p_display_name text,
+    p_basis text, p_covered_clients uuid[], p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_bad uuid[]; v_id uuid; v_req_hash bytea; v_reserved jsonb;
+begin
+  c := clara._human_ctx(clara.role_rank('admin'));
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'a recipient registration needs its idempotency key' using errcode='CLR10', detail='{"reason":"invalid_request","class":"op_key"}';
+  end if;
+  v_req_hash := clara._hash(jsonb_build_object('kind',p_kind,'user',p_user,'display_name',p_display_name,'basis',p_basis,'covered_clients',p_covered_clients));
+  v_reserved := clara._reserve_op(c.firm, 'register_export_recipient', p_op_key, v_req_hash);
+  if v_reserved is not null then return v_reserved; end if;
+
+  if p_kind is null or p_kind not in ('firm_member','external') then
+    raise exception 'unrecognised recipient kind' using errcode='CLR10', detail='{"reason":"invalid_request","class":"kind"}';
+  end if;
+  if nullif(btrim(coalesce(p_display_name,'')),'') is null then
+    raise exception 'a recipient needs a display name' using errcode='CLR10', detail='{"reason":"invalid_request","class":"display_name"}';
+  end if;
+  if nullif(btrim(coalesce(p_basis,'')),'') is null then
+    raise exception 'a recipient needs a stated basis' using errcode='CLR10', detail='{"reason":"invalid_request","class":"basis"}';
+  end if;
+
+  if p_kind = 'firm_member' then
+    if p_user is null then
+      raise exception 'a firm_member recipient needs a user' using errcode='CLR10', detail='{"reason":"invalid_request","class":"user_id"}';
+    end if;
+    if not exists(select 1 from clara.firm_memberships m where m.user_id = p_user and m.firm_id = c.firm and m.status = 'active') then
+      raise exception 'this user is not an active member of your firm' using errcode='CLR11', detail='{"reason":"invalid_request","class":"user_id"}';
+    end if;
+    insert into clara.export_recipients (firm_id, kind, user_id, display_name, basis, covered_clients, registered_by)
+      values (c.firm, 'firm_member', p_user, p_display_name, p_basis, null, c.actor)
+      returning id into v_id;
+  else
+    if p_covered_clients is null or cardinality(p_covered_clients) = 0 then
+      raise exception 'an external recipient needs at least one covered client' using errcode='CLR10', detail='{"reason":"invalid_request","class":"covered_clients"}';
+    end if;
+    -- Every element validated at write against clara.clients of THIS firm, AT ANY STATUS (SS3.3 --
+    -- an active-only validation would make the wall unsatisfiable for an onboarding/archived client).
+    select array_agg(x) into v_bad from unnest(p_covered_clients) x
+      where not exists(select 1 from clara.clients cl where cl.id = x and cl.firm_id = c.firm);
+    if coalesce(array_length(v_bad,1),0) > 0 then
+      raise exception 'covered_clients names a client not in your firm' using errcode='CLR11',
+        detail = jsonb_build_object('reason','invalid_request','class','covered_clients','unknown',to_jsonb(v_bad))::text;
+    end if;
+    insert into clara.export_recipients (firm_id, kind, user_id, display_name, basis, covered_clients, registered_by)
+      values (c.firm, 'external', null, p_display_name, p_basis, p_covered_clients, c.actor)
+      returning id into v_id;
+  end if;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'register_export_recipient', v_id,
+    jsonb_build_object('kind', p_kind, 'op_key', p_op_key));
+  return clara._finish_op(c.firm, 'register_export_recipient', p_op_key,
+    jsonb_build_object('recipient_id', v_id, 'kind', p_kind));
+end
+$$;
+
+create function clara.supersede_export_recipient(p_recipient uuid, p_reason text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; r record; v_new uuid; v_req_hash bytea; v_reserved jsonb;
+begin
+  c := clara._human_ctx(clara.role_rank('admin'));
+  if nullif(btrim(coalesce(p_op_key,'')),'') is null then
+    raise exception 'a supersede act needs its idempotency key' using errcode='CLR10', detail='{"reason":"invalid_request","class":"op_key"}';
+  end if;
+  if nullif(btrim(coalesce(p_reason,'')),'') is null then
+    raise exception 'a supersede act states its reason' using errcode='CLR10', detail='{"reason":"invalid_request","class":"reason"}';
+  end if;
+  v_req_hash := clara._hash(jsonb_build_object('recipient',p_recipient,'reason',p_reason));
+  v_reserved := clara._reserve_op(c.firm, 'supersede_export_recipient', p_op_key, v_req_hash);
+  if v_reserved is not null then return v_reserved; end if;
+
+  select * into r from clara.export_recipients where id = p_recipient and firm_id = c.firm;
+  if not found then
+    raise exception 'no such export recipient in your firm' using errcode='CLR11', detail='{"reason":"export_recipient_unknown"}';
+  end if;
+  if r.superseded_by is not null then
+    raise exception 'this export recipient already has a successor' using errcode='CLR10', detail='{"reason":"export_recipient_superseded"}';
+  end if;
+
+  insert into clara.export_recipients (firm_id, kind, user_id, display_name, basis, covered_clients, registered_by)
+    values (c.firm, r.kind, r.user_id, r.display_name, p_reason, r.covered_clients, c.actor)
+    returning id into v_new;
+  update clara.export_recipients set superseded_by = v_new, superseded_at = now() where id = p_recipient;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'supersede_export_recipient', v_new,
+    jsonb_build_object('supersedes', p_recipient, 'reason', p_reason, 'op_key', p_op_key));
+  return clara._finish_op(c.firm, 'supersede_export_recipient', p_op_key,
+    jsonb_build_object('recipient_id', v_new, 'supersedes', p_recipient));
+end
+$$;
+
+-- bookkeeper+ human read, the 0002:518-520 idiom. p_view: an optional filter to one sandbox view's
+-- exports (NULL = every export in the firm); p_limit: page size.
+create function clara.list_sandbox_exports(p_view uuid, p_limit int)
+  returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare c record; v_limit int; v_rows jsonb;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  v_limit := least(greatest(coalesce(p_limit, 50), 1), 200);
+  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) into v_rows from (
+    select e.id, e.sandbox_view_id, e.recipient_id, r.display_name as recipient_display_name,
+           v.client_set, e.watermark_policy_version_id, e.state, e.artifact_sha256, e.byte_size,
+           e.locale, e.created_at, e.finished_at, e.requested_by
+      from clara.sandbox_exports e
+      join clara.sandbox_views v on v.id = e.sandbox_view_id
+      join clara.export_recipients r on r.id = e.recipient_id
+     where e.firm_id = c.firm and (p_view is null or e.sandbox_view_id = p_view)
+     order by e.created_at desc, e.id desc
+     limit v_limit
+  ) t;
+  return v_rows;
+end
+$$;
+
+reset role;
+
+-- =====================================================================================
+-- SECTION 9 -- GRANTS + THE ALLOWLIST. clara_wake_interactive is the role-level grant (the
+-- estate's role-vs-allowlist split, 0107:243-249: one grant, the fine-grained per-wake_kind gate
+-- lives entirely in wake_fn_allowlist / assert_wake_allowed). 'interactive' rows ONLY -- NOT
+-- 'interactive_client': though F-A2's D34 limb IS merged on this chain (verified at authoring:
+-- 0106/0107/0117/0121/0126 all carry the wake_kind), the LIVE estate carries its own deliberate,
+-- named GB-3/D34 closed-world wall (below) capping interactive_client at exactly one verb --
+-- discovered by rig replay, not assumed from the design's own Annex A.2 text. Never a 'proactive'
+-- row (law 71's proactive-says-nothing posture), never unattended.
+-- =====================================================================================
+set role clara_fn_owner;
+
+revoke all on function
+  clara.wake_mint_sandbox_view(jsonb,jsonb,text,jsonb,text),
+  clara.wake_request_sandbox_export(uuid,uuid,text,text,jsonb,text),
+  clara.wake_sandbox_export_state(uuid)
+  from public;
+grant execute on function
+  clara.wake_mint_sandbox_view(jsonb,jsonb,text,jsonb,text),
+  clara.wake_request_sandbox_export(uuid,uuid,text,text,jsonb,text),
+  clara.wake_sandbox_export_state(uuid)
+  to clara_wake_interactive;
+
+-- interactive ONLY -- NOT interactive_client. Measured, not assumed from the design's own
+-- Annex A.2 text ("the interactive_client triple once F-A2's D34 limb merges"): the rig-replayed
+-- estate carries a DELIBERATE, NAMED closed-world invariant this design did not know about --
+-- GB-3 (f-a2-chat-limb.test.mjs) and D34 (f-a2-grants.test.mjs) both assert interactive_client is
+-- allowlisted for EXACTLY ONE verb, wake_open_question, "so this kind would [not] quietly become
+-- a posting kind". Widening it here would violate a live safety wall this lane does not own and
+-- was never priced to touch. Annex K itself already prices exactly this outcome as an acceptable
+-- fallback: "if it slips: ('interactive', …) rows only; HOME-scoped sandbox works." A client-
+-- pinned chat session therefore cannot mint/request a sandbox export in this build; only a
+-- HOME-scoped (firm-wide) interactive session can. Flagged as a design-doc/live-estate
+-- discrepancy in the build report, not silently absorbed.
+insert into clara.wake_fn_allowlist(wake_kind, function_name) values
+  ('interactive', 'wake_mint_sandbox_view'),
+  ('interactive', 'wake_request_sandbox_export'),
+  ('interactive', 'wake_sandbox_export_state')
+on conflict do nothing;
+
+revoke all on function
+  clara.sandbox_export_payload(uuid,text),
+  clara.complete_sandbox_export(uuid,text,text,bigint,text),
+  clara.fail_sandbox_export(uuid,text,jsonb)
+  from public;
+grant execute on function
+  clara.sandbox_export_payload(uuid,text),
+  clara.complete_sandbox_export(uuid,text,text,bigint,text),
+  clara.fail_sandbox_export(uuid,text,jsonb)
+  to clara_runtime;
+
+revoke all on function
+  clara.register_export_recipient(text,uuid,text,text,uuid[],text),
+  clara.supersede_export_recipient(uuid,text,text),
+  clara.list_sandbox_exports(uuid,int)
+  from public;
+grant execute on function
+  clara.register_export_recipient(text,uuid,text,text,uuid[],text),
+  clara.supersede_export_recipient(uuid,text,text),
+  clara.list_sandbox_exports(uuid,int)
+  to clara_authenticated;
+
+reset role;
+
+-- =====================================================================================
+-- SECTION 10 -- THE TAIL CENSUS. Read from the live catalog, never asserted from prose.
+-- =====================================================================================
+do $tail$
+declare
+  v_n int; v_grantees text[]; v_owner_check boolean;
+begin
+  -- (a) The three relations: FORCE RLS, exactly the owner+human policy pair, correct triggers.
+  select count(*) into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'clara' and c.relname in ('sandbox_views','sandbox_exports','export_recipients')
+      and c.relrowsecurity and c.relforcerowsecurity;
+  if v_n <> 3 then
+    raise exception 'f_a5b pr1 tail: expected 3 force-RLS relations, found %', v_n using errcode = 'CLR10';
+  end if;
+
+  select count(*) into v_n from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'clara' and c.relname = 'sandbox_views' and not t.tgisinternal;
+  if v_n <> 2 then
+    raise exception 'f_a5b pr1 tail: sandbox_views expected 2 triggers (append_only, no_truncate), found %', v_n using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'clara' and c.relname = 'sandbox_exports' and not t.tgisinternal;
+  if v_n <> 2 then
+    raise exception 'f_a5b pr1 tail: sandbox_exports expected 2 triggers (lifecycle, no_truncate), found %', v_n using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'clara' and c.relname = 'export_recipients' and not t.tgisinternal;
+  if v_n <> 2 then
+    raise exception 'f_a5b pr1 tail: export_recipients expected 2 triggers (lifecycle, no_truncate), found %', v_n using errcode = 'CLR10';
+  end if;
+
+  -- (b) No clara_agent_ro table grant anywhere on the three (F-A5's C4/C5 posture, inherited).
+  select count(*) into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'clara' and c.relname in ('sandbox_views','sandbox_exports','export_recipients')
+      and has_table_privilege('clara_agent_ro', c.oid, 'SELECT');
+  if v_n <> 0 then
+    raise exception 'f_a5b pr1 tail: clara_agent_ro must hold zero table grants on the three relations, found %', v_n using errcode = 'CLR10';
+  end if;
+
+  -- (c) The four ungranted cores: zero EXECUTE to any application role.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    cross join lateral unnest(array['clara_authenticated','clara_agent_ro','clara_runtime',
+      'clara_wake_interactive','clara_wake_proactive']) app(rolname)
+    join pg_roles g on g.rolname = app.rolname
+    where n.nspname = 'clara'
+      and p.proname in ('_sandbox_client_set','_recipient_covers','_sandbox_view_mint_core','_sandbox_export_request_core')
+      and has_function_privilege(g.oid, p.oid, 'EXECUTE');
+  if v_n <> 0 then
+    raise exception 'f_a5b pr1 tail: an ungranted core is reachable by an application role, count %', v_n using errcode = 'CLR10';
+  end if;
+
+  -- (d) The wake grant roster, BOTH directions (F5-D30): exactly 3 allowlist rows, exactly these
+  -- three function names, 'interactive' ONLY, never proactive. NOT 'interactive_client' -- measured
+  -- at authoring: the estate's own GB-3/D34 closed-world cells (f-a2-chat-limb.test.mjs,
+  -- f-a2-grants.test.mjs) assert interactive_client is allowlisted for EXACTLY ONE verb
+  -- (wake_open_question), a deliberate anti-capability-creep wall this lane does not own. Annex K's
+  -- own documented fallback ("interactive rows only; HOME-scoped sandbox works") is what ships.
+  select count(*) into v_n from clara.wake_fn_allowlist
+    where function_name in ('wake_mint_sandbox_view','wake_request_sandbox_export','wake_sandbox_export_state');
+  if v_n <> 3 then
+    raise exception 'f_a5b pr1 tail: expected exactly 3 allowlist rows for this lane''s wrappers, found %', v_n using errcode = 'CLR10';
+  end if;
+  if exists(select 1 from clara.wake_fn_allowlist
+      where function_name in ('wake_mint_sandbox_view','wake_request_sandbox_export','wake_sandbox_export_state')
+        and wake_kind <> 'interactive') then
+    raise exception 'f_a5b pr1 tail: an allowlist row for this lane''s wrappers admits an unexpected wake_kind' using errcode = 'CLR10';
+  end if;
+  -- Positive proof this lane did not touch the D34 wall: interactive_client still holds exactly
+  -- its one pre-existing row (wake_open_question), read live, never assumed.
+  if (select count(*) from clara.wake_fn_allowlist where wake_kind = 'interactive_client') <> 1
+     or not exists(select 1 from clara.wake_fn_allowlist
+       where wake_kind = 'interactive_client' and function_name = 'wake_open_question') then
+    raise exception 'f_a5b pr1 tail: interactive_client''s one-row D34 invariant no longer holds -- this file must not have touched it' using errcode = 'CLR10';
+  end if;
+  -- Reverse arm: no allowlist row NAMES one of this lane's wrappers under a kind outside
+  -- 'interactive', and no OTHER lane's allowlist row was touched (count unmoved for everything
+  -- else already proven by F-A5's own tail census pattern; this file adds, never edits, existing
+  -- rows).
+
+  -- (e) EXECUTE grantees, exact sets, no PUBLIC, no extra grantee.
+  select coalesce(array_agg(distinct grantee.rolname order by grantee.rolname), '{}') into v_grantees
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    cross join lateral (values ('clara_authenticated'),('clara_agent_ro'),('clara_runtime'),
+      ('clara_runtime_login'),('clara_wake_interactive'),('clara_wake_proactive'),('public'))
+      as grantee(rolname)
+    where n.nspname = 'clara' and p.proname = 'wake_mint_sandbox_view'
+      and has_function_privilege(case when grantee.rolname = 'public' then 'public' else grantee.rolname end, p.oid, 'EXECUTE');
+  if v_grantees is distinct from array['clara_wake_interactive'] then
+    raise exception 'f_a5b pr1 tail: wake_mint_sandbox_view grantees are %, expected exactly clara_wake_interactive', v_grantees using errcode = 'CLR10';
+  end if;
+
+  select coalesce(array_agg(distinct grantee.rolname order by grantee.rolname), '{}') into v_grantees
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    cross join lateral (values ('clara_authenticated'),('clara_agent_ro'),('clara_runtime'),
+      ('clara_runtime_login'),('clara_wake_interactive'),('clara_wake_proactive'),('public'))
+      as grantee(rolname)
+    where n.nspname = 'clara' and p.proname = 'complete_sandbox_export'
+      and has_function_privilege(case when grantee.rolname = 'public' then 'public' else grantee.rolname end, p.oid, 'EXECUTE');
+  if v_grantees is distinct from array['clara_runtime'] then
+    raise exception 'f_a5b pr1 tail: complete_sandbox_export grantees are %, expected exactly clara_runtime', v_grantees using errcode = 'CLR10';
+  end if;
+
+  select coalesce(array_agg(distinct grantee.rolname order by grantee.rolname), '{}') into v_grantees
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    cross join lateral (values ('clara_authenticated'),('clara_agent_ro'),('clara_runtime'),
+      ('clara_runtime_login'),('clara_wake_interactive'),('clara_wake_proactive'),('public'))
+      as grantee(rolname)
+    where n.nspname = 'clara' and p.proname = 'register_export_recipient'
+      and has_function_privilege(case when grantee.rolname = 'public' then 'public' else grantee.rolname end, p.oid, 'EXECUTE');
+  if v_grantees is distinct from array['clara_authenticated'] then
+    raise exception 'f_a5b pr1 tail: register_export_recipient grantees are %, expected exactly clara_authenticated', v_grantees using errcode = 'CLR10';
+  end if;
+
+  -- (f) Every function this file minted is SECURITY DEFINER, owned by clara_fn_owner, search_path pinned.
+  select bool_and(p.prosecdef and pg_get_userbyid(p.proowner) = 'clara_fn_owner') into v_owner_check
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'clara' and p.proname in (
+      '_sandbox_client_set','_recipient_covers','_sandbox_view_mint_core','_sandbox_export_request_core',
+      'wake_mint_sandbox_view','wake_request_sandbox_export','wake_sandbox_export_state',
+      'sandbox_export_payload','complete_sandbox_export','fail_sandbox_export',
+      'register_export_recipient','supersede_export_recipient','list_sandbox_exports',
+      '_tf_export_recipients_lifecycle','_tf_sandbox_export_lifecycle');
+  if not coalesce(v_owner_check, false) then
+    raise exception 'f_a5b pr1 tail: not every minted function is SECURITY DEFINER owned by clara_fn_owner' using errcode = 'CLR10';
+  end if;
+
+  -- (g) 3 sandbox_watermark rows, exactly en/ms/zh, no other locale seeded by this file.
+  select count(*) into v_n from clara.watermark_policy_versions
+    where policy_key = 'sandbox_watermark' and locale in ('en','ms','zh');
+  if v_n <> 3 then
+    raise exception 'f_a5b pr1 tail: expected 3 sandbox_watermark rows across en/ms/zh, found %', v_n using errcode = 'CLR10';
+  end if;
+
+  -- (h) Zero rows in the two new tables that carry data (relations born empty; watermark rows are
+  -- on a pre-existing F-A5 PR-1 table, not counted here).
+  select count(*) into v_n from clara.sandbox_views;
+  if v_n <> 0 then raise exception 'f_a5b pr1 tail: sandbox_views expected 0 rows at migration end, found %', v_n using errcode = 'CLR10'; end if;
+  select count(*) into v_n from clara.sandbox_exports;
+  if v_n <> 0 then raise exception 'f_a5b pr1 tail: sandbox_exports expected 0 rows at migration end, found %', v_n using errcode = 'CLR10'; end if;
+  select count(*) into v_n from clara.export_recipients;
+  if v_n <> 0 then raise exception 'f_a5b pr1 tail: export_recipients expected 0 rows at migration end, found %', v_n using errcode = 'CLR10'; end if;
+
+  -- (i) No table in workflow/graphile_worker/spike touched (constraint 15 -- printed, never assumed).
+  select count(*) into v_n from information_schema.tables
+    where table_schema in ('workflow','graphile_worker','spike')
+      and table_name in ('sandbox_views','sandbox_exports','export_recipients');
+  if v_n <> 0 then
+    raise exception 'f_a5b pr1 tail: a frozen schema was touched' using errcode = 'CLR10';
+  end if;
+
+  raise notice 'f_a5b pr1 tail: OK -- 3 relations FORCE-RLS with exactly the owner/human policy pair + correct triggers, zero clara_agent_ro table grant, 4 ungranted cores reachable by no application role, 3 allowlist rows (interactive ONLY x3, F5-D30 both directions; interactive_client deliberately NOT widened -- the live GB-3/D34 one-row wall measured intact), exact EXECUTE grantee sets on 3 sample verbs across all three grant tiers (wake/runtime/human), every minted function SECURITY DEFINER owned by clara_fn_owner, 3 sandbox_watermark rows (en/ms/zh), all three new relations born with 0 rows, no frozen schema touched. NO claim_sandbox_export verb built (flagged, presumed PR-3''s dispatch-wiring). NO CHECK EXTENSION needed on watermark_policy_versions (measured at prestate: ck_wpv_policy_key already admits sandbox_watermark). Free-read basis kinds (scope=client/cross_client/firm) refuse sandbox_view_basis_unknown on THIS chain (F-A6 PR-1 not yet merged, measured at runtime by _sandbox_client_set, not assumed) -- preview-cell bases are fully functional.';
+end
+$tail$;

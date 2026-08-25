@@ -460,6 +460,21 @@ const STATEMENT_F_A1_PR4_CLOCK_NAMES = ["_persist_statement_core_v2", "persist_s
 // above, so a chain stopped short of F-A5 measures the roster it actually has.
 const REPORTING_AGENCY_F_A5_CLOCK_NAMES = ["_agent_approve_metric_definition_core"];
 
+// F-A5b PR-1 [`f_a5b_pr1_sandbox_export` at whatever number merge claimed]: five genuinely new
+// bodies, none deriving a business DATE (arm (B)'s own duplication roster stays untouched --
+// _sandbox_export_request_core's watermark-window check calls clara._book_today() itself,
+// exactly the roster's own standing advice, so it never joins THIS list at all). Each of the
+// five stamps a bare timestamptz -- "the audit stamp is the clock" idiom every other core
+// already on this roster carries: clara._recipient_covers's coverage_proof `checked_at`;
+// sandbox_export_payload/complete_sandbox_export/fail_sandbox_export's lease-held comparison
+// (`lease_expires_at >= now()`) and completion/failure `finished_at`; supersede_export_recipient's
+// `superseded_at`. Gated on the migration STEM like every group above, so a chain stopped short
+// of F-A5b measures the roster it actually has.
+const SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES = [
+  "_recipient_covers", "sandbox_export_payload", "complete_sandbox_export",
+  "fail_sandbox_export", "supersede_export_recipient",
+];
+
 // F-A1 PR-3 [the cutover, `f_a1_cutover` at whatever number merge claimed]:
 // clara.fail_witness_facts stamps `finished_at=now()` — the SAME timestamptz column its
 // siblings fail_invoice_facts / fail_statement_facts already stamp bare, no ::date suffix and
@@ -623,6 +638,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
+  if (await appliedStem("f_a5b_pr1_sandbox_export$")) names.push(...SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);

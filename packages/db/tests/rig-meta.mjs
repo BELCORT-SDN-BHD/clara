@@ -386,6 +386,16 @@ export const F_A5_PR2_COHORT = [...F_A5_PR2_WAKE_FNS, ...F_A5_PR2_UNGRANTED_FNS]
 // tail census over all seven named roles.
 const F_A5_PR3_HUMAN_FNS = ["archive_signed_original", "retrieve_signed_original"];
 export const F_A5_PR3_COHORT = [...F_A5_PR3_HUMAN_FNS];
+
+// F-A5b PR-1 [Wave-F Track A, the sandbox export lane's DB layer]: three grant tiers -- the wake
+// wrappers (mint/request/state), the clara_runtime worker verbs (payload/complete/fail, lease-
+// scoped), and the human doors (register/supersede recipient, admin+; list, bookkeeper+). No
+// claim_sandbox_export verb ships here (design annex A.2 enumerates none; presumed PR-3's own
+// dispatch-wiring, flagged in the migration's own header).
+const F_A5B_PR1_WAKE_FNS = ["wake_mint_sandbox_view", "wake_request_sandbox_export", "wake_sandbox_export_state"];
+const F_A5B_PR1_RUNTIME_FNS = ["sandbox_export_payload", "complete_sandbox_export", "fail_sandbox_export"];
+const F_A5B_PR1_HUMAN_FNS = ["register_export_recipient", "supersede_export_recipient", "list_sandbox_exports"];
+export const F_A5B_PR1_COHORT = [...F_A5B_PR1_WAKE_FNS, ...F_A5B_PR1_RUNTIME_FNS, ...F_A5B_PR1_HUMAN_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -1001,6 +1011,9 @@ export const ALLOWED = {
     ...F_A9_PR1A_HUMAN_FNS, // [Wave-F Track A, F-A9 PR-1A] the monthly usage rollup — see the block above
     ...F_A5_PR3_HUMAN_FNS, // [Wave-F Track A, F-A5 PR-3] the signed-original archive doors —
     // clara_authenticated ONLY (bookkeeper+ floor body-enforced) — see the block above
+    ...F_A5B_PR1_HUMAN_FNS, // [Wave-F Track A, F-A5b PR-1] register/supersede_export_recipient
+    // (admin+) + list_sandbox_exports (bookkeeper+) — clara_authenticated ONLY, every floor
+    // body-enforced; agent + both wake roles gain ZERO (covered_clients IS the coverage wall)
     // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
     // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
@@ -1010,7 +1023,7 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS,
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS,
     // [Wave-F Track A, F-A7 beta, 0126] wake_file_document ONLY -- annexes-1 "clara_wake_filing +
     // clara_wake_interactive; one allowlist row per kind" (chat parity). The other four filing
     // wrappers (wake_open_firm_question, wake_propose_identifier_promotion, wake_reattribute_document,
@@ -1061,6 +1074,9 @@ export const ALLOWED = {
     ...F_A7_GAMMA_RUNTIME_FNS, // [Wave-F Track A, F-A7 gamma] prepare_firm_egress_dispatch,
     // mirroring WAVE_B_0020_RUNTIME_FNS' prepare_egress_dispatch (see the block above)
     ...F_A9_PR1A_RUNTIME_FNS, // [Wave-F Track A, F-A9 PR-1A] the second door — see the block above
+    ...F_A5B_PR1_RUNTIME_FNS, // [Wave-F Track A, F-A5b PR-1] the sandbox export worker verbs —
+    // payload (stable, lease-scoped read), complete (hash IN, set-once) and fail — the 0081:162-
+    // 168 lease shape; clara_runtime holds no table privilege on the two new relations either
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1212,6 +1228,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("wave F F-A5 PR-2 reporting-agency granted surface", F_A5_PR2_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5 PR-3 signed-original archive doors", F_A5_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
   return failures;
 }
 
