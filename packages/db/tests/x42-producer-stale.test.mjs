@@ -21,41 +21,30 @@ import {
 } from "./a21-helpers.mjs";
 import {
   af2SubstrateReady, skipAf2, refusesWithCode, caught,
-  acceptBankRuleSuggestion, retireRule, exceptLine,
+  exceptLine,
   T, CLR39,
   BANKCOA, EXPN, CODEACC,
-  af2World, freshAf2Client, signedCodingRule, plainAt,
+  af2World, freshAf2Client, plainAt,
   entryRowOf, entryLinesOf, ruleRow, statementRow,
   matchBankLine, voidBankStatement, approveEntry, lineGroupStatus,
 } from "./x42-af2-world.mjs";
+import { stageSuggestionDraft, stageRuleRetirement } from "./x42-producer-retired-fixtures.mjs";
 
 let live = false;
 let world = null;
 
-/** F-A3 PR-3 (Annex I) drops clara.accept_bank_rule_suggestion whole -- and with it the only
- *  lawful way to mint a NEW `bank_rule_suggested`-flagged draft, which is what every cell in
- *  this file needs to construct its fixture (arm (3)'s re-validation is only reachable through
- *  an accepted suggestion). `db-slice-frontiers` still runs this file at the D-b2/D-b3
- *  frontiers (test-list-d-b2.txt/-d-b3.txt), where the producer is exactly as designed and this
- *  battery must stay green. REVERSE/upper gate, the x42-s5-helpers.mjs `pr3Landed` precedent:
- *  skip loudly once the producer is retired on the frontier this rig runs against, never fail.
- *  (Arm (3)'s CODE itself is NOT retired -- it still re-validates any PRE-EXISTING draft; this
- *  file's claim is specifically about constructing a NEW one, which the drop makes impossible.) */
-async function producerRetired() {
-  return (await rootQuery(
-    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
-    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
-}
-
+/** F-A3 PR-3 (Annex I) drops propose_bank_rule / sign_bank_rule / accept_bank_rule_suggestion
+ *  whole -- review round SHOULD A3: arm (3) itself is NOT retired (0129 SS0's own KEEP
+ *  finding -- it still re-validates any pre-existing flagged draft), so this battery's CLAIM
+ *  survives the drop. Only the fixture-construction path needed a successor:
+ *  x42-producer-retired-fixtures.mjs stages the SAME shape directly (a signed
+ *  clara.bank_rules row + a `bank_rule_suggested`-flagged draft, legs derived through the
+ *  SAME clara._wdb_suggestion_lines arm (3) itself reads), so this file runs at HEAD on
+ *  either side of the retirement -- no frontier gate needed any more. */
 before(async () => {
   live = await af2SubstrateReady();
   if (!live) {
     noteLane("0037/0038/0040 bank substrate absent — the x42 PRODUCER staleness battery is dormant");
-    return;
-  }
-  if (await producerRetired()) {
-    live = false;
-    noteLane("F-A3 PR-3 retires clara.accept_bank_rule_suggestion whole (Annex I) — the x42 PRODUCER staleness battery is dormant on this frontier; db-slice-frontiers still proves it green at D-b2/D-b3 (0041_asm..0045)");
     return;
   }
   world = await af2World();
@@ -67,18 +56,15 @@ after(async () => {
   await endPool();
 });
 
-/** A signed coding rule + ONE accepted suggestion, ready to be made stale.
- *  Returns the rule world plus { entry, token, line }. */
+/** A signed coding rule + ONE staged suggestion, ready to be made stale. Successor to the
+ *  old propose/sign/accept chain (review round SHOULD A3) -- SAME shape,
+ *  { client, w, line, entry, token }, staged directly per
+ *  x42-producer-retired-fixtures.mjs's own header. */
 async function acceptedSuggestion(label) {
-  const client = await freshAf2Client(label);
-  const w = await signedCodingRule({ client, owner: world.users.alice, proposer: world.users.bob });
-  const line = w.lines[0];
-  const receipt = await acceptBankRuleSuggestion(world.users.bob, {
-    client, line: line.id, rule: w.rule, opKey: opk(`x42-stale-${label}`),
-  });
-  const ent = await entryRowOf(receipt.entry_id);
+  const s = await stageSuggestionDraft({ client: await freshAf2Client(label), owner: world.users.alice, proposer: world.users.bob });
+  const ent = await entryRowOf(s.entry);
   assert.equal(ent.status, "draft", `${label} mandatory setup: the suggestion is an outstanding DRAFT`);
-  return { client, w, line, entry: receipt.entry_id, token: ent.revision_token };
+  return s;
 }
 
 /** Approving MUST refuse CLR39 `suggestion_stale`, and the draft must survive. */
@@ -102,8 +88,10 @@ async function assertStale({ client, entry, token }, label) {
 test("x42.stale-22a arm (3): a rule RETIRED while the suggestion sat in the queue refuses suggestion_stale at approve", async (t) => {
   if (skipAf2(t, live)) return;
   const s = await acceptedSuggestion("stale-unsigned");
-  await retireRule(world.users.alice, {
-    rule: s.w.rule, reason: "x42 stale: this pattern turned out to be too broad", opKey: opk("x42-stale-retire"),
+  // retire_bank_rule retires with the machine too (one of the eleven drop targets) -- staged
+  // directly, review round successor (x42-producer-retired-fixtures.mjs).
+  await stageRuleRetirement({
+    rule: s.w.rule, actor: world.users.alice, reason: "x42 stale: this pattern turned out to be too broad",
   });
   assert.equal((await ruleRow(s.w.rule)).status, "retired", "mandatory setup: the rule is retired");
   await assertStale(s, "x42.stale-22a approving a suggestion whose rule is no longer signed");

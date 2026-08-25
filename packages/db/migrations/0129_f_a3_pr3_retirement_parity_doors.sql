@@ -283,6 +283,35 @@ declare
     raise exception 'the book_staff_advance_application core requires an actor and a firm in its context'
       using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
   end if;$c$;
+  -- SECOND SUBSTITUTION (review round fix -- CLR08 the agent-post receipt wall,
+  -- clara._tf_assert_agent_post_receipt, 0011): the pre-extraction body writes ZERO
+  -- entry_post_receipts rows on ANY approve, human or agent, because it was ONLY EVER a human
+  -- verb -- the wall is vacuously satisfied for a human checker_actor (Annex E.3's own "a
+  -- human approval writes no receipt. THAT IS THE WHOLE CONDITION"). The agent core now
+  -- reaches this SAME approve call with an agent checker_actor, and the wall is a DEFERRED
+  -- (commit-time) trigger, so nothing catches the gap until commit -- exactly the shape a
+  -- rig-replayed test battery exists to find. FIX, matching _allocate_receipt_core's own
+  -- precedent verbatim (0037): gate an explicit entry_post_receipts insert on p_ctx->>'is_agent',
+  -- right after the SAME approve call the human path already takes -- the human path inserts
+  -- nothing (is_agent is absent/false there), so its behaviour is BYTE-UNMOVED.
+  v_anchor2 text := $a2$    perform clara._approve_entry_core(
+      jsonb_build_object('actor', c.actor, 'firm', c.firm, 'receipt_preheld', true),
+      v_entry, v_rev, null, v_approve_key);
+    v_status := 'posted';$a2$;
+  v_ctx2 text := $c2$    perform clara._approve_entry_core(
+      jsonb_build_object('actor', c.actor, 'firm', c.firm, 'receipt_preheld', true),
+      v_entry, v_rev, null, v_approve_key);
+    v_status := 'posted';
+    if coalesce((p_ctx->>'is_agent')::boolean, false) then
+      insert into clara.entry_post_receipts(firm_id, client_id, entry_id, acting_actor,
+          on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+          maker_active_at_approval, op_key)
+        values (c.firm, p_client, v_entry, c.actor,
+          nullif(p_ctx->>'on_behalf_of','')::uuid, coalesce(p_ctx->>'wake_kind','bank_agent'),
+          coalesce(p_ctx->'model', '{}'::jsonb),
+          coalesce(nullif(btrim(p_ctx->>'rationale'),''), 'Staff advance application (agent)'),
+          jsonb_build_object('op_key', v_approve_key), 'agent_unattended', null, v_approve_key);
+    end if;$c2$;
 begin
   v_def := pg_get_functiondef('clara.book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)'::regprocedure);
   select p.prosrc, (select string_agg(a.n, ', ' order by a.o)
@@ -300,9 +329,12 @@ begin
   if position('$fa3pr3_core$' in v_src) <> 0 or position('$fa3pr3_wrap$' in v_src) <> 0 then
     raise exception 'F-A3 PR-3 SS2: the body of book_staff_advance_application contains one of this file''s dollar-quote tags' using errcode='CLR10';
   end if;
+  if (length(v_src) - length(replace(v_src, v_anchor2, ''))) / length(v_anchor2) <> 1 then
+    raise exception 'F-A3 PR-3 SS2: the live body does not carry the pinned approve-entry call site exactly once -- the second substitution (the entry_post_receipts fix) cannot be applied blind' using errcode='CLR10';
+  end if;
   execute replace(v_head, 'CREATE OR REPLACE FUNCTION clara.book_staff_advance_application(',
                           'CREATE OR REPLACE FUNCTION clara._book_staff_advance_application_core(p_ctx jsonb, ')
-          || 'AS $fa3pr3_core$' || replace(v_src, v_anchor, v_ctx) || '$fa3pr3_core$';
+          || 'AS $fa3pr3_core$' || replace(replace(v_src, v_anchor, v_ctx), v_anchor2, v_ctx2) || '$fa3pr3_core$';
   select p.oid into v_core_oid from pg_proc p
    where p.pronamespace='clara'::regnamespace and p.proname='_book_staff_advance_application_core';
   if v_core_oid is null then
@@ -352,6 +384,19 @@ end
 $wake_saa$;
 revoke all on function clara.wake_book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text,jsonb,text,text) from public;
 grant execute on function clara.wake_book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text,jsonb,text,text) to clara_wake_bank;
+
+-- THE ALLOWLIST ROW. Without this, assert_wake_allowed (0004:117-120, fail-closed) refuses
+-- EVERY call to the wrapper above with CLR03 -- the wrapper would be created, granted, and
+-- permanently unreachable. bank_agent owns this verb (OQ-7: "a sibling of the SAME SHAPE" as
+-- the other bank-agency wake verbs; the agent core below reuses bank_agent's own Tier-A/Tier-C
+-- machinery -- _agent_bank_tier_a, _agent_bank_tier_c_reason, _agent_bank_receipt -- verbatim,
+-- the same architectural family as _agent_add_bank_account_core). Placed BEFORE SS4 so the
+-- existing bank_agent-to-interactive_client mirror below picks it up the same way it picks up
+-- every other bank_agent row, with no special-casing -- consistent with OQ-7's "same shape"
+-- ruling and OQ-6's "chat parity rides PR-3" scope (both already ride this PR; this file does
+-- not silently narrow either).
+insert into clara.wake_fn_allowlist (wake_kind, function_name)
+  values ('bank_agent', 'wake_book_staff_advance_application');
 
 create function clara._agent_book_staff_advance_application_core(p_client uuid, p_posting_date date,
     p_memo text, p_lines jsonb, p_allocations jsonb, p_kind text, p_reason text,
@@ -457,12 +502,18 @@ begin
   -- OQ-8's fail-closed default: the payer is itself a client of this firm ONLY when a
   -- client_identifiers row of kind ssm/tin, for a DIFFERENT client, carries the SAME
   -- registration_normalized this proposal's counterparty carries -- proved, never assumed
-  -- from a name, per law 3.
+  -- from a name, per law 3. "DIFFERENT client" is enforced STRUCTURALLY here (review finding
+  -- C3b/SHOULD, the same-client trap): the counterparty's own client_id (cp.client_id) is
+  -- excluded from the match, never merely documented in the comment above -- a counterparty
+  -- whose registration_normalized happens to echo the PROPOSAL'S OWN client's identifier
+  -- (e.g. a self-referential reference number in a statement description) must never resolve
+  -- to that same client; there is no payer identity there to promote.
   select ci.client_id into v_target_client
     from clara.counterparties cp
     join clara.client_identifiers ci
       on ci.firm_id = c.firm and ci.kind in ('ssm','tin')
      and ci.value_normalized = cp.registration_normalized
+     and ci.client_id <> cp.client_id
    where cp.id = pr.subject_id and cp.firm_id = c.firm
      and nullif(btrim(coalesce(cp.registration_normalized,'')),'') is not null
    limit 1;
@@ -567,6 +618,14 @@ begin
   if has_function_privilege('public', v_core_oid, 'execute') then
     raise exception 'F-A3 PR-3 tail: clara._book_staff_advance_application_core is reachable by PUBLIC' using errcode='CLR10';
   end if;
+  -- Review-round fix (CLR08 the agent-post receipt wall): the core's SECOND substitution --
+  -- an is_agent-gated clara.entry_post_receipts insert beside the approve call -- is present.
+  -- Structural (a substring probe), not a behavioural re-proof: the behavioural proof that an
+  -- agent-authored posted application actually satisfies clara._tf_assert_agent_post_receipt
+  -- lives in the test battery (f-a3pr3.mfA.pos), which runs the real wake door end to end.
+  if (select p.prosrc from pg_proc p where p.oid = v_core_oid) !~ 'insert into clara\.entry_post_receipts' then
+    raise exception 'F-A3 PR-3 tail: clara._book_staff_advance_application_core does not write entry_post_receipts -- an agent-authored post would trip clara._tf_assert_agent_post_receipt (CLR08) at commit' using errcode='CLR10';
+  end if;
   if to_regprocedure('clara.book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)') is null then
     raise exception 'F-A3 PR-3 tail: the public book_staff_advance_application verb no longer resolves at its original signature' using errcode='CLR10';
   end if;
@@ -589,6 +648,17 @@ begin
   end if;
   if has_function_privilege('public', 'clara._agent_book_staff_advance_application_core(uuid,date,text,jsonb,jsonb,text,text,text,jsonb,text,text)'::regprocedure, 'execute') then
     raise exception 'F-A3 PR-3 tail: _agent_book_staff_advance_application_core is reachable by PUBLIC' using errcode='CLR10';
+  end if;
+  -- MF-A (review finding): a granted, EXECUTE-correct wrapper with NO allowlist row is still
+  -- fully DOA -- assert_wake_allowed (0004:117-120) is fail-closed and refuses every call with
+  -- CLR03 regardless of grants. Proven here as its own claim, never folded into the ACL check
+  -- above, because the two failure modes are independent and a reviewer should be able to tell
+  -- which one broke from the exception alone.
+  if not exists (
+    select 1 from clara.wake_fn_allowlist
+     where wake_kind = 'bank_agent' and function_name = 'wake_book_staff_advance_application'
+  ) then
+    raise exception 'F-A3 PR-3 tail: wake_book_staff_advance_application has no bank_agent allowlist row -- assert_wake_allowed refuses every call with CLR03, DOA' using errcode='CLR10';
   end if;
   -- BOTH directions, never clara_authenticated alone: a role that merely INHERITS PUBLIC's
   -- implicit grant would pass a same-role-only check even with a NULL-proacl PUBLIC leak (the

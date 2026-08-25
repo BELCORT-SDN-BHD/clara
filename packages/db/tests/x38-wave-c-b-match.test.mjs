@@ -1520,11 +1520,13 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
   assert.ok(!settleSrc.includes("pg_advisory_xact_lock(203005003") && !settleSrc.includes("pg_advisory_xact_lock(203005004"),
     "_settle_from_bank_line_core takes NO advisory rung in its own body (the allocation cores own it)");
 
-  // THE WRAPPER PIN -- BOTH live overloads (the 12-arg form and the 13-arg p_via_rule form).
-  // Each must be a real delegator: the bookkeeper+ floor, then the core call, and NOTHING that
-  // acquires. Without this, a future build could re-inline the ladder into one overload and
-  // walk out from under the core pin above. Per-oid, because fnSource() concatenates overloads
-  // and a delegating twin would mask an inlined one.
+  // THE WRAPPER PIN -- the one live overload (the 12-arg human form; F-A3 PR-3 drops the
+  // 13-arg p_via_rule form with the rest of the retired rules machine, Annex I -- this cell
+  // pinned BOTH overloads pre-PR-3, review round truing). It must be a real delegator: the
+  // bookkeeper+ floor, then the core call, and NOTHING that acquires. Without this, a future
+  // build could re-inline the ladder into the overload and walk out from under the core pin
+  // above. Per-oid, because fnSource() concatenates overloads and a delegating twin would mask
+  // an inlined one.
   const settleOverloads = await rootQuery(
     `select p.oid::regprocedure::text as sig, p.prosrc as src
        from pg_proc p join pg_namespace n on n.oid=p.pronamespace

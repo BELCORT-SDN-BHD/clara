@@ -701,20 +701,28 @@ test("f31w.w B2: account_upsert, identifier_promotion_propose, exception_propose
 // ===========================================================================
 // H.7 catalog
 // ===========================================================================
-test("f31w.o clara_wake_bank holds EXACTLY the 13-verb allowlist for bank_agent (closed-world)", async (t) => {
+test("f31w.o clara_wake_bank holds EXACTLY the PR-1b 13-verb allowlist for bank_agent, EXTENDED by PR-3's own additions (closed-world, stem-gated)", async (t) => {
   if (skipHere(t)) return;
+  // F-A3 PR-3 (OQ-7) extends this SAME allowlist with wake_book_staff_advance_application --
+  // review round truing, the standard extend-only stem-gated pattern (never a bare count).
+  const pr3Landed = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
   const rows = await rootQuery(
     "select function_name from clara.wake_fn_allowlist where wake_kind='bank_agent' order by 1");
-  assert.equal(rows.rowCount, 13, `expected 13 allowlist rows, found ${rows.rowCount}`);
+  const expected = pr3Landed ? 14 : 13;
+  assert.equal(rows.rowCount, expected, `expected ${expected} allowlist rows, found ${rows.rowCount}`);
   const names = rows.rows.map((r) => r.function_name);
-  for (const n of [
+  const expectedNames = [
     "wake_match_bank_line", "wake_unmatch_bank_match", "wake_settle_from_bank_line",
     "wake_complete_bank_reconciliation", "wake_void_bank_reconciliation",
     "wake_resolve_bank_line_exception", "wake_resolve_and_book_bank_line",
     "wake_propose_bank_line_exception", "wake_propose_bank_identifier_promotion",
     "wake_add_bank_account", "wake_upsert_account", "wake_void_bank_statement",
     "wake_get_bank_pack",
-  ]) {
+  ];
+  if (pr3Landed) expectedNames.push("wake_book_staff_advance_application");
+  for (const n of expectedNames) {
     assert.ok(names.includes(n), `allowlist is missing ${n}`);
   }
 });

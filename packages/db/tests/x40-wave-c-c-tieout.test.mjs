@@ -2538,8 +2538,8 @@ test("x40.ag ar_aging/ap_aging buckets are disjoint (current 0-30/31-60/61-90/91
 // accept_bank_rule_suggestion, list_bank_rule_candidates, list_bank_rules,
 // list_bank_line_suggestions, _bank_rule_sightings, _bank_rule_pattern_norm,
 // and the p_via_rule overloads of match_bank_line/settle_from_bank_line) drops
-// whole in migrations/UNNUMBERED_f_a3_pr3_retirement_parity_doors.sql SS1 --
-// verified live on the rig (frontier 0128_f_a3_pr3_retirement_parity_doors):
+// whole in migrations/0129_f_a3_pr3_retirement_parity_doors.sql SS1 --
+// verified live on the rig (frontier 0129_f_a3_pr3_retirement_parity_doors):
 // none of the eleven names resolve any more. clara.bank_rules the TABLE and
 // its historical rows are KEPT AS HISTORY (D35/D36); only the CODE retires.
 //
@@ -2559,10 +2559,17 @@ test("x40.ag ar_aging/ap_aging buckets are disjoint (current 0-30/31-60/61-90/91
 //     settle_from_bank_line has exactly ONE live overload (was two) -- the
 //     exact-count assertions that prove the p_via_rule/rule-arity forms are
 //     gone. A second, narrower check here would only restate x38.aa's own
-//     claim. rig-meta.mjs's TIEOUT_0040_COHORT also carries the roster-level
-//     absence (propose/sign/retire_bank_rule, the three list_bank_rule*
-//     reads, and the two _bank_rule_* internals removed from their cohort
-//     arrays with a dated note).
+//     claim. Review round correction: the absence wall for
+//     propose/sign/retire_bank_rule, the three list_bank_rule* reads and the
+//     two _bank_rule_* internals is NOT rig-meta.mjs's TIEOUT_0040_COHORT --
+//     that roster is now SILENT on all five names (removed from it with a
+//     dated note), which proves nothing on its own. The real mechanism is
+//     grantMatrixFailures()'s own live-catalog sweep (rig-meta.mjs ~1190-
+//     1202): it iterates `fns.rows`, read fresh from pg_proc, so a dropped
+//     name simply cannot appear and cannot be graded -- absence is
+//     STRUCTURAL there, not asserted. This file's own migration (F-A3 PR-3)
+//     carries the POSITIVE proof, in its own SS-TAIL: eleven explicit
+//     `to_regprocedure(...) is null` checks, one per dropped signature.
 //   x40.am ARM A/B exercised the (now-gone) producer directly and, by the
 //     test's OWN prior comment, had already gone VACUOUS once F-A2 PR-1
 //     excised the breeding block ("law 31 ... a zero that stops
@@ -2774,7 +2781,7 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
 //
 // F-A3 PR-3 (Annex I): propose_bank_rule/sign_bank_rule/retire_bank_rule --
 // the ONLY writers of bank.rule_proposed/rule_signed/rule_retired -- drop
-// whole. MEASURED live on the rig (frontier 0128_f_a3_pr3_retirement_parity_
+// whole. MEASURED live on the rig (frontier 0129_f_a3_pr3_retirement_parity_
 // doors): all three event types remain in clara.event_types AND
 // clara.trigger_taxonomy (this migration does not touch either table, only
 // the function catalog), so the REGISTRATION claim for all seven names

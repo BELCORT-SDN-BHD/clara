@@ -174,7 +174,7 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
     relations: [],
     calls: ["_human_ctx", "_upsert_account_core", "role_rank"],
   }],
-  // F-A3 PR-3 (UNNUMBERED_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder). ONE more
+  // F-A3 PR-3 (0129_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder). ONE more
   // CoR patch of the exact same family as the nine above: SS2 factors book_staff_advance_
   // application onto the PR-1a idiom (a thin human delegator + an ungranted
   // _book_staff_advance_application_core), reading the LIVE prosrc via

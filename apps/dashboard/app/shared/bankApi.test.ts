@@ -176,6 +176,25 @@ test("matchBankLine passes adjustments + the ack flag through when supplied", as
   assert.equal(seenBody.p_ack_period_exceptions, true);
 });
 
+// F-A3 PR-3 (Annex I): the bank-rules machine and its C-c splice #4 `p_via_rule` overload on
+// match_bank_line/settle_from_bank_line RETIRED WHOLE — `viaRuleId` no longer exists on either
+// function's TypeScript signature, so the two tests that once sent it are simply gone, not
+// replaced. This successor assertion is the half of the old coverage that is STILL a live
+// claim, restored per Annex I's "test breakage split by claim" law (nothing retires without a
+// named successor): matchBankLine must NEVER put `p_via_rule` on the wire — the retired 0040
+// overload no longer resolves, so a stray key here would be a live 42883 in production, not a
+// harmless no-op.
+test("matchBankLine never sends p_via_rule -- the 0040 overload it once selected is retired", async (t) => {
+  const seen: Record<string, unknown>[] = [];
+  t.mock.method(globalThis, "fetch", async (_u: string, init?: RequestInit) => {
+    seen.push(JSON.parse(String(init?.body)));
+    return jsonRes({ match_id: "m1" });
+  });
+  setup();
+  await matchBankLine("jwt", { clientId: "c1", lineIds: ["l1"], entries: [{ entry_id: "e1", matched_cents: -1000 }] });
+  assert.ok(!("p_via_rule" in seen[0]!), "matchBankLine's body carries no p_via_rule key at all");
+});
+
 test("unmatchBankMatch posts p_reason under unmatch_bank_match", async (t) => {
   let seenUrl = "";
   let seenBody: Record<string, unknown> = {};
@@ -208,6 +227,9 @@ test("settleFromBankLine sends the full pinned arg list with its stated defaults
   assert.equal(seenBody.p_attestation, null);
   assert.equal(seenBody.p_control_account, null);
   assert.equal(receipt.status, "approved");
+  // Review round restore (Annex I successor, same claim as matchBankLine's own above): the
+  // retired 0040 p_via_rule overload no longer resolves, so this must stay a live guard.
+  assert.ok(!("p_via_rule" in seenBody), "settleFromBankLine's body carries no p_via_rule key at all");
 });
 
 test("completePendingMatch posts p_match under complete_pending_match", async (t) => {

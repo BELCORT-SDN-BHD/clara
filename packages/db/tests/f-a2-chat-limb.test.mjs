@@ -243,12 +243,15 @@ test("f-a2.c13.roster GB-3's closed-world cell — interactive_client holds EXAC
     "select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind=$1 order by 1", [NEW_KIND]);
   const fns = r.rows.map((x) => x.fn);
   assert.deepEqual(fns, [
-    "wake_add_bank_account", "wake_complete_bank_reconciliation", "wake_get_bank_pack",
+    "wake_add_bank_account", "wake_book_staff_advance_application",
+    "wake_complete_bank_reconciliation", "wake_get_bank_pack",
     "wake_match_bank_line", "wake_open_question", "wake_propose_bank_identifier_promotion",
     "wake_propose_bank_line_exception", "wake_resolve_and_book_bank_line",
     "wake_resolve_bank_line_exception", "wake_settle_from_bank_line", "wake_unmatch_bank_match",
     "wake_upsert_account", "wake_void_bank_reconciliation", "wake_void_bank_statement",
-  ], `c13.roster: interactive_client's allowlist is not the ruled fourteen-row set (got ${fns.join(", ")})`);
+    // wake_book_staff_advance_application review round truing: PR-3's SS2 staff-advance
+    // sibling joins the bank_agent roster SS4 mirrors, extending fourteen to fifteen.
+  ], `c13.roster: interactive_client's allowlist is not the ruled fifteen-row set (got ${fns.join(", ")})`);
 });
 
 test("f-a2.c13.woq wake_open_question succeeds from the pinned kind, and still REFUSES an unpinned credential", async (t) => {

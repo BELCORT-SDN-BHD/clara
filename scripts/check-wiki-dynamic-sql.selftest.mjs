@@ -255,7 +255,7 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // a twelfth: MEASURED (gate B3), plpgsql does not resolve an embedded relation at CREATE time
   // even with check_function_bodies=on, so that arm ships as plain static SQL and never needed
   // a waiver at all — a dynamic-SQL entry proposed, tested, and correctly NOT taken. F-A3 PR-3
-  // (UNNUMBERED_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder) adds an ELEVENTH:
+  // (0129_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder) adds an ELEVENTH:
   // SS2 factors book_staff_advance_application onto the exact same PR-1a idiom (OQ-7's
   // staff-advance sibling), an `unprovable` CoR patch by construction for the same reason as
   // the first nine. The NEXT entry must trip this pin and earn its own reviewed justification,
