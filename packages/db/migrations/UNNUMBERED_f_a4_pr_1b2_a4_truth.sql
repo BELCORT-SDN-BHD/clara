@@ -109,9 +109,14 @@ alter table clara.close_receipts add constraint close_receipts_segregation_mode_
   check (segregation_mode = any (array['two_person', 'solo_self_attested', 'agent_prepared', 'no_preparation']));
 
 -- =================================================================================================
--- §2 · clara.finalize_close CoR -- row 7's ONE line. Every other line below is the LIVE body
--- pulled from the catalog (pg_get_functiondef) at the frontier this file's prestate pins, byte-
--- for-byte, so a diff against the prestate sha's source shows exactly one changed statement.
+-- §2 · clara.finalize_close CoR -- row 7's ONE line. What this estate actually pins is
+-- prosrc, not the full CREATE statement: the RETURNS/LANGUAGE/SECURITY DEFINER header below is
+-- typed in this file's own house casing, so it and the trailing `;` will never literally match
+-- pg_get_functiondef's canonical uppercase, no-trailing-semicolon rendering -- that is
+-- pg_get_functiondef's own artifact on every such CoR in this estate, not a drift here. The
+-- PROSRC BODY -- declare through end, the part the prestate sha actually measures -- is the
+-- live pull verbatim, diffed line-for-line against the catalog read this file's prestate sha
+-- was taken from: one statement changed (the row-7 assignment below), nothing else moved.
 -- =================================================================================================
 create or replace function clara.finalize_close(p_fy uuid, p_self_attestation text, p_op_key text)
  returns jsonb
@@ -517,8 +522,14 @@ begin
     raise exception 'f_a4_pr_1b2_a4_truth tail: finalize_close row 7 does not condition segregation_mode on v_agent_prepared' using errcode = 'CLR10';
   end if;
   -- and the OLD unconditional stamp is genuinely GONE, not merely shadowed by the new line
-  -- appearing somewhere else in the body (forward-only, fail-closed both ways).
-  if v_src ~ 'v_human_preparer is null then[^;]*\n(\s*--[^\n]*\n)*\s*v_mode := ''agent_prepared'';' then
+  -- appearing somewhere else in the body (forward-only, fail-closed both ways). MEASURED: a
+  -- regex spanning "v_human_preparer is null then" to the old assignment via `[^;]*` cannot
+  -- cross the self-attestation raise block's own semicolons in between, so that shape can never
+  -- match either the real pre-image OR a live-reverted mutant -- it is vacuously true (always
+  -- passes) and proves nothing. The reverted-body detector is the OLD line's own exact text, at
+  -- its real four-space indent (disambiguating it from this file's header-comment prose, which
+  -- never sits at that indent): present only in the pre-ruling body, absent in the shipped one.
+  if position('    v_mode := ''agent_prepared'';' in v_src) > 0 then
     raise exception 'f_a4_pr_1b2_a4_truth tail: finalize_close still carries the unconditional row-7 stamp' using errcode = 'CLR10';
   end if;
 
