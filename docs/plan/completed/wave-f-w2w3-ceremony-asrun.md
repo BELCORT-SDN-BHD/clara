@@ -69,7 +69,7 @@ green:
 | `0123_f_a7_gamma_typed_egress` | F-A7 γ | #331 | The 5th egress purpose + the classify consent gate at enqueue |
 | `0124`/`0125_f_a7_alpha_*` | F-A7 α | #332 | The congruence wall functionally proven both ways, in a forced-rollback subtransaction |
 | `0126_f_a7_beta_filing_interview` | F-A7 β | #333 | The three-train staging confirmed wired to REAL merged bodies |
-| `0127_f_a5_pr3_seal_archive` | F-A5 PR-3 | #334 | D1 **NONE** proven by catalog byte-identity |
+| `0127_f_a5_pr3_signed_original_archive` | F-A5 PR-3 | #334 | D1 **NONE** proven by catalog byte-identity |
 
 ## 6 · Positive-read probes — 9/9 ALL-PASS
 

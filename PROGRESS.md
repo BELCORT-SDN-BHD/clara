@@ -10,11 +10,11 @@ file wins or it is stale — and truing it is the first thing you do.
 *(as of 2026-08-25 — **W2+W3 MERGED AND CEREMONIED — LIVE 122/`0127`, TRACK A BACKEND FULLY
 LIVE**; trued at every clock-out)*
 
-- **W2+W3 MERGED AND CEREMONIED — 2026-08-25 (~10:47-11:05 MYT combined apply window).** Six
-  cars merged and LIVE: F-A2 PR-3 cutover+retirement (`0118`, #324) · F-A3 PR-1a (`0119`, #327) ·
+- **W2+W3 MERGED AND CEREMONIED — 2026-08-25 (~10:47-11:05 MYT combined apply window).** Nine
+  cars merged and LIVE (eight PRs tonight + 0118 pre-merged): F-A2 PR-3 cutover+retirement (`0118`, #324) · F-A3 PR-1a (`0119`, #327) ·
   F-A4 PR-1b (`0120`, #329) · F-A3 PR-1b (`0121`, #328) · F-A3 PR-1c (`0122`, #330) · F-A7 γ
   (`0123`, #331) · F-A7 α (`0124`/`0125`, #332) · F-A7 β (`0126`, #333) · F-A5 PR-3 (`0127`,
-  #334). **Live DB: 122 migrations, frontier `0127_f_a5_pr3_seal_archive`.** As-run:
+  #334). **Live DB: 122 migrations, frontier `0127_f_a5_pr3_signed_original_archive`.** As-run:
   `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`. **Track A's backend is now fully LIVE**
   (F-A2, F-A3, F-A4, F-A5 through the seal drill, and F-A7's full π/γ/α/β family); the only
   Track-A backend item left is **F-A3/PR-3, the clock train (W4)**. The full manual-dispatch CI
@@ -335,8 +335,6 @@ lint watch · `0084`'s `C:\ct\`-only tooling. Full text archived verbatim 2026-0
 
 ## Known issues
 
-- **AGENTS.md's `pnpm lint` line naming "binding post-control" is STALE** (2026-08-25) — the
-  script was deleted by F-A2 PR-3's retirement (`0118`); owner call on a successor needed.
 - **OWNER CARD (parked, not blocking): Annex A.4 row 7 vs invariant (i) — `agent_prepared` label
   on preparation-less closes** (F-A4 PR-1b cross-model review, 2026-08-25). `finalize_close`
   stamps `segregation_mode='agent_prepared'` whenever no human preparer exists, even when the
