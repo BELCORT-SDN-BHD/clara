@@ -86,18 +86,21 @@ test("wave-a2 rule_post_receipt is RETIRED — no longer registered in the catal
   assert.ok(!RENDER_BRANCH_TYPES.includes("rule_post_receipt" as (typeof RENDER_BRANCH_TYPES)[number]), "rule_post_receipt must not be registered post-retirement");
 });
 
-// Belt-and-braces: the two Wave C-c parts (bank_recon_receipt/bank_rule_proposal,
-// design v2.1 §7) are registered and render non-empty.
-test("wave-c-c bank_recon_receipt and bank_rule_proposal are registered and render non-empty", () => {
-  for (const t of ["bank_recon_receipt", "bank_rule_proposal"]) {
-    assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
-  }
+// Belt-and-braces: the surviving Wave C-c part (bank_recon_receipt, design
+// v2.1 §7) is registered and renders non-empty.
+test("wave-c-c bank_recon_receipt is registered and renders non-empty", () => {
+  assert.ok(RENDER_BRANCH_TYPES.includes("bank_recon_receipt"), "bank_recon_receipt must be registered");
   const recon = render([{ type: "bank_recon_receipt", statement_id: "stmt-1010", client_id: "client-1111" }]);
   assert.ok(recon.includes("Bank reconciliation"), "the id-only receipt card state must render");
   assert.ok(!recon.includes(FALLBACK_UNSUPPORTED_PREFIX));
-  const rule = render([{ type: "bank_rule_proposal", rule_id: "rule-1111", client_id: "client-1111" }]);
-  assert.ok(rule.includes("Bank rule proposal"), "the id-only proposal card state must render");
-  assert.ok(!rule.includes(FALLBACK_UNSUPPORTED_PREFIX));
+});
+
+// The Wave C-c bank_rule_proposal part RETIRED with F-A3 (Annex I) — it
+// rendered a bank_rules proposal, and the whole bank-rules learn loop
+// (including the verb that ever produced one) is dropped whole. A forced
+// NEGATIVE cell, mirroring the wave-a2 rule_post_receipt precedent above.
+test("wave-c-c bank_rule_proposal is RETIRED — no longer registered in the catalog", () => {
+  assert.ok(!RENDER_BRANCH_TYPES.includes("bank_rule_proposal" as (typeof RENDER_BRANCH_TYPES)[number]), "bank_rule_proposal must not be registered post-retirement");
 });
 
 // Belt-and-braces: the two Wave D-a parts (fixed_asset/depreciation_run_receipt,

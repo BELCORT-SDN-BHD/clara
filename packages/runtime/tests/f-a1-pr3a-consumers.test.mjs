@@ -44,10 +44,11 @@ after(async () => {
 // 1. Registry sanity + the widened kind literal, in source.
 // ===========================================================================
 
-test("registry.ts pins autoDraft_v9/chatTurn_v13 and still exports superseded v8/v12 (policy (c))", () => {
+test("registry.ts pins autoDraft_v9/chatTurn_v14 and still exports superseded v8/v13/v12 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v13");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v14");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v13, "function");
   assert.equal(typeof registryMod.chatTurn_v12, "function");
 });
 

@@ -109,18 +109,15 @@ export const PART_CATALOG = {
     renderBranch: true,
     fixtures: [{ type: "open_question", question_id: "q-8888", client_id: "client-1111" }],
   },
-  // kb_rule_proposal and rule_post_receipt RETIRED with F-A2 PR-3 (GM-11) —
-  // both rendered rules-execution verbs the design drops whole.
-  // --- Wave C-c additions (design v2.1 §7): identifier-only; each card
+  // kb_rule_proposal and rule_post_receipt RETIRED with F-A2 PR-3 (GM-11);
+  // bank_rule_proposal RETIRED with F-A3 (Annex I) — the bank-rules learn
+  // loop it rendered is dropped whole.
+  // --- Wave C-c additions (design v2.1 §7): identifier-only; the card
   // hydrates authoritative state on mount. bank_recon_receipt keys on
   // statement_id (parts.ts explains why, not recon_id).
   bank_recon_receipt: {
     renderBranch: true,
     fixtures: [{ type: "bank_recon_receipt", statement_id: "stmt-1010", client_id: "client-1111" }],
-  },
-  bank_rule_proposal: {
-    renderBranch: true,
-    fixtures: [{ type: "bank_rule_proposal", rule_id: "rule-1111", client_id: "client-1111" }],
   },
   // --- Wave D-a additions (design v2.1 §6/§7): identifier-only; each card
   // hydrates authoritative state on mount, mirroring the receipt idiom.

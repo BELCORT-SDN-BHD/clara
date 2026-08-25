@@ -59,6 +59,36 @@ export const WAKE_ALLOWLIST_ROSTER = {
         + "its role holds SELECT on 35 relations and DML on none — so this row widens what the "
         + "pinned kind may READ and not what it may DO.",
     },
+    // F-A3 PR-3 (0129) SS4: the chat-parity mirror — the PRE-staff-advance bank_agent
+    // allowlist, copied row-for-row onto the pinned chat kind in ONE statement (OQ-6, Annex
+    // A23: a NAMED, RULED widening; the same authority the human dashboard door already
+    // grants, surfaced in chat). wake_book_staff_advance_application is DELIBERATELY ABSENT:
+    // 0129 inserts it into bank_agent only, AFTER SS4's copy runs (the review round's
+    // ordering decision, 0129's own SS4 header) — a human in chat does not get to book a
+    // staff advance through the bank lane. All thirteen share one probe because one statement
+    // inserts them: `clara._agent_wake_ctx` is created by 0129 itself and by nothing else.
+    ...[
+      "wake_add_bank_account",
+      "wake_complete_bank_reconciliation",
+      "wake_get_bank_pack",
+      "wake_match_bank_line",
+      "wake_propose_bank_identifier_promotion",
+      "wake_propose_bank_line_exception",
+      "wake_resolve_and_book_bank_line",
+      "wake_resolve_bank_line_exception",
+      "wake_settle_from_bank_line",
+      "wake_unmatch_bank_match",
+      "wake_upsert_account",
+      "wake_void_bank_reconciliation",
+      "wake_void_bank_statement",
+    ].map((fn) => ({
+      fn,
+      stem: "f_a3_pr3_retirement_parity_doors",
+      applied: fnExists("clara._agent_wake_ctx(uuid,text,jsonb)"),
+      why: "F-A3 PR-3 SS4 chat-parity mirror (OQ-6/A23): the ruled bank-agency widening — "
+        + "no posting/drafting verb is among the thirteen, and the posting-verb literal in "
+        + "the census cell still walls that axis independently of this roster.",
+    })),
   ],
 };
 
