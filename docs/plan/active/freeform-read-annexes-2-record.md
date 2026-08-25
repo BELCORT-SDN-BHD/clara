@@ -215,7 +215,7 @@ than banked — `scope_unpinned` among them, published as *declared unreachable*
 |---|---|---|
 | **D-17** | **The receipt is ONE row with TWO phases** — arm INSERTs, settle performs the ONE permitted UPDATE, a purpose-built settle-once trigger replaces the generic `_tf_append_only`, and a DEFERRABLE INITIALLY DEFERRED trigger aborts at COMMIT any transaction leaving a receipt unsettled. v1's shape (NOT NULL outcome/rung at arm, "appends the completion row", no link column, one-row cell) was unbuildable in every combination. | folds **GB-4** |
 | **D-18** | **The cursor OPENS FIRST; the plan census runs on the certified text.** v1 ran `explain` through a plain plpgsql `EXECUTE` *before* the single-statement wall — and `SPI_execute` runs a multi-statement string in full, so the design's own injection payloads would have executed their stacked statements one wall too early. | folds **GB-3** |
-| **D-19** | **ONE verb, ONE body.** `_freeform_read_core` is folded into `wake_freeform_read`; no shared core, no `p_scope` argument. This kills v1's three-way granted/ungranted contradiction at the root and strengthens R-3 (one body, one variable). | folds **GB-2** |
+| **D-19** | **ONE verb, ONE body.** `_freeform_read_core` is folded into `wake_freeform_read`; no `p_scope` argument. NOTE-3 TRUE (independent review): the BUILT body departs from this decision's "no shared core" clause — §0.1b(7)'s v2-readiness adoption extracts `clara._freeform_core`, called from `_freeform_arm` alone, so the invariant that survives is ONE caller, not ONE undivided body. This kills v1's three-way granted/ungranted contradiction at the root and strengthens R-3 (one body, one variable, one caller). | folds **GB-2** |
 | **D-20** | **The two DEFINER receipt writers stay EXECUTE-granted — a SECURITY INVOKER caller forces it — and the forgery is closed structurally instead:** settle takes no read id and settles only what THIS transaction armed; one arm and one settle per transaction; any second call raises, so a forged receipt can only exist in a transaction that aborts. The payload's function surface (`set_config` family) is walled by session-user membership, a plpgsql deadline and a pool reset. | folds **GB-1**; the "must not be granted" obligation is **ESCALATED** — see the gate record's owner items |
 | **D-21** | **A.2 re-derived from ten to SEVEN** — the sibling verb severed, the core folded, `wake_client()` dropped as uncalled by any policy arm or invoker-layer body. The printed migration line is the truth; this annex is the bug if they differ. | derived from D-19/D-20/D-22 |
 | **D-22** | **The cross-client sibling verb is SEVERED to F-A6 v2** (with `p_scope`, the third allowlist row, the `cross_client` scope value and its cells). v1 refuses the action with `CLR10 cross_client_unavailable` and NAMES it. **This is NARROWER than TA-P9 A(2) for a client-pinned session.** | **DISSENT RECORDED — owner item.** Grounds: the limb carried the most speculative machinery for the least proven demand, and depends on `interactive_client` besides |
@@ -385,8 +385,22 @@ should see the deferral rather than infer it from the words "OCR text or regions
   must be visible in the receipt rather than smoothed over in prose.
 - **R-3 — text identity is a body invariant, not a structural one** (design §3.4). Belt: ONE body,
   one variable, one forcing cell (F.4) plus the runtime census that `withFreeformRead` is the only
-  caller of the freeform pool. Stronger in v2 than v1 (one verb, no shared core). If either belt is
-  dropped the receipt can describe a read that did not happen — the audit control's worst failure.
+  caller of the freeform pool. NOTE-3 TRUE (independent review): the built body DOES factor a
+  shared core out, `clara._freeform_core` (§0.1b(7), v2-readiness) — "no shared core" no longer
+  holds; the invariant is that it has exactly ONE caller (`_freeform_arm`), not that it is absent.
+  If either belt is dropped the receipt can describe a read that did not happen — the audit
+  control's worst failure.
+  **S-1 residual (independent review, this PR) — R-3 DOES NOT CLOSE outside the verb.**
+  `_freeform_arm`/`_freeform_settle` are GRANTED directly to `clara_freeform_ro` (forced by the
+  INVOKER chain, D-20/§0.2), so anyone who can authenticate as `clara_freeform_login` can call
+  either DIRECTLY, skipping `wake_freeform_read`'s own cursor/census/fetch sequence entirely, and
+  arm (then, in a separate transaction, settle) a receipt describing a read the walls above never
+  ran. D-20's one-arm/one-settle-per-transaction forgery closure still holds against a payload
+  riding inside the verb's own composed SQL; it does NOT hold against a caller that never enters
+  the verb at all. **NAMED OBLIGATION FOR PR-2**: `withFreeformRead` must call ONLY
+  `wake_freeform_read`, never `_freeform_arm`/`_freeform_settle` directly, on every code path —
+  a runtime-wiring discipline the DB layer cannot itself enforce (the grant is structural, not a
+  string check). Full text: the migration body, right before `v_composed := format(...)`.
 - **R-4 — a fourth pool costs connections and a password ceremony.** +2 against a budget of 19 whose
   ceiling is unmeasured (P-8), and a new fail-closed DSN in `assertProductionPoolConfig`: a world
   that boots without it must refuse to start, so the ceremony precedes the image.
@@ -403,7 +417,12 @@ should see the deferral rather than infer it from the words "OCR text or regions
   never a door the model can open.
 - **R-9 — payload-set session state on a pooled backend** (new at the fold, D-20). A non-local
   `set_config` from inside the payload outlives the transaction; `withFreeformRead` resets on
-  release, the read deadline is a plpgsql clock check rather than a GUC, and F.3(k) forces both.
+  release **with `DISCARD ALL`, not `reset all`** (S-4/H-5, independent review: `reset all` does
+  not release a session advisory lock a payload took on a well-known firm-derived key — an
+  advisory lock is not GUC state), the read deadline is a plpgsql clock check rather than a GUC
+  (H-4: a session-level `statement_timeout` set by the pool BEFORE the call is the wall that
+  actually bounds a single stalled FETCH — a `SET LOCAL` inside the verb cannot, PG arms the
+  statement timer once at the top-level statement's start), and F.3(k) forces both.
 
 ### Named non-goals
 

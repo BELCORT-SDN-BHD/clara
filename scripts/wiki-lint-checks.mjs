@@ -218,9 +218,15 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       + "not reconstructible' case the doctrine above provides for: there are no static targets "
       + "to declare, because there is no static statement. Declaring a relation here would be "
       + "worse than declaring none — it would imply a reviewed static target that does not "
-      + "exist. The enforcement lives in the GRANT, and the battery forces it non-vacuously "
-      + "(f-a6.wall.wiki: a payload naming clara.wiki_pages is refused, with the twin that the "
-      + "same payload against an enumerated relation succeeds).",
+      + "exist. S-3 CORRECTION (independent review, F-A6 PR-1): a prior cut of this paragraph "
+      + "cited 'f-a6.wall.wiki', a battery cell that was never written — the citation is struck. "
+      + "The enforcement lives in the GRANT, and the migration's OWN tail (§10 check (1)) is what "
+      + "forces it non-vacuously: it derives clara_freeform_ro's SELECT set from the catalog on "
+      + "EVERY apply and RAISES if any relation named there matches `wiki%` — a real, executed "
+      + "assertion, re-proven by every rig replay, not a narrated claim. That is a grant-level "
+      + "proof (no wiki relation is ever enumerated); it does not itself exercise the verb "
+      + "against a live wiki payload — the wake-credential/task path a live exercise needs is "
+      + "PR-2's, not built in this DB-only PR.",
     relations: [],
     calls: [],
   }],

@@ -211,11 +211,29 @@
 --   NOT papered over: registered with B-1 for the owner ceremony, plus a PR-2 obligation to
 --   release the freeform pool with `DISCARD ALL` rather than `reset all`.
 -- M-2 · census C12 for both new roles (schema privileges, database TEMP, superuser/bypassrls) —
---   built into the tail below and into the battery. M-3 · the EXECUTE census goes cluster-wide
---   in the tail rather than stopping at schema `clara`. M-4 · the INVOKER verb pins `search_path`
---   (it already did) and the battery widens T18's claim to every function this file creates,
---   DEFINER or INVOKER. M-5 · the "every exit settles" body invariant is stated at §6.1 and
---   forced per Tier-C pair in the battery.
+--   built into the tail below (§10, "C12"), via `aclexplode`'s EXPLICIT-grantee entries rather
+--   than `has_*_privilege` (which reports PUBLIC-inherited privilege too). NOTE (independent
+--   review, re-derivation this PR): there is **no separate battery file** — `f-a6-freeform-
+--   read.test.mjs` carries only the two π receipt-contract cells; the Annex F admission-ladder
+--   battery does not exist yet (its own header says so). C12 is proven by the migration's OWN
+--   tail asserting and raising on it, re-run on every rig apply — that is real, rig-replayed
+--   evidence (law 2), just not a `.test.mjs` cell; "and into the battery" below was FALSE and is
+--   struck everywhere it appeared. M-3 · the EXECUTE half of C12 goes CLUSTER-WIDE (no
+--   `nspname='clara'` filter — verified: `packages/db/migrations/UNNUMBERED_f_a6_freeform_
+--   read.sql` §10 "(c) EXPLICIT EXECUTE, CLUSTER-WIDE"), not the schema-scoped check (2) it
+--   supersedes. M-4 · the INVOKER verb pins `search_path` (verified: `set search_path = clara,
+--   pg_temp` on the verb, line ~898) — and so does every OTHER function this file creates,
+--   DEFINER or INVOKER (verified by grep: 10 function/trigger bodies, 10 `search_path = clara,
+--   pg_temp` pins, one-to-one); **NOT** battery-forced — a structural fact read directly off the
+--   bodies, not a test cell, and named as such. M-5 · "every exit settles" is a structural
+--   property of `wake_freeform_read`'s OWN body, not a battery-forced invariant: the whole
+--   statement-shape/census/fetch cascade (§6.1) sets `v_reason` and falls through on every
+--   branch — no exception handler returns or re-raises — so there is exactly ONE call to
+--   `clara._freeform_settle` in the function and no code path before it, verified by reading the
+--   body (single settle call, no early `return` precedes it). Both M-4 and M-5's proofs are
+--   THIS PARAGRAPH'S grep/read, not a cell in a battery that does not exist — the honest label,
+--   per the owner's re-derivation order, is "verified by direct read," not "forced in the
+--   battery."
 -- WHAT THE PASS FOUND HOLDING, cited because a later reader deserves the credit as well as the
 --   debts: all 177 `create policy` statements in 0001-0102 are role-pinned (a `TO`-less policy
 --   would have OR'd straight past `_freeform_admitted()`); no dblink/postgres_fdw/file_fdw/http/
@@ -258,9 +276,15 @@ begin
   end if;
 
   -- (b) The helper spine this file grants and calls must exist at the exact signatures.
+  -- MF-1: `wake_firm()` / `shares_my_firm_wake(uuid)` are DELIBERATELY ABSENT from this list —
+  -- neither is called anywhere in this file any more (§4's `_freeform_firm()` /
+  -- `_freeform_shares_firm(uuid)` replace them in every one of the 35 policies, precisely
+  -- because both old readers re-read the GUC §5.1 clears). `wake_context()` stays: it is still
+  -- called directly, inside the two DEFINER bodies (`_freeform_core`, `_freeform_arm`) that run
+  -- BEFORE the clear.
   foreach n in array array[
-    'clara.wake_context()', 'clara.wake_firm()', 'clara.assert_wake_allowed(text,text)',
-    'clara.shares_my_firm_wake(uuid)', 'clara.agent_user_id()', 'clara.actor_role_rank()',
+    'clara.wake_context()', 'clara.assert_wake_allowed(text,text)',
+    'clara.agent_user_id()', 'clara.actor_role_rank()',
     'clara.role_rank(text)', 'clara.jwt_firm()'
   ] loop
     if to_regprocedure(n) is null then
@@ -274,7 +298,8 @@ begin
     'clara._freeform_core(text,text,uuid,text)',
     'clara._freeform_arm(text,text,uuid,text)',
     'clara._freeform_settle(text,int,bigint,text[],int,jsonb)',
-    'clara._freeform_scope_clients()', 'clara._freeform_admitted()'
+    'clara._freeform_scope_clients()', 'clara._freeform_admitted()',
+    'clara._freeform_firm()', 'clara._freeform_shares_firm(uuid)'
   ] loop
     if to_regprocedure(n) is not null then
       raise exception 'F-A6 PR-1 partial birth: % already exists', n using errcode = 'CLR10';
@@ -361,6 +386,14 @@ begin
 end
 $fa6_pre$;
 
+-- S-5 (independent review, this PR) — THE TIMEOUT LIVES IN THE FILE, not the ceremony
+-- (db-migrations.md's own rule). This file's honest cost is 35 brief ACCESS EXCLUSIVE
+-- `CREATE POLICY` locks (§8) plus one on `clara.freeform_read_log` for the ALTER (§3) — §0
+-- already names it; this is where the file ACTS on its own naming rather than leaving it to
+-- an operator's memory. `SET LOCAL` holds for the rest of this transaction, i.e. the rest of
+-- this file, so one statement here covers both.
+set local lock_timeout = '3s';
+
 -- =====================================================================================
 -- §2  THE PRINCIPALS (design §3.1, D-1) — cluster DDL as the DEPLOY role, BEFORE SET ROLE
 --     (S4-C13: clara_fn_owner is NOCREATEROLE). The 0006:59-79 idiom, verbatim in shape.
@@ -402,6 +435,39 @@ $fa6_imp$;
 -- read pool's session-level read-only transactions make that impossible. The write it can
 -- perform is not a table grant; it is two DEFINER functions and nothing else.
 grant usage on schema clara to clara_freeform_ro;
+
+-- =====================================================================================
+-- §2.1  SCHEMA-USAGE CONFINEMENT (B-1, §0.1c) — 0002:153-172's idiom, verbatim in shape, for
+--       the two new roles. HONESTY, copied from 0002's own comment rather than restated: this
+--       is DEFENSE IN DEPTH, not airtight confinement — PostgreSQL privileges are ADDITIVE, so
+--       a DIRECT revoke here does not remove USAGE still held via a PUBLIC grant on `public`
+--       (nor EXECUTE on pg_catalog fns like pg_notify/pg_sleep/query_to_xml — MEASURED, §0.1c's
+--       own paragraph). Full confinement needs the DB-wide ACL baseline (acl-baseline.sql,
+--       MF-4 this PR: both roles now join all three of its load-bearing `confined` arrays, not
+--       only the display `\echo`) plus the pg_catalog residual's owner ceremony (still
+--       registered, unclosable from a migration — B-1 stands as written on that half). Runs
+--       BEFORE `set role clara_fn_owner` — needs the DEPLOY role's own privileges, same as
+--       0002's block. Best-effort: a non-superuser deploy role may not own `public`/an
+--       extension schema, so a revoke may be denied and must not abort the migration.
+do $fa6_confine$
+declare s text;
+begin
+  begin
+    revoke usage on schema public from clara_freeform_ro, clara_freeform_login;
+  exception when insufficient_privilege then
+    raise notice 'F-A6 PR-1: skipping public-schema revoke (deploy role lacks ownership; PUBLIC-additivity confinement is acl-baseline.sql''s job, MF-4 this PR)';
+  end;
+  foreach s in array array['net', 'extensions', 'graphile_worker', 'workflow', 'vault', 'cron'] loop
+    if exists (select 1 from pg_namespace where nspname = s) then
+      begin
+        execute format('revoke all on schema %I from clara_freeform_ro, clara_freeform_login', s);
+      exception when insufficient_privilege then
+        raise notice 'F-A6 PR-1: skipping revoke on schema % (deploy role lacks ownership)', s;
+      end;
+    end if;
+  end loop;
+end
+$fa6_confine$;
 
 set role clara_fn_owner;
 
@@ -593,6 +659,36 @@ language sql stable security definer set search_path = clara, pg_temp as $fa6_sc
      and r.settled_at is null;
 $fa6_scope$;
 
+-- MF-1 (independent review, this PR). `wake_firm()` and `shares_my_firm_wake()` both call
+-- `wake_context()`, which resolves the credential by re-reading `current_setting('clara.
+-- wake_secret', true)` on EVERY invocation (0011:1139). Every one of the 35 policies below
+-- calls one of them on every row, so as long as ANY policy used them, the secret could never
+-- be cleared for the transaction's remaining lifetime — clearing it and then having a policy
+-- evaluation fail closed would have been the alternative, and RLS provides no way to say
+-- "clear after arm, not before". These two readers break that coupling: they read `firm_id`
+-- off the ARMED RECEIPT ROW `_freeform_arm` already wrote it to (the same row
+-- `_freeform_admitted()`/`_freeform_scope_clients()` key on), never the GUC, so §5.1's clear
+-- is safe. MEASURED (the reviewer's own probe, reproduced): before this pair existed, `select
+-- current_setting('clara.wake_secret')` through the real verb returned `outcome=ok` with the
+-- secret in `rows` — that is why every one of the 35 policies below now reads THESE, not
+-- `wake_firm()` / `shares_my_firm_wake()`.
+create function clara._freeform_firm() returns uuid
+language sql stable security definer set search_path = clara, pg_temp as $fa6_firm$
+  select r.firm_id from clara.freeform_read_log r
+   where r.arm_txid = pg_current_xact_id_if_assigned()
+     and r.settled_at is null;
+$fa6_firm$;
+
+-- Mirrors 0002:466-472's `shares_my_firm_wake(uuid)` exactly, substituting `_freeform_firm()`
+-- for `wake_firm()` — the ONE conjunct that changes. Used by the `users` policy alone (§8 S-4).
+create function clara._freeform_shares_firm(p_user uuid) returns boolean
+language sql stable security definer set search_path = clara, pg_temp as $fa6_shares$
+  select exists (
+    select 1 from clara.firm_memberships m
+    where m.user_id = p_user and m.firm_id = clara._freeform_firm() and m.status = 'active'
+  );
+$fa6_shares$;
+
 -- =====================================================================================
 -- §5  THE ADMISSION LADDER — an UNGRANTED core (§0.1b(7)), and the granted ARM that inserts.
 -- =====================================================================================
@@ -727,6 +823,18 @@ begin
      clara.agent_user_id(), w.on_behalf_of, w.wake_kind, p_task, p_op_key, v_txid)
   returning id into v_id;
 
+  -- MF-1 · THE CLEAR. Firm and pin are already on the row (`_freeform_firm()` /
+  -- `_freeform_scope_clients()` read them from there, never from this GUC — see §4's own
+  -- comment). `is_local => true` matches `SET LOCAL`: cleared for the remainder of THIS
+  -- transaction, reverting automatically at COMMIT/ROLLBACK, which is exactly the window the
+  -- verb's payload runs in (arm -> cursor open -> fetch -> settle, all one transaction, proven
+  -- by every read/write above keying on `pg_current_xact_id()`). This runs BEFORE `wake_freeform_
+  -- read` ever opens the cursor (§5.1 is called first, §6.1's cursor open is the caller's next
+  -- statement), so no part of the payload's execution window sees the secret. R-9/PR-2 still owns
+  -- the FULL session reset on pool release — this is the transaction-scoped belt, not a
+  -- replacement for it.
+  perform set_config('clara.wake_secret', '', true);
+
   return v_id;
 end
 $fa6_arm$;
@@ -821,17 +929,21 @@ declare
   v_rows     jsonb := '[]'::jsonb;
   v_n        int    := 0;
   v_bytes    bigint := 0;
+  v_row_bytes bigint;           -- NOTE-2: this fetch's own size, measured once per row
   v_plan     json;
   v_rels     text[];            -- NULL until a plan exists (law 68: NULL, not empty)
   v_bad      text[];
+  v_fns_bad  text[];            -- MF-2: NULL until the function census runs
   v_cost     numeric;
   v_ms       int;
   v_msg      text;
   v_reason   text;
+  v_scope_clients uuid[];       -- MF-3: captured BEFORE settle (settle un-arms the row)
   -- The three-valued vector. `not_evaluable` is the DEFAULT, so a rung that was never reached
   -- can never read as a pass (law 68).
   b_shape    text := 'not_evaluable';
   b_rel      text := 'not_evaluable';
+  b_fn       text := 'not_evaluable';
   b_cost     text := 'not_evaluable';
   b_rowcap   text := 'not_evaluable';
   b_bytecap  text := 'not_evaluable';
@@ -841,6 +953,13 @@ begin
   -- ---- TIER A, in the DEFINER arm. A raise here aborts and leaves NO receipt. -------------
   v_read_id := clara._freeform_arm(p_sql, p_purpose, p_task, p_op_key);
 
+  -- MF-3 (independent review, this PR) — CAPTURE THE COMPILED SCOPE NOW, not after settle:
+  -- `_freeform_scope_clients()` keys on `settled_at is null` (§4), so calling it after
+  -- `_freeform_settle` runs would read nothing — the row it would have read is no longer
+  -- "armed" by that query's own definition. NULL means firm-wide (HOME); a one-element array
+  -- means client-pinned. Never re-derived from `p_sql` or any other tool argument — TA-P9 A(1).
+  v_scope_clients := clara._freeform_scope_clients();
+
   if p_row_cap is not null and p_row_cap < 1 then
     raise exception 'freeform read: p_row_cap % is below 1', p_row_cap using errcode = 'CLR10';
   end if;
@@ -849,6 +968,22 @@ begin
   -- The single composed text. ONE variable reaches both the receipt and the executor, which is
   -- the whole of R-3's text identity: `_freeform_arm` recorded p_sql, and p_sql is what is
   -- wrapped here. There is no second string.
+  --
+  -- S-1 (independent review, this PR) — THE RESIDUAL R-3 DOES NOT CLOSE. `_freeform_arm` and
+  -- `_freeform_settle` are GRANTED to clara_freeform_ro, forced by the INVOKER chain (D-20; §0.2
+  -- names why there is no ungranted seam here). That grant means anyone who can authenticate as
+  -- clara_freeform_login can call EITHER directly, outside this verb entirely — `select clara.
+  -- _freeform_arm(...)` from a plain client, never touching this function's own cursor/census/
+  -- fetch sequence. R-3's "one body, one variable" guarantee is therefore a property of THIS
+  -- verb's own internals, not of the receipt as a whole: a caller that skips the verb can still
+  -- arm (and, in its own separate transaction, settle) a receipt describing a read the walls
+  -- above never ran. D-20's forgery-closure (one arm/one settle PER TRANSACTION, a second call
+  -- aborting) still holds against a PAYLOAD riding inside this verb's own composed SQL — that is
+  -- what D-20 was built to close, and it does. It does NOT hold against a caller who never enters
+  -- the verb at all. NAMED OBLIGATION FOR PR-2: `withFreeformRead` must call ONLY `wake_freeform_
+  -- read`, never `_freeform_arm` or `_freeform_settle` directly, on every code path — this is a
+  -- runtime-wiring discipline the DB layer cannot itself enforce (the grant is structural, not a
+  -- string check), so it belongs in the PR-2 brief and the runtime's own review, not assumed here.
   v_composed := format('select to_jsonb(t) from (%s) t', p_sql);
 
   -- ---- 1. THE SINGLE-STATEMENT WALL — the cursor OPENS FIRST (D-18, folding GB-3). ---------
@@ -886,6 +1021,18 @@ begin
       get stacked diagnostics v_msg = message_text;
       v_reason := case when position(' for function ' in v_msg) > 0 then 'function_denied'
                        else 'relation_denied' end;
+    -- S-2 GAP, ROOT CAUSE (independent review, LIVE PROBE this re-verification round). This is
+    -- where `select 1/0` ACTUALLY throws, not the plan-census step below — MEASURED, isolated:
+    -- a bare `open v_cur for execute 'select to_jsonb(t) from (select 1/0 as x) t'` raises 22012
+    -- division_by_zero at OPEN, because `OPEN ... FOR EXECUTE` plans the query (to produce the
+    -- portal) and PostgreSQL's planner constant-folds an immutable expression built from two
+    -- literals while costing the plan — before FETCH, before EXPLAIN ever runs. The plan-census
+    -- step's own `when others` (added first, and left in place as defense in depth in case some
+    -- plan-time failure is reachable there and not here) is UNREACHABLE for this exact defect:
+    -- OPEN and the plan census's `explain` both plan the SAME v_composed text through the SAME
+    -- planner, so whatever throws during planning throws HERE, first, every time. Same scoped
+    -- fallback, same reason token as the FETCH loop's precedent.
+    when others then v_reason := 'runtime_error';
   end;
 
   if v_reason is null then
@@ -906,6 +1053,19 @@ begin
                          else 'relation_denied' end;
       when sqlstate '42P01' then v_reason := 'unknown_relation';
       when sqlstate '0A000' then v_reason := 'feature_not_permitted';
+      -- S-2 GAP (independent review, LIVE PROBE this re-verification round; NOT the reviewer's
+      -- own finding — found by re-running the register's own cited example). PostgreSQL's
+      -- planner CONSTANT-FOLDS an immutable expression built from literals while producing the
+      -- EXPLAIN plan, so `select 1/0` raises 22012 division_by_zero AT PLANNING, one step before
+      -- the FETCH loop's own `when others` handler (below) ever runs — MEASURED: `explain
+      -- (format json, verbose true) select to_jsonb(t) from (select 1/0 as x) t` throws
+      -- 22012 directly, on this exact rig, before this handler existed. Without this arm the
+      -- error propagated OUT of the whole function and aborted the transaction UNRECEIPTED —
+      -- the identical class of defect S-2's FETCH-loop handler was built to close, just one step
+      -- earlier in the ladder. Same scoped fallback, same reason token, same justification: every
+      -- named wall above (statement shape, then this plan-census pair) still gets its own reason
+      -- first; only a genuinely unclassified planning-time failure falls through here.
+      when others then v_reason := 'runtime_error';
     end;
   end if;
 
@@ -929,13 +1089,37 @@ begin
       b_rel := 'fail'; v_reason := 'relation_not_enumerated';
     else
       b_rel := 'pass';
-      v_cost := (to_jsonb(v_plan) -> 0 -> 'Plan' ->> 'Total Cost')::numeric;
-      if v_cost is null then
-        b_cost := 'not_evaluable';          -- an absent input is never a pass (law 68)
-      elsif v_cost > c_plan_ceiling then
-        b_cost := 'fail'; v_reason := 'plan_cost_ceiling';
+
+      -- MF-2 (independent review, this PR) — THE FUNCTION CENSUS. `explain (format json,
+      -- verbose)` emits `Function Name` for a FUNCTION SCAN and NOT for a scalar call in a
+      -- target list (B-2's own measured reach, §0.1c). No function scan is ever legitimate
+      -- here: the enumerated surface is 35 RELATIONS, never a table-returning function, so
+      -- ANY function scan refuses — there is no allow-list to compare against, unlike the
+      -- relation census. MEASURED (the reviewer's own probe): `select * from
+      -- query_to_xml(...)` reads the WHOLE relation through SPI with `relations_read=[]` and
+      -- `row_count=1` — the RELATION census cannot see it, because it never scans a relation;
+      -- it scans a FUNCTION. This closes that door the same way the relation census closes
+      -- its own. The scalar-call residual (`select query_to_xml(...)`, `pg_get_functiondef`)
+      -- is unmoved and named (H-3): a scalar call emits no `Function Name` node at all, which
+      -- is exactly why B-1's owner ceremony and H-1's clearing carry the confidentiality claim
+      -- and this rung does not try to.
+      select coalesce(array_agg(distinct (x->>'Function Name')), '{}')
+        into v_fns_bad
+        from jsonb_path_query(to_jsonb(v_plan), '$.**') as x
+       where jsonb_typeof(x) = 'object' and (x->>'Function Name') is not null;
+
+      if array_length(v_fns_bad, 1) is not null then
+        b_fn := 'fail'; v_reason := 'function_not_enumerated';
       else
-        b_cost := 'pass';
+        b_fn := 'pass';
+        v_cost := (to_jsonb(v_plan) -> 0 -> 'Plan' ->> 'Total Cost')::numeric;
+        if v_cost is null then
+          b_cost := 'not_evaluable';          -- an absent input is never a pass (law 68)
+        elsif v_cost > c_plan_ceiling then
+          b_cost := 'fail'; v_reason := 'plan_cost_ceiling';
+        else
+          b_cost := 'pass';
+        end if;
       end if;
     end if;
   end if;
@@ -948,20 +1132,30 @@ begin
       loop
         fetch v_cur into v_row;
         exit when not found;
-        v_n     := v_n + 1;
-        v_bytes := v_bytes + octet_length(v_row::text);
-        if v_n > v_cap then
+        -- NOTE-2 (independent review, this PR). CHECK BEFORE COUNTING, not after: the earlier
+        -- shape incremented v_n/v_bytes for the FETCHED row, THEN checked the cap, THEN exited
+        -- without ever appending that row to v_rows — so a capped read reported row_count/
+        -- byte_count that OVERSTATED what `rows` actually held by exactly the one discarded
+        -- row. row_count/byte_count are receipt-accuracy fields, and the receipt lying about
+        -- what it returned (even by one row) is the exact class of defect this design exists to
+        -- refuse. v_row_bytes is measured once so the two cap checks agree on the same number.
+        v_row_bytes := octet_length(v_row::text);
+        if v_n + 1 > v_cap then
           b_rowcap := 'fail'; v_reason := 'result_row_cap'; exit;
         end if;
-        if v_bytes > c_byte_cap then
+        if v_bytes + v_row_bytes > c_byte_cap then
           b_bytecap := 'fail'; v_reason := 'result_byte_cap'; exit;
         end if;
         -- The deadline is a plpgsql CLOCK CHECK, not a payload-settable GUC: a non-local
         -- set_config('statement_timeout', …) from inside the payload cannot move this, and
         -- MEASURED (§0.1(2)) a GUC-borne timeout could not have produced a receipt anyway.
+        -- Checked BEFORE counting, same NOTE-2 reason: a timed-out fetch's row is discarded,
+        -- never appended to v_rows, so it must not inflate row_count/byte_count either.
         if extract(epoch from (clock_timestamp() - v_t0)) * 1000 > c_deadline_ms then
           v_reason := 'read_timeout'; exit;
         end if;
+        v_n     := v_n + 1;
+        v_bytes := v_bytes + v_row_bytes;
         v_rows := v_rows || jsonb_build_array(v_row);
       end loop;
     exception
@@ -970,6 +1164,22 @@ begin
         v_reason := case when position(' for function ' in v_msg) > 0 then 'function_denied'
                          else 'relation_denied' end;
       when sqlstate '0A000' then v_reason := 'feature_not_permitted';
+      -- S-2 (independent review, this PR; CORRECTED in the re-verification round below). BY THIS
+      -- POINT every position-specific wall has already had its chance and passed: statement
+      -- shape, relation census, function census and plan cost are all resolved before FETCH ever
+      -- runs (D-6's own ordering, unmoved). What is left is the payload's row expressions failing
+      -- only once REAL DATA is evaluated at fetch time — a cast that overflows on one row's
+      -- actual value, a malformed literal a specific row exposes — genuinely un-enumerable in
+      -- advance. This is NOT the F-A2 D6 wildcard defect (a classifier positioned WHERE a
+      -- specific wall needed to fire and swallowing it): every named wall above still fires first.
+      -- CORRECTION, LIVE-PROBED this re-verification round: this is the THIRD such `others` arm,
+      -- not the only one (the cursor-OPEN step above and the plan-census step below each carry
+      -- their own) — `select 1/0` is NOT an example of what THIS handler catches: MEASURED, it
+      -- throws 22012 at cursor OPEN (Postgres constant-folds the immutable literal expression
+      -- while planning the portal), never reaching FETCH at all, so the open-step handler is what
+      -- actually settles it. This arm exists for a runtime failure that is NOT plan-time
+      -- foldable — one only a specific FETCHED row's real data can trigger.
+      when others then v_reason := 'runtime_error';
     end;
   end if;
 
@@ -983,6 +1193,7 @@ begin
     jsonb_build_object(
       'statement_shape',          b_shape,
       'relation_not_enumerated',  b_rel,
+      'function_not_enumerated',  b_fn,
       'plan_cost_ceiling',        b_cost,
       'result_row_cap',           b_rowcap,
       'result_byte_cap',          b_bytecap,
@@ -990,6 +1201,14 @@ begin
 
   -- TA-P10 C′, flattened and not nested (the F-A2 D24 lesson). The label is TOLD to the model;
   -- what ENFORCES it is that this role holds no grant that could write anything (D-27).
+  --
+  -- MF-3 (independent review, this PR) — `scope`/`scope_clients`/`scope_note`: B-3's deeper
+  -- half was right even though a producer for `cross_client_unavailable` already exists (§6.3
+  -- (a)) — a client-pinned session asking a two-client question that does NOT trip the
+  -- congruence pair is silently filtered by RLS and would otherwise read as a complete
+  -- firm-wide answer. Stating the COMPILED SCOPE in every result (not only the refused ones)
+  -- is what closes that: a narrowed answer can never read as a complete one, because the model
+  -- is TOLD it was narrowed, on every single call.
   return jsonb_build_object(
     'ok',             v_reason is null,
     'read_id',        v_read_id,
@@ -997,8 +1216,15 @@ begin
     'claim_eligible', false,
     'outcome',        case when v_reason is null then 'ok' else 'refused' end,
     'refusal_reason', v_reason,
+    'scope',          case when v_scope_clients is null then 'firm' else 'client' end,
+    'scope_clients',  to_jsonb(v_scope_clients),
+    'scope_note',     case when v_scope_clients is null then null
+      else 'This read was scoped to the one pinned client; it cannot see or compare against '
+        || 'any other client''s rows. A deliberate cross-client comparison is a separate, '
+        || 'named action (F-A6 v2), not this read narrowed.' end,
     'rung_vector',    jsonb_build_object(
         'statement_shape', b_shape, 'relation_not_enumerated', b_rel,
+        'function_not_enumerated', b_fn,
         'plan_cost_ceiling', b_cost, 'result_row_cap', b_rowcap,
         'result_byte_cap', b_bytecap),
     'relations_read', to_jsonb(v_rels),
@@ -1060,6 +1286,7 @@ revoke execute on function
   clara._freeform_arm(text,text,uuid,text),
   clara._freeform_settle(text,int,bigint,text[],int,jsonb),
   clara._freeform_scope_clients(), clara._freeform_admitted(),
+  clara._freeform_firm(), clara._freeform_shares_firm(uuid),
   clara._tf_freeform_settle_once(), clara._tf_freeform_must_settle()
   from public;
 
@@ -1070,7 +1297,7 @@ grant execute on function
   clara._freeform_arm(text,text,uuid,text),
   clara._freeform_settle(text,int,bigint,text[],int,jsonb),
   clara._freeform_scope_clients(), clara._freeform_admitted(),
-  clara.wake_firm(), clara.shares_my_firm_wake(uuid)
+  clara._freeform_firm(), clara._freeform_shares_firm(uuid)
   to clara_freeform_ro;
 
 -- =====================================================================================
@@ -1105,7 +1332,7 @@ begin
     -- is not true), which is the fail-closed direction and is stated rather than discovered.
     execute format(
       'create policy p_%s_freeform on clara.%I for select to clara_freeform_ro
-         using (firm_id = clara.wake_firm()
+         using (firm_id = clara._freeform_firm()
                 and (clara._freeform_scope_clients() is null
                      or client_id = any (clara._freeform_scope_clients()))
                 and clara._freeform_admitted())', t, t);
@@ -1118,7 +1345,7 @@ $fa6_pol$;
 -- dropping the conjunct it would return EVERY client of the firm from inside a client-pinned
 -- session, which is the leak the pin exists to prevent.
 create policy p_clients_freeform on clara.clients for select to clara_freeform_ro
-  using (firm_id = clara.wake_firm()
+  using (firm_id = clara._freeform_firm()
          and (clara._freeform_scope_clients() is null
               or id = any (clara._freeform_scope_clients()))
          and clara._freeform_admitted());
@@ -1138,7 +1365,7 @@ create policy p_clients_freeform on clara.clients for select to clara_freeform_r
 -- UNFILED document — no filing row, therefore no client attribution — is invisible, which is
 -- the fail-closed reading rather than an oversight.
 create policy p_documents_freeform on clara.documents for select to clara_freeform_ro
-  using (firm_id = clara.wake_firm()
+  using (firm_id = clara._freeform_firm()
          and (clara._freeform_scope_clients() is null
               or exists (select 1 from clara.document_filings f
                           where f.document_id = documents.id
@@ -1151,14 +1378,15 @@ create policy p_documents_freeform on clara.documents for select to clara_freefo
 create policy p_sst_threshold_schedule_freeform on clara.sst_threshold_schedule for select to clara_freeform_ro
   using (clara._freeform_admitted());
 
--- S-4 · identity. `users` uses the 0002:499-500 idiom, resolved against the caller's OWN firm
--- internally — which is why `shares_my_firm_wake` is one of the SEVEN (D-16: "who asked this?"
--- is a question the free read is expected to answer, and a name join is cheaper than a typed
--- reader per question).
+-- S-4 · identity. `users` uses the 0002:466-472 idiom, resolved against the ARMED ROW's firm —
+-- which is why `_freeform_shares_firm` is one of the SEVEN (D-16: "who asked this?" is a
+-- question the free read is expected to answer, and a name join is cheaper than a typed reader
+-- per question). MF-1: `_freeform_shares_firm(uuid)`, never `shares_my_firm_wake(uuid)` — the
+-- latter reads `wake_firm()`, which reads the GUC §5.1 clears.
 create policy p_users_freeform on clara.users for select to clara_freeform_ro
-  using (clara.shares_my_firm_wake(id) and clara._freeform_admitted());
+  using (clara._freeform_shares_firm(id) and clara._freeform_admitted());
 create policy p_firms_freeform on clara.firms for select to clara_freeform_ro
-  using (id = clara.wake_firm() and clara._freeform_admitted());
+  using (id = clara._freeform_firm() and clara._freeform_admitted());
 
 -- =====================================================================================
 -- §9  THE ALLOWLIST — EXACTLY TWO ROWS (design §3.8). Unattended lanes get NO row, which is
@@ -1297,6 +1525,7 @@ begin
               where ns.nspname='clara' and a.grantee = 0 and a.privilege_type='EXECUTE'
                 and p.proname in ('wake_freeform_read','_freeform_core','_freeform_arm','_freeform_settle',
                                   '_freeform_scope_clients','_freeform_admitted',
+                                  '_freeform_firm','_freeform_shares_firm',
                                   '_tf_freeform_settle_once','_tf_freeform_must_settle')) then
     raise exception 'F-A6 PR-1 tail: PUBLIC holds EXECUTE on an F-A6 function' using errcode = 'CLR10';
   end if;
@@ -1318,7 +1547,8 @@ begin
   end if;
 
   for v_line in select unnest(array['wake_freeform_read','_freeform_core','_freeform_arm','_freeform_settle',
-                                    '_freeform_scope_clients','_freeform_admitted']) loop
+                                    '_freeform_scope_clients','_freeform_admitted',
+                                    '_freeform_firm','_freeform_shares_firm']) loop
     select count(*)::int into v_n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
       where ns.nspname='clara' and p.proname = v_line;
     if v_n <> 1 then
@@ -1414,6 +1644,57 @@ begin
   if exists (select 1 from pg_roles where rolname in ('clara_freeform_ro','clara_freeform_login')
                and (rolcanlogin or rolsuper or rolbypassrls or rolcreaterole)) then
     raise exception 'F-A6 PR-1 tail: a clara_freeform_* role carries LOGIN/SUPERUSER/BYPASSRLS/CREATEROLE' using errcode='CLR10';
+  end if;
+
+  -- C12 (M-2/M-3, independent review this PR) — CLUSTER-WIDE, via aclexplode's EXPLICIT
+  -- grantee entries, never `has_*_privilege` (which reports PUBLIC-inherited privilege too,
+  -- and every role has PUBLIC database TEMP by default until acl-baseline.sql's ceremony
+  -- revokes it — a MIGRATION cannot assert that away, only that IT grants nothing at the
+  -- database level; the ceremony's own VERIFY block is what proves the PUBLIC-derived half,
+  -- and MF-4 widened its three confined arrays to both new roles in this same PR).
+  --
+  -- (a) EXPLICIT schema USAGE: clara_freeform_ro holds it on `clara` ALONE (§2's one grant);
+  --     clara_freeform_login holds it NOWHERE (everything it has is via clara_freeform_ro
+  --     membership, never a direct grant).
+  select coalesce(array_agg(distinct ns.nspname order by ns.nspname), '{}') into v_extra
+    from pg_namespace ns cross join lateral aclexplode(coalesce(ns.nspacl, acldefault('n', ns.nspowner))) a
+    join pg_roles g on g.oid = a.grantee
+   where g.rolname = 'clara_freeform_ro' and a.privilege_type = 'USAGE';
+  if v_extra is distinct from array['clara'] then
+    raise exception 'F-A6 PR-1 tail: clara_freeform_ro holds explicit schema USAGE on %, expected exactly {clara}',
+      array_to_string(v_extra,', ') using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_namespace ns cross join lateral aclexplode(coalesce(ns.nspacl, acldefault('n', ns.nspowner))) a
+              join pg_roles g on g.oid = a.grantee where g.rolname = 'clara_freeform_login') then
+    raise exception 'F-A6 PR-1 tail: clara_freeform_login holds an explicit schema privilege — it should hold NONE directly' using errcode='CLR10';
+  end if;
+  -- (b) EXPLICIT database-level privilege (TEMP/CREATE/CONNECT): neither role holds one —
+  --     this file grants nothing at the database level, full stop.
+  if exists (select 1 from pg_database d cross join lateral aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+              join pg_roles g on g.oid = a.grantee
+              where d.datname = current_database() and g.rolname in ('clara_freeform_ro','clara_freeform_login')) then
+    raise exception 'F-A6 PR-1 tail: a clara_freeform_* role holds an explicit database-level privilege' using errcode='CLR10';
+  end if;
+  -- (c) EXPLICIT EXECUTE, CLUSTER-WIDE (M-3: no `nspname='clara'` filter — every schema, so a
+  --     grant landing anywhere else would be caught, not just inside this one). Mirrors check
+  --     (2)'s `has_function_privilege`-derived 7 with a STRONGER instrument: aclexplode reads
+  --     the ACL's own grantee entries, so a function the role reaches only via PUBLIC (the
+  --     H-1/pg_catalog residual B-1 registers for the owner) does NOT inflate this count —
+  --     this is the EXPLICIT surface this migration itself granted, and only that.
+  select coalesce(array_agg(distinct p.oid::regprocedure::text order by p.oid::regprocedure::text), '{}') into v_extra
+    from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    join pg_roles g on g.oid = a.grantee
+   where g.rolname = 'clara_freeform_ro' and a.privilege_type = 'EXECUTE';
+  if array_length(v_extra,1) is distinct from 7 then
+    raise exception 'F-A6 PR-1 tail: clara_freeform_ro holds an EXPLICIT EXECUTE grant on %s function(s) cluster-wide, expected 7: %',
+      coalesce(array_length(v_extra,1),0), array_to_string(v_extra,', ') using errcode='CLR10';
+  end if;
+  if exists (select 1 from unnest(v_extra) f where f !~ '^clara\._?freeform|^clara\.wake_freeform_read') then
+    raise exception 'F-A6 PR-1 tail: the 7 EXPLICIT EXECUTE grants are not all F-A6 objects: %', array_to_string(v_extra,', ') using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+              join pg_roles g on g.oid = a.grantee where g.rolname = 'clara_freeform_login') then
+    raise exception 'F-A6 PR-1 tail: clara_freeform_login holds an explicit EXECUTE grant — it should hold NONE directly (privilege comes only through clara_freeform_ro membership)' using errcode='CLR10';
   end if;
 
   -- (7) THE DIFFERENCE AGAINST clara_agent_ro's ACCUMULATED SELECT SET (P-3) — the whole reason

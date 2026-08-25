@@ -14,6 +14,16 @@
 // rolled-back transaction — it never asserts anything about F-A6's real, permanent projection.
 // This file is that missing assertion, built directly against the receipt table (never through
 // wake_freeform_read: the wake-credential/pool wiring is PR-2's, not built yet).
+//
+// NOTE-1 (independent review): _assert_receipt_surface_conforms is SHAPE-ONLY — arity, column
+// NAME, and column TYPE against pi's contract. It is structurally blind to a VALUE-level bug
+// where a column of the right name and the right type carries the WRONG DOMAIN — exactly the
+// ordinal-19 scope footgun below: the contract's `scope` (firm|platform, receipt VISIBILITY)
+// and this table's own `scope` (client|firm, what the READ touched) are both bare `text` at
+// the same ordinal position, so a naive `r.scope as scope` projection would PASS conformance
+// perfectly while leaking the wrong domain. `f-a6.pi-conforms` below proves the shape only;
+// `f-a6.pi-scope-footgun` is the separate, VALUE-level proof conformance cannot provide — do
+// not read a green `pi-conforms` as evidence the domain projection is also correct.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

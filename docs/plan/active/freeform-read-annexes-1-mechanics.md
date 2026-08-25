@@ -25,7 +25,7 @@ readable, by grant or by policy.
 | band | relations | arm |
 |---|---|---|
 | the books | `journal_entries` · `journal_lines` · `coa_accounts` · `journal_entry_revisions` | S-1 |
-| documents as filed | `documents` · `document_filings` | S-1 |
+| documents as filed | `documents` (**S-1d** — joins live `document_filings` to gate on the filed row, not the bare upload) · `document_filings` (S-1) | S-1 / S-1d |
 | evidence + identity | `entry_evidence` · `counterparties` · `counterparty_aliases` | S-1 |
 | the subledger | `open_items` · `open_item_allocations` | S-1 |
 | bank | `bank_accounts` · `bank_statements` · `bank_statement_lines` · `bank_matches` · `bank_match_line_members` · `bank_match_entry_members` · `bank_reconciliations` · `bank_line_exceptions` | S-1 |
@@ -160,7 +160,12 @@ at             timestamptz not null default now()
 -- added, ARM phase (set by _freeform_arm, never nullable)
 verb           text        not null check (verb in ('wake_freeform_read'))   -- v2 EXTENDS (D34 idiom)
 scope          text        not null check (scope in ('client','firm'))       -- v2 adds 'cross_client'
-client_scope   uuid                          -- NULL iff scope <> 'client'; never false-by-inference
+client_scope   uuid[]                        -- NOTE-3 TRUE (independent review): §0.1b(6) MEASURED
+                                             -- this a uuid[] set, not a scalar uuid -- NULL iff HOME,
+                                             -- a ONE-element array iff scope='client' (never a bare
+                                             -- uuid), so v2's cross-client sibling widens a SET
+                                             -- instead of re-cutting 35 policies. Never false-by-
+                                             -- inference.
 acting_actor   uuid        not null references clara.users(id)   -- clara.agent_user_id()
 on_behalf_of   uuid        references clara.users(id)            -- the ASKING human, from the OBO
                                                                  -- credential; NULL only where no
@@ -169,6 +174,15 @@ via_wake_kind  text        not null check (via_wake_kind in ('interactive','inte
 task_id        uuid        not null          -- the chat turn's agent_tasks row: TA-P4's mechanical
                                              -- binding of who/why to the triggering act
 op_key         text        not null
+arm_txid       xid8        not null              -- NOTE-3 TRUE (independent review): entirely
+                                                 -- absent from earlier annex drafts. §0.1(4)'s
+                                                 -- unforgeable arm-state key — `pg_current_xact_
+                                                 -- id_if_assigned()` at ARM, matched at SETTLE and
+                                                 -- by `_freeform_firm()`/`_freeform_shares_firm()`.
+                                                 -- NOT a GUC: a GUC-borne compiled pin is payload-
+                                                 -- overwritable and was the MF-1 exfiltration route.
+                                                 -- Unique-indexed WHERE settled_at is null (one
+                                                 -- unsettled arm per txn, structurally).
 model_snapshot jsonb       check (model_snapshot is null or (jsonb_typeof(model_snapshot)='object'
                              and btrim(coalesce(model_snapshot->>'provider','')) <> ''
                              and btrim(coalesce(model_snapshot->>'model','')) <> ''
@@ -183,7 +197,9 @@ row_count      int         check (row_count is null or row_count >= 0)
 byte_count     bigint      check (byte_count is null or byte_count >= 0)
 duration_ms    int         check (duration_ms is null or duration_ms >= 0)
 constraint ck_freeform_scope_client check (
-  (scope = 'client' and client_scope is not null)
+  (scope = 'client' and client_scope is not null and cardinality(client_scope) = 1
+   and array_position(client_scope, null) is null)                  -- NOTE-3 TRUE: the built
+                                                                     -- clause, not a bare not-null
   or (scope <> 'client' and client_scope is null))
 constraint ck_freeform_settled check (          -- phase-aware: every settle column together
   (settled_at is null and outcome is null and rung_vector is null
@@ -207,8 +223,11 @@ Triggers and grants:
   DELETE raise `CLR08`; TRUNCATE is refused as elsewhere in the estate (P-20 forces both arms).
 - **`_tf_freeform_must_settle`** — a **DEFERRABLE INITIALLY DEFERRED** constraint trigger raising at
   COMMIT on any row still unsettled, so no read commits behind an unfinished receipt (P-17).
-- An index on `(firm_id, at desc)` and one on `(client_scope, at desc)`; **the drop of
-  `p_freeform_read_log_runtime` and the revoke of `0002:542`** (design §3.2).
+- An index on `(firm_id, at desc)`, and — NOTE-3 TRUE (independent review): not a btree on
+  `(client_scope, at desc)`, but `using gin (client_scope)`, because the column is a `uuid[]`
+  (§0.1b(6)) and the human read surface asks a containment question ("which reads touched THIS
+  client"), which a btree on whole-array equality cannot answer without a sequential scan; **the
+  drop of `p_freeform_read_log_runtime` and the revoke of `0002:542`** (design §3.2).
 - **ONE new policy, not two** — the constant-true owner policy already exists from the
   `0002:482-493` loop. The new one is `for select to clara_authenticated` carrying the bookkeeper+
   floor exactly as `p_audit_log_human` does (`0002:517-520`), ARM-0 first:
