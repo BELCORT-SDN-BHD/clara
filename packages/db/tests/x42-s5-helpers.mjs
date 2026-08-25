@@ -514,6 +514,23 @@ const F_A3_PR1A_CLOCK_NAMES_REMOVED = [
   "resolve_bank_line_exception", "unmatch_bank_match", "void_bank_reconciliation", "void_bank_statement",
 ];
 
+// F-A3 PR-3 [retirement + parity + doors]: `_confirm_bank_identifier_promotion_core` stamps
+// `decided_at = now()` on the accepted proposal row -- a bare timestamptz audit instant, the
+// same shape every other confirm/settle core on this roster already carries -- so it MATCHES
+// arm (D) and joins. `propose_bank_rule` / `sign_bank_rule` / `retire_bank_rule` (base-roster
+// members since 0042) and `match_bank_line` (base-roster member since 0042, kept alive after
+// PR-1a's own extraction ONLY by its then-untouched /7 rule-arity overload's own bare token,
+// per F_A3_PR1A_CLOCK_NAMES_REMOVED's own comment above) all leave the live catalog or lose
+// their last matching overload with PR-3's retirement (Annex I: propose/sign/retire_bank_rule
+// DROPPED whole; match_bank_line's /7 DROPPED, leaving only the byte-unmoved /6 wrapper, which
+// carries no bare token of its own). MEASURED, not inferred: arm (D)'s own detector, re-run
+// against the live post-retirement catalog.
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states.
+const F_A3_PR3_CLOCK_NAMES_ADDED = ["_confirm_bank_identifier_promotion_core"];
+const F_A3_PR3_CLOCK_NAMES_REMOVED = [
+  "match_bank_line", "propose_bank_rule", "retire_bank_rule", "sign_bank_rule",
+];
+
 // F-A2 PR-1 [the agentic posting lane, `f_a2_posting_core` at whatever number merge claimed]:
 // the SEAT for the posting lane's bare-clock cohort, wired and DELIBERATELY EMPTY.
 //
@@ -652,6 +669,13 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a3_pr1a_core_extractions$")) {
     names.push(...F_A3_PR1A_CLOCK_NAMES_ADDED);
     for (const n of F_A3_PR1A_CLOCK_NAMES_REMOVED) {
+      const i = names.indexOf(n);
+      if (i !== -1) names.splice(i, 1);
+    }
+  }
+  if (await appliedStem("f_a3_pr3_retirement_parity_doors$")) {
+    names.push(...F_A3_PR3_CLOCK_NAMES_ADDED);
+    for (const n of F_A3_PR3_CLOCK_NAMES_REMOVED) {
       const i = names.indexOf(n);
       if (i !== -1) names.splice(i, 1);
     }

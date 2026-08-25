@@ -14,7 +14,13 @@ import { shortId } from "../fmt";
 import type { OpenQuestion } from "../reviewCardTypes";
 import styles from "./cards.module.css";
 
-const SCOPE_COPY: Record<string, string> = { document: "this document", vendor: "this vendor", client: "this client" };
+// F-A3 (Annex M.2, TA-P14 clause 3): this surface already renders any
+// scope_kind generically (the ?? fallback below never crashes on an
+// unrecognised value) — 'bank_line' (0121's open_questions CHECK extension)
+// needed no new render branch, only this copy label.
+const SCOPE_COPY: Record<string, string> = {
+  document: "this document", vendor: "this vendor", client: "this client", bank_line: "this bank line",
+};
 
 export function OpenQuestionCard({ token, part }: { token: string | null; part: OpenQuestionPart }) {
   const loader = useCallback((t: string): Promise<OpenQuestion> => getOpenQuestion(t, part.question_id), [part.question_id]);

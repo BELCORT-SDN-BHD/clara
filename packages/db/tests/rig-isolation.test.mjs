@@ -521,10 +521,15 @@ test("T14 HIGH-11: agent cannot be add_member'd; guard_last_owner ignores an age
 // Three rows carry the wave's sharpest edges. `run_adjustment_occurrence` is clara_runtime
 // ONLY — it has no role_rank floor, so the grant IS its authority. `adjustment_run_due` is the
 // one name BOTH lanes hold (design §3.4's depreciation_run_due precedent).
-// `accept_bank_rule_suggestion` is the grant: 0044 created the producer and withheld its
-// EXECUTE because the approve-time re-validation that makes it safe is clara._adj_on_approve
-// arm (3), a body that ships here — so this cell flips it from expected-false to expected-true
-// in the same migration that supplies the door. Every underscore-prefixed internal — the
+// `accept_bank_rule_suggestion` WAS the grant, at the D-b2/D-b3 frontier this history
+// describes: 0044 created the producer and withheld its EXECUTE because the approve-time
+// re-validation that makes it safe is clara._adj_on_approve arm (3), a body that ships here --
+// so this cell flipped it from expected-false to expected-true in the same migration that
+// supplied the door. FRONTIER-SPECIFIC, review round note: F-A3 PR-3 (Annex I) retires
+// accept_bank_rule_suggestion whole, so at HEAD this name resolves to nothing at all and
+// ADJ_0045_PRODUCER_GRANT_FNS (rig-meta.mjs) is correctly empty -- this paragraph is the
+// historical D-b2/D-b3-frontier rationale for a grant that no longer exists, not a live claim.
+// Every underscore-prefixed internal — the
 // occurrence core, the pair core, the content-hash pair, the P1 lineage authority, the five
 // trigger functions — is app-callable by NO role, and the sweep's expected-false proves it.
 // ===========================================================================

@@ -73,15 +73,20 @@ export type OpenQuestionPart = { type: "open_question"; question_id: string; cli
 // were live dashboard consumers of the rules-execution verbs the design drops whole
 // (Annex B.1/B.6, GM-11). rule_post_runs and coding_rules stay KEEP-AS-HISTORY at the
 // DB layer; only these two chat-part surfaces stop rendering them.
+//
+// BankRuleProposalPart ("bank_rule_proposal", a bank_rules proposal, Wave C-c)
+// RETIRED with F-A3 (Annex I) — the whole bank-rules learn loop it rendered
+// (propose/sign/retire_bank_rule) is dropped, the same posture as the two
+// above. clara.bank_rules stays KEEP-AS-HISTORY at the DB layer.
 
 // --- Wave C-c additions (design v2.1 §7) -----------------------------------------
 // Identifier-only, mirroring the Wave-A/A2 receipt/proposal idiom exactly. NOTE (see
 // build-0040/u1-notes.md): design §7 names "new ClaraPart members + catalog entries"
 // without naming them — C-c ships no new machine lane, so nothing in the runtime
-// emits these on the wire TODAY. They are declared here by analogy (a completed
-// reconciliation is a receipt, a bank rule proposal is a proposal — the SweepReceiptPart
-// shape) so the surface exists the day a chat turn references one; both
-// cards hydrate authoritative state on mount, same as every other Wave-A/A2 part.
+// emits these on the wire TODAY. Declared here by analogy (a completed
+// reconciliation is a receipt — the SweepReceiptPart shape) so the surface exists
+// the day a chat turn references one; the card hydrates authoritative state on
+// mount, same as every other Wave-A/A2 part.
 
 /** A completed (or voided) bank reconciliation's receipt (design §4.1/§6).
  *  Keyed on `statement_id`, NOT `recon_id` — the only read RPC the design
@@ -89,9 +94,6 @@ export type OpenQuestionPart = { type: "open_question"; question_id: string; cli
  *  a live statement, WCC-R1), so that is the id this part can actually
  *  hydrate with. */
 export type BankReconReceiptPart = { type: "bank_recon_receipt"; statement_id: string; client_id: string };
-
-/** A bank_rules proposal (design §4.3) — match_settle or coding. */
-export type BankRuleProposalPart = { type: "bank_rule_proposal"; rule_id: string; client_id: string };
 
 // --- Wave D-a additions (design v2.1 §6/§7; 0041-interface-contract.md §7) ------
 // Identifier-only, mirroring the receipt idiom exactly (SweepReceiptPart/
@@ -128,14 +130,12 @@ export type AdjustmentRunReceiptPart = { type: "adjustment_run_receipt"; client_
 /** A staff advance's register row (design §3.2/§3.4). Identifier-only; the card
  *  hydrates `staff_advance_summary(client, as_of=today)` and picks the row by
  *  `advance_id` — there is no single-row getter in the ABI (§9/ABI §A names only
- *  the summary/statement/tie reads), so this follows the SAME "pick by id from a
- *  list" fallback `reconApi.ts`'s `getBankRule` already uses against
- *  `list_bank_rules` (the D4 fix precedent) — never a fabricated read fn. Every
- *  outstanding/cents figure is DB-derived by the summary read itself, never
- *  summed here. */
+ *  the summary/statement/tie reads), so this follows the same "pick by id from a
+ *  list" fallback — never a fabricated read fn. Every outstanding/cents figure is
+ *  DB-derived by the summary read itself, never summed here. */
 export type StaffAdvancePart = { type: "staff_advance"; client_id: string; advance_id: string; label?: string };
 
-/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b members. */
+/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b members. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -153,7 +153,6 @@ export type ClaraPart =
   | OpenQuestionPart
   // --- Wave C-c additions ---
   | BankReconReceiptPart
-  | BankRuleProposalPart
   // --- Wave D-a additions ---
   | FixedAssetPart
   | DepreciationRunReceiptPart

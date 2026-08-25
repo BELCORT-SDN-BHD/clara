@@ -1,14 +1,13 @@
 // reconModel.ts pure-logic tests (no DOM, no DB — the bank/model.test.ts house
 // style). Covers the defensive mappers, the tie-state fail-closed law, the
-// stale-ack gating, the void-unwind composition, and the rule/exception
-// label helpers.
+// stale-ack gating, the void-unwind composition, and the exception label helpers.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   toBankReconciliationView, reconTieState, outstandingStaleUnacked, canCompleteReconciliation,
   deriveVoidUnwindCount, toBankLineException, exceptionDispositionLabel, exceptionKindLabel,
-  toBankRule, bankRuleProposalLabel, candidateMeetsEvidenceFloor, toUnmatchedLine,
+  toUnmatchedLine,
   type BankReconciliationView, type ReconTermSet,
 } from "./reconModel";
 
@@ -300,30 +299,8 @@ test("exceptionDispositionLabel/exceptionKindLabel name every value and degrade 
   assert.equal(exceptionKindLabel("disputed"), "disputed");
 });
 
-// --- bank_rules --------------------------------------------------------------
-
-test("toBankRule maps and defaults an unrecognised status to 'proposed'", () => {
-  const r = toBankRule({ id: "r1", kind: "coding", status: "signed", proposal: { account_code: "620-000" } });
-  assert.equal(r.status, "signed");
-  const garbage = toBankRule({});
-  assert.equal(garbage.status, "proposed");
-});
-
-test("bankRuleProposalLabel renders the match_settle vs coding shapes distinctly", () => {
-  const settle = bankRuleProposalLabel({ kind: "match_settle", proposal: { domain: "ap", counterparty_name: "ACME Sdn Bhd" } });
-  assert.match(settle, /match\/settle/);
-  assert.match(settle, /AP/);
-  assert.match(settle, /ACME/);
-  const coding = bankRuleProposalLabel({ kind: "coding", proposal: { account_code: "620-000" } });
-  assert.match(coding, /code/);
-  assert.match(coding, /620-000/);
-});
-
-test("candidateMeetsEvidenceFloor is a PREVIEW of the ≥3 DB floor — never the authority", () => {
-  assert.equal(candidateMeetsEvidenceFloor({ sighting_count: 2 }), false);
-  assert.equal(candidateMeetsEvidenceFloor({ sighting_count: 3 }), true);
-  assert.equal(candidateMeetsEvidenceFloor({ sighting_count: null }), false);
-});
+// bank_rules (toBankRule/bankRuleProposalLabel/candidateMeetsEvidenceFloor) RETIRED with
+// F-A3 PR-3 (Annex I) alongside their reconModel.ts definitions — see that file's own note.
 
 // --- list_unmatched_lines ---------------------------------------------------------
 

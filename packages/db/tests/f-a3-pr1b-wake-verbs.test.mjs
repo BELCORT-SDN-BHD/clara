@@ -141,14 +141,17 @@ test("f31w.a no credential -> CLR03", async (t) => {
 
 test("f31w.b a credential of a kind without the allowlist row -> CLR03", async (t) => {
   if (skipHere(t)) return;
+  // F-A3 PR-3 (OQ-6) deliberately admits interactive_client to the SAME allowlist rows this
+  // wrapper reads -- chat parity, ruled at Annex A23 -- so it is no longer a negative example
+  // for THIS gate. autodraft stays genuinely unrelated to any bank_agent wrapper allowlist row.
   const firm = await firmOf(world.clients.A1);
-  const cred = await mintCred("interactive_client", firm, world.clients.A1);
+  const cred = await mintCred("autodraft", firm, world.clients.A1);
   const err = await caught(() => wakeQuery(WAKE_ROLE, cred.secret,
     callWrapper("wake_unmatch_bank_match", [
       { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
       { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
     [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-b")]));
-  assert.ok(err, "interactive_client cannot call a bank wrapper");
+  assert.ok(err, "autodraft cannot call a bank wrapper");
   assert.equal(err?.code, "CLR03", `expected CLR03, got ${err?.code}: ${err?.message}`);
 });
 
@@ -204,15 +207,27 @@ test("f31w.e the hold: set_bank_agency_hold(on=true) then a bank wrapper refuses
     [world.clients.A1, opk("f31w-e-hold-off")]);
 });
 
-test("f31w.f the ACL cell (material M4): clara_wake_interactive cannot EXECUTE a bank wrapper at all", async (t) => {
+test("f31w.f the ACL cell, UPDATED for OQ-6 (chatTurn_v14, owner ruling 2026-08-25): clara_wake_interactive now reaches the bank wrapper at the Postgres layer, but the ACL grant alone confers nothing -- a bare SET ROLE with no bound wake credential still refuses CLR03", async (t) => {
   if (skipHere(t)) return;
+  // SUPERSEDES the pre-OQ-6 fact this cell used to prove (a live 42501 insufficient_privilege --
+  // clara_wake_interactive held ZERO EXECUTE on any bank wrapper, material M4's own isolation).
+  // The owner's 2026-08-25 ruling (a human in chat may drive the bank lane's 13 verbs) made that
+  // isolation a wall nothing asked for; chatTurn_v14's own migration
+  // (0130_chatturn_v14_bank_interactive_grants.sql) grants clara_wake_interactive EXECUTE
+  // on exactly the 13 named bank wake_* wrappers -- an extend-only widening, reviewed and
+  // deliberate, never a blanket grant. What this cell proves now instead: the ACL grant ALONE is
+  // not capability. A bare SET ROLE with no `clara.wake_secret` GUC bound reaches past the ACL
+  // check into the function body and still refuses at `wake_context()`'s own gate -- the same
+  // CLR03 every other wake_* caller with no valid credential hits. The real reachability path (a
+  // genuine client-pinned `interactive_client` credential, minted OBO the acting human) is proven
+  // by chatTurn_v14's own battery, f-a3-pr3-chatturn-v14-bank-parity.test.mjs.
   const err = await caught(() => roleQuery(ROLES.wakeInteractive,
     callWrapper("wake_unmatch_bank_match", [
       { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
       { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
     [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-f")]));
-  assert.ok(err, "clara_wake_interactive cannot execute a bank wrapper");
-  assert.equal(err?.code, "42501", `expected 42501 insufficient_privilege, got ${err?.code}: ${err?.message}`);
+  assert.ok(err, "a bare SET ROLE with no wake credential still refuses");
+  assert.equal(err?.code, "CLR03", `expected CLR03 (no valid wake credential) -- clara_wake_interactive now passes the ACL layer (OQ-6), so the refusal moves to the application gate, not 42501; got ${err?.code}: ${err?.message}`);
 });
 
 test("f31w.g replay: the same op_key returns the stored receipt byte-identically", async (t) => {
@@ -698,20 +713,28 @@ test("f31w.w B2: account_upsert, identifier_promotion_propose, exception_propose
 // ===========================================================================
 // H.7 catalog
 // ===========================================================================
-test("f31w.o clara_wake_bank holds EXACTLY the 13-verb allowlist for bank_agent (closed-world)", async (t) => {
+test("f31w.o clara_wake_bank holds EXACTLY the PR-1b 13-verb allowlist for bank_agent, EXTENDED by PR-3's own additions (closed-world, stem-gated)", async (t) => {
   if (skipHere(t)) return;
+  // F-A3 PR-3 (OQ-7) extends this SAME allowlist with wake_book_staff_advance_application --
+  // review round truing, the standard extend-only stem-gated pattern (never a bare count).
+  const pr3Landed = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
   const rows = await rootQuery(
     "select function_name from clara.wake_fn_allowlist where wake_kind='bank_agent' order by 1");
-  assert.equal(rows.rowCount, 13, `expected 13 allowlist rows, found ${rows.rowCount}`);
+  const expected = pr3Landed ? 14 : 13;
+  assert.equal(rows.rowCount, expected, `expected ${expected} allowlist rows, found ${rows.rowCount}`);
   const names = rows.rows.map((r) => r.function_name);
-  for (const n of [
+  const expectedNames = [
     "wake_match_bank_line", "wake_unmatch_bank_match", "wake_settle_from_bank_line",
     "wake_complete_bank_reconciliation", "wake_void_bank_reconciliation",
     "wake_resolve_bank_line_exception", "wake_resolve_and_book_bank_line",
     "wake_propose_bank_line_exception", "wake_propose_bank_identifier_promotion",
     "wake_add_bank_account", "wake_upsert_account", "wake_void_bank_statement",
     "wake_get_bank_pack",
-  ]) {
+  ];
+  if (pr3Landed) expectedNames.push("wake_book_staff_advance_application");
+  for (const n of expectedNames) {
     assert.ok(names.includes(n), `allowlist is missing ${n}`);
   }
 });
