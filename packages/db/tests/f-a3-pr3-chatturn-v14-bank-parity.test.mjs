@@ -126,6 +126,14 @@ test("v14.provenance the receipt from a chat-driven act names the real human and
   // combined tree: this cell flipping from `not ok ... # TODO` to a genuine `ok` (confirmed on
   // this rig before the annotation was dropped) IS the joint acceptance proof the owner's ruling
   // asked for. Never weaken this assertion; if it ever regresses, that is real news.
+  //
+  // approval_arm (opus finding F5): this cell exercises get_bank_pack, a READ, so it is not
+  // the write-verb proof that the receipt's ATTENDED arm actually gates anything -- that
+  // sibling proof is f-a3-pr3-doors.test.mjs's own "f-a3pr3.ss5.interactive" cell, which
+  // performs a chat-driven MATCH (a write) and asserts the same four columns plus
+  // bank_matches.origin='human'. Asserting approval_arm here too, alongside the other three,
+  // is still worth doing: it is the SAME receipt row, and a value this cell can cheaply prove
+  // should not go unchecked just because the write-side proof lives elsewhere.
   if (skipHere(t)) return;
   const firm = await firmOf(world.clients.A1);
   const cred = await mintCred("interactive_client", firm, world.clients.A1, world.users.bob);
@@ -139,6 +147,7 @@ test("v14.provenance the receipt from a chat-driven act names the real human and
   assert.equal(receipt.rows[0]?.via_wake_kind, "interactive_client", "the receipt should name the REAL credential kind the chat lane used, not the agent's own kind");
   assert.equal(receipt.rows[0]?.on_behalf_of, world.users.bob, "the receipt should name the REAL acting human (the credential's OBO subject)");
   assert.notEqual(receipt.rows[0]?.acting_actor, AGENT_USER_ID, "a chat-driven act must not be attributed to the autonomous agent identity");
+  assert.equal(receipt.rows[0]?.approval_arm, "interactive_client_attended", "the receipt's approval_arm should be an ATTENDED value, never agent_unattended");
 });
 
 test("v14.negative-twin an AUTONOMOUS bank_agent-kind call still writes the exact agent-shaped receipt it always has -- unaffected by this PR's grant/allowlist widening", async (t) => {
