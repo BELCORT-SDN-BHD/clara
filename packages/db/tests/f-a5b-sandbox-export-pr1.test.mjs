@@ -34,6 +34,7 @@ import {
   approveMetricDefinition, evaluateMetricHuman, metricAst, measure, cellRow, pastMonthStart,
 } from "./delta-fixtures.mjs";
 import { withTxn, truncateGuardError } from "./rig-txn.mjs";
+import { wakeOpenQuestion } from "./wave-a-fixtures.mjs";
 
 const sha256hex = (s) => createHash("sha256").update(String(s)).digest("hex");
 
@@ -466,6 +467,15 @@ test("wrapper guard -- assert_wake_allowed refuses a non-allowlisted wake_kind (
       [textBody([textBlock("x")]), basisArr(previewBasis("x", cellId)), "wg-kind", model(), opk("wgkind")])).catch((err) => err);
   assert.equal(e.code, "CLR03",
     `an interactive_client credential must be refused by assert_wake_allowed (not allowlisted for wake_mint_sandbox_view), got ${e.code}: ${e.message}`);
+  // opus, one-liner nit (final confirm): CLR03 is SHARED with the wrapper's own null-credential
+  // branch three lines above -- if mint_wake_credential had silently failed to resolve a real
+  // credential, this cell would stay green proving nothing. Positive control: the SAME minted
+  // credential succeeds on wake_open_question, its ONE allowlisted verb (GB-3/D34) -- proving the
+  // credential genuinely resolved and the refusal above is the allowlist's, not a resolution
+  // failure wearing the same errcode.
+  const positive = await wakeOpenQuestion(ROLES.wakeInteractive, secret,
+    { client: clientId, scopeKind: "client", scopeId: clientId, question: "wg-kind positive control" });
+  assert.ok(positive, "the SAME credential succeeds on its one allowlisted verb -- it genuinely resolved");
 });
 
 // =============================================================================================

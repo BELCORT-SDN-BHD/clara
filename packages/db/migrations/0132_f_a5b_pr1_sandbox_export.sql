@@ -1473,7 +1473,7 @@ begin
   -- the other, which would mean the delegation itself dropped something the core still carries).
   declare
     v_refuse_direct jsonb; v_refuse_public jsonb; v_raised boolean;
-    v_detail text; v_unresolvable date := '1900-01-01'::date;
+    v_detail text; v_unresolvable date := '1900-01-01'::date; v_keys text[];
   begin
     v_raised := false;
     begin
@@ -1504,6 +1504,18 @@ begin
     end if;
     if (v_refuse_direct ? 'fix') or (v_refuse_public ? 'fix') then
       raise exception 'f_a5b pr1 tail: the fix key resurfaced -- direct % vs public %', v_refuse_direct, v_refuse_public using errcode = 'CLR10';
+    end if;
+
+    -- opus, one-liner nit (final confirm): the checks above prove fix-absence and delegation,
+    -- but not the KEY SET -- a later edit that also dropped policy_key/as_of from both bodies
+    -- would still pass them. Pin the set explicitly: 0111's original set minus 'fix', exactly.
+    select array_agg(k order by k) into v_keys from jsonb_object_keys(v_refuse_direct) k;
+    if v_keys is distinct from array['as_of','locale','policy_key','reason'] then
+      raise exception 'f_a5b pr1 tail: refusal payload key set is %, expected exactly {as_of,locale,policy_key,reason}', v_keys using errcode = 'CLR10';
+    end if;
+    select array_agg(k order by k) into v_keys from jsonb_object_keys(v_refuse_public) k;
+    if v_keys is distinct from array['as_of','locale','policy_key','reason'] then
+      raise exception 'f_a5b pr1 tail: public CoR refusal payload key set is %, expected exactly {as_of,locale,policy_key,reason}', v_keys using errcode = 'CLR10';
     end if;
   end;
 
