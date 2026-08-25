@@ -141,14 +141,17 @@ test("f31w.a no credential -> CLR03", async (t) => {
 
 test("f31w.b a credential of a kind without the allowlist row -> CLR03", async (t) => {
   if (skipHere(t)) return;
+  // F-A3 PR-3 (OQ-6) deliberately admits interactive_client to the SAME allowlist rows this
+  // wrapper reads -- chat parity, ruled at Annex A23 -- so it is no longer a negative example
+  // for THIS gate. autodraft stays genuinely unrelated to any bank_agent wrapper allowlist row.
   const firm = await firmOf(world.clients.A1);
-  const cred = await mintCred("interactive_client", firm, world.clients.A1);
+  const cred = await mintCred("autodraft", firm, world.clients.A1);
   const err = await caught(() => wakeQuery(WAKE_ROLE, cred.secret,
     callWrapper("wake_unmatch_bank_match", [
       { name: "p_client", cast: "uuid" }, { name: "p_match", cast: "uuid" }, { name: "p_reason" },
       { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
     [world.clients.A1, randomUUID(), "r", RATIONALE, JSON.stringify(MODEL), "d", opk("f31w-b")]));
-  assert.ok(err, "interactive_client cannot call a bank wrapper");
+  assert.ok(err, "autodraft cannot call a bank wrapper");
   assert.equal(err?.code, "CLR03", `expected CLR03, got ${err?.code}: ${err?.message}`);
 });
 

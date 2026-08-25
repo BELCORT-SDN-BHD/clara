@@ -32,10 +32,30 @@ import {
 let live = false;
 let world = null;
 
+/** F-A3 PR-3 (Annex I) drops clara.accept_bank_rule_suggestion whole -- and with it the only
+ *  lawful way to mint a NEW `bank_rule_suggested`-flagged draft, which is what every cell in
+ *  this file needs to construct its fixture (arm (3)'s re-validation is only reachable through
+ *  an accepted suggestion). `db-slice-frontiers` still runs this file at the D-b2/D-b3
+ *  frontiers (test-list-d-b2.txt/-d-b3.txt), where the producer is exactly as designed and this
+ *  battery must stay green. REVERSE/upper gate, the x42-s5-helpers.mjs `pr3Landed` precedent:
+ *  skip loudly once the producer is retired on the frontier this rig runs against, never fail.
+ *  (Arm (3)'s CODE itself is NOT retired -- it still re-validates any PRE-EXISTING draft; this
+ *  file's claim is specifically about constructing a NEW one, which the drop makes impossible.) */
+async function producerRetired() {
+  return (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
+}
+
 before(async () => {
   live = await af2SubstrateReady();
   if (!live) {
     noteLane("0037/0038/0040 bank substrate absent — the x42 PRODUCER staleness battery is dormant");
+    return;
+  }
+  if (await producerRetired()) {
+    live = false;
+    noteLane("F-A3 PR-3 retires clara.accept_bank_rule_suggestion whole (Annex I) — the x42 PRODUCER staleness battery is dormant on this frontier; db-slice-frontiers still proves it green at D-b2/D-b3 (0041_asm..0045)");
     return;
   }
   world = await af2World();

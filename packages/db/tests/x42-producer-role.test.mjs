@@ -26,7 +26,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  opk, reasonOf, endPool, printLaneNotes, printSkipCount, noteLane, entryStatusOf,
+  opk, reasonOf, rootQuery, endPool, printLaneNotes, printSkipCount, noteLane, entryStatusOf,
 } from "./a21-helpers.mjs";
 import {
   af2SubstrateReady, skipAf2, refusesWithCode, caught,
@@ -46,10 +46,26 @@ let world = null;
 const T_INELIGIBLE = "suggestion_line_ineligible";
 const AXIS_ELIGIBILITY = "line_eligibility";
 
+/** F-A3 PR-3 (Annex I) drops clara.accept_bank_rule_suggestion whole -- this file's entire
+ *  subject (the eligibility census applied at its accept/approve doors). `db-slice-frontiers`
+ *  still runs this file at the D-b2 frontier (test-list-d-b2.txt), where the producer is exactly
+ *  as designed. REVERSE/upper gate, the x42-s5-helpers.mjs `pr3Landed` precedent: skip loudly
+ *  once the producer is retired on the frontier this rig is running against, never fail. */
+async function producerRetired() {
+  return (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["^[0-9]{4}_f_a3_pr3_retirement_parity_doors$"])).rows[0].n === 1;
+}
+
 before(async () => {
   live = await af2SubstrateReady();
   if (!live) {
     noteLane("0037/0038/0040 bank substrate absent — the x42 PRODUCER role-eligibility battery is dormant");
+    return;
+  }
+  if (await producerRetired()) {
+    live = false;
+    noteLane("F-A3 PR-3 retires clara.accept_bank_rule_suggestion whole (Annex I) — the x42 PRODUCER role-eligibility battery is dormant on this frontier; db-slice-frontiers still proves it green at D-b2 (0041_asm..0045)");
     return;
   }
   world = await af2World();

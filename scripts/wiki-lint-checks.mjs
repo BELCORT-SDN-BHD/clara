@@ -174,6 +174,22 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
     relations: [],
     calls: ["_human_ctx", "_upsert_account_core", "role_rank"],
   }],
+  // F-A3 PR-3 (UNNUMBERED_f_a3_pr3_retirement_parity_doors.sql, full ADR-061 ladder). ONE more
+  // CoR patch of the exact same family as the nine above: SS2 factors book_staff_advance_
+  // application onto the PR-1a idiom (a thin human delegator + an ungranted
+  // _book_staff_advance_application_core), reading the LIVE prosrc via
+  // `pg_get_functiondef('clara.book_staff_advance_application(...)'::regprocedure)` — a
+  // LITERAL signature, so the patch's target already resolves — and re-installing it via the
+  // same unprovable `execute replace(...) || 'AS $fa3pr3_core$' || replace(v_src, v_anchor,
+  // v_ctx) || '$fa3pr3_core$'` shape (a migration-time-only variable, never a literal in this
+  // file's own text). `relations`/`calls` are the EXACT `clara.*` token set the live installed
+  // body was MEASURED to reference (a rig read, 2026-08-25), and the body was independently
+  // confirmed to contain no word-bounded "wiki" substring (`prosrc !~* '\ywiki'`, same read).
+  ["book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)", {
+    why: "F-A3 PR-3 SS2 — see the family note above.",
+    relations: [],
+    calls: ["_book_staff_advance_application_core", "_human_ctx", "role_rank"],
+  }],
   ["apply_open_items(uuid,jsonb,text,text)", {
     why: "0055 S7 — the TAIL ASSERTION block (PR #226, full ADR-061 ladder; the round-3 "
       + "scoped review corrected this entry's first cut, which mis-attributed the finding "

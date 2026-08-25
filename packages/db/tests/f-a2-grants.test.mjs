@@ -397,14 +397,25 @@ test("f-a2.c12.d34-needs-client a CLIENT-LESS interactive_client mint is REFUSED
     "c12.d34-needs-client: ...naming the kind it refused");
 });
 
-test("f-a2.c12.d34-one-row the pinned chat kind may ask, and may NOT post or draft (D34)", async (t) => {
+test("f-a2.c12.d34-roster the pinned chat kind's allowlist is EXACTLY wake_open_question plus F-A3 PR-3's ruled bank-agency parity roster (D34, OQ-6, Annex A23)", async (t) => {
   if (await gateCore(t)) return;
-  // THE WALL, READ AS A CLOSED SET. `wake_open_question` writes no entry, and every posting and
-  // drafting verb is absent for this kind. Asserting the EXACT row set rather than "post is not
-  // in it" is what makes a later addition - a fifth verb quietly allowlisted - turn this red.
+  // THE WALL, READ AS A CLOSED SET, extended by a NAMED, RULED widening rather than silently.
+  // D34 originally pinned this kind to `wake_open_question` alone -- posts nothing, drafts
+  // nothing. F-A3 PR-3 (OQ-6) is the first deliberate widening past that: Annex A23 rules chat
+  // parity for the bank-agency lane explicitly ("D34 named and distinguished in OQ-6 itself...
+  // OQ-6 grants no authority that then goes unfulfilled"), and the roster below is EXACTLY the
+  // bank_agent allowlist (SS4 of F-A3 PR-3's migration derives one from the other at apply
+  // time) plus the original wake_open_question row. Asserting the EXACT row set rather than
+  // "post is not in it" is still what makes a FUTURE, UN-ruled addition -- a fifteenth verb
+  // quietly allowlisted -- turn this red.
   const rows = await rootQuery(
     `select function_name from clara.wake_fn_allowlist
       where wake_kind='interactive_client' order by function_name`);
-  assert.deepEqual(rows.rows.map((r) => r.function_name), ["wake_open_question"],
-    `c12.d34-one-row: the pinned chat kind is allowlisted for EXACTLY one verb, and it is the one that posts nothing (got ${JSON.stringify(rows.rows.map((r) => r.function_name))})`);
+  assert.deepEqual(rows.rows.map((r) => r.function_name), [
+    "wake_add_bank_account", "wake_complete_bank_reconciliation", "wake_get_bank_pack",
+    "wake_match_bank_line", "wake_open_question", "wake_propose_bank_identifier_promotion",
+    "wake_propose_bank_line_exception", "wake_resolve_and_book_bank_line",
+    "wake_resolve_bank_line_exception", "wake_settle_from_bank_line", "wake_unmatch_bank_match",
+    "wake_upsert_account", "wake_void_bank_reconciliation", "wake_void_bank_statement",
+  ], `c12.d34-roster: the pinned chat kind's allowlist is not the ruled fourteen-row set (got ${JSON.stringify(rows.rows.map((r) => r.function_name))})`);
 });

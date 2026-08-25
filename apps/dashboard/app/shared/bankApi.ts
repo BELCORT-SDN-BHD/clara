@@ -19,7 +19,7 @@
 // for the DB lane to land under these exact names, or correct at integration. Every
 // mapper is DEFENSIVE (model.ts's toXxx idiom) so a near-miss shape still renders.
 
-import { rpc } from "./wire";
+import { rpc, pgrestSelect } from "./wire";
 import { listPlanItems } from "./onboardingApi";
 import { getClientPlan } from "./openingApi";
 import {
@@ -31,6 +31,7 @@ import {
 } from "../bank/model";
 
 const opKey = () => crypto.randomUUID();
+const enc = encodeURIComponent;
 
 // ---------------------------------------------------------------------------
 // Reads — ASSUMED SECURITY DEFINER list/get fns (see header note).
@@ -220,15 +221,12 @@ export async function voidBankStatement(
 // `{account_code, amount_cents}` mirrors 0037's own array-of-object convention
 // (allocate_receipt's p_allocations, `{item_id, amount_cents}[]`).
 //
-// C-c splice register #4 (design §5, migration 0040): match_bank_line +
-// settle_from_bank_line each gain a NEW OVERLOAD — same name, the existing
-// arg list PLUS a trailing `p_via_rule uuid default null`. viaRuleId is
-// OMITTED from the body entirely on a plain human match/settle (0038's
-// original arity resolves, unchanged behaviour); it is sent only when the
-// caller confirms a `list_bank_line_suggestions` match/settle chip
-// (shared/reconApi.ts), so PostgREST resolves the 0040 overload, the DB
-// validates the signed same-client rule and stamps `origin='rule'` on the
-// match (design §4.3/§5) — this file never sets `origin` itself.
+// F-A3 (Annex I): the bank-rules machine — and its C-c splice #4 `p_via_rule`
+// overload on match_bank_line/settle_from_bank_line — RETIRED WHOLE. Both
+// verbs are back to their single 0038 arity; a caller can no longer stamp
+// `origin='rule'` on a new match (bank_matches.origin's 'rule' value and every
+// historical matched_via_rule_id row stay as KEPT history, per Annex I — only
+// the ACTIVE writer path is gone).
 // ---------------------------------------------------------------------------
 
 export type MatchEntryInput = { entry_id: string; matched_cents: number };
@@ -239,10 +237,6 @@ export async function matchBankLine(
   args: {
     clientId: string; lineIds: string[]; entries: MatchEntryInput[];
     adjustments?: BankAdjustmentInput[] | null; ackPeriodExceptions?: boolean;
-    /** C-c splice #4: the signed `bank_rules` row this match was confirmed
-     *  from (shared/reconApi.ts's `list_bank_line_suggestions`). Omitted
-     *  (not merely null) on every ordinary human match. */
-    viaRuleId?: string | null;
   },
 ): Promise<{ match_id: string }> {
   const body: Record<string, unknown> = {
@@ -251,7 +245,6 @@ export async function matchBankLine(
     p_ack_period_exceptions: args.ackPeriodExceptions ?? false,
     p_op_key: opKey(),
   };
-  if (args.viaRuleId) body.p_via_rule = args.viaRuleId;
   const out = (await rpc("match_bank_line", body, token)) as { match_id?: string; id?: string } | null;
   const id = out?.match_id ?? out?.id;
   if (!id) throw new Error("match_bank_line returned no match_id");
@@ -294,9 +287,6 @@ export async function settleFromBankLine(
     postingDate?: string | null; chargeCents?: number; chargeAccount?: string | null;
     adjustments?: BankAdjustmentInput[] | null; attestation?: string | null;
     controlAccount?: string | null;
-    /** C-c splice #4 — see matchBankLine's own comment; omitted on every
-     *  ordinary human settle. */
-    viaRuleId?: string | null;
   },
 ): Promise<SettleReceipt> {
   const body: Record<string, unknown> = {
@@ -310,7 +300,6 @@ export async function settleFromBankLine(
     p_control_account: args.controlAccount ?? null,
     p_op_key: opKey(),
   };
-  if (args.viaRuleId) body.p_via_rule = args.viaRuleId;
   return (await rpc("settle_from_bank_line", body, token)) as SettleReceipt;
 }
 
@@ -322,4 +311,103 @@ export async function completePendingMatch(token: string, clientId: string, matc
     { p_client: clientId, p_match: matchId, p_op_key: opKey() },
     token,
   )) as SettleReceipt;
+}
+
+// ---------------------------------------------------------------------------
+// clara.bank_agent_proposals (F-A3 Annex A.4/M.2) — a structured proposal a
+// human acts on in one click. Human SELECT-only, zero machine grants (0121) —
+// read directly via PostgREST (the pgrestSelect idiom, no list_/get_ RPC
+// exists or is needed for this table).
+// ---------------------------------------------------------------------------
+
+export type BankAgentProposalKind = "line_exception" | "identifier_promotion";
+export type BankAgentProposalStatus = "open" | "accepted";
+
+export type BankAgentProposalRow = {
+  id: string;
+  kind: BankAgentProposalKind | string;
+  /** the proposal's anchor: a bank_statement_lines.id for line_exception, a
+   *  counterparties.id for identifier_promotion (0121's own subject_id law). */
+  subject_id: string;
+  payload: Record<string, unknown>;
+  rationale: string;
+  status: BankAgentProposalStatus | string;
+  created_at: string | null;
+};
+
+function toBankAgentProposal(raw: unknown): BankAgentProposalRow {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: typeof o.id === "string" ? o.id : "",
+    kind: typeof o.kind === "string" ? o.kind : "",
+    subject_id: typeof o.subject_id === "string" ? o.subject_id : "",
+    payload: (o.payload && typeof o.payload === "object" ? o.payload : {}) as Record<string, unknown>,
+    rationale: typeof o.rationale === "string" ? o.rationale : "",
+    status: typeof o.status === "string" ? o.status : "open",
+    created_at: typeof o.created_at === "string" ? o.created_at : null,
+  };
+}
+
+/** Every OPEN `line_exception` proposal for this client (M.2 — the
+ *  StatementDetail exception-proposal door reads this once per statement
+ *  load and matches a line by `subject_id === line.id`; the table carries no
+ *  per-statement column, only `client_id`). */
+export async function listOpenBankLineExceptionProposals(
+  token: string, clientId: string,
+): Promise<BankAgentProposalRow[]> {
+  const rows = await pgrestSelect<Record<string, unknown>>(
+    `bank_agent_proposals?client_id=eq.${enc(clientId)}&kind=eq.line_exception&status=eq.open`
+    + `&select=id,kind,subject_id,payload,rationale,status,created_at`,
+    token,
+  );
+  return rows.map(toBankAgentProposal);
+}
+
+// ---------------------------------------------------------------------------
+// clara.bank_agency_holds (F-A3 Annex D, blocker B3) — the per-client brake on
+// the bank agent lane. Human SELECT-only, zero machine grants (0121) — read
+// directly via PostgREST; written by the bookkeeper-floor human verb
+// clara.set_bank_agency_hold(client, on|off, reason, op_key).
+// ---------------------------------------------------------------------------
+
+export type BankAgencyHoldRow = {
+  client_id: string;
+  on_hold: boolean;
+  reason: string | null;
+  set_by: string | null;
+  set_at: string | null;
+};
+
+function toBankAgencyHold(raw: unknown): BankAgencyHoldRow {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    client_id: typeof o.client_id === "string" ? o.client_id : "",
+    on_hold: typeof o.on_hold === "boolean" ? o.on_hold : false,
+    reason: typeof o.reason === "string" ? o.reason : null,
+    set_by: typeof o.set_by === "string" ? o.set_by : null,
+    set_at: typeof o.set_at === "string" ? o.set_at : null,
+  };
+}
+
+/** No row yet ⇒ the lane has never been held (the DB default, `on_hold`
+ *  defaults false at first write) — never fabricated, this is the honest
+ *  "no hold has ever been set" state. */
+export async function getBankAgencyHold(token: string, clientId: string): Promise<BankAgencyHoldRow | null> {
+  const rows = await pgrestSelect<Record<string, unknown>>(
+    `bank_agency_holds?client_id=eq.${enc(clientId)}&select=client_id,on_hold,reason,set_by,set_at&limit=1`,
+    token,
+  );
+  return rows[0] ? toBankAgencyHold(rows[0]) : null;
+}
+
+/** set_bank_agency_hold(client, on|off, reason, op_key), bookkeeper floor.
+ *  Refuses reason_required (0121). */
+export async function setBankAgencyHold(
+  token: string, clientId: string, on: boolean, reason: string,
+): Promise<void> {
+  await rpc(
+    "set_bank_agency_hold",
+    { p_client: clientId, p_on: on, p_reason: reason, p_op_key: opKey() },
+    token,
+  );
 }

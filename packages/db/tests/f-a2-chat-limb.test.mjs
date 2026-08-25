@@ -232,14 +232,23 @@ test("f-a2.c13.mint the new kind mints only with a firm-congruent active client,
   noteLane("c13.mint: the mint verifies FIRM-CONGRUENT AND ACTIVE, not that this human is authorised for that client — the estate's existing firm-scoped model, stated rather than implied");
 });
 
-test("f-a2.c13.one-row GB-3's closed-world cell — interactive_client holds EXACTLY ONE allowlist row", async (t) => {
+test("f-a2.c13.roster GB-3's closed-world cell — interactive_client holds EXACTLY wake_open_question plus F-A3 PR-3's ruled bank-agency parity roster (OQ-6, Annex A23)", async (t) => {
   if (gateWaveA(t)) return;
   if (await gateChatParity(t)) return;
+  // F-A3 PR-3 (OQ-6, Annex A23) is a NAMED, RULED widening of this kind past the original
+  // wake_open_question-only pin — see f-a2-grants.test.mjs's sibling cell (c12.d34-roster) for
+  // the full citation. Still a closed set: asserting the EXACT row list is what makes a FUTURE,
+  // un-ruled addition turn this red.
   const r = await rootQuery(
     "select coalesce(fn_name, function_name) as fn from clara.wake_fn_allowlist where wake_kind=$1 order by 1", [NEW_KIND]);
   const fns = r.rows.map((x) => x.fn);
-  assert.deepEqual(fns, ["wake_open_question"],
-    `c13.one-row: exactly ONE row, and it is the fail-closed question call. A SECOND row is how this kind would quietly become a posting kind (got ${fns.join(", ")})`);
+  assert.deepEqual(fns, [
+    "wake_add_bank_account", "wake_complete_bank_reconciliation", "wake_get_bank_pack",
+    "wake_match_bank_line", "wake_open_question", "wake_propose_bank_identifier_promotion",
+    "wake_propose_bank_line_exception", "wake_resolve_and_book_bank_line",
+    "wake_resolve_bank_line_exception", "wake_settle_from_bank_line", "wake_unmatch_bank_match",
+    "wake_upsert_account", "wake_void_bank_reconciliation", "wake_void_bank_statement",
+  ], `c13.roster: interactive_client's allowlist is not the ruled fourteen-row set (got ${fns.join(", ")})`);
 });
 
 test("f-a2.c13.woq wake_open_question succeeds from the pinned kind, and still REFUSES an unpinned credential", async (t) => {

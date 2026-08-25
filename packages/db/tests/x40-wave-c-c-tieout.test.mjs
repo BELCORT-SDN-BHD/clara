@@ -103,7 +103,7 @@ import {
   upsertAccountClassed, upsertPayableAccount, grantConsent,
   draftEntryV3, approveEntry, insertUser, addMember,
   idOf, reasonOf, HIGH_STAKES_CENTS,
-  roleCanExecute, fnSource, rlsFlags, restateSightings,
+  roleCanExecute, fnSource, rlsFlags,
 } from "./a21-helpers.mjs";
 import { holdThenContend, sawDeadlock } from "./rig-docs-race.mjs";
 // fix-wave E7/CX12: the REAL Gate-K onboarding-plan lifecycle (K1..K14), for x40.m/x40.n's
@@ -114,7 +114,7 @@ import {
   GUARD, hasBankMatching, caught,
   addBankAccount, deactivateBankAccount, enterStatement, voidBankStatement,
   matchBankLine, unmatchBankMatch, settleFromBankLine, completePendingMatch, matchIdOf,
-  matchRow, lineGroupStatus, assertGroupTies,
+  lineGroupStatus, assertGroupTies,
   openItemsOf, outstandingOf,
   manualRes, birthCounterparty, plainEntry,
 } from "./x38-match-fixtures.mjs";
@@ -215,7 +215,13 @@ async function statementRow(statement) {
 }
 
 // ---------------------------------------------------------------------------
-// THE FIVE NEW C-c VERBS (IA-1..IA-7) + the p_via_rule overload (IA-8).
+// THE FIVE NEW C-c VERBS (IA-1..IA-7). F-A3 PR-3 (Annex I) retires
+// propose_bank_rule / sign_bank_rule / retire_bank_rule (IA-5/IA-6) and both
+// match_bank_line/settle_from_bank_line p_via_rule overloads (IA-8) whole,
+// with the rest of the bank-rules machine -- their wrapper helpers
+// (proposeRule/signRule/retireRule/matchBankLineViaRule) are removed below
+// rather than left dead. set_counterparty_terms (IA-7) is untouched and
+// keeps its wrapper.
 // ---------------------------------------------------------------------------
 
 async function completeRecon(sub, { client, statement, ackOutstanding = [], opKey = null }) {
@@ -263,30 +269,6 @@ async function resolveException(sub, { client, exception, disposition, note = "x
   const r = await humanQuery(sub, namedCall("resolve_bank_line_exception", specs), vals);
   return r.rows[0].result;
 }
-async function proposeRule(sub, { client, kind, pattern, proposal, opKey = null }) {
-  const specs = [{ name: "p_client" }, { name: "p_kind" }, { name: "p_pattern", cast: "jsonb" }, { name: "p_proposal", cast: "jsonb" }, { name: "p_op_key" }];
-  const vals = [client, kind, JSON.stringify(pattern), JSON.stringify(proposal), opKey ?? opk("x40-proposerule")];
-  const r = await humanQuery(sub, namedCall("propose_bank_rule", specs), vals);
-  return r.rows[0].result;
-}
-async function signRule(sub, { client, rule, opKey = null }) {
-  void client;
-  const r = await humanQuery(
-    sub,
-    namedCall("sign_bank_rule", [{ name: "p_rule" }, { name: "p_op_key" }]),
-    [rule, opKey ?? opk("x40-signrule")],
-  );
-  return r.rows[0].result;
-}
-async function retireRule(sub, { client, rule, reason = "x40 retire rule", opKey = null }) {
-  void client;
-  const r = await humanQuery(
-    sub,
-    namedCall("retire_bank_rule", [{ name: "p_rule" }, { name: "p_reason" }, { name: "p_op_key" }]),
-    [rule, reason, opKey ?? opk("x40-retirerule")],
-  );
-  return r.rows[0].result;
-}
 async function setTerms(sub, { client, counterparty, days, opKey = null }) {
   void client;
   const r = await humanQuery(
@@ -296,19 +278,13 @@ async function setTerms(sub, { client, counterparty, days, opKey = null }) {
   );
   return r.rows[0].result;
 }
-/** match_bank_line / settle_from_bank_line, the p_via_rule overload (IA-8). */
-async function matchBankLineViaRule(sub, { client, lines, entries, viaRule, ackPeriodExceptions = false, opKey = null }) {
-  const r = await humanQuery(
-    sub,
-    `select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb,
-       p_adjustments => null, p_ack_period_exceptions => $4, p_via_rule => $5, p_op_key => $6) as r`,
-    [client, JSON.stringify(lines), JSON.stringify(entries), ackPeriodExceptions, viaRule, opKey ?? opk("x40-matchvia")],
-  );
-  return r.rows[0].r;
-}
-
 // ---------------------------------------------------------------------------
-// THE EIGHT READ RPCs (IA-9..IA-14).
+// THE SIX READ RPCs (IA-9..IA-12, plus list_unmatched_lines/get_bank_reconciliation).
+// F-A3 PR-3 (Annex I) retires list_bank_line_suggestions / list_bank_rule_candidates /
+// list_bank_rules whole, with the rest of the bank-rules machine -- their wrapper
+// helpers are removed below rather than left dead. verify_bank_reconciliation (the
+// tenth-turned-SEVENTH read; the 0040 fix wave's own A7 addition) is called inline in
+// x40.an rather than wrapped here, matching the pre-existing house style for that verb.
 // ---------------------------------------------------------------------------
 
 async function arAging(sub, { client, asOf, segment = null }) {
@@ -335,21 +311,6 @@ async function getBankReconciliation(sub, { statement }) {
   const r = await humanQuery(sub, "select clara.get_bank_reconciliation(p_statement => $1) as r", [statement]);
   return r.rows[0].r;
 }
-async function listBankLineSuggestions(sub, { statement }) {
-  const r = await humanQuery(sub, "select clara.list_bank_line_suggestions(p_statement => $1) as r", [statement]);
-  return r.rows[0].r;
-}
-async function listBankRuleCandidates(sub, { client }) {
-  const r = await humanQuery(sub, "select clara.list_bank_rule_candidates(p_client => $1) as r", [client]);
-  return r.rows[0].r;
-}
-// fix-wave E5 [A10]: the NINTH read RPC (assembly order item 6, D4/A9) -- an ADDITIVE rule
-// register, not in the design's original SS6 table, that x40.an's tenancy sweep never covered.
-async function listBankRules(sub, { client }) {
-  const r = await humanQuery(sub, "select clara.list_bank_rules(p_client => $1) as r", [client]);
-  return r.rows[0].r;
-}
-
 // ---------------------------------------------------------------------------
 // Readbacks (root -- superuser bypasses RLS; fixtures/asserts only, never a lane).
 // ---------------------------------------------------------------------------
@@ -362,10 +323,10 @@ async function exceptionRow(id) {
   const r = await rootQuery("select to_jsonb(x) as row from clara.bank_line_exceptions x where x.id=$1", [id]);
   return r.rows[0]?.row ?? null;
 }
-async function ruleRow(id) {
-  const r = await rootQuery("select to_jsonb(x) as row from clara.bank_rules x where x.id=$1", [id]);
-  return r.rows[0]?.row ?? null;
-}
+// ruleRow (clara.bank_rules readback) RETIRED with F-A3 PR-3's Section 5 (its only
+// caller was x40.ai, which retires whole below, Annex I) -- clara.bank_rules the TABLE
+// and its historical rows are KEPT (KEEP-AS-HISTORY), so no reader of it is owed here;
+// a future cell that needs one re-adds it against a live need, not a dead export.
 async function counterpartyRow(id) {
   const r = await rootQuery("select to_jsonb(c) as row from clara.counterparties c where c.id=$1", [id]);
   return r.rows[0]?.row ?? null;
@@ -2571,441 +2532,67 @@ test("x40.ag ar_aging/ap_aging buckets are disjoint (current 0-30/31-60/61-90/91
 });
 
 // ===========================================================================
-// SECTION 5 -- RULES / THE LEARN LOOP (design S4.3, S5; part2 findings 12/28-30/39).
+// SECTION 5 -- RULES / THE LEARN LOOP -- RETIRED WHOLE (F-A3 PR-3, Annex I).
+//
+// The bank-rules machine (propose_bank_rule, sign_bank_rule, retire_bank_rule,
+// accept_bank_rule_suggestion, list_bank_rule_candidates, list_bank_rules,
+// list_bank_line_suggestions, _bank_rule_sightings, _bank_rule_pattern_norm,
+// and the p_via_rule overloads of match_bank_line/settle_from_bank_line) drops
+// whole in migrations/UNNUMBERED_f_a3_pr3_retirement_parity_doors.sql SS1 --
+// verified live on the rig (frontier 0128_f_a3_pr3_retirement_parity_doors):
+// none of the eleven names resolve any more. clara.bank_rules the TABLE and
+// its historical rows are KEPT AS HISTORY (D35/D36); only the CODE retires.
+//
+// Per Annex I's "TEST BREAKAGE, split by CLAIM" law (R-L1/D39): this
+// section's six cells (x40.ah propose's evidence floor, x40.ai sign/retire's
+// owner floor + frozen-after-sign, x40.aj the content-hash dedup, x40.ak
+// suggestion listing, x40.al the p_via_rule overload's origin='rule' stamp,
+// x40.am the sighting-carve-out's arms A/B built directly on
+// accept_bank_rule_suggestion) each claimed RULE BEHAVIOUR of a verb this
+// migration removes outright -- there is no intermediate state where the
+// verbs exist unused, so they retire WITH the drop PR rather than surviving
+// as unreachable stubs. Every retired claim's successor is named, never
+// silently dropped:
+//   x40.ah/ai/aj/ak/al -- the verbs' EXISTENCE is the residual claim, and
+//     x38.aa (x38-wave-c-b-match.test.mjs) already carries the inverted
+//     twin: match_bank_line has exactly ONE live arity (was two) and
+//     settle_from_bank_line has exactly ONE live overload (was two) -- the
+//     exact-count assertions that prove the p_via_rule/rule-arity forms are
+//     gone. A second, narrower check here would only restate x38.aa's own
+//     claim. rig-meta.mjs's TIEOUT_0040_COHORT also carries the roster-level
+//     absence (propose/sign/retire_bank_rule, the three list_bank_rule*
+//     reads, and the two _bank_rule_* internals removed from their cohort
+//     arrays with a dated note).
+//   x40.am ARM A/B exercised the (now-gone) producer directly and, by the
+//     test's OWN prior comment, had already gone VACUOUS once F-A2 PR-1
+//     excised the breeding block ("law 31 ... a zero that stops
+//     discriminating is a finding to record, never a cell to quietly
+//     delete") -- they no longer discriminated anything even before this
+//     migration made them unreachable. ARM C's substantive claim (an
+//     ordinary approval breeds nothing) is already carried, byte-for-byte,
+//     by f-a2.c8.inv-ordinary and f-a2.c8.zero (f-a2-excision.test.mjs) --
+//     named successors the test's own comment pointed at, so no stub is
+//     owed here either.
+//
+// multilineStatement() and the propose/sign/retire/accept fixture helpers
+// this section alone called (proposeRule, signRule, retireRule,
+// matchBankLineViaRule, listBankLineSuggestions, listBankRuleCandidates,
+// listBankRules, ruleRow, acceptSuggestion, revisionOf, sightingCount,
+// vendorAccountProposals, lineDateOf) are removed with it -- an unreferenced
+// fixture export is exactly the "accumulate dead exemptions" failure Annex I
+// warns against. x40.an/x40.ap/x40.aq below are CENSUSES, not behaviour
+// claims -- they keep their cells, with rosters corrected to the
+// post-retirement catalog (see each cell's own comment).
 // ===========================================================================
-
-/** A statement with a MULTI-LINE description (WCC-R1's law: every real
- *  description in the corpus carries embedded newlines) suitable for pattern
- *  breeding (>=3 sightings of the same token pattern). */
-async function multilineStatement(sub, client, bankAccount, { tag, count = 3, direction = -1, amount = 96750 }) {
-  const specs = [];
-  for (let i = 0; i < count; i++) {
-    specs.push({
-      amountCents: direction * amount, entryDate: `2034-0${(i % 9) + 1}-1${i}`,
-      description: `IBG TRANSFER\nEPF PAYMENT ${tag} REF${1000 + i}`,
-    });
-  }
-  return enterStatement(sub, { client, bankAccount, periodStart: "2034-01-01", periodEnd: "2034-12-31", opening: 0, specs, keepPeriod: true });
-}
-
-// ---------------------------------------------------------------------------
-// x40.ah -- RULE FLOORS: derived evidence <3 refused (DB-derived, never
-// caller-supplied); a caller-supplied evidence argument is either ignored or
-// refused (IA-5).
-// ---------------------------------------------------------------------------
-test("x40.ah propose_bank_rule refuses rule_evidence_insufficient below the DB-derived >=3 floor, and evidence is never caller-supplied", async (t) => {
-  if (skipHere(t)) return;
-  const sub = world.users.alice;
-  const client = world.clients.A2;
-  const acct = await freshAccount(sub, client, "ah1");
-  // Only TWO sightings -- below the floor.
-  await multilineStatement(sub, client, acct.bankAccountId, { tag: "AH1", count: 2 });
-  const denied = await caught(() => proposeRule(sub, {
-    client, kind: "coding", pattern: { tokens: ["EPF", "PAYMENT", "AH1"], direction: "debit" },
-    proposal: { account_code: EXPN, narration_template: "EPF contribution" },
-  }));
-  assertReason(denied, null, "rule_evidence_insufficient", "x40.ah below the >=3 sighting floor, propose_bank_rule refuses named");
-
-  // A caller-supplied p_evidence extra argument -- either 42883 (no such
-  // parameter) or the row's actual evidence disagrees with the injected value
-  // (proving it was ignored, never trusted).
-  const injected = await caught(async () => {
-    const r = await humanQuery(
-      sub,
-      `select clara.propose_bank_rule(p_client => $1, p_kind => $2, p_pattern => $3::jsonb, p_proposal => $4::jsonb, p_evidence => $5::jsonb, p_op_key => $6) as r`,
-      [client, "coding", JSON.stringify({ tokens: ["EPF"] }), JSON.stringify({ account_code: EXPN }), JSON.stringify({ sighting_count: 999 }), opk("x40-ah-inject")],
-    );
-    return r.rows[0].r;
-  });
-  assert.ok(injected, "x40.ah a caller-supplied p_evidence argument is refused outright (42883, no such parameter) -- IA-5");
-  noteLane(`x40.ah caller-supplied evidence probe: code=${injected.code} message=${injected.message}`);
-});
-
-// ---------------------------------------------------------------------------
-// x40.ai -- SIGN OWNER-ONLY; FROZEN-AFTER-SIGNING: a bookkeeper cannot sign; a
-// signed rule's pattern/proposal/evidence are immutable (no writer touches
-// them); retire is owner-only and terminal.
-// ---------------------------------------------------------------------------
-test("x40.ai sign_bank_rule is owner-only, a signed rule's substantive fields are frozen, and retire is owner-only + terminal", async (t) => {
-  if (skipHere(t)) return;
-  const sub = world.users.alice; // owner
-  const bookkeeper = world.users.bob;
-  const client = world.clients.A1;
-  const acct = await freshAccount(sub, client, "ai1");
-  await multilineStatement(sub, client, acct.bankAccountId, { tag: "AI1", count: 3 });
-  const proposed = await proposeRule(sub, {
-    client, kind: "coding", pattern: { tokens: ["EPF", "PAYMENT", "AI1"], direction: "debit" },
-    proposal: { account_code: EXPN, narration_template: "EPF contribution" },
-  });
-  const ruleId = idOf(proposed, "rule_id", "id");
-  assert.ok(ruleId, "x40.ai mandatory setup: the rule proposed above the floor");
-
-  const bookkeeperSign = await caught(() => signRule(bookkeeper, { client, rule: ruleId }));
-  assert.ok(bookkeeperSign, "x40.ai a bookkeeper may not sign a bank rule -- the owner floor");
-  noteLane(`x40.ai bookkeeper-sign refusal: code=${bookkeeperSign.code} reason=${reasonOf(bookkeeperSign)}`);
-
-  const signed = await signRule(sub, { client, rule: ruleId });
-  assert.ok(signed, "the owner signs successfully");
-  const before = await ruleRow(ruleId);
-  assert.equal(before.status, "signed");
-
-  // No writer touches pattern/proposal/evidence post-sign (frozen substantive
-  // fields, S4.3/C14) -- probed by re-proposing the IDENTICAL pattern (which
-  // must be refused as an already-signed duplicate, never silently merged).
-  const dupe = await caught(() => proposeRule(sub, {
-    client, kind: "coding", pattern: { tokens: ["EPF", "PAYMENT", "AI1"], direction: "debit" },
-    proposal: { account_code: EXPN, narration_template: "a DIFFERENT template" },
-  }));
-  assertReason(dupe, null, "rule_pattern_already_signed", "x40.ai an identical (kind,pattern) content-hash while a signed rule already holds it is refused");
-
-  const bookkeeperRetire = await caught(() => retireRule(bookkeeper, { client, rule: ruleId }));
-  assert.ok(bookkeeperRetire, "x40.ai a bookkeeper may not retire a bank rule either -- the owner floor");
-  const retired = await retireRule(sub, { client, rule: ruleId, reason: "x40.ai retiring, terminal" });
-  assert.ok(retired);
-  assert.equal((await ruleRow(ruleId)).status, "retired");
-  const reRetire = await caught(() => retireRule(sub, { client, rule: ruleId }));
-  assertReason(reRetire, null, "rule_not_signed", "x40.ai retire is terminal -- an already-retired rule refuses a second retire");
-});
-
-// ---------------------------------------------------------------------------
-// x40.aj -- PATTERN-HASH DUPLICATE refused among {proposed,signed}; a
-// RETIRED rule's content_hash is free again.
-// ---------------------------------------------------------------------------
-test("x40.aj a duplicate (kind,pattern) content_hash is refused among proposed+signed rules, and frees up once retired", async (t) => {
-  if (skipHere(t)) return;
-  const sub = world.users.alice;
-  const client = world.clients.A1;
-  const acct = await freshAccount(sub, client, "aj1");
-  await multilineStatement(sub, client, acct.bankAccountId, { tag: "AJ1", count: 3 });
-  const pattern = { tokens: ["EPF", "PAYMENT", "AJ1"], direction: "debit" };
-  const first = await proposeRule(sub, { client, kind: "coding", pattern, proposal: { account_code: EXPN, narration_template: "EPF" } });
-  const firstId = idOf(first, "rule_id", "id");
-  const dupeWhileProposed = await caught(() => proposeRule(sub, { client, kind: "coding", pattern, proposal: { account_code: EXPN, narration_template: "EPF v2" } }));
-  assertReason(dupeWhileProposed, null, "rule_pattern_already_signed", "x40.aj a dup while the first is merely proposed (not yet signed) is still refused -- unique among proposed+signed");
-
-  await retireRule(sub, { client, rule: firstId });
-  const afterRetire = await proposeRule(sub, { client, kind: "coding", pattern, proposal: { account_code: EXPN, narration_template: "EPF v3" } });
-  assert.ok(idOf(afterRetire, "rule_id", "id"), "x40.aj: once the first rule is RETIRED, the identical content_hash is free again");
-});
-
-// ---------------------------------------------------------------------------
-// x40.ak -- SUGGESTIONS: at most ONE suggestion per (line, kind); multi-line
-// description matching (WCC-R1's law -- every description is multi-line).
-// ---------------------------------------------------------------------------
-test("x40.ak list_bank_line_suggestions returns at most one suggestion per (line, kind), matching multi-line descriptions", async (t) => {
-  if (skipHere(t)) return;
-  const sub = world.users.alice;
-  const client = world.clients.A1;
-  const acct = await freshAccount(sub, client, "ak1");
-  await multilineStatement(sub, client, acct.bankAccountId, { tag: "AK1", count: 3 });
-  const pattern = { tokens: ["EPF", "PAYMENT", "AK1"], direction: "debit" };
-  const proposed = await proposeRule(sub, { client, kind: "coding", pattern, proposal: { account_code: EXPN, narration_template: "EPF contribution" } });
-  await signRule(sub, { client, rule: idOf(proposed, "rule_id", "id") });
-
-  // A FOURTH statement line, same multi-line description shape, unmatched.
-  const target = await multilineStatement(sub, client, await (async () => (await freshAccount(sub, client, "ak2")).bankAccountId)(), { tag: "AK1", count: 1 });
-  const suggestions = await listBankLineSuggestions(sub, { statement: target.statementId });
-  const rows = Array.isArray(suggestions) ? suggestions : (suggestions?.suggestions ?? []);
-  const perLineKind = new Map();
-  for (const s of rows) {
-    const key = `${s.line_id}:${s.kind}`;
-    perLineKind.set(key, (perLineKind.get(key) ?? 0) + 1);
-  }
-  for (const [key, n] of perLineKind) assert.ok(n <= 1, `x40.ak: at most 1 suggestion per (line,kind) -- got ${n} for ${key}`);
-  assert.ok(rows.some((s) => String(s.line_id) === String(target.lines[0].id)), "x40.ak: the multi-line description on the target line was matched by the signed rule's pattern");
-});
-
-// ---------------------------------------------------------------------------
-// x40.al -- origin='rule' VIA the p_via_rule OVERLOADS; tenancy: a foreign
-// client's signed rule is refused (composite FK, S4.3).
-// ---------------------------------------------------------------------------
-test("x40.al match_bank_line's p_via_rule overload stamps origin='rule' and matched_via_rule_id; a foreign client's rule is refused", async (t) => {
-  if (skipHere(t)) return;
-  const sub = world.users.alice;
-  const client = world.clients.A1;
-  const acct = await freshAccount(sub, client, "al1");
-  await multilineStatement(sub, client, acct.bankAccountId, { tag: "AL1", count: 3 });
-  const pattern = { tokens: ["EPF", "PAYMENT", "AL1"], direction: "debit" };
-  const ruleCp = await birthCounterparty(sub, { client, name: `X40AL1 CO ${randomUUID().slice(0, 6)}` });
-  const proposed = await proposeRule(sub, { client, kind: "match_settle", pattern, proposal: { domain: "ap", counterparty_id: ruleCp } });
-  const ruleId = idOf(proposed, "rule_id", "id");
-  await signRule(sub, { client, rule: ruleId });
-
-  const entry = await plainEntry(sub, { client, debit: EXPN, credit: acct.coaCode, cents: 96750, postingDate: "2035-02-05", memo: "x40.al via-rule match" });
-  // INTEGRATION FIX: multilineStatement already holds 2034-01-01..2034-12-31 live on this
-  // account (the breeding corpus), and 0038 refuses an overlapping live period -- so the
-  // via-rule match rides its own 2035 statement.
-  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2035-02-01", periodEnd: "2035-02-28", opening: 0, specs: [{ amountCents: -96750, entryDate: "2035-02-06", description: "IBG TRANSFER\nEPF PAYMENT AL1 REF9999" }], keepPeriod: true });
-  const receipt = await matchBankLineViaRule(sub, { client, lines: [stmt.lines[0].id], entries: [{ entry_id: entry, matched_cents: -96750 }], viaRule: ruleId });
-  const row = await matchRow(matchIdOf(receipt));
-  assert.equal(row.origin, "rule", "x40.al: origin='rule' via the p_via_rule overload (the unbuildable-bare-pin fix, part2 finding 12)");
-  assert.equal(row.matched_via_rule_id, ruleId, "matched_via_rule_id is stamped");
-
-  // Tenancy: a client-A2 rule may never be named by a client-A1 call.
-  const otherClient = world.clients.A2;
-  await multilineStatement(sub, otherClient, (await freshAccount(sub, otherClient, "al2")).bankAccountId, { tag: "AL2", count: 3 });
-  // INTEGRATION FIX: design S4.3 pins the match_settle proposal shape as
-  // {domain, counterparty_id}, and domain is the subledger domain (ar/ap).
-  const foreignCp = await birthCounterparty(sub, { client: otherClient, name: `X40AL2 CO ${randomUUID().slice(0, 6)}` });
-  const foreignProposed = await proposeRule(sub, { client: otherClient, kind: "match_settle", pattern: { tokens: ["EPF", "PAYMENT", "AL2"], direction: "debit" }, proposal: { domain: "ap", counterparty_id: foreignCp } });
-  const foreignRuleId = idOf(foreignProposed, "rule_id", "id");
-  await signRule(sub, { client: otherClient, rule: foreignRuleId });
-  const entry2 = await plainEntry(sub, { client, debit: EXPN, credit: acct.coaCode, cents: 1000, postingDate: "2035-03-05", memo: "x40.al foreign-rule probe" });
-  const stmt2 = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2035-03-01", periodEnd: "2035-03-31", opening: -96750, specs: [{ amountCents: -1000, entryDate: "2035-03-06" }], keepPeriod: true });
-  const denied = await caught(() => matchBankLineViaRule(sub, { client, lines: [stmt2.lines[0].id], entries: [{ entry_id: entry2, matched_cents: -1000 }], viaRule: foreignRuleId }));
-  assert.ok(denied, "x40.al a foreign (other client's) rule id is refused by the composite FK");
-  noteLane(`x40.al foreign-rule refusal: code=${denied.code} reason=${reasonOf(denied)}`);
-});
-
-// ---------------------------------------------------------------------------
-// x40.am HELPERS -- the 0042 producer verb + the three root readbacks the
-// carve-out cell measures with. Kept beside the cell (its only caller) rather
-// than in the C-c verb block above: accept_bank_rule_suggestion is a WAVE D-b
-// verb (design S5 / ABI SSA), not one of the five C-c verbs IA-1..IA-7.
-// ---------------------------------------------------------------------------
-
-/** clara.accept_bank_rule_suggestion(p_client, p_line, p_rule, p_op_key) -- ABI §A,
- *  bookkeeper+. The ONLY lawful writer of the `bank_rule_suggested` flags key
- *  (0042 tail 6(a) pins that writer census at exactly this one function). */
-async function acceptSuggestion(sub, { client, line, rule, opKey = null }) {
-  const r = await humanQuery(
-    sub,
-    namedCall("accept_bank_rule_suggestion", [
-      { name: "p_client" }, { name: "p_line" }, { name: "p_rule" }, { name: "p_op_key" },
-    ]),
-    [client, line, rule, opKey ?? opk("x40-accept-sugg")],
-  );
-  return r.rows[0].result;
-}
-
-/** A draft's CURRENT revision token. The producer's receipt carries only
- *  {entry_id} (ABI §A), and the flags stamp in arm B is a raw UPDATE -- so the
- *  token is always re-read immediately before approve rather than carried. */
-async function revisionOf(entry) {
-  const r = await rootQuery("select revision_token from clara.journal_entries where id=$1", [entry]);
-  return r.rows[0]?.revision_token ?? null;
-}
-
-/** The rule_sightings evidence rows a set of entries accrued (root; RLS bypass).
- *  This is the carve-out's OWN subject -- 0040 S5 gates the two sighting INSERTs
- *  themselves, not merely the >=3 proposal loop they feed. */
-async function sightingCount(entries) {
-  const r = await rootQuery(
-    "select count(*)::int as n from clara.rule_sightings s where s.entry_id = any($1::uuid[])",
-    [entries],
-  );
-  return r.rows[0].n;
-}
-
-/** vendor_account autopost proposals standing for one counterparty (0037:2085). */
-async function vendorAccountProposals(client, counterparty) {
-  const r = await rootQuery(
-    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='vendor_account' and counterparty_id=$2",
-    [client, counterparty],
-  );
-  return r.rows[0].n;
-}
-
-/** A statement line's entry_date as a plain YYYY-MM-DD string (never a JS Date
- *  round-trip -- the rig has been bitten by timezone drift on date columns). */
-async function lineDateOf(line) {
-  const r = await rootQuery(
-    "select to_char(entry_date,'YYYY-MM-DD') as d from clara.bank_statement_lines where id=$1", [line]);
-  return r.rows[0].d;
-}
-
-// ---------------------------------------------------------------------------
-// x40.am -- THE SIGHTING CARVE-OUT: a bank_rule_suggested-stamped draft
-// approved THREE TIMES breeds NO vendor_account autopost proposal (part2
-// finding 29, the WA2-R9 wall applied).
-//
-// PREVIOUS REBUILD (fix-wave E1/A2, asbuilt-authority.md finding 2) fixed two
-// vacuity breaks: the stamp targeted a non-existent COLUMN (the build carries
-// the marker as a KEY INSIDE `flags`) and the query asked for the wrong
-// rule_type. Both fixes stand; the construction below keeps them.
-//
-// REBUILT AGAIN (0042, wave D-b) -- BECAUSE THE BUILD CLOSED A HOLE. 0040
-// shipped the S5 carve-out deliberately INERT: "no writer stamps this key yet
-// ... it ships AHEAD of its producer" (0040:6987), so the E1/A2 cut had no
-// lawful way to reach it and forged the stamp by hand out of a random uuid.
-// Nothing validated that stamp at approve, so the forgery sailed through.
-// 0042 ships the producer AND its approve-time re-validation:
-// clara._adj_on_approve arm (3) [design §5; ABI §A] re-asks every question
-// clara.accept_bank_rule_suggestion asked -- signed coding rule, line unmatched
-// and un-excepted, statement live, predicate still matching, legs byte-equal to
-// clara._wdb_suggestion_lines -- refusing CLR39 suggestion_stale otherwise. The
-// forged stamp names no signed rule, so it is now CORRECTLY refused on axis
-// 'rule'. That is a desirable tightening, not a regression: before 0042 a
-// hand-stamped flag silently suppressed vendor-binding sighting accrual. The
-// assertion FOLLOWS THE INVARIANT to its new home -- the cell now reaches the
-// carve-out the way the build says it is reached.
-//
-// THREE ARMS, because 0042 gave this invariant a SECOND, INDEPENDENT wall and
-// an honest cell has to tell the two apart:
-//   A  THE LAWFUL PRODUCER, END TO END. clara.accept_bank_rule_suggestion
-//      direct-INSERTs its draft with NO counterparty on any leg and NO client
-//      resolution (design §5's attribution posture: "the entry is FK-anchored
-//      to the statement line"). So v_counterparty is NULL at 0037:1891 and the
-//      whole accrual block is skipped BEFORE the carve-out conjunct is ever
-//      evaluated. Arm A therefore states the PRODUCTION fact -- a bank rule's
-//      own output accrues nothing -- but cannot, alone, discriminate the
-//      carve-out. Saying so out loud is precisely why arm B exists.
-//   B  THE CARVE-OUT, ISOLATED. The same draft, but carrying a VENDOR, so
-//      v_counterparty is non-null and 0040 S5's
-//      `not (coalesce(e.flags,'{}'::jsonb) ? 'bank_rule_suggested')` conjunct
-//      is the ONLY thing left withholding accrual. Its stamp names a REAL
-//      signed coding rule and a REAL live unmatched line and its legs ARE the
-//      derived legs, so it passes all five of arm (3)'s axes and is refused by
-//      nothing. Hand-built on purpose: the lawful verb binds no counterparty by
-//      design, so no lawful call can put the conjunct under load. flags is in
-//      _tf_entry_immutable's draft->draft allowset (0016:4956), which is what
-//      makes the stamp landable without a verb.
-//   C  THE POSITIVE CONTROL: arm B's draft MINUS the stamp, on a second
-//      counterparty, must breed EXACTLY ONE proposal. Without it, a dead
-//      sighting mechanism would read identically to a working carve-out.
-//
-// [WAVE D-b SPLIT — INHERITED AT D-b2 (0045)] This cell's D-b rewrite deferred
-// out of D-b3 (0044) because ARM A calls `clara.accept_bank_rule_suggestion` —
-// the `bank_rule_suggested` producer — through the authenticated lane, and 0044
-// deliberately WITHHELD its `grant execute … to clara_authenticated` (the
-// confirming round's CF-B3-1 ≡ Codex CX1: its approve-time re-validation is
-// `clara._adj_on_approve` arm (3), a D-b2 body, and a reachable producer
-// without it can mint a staff advance nobody incurred). Arm A would have
-// failed 42501 at that frontier, and arm B's `{rule_id, line_id}` stamp
-// asserts a refusal — CLR39 `suggestion_stale` — that only arm (3) can raise.
-// D-b2 (0045, block S2.9-b3) lands BOTH: the grant and arm (3)'s wall. The
-// inheritance below is therefore whole -- the five helpers (`acceptSuggestion`,
-// `revisionOf`, `sightingCount`, `vendorAccountProposals`, `lineDateOf`) and the
-// arm A/B/C rewrite, unmodified from the wave's pre-split cut, now GREEN on 0045.
-// ---------------------------------------------------------------------------
-test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO vendor_account autopost proposal -- an identical unstamped trio on a second counterparty breeds exactly one", async (t) => {
-  if (skipHere(t)) return;
-  const sub = world.users.alice;
-  const client = world.clients.A1;
-  const acct = await freshAccount(sub, client, "am1");
-  const cpStamped = await birthCounterparty(sub, { client, name: `X40AM STAMPED CO ${randomUUID().slice(0, 6)}` });
-  const cpControl = await birthCounterparty(sub, { client, name: `X40AM CONTROL CO ${randomUUID().slice(0, 6)}` });
-
-  // SIX matching lines on one statement: three for the lawful producer (arm A), three named
-  // by the hand-built isolation drafts (arm B). It has to be six DIFFERENT lines -- the
-  // producer's dedup law (design §5: at most ONE bank_rule_suggested entry per line across
-  // status IN ('draft','approved') AND reversed_by IS NULL, index
-  // uq_je_bank_rule_suggested_line) means "approved three times" is necessarily three lines.
-  const stmt = await multilineStatement(sub, client, acct.bankAccountId, { tag: "AM1", count: 6 });
-  const pattern = { tokens: ["EPF", "PAYMENT", "AM1"], direction: "debit" };
-  const proposed = await proposeRule(sub, {
-    client, kind: "coding", pattern,
-    proposal: { account_code: EXPN, narration_template: "x40.am coded from a signed rule" },
-  });
-  const ruleId = idOf(proposed, "rule_id", "id");
-  await signRule(sub, { client, rule: ruleId });
-
-  // ---- ARM A: the lawful producer, end to end (design §5 / ABI §A). ----
-  const armA = [];
-  for (let i = 0; i < 3; i++) {
-    const accepted = await acceptSuggestion(sub, { client, line: stmt.lines[i].id, rule: ruleId, opKey: opk(`x40-am-accept-${i}`) });
-    const entry = idOf(accepted, "entry_id", "id");
-    assert.ok(entry, `x40.am mandatory setup: accept_bank_rule_suggestion minted a draft for line ${i}`);
-    await approveEntry(sub, { entry, expectedRevision: await revisionOf(entry), opKey: opk(`x40-am-accepta-${i}`) });
-    armA.push(entry);
-  }
-  const armAState = await rootQuery(
-    `select count(*) filter (where e.status='approved')::int as approved,
-            count(*) filter (where e.proposed_counterparty is not null
-              or exists (select 1 from clara.journal_lines l
-                         where l.entry_id=e.id and l.counterparty_id is not null))::int as bound
-       from clara.journal_entries e where e.id = any($1::uuid[])`,
-    [armA],
-  );
-  assert.equal(armAState.rows[0].approved, 3, "x40.am ARM A mandatory setup: all three LAWFULLY suggested drafts approved -- arm (3)'s five axes all held on a producer-minted draft");
-  assert.equal(armAState.rows[0].bound, 0, "x40.am ARM A: the producer's own drafts bind NO counterparty at all (design §5's FK-anchored attribution posture) -- so v_counterparty is null and the accrual block never reaches the carve-out conjunct. THAT is why arm A alone cannot discriminate it, and why arm B follows");
-  assert.equal(await sightingCount(armA), 0, "x40.am ARM A: three lawfully suggested approvals accrue ZERO rule_sightings -- a bank rule's own output never becomes autopost evidence (WA2-R9)");
-
-  // The two legs clara._wdb_suggestion_lines derives for a money-OUT line (ABI §A / 0042 S2):
-  // Dr the rule's account / Cr the bank account's GL code, magnitude the line's own, DEBIT LEG
-  // FIRST. Arm (3) compares this array position-for-position against `order by line_no`, so
-  // arms B and C carry it verbatim -- and arm B's stamp is refused on axis 'legs' if it drifts.
-  const derivedLines = [
-    { account_code: EXPN, debit_cents: 96750, credit_cents: 0, description: "x40.am coded leg" },
-    { account_code: acct.coaCode, debit_cents: 0, credit_cents: 96750, description: "x40.am bank leg" },
-  ];
-
-  // ---- ARM B: the same draft WITH a vendor -- the carve-out conjunct alone. ----
-  const armB = [];
-  for (let i = 0; i < 3; i++) {
-    const line = stmt.lines[3 + i];
-    const d = await draftEntryV3(sub, {
-      client, resolution: await manualRes(sub, client), memo: `x40.am suggestion-stamped draft ${i}`,
-      postingDate: await lineDateOf(line.id), lines: derivedLines,
-      vendor: { existing_id: cpStamped }, opKey: opk(`x40-am-draft-${i}`),
-    });
-    // Stamp bank_rule_suggested THROUGH THE LAWFUL COLUMN: flags is in
-    // _tf_entry_immutable's draft->draft allowset (0016:4956). The VALUE is now the ABI §B
-    // shape {rule_id, line_id} naming a real signed rule and a real live unmatched line --
-    // a random uuid would be refused CLR39 suggestion_stale by arm (3), which is exactly the
-    // hole 0042 closed. No `.catch()`: a swallowed stamp is how this cell went vacuous once.
-    const stamped = await withActor({}, (c) => c.query(
-      `update clara.journal_entries set flags = coalesce(flags,'{}'::jsonb)
-         || jsonb_build_object('bank_rule_suggested',
-              jsonb_build_object('rule_id', $2::uuid, 'line_id', $3::uuid))
-       where id=$1`,
-      [d.entry_id, ruleId, line.id],
-    ));
-    assert.equal(stamped.rowCount, 1, `x40.am: the bank_rule_suggested stamp landed on draft ${i} (no swallowed error)`);
-    await approveEntry(sub, { entry: d.entry_id, expectedRevision: await revisionOf(d.entry_id), opKey: opk(`x40-am-approve-${i}`) });
-    armB.push(d.entry_id);
-  }
-  assert.equal(await sightingCount(armB), 0, "x40.am ARM B: three stamped approvals that DO carry a vendor accrue ZERO rule_sightings -- with v_counterparty non-null the 0040 S5 conjunct is the only wall left, and it holds");
-  assert.equal(await vendorAccountProposals(client, cpStamped), 0, "x40.am ARM B: and therefore ZERO vendor_account autopost proposals -- a bank rule may not breed a coding rule out of three assisted approvals of its own output (WA2-R9)");
-
-  // ---- ARM C, INVERTED (F-A2 PR-1, D39). ----
-  //
-  // THE RETIRED CLAIM, named rather than deleted: *"the identical UNSTAMPED trio accrues one
-  // debit sighting per entry on the coded account -- the accrual the stamp withheld in arm B"*,
-  // and *"breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive."* It
-  // was the POSITIVE CONTROL, and it is exactly what the eighth `clara._approve_entry_core`
-  // body deletes: the whole `0037:2046-2100` block goes, so an ordinary approval breeds nothing
-  // on any counterparty. Same class as `x42.prod-23`'s control half (B.7) and the same
-  // treatment -- an inverted twin, whose battery successors are `f-a2.c8.inv-ordinary` and
-  // `f-a2.c8.zero`.
-  //
-  // AND ARMS A AND B ARE NOW VACUOUS, which is stated rather than left to be discovered. Their
-  // zeros no longer discriminate: nothing accrues anywhere, so the 0040 S5 carve-out conjunct
-  // they were built to isolate has nothing left to withhold. They are kept because the SETUP
-  // halves above them are live claims about the producer (arm A's three lawful accepts, arm B's
-  // ABI-shaped stamp surviving arm (3)'s five axes), and because a zero that stops
-  // discriminating is a law-31 finding to record, never a cell to quietly delete.
-  const armC = [];
-  for (let i = 0; i < 3; i++) {
-    const d = await draftEntryV3(sub, {
-      client, resolution: await manualRes(sub, client), memo: `x40.am UNSTAMPED control draft ${i}`,
-      postingDate: await lineDateOf(stmt.lines[3 + i].id), lines: derivedLines,
-      vendor: { existing_id: cpControl }, opKey: opk(`x40-am-ctrl-${i}`),
-    });
-    await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-ctrla-${i}`) });
-    armC.push(d.entry_id);
-  }
-  assert.equal(await sightingCount(armC), 0,
-    "x40.am ARM C, INVERTED (D39): the identical UNSTAMPED trio accrues ZERO rule_sightings -- an ordinary approval no longer moves the counter, so the accrual the stamp used to withhold no longer exists to withhold");
-  assert.equal(await vendorAccountProposals(client, cpControl), 0,
-    "x40.am ARM C, INVERTED (D39): …and breeds NO vendor_account proposal. The successor claims are f-a2.c8.inv-ordinary and f-a2.c8.zero");
-  // THE INSTRUMENT IS STILL LIVE, and this half is why the two zeros above are evidence rather
-  // than an absence (review law 2). `restateSightings` replays the retired writer's own inserts
-  // onto arm C's real approved entries, and the SAME `sightingCount` read that returned zero
-  // now returns three.
-  for (const entry of armC) await restateSightings(entry, { counterparty: cpControl });
-  assert.equal(await sightingCount(armC), 3,
-    "x40.am ARM C control-of-the-control: the restated pool reads THREE through the same instrument -- the zeros above are the door's answer, not a broken reader");
-  noteLane(`x40.am carve-out arms: lawful=${armA.length} stamped=${armB.length} control=${armC.length}; signed coding rule ${ruleId}. ARMS A AND B ARE NOW VACUOUS (law 31): with breeding excised nothing accrues on any arm, so the 0040 S5 conjunct they isolated has nothing to withhold.`);
-});
 
 // ===========================================================================
 // SECTION 6 -- TENANCY / LOCKS / EVENTS.
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// x40.an -- PER-RPC CROSS-FIRM ZERO-ROWS for all NINE read RPCs (S6 header:
-// "cross-firm probes return zero rows, never a discriminating error").
+// x40.an -- PER-RPC CROSS-FIRM ZERO-ROWS for all SEVEN live read RPCs (S6
+// header: "cross-firm probes return zero rows, never a discriminating error").
+// A closed-world census (Annex I): the roster shrinks here, it is not deleted.
 //
 // REBUILT (fix-wave E5/A10, asbuilt-authority.md finding 10). The original cut's
 // "isEmpty" predicate was a tautology for any object payload: its last clause,
@@ -3017,15 +2604,19 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
 // would pass while leaking. Fixed: one exact, per-RPC shape assertion, read
 // straight off each function's own jsonb_build_object in 0040 (ar_aging/
 // ap_aging -> _aging_core's 'counterparties' key; customer_statement/
-// supplier_statement -> _statement_core's 'rows' key; list_unmatched_lines/
-// list_bank_line_suggestions/list_bank_rule_candidates/list_bank_rules -> a
-// PLAIN jsonb array; get_bank_reconciliation -> SQL null on an unfound
-// statement). PLUS list_bank_rules as the ninth probe (assembly's additive
-// read RPC, order item 6/D4 -- never swept here before) and, since the delta
-// round (#9), verify_bank_reconciliation as the TENTH -- the one rig-meta.mjs's
-// grant catalog already counted and this sweep did not.
+// supplier_statement -> _statement_core's 'rows' key; list_unmatched_lines ->
+// a PLAIN jsonb array; get_bank_reconciliation -> SQL null on an unfound
+// statement), plus verify_bank_reconciliation (the fix wave's own #9, SQL
+// null on a foreign reconciliation) -- the one rig-meta.mjs's grant catalog
+// counted and this sweep originally did not.
+//
+// RETIRED AT F-A3 PR-3 (Annex I): list_bank_line_suggestions,
+// list_bank_rule_candidates and list_bank_rules drop whole with the rest of
+// the bank-rules machine -- their three probes are removed from the roster
+// below (TEN -> SEVEN), the count this cell's own title now states, rather
+// than left calling a function that no longer resolves.
 // ---------------------------------------------------------------------------
-test("x40.an all TEN C-c read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
+test("x40.an all SEVEN live C-c read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -3047,13 +2638,10 @@ test("x40.an all TEN C-c read RPCs return empty for a firm-B actor over firm-A o
   assert.deepEqual(suppOut?.rows, [], `supplier_statement: expected an empty 'rows' array (got ${JSON.stringify(suppOut)})`);
   assert.deepEqual(await listUnmatchedLines(dave, { client }), [], "list_unmatched_lines: expected a bare empty array");
   assert.equal(await getBankReconciliation(dave, { statement: stmt.statementId }), null, "get_bank_reconciliation: expected SQL null (statement not found for this firm)");
-  assert.deepEqual(await listBankLineSuggestions(dave, { statement: stmt.statementId }), [], "list_bank_line_suggestions: expected a bare empty array");
-  assert.deepEqual(await listBankRuleCandidates(dave, { client }), [], "list_bank_rule_candidates: expected a bare empty array");
-  assert.deepEqual(await listBankRules(dave, { client }), [], "list_bank_rules: expected a bare empty array (the ninth probe, D4/A9's additive read RPC)");
-  // 0040 FIX WAVE F14 [the delta round's #9]: THE TENTH READ. rig-meta.mjs's grant catalog has
-  // named verify_bank_reconciliation among the ten C-c reads since A7 landed, but this sweep
-  // still claimed and probed nine -- so deleting the verifier's OWN firm predicate would have
-  // left the tenancy battery green. It is called here as firm B over firm A's reconciliation.
+  // 0040 FIX WAVE F14 [the delta round's #9]: THE SEVENTH READ (was the "TENTH" before F-A3
+  // PR-3 retired the three rule-list reads). rig-meta.mjs's grant catalog names
+  // verify_bank_reconciliation among the live C-c reads since A7 landed. It is called here
+  // as firm B over firm A's reconciliation.
   const anVerify = (await humanQuery(dave, "select clara.verify_bank_reconciliation($1) as v", [anRecon])).rows[0].v;
   assert.equal(anVerify, null, "verify_bank_reconciliation: expected SQL null (the reconciliation is not this actor's firm's) -- never a discriminating error, and never a recomputation of another firm's money");
   assert.equal(await outstandingOf(inv.item), 4400, "x40.an mandatory setup: the firm-A invoice is untouched by the cross-firm probes");
@@ -3159,8 +2747,11 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
 });
 
 // ---------------------------------------------------------------------------
-// x40.ap -- EVENT REGISTRATION + ID-ONLY PAYLOAD ALLOWLIST for the seven new
-// event types (design S4.5).
+// x40.ap -- EVENT REGISTRATION + ID-ONLY PAYLOAD ALLOWLIST for the seven
+// original bank.* event types (design S4.5). A closed-world census (Annex
+// I): the roster of REGISTERED types stays seven, but F-A3 PR-3 permanently
+// silences the three rule-machine producers, so the "actually fires" claim
+// is corrected to the four that still have a live writer.
 //
 // REBUILT (fix-wave E6/A11, asbuilt-authority.md finding 11). Three
 // independent weaknesses in the original cut, all fixed: (1) ALLOWED_KEYS
@@ -3175,24 +2766,42 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
 // of the seven event types -- only bank.line_excepted was guaranteed. Fixed:
 // a REAL reciprocal bank_corrective_line pair (x40.k's pattern, buildable now
 // that A2 landed) resolves without needing a live match, so except+resolve
-// succeed for real; complete+void a genuine receipt; propose+sign+retire a
-// real coding rule -- all SEVEN types fire, asserted by name. (3) the loop
-// iterated `rows` with no assertion it ever found any -- `noteLane` recorded
-// the count without ever failing on zero. Fixed: assert.ok(rows.length>=1)
-// AND that every one of the seven types was actually observed.
+// succeed for real; complete+void a genuine receipt -- all FOUR live types
+// fire, asserted by name. (3) the loop iterated `rows` with no assertion it
+// ever found any -- `noteLane` recorded the count without ever failing on
+// zero. Fixed: assert.ok(rows.length>=1) AND that every one of the four
+// live types was actually observed.
+//
+// F-A3 PR-3 (Annex I): propose_bank_rule/sign_bank_rule/retire_bank_rule --
+// the ONLY writers of bank.rule_proposed/rule_signed/rule_retired -- drop
+// whole. MEASURED live on the rig (frontier 0128_f_a3_pr3_retirement_parity_
+// doors): all three event types remain in clara.event_types AND
+// clara.trigger_taxonomy (this migration does not touch either table, only
+// the function catalog), so the REGISTRATION claim for all seven names
+// still holds and is kept, unchanged. What no longer holds is "fires" for
+// these three -- there is no live verb left that can raise them, so the
+// fixture no longer tries to (it cannot: the three verbs are gone) and the
+// "actually observed" loop is scoped to the four types that still have a
+// producer. This is a roster correction, not a deletion: the three names
+// are asserted PRESENT-BUT-UNREACHABLE rather than silently dropped from
+// the cell.
 // ---------------------------------------------------------------------------
-test("x40.ap the seven new bank.* event types are registered, in the taxonomy, all SEVEN actually fire, and every payload carries identifiers only", async (t) => {
+test("x40.ap the seven original bank.* event types are all still registered/taxonomied; the four with a surviving producer actually fire; every payload carries identifiers only", async (t) => {
   if (skipHere(t)) return;
-  const types = [
+  const firedTypes = [
     "bank.reconciliation_completed", "bank.reconciliation_voided",
     "bank.line_excepted", "bank.line_exception_resolved",
-    "bank.rule_proposed", "bank.rule_signed", "bank.rule_retired",
   ];
+  // F-A3 PR-3 (Annex I): propose_bank_rule/sign_bank_rule/retire_bank_rule are gone, so these
+  // three event types can never fire again -- but they are NOT dropped from event_types/
+  // trigger_taxonomy by this migration (SS1 drops functions only), so registration still holds.
+  const registeredOnlyTypes = ["bank.rule_proposed", "bank.rule_signed", "bank.rule_retired"];
+  const types = [...firedTypes, ...registeredOnlyTypes];
   const reg = await rootQuery("select name from clara.event_types where name = any($1)", [types]);
   const got = new Set(reg.rows.map((r) => r.name));
   for (const type of types) assert.ok(got.has(type), `${type} is registered in clara.event_types`);
   const tax = await rootQuery("select event_type from clara.trigger_taxonomy where event_type = any($1)", [types]);
-  assert.equal(new Set(tax.rows.map((r) => r.event_type)).size, types.length, "every new bank.* type is ALSO in the trigger taxonomy");
+  assert.equal(new Set(tax.rows.map((r) => r.event_type)).size, types.length, "every one of the seven bank.* types is ALSO in the trigger taxonomy -- registration is unaffected by the producer's retirement");
 
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -3218,20 +2827,11 @@ test("x40.ap the seven new bank.* event types are registered, in the taxonomy, a
   const reconId = idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
   await voidRecon(sub, { client, recon: reconId, reason: "x40.ap event probe: voiding the receipt to observe bank.reconciliation_voided" });
 
-  // MEASURED THIS SESSION (rig verification): propose_bank_rule's evidence is DERIVED
-  // in-verb (x40.ah), not a caller claim -- it genuinely refuses rule_evidence_insufficient
-  // below the >=3-sighting floor. A FRESH account (x40.aj/x40.ah's own multilineStatement
-  // idiom) carries three matching, unmatched, unexcepted lines to clear it.
-  const acctRule = await freshAccount(sub, client, "ap2");
-  await multilineStatement(sub, client, acctRule.bankAccountId, { tag: "AP1", count: 3 });
-  const pattern = { tokens: ["EPF", "PAYMENT", "AP1"], direction: "debit" };
-  const proposed = await proposeRule(sub, { client, kind: "coding", pattern, proposal: { account_code: EXPN, narration_template: "x40.ap event probe rule" } });
-  const ruleId = idOf(proposed, "rule_id", "id");
-  await signRule(sub, { client, rule: ruleId });
-  await retireRule(sub, { client, rule: ruleId, reason: "x40.ap event probe: retiring to observe bank.rule_retired" });
-
   // TAIL 6's OWN allowlist, copied verbatim (0040: the `v_allowed` array inside the tail6 do
-  // block) -- this cell can never be looser than the gate it exists to shadow-test.
+  // block) -- this cell can never be looser than the gate it exists to shadow-test. rule_id
+  // stays on the allowlist (it is still a legitimate identifier key on the historical
+  // bank.rule_* rows this scan could in principle read back) even though no NEW row can carry
+  // it any more.
   const ALLOWED_KEYS = new Set([
     "reconciliation_id", "statement_id", "bank_account_id", "prior_reconciliation_id",
     "first_period", "outstanding_items", "exception_items",
@@ -3257,8 +2857,11 @@ test("x40.ap the seven new bank.* event types are registered, in the taxonomy, a
   const rows = await tieoutEventPayloads(client);
   assert.ok(rows.length >= 1, "x40.ap: the fixture must actually have produced tie-out event rows -- an empty scan proves nothing");
   const observedTypes = new Set(rows.map((r) => r.event_type));
-  for (const type of types) {
-    assert.ok(observedTypes.has(type), `x40.ap: event type ${type} was never observed -- the fixture must exercise all seven, not just bank.line_excepted`);
+  for (const type of firedTypes) {
+    assert.ok(observedTypes.has(type), `x40.ap: event type ${type} was never observed -- the fixture must exercise all four surviving types, not just bank.line_excepted`);
+  }
+  for (const type of registeredOnlyTypes) {
+    assert.ok(!observedTypes.has(type), `x40.ap: ${type} was observed even though its only producer (F-A3 PR-3) is retired -- something is still writing it`);
   }
   for (const row of rows) {
     for (const k of Object.keys(row.payload ?? {})) {
@@ -3267,12 +2870,21 @@ test("x40.ap the seven new bank.* event types are registered, in the taxonomy, a
     const text = JSON.stringify(row.payload ?? {});
     assert.ok(!text.includes("REF1") && !text.includes("REF2"), `${row.event_type} payload leaks a line description substring`);
   }
-  noteLane(`x40.ap tie-out event rows observed: ${rows.length}, types: ${[...observedTypes].sort().join(",")}`);
+  noteLane(`x40.ap tie-out event rows observed: ${rows.length}, fired types: ${[...observedTypes].sort().join(",")}; registered-but-unreachable: ${registeredOnlyTypes.join(",")}`);
 });
 
 // ---------------------------------------------------------------------------
 // x40.aq -- TABLE ACL PINS: FORCE RLS, human SELECT-only, zero agent/runtime/
-// wake grants on the three new tables.
+// wake grants on the three new tables (a closed-world census, Annex I --
+// the TABLES are unchanged by F-A3 PR-3's retirement, so their RLS/grant
+// pins stand exactly as before; only the guarded VERB roster shrinks).
+//
+// F-A3 PR-3 (Annex I): propose_bank_rule/sign_bank_rule/retire_bank_rule drop
+// whole -- roleCanExecute() returns null (not a boolean) for an absent
+// function (a21-helpers.mjs, "null = fn absent"), so keeping them on the
+// `verbs` roster would assert `null === true` against a verb that no longer
+// resolves. Removed from the roster below (EIGHT -> FIVE new C-c verbs);
+// clara.bank_rules the TABLE keeps its own ACL pin above, unchanged.
 // ---------------------------------------------------------------------------
 test("x40.aq bank_reconciliations/bank_line_exceptions/bank_rules: human SELECT-only under forced RLS, zero agent/runtime/wake grants", async (t) => {
   if (skipHere(t)) return;
@@ -3298,7 +2910,10 @@ test("x40.aq bank_reconciliations/bank_line_exceptions/bank_rules: human SELECT-
       assert.notEqual(r.rows[0].ok, true, `${role} must hold NO direct table privilege on clara.${tbl} -- zero agent grants anywhere in the tie-out schema`);
     }
   }
-  const verbs = ["complete_bank_reconciliation", "void_bank_reconciliation", "except_bank_line", "resolve_bank_line_exception", "propose_bank_rule", "sign_bank_rule", "retire_bank_rule", "set_counterparty_terms"];
+  // F-A3 PR-3 (Annex I): propose_bank_rule/sign_bank_rule/retire_bank_rule removed from this
+  // roster -- all three no longer resolve, so guarding them here would assert a null result
+  // against clara_authenticated rather than a true one.
+  const verbs = ["complete_bank_reconciliation", "void_bank_reconciliation", "except_bank_line", "resolve_bank_line_exception", "set_counterparty_terms"];
   // 0040 FIX WAVE F14 [the delta round's #9]: verify_bank_reconciliation is a READ, and the same
   // wall applies to it -- it recomputes a client's whole bank identity under a stored cutoff, so
   // a machine role holding EXECUTE on it would be an agent reading money by another door. A7
@@ -3311,5 +2926,5 @@ test("x40.aq bank_reconciliations/bank_line_exceptions/bank_rules: human SELECT-
     }
   }
   const wake = await rootQuery("select count(*)::int as n from clara.wake_fn_allowlist where function_name = any($1)", [guarded]);
-  assert.equal(wake.rows[0].n, 0, "ZERO wake_fn_allowlist entries name any of the eight new C-c verbs or the A7 verifier");
+  assert.equal(wake.rows[0].n, 0, "ZERO wake_fn_allowlist entries name any of the five live new C-c verbs or the A7 verifier");
 });
