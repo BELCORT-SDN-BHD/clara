@@ -12,6 +12,12 @@
 // against a throwaway rig only (packages/db/README.md's rig, PG* vars) -- never against a live
 // project.
 //
+// NEVER RUN THIS AGAINST THE ESTATE RIG, OR ANY RIG F-A5/PR-1 CELL D ALSO RUNS ON: the preflight
+// below requires clara.evaluate_fs_pack_agent v1 already DEPLOYED, while PR-1 cell D's refusing
+// half needs that SAME evaluator_versions row to still be UNDEPLOYED -- and 0060's
+// _tf_evaluator_deploy_once makes the flip one-way, so this drill permanently reds PR-1 cell D on
+// whatever database it runs against. Use a throwaway rig dedicated to this drill.
+//
 // Usage:
 //   PGHOST=127.0.0.1 PGPORT=<rig> PGUSER=postgres PGPASSWORD=rig PGDATABASE=postgres \
 //     node scripts/fa5-pr3-real-seal-drill.mjs
