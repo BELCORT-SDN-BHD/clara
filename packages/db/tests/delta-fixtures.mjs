@@ -113,6 +113,28 @@ export async function requireWaveEDelta() {
   }, `Wave E delta exact readiness failed: ${JSON.stringify(readiness)}`);
   return readiness;
 }
+/** True when the delta/epsilon ceremony's five covered closures (every evaluator except F-A5
+ *  PR-1's own evaluate_fs_pack_agent, cell D's separate ceremony) are STILL undeployed -- a
+ *  fresh witness. `_tf_evaluator_deploy_once` (0060) admits ONE undeployed->deployed transition
+ *  per row EVER, so False means a PRIOR run already ceremonied this database (re-run, not a
+ *  defect): callers skip the now-unwitnessable pre-ceremony half loudly instead of asserting it. */
+// The CLOSED-WORLD roster this ceremony covers (delta-contract.test.mjs:64-73 is where it is
+// pinned by name AND version). NAMED, not "any not-deployed row": a blanket count reclassifies a
+// reused database migrated onto a NEW frontier that registers one more evaluator (born
+// undeployed, unrelated to this ceremony) as falsely "fresh" -- fail-closed either way (every
+// consumer would then assert against a roster that no longer matches and go loudly red), but
+// this stays correct across a frontier move instead of needing a same-day fix. Extend this array
+// the same day a new evaluator joins the ceremony (mirror delta-contract.test.mjs's own roster).
+export const DELTA_CEREMONY_COVERED = Object.freeze([
+  ["assess_metric_cell_independent", 1], ["evaluate_metric", 1],
+  ["evaluate_witness_fact_state", 1], ["evaluate_witness_fact_state", 2],
+  ["evaluate_witness_identity", 1],
+]);
+export async function evaluatorCeremonyUnwitnessed() {
+  const rows = (await rootQuery("select evaluator_name,version,deployed from clara.evaluator_versions where firm_id is null")).rows;
+  const byKey = new Map(rows.map((r) => [`${r.evaluator_name}@${r.version}`, r.deployed]));
+  return DELTA_CEREMONY_COVERED.some(([name, version]) => byKey.get(`${name}@${version}`) === false);
+}
 export async function caught(fn) { try { await fn(); return null; } catch (error) { return error; } }
 export function errorDetail(error) { if (!error?.detail) return {}; try { return JSON.parse(error.detail); } catch { return { raw: error.detail }; } }
 export function reasonOf(error) {

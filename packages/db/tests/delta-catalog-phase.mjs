@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"; import { randomUUID } from "node:crypto";
 import {
   rootQuery, humanQuery, roleQuery, wakeQuery, withActor, ROLES, PG, buildWorld, addMember, insertUser, mintInteractive,
-  requireWaveEDelta, DELTA_RELATIONS, DELTA_ENTRYPOINTS, exactEntrypoint, caught, reasonOf,
+  requireWaveEDelta, DELTA_RELATIONS, DELTA_ENTRYPOINTS, exactEntrypoint, caught, reasonOf, evaluatorCeremonyUnwitnessed,
   freshDeltaClient, pastMonthStart, addMonths, mintPeriodWithMovement, createStandardSets, upsertAccountClassed,
   proposeMetricDefinition, approveMetricDefinition, rejectMetricDefinition, supersedeMetricDefinition,
-  assertThreeRevisionBackwardRefusal, mintMetricInput, evaluateMetricHuman,
+  assertThreeRevisionBackwardRefusal, mintMetricInput, evaluateMetricHuman, evaluateFsPackHuman,
+  assessMetricIndependentHuman, cellRow,
   firmIdOf, assertSnapshotForgeryRefusals, measure, metricAst,
 } from "./delta-fixtures.mjs";
 let world;
@@ -295,29 +296,49 @@ await t.test("undeployed evaluators refuse execution and do not claim an ineffec
   const fx = await mintPeriodWithMovement(owner, { client, monthStart: await pastMonthStart(3) });
   const version = await proposeMetricDefinition(owner, { client, key: `undeployed_${randomUUID()}`, unit: "money", ast: metricAst({ root: measure({ set: "revenue" }), unit: "money" }) });
   await approveMetricDefinition(owner, version);
-  const error = await caught(() => evaluateMetricHuman(owner, { client, definitionVersion: version, periodIds: [fx.period.id], snapshotId: fx.snapshotId }));
-  assert.ok(error, "evaluation refuses before the ceremony deploys its evaluator closure");
-  assert.match(`${error.message} ${error.detail ?? ""}`, /evaluator|deploy/i);
-  const packRun = randomUUID(), packError = await caught(() => humanQuery(owner, "select clara.evaluate_fs_pack_v1($1,$2,$3,$4,$5)", [client, [version], [fx.period.id], fx.snapshotId, packRun]));
-  assert.ok(packError, "pack evaluation refuses before the ceremony deploys its evaluator closure"); assert.match(`${packError.message} ${packError.detail ?? ""}`, /evaluator|deploy/i);
-  assert.equal((await rootQuery("select count(*)::int n from clara.op_receipts where fn='evaluate_fs_pack_v1' and op_key=$1", [packRun])).rows[0].n, 0);
-  assert.equal((await rootQuery("select count(*)::int n from clara.metric_cells where definition_version_id=$1", [version])).rows[0].n, 0);
-  const rollback = await caught(() => withActor({ transaction: true }, async (db) => {
-    const primary = (await db.query("select id from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].id;
-    const checker = (await db.query("select id from clara.evaluator_versions where evaluator_name='assess_metric_cell_independent' and version=1")).rows[0].id;
-    await db.query("update clara.evaluator_versions set deployed=true where id=$1", [primary]);
-    await db.query(`set role ${ROLES.authenticated}`); await db.query("select set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: owner, role: "authenticated" })]);
-    const receipt = await db.query("select clara.evaluate_metric_v1($1,$2,$3,$4,$5) r", [client, version, [fx.period.id], fx.snapshotId, randomUUID()]);
-    const cellId = receipt.rows[0].r.cell_id;
-    await db.query("set constraints all immediate");
-    const assessmentError = await caught(() => db.query("select clara.assess_metric_cell_independent_v1($1,$1,$2)", [cellId, `predeploy-${randomUUID()}`]));
-    const rollback = new Error("rollback pre-ceremony fixture"); rollback.fixture = { cellId, checker, assessmentError }; throw rollback;
-  }));
-  assert.ok(rollback?.fixture, `pre-ceremony assessment fixture reaches its rollback sentinel (${rollback?.code ?? "no code"}: ${rollback?.message ?? "none"})`);
-  const { cellId, checker, assessmentError } = rollback.fixture ?? {};
-  assert.ok(assessmentError, "independent assessment refuses before its evaluator is deployed");
-  assert.match(`${assessmentError.message} ${assessmentError.detail ?? ""}`, /evaluator|deploy/i);
-  assert.equal((await rootQuery("select count(*)::int n from clara.metric_cell_assessments where cell_id=$1 or evaluator_version_id=$2", [cellId, checker])).rows[0].n, 0);
+  if (await evaluatorCeremonyUnwitnessed()) {
+    const error = await caught(() => evaluateMetricHuman(owner, { client, definitionVersion: version, periodIds: [fx.period.id], snapshotId: fx.snapshotId }));
+    assert.ok(error, "evaluation refuses before the ceremony deploys its evaluator closure");
+    assert.match(`${error.message} ${error.detail ?? ""}`, /evaluator|deploy/i);
+    const packRun = randomUUID(), packError = await caught(() => humanQuery(owner, "select clara.evaluate_fs_pack_v1($1,$2,$3,$4,$5)", [client, [version], [fx.period.id], fx.snapshotId, packRun]));
+    assert.ok(packError, "pack evaluation refuses before the ceremony deploys its evaluator closure"); assert.match(`${packError.message} ${packError.detail ?? ""}`, /evaluator|deploy/i);
+    assert.equal((await rootQuery("select count(*)::int n from clara.op_receipts where fn='evaluate_fs_pack_v1' and op_key=$1", [packRun])).rows[0].n, 0);
+    assert.equal((await rootQuery("select count(*)::int n from clara.metric_cells where definition_version_id=$1", [version])).rows[0].n, 0);
+    const rollback = await caught(() => withActor({ transaction: true }, async (db) => {
+      const primary = (await db.query("select id from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].id;
+      const checker = (await db.query("select id from clara.evaluator_versions where evaluator_name='assess_metric_cell_independent' and version=1")).rows[0].id;
+      await db.query("update clara.evaluator_versions set deployed=true where id=$1", [primary]);
+      await db.query(`set role ${ROLES.authenticated}`); await db.query("select set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: owner, role: "authenticated" })]);
+      const receipt = await db.query("select clara.evaluate_metric_v1($1,$2,$3,$4,$5) r", [client, version, [fx.period.id], fx.snapshotId, randomUUID()]);
+      const cellId = receipt.rows[0].r.cell_id;
+      await db.query("set constraints all immediate");
+      const assessmentError = await caught(() => db.query("select clara.assess_metric_cell_independent_v1($1,$1,$2)", [cellId, `predeploy-${randomUUID()}`]));
+      const rollback = new Error("rollback pre-ceremony fixture"); rollback.fixture = { cellId, checker, assessmentError }; throw rollback;
+    }));
+    assert.ok(rollback?.fixture, `pre-ceremony assessment fixture reaches its rollback sentinel (${rollback?.code ?? "no code"}: ${rollback?.message ?? "none"})`);
+    const { cellId, checker, assessmentError } = rollback.fixture ?? {};
+    assert.ok(assessmentError, "independent assessment refuses before its evaluator is deployed");
+    assert.match(`${assessmentError.message} ${assessmentError.detail ?? ""}`, /evaluator|deploy/i);
+    assert.equal((await rootQuery("select count(*)::int n from clara.metric_cell_assessments where cell_id=$1 or evaluator_version_id=$2", [cellId, checker])).rows[0].n, 0);
+  } else {
+    // RE-RUN SHAPE (evaluatorCeremonyUnwitnessed() false): a prior invocation against this SAME
+    // database already flipped these closures, one-way. The pre-deploy refusal proof above can
+    // never be re-witnessed here -- so this proves the MIRROR instead, the strong positive half
+    // of the identical invariant: all three entrypoints now genuinely EVALUATE, with no
+    // evaluator_undeployed refusal anywhere in the chain, and persist real rows. (The nested
+    // hand-deploy-then-rollback fixture above, which isolates assess_metric_cell_independent's
+    // OWN pre-deploy refusal specifically, has no re-run counterpart worth building: the plain
+    // assess call below already proves that evaluator now runs for real, which is the fact that
+    // matters once "deployed" is no longer news.)
+    const receipt = await evaluateMetricHuman(owner, { client, definitionVersion: version, periodIds: [fx.period.id], snapshotId: fx.snapshotId });
+    const cell = await cellRow(receipt);
+    assert.equal(cell.definition_version_id, version, "the deployed evaluator persisted a real cell for this definition");
+    assert.equal(cell.cell_status, "ok", "genuinely EVALUATE means the cell settled ok, not merely that a row of ANY status exists (a refused cell would satisfy the row check alone)");
+    const packReceipt = await evaluateFsPackHuman(owner, { client, definitionVersions: [version], periodIds: [fx.period.id], snapshotId: fx.snapshotId });
+    assert.ok(packReceipt, "evaluate_fs_pack_v1 must actually evaluate once its closure is deployed (re-run shape)");
+    const assessReceipt = await assessMetricIndependentHuman(owner, { cell: cell.id });
+    assert.ok(assessReceipt, "assess_metric_cell_independent_v1 must actually assess once its closure is deployed (re-run shape)");
+  }
 });
 await t.test("forced RLS carries owner and human policy pairs on all 38 delta tables", async () => {
   const rows = (await rootQuery(
@@ -435,7 +456,7 @@ await t.test("snapshots, contexts, cells, assessments, and provenance are insert
     assert.equal(err?.code, "CLR08");
   }
 });
-await t.test("both evaluator closures are exact, independent, and registered undeployed", async () => {
+await t.test("both evaluator closures are exact, independent, and registered — undeployed (fresh) or deployed, monotone (re-run)", async () => {
   const independentSignatures = ["clara.assess_metric_cell_independent_v1(uuid,uuid,text)", "clara._metric_recheck_node_v1(uuid,uuid,uuid,uuid,jsonb,boolean,text,date)"];
   // CLOSED-WORLD by design: this census pins EVERY registered closure, so a new evaluator has to
   // be named here rather than slipping past a count. F-A1 (Wave-F Track A, migrations 0091/0092)
@@ -474,10 +495,19 @@ await t.test("both evaluator closures are exact, independent, and registered und
       "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)",
       "clara._hash(jsonb)"]]]);
   const members = (await rootQuery(`select e.evaluator_name,e.version,e.deployed,m.ordinal,m.member_signature,encode(m.body_sha256,'hex') stored,encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') live,encode(e.closure_sha256,'hex') aggregate from clara.evaluator_versions e join clara.evaluator_version_members m on m.evaluator_version_id=e.id order by e.evaluator_name,e.version,m.ordinal`)).rows;
+  // FRESH once here, reused below: fs_pack_agent owns its OWN ceremony (f-a5 cell D), so its
+  // deployed flag is never asserted by this closed-world census either way -- only the covered
+  // five are. Not-fresh still asserts a STRONG truth (deployed, monotone), never a bare skip.
+  const fresh = await evaluatorCeremonyUnwitnessed();
   for (const [key, roster] of expected) {
     const rows = members.filter((row) => `${row.evaluator_name}@v${row.version}` === key);
     assert.deepEqual(rows.map((row) => row.member_signature), roster, `${key} exact ordered closure`);
-    assert.ok(rows.every((row) => !row.deployed && row.stored === row.live), `${key} is exact and undeployed`);
+    assert.ok(rows.every((row) => row.stored === row.live), `${key} closure member bodies are byte-exact`);
+    if (key !== "evaluate_fs_pack_agent@v1") {
+      assert.ok(rows.every((row) => row.deployed === !fresh), fresh
+        ? `${key} is undeployed (fresh witness)`
+        : `${key} is deployed -- monotone, a prior run's one-way ceremony (re-run shape)`);
+    }
     const aggregate = (await rootQuery("select encode(sha256(convert_to(string_agg(stored,'' order by ordinal),'UTF8')),'hex') h from jsonb_to_recordset($1::jsonb) as x(ordinal int,stored text)", [JSON.stringify(rows)])).rows[0].h;
     assert.equal(rows[0].aggregate, aggregate, `${key} aggregate equals ordered member hashes`);
   }
@@ -508,7 +538,11 @@ await t.test("both evaluator closures are exact, independent, and registered und
   // is name AND VERSION: a family can carry more than one row and a name-only comparison would
   // have read the two witness versions as a duplicate rather than as the append they are.
   assert.deepEqual(registered.map((row) => `${row.evaluator_name}@v${row.version}`), [...expected.keys()].sort());
-  assert.ok(registered.every((row) => row.deployed === false && /^[0-9a-f]{64}$/.test(row.hash)));
+  assert.ok(registered.every((row) => /^[0-9a-f]{64}$/.test(row.hash)), "every registered closure carries a valid hash");
+  const covered = registered.filter((row) => row.evaluator_name !== "evaluate_fs_pack_agent");
+  assert.ok(covered.every((row) => row.deployed === !fresh), fresh
+    ? "the five covered closures are undeployed (fresh witness)"
+    : "the five covered closures are deployed -- monotone, a prior run's one-way ceremony (re-run shape)");
   assert.equal(new Set(registered.map((row) => row.hash)).size, registered.length,
     "every registered closure hashes differently — a shared aggregate would mean two rows freeze one body set");
 });
@@ -519,9 +553,21 @@ await t.test("producer-helper changes are inside the producer freeze closure", a
   const deployWall = (await rootQuery("select pg_get_functiondef(t.tgfoid) body from pg_trigger t where t.tgname='t_evaluatorversions_deploy_once' and t.tgrelid='clara.evaluator_versions'::regclass")).rows[0].body;
   assert.match(deployWall, /current_user\s*<>\s*session_user/i);
   assert.doesNotMatch(deployWall, /evaluator_deploy_permit|current_setting\s*\(|set_config\s*\(/i);
-  const direct = await caught(() => withActor({ transaction: true }, async (db) => { const before = (await db.query("select current_user u,session_user s")).rows[0]; assert.equal(before.u, before.s); await db.query("update clara.evaluator_versions set deployed=true where evaluator_name='evaluate_metric' and version=1"); assert.equal((await db.query("select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].deployed, true); throw new Error("rollback direct deployment proof"); }));
-  assert.equal(direct?.message, "rollback direct deployment proof");
-  assert.equal((await rootQuery("select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].deployed, false);
+  if (await evaluatorCeremonyUnwitnessed()) {
+    const direct = await caught(() => withActor({ transaction: true }, async (db) => { const before = (await db.query("select current_user u,session_user s")).rows[0]; assert.equal(before.u, before.s); await db.query("update clara.evaluator_versions set deployed=true where evaluator_name='evaluate_metric' and version=1"); assert.equal((await db.query("select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].deployed, true); throw new Error("rollback direct deployment proof"); }));
+    assert.equal(direct?.message, "rollback direct deployment proof");
+    assert.equal((await rootQuery("select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].deployed, false);
+  } else {
+    // RE-RUN SHAPE: evaluate_metric v1 is already deployed from a prior invocation. Prove the
+    // MIRROR strong truth instead -- even the LEGITIMATE ceremony principal (current_user =
+    // session_user, no spoof) cannot re-flip an already-deployed row: the one-way wall's OWN
+    // "old.deployed" arm bites here, not merely the identity-mismatch arm the spoof loop below
+    // exercises.
+    const redeploy = await caught(() => withActor({ transaction: true }, async (db) => { const before = (await db.query("select current_user u,session_user s")).rows[0]; assert.equal(before.u, before.s); await db.query("update clara.evaluator_versions set deployed=true where evaluator_name='evaluate_metric' and version=1"); }));
+    assert.equal(redeploy?.code, "CLR08", `${redeploy?.code} ${redeploy?.message}`);
+    assert.match(redeploy.message, /one undeployed-to-deployed transition/i);
+    assert.equal((await rootQuery("select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=1")).rows[0].deployed, true, "still deployed -- monotone (re-run shape)");
+  }
   for (const spoof of [async (db) => db.query(`set role ${ROLES.fnOwner}`), async (db) => { await db.query("select set_config('clara.evaluator_deploy_permit','1',true)"); await db.query(`set role ${ROLES.fnOwner}`); }]) {
     const error = await caught(() => withActor({ transaction: true }, async (db) => { await spoof(db); await db.query("update clara.evaluator_versions set deployed=true where evaluator_name='evaluate_metric' and version=1"); }));
     assert.equal(error?.code, "CLR08", `${error?.code} ${error?.message}`); assert.match(error.message, /migration ceremony principal/i);
@@ -540,22 +586,30 @@ await t.test("producer-helper changes are inside the producer freeze closure", a
   assert.deepEqual(member.body_sha256, liveHash, "the registered producer-helper hash equals its live body");
   assert.equal((await rootQuery("select clara.verify_metric_input_producer_freeze() r")).rows[0].r.ok, true);
 });
-await t.test("freeze verifier positively reads registered live bodies while deployment count is zero", async () => {
+await t.test("freeze verifier positively reads registered live bodies, deployment count exact for either witness shape", async () => {
   const freeze = await exactEntrypoint("verify_evaluator_freeze");
   assert.match(freeze.definition, /evaluator_versions/i);
   assert.match(freeze.definition, /pg_get_functiondef/i);
   assert.match(freeze.definition, /deployed/i);
   const result = (await rootQuery("select clara.verify_evaluator_freeze() r")).rows[0].r;
   assert.equal(result.ok ?? result.verified ?? result.valid, true, JSON.stringify(result));
-  assert.equal(result.verified_deployed, 0, JSON.stringify(result));
+  // ZERO deployed is the property this cell is really about on a FRESH witness -- the verifier
+  // reads every registered closure's live bodies BEFORE any ceremony has flipped one. On a
+  // RE-RUN (a prior invocation already ceremonied this database, one-way) the true count is the
+  // five covered closures plus F-A5 PR-1's own evaluate_fs_pack_agent IF ITS SEPARATE ceremony
+  // (cell D) has ALSO already run -- read directly rather than assumed, so this stays a strong,
+  // exact assertion in either shape rather than a bare skip.
+  const fresh = await evaluatorCeremonyUnwitnessed();
+  const fsPackDeployed = (await rootQuery(
+    "select deployed from clara.evaluator_versions where evaluator_name='evaluate_fs_pack_agent' and version=1")).rows[0]?.deployed === true;
+  assert.equal(result.verified_deployed, fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0), JSON.stringify(result));
   // SIX registered closures at this frontier: delta's evaluate_metric +
   // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
   // evaluate_witness_identity (0091/0092), F-A2's evaluate_witness_fact_state **v2** — the
   // three-locks nil-tax arm, a NEW closure beside the frozen v1 rather than a recut of it, so
   // the count moves by one and the frozen predecessor keeps its own row — and F-A5 PR-1's
-  // evaluate_fs_pack_agent v1, the agent-lane pack entrypoint, on the same terms. ZERO deployed
-  // is the property this cell is really about — the verifier reads every registered closure's
-  // live bodies BEFORE any ceremony has flipped one, and that half is unchanged.
+  // evaluate_fs_pack_agent v1, the agent-lane pack entrypoint, on the same terms. This total is
+  // REGISTRATION, not deployment -- unaffected by re-run.
   assert.equal(result.verified_registered, 6, JSON.stringify(result));
 });
 }
