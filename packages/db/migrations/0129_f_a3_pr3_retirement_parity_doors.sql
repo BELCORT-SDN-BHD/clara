@@ -924,8 +924,8 @@ $fa3pr3_prov_events$;
 -- cores calls. ONE recut here fixes the receipt half for all thirteen at once -- the SAME
 -- centralization argument as _agent_wake_ctx above, and the reason this file touches this
 -- function's OWN VALUES clause rather than thirteen call sites. TWO substitutions: the
--- provenance identity (owner ruling) and, review finding C1 (Codex), the conflict-identity
--- check gains `outcome`/`gate_verdicts`.
+-- provenance identity (owner ruling) and, review findings C1 + C1-bis (Codex, two rounds),
+-- the conflict-identity check gains the FULL written-field set.
 --
 -- C1: a refused receipt was silently REUSABLE by a later successful act sharing the same
 -- op_key. The on-conflict identity check compared client/act_kind/subject/inputs_digest but
@@ -940,6 +940,30 @@ $fa3pr3_prov_events$;
 -- the identity set a same-op_key replay must match; a genuine outcome change on retry now
 -- forces a FRESH op_key (op_key_identity_mismatch), which is the same shape every other
 -- identity mismatch in this function already produces.
+--
+-- C1-bis (Codex final leg, the concrete-scenario tiebreak): C1's fix still left
+-- acting_actor/on_behalf_of/via_wake_kind/model_snapshot/rationale/approval_arm -- every OTHER
+-- judgement-bearing column this function WRITES -- out of the comparison. Real
+-- scenario: a bank_agent act gets Tier-B refused (op_key K, outcome='refused',
+-- via_wake_kind='bank_agent', acting_actor=agent_user_id()); an interactive_client human then
+-- independently produces the SAME client/act_kind/subject/digest/outcome/gate_verdicts on the
+-- SAME op_key K (a name collision, not a replay) -- C1 alone would read back and return the OLD
+-- bank_agent-attributed row, so the human's own receipt permanently misattributes WHO acted.
+-- Fixed: the comparison now covers each of them, either against the calling p_ parameter
+-- (model_snapshot vs p_model, rationale vs p_rationale) or against the SAME
+-- wake_context()-derived expression the INSERT itself uses (acting_actor/on_behalf_of/
+-- via_wake_kind/approval_arm) -- repeated verbatim rather than pulled into shared variables, so
+-- there is no risk of the compare-side silently drifting from the insert-side.
+--
+-- Against the INSERT's own fifteen-column list, THREE are deliberately not compared, and only
+-- three: firm_id and op_key are the conflict target itself (the WHERE clause above already pins
+-- both, so comparing them could only ever be vacuously true), and retry_after is an ADVISORY
+-- when-to-retry hint, not a claim about what happened or who did it. Binding retry_after into
+-- the identity set would be actively wrong the moment a caller computes it from wall clock: a
+-- genuine idempotent replay landing a minute later would carry a different now()-derived hint
+-- and get refused as an identity mismatch. Measured at this migration: no caller passes it at
+-- all -- all thirteen cores omit the parameter and take its null default -- so the exclusion is
+-- inert today and correct when that changes.
 do $fa3pr3_prov_receipt$
 declare
   v_target text := $t3$clara.agent_user_id(), null, 'bank_agent', p_model,
@@ -960,13 +984,24 @@ declare
       raise exception 'op_key % is already claimed by a different act; a replayed op_key must never return a receipt for another client/act/subject/digest', p_op_key
         using errcode='CLR10', detail='{"reason":"op_key_identity_mismatch"}';
     end if;$tc1$;
-  v_replacement_c1 text := $rc1$    select id, firm_id, client_id, act_kind, subject_id, inputs_digest, outcome, gate_verdicts into v_existing
+  v_replacement_c1 text := $rc1$    select id, firm_id, client_id, act_kind, subject_id, inputs_digest, outcome, gate_verdicts,
+        acting_actor, on_behalf_of, via_wake_kind, model_snapshot, rationale, approval_arm into v_existing
       from clara.bank_agent_receipts where firm_id = p_firm and op_key = p_op_key;
     if v_existing.client_id is distinct from p_client
        or v_existing.act_kind is distinct from p_act_kind or v_existing.subject_id is distinct from p_subject
        or v_existing.inputs_digest is distinct from v_digest
-       or v_existing.outcome is distinct from p_outcome or v_existing.gate_verdicts is distinct from p_gate_verdicts then
-      raise exception 'op_key % is already claimed by a different act; a replayed op_key must never return a receipt for another client/act/subject/digest/outcome', p_op_key
+       or v_existing.outcome is distinct from p_outcome or v_existing.gate_verdicts is distinct from p_gate_verdicts
+       or v_existing.acting_actor is distinct from
+         (select case when w.wake_kind = 'interactive_client' then w.on_behalf_of else clara.agent_user_id() end from clara.wake_context() w)
+       or v_existing.on_behalf_of is distinct from
+         (select w.on_behalf_of from clara.wake_context() w where w.wake_kind = 'interactive_client')
+       or v_existing.via_wake_kind is distinct from
+         coalesce((select w.wake_kind from clara.wake_context() w), 'bank_agent')
+       or v_existing.model_snapshot is distinct from p_model
+       or v_existing.rationale is distinct from p_rationale
+       or v_existing.approval_arm is distinct from
+         (select case when w.wake_kind = 'interactive_client' then 'interactive_client_attended' else 'agent_unattended' end from clara.wake_context() w) then
+      raise exception 'op_key % is already claimed by a different act; a replayed op_key must never return a receipt for another client/act/subject/digest/outcome/who', p_op_key
         using errcode='CLR10', detail='{"reason":"op_key_identity_mismatch"}';
     end if;$rc1$;
   v_src text; v_occ int; v_oid oid; v_def text; v_head text;
