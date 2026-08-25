@@ -79,7 +79,37 @@ function classifyWorkflowArg(argRaw, bindings, rel) {
       why: `"${root}" is not an imported binding (a local variable or parameter) — its provenance is unknown; pass the registry export directly (fail-closed).`,
     };
   }
-  if (b.source.startsWith(".") && resolveRelPure(rel, b.source) === REGISTRY_KEY) return { ok: true };
+  const fromRegistry = b.source.startsWith(".") && resolveRelPure(rel, b.source) === REGISTRY_KEY;
+  if (fromRegistry) {
+    // #11 (round-4 review, REOPENED) — this used to trust ANY binding whose SOURCE MODULE
+    // resolved to workflows/registry.ts, regardless of which export it actually names.
+    // checkRegistryViewIntegrity's own closed-world exports census (freeze-lint-checks.mjs) now
+    // guarantees registry.ts exports NOTHING besides `workflows`, the canonical
+    // `workflowsByName`, and allowlisted types — but a bypass through THIS check never needed
+    // registry.ts to actually export anything unverified; it only needed this check to not look
+    // at WHICH name was imported. `import { fake as alternateView } from "./registry.ts"` (a
+    // binding whose local name is arbitrary, but whose ORIGINAL exported name — `b.imported`,
+    // tracked separately by parseImportBindings — was never checked at all) sailed through
+    // purely on source-module provenance. Pin to the two canonical exported names only.
+    if (b.imported === "workflows" || b.imported === "workflowsByName") return { ok: true };
+    if (b.imported === "*") {
+      // A namespace import (`import * as reg from "./registry.ts"`) — the FIRST property
+      // accessed off it must itself be one of the two canonical names; anything else (a
+      // namespace access into some other, unverified export) is the exact same bypass shape.
+      const firstProp = /^\s*\.\s*([A-Za-z_$][\w$]*)/.exec(chain[2] ?? "");
+      if (firstProp && (firstProp[1] === "workflows" || firstProp[1] === "workflowsByName")) return { ok: true };
+      return {
+        ok: false,
+        code: "BYPASS",
+        why: `"${root}" is a namespace import of workflows/registry.ts, but the property accessed ("${firstProp ? firstProp[1] : arg}") is not \`workflows\` or \`workflowsByName\` — only those two exports are trusted (fail-closed).`,
+      };
+    }
+    return {
+      ok: false,
+      code: "BYPASS",
+      why: `"${root}" is imported from workflows/registry.ts, but as \`${b.imported}\` — only the canonical \`workflows\`/\`workflowsByName\` exports are ever trusted as an enqueue-provenance root, never an arbitrary re-exported or aliased binding, even one sourced from the registry module itself (fail-closed).`,
+    };
+  }
   return {
     ok: false,
     code: "BYPASS",

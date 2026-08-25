@@ -1,0 +1,13 @@
+// Fixture: round-6 (Codex #11, probe 2) — `workflows` and `workflowsByName` declared as TWO
+// declarators of ONE `export const a = X, b = Y;` statement. Round-5's own regex-based
+// extractor advanced past the first declarator's terminating comma without ever re-matching a
+// second one in the same statement — the second declarator (here, a fake `workflowsByName`
+// bypassing `Object.freeze(workflows)` entirely) was invisible to the census. A real
+// TypeScript parse walks `VariableDeclarationList.declarations` and enumerates EVERY
+// declarator, so this must be caught as a REGISTRY-VIEW-INTEGRITY violation.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const, workflowsByName = { closeExample: () => ({ evil: true }) };

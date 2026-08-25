@@ -267,11 +267,10 @@ processFirm(client, firm, sources, deps):
     if source is None: continue        # unregistered event_type -- checkpoint-only advance, no dead-letter (nothing is wrong; the source simply has not shipped its registry row yet)
     try:
       begin txn
-        credential = mint_wake_credential(source.wake_kind, firm, null, '15 min', row.client_id)
         UPDATE agent_tasks SET status='running' WHERE id=row.id   # legal per Annex B's delta
         writeCheckpoint(consumer=WAKE_ENGINE_CONSUMER, firm, seq=row.event_seq)
       commit
-      enqueue(source.workflow_export, row.id, credential)   # same DI shape as autodraft.mjs's enqueue(taskId)
+      enqueue(source.workflow_export, row.id)   # same DI shape as autodraft.mjs's enqueue(taskId) -- no credential minted here or ever by the consumer; the dispatched workflow's own first "use step" attempt mints it (design §2)
     except err:
       rollback
       attempts = recordDeadLetter(relay_dead_letters, consumer=WAKE_ENGINE_CONSUMER, event_id=<via wi.event_id>, reason=err)
@@ -287,10 +286,9 @@ processFirm(client, firm, sources, deps):
     for row in rows:
       try:
         begin txn
-          credential = mint_wake_credential(source.wake_kind, firm, null, '15 min', row.client_id)
           UPDATE agent_tasks SET status='running' WHERE id=row.id   # already-legal autodraft-shaped transition, unchanged
         commit
-        enqueue(source.workflow_export, row.id, credential)
+        enqueue(source.workflow_export, row.id)   # no credential minted here either -- the dispatched workflow's own first "use step" attempt mints it (design §2), never the consumer
       except err:
         rollback
         attempts = recordTaskDeadLetter(wake_engine_task_dead_letters, consumer=WAKE_ENGINE_CONSUMER, task_id=row.id, reason=err)
@@ -349,10 +347,12 @@ Owns `bank-agency-annexes-3-build.md:58`'s M4 seam, explicitly "GATED ON G1." Mi
    dedicated bank login and silently misroute onto a shared identity.
 6. A lazy singleton pool getter, mirroring `getWritePool()` (`pools.mjs:171-177`).
 7. A scoped-transaction helper, mirroring `withWriteWakeScoped` (`pools.mjs:411-438`) — the
-   engine's `mint_wake_credential`+claim transaction runs under `clara_wake_bank`'s own connection
-   for a `bank_agent`-sourced dispatch, never the shared runtime pool (least-privilege: the
-   engine's OWN claim/checkpoint bookkeeping runs as `clara_runtime`; the actual bank-scoped work
-   the dispatched workflow does runs as `clara_wake_bank`, via this pool).
+   dispatched workflow's own first `"use step"` attempt calls `mint_wake_credential` under
+   `clara_wake_bank`'s own connection for a `bank_agent`-sourced dispatch, never the shared runtime
+   pool and never the engine's claim transaction (least-privilege: the engine's OWN claim/checkpoint
+   bookkeeping runs as `clara_runtime`, per Annex C's `processFirm`; the actual bank-scoped work,
+   credential mint included, runs as `clara_wake_bank`, via this pool, inside the workflow the
+   engine dispatched).
 8. DB side: `clara_wake_bank_login` created `NOLOGIN` in this gate's own migration (or F-A3's
    follow-up, whichever lands the row); granted `LOGIN` + password + the DSN secret at the operator
    ceremony — must be present before the image boots or the world fails closed, matching step 5's
@@ -380,3 +380,81 @@ agent judge and why" — the engine only needs to know a task REACHED a terminal
 the DOMAIN receipt says about it. This design does not require `bank_agent_receipts` and
 `agent_act_receipts` to converge, and does not recommend forcing it — that is a PM-level
 observation for a future debt sweep, not a G1 blocker.
+
+## Annex G · Operator runbook — the `heldBelowCheckpoint` WARN (round-9)
+
+**What it means.** `wakeEngineHealth`'s `heldBelowCheckpoint` counter (round-7's own
+defense-in-depth for the checkpoint-durability hole family MUST A/#1/round-6..8 closed) counts a
+genuine held wake row — a real, materialized `agent_tasks(kind='wake', status='held')` row, not a
+dead-letter — whose own `wake_intents.event_seq` sits AT OR BELOW its firm's `wake_engine`
+checkpoint. `readHeldWakeRows`' own `event_seq > lastSeq` gate will never surface it again on its
+own — it is a genuine strand, wired into `/ready` as a WARN (never a FAIL — the load-balancer
+must keep routing) exactly like every sibling wake-engine signal.
+
+**Why `redrive()` does NOT remediate this shape.** Two independent reasons, both worth stating so
+this is not re-litigated by a future reader reaching for the obvious tool first:
+1. `redrive()` requires a `relay_dead_letters` row for the event (`consumer`, `event_id`) — if the
+   strand's own event was never dead-lettered at all (it minted a wake_intent through the
+   ordinary relay flow, then got stranded purely by the checkpoint-durability class of bug),
+   there is nothing to redrive; the call throws `"no dead-letter... nothing to redrive"`.
+2. Even where a dead-letter DOES exist for the same event, round-8's own SHOULD C fix
+   deliberately gates the checkpoint rewind on `insertWakeIntent` actually inserting a NEW row
+   (`rowCount > 0`) — a wake_intent that already exists (which is exactly this strand's own
+   shape: the intent is already there, only the checkpoint is wrong) makes `redrive()`'s own
+   insert a no-op (`ON CONFLICT DO NOTHING`), so the rewind never fires. This is deliberate, not
+   an oversight: SHOULD C's whole point is that an idempotent re-redrive of an already-drained
+   event must not touch the checkpoint. Its side effect (named explicitly so it is not
+   rediscovered the hard way) is that it also removed round-7's own ACCIDENTAL repair path — an
+   unconditional rewind would have incidentally healed a pre-existing strand as a side effect of
+   any later redrive touching the same firm. There is currently no governed verb that performs
+   this repair; the manual correction below is the supported path.
+
+**The verified remediation: a manual checkpoint correction, under the SAME lock the engine's own
+writers take.** Run as an operator, against the live DB, for the SPECIFIC firm and event_seq the
+WARN names (join `heldBelowCheckpoint`'s own query — `agent_tasks` × `wake_intents` ×
+`domain_events` × `relay_checkpoints` — to find the exact stranded row(s) first; never guess a
+seq):
+
+```sql
+begin;
+select pg_advisory_xact_lock(hashtext('wake_coalesce:' || :firm_id)::bigint);
+update clara.relay_checkpoints
+   set last_seq = :stranded_event_seq - 1, updated_at = now()
+ where consumer = 'wake_engine' and firm_id = :firm_id;
+commit;
+```
+
+**Use `:firm_id` exactly as the health query returns it — never hand-typed, never
+re-cased.** `hashtext(...)` is byte-sensitive: `firm_id` is a UUID, and Postgres's own text
+rendering of a `uuid` column is lowercase, so a hand-typed or upper-cased UUID hashes to a
+DIFFERENT lock key and silently fails to exclude the engine's own writers — the correction
+above would then run UNSERIALIZED against a concurrent `advanceCheckpointIfClear`/`redrive()`
+call, exactly the race MUST A closed. Copy `firm_id` verbatim from the row(s)
+`heldBelowCheckpoint`'s own query names, never retype it.
+
+Taking the identical `wake_coalesce:<firmId>` advisory lock `advanceCheckpointIfClear`
+(wake-engine.mjs) and `redrive()` (relay.mjs) both already serialize on means this correction can
+never race either writer — it is strictly ordered before or after any concurrent
+checkpoint-advancing call, the same guarantee those two functions give each other. Lowering
+`last_seq` to exactly `stranded_event_seq - 1` (never wider) re-exposes ONLY the stranded row (and
+anything else at or above it) to `readHeldWakeRows`' own gate, without disturbing anything
+genuinely already correctly excluded below that point.
+
+**Verified against the rig (round-9):** constructed the exact strand shape (a held wake row with
+its own checkpoint seeded at its own event_seq), confirmed a cycle does NOT dispatch it
+beforehand, ran the correction above, then confirmed a subsequent `runWakeEngineCycle` call DOES
+claim and dispatch it (`status` → `running`, `enqueue` called exactly once) — the recipe above is
+not asserted from reading the code, it is the exact SQL that produced that result.
+
+**The one-cycle delay is by design, not a bug (the docstring rider).** When a mid-cycle rewind
+happens — `redrive()` lowering the checkpoint WHILE `runWakeEngineCycle` is still mid-flight for
+that same firm (MUST A's own cells i/ii) — the CURRENT cycle's own cursor tracking
+(`runWakeEngineCycle`'s `cur.lastSeq = res.maxSeq`) sees `res.maxSeq <= cur.lastSeq` for that
+firm's remaining rounds and marks it `active = false`: the firm is PARKED for the rest of THAT
+cycle, never re-scanned again until the NEXT cycle. This is harmless by construction and
+deliberate, not a residual bug: the rescued row is fully visible and dispatched on the VERY NEXT
+cycle (every MUST A cell's own final assertion proves exactly this — "EVENTUALLY dispatched",
+never "dispatched immediately, same cycle"). A reader who notices a rescued row waiting one extra
+`CLARA_WAKE_ENGINE_POLL_MS` interval (2000ms default) before dispatch is seeing the designed
+delay, not a strand — `heldBelowCheckpoint` would already have caught a REAL strand: this waiting
+window is not what that counter measures.

@@ -1,0 +1,18 @@
+// Fixture: round-8 (native adversarial leg, MUST B, P-B) — a NAMESPACE import (`import * as NS`)
+// then a bare, unaliased `export { NS };`. The direct asymmetry the leg named: round-6 already
+// rejects `export * as ns from "..."` unconditionally on the EXPORT side (an unbounded,
+// unverifiable-by-shape set of names) — the equivalent shape on the IMPORT side (a namespace
+// object imported, then re-exported as if it were one plain binding) reaches the identical
+// unbounded territory and must be rejected the same way, never inspected member-by-member. Must
+// REJECT (REGISTRY-EXPORTS-CLOSED-WORLD).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import * as NS from "./chatTurn.v13.impl.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { NS };
