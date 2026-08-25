@@ -281,6 +281,63 @@
 -- this file's business.
 --
 -- =====================================================================================
+-- THE CI-RED DIAGNOSIS (2026-08-25, first real-chain merge: alpha 0124/0125 + gamma 0123 both
+-- real for the first time, this file at 0126) -- CLASS 2, THE RECEIPT TRIGGER OVER-REACHED --
+-- SS0 GROWS AGAIN
+-- =====================================================================================
+-- `f-a7-alpha.test.mjs` AB-2(a) and its row-5 parity cell red against `t_document_filings_
+-- agent_receipt`'s ORIGINAL body: it raised CLR01 ("a judged filing must carry its own clean
+-- agent_filing_receipts row") for basis='judgement' filings minted by clara.file_document (the
+-- HUMAN door, alpha's own extracted delegate _file_document_write) and by clara._seed_verified_
+-- document (the shared fixture/seed path) -- neither of which routes through this train's own
+-- agent core, so neither ever inserts an agent_filing_receipts row.
+--
+-- Adjudicated from the design, not fixed by author's-own-read alone (review law 1): Annex H of
+-- filing-and-interview-annexes-2.md, "the two-value re-derivation census (AB-1, AB-2)", rows 4
+-- and 5 are BOTH marked EXTEND --
+--   row 4, clara.file_document -> clara._file_document_write (0009:2319/:2324, CLR01 at :2326):
+--     "EXTEND, inside the extracted delegate -- the agent core passes a judged resolution and
+--     must not mint a second 'human' one" (alpha1+alpha2);
+--   row 5, clara._seed_verified_document(...) (0007:1592): "EXTEND for parity -- a divergent
+--     two-value world in the seed path makes every fixture a false negative" (alpha2).
+-- The design explicitly requires BOTH the human door and the seed/fixture path to accept and
+-- carry judgement-basis resolutions with no receipt of any kind. The trigger's unconditional
+-- existence mandate was never sanctioned against these two paths -- an over-reach in THIS
+-- file, not a design collision, so fixed directly (constraint 14's own operative clause: a
+-- security mechanism under test is never weakened for convenience, but this mandate was never
+-- the design's own invariant to begin with).
+--
+-- THE FIX, ROUND 1 (SUPERSEDED, kept for the record -- see the round-2 amendment immediately
+-- below): a first draft rewrote `_tf_document_filings_agent_receipt` from an EXISTENCE MANDATE to
+-- a CONGRUENCE-ONLY check ("IF a receipt names this filing_id, it must be clean; no mandate that
+-- one exist"). An independent reviewer's rig probe caught that this is VACUOUS:
+-- `ck_agent_filing_receipts_filed_iff_clean` (SS3) already enforces `(filing_id IS NOT NULL) =
+-- (failing_rungs = '{}')` at the receipts table itself, so a dirty receipt naming a filing_id
+-- cannot exist to begin with (probed: refuses 23514 before this trigger ever runs) -- the
+-- congruence-only rewrite silently deleted Tier C's independent DB-level proof while appearing
+-- to keep it.
+--
+-- THE FIX, ROUND 2 (2026-08-25, reviewer-corrected, ADOPTED -- see SS7 for the live body): keep
+-- the EXISTENCE mandate, but SCOPE it to AGENT-SOURCED filings, using the discriminator the write
+-- paths already stamp on their own resolution (review law 3): _agent_file_document_core stamps
+-- client_resolutions.evidence->>'source' = 'agent_file_document' (:1454) and wake_reattribute_
+-- document stamps 'wake_reattribute_document' (:1748) -- both, and ONLY those two, insert their
+-- own clean agent_filing_receipts row in the same statement as the filing. The census of
+-- receipt-less judgement minters this trigger must NOT reach is THREE, not two (review law 2 --
+-- naming two where three exist is its own absence-is-not-evidence failure): Annex H rows 4
+-- (clara.file_document -> _file_document_write) and 5 (clara._seed_verified_document) as
+-- diagnosed below, PLUS clara.finalize_document_intake's own MF-2 basis-CASE
+-- (0125_f_a7_alpha2_judgement_recut.sql:856-862), a real production intake path that mints
+-- basis='judgement' with no receipt and no agent source stamped. "No agent-core filing without a
+-- clean receipt" stays true BY CONSTRUCTION for exactly the two agent-sourced write paths
+-- (each inserts its own receipt in the same statement as its filing, never after) -- what this
+-- trigger now proves, independently, at the DB level, is precisely that construction, scoped
+-- honestly to the path it protects; the human door, the seed/fixture path and finalize_document_
+-- intake's MF-2 arm are proven by alpha's own walls (the MF-2 congruence wall) and the receipts-
+-- table CHECK, never by this trigger. (F) below, SS7's own comment, and the table comment on
+-- clara.agent_filing_receipts (SS3) are all trued to the round-2 shape.
+--
+-- =====================================================================================
 -- WHAT THIS FILE SHIPS
 -- =====================================================================================
 -- (A) The `filing` wake kind: both wake_credentials CHECKs extended (extend-only, LAST in the
@@ -303,11 +360,19 @@
 --     file mints (annexes-1.md:27-28, allowlist rows 4-5). Only wake_file_document was named in
 --     this train's own order; the other three ride the same kind for the same structural
 --     reason pi already gave, so they are built here too rather than left dangling.
--- (F) The two deferred Tier-C triggers on clara.document_filings (congruence + receipt
---     existence), DEFERRABLE INITIALLY DEFERRED, scoped by a NEGATIVE SET
---     (basis NOT IN the five pre-existing values) rather than a literal fourth value this file
---     cannot yet name (train alpha's to mint) -- so the triggers are correct and inert now, and
---     activate the moment alpha's write path lands, with no re-cut of this file.
+-- (F) The two deferred Tier-C triggers on clara.document_filings (resolution/client/document
+--     congruence + this train's own receipt existence -- CI-red diagnosis, 2026-08-25, RE-SCOPED
+--     to agent-sourced filings only (client_resolutions.evidence->>'source' IN
+--     ('agent_file_document','wake_reattribute_document')): a universal mandate over-reached
+--     Annex H rows 4/5's human door and seed/fixture path PLUS finalize_document_intake's own
+--     MF-2 arm (all three mint judgement-basis filings with no receipt and no agent source, by
+--     design); a congruence-only rewrite was tried and rejected as vacuous against
+--     ck_agent_filing_receipts_filed_iff_clean (SS3, SS0's round-1/round-2 record has the full
+--     argument), DEFERRABLE INITIALLY DEFERRED, scoped by a NEGATIVE SET (basis NOT IN the five
+--     pre-existing values) rather than a literal fourth value this file cannot yet name (train
+--     alpha's to mint) -- so the
+--     triggers are correct and inert now, and activate the moment alpha's write path lands, with
+--     no re-cut of this file.
 -- (G) The filing kind's SIX allowlist rows this train can prove today (annexes-1 SSA.3 rows
 --     1-6; row 7, wake_begin_client_onboarding, is F-A7b's per that annex's own footnote).
 --
@@ -670,9 +735,17 @@ create table clara.agent_filing_receipts (
 -- reverse lookup -- so the table stays PURELY insert-only with no follow-up write, which is
 -- what TA-P4 A's receipts are for.
 comment on table clara.agent_filing_receipts is
-  'F-A7 beta / TA-P4 A: one row per attribution attempt (filed or refused). There is no filing '
-  'without a receipt (Tier C SS7 enforces it once train alpha lands) and no receipt claims a '
-  'filing while failing_rungs is non-empty.';
+  'F-A7 beta / TA-P4 A: one row per attribution attempt (filed or refused) through THIS TRAIN''S '
+  'TWO AGENT-SOURCED writers -- _agent_file_document_core and wake_reattribute_document (their '
+  'own client_resolutions.evidence->>''source'' stamp is Tier C''s discriminator, SS7) -- no '
+  'agent-sourced filing without a receipt (by construction: each core inserts both in the same '
+  'statement) and no receipt claims a filing while failing_rungs is non-empty (the CHECK below, '
+  'and Tier C SS7''s receipt trigger, scoped to the agent source, once train alpha lands). NOT a '
+  'claim over every document_filings row: the human door, the seed/fixture path, and clara.'
+  'finalize_document_intake''s own MF-2 arm all mint judgement-basis filings with no receipt and '
+  'no agent source, by design (Annex H rows 4/5 plus the MF-2 arm, filing-and-interview-annexes-2.'
+  'md -- CI-red diagnosis, 2026-08-25, re-scoped on reviewer probe from an earlier, over-reaching '
+  'wording; a congruence-only rewrite was tried and rejected as vacuous, SS0).';
 create index ix_agent_filing_receipts_document on clara.agent_filing_receipts(document_id, firm_id);
 create index ix_agent_filing_receipts_open on clara.agent_filing_receipts(firm_id, created_at desc);
 
@@ -1923,22 +1996,67 @@ create constraint trigger t_document_filings_agent_congruence
   deferrable initially deferred
   for each row execute function clara._tf_document_filings_agent_congruence();
 
+-- CI-red diagnosis (2026-08-25), REVISED on independent reviewer probe: originally an
+-- unconditional EXISTENCE MANDATE ("every judged filing must carry a clean receipt"), which
+-- over-reached the moment alpha/gamma landed for real -- f-a7-alpha.test.mjs AB-2(a) and its
+-- row-5 parity cell red because clara.file_document (the human door, via alpha's own extracted
+-- delegate _file_document_write) and clara._seed_verified_document (the shared fixture/seed
+-- path) both mint basis='judgement' filings with no receipt. A THIRD receipt-less judgement
+-- minter is on this same chain and belongs in the same census (review law 2 -- a census that
+-- names two where three exist is exactly the "absence is not evidence" failure): clara.
+-- finalize_document_intake's own MF-2 basis-CASE (0125_f_a7_alpha2_judgement_recut.sql:856-862)
+-- inserts document_filings with basis='judgement' whenever the intake's resolution carries
+-- method='judgement', through the ordinary intake path, and mints no receipt either.
+--
+-- FIRST DRAFT'S MISTAKE, CAUGHT BY REVIEWER RIG PROBE: rewriting to a congruence-only check ("IF
+-- a receipt names this filing_id, it must be clean") is VACUOUS -- `ck_agent_filing_receipts_
+-- filed_iff_clean` (SS3 above) already enforces `(filing_id IS NOT NULL) = (failing_rungs =
+-- '{}')` AT THE RECEIPTS TABLE ITSELF, so a receipt with a non-null filing_id and non-empty
+-- failing_rungs cannot exist in the first place (probed: such an INSERT refuses 23514 before
+-- this trigger ever runs) -- a congruence-only rewrite here would delete Tier C's independent
+-- DB-level proof while appearing to keep it.
+--
+-- THE CORRECT SHAPE: keep the EXISTENCE mandate, but SCOPE it to AGENT-SOURCED filings only,
+-- using the discriminator the write paths already stamp on their own resolution (review law 3 --
+-- read the actual stamped value, never assume the name): _agent_file_document_core stamps
+-- client_resolutions.evidence->>'source' = 'agent_file_document' (this file, :1482) and
+-- wake_reattribute_document stamps 'wake_reattribute_document' (this file, :1776) -- both, and
+-- ONLY those two, insert their own agent_filing_receipts row in the same statement as the
+-- filing. The human door, the seed/fixture path and finalize_document_intake's MF-2 arm stamp no
+-- such source (or none at all) and mint no receipt, by design -- they owe this trigger nothing.
+-- A NULL or unrecognized source fails OPEN for the mandate (no receipt required) -- correct here
+-- per review law 2's own fail-closed default: the WALL this trigger owns is "agent-sourced work
+-- proves itself", not "every judged filing is agent work", and a non-agent source genuinely owes
+-- no receipt. Tier C's "independent DB-level proof" claim now holds EXACTLY for the agent-sourced
+-- path it was written to prove; the human/seed/intake judgement paths are proven by alpha's own
+-- walls (MF-2's congruence wall, _tf_stamp_document_pipeline) and the receipts-table CHECK above,
+-- never by this trigger -- stated plainly rather than left implicit.
 create function clara._tf_document_filings_agent_receipt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_source text;
 begin
   if new.basis = any (array['legacy-0007','human','rule','correction','seed-0007']) then
     return new;
   end if;
+  select r.evidence->>'source' into v_source
+    from clara.client_resolutions r where r.id = new.resolution_id and r.firm_id = new.firm_id;
+  if v_source is distinct from 'agent_file_document' and v_source is distinct from 'wake_reattribute_document' then
+    return new; -- not agent-sourced (human door / seed-fixture / finalize_document_intake's MF-2
+                -- arm / an absent source) -- this trigger's mandate does not reach it
+  end if;
   if not exists (select 1 from clara.agent_filing_receipts r
       where r.filing_id = new.id and r.failing_rungs = '{}'::text[]) then
-    raise exception 'a judged filing must carry its own clean agent_filing_receipts row' using errcode='CLR01',
-      detail = format('{"filing":"%s"}', new.id);
+    raise exception 'an agent-sourced judged filing must carry its own clean agent_filing_receipts row' using errcode='CLR01',
+      detail = format('{"filing":"%s","source":"%s"}', new.id, coalesce(v_source, 'null'));
   end if;
   return new;
 end $fn$;
 comment on function clara._tf_document_filings_agent_receipt() is
-  'F-A7 beta Tier C: there is no judged filing without a receipt. DEFERRABLE INITIALLY DEFERRED, '
-  'the design''s own words ("the transaction commits, so the reason is durable").';
+  'F-A7 beta Tier C: an AGENT-SOURCED judged filing (client_resolutions.evidence->>''source'' = '
+  '''agent_file_document'' or ''wake_reattribute_document'') must carry its own clean receipt --'
+  ' SCOPED, not universal (revised 2026-08-25 on reviewer probe: an unconditional mandate over-'
+  'reaches the human door / seed-fixture path / finalize_document_intake''s MF-2 arm, none of '
+  'which stamp an agent source or mint a receipt, by design). DEFERRABLE INITIALLY DEFERRED.';
 
 create constraint trigger t_document_filings_agent_receipt
   after insert or update on clara.document_filings

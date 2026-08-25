@@ -51,7 +51,7 @@ import {
   endPool,
 } from "./rig-fixtures.mjs";
 import { printLaneNotes } from "./rig-runtime-helpers.mjs";
-import { seedVerifiedDocument, activeFilings } from "./rig-docs-fixtures.mjs";
+import { seedVerifiedDocument, activeFilings, ensureFirmNarrowAttribution } from "./rig-docs-fixtures.mjs";
 
 let world;
 let ready = false;
@@ -110,31 +110,23 @@ async function mintFiling(onBehalfOf = null) {
 
 const validModel = () => ({ provider: "openai", model: "gpt-5.6-terra", version: "2026-08-01" });
 
-let firmNarrowActivated = false;
 /** One-time, per-firm: grant + activate the firm-narrow `attribution` moment for firm A as its
  *  owner (alice). `uq_firm_egress_purpose_consents_one_live` means this can only happen ONCE
  *  per (firm, purpose, moment) -- callers share this activation and mint their own fresh
- *  dispatch authorization via freshAuthorization() below. */
+ *  dispatch authorization via freshAuthorization() below.
+ *  CI-red diagnosis (2026-08-25, class 3): this file used to hand-roll its own grant+activate
+ *  sequence here, written before gamma's `seedVerifiedDocument` grew its own default-on
+ *  `ensureFirmNarrowAttribution` side effect (rig-docs-fixtures.mjs: any call that leaves
+ *  `client` at its default null -- which is how every seed call in THIS file reads -- now
+ *  auto-grants the same consent as a side effect). On the real merged chain the auto-grant fires
+ *  on this file's very FIRST document seed, so the hand-rolled call below raced a consent that
+ *  already existed and lost to CLR28 "firm already has a live typed egress consent". Fixed by
+ *  delegating to the shared, idempotent helper directly instead of maintaining a competing copy
+ *  -- it dedupes on its own (a Set plus a live-DB check), so calling it here is a no-op on the
+ *  common path where seedVerifiedDocument already granted it, and the one real grant on a path
+ *  that never seeds a document first. */
 async function ensureFirmNarrowActivated() {
-  if (firmNarrowActivated) return;
-  const evidence = await seedVerifiedDocument({ firm: world.firms.A, kind: "consent_evidence" });
-  const grant = await runAs(
-    human(world.users.alice),
-    namedCall("grant_firm_egress_purpose", [
-      { name: "p_purpose" }, { name: "p_moment" }, { name: "p_evidence_document" },
-      { name: "p_scope_note" }, { name: "p_op_key" },
-    ]),
-    ["firm_narrow_intake", "attribution", evidence.documentId, "rig test consent", opk("gfep")],
-  );
-  const consentId = grant.rows[0].result.consent_id;
-  await runAs(
-    human(world.users.alice),
-    namedCall("activate_firm_egress_purpose", [
-      { name: "p_purpose" }, { name: "p_moment" }, { name: "p_consent" }, { name: "p_op_key" },
-    ]),
-    ["firm_narrow_intake", "attribution", consentId, opk("afep")],
-  );
-  firmNarrowActivated = true;
+  await ensureFirmNarrowAttribution({ firm: world.firms.A });
 }
 
 /** Mint a fresh, live firm-narrow dispatch authorization tied to `documentSha256`, via the
@@ -1287,20 +1279,30 @@ test("Tier C: both triggers exist on document_filings, DEFERRABLE INITIALLY DEFE
   }
 });
 
-test("Tier C cell 58 twin / receipt-existence trigger: a RAW judged filing with NO agent_filing_receipts row refuses at COMMIT", async (t) => {
+// CI-red diagnosis, round 2 (2026-08-25, reviewer-corrected): the receipt-existence trigger is
+// now SCOPED to agent-sourced filings (client_resolutions.evidence->>'source' IN
+// ('agent_file_document','wake_reattribute_document')) rather than a universal judgement-basis
+// mandate -- see the migration's own SS0 round-1/round-2 record and SS7 comment on
+// _tf_document_filings_agent_receipt for the full argument (a universal mandate over-reached
+// Annex H rows 4/5 plus finalize_document_intake's MF-2 arm; a congruence-only rewrite was tried
+// first and rejected as vacuous against ck_agent_filing_receipts_filed_iff_clean). The two cells
+// below prove the scope BOTH ways -- an admitting twin beside the refusal, per this file's own
+// established law (review finding 6a's own lesson: an untested admit path is a claim, not a wall).
+test("Tier C cell 58 twin / receipt-existence trigger: a RAW AGENT-SOURCED judged filing with NO agent_filing_receipts row refuses at COMMIT", async (t) => {
   if (unready(t)) return;
   const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
   const res = await rootQuery(
     `insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id, confidence, method, evidence)
-     values ($1,$2,'document',$3,1.0,'judgement','{}'::jsonb) returning id`,
-    [world.firms.A, world.clients.A1, doc.documentId],
+     values ($1,$2,'document',$3,1.0,'judgement',$4::jsonb) returning id`,
+    [world.firms.A, world.clients.A1, doc.documentId, JSON.stringify({ source: "agent_file_document" })],
   );
   // A raw, single-statement probe (bypassing every wake wrapper): rootQuery's implicit
   // autocommit fires the DEFERRABLE INITIALLY DEFERRED trigger right after this one INSERT,
-  // which is the same "COMMIT is the judge" property the design names. No agent_filing_receipts
-  // row exists for this filing -- the receipt-existence trigger must refuse. Message asserted,
-  // not just SQLSTATE (M-2 on independent review): three different raisers in this file's reach
-  // share CLR01, so the code alone cannot distinguish which one actually fired.
+  // which is the same "COMMIT is the judge" property the design names. The resolution carries the
+  // exact `source` string _agent_file_document_core stamps, so the SCOPED mandate reaches it --
+  // and no agent_filing_receipts row exists for this filing, so the trigger must refuse. Message
+  // asserted, not just SQLSTATE (M-2 on independent review): three different raisers in this
+  // file's reach share CLR01, so the code alone cannot distinguish which one actually fired.
   const err = await assertRaises(
     CLR.client,
     () => rootQuery(
@@ -1308,9 +1310,29 @@ test("Tier C cell 58 twin / receipt-existence trigger: a RAW judged filing with 
          values ($1,$2,$3,$4,$5,'judgement')`,
       [world.firms.A, doc.documentId, world.clients.A1, "00000000-0000-4000-8000-000000c1a7a0", res.rows[0].id],
     ),
-    "a judged filing with no receipt refuses at (implicit) COMMIT",
+    "an agent-sourced judged filing with no receipt refuses at (implicit) COMMIT",
   );
   assert.match(err.message, /clean agent_filing_receipts row/, "the RECEIPT trigger specifically fired");
+});
+
+test("Tier C cell 58 admitting twin: a RAW NON-AGENT judged filing (no source stamp) with NO agent_filing_receipts row ADMITS -- the scoped mandate does not reach it", async (t) => {
+  if (unready(t)) return;
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  const res = await rootQuery(
+    `insert into clara.client_resolutions(firm_id, client_id, subject_kind, subject_id, confidence, method, evidence)
+     values ($1,$2,'document',$3,1.0,'judgement','{}'::jsonb) returning id`,
+    [world.firms.A, world.clients.A1, doc.documentId],
+  );
+  // Byte-identical to the refusal twin above except the resolution's evidence carries no
+  // `source` key at all -- the exact shape the human door / seed-fixture path / finalize_
+  // document_intake's MF-2 arm produce. No agent_filing_receipts row exists for this filing
+  // either, and this ADMITS: the receipt-existence mandate never reaches a non-agent source, by
+  // design (Annex H rows 4/5, MF-2), so there is nothing here for it to refuse.
+  await rootQuery(
+    `insert into clara.document_filings(firm_id, document_id, client_id, filed_by, resolution_id, basis)
+       values ($1,$2,$3,$4,$5,'judgement')`,
+    [world.firms.A, doc.documentId, world.clients.A1, "00000000-0000-4000-8000-000000c1a7a0", res.rows[0].id],
+  );
 });
 
 test("document_filings INSERT congruence: a judged filing whose resolution names a DIFFERENT client refuses BEFORE INSERT (the PRE-EXISTING stamp trigger, alpha2's own CoR -- this train's own t_document_filings_agent_congruence is a defense-in-depth twin, see its migration comment for why it cannot itself be reached on the live schema)", async (t) => {

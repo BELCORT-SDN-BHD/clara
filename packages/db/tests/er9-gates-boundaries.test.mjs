@@ -466,13 +466,13 @@ test("R9.H3 the close verbs are HUMAN-ONLY: clara_authenticated can execute ever
   // which it silently missed. A role invented later only grows this set; it is never re-hardcoded
   // -- ROSTER EXTENSION (F-A3/PR-1b, DDL 7): clara_wake_bank + clara_wake_bank_login grow it to
   // nine. Both are already covered by this cell's OWN loop below (neither holds EXECUTE on any
-  // close verb) -- this is a census update, not a weakening; no close verb's grantee set changed.
-  assert.equal(machineRoles.length, 9,
-    `mandatory setup: expected the nine known non-sanctioned clara_ roles (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
+  // close verb) -- census update, not a weakening; F-A7/PR-4 beta (0126) grows it to ten the same way.
+  assert.equal(machineRoles.length, 10,
+    `mandatory setup: expected the ten known non-sanctioned clara_ roles (got ${machineRoles.length}: ${machineRoles.join(", ")})`);
   for (const expected of [
     "clara_agent_ro", "clara_agent_read_login", "clara_runtime", "clara_runtime_login",
     "clara_wake_interactive", "clara_wake_proactive", "clara_wake_write_login",
-    "clara_wake_bank", "clara_wake_bank_login",
+    "clara_wake_bank", "clara_wake_bank_login", "clara_wake_filing",
   ]) {
     assert.ok(machineRoles.includes(expected), `mandatory setup: the derived census includes ${expected}`);
   }

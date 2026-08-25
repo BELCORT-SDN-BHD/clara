@@ -584,6 +584,13 @@ const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
 // idiom every other `_tf_*` trigger already on this roster carries.
 const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set_bank_agency_hold"];
 
+// [Wave-F Track A, F-A7 beta, 0126] two genuinely new bodies (measured on the live rig sweep,
+// not assumed from the first one's shape). `_agent_file_document_core`'s bare
+// `statement_timestamp()` calls gate the authorization window. `wake_reattribute_document`'s bare
+// `now()` stamps `retired_at` on its own retire-and-refile path -- the same "the audit stamp is
+// the clock" idiom every other core already on this roster carries.
+const FILING_VERB_F_A7_BETA_CLOCK_NAMES = ["_agent_file_document_core", "wake_reattribute_document"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -627,6 +634,7 @@ export async function s5BareTokenRoster(query) {
     }
   }
   if (await appliedStem("f_a3_pr1b_agent_limb$")) names.push(...AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES);
+  if (await appliedStem("f_a7_beta_filing_verb$")) names.push(...FILING_VERB_F_A7_BETA_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_1b_close_lifecycle$")) {
     // A SWAP, not an addition -- see F_A4_PR1B_CLOCK_NAMES's own header note.
     const i = names.indexOf("abandon_close");

@@ -394,13 +394,17 @@ test("A6c E-R6 Law 2 -- the state fn resolves FAIL-CLOSED for an unknown entry i
   assert.equal(r.rows[0].s, "entry_missing", "an unknown entry id resolves to the non-NULL sentinel, not NULL (NULL <> 'no_period_model' is NULL, which would fail the guard OPEN)");
 });
 
-test("A6d E-R6 Law 3 -- the LIVE reader census for _correction_period_state is exactly the three known callers, guard predicate pinned to the first", async (t) => {
+test("A6d E-R6 Law 3 -- the LIVE reader census for _correction_period_state is exactly the known callers, guard predicate pinned to the first", async (t) => {
   if (skip56(t)) return;
   // Law 3 (spelling is not identity): the FAMILY is the search, not the literal
   // underscored string -- `_correction_period_state(` already CONTAINS
   // `correction_period_state(` as a substring, so this one pattern catches both the
   // protocol-token caller (still `_correction_period_state`) and the two honest-twin
   // readers 0056's S7 repointed (now bare `correction_period_state`) in one sweep.
+  // [Wave-F Track A, F-A7 beta, 0126] widens this to a fourth caller: wake_reattribute_document's
+  // own unposted-citation blocker query calls the bare `clara.correction_period_state(je.id)`,
+  // byte-identical in shape to retire_document_filing's own blocker (0027:426-434) that this
+  // census already carries -- a genuinely new reader, not a rename.
   const census = (await rootQuery(
     `select coalesce(array_agg(p.proname::text order by p.proname), '{}') as c
        from pg_proc p
@@ -409,8 +413,10 @@ test("A6d E-R6 Law 3 -- the LIVE reader census for _correction_period_state is e
         and coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid))
               like '%correction\\_period\\_state(%' escape '\\'`,
   )).rows[0].c;
-  assert.deepEqual(census, ["approve_wrong_client_correction", "preview_wrong_client_correction", "retire_document_filing"],
-    `the live reader census (got ${JSON.stringify(census)}) -- exactly the three readers, one still on the protocol token, two repointed to the honest twin`);
+  assert.deepEqual(census,
+    ["approve_wrong_client_correction", "preview_wrong_client_correction", "retire_document_filing",
+      "wake_reattribute_document"],
+    `the live reader census (got ${JSON.stringify(census)}) -- exactly the four readers, one still on the protocol token, three repointed to (or born on) the honest twin`);
   const guardSrc = (await rootQuery(
     "select coalesce(nullif(p.prosrc,''), pg_get_functiondef(p.oid)) as s from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname='approve_wrong_client_correction'",
   )).rows[0].s;
