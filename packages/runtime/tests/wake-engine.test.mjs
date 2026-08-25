@@ -886,6 +886,223 @@ test("#1 (round-7, native adversarial leg): redrive() rewinds a checkpoint it ad
 });
 
 // =====================================================================================
+// MUST A (round-8, BOTH review legs, independently constructed) — round-7's rewind writes the
+// checkpoint DIRECTLY, but its CALLER (runWakeEngineCycle/processWakeOutboxFirm) carries
+// `priorSeq` as an IN-MEMORY cursor across an entire cycle — potentially many
+// advanceCheckpointIfClear calls, with the wake_coalesce lock released BETWEEN each one. A
+// redrive() landing in that gap rewinds the PERSISTED checkpoint; the NEXT call still passes the
+// stale (too-high) cursor, so its own hasHiddenHeldRow window starts too high to see the
+// newly-materialized held row, and writeCheckpoint's own greatest() silently RE-RAISES the
+// checkpoint straight back past the rewind — erasing round-7's own fix within the SAME cycle.
+// Fix (wake-engine.mjs's own advanceCheckpointIfClear): re-read the LIVE checkpoint under the
+// lock on every call, floor everything on effectivePrior = min(priorSeq, liveCp), and RETURN
+// effectivePrior (not the stale input) whenever nothing advances — since every call site already
+// threads the return value into the variable it next passes as priorSeq, correcting the return
+// value here self-heals every later call in the SAME cycle automatically, closing BOTH interleave
+// windows below through the identical mechanism (stated here per the coordinator's own ask, not
+// left implicit).
+//
+// Both cells drive the REAL runWakeEngineCycle's own internals — never simulated, never a second
+// session — by injecting the redrive()+drain as a side effect of the TEST'S OWN `enqueue` hook,
+// which the engine itself calls, on the SAME connection, at the EXACT point between two
+// checkpoint-advancing calls the interleave needs to land. This is deliberately sequential-but-
+// precisely-timed rather than concurrent: the whole point is that NO race or second session is
+// needed for this hole — a single execution thread hitting the two calls in the wrong order is
+// sufficient, exactly as MUST A's own real-world trace describes.
+// =====================================================================================
+
+/** Materializes an already-minted wake_intent into a genuinely claimable held row — the
+ *  drain-simulation idiom every cell in this file already uses by hand. */
+async function materializeHeldRowForEvent(eventId) {
+  const intentId = (await rig.rootQuery("select id from clara.wake_intents where event_id=$1", [eventId])).rows[0].id;
+  const taskId = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intentId, randomUUID()]);
+  return taskId;
+}
+
+test("MUST A (round-8) cell (i): the TRAILING-COALESCE erasure — a redrive+drain landing between a batch's own claims and its end-of-batch coalesceIfSafe call must not silently re-raise the checkpoint past a mid-cycle rewind", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_r8i_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_r8i");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // The low-seq event: dead-lettered DIRECTLY as 'resolved' (the round-7b shortcut — how it got
+  // resolved does not matter to THIS bug); WAKE_EVENT_TYPE is covered+wake-bound from the start,
+  // so the interleaved redrive() below goes straight to the mint branch, no reopen needed.
+  const lowEvent = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  const lowSeq = Number(lowEvent.seq);
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status, resolved_at)
+       values ('router',$1,$2,$3,$4,'MUST-A round-8 (i) battery: simulated already-resolved dead-letter','resolved',now())`,
+    [lowEvent.id, w.firm, lowSeq, WAKE_EVENT_TYPE],
+  );
+
+  // ONE claimable held row at a HIGHER seq — this batch's own claim raises the checkpoint to
+  // highSeq; the trailing coalesce (rows.length < batchSize) fires right after, on the SAME
+  // in-memory cursor the claim's own advanceCheckpointIfClear call just returned.
+  const highIntent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const highSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [highIntent.intentId])).rows[0].event_seq);
+  const highTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [highIntent.intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [highIntent.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [highIntent.intentId, randomUUID()]);
+  assert.ok(highSeq > lowSeq, "mandatory setup: the dead-letter's own seq is genuinely lower than the claimable row's");
+
+  // round-8 debugging note (kept as a comment, not a mistake to repeat): safeCoalesceBound's own
+  // bound-1 is the ROUTER's own checkpoint value — NOT capped by firm_event_seq, but if seeded at
+  // EXACTLY `head` (== highSeq here, since highSeq is this firm's last real event), it caps the
+  // trailing coalesce's own `target` at exactly highSeq too, making `target <= effectivePrior`
+  // true regardless of the fix under test and masking the erasure entirely (no write is even
+  // attempted, so nothing can be silently mis-written). Seed it comfortably ABOVE head so bound-1
+  // is never the limiting factor — the trailing coalesce must be free to WANT to advance well
+  // past highSeq for this cell to exercise anything.
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head + 1000],
+  );
+
+  const enqueued = [];
+  let interleaveRan = false;
+  let lowTask = null;
+  let redriveResult = null;
+  await rig.asRuntime((c) =>
+    runWakeEngineCycle(c, {
+      onlyFirm: w.firm,
+      log: () => {},
+      // THE INTERLEAVE: fires as a side effect of the batch's OWN claim of the higher-seq row —
+      // strictly AFTER that claim's own advanceCheckpointIfClear call has already committed (the
+      // real code calls enqueue() only after that), and strictly BEFORE this batch's own trailing
+      // coalesceIfSafe call runs (the loop has not returned to the caller yet — the trailing
+      // coalesce is still to come, right after this row loop finishes). Same connection, same
+      // client — a real interleave inside the cycle's own internals, not a simulation.
+      enqueue: async (...a) => {
+        enqueued.push(a);
+        if (!interleaveRan) {
+          interleaveRan = true;
+          redriveResult = await redrive(c, ROUTER_CONSUMER, lowEvent.id);
+          lowTask = await materializeHeldRowForEvent(lowEvent.id);
+        }
+      },
+    }),
+  );
+
+  assert.equal(interleaveRan, true, "mandatory: the interleave actually fired mid-cycle, not before or after runWakeEngineCycle");
+  assert.ok(redriveResult && redriveResult.resolved === true && redriveResult.wakeBound === true, "mandatory: the interleaved redrive genuinely minted a wake-bound intent");
+  assert.ok(lowTask, "mandatory: the interleaved drain materialized a genuinely held row");
+
+  const highRow = await rig.readTask(highTask);
+  assert.equal(highRow.status, "running", "MUST A (i): the higher-seq row still claims and dispatches normally");
+
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(
+    cp && Number(cp.last_seq) < lowSeq,
+    `MUST A (i): THE CORE ASSERTION — the SAME cycle's own trailing coalesce must not silently re-raise the checkpoint past the mid-cycle rewind; got last_seq=${cp && cp.last_seq}, must stay below ${lowSeq}`,
+  );
+
+  // Prove the row is EVENTUALLY dispatched, not merely that the checkpoint number looks right.
+  const enqueued2 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+  const lowRow = await rig.readTask(lowTask);
+  assert.equal(lowRow.status, "running", "MUST A (i): the low-seq row is EVENTUALLY dispatched on the very next cycle — never permanently stranded by the trailing-coalesce erasure");
+  assert.equal(enqueued2.length, 1);
+  assert.equal(enqueued2[0][1], lowTask);
+});
+
+test("MUST A (round-8) cell (ii): the CLAIMED-ROW-ADVANCE erasure — a redrive+drain landing between two claims in the SAME batch must not let the LATER claim's own advance (still carrying the pre-rewind cursor) re-raise the checkpoint", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_r8ii_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_r8ii");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // The low-seq event, resolved dead-letter, exactly as cell (i).
+  const lowEvent = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  const lowSeq = Number(lowEvent.seq);
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status, resolved_at)
+       values ('router',$1,$2,$3,$4,'MUST-A round-8 (ii) battery: simulated already-resolved dead-letter','resolved',now())`,
+    [lowEvent.id, w.firm, lowSeq, WAKE_EVENT_TYPE],
+  );
+
+  // THREE claimable held rows at ascending higher seqs (the coordinator's own trace: 200/210/220
+  // — reproduced with three genuinely distinct rows here, not two, to match it exactly). All
+  // three must land in the SAME batch read (well under batchSize) so the SAME `rows` for-loop
+  // processes claim(A) -> [interleave] -> claim(B) -> claim(C) without ever returning to the
+  // caller between them.
+  const mkHigh = async () => {
+    const intent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+    const seq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [intent.intentId])).rows[0].event_seq);
+    const taskId = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intent.intentId])).rows[0].id;
+    await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [intent.intentId]);
+    await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intent.intentId, randomUUID()]);
+    return { seq, taskId };
+  };
+  const rowA = await mkHigh();
+  const rowB = await mkHigh();
+  const rowC = await mkHigh();
+  assert.ok(rowA.seq < rowB.seq && rowB.seq < rowC.seq, "mandatory setup: three genuinely ascending claimable rows");
+  assert.ok(lowSeq < rowA.seq, "mandatory setup: the dead-letter's own seq is genuinely lower than every claimable row");
+
+  // round-8 debugging note (see cell (i)'s own identical note): seed the router checkpoint
+  // comfortably ABOVE head, never AT it — bound-1 in safeCoalesceBound is the raw router
+  // checkpoint value, and pinning it exactly at head can coincidentally cap `target` at the last
+  // claimed row's own seq for reasons that have nothing to do with THIS cell's own mechanism,
+  // masking the erasure this cell exists to exercise.
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head + 1000],
+  );
+
+  const enqueued = [];
+  let interleaveRan = false;
+  let lowTask = null;
+  let redriveResult = null;
+  await rig.asRuntime((c) =>
+    runWakeEngineCycle(c, {
+      onlyFirm: w.firm,
+      log: () => {},
+      // THE INTERLEAVE: fires after row A's own claim (and its own advanceCheckpointIfClear call
+      // — cp now at rowA.seq, the in-memory cursor now rowA.seq too) but strictly BEFORE row B's
+      // own claim/advance runs — the for-loop is mid-iteration, has not reached the trailing
+      // coalesce at all. Row B's (and row C's) own advanceCheckpointIfClear call is what MUST
+      // re-derive the floor instead of trusting the stale rowA.seq cursor.
+      enqueue: async (...a) => {
+        enqueued.push(a);
+        if (!interleaveRan) {
+          interleaveRan = true;
+          redriveResult = await redrive(c, ROUTER_CONSUMER, lowEvent.id);
+          lowTask = await materializeHeldRowForEvent(lowEvent.id);
+        }
+      },
+    }),
+  );
+
+  assert.equal(interleaveRan, true, "mandatory: the interleave fired between row A's own claim and row B's, not at the trailing coalesce");
+  assert.ok(redriveResult && redriveResult.resolved === true && redriveResult.wakeBound === true, "mandatory: the interleaved redrive genuinely minted a wake-bound intent");
+  assert.ok(lowTask, "mandatory: the interleaved drain materialized a genuinely held row");
+  assert.equal(enqueued.length, 3, "mandatory: all three rows (A, B, C) were claimed in this SAME batch/cycle — the interleave landed mid-batch, not degenerated to a second cycle");
+
+  for (const row of [rowA, rowB, rowC]) {
+    const r = await rig.readTask(row.taskId);
+    assert.equal(r.status, "running", `MUST A (ii): row at seq=${row.seq} still claims and dispatches normally regardless of the checkpoint staying conservative`);
+  }
+
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(
+    cp && Number(cp.last_seq) < lowSeq,
+    `MUST A (ii): THE CORE ASSERTION — row B's (and row C's) own advance, carrying the PRE-rewind cursor from row A's claim, must not silently re-raise the checkpoint past the mid-batch rewind; got last_seq=${cp && cp.last_seq}, must stay below ${lowSeq}`,
+  );
+
+  const enqueued2 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+  const lowRow = await rig.readTask(lowTask);
+  assert.equal(lowRow.status, "running", "MUST A (ii): the low-seq row is EVENTUALLY dispatched on the very next cycle — never permanently stranded by the claimed-row-advance erasure");
+  assert.equal(enqueued2.length, 1);
+  assert.equal(enqueued2[0][1], lowTask);
+});
+
+// =====================================================================================
 // M2 (Codex review) — the kill switch used a STALE per-cycle snapshot: loadEnabledSources runs
 // ONCE at the top of runWakeEngineCycle, so a set_wake_source_enabled(false) call landing
 // mid-cycle used to keep claiming the REST of an already-in-flight batch against the stale

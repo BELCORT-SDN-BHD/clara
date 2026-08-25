@@ -546,7 +546,50 @@ function checkRegistryExportsClosedWorld(headSrc, parsedIn, label) {
       continue;
     }
     const b = bindings.get(item.local);
-    if (!b || !resolvesInsideWorkflowsDir(b.source)) {
+    if (!b) {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` does not name a binding imported from a path that resolves inside ${WORKFLOWS_DIR}/ — registry.ts's closed world admits only \`workflows\`/\`workflowsByName\`, a SAFE_WORKFLOWS_DERIVATIONS-shaped const, or a bare re-export of an actually-imported workflow file IN THIS DIRECTORY; a freshly-declared local, a non-relative (package) import, or a relative import that escapes ${WORKFLOWS_DIR}/ (round-6, Codex probe 3 — relativity alone is not target verification) is REJECTED on sight (fail-closed).`,
+      );
+      continue;
+    }
+    // round-8 (native adversarial leg, MUST B) — the UNALIASED rule above ("the exported name
+    // equals the imported local name") only ever pinned the EXPORT-SIDE half of the identity: it
+    // never checked what the SOURCE MODULE itself calls the thing. An import-side alias
+    // (`import { real as alias } from "./real.js";` then a perfectly plain, unaliased
+    // `export { alias };`) sails straight through both checks — item.local === item.exported
+    // (satisfies the export-side rule above) and b.source resolves inside workflows/ (satisfies
+    // the directory check below) — while registry.ts's own export surface now offers a name
+    // ("alias") that is NOT what the frozen file actually calls its own export ("real"),
+    // defeating constraint-9's honest-naming census exactly the way an export-side alias would.
+    // Fix: pin the IMPORTED name too, not just the local one — `b.imported` (round-6's own
+    // parseImportBindingsAst already resolves it: the real export name for a named import, "*"
+    // for a namespace import, "default" for a default import) must equal `item.exported`
+    // EXACTLY. A namespace import used as a bare re-export target reaches the same unbounded,
+    // unverifiable-by-shape territory `export * as ns from "..."` is already rejected for
+    // unconditionally on the export side (this module's own header) — rejected here the same way,
+    // never inspected member-by-member. A default import re-exported as a NAMED export is
+    // rejected too: registry.ts's own real pattern is always a named `export const chatTurn_vN`
+    // in the source file, never a default export, so accepting one here would admit a shape the
+    // real workflow files never actually use.
+    if (b.imported === "*") {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` names a binding imported as a NAMESPACE (\`import * as ${item.local}\`) — an unbounded, unverifiable-by-shape import, rejected unconditionally, exactly like \`export * as ns from "..."\` already is on the export side.`,
+      );
+      continue;
+    }
+    if (b.imported === "default") {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` names a binding imported as a DEFAULT import — registry.ts's own real pattern is always a named export in the source file; a default import re-exported as a named one is REJECTED on sight.`,
+      );
+      continue;
+    }
+    if (b.imported !== item.exported) {
+      violations.push(
+        `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` imports a binding the SOURCE MODULE itself calls "${b.imported}" (\`import { ${b.imported} as ${item.local} } from "${b.source}"\`) — an IMPORT-SIDE alias is exactly as unverifiable as an export-side one (both make the exported name diverge from the frozen file's own name for the thing): re-export under the name the source module actually uses, or not at all.`,
+      );
+      continue;
+    }
+    if (!resolvesInsideWorkflowsDir(b.source)) {
       violations.push(
         `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${item.exported} }\` does not name a binding imported from a path that resolves inside ${WORKFLOWS_DIR}/ — registry.ts's closed world admits only \`workflows\`/\`workflowsByName\`, a SAFE_WORKFLOWS_DERIVATIONS-shaped const, or a bare re-export of an actually-imported workflow file IN THIS DIRECTORY; a freshly-declared local, a non-relative (package) import, or a relative import that escapes ${WORKFLOWS_DIR}/ (round-6, Codex probe 3 — relativity alone is not target verification) is REJECTED on sight (fail-closed).`,
       );

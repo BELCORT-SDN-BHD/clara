@@ -1,0 +1,17 @@
+// Fixture: round-8 (native adversarial leg, MUST B, P-F) — a COMBINED default+named import in
+// ONE statement (`import DefaultThing, { closeExampleV1 } from "...";`), where the named half is
+// perfectly legitimate (closeExampleV1 stays bound inside `workflows`) but the DEFAULT half is
+// the one bare-re-exported. Proves parseImportBindingsAst registers BOTH bindings from a single
+// combined import declaration correctly, and that the default-import rejection fires regardless
+// of a co-located legitimate named import smuggling nothing itself. Must REJECT
+// (REGISTRY-EXPORTS-CLOSED-WORLD) for DefaultThing specifically.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import DefaultThing, { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { DefaultThing };

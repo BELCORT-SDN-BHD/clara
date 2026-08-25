@@ -180,6 +180,18 @@ export async function loadEnabledSources(client) {
 // (survives the caller's rollback), mirroring autodraft.mjs's recordAutodraftDeadLetter.
 // ---------------------------------------------------------------------------
 
+// round-8 (Rider E, native adversarial leg) — attempt_count is an UNBOUNDED counter by design,
+// judged acceptable rather than capped: a row already poison-skip-exhausted (attempts >=
+// maxAttempts, once) sits BELOW the checkpoint from that point on, so readHeldWakeRows' own
+// `event_seq > lastSeq` gate should never surface it again for a fresh claim attempt under
+// ordinary operation — a re-bump past the cap can only happen if something external re-exposes
+// the row (an operator's own manual redrive-equivalent, or a checkpoint rewound back below it for
+// an unrelated reason), and every such re-bump is read the SAME way regardless of its exact
+// value: `attempts >= source.maxAttempts` is a one-way comparison, never an index or a resource
+// bound, so a count of 5000 exhausts exactly as loudly as a count of 6 — the inflation is inert,
+// visible in the row's own history (a real diagnostic signal an operator can read), never a
+// correctness or security hazard. Bounding it would trade a harmless, honest count for a
+// silently-clamped one; left unbounded on purpose.
 async function recordEventDeadLetter(client, { eventId, reason }) {
   await client.query("begin");
   try {
@@ -528,28 +540,66 @@ const NO_SEQ_CAP = Number.MAX_SAFE_INTEGER;
  *  taxonomy covers it, and by then the checkpoint this function wrote has already sailed past it,
  *  with nothing left in relay_dead_letters for bound-3 to see (the row converted into a
  *  wake_intent, a different table entirely) — "bound-3 picks it up on the very NEXT cycle" was
- *  false; there is no dead-letter left for it to pick up. THE ACTUAL FIX lives in redrive() now,
- *  not here: under the SAME `wake_coalesce:<firmId>` lock this function takes, redrive() rewinds
- *  the wake_engine checkpoint (a DIRECT, non-greatest() write) whenever it mints an intent at or
- *  below the firm's current checkpoint — see redrive()'s own header in relay.mjs. This function's
- *  own comment here is corrected, not because this function changed, but because the ORIGINAL
- *  claim was never true and must not be re-asserted in a future commit message either.
- *  Returns the seq actually reached (unchanged from priorSeq if nothing was safe to advance). */
+ *  false; there is no dead-letter left for it to pick up. redrive() closes THAT (relay.mjs's own
+ *  header), rewinding the checkpoint (a DIRECT, non-greatest() write) whenever it mints an intent
+ *  at or below the firm's current checkpoint, under this SAME lock.
+ *
+ *  round-8 (BOTH review legs, independently constructed, MUST A) — round-7's own closing claim
+ *  here ("the actual fix lives in redrive() now, not here") was ITSELF not durable, and is
+ *  deleted rather than repeated: redrive()'s rewind writes the checkpoint DIRECTLY, but this
+ *  function's own CALLER (runWakeEngineCycle/processWakeOutboxFirm) carries `priorSeq` as an
+ *  IN-MEMORY cursor across an entire cycle — potentially many calls to THIS function, batch after
+ *  batch, round after round — with the advisory lock released BETWEEN each one. A redrive() can
+ *  rewind the persisted checkpoint in exactly that gap; the next call still passes the OLD
+ *  (too-high) `priorSeq`, this function's own hasHiddenHeldRow window would start from that stale
+ *  floor and miss the newly-materialized held row sitting BELOW it entirely, and writeCheckpoint's
+ *  own greatest() semantics would silently RE-RAISE the checkpoint straight back past the rewind
+ *  — erasing it. Two concrete interleaves reproduce it (both celled below): the TRAILING coalesce
+ *  at the end of a batch (a redrive+drain landing between this firm's discoverWork-time cursor and
+ *  its own end-of-batch coalesceIfSafe call), and a LATER claimed row's own advance within the
+ *  SAME batch (claim row A raises the checkpoint; redrive rewinds it; claim row B's own advance
+ *  call still carries the pre-rewind cursor as `priorSeq`). ONE mechanism closes both, because
+ *  both interleaves reach this exact function through the exact same `priorSeq` parameter: RE-READ
+ *  the LIVE checkpoint under the lock this function already holds, on EVERY call, and use
+ *  `effectivePrior = min(priorSeq, liveCp)` everywhere `priorSeq` used to appear — including the
+ *  RETURN value when this call cannot advance, so the caller's own in-memory cursor SELF-CORRECTS
+ *  downward instead of staying stale for the rest of the cycle (every call site already threads
+ *  the return value straight back into the variable it next passes as `priorSeq` — correcting it
+ *  here is correcting it everywhere, with no other call-site changes needed). A live value below
+ *  `priorSeq` can only mean a legitimate rewind landed: this consumer's checkpoint has exactly two
+ *  writers, this function and redrive(), and both serialize on the identical
+ *  `wake_coalesce:<firmId>` lock — a live value AT OR ABOVE `priorSeq` means nothing changed, and
+ *  `effectivePrior` collapses to plain `priorSeq` exactly as before. The `seq <= priorSeq` fast
+ *  exit that used to run BEFORE the lock was ever acquired is gone for the same reason: it could
+ *  return a stale, un-rederived `priorSeq` without ever consulting the live row, even though the
+ *  bulk of this function's own protection lives inside the lock — the equivalent short-circuit
+ *  now runs AFTER the live re-read, gated on the corrected `effectivePrior`, never the raw input.
+ *  Returns the seq actually reached, or the CORRECTED effective prior (never blindly the caller's
+ *  own stale input) when nothing was safe to advance. */
 async function advanceCheckpointIfClear(client, { firmId, priorSeq, seq = NO_SEQ_CAP, excludeTaskId = null }) {
-  if (seq <= priorSeq) return priorSeq;
   await client.query("begin");
   try {
     await client.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_coalesce:${firmId}`]);
+    const liveRow = await client.query(
+      "select last_seq from clara.relay_checkpoints where consumer = $1 and firm_id = $2",
+      [WAKE_ENGINE_CONSUMER, firmId],
+    );
+    const liveCp = liveRow.rowCount > 0 ? Number(liveRow.rows[0].last_seq) : 0;
+    const effectivePrior = Math.min(priorSeq, liveCp);
+    if (seq <= effectivePrior) {
+      await client.query("commit");
+      return effectivePrior;
+    }
     const safeBound = await safeCoalesceBound(client, firmId);
     const target = Math.min(seq, safeBound);
-    if (target <= priorSeq) {
+    if (target <= effectivePrior) {
       await client.query("commit");
-      return priorSeq;
+      return effectivePrior;
     }
-    const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: priorSeq, toSeqInclusive: target, excludeTaskId });
+    const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: effectivePrior, toSeqInclusive: target, excludeTaskId });
     if (hidden) {
       await client.query("commit");
-      return priorSeq;
+      return effectivePrior;
     }
     await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: target });
     await client.query("commit");

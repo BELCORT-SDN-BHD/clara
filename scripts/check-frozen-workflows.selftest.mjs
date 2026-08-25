@@ -220,6 +220,34 @@ testCase("round-7 D4: the same decoy inside an Error() diagnostic message string
   expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-error-message.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
 });
 
+// round-8 (native adversarial leg, MUST B) — round-7 pinned the EXPORT side's identity
+// (`item.aliased`) but never checked what the SOURCE MODULE calls the thing being re-exported —
+// an import-side alias, a namespace import, or a default import all sail through a perfectly
+// plain `export { x };`. P-A..P-F, the six proof shapes the leg named.
+testCase("round-8 P-A: import-side alias of a foreign binding (`import { real as alias }` then `export { alias }`) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-a.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-D: import-side alias of a REAL frozen export renamed to impersonate another version (chatTurn_v13 as chatTurn_v14) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-d.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-B: namespace import (`import * as X`) then `export { X }` -> REJECT, the direct asymmetry with round-6's unconditional `export * as ns` rejection (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-b.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-C: default import bare-re-exported as a named export -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-c.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-F: combined default+named import in one statement, the DEFAULT half smuggled out -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-f.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-8 P-E (lowest severity, typecheck backstops): two imports claim the same local name, the SAFE unaliased one last -> OK, last-write-wins lands on the safe binding (never a false reject on a shape tsc itself would refuse to compile)", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-import-alias-p-e.ts.txt")));
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 

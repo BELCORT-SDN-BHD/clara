@@ -246,14 +246,20 @@ export async function discoverWork(client, { consumer = CONSUMER, onlyFirm = nul
  * event_seq, event_type from domain_events(event_id) and validates the triple
  * (C6). ON CONFLICT (event_id) DO NOTHING ⇒ at-least-once delivery collapses to
  * exactly one row.
+ * round-8 (SHOULD C) — returns whether THIS call actually inserted a row (vs. a no-op replay
+ * hitting the ON CONFLICT arm), so a caller that only owes work on a REAL insert (redrive()'s
+ * own checkpoint rewind) can tell an idempotent re-redrive of an already-drained event apart
+ * from a genuine first mint.
+ * @returns {Promise<boolean>} true iff this call's own INSERT actually landed a new row.
  */
 export async function insertWakeIntent(client, { eventId, decision, version }) {
-  await client.query(
+  const r = await client.query(
     `insert into clara.wake_intents (event_id, decision, taxonomy_version)
        values ($1, $2, $3)
      on conflict (event_id) do nothing`,
     [eventId, decision, version],
   );
+  return r.rowCount > 0;
 }
 
 /**
@@ -524,7 +530,13 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
       return { resolved: false, reason: "still-uncovered" };
     }
     if (isWakeBound(decision)) {
-      await insertWakeIntent(client, { eventId, decision, version: taxonomy.version });
+      // round-8 (SHOULD C) — insertWakeIntent now REPORTS whether it actually inserted (vs. an
+      // idempotent re-redrive of an already-drained event hitting its own ON CONFLICT DO NOTHING
+      // arm). The rewind below only matters the instant a NEW intent is born below the checkpoint
+      // — an already-existing intent changes nothing about what is or is not visible, so gating on
+      // a real insert turns a harmless-but-pointless rescan (every re-redrive of a settled event,
+      // forever) into nothing at all.
+      const minted = await insertWakeIntent(client, { eventId, decision, version: taxonomy.version });
       // round-7 (native adversarial leg, MUST #1) — see this function's own header comment above
       // for the full "no race needed" hazard. A wake-bound intent now exists at `eventSeq`; if
       // the WAKE ENGINE's own checkpoint for this firm is already AT OR PAST that seq (legitimate
@@ -538,20 +550,22 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
       // row is advanceCheckpointIfClear (wake-engine.mjs), which takes this identical
       // `wake_coalesce:<firmId>` lock before its own read-then-write, so no writer can race this
       // read-then-write either.
-      const wakeCp = await client.query(
-        "select last_seq from clara.relay_checkpoints where consumer = $1 and firm_id = $2",
-        [WAKE_ENGINE_CONSUMER, firmId],
-      );
-      if (wakeCp.rowCount > 0 && Number(wakeCp.rows[0].last_seq) >= eventSeq) {
-        await client.query(
-          `update clara.relay_checkpoints set last_seq = $1, updated_at = now()
-             where consumer = $2 and firm_id = $3`,
-          [eventSeq - 1, WAKE_ENGINE_CONSUMER, firmId],
+      if (minted) {
+        const wakeCp = await client.query(
+          "select last_seq from clara.relay_checkpoints where consumer = $1 and firm_id = $2",
+          [WAKE_ENGINE_CONSUMER, firmId],
         );
-        log(
-          `[relay] redrive: event ${eventId} minted a wake intent at seq=${eventSeq}, at/behind the ` +
-            `wake_engine checkpoint (was ${wakeCp.rows[0].last_seq}) — rewound to ${eventSeq - 1}`,
-        );
+        if (wakeCp.rowCount > 0 && Number(wakeCp.rows[0].last_seq) >= eventSeq) {
+          await client.query(
+            `update clara.relay_checkpoints set last_seq = $1, updated_at = now()
+               where consumer = $2 and firm_id = $3`,
+            [eventSeq - 1, WAKE_ENGINE_CONSUMER, firmId],
+          );
+          log(
+            `[relay] redrive: event ${eventId} minted a wake intent at seq=${eventSeq}, at/behind the ` +
+              `wake_engine checkpoint (was ${wakeCp.rows[0].last_seq}) — rewound to ${eventSeq - 1}`,
+          );
+        }
       }
     }
     await client.query(

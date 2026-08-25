@@ -171,12 +171,21 @@ export async function checkReadiness() {
             const weLag = Number(weh.lag ?? 0);
             const weHeld = Number(weh.heldForDisabledSource ?? 0);
             const weCancelStuck = Number(weh.cancelRequestedStuck ?? 0);
+            // round-8 (SHOULD D, native adversarial leg) — wakeEngineHealth computed this counter
+            // (round-7's own defense-in-depth for the checkpoint-durability hole family) but
+            // nothing surfaced it: every sibling signal above gets a WARN line, this one alone sat
+            // inert, so its own docstring's "surfaces on /ready" claim was false as shipped —
+            // wired the same way the four siblings already are, so a FUTURE hole of this exact
+            // shape is loud on /ready instead of silent, which is the entire reason the counter
+            // exists in the first place.
+            const weBelowCp = Number(weh.heldBelowCheckpoint ?? 0);
             if (weDead > 0) warnings.push(`${weDead} wake-engine dead-letter(s)`);
             if (weLag > 1000) warnings.push(`wake-engine lag ${weLag}`);
             if (weHeld > 0) warnings.push(`${weHeld} held/queued wake-engine row(s) awaiting a disabled/unregistered source`);
             // NOTE-b (opus, round-4 review): surface an accumulating cancel_requested stall the
             // same way every other wake-engine signal above is surfaced — a WARN, not silence.
             if (weCancelStuck > 0) warnings.push(`${weCancelStuck} wake-engine row(s) stuck in cancel_requested`);
+            if (weBelowCp > 0) warnings.push(`${weBelowCp} held wake-engine row(s) sitting AT OR BELOW their firm's own checkpoint (stranded — never re-scanned)`);
           } catch (err) {
             warnings.push(`wake_engine_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
