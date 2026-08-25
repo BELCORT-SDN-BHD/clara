@@ -8,6 +8,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   witnessPromptHash as v2PromptHash,
@@ -35,6 +37,7 @@ import { witnessTextCoverage, witnessVisionCoverage } from "../workflows/witness
 
 const CHANNELS = [["text", WITNESS_TEXT_SYSTEM_PROMPT], ["vision", WITNESS_VISION_SYSTEM_PROMPT]];
 const flat = (s) => s.replace(/\s+/g, " ");
+const SRC = (name) => readFileSync(fileURLToPath(new URL(`../workflows/${name}`, import.meta.url)), "utf8");
 
 // ======================================================================================
 // Fix 1 — the MYR currency-code carve-out.
@@ -174,6 +177,30 @@ test("v3 both prompt hashes moved off v2's, remain distinct from each other, and
   assert.notEqual(v, v2Vision);
   assert.notEqual(t, v, "equal prompt hashes make persist_witness_facts refuse the pair (0095 §5)");
   assert.equal(witnessPromptHash("text"), t, "stable across calls — it identifies the PROMPT version, not the document");
+});
+
+// ======================================================================================
+// The wiring: v3 deliberately reuses v2's services global — pinned mechanically, because
+// f-a2-witness-v2-envelope.test.mjs's own wiring cell is the ONLY mechanical guarantee that
+// startWorld injects __claraWitnessFactsServicesV2, and it is v2-NAMED: v2's eventual retirement
+// (dropping that test file with it) would silently strand v3's runtime dependency, a break that
+// would surface in production rather than CI. This cell is v3's OWN pin, independent of v2's.
+// ======================================================================================
+
+test("v3 reads v2's OWN services global — no new global is minted, and startWorld still injects it", () => {
+  const startWorld = readFileSync(fileURLToPath(new URL("../plugins/startWorld.ts", import.meta.url)), "utf8");
+  assert.match(startWorld, /__claraWitnessFactsServicesV2 = makeWitnessFactsServicesV2\(\)/,
+    "the ONE global v3 depends on at runtime — if a future edit drops this injection line, v3's " +
+    "services() throws 'not injected' on every claimed task, and this cell must fail FIRST, not " +
+    "the on-call rotation");
+  assert.match(SRC("witnessFacts.v3.impl.ts"), /\}\)\.__claraWitnessFactsServicesV2;/,
+    "v3's own impl reads v2's slot BY NAME — this is the deliberate reuse, not an accident");
+  assert.ok(!/\}\)\.__claraWitnessFactsServicesV3\b/.test(SRC("witnessFacts.v3.impl.ts")),
+    "no CODE actually reads a v3-named global — a bare substring check would false-positive on " +
+    "this file's own header prose (which names __claraWitnessFactsServicesV3 to explain why it " +
+    "does NOT exist), so this matches the real property-access SHAPE instead. If one is ever " +
+    "minted (a future version that widens the wire schema), THIS assertion is the one that must " +
+    "be updated, on purpose");
 });
 
 test("v3 the user prompts still count three reference answers, and the fence defence is intact", () => {
