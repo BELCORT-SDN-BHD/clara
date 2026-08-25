@@ -46,43 +46,69 @@
 -- =====================================================================================
 -- SS0 PRESTATE -- every claim this file makes about what it is editing, MEASURED.
 -- =====================================================================================
+
+-- THE ELEVEN DROP TARGETS' PROSRC SHA-256 PINS (the F-A1 pre-quiesce tripwire, PR-1a's own
+-- idiom: 0119 lines 143-184). Measured on a rig at the pre-drop frontier (0127) by holding
+-- this file out of CLARA_MIGRATIONS_DIR, resetting, migrating to 127, and reading
+-- sha256(prosrc) for each exact signature -- never taken from any file's text, because these
+-- eleven bodies are the bank-rules machine and (0119's own note applies here too) are spliced
+-- across generations and readable from no file. This is D1 evidentiary, not behavioural: DROP
+-- does not run the body, so a mismatch cannot corrupt data -- it means "the ceremony is not
+-- looking at the tip this file was authored and reviewed against", which is reason enough to
+-- stop before recording an inventory that would then be wrong.
+create temp table fa3pr3_drop_targets (
+  sig text primary key, sha text not null
+) on commit drop;
+
+insert into fa3pr3_drop_targets (sig, sha) values
+ ('clara.propose_bank_rule(uuid,text,jsonb,jsonb,text)',
+  '9f0c14671151d8c746f9ecc2ca27b114419e4b375019bb1dce066fabd7f5bf53'),
+ ('clara.sign_bank_rule(uuid,text)',
+  '8a04c963fb5017c43abcf3abbdd913b1f993d4db32fe10601dd054b7cce64aa8'),
+ ('clara.retire_bank_rule(uuid,text,text)',
+  'a746f2a850b805460842bfda2af6d8346a1906bd1449e1c86611ca8104aa264d'),
+ ('clara.accept_bank_rule_suggestion(uuid,uuid,uuid,text)',
+  'aa93528450b4af2c05e2a1689b4961c72a7f825b14aca5e47601bd5e8d13941e'),
+ ('clara._bank_rule_sightings(uuid,text,jsonb)',
+  'b4542a82f2da89d5aefdd46b6dbd39dce6c8ee7f2d9fcff53b66c785da47cd58'),
+ ('clara._bank_rule_pattern_norm(jsonb)',
+  '4f1791f3d4421ff3dc3bd00486406e0d6dd30ade87becf18988b4e385da08aad'),
+ ('clara.list_bank_rule_candidates(uuid)',
+  'db0ff3dccff652e9d0d718f227945221d986faab792735988bb4ae038206b712'),
+ ('clara.list_bank_rules(uuid)',
+  '3230a50162935e28ffee0265649189f7b91ae93d7c83e2f1d712c46a6cb55dc2'),
+ ('clara.list_bank_line_suggestions(uuid)',
+  '76755e32f9b7ea67cd8cfaca2afa8776d06111c2f2319d65614d364131341bfa'),
+ ('clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,uuid)',
+  'f96669e6982c51c83968c77d184f64e6131726d0e6d8d2a794e4c4a24b0585be'),
+ ('clara.settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,text,uuid)',
+  '4e2698bb5f5e79c3b21236fcc5708f28b2524128570a8f48f1b6d1a39c8f8735');
+
 do $fa3pr3_pre$
 declare
-  v_n int; v_oid oid;
+  v_n int; v_oid oid; t record; v_src text; v_sha text; v_pinned int := 0;
 begin
-  -- (a) THE ELEVEN DROP TARGETS RESOLVE, at their exact signatures, and are NOT already gone.
-  if to_regprocedure('clara.propose_bank_rule(uuid,text,jsonb,jsonb,text)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.propose_bank_rule/5 does not resolve' using errcode='CLR10';
+  -- (a) THE ELEVEN DROP TARGETS RESOLVE, at their exact signatures, are NOT already gone, and
+  -- their live prosrc matches the sha256 pinned above -- the D1 write-quiesce inventory this
+  -- file's header promises, proven rather than asserted.
+  if (select count(*)::int from fa3pr3_drop_targets) <> 11 then
+    raise exception 'F-A3 PR-3 prestate: the drop-target roster is not the ELEVEN Annex I names' using errcode='CLR10';
   end if;
-  if to_regprocedure('clara.sign_bank_rule(uuid,text)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.sign_bank_rule/2 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.retire_bank_rule(uuid,text,text)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.retire_bank_rule/3 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.accept_bank_rule_suggestion(uuid,uuid,uuid,text)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.accept_bank_rule_suggestion/4 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara._bank_rule_sightings(uuid,text,jsonb)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara._bank_rule_sightings/3 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara._bank_rule_pattern_norm(jsonb)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara._bank_rule_pattern_norm/1 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.list_bank_rule_candidates(uuid)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.list_bank_rule_candidates/1 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.list_bank_rules(uuid)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.list_bank_rules/1 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.list_bank_line_suggestions(uuid)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.list_bank_line_suggestions/1 does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,uuid)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.match_bank_line/7 (the rule arity) does not resolve' using errcode='CLR10';
-  end if;
-  if to_regprocedure('clara.settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,text,uuid)') is null then
-    raise exception 'F-A3 PR-3 prestate: clara.settle_from_bank_line/13 (the rule arity) does not resolve' using errcode='CLR10';
+  for t in select * from fa3pr3_drop_targets order by sig loop
+    v_oid := to_regprocedure(t.sig);
+    if v_oid is null then
+      raise exception 'F-A3 PR-3 prestate: % does not resolve', t.sig using errcode='CLR10';
+    end if;
+    select p.prosrc into v_src from pg_proc p where p.oid = v_oid;
+    v_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
+    if v_sha <> t.sha then
+      raise exception 'F-A3 PR-3 prestate: % prosrc sha256 mismatch (got %, expected %) -- this is NOT the body this drop inventory was authored and reviewed against. STOP the ceremony; re-derive the tip on a rig and re-pin before re-cutting',
+        t.sig, v_sha, t.sha using errcode='CLR10';
+    end if;
+    v_pinned := v_pinned + 1;
+  end loop;
+  if v_pinned <> 11 then
+    raise exception 'F-A3 PR-3 prestate: only % of 11 drop targets were sha-pinned', v_pinned using errcode='CLR10';
   end if;
 
   -- (b) THE FIVE KEEP TARGETS ARE LIVE (so this file's comments about them are not describing
@@ -140,7 +166,49 @@ begin
     raise exception 'F-A3 PR-3 prestate: % bank wake wrapper(s) already carry an interactive_client allowlist row -- SS4 partially applied', v_n using errcode='CLR10';
   end if;
 
-  raise notice 'F-A3 PR-3 prestate: clean -- 11 drop targets resolve, 5 keep targets resolve (2 newly justified by re-measured caller census), clara._adj_on_approve still calls both, book_staff_advance_application is unextracted, every new-verb name is free, no bank wake wrapper yet carries an interactive_client row';
+  -- (g) SS3's two dependency shapes, PINNED against the live catalog rather than assumed from
+  -- authoring-time reads (PR-1b built both objects; this file is the FIRST to write a NEW
+  -- confirm door against them, so their live text is the premise the whole door stands on).
+  declare v_c text;
+  begin
+    select pg_get_constraintdef(oid) into v_c from pg_constraint
+     where conrelid = 'clara.bank_agent_proposals'::regclass and conname = 'bank_agent_proposals_kind_check';
+    if v_c is null or v_c !~ '''identifier_promotion''' then
+      raise exception 'F-A3 PR-3 prestate: bank_agent_proposals_kind_check does not admit identifier_promotion (got: %)', v_c using errcode='CLR10';
+    end if;
+    select pg_get_constraintdef(oid) into v_c from pg_constraint
+     where conrelid = 'clara.bank_agent_proposals'::regclass and conname = 'bank_agent_proposals_status_check';
+    if v_c is null or v_c !~ '''open''' or v_c !~ '''accepted''' then
+      raise exception 'F-A3 PR-3 prestate: bank_agent_proposals_status_check does not admit open/accepted (got: %)', v_c using errcode='CLR10';
+    end if;
+    -- ck_bap_terminal's own shape: status='open' <=> decided_by/decided_at both null, checked
+    -- structurally (never-open vs terminal), not by a literal 'accepted' text it does not carry.
+    select pg_get_constraintdef(oid) into v_c from pg_constraint
+     where conrelid = 'clara.bank_agent_proposals'::regclass and conname = 'ck_bap_terminal';
+    if v_c is null or v_c !~ 'decided_by IS NULL' or v_c !~ 'decided_at IS NOT NULL' then
+      raise exception 'F-A3 PR-3 prestate: ck_bap_terminal does not carry the open<=>undecided congruence shape this file writes through (got: %)', v_c using errcode='CLR10';
+    end if;
+    select pg_get_constraintdef(oid) into v_c from pg_constraint
+     where conrelid = 'clara.client_identifiers'::regclass and conname = 'client_identifiers_kind_check';
+    if v_c is null or v_c !~ '''ssm''' or v_c !~ '''tin''' then
+      raise exception 'F-A3 PR-3 prestate: client_identifiers_kind_check does not admit ssm/tin (got: %)', v_c using errcode='CLR10';
+    end if;
+    -- the columns SS3's core reads/writes by name, positively confirmed present (never assumed
+    -- from the design's own citation of PR-1b's build).
+    if to_regclass('clara.bank_agent_proposals') is null
+       or not exists (select 1 from information_schema.columns where table_schema='clara' and table_name='bank_agent_proposals' and column_name in ('subject_id','payload','client_id','firm_id','status','decided_by','decided_at','decision_note') having count(*) = 8)
+       or to_regclass('clara.client_identifiers') is null
+       or not exists (select 1 from information_schema.columns where table_schema='clara' and table_name='client_identifiers' and column_name in ('client_id','firm_id','kind','value_normalized') having count(*) = 4)
+       or to_regclass('clara.counterparties') is null
+       or not exists (select 1 from information_schema.columns where table_schema='clara' and table_name='counterparties' and column_name in ('id','firm_id','registration_normalized') having count(*) = 3) then
+      raise exception 'F-A3 PR-3 prestate: at least one column SS3 reads/writes by name is missing from bank_agent_proposals / client_identifiers / counterparties' using errcode='CLR10';
+    end if;
+    if to_regprocedure('clara.add_client_identifier(uuid,text,text,text)') is null then
+      raise exception 'F-A3 PR-3 prestate: clara.add_client_identifier/4 does not resolve -- SS3''s confirm door has no audited identifier-write door to delegate to' using errcode='CLR10';
+    end if;
+  end;
+
+  raise notice 'F-A3 PR-3 prestate: clean -- 11 drop targets resolve, 5 keep targets resolve (2 newly justified by re-measured caller census), clara._adj_on_approve still calls both, book_staff_advance_application is unextracted, every new-verb name is free, no bank wake wrapper yet carries an interactive_client row, bank_agent_proposals/client_identifiers/counterparties carry every column and CHECK SS3 depends on, and clara.add_client_identifier resolves';
 end
 $fa3pr3_pre$;
 
@@ -550,3 +618,19 @@ begin
   raise notice 'F-A3 PR-3 tail: OK -- 11 rule-machine functions dropped (match_bank_line/6 and settle_from_bank_line/12 the human arities untouched), 5 helpers kept and still resolving, bank_agent_receipts_act_kind_check widened to 14 admitted values, book_staff_advance_application factored onto the PR-1a wake shape (core ungranted, wrapper unmoved, clara_authenticated EXECUTE intact), wake_book_staff_advance_application + its agent core live and clara_wake_bank-only, confirm_bank_identifier_promotion + its core live (clara_authenticated-only / ungranted-core), interactive_client now carries the complete bank_agent allowlist roster with zero gaps. No table in workflow/graphile_worker/spike touched. D1 write-quiesce: book_staff_advance_application replaced in place per SS0''s inventory; every other body in this file is newly created, no quiesce owed.';
 end
 $fa3pr3_tail$;
+
+-- =====================================================================================
+-- SS-TAIL D1 INVENTORY -- the eleven dropped bodies, one notice per name, each carrying the
+-- exact pinned pre-drop prosrc sha256 SS0 proved it read (short form: first 12 hex chars is
+-- enough to eyeball-diff against SS0's insert; the full 64-char pin is what the prestate
+-- actually checked). This is the D1 write-quiesce record a reviewer reads, not a re-proof --
+-- SS0 already proved the pin; this just puts it in the transcript beside its signature.
+-- =====================================================================================
+do $fa3pr3_tail_d1$
+declare t record;
+begin
+  for t in select * from fa3pr3_drop_targets order by sig loop
+    raise notice 'F-A3 PR-3 D1 drop: % -- pre-drop prosrc sha256 %', t.sig, t.sha;
+  end loop;
+end
+$fa3pr3_tail_d1$;
