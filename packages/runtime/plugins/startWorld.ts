@@ -98,6 +98,8 @@ export default definePlugin(() => {
   // registry mints. Both present simultaneously, each version reading its own — the
   // __claraStatementFactsServices / __claraStatementWitnessServices precedent, unchanged.
   (globalThis as unknown as { __claraWitnessFactsServicesV2?: unknown }).__claraWitnessFactsServicesV2 = makeWitnessFactsServicesV2();
+  // debt/prompts-v3: witnessFacts_v3 reads this SAME slot (witnessFacts.v3.impl.ts's header) —
+  // it adds no answer key and no engine-id change, so no third bundle or global is minted here.
   // The MyInvois local_facts consumer reuses the document services (temp-file lifecycle +
   // canonical download); the UBL facts parse runs in its own worker thread.
   const localFactsServices = makeDocumentServices();

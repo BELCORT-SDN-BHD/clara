@@ -27,6 +27,7 @@ import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { statementFacts_v2 } from "./statementFacts.v2.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
 import { witnessFacts_v2 } from "./witnessFacts.v2.js";
+import { witnessFacts_v3 } from "./witnessFacts.v3.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
@@ -70,7 +71,16 @@ export const workflows = {
   // with the `:v2` invoice literal (0099); `statement_facts` pairs statementFacts_v2 with the
   // `:stmt-witness-v1` statement literal (0102). Neither guard can see the other's lane, so a
   // half-deployed window stalls the affected lane only — it never crosses.
-  witnessFacts: witnessFacts_v2,
+  // debt/prompts-v3: REPOINTED v2 -> v3, the NEXT-ROUND QUEUE fold (five fixes banked out of the
+  // 2026-08-21 F-A2 openers re-measure + the owner's 2026-08-24 discount-no-net ruling; full fold
+  // in witnessFacts.v3.prompts.mjs's header). UNLIKE the v1->v2 repoint above, this one adds NO
+  // answer key and widens NO wire schema, so it carries NO coupled DB migration and NO
+  // deploy-order obligation — witnessFacts.v3.impl.ts reuses v2's own injected engine snapshot
+  // unchanged (still `:v2`), so a v3 task's DB-stamped engine_id matches this image's snapshot
+  // the moment this registry entry deploys. witnessFacts_v2 stays exported and frozen (policy
+  // (c)) — the `llm_witness` lane's parks are the deployment-window kind, so a run still resuming
+  // into the frozen v2 body at cutover time is the expected case, not a corner one.
+  witnessFacts: witnessFacts_v3,
   // F-A2 (the agentic posting lane): REPOINTED v8 -> v9. Same note, same deploy order.
   autoDraft: autoDraft_v9,
   firmInterview: firmInterview_v3,
@@ -395,6 +405,11 @@ export { statementFacts_v2 };
 // the frozen v1 body at cutover time is the expected case, not a corner one; the engine resumes
 // it by run id and it must find its own body and its own `:v1` services bundle.
 export { witnessFacts_v1 };
+// debt/prompts-v3: witnessFacts_v2 stops being the `witnessFacts:` pointer and must stay EXPORTED
+// — policy (c). It reads its own dedicated `:v2` services bundle (`__claraWitnessFactsServicesV2`)
+// unchanged, and v3 reuses that SAME bundle (witnessFacts.v3.impl.ts's header) rather than
+// replacing it, so v2's own straggler runs and v3's fresh ones are served correctly side by side.
+export { witnessFacts_v2 };
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
