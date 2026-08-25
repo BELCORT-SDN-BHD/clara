@@ -46,6 +46,13 @@ is ruled; if the ruling is (a), its DB half joins PR-1b's window or takes its ow
 ride PR-2, which is runtime-only.** **F-A4 and F-A5 ride the same TA-P5 source (register A12), so
 ONE item lands the mechanism and the others extend it** (§O.4).
 
+**RULED 2026-08-25 (owner): (b).** Design of record `g1-wake-engine-design.md` (+
+`g1-wake-engine-survey.md`, `g1-wake-engine-annexes.md`); full ruling text and (a)'s overruled case
+recorded in `bank-agency-gate-record.md §6 item 1`. F-A3's PR-2 rides the engine's registry
+(annexes §A: a `wake_engine_sources` row + `bank_agent_run_due` + `clara_wake_bank_login`'s pool
+wiring, the M4 seam annexes §E now owns) rather than minting a kind — §O.2's PR-2 row below is
+unchanged in ceremony shape, only in what it contains.
+
 ### O.2 · The revised build sequence (the width ruling folded)
 
 | # | PR | contents | window |

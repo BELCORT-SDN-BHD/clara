@@ -443,7 +443,7 @@ sweep, `PG*` vars for rig runs, and the reconciler herd against two lane slots.
 | 2 | **PR-γ** — the egress train | **D1-γ** | **C6** | **law 28 cross-model, mandatory** (consent boundary + injection surface) |
 | 3 | **PR-α** — the constitutional train, TWO files | **D1-α** | the **digest sign-off** | law 1, reading ONE change; revert is one file |
 | 4 | **PR-β** — the filing verb + the `filing` kind + **π's four `wake_*` wrappers and both correction siblings** (†) | **D1-β** | α, γ, **F-A2 PR-1** | law 1 over §3.2's rungs and §3.3's riders |
-| 5 | **PR-ρ** — runtime: triage lane (D-5), classify plumbing, the kind, `matcher.mjs`'s comment | none | γ, β | bundle-grep after build (WDK lesson) |
+| 5 | **PR-ρ** — runtime: triage lane (D-5), classify plumbing, the kind, `matcher.mjs`'s comment. **Gate G1 (2026-08-25) maps this seam: rho is a CONSUMER CONFIG of `g1-wake-engine-design.md`'s engine — a registry row + `filingRuntime`'s workflow export — never its own spine consumer**; `filing`'s DB shape (`0126`) already rides `kind='wake'`, so no carrier-shape work is owed here | none | γ, β, **G1** | bundle-grep after build (WDK lesson) |
 | 6 | **PR-ε** — chat parity, as the next free `chatTurn` `_vN` | none | **F-A2 PR-2 lands `chatTurn_v13`** | registry prestate check (constraint 9) |
 | 7 | **PR-dash** · **PR-acc** (zero code) | none | ρ | re-measure as-run; the F-A10 census |
 | 8 | **F-A7b — its own item** | **D1-δ** | F-A7a's acceptance | its own design doc, seeded by annexes-2 §K |

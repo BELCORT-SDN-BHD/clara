@@ -804,9 +804,14 @@ test("pi-E1 · pi itself minted NO wake authority — any filing-kind rows, wrap
   // "pi minted nothing" is asserted as a DELTA against beta's own known, tail-census-pinned
   // footprint (0126: exactly six filing-kind allowlist rows, five wake wrappers) rather than as
   // an absolute zero — the boundary claim under test is pi's OWN scope, not beta's absence.
+  // betaLanded is gated on the CATALOG (schema_migrations, stem-keyed per wb-0020-tail's own
+  // idiom), never on the very count it then asserts — a self-referential gate would read
+  // "all rows vanished" as "beta absent" and pass either way, which proves nothing.
   const rows = await rootQuery(
     "select count(*)::int as n from clara.wake_fn_allowlist where wake_kind = 'filing'");
-  const betaLanded = rows.rows[0].n > 0;
+  const betaLanded = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations "
+    + "where version ~ '^[0-9]{4}_f_a7_beta_filing_verb$'")).rows[0].n > 0;
   assert.equal(rows.rows[0].n, betaLanded ? 6 : 0,
     "the filing kind and its rows are train beta's — zero if beta is absent, exactly beta's own "
     + "pinned six if beta has landed (0126 tail census)");
