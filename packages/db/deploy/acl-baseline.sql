@@ -37,15 +37,21 @@ select nspname, pg_get_userbyid(nspowner) as public_owner,
        pg_has_role(current_user,'pg_database_owner','USAGE') as deploy_is_dbowner_member
   from pg_namespace where nspname='public';
 \echo '--- roles that will be CONFINED (agent/wake lanes + their logins) — edit ONLY with owner sign-off ---'
+-- F-A6 PR-1 adds the freeform read lane. It is confined for the SAME reason the other read
+-- lanes are: it must reach exactly its 35 enumerated relations and nothing the public schema
+-- happens to expose. Leaving it out would have made the newest, widest-reading role the ONE
+-- lane the ACL baseline does not confine.
 select unnest(array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
-                    'clara_agent_read_login','clara_wake_write_login']) as confined_role;
+                    'clara_agent_read_login','clara_wake_write_login',
+                    'clara_freeform_ro','clara_freeform_login']) as confined_role;
 
 \echo ''
 \echo '===== EXISTENCE CHECK (fail-closed — a typo must not silently confine nothing) ====='
 do $$
 declare
   confined text[] := array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
-                           'clara_agent_read_login','clara_wake_write_login'];
+                           'clara_agent_read_login','clara_wake_write_login',
+                           'clara_freeform_ro','clara_freeform_login'];
   c text;
   missing text := '';
 begin
@@ -65,7 +71,8 @@ end $$;
 do $$
 declare
   confined text[] := array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
-                           'clara_agent_read_login','clara_wake_write_login'];
+                           'clara_agent_read_login','clara_wake_write_login',
+                           'clara_freeform_ro','clara_freeform_login'];
   rn text;
   usage_snapshot text[];
   temp_snapshot text[];
@@ -149,12 +156,14 @@ end $$;
 do $$
 declare
   confined text[] := array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
-                           'clara_agent_read_login','clara_wake_write_login'];
+                           'clara_agent_read_login','clara_wake_write_login',
+                           'clara_freeform_ro','clara_freeform_login'];
   c text;
   bad text := '';
 begin
-  -- (a) ALL FIVE confined roles must lack effective public USAGE AND effective TEMP
-  --     (Codex LOW-1: loop the whole array, not just the three group roles; assert TEMP).
+  -- (a) ALL SEVEN confined roles must lack effective public USAGE AND effective TEMP
+  --     (Codex LOW-1: loop the whole array, not just the three group roles; assert TEMP;
+  --     F-A6 PR-1 widened the array from five to seven — see the EXISTENCE/APPLY blocks).
   foreach c in array confined loop
     if has_schema_privilege(c, 'public', 'USAGE') then
       bad := bad || format('%s still has public USAGE (revoke no-oped — deploy role likely does not own public). ', c);

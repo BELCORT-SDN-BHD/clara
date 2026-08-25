@@ -555,6 +555,15 @@ const F_A3_PR3_CLOCK_NAMES_REMOVED = [
 // one-line fill instead of a re-derivation.
 const POSTING_F_A2_PR1_CLOCK_NAMES = [];
 
+// F-A6 PR-1 [`f_a6_freeform_read` at whatever number merge claimed]: re-run arm (D) against the
+// migration's own bodies (the F-A2 seat's obligation, stated in full above) — two names flag,
+// both lawful, neither a date derivation: `_freeform_settle` stamps `settled_at = now()`, the
+// same timestamptz shape as every settle stamp already rostered above; `wake_freeform_read`
+// reads `clock_timestamp()` to measure WALL-CLOCK ELAPSED TIME for the read's deadline loop
+// (design §3.3), an interval measurement that writes no date/timestamptz column. Gated on the
+// migration stem, never a number, exactly like every seat above.
+const F_A6_FREEFORM_READ_CLOCK_NAMES = ["_freeform_settle", "wake_freeform_read"];
+
 // F-A7 pi [train position 1, `f_a7_pi_additive` at whatever number merge claimed]: the firm-
 // question door's two settle verbs and the identifier-promotion card's two settle verbs each
 // stamp `settled_at = now()` — a timestamptz audit column, the same shape as
@@ -638,6 +647,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a1_statements$")) names.push(...STATEMENT_F_A1_PR4_CLOCK_NAMES);
   if (await appliedStem("f_a7_gamma_egress$")) names.push(...F_A7_GAMMA_CLOCK_NAMES);
   if (await appliedStem("f_a2_posting_core$")) names.push(...POSTING_F_A2_PR1_CLOCK_NAMES);
+  if (await appliedStem("f_a6_freeform_read$")) names.push(...F_A6_FREEFORM_READ_CLOCK_NAMES);
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
