@@ -419,3 +419,37 @@ record of their own — ADR-0072 ④ for the first, ADR-0073 for the second.*
   `witness_extraction` consents granted+activated for RS/BEE/RPR. **The F-A1 corpus measurement**
   (`docs/plan/completed/f-a1-corpus-measurement.md`) is the 0/33 baseline the re-measure reads
   against, and its live incident minted riders ③④⑤ — **all three now live-proven** (Known issues).
+
+## Backlog blocks archived 2026-08-25 (the W2/W3 close's line-budget sweep) — moved verbatim,
+## PROGRESS.md keeps compact pointers
+
+**Owner/legal (full text as of 2026-08-24):** **C6 legal pack DRAFTED + CITATION-VERIFIED
+2026-08-22** — the three documents ADR-0074/TA-P3 put ahead of F-A7's firm-level narrow purpose
+are on disk in [`docs/ops/legal/`](docs/ops/legal/) (OpenAI DPA brief · the client AI-authorization
+letter template en/ms/zh whose purpose list IS the future onboarding click-through · the PDPA
+s.129 cross-border basis memo), each carrying a DRAFT / not-legal-advice banner. **Owner items:
+NONE** — the training-share toggle was confirmed OFF by the owner 2026-08-22, the DPA
+auto-incorporates through the Business Terms (no click), and ZDR / the entity note / the
+Malaysian-lawyer pass are record-keeping or post-beta. **They gate nothing.** **The real-data
+egress gate is the CLIENT's own onboarding click (F-A7b), which is product work, not
+paperwork** · tracing stays OFF · **the OpenAI processor bundle — NON-BLOCKING by the
+2026-08-18 direct-release ruling; the DPA-first recommendation on file as dissent (F-A1 design
+§5)**, live-relevant because the witness pair ships real client documents daily · the first
+monthly LIGHT DR sitting (WB-R26) · PITR (deferred) · **WB-R22's target capability**, still the
+only route by which B3's `distinct_checker` arm gets exercised on real books · PRD §9 · the old
+SGD-document clarify.
+
+**Tooling follow-ups (full text as of 2026-08-24). RE-HOMED to the F-A2 / F-T4 fix queues by
+the 2026-08-20 audit — four items:** **(1) the ceremony DSN bridge belongs IN-REPO** (commit
+the pooler CA + a dsn-pipe successor; the 2026-08-19 ceremony ran `sslmode=no-verify` because
+the prior sessions' pinned-CA tooling was session-local and gone — the handoffs-rule failure
+shape **twice now**, and the highest-value item here: every remaining Wave-F/G ceremony walks
+it) · **(2) the wiki CoR-comment gate** · **(3) `0057` §11's writer-roster successor** ·
+**(4) `0007`'s firm-limits pseudo-upsert**. **Still unscheduled:** the dr-verify trio (UTC
+hashing · the STRICT canary probe's stale expectation · the AP-gate ILIKE example) · the
+runtime boot line should name its bundle version (the positive-read law's second leg,
+hand-assembled at four ceremonies now) · Supavisor headroom re-measure (**one item registered
+twice** — the δ residual above) · the local disposable Supabase stack · the ComplianceWatchCard
+`acknowledged_at` echo · the unreverted-admin-grant lint watch · **`0084`'s derivation tooling
+retained only at `C:\ct\`** — the machine-local-custody shape that bit the DSN bridge twice;
+worth pricing for in-repo custody.

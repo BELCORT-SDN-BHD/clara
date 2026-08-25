@@ -128,3 +128,54 @@ never `wsl --shutdown`.
   chain `rebase --continue`/push behind an unverified check.
 - **Docker hygiene is a settle obligation**: prune your rig container AND volume when your
   stage finishes (the 2026-08-24 disk-zero event was 369 orphaned volumes / 100.8 GB).
+
+## Rules minted on the 2026-08-25 W2/W3 close
+
+- **① A migration minting a NEW CLUSTER ROLE joins `packages/db/deploy/roles-bootstrap.sql`
+  SAME-COMMIT.** `pg_dump` carries no roles — a DR restore replays the migration's `GRANT`s into
+  a fresh cluster whose roles come only from the bootstrap script, so a role minted only in the
+  migration makes restore-full FAIL with `role does not exist` (found at F-A3 PR-1b's `0121`,
+  `clara_wake_bank` + `clara_wake_bank_login`). **Plain-grant mirroring must be EXACT**, not
+  restyled: PG16+ plain `GRANT` takes `INHERIT` from the member's own `rolinherit`, so writing
+  `inherit false, set true` in the bootstrap when the migration used a plain grant desyncs
+  `dr-verify` §4.5's membership differential (`(f,t,f)` restored vs `(t,t,f)` source). Same
+  family as new-grants-join-rig-meta.
+- **② The FROZEN-WINDOW law, cross-PR face: a battery that byte-pins another PR's body must
+  window the pin at the first successor CoR.** A battery written against a body at one frontier
+  can legitimately need that body to change again later (F-A3 PR-1a's `f-a3.1a-a` byte-inversion
+  cell reds the first time it runs on a chain containing `0121`, because PR-1b legitimately
+  re-CoRs 4 of PR-1a's 9 cores). The fix is stem-gated: a `SUPERSEDED_BY_<PR>` set plus a stem
+  gate turns the inversion check into a pre-successor-window claim, while presence and
+  no-`_human_ctx` checks stay un-windowed. The successor's own §0 pre-state pins are the machine
+  proof of where that boundary sits — read them, don't guess.
+- **③ The VACUOUS-RELAXATION class: a "relaxed" guard that a pre-existing CHECK already subsumes
+  is proof DELETION in disguise.** F-A7 β's first fix-round rewrite of CLR01 was judged vacuous
+  because `ck_agent_filing_receipts_filed_iff_clean` already subsumed the congruence it claimed
+  to add — the "relaxation" would have deleted the only proof of a real property, not narrowed an
+  over-broad one. The adopted fix scopes the EXISTENCE mandate to agent-sourced filings instead
+  (discriminator: `client_resolutions.evidence->>'source'`) rather than relaxing the guard's
+  reach. When a proposed fix makes a guard redundant with something already enforced, check
+  whether the guard was carrying independent weight before relaxing it.
+- **④ A wall-introducing PR's shared-fixture remedy must reach EVERY package whose fixtures walk
+  the walled path.** γ's `ensureClassifyConsent` fixture remedy landed only in
+  `packages/db/tests/rig-docs-fixtures.mjs`; `packages/runtime`'s own fixtures create NULL-kind
+  documents without the consent, so 4 runtime cells born `failed` — first surfaced on the estate
+  leg, the only place all packages meet on one chain. **A lane verification that runs one
+  package's suite is not estate verification.** Any wall-introducing PR enumerates the packages
+  whose fixtures exercise the walled path and trues them all same-branch.
+- **⑤ Closed-world censuses extend same-branch.** Four separate W2 cars re-learned this: a
+  census that enumerates a closed world (roles, event types, clock rosters, seam ledgers) must be
+  extended in the SAME migration/branch that adds the new member, never left for a later PR to
+  discover the gap (er9 R9.H3's role census missing `clara_wake_filing` was the sharpest
+  instance, caught only on the first-chain-meeting estate leg).
+- **⑥ Pattern note — candidate future mechanism.** Four of the six W2 cars (pr-1b: DR roles +
+  frozen-window · γ: cross-package fixture · β: three failure classes) needed a fix round found
+  only when their closed, individually-green ladders met each other for the first time on the
+  estate leg. Closed ladders built on stale bases prove nothing about how they behave once
+  merged together. Candidate mechanism for a future wave: a pre-merge TRAIN RIG that applies the
+  whole queued batch to one chain before car 1 merges, so this class of red surfaces before the
+  ceremony window rather than during it.
+- **⑦ `clara._tf_processing_task_update` joins the shared-surface list** beside `agent_tasks`
+  triggers (≥6 lanes CoR'd it across the W2/W3 window — read its live body via
+  `pg_get_functiondef` before authoring against it, per the shared-surfaces rule above; SendMessage
+  the surface owner first).
