@@ -94,6 +94,30 @@ Root shortcuts: `pnpm db:migrate`, `pnpm db:seed`, `pnpm db:reset`, `pnpm db:bac
 `pnpm db:backup:full`, `pnpm db:restore:full`, `pnpm db:dr:verify`. Full-profile DR
 runbook + tooling: `docs/ops/DR-full-drill.md`.
 
+**Running `test` locally also needs `CLARA_ALLOW_DESTRUCTIVE=1`.** `tests/pipeline.test.mjs`
+calls the real `seed()` (which truncates+reloads the smoke tables) as its own proof that the
+pipeline works end to end, and `lib/guard.mjs` refuses any destructive op without the sentinel
+— by design, the same wall every seed/reset/restore script carries, never weakened for a test's
+convenience. CI's `db-estate` job sets this for the WHOLE job (`.github/workflows/ci.yml`), so
+migrate, seed and test all share one env block there; a local run that exports the var for
+migrate/seed but forgets it on the `test` invocation gets a single, correctly-worded refusal
+from `pipeline.test.mjs` and nothing else. Export it once, for the whole session, before any of
+the three commands above.
+
+**Re-running `test` against the SAME already-tested database needs `CLARA_ESTATE_REUSED_DB=1`.**
+A handful of one-way evaluator-ceremony cells (`clara._tf_evaluator_deploy_once`, 0060, admits
+exactly one undeployed→deployed transition per `clara.evaluator_versions` row, EVER) prove a
+"born undeployed" precondition that a second invocation against the same database can never
+re-witness — that is the ceremony working as designed, not a defect. There is no `deployed_at`
+column to tell that apart from a fixture illegitimately flipping a row early, so reuse must be
+DECLARED, not inferred: `f-a5-reporting-agency-pr1.test.mjs` cell D hard-fails an unexplained
+already-deployed row unless this var says the reuse is deliberate. Everywhere else in this
+family the freshness check is derived (`evaluatorCeremonyUnwitnessed()`, `delta-fixtures.mjs`)
+from the exact closed-world evaluator roster `delta-contract.test.mjs` pins by name and version
+— not a blanket "any undeployed row" count, so migrating a reused database onto a NEW frontier
+that registers one more evaluator does not get misread as "fresh" (it fails closed either way,
+just loudly, rather than silently).
+
 ## The migration runner contract
 
 - Migrations apply in numeric filename order, each in its **own transaction**.

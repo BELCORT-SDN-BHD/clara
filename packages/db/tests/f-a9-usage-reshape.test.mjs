@@ -583,11 +583,26 @@ test("f-a9.leak the priced view is invoker-executed and reachable by no app role
 test("f-a9.buckets the rollup gives firm B zero of firm A's rows and keeps platform spend in its own bucket", async (t) => {
   if (gate(t)) return;
   const engine = `rig-bucket-${randomUUID().slice(0, 8)}`;
+  const when = "2026-05-15T03:00:00Z";
+
+  // BASELINE, read BEFORE this run's own fixture exists. The platform bucket is genuinely
+  // firm-less (R-L10: real spend, no tenant to own it) and scoped ONLY by calendar month -- never
+  // by any per-run identity, unlike world.firms.B (a fresh uuid every buildWorld() call). So a
+  // database this sweep has already run against carries forward every PRIOR run's own May-2026
+  // platform row, and an absolute-total assertion would double, triple... on each re-run. Proving
+  // this run's OWN insert by DELTA is the same instrument f-a9.tripwire already uses
+  // (before_/after_) -- it asserts the identical fact, just not on the false assumption that a
+  // global, never-truncated bucket starts at zero.
+  const baseline = await humanQuery(world.users.dave,
+    "select * from clara.get_llm_usage_summary($1, date '2026-05-01')", [world.firms.B]);
+  const platBefore = baseline.rows.find((x) => x.scope === "platform" && x.call_kind === "tier1_policy_fetch");
+  const spendBefore = platBefore ? Number(platBefore.spend_cents) : 0;
+  const callsBefore = platBefore ? Number(platBefore.calls) : 0;
+
   await rootQuery(
     `insert into clara.llm_price_table(engine_id, effective_from, effective_to,
        input_price_cents_per_million_tokens, output_price_cents_per_million_tokens, source_note)
      values ($1, date '2026-05-01', null, 100, 100, 'rig bucket fixture')`, [engine]);
-  const when = "2026-05-15T03:00:00Z";
   await rootQuery(
     `insert into clara.llm_usage_events(firm_id, call_kind, engine_id, outcome, input_tokens, output_tokens, created_at)
      values($1,'chat',$2,'success',1000000,1000000,$3)`, [world.firms.A, engine, when]);
@@ -607,8 +622,13 @@ test("f-a9.buckets the rollup gives firm B zero of firm A's rows and keeps platf
   assert.ok(firmRows.some((x) => x.call_kind === "reporting"), "firm B's own row is missing from its rollup");
   const plat = platformRows.find((x) => x.call_kind === "tier1_policy_fetch");
   assert.ok(plat, "the platform call vanished from the rollup — R-L10 says it is metered, not unmetered");
-  assert.equal(Number(plat.spend_cents), 200);
-  // The whole point of the split: platform spend is NOT inside any firm's figure.
+  assert.equal(Number(plat.spend_cents) - spendBefore, 200,
+    "this run's OWN platform call must add exactly 200c, regardless of any prior run's residual May-2026 platform rows");
+  assert.equal(Number(plat.calls) - callsBefore, 1,
+    "this run's OWN platform call must add exactly one call to the bucket's count");
+  // The whole point of the split: platform spend is NOT inside any firm's figure. Firm B's world
+  // is FRESH every run (buildWorld mints a new firm id), so no prior run's firm B could ever
+  // exist to pollute this sum -- an absolute total is correct here, unlike the platform bucket.
   const firmSpend = firmRows.reduce((a, x) => a + Number(x.spend_cents), 0);
   assert.equal(firmSpend, 200,
     "firm B's own figure must be its own 200c alone — a platform call billed to one tenant is a lie in a money number");
