@@ -19,6 +19,10 @@ import {
   runWakeEngineCycle, wakeEngineHealth, loadEnabledSources,
 } from "../lib/wake-engine.mjs";
 import { reconcileWakeEngineTasks } from "../lib/reconciler-wake.mjs";
+// round-7 (native adversarial leg, MUST #1) — the two new cells below need redrive() itself
+// (relay.mjs), not a raw-SQL simulation, plus its own ROUTER-side consumer name (dead-letters in
+// this battery are always keyed under 'router', matching every other cell in this file).
+import { redrive, CONSUMER as ROUTER_CONSUMER } from "../lib/relay.mjs";
 
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
@@ -91,11 +95,14 @@ after(async () => {
 // =====================================================================================
 // Health shape — mirrors autodraftHealth's own cells; extended with heldForDisabledSource.
 // =====================================================================================
-test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/heldForDisabledSource/cancelRequestedStuck", { skip: skip || skipG1 }, async () => {
+test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/heldForDisabledSource/cancelRequestedStuck/heldBelowCheckpoint", { skip: skip || skipG1 }, async () => {
   const h = await rig.asRuntime((c) => wakeEngineHealth(c));
   assert.equal(h.consumer, WAKE_ENGINE_CONSUMER);
   // NOTE-b (opus, round-4 review): cancelRequestedStuck added to this signal set.
-  for (const k of ["lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource", "cancelRequestedStuck"]) {
+  // round-7 (native adversarial leg, MUST #1): heldBelowCheckpoint added — defense-in-depth for
+  // exactly the shape of hole this round's own structural fix closes (see wakeEngineHealth's own
+  // header comment).
+  for (const k of ["lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource", "cancelRequestedStuck", "heldBelowCheckpoint"]) {
     assert.equal(typeof h[k], "number", `${k} is a number`);
     assert.ok(h[k] >= 0, `${k} is non-negative`);
   }
@@ -518,7 +525,11 @@ test("SHOULD-1: a pending router dead-letter at a LOW seq blocks the checkpoint 
   assert.equal(enqueued.length, 1);
   assert.equal(enqueued[0][1], highTask);
   const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
-  assert.ok(!cp || Number(cp.last_seq) < lowSeq, "SHOULD-1: THE CORE ASSERTION — the checkpoint must stay below the pending dead-letter's own seq, even though a HIGHER-seq row claimed successfully in the SAME cycle");
+  // round-7 NOTE rider (native adversarial leg): `!cp ||` was a vacuous escape hatch — target
+  // here is lowSeq-1, strictly greater than the priorSeq=0 this firm starts at, so a checkpoint
+  // row MUST exist by now; removing the `!cp` branch means a future regression that stopped
+  // writing the row at all would FAIL this assertion instead of passing through it unnoticed.
+  assert.ok(cp && Number(cp.last_seq) < lowSeq, "SHOULD-1: THE CORE ASSERTION — the checkpoint must stay below the pending dead-letter's own seq, even though a HIGHER-seq row claimed successfully in the SAME cycle");
 
   // Redrive the dead-letter now and prove its own (low-seq) task is still discoverable.
   await rig.rootQuery(
@@ -553,17 +564,23 @@ test("SHOULD-1: a pending router dead-letter at a LOW seq blocks the checkpoint 
 // never a sleep), flip the dead-letter resolved->pending while still holding the lock, release,
 // and prove the checkpoint that then lands stays below the dead-letter's own seq.
 // =====================================================================================
-async function waitSomeoneBlockedByOrThrow(blockerPid, { timeoutMs = 5000, intervalMs = 25, what = "the lock" } = {}) {
+// round-7 NOTE rider (native adversarial leg): the original helper counted ANY backend blocked
+// by blockerPid — sound only because nothing else concurrent happened to exist in these cells'
+// own setups, not because the check itself pinned down WHICH backend was waiting. Tightened to
+// require the SPECIFIC waiter pid (the cycle's own connection, captured before it runs) is the
+// one observed blocked — a bystander backend blocked on some unrelated lock the holder also
+// happens to carry could otherwise satisfy a bare count(*) and pass this wait vacuously.
+async function waitPidBlockedByOrThrow(waiterPid, blockerPid, { timeoutMs = 5000, intervalMs = 25, what = "the lock" } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const r = await rig.rootQuery(
-      "select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
-      [blockerPid],
+      "select count(*)::int as n from pg_stat_activity where pid = $1 and wait_event_type = 'Lock' and $2 = any(pg_blocking_pids(pid))",
+      [waiterPid, blockerPid],
     );
     if (r.rows[0].n > 0) return true;
     await new Promise((res) => setTimeout(res, intervalMs));
   }
-  throw new Error(`waitSomeoneBlockedByOrThrow: nobody observably blocked on ${what} (held by ${blockerPid}) within ${timeoutMs}ms`);
+  throw new Error(`waitPidBlockedByOrThrow: pid ${waiterPid} never observably blocked on ${what} (held by ${blockerPid}) within ${timeoutMs}ms`);
 }
 
 test("#1 (round-6, Codex): the bound-read -> checkpoint-write critical section is serialized against a concurrent dead-letter REOPEN — the checkpoint never lands on a stale pre-reopen read", { skip: skip || skipG1 }, async () => {
@@ -620,10 +637,20 @@ test("#1 (round-6, Codex): the bound-read -> checkpoint-write critical section i
   await lockIsHeld;
 
   const enqueued = [];
-  const cyclePromise = rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
+  let cyclePid;
+  let cyclePidKnown;
+  const cyclePidPromise = new Promise((resolve) => { cyclePidKnown = resolve; });
+  const cyclePromise = rig.asRuntime(async (c) => {
+    // round-7 NOTE rider: capture THIS specific connection's own backend pid before running the
+    // cycle, so the wait below can require exactly THIS pid be blocked — not "someone, somewhere".
+    cyclePid = (await c.query("select pg_backend_pid() as pid")).rows[0].pid;
+    cyclePidKnown();
+    return runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} });
+  });
+  await cyclePidPromise;
 
   try {
-    await waitSomeoneBlockedByOrThrow(holderPid, { what: "the #1 wake_coalesce advisory lock" });
+    await waitPidBlockedByOrThrow(cyclePid, holderPid, { what: "the #1 wake_coalesce advisory lock" });
   } finally {
     releaseLock();
     await holderDone;
@@ -635,10 +662,227 @@ test("#1 (round-6, Codex): the bound-read -> checkpoint-write critical section i
   assert.equal(enqueued.length, 1);
   assert.equal(enqueued[0][1], highTask);
   const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
-  assert.ok(!cp || Number(cp.last_seq) < lowSeq, "#1 (round-6): THE CORE ASSERTION — the checkpoint must stay below the reopened dead-letter's own seq; a stale pre-reopen bound read would have let it race straight to the higher row's own seq instead");
+  // round-7 NOTE rider: `!cp ||` was a vacuous escape hatch — target here is lowSeq-1, strictly
+  // greater than this firm's priorSeq=0, so a checkpoint row MUST exist by now.
+  assert.ok(cp && Number(cp.last_seq) < lowSeq, "#1 (round-6): THE CORE ASSERTION — the checkpoint must stay below the reopened dead-letter's own seq; a stale pre-reopen bound read would have let it race straight to the higher row's own seq instead");
 
   const dl = (await rig.rootQuery("select status from clara.relay_dead_letters where consumer='router' and event_id=$1", [lowEvent.id])).rows[0];
   assert.equal(dl.status, "pending", "mandatory setup: the reopen actually landed — the dead-letter really is 'pending' now, not still 'resolved'");
+});
+
+// =====================================================================================
+// #1 (round-7, native adversarial leg, MUST, REOPENED) — round-6 closed the RACE (a concurrent
+// reopen landing mid-flight between this cycle's own bound read and checkpoint write); it never
+// claimed to close the SEQUENTIAL case, which needs NO race at all: a dead-letter already
+// 'resolved' when the checkpoint advances excludes NOTHING from bound-3 (which only ever protects
+// PENDING dead-letters BY DESIGN) — the checkpoint correctly sails past its seq. redrive() itself
+// never branched on the dead-letter's own CURRENT status before minting; a LATER call (with or
+// without an intervening reopen) can mint a wake-bound intent at that SAME already-passed seq,
+// and writeCheckpoint's own greatest() semantics mean nothing ever rewinds it back —
+// readHeldWakeRows' own `event_seq > lastSeq` gate then excludes the row FOREVER, silently. Fix:
+// under the SAME wake_coalesce:<firmId> lock redrive() already takes, it now rewinds the
+// wake_engine checkpoint (a DIRECT, non-greatest() write) whenever it mints an intent at or below
+// the firm's current checkpoint. Two cells against the REAL redrive() (never simulated), both
+// must fail against the pre-fix code:
+//   (b) below — the no-race DIRECT path: redrive a dead-letter that is ALREADY 'resolved', whose
+//       event type is CURRENTLY wake-bound, with no reopen step at all.
+//   (a) further below — the LOSING ordering: a dead-letter reopened via redrive() while its type
+//       is still genuinely uncovered ((X5b)'s own branch), THEN covered by a real taxonomy
+//       repoint, THEN redriven again.
+// Both prove the row is EVENTUALLY dispatched by a real runWakeEngineCycle, not merely that the
+// checkpoint number looks right.
+// =====================================================================================
+test("#1 (round-7, native adversarial leg): redrive() rewinds a checkpoint it advanced past — the no-race DIRECT path (redrive an already-resolved dead-letter whose type is NOW wake-bound)", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_1r7b_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_1r7b");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // The low-seq event: dead-lettered DIRECTLY as 'resolved' — never drained through the normal
+  // router batch flow, so no wake_intent exists for it yet. WAKE_EVENT_TYPE is covered and
+  // wake-bound in the currently-active taxonomy from the start, so a SINGLE redrive() call below
+  // goes straight to the mint branch — no reopen, no concurrency, no race at all.
+  const lowEvent = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  const lowSeq = Number(lowEvent.seq);
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status, resolved_at)
+       values ('router',$1,$2,$3,$4,'#1 round-7b battery: simulated already-resolved dead-letter, never drained','resolved',now())`,
+    [lowEvent.id, w.firm, lowSeq, WAKE_EVENT_TYPE],
+  );
+
+  // A fully materialized, genuinely claimable held row at a HIGHER seq — claiming it drives the
+  // wake_engine checkpoint PAST lowSeq (bound-3 excludes nothing for an already-RESOLVED
+  // dead-letter, so this is the checkpoint's own correct, non-buggy behavior at THIS point).
+  const highIntent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const highSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [highIntent.intentId])).rows[0].event_seq);
+  const highTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [highIntent.intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [highIntent.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [highIntent.intentId, randomUUID()]);
+  assert.ok(highSeq > lowSeq, "mandatory setup: the dead-letter's own seq is genuinely lower than the claimable row's");
+
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head],
+  );
+
+  const enqueued1 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued1.push(a), log: () => {} }));
+  const highRow = await rig.readTask(highTask);
+  assert.equal(highRow.status, "running", "mandatory setup: the higher-seq row claimed normally");
+  const cpBefore = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(
+    cpBefore && Number(cpBefore.last_seq) >= lowSeq,
+    "mandatory setup: THE TRAP IS SET — the wake_engine checkpoint has genuinely advanced past (or onto) the resolved dead-letter's own seq, correctly, since bound-3 excludes nothing for a resolved row",
+  );
+
+  // THE PROBE: redrive the ALREADY-RESOLVED dead-letter. No concurrency, no intervening reopen —
+  // decision is wake-bound from the start, so this goes straight to the mint branch. Pre-fix,
+  // this minted intent(lowSeq) below an already-advanced checkpoint and never rewound it — the
+  // row would have been born already invisible.
+  const res = await rig.asRuntime((c) => redrive(c, ROUTER_CONSUMER, lowEvent.id));
+  assert.equal(res.resolved, true);
+  assert.equal(res.wakeBound, true, "mandatory: this redrive genuinely minted a wake-bound intent");
+
+  const cpAfter = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(
+    cpAfter && Number(cpAfter.last_seq) < lowSeq,
+    "#1 (round-7b): THE CORE ASSERTION — redrive() itself must have rewound the wake_engine checkpoint back below the seq it just minted an intent at",
+  );
+
+  // Materialize the newly-minted intent into a held row (mirrors every other cell's own pattern
+  // in this file — the wake_intents -> held agent_tasks drain is a separate mechanism this
+  // battery always constructs by hand) and prove it is EVENTUALLY dispatched by a real cycle.
+  const lowIntentId = (await rig.rootQuery("select id from clara.wake_intents where event_id=$1", [lowEvent.id])).rows[0].id;
+  const lowTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [lowIntentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [lowIntentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [lowIntentId, randomUUID()]);
+
+  const enqueued2 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+  const lowRow = await rig.readTask(lowTask);
+  assert.equal(lowRow.status, "running", "#1 (round-7b): the low-seq row is EVENTUALLY dispatched — never permanently stranded below an already-advanced checkpoint");
+  assert.equal(enqueued2.length, 1);
+  assert.equal(enqueued2[0][1], lowTask);
+});
+
+test("#1 (round-7, native adversarial leg): redrive() rewinds a checkpoint it advanced past — the LOSING ordering (checkpoint advances past a resolved dead-letter, redrive() reopens it while still uncovered, a taxonomy repoint covers it, redrive() again mints)", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_1r7a_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_1r7a");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  const origVersion = await rig.activeTaxonomyVersion();
+  const uncoveredType = `g1.round7a.uncov.${Date.now().toString(36)}`;
+
+  try {
+    // A CUSTOM event type, genuinely uncovered by the CURRENT taxonomy — the only way to reach
+    // redrive()'s own (X5b) reopen branch (decision === undefined) for real, not simulated. Also
+    // needs its OWN registered wake_outbox source (a different event_type than WAKE_EVENT_TYPE),
+    // or the eventual held row would sit "held for disabled source" forever, never claimed.
+    const key2 = `g1_test_1r7a2_${randomUUID().slice(0, 8)}`;
+    await registerSource({ sourceKey: key2, carrier: "wake_outbox", eventType: uncoveredType, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+    await rig.rootQuery("insert into clara.event_types (name, client_scoped, description) values ($1, false, 'g1 round-7a uncovered')", [uncoveredType]);
+    await rig.asFnOwner((c) =>
+      c.query(
+        `select clara._append_event(p_firm => $1, p_type => $2, p_client => null, p_actor => $3,
+            p_obo => null, p_wake_kind => null, p_entry => null, p_document => null,
+            p_resolution => null, p_payload => '{}'::jsonb)`,
+        [w.firm, uncoveredType, w.owner],
+      ),
+    );
+    const lowEventRow = await rig.asRoot(async (c) => {
+      const r = await c.query("select id, seq from clara.domain_events where firm_id = $1 and event_type = $2 limit 1", [w.firm, uncoveredType]);
+      return r.rows[0];
+    });
+    const lowEventId = lowEventRow.id;
+    const lowSeq = Number(lowEventRow.seq);
+
+    // Dead-lettered DIRECTLY as 'resolved' — how it GOT resolved does not matter to this bug
+    // (round-6's own #1 cell above uses the identical shortcut); what matters is that it IS
+    // resolved when the checkpoint advances past it, correctly, per bound-3's own design.
+    await rig.rootQuery(
+      `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status, resolved_at)
+         values ('router',$1,$2,$3,$4,'#1 round-7a battery: simulated already-resolved dead-letter, still uncovered','resolved',now())`,
+      [lowEventId, w.firm, lowSeq, uncoveredType],
+    );
+
+    // A fully materialized, genuinely claimable held row at a HIGHER seq, over WAKE_EVENT_TYPE's
+    // own registered source — drives the wake_engine checkpoint PAST lowSeq.
+    const highIntent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+    const highSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [highIntent.intentId])).rows[0].event_seq);
+    const highTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [highIntent.intentId])).rows[0].id;
+    await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [highIntent.intentId]);
+    await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [highIntent.intentId, randomUUID()]);
+    assert.ok(highSeq > lowSeq, "mandatory setup: the dead-letter's own seq is genuinely lower than the claimable row's");
+
+    const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+    await rig.rootQuery(
+      `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+         on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+      [w.firm, head],
+    );
+
+    const enqueued1 = [];
+    await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued1.push(a), log: () => {} }));
+    const highRow = await rig.readTask(highTask);
+    assert.equal(highRow.status, "running", "mandatory setup: the higher-seq row claimed normally");
+    const cpAfterClaim = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+    assert.ok(
+      cpAfterClaim && Number(cpAfterClaim.last_seq) >= lowSeq,
+      "mandatory setup: THE TRAP IS SET — the wake_engine checkpoint has genuinely advanced past (or onto) the resolved dead-letter's own seq before any reopen",
+    );
+
+    // Step 1: redrive() while STILL genuinely uncovered — the real (X5b) reopen branch, not
+    // simulated raw SQL. Must NOT mint anything.
+    const reopenRes = await rig.asRuntime((c) => redrive(c, ROUTER_CONSUMER, lowEventId));
+    assert.deepEqual(reopenRes, { resolved: false, reason: "still-uncovered" });
+    const dlAfterReopen = (await rig.rootQuery("select status from clara.relay_dead_letters where consumer='router' and event_id=$1", [lowEventId])).rows[0];
+    assert.equal(dlAfterReopen.status, "pending", "mandatory: the reopen actually landed — resolved -> pending, for real, via redrive() itself");
+
+    // Step 2: cover the type as wake-bound via a REAL taxonomy repoint (mirrors relay-taxonomy
+    // .test.mjs's own (f) "TAXONOMY FLIP" pattern).
+    const nextVersion = await rig.asRoot(async (c) => {
+      const r = await c.query("select coalesce(max(version), 0) + 1 as v from clara.taxonomy_versions");
+      return Number(r.rows[0].v);
+    });
+    await rig.rootQuery("insert into clara.taxonomy_versions (version, note) values ($1, $2)", [nextVersion, "g1 round-7a battery"]);
+    await rig.rootQuery(
+      "insert into clara.trigger_taxonomy (version, event_type, decision) select $1, event_type, decision from clara.trigger_taxonomy where version = $2",
+      [nextVersion, origVersion],
+    );
+    await rig.rootQuery("insert into clara.trigger_taxonomy (version, event_type, decision) values ($1, $2, 'background_review')", [nextVersion, uncoveredType]);
+    await rig.rootQuery("update clara.taxonomy_active set version = $1 where singleton = true", [nextVersion]);
+
+    // Step 3: redrive() AGAIN — now covered and wake-bound, so this is the mint branch. THE
+    // PROBE: the checkpoint is still sitting at/past lowSeq from the claim above; pre-fix this
+    // mints below it and never rewinds.
+    const res2 = await rig.asRuntime((c) => redrive(c, ROUTER_CONSUMER, lowEventId));
+    assert.equal(res2.resolved, true);
+    assert.equal(res2.wakeBound, true, "mandatory: the covering redrive genuinely minted a wake-bound intent");
+
+    const cpAfterMint = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+    assert.ok(
+      cpAfterMint && Number(cpAfterMint.last_seq) < lowSeq,
+      "#1 (round-7a): THE CORE ASSERTION — the covering redrive rewound the wake_engine checkpoint back below the reopened-then-minted seq",
+    );
+
+    // Materialize the newly-minted intent and prove it is EVENTUALLY dispatched.
+    const lowIntentId = (await rig.rootQuery("select id from clara.wake_intents where event_id=$1", [lowEventId])).rows[0].id;
+    const lowTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [lowIntentId])).rows[0].id;
+    await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [lowIntentId]);
+    await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [lowIntentId, randomUUID()]);
+
+    const enqueued2 = [];
+    await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+    const lowRow = await rig.readTask(lowTask);
+    assert.equal(lowRow.status, "running", "#1 (round-7a): the low-seq row is EVENTUALLY dispatched — never permanently stranded below an already-advanced checkpoint, even through the LOSING reopen-then-cover ordering");
+    assert.equal(enqueued2.length, 1);
+    assert.equal(enqueued2[0][1], lowTask);
+  } finally {
+    // ALWAYS restore the global taxonomy pointer — this mutates GLOBAL state (matches
+    // relay-taxonomy.test.mjs's own (f) test's own finally block, bulletproof no-op if already there).
+    await rig.rootQuery("update clara.taxonomy_active set version = $1 where singleton = true", [origVersion]);
+  }
 });
 
 // =====================================================================================

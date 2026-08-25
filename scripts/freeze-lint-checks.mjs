@@ -51,10 +51,67 @@
 // entry waiting to be found.
 
 import ts from "typescript";
-import { blankSource, parseImportBindings, REGISTRY_REL } from "./freeze-lint-lex.mjs";
+import { blankSource, REGISTRY_REL } from "./freeze-lint-lex.mjs";
 
-export { blankSource, parseImportBindings, REGISTRY_REL };
+export { blankSource, REGISTRY_REL };
 export { checkEnqueueSites, isTestPath, ENQUEUE_MODULES, ENQUEUE_CALLABLES } from "./freeze-lint-enqueue.mjs";
+
+// round-7 (native adversarial leg, MUST #11) — the closed-world census's EXPORT half moved to
+// the TypeScript compiler API in round-6; its ACCEPTANCE half (resolving a re-export's local
+// name, or a `workflows={...}` entry's identifier, back to the import that actually bound it)
+// still ran on freeze-lint-lex.mjs's own regex-based `parseImportBindings`, over a blank that
+// deliberately PRESERVES string literals (it has to — it reads the import specifier's own quoted
+// path). That combination is bypassable: `importRe` matches ANY text shaped like an import
+// statement, including one sitting inside an ordinary string literal — e.g. `const NOTE =
+// "import { backdoor } from './evil.js'"` — and since `bindings` is a plain Map, a decoy landing
+// after the real import for the same local name silently WINS (last-write-wins), so a locally-
+// declared or genuinely-unrelated-import binding gets accepted as if it were the real one.
+// Reproduced live against the real exported checker (round-7 finding). Fixed the same way the
+// export half was: a real AST walk over `ts.isImportDeclaration` nodes. A string literal is
+// never re-parsed as a statement by a real parser — the decoy trick dies structurally, not by
+// pattern-matching harder. `parseImportBindings`/`blankSource(...,{strings:false})` is RETIRED
+// from this module's own registry.ts-facing use entirely (both call sites below); `blankSource`
+// itself stays imported only because parseRegistrySource's own pass2 (locating the `workflows =
+// {...}` object literal, an unrelated concern to import-binding resolution) still needs it.
+// `parseImportBindings` keeps its OWN separate life in freeze-lint-enqueue.mjs — that module scans
+// arbitrary `packages/runtime/src/**` files for enqueue call sites, a materially different, wider
+// surface the round-4 canonical-name pin already backstops (this finding's own "blast radius
+// limited" note) and which round-7 did not ask this pass to rebuild.
+/**
+ * AST-based import-binding resolver for registry.ts — the drop-in structural replacement for
+ * freeze-lint-lex.mjs's own regex-based `parseImportBindings`, scoped to what THIS module needs
+ * (a Map<localName, {source, imported}>; registry.ts never re-exports another module's exports
+ * or uses a dynamic import, so the old function's `reexports`/`dynamics` fields have no analogue
+ * here — checkRegistryExportsClosedWorld reads registry.ts's OWN re-export statements straight
+ * off parseRegistryExports instead). A type-only import (`import type {...}`, or a per-specifier
+ * `import { type X, real }`) carries no runtime binding and is skipped, exactly like a type-only
+ * EXPORT is skipped on the other half of this same census.
+ */
+function parseImportBindingsAst(headSrc) {
+  const bindings = new Map();
+  const sourceFile = ts.createSourceFile("registry.ts", headSrc, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    const clause = stmt.importClause;
+    if (!clause || clause.isTypeOnly) continue; // side-effect-only import, or `import type {...}` — no runtime binding
+    const source = stmt.moduleSpecifier && ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : null;
+    if (source === null) continue; // an unparseable/non-string specifier — nothing to bind
+    if (clause.name && ts.isIdentifier(clause.name)) {
+      bindings.set(clause.name.text, { source, imported: "default" });
+    }
+    const named = clause.namedBindings;
+    if (named && ts.isNamespaceImport(named)) {
+      bindings.set(named.name.text, { source, imported: "*" });
+    } else if (named && ts.isNamedImports(named)) {
+      for (const el of named.elements) {
+        if (el.isTypeOnly) continue; // `import { type X, real } from "..."` — X carries no runtime binding
+        const imported = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text;
+        bindings.set(el.name.text, { source, imported });
+      }
+    }
+  }
+  return bindings;
+}
 
 // --- (d) registry-version monotonicity --------------------------------------
 
@@ -82,8 +139,7 @@ export function specVersion(spec) {
 export function parseRegistrySource(src, label) {
   const problems = [];
   const classes = new Map();
-  const pass1 = blankSource(src, { comments: true, strings: false, templates: true });
-  const { bindings } = parseImportBindings(pass1);
+  const bindings = parseImportBindingsAst(src);
   const pass2 = blankSource(src, { comments: true, strings: true, templates: true });
   const declM = /\bexport\s+const\s+workflows\s*=\s*\{/.exec(pass2);
   if (!declM) {
@@ -465,10 +521,10 @@ function checkRegistryExportsClosedWorld(headSrc, parsedIn, label) {
   const parsed = parsedIn ?? parseRegistryExports(headSrc, label);
   violations.push(...parsed.rejected);
 
-  // strings:false — parseImportBindings reads the import specifier's own quoted string, which
-  // a strings:true blank would erase entirely (checkEnqueueSites' own established idiom).
-  const blanked = blankSource(headSrc, { comments: true, strings: false, templates: true });
-  const { bindings } = parseImportBindings(blanked);
+  // round-7 (native adversarial leg, MUST #11) — AST-based, not the regex-based
+  // parseImportBindings this used to call (see this module's own header): a decoy string
+  // literal shaped like an import statement can no longer be mistaken for a real one.
+  const bindings = parseImportBindingsAst(headSrc);
 
   for (const item of parsed.reexports) {
     if (item.exported === "workflows" || item.exported === "workflowsByName") continue; // covered by checkRegistryViewIntegrity above

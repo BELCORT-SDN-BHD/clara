@@ -157,14 +157,29 @@ test("#1 (round-6, Codex): redrive() takes the SAME wake_coalesce advisory lock 
   await lockIsHeld;
 
   let redriveDone = false;
-  const redrivePromise = fx.asRuntime((c) => redrive(c, CONSUMER, eventId)).then((r) => { redriveDone = true; return r; });
+  let redrivePid;
+  let redrivePidKnown;
+  const redrivePidPromise = new Promise((resolve) => { redrivePidKnown = resolve; });
+  const redrivePromise = fx
+    .asRuntime(async (c) => {
+      // round-7 NOTE rider (native adversarial leg): capture THIS specific connection's own
+      // backend pid before calling redrive() on it, so the wait below can require exactly THIS
+      // pid be blocked — not "some backend, somewhere" (the original check counted ANY backend
+      // blocked by holderPid, sound here only because nothing else concurrent existed, not
+      // because the check itself pinned down WHICH backend was waiting).
+      redrivePid = (await c.query("select pg_backend_pid() as pid")).rows[0].pid;
+      redrivePidKnown();
+      return redrive(c, CONSUMER, eventId);
+    })
+    .then((r) => { redriveDone = true; return r; });
+  await redrivePidPromise;
 
   let blocked = false;
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const r = await fx.rootQuery(
-      "select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
-      [holderPid],
+      "select count(*)::int as n from pg_stat_activity where pid = $1 and wait_event_type = 'Lock' and $2 = any(pg_blocking_pids(pid))",
+      [redrivePid, holderPid],
     );
     if (r.rows[0].n > 0) {
       blocked = true;

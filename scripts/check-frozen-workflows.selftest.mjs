@@ -199,6 +199,27 @@ testCase("round-6 novel probe (self-devised): TYPE-ONLY exports (`export type {.
   expectClean(checkRegistryViewIntegrity(fixture("registry-view-type-only-reexport.ts.txt")));
 });
 
+// round-7 (native adversarial leg, MUST #11) — the ACCEPTANCE half of the closed-world census
+// (resolving a bare re-export's local name back to its real import) still ran on the regex-based
+// parseImportBindings, over a blank that PRESERVES string literals — a decoy string shaped like
+// an import statement could be trusted as a real one. D1-D4: the four decoy shapes reproduced
+// live against the exported checker (D2) plus three more of the same class.
+testCase("round-7 D1 (control): a decoy import-shaped string BEFORE the real import for the same name -> OK, safe by construction not by ordering luck", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-before.ts.txt")));
+});
+
+testCase("round-7 D2 (live-reproduced finding): a decoy import-shaped STRING for a locally-declared function, positioned AFTER it -> REJECT, the decoy must never be trusted as a real binding (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-after.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-7 D3: the same decoy inside a REGEX LITERAL (blankSource's own documented blind spot for regex literals) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-regex.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-7 D4: the same decoy inside an Error() diagnostic message string -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-decoy-error-message.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 

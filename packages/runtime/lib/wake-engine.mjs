@@ -93,14 +93,18 @@
 // not a silently-missed one. Tracked: docs/plan/active/g1-wake-engine-design.md names this same
 // obligation explicitly for F-A3/F-A4's own PRs.
 import { setTimeout as sleep } from "node:timers/promises";
-import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole, CONSUMER as ROUTER_CONSUMER } from "./relay.mjs";
+import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole, CONSUMER as ROUTER_CONSUMER, WAKE_ENGINE_CONSUMER } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 
 /** The wake-engine consumer name — its own checkpoint / lock key (relay_checkpoints,
  *  acquireLeaderLock, relay_dead_letters' carrier-1 ledger). NOT used directly as the
- *  wake_engine_task_dead_letters consumer any more — see the two split keys below (#6). */
-export const WAKE_ENGINE_CONSUMER = "wake_engine";
+ *  wake_engine_task_dead_letters consumer any more — see the two split keys below (#6).
+ *  round-7 (native adversarial leg, MUST #1): the constant now LIVES in relay.mjs (redrive()'s
+ *  own below-checkpoint rewind needs it too) — imported above and re-exported here so every
+ *  existing consumer of `wake-engine.mjs`'s own WAKE_ENGINE_CONSUMER (this file, the test
+ *  battery) keeps working unchanged. One JS binding, never two string literals to keep in sync. */
+export { WAKE_ENGINE_CONSUMER };
 
 /** #6 (round-4 review, both legs + opus SHOULD-A, converged) — the direct_queue carrier's own
  *  task-keyed dead-letter ledger (wake_engine_task_dead_letters) used to be written by TWO
@@ -507,11 +511,29 @@ const NO_SEQ_CAP = Number.MAX_SAFE_INTEGER;
  *  Whichever side acquires the lock first is strictly ordered before the other: a reopen either
  *  fully lands before this function's own bound read (so bound-3 correctly excludes it) or
  *  fully waits until after this function's own commit (so the checkpoint it just wrote is
- *  already durable, and the reopen's own later redrive lands at whatever seq it does — bound-3
- *  picks it up on the very NEXT cycle, never silently skipped). Owning the transaction is also
- *  why this is no longer nested inside claimWakeOutboxRow's own claim transaction (see that
- *  function's own header) — a lock scoped to a SUB-section of an already-open transaction is
- *  not expressible in Postgres; the checkpoint advance is its own transaction now, always.
+ *  already durable). Owning the transaction is also why this is no longer nested inside
+ *  claimWakeOutboxRow's own claim transaction (see that function's own header) — a lock scoped
+ *  to a SUB-section of an already-open transaction is not expressible in Postgres; the checkpoint
+ *  advance is its own transaction now, always.
+ *
+ *  round-7 (native adversarial leg, MUST #1, REOPENED) — the lock closes the RACE (a reopen
+ *  landing mid-flight); it never claimed, and does NOT, close the SEQUENTIAL case, which needs
+ *  no race at all: bound-3 excludes only PENDING dead-letters BY DESIGN, so a dead-letter that is
+ *  already 'resolved' (for any reason — redrive() marks it so the instant a decision resolves it,
+ *  whether or not this was ever "the same cycle") excludes NOTHING, and this function correctly
+ *  advances the checkpoint straight past its seq — that read is not stale, it is simply true.
+ *  The hole is what happens AFTER: `redrive()` reads a dead-letter's row but never branches on
+ *  its CURRENT status before deciding what to do — a later redrive() call (whether or not an
+ *  intermediate reopen ever happened) can mint a wake-bound intent at that same seq once the
+ *  taxonomy covers it, and by then the checkpoint this function wrote has already sailed past it,
+ *  with nothing left in relay_dead_letters for bound-3 to see (the row converted into a
+ *  wake_intent, a different table entirely) — "bound-3 picks it up on the very NEXT cycle" was
+ *  false; there is no dead-letter left for it to pick up. THE ACTUAL FIX lives in redrive() now,
+ *  not here: under the SAME `wake_coalesce:<firmId>` lock this function takes, redrive() rewinds
+ *  the wake_engine checkpoint (a DIRECT, non-greatest() write) whenever it mints an intent at or
+ *  below the firm's current checkpoint — see redrive()'s own header in relay.mjs. This function's
+ *  own comment here is corrected, not because this function changed, but because the ORIGINAL
+ *  claim was never true and must not be re-asserted in a future commit message either.
  *  Returns the seq actually reached (unchanged from priorSeq if nothing was safe to advance). */
 async function advanceCheckpointIfClear(client, { firmId, priorSeq, seq = NO_SEQ_CAP, excludeTaskId = null }) {
   if (seq <= priorSeq) return priorSeq;
@@ -902,7 +924,23 @@ export async function wakeEngineHealth(client) {
        (select count(*) from clara.agent_tasks
           where status = 'cancel_requested'
             and kind = any(select task_kind from clara.wake_engine_sources))::int
-         as cancel_requested_stuck`,
+         as cancel_requested_stuck,
+       -- round-7 (native adversarial leg, MUST #1) — defense-in-depth, added specifically because
+       -- a hole of THIS EXACT SHAPE was silently invisible until machine-reproduced: a held wake
+       -- row whose own event_seq sits AT OR BEHIND its firm's own wake_engine checkpoint is a row
+       -- readHeldWakeRows' own event_seq > lastSeq gate will NEVER see again — the structural
+       -- fix (redrive()'s own checkpoint rewind, relay.mjs) is meant to make this permanently
+       -- zero, but the counter exists so any FUTURE hole of the same shape (a new mint path this
+       -- gate did not anticipate) surfaces on /ready instead of staying silent the way this one
+       -- did — lag contributes 0 for a row below the checkpoint by construction, and
+       -- heldForDisabledSource only ever counts a DISABLED source, neither of which this row is.
+       (select count(*) from clara.agent_tasks at
+          join clara.wake_intents wi on wi.id = at.origin_intent_id
+          join clara.domain_events de on de.id = wi.event_id
+          join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = de.firm_id
+         where at.kind = 'wake' and at.status = 'held'
+           and wi.event_seq <= c.last_seq)::int
+         as held_below_checkpoint`,
     [WAKE_ENGINE_CONSUMER, [WAKE_ENGINE_CLAIM_CONSUMER, WAKE_ENGINE_ENQUEUE_CONSUMER]],
   );
   const row = r.rows[0];
@@ -913,6 +951,7 @@ export async function wakeEngineHealth(client) {
     firmsTracked: row.firms_tracked,
     heldForDisabledSource: row.held_for_disabled_source,
     cancelRequestedStuck: row.cancel_requested_stuck,
+    heldBelowCheckpoint: row.held_below_checkpoint,
   };
 }
 
