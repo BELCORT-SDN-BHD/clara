@@ -205,7 +205,17 @@ const RECEIPT_BLOCK_CTX = RECEIPT_BLOCK_ANCHOR +
           jsonb_build_object('op_key', v_approve_key), 'agent_unattended', null, v_approve_key);
     end if;`;
 
-test("f-a3pr3.c3c.a the extracted core is the PRE-EXTRACTION body byte-for-byte: inverting BOTH substitutions re-derives the pinned sha256", async (t) => {
+// THIRD substitution (F2, review finding): last_human_editor gains the case-arm instead of
+// unconditionally stamping c.actor -- mirrors the migration's own v_anchor3/v_ctx3 pair.
+const LHE_ANCHOR =
+  `      maker_actor, last_human_editor, flags)
+    values (p_client, 'draft', p_posting_date, v_memo, 'manual', c.actor, c.actor,`;
+const LHE_CTX =
+  `      maker_actor, last_human_editor, flags)
+    values (p_client, 'draft', p_posting_date, v_memo, 'manual', c.actor,
+      case when coalesce((p_ctx->>'is_agent')::boolean, false) then null else c.actor end,`;
+
+test("f-a3pr3.c3c.a the extracted core is the PRE-EXTRACTION body byte-for-byte: inverting ALL THREE substitutions re-derives the pinned sha256", async (t) => {
   if (skipHere(t)) return;
   const r = await rootQuery(
     `select prosrc, encode(sha256(prosrc::bytea),'hex') as post_sha from pg_proc where oid = $1::regprocedure`, [CORE]);
@@ -216,11 +226,16 @@ test("f-a3pr3.c3c.a the extracted core is the PRE-EXTRACTION body byte-for-byte:
   const receiptOccurrences = coreSrc.split(RECEIPT_BLOCK_CTX).length - 1;
   assert.equal(receiptOccurrences, 1,
     `c3c.a: the core carries the entry_post_receipts insert block EXACTLY once (found ${receiptOccurrences})`);
-  const inverted = coreSrc.split(CTX_BLOCK).join(CTX_ANCHOR).split(RECEIPT_BLOCK_CTX).join(RECEIPT_BLOCK_ANCHOR);
+  const lheOccurrences = coreSrc.split(LHE_CTX).length - 1;
+  assert.equal(lheOccurrences, 1,
+    `c3c.a: the core carries the last_human_editor case-arm block EXACTLY once (found ${lheOccurrences})`);
+  const inverted = coreSrc.split(CTX_BLOCK).join(CTX_ANCHOR)
+    .split(RECEIPT_BLOCK_CTX).join(RECEIPT_BLOCK_ANCHOR)
+    .split(LHE_CTX).join(LHE_ANCHOR);
   const crypto = await import("node:crypto");
   const sha = crypto.createHash("sha256").update(inverted, "utf8").digest("hex");
   assert.equal(sha, PRE_EXTRACTION_SHA,
-    "c3c.a: inverting BOTH of the core's substitutions reproduces the pinned pre-extraction sha256 -- nothing else moved");
+    "c3c.a: inverting ALL THREE of the core's substitutions reproduces the pinned pre-extraction sha256 -- nothing else moved");
   assert.notEqual(r.rows[0].post_sha, PRE_EXTRACTION_SHA,
     "c3c.a: NON-VACUOUS -- the installed core really does differ from the pre-extraction body");
   assert.ok(!coreSrc.includes("clara._human_ctx("),
@@ -584,4 +599,177 @@ test("f-a3pr3.ss5.regression a bank_agent (unattended) act is BYTE-UNCHANGED by 
   assert.equal(rec.approval_arm, "agent_unattended", "ss5.regression: approval_arm is still agent_unattended");
   const actorRow = await rootQuery(`select is_agent from clara.users where id = $1`, [rec.acting_actor]);
   assert.equal(actorRow.rows[0]?.is_agent, true, "ss5.regression: acting_actor still resolves to the SYSTEM agent user, never a human");
+});
+
+// ===========================================================================
+// F1 (review finding, HIGH, the blocker) -- SS5's census was short by two: the two propose
+// cores build no ctx object and call clara._append_event DIRECTLY, so before the fix a
+// chat-driven propose stamped the EVENT SPINE ITSELF as an agent act. Both polarities, on the
+// domain_events row the propose call actually writes.
+// ===========================================================================
+
+test("f-a3pr3.f1.events.interactive a chat-driven propose (line_exception) stamps the domain_events row with the REAL human identity and kind", async (t) => {
+  if (skipHere(t)) return;
+  const w = await advWorld();
+  const { client } = await freshAdvClient("f1evint");
+  const firm = await firmOf(client);
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `F1EVI${randomUUID().slice(0, 6)}` });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  await grantBankMatching({ client, firm, actor: w.users.alice });
+  const stmt = await enterStatement(w.users.alice, {
+    client, bankAccount: bankAccountId,
+    opening: 0, specs: [{ entryDate: "2026-07-17", amountCents: -5500, description: "f1evint fee" }],
+  });
+  const line = stmt.lines[0].id;
+  const cred = await mintCred("interactive_client", firm, client, w.users.alice);
+  const digest = await realDigest(cred.secret, client, bankAccountId, opk("f1evint-pack"));
+  const specs = [
+    { name: "p_line", cast: "uuid" }, { name: "p_kind" }, { name: "p_reason" },
+    { name: "p_evidence_document", cast: "uuid" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+    { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const opKey = opk("f1evint-propose");
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_propose_bank_line_exception", specs),
+    [line, "disputed", "f1evint disputed by the client", null, RATIONALE, JSON.stringify(MODEL), digest, opKey]);
+  assert.notEqual(r.rows[0].r.status, "refused", `f1.events.interactive: the propose admits (got ${JSON.stringify(r.rows[0].r)})`);
+
+  const ev = await rootQuery(
+    `select actor, on_behalf_of, via_wake_kind, payload from clara.domain_events
+      where firm_id = $1 and event_type = 'bank.line_exception_proposed' and (payload->>'line_id')::uuid = $2
+      order by seq desc limit 1`,
+    [firm, line]);
+  assert.equal(ev.rows.length, 1, "f1.events.interactive: the propose emitted exactly one event for this line");
+  assert.equal(ev.rows[0].actor, w.users.alice, "f1.events.interactive: domain_events.actor is the REAL human, never the system agent user");
+  assert.equal(ev.rows[0].on_behalf_of, w.users.alice, "f1.events.interactive: domain_events.on_behalf_of is populated with the same human");
+  assert.equal(ev.rows[0].via_wake_kind, "interactive_client", "f1.events.interactive: domain_events.via_wake_kind names the REAL credential kind");
+});
+
+test("f-a3pr3.f1.events.regression a bank_agent (unattended) propose still stamps domain_events as the agent, unchanged", async (t) => {
+  if (skipHere(t)) return;
+  const w = await advWorld();
+  const { client } = await freshAdvClient("f1evreg");
+  const firm = await firmOf(client);
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `F1EVR${randomUUID().slice(0, 6)}` });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  await grantBankMatching({ client, firm, actor: w.users.alice });
+  const stmt = await enterStatement(w.users.alice, {
+    client, bankAccount: bankAccountId,
+    opening: 0, specs: [{ entryDate: "2026-07-17", amountCents: -6600, description: "f1evreg fee" }],
+  });
+  const line = stmt.lines[0].id;
+  const cred = await mintCred("bank_agent", firm, client);
+  const digest = await realDigest(cred.secret, client, bankAccountId, opk("f1evreg-pack"));
+  const specs = [
+    { name: "p_line", cast: "uuid" }, { name: "p_kind" }, { name: "p_reason" },
+    { name: "p_evidence_document", cast: "uuid" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+    { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const opKey = opk("f1evreg-propose");
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_propose_bank_line_exception", specs),
+    [line, "bank_error", "f1evreg bank error", null, RATIONALE, JSON.stringify(MODEL), digest, opKey]);
+  assert.notEqual(r.rows[0].r.status, "refused", `f1.events.regression: the propose admits (got ${JSON.stringify(r.rows[0].r)})`);
+
+  const ev = await rootQuery(
+    `select actor, on_behalf_of, via_wake_kind from clara.domain_events
+      where firm_id = $1 and event_type = 'bank.line_exception_proposed' and (payload->>'line_id')::uuid = $2
+      order by seq desc limit 1`,
+    [firm, line]);
+  assert.equal(ev.rows[0].on_behalf_of, null, "f1.events.regression: on_behalf_of stays NULL, exactly as before the fix");
+  assert.equal(ev.rows[0].via_wake_kind, "bank_agent", "f1.events.regression: via_wake_kind is still bank_agent");
+  const actorRow = await rootQuery(`select is_agent from clara.users where id = $1`, [ev.rows[0].actor]);
+  assert.equal(actorRow.rows[0]?.is_agent, true, "f1.events.regression: actor still resolves to the SYSTEM agent user, never a human");
+});
+
+// ===========================================================================
+// F2 (review finding, MED-HIGH) -- an unattended staff-advance application must satisfy
+// 0120:387-393's own segregation probe (maker_actor = agent_user_id() AND last_human_editor IS
+// NULL), not read as neither human- nor agent-prepared.
+// ===========================================================================
+
+test("f-a3pr3.f2.agent-prepared an unattended staff-advance's journal_entries row satisfies 0120's v_agent_prepared probe", async (t) => {
+  if (skipHere(t)) return;
+  const { client } = await freshAdvClient("f2agentprep");
+  const { advance } = await disburse({ client, cents: 60_000, postingDate: "2026-07-02" });
+  const w = await advWorld();
+  const firm = await firmOf(client);
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `F2AP${randomUUID().slice(0, 6)}` });
+  const bankAccountId = acct.bank_account_id ?? acct.id;
+  await grantBankMatching({ client, firm, actor: w.users.alice });
+  const cred = await mintCred("bank_agent", firm, client);
+  const digest = await realDigest(cred.secret, client, bankAccountId, opk("f2agentprep-pack"));
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_posting_date", cast: "date" }, { name: "p_memo" },
+    { name: "p_lines", cast: "jsonb" }, { name: "p_allocations", cast: "jsonb" }, { name: "p_kind" },
+    { name: "p_reason" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+    { name: "p_inputs_digest" }, { name: "p_op_key" }];
+  const opKey = opk("f2agentprep");
+  const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_book_staff_advance_application", specs), [
+    client, "2026-07-06", "f2 agent application", JSON.stringify(applicationLines(ADV1, 20_000)),
+    JSON.stringify([{ line_no: 2, advance_id: advance.id, amount_cents: 20_000 }]),
+    "payroll_deduction", "f2 rig application", RATIONALE, JSON.stringify(MODEL),
+    digest, opKey,
+  ]);
+  const res = r.rows[0].r;
+  assert.notEqual(res.status, "refused", `f2.agent-prepared: the wake door admits a real application (got ${JSON.stringify(res)})`);
+  const entryId = res.entry_id ?? res.id;
+  assert.ok(entryId, "f2.agent-prepared: the receipt names an entry");
+
+  const je = await rootQuery(
+    `select maker_actor, last_human_editor from clara.journal_entries where id = $1`, [entryId]);
+  const agentUserRow = await rootQuery(`select clara.agent_user_id() as id`);
+  assert.equal(je.rows[0].maker_actor, agentUserRow.rows[0].id,
+    "f2.agent-prepared: maker_actor is the SYSTEM agent user, per 0120's own probe predicate");
+  assert.equal(je.rows[0].last_human_editor, null,
+    "f2.agent-prepared: last_human_editor is NULL -- the exact pair 0120:387-393's v_agent_prepared checks for");
+});
+
+// ===========================================================================
+// C1 (review finding, Codex) -- a refused receipt must NOT be silently reusable by a later
+// SUCCESSFUL act sharing the same op_key. Tested directly against clara._agent_bank_receipt
+// (superuser call, matching this file's own c3c.c precedent of exercising an ungranted core
+// directly) rather than orchestrating a full refuse/unblock/retry through business logic --
+// the fix lives entirely in this one function's conflict-identity check, so this is the
+// tightest, most direct proof of it.
+// ===========================================================================
+
+test("f-a3pr3.c1.outcome-mismatch a same-op_key retry with a DIFFERENT outcome refuses op_key_identity_mismatch; a fresh op_key succeeds", async (t) => {
+  if (skipHere(t)) return;
+  const { client } = await freshAdvClient("c1outcome");
+  const firm = await firmOf(client);
+  const cred = await mintCred("bank_agent", firm, client);
+  const opKey = opk("c1-retry");
+  // _agent_bank_receipt is UNGRANTED (no role holds EXECUTE) and reads clara.wake_context(),
+  // so a direct call needs BOTH superuser (to bypass the grant, matching c3c.c's own
+  // ungranted-core-call precedent) AND a live wake session -- set_config(...,true) binds
+  // clara.wake_secret for exactly this one statement (LOCAL semantics), evaluated before the
+  // receipt call in the same target list, never leaking to any later rootQuery call.
+  const bind = `select set_config('clara.wake_secret', $1, true), `;
+
+  // First call: recorded REFUSED (the Tier-B refusal shape -- same op_key, same everything
+  // else, outcome='refused').
+  const r1 = await rootQuery(
+    bind + `clara._agent_bank_receipt($2,$3,'unmatch','refused',$4,$5,$6::jsonb,'d1',$7,$8::jsonb,null) as id`,
+    [cred.secret, firm, client, client, RATIONALE, JSON.stringify(MODEL), opKey, JSON.stringify({ verdict: "refused" })]);
+  assert.ok(r1.rows[0].id, "c1: the first (refused) call returns a receipt id");
+
+  // Retry with the SAME op_key, but the act now COMMITS (outcome='admitted') -- must refuse,
+  // never silently return the stale refused row.
+  let err = null;
+  try {
+    await rootQuery(
+      bind + `clara._agent_bank_receipt($2,$3,'unmatch','admitted',$4,$5,$6::jsonb,'d1',$7,$8::jsonb,null) as id`,
+      [cred.secret, firm, client, client, RATIONALE, JSON.stringify(MODEL), opKey, JSON.stringify({ verdict: "admitted" })]);
+  } catch (e) { err = e; }
+  assert.ok(err, "c1: a same-op_key retry with a different outcome is refused, not silently reused");
+  assert.equal(err?.code, "CLR10", `c1: expected CLR10, got ${err?.code}: ${err?.message}`);
+  assert.match(String(err?.detail ?? ""), /op_key_identity_mismatch/,
+    `c1: names op_key_identity_mismatch (got ${err?.detail ?? "(none)"})`);
+
+  // A FRESH op_key for the retry succeeds, with a truthful (admitted) receipt.
+  const freshKey = opk("c1-retry-fresh");
+  const r2 = await rootQuery(
+    bind + `clara._agent_bank_receipt($2,$3,'unmatch','admitted',$4,$5,$6::jsonb,'d1',$7,$8::jsonb,null) as id`,
+    [cred.secret, firm, client, client, RATIONALE, JSON.stringify(MODEL), freshKey, JSON.stringify({ verdict: "admitted" })]);
+  assert.ok(r2.rows[0].id, "c1: a fresh op_key succeeds");
+  assert.notEqual(r2.rows[0].id, r1.rows[0].id, "c1: the fresh-key retry writes a NEW receipt row, not the stale one");
+  const rec2 = await rootQuery(`select outcome from clara.bank_agent_receipts where id = $1`, [r2.rows[0].id]);
+  assert.equal(rec2.rows[0].outcome, "admitted", "c1: the fresh receipt truthfully names the real outcome");
 });
