@@ -198,12 +198,16 @@ extension yields a kind that can neither be inserted nor transition. The new arm
 **`autodraft` precedent** — firm and client present, no session, no intent, a non-blank
 `model_snapshot`, **born `queued`** on the `queued→running→completed/failed` lifecycle — because
 the `wake` arm's `held` birth (`0011:1230`) with `held→cancelled` as its sole transition (`:1271`)
-describes a task **nothing in the estate can execute**. **This is the clock's execution path, F-A4
-mints it first, and F-A3/F-A5 adopt this arm rather than each minting their own** (TA-P11; gate
-record §7). **`mint_wake_credential`'s live body is NOT touched** (D-13): after F-A2's PR-1 it
-carries a **FOUR**-kind list (F-A2's CoR of `0011:1163` — `f-a2-annexes-1-estate.md:419`, D34) and
-simply refuses `close_prep`; the branch lives in the F14 sibling, the only minter of this kind.
-**F-A4 authors against the POST-F-A2 text and its prestate pins that text** (gate GM-8).
+describes a task **nothing in the estate can execute**. ~~This is the clock's execution path, F-A4
+mints it first, and F-A3/F-A5 adopt this arm rather than each minting their own (TA-P11; gate
+record §7).~~ **SUPERSEDED 2026-08-25 by gate G1** (`bank-agency-gate-record.md §6 item 1` →
+`g1-wake-engine-design.md`): F-A3/F-A5 ride `kind='wake'` through a new shared engine instead; this
+item's `close_prep` shape is UNCHANGED and grandfathered into that SAME engine as a second carrier
+(full argument: `g1-wake-engine-survey.md §6`). **`mint_wake_credential`'s live body is NOT
+touched** (D-13): after F-A2's PR-1 it carries a **FOUR**-kind list (F-A2's CoR of `0011:1163` —
+`f-a2-annexes-1-estate.md:419`, D34) and simply refuses `close_prep`; the branch lives in the F14
+sibling, the only minter of this kind — G1's own migration adds that missing arm. **F-A4 authors
+against the POST-F-A2 text and its prestate pins that text** (gate GM-8).
 
 ### 3.4 begin / abandon — the freeze-timing judgement, walled
 
@@ -334,8 +338,20 @@ logic** (the eight-combination table is **Annex A.4**):
 |---|---|---|
 | 1 | **the wall measures the last HUMAN preparer** — `v_human_preparer` is the most recent FY entry whose `coalesce(last_human_editor, maker_actor)` resolves to a user with `is_agent = false`, and the distinct-checker test runs against **that** actor | law 69's shape; today's single `v_prep` read resolves to the agent and the test goes vacuous (F2) |
 | 2 | **an independent agent-preparation probe** — `v_agent_prepared` is true when **any** approved FY-dated entry carries the agent as maker with no human editor | a separate read for a separate question; deriving it from `v_prep` is exactly the derivation that broke |
-| 3 | **the honest label with a stated priority** — `segregation_mode` becomes `('two_person','solo_self_attested','agent_prepared')`, **one value added at `0056:1520`, the two existing values byte-identical in meaning**; `agent_prepared` wins whenever `v_agent_prepared` | under-claiming is fail-closed; over-claiming a two-human review is the harm. The receipt reads *"prepared by Clara, sole human signer X"* |
+| 3 | **the honest label with a stated priority** — `segregation_mode` is a CLOSED four-value domain `('two_person','solo_self_attested','agent_prepared','no_preparation')` — `agent_prepared` added at `0056:1520` (the two original values byte-identical in meaning), `no_preparation` added at `F-A4 PR-1b2` (RULED 2026-08-25, below); `agent_prepared` wins whenever `v_agent_prepared`, `no_preparation` is the fallback ONLY when neither a human nor the agent prepared the year | under-claiming is fail-closed; over-claiming a two-human review, OR the agent's name on work the agent never did, is the harm. The receipt reads *"prepared by Clara, sole human signer X"* — or, on a genuinely untouched year, *"prepared by nobody"* |
 | 4 | **`reopen_fiscal_year` gets the SAME re-aim** (gate GM-5 → **D-19**) — its own two-value computation at `0085:344-345` writes the identical column under the identical CHECK, so today a reopen of a year Clara prepared records `two_person`. The CLR05 arms at `0085:328-340`, about the REVERSAL act's signer, **do not move a word** | the sentence TA-P6 ruled untruthful, in the other body, inside the CoR window PR-1b already owns. Cell **A-10** |
+
+**RULING, 2026-08-25 (owner, debt-clearing sprint; F-A4 PR-1b cross-model review) — `no_preparation`
+joins the domain.** As originally built, `finalize_close`'s row 7 (no human ever touched the
+year) stamped `agent_prepared` unconditionally, never reading `v_agent_prepared` — a year no
+human AND no agent prepared (most commonly a dormant year that mints zero entries) got a
+permanent receipt claiming Clara prepared it, contradicting this very table's own stated
+priority ("`agent_prepared` wins whenever `v_agent_prepared`" was never true on that branch).
+The owner ruled the label follows the real probe there too: `no_preparation` is the fourth,
+truthful value for that case, review requirements **at least as strict as `agent_prepared`'s**
+by construction (the row's own self-attestation gate, for a solo firm, governs both outcomes
+identically). Migration `0128_f_a4_pr_1b2_a4_truth.sql` — full mechanism, invariants and
+the reopen non-participation finding: `close-key-1-annexes-1-mechanics.md` Annex A.4.
 
 **The solo arm auto-upgrades.** At `eligible_checker_count(firm) = 1` the self-attestation
 requirement stands unchanged (`0056:2130-2136`) — CLR05's live-proven BEE path; when a second human
