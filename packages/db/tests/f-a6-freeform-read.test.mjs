@@ -74,7 +74,10 @@ test("f-a6.pi-scope-footgun — the contract's scope (firm|platform) is never th
   // conform perfectly and still be wrong.
   const firm = randomUUID();
   const client = randomUUID();
-  const user = await insertUser("f_a6_rct", "u1");
+  // CORRECTED (narrow re-review round): a fixed tag collides on `users_email_key` under any
+  // database reuse (a re-run against a not-actually-fresh rig, #344's own class of hazard) --
+  // randomized per call, matching every other fixture in this file.
+  const user = await insertUser("f_a6_rct", randomUUID());
   await rootQuery("insert into clara.firms (id, name) values ($1, $2)", [firm, "f_a6 rct firm"]);
   const rungVector = {
     statement_shape: "pass",
@@ -126,7 +129,9 @@ async function buildMf2World() {
   if (mf2World) return mf2World;
   const firm = randomUUID();
   const client = randomUUID();
-  const user = await insertUser("f_a6_mf2", "u1");
+  // Randomized tag, same reasoning as pi-scope-footgun's own fix above -- a fixed tag is not
+  // safe under database reuse.
+  const user = await insertUser("f_a6_mf2", randomUUID());
   await rootQuery("insert into clara.firms (id, name) values ($1, $2)", [firm, "f_a6 mf2 firm"]);
   await rootQuery("insert into clara.clients (id, firm_id, name, status) values ($1, $2, $3, 'active')", [client, firm, "f_a6 mf2 client"]);
   await rootQuery(
