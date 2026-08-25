@@ -198,12 +198,16 @@ extension yields a kind that can neither be inserted nor transition. The new arm
 **`autodraft` precedent** — firm and client present, no session, no intent, a non-blank
 `model_snapshot`, **born `queued`** on the `queued→running→completed/failed` lifecycle — because
 the `wake` arm's `held` birth (`0011:1230`) with `held→cancelled` as its sole transition (`:1271`)
-describes a task **nothing in the estate can execute**. **This is the clock's execution path, F-A4
-mints it first, and F-A3/F-A5 adopt this arm rather than each minting their own** (TA-P11; gate
-record §7). **`mint_wake_credential`'s live body is NOT touched** (D-13): after F-A2's PR-1 it
-carries a **FOUR**-kind list (F-A2's CoR of `0011:1163` — `f-a2-annexes-1-estate.md:419`, D34) and
-simply refuses `close_prep`; the branch lives in the F14 sibling, the only minter of this kind.
-**F-A4 authors against the POST-F-A2 text and its prestate pins that text** (gate GM-8).
+describes a task **nothing in the estate can execute**. ~~This is the clock's execution path, F-A4
+mints it first, and F-A3/F-A5 adopt this arm rather than each minting their own (TA-P11; gate
+record §7).~~ **SUPERSEDED 2026-08-25 by gate G1** (`bank-agency-gate-record.md §6 item 1` →
+`g1-wake-engine-design.md`): F-A3/F-A5 ride `kind='wake'` through a new shared engine instead; this
+item's `close_prep` shape is UNCHANGED and grandfathered into that SAME engine as a second carrier
+(full argument: `g1-wake-engine-survey.md §6`). **`mint_wake_credential`'s live body is NOT
+touched** (D-13): after F-A2's PR-1 it carries a **FOUR**-kind list (F-A2's CoR of `0011:1163` —
+`f-a2-annexes-1-estate.md:419`, D34) and simply refuses `close_prep`; the branch lives in the F14
+sibling, the only minter of this kind — G1's own migration adds that missing arm. **F-A4 authors
+against the POST-F-A2 text and its prestate pins that text** (gate GM-8).
 
 ### 3.4 begin / abandon — the freeze-timing judgement, walled
 

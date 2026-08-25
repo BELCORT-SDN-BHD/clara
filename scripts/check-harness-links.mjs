@@ -117,6 +117,8 @@ export const NON_PATH_ALLOWLIST = new Set([
   "frozen-evaluators.json", // its manifest (unbuilt)
   "packages/reporting-render", // the render package the reporting design specifies (unbuilt)
   "packages/reporting-render/", // the same, written as a directory
+  "packages/runtime/lib/wake-engine.mjs", // g1-wake-engine-design.md's fourth spine consumer (gate G1, unbuilt)
+  "packages/runtime/lib/reconciler-wake.mjs", // g1-wake-engine-design.md's split-out reconciler belt (gate G1, unbuilt)
 
   // --- Produced or remote directories, and working dirs, that are gitignored by design.
   "packages/db/backups/", // where a dump lands; gitignored ("dumps may hold data" — DR.md)
