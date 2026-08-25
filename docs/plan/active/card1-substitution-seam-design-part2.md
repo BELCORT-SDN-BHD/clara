@@ -1,11 +1,10 @@
 # Card 1 — the substitution seam: DESIGN (stages (a)+(b)), part 2
 
-> **Part 2 of `card1-substitution-seam-design.md`** — v2, gate-folded 2026-08-26, split into
-> THREE files at the fold (§3 alone grew past the two-file budget once BL-1..BL-4/M6/M7/M8
-> folded in). **Part 1 carries §1-§2** (the honest B-mapping, stage (a)'s complete mechanism);
-> **this file carries §3** (stage (b): the `cell` primitive, its evaluator-versioning plan, and
-> the fold's four blocker-level corrections to it); **part 3** carries §4-§7. Section numbers
-> continue; read part 1 first — nothing here restates its premises.
+> **Part 2 of `card1-substitution-seam-design.md`** — v3, the final design fold before build
+> (2026-08-26), split into THREE files at v2's fold (§3 alone grew past the two-file budget).
+> **Part 1 carries §1-§2**; **this file carries §3** (stage (b): the `cell` primitive, its
+> evaluator-versioning plan, CD-14 now APPROVED, M8 restated with both groupings named, N3/N5/
+> N8's additions); **part 3** carries §4-§7. Section numbers continue; read part 1 first.
 
 ---
 
@@ -99,7 +98,14 @@ refuses `metric_cell_reference_not_ok` (CLR10). Dimension is carried from the re
 `unit_key` through the existing `clara.metric_units` lookup (`currency_power/days_power/
 count_power`, S31's `constant` branch does the identical thing against `clara.metric_constants`
 — `0059.sql:34` — the `cell` branch mirrors it against `clara.metric_units` directly since
-`metric_cells.unit_key` already names a registered unit).
+`metric_cells.unit_key` already names a registered unit). **N5 — this `metric_units` read
+carries NO firm predicate, and that is safe, stated explicitly given CD-7's own framing.**
+Unlike the `metric_cells` lookup two lines above it (firm-scoped OPERATIONAL data, `firm_id =
+p_firm and client_id = p_client` mandatory, C-20/CD-7's whole point), `clara.metric_units` is a
+firm-NULLABLE CATALOG table (`unit_key text primary key`, `0058.sql:60-63`) — the SAME class of
+global, product-owned reference data `metric_constants`/`edge_policy_sets` already are, which
+S31's own `constant` branch also reads with no firm predicate. A PK-keyed catalog lookup has no
+tenant to leak across; CD-7's discipline governs the OPERATIONAL row, not this one.
 
 **M7 — the full `r` object, temporality corrected (not hardcoded).** This design's v1 draft
 hardcoded the `cell` node's `temp` to `'flow'` and its `po` to `0` — **wrong**, per the fold:
@@ -170,6 +176,37 @@ r.inputs := jsonb_build_object('sign_normalizations', '[]'::jsonb,
 This mirrors the `constant` branch's own shape exactly (`0059.sql:99`: `'node','constant',
 'key',...,'version_id',cv.id,'value',...`) — a `cell` node cites its source BY ID, echoes only
 the numeric value, and stops.
+
+**N8 — stage (b) is single-client, stated explicitly (the mirror of §2.3's stage-(a)
+statement).** `_validate_metric_node_v2`/`_metric_eval_node_v2` both take exactly ONE
+`p_client uuid` parameter for the whole formula, and every `cell` node's own lookup carries
+`client_id = p_client` as a hard equality (above) — so a `cell` node naming a cell that belongs
+to a DIFFERENT client is not merely disallowed, it is **structurally unreachable**: the lookup
+itself returns no row, and `metric_cell_reference_unknown` fires the same way it would for a
+genuinely absent id (no existence oracle, S20). **A single stage-(b) formula can therefore
+never combine facts from two different clients** — this is the deliberate mirror-image of §2.3's
+own statement that a stage-(a) VIEW (built from multiple independent `placeholder` blocks) CAN
+be cross-client. The constraint lives in the EVALUATOR's own signature (one `p_client`, full
+stop), not in any basis-derivation loop, which is why the two stages differ here.
+
+**N3 — `_validate_metric_ast_shape_v1` needs NO `_v2` twin, and this is deliberate, not an
+oversight — it is the SECOND independent enforcement of §6's own non-goal.**
+`clara._validate_metric_ast_shape_v1(a jsonb)` (`0059.sql:49-67`, read in full for this fold)
+is a SECOND closed node-kind switch, structurally identical in shape to
+`_validate_metric_node_v1`/`_validate_metric_node_v2` (the same `elsif k='measure' then ...`
+chain, `0059.sql:57-58` confirmed directly), but cheaper — the proposal-time structural gate
+S32 already named, run BEFORE the full semantic/dimensional proof. It is called by
+`clara._eta_save_metric_definition_draft_core` (`0077.sql:299-330`, the agent-reachable core
+that saves a DRAFT `metric_definition_versions` row — *"SAVING A COMPOSITION MINTS A DRAFT...
+approved version [comes] only [through] the approval lane"*, `0077.sql:294-297`'s own header).
+Because `_validate_metric_ast_shape_v1` is v1-only and closes on the SAME eleven primitives
+(no `cell` branch), **a `cell`-containing AST is refused at DRAFT-SAVE time, before it can even
+become a pending proposal** — a SECOND, independent wall behind CD-14's own scope boundary
+(`propose_metric_definition`/`approve_metric_definition` staying v1-scoped covers the human
+proposal/approval verbs directly; this core covers the AGENT-reachable draft-save path the same
+non-goal must also close). §6's non-goal — no canonical, `cell`-referencing definition is
+buildable through this session — is therefore enforced at BOTH doors a definition could enter
+through, not merely one, and this design mints no `_v2` sibling for either.
 
 ### 3.2 Evaluator versioning — the precise plan (v2, corrected on four points)
 
@@ -242,23 +279,24 @@ design's):**
    members of BOTH the v1 and v2 evaluator closures simultaneously, which the freeze schema
    already supports (`evaluator_version_members`' PK is `(evaluator_version_id,
    member_signature)`, so one function signature can be a member of many evaluator versions).
-   **M8 — the recursive call-site retargets, counted precisely, not asserted.** Every point in
-   v1's body (`0059.sql:95-105`, read in full for this fold) where `_metric_eval_node_v1` calls
-   ITSELF must retarget to `_metric_eval_node_v2` in the v2 body. **This design counts SEVEN
-   distinct textual call sites, not six** — stated as a discrepancy against the fold's own
-   count rather than silently matched, per review law 2/3 (a count is evidence only once
-   verified against the actual body, and this design verified it): `lag`'s tail-call (1,
-   `0059.sql:102`) · `average ... of`'s loop-body call (1, `:103`) · `sum`/`average ...
-   terms`'s loop-body call (1, `:104`) · `percent_change`'s two operand calls, `prior` then
-   `current` (2, `:105`) · `divide`/`subtract`/`multiply`'s two shared operand calls, the
-   num-or-left then den-or-right (2, `:105`). **`_validate_metric_node_v2` needs the identical
-   retargeting at the identical seven shapes within `_validate_metric_node_v1`'s own body**
-   (`0059.sql:37-40`) — fourteen retargets total across the two v2 functions. **If the gate
-   reviewer's count of six was scoped differently (e.g. by node-KIND rather than by textual
-   call site — five kind-groups recurse: `lag`, `average-of`, `sum`/`average`-terms,
-   `percent_change`, `divide`/`subtract`/`multiply`), that reconciles to five, not six or
-   seven either — this design flags the three-way count discrepancy for the coordinator rather
-   than picking whichever number is convenient.**
+   **M8 — the recursive call-site retargets, enumerated in full, both groupings named,
+   no single number picked (ruled: state all seven, or five by group, never just one).**
+   Every point in v1's body (`0059.sql:95-105`, read in full for this fold) where
+   `_metric_eval_node_v1` calls ITSELF must retarget to `_metric_eval_node_v2` in the v2 body.
+   **By TEXTUAL call site — seven, the count that governs what a builder actually retargets:**
+   `lag`'s tail-call (1, `0059.sql:102`) · `average ... of`'s loop-body call (1, `:103`) ·
+   `sum`/`average ... terms`'s loop-body call (1, `:104`) · `percent_change`'s two operand
+   calls, `prior` then `current` (2, `:105`) · `divide`/`subtract`/`multiply`'s two shared
+   operand calls, num-or-left then den-or-right (2, `:105`). **By NODE-KIND GROUP — five, the
+   count that governs how many primitive families recurse:** `lag`; `average-of`;
+   `sum`/`average`-terms; `percent_change`; `divide`/`subtract`/`multiply` (the last three
+   textual groups collapse to fewer kind-groups because `percent_change` and
+   `divide`/`subtract`/`multiply` each pack two call sites into one shared code branch). **Both
+   numbers are correct, for different purposes — seven sites to retarget, five kinds that
+   recurse — and a builder needs the seven-site enumeration above to not miss one.**
+   `_validate_metric_node_v2` needs the IDENTICAL retargeting at the identical seven shapes
+   within `_validate_metric_node_v1`'s own body (`0059.sql:37-40`) — fourteen textual retargets
+   total across the two v2 functions.
 4. **BL-2 — RULED: `clara.evaluate_metric_v2(p_client uuid, p_definition_version_id uuid,
    p_period_ids uuid[], p_snapshot_id uuid, p_run_id uuid) returns jsonb` is minted as the
    REAL, honest entrypoint** — the same signature as `evaluate_metric_v1`
@@ -270,17 +308,16 @@ design's):**
    member_signature = r.entrypoint_signature)` — with no literal target to count), a real,
    callable, correctly-typed `evaluate_*`-named function exists, and `check-frozen-
    evaluators.mjs`'s scan (S23) finds and hashes it directly, exactly as it does
-   `evaluate_metric_v1`. **Scope boundary, stated as a decision this design makes rather than
-   one the fold dictated:** `propose_metric_definition`/`approve_metric_definition`
-   (`0059.sql:82,85`) stay v1-scoped, unedited — no human-proposable, firm-approved,
-   `cell`-referencing CANONICAL definition is buildable through this session's scope.
-   `evaluate_metric_v2` is therefore real, correctly hashed, and callable, but has **no
-   currently-reachable caller other than being the evaluator-identity anchor** the freeze
-   machinery requires — its canonical-path caller (a `propose_metric_definition_v2`/
-   `approve_metric_definition_v2` pair admitting `cell`-referencing definitions) is a **named
-   future extension** (§6), not built here. This scope boundary is this design's own judgement
-   call, not a ruled DECISION from the fold, and is flagged for sign-off precisely because it
-   narrows what "the real entrypoint" does in practice.
+   `evaluate_metric_v1`. **CD-14 — APPROVED 2026-08-26 (was a scope-boundary judgement call
+   this design made, now ruled, not merely proposed):** `propose_metric_definition`/
+   `approve_metric_definition` (`0059.sql:82,85`) stay v1-scoped, unedited — no
+   human-proposable, firm-approved, `cell`-referencing CANONICAL definition is buildable
+   through this session's scope. `evaluate_metric_v2` is therefore real, correctly hashed, and
+   callable, but has **no currently-reachable caller other than being the evaluator-identity
+   anchor** the freeze machinery requires — stage (b) works entirely through the PREVIEW
+   pathway; a canonical-path caller (a `propose_metric_definition_v2`/`approve_metric_
+   definition_v2` pair admitting `cell`-referencing definitions) is a **named future card**
+   (§6), explicitly not this one.
 5. **`clara._eta_compose_metric_preview_core_v2`** and a sibling wake wrapper
    **`clara.wake_compose_metric_preview_v2`** — a NEW pair, never a rewrite of the v1 pair. The
    v2 core is `_eta_compose_metric_preview_core`'s body with three changes: it resolves

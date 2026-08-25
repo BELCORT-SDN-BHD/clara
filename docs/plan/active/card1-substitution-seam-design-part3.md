@@ -1,10 +1,10 @@
 # Card 1 — the substitution seam: DESIGN (stages (a)+(b)), part 3
 
-> **Part 3 of `card1-substitution-seam-design.md`** — v2, gate-folded 2026-08-26. **Part 1
-> carries §1-§2** (the honest B-mapping, stage (a)); **part 2 carries §3** (stage (b), the
-> `cell` primitive, BL-1..BL-4/M6/M7/M8); **this file carries §4-§7** — walls that do not move,
-> the full refusal-token table, named extension points/non-goals, and the migration + runtime +
-> census move list, corrected throughout for BL-1, BL-6, BL-7, M1, M2, M9, M10, M12. Section
+> **Part 3 of `card1-substitution-seam-design.md`** — v3, the final design fold before build
+> (2026-08-26). **Part 1 carries §1-§2**; **part 2 carries §3** (stage (b)); **this file
+> carries §4-§7** — walls that do not move, the full refusal-token table, named extension
+> points/non-goals (§6 item 5 gains N3's second-door finding), and the migration + runtime +
+> census move list. Section
 > numbers continue; read parts 1-2 first — nothing here restates their premises.
 
 ---
@@ -126,13 +126,20 @@ rediscovery:**
    quarter's" where BOTH sides are themselves `cell`-composed — is a materially different,
    larger capability than `lag`/`percent_change` already provide over RAW measures, and is not
    built here.
-5. **A canonical, firm-approved, `cell`-referencing metric definition (BL-2's scope
-   boundary).** `evaluate_metric_v2` is minted as a real, correctly-hashed entrypoint (§3.2 item
-   4), but `propose_metric_definition`/`approve_metric_definition` stay v1-scoped — no human can
-   propose or approve a durable, canonical definition containing a `cell` node through this
-   build. A `propose_metric_definition_v2`/`approve_metric_definition_v2` pair, admitting the
-   twelve-primitive grammar into the maker-checker lifecycle `_tf_metric_definition_lifecycle_
-   v1` already governs, is the natural next step and is named here rather than left implicit.
+5. **A canonical, firm-approved, `cell`-referencing metric definition (BL-2's scope boundary
+   — CD-14 APPROVED 2026-08-26).** `evaluate_metric_v2` is minted as a real, correctly-hashed
+   entrypoint (§3.2 item 4), but `propose_metric_definition`/`approve_metric_definition` stay
+   v1-scoped — no human can propose or approve a durable, canonical definition containing a
+   `cell` node through this build. **This is enforced at TWO independent doors today (N3, §3.1),
+   not merely by the human verbs staying unedited**: `_validate_metric_ast_shape_v1`, the
+   proposal-time structural gate `_eta_save_metric_definition_draft_core` calls
+   (`0077.sql:299-330`), is ALSO v1-only and closes on the same eleven primitives — a
+   `cell`-containing AST is refused at DRAFT-SAVE time, before a canonical proposal could even
+   exist. A future `propose_metric_definition_v2`/`approve_metric_definition_v2` pair, admitting
+   the twelve-primitive grammar into the maker-checker lifecycle `_tf_metric_definition_
+   lifecycle_v1` already governs, would need its OWN `_validate_metric_ast_shape_v2` twin as
+   well — named here so a future builder does not stop at the human verbs and miss the
+   draft-save door.
 6. **Point-in-time composition of cells.** A future build wanting to `average()` a chain of
    `cell`-composed point-in-time values is not precluded by this design (M7's real-temporality
    fix makes a `point_in_time` cell operand dimensionally sound), but no such formula is built
