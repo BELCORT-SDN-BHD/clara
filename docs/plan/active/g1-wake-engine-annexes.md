@@ -424,6 +424,14 @@ update clara.relay_checkpoints
 commit;
 ```
 
+**Use `:firm_id` exactly as the health query returns it — never hand-typed, never
+re-cased.** `hashtext(...)` is byte-sensitive: `firm_id` is a UUID, and Postgres's own text
+rendering of a `uuid` column is lowercase, so a hand-typed or upper-cased UUID hashes to a
+DIFFERENT lock key and silently fails to exclude the engine's own writers — the correction
+above would then run UNSERIALIZED against a concurrent `advanceCheckpointIfClear`/`redrive()`
+call, exactly the race MUST A closed. Copy `firm_id` verbatim from the row(s)
+`heldBelowCheckpoint`'s own query names, never retype it.
+
 Taking the identical `wake_coalesce:<firmId>` advisory lock `advanceCheckpointIfClear`
 (wake-engine.mjs) and `redrive()` (relay.mjs) both already serialize on means this correction can
 never race either writer — it is strictly ordered before or after any concurrent
