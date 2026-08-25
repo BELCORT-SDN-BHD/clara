@@ -138,12 +138,16 @@ export async function loadEnabledSources(client) {
   // ONCE PER ENTRY — the SAME 'queued' row then gets a SEPARATE claim attempt under EACH
   // source's own (possibly different) max_attempts, defeating the claim ledger's own exhaustion
   // cap the instant a second, differently-configured source for the same kind exists.
+  // N3 (round-5, opus NOTE): created_at alone can tie within one transaction (multiple sources
+  // registered in the same commit share one statement-clock timestamp) — source_key (this
+  // table's own primary key) is the deterministic secondary tiebreak, so "most-recently-
+  // created wins" never degrades back into an arbitrary pick at the tie.
   const r = await client.query(
     `select source_key, carrier, event_type, task_kind, wake_kind, workflow_export,
             login_pool, max_attempts
        from clara.wake_engine_sources
       where enabled
-      order by created_at asc`,
+      order by created_at asc, source_key asc`,
   );
   const byEventType = new Map(); // carrier='wake_outbox', keyed on event_type
   const directQueueByTaskKind = new Map(); // carrier='direct_queue', keyed on task_kind — same
@@ -208,7 +212,23 @@ async function recordEventDeadLetter(client, { eventId, reason }) {
  *  cap is reached, every later sweep on THAT path skips straight to (re-)settling and never
  *  re-attempts its own action again, even if a settle attempt itself fails and the row becomes
  *  eligible again next sweep. */
+/** N2 (round-5, opus NOTE) — a missing/unrecognized `consumer` used to fall through silently:
+ *  `readDeadLetterAttempts` would query with an undefined/null/garbage value, find no matching
+ *  row (nothing is ever written under one), and return 0 — indistinguishable from "genuinely
+ *  zero prior attempts." A caller that forgot to pass `consumer` at all (a refactor slip, a
+ *  future third ledger added without updating every call site) would silently read as "never
+ *  tried," letting the check-first guard's own cap logic pass every single time — the exact
+ *  fail-OPEN this ledger split exists to prevent. Both functions below now validate `consumer`
+ *  is one of the two closed-world keys and THROW otherwise — fail-closed on an unrecognized
+ *  identity, never a silent zero. */
+function assertKnownDeadLetterConsumer(consumer) {
+  if (consumer !== WAKE_ENGINE_CLAIM_CONSUMER && consumer !== WAKE_ENGINE_ENQUEUE_CONSUMER) {
+    throw new Error(`wake_engine_task_dead_letters: unrecognized consumer "${consumer}" — must be WAKE_ENGINE_CLAIM_CONSUMER or WAKE_ENGINE_ENQUEUE_CONSUMER, never omitted or guessed`);
+  }
+}
+
 export async function readDeadLetterAttempts(client, { consumer, taskId }) {
+  assertKnownDeadLetterConsumer(consumer);
   const r = await client.query(
     "select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2",
     [consumer, taskId],
@@ -217,6 +237,7 @@ export async function readDeadLetterAttempts(client, { consumer, taskId }) {
 }
 
 export async function recordTaskDeadLetter(client, { consumer, taskId, reason }) {
+  assertKnownDeadLetterConsumer(consumer);
   await client.query("begin");
   try {
     const r = await client.query(
@@ -345,16 +366,13 @@ async function claimWakeOutboxRow(client, { row, firmId, sourceKey, priorSeq }) 
       await client.query("commit");
       return { ok: true, claimed: false, stillHeld: still.rowCount > 0 };
     }
-    // #1(a): only advance the checkpoint to THIS row's own seq if nothing held is hidden in the
-    // gap (priorSeq, row.eventSeq) — see the function-header comment above.
-    const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: priorSeq, toSeqInclusive: row.eventSeq - 1 });
-    let checkpointAdvanced = false;
-    if (!hidden) {
-      await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: row.eventSeq });
-      checkpointAdvanced = true;
-    }
+    // #1(a) + SHOULD-1: advance the checkpoint toward THIS row's own seq only as far as
+    // advanceCheckpointIfClear proves safe — see its own header comment. Sharing the ONE
+    // function (rather than duplicating the logic inline, as round-4's own fix did) is what
+    // keeps this path and the raced/poison-skip paths below from drifting apart again.
+    const newCursor = await advanceCheckpointIfClear(client, { firmId, priorSeq, seq: row.eventSeq, excludeTaskId: row.taskId });
     await client.query("commit");
-    return { ok: true, claimed: true, checkpointAdvanced };
+    return { ok: true, claimed: true, checkpointAdvanced: newCursor > priorSeq, newCursor };
   } catch (err) {
     try {
       await client.query("rollback");
@@ -448,16 +466,26 @@ async function safeCoalesceBound(client, firmId) {
 
 /** Lock-free (no FOR UPDATE / SKIP LOCKED) existence check for a held wake row in
  *  (fromSeqExclusive, toSeqInclusive] — closes the skip-locked variant of M1: a row this
- *  cycle's own locking read could not see is still a row that must not be coalesced past. */
-async function hasHiddenHeldRow(client, { firmId, fromSeqExclusive, toSeqInclusive }) {
+ *  cycle's own locking read could not see is still a row that must not be coalesced past.
+ *  `excludeTaskId` (round-5, SHOULD-1's own plumbing): the row-loop callers below are always
+ *  checking this range WHILE they themselves hold an opinion about ONE specific task — for the
+ *  claimed/raced branches that task's own status has already flipped away from 'held' by the
+ *  time this runs (so it would never match anyway), but poison-skip-exhausted's own row is
+ *  STILL genuinely 'held' at this point (the claim attempt itself failed and rolled back) — an
+ *  inclusive range that happened to reach that row's own seq would wrongly see it as "hidden"
+ *  and block the poison-skip the caller is deliberately choosing to make. Excluding the row
+ *  we're already resolving by id (never by seq arithmetic) keeps the range check honest in
+ *  every caller uniformly. */
+async function hasHiddenHeldRow(client, { firmId, fromSeqExclusive, toSeqInclusive, excludeTaskId = null }) {
   const r = await client.query(
     `select exists(
        select 1 from clara.agent_tasks at
        join clara.wake_intents wi on wi.id = at.origin_intent_id
       where at.kind = 'wake' and at.status = 'held' and wi.firm_id = $1
         and wi.event_seq > $2 and wi.event_seq <= $3
+        and ($4::uuid is null or at.id <> $4)
      ) as hidden`,
-    [firmId, fromSeqExclusive, toSeqInclusive],
+    [firmId, fromSeqExclusive, toSeqInclusive, excludeTaskId],
   );
   return r.rows[0].hidden;
 }
@@ -472,18 +500,31 @@ async function coalesceIfSafe(client, { firmId, from }) {
   return bound;
 }
 
-/** #1(a) (round-4 review): advance the checkpoint to `seq` ONLY if nothing held is hidden in
- *  (priorSeq, seq) — the shared guard every checkpoint-advancing branch in
- *  processWakeOutboxFirm's own row loop uses (claimed, raced-no-longer-held, and poison-skip-
- *  exhausted alike — the hidden-earlier/visible-later race is reachable through any of the
- *  three, not only the claimed path the review's own repro named). Returns the seq actually
- *  reached (unchanged from priorSeq if blocked). */
-async function advanceCheckpointIfClear(client, { firmId, priorSeq, seq }) {
+/** #1(a) (round-4) + SHOULD-1 (round-5, opus reviewer's own trace) — advance the checkpoint
+ *  toward `seq` ONLY as far as is PROVABLY safe, the SAME two-part proof coalesceIfSafe already
+ *  uses, not just the held-row half. Round-4's own fix only added the hidden-HELD-row check
+ *  (hasHiddenHeldRow) to the row-loop's checkpoint advances — SHOULD-1 found this asymmetric
+ *  with coalesceIfSafe's own logic: a PENDING wake_intent or PENDING router dead-letter at a
+ *  LOWER seq than the row just claimed has NOT materialized into a held task at all yet, so
+ *  hasHiddenHeldRow (which only sees materialized 'held' rows) cannot catch it — exact trace: a
+ *  pending dead-letter at seq=3, a claimable held row at seq=9; hasHiddenHeldRow(0,8) sees
+ *  nothing (seq 3 has no task yet); the claim commits with the checkpoint racing to 9; a later
+ *  redrive mints intent(3); drain births held(3); `event_seq > 9` excludes it forever. Fix:
+ *  never advance PAST safeCoalesceBound's own three-bound minimum either — cap the candidate to
+ *  `min(seq, safeCoalesceBound(firm))` before even considering it, exactly folding bound-2/
+ *  bound-3 into the row-loop the same way coalesceIfSafe already folds them into the trailing/
+ *  empty-batch path. The checkpoint may land BELOW the row's own seq now (never above it) —
+ *  the row itself still claims and dispatches normally either way; only the checkpoint's own
+ *  advance is capped. Returns the seq actually reached (unchanged from priorSeq if blocked). */
+async function advanceCheckpointIfClear(client, { firmId, priorSeq, seq, excludeTaskId = null }) {
   if (seq <= priorSeq) return priorSeq;
-  const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: priorSeq, toSeqInclusive: seq - 1 });
+  const safeBound = await safeCoalesceBound(client, firmId);
+  const target = Math.min(seq, safeBound);
+  if (target <= priorSeq) return priorSeq;
+  const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: priorSeq, toSeqInclusive: target, excludeTaskId });
   if (hidden) return priorSeq;
-  await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq });
-  return seq;
+  await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: target });
+  return target;
 }
 
 /** Walk one firm's held wake_outbox rows in event_seq order. Stops (never advances the
@@ -527,11 +568,11 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sourc
     const res = await claimWakeOutboxRow(client, { row, firmId, sourceKey: source.sourceKey, priorSeq: cursor });
     if (res.ok) {
       if (res.claimed) {
-        // #1(a): cursor only actually moves if claimWakeOutboxRow's own hidden-row check cleared
-        // it to write the checkpoint — a hidden EARLIER row leaves cursor exactly where it was,
-        // even though this row (genuinely available under SKIP LOCKED) still claims and
-        // dispatches normally below.
-        if (res.checkpointAdvanced) cursor = row.eventSeq;
+        // #1(a) + SHOULD-1: cursor moves to whatever advanceCheckpointIfClear actually proved
+        // safe — never assume it reached row.eventSeq itself; a pending intent/dead-letter at a
+        // LOWER seq can cap it short even though THIS row (genuinely available under SKIP
+        // LOCKED) still claims and dispatches normally below.
+        cursor = res.newCursor;
         counts.claimed += 1;
         try {
           // MUST F: only plain identifiers cross into durable WDK state — never a credential. The
@@ -551,10 +592,11 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sourc
         return { maxSeq: cursor, blocked: true, counts, readCount: rows.length };
       } else {
         // SHOULD H: the CAS found this row no longer 'held' — someone/something else already
-        // moved it (e.g. a concurrent claim, or a human's cancel_agent_task racing us). #1(a):
-        // this seq IS spoken for, but advancing the checkpoint to it is the SAME race as the
-        // claimed path — gate it identically.
-        cursor = await advanceCheckpointIfClear(client, { firmId, priorSeq: cursor, seq: row.eventSeq });
+        // moved it (e.g. a concurrent claim, or a human's cancel_agent_task racing us). #1(a) +
+        // SHOULD-1: this seq IS spoken for, but advancing the checkpoint to it is the SAME race
+        // as the claimed path — gate it identically (this row is no longer 'held' either way, so
+        // excluding it from the hidden-row check is defensive, not load-bearing, here).
+        cursor = await advanceCheckpointIfClear(client, { firmId, priorSeq: cursor, seq: row.eventSeq, excludeTaskId: row.taskId });
         log(`[wake-engine] task=${row.taskId} raced (no longer 'held' at claim) — checkpoint advances, no dispatch`);
       }
       continue;
@@ -563,9 +605,12 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sourc
     const attempts = await recordEventDeadLetter(client, { eventId: row.eventId, reason: res.err?.message ?? String(res.err) });
     if (attempts >= source.maxAttempts) {
       log(`[wake-engine] event=${row.eventId} source=${source.sourceKey} exhausted ${source.maxAttempts} attempts -> dead-lettered + skipped: ${res.err?.message ?? res.err}`);
-      // #1(a): same guard — a poison-skip's own checkpoint advance is not exempt from the
-      // hidden-earlier-row race either.
-      cursor = await advanceCheckpointIfClear(client, { firmId, priorSeq: cursor, seq: row.eventSeq });
+      // #1(a) + SHOULD-1: same guard — a poison-skip's own checkpoint advance is not exempt from
+      // the hidden-earlier-row race either. This row IS still genuinely 'held' here (the claim
+      // attempt failed and rolled back) — excludeTaskId is LOAD-BEARING in this branch
+      // specifically, or the hidden-row check would see this row's own still-'held' status and
+      // wrongly refuse the poison-skip we are deliberately choosing to make.
+      cursor = await advanceCheckpointIfClear(client, { firmId, priorSeq: cursor, seq: row.eventSeq, excludeTaskId: row.taskId });
       counts.deadLettered += 1;
       continue;
     }

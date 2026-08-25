@@ -1003,7 +1003,14 @@ begin
   if position('pg_advisory_xact_lock(hashtext(''wake_source_gate:'' || p_source_key)::bigint)' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its #2 advisory-lock mutual exclusion' using errcode='CLR10';
   end if;
-  if position('for update' in v_src) = 0 then
+  -- N4 (round-5, opus NOTE): a bare `position('for update' in v_src)` matches ANY occurrence of
+  -- that phrase ANYWHERE in prosrc, INCLUDING inside this file's own comments (prosrc is the
+  -- verbatim body text, comments included, exactly like #2's own advisory-lock check three
+  -- lines up already anchors to the full call expression rather than a bare 'pg_advisory'
+  -- substring) -- a reviewer's own comment mentioning "FOR UPDATE" in prose would trivially
+  -- satisfy a bare substring check even with the real clause deleted. Anchored to the actual
+  -- statement shape instead: the exact SELECT this file authors, ending in `for update;`.
+  if position('where source_key = p_source_key for update;' in v_src) = 0 then
     raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its #3 FOR UPDATE read+flip atomicity' using errcode='CLR10';
   end if;
 

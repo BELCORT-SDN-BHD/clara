@@ -15,6 +15,7 @@ import {
   rootQuery, endPool, printLaneNotes, noteLane, humanQuery, assertRaises, opk,
   seedFreshFirm, makeConsumableIntent, insertWakeTask, insertOutbox, driveTaskStatus, readRow,
   insertUser, addMember, cancelAgentTask,
+  ROLES, getPool,
 } from "./rig-runtime-fixtures.mjs";
 
 let ready = false;
@@ -662,4 +663,92 @@ test("M3: a repeated NO-OP flip (a DIFFERENT op_key re-asserting the SAME alread
     [W.firm],
   )).rows[0].n;
   assert.equal(afterRealFlip, afterFirstFlip + 1, "M3: a GENUINE state change still broadcasts exactly one new row — the fix suppresses no-ops only, never a real transition");
+});
+
+// =====================================================================================
+// N1 (round-5, opus NOTE) — #2's advisory-lock fix (round-4) spans TWO files: the runtime
+// claim path (packages/runtime/lib/wake-engine.mjs) and this migration's own
+// set_wake_source_enabled body, each independently spelling the SAME key expression
+// ('wake_source_gate:' || source_key). Review law 3 (spelling is not identity) applies
+// directly: nothing short of PROVING the two sides actually contend on the SAME lock confirms
+// they didn't drift apart (a typo'd prefix on either side would silently degrade #2 back to
+// the unlocked race it was meant to close, with no test ever failing). Two real sessions,
+// PROVEN blocked via pg_blocking_pids (never a sleep, which proves nothing about whether the
+// interleave actually happened — db-tests.md's own standing law).
+// =====================================================================================
+async function pollBlockedByOrThrow(blockedPid, blockerPid, { timeoutMs = 5000, intervalMs = 25, what = "the lock" } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [blockedPid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  throw new Error(`pollBlockedByOrThrow: backend ${blockedPid} never observably blocked on ${what} (held by ${blockerPid}) within ${timeoutMs}ms`);
+}
+
+test("N1: the runtime's own JS-side advisory-lock key literal is the IDENTICAL lock set_wake_source_enabled's SQL-side takes — proven by a real cross-session block, not string comparison", async (t) => {
+  if (gate(t)) return;
+  const sourceKey = "bank_agent"; // a real, already-registered source_key -- no synthetic registration needed for a lock-identity probe
+
+  // Hold the EXACT expression wake-engine.mjs's own claim path uses, verbatim, on a raw
+  // connection: `select pg_advisory_xact_lock(hashtext($1)::bigint)` keyed on
+  // `wake_source_gate:${sourceKey}`.
+  const c1 = await getPool().connect();
+  let releaseHolder;
+  const holderShouldRelease = new Promise((resolve) => { releaseHolder = resolve; });
+  let holderPid;
+  const holderTxn = (async () => {
+    await c1.query("begin");
+    holderPid = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c1.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_source_gate:${sourceKey}`]);
+    await holderShouldRelease;
+    await c1.query("rollback");
+  })();
+  // Wait for the holder to actually report its own pid (cheap, deterministic — the SELECT
+  // pg_backend_pid() above always returns immediately, well before the lock acquisition
+  // itself, which is instant here anyway since nothing else holds it yet).
+  while (holderPid === undefined) await new Promise((r) => setTimeout(r, 5));
+
+  // set_wake_source_enabled, called normally (as the real operator-firm owner) — if the
+  // migration's own key expression genuinely matches the runtime's, this call must BLOCK
+  // behind holderPid.
+  const c2 = await getPool().connect();
+  let callerPid;
+  const callerDone = (async () => {
+    await c2.query(`set role ${ROLES.authenticated}`);
+    // is_local=false (SESSION-scoped, matching withActor's own non-transaction `asHuman` shape)
+    // -- this connection never opens an explicit `begin`, so an is_local=true (transaction-
+    // scoped) config would vanish the instant this single autocommit statement ends, leaving
+    // the very next statement (the set_wake_source_enabled call below) with no actor at all.
+    await c2.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ sub: OP.owner, role: "authenticated" })]);
+    callerPid = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+    return c2.query("select clara.set_wake_source_enabled($1,$2,$3,$4)", [sourceKey, true, "N1 lock-identity probe", opk("g1-n1-lock-identity")]);
+  })();
+  while (callerPid === undefined) await new Promise((r) => setTimeout(r, 5));
+
+  try {
+    await pollBlockedByOrThrow(callerPid, holderPid, { what: "the #2 advisory lock (wake_source_gate:bank_agent)" });
+  } finally {
+    releaseHolder();
+    await holderTxn;
+    await callerDone.catch(() => {}); // whatever it settles to, we only needed the block proof above
+    try {
+      await c2.query("rollback");
+    } catch {
+      /* no open txn on a bare autocommit statement */
+    }
+    await c2.query("reset role").catch(() => {});
+    await c2.query("reset all").catch(() => {});
+    c1.release();
+    c2.release();
+  }
+
+  // Cleanup: bank_agent's own enabled state may have flipped true above (or not, depending on
+  // whether callerDone's own call actually landed vs raced with cleanup) — restore false, the
+  // seed's own birth default, unconditionally.
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "N1 cleanup", opk("g1-n1-cleanup")]);
 });

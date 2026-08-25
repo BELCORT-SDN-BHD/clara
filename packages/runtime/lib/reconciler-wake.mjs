@@ -58,7 +58,11 @@ async function resolveSource(client, taskRow) {
     // wake_outbox test in this file registers a source sharing ONE global event_type constant,
     // and none of them ever delete their own row -- by the time a later test's assertions
     // depend on WHICH source answers, several disabled-or-superseded rows already share the
-    // same event_type, and `.rows[0]` with no ORDER BY was silently arbitrary.
+    // same event_type, and `.rows[0]` with no ORDER BY was silently arbitrary. N3 (round-5,
+    // opus NOTE): created_at alone can still tie WITHIN one transaction (multiple sources
+    // registered inside the same commit share one statement-clock timestamp) -- source_key
+    // (the table's own primary key, always unique) is the tertiary tiebreak, so the pick is
+    // fully deterministic even then, never re-arbitrary at the next tie level down.
     const r = await client.query(
       `select s.source_key, s.workflow_export, s.max_attempts
          from clara.agent_tasks at
@@ -66,7 +70,7 @@ async function resolveSource(client, taskRow) {
          join clara.domain_events de on de.id = wi.event_id
          join clara.wake_engine_sources s on s.event_type = de.event_type and s.carrier = 'wake_outbox'
         where at.id = $1
-        order by s.enabled desc, s.created_at desc`,
+        order by s.enabled desc, s.created_at desc, s.source_key desc`,
       [taskRow.id],
     );
     return r.rows[0] ?? null;
@@ -75,11 +79,12 @@ async function resolveSource(client, taskRow) {
   // fixed above applies equally here — a direct_queue task_kind can have more than one
   // registered source row over a registry's lifetime (an old disabled one, a later
   // replacement), and an unordered `.rows[0]` was just as arbitrary. Same ORDER BY, same
-  // reasoning: prefer the currently-enabled source, then the most recently registered.
+  // reasoning: prefer the currently-enabled source, then the most recently registered, then
+  // (N3, round-5) source_key as the deterministic tertiary tiebreak.
   const r = await client.query(
     `select source_key, workflow_export, max_attempts from clara.wake_engine_sources
       where task_kind = $1 and carrier = 'direct_queue'
-      order by enabled desc, created_at desc`,
+      order by enabled desc, created_at desc, source_key desc`,
     [taskRow.kind],
   );
   return r.rows[0] ?? null;

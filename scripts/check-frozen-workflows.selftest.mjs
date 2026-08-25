@@ -158,6 +158,29 @@ testCase("#11 control: a LEGITIMATE bare re-export of an actually-imported, rela
   expectClean(checkRegistryViewIntegrity(fixture("registry-view-legit-reexport.ts.txt")));
 });
 
+// SHOULD-2 (round-5, opus reviewer's own probes) — the closed-world census previously matched
+// only an ENUMERATED set of shapes (reject-known); these five probes each proved a real shape
+// invisible to it, matching nothing and reporting zero violations.
+testCase("SHOULD-2 `export * from \"...\"` (unbounded wildcard re-export) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-star-reexport.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export * as ns from \"...\"` (namespace wildcard re-export) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-star-as-reexport.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export {x} from \"./rel\"` (direct re-export, relative source, x never locally bound) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-brace-from-relative.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export {x} from \"pkg\"` (direct re-export, package source) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-brace-from-package.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("SHOULD-2 `export let alternateView = {...}` (the const-only name regex's own blind spot) -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-export-let.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 

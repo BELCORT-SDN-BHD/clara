@@ -467,6 +467,79 @@ test("#1(b): a firm with a pending (unredriven) router dead-letter never coalesc
 });
 
 // =====================================================================================
+// SHOULD-1 (round-5, opus reviewer's own trace) — round-4's #1(a)/#1(b) fixes were internally
+// INCONSISTENT: the row-loop's own checkpoint-advance (claimed/raced/poison-skip-exhausted)
+// only consulted hasHiddenHeldRow (materialized held rows), never safeCoalesceBound's own
+// pending-intent/pending-dead-letter bounds the way coalesceIfSafe already does. Exact trace: a
+// pending router dead-letter at seq=3 (NOT YET materialized into any wake_intent/held task —
+// hasHiddenHeldRow cannot see it, it isn't a held row at all) alongside a fully claimable held
+// row at seq=9. Claiming seq=9 alone: hasHiddenHeldRow(0,8) sees nothing (correctly — nothing
+// IS held there), so pre-fix the checkpoint raced straight to 9. A later redrive mints intent(3)
+// at that low seq; drain births held(3); `event_seq > 9` excludes it forever, same class as
+// #1(b), just reached through the CLAIM path instead of the coalesce path.
+// =====================================================================================
+test("SHOULD-1: a pending router dead-letter at a LOW seq blocks the checkpoint even while a HIGHER-seq row claims successfully in the SAME cycle", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_sh1_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_sh1");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // The pending (unredriven) router dead-letter at the LOW seq — never materialized into a
+  // wake_intent, exactly the reviewer's own trace.
+  const lowEvent = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  const lowSeq = Number(lowEvent.seq);
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status)
+       values ('router',$1,$2,$3,$4,'SHOULD-1 battery: simulated pre-fix uncovered event','pending')`,
+    [lowEvent.id, w.firm, lowSeq, WAKE_EVENT_TYPE],
+  );
+
+  // A fully materialized, genuinely claimable held row at a HIGHER seq.
+  const highIntent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const highSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [highIntent.intentId])).rows[0].event_seq);
+  const highTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [highIntent.intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [highIntent.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [highIntent.intentId, randomUUID()]);
+  assert.ok(highSeq > lowSeq, "mandatory setup: the dead-letter's own seq is genuinely lower than the claimable row's");
+
+  // Router checkpoint well past both, so bound-1 alone would not block this (isolates the cell
+  // to bound-3, the dead-letter bound, specifically).
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head],
+  );
+
+  const enqueued = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
+
+  const highRow = await rig.readTask(highTask);
+  assert.equal(highRow.status, "running", "SHOULD-1: the higher-seq row still claims and dispatches normally — the pending dead-letter never blocks the ROW's own claim, only the checkpoint");
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0][1], highTask);
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(!cp || Number(cp.last_seq) < lowSeq, "SHOULD-1: THE CORE ASSERTION — the checkpoint must stay below the pending dead-letter's own seq, even though a HIGHER-seq row claimed successfully in the SAME cycle");
+
+  // Redrive the dead-letter now and prove its own (low-seq) task is still discoverable.
+  await rig.rootQuery(
+    "insert into clara.wake_intents (event_id, decision, taxonomy_version) values ($1,'background_review',(select version from clara.taxonomy_active)) on conflict (event_id) do nothing",
+    [lowEvent.id],
+  );
+  await rig.rootQuery("update clara.relay_dead_letters set status='resolved', resolved_at=now() where consumer='router' and event_id=$1", [lowEvent.id]);
+  const redrivenIntentId = (await rig.rootQuery("select id from clara.wake_intents where event_id=$1", [lowEvent.id])).rows[0].id;
+  const redrivenTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [redrivenIntentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [redrivenIntentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [redrivenIntentId, randomUUID()]);
+
+  const enqueued2 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+  const redrivenRow = await rig.readTask(redrivenTask);
+  assert.equal(redrivenRow.status, "running", "SHOULD-1: once redriven, the low-seq task is still discoverable and dispatched — never stranded by the earlier claim of the higher-seq row");
+  assert.equal(enqueued2.length, 1);
+  assert.equal(enqueued2[0][1], redrivenTask);
+});
+
+// =====================================================================================
 // M2 (Codex review) — the kill switch used a STALE per-cycle snapshot: loadEnabledSources runs
 // ONCE at the top of runWakeEngineCycle, so a set_wake_source_enabled(false) call landing
 // mid-cycle used to keep claiming the REST of an already-in-flight batch against the stale
@@ -483,11 +556,30 @@ test("M2: a source disabled MID-CYCLE stops claiming the rest of an in-flight ba
   const intent1 = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
   const task1 = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intent1.intentId])).rows[0].id;
   await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [intent1.intentId]);
+  // SHOULD-1 (round-5): drain's own real shape flips the wake_intent to 'consumed' in the SAME
+  // transaction it creates the held task in (never leaving a 'pending' intent alongside an
+  // already-materialized held row) — safeCoalesceBound's own bound-2 now depends on this being
+  // true (a 'pending' intent is treated as NOT YET materialized), matching #1(a)/#1(b)/M1's own
+  // already-established fixture pattern.
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intent1.intentId, randomUUID()]);
   const seq1 = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [intent1.intentId])).rows[0].event_seq);
 
   const intent2 = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
   const task2 = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intent2.intentId])).rows[0].id;
   await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [intent2.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intent2.intentId, randomUUID()]);
+
+  // SHOULD-1 (round-5): advanceCheckpointIfClear now ALSO caps by safeCoalesceBound's own
+  // bound-1 (the router's own checkpoint) — with none seeded, bound-1 defaults to 0 and would
+  // cap EVERY advance in this cycle to 0 regardless of what this test is actually isolating.
+  // Seed it at head, mirroring M1's own established pattern, so this cell isolates the M2
+  // mid-cycle-disable concern specifically, not a side effect of an absent router checkpoint.
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head],
+  );
 
   const enqueued = [];
   await rig.asRuntime((c) => runWakeEngineCycle(c, {
