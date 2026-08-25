@@ -151,6 +151,17 @@ begin
 end
 $s0$;
 
+-- Pin interactive_client's allowlist SET at entry (train fix, 2026-08-25). The tail used to
+-- assert a count-of-1 literal here -- true only at this file's authoring frontier, and broken
+-- the moment 0129's SS4 chat-parity mirror (thirteen rows) and 0131's freeform row lawfully
+-- widened the kind while this PR rode the merge train. What this file actually OWES is
+-- UNCHANGEDNESS -- it must not touch a kind it does not own -- so the prestate measures the set
+-- and the tail asserts set-equality against this pin (measure-before/measure-after, the
+-- db-migrations rule this file's original literal violated). ON COMMIT DROP: the runner applies
+-- each migration in its own transaction, so the pin cannot leak past this file.
+create temp table _fa5b_pin_ic_allowlist on commit drop as
+  select function_name from clara.wake_fn_allowlist where wake_kind = 'interactive_client';
+
 set role clara_fn_owner;
 
 -- =====================================================================================
@@ -1186,6 +1197,10 @@ reset role;
 -- named GB-3/D34 closed-world wall (below) capping interactive_client at exactly one verb --
 -- discovered by rig replay, not assumed from the design's own Annex A.2 text. Never a 'proactive'
 -- row (law 71's proactive-says-nothing posture), never unattended.
+-- (Authoring-frontier statement, trued at the train merge 2026-08-25: 0129's SS4 chat-parity
+-- mirror + 0131's freeform row later lawfully widened interactive_client, and the GB-3/D34 cells
+-- moved onto the shared roster fixture. This lane's own choice of 'interactive' rows stands
+-- unchanged; the tail's check is now set-equality against a prestate pin, not a count.)
 -- =====================================================================================
 set role clara_fn_owner;
 
@@ -1365,7 +1380,9 @@ begin
   -- three function names, 'interactive' ONLY, never proactive. NOT 'interactive_client' -- measured
   -- at authoring: the estate's own GB-3/D34 closed-world cells assert interactive_client is
   -- allowlisted for EXACTLY ONE verb (wake_open_question), a deliberate anti-capability-creep wall
-  -- this lane does not own. Annex K's own documented fallback ships instead.
+  -- this lane does not own. Annex K's own documented fallback ships instead. (Authoring-frontier
+  -- statement -- see the SECTION 9 header's train-merge truing note; the check below is
+  -- self-scoped to this lane's three names and needed no change.)
   select count(*) into v_n from clara.wake_fn_allowlist
     where function_name in ('wake_mint_sandbox_view','wake_request_sandbox_export','wake_sandbox_export_state');
   if v_n <> 3 then
@@ -1376,10 +1393,18 @@ begin
         and wake_kind <> 'interactive') then
     raise exception 'f_a5b pr1 tail: an allowlist row for this lane''s wrappers admits an unexpected wake_kind' using errcode = 'CLR10';
   end if;
-  if (select count(*) from clara.wake_fn_allowlist where wake_kind = 'interactive_client') <> 1
+  -- Train fix 2026-08-25: was a count-of-1 literal (true only at the authoring frontier; 0129's
+  -- SS4 mirror + 0131's freeform row lawfully widened this kind while the PR rode the train).
+  -- The claim this file actually owes is UNCHANGEDNESS: the set equals the prestate pin, both
+  -- directions, and the D34 anchor row is still present. Set-equality, never a count -- a count
+  -- of N would go stale at the NEXT lawful widening exactly as the 1 did.
+  if exists(select function_name from clara.wake_fn_allowlist where wake_kind = 'interactive_client'
+            except select function_name from _fa5b_pin_ic_allowlist)
+     or exists(select function_name from _fa5b_pin_ic_allowlist
+               except select function_name from clara.wake_fn_allowlist where wake_kind = 'interactive_client')
      or not exists(select 1 from clara.wake_fn_allowlist
        where wake_kind = 'interactive_client' and function_name = 'wake_open_question') then
-    raise exception 'f_a5b pr1 tail: interactive_client''s one-row D34 invariant no longer holds -- this file must not have touched it' using errcode = 'CLR10';
+    raise exception 'f_a5b pr1 tail: interactive_client''s allowlist set changed under this file (or the wake_open_question anchor is gone) -- this file must not touch a kind it does not own' using errcode = 'CLR10';
   end if;
 
   -- F5-D30 followup (Codex re-review): wake_fn_allowlist's own PK is (wake_kind, function_name) --
