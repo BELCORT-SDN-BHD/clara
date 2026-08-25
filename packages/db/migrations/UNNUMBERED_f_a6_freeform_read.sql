@@ -333,7 +333,31 @@ begin
     raise exception 'F-A6 PR-1 prestate: enumerated relation(s) absent: %', array_to_string(v_missing,', ') using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-A6 PR-1 prestate: clean -- both wake_credentials CHECKs admit interactive_client and pin it to a non-null client, all 8 helper signatures resolve, no F-A6 object or role exists yet, clara.freeform_read_log is EMPTY (P-1 confirmed) with 0002:542''s runtime INSERT grant and p_freeform_read_log_runtime BOTH present to be removed, and all 35 enumerated relations exist.';
+  -- (f) THE π RECEIPT-CONTRACT DEPENDENCY (0103_f_a7_pi_additive.sql, D-6, merged AFTER this
+  --     file was first authored). pi's own header rules the obligation on every member item:
+  --     "that item's OWN migration runs exactly one statement — create or replace view
+  --     clara._agent_receipt_src_<item> ... — and then select
+  --     clara._assert_receipt_surface_conforms('_agent_receipt_src_<item>') in its tail." §9.5
+  --     below is that statement; this probe confirms the three things it depends on rather than
+  --     assuming pi landed in the shape this file was written against.
+  if to_regclass('clara.agent_receipt_contract') is null
+     or to_regclass('clara.agent_receipt_surfaces') is null
+     or to_regclass('clara._agent_receipt_src_f_a6') is null
+     or to_regprocedure('clara._assert_receipt_surface_conforms(text)') is null then
+    raise exception 'F-A6 PR-1 prestate: the pi receipt-contract objects are not all present (agent_receipt_contract/agent_receipt_surfaces/_agent_receipt_src_f_a6/_assert_receipt_surface_conforms) — apply 0103_f_a7_pi_additive.sql first' using errcode = 'CLR10';
+  end if;
+  if not exists (select 1 from clara.agent_receipt_surfaces
+                  where item = 'f_a6' and receipt_kind = 'freeform_read'
+                    and shim_relname = '_agent_receipt_src_f_a6' and expected_source = 'freeform_read_log') then
+    raise exception 'F-A6 PR-1 prestate: agent_receipt_surfaces does not carry the f_a6 row pi registered' using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_rows from pg_attribute a
+   where a.attrelid = 'clara._agent_receipt_src_f_a6'::regclass and a.attnum > 0 and not a.attisdropped;
+  if v_rows <> 19 then
+    raise exception 'F-A6 PR-1 prestate: clara._agent_receipt_src_f_a6 carries % column(s), pi''s contract has 19 — the stub shape has moved under this file', v_rows using errcode = 'CLR10';
+  end if;
+
+  raise notice 'F-A6 PR-1 prestate: clean -- both wake_credentials CHECKs admit interactive_client and pin it to a non-null client, all 8 helper signatures resolve, no F-A6 object or role exists yet, clara.freeform_read_log is EMPTY (P-1 confirmed) with 0002:542''s runtime INSERT grant and p_freeform_read_log_runtime BOTH present to be removed, all 35 enumerated relations exist, and pi''s 19-column receipt-contract stub for f_a6 is present and registered.';
 end
 $fa6_pre$;
 
@@ -1146,6 +1170,79 @@ insert into clara.wake_fn_allowlist (wake_kind, function_name) values
   ('interactive_client', 'wake_freeform_read');
 
 -- =====================================================================================
+-- §9.5  THE π RECEIPT-CONTRACT PROJECTION (0103_f_a7_pi_additive.sql D-6) — pi's typed-empty
+--       stub `clara._agent_receipt_src_f_a6` CoR'd with the real projection, ONE statement,
+--       exactly pi's own documented mechanism. This did not exist when F-A6 PR-1 was first
+--       authored; folded in at merge because pi landed first and the contract now binds.
+-- =====================================================================================
+-- Ordinal-by-ordinal against pi's 19-column contract (§1(f) confirmed the arity above):
+--   1 receipt_kind    'freeform_read' literal — this item's own discriminator, matching the
+--                     agent_receipt_surfaces row pi already inserted.
+--   2 receipt_id      r.id::text — id is bigint; text is the contract's common PK type.
+--   3 firm_id         r.firm_id — NOT NULL on this table; a freeform read is NEVER platform-
+--                     scoped (see 19 below), so this is never NULL in practice either.
+--   4 client_id       (r.client_scope)[1] — NULL for a HOME/firm-wide read (client_scope IS
+--                     NULL, and NULL[1] is NULL), the pinned client for a client-scoped read
+--                     (ck_freeform_scope_client already proves cardinality=1 there). NEVER
+--                     `r.scope` fed through as-is — see 19.
+--   5 subject_id      NULL — a freeform read acts on no single row; TA-P10 C' is exactly why
+--                     it has no subject in the entry/document/filing sense the contract names.
+--   6 acting_actor    r.acting_actor — NOT NULL.
+--   7 on_behalf_of    r.on_behalf_of — the director, NULL only where the credential carried none.
+--   8 occurred_at     r.at — the base table's own pre-F-A6 timestamptz column (0002:314).
+--   9 model           r.model_snapshot->>'model'.
+--  10 model_version   r.model_snapshot->>'version'.
+--  11 rationale       r.purpose — TA-P4's bound purpose IS the agent's stated reasoning for
+--                     this read; there is no second free-text field to prefer over it.
+--  12 verdict         r.rung_vector — the three-valued gate vector IS "what the DB saw" here.
+--  13 failing_rungs   derived from rung_vector: every key whose value is the literal 'fail'.
+--                     `reason` is a string token, never 'fail', so it never leaks in by
+--                     accident; a passing or not_evaluable rung contributes nothing. Empty
+--                     array (never NULL) on a fully-passing read, matching the contract's own
+--                     "empty means every rung passed".
+--  14 via_wake_kind   r.via_wake_kind — NOT NULL; every F-A6 read rides interactive or
+--                     interactive_client (§9's two allowlist rows), never a chat-turn-less lane.
+--  15 trigger_kind    'wake_task' literal — every read binds task_id (§5 A4's mechanical
+--                     binding); there is no chat_turn-triggered arm in v1.
+--  16 trigger_id      r.task_id::text.
+--  17 authorization_id NULL — freeform reads consume no egress authorization row.
+--  18 adopted_verbatim NULL — nothing from this verb is ever adopted into a durable artifact
+--                     (D-27's grant wall; TA-P10 C'), so the question is inapplicable, not false.
+--  19 scope           'firm' literal, NEVER `r.scope` fed through as-is — THE FOOTGUN NAMED IN
+--                     THE F-A6 REPORT. r.scope is THIS TABLE's own column, 'client'|'firm',
+--                     meaning what the READ touched (§3, ck_freeform_scope_client). The
+--                     contract's scope is firm|platform RECEIPT VISIBILITY (R-L26, pi §SS2.1)
+--                     — same name, different domain, on different objects (base table vs. this
+--                     shim view). A freeform read is always a firm-tenant act (no F-A6 platform
+--                     read exists), so the derived value is unconditionally 'firm', regardless
+--                     of whether the READ itself was client-pinned or firm-wide.
+create or replace view clara._agent_receipt_src_f_a6 as
+  select
+    'freeform_read'::text               as receipt_kind,
+    r.id::text                          as receipt_id,
+    r.firm_id                           as firm_id,
+    (r.client_scope)[1]                 as client_id,
+    null::text                          as subject_id,
+    r.acting_actor                      as acting_actor,
+    r.on_behalf_of                      as on_behalf_of,
+    r.at                                as occurred_at,
+    r.model_snapshot->>'model'          as model,
+    r.model_snapshot->>'version'        as model_version,
+    r.purpose                           as rationale,
+    r.rung_vector                       as verdict,
+    array(select kv.key from jsonb_each_text(coalesce(r.rung_vector, '{}'::jsonb)) kv
+           where kv.value = 'fail')     as failing_rungs,
+    r.via_wake_kind                     as via_wake_kind,
+    'wake_task'::text                   as trigger_kind,
+    r.task_id::text                     as trigger_id,
+    null::uuid                          as authorization_id,
+    null::boolean                       as adopted_verbatim,
+    'firm'::text                        as scope
+  from clara.freeform_read_log r;
+
+select clara._assert_receipt_surface_conforms('_agent_receipt_src_f_a6');
+
+-- =====================================================================================
 -- §10  THE TAIL — a self-proof that RAISES on failure, and the LAW-34 AUDIT LINE printed by
 --      the thing that installed the surface (Annex E.1: printed by the migration, not retyped
 --      by a document; PR-4 publishes this text verbatim).
@@ -1341,7 +1438,13 @@ begin
     coalesce(array_length(v_only_ff,1),0), array_to_string(v_only_ff, ', '),
     coalesce(array_length(v_only_ag,1),0), array_to_string(v_only_ag, ', ');
 
-  raise notice 'F-A6 PR-1 tail: OK -- two new roles (clara_freeform_ro group + the fourth login clara_freeform_login, member of it ALONE, NOLOGIN until the operator ceremony); the admission ladder sits in the UNGRANTED clara._freeform_core, which takes no scope and no verb argument and is EXECUTE-reachable by no role at all; the compiled pin is a uuid[] set (NULL = firm-wide, one element = the credential''s client), so F-A6 v2 widens a set instead of re-cutting 35 policies; SELECT on exactly 35 enumerated relations and EXECUTE on exactly 7 functions, both DERIVED from the catalog and both excluding the audit spine, the authority spine, the wiki cohort, the runtime state and the OCR/structured-parse tables; 35 role-pinned SELECT policies, one per relation, EVERY one carrying the _freeform_admitted() conjunct, so an un-armed transaction reads ZERO ROWS from all 35; clara.freeform_read_log ALTERed in place over ZERO rows with the settle-once + no-truncate + DEFERRED must-settle triggers, the bookkeeper+ human policy AND its table GRANT, and 0002:542''s runtime INSERT grant plus p_freeform_read_log_runtime BOTH REMOVED -- the receipt now has exactly two writer bodies and no third; exactly two allowlist rows, both interactive-family, F-A2''s own interactive_client row untouched; PUBLIC holds zero EXECUTE and every new function carries exactly one overload. No live body was CoR''d, so no D1 write-quiesce was required. No table in workflow/graphile_worker/spike touched.';
+  -- (8) THE π RECEIPT-CONTRACT PROJECTION CONFORMS — re-asserted here, not only at §9.5's own
+  --     call, so a later edit to this file cannot silently drop it (0126's own precedent,
+  --     :2280-2282). It CAN say NO: arity first, then a per-ordinal name+type comparison
+  --     against clara.agent_receipt_contract, both read from the live catalog.
+  perform clara._assert_receipt_surface_conforms('_agent_receipt_src_f_a6');
+
+  raise notice 'F-A6 PR-1 tail: OK -- two new roles (clara_freeform_ro group + the fourth login clara_freeform_login, member of it ALONE, NOLOGIN until the operator ceremony); the admission ladder sits in the UNGRANTED clara._freeform_core, which takes no scope and no verb argument and is EXECUTE-reachable by no role at all; the compiled pin is a uuid[] set (NULL = firm-wide, one element = the credential''s client), so F-A6 v2 widens a set instead of re-cutting 35 policies; SELECT on exactly 35 enumerated relations and EXECUTE on exactly 7 functions, both DERIVED from the catalog and both excluding the audit spine, the authority spine, the wiki cohort, the runtime state and the OCR/structured-parse tables; 35 role-pinned SELECT policies, one per relation, EVERY one carrying the _freeform_admitted() conjunct, so an un-armed transaction reads ZERO ROWS from all 35; clara.freeform_read_log ALTERed in place over ZERO rows with the settle-once + no-truncate + DEFERRED must-settle triggers, the bookkeeper+ human policy AND its table GRANT, and 0002:542''s runtime INSERT grant plus p_freeform_read_log_runtime BOTH REMOVED -- the receipt now has exactly two writer bodies and no third; exactly two allowlist rows, both interactive-family, F-A2''s own interactive_client row untouched; PUBLIC holds zero EXECUTE and every new function carries exactly one overload; pi''s clara._agent_receipt_src_f_a6 stub is CoR''d with the real 19-column projection and CONFORMS to clara.agent_receipt_contract, re-checked in this same tail. No live body was CoR''d, so no D1 write-quiesce was required. No table in workflow/graphile_worker/spike touched.';
 end
 $fa6_tail$;
 
