@@ -1,0 +1,30 @@
+// Fixture: round-6, novel probe (self-devised, not one of Codex's three) — TYPE-ONLY exports,
+// both the whole-clause form (`export type { X } from "..."`) and the per-specifier form
+// (`export { type X, real }`), are erased entirely at compile time: they carry ZERO runtime
+// export surface, so registry.ts's closed-world census has nothing to verify them against —
+// not even a target-directory check, since a pure type has no runtime existence to smuggle.
+// Neither Codex's three named probes nor a naive first-draft AST walk (one that visits every
+// ExportDeclaration/ExportSpecifier uniformly) distinguishes this from a real value re-export;
+// without recognizing `isTypeOnly` on both the ExportDeclaration and the individual
+// ExportSpecifier, this fixture would misfire as REGISTRY-EXPORTS-CLOSED-WORLD (a false
+// positive on: `SomeUnrelatedType` was never imported as a value at all, and the whole-clause
+// type export below points OUTSIDE packages/runtime/workflows/, both of which are entirely
+// fine for a TYPE that is compiled away before any of it could matter at runtime).
+// Must stay clean — no violations at all.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+// Whole-clause type-only re-export, sourced from OUTSIDE workflows/ — fine; erased at compile
+// time, so there is no runtime binding to verify a target directory for.
+export type { SharedWorkflowContext } from "../shared-types.js";
+
+// Per-specifier type-only export mixed with a real, legitimate bare re-export — the type
+// specifier names something never imported as a value in this file at all (fine, it is a
+// type), while the value specifier re-exports the real, relatively-imported workflow.
+export { type SomeUnrelatedType, closeExampleV1 };

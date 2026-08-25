@@ -1,0 +1,18 @@
+// Fixture: round-6 (Codex #11, probe 3) — a bare, UNALIASED re-export whose local name IS
+// imported from a RELATIVE path (`spec.startsWith(".")` is true), but the path does not
+// actually resolve inside packages/runtime/workflows/ — it climbs two levels out via `../..`
+// first. Round-5's own check accepted any specifier merely because it started with a dot;
+// `../../../etc/passwd.js` starts with a dot too. The path must be resolved PURELY (no fs)
+// against registry.ts's own known location and REJECTED unless the result stays under
+// packages/runtime/workflows/.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { evil } from "../../evil.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { evil };

@@ -455,11 +455,25 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
     if (dl.rowCount === 0) {
       throw new Error(`redrive: no dead-letter for consumer='${consumer}' event=${eventId} — nothing to redrive`);
     }
-    const evR = await client.query("select event_type from clara.domain_events where id = $1", [eventId]);
+    const evR = await client.query("select event_type, firm_id from clara.domain_events where id = $1", [eventId]);
     if (evR.rowCount === 0) {
       throw new Error(`redrive: event ${eventId} not found`);
     }
     const eventType = evR.rows[0].event_type;
+    // #1 (round-6, Codex) — the SAME per-firm advisory lock wake-engine.mjs's own
+    // advanceCheckpointIfClear takes ('wake_coalesce:'||firm_id — the two literals MUST stay
+    // byte-identical, proven by a battery cell exactly like N1's own JS/SQL pairing proof, never
+    // trusted by spelling alone). Closes a TOCTOU round-5 left open: wake-engine's own coalesce
+    // bounds itself on this dead-letter's CURRENT status (pending excludes the seq; resolved
+    // does not) — without this lock, a resolved dead-letter here could flip BACK to pending
+    // (the branch immediately below, when the type is still uncovered — despite the word
+    // "redrive," this function is ALSO the reopen path) in the gap between wake-engine's own
+    // bound READ and its checkpoint WRITE, letting the checkpoint sail straight over a seq that
+    // a LATER genuine redrive then resurrects as wake-bound, invisible forever. Acquired before
+    // either exit branch below (reopen or resolve+insert-intent) and held for this whole
+    // transaction's own remaining lifetime — released at this function's own commit/rollback,
+    // exactly like wake_source_gate's already-shipped pattern.
+    await client.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_coalesce:${evR.rows[0].firm_id}`]);
     const decision = taxonomy.decisions.get(eventType);
     if (decision === undefined) {
       // (X5b) still uncovered — REOPEN if it was resolved (status/resolved_at are in

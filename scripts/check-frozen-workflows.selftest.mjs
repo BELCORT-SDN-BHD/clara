@@ -181,6 +181,24 @@ testCase("SHOULD-2 `export let alternateView = {...}` (the const-only name regex
   expectCodes(checkRegistryViewIntegrity(fixture("registry-view-export-let.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
 });
 
+// round-6 (Codex #11) — "stop regex-parsing TypeScript; parse it": three probes that beat
+// round-5's own regex census, now on the real TypeScript compiler API. Plus one novel probe.
+testCase("round-6 probe 1: `workflowsByName` declared with an escaped identifier (\\u0077orkflowsByName) -> REJECT, the escape trick does not hide it from a real parser (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-escaped-identifier.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("round-6 probe 2: `export const workflows = {...} as const, workflowsByName = {...}` (multi-declarator; the second declarator is invisible to a first-match regex) -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-multi-declarator.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("round-6 probe 3: bare re-export of a RELATIVE import that resolves OUTSIDE packages/runtime/workflows/ (`../../evil.js`) -> REJECT, relativity alone is not target verification (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-reexport-escapes-directory.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("round-6 novel probe (self-devised): TYPE-ONLY exports (`export type {...} from \"../outside.js\"` and `export { type X, real }`) carry zero runtime surface -> OK, never a false REGISTRY-EXPORTS-CLOSED-WORLD reject", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-type-only-reexport.ts.txt")));
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 

@@ -297,8 +297,10 @@ async function readHeldWakeRows(client, { firmId, lastSeq, batchSize }) {
   }));
 }
 
-/** One held row's claim: held->running + checkpoint, ONE transaction. NO credential is minted
- *  here (MUST F) — that is the dispatched workflow's own first-step obligation. SHOULD H (opus/
+/** One held row's claim: held->running. NO credential is minted here (MUST F) — that is the
+ *  dispatched workflow's own first-step obligation. Round-6 (Codex #1): the checkpoint advance
+ *  is a SEPARATE call the caller makes right after this one returns, not nested in this same
+ *  transaction — see advanceCheckpointIfClear's own header. SHOULD H (opus/
  *  Codex review): the read's `FOR UPDATE SKIP LOCKED` is decorative outside an explicit
  *  transaction (proven by a two-session differential — the row lock releases at statement end,
  *  before this transaction even opens); the CAS (`and status='held'`) below is the REAL
@@ -329,7 +331,7 @@ async function readHeldWakeRows(client, { firmId, lastSeq, batchSize }) {
  *  not block seq=5's own claim — it is genuinely available), but the checkpoint write is
  *  SKIPPED, leaving it at priorSeq until the earlier row's own hider resolves (a self-healing
  *  wait — see the caller's own comment for why this cannot orphan seq=5's dispatch). */
-async function claimWakeOutboxRow(client, { row, firmId, sourceKey, priorSeq }) {
+async function claimWakeOutboxRow(client, { row, sourceKey }) {
   await client.query("begin");
   try {
     // #2 (round-4 review, both legs) — without SOME cross-transaction dependency, the exists-check
@@ -366,13 +368,16 @@ async function claimWakeOutboxRow(client, { row, firmId, sourceKey, priorSeq }) 
       await client.query("commit");
       return { ok: true, claimed: false, stillHeld: still.rowCount > 0 };
     }
-    // #1(a) + SHOULD-1: advance the checkpoint toward THIS row's own seq only as far as
-    // advanceCheckpointIfClear proves safe — see its own header comment. Sharing the ONE
-    // function (rather than duplicating the logic inline, as round-4's own fix did) is what
-    // keeps this path and the raced/poison-skip paths below from drifting apart again.
-    const newCursor = await advanceCheckpointIfClear(client, { firmId, priorSeq, seq: row.eventSeq, excludeTaskId: row.taskId });
+    // #1 (round-6, Codex): the checkpoint advance moved OUT of this transaction and into its
+    // OWN, called by the caller right after this one commits — see advanceCheckpointIfClear's
+    // own header for why (it now needs to hold a per-firm advisory lock for the ENTIRE
+    // bound-read-through-write critical section, and nesting a second BEGIN inside this
+    // transaction would silently commit THIS one early instead of scoping a lock to a sub-
+    // section of it). Splitting is safe: a crash between this commit and that one just leaves
+    // the checkpoint lagging behind an already-'running' (therefore invisible to
+    // readHeldWakeRows) row — the SAME lag this whole design already tolerates everywhere else.
     await client.query("commit");
-    return { ok: true, claimed: true, checkpointAdvanced: newCursor > priorSeq, newCursor };
+    return { ok: true, claimed: true };
   } catch (err) {
     try {
       await client.query("rollback");
@@ -380,23 +385,6 @@ async function claimWakeOutboxRow(client, { row, firmId, sourceKey, priorSeq }) 
       /* aborted/dead */
     }
     return { ok: false, err };
-  }
-}
-
-/** Wake-engine-only checkpoint advance, no task write (MUST F liveness, opus/Codex review) —
- *  mirrors autodraft.mjs's own checkpointOnly. */
-async function checkpointOnlyWake(client, { firmId, seq }) {
-  await client.query("begin");
-  try {
-    await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq });
-    await client.query("commit");
-  } catch (err) {
-    try {
-      await client.query("rollback");
-    } catch {
-      /* aborted/dead */
-    }
-    throw err;
   }
 }
 
@@ -490,41 +478,74 @@ async function hasHiddenHeldRow(client, { firmId, fromSeqExclusive, toSeqInclusi
   return r.rows[0].hidden;
 }
 
-/** M1: compute the safe bound and, ONLY if it clears both checks, advance the checkpoint to it.
- *  Returns the new cursor (unchanged if nothing was safe to coalesce). */
-async function coalesceIfSafe(client, { firmId, from }) {
-  const bound = await safeCoalesceBound(client, firmId);
-  if (bound <= from) return from;
-  if (await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: from, toSeqInclusive: bound })) return from;
-  await checkpointOnlyWake(client, { firmId, seq: bound });
-  return bound;
+// No specific row seq to cap against (the trailing/empty-batch coalesce path) — advance as far
+// as safeCoalesceBound's own minimum allows, full stop. Comfortably below Postgres's own MAXINT
+// sentinel (9223372036854775807) used inside safeCoalesceBound's COALESCE fallbacks, so
+// Math.min(NO_CAP, safeBound) always yields safeBound in any real firm's own seq space.
+const NO_SEQ_CAP = Number.MAX_SAFE_INTEGER;
+
+/** #1(a) (round-4) + SHOULD-1 (round-5, opus reviewer's own trace) + #1 (round-6, Codex) —
+ *  advance the checkpoint toward `seq` (or, with no specific row to cap against — the trailing/
+ *  empty-batch coalesce path, `seq` omitted — as far as the bound alone allows) ONLY as far as
+ *  is PROVABLY safe. Round-4 only added the hidden-HELD-row check; round-5 (SHOULD-1) found
+ *  that asymmetric with the coalesce path's own bound — a PENDING wake_intent or PENDING router
+ *  dead-letter at a LOWER seq than a just-claimed row has not materialized into a held task at
+ *  all, so hasHiddenHeldRow (materialized rows only) cannot catch it, and capped the candidate
+ *  to `min(seq, safeCoalesceBound(firm))`.
+ *
+ *  #1 (round-6, Codex, REOPENED) — that cap still raced the DEAD-LETTER STATE MACHINE itself:
+ *  safeCoalesceBound's own bound-3 reads relay_dead_letters.status at ONE instant; a concurrent
+ *  `redrive()` can flip a 'resolved' dead-letter back to 'pending' (relay.mjs's own "still
+ *  uncovered" reopen branch) in the gap between THIS function's bound read and its checkpoint
+ *  write — the read saw resolved (no exclusion), the write lands, and the reopen's own later
+ *  redrive then resurrects a wake-bound intent at a seq already behind the checkpoint,
+ *  invisible forever. Not a wider bound — a WIDER bound cannot fix a race in WHEN the bound is
+ *  read relative to a concurrent writer; only serialization can. Fix: this function now owns
+ *  its ENTIRE transaction (bound read through checkpoint write, one commit) and holds a
+ *  per-firm advisory lock (`wake_coalesce:<firmId>`) for that whole duration — the SAME lock
+ *  `redrive()` now takes before EITHER of its own exit branches (relay.mjs's own #1 comment).
+ *  Whichever side acquires the lock first is strictly ordered before the other: a reopen either
+ *  fully lands before this function's own bound read (so bound-3 correctly excludes it) or
+ *  fully waits until after this function's own commit (so the checkpoint it just wrote is
+ *  already durable, and the reopen's own later redrive lands at whatever seq it does — bound-3
+ *  picks it up on the very NEXT cycle, never silently skipped). Owning the transaction is also
+ *  why this is no longer nested inside claimWakeOutboxRow's own claim transaction (see that
+ *  function's own header) — a lock scoped to a SUB-section of an already-open transaction is
+ *  not expressible in Postgres; the checkpoint advance is its own transaction now, always.
+ *  Returns the seq actually reached (unchanged from priorSeq if nothing was safe to advance). */
+async function advanceCheckpointIfClear(client, { firmId, priorSeq, seq = NO_SEQ_CAP, excludeTaskId = null }) {
+  if (seq <= priorSeq) return priorSeq;
+  await client.query("begin");
+  try {
+    await client.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_coalesce:${firmId}`]);
+    const safeBound = await safeCoalesceBound(client, firmId);
+    const target = Math.min(seq, safeBound);
+    if (target <= priorSeq) {
+      await client.query("commit");
+      return priorSeq;
+    }
+    const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: priorSeq, toSeqInclusive: target, excludeTaskId });
+    if (hidden) {
+      await client.query("commit");
+      return priorSeq;
+    }
+    await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: target });
+    await client.query("commit");
+    return target;
+  } catch (err) {
+    try {
+      await client.query("rollback");
+    } catch {
+      /* aborted/dead */
+    }
+    throw err;
+  }
 }
 
-/** #1(a) (round-4) + SHOULD-1 (round-5, opus reviewer's own trace) — advance the checkpoint
- *  toward `seq` ONLY as far as is PROVABLY safe, the SAME two-part proof coalesceIfSafe already
- *  uses, not just the held-row half. Round-4's own fix only added the hidden-HELD-row check
- *  (hasHiddenHeldRow) to the row-loop's checkpoint advances — SHOULD-1 found this asymmetric
- *  with coalesceIfSafe's own logic: a PENDING wake_intent or PENDING router dead-letter at a
- *  LOWER seq than the row just claimed has NOT materialized into a held task at all yet, so
- *  hasHiddenHeldRow (which only sees materialized 'held' rows) cannot catch it — exact trace: a
- *  pending dead-letter at seq=3, a claimable held row at seq=9; hasHiddenHeldRow(0,8) sees
- *  nothing (seq 3 has no task yet); the claim commits with the checkpoint racing to 9; a later
- *  redrive mints intent(3); drain births held(3); `event_seq > 9` excludes it forever. Fix:
- *  never advance PAST safeCoalesceBound's own three-bound minimum either — cap the candidate to
- *  `min(seq, safeCoalesceBound(firm))` before even considering it, exactly folding bound-2/
- *  bound-3 into the row-loop the same way coalesceIfSafe already folds them into the trailing/
- *  empty-batch path. The checkpoint may land BELOW the row's own seq now (never above it) —
- *  the row itself still claims and dispatches normally either way; only the checkpoint's own
- *  advance is capped. Returns the seq actually reached (unchanged from priorSeq if blocked). */
-async function advanceCheckpointIfClear(client, { firmId, priorSeq, seq, excludeTaskId = null }) {
-  if (seq <= priorSeq) return priorSeq;
-  const safeBound = await safeCoalesceBound(client, firmId);
-  const target = Math.min(seq, safeBound);
-  if (target <= priorSeq) return priorSeq;
-  const hidden = await hasHiddenHeldRow(client, { firmId, fromSeqExclusive: priorSeq, toSeqInclusive: target, excludeTaskId });
-  if (hidden) return priorSeq;
-  await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: target });
-  return target;
+/** Thin wrapper preserving the trailing/empty-batch call sites' own existing shape — no
+ *  specific row seq to cap against, so `seq` is omitted (NO_SEQ_CAP). */
+async function coalesceIfSafe(client, { firmId, from }) {
+  return advanceCheckpointIfClear(client, { firmId, priorSeq: from });
 }
 
 /** Walk one firm's held wake_outbox rows in event_seq order. Stops (never advances the
@@ -565,14 +586,16 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sourc
       // module header). Nothing is wrong — the source simply has not shipped/enabled yet.
       return { maxSeq: cursor, blocked: true, counts, readCount: rows.length };
     }
-    const res = await claimWakeOutboxRow(client, { row, firmId, sourceKey: source.sourceKey, priorSeq: cursor });
+    const res = await claimWakeOutboxRow(client, { row, sourceKey: source.sourceKey });
     if (res.ok) {
       if (res.claimed) {
-        // #1(a) + SHOULD-1: cursor moves to whatever advanceCheckpointIfClear actually proved
-        // safe — never assume it reached row.eventSeq itself; a pending intent/dead-letter at a
-        // LOWER seq can cap it short even though THIS row (genuinely available under SKIP
-        // LOCKED) still claims and dispatches normally below.
-        cursor = res.newCursor;
+        // #1(a) + SHOULD-1 + #1 (round-6): the checkpoint advance is now its OWN transaction,
+        // called here right after the claim's own commit (see claimWakeOutboxRow's + this
+        // function's own headers for why) — cursor moves to whatever it actually proved safe,
+        // never assumed to reach row.eventSeq itself; a pending intent/dead-letter at a LOWER
+        // seq can cap it short even though THIS row (genuinely available under SKIP LOCKED)
+        // still claims and dispatches normally below.
+        cursor = await advanceCheckpointIfClear(client, { firmId, priorSeq: cursor, seq: row.eventSeq, excludeTaskId: row.taskId });
         counts.claimed += 1;
         try {
           // MUST F: only plain identifiers cross into durable WDK state — never a credential. The

@@ -540,6 +540,108 @@ test("SHOULD-1: a pending router dead-letter at a LOW seq blocks the checkpoint 
 });
 
 // =====================================================================================
+// #1 (round-6, Codex, REOPENED) — the bound READ races the dead-letter STATE MACHINE itself
+// (a TOCTOU, not a widening-the-bound problem): a dead-letter already RESOLVED excludes nothing
+// from safeCoalesceBound's own bound-3 — but a concurrent reopen (relay.mjs's own redrive(),
+// "still uncovered" branch: resolved -> pending) landing BETWEEN this cycle's own bound read and
+// its checkpoint write would let the checkpoint sail straight over a seq a LATER genuine redrive
+// then resurrects, invisible forever. Closed by serialization: advanceCheckpointIfClear now
+// holds a per-firm advisory lock ('wake_coalesce:'||firmId) for its ENTIRE bound-read-through-
+// checkpoint-write transaction, and redrive() takes the SAME lock before either of its own exit
+// branches. Proof: hold the lock open on a second session (simulating an in-flight reopen),
+// prove THIS cycle's own checkpoint-advance is genuinely BLOCKED behind it (pg_blocking_pids,
+// never a sleep), flip the dead-letter resolved->pending while still holding the lock, release,
+// and prove the checkpoint that then lands stays below the dead-letter's own seq.
+// =====================================================================================
+async function waitSomeoneBlockedByOrThrow(blockerPid, { timeoutMs = 5000, intervalMs = 25, what = "the lock" } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rig.rootQuery(
+      "select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+      [blockerPid],
+    );
+    if (r.rows[0].n > 0) return true;
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  throw new Error(`waitSomeoneBlockedByOrThrow: nobody observably blocked on ${what} (held by ${blockerPid}) within ${timeoutMs}ms`);
+}
+
+test("#1 (round-6, Codex): the bound-read -> checkpoint-write critical section is serialized against a concurrent dead-letter REOPEN — the checkpoint never lands on a stale pre-reopen read", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_1r6_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_1r6");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // A dead-letter that is ALREADY resolved (a prior redrive covered it) — bound-3 excludes
+  // nothing for it as it stands right now.
+  const lowEvent = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  const lowSeq = Number(lowEvent.seq);
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status, resolved_at)
+       values ('router',$1,$2,$3,$4,'#1 round-6 battery: simulated already-resolved dead-letter','resolved',now())`,
+    [lowEvent.id, w.firm, lowSeq, WAKE_EVENT_TYPE],
+  );
+
+  // A fully materialized, genuinely claimable held row at a HIGHER seq.
+  const highIntent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const highSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [highIntent.intentId])).rows[0].event_seq);
+  const highTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [highIntent.intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [highIntent.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [highIntent.intentId, randomUUID()]);
+  assert.ok(highSeq > lowSeq, "mandatory setup: the dead-letter's own seq is genuinely lower than the claimable row's");
+
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head],
+  );
+
+  // Hold the SAME wake_coalesce:firmId lock advanceCheckpointIfClear itself takes, open on a
+  // separate session — simulating a concurrent reopen already in flight.
+  let releaseLock, lockAcquired;
+  const lockHeld = new Promise((resolve) => { releaseLock = resolve; });
+  const lockIsHeld = new Promise((resolve) => { lockAcquired = resolve; });
+  let holderPid;
+  const holderDone = rig.asRuntime(async (c) => {
+    await c.query("begin");
+    holderPid = (await c.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_coalesce:${w.firm}`]);
+    lockAcquired();
+    await lockHeld;
+    // The reopen itself, matching redrive()'s own "still uncovered" branch shape — landing
+    // WHILE still holding the lock, so the checkpoint-writer (blocked below) can only ever see
+    // this AFTER it commits, never mid-flight.
+    await c.query(
+      "update clara.relay_dead_letters set status='pending', resolved_at=null, attempt_count=attempt_count+1 where consumer='router' and event_id=$1",
+      [lowEvent.id],
+    );
+    await c.query("commit");
+  });
+  await lockIsHeld;
+
+  const enqueued = [];
+  const cyclePromise = rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
+
+  try {
+    await waitSomeoneBlockedByOrThrow(holderPid, { what: "the #1 wake_coalesce advisory lock" });
+  } finally {
+    releaseLock();
+    await holderDone;
+    await cyclePromise;
+  }
+
+  const highRow = await rig.readTask(highTask);
+  assert.equal(highRow.status, "running", "#1 (round-6): the higher-seq row still claims and dispatches normally once the lock releases");
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0][1], highTask);
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(!cp || Number(cp.last_seq) < lowSeq, "#1 (round-6): THE CORE ASSERTION — the checkpoint must stay below the reopened dead-letter's own seq; a stale pre-reopen bound read would have let it race straight to the higher row's own seq instead");
+
+  const dl = (await rig.rootQuery("select status from clara.relay_dead_letters where consumer='router' and event_id=$1", [lowEvent.id])).rows[0];
+  assert.equal(dl.status, "pending", "mandatory setup: the reopen actually landed — the dead-letter really is 'pending' now, not still 'resolved'");
+});
+
+// =====================================================================================
 // M2 (Codex review) — the kill switch used a STALE per-cycle snapshot: loadEnabledSources runs
 // ONCE at the top of runWakeEngineCycle, so a set_wake_source_enabled(false) call landing
 // mid-cycle used to keep claiming the REST of an already-in-flight batch against the stale
