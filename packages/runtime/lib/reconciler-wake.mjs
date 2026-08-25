@@ -25,7 +25,7 @@
 
 import { terminalFor } from "./reconciler.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
-import { recordTaskDeadLetter, readDeadLetterAttempts } from "./wake-engine.mjs";
+import { recordTaskDeadLetter, readDeadLetterAttempts, WAKE_ENGINE_ENQUEUE_CONSUMER } from "./wake-engine.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 
@@ -71,9 +71,15 @@ async function resolveSource(client, taskRow) {
     );
     return r.rows[0] ?? null;
   }
+  // NOTE-a (opus, round-4 review): the SAME ambiguity resolveSource's wake-kind branch already
+  // fixed above applies equally here — a direct_queue task_kind can have more than one
+  // registered source row over a registry's lifetime (an old disabled one, a later
+  // replacement), and an unordered `.rows[0]` was just as arbitrary. Same ORDER BY, same
+  // reasoning: prefer the currently-enabled source, then the most recently registered.
   const r = await client.query(
     `select source_key, workflow_export, max_attempts from clara.wake_engine_sources
-      where task_kind = $1 and carrier = 'direct_queue'`,
+      where task_kind = $1 and carrier = 'direct_queue'
+      order by enabled desc, created_at desc`,
     [taskRow.kind],
   );
   return r.rows[0] ?? null;
@@ -120,7 +126,7 @@ async function reenqueueStuckRows(client, deps) {
       // actually stopping anything. Exhaustion is now STICKY: once recorded, every later sweep
       // skips straight to (re-)settling and never touches enqueue() again — a hard cap in
       // EITHER direction, not just the first time it is reached.
-      const priorAttempts = await readDeadLetterAttempts(client, { taskId: t.id });
+      const priorAttempts = await readDeadLetterAttempts(client, { consumer: WAKE_ENGINE_ENQUEUE_CONSUMER, taskId: t.id });
       if (priorAttempts >= source.max_attempts) {
         try {
           await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
@@ -144,7 +150,7 @@ async function reenqueueStuckRows(client, deps) {
         // through the SAME wake_engine_task_dead_letters home the direct_queue carrier already
         // uses, then settle the task terminally once exhausted — mirrors wake-engine.mjs's own
         // poison-skip shape, never a silent forever-loop.
-        const attempts = await recordTaskDeadLetter(client, { taskId: t.id, reason: enqErr?.message ?? String(enqErr) });
+        const attempts = await recordTaskDeadLetter(client, { consumer: WAKE_ENGINE_ENQUEUE_CONSUMER, taskId: t.id, reason: enqErr?.message ?? String(enqErr) });
         if (attempts >= source.max_attempts) {
           try {
             await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);

@@ -137,6 +137,27 @@ testCase("REAL repo registry's workflowsByName + workflowNames -> OK (canary)", 
   expectClean(checkRegistryViewIntegrity(real, "registry@working-tree"));
 });
 
+// #11 (round-4 review, REOPENED) — the closed-world exports census.
+testCase("#11 aliased bare re-export of a LOCAL (non-imported) declaration -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-alternate-export-bypass.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("#11 bare re-export of a NON-RELATIVE (package) import -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-nonrelative-reexport.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("#11 a function declared and exported directly in registry.ts -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-function-export.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+testCase("#11 a second const export that never references `workflows` at all -> REJECT (REGISTRY-VIEW-INTEGRITY, the now-unconditional half)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-bare-const-no-ref.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("#11 control: a LEGITIMATE bare re-export of an actually-imported, relatively-sourced workflow -> OK, never a false positive", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-legit-reexport.ts.txt")));
+});
+
 // --- (e) enqueue-site provenance --------------------------------------------
 console.log("enqueue-site provenance:");
 
@@ -146,6 +167,10 @@ const entry = (name) => [{ rel: `packages/runtime/src/${name.replace(/\.txt$/, "
 
 testCase("enqueue via registry export -> OK", () => {
   expectClean(checkEnqueueSites(entry("enqueue-via-registry.ts.txt")));
+});
+
+testCase("#11 (round-4 review, REOPENED) enqueue via a NON-CANONICAL name imported FROM registry.ts -> REJECT (ENQUEUE-BYPASS)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-noncanonical-name-from-registry.ts.txt")), ["ENQUEUE-BYPASS"]);
 });
 
 testCase("direct workflow-module import -> REJECT (ENQUEUE-BYPASS)", () => {

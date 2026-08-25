@@ -291,7 +291,25 @@ begin
     raise exception 'set_wake_source_enabled is an operator-only door -- % is not the operator firm', c.firm
       using errcode='CLR04';
   end if;
-  select enabled into v_was_enabled from clara.wake_engine_sources where source_key = p_source_key;
+  -- #2 (round-4 review, both legs) -- the SAME advisory-lock mutual exclusion the runtime claim
+  -- path takes (packages/runtime/lib/wake-engine.mjs's own #2 comment) -- ordering THIS call
+  -- strictly against an in-flight claim transaction on the SAME source, so a claim's own
+  -- exists-check never reads a "stale enabled=true" snapshot the WHOLE way to its own commit
+  -- while this flip lands concurrently. Zero grant footprint either side (pg_advisory_xact_lock
+  -- needs no table ACL), auto-released at this call's own commit/rollback. Identical key format
+  -- ('wake_source_gate:' || source_key) on both sides -- a mismatch here would silently defeat
+  -- the whole mechanism, so this string is deliberately NOT reformatted independently.
+  perform pg_advisory_xact_lock(hashtext('wake_source_gate:' || p_source_key)::bigint);
+  -- #3 (round-4 review, both legs): FOR UPDATE makes this read+later-flip ATOMIC against a
+  -- concurrent same-direction call -- without it, two overlapping calls can both read the SAME
+  -- pre-flip v_was_enabled snapshot, both compute v_now_on IS DISTINCT FROM v_was_enabled as
+  -- true, and both broadcast -- defeating M3's own no-op-suppression by racing it, not by
+  -- disagreeing with it. Locking this row here means the SECOND call blocks until the first
+  -- commits, then reads the POST-flip value -- its own is-distinct-from check then correctly
+  -- sees no further change and stays silent. (This role, clara_fn_owner, OWNS this table, so
+  -- FOR UPDATE here needs no extra grant the way the runtime claim path's own FOR SHARE would
+  -- have on clara_runtime -- the two fixes use different mechanisms for exactly that reason.)
+  select enabled into v_was_enabled from clara.wake_engine_sources where source_key = p_source_key for update;
   if not found then
     raise exception 'unknown wake-engine source %', p_source_key using errcode='CLR10';
   end if;
@@ -978,6 +996,15 @@ begin
   end if;
   if position('set_by_operator_firm' in v_src) > 0 then
     raise exception 'g1_wake_engine tail: set_wake_source_enabled''s broadcast payload still carries the operator-firm uuid M3 requires stripped' using errcode='CLR10';
+  end if;
+  -- #2/#3 (round-4 review): the advisory-lock mutual exclusion is taken BEFORE the FOR UPDATE
+  -- read, and under the SAME key format the runtime claim path uses -- a mismatch here would
+  -- silently defeat the whole mechanism (the two sides would never actually contend).
+  if position('pg_advisory_xact_lock(hashtext(''wake_source_gate:'' || p_source_key)::bigint)' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its #2 advisory-lock mutual exclusion' using errcode='CLR10';
+  end if;
+  if position('for update' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its #3 FOR UPDATE read+flip atomicity' using errcode='CLR10';
   end if;
 
   -- T.7 · MUST A: cancel_agent_task's wakes_outbox cascade now carries the t.status='held'

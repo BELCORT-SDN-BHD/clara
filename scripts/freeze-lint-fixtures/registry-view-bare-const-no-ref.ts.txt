@@ -1,0 +1,13 @@
+// Fixture: #11 (round-4 review, REOPENED) — a second top-level const export that does not even
+// TEXTUALLY MENTION `workflows` — the pre-round-4 check only fired when the initializer
+// referenced `workflows`, so this exact shape sailed through undetected.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export const alternateView = { evilThing: (x: unknown) => Promise.resolve(x) };

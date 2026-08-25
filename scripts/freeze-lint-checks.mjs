@@ -313,14 +313,85 @@ export function checkRegistryViewIntegrity(headSrc, label = "registry@HEAD") {
     }
   }
 
+  // #11 (round-4 review, REOPENED) — this used to only flag a second const export whose
+  // initializer TEXTUALLY MENTIONS `workflows` — `export const alternateView = {evil:fn};`
+  // mentions nothing about `workflows` at all and sailed straight through. Unconditional now:
+  // every OTHER top-level const export must collapse to a SAFE_WORKFLOWS_DERIVATIONS shape,
+  // whether or not it references `workflows` in its own text.
   for (const e of exportsFound) {
     if (e.name === "workflows" || e.name === "workflowsByName") continue;
     const collapsed = e.exprText.replace(/\s+/g, "");
-    if (/\bworkflows\b/.test(e.exprText) && !SAFE_WORKFLOWS_DERIVATIONS.has(collapsed)) {
+    if (!SAFE_WORKFLOWS_DERIVATIONS.has(collapsed)) {
       violations.push(
-        `REGISTRY-VIEW-INTEGRITY  ${label}: a second top-level export "${e.name}" references \`workflows\` via \`${e.exprText.trim().slice(0, 120)}\`, which is not one of the provably-safe derivations (a bare alias, Object.keys/values/entries, or exactly \`Object.freeze(workflows)\`). Only \`workflowsByName\` (declared as exactly \`Object.freeze(workflows)\`) may be trusted as a dynamic-dispatch view of the registry — any other shape is an ALTERNATE, unverified view that the enqueue-provenance check (e) would trust by import source alone; rename/remove it or fold it into \`workflowsByName\` (Gate G1 MUST D, fail-closed).`,
+        `REGISTRY-VIEW-INTEGRITY  ${label}: a second top-level export "${e.name}" is declared as \`${e.exprText.trim().slice(0, 120)}\`, which is not one of the provably-safe derivations (a bare alias, Object.keys/values/entries, or exactly \`Object.freeze(workflows)\`). Only \`workflowsByName\` (declared as exactly \`Object.freeze(workflows)\`) may be trusted as a dynamic-dispatch view of the registry — any other shape is an ALTERNATE, unverified view that the enqueue-provenance check (e) would trust by import source alone; rename/remove it or fold it into \`workflowsByName\` (Gate G1 MUST D, fail-closed).`,
       );
     }
+  }
+
+  violations.push(...checkRegistryExportsClosedWorld(headSrc, label));
+
+  return violations;
+}
+
+/** #11 (round-4 review, both legs, REOPENED) — a CLOSED-WORLD census of EVERY OTHER export
+ *  shape registry.ts can carry, closing what the checks above (built to catch a suspicious
+ *  REFERENCE to `workflows`, or a specific `workflowsByName` mis-declaration) were never built
+ *  to see: `export { fake as alternateView }` — a bare re-export under an ARBITRARY exported
+ *  name, naming a LOCAL binding (`fake`) that is not even an import at all. freeze-lint-
+ *  enqueue.mjs's own provenance check (classifyWorkflowArg) used to trust ANY name imported
+ *  FROM registry.ts, so `import { alternateView } from "./registry.ts"` then
+ *  `start(alternateView.evilThing, ...)` traced clean purely on source-module provenance — see
+ *  that file's own #11 fix (pinned to the canonical `workflows`/`workflowsByName` import names
+ *  only). This census is the OTHER half: even with that pin, an attacker who could ALSO smuggle
+ *  a plausibly-named export out of registry.ts (`export { fake as workflowsByName }`, e.g. —
+ *  already caught above by the exact-shape check, but a bare re-export needs its OWN rule)
+ *  should never get the chance. A re-export is legitimate ONLY if it names a binding this file
+ *  ACTUALLY imported via a relative path — the real, individual frozen workflow exports every
+ *  class needs for check-frozen-workflows.mjs's own golden-hash tracking (every historical
+ *  `chatTurn_v1`..`chatTurn_v13`, not just whichever is CURRENTLY pointed to inside the
+ *  `workflows` object — constraint 9 requires every one of them to stay exported) — and it must
+ *  be UNALIASED (the exported name equals the imported name); a function/class declared and
+ *  exported directly in this file is rejected outright, since registry.ts has no legitimate
+ *  reason to declare a workflow-shaped callable of its own. */
+function checkRegistryExportsClosedWorld(headSrc, label) {
+  const violations = [];
+  // strings:false (unlike checkRegistryViewIntegrity's own `blanked`) — parseImportBindings
+  // reads the import specifier's own quoted string, which a strings:true blank would erase
+  // entirely (checkEnqueueSites' own established idiom, freeze-lint-enqueue.mjs).
+  const blanked = blankSource(headSrc, { comments: true, strings: false, templates: true });
+  const { bindings } = parseImportBindings(blanked);
+
+  const reexportRe = /\bexport\s*\{([^}]*)\}\s*;/g;
+  let rm;
+  while ((rm = reexportRe.exec(blanked))) {
+    for (const piece of rm[1].split(",")) {
+      const p = piece.trim();
+      if (!p) continue;
+      const asM = p.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+      const local = asM ? asM[1] : p;
+      const exported = asM ? asM[2] : p;
+      if (exported === "workflows" || exported === "workflowsByName") continue; // covered above
+      if (asM) {
+        violations.push(
+          `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${local} as ${exported} }\` is an ALIASED re-export — even if "${local}" is itself a legitimate workflow implementation, exporting it under a DIFFERENT name is indistinguishable from smuggling an unrelated binding out under a plausible-looking one. Re-export a workflow implementation under its OWN imported name only.`,
+        );
+        continue;
+      }
+      const b = bindings.get(local);
+      if (!b || !b.source.startsWith(".")) {
+        violations.push(
+          `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export { ${exported} }\` does not name a binding this file imported via a relative path — registry.ts's closed world admits only \`workflows\`/\`workflowsByName\`, a SAFE_WORKFLOWS_DERIVATIONS-shaped const, or a bare re-export of an actually-imported local workflow file; a freshly-declared local, or anything sourced from a non-relative (package) import, is REJECTED on sight (fail-closed).`,
+        );
+      }
+    }
+  }
+
+  const otherDeclRe = /\bexport\s+(?:default\s+)?(?:async\s+)?(function|class)\s+([A-Za-z_$][\w$]*)/g;
+  let dm;
+  while ((dm = otherDeclRe.exec(blanked))) {
+    violations.push(
+      `REGISTRY-EXPORTS-CLOSED-WORLD  ${label}: \`export ${dm[1]} ${dm[2]}\` — registry.ts's own closed world admits only \`workflows\`/\`workflowsByName\`, SAFE_WORKFLOWS_DERIVATIONS-shaped consts, and bare unaliased workflow re-exports; a function/class declared and exported directly in this file is none of those and is REJECTED on sight.`,
+    );
   }
 
   return violations;

@@ -114,6 +114,29 @@ execution — never an input to the step, never a value the step returns.
 function counts them (`heldForDisabledSource` in `wakeEngineHealth`'s payload) so a disabled source
 never silently accumulates an invisible backlog — §6's battery cell drills this.
 
+**d) The dispatched workflow's own FIRST durable step MUST CAS on its own task's status before
+doing anything consequential** (round-4 opus/Codex review, #5/#8 — a NAMED obligation on
+whichever PR builds the real bankAgent.v1/closePrep.v1 body, since no wake-kind workflow body
+ships in THIS gate to enforce it in). The gap: a cancel can land between `enqueue()`'s own commit
+and the dispatched run's first bind of `workflow_run_id` back onto the task row — while
+`workflow_run_id` is still NULL, `reconciler.mjs`'s own cancel-branch (section B) cannot tell
+"never started" from "started but has not bound back yet," and treats a null run id as trivially
+confirmed-aborted, settling the task 'cancelled' immediately (M5's own fix closes only the
+BOUND-run case). If the run genuinely IS live, it can keep acting — minting a credential, calling
+a tool — under books that already say it stopped. Closing this needs no reconciler change and no
+2PC: the workflow's own first `"use step"` attempt (the SAME step §2 already requires to mint the
+wake credential) must re-read `agent_tasks.status` for its own `taskId` FIRST, and refuse to
+proceed (a clean no-op exit, never an error) unless status is still `'running'` — off
+`cancel_requested`/`cancelled`/`failed`, self-abort without minting anything or touching a tool.
+This is the SAME "duplicate start self-aborts" idiom `reconciler-wake.mjs`'s own header comment
+already invokes for crash-recovery re-enqueue (§4 below) — one guard closes BOTH #8's
+duplicate-start (a re-enqueued run finding the task already bound/settled) and #5's
+unknown-abort (a run finding its own task cancelled out from under it). Acceptance for the PR
+that ships this: a cell proving a post-settle, unbound run's first step self-aborts at exactly
+this check — `packages/runtime/lib/wake-engine.mjs`'s own module header carries this same
+obligation, cited there as the reason a `workflow_run_id`-null cancel is a documented, understood
+residual risk in G1 itself, not a silently-missed one.
+
 ### 1.3 The settlement path — the exact matrix delta
 
 **`_tf_agent_task_update`'s `wake` arm, live tip `0120:1530`, today:**

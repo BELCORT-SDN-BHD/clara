@@ -207,6 +207,16 @@ export async function reconcileTasks(client, deps) {
     // genuine cancel() failure, skip settling entirely and leave the row in cancel_requested for
     // the next sweep to retry — never fabricate a receipt for something that may not have
     // happened.
+    //
+    // #5/#8 (round-4 opus/Codex review, wake/close_prep specifically — documented, not yet
+    // guarded): `t.workflow_run_id` still NULL is treated below as trivially confirmed-aborted
+    // (the `if (t.workflow_run_id)` guard skips the whole cancel() attempt) — but a null run id
+    // is ALSO the shape of a run that started and has not bound back yet (the gap between
+    // enqueue()'s own commit and the dispatched workflow's first-step bind), which this branch
+    // cannot distinguish from "never started." The closing wall lives in the dispatched
+    // workflow's own first durable step, not here — see wake-engine.mjs's own module header
+    // (#5/#8) and g1-wake-engine-design.md §1.2(d) for the full obligation this settle assumes
+    // but cannot itself enforce.
     let abortConfirmed = true;
     if (t.workflow_run_id) {
       try {

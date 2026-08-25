@@ -170,9 +170,13 @@ export async function checkReadiness() {
             const weDead = Number(weh.pendingDeadLetters ?? 0);
             const weLag = Number(weh.lag ?? 0);
             const weHeld = Number(weh.heldForDisabledSource ?? 0);
+            const weCancelStuck = Number(weh.cancelRequestedStuck ?? 0);
             if (weDead > 0) warnings.push(`${weDead} wake-engine dead-letter(s)`);
             if (weLag > 1000) warnings.push(`wake-engine lag ${weLag}`);
             if (weHeld > 0) warnings.push(`${weHeld} held/queued wake-engine row(s) awaiting a disabled/unregistered source`);
+            // NOTE-b (opus, round-4 review): surface an accumulating cancel_requested stall the
+            // same way every other wake-engine signal above is surfaced — a WARN, not silence.
+            if (weCancelStuck > 0) warnings.push(`${weCancelStuck} wake-engine row(s) stuck in cancel_requested`);
           } catch (err) {
             warnings.push(`wake_engine_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }

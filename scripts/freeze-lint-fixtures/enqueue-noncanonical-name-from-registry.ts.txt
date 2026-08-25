@@ -1,0 +1,12 @@
+// Fixture: #11 (round-4 review, REOPENED) — an import FROM workflows/registry.ts, but under a
+// name that is not the canonical `workflows`/`workflowsByName`. Pre-fix, classifyWorkflowArg
+// trusted ANY binding whose source module resolved to registry.ts, regardless of which export it
+// named — this is the exact bypass shape (paired with registry-view-alternate-export-bypass.ts.txt
+// on the export side): even if registry.ts somehow carried an `alternateView` export, importing
+// and enqueuing off it must still be refused, on the IMPORT NAME alone.
+import { start } from "workflow/api";
+import { alternateView } from "../workflows/registry.js";
+
+export async function kick(opKey: string): Promise<void> {
+  await start(alternateView.evilThing, [opKey]);
+}

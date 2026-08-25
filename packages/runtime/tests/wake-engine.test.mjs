@@ -15,7 +15,8 @@ import { randomUUID } from "node:crypto";
 import * as rig from "./rig.mjs";
 import { WAKE_EVENT_TYPE } from "./relay-fixtures.mjs";
 import {
-  WAKE_ENGINE_CONSUMER, runWakeEngineCycle, wakeEngineHealth, loadEnabledSources,
+  WAKE_ENGINE_CONSUMER, WAKE_ENGINE_CLAIM_CONSUMER, WAKE_ENGINE_ENQUEUE_CONSUMER,
+  runWakeEngineCycle, wakeEngineHealth, loadEnabledSources,
 } from "../lib/wake-engine.mjs";
 import { reconcileWakeEngineTasks } from "../lib/reconciler-wake.mjs";
 
@@ -90,10 +91,11 @@ after(async () => {
 // =====================================================================================
 // Health shape — mirrors autodraftHealth's own cells; extended with heldForDisabledSource.
 // =====================================================================================
-test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/heldForDisabledSource", { skip: skip || skipG1 }, async () => {
+test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/heldForDisabledSource/cancelRequestedStuck", { skip: skip || skipG1 }, async () => {
   const h = await rig.asRuntime((c) => wakeEngineHealth(c));
   assert.equal(h.consumer, WAKE_ENGINE_CONSUMER);
-  for (const k of ["lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource"]) {
+  // NOTE-b (opus, round-4 review): cancelRequestedStuck added to this signal set.
+  for (const k of ["lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource", "cancelRequestedStuck"]) {
     assert.equal(typeof h[k], "number", `${k} is a number`);
     assert.ok(h[k] >= 0, `${k} is non-negative`);
   }
@@ -269,16 +271,24 @@ test("M1 skip-locked variant: a held row hidden from THIS cycle's own locking re
 
   // Hold the row's lock open on a SEPARATE connection — simulating a concurrent transaction
   // (a real cancel_agent_task, or another leader mid-claim) — never released until after this
-  // cycle's own assertions below.
-  let releaseLock;
+  // cycle's own assertions below. NOTE-e (opus, round-4 review): deflake — a fixed 100ms sleep
+  // was a GUESS that the locker's own `for update` had completed by then, not a proof; on a
+  // slow/loaded runner it can fire before the lock is actually held, silently certifying the
+  // race it means to construct. Signal deterministically instead: `lockAcquired` resolves only
+  // AFTER the locker's own `for update` SELECT has genuinely returned (Postgres has granted the
+  // lock by the time that statement completes), so the main cycle below never starts before the
+  // lock is real — no timing margin to get wrong.
+  let releaseLock, lockAcquired;
   const lockHeld = new Promise((resolve) => { releaseLock = resolve; });
+  const lockIsHeld = new Promise((resolve) => { lockAcquired = resolve; });
   const lockerDone = rig.asRuntime(async (c) => {
     await c.query("begin");
     await c.query("select 1 from clara.agent_tasks where id=$1 for update", [taskId]);
+    lockAcquired();
     await lockHeld;
     await c.query("rollback");
   });
-  await new Promise((r) => setTimeout(r, 100)); // let the locker actually acquire the lock first
+  await lockIsHeld;
 
   const enqueued = [];
   try {
@@ -300,6 +310,160 @@ test("M1 skip-locked variant: a held row hidden from THIS cycle's own locking re
   const claimed = await rig.readTask(taskId);
   assert.equal(claimed.status, "running", "M1 skip-locked variant: once the lock releases, the row is claimed on the very next cycle");
   assert.equal(enqueued2.length, 1);
+});
+
+// =====================================================================================
+// #1(a) (round-4 review, both legs, REOPENED) — hidden-earlier + visible-later IN ONE BATCH.
+// The skip-locked variant above has ONE hidden row and nothing else — it never exercised the
+// actual defect: claimWakeOutboxRow used to write the checkpoint straight to a CLAIMED row's own
+// seq the instant its claim committed, with no regard for whether an EARLIER seq was still
+// unaccounted for. Lock the LOWER-seq row (hiding it from THIS cycle's own SKIP LOCKED read)
+// while the HIGHER-seq row stays visible and claimable — pre-fix, claiming the higher row alone
+// would race the checkpoint straight past the still-hidden lower one, stranding it forever
+// (writeCheckpoint's own greatest() never rewinds; readHeldWakeRows' `event_seq > lastSeq` would
+// permanently exclude it once the lock released). Post-fix: the higher row still claims and
+// dispatches normally (SKIP LOCKED does not block ITS claim), but the checkpoint stays below the
+// hidden row's own seq until it clears.
+// =====================================================================================
+test("#1(a): a hidden-earlier row alongside a visible-later one in the SAME batch — the later row still claims, but the checkpoint never races past the hidden earlier one; it is still claimable once the lock releases", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_1a_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_1a");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // The LOWER-seq row (will be locked, hidden from this cycle's own claim read).
+  const intentLow = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const lowSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [intentLow.intentId])).rows[0].event_seq);
+  const taskLow = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intentLow.intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [intentLow.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intentLow.intentId, randomUUID()]);
+
+  // The HIGHER-seq row (stays visible, genuinely claimable this cycle).
+  const intentHigh = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const highSeq = Number((await rig.rootQuery("select event_seq from clara.wake_intents where id=$1", [intentHigh.intentId])).rows[0].event_seq);
+  const taskHigh = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intentHigh.intentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [intentHigh.intentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [intentHigh.intentId, randomUUID()]);
+  assert.ok(highSeq > lowSeq, "mandatory setup: the two rows are genuinely ordered low < high");
+
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head],
+  );
+
+  // Lock ONLY the lower-seq row — the higher one stays fully visible to readHeldWakeRows' own
+  // SKIP LOCKED read. Deterministic signal (NOTE-e), never a fixed sleep.
+  let releaseLock, lockAcquired;
+  const lockHeld = new Promise((resolve) => { releaseLock = resolve; });
+  const lockIsHeld = new Promise((resolve) => { lockAcquired = resolve; });
+  const lockerDone = rig.asRuntime(async (c) => {
+    await c.query("begin");
+    await c.query("select 1 from clara.agent_tasks where id=$1 for update", [taskLow]);
+    lockAcquired();
+    await lockHeld;
+    await c.query("rollback");
+  });
+  await lockIsHeld;
+
+  const enqueued = [];
+  try {
+    await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
+  } finally {
+    releaseLock();
+    await lockerDone;
+  }
+
+  const rowHigh = await rig.readTask(taskHigh);
+  assert.equal(rowHigh.status, "running", "#1(a): the visible HIGHER-seq row still claims and dispatches normally — SKIP LOCKED never blocked IT");
+  assert.equal(enqueued.length, 1, "#1(a): exactly one dispatch, the higher row");
+  assert.equal(enqueued[0][1], taskHigh);
+  const rowLow = await rig.readTask(taskLow);
+  assert.equal(rowLow.status, "held", "#1(a): the hidden LOWER-seq row survives untouched — it was never visible to this cycle's own claim read");
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(!cp || Number(cp.last_seq) < lowSeq, "#1(a): THE CORE ASSERTION — claiming the higher row must NOT have raced the checkpoint past the still-hidden lower row's own seq, even though the higher row's own claim committed successfully");
+
+  // Now release the lock and prove the lower row is STILL discoverable and claimable — the
+  // review's own acceptance line: "prove 3 still claimable after release."
+  const enqueued2 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+  const rowLowAfter = await rig.readTask(taskLow);
+  assert.equal(rowLowAfter.status, "running", "#1(a): once the lock releases, the previously-hidden lower row is claimed on the very next cycle — never permanently stranded");
+  assert.equal(enqueued2.length, 1);
+  assert.equal(enqueued2[0][1], taskLow);
+});
+
+// =====================================================================================
+// #1(b) (round-4 review, both legs, REOPENED) — router dead-letter REDRIVE can insert a
+// pending wake_intents row at an OLD (low) seq, at ANY time, including AFTER this engine has
+// already coalesced its checkpoint past that seq (the router's own checkpoint advances past a
+// dead-lettered event just like this engine's own poison-skip advances past an exhausted row —
+// dead-lettering is a terminal outcome under the taxonomy version active AT THE TIME, not a
+// block). safeCoalesceBound's bound-3 (this round's own fix) closes it: never coalesce past the
+// lowest seq among this firm's own still-PENDING router dead-letters, since any one of them
+// could resolve wake-bound on a future redrive at exactly that seq.
+// =====================================================================================
+test("#1(b): a firm with a pending (unredriven) router dead-letter never coalesces past it — a later redrive's low-seq wake_intent is still discoverable, never stranded by an earlier coalesce", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_1b_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_1b");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // A genuinely OLD event, dead-lettered by the router (uncovered under some earlier taxonomy
+  // state) and still pending redrive — emitWakeEvent mints a REAL domain_events row with its own
+  // seq WITHOUT ever creating a wake_intents row for it (rig.mjs's own §3.1 helper, the exact
+  // "the router dead-lettered it instead of routing it wake-bound" shape this cell needs;
+  // wake_intents is append-only/no-delete by design, so a delete-then-fake approach cannot work
+  // here — this mints the event correctly the first time instead).
+  const oldEvent = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  const oldSeq = Number(oldEvent.seq);
+  const oldEventId = oldEvent.id;
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason, status)
+       values ('router',$1,$2,$3,$4,'#1(b) battery: simulated pre-fix uncovered event','pending')`,
+    [oldEventId, w.firm, oldSeq, WAKE_EVENT_TYPE],
+  );
+
+  // The router's own checkpoint has ALREADY moved past the dead-letter (dead-lettering is
+  // terminal for the router, same as this engine's own poison-skip advancing past an exhausted
+  // row) — seeded at the firm's own current head, which already includes oldSeq's own event —
+  // the exact pre-condition bound-1 alone would otherwise treat as "safe to coalesce."
+  const head = Number((await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n);
+  await rig.rootQuery(
+    `insert into clara.relay_checkpoints (consumer, firm_id, last_seq) values ('router',$1,$2)
+       on conflict (consumer,firm_id) do update set last_seq = greatest(clara.relay_checkpoints.last_seq, excluded.last_seq)`,
+    [w.firm, head],
+  );
+  const pendingNow = (await rig.rootQuery("select count(*)::int as n from clara.wake_intents where firm_id=$1 and status='pending'", [w.firm])).rows[0].n;
+  assert.equal(pendingNow, 0, "mandatory setup: nothing pending in wake_intents right now — bound-2 alone would not block this coalesce");
+
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async () => {}, log: () => {} }));
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(!cp || Number(cp.last_seq) < oldSeq, "#1(b): THE CORE ASSERTION — the checkpoint must not coalesce past the still-pending router dead-letter's own seq, even though the router's own checkpoint and firm_event_seq are both well past it");
+
+  // Redrive lands NOW (relay.mjs's own redrive() shape, inlined here since importing relay.mjs's
+  // CLI-facing redrive would also require a full taxonomy fixture this cell does not need) —
+  // proves the freshly-minted pending wake_intent is still discoverable and dispatched normally.
+  // rig.rootQuery is one connection per call (relay-fixtures.mjs's own withActor), so this is
+  // two independently-autocommitted statements, not a real multi-statement transaction — that
+  // matches redrive()'s OWN net effect closely enough for this cell (both rows land before the
+  // engine's next cycle runs; the atomicity of redrive()'s own real transaction is relay.mjs's
+  // own test surface, not this one's).
+  await rig.rootQuery(
+    "insert into clara.wake_intents (event_id, decision, taxonomy_version) values ($1,'background_review',(select version from clara.taxonomy_active)) on conflict (event_id) do nothing",
+    [oldEventId],
+  );
+  await rig.rootQuery("update clara.relay_dead_letters set status='resolved', resolved_at=now() where consumer='router' and event_id=$1", [oldEventId]);
+  const redrivenIntentId = (await rig.rootQuery("select id from clara.wake_intents where event_id=$1", [oldEventId])).rows[0].id;
+  const redrivenTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [redrivenIntentId])).rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [redrivenIntentId]);
+  await rig.rootQuery("update clara.wake_intents set status='consumed', consumed_by=$2 where id=$1", [redrivenIntentId, randomUUID()]);
+
+  const enqueued = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
+  const redrivenRow = await rig.readTask(redrivenTask);
+  assert.equal(redrivenRow.status, "running", "#1(b): the redrive's own low-seq wake_intent is still discoverable and dispatched — never stranded by the earlier coalesce");
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0][1], redrivenTask);
 });
 
 // =====================================================================================
@@ -433,6 +597,105 @@ test("M4: a poisoned close_prep claim terminalizes to 'failed' (queued->failed, 
 });
 
 // =====================================================================================
+// #6 (round-4 review, both legs + opus SHOULD-A, converged) — the CLAIM path's own ledger used
+// to be attempted UNCONDITIONALLY every cycle, checked only AFTER a claim failed — mirroring the
+// exact pre-fix M6 shape, but on processDirectQueueSource's own claim UPDATE rather than the
+// reconciler's enqueue() call. Two cells, mirroring M6's own pair: cap-exact on the claim mode,
+// and an exhausted task never re-attempts a claim (and therefore never dispatches) even once the
+// poison lifts.
+// =====================================================================================
+test("#6: a claim that always fails exhausts the CLAIM ledger to an exact hard cap — the task settles 'failed', and the claim dead-letter count never overruns it", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_6claim_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_6claim");
+  await registerSource({ sourceKey: key, carrier: "direct_queue", taskKind: "close_prep", wakeKind: "close_prep", maxAttempts: 2, enabled: true, actor: w.owner });
+
+  const poisonTask = (await rig.rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [w.firm, w.client],
+  )).rows[0].id;
+  // Poison ONLY the claim's own target (`new.status='running'`) — matching M4's own established
+  // scoping, so the exhaustion-terminal write (new.status='failed') stays unpoisoned and can
+  // actually land once the cap is reached.
+  const poisonFn = `g1_test_6claim_poison_${randomUUID().slice(0, 8)}`;
+  await rig.rootQuery(`create function clara.${poisonFn}() returns trigger language plpgsql as $f$ begin raise exception 'g1 battery #6: deliberate claim-poison injection'; end $f$`);
+  await rig.rootQuery(`create trigger ${poisonFn} before update on clara.agent_tasks for each row when (old.id = '${poisonTask}'::uuid and new.status = 'running') execute function clara.${poisonFn}()`);
+
+  const sweep = () => rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async () => {}, log: () => {} }));
+  try {
+    await sweep(); // attempt 1/2 -- claim fails, recorded on the CLAIM ledger, stays 'queued'
+    let row = await rig.readTask(poisonTask);
+    assert.equal(row.status, "queued", "mandatory setup: not yet exhausted after 1 claim attempt (max_attempts=2)");
+
+    await sweep(); // attempt 2/2 -- claim fails again -> exhausted -> terminal settle (unpoisoned)
+    row = await rig.readTask(poisonTask);
+    assert.equal(row.status, "failed", "#6: the task settles 'failed' once the CLAIM ledger reaches max_attempts");
+    const dl = await rig.rootQuery(
+      "select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2",
+      [WAKE_ENGINE_CLAIM_CONSUMER, poisonTask],
+    );
+    assert.equal(dl.rows[0].attempt_count, 2, "#6: the CLAIM ledger's own count stops EXACTLY at max_attempts — never overruns it");
+
+    // Sweep 3: 'failed' is no longer 'queued' -- outside the direct_queue SELECT's own WHERE
+    // clause entirely; no further claim attempt, no further ledger growth.
+    await sweep();
+    const dl2 = await rig.rootQuery(
+      "select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2",
+      [WAKE_ENGINE_CLAIM_CONSUMER, poisonTask],
+    );
+    assert.equal(dl2.rows[0].attempt_count, 2, "#6: still exactly 2 — a hard cap, not merely a threshold crossed once");
+  } finally {
+    await rig.rootQuery(`drop trigger if exists ${poisonFn} on clara.agent_tasks`);
+    await rig.rootQuery(`drop function if exists clara.${poisonFn}()`);
+  }
+});
+
+test("#6: once the CLAIM ledger is exhausted, a later cycle never re-attempts the claim (and so never dispatches) even after the poison lifts — exhaustion is STICKY on the claim ledger too", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_6claim2_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_6claim2");
+  await registerSource({ sourceKey: key, carrier: "direct_queue", taskKind: "close_prep", wakeKind: "close_prep", maxAttempts: 1, enabled: true, actor: w.owner });
+
+  const poisonTask = (await rig.rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [w.firm, w.client],
+  )).rows[0].id;
+  // Poison BOTH the claim's own target AND the exhaustion-terminal write this time — simulating
+  // the exhaustion-terminal settle ALSO failing (M4's own accepted "leave 'queued' for a later
+  // sweep" path), so the task stays 'queued' despite already being at the cap.
+  const poisonFn = `g1_test_6claim2_poison_${randomUUID().slice(0, 8)}`;
+  await rig.rootQuery(`create function clara.${poisonFn}() returns trigger language plpgsql as $f$ begin raise exception 'g1 battery #6: deliberate claim+terminal poison injection'; end $f$`);
+  await rig.rootQuery(`create trigger ${poisonFn} before update on clara.agent_tasks for each row when (old.id = '${poisonTask}'::uuid) execute function clara.${poisonFn}()`);
+
+  const enqueued1 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued1.push(a), log: () => {} }));
+  let row = await rig.readTask(poisonTask);
+  assert.equal(row.status, "queued", "mandatory setup: the claim failed (max_attempts=1, immediately exhausted) AND the terminal settle itself failed (poisoned too) — stuck 'queued' despite being at the cap");
+  const dl = await rig.rootQuery(
+    "select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2",
+    [WAKE_ENGINE_CLAIM_CONSUMER, poisonTask],
+  );
+  assert.equal(dl.rows[0].attempt_count, 1, "mandatory setup: exhaustion WAS recorded on the claim ledger despite the terminal settle failure");
+
+  // Lift the poison entirely — if the check-first guard were absent, the NEXT cycle would
+  // re-attempt (and this time succeed at) the claim, dispatching a task the cap already meant to
+  // stop. With the guard, it must go straight to a (now-successful) terminal re-settle instead.
+  await rig.rootQuery(`drop trigger if exists ${poisonFn} on clara.agent_tasks`);
+  await rig.rootQuery(`drop function if exists clara.${poisonFn}()`);
+
+  const enqueued2 = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued2.push(a), log: () => {} }));
+  const rowAfter = await rig.readTask(poisonTask);
+  assert.equal(rowAfter.status, "failed", "#6: once the poison lifts, the retried TERMINAL settle finally succeeds");
+  assert.equal(enqueued2.length, 0, "#6: THE CORE ASSERTION — the claim was never re-attempted, so nothing was ever dispatched, even though this sweep's own claim UPDATE would have succeeded had it been tried");
+  const dl2 = await rig.rootQuery(
+    "select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2",
+    [WAKE_ENGINE_CLAIM_CONSUMER, poisonTask],
+  );
+  assert.equal(dl2.rows[0].attempt_count, 1, "#6: the claim ledger's own count is still exactly 1 — the check-first guard skipped straight to the settle-only path, never touching the claim again");
+});
+
+// =====================================================================================
 // M6 (both legs demanded the cell) — enqueue() was attempted UNCONDITIONALLY every sweep,
 // checked only AFTER it failed. Once genuinely exhausted, a settle FAILURE (the
 // _settle_wake_task call itself erroring) left the row 'running', so the next sweep
@@ -460,14 +723,14 @@ test("M6: an enqueue() that always throws exhausts to a hard cap — the task se
   await sweep(alwaysThrows); // attempt 2/2 -> exhausted -> settles
   row = await rig.readTask(task);
   assert.equal(row.status, "failed", "M6: the task settles 'failed' once max_attempts is reached");
-  const dl = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer='wake_engine' and task_id=$1", [task])).rows[0];
+  const dl = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2", [WAKE_ENGINE_ENQUEUE_CONSUMER, task])).rows[0];
   assert.equal(dl.attempt_count, 2, "M6: the dead-letter count stops EXACTLY at max_attempts — never overruns it");
 
   // Sweep 3: 'failed' is no longer 'running' — outside stuck's own WHERE clause entirely.
   let enqueueCalled = false;
   await sweep(async () => { enqueueCalled = true; });
   assert.equal(enqueueCalled, false, "M6: once settled failed, a later sweep does not even select this task again");
-  const dl2 = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer='wake_engine' and task_id=$1", [task])).rows[0];
+  const dl2 = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2", [WAKE_ENGINE_ENQUEUE_CONSUMER, task])).rows[0];
   assert.equal(dl2.attempt_count, 2, "M6: the dead-letter count is still exactly 2 — a hard cap, not merely a threshold crossed once");
 });
 
@@ -496,7 +759,7 @@ test("M6: a settle FAILURE after exhaustion does NOT re-attempt enqueue on the n
     await sweep(async () => { enqueueCallCount1 += 1; throw new Error("enqueue fails"); });
     assert.equal(enqueueCallCount1, 1, "mandatory setup: sweep 1 attempted enqueue once");
     assert.equal((await rig.readTask(task)).status, "running", "mandatory setup: the settle FAILED (poisoned) — still running, not failed");
-    let dl = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer='wake_engine' and task_id=$1", [task])).rows[0];
+    let dl = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2", [WAKE_ENGINE_ENQUEUE_CONSUMER, task])).rows[0];
     assert.equal(dl.attempt_count, 1, "mandatory setup: exhaustion WAS recorded despite the settle failure");
 
     // Sweep 2: the task is STILL 'running' (reappears in `stuck`) — M6's fix must check
@@ -504,7 +767,7 @@ test("M6: a settle FAILURE after exhaustion does NOT re-attempt enqueue on the n
     let enqueueCallCount2 = 0;
     await sweep(async () => { enqueueCallCount2 += 1; throw new Error("enqueue fails"); });
     assert.equal(enqueueCallCount2, 0, "M6: sweep 2 does NOT re-attempt enqueue at all — exhaustion is STICKY, only the settle retries");
-    dl = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer='wake_engine' and task_id=$1", [task])).rows[0];
+    dl = (await rig.rootQuery("select attempt_count from clara.wake_engine_task_dead_letters where consumer=$1 and task_id=$2", [WAKE_ENGINE_ENQUEUE_CONSUMER, task])).rows[0];
     assert.equal(dl.attempt_count, 1, "M6: the dead-letter count did NOT grow further — the pre-fix bug pushed this arbitrarily past the cap on every resweep");
   } finally {
     await rig.rootQuery(`drop trigger if exists ${poisonFn} on clara.agent_tasks`);
