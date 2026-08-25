@@ -113,6 +113,14 @@ export async function requireWaveEDelta() {
   }, `Wave E delta exact readiness failed: ${JSON.stringify(readiness)}`);
   return readiness;
 }
+/** True when the delta/epsilon ceremony's five covered closures (every evaluator except F-A5
+ *  PR-1's own evaluate_fs_pack_agent, cell D's separate ceremony) are STILL undeployed -- a
+ *  fresh witness. `_tf_evaluator_deploy_once` (0060) admits ONE undeployed->deployed transition
+ *  per row EVER, so False means a PRIOR run already ceremonied this database (re-run, not a
+ *  defect): callers skip the now-unwitnessable pre-ceremony half loudly instead of asserting it. */
+export async function evaluatorCeremonyUnwitnessed() {
+  return (await rootQuery("select count(*)::int n from clara.evaluator_versions where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'")).rows[0].n > 0;
+}
 export async function caught(fn) { try { await fn(); return null; } catch (error) { return error; } }
 export function errorDetail(error) { if (!error?.detail) return {}; try { return JSON.parse(error.detail); } catch { return { raw: error.detail }; } }
 export function reasonOf(error) {

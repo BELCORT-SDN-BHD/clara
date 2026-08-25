@@ -94,6 +94,16 @@ Root shortcuts: `pnpm db:migrate`, `pnpm db:seed`, `pnpm db:reset`, `pnpm db:bac
 `pnpm db:backup:full`, `pnpm db:restore:full`, `pnpm db:dr:verify`. Full-profile DR
 runbook + tooling: `docs/ops/DR-full-drill.md`.
 
+**Running `test` locally also needs `CLARA_ALLOW_DESTRUCTIVE=1`.** `tests/pipeline.test.mjs`
+calls the real `seed()` (which truncates+reloads the smoke tables) as its own proof that the
+pipeline works end to end, and `lib/guard.mjs` refuses any destructive op without the sentinel
+— by design, the same wall every seed/reset/restore script carries, never weakened for a test's
+convenience. CI's `db-estate` job sets this for the WHOLE job (`.github/workflows/ci.yml`), so
+migrate, seed and test all share one env block there; a local run that exports the var for
+migrate/seed but forgets it on the `test` invocation gets a single, correctly-worded refusal
+from `pipeline.test.mjs` and nothing else. Export it once, for the whole session, before any of
+the three commands above.
+
 ## The migration runner contract
 
 - Migrations apply in numeric filename order, each in its **own transaction**.
