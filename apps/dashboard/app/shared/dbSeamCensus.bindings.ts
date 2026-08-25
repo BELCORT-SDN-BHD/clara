@@ -88,6 +88,11 @@ export const UNMAPPED_READS: Record<string, string> = {
   // FiscalYearRow[]) : []` — a bare cast over the array, no toX mapper.
   list_fiscal_years: "closeApi.listFiscalYears casts the envelope straight to FiscalYearRow[] — no mapper, nothing to diff",
   preview_wrong_client_correction: "the correction preview is cast straight to its detail type — no mapper, nothing to diff",
+  // [Wave-F F-A5 PR-3] reportsApi's S5/S6 additions: both responses are cast straight to
+  // their detail types (the requeue receipt and the signed-original custody envelope with
+  // its 'attempted' state + prepared_by_agent) — no runtime mapper, nothing to diff.
+  requeue_render_job: "reportsApi casts the requeue receipt straight to its detail type — no mapper, nothing to diff",
+  retrieve_signed_original: "reportsApi casts the custody envelope (attempted-state + prepared_by_agent) straight to its detail type — no mapper, nothing to diff",
   // [Wave E lane theta] reportsApi.snapshotState: `typeof out === "string" ? out
   // : "unknown"` — a scalar string result, no envelope to map.
   snapshot_state: "reportsApi.snapshotState narrows the envelope straight to a string ('current'|'stale'|'unknown') — no mapper, nothing to diff",
