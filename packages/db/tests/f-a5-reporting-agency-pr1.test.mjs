@@ -343,7 +343,6 @@ test("D -- the agent evaluator refuses while its closure row is undeployed, and 
     `select id, deployed from clara.evaluator_versions
       where evaluator_name='evaluate_fs_pack_agent' and version=1 and firm_id is null`)).rows[0];
   assert.ok(row, "the agent closure row exists");
-  assert.equal(row.deployed, false, "and it is BORN UNDEPLOYED -- the flip is a ceremony act");
 
   const firm = await firmIdOf(world.clients.A1);
   const args = [firm, AGENT_USER_ID, world.users.bob, "interactive", world.clients.A1,
@@ -351,14 +350,49 @@ test("D -- the agent evaluator refuses while its closure row is undeployed, and 
     JSON.stringify(agentObj()), opk("fa5-gate")];
   const sql = `select clara.evaluate_fs_pack_agent_v1($1,$2,$3,$4,$5,$6::uuid[],$7::uuid[],$8,$9,$10::jsonb,$11) as r`;
 
-  const pre = await caught(() => rootQuery(sql, args));
-  assert.ok(pre, "the pre-ceremony call is refused");
-  assert.equal(errorDetail(pre)?.reason, "evaluator_undeployed",
-    `the gate is the reason, and it fires FIRST: ${pre?.message}`);
+  // THIS ROW'S DEPLOY FLIP IS ONE-WAY (0060's t_evaluatorversions_deploy_once: exactly one
+  // undeployed->deployed transition per row, EVER). On a FRESH database this cell is the row's
+  // only witness and proves BOTH polarities. On a RE-RUN against a database a PRIOR invocation
+  // of THIS SAME FILE already ran, the row is already deployed -- the ceremony working as
+  // designed, not a defect -- and the pre-ceremony refusal can never be re-witnessed. The re-run
+  // arm proves the MIRROR strong truth instead: monotone (still deployed) and a second flip
+  // attempt is ITSELF refused by the one-way wall, never a bare skip.
+  //
+  // REUSE MUST BE DECLARED, NEVER INFERRED. There is no `deployed_at` column, so `row.deployed`
+  // alone cannot distinguish "a prior run of THIS file already witnessed it" from "some OTHER
+  // fixture illegitimately flipped it early, destroying the born-undeployed witness" -- so an
+  // already-deployed row is a HARD FAILURE unless the operator has explicitly acknowledged a
+  // reused database via CLARA_ESTATE_REUSED_DB=1 (documented in packages/db/README.md; the
+  // estate sweep's second-run protocol sets it).
+  const reusedDeclared = process.env.CLARA_ESTATE_REUSED_DB === "1";
+  if (row.deployed && !reusedDeclared) {
+    assert.fail(
+      "evaluate_fs_pack_agent v1 is already deployed but CLARA_ESTATE_REUSED_DB is not set to "
+      + "\"1\" -- either this database is not actually fresh (reset it: "
+      + "pnpm --filter @clara/db reset, then re-migrate/seed) or the reuse is deliberate "
+      + "(export CLARA_ESTATE_REUSED_DB=1 to acknowledge a re-run against this same database)");
+  }
+  if (!row.deployed) {
+    assert.equal(row.deployed, false, "and it is BORN UNDEPLOYED -- the flip is a ceremony act");
+    const pre = await caught(() => rootQuery(sql, args));
+    assert.ok(pre, "the pre-ceremony call is refused");
+    assert.equal(errorDetail(pre)?.reason, "evaluator_undeployed",
+      `the gate is the reason, and it fires FIRST: ${pre?.message}`);
 
-  // THE DIFFERENTIAL. Flip the row and call again with the same garbage identities: the refusal
-  // must MOVE PAST the gate. Without this the cell above passes on a body that refuses everything.
-  await rootQuery("update clara.evaluator_versions set deployed=true where id=$1", [row.id]);
+    // THE DIFFERENTIAL. Flip the row and call again with the same garbage identities: the refusal
+    // must MOVE PAST the gate. Without this the cell above passes on a body that refuses everything.
+    await rootQuery("update clara.evaluator_versions set deployed=true where id=$1", [row.id]);
+  } else {
+    // row.deployed === true AND reusedDeclared === true (the only way past the assert.fail
+    // above) -- prove the MIRROR strong truth instead of a bare skip.
+    const redeploy = await caught(() => rootQuery(
+      "update clara.evaluator_versions set deployed=true where id=$1", [row.id]));
+    assert.equal(redeploy?.code, "CLR08", `${redeploy?.code} ${redeploy?.message}`);
+    assert.match(redeploy.message, /one undeployed-to-deployed transition/i);
+    assert.equal((await rootQuery(
+      "select deployed from clara.evaluator_versions where id=$1", [row.id])).rows[0].deployed,
+      true, "still deployed -- monotone (re-run shape)");
+  }
   const post = await caught(() => rootQuery(sql, args));
   assert.ok(post, "the post-ceremony call still refuses -- the identities are deliberately garbage");
   assert.notEqual(errorDetail(post)?.reason, "evaluator_undeployed",
