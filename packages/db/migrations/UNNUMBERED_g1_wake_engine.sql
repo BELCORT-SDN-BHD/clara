@@ -66,13 +66,19 @@ set role clara_fn_owner;
 -- §0 · PRESTATE — measure every claim this file makes, abort on any drift rather than CoR a body
 -- this branch never read (db-migrations.md's own rule; rig-replayed at frontier 0127).
 -- =================================================================================================
+-- Carries v_held_before across this file's SEPARATE `do $$ ... $$` blocks (each is its own
+-- PL/pgSQL scope -- a local variable does NOT survive from §0 into §TAIL). Opus/Codex review,
+-- NOTE L: a comment claiming "structurally guaranteed equal" is not itself evidence (review law
+-- 2) -- §TAIL now does a REAL comparison against this persisted count, not a dead local.
+create temporary table g1_wake_engine_census (held_before bigint not null);
+
 do $prestate$
 declare
   v_sha text;
   v_def text;
   v_held_before bigint;
 begin
-  -- 0.1 · prosrc-SHA pins on the THREE live bodies this file CoRs, re-derived by THIS branch's
+  -- 0.1 · prosrc-SHA pins on the FOUR live bodies this file CoRs, re-derived by THIS branch's
   -- own rig replay against the exact 0127 frontier (never trusted from a design doc's cite).
   select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
     from pg_proc p where p.oid = 'clara._tf_agent_task_update()'::regprocedure;
@@ -96,6 +102,18 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- MUST A (opus/Codex review): clara.cancel_agent_task (0006, otherwise untouched by this
+  -- file) unconditionally cascades wakes_outbox held->cancelled on ANY status of the task
+  -- itself -- correct only while 'held' was the sole cancellable wake state, which THIS file's
+  -- own matrix delta breaks (running is now reachable). Pinned so the CoR below is proven a
+  -- ONE-LINE guard addition, not a rewrite.
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
+    from pg_proc p where p.oid = 'clara.cancel_agent_task(uuid,text)'::regprocedure;
+  if v_sha is distinct from '2662c842fc9620c4a6113a6912d9c12c92648b921938f4eb9dfb54aed22d74ae' then
+    raise exception 'g1_wake_engine prestate: clara.cancel_agent_task drifted from the pinned prosrc (got %)', v_sha
+      using errcode = 'CLR10';
+  end if;
+
   -- 0.2 · the ANNEX-B CORRECTION, proven at the bytes (not trusted on the design's word — review
   -- law 3). The design's Annex B claims "the early kind-membership gate (0126:624) already
   -- admits close_prep, so no change is needed there." This branch's own rig replay shows the
@@ -108,6 +126,18 @@ begin
   end if;
   if position('close_prep' in v_def) > 0 then
     raise exception 'g1_wake_engine prestate: mint_wake_credential already carries a close_prep reference -- this file may already be applied'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 0.2b · cancel_agent_task's cascade is at its pre-fix (unconditional-on-task-status) shape --
+  -- byte-checked, not merely sha-pinned, so a future reviewer can see exactly what changes.
+  select p.prosrc into v_def from pg_proc p where p.oid = 'clara.cancel_agent_task(uuid,text)'::regprocedure;
+  if position('where intent_id = t.origin_intent_id and status = ''held''' in v_def) = 0 then
+    raise exception 'g1_wake_engine prestate: cancel_agent_task''s wakes_outbox cascade is not at its expected pre-fix text'
+      using errcode = 'CLR10';
+  end if;
+  if position('t.status = ''held''' in v_def) > 0 then
+    raise exception 'g1_wake_engine prestate: cancel_agent_task already carries a t.status=''held'' guard -- this file may already be applied'
       using errcode = 'CLR10';
   end if;
 
@@ -127,7 +157,9 @@ begin
   if to_regclass('clara.wake_engine_sources') is not null
      or to_regclass('clara.wake_engine_task_dead_letters') is not null
      or to_regprocedure('clara.set_wake_source_enabled(text,boolean,text,text)') is not null
-     or to_regprocedure('clara._settle_wake_task(uuid,text,text)') is not null then
+     or to_regprocedure('clara._settle_wake_task(uuid,text,text)') is not null
+     or exists(select 1 from information_schema.columns
+         where table_schema='clara' and table_name='firms' and column_name='is_operator') then
     raise exception 'g1_wake_engine prestate: one or more Gate-G1 objects already exist'
       using errcode = 'CLR10';
   end if;
@@ -136,7 +168,8 @@ begin
   -- tail can prove this migration (pure DDL/trigger/INSERT-into-a-NEW-table — no UPDATE/INSERT/
   -- DELETE anywhere in this file against agent_tasks or wakes_outbox) leaves that count UNCHANGED.
   select count(*) into v_held_before from clara.agent_tasks where kind = 'wake' and status = 'held';
-  raise notice 'g1_wake_engine prestate: clean -- three live bodies at their pinned prosrc shas, the ANNEX-B CORRECTION confirmed at the bytes (close_prep absent from mint_wake_credential''s early gate), wakes_outbox_status_check at its pre-extension (held,cancelled) text, no Gate-G1 object exists yet, % held wake row(s) exist pre-migration (the stranded-row cure''s own baseline, re-measured in the tail).', v_held_before;
+  insert into g1_wake_engine_census values (v_held_before);
+  raise notice 'g1_wake_engine prestate: clean -- four live bodies at their pinned prosrc shas, the ANNEX-B CORRECTION confirmed at the bytes (close_prep absent from mint_wake_credential''s early gate), cancel_agent_task''s cascade confirmed at its pre-fix unconditional-on-task-status text, wakes_outbox_status_check at its pre-extension (held,cancelled) text, no Gate-G1 object exists yet, % held wake row(s) exist pre-migration (the stranded-row cure''s own baseline, persisted for a REAL tail comparison, not a dead local -- NOTE L).', v_held_before;
 end $prestate$;
 
 -- =================================================================================================
@@ -184,8 +217,32 @@ comment on table clara.wake_engine_sources is
    agent_tasks.kind (today, only close_prep). A row with enabled=false is registered but never
    claimed -- its held/queued rows accumulate visibly, counted by wakeEngineHealth, never silently.';
 
--- The writer -- owner floor (an estate-wide switch, not a per-client one; mirrors
--- set_bank_agency_hold's shape at the next floor up, 0121:4484-4520).
+-- =================================================================================================
+-- G1-10 — clara.firms.is_operator (Codex-round MUST B / opus-round MUST D -- the SAME finding,
+-- independently reproduced by both reviewers; the consolidated fix order names it MUST D, so
+-- later references in this file use that label). set_wake_source_enabled gates an
+-- ESTATE-WIDE switch (no firm scoping in its own UPDATE — every firm's bank_agent work), but
+-- `_human_ctx(role_rank('owner'))` alone proves only "owner of SOME firm" — including any test
+-- fixture (Alara, Borneo, ROME PROPERTIES, ...). The design calls this door an "ENGINEERING/
+-- OPERATOR door" (Annex A's own comment); operator identity is NOT owner-rank-inside-an-arbitrary-
+-- tenant. Fix: a firm-level flag, defaulting false on every firm (including any seeded during this
+-- migration's own apply), with AT MOST ONE true at a time (the partial unique index below) --
+-- BELCORT, the one operator firm (constraint 13). No app-facing RPC ever sets this column: it is a
+-- deploy-time/ops fact about the estate, set by a raw, audited DB act (mirroring how
+-- clara_wake_bank_login's actual LOGIN+password lands via an operator ceremony, never an app RPC)
+-- -- an app-facing setter would just relocate the same "who may call it" problem one level down.
+-- No firm starts as operator, so set_wake_source_enabled is UNREACHABLE by anyone until that
+-- ceremony runs -- correct fail-closed behaviour, not a gap.
+alter table clara.firms add column is_operator boolean not null default false;
+create unique index uq_firms_one_operator on clara.firms ((true)) where is_operator;
+comment on column clara.firms.is_operator is
+  'Gate G1 MUST D (Codex-round MUST B): true for EXACTLY the one operator firm (BELCORT, constraint 13), enforced by
+   uq_firms_one_operator. Set ONLY by a raw, audited ops act -- never an app-facing RPC. Read by
+   set_wake_source_enabled''s authority check; not a general-purpose "is this firm special" flag.';
+
+-- The writer -- OPERATOR-ONLY (an estate-wide switch, not a per-client one; the owner-rank floor
+-- from set_bank_agency_hold's shape, 0121:4484-4520, PLUS the operator-firm predicate MUST D adds
+-- -- owner rank alone is necessary but not sufficient).
 create or replace function clara.set_wake_source_enabled(p_source_key text, p_on boolean,
     p_reason text, p_op_key text) returns jsonb
  language plpgsql security definer set search_path to 'clara', 'pg_temp'
@@ -193,6 +250,10 @@ as $function$
 declare c record; v_dedupe jsonb; v_reason text;
 begin
   c := clara._human_ctx(clara.role_rank('owner'));
+  if not exists(select 1 from clara.firms where id = c.firm and is_operator) then
+    raise exception 'set_wake_source_enabled is an operator-only door -- % is not the operator firm', c.firm
+      using errcode='CLR04';
+  end if;
   if not exists(select 1 from clara.wake_engine_sources where source_key = p_source_key) then
     raise exception 'unknown wake-engine source %', p_source_key using errcode='CLR10';
   end if;
@@ -215,6 +276,22 @@ begin
 
   perform clara._audit(c.firm, c.actor, null, null, 'set_wake_source_enabled', null,
     jsonb_build_object('source', p_source_key, 'on', coalesce(p_on,false), 'reason', v_reason));
+
+  -- MUST D (opus/Codex review, owner-ruled defect): this is an ESTATE-WIDE switch -- every
+  -- firm's automation posture on this source changes the instant this call commits, not just
+  -- the operator's own. audit_log is firm-scoped RLS, so without this only BELCORT's own trail
+  -- would EVER show the flip happened -- every OTHER firm would have zero receipt that its
+  -- automation was just switched on/off. Broadcast an informational receipt into every OTHER
+  -- firm's OWN audit_log (actor=c.actor, the OPERATOR's identity -- never blank -- so a reader
+  -- can tell this was not a self-service act); the acting firm's own op-key-scoped receipt above
+  -- is untouched (that ledger stays firm-scoped by the idempotency design, _reserve_op/_finish_op).
+  insert into clara.audit_log (firm_id, actor, on_behalf_of, via_wake_kind, fn, entry_id, args, outcome)
+  select f.id, c.actor, null, null, 'set_wake_source_enabled_estate_notice', null,
+    jsonb_build_object('source', p_source_key, 'on', coalesce(p_on,false), 'reason', v_reason, 'set_by_operator_firm', c.firm),
+    'ok'
+  from clara.firms f
+  where f.id <> c.firm;
+
   return clara._finish_op(c.firm, 'set_wake_source_enabled', p_op_key,
     jsonb_build_object('source_key', p_source_key, 'on', coalesce(p_on,false)));
 end $function$;
@@ -330,23 +407,45 @@ end $$;
 
 -- The settlement verb -- ungranted, called only by the reconciler belt and by a workflow's own
 -- terminal step, mirroring settleTaskTerminal's existing shape.
+--
+-- MUST B (opus/Codex review): the pre-fix body filtered `kind = 'wake'` literally, so a
+-- direct_queue task (kind='close_prep') NEVER matched -- v_intent stayed null and every close_prep
+-- settle attempt raised 'no wake task % to settle', which (proven live) let
+-- reconciler-wake.mjs's own cancel repair convert a RECOVERABLE running row into a PERMANENTLY
+-- STRANDED cancel_requested one (its two statements now run in one txn -- see reconciler-wake.mjs
+-- -- but this body's own kind-filter bug is the root cause fixed here). Fix: the legal kind
+-- domain is the REGISTRY's own task_kind column (today {wake, close_prep}, future-proof for any
+-- new direct_queue source with NO further CoR of this function), and GET DIAGNOSTICS proves "did
+-- this match a row" rather than "v_intent is null" -- a close_prep task's origin_intent_id is
+-- STRUCTURALLY null (Annex B: direct_queue tasks carry no wake_intent at all), so a null
+-- v_intent on a REAL match must never be conflated with zero rows matched.
 create or replace function clara._settle_wake_task(p_task uuid, p_outcome text, p_error_code text)
   returns void
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_intent uuid;
+declare v_intent uuid; v_n int;
 begin
   if p_outcome not in ('completed','failed','cancelled') then
     raise exception 'unknown wake settlement outcome %', p_outcome using errcode='CLR10';
   end if;
-  update clara.agent_tasks set status = p_outcome, error_code = p_error_code
-    where id = p_task and kind = 'wake'
+  -- NOTE C (opus/Codex review): coalesce, never overwrite -- a re-settle REPLAY that (for
+  -- whatever caller reason) carries a null p_error_code must not ERASE a real error_code an
+  -- earlier call already stamped. A genuine transition always supplies its own real value or
+  -- null consistently, so this changes nothing on the honest path, only the erasure on replay.
+  update clara.agent_tasks set status = p_outcome, error_code = coalesce(p_error_code, error_code)
+    where id = p_task and kind in (select task_kind from clara.wake_engine_sources)
     returning origin_intent_id into v_intent;
-  if v_intent is null then
-    raise exception 'no wake task % to settle', p_task using errcode='CLR10';
+  get diagnostics v_n = row_count;
+  if v_n = 0 then
+    raise exception 'no wake-engine task % to settle', p_task using errcode='CLR10';
   end if;
   -- Idempotent by construction: a re-settle attempt (crash-recovery replay) finds the outbox
-  -- row already 'settled'/'cancelled' and this UPDATE affects zero rows -- never a raise.
-  update clara.wakes_outbox set status = 'settled' where intent_id = v_intent and status = 'held';
+  -- row already 'settled'/'cancelled' and this UPDATE affects zero rows -- never a raise. A
+  -- direct_queue task (close_prep) carries NO wakes_outbox row at all -- v_intent is null BY
+  -- CONSTRUCTION there, not by a missed match -- so this cascade is conditioned on v_intent,
+  -- never assumed present.
+  if v_intent is not null then
+    update clara.wakes_outbox set status = 'settled' where intent_id = v_intent and status = 'held';
+  end if;
 end $$;
 revoke all on function clara._settle_wake_task(uuid,text,text) from public;
 -- clara_runtime ONLY (measured, this design's own runtime battery): the reconciler belt and the
@@ -355,6 +454,73 @@ revoke all on function clara._settle_wake_task(uuid,text,text) from public;
 -- own prose meant "no APP-FACING (human/wake) grant", never "unreachable by the runtime that is
 -- its only real caller". Every human/wake role stays refused; PUBLIC stays refused.
 grant execute on function clara._settle_wake_task(uuid,text,text) to clara_runtime;
+
+-- =================================================================================================
+-- §C2 · MUST A (opus/Codex review) — clara.cancel_agent_task (0006) CoR: guard the wakes_outbox
+-- cascade on the TASK's own status, not just its kind. Proven live by the reviewer through the
+-- real audited door: cancel a RUNNING wake task -> the pre-fix cascade set the outbox row
+-- 'cancelled' (terminal) immediately, on the UNCONDITIONAL `t.kind='wake'` predicate alone; the
+-- task itself only moves to 'cancel_requested' (not yet terminal) and, if the in-flight workflow
+-- does not itself observe the cancel request, later settles 'completed' anyway -- task=completed,
+-- outbox=cancelled, PERMANENTLY DIVERGENT, and _settle_wake_task's own `and status='held'`
+-- predicate on the outbox write silently no-ops on the replay. This was correct ONLY while
+-- 'held' was the sole cancellable wake state (the pre-G1 world); G1's own matrix delta makes
+-- 'running' reachable, which is what turns this cascade's missing status guard into a live bug.
+-- Restated per the design's own claim (§2, "the two projections can never diverge"): the ACCURATE
+-- law is "every settlement path must go through clara._settle_wake_task" -- this fix makes
+-- cancel_agent_task honor that law instead of racing ahead of it. ONE LINE changes (the added
+-- `and t.status = 'held'` conjunct); everything else in the body is byte-identical to 0006's live
+-- tip (the prestate's own byte-check above proves the pre-fix text, not merely a sha).
+create or replace function clara.cancel_agent_task(p_task uuid, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_dedupe jsonb; t record; v_new_status text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
+  v_dedupe := clara._reserve_op(c.firm, 'cancel_agent_task', p_op_key, clara._hash(jsonb_build_object('t', p_task)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- Lock the task FIRST, then its interruptions (a single global lock order).
+  select * into t from clara.agent_tasks where id = p_task for update;
+  if not found or t.firm_id <> c.firm then raise exception 'task not in your firm' using errcode = 'CLR11'; end if;
+
+  if t.status in ('completed','failed','cancelled','expired') then
+    return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
+      jsonb_build_object('task_id', p_task, 'status', t.status));      -- idempotent: already terminal
+  end if;
+  if t.status = 'cancel_requested' then
+    return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
+      jsonb_build_object('task_id', p_task, 'status', 'cancel_requested'));  -- already requested
+  end if;
+
+  -- Cascades (S4-D6): pending interruptions → cancelled; a held wake task's outbox → cancelled.
+  update clara.agent_interruptions set status = 'cancelled' where task_id = p_task and status = 'pending';
+  -- MUST A: the outbox cascade is now guarded on t.status = 'held' TOO (was: t.kind = 'wake' and
+  -- t.origin_intent_id is not null alone) -- a RUNNING wake task's cancel is only a REQUEST
+  -- (v_new_status below), never a terminal settle, so its outbox twin must stay 'held' until the
+  -- real settlement path (clara._settle_wake_task) says otherwise.
+  if t.kind = 'wake' and t.origin_intent_id is not null and t.status = 'held' then
+    update clara.wakes_outbox set status = 'cancelled' where intent_id = t.origin_intent_id and status = 'held';
+  end if;
+
+  if t.status in ('running','awaiting_input') then
+    v_new_status := 'cancel_requested';                               -- engine still active; runtime aborts + settles
+  else
+    v_new_status := 'cancelled';                                      -- queued/held: no engine run — terminal settle
+  end if;
+  update clara.agent_tasks
+     set status = v_new_status, cancelled_by = c.actor, cancelled_at = now(), updated_at = now()
+   where id = p_task;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'cancel_agent_task', null,
+    jsonb_build_object('task', p_task, 'op_key', p_op_key));
+  perform pg_notify('clara_runtime_ctl', '');                         -- empty payload
+  return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
+    jsonb_build_object('task_id', p_task, 'status', v_new_status));
+end $$;
+-- ACL unmoved: this CoR changes ONLY the cascade's guard, never the door itself.
+revoke all on function clara.cancel_agent_task(uuid, text) from public;
+grant execute on function clara.cancel_agent_task(uuid, text) to clara_authenticated;
 
 -- =================================================================================================
 -- §E2 · G1-9 — clara.wake_engine_task_dead_letters (Annex D8): the direct_queue carrier's OWN
@@ -663,19 +829,72 @@ begin
     raise exception 'g1_wake_engine tail: clara_runtime reads % row(s) of wake_engine_sources via SET ROLE, expected 2 -- grant without a matching RLS policy is a silent zero-row read' , v_n using errcode='CLR10';
   end if;
 
+  -- T.5c · MUST D (Codex-round MUST B): clara.firms.is_operator exists, defaults false, and AT
+  -- MOST ONE row can ever carry it (the partial unique index) -- re-derived from the live
+  -- catalog, never assumed from the ALTER TABLE statement's own text.
+  if not exists (select 1 from information_schema.columns
+      where table_schema='clara' and table_name='firms' and column_name='is_operator'
+        and is_nullable='NO' and column_default='false') then
+    raise exception 'g1_wake_engine tail: clara.firms.is_operator is missing or not NOT NULL DEFAULT false' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_indexes where schemaname='clara' and tablename='firms' and indexname='uq_firms_one_operator') then
+    raise exception 'g1_wake_engine tail: uq_firms_one_operator index missing' using errcode='CLR10';
+  end if;
+  select count(*) into v_n from clara.firms where is_operator;
+  if v_n <> 0 then
+    raise exception 'g1_wake_engine tail: % firm(s) are already marked is_operator -- this migration marks NONE (a raw ops act does, later)', v_n using errcode='CLR10';
+  end if;
+
+  -- T.5d · MUST D: set_wake_source_enabled's body carries BOTH halves -- the operator-firm gate
+  -- AND the estate-wide receipt broadcast to every OTHER firm -- positionally, not a bare
+  -- substring hit.
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.set_wake_source_enabled(text,boolean,text,text)'::regprocedure;
+  if position('is not the operator firm' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its operator-firm gate' using errcode='CLR10';
+  end if;
+  if position('set_wake_source_enabled_estate_notice' in v_src) = 0 or position('where f.id <> c.firm' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: set_wake_source_enabled lost its MUST-D estate-wide receipt broadcast' using errcode='CLR10';
+  end if;
+
+  -- T.7 · MUST A: cancel_agent_task's wakes_outbox cascade now carries the t.status='held'
+  -- guard, positionally, alongside its ORIGINAL two conjuncts (kind='wake' AND
+  -- origin_intent_id is not null) -- proving this is an ADDED guard, not a replaced predicate.
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara.cancel_agent_task(uuid,text)'::regprocedure;
+  if position('t.kind = ''wake'' and t.origin_intent_id is not null and t.status = ''held''' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: cancel_agent_task''s cascade guard is not the expected three-conjunct MUST-A fix' using errcode='CLR10';
+  end if;
+
+  -- T.8 · MUST B (opus-round; distinct from the Codex-round MUST B renamed to MUST D above):
+  -- _settle_wake_task's kind filter is now the REGISTRY's own task_kind column (never a literal
+  -- 'wake'), and GET DIAGNOSTICS proves row_count -- never the v_intent-is-null conflation NOTE C
+  -- also touches (coalesce on error_code).
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara._settle_wake_task(uuid,text,text)'::regprocedure;
+  if position('kind in (select task_kind from clara.wake_engine_sources)' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: _settle_wake_task does not filter on the registry''s task_kind domain' using errcode='CLR10';
+  end if;
+  if position('get diagnostics v_n = row_count' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: _settle_wake_task does not use GET DIAGNOSTICS row_count' using errcode='CLR10';
+  end if;
+  if position('coalesce(p_error_code, error_code)' in v_src) = 0 then
+    raise exception 'g1_wake_engine tail: _settle_wake_task does not coalesce error_code (NOTE C)' using errcode='CLR10';
+  end if;
+
   -- T.6 · THE STRANDED-ROW CURE'S OWN PROOF: this file's held-wake-row count is UNCHANGED by its
   -- own apply (pure DDL/trigger/config-INSERT -- no UPDATE/INSERT/DELETE anywhere in this file
   -- touches clara.agent_tasks or clara.wakes_outbox). The DISPOSITION becomes reachable, not
   -- retroactively forced (design §4's own framing) -- the battery (D9) proves a pre-existing held
   -- row survives a REAL apply of this exact file untouched, and is claimable once its source
-  -- registers+enables.
+  -- registers+enables. NOTE L (opus/Codex review): this is now a REAL comparison against the
+  -- count PERSISTED in §0 (g1_wake_engine_census), not a dead local re-declared and never
+  -- assigned in this block (review law 2 -- a comment claiming "structurally guaranteed" is not
+  -- itself evidence).
   select count(*) into v_held_after from clara.agent_tasks where kind = 'wake' and status = 'held';
-  -- (v_held_before was only NOTICE'd in §0, not persisted across DO blocks; re-derive the
-  -- structural guarantee instead: no DML statement in this file's own text touches agent_tasks or
-  -- wakes_outbox rows -- confirmed by inspection above (only the two trigger CoRs + one CHECK
-  -- swap + the wake_engine_sources INSERT are DML/DDL in this file, and the wake_engine_sources
-  -- INSERT cannot touch either table). Nothing to compare against a stale local unless a caller
-  -- wants belt-and-braces; log the live count so a reviewer can eyeball it against the prestate
-  -- notice above.
-  raise notice 'g1_wake_engine tail: OK -- G1-1..G1-8 applied. wake arm carries held->running->{completed,failed,cancel_requested}->{completed,failed,cancelled} plus held->cancelled, every sibling kind arm unmoved; wakes_outbox admits held->settled on both the trigger and the CHECK; _settle_wake_task exists, reachable by clara_runtime ONLY (zero human/wake role, zero PUBLIC), and clara_runtime can ACTUALLY READ wake_engine_sources (T.5b, a real SET ROLE row-count, not has_table_privilege alone); mint_wake_credential''s early gate AND per-kind chain both admit close_prep (the ANNEX-B CORRECTION applied, not merely claimed), every sibling per-kind arm unmoved; wake_engine_sources is FORCE RLS with exactly 2 rows (bank_agent/wake_outbox, close_prep/direct_queue), BOTH enabled=false; set_wake_source_enabled is clara_authenticated-reachable, PUBLIC-refused. % held wake row(s) exist now (compare to the prestate notice above -- this file''s own text contains no DML against agent_tasks/wakes_outbox, so the two counts are structurally guaranteed equal; the battery''s D9 cell proves this end-to-end against a REAL pre-seeded row). No table in workflow/graphile_worker/spike touched. No new PostgreSQL role minted (clara_wake_bank/clara_wake_bank_login already exist, 0121).', v_held_after;
+  select held_before into v_held_before from g1_wake_engine_census;
+  if v_held_before is distinct from v_held_after then
+    raise exception 'g1_wake_engine tail: held wake row count changed % -> % -- this file''s own text must never DML agent_tasks/wakes_outbox', v_held_before, v_held_after
+      using errcode='CLR10';
+  end if;
+  drop table g1_wake_engine_census;
+
+  raise notice 'g1_wake_engine tail: OK -- G1-1..G1-8 applied. wake arm carries held->running->{completed,failed,cancel_requested}->{completed,failed,cancelled} plus held->cancelled, every sibling kind arm unmoved; wakes_outbox admits held->settled on both the trigger and the CHECK; _settle_wake_task now settles BOTH kind=''wake'' AND kind=''close_prep'' via the registry''s own task_kind domain, uses GET DIAGNOSTICS (never the v_intent-is-null conflation), coalesces error_code on replay (MUST B + NOTE C), reachable by clara_runtime ONLY (zero human/wake role, zero PUBLIC), and clara_runtime can ACTUALLY READ wake_engine_sources (T.5b, a real SET ROLE row-count, not has_table_privilege alone); mint_wake_credential''s early gate AND per-kind chain both admit close_prep (the ANNEX-B CORRECTION applied, not merely claimed), every sibling per-kind arm unmoved; cancel_agent_task''s wakes_outbox cascade now guards on t.status=''held'' too, never diverging a running-then-cancelled wake task from its outbox twin (MUST A); wake_engine_sources is FORCE RLS with exactly 2 rows (bank_agent/wake_outbox, close_prep/direct_queue), BOTH enabled=false; set_wake_source_enabled is clara_authenticated-reachable, PUBLIC-refused, gated on clara.firms.is_operator (MUST D/Codex-MUST-B) -- the column exists NOT NULL DEFAULT false, uq_firms_one_operator enforces at most one operator firm ever, ZERO firms are marked operator by this migration (a raw ops act does that later, never an app RPC) -- AND broadcasts an estate-wide receipt to every OTHER firm''s own audit_log on every successful flip (MUST D). % held wake row(s) exist now, byte-compared equal to the persisted prestate count (NOTE L -- a REAL comparison, not a dead local). No table in workflow/graphile_worker/spike touched. No new PostgreSQL role minted (clara_wake_bank/clara_wake_bank_login already exist, 0121).', v_held_after;
 end $tail$;

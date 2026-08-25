@@ -29,7 +29,21 @@
 // independently re-counts it every health check, regardless of checkpoint position.
 //
 // Connections come from the environment ONLY, via pools.makeRuntimeClient (the autodraft idiom).
-
+//
+// SECURITY LAW (opus/Codex review round, MUST F): this module NEVER mints a wake credential and
+// NEVER passes a secret through `enqueue`/`start()`. docs/plan/completed/slice4-durable-runtime-
+// contract.md:270 states plainly that plaintext secrets must never transit WDK inputs, returns or
+// workflow state, because step IO is durably persisted (to Postgres, and into backups). The
+// design's own Annex C pseudocode minted a credential in the claim transaction and enqueued it —
+// that was WRONG against this standing law, and is deliberately NOT followed here. `enqueue`
+// receives only `(workflowExport, taskId)` — two plain identifiers, neither secret. The credential
+// mint moves ENTIRELY into the dispatched workflow's own first `"use step"` attempt: a future
+// bankAgent.v1/closePrep.v1 step calls `clara.mint_wake_credential(wakeKind, firm, null, ttl,
+// client)` itself, uses the returned secret ONLY within that one step's local execution (the
+// pools.mjs `mintWakeCredential` JSDoc's own law: "minted, used and discarded inside ONE step
+// execution attempt"), and returns nothing secret from the step. This is a closed obligation on
+// every future dispatched workflow, not something this engine can enforce by itself — but the
+// engine's own code can and does structurally guarantee it never OFFERS a secret to persist.
 import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
@@ -41,7 +55,6 @@ export const WAKE_ENGINE_CONSUMER = "wake_engine";
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 const POLL_INTERVAL_MS = Number(process.env.CLARA_WAKE_ENGINE_POLL_MS || 2000);
-const DEFAULT_TTL = process.env.CLARA_WAKE_ENGINE_CREDENTIAL_TTL || "00:15:00";
 
 // ---------------------------------------------------------------------------
 // Registry read — re-read EVERY cycle, never cached (design §1.2c / battery D4).
@@ -102,7 +115,9 @@ async function recordEventDeadLetter(client, { eventId, reason }) {
   }
 }
 
-async function recordTaskDeadLetter(client, { taskId, reason }) {
+/** Exported for reconciler-wake.mjs's own re-enqueue attempt cap (SHOULD I, opus/Codex review)
+ *  — the SAME direct_queue dead-letter home, one shared attempt-count ledger per task. */
+export async function recordTaskDeadLetter(client, { taskId, reason }) {
   await client.query("begin");
   try {
     const r = await client.query(
@@ -162,18 +177,21 @@ async function readHeldWakeRows(client, { firmId, lastSeq, batchSize }) {
   }));
 }
 
-/** One held row's claim: mint credential + held->running + checkpoint, ONE transaction. */
-async function claimWakeOutboxRow(client, { row, source, firmId }) {
+/** One held row's claim: held->running + checkpoint, ONE transaction. NO credential is minted
+ *  here (MUST F) — that is the dispatched workflow's own first-step obligation. SHOULD H (opus/
+ *  Codex review): the read's `FOR UPDATE SKIP LOCKED` is decorative outside an explicit
+ *  transaction (proven by a two-session differential — the row lock releases at statement end,
+ *  before this transaction even opens); the CAS (`and status='held'`) below is the REAL
+ *  exclusion. A zero rowCount means the row raced out from under us (claimed/changed by
+ *  something else between the read and here) — `claimed:false` tells the caller to advance the
+ *  checkpoint (this seq is spoken for) without dispatching a SECOND time. */
+async function claimWakeOutboxRow(client, { row, firmId }) {
   await client.query("begin");
   try {
-    const cred = await client.query(
-      "select credential_id, secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)",
-      [source.wakeKind, firmId, null, DEFAULT_TTL, row.clientId],
-    );
-    await client.query("update clara.agent_tasks set status='running' where id=$1", [row.taskId]);
+    const upd = await client.query("update clara.agent_tasks set status='running' where id=$1 and status='held'", [row.taskId]);
     await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq: row.eventSeq });
     await client.query("commit");
-    return { ok: true, credential: cred.rows[0] };
+    return { ok: true, claimed: upd.rowCount > 0 };
   } catch (err) {
     try {
       await client.query("rollback");
@@ -184,16 +202,46 @@ async function claimWakeOutboxRow(client, { row, source, firmId }) {
   }
 }
 
+/** Wake-engine-only checkpoint advance, no task write (MUST F liveness, opus/Codex review) —
+ *  mirrors autodraft.mjs's own checkpointOnly. */
+async function checkpointOnlyWake(client, { firmId, seq }) {
+  await client.query("begin");
+  try {
+    await writeCheckpoint(client, { consumer: WAKE_ENGINE_CONSUMER, firmId, seq });
+    await client.query("commit");
+  } catch (err) {
+    try {
+      await client.query("rollback");
+    } catch {
+      /* aborted/dead */
+    }
+    throw err;
+  }
+}
+
 /** Walk one firm's held wake_outbox rows in event_seq order. Stops (never advances the
  *  checkpoint past) the first row whose source is absent/disabled or still retrying — see the
  *  module header for why. Poisoned rows (repeated claim failure) dead-letter and skip past
  *  ONLY once max_attempts is exhausted, exactly like autodraft.mjs's own poison-skip. */
-async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sources, deps }) {
+async function processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSize, sources, deps }) {
   const log = deps.log ?? (() => {});
   const enqueue = deps.enqueue ?? (async () => {});
   const counts = { claimed: 0, dispatched: 0, failed: 0, deadLettered: 0 };
   const rows = await readHeldWakeRows(client, { firmId, lastSeq, batchSize });
-  if (rows.length === 0) return { maxSeq: lastSeq, blocked: false, counts, readCount: 0 };
+  if (rows.length === 0) {
+    // MUST F(liveness), opus/Codex review: no held wake row past lastSeq right now does not mean
+    // nothing happened — ordinary (non-wake) traffic still advances firm_event_seq, and with no
+    // coalescing this checkpoint sits at its last CLAIM forever (measured on a healthy rig:
+    // lag=170 against ordinary traffic, autodraft's own lag=0 on the identical traffic).
+    // Coalesce straight to headSeq — discoverWork's own live head for this firm, captured before
+    // this read — safe because any row minted AFTER that snapshot carries a seq > headSeq and is
+    // found on a LATER cycle, never skipped.
+    if (headSeq > lastSeq) {
+      await checkpointOnlyWake(client, { firmId, seq: headSeq });
+      return { maxSeq: headSeq, blocked: false, counts, readCount: 0 };
+    }
+    return { maxSeq: lastSeq, blocked: false, counts, readCount: 0 };
+  }
 
   let cursor = lastSeq;
   for (const row of rows) {
@@ -203,19 +251,29 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sourc
       // module header). Nothing is wrong — the source simply has not shipped/enabled yet.
       return { maxSeq: cursor, blocked: true, counts, readCount: rows.length };
     }
-    const res = await claimWakeOutboxRow(client, { row, source, firmId });
+    const res = await claimWakeOutboxRow(client, { row, firmId });
     if (res.ok) {
       cursor = row.eventSeq;
-      counts.claimed += 1;
-      try {
-        await enqueue(source.workflowExport, row.taskId, res.credential);
-        counts.dispatched += 1;
-      } catch (e) {
-        log(`[wake-engine] enqueue failed task=${row.taskId} source=${source.sourceKey} (reconciler will re-enqueue): ${e?.message ?? e}`);
+      if (res.claimed) {
+        counts.claimed += 1;
+        try {
+          // MUST F: only plain identifiers cross into durable WDK state — never a credential. The
+          // dispatched workflow's own first step mints its own credential fresh (see the module
+          // header's security law).
+          await enqueue(source.workflowExport, row.taskId);
+          counts.dispatched += 1;
+        } catch (e) {
+          log(`[wake-engine] enqueue failed task=${row.taskId} source=${source.sourceKey} (reconciler will re-enqueue): ${e?.message ?? e}`);
+        }
+      } else {
+        // SHOULD H: the CAS found this row no longer 'held' — someone/something else already
+        // moved it (e.g. a concurrent claim, or a human's cancel_agent_task racing us). Advance
+        // the checkpoint (this seq IS spoken for) but never dispatch a second time.
+        log(`[wake-engine] task=${row.taskId} raced (no longer 'held' at claim) — checkpoint advances, no dispatch`);
       }
       continue;
     }
-    // Claim failed (mint refusal, transient DB error, …) — dead-letter + poison-skip.
+    // Claim failed (a transient DB error on the plain UPDATE/checkpoint write) — dead-letter + poison-skip.
     const attempts = await recordEventDeadLetter(client, { eventId: row.eventId, reason: res.err?.message ?? String(res.err) });
     if (attempts >= source.maxAttempts) {
       log(`[wake-engine] event=${row.eventId} source=${source.sourceKey} exhausted ${source.maxAttempts} attempts -> dead-lettered + skipped: ${res.err?.message ?? res.err}`);
@@ -227,6 +285,14 @@ async function processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sourc
     counts.failed += 1;
     log(`[wake-engine] claim-error event=${row.eventId} source=${source.sourceKey} attempt=${attempts}/${source.maxAttempts}: ${res.err?.message ?? res.err}`);
     return { maxSeq: cursor, blocked: true, counts, readCount: rows.length }; // retry next cycle
+  }
+  // Nothing in this batch blocked. If we drained fewer than batchSize rows, nothing more exists
+  // right now: coalesce past trailing non-wake traffic too (MUST F liveness). If we hit the
+  // limit, more held rows may exist beyond `cursor` that this read never saw — must NOT skip
+  // past them (the module header's own "never advance past an unclaimable row" law, generalised).
+  if (rows.length < batchSize && headSeq > cursor) {
+    await checkpointOnlyWake(client, { firmId, seq: headSeq });
+    cursor = headSeq;
   }
   return { maxSeq: cursor, blocked: false, counts, readCount: rows.length };
 }
@@ -250,15 +316,15 @@ async function processDirectQueueSource(client, { firmId, source, batchSize, dep
   );
   for (const row of r.rows) {
     await client.query("begin");
-    let credential = null;
     let err = null;
+    let claimed = false;
     try {
-      const cred = await client.query(
-        "select credential_id, secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)",
-        [source.wakeKind, firmId, null, DEFAULT_TTL, row.client_id],
-      );
-      credential = cred.rows[0];
-      await client.query("update clara.agent_tasks set status='running' where id=$1 and status='queued'", [row.id]);
+      // MUST F: NO credential is minted here — the dispatched workflow's own first step mints
+      // its own fresh credential (see the module header's security law). This transaction claims
+      // ONLY the row. SHOULD H: rowCount, not just the CAS predicate, is the proof — the SELECT's
+      // own SKIP LOCKED is decorative outside an explicit txn (see claimWakeOutboxRow's comment).
+      const upd = await client.query("update clara.agent_tasks set status='running' where id=$1 and status='queued'", [row.id]);
+      claimed = upd.rowCount > 0;
       await client.query("commit");
     } catch (e) {
       err = e;
@@ -283,9 +349,14 @@ async function processDirectQueueSource(client, { firmId, source, batchSize, dep
       }
       continue;
     }
+    if (!claimed) {
+      log(`[wake-engine] task=${row.id} raced (no longer 'queued' at claim) — skipping dispatch`);
+      continue;
+    }
     counts.claimed += 1;
     try {
-      await enqueue(source.workflowExport, row.id, credential);
+      // MUST F: only plain identifiers cross into durable WDK state — never a credential.
+      await enqueue(source.workflowExport, row.id);
       counts.dispatched += 1;
     } catch (e) {
       log(`[wake-engine] enqueue failed task=${row.id} source=${source.sourceKey} (reconciler will re-enqueue): ${e?.message ?? e}`);
@@ -309,14 +380,26 @@ function mergeCounts(a, b) {
   };
 }
 
-async function processFirm(client, { firmId, lastSeq, batchSize, sources, deps }) {
-  const outbox = await processWakeOutboxFirm(client, { firmId, lastSeq, batchSize, sources, deps });
+async function processFirm(client, { firmId, lastSeq, headSeq, batchSize, sources, deps }) {
+  const outbox = await processWakeOutboxFirm(client, { firmId, lastSeq, headSeq, batchSize, sources, deps });
   let counts = outbox.counts;
   for (const source of sources.directQueue) {
     const c = await processDirectQueueSource(client, { firmId, source, batchSize, deps });
     counts = mergeCounts(counts, c);
   }
   return { maxSeq: outbox.maxSeq, blocked: outbox.blocked, readCount: outbox.readCount, counts };
+}
+
+/** MUST E (opus/Codex review): direct_queue discovery for a firm NOT already covered by
+ *  carrier 1's round-robin — a firm with direct_queue work but no wake_outbox backlog never
+ *  appears in discoverWork's result (direct_queue rides no domain event at all). Bounded like
+ *  readHeldWakeRows' own batchSize discipline. */
+async function discoverDirectQueueFirms(client, { taskKind, limit }) {
+  const r = await client.query(
+    `select distinct firm_id from clara.agent_tasks where kind = $1 and status = 'queued' limit $2`,
+    [taskKind, limit],
+  );
+  return r.rows.map((row) => row.firm_id);
 }
 
 /** One full wake-engine cycle — discover firms behind the checkpoint, drain each ROUND-ROBIN
@@ -328,14 +411,14 @@ export async function runWakeEngineCycle(client, opts = {}) {
   const deps = { ...opts, log };
   const sources = await loadEnabledSources(client);
   const work = await discoverWork(client, { consumer: WAKE_ENGINE_CONSUMER, onlyFirm });
-  const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, active: true }));
+  const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, headSeq: w.headSeq, active: true }));
   let totals = { claimed: 0, dispatched: 0, failed: 0, deadLettered: 0 };
 
   for (let round = 0; round < maxBatchesPerFirm; round++) {
     let anyActive = false;
     for (const cur of cursors) {
       if (!cur.active) continue;
-      const res = await processFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, batchSize, sources, deps });
+      const res = await processFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, headSeq: cur.headSeq, batchSize, sources, deps });
       totals = mergeCounts(totals, res.counts);
       if (res.blocked || res.maxSeq <= cur.lastSeq) {
         cur.active = false; // blocked (unclaimable/retrying) or caught up
@@ -350,12 +433,21 @@ export async function runWakeEngineCycle(client, opts = {}) {
 
   // direct_queue sources with no wake_outbox backlog at all still need scanning — discoverWork
   // only surfaces firms with pending domain_events, so a client-scoped close_prep firm whose
-  // checkpoint is already caught up would otherwise never get a direct_queue pass.
-  if (sources.directQueue.length > 0 && onlyFirm != null) {
-    const firms = Array.isArray(onlyFirm) ? onlyFirm : [onlyFirm];
-    for (const firmId of firms) {
-      if (cursors.some((c) => c.firmId === firmId)) continue; // already scanned above
-      for (const source of sources.directQueue) {
+  // checkpoint is already caught up would otherwise never get a direct_queue pass. MUST E
+  // (opus/Codex review): gating this WHOLE block on `onlyFirm != null` made it dead code in
+  // PRODUCTION — startWorld.ts never passes onlyFirm, so every runtime battery cell that DID
+  // pass it was proving a path production never takes (measured: task stayed 'queued',
+  // dispatched=0, in the production shape). onlyFirm now only narrows WHICH firms to scan
+  // (test-scoping, matching discoverWork's own contract); when it is null (production), each
+  // source discovers its own firm list live instead of skipping the pass entirely.
+  if (sources.directQueue.length > 0) {
+    const alreadyScanned = new Set(cursors.map((c) => c.firmId));
+    for (const source of sources.directQueue) {
+      const firmIds = onlyFirm != null
+        ? (Array.isArray(onlyFirm) ? onlyFirm : [onlyFirm])
+        : await discoverDirectQueueFirms(client, { taskKind: source.taskKind, limit: batchSize });
+      for (const firmId of firmIds) {
+        if (alreadyScanned.has(firmId)) continue; // covered by the round-robin above
         const c = await processDirectQueueSource(client, { firmId, source, batchSize, deps });
         totals = mergeCounts(totals, c);
       }
@@ -405,8 +497,9 @@ export async function wakeEngineHealth(client) {
 // The wake-engine leader loop — its OWN dedicated connection + advisory lock ('wake_engine'),
 // byte-identical shape to startAutodraftLoop. Structurally independent: a wake-engine stall
 // never touches router/matcher/autodraft leadership, readiness, or heartbeat.
-// `deps.enqueue(workflowExport, taskId, credential)` is injectable (the supervisor supplies the
-// registry-provenance enqueue, e.g. `(w,t,c) => start(workflows[w], [{taskId:t, credential:c}])`).
+// `deps.enqueue(workflowExport, taskId)` is injectable (the supervisor supplies the registry-
+// provenance enqueue, e.g. `(w,t) => start(workflowsByName[w], [{taskId:t}])`) — TWO plain
+// identifiers only, NEVER a credential (MUST F, the module header's security law).
 export function startWakeEngineLoop(deps = {}) {
   const log = deps.log ?? (() => {});
   const makeClient = deps.makeClient ?? makeRuntimeClient;

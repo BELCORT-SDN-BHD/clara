@@ -87,16 +87,46 @@ export const workflows = {
   clientOnboarding: clientOnboarding_v3,
 } as const;
 
-// Gate G1: a loosely-typed VIEW of the SAME `workflows` object above (not a copy, not a second
-// source of truth) — for the wake engine's dynamic dispatch, where `clara.wake_engine_sources.
-// workflow_export` names a registry KEY at RUNTIME (a plain string column), which no single
-// overload of workflow/api's `start()` can type statically. Every static enqueue site keeps
-// using `workflows` unchanged; this export exists ONLY so a runtime-string-keyed lookup type-
-// checks without an inline cast at the call site (an inline cast there would strip past the
-// bracket access under the freeze-lint enqueue-provenance checker's own TS-cast-stripping rule
-// and read as untraceable — see packages/runtime/plugins/startWorld.ts's own comment).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see the comment block above.
-export const workflowsByName: Record<string, (input: any) => Promise<unknown>> = workflows;
+// Gate G1 (opus/Codex review, MUST D): a loosely-typed VIEW of the SAME `workflows` object above
+// — NOT a copy, NOT a second source of truth, and now PROVABLY so — for the wake engine's dynamic
+// dispatch, where `clara.wake_engine_sources.workflow_export` names a registry KEY at RUNTIME (a
+// plain string column), which no single overload of workflow/api's `start()` can type statically.
+// Every static enqueue site keeps using `workflows` unchanged; this export exists ONLY so a
+// runtime-string-keyed lookup type-checks without an inline cast at the call site (an inline cast
+// there would strip past the bracket access under the freeze-lint enqueue-provenance checker's own
+// TS-cast-stripping rule and read as untraceable — see packages/runtime/plugins/startWorld.ts's own
+// comment).
+//
+// `Object.freeze` is the mechanical guarantee an unchecked mutable alias lacked: it freezes AND
+// returns the SAME object `workflows` already is (never a copy), so `workflowsByName === workflows`
+// is a true statement at runtime, not merely by construction. (An earlier draft asserted this via
+// a dedicated tests/registry-view.test.mjs that imported this file directly — DELETED: this
+// package's test infra never TS-compiles workflows/*.ts for `node --test`, only lib/*.mjs is
+// directly importable by a test [confirmed: every OTHER test importing from workflows/ targets a
+// .mjs sibling, zero import a .ts file] — so that file could never actually run under `pnpm test`.
+// The runtime property is instead proven by (a) TypeScript's own type system — this declaration's
+// annotation only type-checks because `Object.freeze(workflows)`'s inferred type IS assignable to
+// it, which typecheck proves every PR, and (b) the REGISTRY-VIEW-INTEGRITY static check below,
+// which is real, wired into freeze-lint, and runs on every PR.) Because freeze operates on the
+// shared object, `workflows` itself becomes runtime-immutable too (harmless: nothing ever
+// reassigns its own properties) — so `workflowsByName.someKey = maliciousFn` THROWS (ES modules
+// are always strict mode) rather than silently succeeding. scripts/check-frozen-workflows.mjs's own
+// REGISTRY-VIEW-INTEGRITY check (capability (f)) parses this declaration structurally and rejects
+// anything BUT `Object.freeze(workflows)` on the right-hand side, and rejects a second view export.
+// NOTE J (opus/Codex review) — TRIED, REVERTED: narrowing the VALUE type to the per-class union
+// `(typeof workflows)[keyof typeof workflows]` broke typecheck at the real call site
+// (startWorld.ts) — a union of DIFFERENT workflow classes' input types is not callable with a
+// dynamically-picked argument (a `{taskId}` input does not satisfy every arm of the union
+// simultaneously; TypeScript overload resolution needs the argument to satisfy ALL arms, not
+// just the one actually selected at runtime — inherent to a Record<string,...>'s dynamic-key
+// dispatch, not a lint gap). More fundamentally, the note's own claim does not hold: what would
+// catch a typo'd class name is narrowing the KEY type to `keyof typeof workflows`, never the
+// VALUE type — and the key here MUST stay `string` (a DB-driven `workflow_export` column value,
+// never known at compile time), so no value-type narrowing can add that protection. SHOULD I's
+// actual fix (a bounded re-enqueue attempt cap, reconciler-wake.mjs) is what closes this gap —
+// not a type change. `any` stays; the eslint-disable stays too.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see the comment above (NOTE J).
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
 // park-resume re-sent collected stream output as an assistant INPUT message,

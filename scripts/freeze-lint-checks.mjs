@@ -8,6 +8,19 @@
 //   (e) ENQUEUE-SITE PROVENANCE (freeze-lint-enqueue.mjs) — a WDK enqueue call
 //       must receive a workflow reference whose import provenance traces to
 //       workflows/registry.ts.
+//   (f) REGISTRY-VIEW-INTEGRITY (this module, Gate G1 MUST D) — the
+//       enqueue-provenance check in (e) accepts ANY identifier imported from
+//       registry.ts as a proven-safe root, by name alone. That is only sound
+//       because exactly one dynamic-dispatch view exists (`workflowsByName`)
+//       and it is PROVABLY the same object as `workflows` (Object.freeze
+//       returns its argument, so `workflowsByName === workflows`). This check
+//       enforces both halves structurally at HEAD: `workflowsByName`, if
+//       present, must be declared as EXACTLY `Object.freeze(workflows)` — no
+//       spread copy, no fresh literal, no unfrozen alias — and no SECOND
+//       top-level const export may exist whose initializer mentions
+//       `workflows` (a second, unverified "view" would be silently trusted by
+//       (e) merely for living in this file). Fail-closed: an unparseable
+//       `workflowsByName` declaration is a violation, never a skip.
 //
 // Everything is PURE (source strings in, violation strings out — no git, no
 // fs) so the self-test (check-frozen-workflows.selftest.mjs) can inject
@@ -169,5 +182,126 @@ export function checkRegistryMonotonicity(baseSrc, headSrc, baseLabel = "base") 
       );
     }
   }
+  return violations;
+}
+
+// --- (f) registry-view integrity (Gate G1 MUST D) ---------------------------
+
+const TOP_LEVEL_EXPORT_CONST_NAME_RE = /\bexport\s+const\s+([A-Za-z_$][\w$]*)\s*/g;
+
+/**
+ * Every top-level `export const NAME[: TYPE] = <expr>;` in a fully-blanked
+ * source (comments/strings/templates blanked so bracket depth can't be
+ * fooled by their content) — [{name, exprText, start}]. The optional TYPE
+ * annotation is skipped by scanning for the real assignment `=` at
+ * `(){}[]`-depth 0 that is NOT part of `=>`/`==`/`===`/`!=`/`!==`/`<=`/`>=`
+ * (a naive "first bare `=`" scan misfires on a `Record<K, (x) => Y>`-shaped
+ * annotation, whose `=>` contains a `=`). exprText then runs to the
+ * statement's own top-level `;` using the same depth scan, never a naive
+ * first-semicolon match.
+ */
+function extractTopLevelConstExports(blanked) {
+  const out = [];
+  TOP_LEVEL_EXPORT_CONST_NAME_RE.lastIndex = 0;
+  let m;
+  while ((m = TOP_LEVEL_EXPORT_CONST_NAME_RE.exec(blanked))) {
+    const name = m[1];
+    let depth = 0;
+    let assignIdx = -1;
+    for (let i = TOP_LEVEL_EXPORT_CONST_NAME_RE.lastIndex; i < blanked.length; i++) {
+      const ch = blanked[i];
+      if (ch === "{" || ch === "(" || ch === "[") depth++;
+      else if (ch === "}" || ch === ")" || ch === "]") depth--;
+      else if (ch === "=" && depth === 0) {
+        const prev = blanked[i - 1];
+        const next = blanked[i + 1];
+        if (prev === "=" || prev === "!" || prev === "<" || prev === ">" || next === "=" || next === ">") continue;
+        assignIdx = i;
+        break;
+      }
+    }
+    if (assignIdx < 0) {
+      TOP_LEVEL_EXPORT_CONST_NAME_RE.lastIndex = m.index + m[0].length;
+      continue; // no assignment found (fail-closed elsewhere: callers only look up names they expect)
+    }
+    const exprStart = assignIdx + 1;
+    depth = 0;
+    let end = blanked.length;
+    for (let i = exprStart; i < blanked.length; i++) {
+      const ch = blanked[i];
+      if (ch === "{" || ch === "(" || ch === "[") depth++;
+      else if (ch === "}" || ch === ")" || ch === "]") depth--;
+      else if (ch === ";" && depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    out.push({ name, exprText: blanked.slice(exprStart, end), start: m.index });
+    TOP_LEVEL_EXPORT_CONST_NAME_RE.lastIndex = end;
+  }
+  return out;
+}
+
+/** RHS forms that derive PURELY and ONLY from `workflows`, with nothing else
+ * mixed in, so their values (if any) are provably the real frozen originals
+ * — never an alternate/fake collection. Anything else that mentions
+ * `workflows` (a spread copy, a fresh literal, a second `Object.freeze`
+ * under a different name, ...) is an unverified alternate view. */
+const SAFE_WORKFLOWS_DERIVATIONS = new Set([
+  "workflows",
+  "Object.keys(workflows)",
+  "Object.values(workflows)",
+  "Object.entries(workflows)",
+]);
+
+/**
+ * Gate G1 MUST D — REGISTRY-VIEW-INTEGRITY. Structural, HEAD-only (a standing
+ * shape policy, not a base-diff monotonicity check): the enqueue-provenance
+ * check (e) trusts ANY identifier imported from registry.ts as a proven-safe
+ * dispatch root, by IMPORT SOURCE alone — that trust is only sound because
+ * exactly one dynamic-dispatch view exists (`workflowsByName`) and it is
+ * PROVABLY `workflows` itself, not merely a same-shaped copy. Enforces:
+ *
+ *   1. If `workflowsByName` is exported, its initializer (whitespace-
+ *      collapsed) must be EXACTLY `Object.freeze(workflows)` — a spread
+ *      copy, a fresh object literal, or an unfrozen alias all LOOK like a
+ *      view but prove nothing about reference identity or mutability.
+ *   2. No OTHER top-level `export const` (besides `workflows` itself and a
+ *      correctly-shaped `workflowsByName`) may have an initializer
+ *      mentioning the `workflows` identifier — a second, differently-shaped
+ *      "view" would be silently trusted by (e) merely for living in this
+ *      file, without ever being proven to alias the real registry.
+ *
+ * Pure: registry.ts being entirely absent from a change is fine (no
+ * violations); an unparseable/wrong-shaped `workflowsByName` when the name
+ * IS present is fail-closed, never a skip.
+ */
+export function checkRegistryViewIntegrity(headSrc, label = "registry@HEAD") {
+  const violations = [];
+  if (headSrc == null) return violations;
+  const blanked = blankSource(headSrc, { comments: true, strings: true, templates: true });
+  const exportsFound = extractTopLevelConstExports(blanked);
+  const byName = new Map(exportsFound.map((e) => [e.name, e]));
+
+  const view = byName.get("workflowsByName");
+  if (view) {
+    const collapsed = view.exprText.replace(/\s+/g, "");
+    if (collapsed !== "Object.freeze(workflows)") {
+      violations.push(
+        `REGISTRY-VIEW-INTEGRITY  ${label}: "workflowsByName" must be declared as EXACTLY \`Object.freeze(workflows)\` — found \`${view.exprText.trim().slice(0, 120)}\` instead. Anything else (a spread copy, a fresh literal, an unfrozen alias) is not provably the same object as \`workflows\`, so the enqueue-provenance check's trust in registry.ts exports would no longer be sound (Gate G1 MUST D, fail-closed).`,
+      );
+    }
+  }
+
+  for (const e of exportsFound) {
+    if (e.name === "workflows" || e.name === "workflowsByName") continue;
+    const collapsed = e.exprText.replace(/\s+/g, "");
+    if (/\bworkflows\b/.test(e.exprText) && !SAFE_WORKFLOWS_DERIVATIONS.has(collapsed)) {
+      violations.push(
+        `REGISTRY-VIEW-INTEGRITY  ${label}: a second top-level export "${e.name}" references \`workflows\` via \`${e.exprText.trim().slice(0, 120)}\`, which is not one of the provably-safe derivations (a bare alias, Object.keys/values/entries, or exactly \`Object.freeze(workflows)\`). Only \`workflowsByName\` (declared as exactly \`Object.freeze(workflows)\`) may be trusted as a dynamic-dispatch view of the registry — any other shape is an ALTERNATE, unverified view that the enqueue-provenance check (e) would trust by import source alone; rename/remove it or fold it into \`workflowsByName\` (Gate G1 MUST D, fail-closed).`,
+      );
+    }
+  }
+
   return violations;
 }

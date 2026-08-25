@@ -13,9 +13,11 @@
 // Two sections, mirroring reconcileTasks'/reconcileAutoDraftTasks' own shape:
 //   A) running + workflow_run_id NULL past grace -> the claim committed but enqueue() never
 //      landed (a crash between commit and enqueue, or a lost nudge) -> re-derive the row's
-//      source, re-mint a FRESH credential (never cached/reused, the estate's own law) and
-//      re-enqueue. "Just start — the workflow's first step CAS-binds itself; a duplicate start
-//      self-aborts" (reconcileTasks §A's own idiom, unchanged here).
+//      source and re-enqueue (taskId + workflowExport only — NEVER a credential; MUST F, see
+//      wake-engine.mjs's own module-header security law. No mint happens here: the dispatched
+//      workflow's own first step mints its own fresh credential when IT runs). "Just start —
+//      the workflow's first step CAS-binds itself; a duplicate start self-aborts" (reconcileTasks
+//      §A's own idiom, unchanged here).
 //   B) running + workflow_run_id NOT NULL -> engine truth. A terminal engine settles via
 //      terminalFor; an engine-cancelled run on a plain 'running' task repairs through
 //      running->cancel_requested->cancelled (reconcileTasks §C's own two-step shape — a direct
@@ -23,9 +25,9 @@
 
 import { terminalFor } from "./reconciler.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
+import { recordTaskDeadLetter } from "./wake-engine.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
-const DEFAULT_TTL = process.env.CLARA_WAKE_ENGINE_CREDENTIAL_TTL || "00:15:00";
 
 function isLeaderHalt(err) {
   return err instanceof TaxonomyHaltError || !!err?.halt;
@@ -36,7 +38,7 @@ function isLeaderHalt(err) {
 async function resolveSource(client, taskRow) {
   if (taskRow.kind === "wake") {
     const r = await client.query(
-      `select s.source_key, s.wake_kind, s.workflow_export
+      `select s.source_key, s.workflow_export, s.max_attempts
          from clara.agent_tasks at
          join clara.wake_intents wi on wi.id = at.origin_intent_id
          join clara.domain_events de on de.id = wi.event_id
@@ -47,7 +49,7 @@ async function resolveSource(client, taskRow) {
     return r.rows[0] ?? null;
   }
   const r = await client.query(
-    `select source_key, wake_kind, workflow_export from clara.wake_engine_sources
+    `select source_key, workflow_export, max_attempts from clara.wake_engine_sources
       where task_kind = $1 and carrier = 'direct_queue' and enabled`,
     [taskRow.kind],
   );
@@ -59,9 +61,10 @@ async function resolveSource(client, taskRow) {
 async function reenqueueStuckRows(client, deps) {
   const { enqueue, onlyFirm = null, graceInterval = GRACE_REENQUEUE, log = () => {} } = deps;
   let reenqueued = 0;
-  if (typeof enqueue !== "function") return { wakeReenqueued: 0 };
+  let deadLettered = 0;
+  if (typeof enqueue !== "function") return { wakeReenqueued: 0, wakeReenqueueDeadLettered: 0 };
   const stuck = await client.query(
-    `select id, kind, firm_id, client_id from clara.agent_tasks
+    `select id, kind from clara.agent_tasks
       where kind = any(select task_kind from clara.wake_engine_sources)
         and status = 'running' and workflow_run_id is null
         and created_at < now() - ($1)::interval
@@ -76,18 +79,33 @@ async function reenqueueStuckRows(client, deps) {
         log(`[reconcile] wake-engine stuck task=${t.id} kind=${t.kind}: source no longer registered/enabled — leaving for a future cycle`);
         continue;
       }
-      const cred = await client.query(
-        "select credential_id, secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)",
-        [source.wake_kind, t.firm_id, null, DEFAULT_TTL, t.client_id],
-      );
-      await enqueue(source.workflow_export, t.id, cred.rows[0]);
-      reenqueued += 1;
+      try {
+        // MUST F: taskId + workflowExport only — never a credential. No mint here.
+        await enqueue(source.workflow_export, t.id);
+        reenqueued += 1;
+      } catch (enqErr) {
+        // SHOULD I (opus/Codex review): an enqueue() that never resolves (e.g. a workflow_export
+        // the registry does not carry) would otherwise retry FOREVER, every grace window, with
+        // no cap and no dead-letter (probed: 1->4 credential-shaped attempts over 3 sweeps pre-
+        // MUST-F; post-MUST-F it is a pure infinite-retry, still uncapped). Attempt-cap it
+        // through the SAME wake_engine_task_dead_letters home the direct_queue carrier already
+        // uses, then settle the task terminally once exhausted — mirrors wake-engine.mjs's own
+        // poison-skip shape, never a silent forever-loop.
+        const attempts = await recordTaskDeadLetter(client, { taskId: t.id, reason: enqErr?.message ?? String(enqErr) });
+        if (attempts >= source.max_attempts) {
+          await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
+          deadLettered += 1;
+          log(`[reconcile] wake-engine re-enqueue for task=${t.id} exhausted ${source.max_attempts} attempts -> settled failed`);
+        } else {
+          log(`[reconcile] wake-engine re-enqueue failed task=${t.id} attempt=${attempts}/${source.max_attempts}: ${enqErr?.message ?? enqErr}`);
+        }
+      }
     } catch (err) {
       if (isLeaderHalt(err)) throw err;
       log(`[reconcile] wake-engine re-enqueue failed task=${t.id}: ${err?.message ?? err}`);
     }
   }
-  return { wakeReenqueued: reenqueued };
+  return { wakeReenqueued: reenqueued, wakeReenqueueDeadLettered: deadLettered };
 }
 
 /** §B — running-with-a-run: converge on engine truth, exactly reconcileTasks §C's own shape but
@@ -120,11 +138,26 @@ async function settleFromEngineTruth(client, deps) {
     // matrix admits running->cancel_requested only) — repair in two steps, reconcileTasks §C's
     // own precedent verbatim.
     if (engineTerminal === "cancelled") {
+      // MUST B (opus/Codex review): the two statements below MUST commit or fail TOGETHER. The
+      // pre-fix shape ran them bare (no surrounding txn) — when _settle_wake_task then failed
+      // (its own direct_queue bug, fixed separately in the DB migration), the running->
+      // cancel_requested UPDATE had ALREADY committed on its own, converting a perfectly
+      // recoverable 'running' row into a PERMANENTLY STRANDED 'cancel_requested' one (proven:
+      // reconciler-wake:124 was doing exactly this). Wrapping in begin/rollback means a settle
+      // failure now leaves the row exactly as it started — 'running', retried cleanly next sweep
+      // — never a partial, unrecoverable state.
       try {
+        await client.query("begin");
         await client.query("update clara.agent_tasks set status = 'cancel_requested', updated_at = now() where id = $1 and status = 'running'", [t.id]);
         await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "cancelled", null]);
+        await client.query("commit");
         out.wakeSettled += 1;
       } catch (err) {
+        try {
+          await client.query("rollback");
+        } catch {
+          /* aborted/dead */
+        }
         if (isLeaderHalt(err)) throw err;
         out.wakeSettleFailed += 1;
         log(`[reconcile] wake-engine settle failed task=${t.id} engine=cancelled: ${err?.message ?? err}`);

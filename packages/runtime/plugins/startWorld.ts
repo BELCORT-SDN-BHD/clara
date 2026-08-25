@@ -233,8 +233,13 @@ export default definePlugin(() => {
       // The trailing `!` asserts the row names a SHIPPED registry key — an enabled source whose
       // workflow_export the registry does not (yet) carry throws inside start() itself, caught by
       // wake-engine.mjs's own per-row try/catch and dead-lettered, never silently dropped.
-      enqueue: (workflowExport: string, taskId: string, credential: unknown) =>
-        start(workflowsByName[workflowExport]!, [{ taskId, credential }]),
+      // MUST F (opus/Codex review): ONLY the plain taskId identifier crosses into durable WDK
+      // state — NEVER a credential. wake-engine.mjs/reconciler-wake.mjs never mint one to pass
+      // here; the dispatched workflow's own first "use step" mints its own fresh credential
+      // (slice4-durable-runtime-contract.md:270 — plaintext secrets never transit WDK inputs,
+      // returns or workflow state, because step IO is durably persisted).
+      enqueue: (workflowExport: string, taskId: string) =>
+        start(workflowsByName[workflowExport]!, [{ taskId }]),
       getRun,
       log: (m: string) => console.log(m),
     });

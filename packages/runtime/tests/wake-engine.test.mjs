@@ -87,6 +87,13 @@ test("loadEnabledSources re-reads the registry EVERY call — never cached (desi
   await setEnabled(key, true, w.owner);
   const after1 = await rig.asRuntime((c) => loadEnabledSources(c));
   assert.equal(after1.byEventType.get(WAKE_EVENT_TYPE)?.sourceKey, key, "enabling makes it visible on the VERY NEXT read, no restart, no cache");
+  // Test-isolation hygiene (found while fixing G1's opus/Codex review round): wake_engine_sources
+  // is ESTATE-WIDE, not firm-scoped — leaving this source ENABLED under the SHARED WAKE_EVENT_TYPE
+  // key leaks into every LATER test's own byEventType lookup for that same event type (proven: it
+  // broke D4 when run in the same file). Disable it again so this test's own state never survives
+  // past its own body — REGISTERED's file-level after() only DELETES the row, too late for a
+  // sibling test's mid-file assertion.
+  await setEnabled(key, false, w.owner);
 });
 
 // =====================================================================================
@@ -116,6 +123,118 @@ test("D4 a disabled synthetic source's held row is untouched across a real engin
   assert.equal(claimed.status, "running", "D4: enabling claims it on the VERY NEXT cycle — no restart required");
   assert.equal(enqueued2.length, 1, "D4: exactly one dispatch");
   assert.equal(enqueued2[0][0], "g1TestWorkflow", "D4: dispatched with the source's own workflow_export");
+});
+
+// =====================================================================================
+// MUST F liveness (opus/Codex review) — with zero held wake rows, the checkpoint must
+// COALESCE to the firm's live head, not sit at its last claim forever. Pre-fix, ordinary
+// (non-wake) traffic never advanced this checkpoint at all — measured lag=170 on a rig where
+// the engine was perfectly healthy, so /ready's WARN could never distinguish a dead engine
+// from a live one.
+// =====================================================================================
+test("MUST F(liveness): with zero held wake rows, the checkpoint coalesces to the firm's live head — lag returns to zero on ordinary traffic, never stuck at the last claim", { skip: skip || skipG1 }, async () => {
+  const w = await rig.buildFirm("g1mustfliveness");
+  // Ordinary, non-wake-triggering traffic — no registerSource call, no held wake row: nothing
+  // here is even claimable, which is exactly the common case this coalescing fixes.
+  await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async () => {}, log: () => {} }));
+
+  const head = (await rig.rootQuery("select n from clara.firm_event_seq where firm_id=$1", [w.firm])).rows[0].n;
+  const cp = (await rig.rootQuery("select last_seq from clara.relay_checkpoints where consumer='wake_engine' and firm_id=$1", [w.firm])).rows[0];
+  assert.ok(cp, "MUST F(liveness): a checkpoint row now exists for this firm after one cycle");
+  assert.equal(Number(cp.last_seq), Number(head), "MUST F(liveness): the checkpoint coalesced all the way to the firm's live head — pre-fix this stayed at its last claim (often null/0 with zero wake traffic), the measured lag=170-on-a-healthy-rig defect");
+});
+
+// =====================================================================================
+// MUST F (opus/Codex review) — plaintext credentials never cross into durable WDK state.
+// A REAL wake credential is minted independently (the exact secret this cell must never see
+// echoed back), a real held row is claimed through a REAL engine cycle, and every captured
+// `enqueue` call — the ONLY boundary through which anything could reach start()'s durably-
+// persisted args — is asserted to carry exactly two plain string identifiers, with the real
+// secret (and the generic shape a wake secret takes) appearing NOWHERE in what was captured.
+// =====================================================================================
+test("MUST F: enqueue never carries a credential — captured args are exactly [workflowExport, taskId], and a real minted secret never appears in them", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_mustf_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1mustf");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", enabled: true, actor: w.owner });
+
+  // A REAL secret, minted independently of the engine — the exact string this cell asserts
+  // never leaks into an enqueue call.
+  const realSecret = (await rig.rootQuery(
+    "select secret from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)",
+    ["proactive", w.firm, null, null],
+  )).rows[0].secret;
+  assert.ok(realSecret && realSecret.length > 20, "mandatory setup: a real secret was minted");
+
+  const intent = await rig.makeConsumableIntent({ ownerSub: w.owner, client: w.client });
+  const task = await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [intent.intentId]);
+  const taskId = task.rows[0].id;
+  await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,$2,'held')", [intent.intentId, "background_review"]);
+
+  const calls = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...args) => calls.push(args), log: () => {} }));
+
+  assert.equal(calls.length, 1, "mandatory setup: exactly one dispatch happened");
+  const args = calls[0];
+  assert.equal(args.length, 2, "MUST F: enqueue receives EXACTLY two arguments — workflowExport and taskId, never a third (credential) argument");
+  assert.equal(typeof args[0], "string", "MUST F: arg 0 (workflowExport) is a plain string");
+  assert.equal(typeof args[1], "string", "MUST F: arg 1 (taskId) is a plain string");
+  assert.equal(args[1], taskId, "MUST F: arg 1 is the plain task id, not an object wrapping it");
+
+  const serialized = JSON.stringify(calls);
+  assert.ok(!serialized.includes(realSecret), "MUST F: the real minted secret does not appear anywhere in what was captured");
+  assert.ok(!/secret/i.test(serialized), "MUST F: no captured arg carries a 'secret'-named field at all");
+  assert.ok(!serialized.includes("credential"), "MUST F: no captured arg carries a 'credential'-named field at all");
+});
+
+test("MUST F: the direct_queue carrier's dispatch is equally credential-free", { skip: skip || skipG1 }, async () => {
+  // close_prep is the only live direct_queue kind; register a SYNTHETIC direct_queue source on
+  // it so this cell never touches the real (disabled) close_prep registry row.
+  const key = `g1_test_mustfdq_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1mustfdq");
+  await registerSource({ sourceKey: key, carrier: "direct_queue", taskKind: "close_prep", wakeKind: "close_prep", enabled: true, actor: w.owner });
+  const task = await rig.rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [w.firm, w.client],
+  );
+  const taskId = task.rows[0].id;
+
+  const calls = [];
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...args) => calls.push(args), log: () => {} }));
+  assert.equal(calls.length, 1, "mandatory setup: exactly one direct_queue dispatch happened");
+  assert.equal(calls[0].length, 2, "MUST F: direct_queue dispatch also carries exactly two plain identifiers");
+  assert.equal(calls[0][1], taskId);
+  assert.ok(!JSON.stringify(calls).toLowerCase().includes("secret"), "MUST F: no secret-shaped field in the direct_queue dispatch either");
+});
+
+// =====================================================================================
+// MUST E (opus/Codex review) — the direct_queue carrier must dispatch in the PRODUCTION cycle
+// shape too, not only when a caller passes onlyFirm (the test-only knob every OTHER cell here
+// uses). startWorld.ts never passes onlyFirm — pre-fix, the whole direct_queue-with-no-backlog
+// scan was gated on `onlyFirm != null`, so this exact path was dead code in production (probed
+// live by the reviewer: task stayed 'queued', dispatched=0, in the real production shape).
+// =====================================================================================
+test("MUST E: a direct_queue task with no wake_outbox backlog dispatches in the PRODUCTION cycle shape — runWakeEngineCycle called WITHOUT onlyFirm", { skip: skip || skipG1 }, async () => {
+  const key = `g1_test_muste_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1muste");
+  await registerSource({ sourceKey: key, carrier: "direct_queue", taskKind: "close_prep", wakeKind: "close_prep", enabled: true, actor: w.owner });
+  const task = await rig.rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [w.firm, w.client],
+  );
+  const taskId = task.rows[0].id;
+
+  const calls = [];
+  // NO onlyFirm — exactly the shape startWorld.ts uses in production.
+  await rig.asRuntime((c) => runWakeEngineCycle(c, { enqueue: async (...args) => calls.push(args), log: () => {} }));
+
+  const row = (await rig.rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0];
+  assert.equal(row.status, "running", "MUST E: the task IS claimed in the production shape — pre-fix this stayed 'queued' (dispatched=0)");
+  const mine = calls.filter((c) => c[1] === taskId);
+  assert.equal(mine.length, 1, "MUST E: exactly one dispatch happened for this task in the production shape");
 });
 
 // =====================================================================================
@@ -162,18 +281,38 @@ test("D6 per-source isolation: a poisoned source dead-letters + stays held; a he
   const healthyTask = (await rig.rootQuery("insert into clara.agent_tasks (origin_intent_id, kind, status) values ($1,'wake','held') returning id", [healthyIntent.intentId])).rows[0].id;
   await rig.rootQuery("insert into clara.wakes_outbox (intent_id, condition, status) values ($1,'background_review','held')", [healthyIntent.intentId]);
 
+  // MUST F (opus/Codex review) removed credential minting from the claim transaction entirely
+  // — pre-fix, this cell poisoned the claim by giving the source a wake_kind the
+  // wake_credentials CHECK would reject, which failed the mint INSIDE claimWakeOutboxRow. That
+  // surface no longer exists (claimWakeOutboxRow is now just an UPDATE + a checkpoint write, and
+  // the workflow's own first step mints post-dispatch). Inject a genuine, isolated claim failure
+  // the same way this codebase tests such things elsewhere — a REAL trigger, scoped to exactly
+  // this one task id via a WHEN clause, never a mock (mocks can't see triggers): every OTHER
+  // row's UPDATE, including the healthy task's, is untouched.
+  const poisonFn = `g1_test_d6_poison_${randomUUID().slice(0, 8)}`;
+  await rig.rootQuery(`create function clara.${poisonFn}() returns trigger language plpgsql as $f$ begin raise exception 'g1 battery D6: deliberate poison injection'; end $f$`);
+  // DDL cannot take a bind parameter for the WHEN clause — poisonTask is a DB-generated uuid
+  // (never user input), safe to embed directly with an explicit ::uuid cast.
+  await rig.rootQuery(`create trigger ${poisonFn} before update on clara.agent_tasks for each row when (old.id = '${poisonTask}'::uuid) execute function clara.${poisonFn}()`);
+
   const enqueued = [];
-  await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
+  try {
+    await rig.asRuntime((c) => runWakeEngineCycle(c, { onlyFirm: w.firm, enqueue: async (...a) => enqueued.push(a), log: () => {} }));
 
-  const poisonRow = await rig.readTask(poisonTask);
-  assert.equal(poisonRow.status, "held", "D6: the poisoned row is NEVER claimed — poison-skip leaves it VISIBLY held, never silently settled");
-  const dl = await rig.rootQuery("select attempt_count, reason from clara.relay_dead_letters where consumer=$1 and event_id=$2", [WAKE_ENGINE_CONSUMER, poisonEvId]);
-  assert.equal(dl.rowCount, 1, "D6: the poisoned event dead-lettered exactly once (max_attempts=1 poison-skips on the first failure)");
-  assert.equal(dl.rows[0].attempt_count, 1);
+    const poisonRow = await rig.readTask(poisonTask);
+    assert.equal(poisonRow.status, "held", "D6: the poisoned row is NEVER claimed — poison-skip leaves it VISIBLY held, never silently settled");
+    const dl = await rig.rootQuery("select attempt_count, reason from clara.relay_dead_letters where consumer=$1 and event_id=$2", [WAKE_ENGINE_CONSUMER, poisonEvId]);
+    assert.equal(dl.rowCount, 1, "D6: the poisoned event dead-lettered exactly once (max_attempts=1 poison-skips on the first failure)");
+    assert.equal(dl.rows[0].attempt_count, 1);
+    assert.match(dl.rows[0].reason, /deliberate poison injection/, "D6: the dead-letter reason names the REAL claim-transaction failure, not a stale/guessed cause");
 
-  const healthyRow = await rig.readTask(healthyTask);
-  assert.equal(healthyRow.status, "running", "D6: the healthy source's item, later in the SAME cycle, dispatches normally — isolation holds");
-  assert.ok(enqueued.some((a) => a[1] === healthyTask), "D6: the healthy task was enqueued in the SAME cycle the poison ran in");
+    const healthyRow = await rig.readTask(healthyTask);
+    assert.equal(healthyRow.status, "running", "D6: the healthy source's item, later in the SAME cycle, dispatches normally — isolation holds");
+    assert.ok(enqueued.some((a) => a[1] === healthyTask), "D6: the healthy task was enqueued in the SAME cycle the poison ran in");
+  } finally {
+    await rig.rootQuery(`drop trigger if exists ${poisonFn} on clara.agent_tasks`);
+    await rig.rootQuery(`drop function if exists clara.${poisonFn}()`);
+  }
 });
 
 // =====================================================================================

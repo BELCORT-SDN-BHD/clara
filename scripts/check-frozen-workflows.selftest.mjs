@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   checkRegistryMonotonicity,
+  checkRegistryViewIntegrity,
   checkEnqueueSites,
   parseRegistrySource,
 } from "./freeze-lint-checks.mjs";
@@ -106,6 +107,30 @@ testCase("REAL repo registry parses structurally (canary)", () => {
   for (const [cls, info] of classes) {
     if (!Number.isInteger(info.version)) throw new Error(`class ${cls} has no structural version`);
   }
+});
+
+// --- (f) registry-view integrity (Gate G1 MUST D) ----------------------------
+console.log("registry-view integrity:");
+
+testCase("correctly-shaped workflowsByName + safe workflowNames derivation -> OK", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-good.ts.txt")));
+});
+
+testCase("workflowsByName absent (pre-G1 registry shape) -> OK (not a skip; genuinely N/A)", () => {
+  expectClean(checkRegistryViewIntegrity(v1));
+});
+
+testCase("workflowsByName as an unfrozen spread copy -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-mutated.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("a second unverified view export mentioning workflows -> REJECT (REGISTRY-VIEW-INTEGRITY)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-altview.ts.txt")), ["REGISTRY-VIEW-INTEGRITY"]);
+});
+
+testCase("REAL repo registry's workflowsByName + workflowNames -> OK (canary)", () => {
+  const real = readFileSync(join(HERE, "..", "packages", "runtime", "workflows", "registry.ts"), "utf8");
+  expectClean(checkRegistryViewIntegrity(real, "registry@working-tree"));
 });
 
 // --- (e) enqueue-site provenance --------------------------------------------

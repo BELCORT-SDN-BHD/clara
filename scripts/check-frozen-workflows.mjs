@@ -39,11 +39,11 @@
 //       workflow reference whose IMPORT PROVENANCE traces to the registry.
 //       Resolution is per-identifier, so importing the registry SOMEWHERE in the
 //       file while handing start() a direct module import is still a REJECT.
-//       Both checks fail CLOSED: unparseable registries and untraceable enqueue
-//       arguments are violations, never skips.
+//   (f) REGISTRY-VIEW-INTEGRITY (Gate G1 MUST D) — (e) trusts any registry.ts export
+//       by name alone, so `workflowsByName` must be exactly `Object.freeze(workflows)`
+//       and no other export may alias `workflows`. All three checks fail CLOSED.
 //   Self-test: node scripts/check-frozen-workflows.selftest.mjs (fixtures under
 //   scripts/freeze-lint-fixtures/ — stored as .txt so eslint/tsc never parse them).
-//
 // Usage:
 //   node scripts/check-frozen-workflows.mjs                  # verify (CI gate)
 //   node scripts/check-frozen-workflows.mjs --update         # re-baseline (local only)
@@ -68,7 +68,7 @@ import { dirname, join, relative, resolve, extname } from "node:path";
 import { execFileSync } from "node:child_process";
 // The (d)+(e) checkers are PURE (source strings in, violations out) and live in
 // a sibling module so the self-test can inject simulated base/head pairs.
-import { checkRegistryMonotonicity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
+import { checkRegistryMonotonicity, checkRegistryViewIntegrity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
 
 // All git calls go through execFileSync with an argv array — never a shell string —
 // so a ref/path can never be interpreted as a shell command (no injection surface).
@@ -467,7 +467,7 @@ function main() {
   const headRegistrySrc = existsSync(headRegistryAbs) ? readFileSync(headRegistryAbs, "utf8") : null;
   const baseRegistrySrc = base.available ? readBaseFile(REGISTRY_REL) : null;
   violations.push(...checkRegistryMonotonicity(baseRegistrySrc, headRegistrySrc, BASE_REF));
-
+  violations.push(...checkRegistryViewIntegrity(headRegistrySrc)); // 4b. capability (f), MUST D
   // 5. ENQUEUE-SITE PROVENANCE (capability (e), contract §4.9): every WDK
   // enqueue call in packages/runtime (tests + the registry itself excluded)
   // must receive a workflow reference imported from workflows/registry.ts.

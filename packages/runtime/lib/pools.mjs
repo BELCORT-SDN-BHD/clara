@@ -52,10 +52,10 @@ export const READ_POOL_MAX = Number(process.env.CLARA_READ_POOL_MAX || 5);
 // pool (max 2 — inside the connection budget) that reaches the EXISTING
 // wake_draft_entry writer. NOT read-only; SET ROLE clara_wake_interactive; COMMITs.
 export const WRITE_POOL_MAX = Number(process.env.CLARA_WRITE_POOL_MAX || 2);
-// Gate G1 Annex E, step 1: the bank_agent wake source's own dedicated pool (mirrors the write
-// floor's shape exactly — a small pool, least-privilege). GATED ON G1 (bank-agency-annexes-3-
-// build.md:58's M4 seam) — this wiring is inert until the DB-side clara_wake_bank_login gains
-// LOGIN+password+the DSN secret at the operator ceremony (already NOLOGIN-created, 0121).
+// Gate G1 Annex E step 1: bank_agent's own dedicated pool (write-floor shape, least-privilege).
+// Inert until clara_wake_bank_login (NOLOGIN-created, 0121) gains LOGIN+password+DSN at the
+// operator ceremony — assertProductionPoolConfig deliberately does NOT require this DSN eagerly
+// (MUST G below): that ceremony is itself gated on G1 merging first.
 export const BANK_POOL_MAX = Number(process.env.CLARA_BANK_POOL_MAX || 2);
 
 // The dedicated login each pool connects AS in production (the two-login law, N10):
@@ -102,15 +102,16 @@ function poolMaxFor(which) {
  * (deploy ordering): the clara_wake_write_login is created NOLOGIN in 0009 and given
  * LOGIN+password + this secret at the operator ceremony — the secret must be present
  * BEFORE the Slice-6 image boots, or the world fails closed.
- * The bank DSN (CLARA_BANK_DATABASE_URL) joins this set for the SAME reason (Gate G1 Annex
- * E, step 5 — REQUIRED, not optional: omitting it would let the wake engine boot in
- * production without a dedicated bank login and silently misroute a bank_agent-sourced
- * dispatch onto a shared identity). clara_wake_bank_login is already NOLOGIN-created (0121);
- * LOGIN+password land at the same kind of operator ceremony.
+ * CLARA_BANK_DATABASE_URL is DELIBERATELY NOT eager here (MUST G, opus/Codex review — an
+ * earlier draft put it in this set, which would refuse to BOOT the whole server+worker until
+ * the bank ceremony ran, and that ceremony is itself gated on G1 merging first). `getBankPool()`
+ * below still fails CLOSED, just LAZILY, at first actual bank use (its own `loginConfig("bank")`
+ * throws if the DSN is absent) — no shared-identity fallback, only a deferred failure point that
+ * cannot fire before bank_agent is registered+enabled regardless.
  */
 export function assertProductionPoolConfig() {
   if (TEST_MODE) return;
-  for (const which of ["runtime", "read", "write", "bank"]) {
+  for (const which of ["runtime", "read", "write"]) {
     const v = dsnVarFor(which);
     if (!process.env[v]) {
       throw new Error(
@@ -189,11 +190,9 @@ export function getWritePool() {
   return _writePool;
 }
 
-/** Gate G1 Annex E, step 6: lazy singleton bank pool (clara_wake_bank). Connects as
- * clara_wake_bank_login and SET ROLEs to clara_wake_bank — NOT read-only (bank_agent's wrapper
- * verbs write). Small (max 2, BANK_POOL_MAX), least-privilege: the wake engine's OWN claim/
- * checkpoint bookkeeping runs as clara_runtime; only the DISPATCHED bank_agent workflow's actual
- * bank-scoped work runs as clara_wake_bank, via this pool. */
+/** Gate G1 Annex E step 6: lazy singleton bank pool. clara_wake_bank_login -> SET ROLE
+ * clara_wake_bank (NOT read-only, small/least-privilege) — only a DISPATCHED bank_agent
+ * workflow's own bank-scoped work uses this; the engine's claim/checkpoint stays clara_runtime. */
 export function getBankPool() {
   if (!_bankPool) {
     _bankPool = new pg.Pool(loginConfig("bank"));
@@ -464,11 +463,8 @@ export function withWriteWakeScoped(secret, fn) {
 }
 
 /**
- * Gate G1 Annex E, step 7: run fn on a clara_wake_bank WRITE connection — the bank_agent wake
- * source's own scoped-transaction helper, byte-shaped after withWriteWakeScoped. The checkout
- * SET ROLEs to clara_wake_bank (NOT read-only); this binds the wake secret TXN-LOCALLY, runs the
- * write, and COMMITs. A thrown fn rolls back; checkout()'s shared cleanup + P4 destroy-on-
- * connection-error then apply, identically to the write floor.
+ * Gate G1 Annex E step 7: clara_wake_bank WRITE scoped-txn helper (shaped after
+ * withWriteWakeScoped) — binds the wake secret TXN-LOCALLY, writes, COMMITs; throw -> rollback.
  * @template T
  * @param {string} secret  a live bank_agent wake-credential secret (never persisted/returned)
  * @param {(c: pg.PoolClient) => Promise<T>} fn

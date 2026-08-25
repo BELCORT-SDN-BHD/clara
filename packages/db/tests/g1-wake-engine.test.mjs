@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, humanQuery, assertRaises, opk,
   seedFreshFirm, makeConsumableIntent, insertWakeTask, insertOutbox, driveTaskStatus, readRow,
-  insertUser, addMember,
+  insertUser, addMember, cancelAgentTask,
 } from "./rig-runtime-fixtures.mjs";
 
 let ready = false;
@@ -37,7 +37,12 @@ function gate(t) {
   return false;
 }
 
-let W = null; // { owner, firm, client, coa }
+let W = null; // { owner, firm, client, coa } — an ORDINARY tenant fixture, NEVER marked operator
+let OP = null; // { owner, firm, client, coa } — the ONE firm this file marks is_operator=true,
+// simulating the raw, audited ops ceremony MUST B requires (never an app-facing RPC — the
+// migration itself ships ZERO operator firms, T.5c). Mirrors constraint 13: in the real estate
+// exactly BELCORT holds this flag; every other firm (ROME PROPERTIES, Alara, Borneo, ...) is a
+// resettable, non-operator test fixture — W plays that role here, OP plays BELCORT's role.
 
 before(async () => {
   ready = await hasG1();
@@ -49,7 +54,14 @@ before(async () => {
   // bank_agent enabled — reset to the shipped default before this run's own assertions,
   // which assume the birth state (this file never touches close_prep's flag).
   await rootQuery("update clara.wake_engine_sources set enabled=false, enabled_by=null, enabled_at=null, disabled_by=null, disabled_at=null, disabled_reason=null where source_key='bank_agent'");
+  // Defensive (MUST B): uq_firms_one_operator allows AT MOST ONE true across the WHOLE database
+  // — a prior partial/aborted run of THIS file (the only place that ever sets this column) may
+  // have left its old OP firm marked operator, which would block this run's OWN OP firm from
+  // ever being markable. Nothing else in the estate ever sets is_operator (grepped clean).
+  await rootQuery("update clara.firms set is_operator=false where is_operator");
   W = await seedFreshFirm(`g1_${randomUUID().slice(0, 8)}`, "w");
+  OP = await seedFreshFirm(`g1op_${randomUUID().slice(0, 8)}`, "op");
+  await rootQuery("update clara.firms set is_operator=true where id=$1", [OP.firm]);
 });
 after(async () => {
   printLaneNotes("g1-wake-engine");
@@ -75,6 +87,34 @@ test("T1 wake_engine_sources: forced RLS, exactly bank_agent+close_prep, both en
 });
 
 // =====================================================================================
+// T1b — MUST B: clara.firms.is_operator's shape, re-derived FRESH from the live catalog
+// (review law 2/3 — never trusted from the migration's own tail notice). Also proves the
+// partial unique index actually BINDS: exactly one firm (OP, this file's own operator-firm
+// fixture, set via a raw UPDATE in before() — never an app RPC) carries it.
+// =====================================================================================
+test("T1b clara.firms.is_operator: boolean NOT NULL DEFAULT false, uq_firms_one_operator enforces at most one true, exactly OP holds it", async (t) => {
+  if (gate(t)) return;
+  const col = (await rootQuery(
+    `select data_type, is_nullable, column_default from information_schema.columns
+      where table_schema='clara' and table_name='firms' and column_name='is_operator'`,
+  )).rows[0];
+  assert.ok(col, "T1b: clara.firms.is_operator column exists");
+  assert.equal(col.data_type, "boolean", "T1b: is_operator is boolean");
+  assert.equal(col.is_nullable, "NO", "T1b: is_operator is NOT NULL");
+  assert.match(col.column_default ?? "", /false/i, "T1b: is_operator defaults false");
+  const idx = (await rootQuery(
+    `select pg_get_indexdef(indexrelid) as def from pg_index
+      where indexrelid = 'clara.uq_firms_one_operator'::regclass`,
+  )).rows[0];
+  assert.ok(idx, "T1b: uq_firms_one_operator exists");
+  assert.match(idx.def, /UNIQUE/i, "T1b: uq_firms_one_operator is a UNIQUE index");
+  assert.match(idx.def, /WHERE\s+is_operator/i, "T1b: uq_firms_one_operator is the partial (WHERE is_operator) form — a full unique index would forbid TWO false rows too");
+  const operators = (await rootQuery("select id from clara.firms where is_operator")).rows;
+  assert.equal(operators.length, 1, "T1b: exactly one firm is marked operator on this rig");
+  assert.equal(operators[0].id, OP.firm, "T1b: it is THIS file's own OP fixture (set via raw UPDATE in before(), never an app RPC)");
+});
+
+// =====================================================================================
 // T2 — set_wake_source_enabled: owner floor enforced, reason required, idempotent replay.
 // =====================================================================================
 test("T2 set_wake_source_enabled requires OWNER rank — a bookkeeper-rank member of the SAME firm is refused CLR04", async (t) => {
@@ -92,11 +132,32 @@ test("T2 set_wake_source_enabled requires OWNER rank — a bookkeeper-rank membe
   assert.equal(row.enabled, false, "T2: a refused non-owner call leaves the registry row untouched");
 });
 
-test("T2b a blank reason is refused CLR10; a real reason FLIPS the row and stamps enabled_by/enabled_at", async (t) => {
+// =====================================================================================
+// T2z — MUST B (opus/Codex review): owner rank alone is NECESSARY but NOT SUFFICIENT.
+// W is an ordinary tenant fixture (never marked is_operator) — its OWNER, at full owner
+// rank, is STILL refused. This is the cross-tenant probe MUST B asked for: it proves that
+// ANY tenant firm's owner (a real firm's owner, or a resettable test fixture's like Alara's
+// or Borneo's — constraint 13) cannot reach this estate-global switch merely by being an
+// owner somewhere. Only the flag on clara.firms — set by a raw, audited ops act, never an
+// app RPC — grants the door (T.5c; OP, this file's operator-firm fixture, holds it below).
+// =====================================================================================
+test("T2z set_wake_source_enabled refuses an OWNER-rank member of a NON-operator firm — CLR04, the operator-only door, not the rank gate", async (t) => {
+  if (gate(t)) return;
+  const err = await assertRaises(
+    "CLR04",
+    () => humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "cross-tenant probe", opk("g1t2z")]),
+    "set_wake_source_enabled as a full OWNER-rank member of a firm that is not the operator firm",
+  );
+  assert.match(err.message ?? "", /operator firm/i, "T2z: the refusal names the OPERATOR-firm gate specifically, not the rank gate (owner rank was satisfied)");
+  const row = (await rootQuery("select enabled from clara.wake_engine_sources where source_key='bank_agent'")).rows[0];
+  assert.equal(row.enabled, false, "T2z: a refused non-operator-firm call leaves the registry row untouched");
+});
+
+test("T2b a blank reason is refused CLR10; a real reason FLIPS the row and stamps enabled_by/enabled_at (called as the OPERATOR firm's owner — MUST B)", async (t) => {
   if (gate(t)) return;
   const blank = await assertRaises(
     "CLR10",
-    () => humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "", opk("g1t2b-blank")]),
+    () => humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "", opk("g1t2b-blank")]),
     "set_wake_source_enabled with a blank reason",
   );
   assert.match(blank.message ?? "", /reason/i, "T2b: the refusal names the missing reason");
@@ -104,10 +165,10 @@ test("T2b a blank reason is refused CLR10; a real reason FLIPS the row and stamp
   const before1 = (await rootQuery("select enabled, enabled_by, enabled_at from clara.wake_engine_sources where source_key='bank_agent'")).rows[0];
   assert.equal(before1.enabled, false, "mandatory setup: bank_agent starts disabled");
 
-  await humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "g1 battery T2b enable", opk("g1t2b-on")]);
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "g1 battery T2b enable", opk("g1t2b-on")]);
   const after1 = (await rootQuery("select enabled, enabled_by, enabled_at from clara.wake_engine_sources where source_key='bank_agent'")).rows[0];
   assert.equal(after1.enabled, true, "T2b: enabled flips true");
-  assert.equal(after1.enabled_by, W.owner, "T2b: enabled_by stamps the calling owner");
+  assert.equal(after1.enabled_by, OP.owner, "T2b: enabled_by stamps the calling (operator-firm) owner");
   assert.ok(after1.enabled_at, "T2b: enabled_at is stamped");
 
   // Idempotent replay: the SAME op_key (captured ONCE — opk() mints a fresh string per call,
@@ -115,31 +176,31 @@ test("T2b a blank reason is refused CLR10; a real reason FLIPS the row and stamp
   // without re-auditing.
   const auditBefore = (await rootQuery(
     "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled' and firm_id=$1",
-    [W.firm],
+    [OP.firm],
   )).rows[0].n;
   const replayKey = opk("g1t2b-replay");
-  await humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "g1 battery T2b replay", replayKey]);
-  await humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "g1 battery T2b replay", replayKey]);
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "g1 battery T2b replay", replayKey]);
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "g1 battery T2b replay", replayKey]);
   const auditAfter = (await rootQuery(
     "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled' and firm_id=$1",
-    [W.firm],
+    [OP.firm],
   )).rows[0].n;
   assert.equal(auditAfter, auditBefore + 1, "T2b: the SAME op_key replayed is a pure dedupe — exactly one new audit row for two calls");
 
   // Disable it again for the cells below (D4-adjacent hygiene): a disabled source is the
   // baseline every OTHER cell in this file assumes.
-  await humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "g1 battery T2b cleanup", opk("g1t2b-off")]);
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "g1 battery T2b cleanup", opk("g1t2b-off")]);
   const disabled = (await rootQuery("select enabled, disabled_by, disabled_reason from clara.wake_engine_sources where source_key='bank_agent'")).rows[0];
   assert.equal(disabled.enabled, false, "T2b: re-disable flips back false");
-  assert.equal(disabled.disabled_by, W.owner, "T2b: disabled_by stamps the calling owner");
+  assert.equal(disabled.disabled_by, OP.owner, "T2b: disabled_by stamps the calling (operator-firm) owner");
   assert.equal(disabled.disabled_reason, "g1 battery T2b cleanup", "T2b: disabled_reason is the given reason");
 });
 
-test("T2c an unknown source_key is refused CLR10", async (t) => {
+test("T2c an unknown source_key is refused CLR10 (called as the OPERATOR firm's owner, past the operator gate — MUST B)", async (t) => {
   if (gate(t)) return;
   const err = await assertRaises(
     "CLR10",
-    () => humanQuery(W.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["not_a_real_source", true, "x", opk("g1t2c")]),
+    () => humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["not_a_real_source", true, "x", opk("g1t2c")]),
     "set_wake_source_enabled on an unregistered source_key",
   );
   assert.match(err.message ?? "", /unknown/i, "T2c: the refusal names the unknown source");
@@ -368,4 +429,120 @@ test("wakes_outbox: a foreign status value is refused by the TRIGGER (CLR08) bef
     "an out-of-CHECK status value via UPDATE",
   );
   assert.match(err.message ?? "", /illegal wakes_outbox transition/i);
+});
+
+// =====================================================================================
+// MUST A (opus/Codex review) — cancelling a RUNNING wake task must never diverge the two
+// projections. Pre-fix: the outbox cascade fired unconditionally on t.kind='wake', so a
+// cancel-REQUEST on a running task immediately terminal-ized the outbox row while the task
+// itself stayed non-terminal — proven live by the reviewer through this exact door.
+// =====================================================================================
+test("MUST A: cancelling a RUNNING wake task leaves the outbox row 'held' (a REQUEST, not a settle); a later completion settles both projections together, never diverging", async (t) => {
+  if (gate(t)) return;
+  const intent = await makeConsumableIntent({ sub: W.owner, client: W.client });
+  await require_consumeIntent(intent.intentId);
+  const task = await insertWakeTask({ intent: intent.intentId, firm: intent.firm, status: "held" });
+  await insertOutbox({ intent: intent.intentId, firm: intent.firm });
+  await driveTaskStatus(task, ["running"]);
+
+  const before = (await rootQuery("select status from clara.wakes_outbox where intent_id=$1", [intent.intentId])).rows[0];
+  assert.equal(before.status, "held", "mandatory setup: outbox starts held while the task runs");
+
+  const result = await cancelAgentTask(W.owner, { task, opKey: opk("g1-musta-cancel") });
+  assert.equal(result.status, "cancel_requested", "MUST A: a RUNNING wake task's cancel is a REQUEST, not an immediate terminal");
+
+  const afterCancel = (await rootQuery("select status from clara.wakes_outbox where intent_id=$1", [intent.intentId])).rows[0];
+  assert.equal(afterCancel.status, "held", "MUST A: the outbox projection is NOT prematurely terminal-ized by a cancel REQUEST — the pre-fix bug set this to 'cancelled' here");
+
+  // The in-flight workflow finishes anyway (a cancel is a request, never a guarantee) — settle
+  // through the REAL settlement path and prove BOTH projections land together, never diverging.
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [task, "completed", null]);
+  const taskRow = await readRow("agent_tasks", task);
+  assert.equal(taskRow.status, "completed", "MUST A: the task settles to its real outcome");
+  const outboxRow = (await rootQuery("select status from clara.wakes_outbox where intent_id=$1", [intent.intentId])).rows[0];
+  assert.equal(outboxRow.status, "settled", "MUST A: the outbox settles IN STEP — task=completed, outbox=settled, never task=completed/outbox=cancelled (the pre-fix permanent divergence)");
+});
+
+// =====================================================================================
+// MUST B (opus/Codex review) — _settle_wake_task must settle a direct_queue (close_prep) task
+// too, not just kind='wake'. Pre-fix: the literal `kind = 'wake'` filter never matched a
+// close_prep row, so v_intent stayed null and every close_prep settle raised CLR10 — which,
+// chained through reconciler-wake.mjs's own cancel repair, converted a recoverable running row
+// into a permanently stranded cancel_requested one.
+// =====================================================================================
+test("MUST B: _settle_wake_task settles a direct_queue (close_prep) task — no wakes_outbox row exists or is touched, GET DIAGNOSTICS never conflates a structural NULL origin_intent_id with 'no such task'", async (t) => {
+  if (gate(t)) return;
+  const task = await rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [W.firm, W.client],
+  );
+  const taskId = task.rows[0].id;
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+  const preRow = await readRow("agent_tasks", taskId);
+  assert.equal(preRow.origin_intent_id, null, "mandatory setup: a close_prep task carries NO origin_intent_id (Annex B — direct_queue rides no wake_intent)");
+
+  // MUST B: this used to raise CLR10 'no wake task % to settle' unconditionally.
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", null]);
+  const settled = await readRow("agent_tasks", taskId);
+  assert.equal(settled.status, "completed", "MUST B: a close_prep (direct_queue) task settles through the SAME verb a wake task uses");
+
+  // A SECOND settle (crash-recovery replay shape) must stay idempotent, never raise, even though
+  // v_intent is structurally null on every close_prep row (never "zero rows matched").
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", null]);
+  const replayed = await readRow("agent_tasks", taskId);
+  assert.equal(replayed.status, "completed", "MUST B: a replayed close_prep settle is idempotent — no raise, no wakes_outbox touch attempted");
+});
+
+test("NOTE C: a re-settle replay with a null error_code never ERASES an earlier real error_code", async (t) => {
+  if (gate(t)) return;
+  const task = await rootQuery(
+    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
+       values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
+    [W.firm, W.client],
+  );
+  const taskId = task.rows[0].id;
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "internal"]);
+  const first = await readRow("agent_tasks", taskId);
+  assert.equal(first.error_code, "internal", "mandatory setup: the first settle stamps a real error_code");
+
+  // A replay carrying a null error_code (a caller that does not re-derive the original code)
+  // must NOT blank it out — NOTE C's own finding, probed live pre-fix.
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", null]);
+  const replayed = await readRow("agent_tasks", taskId);
+  assert.equal(replayed.error_code, "internal", "NOTE C: error_code survives a null-carrying replay — coalesce, never overwrite");
+});
+
+// =====================================================================================
+// MUST D (opus/Codex review) — the estate-wide switch broadcasts a receipt to every OTHER
+// firm's own audit_log, so a tenant firm can discover its automation posture changed even
+// though only the OPERATOR firm can ever flip it (T2z proves the flip itself refuses).
+// =====================================================================================
+test("MUST D: set_wake_source_enabled broadcasts an estate-wide receipt into every OTHER firm's own audit_log — W (a non-operator, non-acting firm) gets one, OP's own op-key-scoped receipt is unaffected", async (t) => {
+  if (gate(t)) return;
+  const before = (await rootQuery(
+    "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1",
+    [W.firm],
+  )).rows[0].n;
+
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", true, "MUST D receipt probe", opk("g1-mustd-on")]);
+  const afterOn = (await rootQuery(
+    "select firm_id, actor, args from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1 order by id desc limit 1",
+    [W.firm],
+  )).rows[0];
+  assert.ok(afterOn, "MUST D: W's OWN audit_log gained a receipt row, though W never called this function and never could (T2z)");
+  assert.equal(afterOn.actor, OP.owner, "MUST D: the receipt names the OPERATOR's identity as actor — a reader can tell this was not W's own act");
+  assert.equal(afterOn.args.source, "bank_agent");
+  assert.equal(afterOn.args.on, true);
+  assert.equal(afterOn.args.set_by_operator_firm, OP.firm, "MUST D: the receipt names WHICH firm acted");
+
+  const afterCount = (await rootQuery(
+    "select count(*)::int as n from clara.audit_log where fn='set_wake_source_enabled_estate_notice' and firm_id=$1",
+    [W.firm],
+  )).rows[0].n;
+  assert.equal(afterCount, before + 1, "MUST D: exactly one new receipt row landed in W's audit_log for this flip");
+
+  // Cleanup for hygiene (matches T2b's own convention) — restore the birth default.
+  await humanQuery(OP.owner, "select clara.set_wake_source_enabled($1,$2,$3,$4)", ["bank_agent", false, "MUST D receipt probe cleanup", opk("g1-mustd-off")]);
 });
