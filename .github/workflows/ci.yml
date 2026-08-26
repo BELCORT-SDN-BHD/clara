@@ -203,6 +203,16 @@ jobs:
     runs-on: [self-hosted, linux, clara]
     env:
       NEXT_TELEMETRY_DISABLED: "1"
+      # apps/web's build runs `scripts/check-public-key.mjs` BEFORE bundling: it
+      # refuses any value in the public key slot that is not a publishable/anon
+      # key, ABSENCE included (security review 2026-08-27, finding 7 — a name
+      # proves nothing about a value, and `next build` inlines whatever sits
+      # there into every browser bundle). CI is a compile check, not a deploy,
+      # so it supplies a fabricated PUBLISHABLE-class placeholder: the gate stays
+      # strict in both arms instead of being taught to pass on an empty slot.
+      # These are not credentials — no Supabase project answers to them.
+      NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_ci_placeholder"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/setup-workspace

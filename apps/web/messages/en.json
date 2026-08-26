@@ -3,9 +3,36 @@
     "title": "Clara",
     "description": "Clara — AI-native Agentic Accounting OS for Malaysian accounting firms."
   },
+  "FirmShell": {
+    "productName": "Clara"
+  },
+  "FirmNav": {
+    "ariaLabel": "Firm navigation",
+    "home": "Home",
+    "needsYou": "Needs you",
+    "clients": "Clients",
+    "activity": "Activity",
+    "admin": "Admin"
+  },
   "FirmHome": {
     "heading": "Firm home",
     "body": "P1 foundation scaffold — the firm-altitude workspace (Needs-you inbox, client register, firm activity, admin) is built in P3/P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "NeedsYou": {
+    "heading": "Needs you",
+    "body": "P2 shell — the cross-client Needs-you inbox is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientsRegister": {
+    "heading": "Clients",
+    "body": "P2 shell — the client register (every client the firm serves) is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "FirmActivity": {
+    "heading": "Activity",
+    "body": "P2 shell — the firm activity/receipts feed is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "Admin": {
+    "heading": "Admin",
+    "body": "P2 shell — users, capabilities and the metering rollup are built in P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
   },
   "ClientWorkspace": {
     "heading": "Client workspace",
@@ -82,5 +109,73 @@
       "disabledLabel": "Dispatch a run — wires up in P3",
       "hint": "Not connected yet"
     }
+  },
+  "ClientWorkspaceNav": {
+    "ariaLabel": "Client workspace navigation",
+    "home": "Home",
+    "journals": "Journals",
+    "documents": "Documents",
+    "bank": "Bank",
+    "close": "Close",
+    "reports": "Reports",
+    "registers": "Registers",
+    "knowledge": "Knowledge"
+  },
+  "ClientJournals": {
+    "heading": "Journals",
+    "body": "P2 shell — drafts, the review queue, manual JE compose and posted-entry reversal are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientDocuments": {
+    "heading": "Documents",
+    "body": "P2 shell — upload, OCR, the evidence viewer, correction and filing are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientBank": {
+    "heading": "Bank",
+    "body": "P2 shell — accounts, statements, matching and reconciliation are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientClose": {
+    "heading": "Close",
+    "body": "P2 shell — the three close keys and the agent-act receipt panel are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientReports": {
+    "heading": "Reports",
+    "body": "P2 shell — statutory close reports, flexible/generative reports and the agent-receipt panel are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientRegisters": {
+    "heading": "Registers",
+    "body": "P2 shell — AR/AP aging, fixed assets, adjustments, staff advances and accounts are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientKnowledge": {
+    "heading": "Knowledge",
+    "body": "P2 shell — the knowledge/data-library surface is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "Login": {
+    "title": "Sign in",
+    "description": "Sign in to your Clara account.",
+    "emailLabel": "Email",
+    "passwordLabel": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…"
+  },
+  "Logout": {
+    "submit": "Sign out",
+    "submitting": "Signing out…",
+    "failed": "Sign-out didn't complete. Please try again."
+  },
+  "Invite": {
+    "confirmTitle": "Accept your invitation",
+    "confirmDescription": "This link can only be used once. Continue when you're ready to set your password.",
+    "confirmSubmit": "Accept invitation",
+    "verifyingTitle": "Accepting your invite",
+    "verifyingDescription": "Checking your invite link…",
+    "errorTitle": "This invite link didn't work",
+    "errorDescription": "It may have expired or already been used. Ask whoever invited you to send a new one.",
+    "verificationIncomplete": "This invite could not be confirmed. Ask whoever invited you to send a new one.",
+    "subjectMismatch": "This browser is signed in as a different account. Sign out first, then open your invite link again.",
+    "setPasswordTitle": "Set your password",
+    "setPasswordDescription": "Your invite is confirmed. Choose a password to finish setting up your account.",
+    "passwordLabel": "Password",
+    "submit": "Continue",
+    "submitting": "Saving…"
   }
 }

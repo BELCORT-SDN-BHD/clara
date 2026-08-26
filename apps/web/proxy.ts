@@ -1,0 +1,47 @@
+import { type NextRequest } from "next/server";
+
+import { updateSession } from "@/lib/supabase/proxy";
+
+/**
+ * Next.js 16 renamed the `middleware.ts` file convention to `proxy.ts`
+ * (`export function middleware` → `export function proxy`); `middleware.ts`
+ * is now deprecated in favour of this file, with an official codemod
+ * (`npx @next/codemod@canary middleware-to-proxy .`) — verified via context7
+ * against the Next.js 16.2.9 docs, 2026-08-27. apps/web is on Next 16.3.3, so
+ * this repo uses the current convention rather than the deprecated one.
+ *
+ * This is the ONLY auth gate in the app: it runs before every matched
+ * request, refreshes the Supabase session cookie, and redirects an
+ * unauthenticated request to `/login` (see lib/supabase/proxy.ts for the
+ * public-path allowlist and the session-refresh mechanics). Page and layout
+ * code never re-implements this check — one authority, one place.
+ */
+export async function proxy(request: NextRequest) {
+  return await updateSession(request);
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Match every request path except these NAMESPACES, anchored at the start
+     * of the path:
+     * - _next/static  (framework build output)
+     * - _next/image   (image optimizer)
+     * - favicon.ico   (exact file)
+     * - brand/        (public/brand/** — the app's only static asset
+     *                 namespace; fonts + their OFL licences)
+     *
+     * NOT an extension list (cross-model security review 2026-08-27, finding
+     * 3, MEDIUM). The previous pattern excluded `.*\.(svg|png|jpg|jpeg|gif|
+     * webp)$` — an extension ANYWHERE in the path — while Next.js dynamic
+     * segments happily accept dots. `/clients/anything.png` therefore
+     * resolved to the protected `[clientId]` route with `proxy()` skipped
+     * entirely, and this proxy is the app's ONLY auth gate (no layout
+     * re-checks it). Exempt namespaces, never suffixes.
+     *
+     * Adding a new always-public static path means adding its NAMESPACE here
+     * and extending tests/proxy-matcher.test.ts, which asserts both arms.
+     */
+    "/((?!_next/static|_next/image|favicon\\.ico|brand/).*)",
+  ],
+};
