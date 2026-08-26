@@ -151,8 +151,10 @@ integration note are in `components/command/command-k-provider.tsx`'s header com
 file deliberately does **not** self-mount into any layout. **Mounted** in
 `app/(firm)/layout.tsx` (P2 fold seam H) — every route under the firm shell has ⌘K reachable
 end to end; the docked Clara rail is mounted alongside it via `components/clara/rail-mount.tsx`
-(one mount app-wide, suppressed on a Clara full-screen escalation route — see that file's own
-header for why).
+(one mount app-wide). Both Clara full-screen escalation routes live outside the `(firm)` shell
+entirely, in their own `app/(full)/` route group (P2 fold round 3, same URLs — route groups add
+no URL segment) — the rail never wraps them, because `(firm)/layout.tsx` never wraps them,
+structurally rather than by a runtime pathname check. See `app/(full)/layout.tsx`'s header.
 
 **Known deviation, by design:** adding `cmdk` (a `command.tsx` dependency) surfaced a
 pre-existing `@types/react` version skew between this package (`19.2.18`) and

@@ -2,7 +2,8 @@ import { ClaraFullScreenThread } from "@/components/clara/ClaraFullScreenThread"
 
 /**
  * Client-workspace Clara thread escalation ("/clients/:clientId/clara/:threadId") —
- * P2-RAIL, the client-altitude twin of `(firm)/clara/[threadId]`.
+ * P2-RAIL, the client-altitude twin of `(full)/clara/[threadId]`. Lives in the `(full)`
+ * route group (P2 fold round 3), not `(firm)` — same URL, no firm sidebar/rail chrome.
  *
  * The rail's expand control lands here with `?from=<originating pathname>`; the
  * collapse control reads it back (Q2: "collapsible back to the rail"). No `from`

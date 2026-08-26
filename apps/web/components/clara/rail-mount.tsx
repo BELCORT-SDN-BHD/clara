@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, usePathname } from "next/navigation";
+import { useParams } from "next/navigation";
 
 import { ClaraRail } from "@/components/clara/ClaraRail";
 
@@ -13,25 +13,17 @@ import { ClaraRail } from "@/components/clara/ClaraRail";
 // compose, so a second mount there would show two rails on every client-workspace
 // route.
 //
-// SUPPRESSED on a Clara escalation route ("/clara/:threadId" or
-// "/clients/:clientId/clara/:threadId"). This is required by the standing ruling
-// (mohe-grill-rulings-2026-08-27.md Q2: "full-screen is the rail conversation
-// enlarged, never a separate universe... the remove-the-rail acceptance test binds
-// every workbench screen regardless") — both escalation pages
-// (`app/(firm)/clara/[threadId]/page.tsx` and
-// `app/(firm)/clients/[clientId]/clara/[threadId]/page.tsx`) render as `children` of
-// this SAME (firm) layout, so an unconditional mount here would show the docked rail
-// beside the full-screen thread, which the ruling forbids. No prior mechanism existed
-// for this suppression (checked: neither `ClaraRail` nor either full-screen page
-// carried one) — this pathname check is the minimal implementation of the
-// already-ruled behaviour, not a new decision.
+// P2 FOLD ROUND 3: no pathname suppression here anymore. Both Clara full-screen
+// escalation routes ("/clara/:threadId", "/clients/:clientId/clara/:threadId") were
+// MOVED out of `(firm)` into their own `app/(full)/` route group (same URLs — route
+// groups add no URL segment), which does not nest under `app/(firm)/layout.tsx` at
+// all. This layout genuinely never wraps an escalation route anymore, so there is
+// nothing left for a pathname guard here to suppress (Q2's "remove-the-rail"
+// requirement is now satisfied structurally, by which layout wraps which route, not
+// by a runtime check — see `app/(full)/layout.tsx`'s own header for the mechanism).
 export function RailMount() {
-  const pathname = usePathname();
   const params = useParams();
   const clientId = typeof params.clientId === "string" ? params.clientId : undefined;
-
-  const onClaraEscalation = /(?:^|\/)clara\/[^/]+$/.test(pathname);
-  if (onClaraEscalation) return null;
 
   return <ClaraRail clientId={clientId} />;
 }

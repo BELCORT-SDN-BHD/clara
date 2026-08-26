@@ -1,7 +1,9 @@
 import { ClaraFullScreenThread } from "@/components/clara/ClaraFullScreenThread";
 
 /**
- * Firm-altitude Clara thread escalation ("/clara/:threadId") — P2-RAIL.
+ * Firm-altitude Clara thread escalation ("/clara/:threadId") — P2-RAIL. Lives in the
+ * `(full)` route group (P2 fold round 3), not `(firm)` — same URL, no firm sidebar/rail
+ * chrome (the whole point: this page owns the viewport).
  *
  * The rail's expand control lands here with `?from=<originating pathname>`; the
  * collapse control reads it back so escalation is a round trip, never a dead end
