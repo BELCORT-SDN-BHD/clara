@@ -30,6 +30,11 @@ coverage/
 .workflow-data/
 .workflow-data-dryrun/
 
+# storage.mjs local-fs fallback (RELAY_TEST_MODE=1 with no CLARA_TEST_STORAGE_DIR set lands
+# here relative to CWD) — belt-and-suspenders alongside setting CLARA_TEST_STORAGE_DIR in
+# every rig-gated test's before()
+test-storage/
+
 # DR / backups (may contain data — never commit)
 backups/
 *.dump

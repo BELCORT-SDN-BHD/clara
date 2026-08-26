@@ -8,8 +8,9 @@
 //
 // A dead relay LEADER is handled by the supervisor's fail-fast (S4-ND5), not here.
 // Relay lag / dead-letters / backlog are WARNINGS only (degraded, still serving) —
-// surfaced from clara.relay_health(). Everything is bounded + sanitized: /ready must
-// never hang and never leak raw DB text.
+// surfaced from clara.relay_health(). The storage write probe (R9, below) joins this
+// same WARN-only class: a broken document lane is not "nothing works." Everything is
+// bounded + sanitized: /ready must never hang and never leak raw DB text.
 
 import { withRuntime } from "./pools.mjs";
 import { scannerReachable } from "./scan.mjs";
@@ -22,6 +23,7 @@ import { sstWatchHealth } from "./sst-watch.mjs";
 import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
+import { storageProbeHealth } from "./storage-probe.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -296,6 +298,22 @@ export async function checkReadiness() {
     const queueWarnMs = Number(process.env.CLARA_DOCUMENT_QUEUE_WARN_MS || 60000);
     if (intake.oldestQueuedMs > queueWarnMs) warnings.push(`oldest unbound document task age ${Math.round(intake.oldestQueuedMs)}ms`);
   }
+
+  // Storage write probe (R9, docs/plan/active/harness-audit-rulings-2026-08-26.md — the
+  // MEASUREMENT half of follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md; the
+  // ALARM/ROUTING half is DR.md:300's still-open "external /ready uptime checks" item, not
+  // this change). WARN-only, like every other intake-adjacent signal above: a storage outage
+  // takes the DOCUMENT LANE down, not "nothing works" — the /ready contract at the top of this
+  // file fails only on the latter. storageProbeHealth() is SYNCHRONOUS (storage-probe.mjs runs
+  // the actual round trip on its own background interval, off this call entirely) — no await,
+  // no bounded() wrap, ~0ms: three SEQUENTIAL bounded() network round trips already share fly's
+  // 5s /ready timeout above, and this check's own verdict cannot change the status code, so it
+  // must never spend any of that budget. The object it returns is already the full public
+  // shape (ok/reason/pending only — never the raw vendor error text) — safe to assign as-is to
+  // an unauthenticated endpoint's response.
+  const storage = storageProbeHealth();
+  checks.storage = storage;
+  if (!storage.ok) warnings.push(`storage write probe failed: ${storage.reason || (storage.pending ? "first probe still pending" : "unknown")}`);
 
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.
