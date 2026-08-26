@@ -5,7 +5,7 @@
 > questions in that gate"* (`harness-audit-rulings-2026-08-26.md:114-118`). Q-C confirmed the
 > **starting five** and ruled that the per-situation treatments — *"what Clara may build, must
 > request, and must never fabricate (law 22)"* — **are proposed BY this gate and ruled here**
-> (**mohe-grill-rulings-2026-08-27.md**:102-106). §1 is that proposal. §2 is every other open design
+> (`mohe-grill-rulings-2026-08-27.md`:102-106). §1 is that proposal. §2 is every other open design
 > decision.
 >
 > Companions: **`fa7b-onboarding-design.md`** (the design of record; its D-numbers are cited

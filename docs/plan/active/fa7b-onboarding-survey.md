@@ -27,7 +27,7 @@
 > **Binding rulings:** R8(a) (the joint gate + the Wave-G scenario) · the 磨合 grill rulings
 > **Q2** (rail-first + thread escalation), **Q3** (two-level IA), **Q8** (workbench-first, four new
 > part types), **Q9** (per-journey DONE), **Q-C** (the five playbooks —
-> **mohe-grill-rulings-2026-08-27.md**:22-36, `:63-72`, `:73-90`, `:102-106`) · the Track-A sitting's
+> `mohe-grill-rulings-2026-08-27.md`:22-36, `:63-72`, `:73-90`, `:102-106`) · the Track-A sitting's
 > **TA-P1 C** · **TA-P3 A** · **TA-P4 A** · **TA-P7 C** · **TA-P8 B** · **TA-P11 A** · **TA-P14 A**
 > · digest laws **2 · 6 · 22 · 58 · 71 · 72 · 78 · 79**.
 

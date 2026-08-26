@@ -17,7 +17,7 @@
 > belong to R8(b)** (`harness-audit-rulings-2026-08-26.md:122-130`) and take their own gate and
 > their own security review. Nothing in this document designs a firm.
 >
-> **A merge-order fact, recorded rather than left to be discovered.** **mohe-grill-rulings-2026-08-27.md**
+> **A merge-order fact, recorded rather than left to be discovered.** `mohe-grill-rulings-2026-08-27.md`
 > was **untracked** when this set was authored, so its name is cited in **bold, never backticks**,
 > across all four documents — harness-links is right to refuse a backticked path the repo does not
 > hold. **Re-backtick when it lands**; the line numbers were read from the file itself.
@@ -26,7 +26,7 @@
 > **Q4** (ClaraBook visual law), **Q5** (BM+EN on statutory instruments), **Q6** (desktop-first +
 > the mobile decision corridor), **Q7** (WCAG 2.1 AA), **Q8** (workbench-first; four new part
 > types in one bump), **Q9** (the per-journey DONE formula), **Q-C** (the five playbooks) —
-> **mohe-grill-rulings-2026-08-27.md**. Track-A: **TA-P1 C** · **TA-P3 A** · **TA-P4 A** ·
+> `mohe-grill-rulings-2026-08-27.md`. Track-A: **TA-P1 C** · **TA-P3 A** · **TA-P4 A** ·
 > **TA-P7 C** · **TA-P8 B** · **TA-P11 A** · **TA-P14 A**. Digest laws **2 · 6 · 22 · 58 · 71 ·
 > 72 · 78 · 79 · 81**. Every build PR takes the uniform ADR-061 ladder; **§3.2's acceptance
 > branch, §4's D-2 and §4's D-7 are all judgement logic** (review law 1), and the interview
@@ -79,7 +79,7 @@ column is the whole point of this document.**
 | **A1** | an invoice is taken in with no client declared | `document_intakes` / the documents tab; the row appears in `list_unassigned_documents` (live tip `0011_daily_loop.sql:3943-3965`) | **EXISTS** |
 | **A2** | Clara triages it under the firm-narrow `attribution` moment | `prepare_firm_egress_dispatch` (`0123_f_a7_gamma_egress.sql:1024`), moment CHECKed `('attribution','onboarding_interview')` (`:713`, `:1038`) | **EXISTS** |
 | **A3** | the verdict finds no candidate; the filing verb refuses at Tier B and the SAME transaction opens the carrier row | `wake_file_document` (`0126:1522`) → typed non-filing receipt; `wake_open_firm_question` (`0126:1541`) writes `firm_open_questions kind='unattributed'` (`0103:559-593`) | **EXISTS** |
-| **A4** | the held document surfaces in the firm **Needs-you** inbox | firm altitude, Q3 (**mohe-grill-rulings-2026-08-27.md**:30-32); reads `firm_open_questions` directly under RLS (`0103:952-953`) | **NEEDS-UI** (backend exists) |
+| **A4** | the held document surfaces in the firm **Needs-you** inbox | firm altitude, Q3 (`mohe-grill-rulings-2026-08-27.md`:30-32); reads `firm_open_questions` directly under RLS (`0103:952-953`) | **NEEDS-UI** (backend exists) |
 | **A5** | **Clara proposes onboarding** — a typed proposal naming the party, the basis, the sightings and what she could not settle | the carrier's `kind` closed world has no member for it (`0103:563-565`) | **NEEDS-VERB** — §4 D-1 |
 | **A6** | a human accepts the proposal, or declines it | nothing | **NEEDS-VERB** — §4 D-1 |
 | **A7** | the client file opens, labelled as Clara's | `wake_begin_client_onboarding` (allowlist row 7 reserved, `0126:2065-2067`) over an extracted birth core; the human verb `begin_client_onboarding` (`0017_wave_b.sql:2492-2524`) keeps its body | **NEEDS-VERB** — §4 D-2/D-3 |
@@ -110,7 +110,7 @@ wall.
 
 **Firm altitude owns the beginning; the client workspace owns the rest.** Q3's firm altitude is
 *firm home · cross-client Needs-you inbox · client register · firm activity · admin*
-(**mohe-grill-rulings-2026-08-27.md**:30-33). A held unattributed document has **no client**, so it
+(`mohe-grill-rulings-2026-08-27.md`:30-33). A held unattributed document has **no client**, so it
 can only live at firm altitude — the carrier's schema says the same thing by having no `client_id`
 column at all (`0103:559-593`, comment `:579-581`). The moment the client is born, the work moves
 into that client's workspace and the URL changes with it (URL-as-truth, Q3 `:35`).
@@ -133,7 +133,7 @@ proposal is the only thing that disappears — and it is a proposal, which is ex
 
 **Where it renders: twice, one source.** As a row in `/needs-you` (workbench-first, Q8:
 *"build first as workbench objects on direct RLS reads + governed doors — zero wire change"*,
-**mohe-grill-rulings-2026-08-27.md**:63-66) and, when the moment is conversational, as the
+`mohe-grill-rulings-2026-08-27.md`:63-66) and, when the moment is conversational, as the
 `firm_question` chat part Q8 already budgets (`:66-67`). **One read, two dressings** — the card
 hydrates from the carrier on mount and never trusts a part payload (Q9 (2), hydrate-never-trust).
 
@@ -153,7 +153,7 @@ go-ahead.
 **Accessibility and copy (Q7, Q5).** The card is an `<article>` with a heading, the two verbs are
 real buttons in DOM order, the refusal reason sits in an `aria-live` region, and the whole card is
 keyboard-operable — the keyboard-walk CI gate binds this journey by name
-(**mohe-grill-rulings-2026-08-27.md**:57-60). Chrome is English-first through next-intl (Q5
+(`mohe-grill-rulings-2026-08-27.md`:57-60). Chrome is English-first through next-intl (Q5
 `:46-50`); nothing here is a statutory instrument, so BM is not day-one on this card — **§3.5's
 doors step is, and it is.**
 
@@ -165,7 +165,7 @@ doors step is, and it is.**
 thread (`InterviewPanel.tsx:34-118`), `useInterviewRun` polling `GET /state`
 (`useInterviewRun.ts:169-193`). **Q2 makes it a Clara thread that ESCALATED**, not a separate
 universe: URL-addressable, collapsible back to the rail, the same conversation enlarged
-(**mohe-grill-rulings-2026-08-27.md**:22-28).
+(`mohe-grill-rulings-2026-08-27.md`:22-28).
 
 **What actually changes, and what deliberately does not.**
 
@@ -185,7 +185,7 @@ universe: URL-addressable, collapsible back to the rail, the same conversation e
 
 **Mobile (Q6).** The interview is one of the three surfaces the mobile decision corridor explicitly
 keeps — *"Clara threads (the full-screen form — resolves the no-modal law on phones)"*
-(**mohe-grill-rulings-2026-08-27.md**:53-56). The escalated thread is the mobile shape. No separate
+(`mohe-grill-rulings-2026-08-27.md`:53-56). The escalated thread is the mobile shape. No separate
 mobile interview is built.
 
 ### 3.4 The adaptive interview surface — the materials fork
@@ -193,7 +193,7 @@ mobile interview is built.
 **The single question this design adds to the interview, and where.** Immediately **before**
 `opening_position` (`interview.v2.questions.ts:94`), a new segment **`materials_basis`** asks what
 the firm actually received, in the client's own terms, with the five ruled playbooks as its values
-(Q-C, **mohe-grill-rulings-2026-08-27.md**:102-106) plus the green-field case that already exists:
+(Q-C, `mohe-grill-rulings-2026-08-27.md`:102-106) plus the green-field case that already exists:
 
 ```
 green_field            brand new entity, nothing before commencement
@@ -256,7 +256,7 @@ consent id. The paper says the same: *"a signature alone authorises nothing … 
    at / revoked at* from the two relations' own columns (`0020:149-171`, `:194-215`) — never a
    derived "active" boolean the UI computed (review law 2).
 
-**BM + EN from day one, zh to follow** (Q5, **mohe-grill-rulings-2026-08-27.md**:46-48). The letter
+**BM + EN from day one, zh to follow** (Q5, `mohe-grill-rulings-2026-08-27.md`:46-48). The letter
 already exists in all three (`client-ai-authorization-letter-template.md` §4/§5/§6); the screen
 renders the statutory copy from those source texts, and **the owner signs off the BM/zh strings
 when they are wired** (Q-F, `:112-114`).
@@ -397,7 +397,7 @@ workflow    clientOnboarding_v4 + a registry repoint. NEVER an edit (constraint 
 **The per-branch treatment — what Clara may construct, what she must request, what she must never
 fabricate — is `fa7b-gate-questions.md` §1 and is RULED THERE, not here** (Q-C:
 *"per-situation treatments … are proposed BY the F-A7b design gate and ruled there"*,
-**mohe-grill-rulings-2026-08-27.md**:104-106).
+`mohe-grill-rulings-2026-08-27.md`:104-106).
 
 ### D-6 · The deferred-opening posture, made visible — **NEEDS-DECISION**
 
@@ -495,6 +495,6 @@ disagreement.**
 
 **The two sentences that must not live only in an annex.** F-A7b is **P5** in Q9's phase order —
 it runs EARLY, in parallel with P1/P2, and *"its train builds after it closes"*
-(**mohe-grill-rulings-2026-08-27.md**:86-87). And every crude door the survey measured in
+(`mohe-grill-rulings-2026-08-27.md`:86-87). And every crude door the survey measured in
 `apps/dashboard` is replaced **IN PLACE, same verb, no new gate** (Q9 cross-cutting, `:89-90`) —
 this item adds verbs, it does not add gates to journeys that already have them.

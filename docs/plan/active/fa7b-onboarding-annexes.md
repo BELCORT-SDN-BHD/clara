@@ -20,7 +20,7 @@
 | 6 | **PR-f — the wire** | Q8's `firm_question` part type, folded into the **single** four-part bump — never its own version | none | PR-e | registry prestate check (constraint 9) |
 
 **PR-f does not mint a `chatTurn` version of its own.** Q8 rules the four new part types ship in
-**one** runtime version bump (**mohe-grill-rulings-2026-08-27.md**:63-68); F-A7b contributes
+**one** runtime version bump (`mohe-grill-rulings-2026-08-27.md`:63-68); F-A7b contributes
 `firm_question` to that bump and waits for it. Two items may not mint the same frozen `_vN`
 (constraint 9).
 
@@ -36,7 +36,7 @@ an impeccable/Emil polish pass · an end-to-end walk on live test data (ADR-0075
 
 **Where F-A7b sits in the 磨合 phase order.** Q9 puts this gate at **P5**, running EARLY and in
 parallel with P1/P2, *"its train builds after it closes"*
-(**mohe-grill-rulings-2026-08-27.md**:86-87). Annex A's PR-e therefore lands against the **apps/web**
+(`mohe-grill-rulings-2026-08-27.md`:86-87). Annex A's PR-e therefore lands against the **apps/web**
 shell (Q1(a)), not `apps/dashboard` — the dashboard surfaces measured in the survey are the CRUDE doors
 this train replaces **in place, same verb, no new gate** (Q9 cross-cutting, `:89-90`).
 
