@@ -87,6 +87,12 @@ export type HookHarness<T> = {
   act: (fn?: () => void | Promise<void>) => Promise<void>;
   /** Let pending promise chains settle (a real macrotask hop), then flush React. */
   settle: () => Promise<void>;
+  /** Re-render the SAME probe element (an update, not a remount) — for a test
+   *  that swaps what an outer closure captures (e.g. a fresh inline loader or
+   *  session, simulating a parent re-render) between renders, then must force
+   *  an actual render before asserting whether the hook picked up the new
+   *  value (P3 loader-stability hardening). */
+  rerender: () => Promise<void>;
   unmount: () => Promise<void>;
 };
 
@@ -109,6 +115,7 @@ export async function renderHook<T>(hook: () => T): Promise<HookHarness<T>> {
     get current() { return latest; },
     act,
     settle: async () => { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); },
+    rerender: async () => { await act(() => { root.render(createElement(Probe)); }); },
     unmount: async () => { await act(() => { root.unmount(); }); },
   };
 }

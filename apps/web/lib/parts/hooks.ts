@@ -11,8 +11,12 @@
 //
 // CONSUMER CONTRACT (fix-round, independent review finding 2 — read before calling
 // this from a card):
-//   - `loader` MUST be a useCallback-stable closure over the part's primitive ids
-//     (the cardHooks.ts `load` discipline, unchanged).
+//   - `loader` no longer needs a stable identity to avoid a storm — the P3
+//     follow-up below defends it exactly like `session` now does. It SHOULD
+//     still be a `useCallback`-stable closure over the part's primitive ids
+//     where that is free (the cardHooks.ts `load` discipline): a stable
+//     identity is ordinary React perf hygiene, not a correctness requirement
+//     here any more.
 //   - `session` SHOULD be a referentially STABLE SessionTokenAccessor. Import the
 //     blessed singleton `sessionTokenAccessor` from ../session-accessor.ts — never
 //     construct a fresh accessor object literal inline at a call site
@@ -30,6 +34,26 @@
 //     re-trigger a mount reload here — see ../session-accessor.ts's own header
 //     for why that is unreachable under the intended one-singleton usage, not an
 //     oversight.
+//
+// P3 FOLLOW-UP (loader-stability hardening — the recorded next storm class):
+// an UNSTABLE `loader` identity (a fresh inline closure built every render —
+// e.g. `useHydratedPart(session, () => getDraftReview(id))` written directly
+// in a card's JSX) could storm this hook exactly the way an unstable
+// `session` object once did (the 4GB-heap OOM measurement, above):
+// `reloadImpl` closed over `loader` BY IDENTITY (`useCallback(..., [loader])`),
+// so a churning loader changed `reloadImpl`'s own identity every render, which
+// re-fired the mount effect (keyed on `[reloadImpl, hasSession]`) right along
+// with it. The hook now reads the latest loader via a ref (`loaderRef`, the
+// same pattern as `sessionRef`) — `reloadImpl` depends on NEITHER `loader` nor
+// `session` by identity any more, only on a stable empty dependency list, so
+// its own identity never changes and the mount effect fires exactly once per
+// null<->present session transition, no matter how many fresh loader (or
+// session) closures a parent re-render hands in. `loaderRef.current` is
+// written on every render (same discipline as `sessionRef`), so a MANUAL
+// `reload()` call still always invokes whichever loader body is CURRENT at
+// call time — no stale closure, even though the effect that fires the very
+// first reload was registered once, on mount, over whichever loader existed
+// then.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefusalError, WireError } from "../wire";
@@ -98,6 +122,12 @@ export function useHydratedPart<T>(
   sessionRef.current = session;
   const hasSession = session != null;
 
+  // P3 follow-up: the SAME ref discipline as sessionRef, for the same reason —
+  // see the header's "P3 FOLLOW-UP" paragraph. Written on every render, so a
+  // manual reload() always calls whichever loader body is CURRENT.
+  const loaderRef = useRef(loader);
+  loaderRef.current = loader;
+
   // The internal variant, carrying the private `preserveErrorOnSuccess` opt-in
   // (finding 1's sticky-refusal mechanism). Round-2 finding: the PUBLIC `reload`
   // exposed on the returned state must not leak this parameter — a consumer must
@@ -110,7 +140,7 @@ export function useHydratedPart<T>(
       if (!sess) return;
       setLoading(true);
       try {
-        const result = await loader(sess);
+        const result = await loaderRef.current(sess);
         setData(result);
         // Sticky refusal (finding 1): a plain reload (no opts, e.g. mount or a
         // manual refresh) still clears err/clr on success as always. Only the
@@ -125,14 +155,20 @@ export function useHydratedPart<T>(
         setLoading(false);
       }
     },
-    [loader],
+    // Deliberately empty (P3 follow-up): `sess` and the loader are both read via
+    // refs, never closed over by identity, so `reloadImpl` itself never changes
+    // identity across renders — no `[loader]` (or `[session]`) dependency left to
+    // churn and re-fire the mount effect below.
+    [],
   );
 
-  // `hasSession` (not `session`'s object identity) is the DELIBERATE dependency
-  // here — see the sessionRef comment above. This project's eslint config does not
-  // register `react-hooks/exhaustive-deps`, so no suppression comment is needed;
-  // if that rule is ever added, this effect's deps are intentionally narrower than
-  // a naive "close over everything reloadImpl reads" would suggest.
+  // `hasSession` (not `session`'s object identity, and `reloadImpl` is now
+  // permanently stable regardless of `loader`'s identity too) is the DELIBERATE
+  // dependency here — see the sessionRef/loaderRef comments above. This project's
+  // eslint config does not register `react-hooks/exhaustive-deps`, so no
+  // suppression comment is needed; if that rule is ever added, this effect's deps
+  // are intentionally narrower than a naive "close over everything reloadImpl
+  // reads" would suggest.
   useEffect(() => {
     void reloadImpl();
   }, [reloadImpl, hasSession]);

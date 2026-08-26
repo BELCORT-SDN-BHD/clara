@@ -10,7 +10,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "node --import ./test/bootstrap.mjs --import tsx --test lib/parts/catalog.test.tsx lib/parts/hooks.test.ts lib/wire.test.ts lib/session-accessor.test.ts tests/safe-redirect.test.ts tests/proxy-matcher.test.ts tests/invite-verification.test.ts tests/client-scope.test.ts tests/public-key.test.ts tests/same-origin.test.ts tests/response-state.test.ts tests/",
+    "test": "node --import ./test/bootstrap.mjs --import tsx --test lib/parts/catalog.test.tsx lib/parts/hooks.test.ts lib/wire.test.ts lib/read.test.ts lib/doors.test.ts lib/session-accessor.test.ts tests/safe-redirect.test.ts tests/proxy-matcher.test.ts tests/invite-verification.test.ts tests/client-scope.test.ts tests/public-key.test.ts tests/same-origin.test.ts tests/response-state.test.ts tests/",
     "check:public-key": "node scripts/check-public-key.mjs",
     "cf:build": "node scripts/check-public-key.mjs && opennextjs-cloudflare build",
     "cf:preview": "node scripts/check-public-key.mjs && opennextjs-cloudflare build && opennextjs-cloudflare preview",

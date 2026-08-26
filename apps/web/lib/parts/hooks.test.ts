@@ -232,3 +232,65 @@ test(
     }
   },
 );
+
+// P3 loader-stability hardening (this build's own follow-up): an unstable
+// `loader` identity could storm the hook exactly the way an unstable
+// `session` did, above — `reloadImpl` used to close over `loader` BY IDENTITY.
+// Requirement (a): a parent re-rendering with a NEW inline loader identity
+// must NOT re-trigger reload. Uses `h.rerender()` (an explicit, deterministic
+// re-render) rather than relying on incidental churn during an in-flight
+// reload's own state transitions, for an unambiguous proof.
+test(
+  "[P3 loader-stability] a parent re-render with a NEW inline loader identity does not re-trigger reload",
+  { timeout: 5000 },
+  async () => {
+    const sess = session();
+    let currentLoader = async () => ({ gen: "A" });
+    const h = await renderHook(() => useHydratedPart(sess, currentLoader));
+    try {
+      await h.settle();
+      assert.deepEqual(h.current.data, { gen: "A" }, "mount reload uses the initial loader");
+
+      let bCalls = 0;
+      currentLoader = async () => { bCalls += 1; return { gen: "B" }; };
+      await h.rerender();
+      await h.rerender();
+      await h.rerender();
+
+      assert.equal(bCalls, 0, "a re-render with a new loader identity must not itself re-trigger reload");
+      assert.deepEqual(h.current.data, { gen: "A" }, "data is unchanged by the re-render alone — no reload fired");
+    } finally {
+      await h.unmount();
+    }
+  },
+);
+
+// Requirement (b): the LATEST loader body is the one a manual reload()
+// invokes — no stale closure captured back at mount / effect-registration
+// time. Proven by swapping the loader, forcing a fresh render over it (so
+// `loaderRef.current` picks it up), then calling reload() and checking the
+// result comes from the NEW loader, not the one mount originally saw.
+test(
+  "[P3 loader-stability] reload() invokes the CURRENT loader body — no stale-closure regression",
+  { timeout: 5000 },
+  async () => {
+    const sess = session();
+    let currentLoader = async () => ({ gen: "A" });
+    const h = await renderHook(() => useHydratedPart(sess, currentLoader));
+    try {
+      await h.settle();
+      assert.deepEqual(h.current.data, { gen: "A" });
+
+      let bCalls = 0;
+      currentLoader = async () => { bCalls += 1; return { gen: "B" }; };
+      await h.rerender(); // the parent re-render that hands in the new loader
+
+      await h.act(async () => { await h.current.reload(); });
+
+      assert.equal(bCalls, 1, "the manual reload() must call the loader body CURRENT at call time");
+      assert.deepEqual(h.current.data, { gen: "B" }, "the latest loader body is the one reload() invokes");
+    } finally {
+      await h.unmount();
+    }
+  },
+);
