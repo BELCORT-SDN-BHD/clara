@@ -59,6 +59,25 @@ the distro at logon (an elevated Scheduled Task was refused without admin — th
 folder needs none). If jobs sit queued after a reboot: log in once, or run the
 one-liner above; check Docker with `wsl -d Ubuntu -- docker info`.
 
+### WSL operating laws (from two dated incidents — 2026-08-14/15 and 2026-08-20)
+
+**A detached keeper for any port-dependent WSL work:**
+`Start-Process -WindowStyle Hidden wsl.exe -ArgumentList "-e","sleep","43200"` — the WSL NAT
+dies ~10 minutes after the last client detaches, even with the distro's VM otherwise held up.
+**NEVER `wsl --shutdown` with runners busy** — restart the specific service instead
+(`wsl -d Ubuntu -u root -- systemctl restart <unit>`); a shutdown mid-run silently kills every
+in-flight job on all four runners. **Never diagnose VM health with a probe that itself cycles
+the VM** (the 2026-08-14/15 incident) — a probe that spins the distro up/down to "check" it
+can itself trigger the NAT death it is trying to rule out.
+
+**The WSL split-brain signature (the 2026-08-20 incident):** `wsl -l -v` reports the distro
+`Stopped` while `vmmem` is still a live process — every subsequent `wsl` command silently
+boots a SECOND userland, so two runner-registration copies fight one repo-level registration
+(a `Conflict` crashloop; symptom: zero failing steps plus vanished logs, not a red test).
+**Cure:** a full `wsl --shutdown` — but only once every runner is genuinely IDLE — then bring
+up exactly one keeper (the detached-keeper recipe above). Never attempt the cure with a
+runner mid-job.
+
 ## Re-register / decommission
 
 ```bash

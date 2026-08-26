@@ -31,9 +31,9 @@ generalize from, rather than being guessed ahead of the surfaces that will use i
 
 ## What will live here at Wave G
 
-- The token set actually in use (extracted from `apps/dashboard`'s Tailwind config + shadcn
-  theme, not invented fresh) — color (OKLCH, contrast-guaranteed per the seed direction's a11y
-  floor), spacing, type scale.
+- The token set actually in use (extracted from **apps/web**'s Tailwind config + shadcn theme,
+  not invented fresh — `apps/dashboard` carries neither, per the TRUED banner above) — color
+  (OKLCH, contrast-guaranteed per the seed direction's a11y floor), spacing, type scale.
 - The component inventory: which shadcn primitives are used as-is, which are customized, and
   the Clara-specific compositions (trust-badge accessories, confidence bands, evidence-region
   overlays, tool chips, the card catalog).
@@ -46,6 +46,9 @@ generalize from, rather than being guessed ahead of the surfaces that will use i
 
 ## Pointer
 
-Until Wave G, treat `apps/dashboard` as the design system: its shadcn/Tailwind setup and the
-shipped surfaces are the ground truth. `docs/design/PRODUCT_DESIGN.md` governs precedence and
-principles; this file governs nothing yet.
+**apps/web** (branch `frontend/web`, replacing `apps/dashboard` at cutover — see
+`docs/design/FRONTEND.md`) is where the Codex frontend build's Tailwind/shadcn setup lives and
+where Wave G's real token set will be extracted from. Until cutover, `apps/dashboard`'s plain
+CSS Modules surfaces (see the TRUED banner above) remain the only SHIPPED ground truth.
+`docs/design/PRODUCT_DESIGN.md` governs precedence and principles; this file governs nothing
+yet.

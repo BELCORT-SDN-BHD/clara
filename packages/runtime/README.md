@@ -44,6 +44,10 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
   target; the CI freeze-lint golden-hashes every frozen body + its import
   closure. Prompt + tools live INSIDE the frozen closure by design (§4.9).
+- **Gate G1's universal wake-execution engine** (`lib/wake-engine.mjs` + `lib/reconciler-wake.mjs`,
+  migration `0133`): registry-driven off `clara.wake_engine_sources`, consuming the existing
+  wake allowlist unchanged; the sources table ships EMPTY pending F-A3 (`bank_agent`) and F-A4
+  (`close_prep`) each inserting-and-flipping their own row.
 
 ## The world is OFF by default
 
@@ -102,10 +106,12 @@ Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability; **the registry pins
-`chatTurn: chatTurn_v11` and `autoDraft: autoDraft_v7`** (v11 deployed at the Wave-E
-0077-0084 ceremony, 2026-08-15; the live DB frontier is migration `0088`). v1–v10 stay
-frozen + reachable for parked runs; v7 = Wave B's
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-08-26: the registry
+(`registry.ts:54,88`) pins `chatTurn: chatTurn_v14` and `autoDraft: autoDraft_v9`** — repo
+frontier is 131 migration files, live through `0136_fix_freeform_basis_types`. **The SERVING
+Fly bundle, measured 2026-08-26 in-VM, still carries `chatTurn_v13` + `autoDraft_v9`** —
+`chatTurn_v14` is registered but not yet deployed (`PROGRESS.md`'s pre-flight note). v1–v13
+stay frozen + reachable for parked runs; v7 = Wave B's
 `'wiki_coding'` pack purpose + the txn-local `clara.pack_consumer` GUC + the
 citation-visible wiki framing; v8 = the Wave-C closing batch; v9 = the §7-A
 PR-RUNTIME cut; **v10 = F9's cite-by-index cut** — evidence elements carry

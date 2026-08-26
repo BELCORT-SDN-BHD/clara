@@ -12,12 +12,13 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger — TRUED 2026-08-23 (counted, not remembered).** The repo carries **97
-> migration files, `0001`–`0102`** (the sequence skips `0032`, which never existed, and the
-> `0055`-era gaps), and **live is applied through the frontier `0102_f_a2_statement_activation`**
-> — matching `PROGRESS.md`'s posture line. *(Was: "53 migrations, `0001`–`0054`, frontier `0054`,
-> as of 2026-08-09" — stale by 44 files and 48 numbers.)* The paragraph below is the **2026-08-09
-> arrivals note**, kept as the record of that batch rather than rewritten:
+> **Migration ledger — TRUED 2026-08-26 (counted, not remembered).** The repo carries **131
+> migration files, `0001`–`0136`** (the sequence skips `0032`, which never existed, and the
+> `0055`-era gaps), and **live is applied through the frontier `0136_fix_freeform_basis_types`**
+> — matching `PROGRESS.md`'s posture line. *(Was: "97 migrations, `0001`–`0102`, frontier
+> `0102_f_a2_statement_activation`, as of 2026-08-23" — stale by 34 files and 34 numbers.)* The
+> paragraph below is the **2026-08-09 arrivals note**, kept as the record of that batch rather
+> than rewritten:
 >
 > The most recent arrivals
 > are the **F6–F9 batch** (ADR-066, applied 2026-08-08 23:24Z in ONE D1-quiesced ceremony):
@@ -171,6 +172,27 @@ stop seeing third-party changes (accepted — a pinned migration only ever appli
 chain), and a **data backfill** under it silently skips rows committed after the snapshot
 and raises 40001 on concurrently-modified rows. Backfills want the D1 write-quiesce window
 or no pin at all.
+
+## Evaluator deploy ceremony (two SEPARATE acts, both required)
+
+A new frozen evaluator ships DARK (`deployed: false`) by construction. Flipping it live is
+TWO halves, run in this order — neither substitutes for the other:
+
+1. **`node packages/db/scripts/deploy-evaluator-version.mjs --name <n> --version <v>`** — the
+   DB-side act. It flips `clara.evaluator_versions.deployed` for the named row, but only under
+   the BARE migration principal: `clara._tf_evaluator_deploy_once` (`0060:93`) refuses the
+   undeployed→deployed transition unless `current_user = session_user`, i.e. the deploying
+   session holds NO active `SET ROLE`. `clara.verify_evaluator_freeze()` is checked before the
+   flip commits. This transition is one-way and admitted exactly once per row, ever — no undo,
+   and a second run is a no-op.
+2. **`node scripts/check-frozen-evaluators.mjs --lock-deployed`** — the repo-side act. It stamps
+   `frozen-evaluators.json` so a deployed body's hash becomes immutable versus `origin/main`.
+   Skipping this after step 1 leaves a LIVE evaluator outside the append-only hash lock — missed
+   once on 2026-08-24, caught and fixed 2026-08-26.
+
+**`--lock-deployed` is BLANKET, not per-entry**: it stamps EVERY manifest entry whose `deployed`
+flag is not already `true`. Run it only when every currently-dark entry in the manifest is
+genuinely, deliberately intended to be deployed — never as a routine "sync the file" step.
 
 ## CI
 

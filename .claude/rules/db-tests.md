@@ -51,6 +51,19 @@ package, but CI's sweep has other packages writing to the same migrated database
 on `CLARA_RIG_DB=1`, which nothing in `packages/db` reads) — that is where the concurrent
 writers behind the TRUNCATE rule come from.
 
+**A PR retiring or moving a catalog object pinned by a closed-wave floor trues that floor IN
+THE SAME PR** (minted at #352, migration `0129`). A closed drill applies the WHOLE on-disk
+chain onto a populated book, so a floor's old assertion goes false BY DESIGN the moment the
+retiring migration lands — not drift — and closed drills run only on the weekly sweep +
+manual dispatch (ADR-0073), so an untrued floor reds the NEXT sweep far from the PR that
+caused it. Grep the drill kits for every name your migration drops or renames before merging.
+**Succession pattern:** branch on EITHER a migration-STEM witness (`clara.schema_migrations`
+matched against the retiring migration's stable stem — permanent, immutable once applied) OR
+a catalog witness (a body the retiring migration itself creates, probed by EXACT SIGNATURE via
+`to_regprocedure`, never a bare name — law 3), post-arm if either says retired; assert
+exact-signature ABSENCE of every retired body plus a positive control that any surviving
+same-named overload still resolves. Exemplar: `x42-b3-retirement-succession.mjs`.
+
 Enforced by machine, not restated here: the per-slice `#!cells-floor:` count and the totality
 partition gate in `.github/workflows/ci.yml`. The gate's corpus is the enumerated slice
 patterns (`tests/x41-*` / `tests/x42-*` families) — it does NOT reach every file in this
