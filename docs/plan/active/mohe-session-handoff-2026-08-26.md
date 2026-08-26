@@ -68,7 +68,8 @@ the same verb — never a new gate**), plus the 08-24 addendum's Wave-G OS surfa
    `packages/runtime/lib/health.mjs` is the file).
 5. **PRD two-tier wording** (R2): draft the §4+§6 sentences (analysis sandbox watermarked +
    structurally seal-unreachable), take them to the owner for WORD-BY-WORD review, then a
-   docs PR. **`docs/ops/ceremony-practices.md`** (R6) also lands this session
+   docs PR. **A new ceremony-practices doc under docs/ops/** (R6 — not yet created, hence
+   named unbackticked) also lands this session
    (combined-window practice · sleeper-machine DSN recipe · run-id-pinned DONE watchers).
 6. **G1 ADR** (R3): one page minting the 2026-08-25 universal wake-engine ruling (mechanism
    (b) chosen over (a), source record `docs/plan/active/bank-agency-gate-record.md` §around
