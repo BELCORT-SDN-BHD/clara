@@ -49,7 +49,15 @@ export function LoginForm() {
       return;
     }
 
-    const next = searchParams.get("next") ?? "/";
+    // Open-redirect wall: only same-origin relative paths may ride ?next= —
+    // absolute URLs, protocol-relative (//host) and backslash-escape (/\host)
+    // forms all fall back to "/". proxy.ts only ever WRITES a pathname here;
+    // this guards the READ side against a crafted link.
+    const rawNext = searchParams.get("next") ?? "/";
+    const next =
+      rawNext.startsWith("/") && !rawNext.startsWith("//") && !rawNext.startsWith("/\\")
+        ? rawNext
+        : "/";
     router.push(next);
     router.refresh();
   }
