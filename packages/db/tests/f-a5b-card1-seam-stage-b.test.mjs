@@ -913,8 +913,19 @@ test("B4.12 (M6, cross-period axis) — a `cell` beneath a PERIOD SHIFT is refus
   assert.equal((await validateNode(X, scope)).cells, 1, "the leaf contributes one cell");
   assert.equal((await validateNode(sumOf(X, X), scope)).cells, 2, "the LOOP path accumulates");
   assert.equal((await validateNode(subtract(X, X), scope)).cells, 2, "the BINARY path accumulates");
-  assert.equal((await validateNode(measure({ set: "revenue" }), scope)).cells ?? 0, 0,
-    "a cell-free subtree carries no cells — the counter is not simply always positive");
+  // A cell-free subtree must carry NO `cells` KEY AT ALL — absence, not zero, and this is asserted
+  // at the two shapes that build a fresh contract rather than inheriting one. It is stated as
+  // absence because a `cells: 0` is exactly what broke B5.8 on the first cut of this fix: that cell
+  // diffs v1's contract against v2's on every canonical cell-free AST at both doors, and a field v1
+  // has no counterpart for made all ten differ on something meaningless there. Measured, it was the
+  // SOLE difference — no evaluation divergence. The fix emits the key only when positive rather than
+  // teaching B5.8 to ignore it, so the differential stays byte-exact; these three assertions are
+  // what stop that regression coming back.
+  const M = measure({ set: "revenue" });
+  for (const [shape, node] of [["leaf", M], ["loop", sumOf(M, M)], ["binary", subtract(M, M)]]) {
+    assert.equal((await validateNode(node, scope)).cells, undefined,
+      `${shape}: a cell-free contract carries no cells key at all — B5.8 diffs these against v1 byte-for-byte`);
+  }
 
   // ---- GUARD 1 (STRUCTURAL, at validation): the adversary's EXACT scenario, plus the same shape
   // at depth through each accumulating path. Depth matters: a guard that only inspected lag's
