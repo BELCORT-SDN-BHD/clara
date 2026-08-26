@@ -3,6 +3,15 @@
     "title": "Clara",
     "description": "Clara — AI-native Agentic Accounting OS for Malaysian accounting firms."
   },
+  "Common": {
+    "loading": "Loading…",
+    "noSession": "Sign in to see this.",
+    "forbidden": "Your account can't read this yet.",
+    "notFound": "This isn't available yet.",
+    "unexpectedError": "Something went wrong: {message}",
+    "notBuiltHeading": "Not built yet",
+    "cancel": "Cancel"
+  },
   "FirmShell": {
     "productName": "Clara"
   },
@@ -20,15 +29,59 @@
   },
   "NeedsYou": {
     "heading": "Needs you",
-    "body": "P2 shell — the cross-client Needs-you inbox is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "P2 shell — the cross-client Needs-you inbox is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "emptyMessage": "Nothing is waiting on you across any client right now.",
+    "countsReady": "Ready",
+    "countsNeedsReview": "Needs review",
+    "countsNeedsYou": "Needs you",
+    "countsOpenDrafts": "Open drafts",
+    "countsOpenQuestions": "Open questions",
+    "countsOpenTasks": "Open coding tasks",
+    "sectionNeedsYou": "Needs you",
+    "sectionNeedsReview": "Needs review",
+    "rowKind": {
+      "draft": "Draft entry",
+      "uncoded_filing": "Uncoded filing",
+      "open_question": "Open question",
+      "coding_task": "Coding task"
+    },
+    "openClient": "Open client",
+    "highStakes": "high stakes",
+    "amountLabel": "amount",
+    "periodLabel": "period",
+    "resolve": "Resolve",
+    "dismiss": "Dismiss",
+    "resolutionPlaceholder": "How was this resolved?",
+    "reasonPlaceholder": "Why dismiss this?",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "gapsHeading": "Not built yet",
+    "gapFirmQuestions": "Firm-level questions (a document with no client yet) have no human read surface in the database today — clara.firm_open_questions carries no grant a firm session can read. Reported as a backend gap; not shown here.",
+    "gapIdentifierPromotions": "Client-identifier merge proposals (clara.client_identifier_promotions) have the same gap — no human read surface yet."
   },
   "ClientsRegister": {
     "heading": "Clients",
-    "body": "P2 shell — the client register (every client the firm serves) is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "P2 shell — the client register (every client the firm serves) is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "emptyMessage": "No clients are visible to this firm yet.",
+    "columnName": "Client",
+    "columnStatus": "Status",
+    "columnEntityType": "Entity type",
+    "columnMsic": "MSIC",
+    "factAbsent": "—"
   },
   "FirmActivity": {
     "heading": "Activity",
-    "body": "P2 shell — the firm activity/receipts feed is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "P2 shell — the firm activity/receipts feed is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "subheading": "A record of what the agent did across every client — not a queue of what awaits you. See Needs you for that.",
+    "emptyMessage": "No agent activity has been recorded yet.",
+    "columnAct": "Act",
+    "columnActor": "Actor",
+    "columnClient": "Client",
+    "columnBasis": "Basis",
+    "columnOccurred": "Occurred",
+    "columnScope": "Scope",
+    "platformScope": "Platform-wide",
+    "noRationale": "No stated rationale."
   },
   "Admin": {
     "heading": "Admin",
@@ -37,7 +90,12 @@
   "ClientWorkspace": {
     "heading": "Client workspace",
     "body": "P1 foundation scaffold — the client workspace tabs (journals, documents, bank, close, reports, registers, knowledge) are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
-    "clientIdLabel": "Client ID"
+    "clientIdLabel": "Client ID",
+    "statusLabel": "Status",
+    "createdLabel": "Client since",
+    "notFoundMessage": "No client with this id is visible to your firm.",
+    "queueHeading": "Needs your attention",
+    "queueEmpty": "Nothing is waiting on you for this client right now."
   },
   "Clara": {
     "rail": {
@@ -143,11 +201,77 @@
   },
   "ClientRegisters": {
     "heading": "Registers",
-    "body": "P2 shell — AR/AP aging, fixed assets, adjustments, staff advances and accounts are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "P2 shell — AR/AP aging, fixed assets, adjustments, staff advances and accounts are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "tabs": {
+      "aging": "AR/AP aging",
+      "fixedAssets": "Fixed assets",
+      "adjustments": "Adjustments",
+      "staffAdvances": "Staff advances",
+      "accounts": "Chart of accounts"
+    },
+    "aging": {
+      "ar": "Receivables",
+      "ap": "Payables",
+      "asOf": "As of {date}",
+      "empty": "No open items as of today.",
+      "counterparty": "Counterparty",
+      "current": "Current",
+      "d3160": "31–60",
+      "d6190": "61–90",
+      "d91plus": "91+",
+      "total": "Total",
+      "totalsRow": "Firm total"
+    },
+    "fixedAssets": {
+      "empty": "No fixed assets recorded for this client.",
+      "asset": "Asset",
+      "status": "Status",
+      "acquired": "Acquired",
+      "cost": "Cost",
+      "accumulated": "Accumulated depreciation",
+      "nbv": "Net book value",
+      "method": "Method",
+      "incompleteNote": "{count} asset(s) have incomplete particulars."
+    },
+    "adjustments": {
+      "templatesHeading": "Templates",
+      "runsHeading": "Runs",
+      "emptyTemplates": "No recurring adjustment templates for this client.",
+      "emptyRuns": "No adjustment runs recorded for this client.",
+      "name": "Name",
+      "status": "Status",
+      "cadence": "Cadence",
+      "period": "Period",
+      "amount": "Amount",
+      "mode": "Mode"
+    },
+    "staffAdvances": {
+      "empty": "No staff advances recorded for this client.",
+      "issued": "Issued",
+      "amount": "Amount",
+      "purpose": "Purpose",
+      "voided": "Voided"
+    },
+    "accounts": {
+      "empty": "No accounts in this client's chart of accounts yet.",
+      "code": "Code",
+      "name": "Name",
+      "type": "Type",
+      "inactive": "Inactive"
+    }
   },
   "ClientKnowledge": {
     "heading": "Knowledge",
-    "body": "P2 shell — the knowledge/data-library surface is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "P2 shell — the knowledge/data-library surface is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "subheading": "Durable facts recorded about this client — each with who recorded it, on what basis, and when. A document-attached evidence library lives on the Documents tab, not here.",
+    "empty": "No facts have been recorded for this client yet.",
+    "columnFact": "Fact",
+    "columnValue": "Value",
+    "columnBasis": "Basis",
+    "columnRecordedAt": "Recorded",
+    "historyLabel": "{count} superseded version(s)",
+    "showHistory": "Show history",
+    "hideHistory": "Hide history"
   },
   "Login": {
     "title": "Sign in",
