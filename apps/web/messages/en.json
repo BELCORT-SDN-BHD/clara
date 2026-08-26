@@ -135,11 +135,168 @@
   },
   "ClientClose": {
     "heading": "Close",
-    "body": "P2 shell — the three close keys and the agent-act receipt panel are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "Pick a fiscal year to view its close plan — gates, doors, and the receipt/segregation record. Every figure is read live from the DB; “Clara proposes close” is not built yet (no close_proposals carrier exists).",
+    "picker": {
+      "ariaLabel": "Fiscal years",
+      "loading": "Loading fiscal years…",
+      "error": "Could not load fiscal years: {message}",
+      "empty": "No fiscal years opened yet for this client."
+    },
+    "plan": {
+      "loading": "Loading the close plan…",
+      "mismatch": "Close plan unavailable — the read did not match the current selection.",
+      "selectPrompt": "Select a fiscal year above to view its close plan.",
+      "fyEnd": "fy_end"
+    },
+    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "doors": {
+      "begin": {
+        "trigger": "Begin close",
+        "title": "Begin close — {label}",
+        "description": "clara.begin_close — opens a close run and evaluates every gate. Needs the close_and_attest capability.",
+        "confirm": "Begin close"
+      },
+      "finalize": {
+        "trigger": "Finalize close",
+        "title": "Finalize close",
+        "description": "clara.finalize_close re-evaluates every gate in-transaction. A solo firm, or a year with no distinct human preparer, needs an explicit self-attestation — leave it blank otherwise.",
+        "confirm": "Finalize",
+        "attestationLabel": "Self-attestation (only if required)"
+      },
+      "abandon": {
+        "trigger": "Abandon close",
+        "title": "Abandon this close run",
+        "description": "clara.abandon_close reopens the fiscal year for editing without a receipt. Requires a reason.",
+        "confirm": "Abandon",
+        "reasonPlaceholder": "Why is this close run being abandoned?"
+      },
+      "reopen": {
+        "trigger": "Reopen year",
+        "title": "Reopen this closed fiscal year",
+        "description": "clara.reopen_fiscal_year mirrors the closing entry as a prior-period adjustment. Needs the reopen capability, a reason (10+ characters), and a correction target. A CLR05 refusal (no_eligible_human / attestation_required / distinct_checker / self_attestation) names exactly who may act — try again with an attestation if it asks for one.",
+        "confirm": "Reopen",
+        "reasonLabel": "Reason (10+ characters)",
+        "checkKeyLabel": "Correction target — gate check key",
+        "checkKeyPlaceholder": "e.g. ar_control_tie",
+        "attestationLabel": "Attestation (only if a refusal named it)"
+      }
+    },
+    "gates": {
+      "heading": "Close gates",
+      "empty": "No gate measurements yet — begin the close to evaluate them.",
+      "notYetMeasured": "not yet measured",
+      "noAttestation": "no attestation",
+      "attest": {
+        "trigger": "Attest",
+        "title": "Attest this gate exception",
+        "description": "clara.attest_close_exception — the existing audited attest door (0056). One click records one attestation, bound to the gate's current measurement.",
+        "confirm": "Attest",
+        "reasonPlaceholder": "Why is this exception acceptable?"
+      }
+    },
+    "receipt": {
+      "heading": "Close receipt & segregation",
+      "absent": "No close receipt yet for this fiscal year.",
+      "verify": "Verify",
+      "verifying": "Verifying…",
+      "verified": "verified",
+      "notVerified": "verification failed",
+      "closedBy": "closed by",
+      "closedAt": "closed at",
+      "plNet": "P&L net (cents)",
+      "retainedEarnings": "retained earnings account",
+      "watermark": "books watermark",
+      "datasetSha": "dataset sha256",
+      "selfAttestation": "self-attestation",
+      "segregation": {
+        "two_person": "two-person segregation",
+        "solo_self_attested": "solo, self-attested",
+        "agent_prepared": "agent-prepared",
+        "no_preparation": "no preparation recorded"
+      }
+    },
+    "proposal": {
+      "heading": "Clara proposes close",
+      "body": "Not built yet — no clara.close_proposals carrier and no wake_propose_close verb exist in the live catalog. When they ship, this panel reads the existing proposal (never invents one), and attest_close_exception's own p_from_proposal argument links an attestation back to it."
+    }
   },
   "ClientReports": {
     "heading": "Reports",
-    "body": "P2 shell — statutory close reports, flexible/generative reports and the agent-receipt panel are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "Statutory close reports (sealed, archived) and the analysis sandbox (watermarked, requested through Clara) — every figure and every custody fact is read live from the DB.",
+    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "statutory": {
+      "heading": "Statutory close reports",
+      "subheading": "The signed-original archive (0127) — sealed, never watermarked.",
+      "loading": "Loading report artifacts…",
+      "notDeployed": "The reporting engine is not deployed in this environment yet.",
+      "error": "Could not load report artifacts: {message}",
+      "empty": "No report artifacts yet for this client.",
+      "agentPrepared": "agent-prepared",
+      "claimRemoved": "claim removed",
+      "uncertified": "uncertified",
+      "sealedBy": "sealed",
+      "noDownload": "No byte-download door exists yet — copy the storage key and retrieve the file through ops tooling. A signed-URL download route is a named follow-up, not built in this pass.",
+      "copyKey": "Copy storage key",
+      "copied": "Copied",
+      "issue": {
+        "trigger": "Issue for approval",
+        "title": "Issue this pack for approval",
+        "description": "clara.approve_report_for_issue — the one human act that closes the pre_sign chain. Names the sealed hash shown below, never recomputed.",
+        "confirm": "Issue",
+        "reasonPlaceholder": "Reason",
+        "attestationPlaceholder": "Self-attestation (solo firm, or agent-prepared, only)"
+      },
+      "archive": {
+        "trigger": "Archive signed original",
+        "title": "Archive the signed original",
+        "description": "clara.archive_signed_original — the wet-signed pack's own identity, bound to the pre-sign hash it answers.",
+        "confirm": "Archive",
+        "shaPlaceholder": "Signed PDF sha256",
+        "byteSizePlaceholder": "Byte size",
+        "signerPlaceholder": "Signer name"
+      },
+      "retrieve": {
+        "trigger": "Retrieve",
+        "retrieving": "Retrieving…",
+        "none": "No signed original archived yet for this run."
+      },
+      "receipts": {
+        "heading": "Agent receipts",
+        "empty": "No agent-act receipts yet for this client.",
+        "directedBy": "directed by"
+      }
+    },
+    "sandbox": {
+      "heading": "Analysis sandbox",
+      "subheading": "Watermarked, never sealed (0132) — structurally unreachable by the seal chain.",
+      "requestNotice": "There is no human \"request export\" door — the mint/request verbs are granted to Clara's agent lane only. Ask Clara, in the rail, to build a sandbox view or request an export.",
+      "loading": "Loading sandbox exports…",
+      "error": "Could not load sandbox exports: {message}",
+      "empty": "No sandbox exports yet touching this client.",
+      "recipients": {
+        "heading": "Export recipients",
+        "loading": "Loading recipients…",
+        "error": "Could not load recipients: {message}",
+        "empty": "No export recipients registered yet.",
+        "register": {
+          "trigger": "Register recipient",
+          "title": "Register an export recipient",
+          "description": "clara.register_export_recipient — admin only. Firm-member recipients only in this form (an external recipient's covered-clients form is a named follow-up).",
+          "confirm": "Register",
+          "userIdPlaceholder": "Firm member user id (UUID)",
+          "displayNamePlaceholder": "Display name",
+          "basisPlaceholder": "Basis for receiving exports"
+        }
+      }
+    },
+    "freeform": {
+      "heading": "Freeform reads",
+      "subheading": "The audited \"ask the books\" read log (0131) — a history, not a query box.",
+      "runNotice": "There is no human \"run a freeform read\" door — wake_freeform_read is Clara's agent lane. This is a read-only history of what Clara has read.",
+      "loading": "Loading freeform read history…",
+      "error": "Could not load freeform reads: {message}",
+      "empty": "No freeform reads yet touching this client."
+    }
   },
   "ClientRegisters": {
     "heading": "Registers",
