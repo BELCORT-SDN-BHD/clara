@@ -2,6 +2,7 @@
   "name": "@clara/web",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "Clara web app (P1 foundation scaffold). Next.js App Router, deployed to Cloudflare Workers via @opennextjs/cloudflare; replaces apps/dashboard at cutover. See README.md for the rulings pointer and token provenance.",
   "scripts": {
     "dev": "next dev",
@@ -9,6 +10,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "node --test tests/",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
@@ -34,6 +36,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.1",
     "typescript": "5.9.3",
     "wrangler": "4.126.0"
   }
