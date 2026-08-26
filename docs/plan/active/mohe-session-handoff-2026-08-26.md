@@ -54,11 +54,12 @@ the same verb — never a new gate**), plus the 08-24 addendum's Wave-G OS surfa
      (the most dangerous door in a multi-tenant system; never fold it into UI work).
 2. **F-A7b client onboarding = a JOINT design gate in this session** (UI + backend contract
    at one table), built as its own train immediately after, with the Wave-G e2e acceptance
-   scenario: *unknown-counterparty invoice → held in the firm-scoped unattributed carrier →
-   Clara proposes onboarding → adaptive interview → doors signed → client born → the held
-   document auto-attributes*. The gate's must-answer set includes the owner's
-   variable-materials playbooks (full audited FS / values-only records / bank statements
-   only). Firm onboarding stays OUT of F-A7b — tiers 2/3 above own firms.
+   scenario, verbatim from R8(a): *"unknown-counterparty invoice → held in unattributed
+   carrier → Clara proposes onboarding → interview → doors signed → client born → document
+   auto-attributes"* — glosses: the carrier is the firm-scoped one F-A7 α shipped, and the
+   interview is adaptive by design (it asks for what is missing). The gate's must-answer set
+   includes the owner's variable-materials playbooks (full audited FS / values-only records /
+   bank statements only). Firm onboarding stays OUT of F-A7b — tiers 2/3 above own firms.
 3. **Pricing shape is RULED** (R8c: base monthly tier per firm + metered overage). The
    AMOUNTS take a dedicated pricing sitting — schedule it INSIDE 磨合 so tier-3's checkout
    can finish (PROGRESS Next item 1 carries it).
@@ -126,7 +127,10 @@ the same verb — never a new gate**), plus the 08-24 addendum's Wave-G OS surfa
 
 ## 6 · What "done" means for 磨合 (the owner's own words)
 
-"总之我要完整的 frontend when I step in Wave G and beta live launch" — every screen of the
+"总之我要完整的 frontend when I step in Wave G and beta live launch" *(the owner, in the
+2026-08-26 grill session whose rulings are minuted as R8 in
+`harness-audit-rulings-2026-08-26.md`; this handoff is the sentence's written record)* —
+every screen of the
 three-tier world built (tier-3's checkout may sit behind invite-only copy ONLY until the
 pricing amounts land), every crude door re-skinned in place, F-A7b designed and its train
 built, the §3 pre-flight discharged, and a clean handoff into Wave G, where the factory
