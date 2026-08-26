@@ -5,7 +5,7 @@ here verbatim from `PROGRESS.md` at clock-outs; the live file keeps only current
 
 ## Archived at the 2026-08-26 W4 clock-out (verbatim moves from PROGRESS.md)
 
-**Posture bullets superseded by the W4 bullet (records: the two as-runs):**
+**Posture bullets superseded by the W4 bullet (records: the four ceremony as-runs):**
 
 - **W2+W3 MERGED AND CEREMONIED — 2026-08-25 (~10:47-11:05 MYT combined apply window).** Nine
   cars merged and LIVE (eight PRs tonight + 0118 pre-merged): F-A2 PR-3 cutover+retirement (`0118`, #324) · F-A3 PR-1a (`0119`, #327) ·

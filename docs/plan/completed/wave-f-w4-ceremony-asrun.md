@@ -77,7 +77,9 @@ freeze **7 registered / 7 deployed**. Repo-side manifest lock ran after the wind
 (`check-frozen-evaluators.mjs --lock-deployed`): it stamped `deployed: true` on
 `evaluate_metric_v2` AND on `evaluate_fs_pack_agent_v1` — the latter a **stale-manifest
 truing**, not a new act: that evaluator was flipped at the 2026-08-24 D-a window's C-flip and
-the manifest was never re-stamped then.
+the manifest was never re-stamped then. The stamp is also self-supported by TONIGHT's
+measurement, not only the 08-24 narrative: probe 8's `verify_evaluator_freeze()` = 7/7
+deployed over exactly the seven registry rows, `evaluate_fs_pack_agent v1` among them.
 
 ## 7 · Positive-read probes — 8/8 ALL-PASS
 
