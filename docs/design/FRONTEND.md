@@ -36,4 +36,6 @@ something stable to describe.
 
 The dashboard package is `apps/dashboard` (Next.js on Cloudflare Pages, `app.clarabook.com`).
 Until this file is populated, its shipped routes and components are the only source of truth
-for current frontend behavior — read the code, not a spec.
+for current frontend behavior — read the code, not a spec. **apps/web** (branch
+`frontend/web`) replaces `apps/dashboard` at cutover; see
+`docs/plan/active/frontend-handoff-2026-08-23.md` + its 08-24 addendum.
