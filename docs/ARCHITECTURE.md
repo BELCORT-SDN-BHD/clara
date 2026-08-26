@@ -66,7 +66,9 @@ Three new event-stream consumers join the existing five loops (Wave A2.1, ADR-02
 leader's daily flag — `opts.autopostRules` / `sstWatches` / `lintBelt` / `faRuns` / `adjRuns` —
 all feature-detecting their own DB surface so a runtime image can boot before its migration
 lands): the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`, WA2-R10 never-auto-renew —
-**retires with the rules machine at Wave F per ADR-0071/G1.4**) ·
+**its reconciler belt function, `reconcile_autopost_rules()`, and the whole CODING-rules
+EXECUTION tier RETIRED at `0118` (F-A2 PR-3, 2026-08-25 ceremony); the separate, later
+BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26 ceremony)**) ·
 `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the **FA
 depreciation-run** belt (Wave D-a, `0041`) · the **recurring-adjustment** belt (Wave D-b2,
 `0045`). Each belt is **failure-isolated** — an error logs and retries next cycle rather than
@@ -79,6 +81,18 @@ before any autonomy is earned; only afterwards do occurrences auto-post, each wi
 and a **high-stakes occurrence always routes to a distinct human checker** regardless of ramp.
 Autonomy is forward-only from the signing date — catch-up occurrences all draft. The
 per-client-statement rule above binds this belt for the same `firm_event_seq` reason.
+
+### 2.2a The universal wake-execution engine (Gate G1, `0133`)
+A single registry-driven consumer, `clara.wake_engine_sources`, generalizes the spine's
+`kind='wake'` held-task carrier beyond autodraft's own precedent: each registered source names
+its `task_kind` and an `enabled` flag, and the engine's state matrix moves a task
+held→running→settled the same way the estate's other spine consumers do. `_settle_wake_task()`
+writes BOTH the task row and its `wakes_outbox` projection in one settlement, and a
+direct-queue carrier that dead-letters lands in its own `clara.wake_engine_task_dead_letters`
+table (mirroring `relay_dead_letters`' shape). The registry ships EMPTY by design — `bank_agent`
+and `close_prep` seed rows land `enabled=false` — so a consumer only goes live when its owning
+lane inserts-and-flips its own row; the per-wake-kind allowlist (§0 item 3) is unchanged and
+unconsulted by this engine's own logic.
 
 ### 2.3 Context packs + freshness
 - Before any accounting decision, Clara calls `get_context_pack(client_id, purpose)` → a fresh, typed pack: client profile, FY/period + lock state, MSIC/business description, SST/tax status, COA policy, relevant documents, journal history slice, approval/reversal history, reconciliation exceptions, open questions (must-asks), the relevant wiki pages, and the **current books-version token**.
@@ -173,6 +187,13 @@ Fixes H-1/H-2/H-4 (model-authored numbers laundered as DB-authoritative). Compos
 - Renderers (CSV/PDF/XLSX/UI artifact) **format** DB output; a model cannot inject a number or a balance claim into a rendered artifact. Free-text commentary is clearly labelled model-authored and never presented as a computed figure.
 - Every export is persisted as a **durable, auditable artifact** with parameters, data-version token, permissions, and reproducibility — never a loose file, never model-authored bytes filed as authoritative (fixes H-1).
 
+**As shipped:** the renderer lives in `packages/reporting-render` — `lib/layout.mjs` is the
+FROZEN sealed-lane layout (golden-hashed like a workflow body), `lib/layout-sandbox.mjs` its
+sibling for the non-authoritative analysis lane, and `scripts/render-worker.mjs` the worker
+driving both. **The two-tier split is SHIPPED FACT (digest law 74):** the sandbox lane is
+watermarked non-authoritative and structurally unreachable from the seal chain; the sealed
+lane runs the full open→evaluate→seal→render chain through the OBO lane.
+
 ---
 
 ## 7. Document pipeline, storage doctrine + registry (E)
@@ -184,7 +205,7 @@ Firm-scoped keys (`firms/{firm_id}/…`), an **Unassigned lane** for persist-aft
 
 A **`classify` lane** resolves each document's type after layout/structured extraction and before its facts are read, persisting the verdict via the audited `classify_document(...)` — human-recorded kind overrides the model — so the fact-extraction engines are never fed an unclassified or mis-typed document (Wave A2.1, ADR-028/029/030).
 
-**The extraction estate after ADR-0071 (builds in Wave F, `docs/plan/active/wave-f-contract.md` F-A1):** the semantic readers — Azure `prebuilt-invoice`, Azure `prebuilt-bankStatement`, and the deterministic layout-reader family — RETIRE. Facts are witnessed by the **LLM witness pair** (one read of the stored OCR raw text, one of the original image bytes; same provider, two channels), agreeing to the sen under a versioned deterministic DB predicate, every witnessed amount server-snapped to a layout region (so the polygon/evidence walls and `doc_review` keep their fuel), the document's arithmetic identity and the bank running-balance chain retained as mechanical checks, and both reads persisted whole with model+version stamps. OCR itself is demoted to a coordinates-and-text-fidelity supplier — zero semantics — and is vendor-swappable behind the existing normalized envelope/regions shape. Digest law 72 is the binding statement.
+**The extraction estate after ADR-0071 (shipped/ceremonied 2026-08-20, F-A1; `docs/plan/active/wave-f-contract.md`):** the semantic readers — Azure `prebuilt-invoice`, Azure `prebuilt-bankStatement`, and the deterministic layout-reader family — RETIRED. Facts are witnessed by the **LLM witness pair** (one read of the stored OCR raw text, one of the original image bytes; same provider, two channels), agreeing to the sen under a versioned deterministic DB predicate, every witnessed amount server-snapped to a layout region (so the polygon/evidence walls and `doc_review` keep their fuel), the document's arithmetic identity and the bank running-balance chain retained as mechanical checks, and both reads persisted whole with model+version stamps. OCR itself is demoted to a coordinates-and-text-fidelity supplier — zero semantics — and is vendor-swappable behind the existing normalized envelope/regions shape. Digest law 72 is the binding statement.
 
 ## 7a. Retention (fixes GAP3-4/3-5)
 The 7-year statutory clock anchors at **period-end + filing date** (ITA s.82/82A, CA2016 s.245), not row-creation, and is recomputed on close; `legal_hold` gets a real audited writer.
@@ -247,6 +268,20 @@ The Slice-0 spike ran against the fresh hosted Supabase project (`spike/RESULTS.
 4. **BINDING VERSIONING POLICY (from T6):** (a) a deployed workflow body is immutable once any run can be in flight; every behavioral change ships as a new exported workflow (`_v2`, `_v3`, …), the old export retained until zero non-terminal runs reference it; (b) enqueue sites always target the newest version; a CI freeze-lint (golden-hash per frozen workflow) forbids editing frozen bodies; (c) renaming/deleting an export with in-flight runs is forbidden (workflowName derives from path+export — a rename strands parked runs); (d) in-place hotfixes only for provably pre-park-idempotent step-body bugs.
 
 **Freeze-lint coverage (as built, finding 11):** the CI freeze-lint golden-hashes each `@frozen` workflow **and its transitive relative-import closure**, requires every `"use workflow"` file to be frozen + registered, compares append-only vs `origin/main` (fail-closed if the base ref is missing under CI), and **rejects a workspace-package / path-alias import inside a frozen closure** (such a first-party import would escape the closure and change a frozen body while its hash stayed green). **No longer deferred — both are BUILT and enforced** (verified 2026-08-06 in `scripts/check-frozen-workflows.mjs`, which delegates to `freeze-lint-checks.mjs`): **registry-version monotonicity** — the lint parses `packages/runtime/workflows/registry.ts` at HEAD and at the base ref, so a class may only keep or *increase* its version and a class removed vs base is a hard reject — and **enqueue-site provenance** — every WDK enqueue in `packages/runtime` (tests and the registry itself excluded) must receive a workflow reference whose import provenance traces to the registry. Policy (b) is therefore machine-checked, not convention. Handles: `scripts/check-frozen-workflows.mjs`, the manifest `frozen-workflows.json` (**130** entries at the F6–F9 close, ADR-066 — the count grows with every frozen closure; read the file, not this line), regenerated only via `pnpm freeze:update` (refused under CI).
+4a. **The parallel EVALUATOR freeze (invariant 1's enforcement machinery, mirroring the
+workflow freeze above):** `frozen-evaluators.json` is the manifest; `scripts/check-frozen-
+evaluators.mjs` is its lint (with its own `--lock-deployed` ceremony flag, refused under CI);
+`clara.evaluator_versions.deployed` is the DB-side flag a registered evaluator row carries;
+`clara.verify_evaluator_freeze()` re-derives every DEPLOYED member's hash LIVE from the
+catalog between migration bodies and their commit, so an in-place edit fails at APPLY, not
+merely at review; `clara._tf_evaluator_deploy_once` is the one-way, exactly-once
+undeployed→deployed transition trigger, gated on the deploying session holding no active
+`SET ROLE`; and `packages/db/scripts/deploy-evaluator-version.mjs` is the deploy ceremony
+script that flips it (a SEPARATE act from the manifest lock — `packages/db/README.md`'s
+"Evaluator deploy ceremony" section). Together these make invariant 1's "no model-generated
+numeral enters a durable artifact unless a versioned deterministic evaluator reproduces it"
+structural, not conventional, on the evaluator half of the same invariant the workflow freeze
+enforces on the workflow half.
 5. Operational notes: the runtime reads `WORKFLOW_POSTGRES_URL` (not `DATABASE_URL` — mapped in the worker entry); engine timestamps are tz-naive (display only); Supavisor session-mode LISTEN/NOTIFY verified at 32ms with sub-second job pickup.
 
 Remaining before final Slice-0 sign-off: the 48-hour park check-in (armed 2026-07-17 15:15 +08, resume due ≥2026-07-19 15:15 +08). **RESOLVED** — the park check-in closed with Slice 4 (ADR-017); nothing remains open in this appendix.
