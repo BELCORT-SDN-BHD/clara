@@ -138,6 +138,7 @@ derived state is not evidence**; (3) **spelling is not identity**.
 - **SG-2 — The agent-native surface test** (`docs/product/PRD.md` §5a): remove the chat rail, and the
   workbench must still show what Clara did, why, with what evidence, and offer every Clara action as
   an object-level verb.
-- **SG-3 — Nothing here relaxes for testing convenience.** ADR-060's pre-beta authority is
-  **DATA-scoped only**; the product's mechanisms, the engineering gates, and these criteria stay at
-  full force.
+- **SG-3 — Nothing here relaxes for testing convenience.** ADR-060's pre-beta authority
+  (widened by ADR-0075) is **DATA-scoped only**; the product's mechanisms, the engineering
+  gates, and these criteria stay at full force — mechanisms NEVER move, the operative clause
+  on any collision.
