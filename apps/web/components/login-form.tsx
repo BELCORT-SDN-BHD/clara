@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { resolveSameOriginPath } from "@/lib/safe-redirect";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,15 +50,17 @@ export function LoginForm() {
       return;
     }
 
-    // Open-redirect wall: only same-origin relative paths may ride ?next= —
-    // absolute URLs, protocol-relative (//host) and backslash-escape (/\host)
-    // forms all fall back to "/". proxy.ts only ever WRITES a pathname here;
-    // this guards the READ side against a crafted link.
-    const rawNext = searchParams.get("next") ?? "/";
-    const next =
-      rawNext.startsWith("/") && !rawNext.startsWith("//") && !rawNext.startsWith("/\\")
-        ? rawNext
-        : "/";
+    // Open-redirect wall (lib/safe-redirect.ts): the raw `?next=` value is
+    // PARSED against this origin and only its proved-same-origin canonical
+    // path is navigated to. Lexical startsWith() checks are not sufficient —
+    // WHATWG URL normalization strips %09/%0A/%0D before interpreting the
+    // URL, which turns "/%09/evil.example" into a protocol-relative external
+    // destination (security review finding 4). proxy.ts only ever WRITES a
+    // pathname here; this guards the READ side against a crafted link.
+    const next = resolveSameOriginPath(
+      searchParams.get("next"),
+      window.location.origin,
+    );
     router.push(next);
     router.refresh();
   }

@@ -23,13 +23,25 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match every request path except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico
-     * - common static image extensions
-     * Adjust this pattern if a new always-public static path is added.
+     * Match every request path except these NAMESPACES, anchored at the start
+     * of the path:
+     * - _next/static  (framework build output)
+     * - _next/image   (image optimizer)
+     * - favicon.ico   (exact file)
+     * - brand/        (public/brand/** — the app's only static asset
+     *                 namespace; fonts + their OFL licences)
+     *
+     * NOT an extension list (cross-model security review 2026-08-27, finding
+     * 3, MEDIUM). The previous pattern excluded `.*\.(svg|png|jpg|jpeg|gif|
+     * webp)$` — an extension ANYWHERE in the path — while Next.js dynamic
+     * segments happily accept dots. `/clients/anything.png` therefore
+     * resolved to the protected `[clientId]` route with `proxy()` skipped
+     * entirely, and this proxy is the app's ONLY auth gate (no layout
+     * re-checks it). Exempt namespaces, never suffixes.
+     *
+     * Adding a new always-public static path means adding its NAMESPACE here
+     * and extending tests/proxy-matcher.test.ts, which asserts both arms.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|brand/).*)",
   ],
 };

@@ -88,13 +88,19 @@
   },
   "Logout": {
     "submit": "Sign out",
-    "submitting": "Signing out…"
+    "submitting": "Signing out…",
+    "failed": "Sign-out didn't complete. Please try again."
   },
   "Invite": {
+    "confirmTitle": "Accept your invitation",
+    "confirmDescription": "This link can only be used once. Continue when you're ready to set your password.",
+    "confirmSubmit": "Accept invitation",
     "verifyingTitle": "Accepting your invite",
     "verifyingDescription": "Checking your invite link…",
     "errorTitle": "This invite link didn't work",
     "errorDescription": "It may have expired or already been used. Ask whoever invited you to send a new one.",
+    "verificationIncomplete": "This invite could not be confirmed. Ask whoever invited you to send a new one.",
+    "subjectMismatch": "This browser is signed in as a different account. Sign out first, then open your invite link again.",
     "setPasswordTitle": "Set your password",
     "setPasswordDescription": "Your invite is confirmed. Choose a password to finish setting up your account.",
     "passwordLabel": "Password",
