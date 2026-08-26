@@ -131,8 +131,8 @@ governs.
 > current standing set at the ADR-0069 harness refactor. Additions or supersessions land
 > as new ADR entries; this digest is re-trued whenever one does.
 > **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's
-> 500-line ceiling, verbatim and append-only. Six minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 ·
-> 08-23). **The laws below govern; the log records when each was re-read and what the reading found.**
+> 500-line ceiling, verbatim and append-only. Seven minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 ·
+> 08-23 ×2). **The laws below govern; the log records when each was re-read and what the reading found.**
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -445,6 +445,16 @@ governs.
     TRUED by 0074/TA-P13, RATIFIED 2026-08-22 (owner):** 0071/G8 and contract F-A9 read "Per-call usage"
     unqualified — the digest added "LLM", never ruled; law 81.)*
 
+## 10 · The CI-economics supplement (folded 2026-08-21; source ADR-0073)
+
+77. **Per-PR CI scope is current-wave + backstop; closed-wave drills live on the weekly sweep.** Per-PR: lint (every event,
+    docs-only included) · typecheck/build + the worker-path gate · the estate suite + deploy-onto-existing (the ruled backstop) ·
+    the live-behavior e2es + the DR pair · the render drill · the partition gate · the CURRENT wave's drill while its wave is
+    open. Sweep + manual dispatch only: every closed wave's upgrade/contract drill and the D-b frontier matrix. The required
+    check `ci` is a fail-closed meta-gate over every job — success or lawfully-skipped, both directions asserted. After merging a
+    PR that touches a closed drill or the pipeline itself, run the sweep by hand (`gh workflow run ci.yml`). Review intensity
+    (law 26) is unaffected. *(0073)*
+
 ## 11 · The Track-A sitting supplement (folded 2026-08-22; source ADR-0074 — the sitting's other ten rulings bind through the ADR and `docs/plan/active/wave-f-contract.md`)
 
 78. **The human roster is an OPEN REGISTER.** Law 71's seven acts are a RESERVATION, not a census: any act they do not reserve is
@@ -466,13 +476,3 @@ governs.
 
 ## 12 · The test-data authority supplement (folded 2026-08-23; source ADR-0075)
 82. **Test data is free; law-71 gates are walked by the DELEGATE; mechanisms NEVER move.** Every client in the estate is test data (reset, reseed, reverse, re-run freely — live DB included); the agent walks law-71's gates as the owner's DELEGATE through the REAL audited doors, receipted, e-filing excluded by nature and secrets never printed; **no mechanism ever moves for testing convenience** (RLS, the attribution walls, receipts, roles/grants, the generic name-only wall — they are the product under test), and nothing client-specific is built or kept for a test client. Full text: `0075-test-data-authority-widened.md`. *(0075; expires at beta with hard constraint 14)*
-
-## 10 · The CI-economics supplement (folded 2026-08-21; source ADR-0073)
-
-77. **Per-PR CI scope is current-wave + backstop; closed-wave drills live on the weekly sweep.** Per-PR: lint (every event,
-    docs-only included) · typecheck/build + the worker-path gate · the estate suite + deploy-onto-existing (the ruled backstop) ·
-    the live-behavior e2es + the DR pair · the render drill · the partition gate · the CURRENT wave's drill while its wave is
-    open. Sweep + manual dispatch only: every closed wave's upgrade/contract drill and the D-b frontier matrix. The required
-    check `ci` is a fail-closed meta-gate over every job — success or lawfully-skipped, both directions asserted. After merging a
-    PR that touches a closed drill or the pipeline itself, run the sweep by hand (`gh workflow run ci.yml`). Review intensity
-    (law 26) is unaffected. *(0073)*
