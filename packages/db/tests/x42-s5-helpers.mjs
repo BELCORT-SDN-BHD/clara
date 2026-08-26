@@ -632,6 +632,29 @@ const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set
 // the clock" idiom every other core already on this roster carries.
 const FILING_VERB_F_A7_BETA_CLOCK_NAMES = ["_agent_file_document_core", "wake_reattribute_document"];
 
+// [Gate G1, `0133_g1_wake_engine` — number claimed at merge]: ONE genuinely new body.
+// clara.set_wake_source_enabled's two `now()` calls stamp enabled_at/disabled_at on the
+// registry row it flips — the SAME "the audit stamp is the clock" idiom every other human
+// writer already on this roster carries (cancel_agent_task's cancelled_at, set_bank_agency_
+// hold's set_at, ...). It derives no DATE from the session clock anywhere in its body: the
+// estate-wide switch it writes (clara.wake_engine_sources) carries no date-typed column at
+// all, only the two timestamptz audit pairs and a boolean. Lawful, and therefore rostered.
+// MEASURED, not inferred: arm (D)'s own detector over this migration's whole surface flags
+// this one name and no other of the new/CoR'd bodies — _settle_wake_task, the two trigger
+// CoRs (_tf_agent_task_update's own `new.updated_at:=now()` tail and cancel_agent_task's
+// `cancelled_at/updated_at = now()` are BYTE-IDENTICAL carryover from their live pre-G1
+// bodies, already rostered before this migration existed) and mint_wake_credential's new
+// close_prep arm (mint_wake_credential is already rostered for its OTHER per-kind arms'
+// identical statement_timestamp() idiom) all carry no NEW clock token this roster does not
+// already account for. wake_engine_sources.created_at / wake_engine_task_dead_letters.
+// created_at are column DEFAULTS, which live in the table definition rather than a pg_proc
+// body and correctly do not flag (the 0081/0082 block's rule, restated).
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states: this
+// file is numbered at MERGE, and db-slice-frontiers runs this battery against databases
+// pinned at earlier frontiers where this function does not exist yet — an unconditional
+// entry would red every such leg on a one-name diff that says nothing about clock discipline.
+const G1_WAKE_ENGINE_CLOCK_NAMES = ["set_wake_source_enabled"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -691,6 +714,7 @@ export async function s5BareTokenRoster(query) {
     if (i !== -1) names.splice(i, 1);
     names.push(...F_A4_PR1B_CLOCK_NAMES);
   }
+  if (await appliedStem("g1_wake_engine$")) names.push(...G1_WAKE_ENGINE_CLOCK_NAMES);
   return names.sort();
 }
 

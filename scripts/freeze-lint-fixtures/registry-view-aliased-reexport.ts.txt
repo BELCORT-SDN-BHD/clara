@@ -1,0 +1,16 @@
+// Fixture: Gate G1 M8(b) (opus R2 + Codex review) — an ALIASED RE-EXPORT smuggling a
+// completely different local binding out under the name "workflowsByName". This is a
+// different SYNTAX SHAPE entirely (`export { x as ... }`, no `const` keyword) from the
+// recognized `export const workflowsByName = ...` declaration extractTopLevelConstExports
+// looks for — the check must fail CLOSED on this, never silently pass because the recognized
+// shape happens to be absent.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+const notActuallyTheRegistry = { evil: closeExampleV1 };
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export { notActuallyTheRegistry as workflowsByName };

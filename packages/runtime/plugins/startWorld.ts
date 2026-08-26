@@ -12,6 +12,7 @@ import { startControlListener, productionControlDeps } from "../lib/control.mjs"
 import { startLeaderLoop } from "../lib/leader.mjs";
 import { startMatcherLoop } from "../lib/matcher.mjs";
 import { startAutodraftLoop } from "../lib/autodraft.mjs";
+import { startWakeEngineLoop } from "../lib/wake-engine.mjs";
 import { startLocalFactsLoop, processLocalFactsTask } from "../lib/local-facts.mjs";
 import { startSstWatchLoop } from "../lib/sst-watch.mjs";
 import { startFactsGateLoop } from "../lib/facts-gate.mjs";
@@ -19,7 +20,7 @@ import { startClassifyLoop } from "../lib/classify.mjs";
 import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
-import { workflows } from "../workflows/registry.js";
+import { workflows, workflowsByName } from "../workflows/registry.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -213,6 +214,38 @@ export default definePlugin(() => {
     autodraft.done.then(() => fatal("autodraft loop"), (e: unknown) => fatal("autodraft loop", e));
     sup.stops.push(autodraft.stop);
 
+    // Gate G1: the wake-execution engine — a FOURTH INDEPENDENT loop on its own dedicated
+    // connection under the 'wake_engine' advisory lock, so router/matcher/autodraft leadership +
+    // the engine heartbeat are untouched. +1 persistent session. `enqueue` resolves the
+    // per-source workflow_export DYNAMICALLY through the registry `workflows` object (freeze-lint
+    // enqueue-site-provenance: the root `workflows` binding is imported from workflows/registry.ts
+    // right here, so a bracket lookup on it is traceable) — no bankAgent/closePrep export exists
+    // yet (each source's own follow-up PR ships its frozen workflow + flips enabled=true); an
+    // enabled row naming an export the registry does not carry would throw at start(), caught by
+    // wake-engine.mjs's own per-row try/catch and dead-lettered, never silently dropped.
+    const wakeEngine = startWakeEngineLoop({
+      // `workflowsByName` (registry.ts) is the SAME object as `workflows`, typed loosely for
+      // exactly this dynamic (runtime-string-keyed) dispatch — `workflowExport` is a registry row
+      // column, so no single `start()` overload can type it statically. No cast lives INSIDE this
+      // call's own argument (freeze-lint's enqueue-provenance check traces the property-access
+      // chain's ROOT import; an inline `as` cast there would strip past the bracket and read as
+      // untraceable — registry.ts carries the typing fix instead, never this call site).
+      // The trailing `!` asserts the row names a SHIPPED registry key — an enabled source whose
+      // workflow_export the registry does not (yet) carry throws inside start() itself, caught by
+      // wake-engine.mjs's own per-row try/catch and dead-lettered, never silently dropped.
+      // MUST F (opus/Codex review): ONLY the plain taskId identifier crosses into durable WDK
+      // state — NEVER a credential. wake-engine.mjs/reconciler-wake.mjs never mint one to pass
+      // here; the dispatched workflow's own first "use step" mints its own fresh credential
+      // (slice4-durable-runtime-contract.md:270 — plaintext secrets never transit WDK inputs,
+      // returns or workflow state, because step IO is durably persisted).
+      enqueue: (workflowExport: string, taskId: string) =>
+        start(workflowsByName[workflowExport]!, [{ taskId }]),
+      getRun,
+      log: (m: string) => console.log(m),
+    });
+    wakeEngine.done.then(() => fatal("wake-engine loop"), (e: unknown) => fatal("wake-engine loop", e));
+    sup.stops.push(wakeEngine.stop);
+
     // local_facts consumer (Wave A2) — an INDEPENDENT loop on its own connection under the
     // 'local_facts' advisory lock. Claims MyInvois local_facts tasks, runs the UBL facts
     // parse in a worker, persists via persist_invoice_facts. +1 persistent session.
@@ -229,15 +262,17 @@ export default definePlugin(() => {
     // dedicated LISTEN connection under its own advisory lock, structurally isolated from the
     // other consumers' leadership / readiness / heartbeat. +3 persistent sessions.
     //
-    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds NINE dedicated
+    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds TEN dedicated
     // LISTEN/persistent clients — control + leader + matcher + autodraft + local_facts +
-    // (A2.1) sst_watch + facts_gate + classify + (Wave B) wiki_projection — ON TOP
-    // OF the pooled budgets in lib/pools.mjs (5 runtime + 5 read + 2 write + 5 engine = 17).
-    // Grand total ≈ 26 sessions against the Supavisor session ceiling (one fewer than before
-    // F-A2 PR-3 retired the rule_post loop); the integrator MUST confirm headroom before
-    // deploy (WB-R18: ~26/60 today). The Wave B lint
-    // belt is a leader-phase sibling (ZERO new sessions); the interview workflows ride the WDK
-    // world (ZERO new sessions) — only wiki_projection adds a dedicated session this wave.
+    // (A2.1) sst_watch + facts_gate + classify + (Wave B) wiki_projection + (Gate G1)
+    // wake_engine — ON TOP OF the pooled budgets in lib/pools.mjs (5 runtime + 5 read + 2
+    // write + 2 bank + 5 engine = 19; the bank pool is inert headroom until F-A3's ceremony
+    // gives clara_wake_bank_login a password). Grand total ≈ 29 sessions against the Supavisor
+    // session ceiling; the integrator MUST confirm headroom before deploy (WB-R18: ~26/60
+    // before this gate; re-check at ~29/60 now). The Wave B lint belt is a leader-phase
+    // sibling (ZERO new sessions); the interview workflows ride the WDK world (ZERO new
+    // sessions) — wiki_projection and wake_engine are the two dedicated-session additions
+    // since that count was last true.
 
     // sst_watch consumer — the STRUCTURAL SST compliance watch. Plain group-role
     // evaluate_sst_watch(client) on each entry.approved (never blocks/touches an approval).

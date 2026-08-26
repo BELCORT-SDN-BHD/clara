@@ -1,0 +1,12 @@
+// Fixture: Gate G1 MUST D — `workflowsByName` declared as an unfrozen spread
+// copy instead of `Object.freeze(workflows)`. LOOKS like a view but proves
+// nothing about reference identity (`workflowsByName === workflows` would be
+// false) or mutability (a plain object literal is never frozen).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName = { ...workflows };

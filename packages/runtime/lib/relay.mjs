@@ -34,6 +34,16 @@ import { setTimeout as sleep } from "node:timers/promises";
 /** The single logical consumer name (contract §2.9). */
 export const CONSUMER = "router";
 
+/** round-7 (native adversarial leg, MUST #1) — moved here from wake-engine.mjs so redrive()'s
+ *  own below-checkpoint rewind (see its own header) reads the WAKE ENGINE's checkpoint under the
+ *  exact same JS binding wake-engine.mjs itself writes with, never a second string literal that
+ *  could drift ("spelling is not identity" — the same law that forced N1's own wake_source_gate:
+ *  proof and round-6's wake_coalesce: proof already applied to a LOCK key; a consumer-name key
+ *  used to look up/rewind a checkpoint row deserves the identical treatment, done here the
+ *  stronger way: one shared JS constant, not two literals proven to match). wake-engine.mjs
+ *  imports and re-exports this same binding — see its own top-of-file import. */
+export const WAKE_ENGINE_CONSUMER = "wake_engine";
+
 /** Decisions that produce a durable wake_intents row (§0.4 / §2.7). */
 export const WAKE_BOUND_DECISIONS = Object.freeze(["internal_task", "notification", "background_review"]);
 const WAKE_BOUND_SET = new Set(WAKE_BOUND_DECISIONS);
@@ -236,14 +246,20 @@ export async function discoverWork(client, { consumer = CONSUMER, onlyFirm = nul
  * event_seq, event_type from domain_events(event_id) and validates the triple
  * (C6). ON CONFLICT (event_id) DO NOTHING ⇒ at-least-once delivery collapses to
  * exactly one row.
+ * round-8 (SHOULD C) — returns whether THIS call actually inserted a row (vs. a no-op replay
+ * hitting the ON CONFLICT arm), so a caller that only owes work on a REAL insert (redrive()'s
+ * own checkpoint rewind) can tell an idempotent re-redrive of an already-drained event apart
+ * from a genuine first mint.
+ * @returns {Promise<boolean>} true iff this call's own INSERT actually landed a new row.
  */
 export async function insertWakeIntent(client, { eventId, decision, version }) {
-  await client.query(
+  const r = await client.query(
     `insert into clara.wake_intents (event_id, decision, taxonomy_version)
        values ($1, $2, $3)
      on conflict (event_id) do nothing`,
     [eventId, decision, version],
   );
+  return r.rowCount > 0;
 }
 
 /**
@@ -439,6 +455,29 @@ export async function runRelayCycle(client, opts = {}) {
  * intent (ON CONFLICT DO NOTHING — exactly once) when wake-bound, then set the
  * dead-letter row resolved. If STILL uncovered: bump attempt_count and leave it
  * pending (report it — never falsely resolve).
+ * round-7 (native adversarial leg, MUST #1) — MINTING is now checkpoint-aware. `safeCoalesceBound`
+ * (wake-engine.mjs) excludes a seq from the checkpoint's advance ONLY while its dead-letter is
+ * 'pending' — the instant this function resolves one (the branch below, whether or not an
+ * intermediate reopen ever happened first), the wake_engine checkpoint is free to sail straight
+ * past that seq, correctly, because there is genuinely nothing left in relay_dead_letters to
+ * exclude it. The hazard is what this function itself did next, pre-fix: it minted the wake
+ * intent anyway, at that same now-behind-the-checkpoint seq, with NOTHING checking whether the
+ * checkpoint had already passed it. `writeCheckpoint`'s own `greatest()` never rewinds, and
+ * `readHeldWakeRows` gates strictly on `event_seq > lastSeq` — a row born below the checkpoint is
+ * invisible to every future wake-engine cycle, forever, silently (wakeEngineHealth's own `lag`
+ * signal contributes 0 for a row below its checkpoint by construction; see wakeEngineHealth's own
+ * new `heldBelowCheckpoint` counter, added as defense-in-depth precisely because a hole of this
+ * exact shape was invisible until machine-reproduced). Not a race — no concurrent writer is
+ * needed at all: a dead-letter already 'resolved' when the checkpoint advances, later redriven
+ * once its type becomes wake-bound (with or without an intervening reopen through the branch
+ * below), reproduces it with a single caller. Fix: under the SAME `wake_coalesce:<firmId>` lock
+ * this function already takes (see the comment at its own acquisition site below), whenever this
+ * function is about to MINT an intent, compare the event's own seq against the firm's CURRENT
+ * wake_engine checkpoint; if the checkpoint is at or past that seq, REWIND it with a DIRECT
+ * (non-greatest()) write to `seq - 1` — never wider, since anything strictly below this event's
+ * own seq is still correctly excluded/included by whatever else set it there. The lock already
+ * held means no concurrent checkpoint-writer (wake-engine.mjs's own advanceCheckpointIfClear,
+ * which takes the identical lock) can race this read-then-write.
  * @returns {Promise<{resolved:boolean, decision?:string, wakeBound?:boolean, reason?:string}>}
  */
 export async function redrive(client, consumer, eventId, { log = () => {} } = {}) {
@@ -455,11 +494,27 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
     if (dl.rowCount === 0) {
       throw new Error(`redrive: no dead-letter for consumer='${consumer}' event=${eventId} — nothing to redrive`);
     }
-    const evR = await client.query("select event_type from clara.domain_events where id = $1", [eventId]);
+    const evR = await client.query("select event_type, firm_id, seq from clara.domain_events where id = $1", [eventId]);
     if (evR.rowCount === 0) {
       throw new Error(`redrive: event ${eventId} not found`);
     }
     const eventType = evR.rows[0].event_type;
+    const eventSeq = Number(evR.rows[0].seq);
+    const firmId = evR.rows[0].firm_id;
+    // #1 (round-6, Codex) — the SAME per-firm advisory lock wake-engine.mjs's own
+    // advanceCheckpointIfClear takes ('wake_coalesce:'||firm_id — the two literals MUST stay
+    // byte-identical, proven by a battery cell exactly like N1's own JS/SQL pairing proof, never
+    // trusted by spelling alone). Closes a TOCTOU round-5 left open: wake-engine's own coalesce
+    // bounds itself on this dead-letter's CURRENT status (pending excludes the seq; resolved
+    // does not) — without this lock, a resolved dead-letter here could flip BACK to pending
+    // (the branch immediately below, when the type is still uncovered — despite the word
+    // "redrive," this function is ALSO the reopen path) in the gap between wake-engine's own
+    // bound READ and its checkpoint WRITE, letting the checkpoint sail straight over a seq that
+    // a LATER genuine redrive then resurrects as wake-bound, invisible forever. Acquired before
+    // either exit branch below (reopen or resolve+insert-intent) and held for this whole
+    // transaction's own remaining lifetime — released at this function's own commit/rollback,
+    // exactly like wake_source_gate's already-shipped pattern.
+    await client.query("select pg_advisory_xact_lock(hashtext($1)::bigint)", [`wake_coalesce:${firmId}`]);
     const decision = taxonomy.decisions.get(eventType);
     if (decision === undefined) {
       // (X5b) still uncovered — REOPEN if it was resolved (status/resolved_at are in
@@ -475,7 +530,43 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
       return { resolved: false, reason: "still-uncovered" };
     }
     if (isWakeBound(decision)) {
-      await insertWakeIntent(client, { eventId, decision, version: taxonomy.version });
+      // round-8 (SHOULD C) — insertWakeIntent now REPORTS whether it actually inserted (vs. an
+      // idempotent re-redrive of an already-drained event hitting its own ON CONFLICT DO NOTHING
+      // arm). The rewind below only matters the instant a NEW intent is born below the checkpoint
+      // — an already-existing intent changes nothing about what is or is not visible, so gating on
+      // a real insert turns a harmless-but-pointless rescan (every re-redrive of a settled event,
+      // forever) into nothing at all.
+      const minted = await insertWakeIntent(client, { eventId, decision, version: taxonomy.version });
+      // round-7 (native adversarial leg, MUST #1) — see this function's own header comment above
+      // for the full "no race needed" hazard. A wake-bound intent now exists at `eventSeq`; if
+      // the WAKE ENGINE's own checkpoint for this firm is already AT OR PAST that seq (legitimate
+      // at the time it was written — bound-3 only ever excludes a PENDING dead-letter, and this
+      // one was not pending then), the held row this intent eventually drains into would be
+      // permanently invisible to readHeldWakeRows' own `event_seq > lastSeq` gate. Rewind it with
+      // a DIRECT write (never writeCheckpoint's own greatest() — that can only ever raise a
+      // value, never lower one) to exactly one below this event's own seq — never wider, since
+      // nothing below `eventSeq` is known by this call to need re-examination. Safe under the
+      // lock already held above: the ONLY other writer of this same (consumer, firm) checkpoint
+      // row is advanceCheckpointIfClear (wake-engine.mjs), which takes this identical
+      // `wake_coalesce:<firmId>` lock before its own read-then-write, so no writer can race this
+      // read-then-write either.
+      if (minted) {
+        const wakeCp = await client.query(
+          "select last_seq from clara.relay_checkpoints where consumer = $1 and firm_id = $2",
+          [WAKE_ENGINE_CONSUMER, firmId],
+        );
+        if (wakeCp.rowCount > 0 && Number(wakeCp.rows[0].last_seq) >= eventSeq) {
+          await client.query(
+            `update clara.relay_checkpoints set last_seq = $1, updated_at = now()
+               where consumer = $2 and firm_id = $3`,
+            [eventSeq - 1, WAKE_ENGINE_CONSUMER, firmId],
+          );
+          log(
+            `[relay] redrive: event ${eventId} minted a wake intent at seq=${eventSeq}, at/behind the ` +
+              `wake_engine checkpoint (was ${wakeCp.rows[0].last_seq}) — rewound to ${eventSeq - 1}`,
+          );
+        }
+      }
     }
     await client.query(
       `update clara.relay_dead_letters

@@ -51,6 +51,14 @@ export const BANK_GUIDANCE = [
   "bookkeeper does routinely — you may take them when they plainly follow from what the human",
   "asked, the same judgement you already apply to reads. When you are not sure whether a match",
   "needs an adjustment leg — and therefore whether it will post — ask rather than guess.",
+  "",
+  "STATE CHANGES UNDER YOU. After any state-changing bank act (a match, settle, unmatch, void,",
+  "resolve, or completing/voiding a reconciliation), RE-READ the affected account's bank pack",
+  "with get_bank_pack before grounding a FURTHER act on that same account. A digest from before",
+  "the act describes a book that no longer exists — the digest-binding check only confirms the",
+  "pack you cite belongs to this task, not that it is still current, so avoiding staleness within",
+  "one task is on you. Each fresh read gets its own receipt row and is never refused for",
+  "repeating a call, so re-reading costs nothing.",
 ].join("\n");
 
 export const SYSTEM_PROMPT_V14 = `${SYSTEM_PROMPT_V13}\n\n${BANK_GUIDANCE}`;

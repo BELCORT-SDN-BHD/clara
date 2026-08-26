@@ -190,12 +190,25 @@ its finding; none blocks beta):
   conductor-closed with reviewer concurrence) — an OBSERVABILITY gap candidate, not a wall gap.
 - ~~β's §0 collision note re f-a3 goes stale at W2 rebase~~ — **RESOLVED**, the rename (c623178)
   landed with pr-1b at the W2+W3 close.
-- **F-A3 PR-3/C2's per-subject-account digest-binding is NOT implemented** (measured: none of
-  the thirteen agent bank cores take a directly-named bank-account-id parameter — each
-  references an account only indirectly via a statement/line/match/reconciliation id); only
-  task-binding shipped this round. Closes the cross-task staleness leak; the narrower same-task
-  cross-account leak stays open — a future per-core derivation, with its own test coverage,
-  closes it. *(F-A3 PR-3 third review round, 2026-08-25, PR #343.)*
+- **F-A3 PR-3/C2's per-subject-account digest-binding is NOT implemented, for ANY of the
+  thirteen agent bank cores** (Codex's final leg re-probed after the third round's PR-body note
+  claimed "3 of 13 trivially derivable" — false on re-measurement, corrected: none of the
+  thirteen carries a directly-named bank-account-id parameter). Only task-binding shipped.
+  Closes the cross-task staleness leak; the narrower same-task cross-account leak stays open.
+  **Acceptance criteria to close it, registered as `bank-agency-annexes-2-record.md` Annex K
+  A33** (not merely this line): a derivation path per core, a subject-binding parameter on
+  `_agent_verify_inputs_digest`, and a same-task cross-account negative cell per derivable core.
+  *(F-A3 PR-3 review rounds 3-4, 2026-08-25, PR #343.)*
+- **F-A3 PR-3/C1-bis carries an UNDISCHARGED D1 write-quiesce obligation.** The receipt
+  identity fix lands as its OWN migration — a
+  fix-forward recut-on-recut (`packages/db/migrations/0134_f_a3_pr3_c1bis_receipt_identity.sql`),
+  because 0129 is applied history and applied migrations are
+  immutable (`.claude/rules/db-migrations.md`; the in-place edit was tried and reproducibly
+  trips the runner's checksum-drift abort). It REPLACES `clara._agent_bank_receipt`'s live body
+  for the second time, so it needs a write-quiesce window at ceremony exactly as 0129 did.
+  **Numbered 0134 on the assumption it merges AFTER G1's 0133 — renumber at merge if the train
+  reorders** (nothing in the file depends on its own number; its gate and its test both read the
+  catalog, never a filename or a `schema_migrations` row). *(Fast-follow PR, 2026-08-26.)*
 - **The autonomous `bank_agent` driver, when built, must mint op_keys that either carry
   `taskId` at colon-field 2 (chatTurn_v14's own `bank-{verb}:{taskId}:{segment}:{payload}`
   shape) or contain no colons at all** — `_agent_verify_inputs_digest`'s C2 task-binding falls
