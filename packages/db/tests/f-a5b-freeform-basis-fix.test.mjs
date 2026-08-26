@@ -503,3 +503,74 @@ test("fix.fr.guards-unreachable — ck_freeform_scope_client is what makes the m
   assert.equal(await tryRow("client", `array['${world.clients.A1}']::uuid[]`), null,
     "a one-element client_scope on scope='client' must INSERT — otherwise every refusal above is meaningless");
 });
+
+test("fix.fr.ndims-forced — with the CHECK lifted inside a rolled-back txn, a 2-D client_scope is refused TYPED by the body, never as a raw 0A000", async (t) => {
+  if (gate(t)) return;
+  // WHY THE CELL ABOVE IS NOT ENOUGH (adversary ADV-4, adopted). `guards-unreachable` proves only
+  // that a 2-D row is UNWRITABLE — which cannot distinguish "F3's array_ndims guard works" from
+  // "the row can never exist, so the guard is never asked". Those are different claims, and only
+  // one of them is about 0136. This probes BEHIND the constraint: lift ck_freeform_scope_client,
+  // force the row in, cite it through the body, and require the TYPED refusal.
+  // NOTHING SHIPPED IS WEAKENED: the DROP lives inside a transaction that is ALWAYS rolled back,
+  // on a throwaway rig, and the constraint is asserted back in place afterwards. The product wall
+  // is the thing under test, not something being bypassed for convenience.
+  const c = await getPool().connect();
+  let wrote = null; let outcome = null; let lockFailed = false;
+  try {
+    await c.query("begin");
+    // The DROP takes ACCESS EXCLUSIVE on clara.freeform_read_log. Concurrency is 1 inside this
+    // package, but CI's estate sweep has OTHER packages writing to the same database, so an
+    // unbounded wait here could park on a lock and be read as a hang. Bound it and treat a lock
+    // failure as a loud skip rather than a false red — the truncate-guard discipline
+    // (.claude/rules/db-tests.md), applied to the same hazard in a different disguise.
+    await c.query("set local lock_timeout = '5s'");
+    try {
+      await c.query("alter table clara.freeform_read_log drop constraint ck_freeform_scope_client");
+    } catch (e) {
+      if (e.code === "55P03" || e.code === "40P01") { lockFailed = true; throw e; }
+      throw e;
+    }
+    const r = await c.query(
+      `insert into clara.freeform_read_log
+         (firm_id, credential_id, query_text, purpose, verb, scope, client_scope, acting_actor,
+          via_wake_kind, task_id, op_key, arm_txid, settled_at, outcome, rung_vector,
+          relations_read, row_count, byte_count, duration_ms)
+       values ($1, $2, 'select 1', 'fix.fr forced 2-D probe', 'wake_freeform_read', 'client',
+               array[array[$3::uuid]], $4, 'interactive_client', $5, $6,
+               pg_current_xact_id(), now(), 'ok', '{"statement_shape":"pass"}'::jsonb,
+               array['clara.clients']::text[], 1, 64, 3)
+       returning id`,
+      [world.firms.A, randomUUID(), world.clients.A1, world.users.alice, randomUUID(),
+        `fixfr-2d-${randomUUID()}`]);
+    wrote = String(r.rows[0].id);
+    try {
+      const q = await c.query("select clara._sandbox_client_set($1,$2::jsonb,$3::jsonb) as r",
+        [world.firms.A, basisArr(frBasis("fr", wrote)), JSON.stringify(body("fr"))]);
+      outcome = { code: "NONE", value: q.rows[0].r };
+    } catch (e) { outcome = { code: e.code, message: e.message, detail: e.detail }; }
+  } catch (e) {
+    if (!lockFailed) throw e;
+  } finally {
+    try { await c.query("rollback"); } catch { /* best-effort cleanup only */ }
+    try { await c.query("reset role"); await c.query("reset all"); } catch { /* best-effort */ }
+    c.release();
+  }
+  if (lockFailed) {
+    t.skip("fix.fr.ndims-forced: could not take ACCESS EXCLUSIVE on clara.freeform_read_log within 5s (a concurrent writer holds it) — skipped rather than reported as a guard failure");
+    return;
+  }
+  assert.ok(wrote, "the 2-D row had to be forced past the CHECK or this probe measures nothing");
+  assert.notEqual(outcome.code, "0A000",
+    `a 2-D client_scope must never reach array_position: a raw 0A000 escaped through the body — ${outcome.message}`);
+  assert.equal(outcome.code, "CLR11",
+    `expected F3's typed unnameable-set refusal, got ${outcome.code} ${outcome.message ?? JSON.stringify(outcome.value)}`);
+  assert.match(outcome.detail || "", /sandbox_view_basis_unknown/,
+    "and it carries the same no-oracle token every other unresolved basis gets");
+
+  // THE ROLLBACK HELD: the constraint this probe lifted is back, asserted rather than assumed.
+  const still = await rootQuery(
+    `select count(*)::int n from pg_constraint
+      where conrelid = 'clara.freeform_read_log'::regclass and conname = 'ck_freeform_scope_client'`);
+  assert.equal(still.rows[0].n, 1,
+    "ck_freeform_scope_client must be back after the rollback — this probe may not leave the estate's own wall dropped");
+});

@@ -30,6 +30,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { rootQuery, endPool, asHuman, opk, ROLES, roleQuery } from "./rig-helpers.mjs";
 import { buildWorld } from "./rig-fixtures.mjs";
 import { freshDeltaClient } from "./delta-fixtures.mjs";
@@ -85,29 +86,62 @@ test("B1.1 — a placeholder citing an 'ok' preview-cell basis MINTS, and derive
 test("B1.2 — a placeholder citing a NON-preview_cell basis kind REFUSES sandbox_placeholder_basis_not_cell; the preview_cell twin succeeds", async (t) => {
   if (!ready) return skipHere(t, "the card-1 migration is not applied on this database");
   // `freeform_read` is the only OTHER basis kind that exists, so it is the only fixture that can
-  // reach this wall. Whether it CAN reach it is MEASURED here, never assumed: 0132 requires every
-  // basis element id to match a uuid shape and casts it `::uuid`, while F-A6 PR-1's live
-  // clara.freeform_read_log carries a BIGINT id. On such a chain a freeform_read basis refuses at
-  // an EARLIER wall (`sandbox_view_basis_unknown`, the malformed-id arm), so running the cell would
-  // read a pass off the wrong refusal — the exact shape a green test is supposed to make impossible.
-  const idType = (await rootQuery(
-    `select data_type from information_schema.columns
-      where table_schema='clara' and table_name='freeform_read_log' and column_name='id'`)).rows[0]?.data_type;
-  if (idType !== "uuid") {
-    t.skip(`card 1 B1.2 refusal arm: clara.freeform_read_log.id is ${idType ?? "absent"}, not uuid, so 0132's uuid-shaped basis_ref id can never resolve a freeform_read basis on this chain — the refusal this cell wants is unreachable behind an earlier wall (reported to the conductor; it is F-A5b PR-1's own integration with F-A6 PR-1, not card 1's to move)`);
+  // reach this wall. Whether it CAN reach it is MEASURED here, never assumed — but the ORIGINAL
+  // measurement was a proxy that could never be true, and this is its repair (migration 0136).
+  //
+  // WHAT WAS WRONG. The gate asked `information_schema` whether clara.freeform_read_log.id is
+  // `uuid`, and skipped unless it was. That column is `bigint` and always has been (0002:309), so
+  // the condition was false on EVERY chain that has ever existed: the refusal arm never ran once,
+  // and the skip text named the blocker as "F-A5b PR-1's own integration with F-A6 PR-1" — which
+  // is exactly the work that has now landed. A permanently-false gate is not a measurement; it is
+  // an arm hidden behind a sentence, and card-1's own sandbox_placeholder_basis_not_cell wall sat
+  // unproven by the committed suite because of it.
+  //
+  // WHAT REPLACES IT. The gate now reads the LIVE BODY for 0136's own marker, three-state, the
+  // same shape every other gate in this lane uses: the recut present -> RUN; the pre-0136 ::uuid
+  // arm present -> skip LOUDLY (a freeform basis genuinely does refuse at the earlier malformed-id
+  // wall there, so the cell would otherwise read a pass off the wrong refusal); NEITHER marker ->
+  // do not skip, run and let the assertions speak, because a body nobody recognises is not
+  // evidence of anything.
+  const arm = (await rootQuery(
+    `select (select position($1 in p.prosrc) > 0 from pg_proc p
+               where p.oid = to_regprocedure('clara._sandbox_client_set(uuid,jsonb,jsonb)')) as fixed,
+            (select position($2 in p.prosrc) > 0 from pg_proc p
+               where p.oid = to_regprocedure('clara._sandbox_client_set(uuid,jsonb,jsonb)')) as pre`,
+    ["clara.freeform_read_log where id = v_label_id::bigint",
+      "clara.freeform_read_log where id = v_label_id::uuid"])).rows[0];
+  if (!arm.fixed && arm.pre) {
+    t.skip("card 1 B1.2 refusal arm: migration 0136 is not on this chain, so clara._sandbox_client_set still casts a freeform basis id ::uuid against a bigint column and refuses at the earlier malformed-id wall — this cell's own refusal is unreachable behind it");
   } else {
+    // A REAL, FULLY RESOLVABLE receipt, minted here rather than scavenged from whatever another
+    // battery happened to leave behind. Post-0136 a freeform basis must survive the bigint id
+    // gate, the tenancy conjunct AND the outcome='ok' conjunct before the placeholder wall can be
+    // the thing that refuses. A row failing any of those would refuse EARLIER — which is the very
+    // "pass read off the wrong refusal" the old gate was trying to prevent, now prevented for
+    // real instead of by skipping.
     const read = (await rootQuery(
-      "select id from clara.freeform_read_log where firm_id=$1 limit 1", [world.firms.A])).rows[0];
-    if (!read) {
-      t.skip("card 1 B1.2 refusal arm: no freeform_read_log row exists in firm A on this database to cite");
-    } else {
-      await assert.rejects(
-        mintSandboxView(world.firms.A, world.users.alice, {
-          viewBody: body(placeholderBlock("fr")),
-          basis: basisArr({ label: "fr", kind: "freeform_read", id: read.id }),
-        }),
-        (e) => { assert.equal(e.code, "CLR10"); assert.match(e.detail || "", /sandbox_placeholder_basis_not_cell/); return true; });
-    }
+      `insert into clara.freeform_read_log
+         (firm_id, credential_id, query_text, purpose, verb, scope, client_scope, acting_actor,
+          via_wake_kind, task_id, op_key, arm_txid, settled_at, outcome, rung_vector,
+          relations_read, row_count, byte_count, duration_ms)
+       values ($1, $2, 'select id from clara.clients', 'card1 B1.2 basis fixture',
+               'wake_freeform_read', 'client', array[$3]::uuid[], $4, 'interactive_client', $5, $6,
+               pg_current_xact_id(), now(), 'ok', '{"statement_shape":"pass"}'::jsonb,
+               array['clara.clients']::text[], 1, 64, 3)
+       returning id`,
+      [world.firms.A, randomUUID(), fx.A1.clientId, world.users.alice, randomUUID(),
+        `c1b12-${randomUUID()}`])).rows[0];
+    await assert.rejects(
+      mintSandboxView(world.firms.A, world.users.alice, {
+        viewBody: body(placeholderBlock("fr")),
+        basis: basisArr({ label: "fr", kind: "freeform_read", id: String(read.id) }),
+      }),
+      (e) => {
+        assert.equal(e.code, "CLR10", `${e.code}: ${e.message}`);
+        assert.match(e.detail || "", /sandbox_placeholder_basis_not_cell/,
+          `must refuse at CARD-1'S OWN wall, not at an earlier basis wall — got detail=${e.detail} msg=${e.message}`);
+        return true;
+      });
   }
   // THE TWIN, ALWAYS RUN whichever arm the measurement chose: the same placeholder over a
   // preview_cell basis mints, so the cell always says something about the wall it is named for.
