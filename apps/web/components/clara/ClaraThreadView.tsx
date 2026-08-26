@@ -31,7 +31,7 @@ export function ClaraThreadView({
 }) {
   const t = useTranslations("Clara.thread");
   const [draft, setDraft] = useState("");
-  const { state, sendMessage } = useClaraThread(auth, threadId ?? "");
+  const { state, sendMessage, retryConnection } = useClaraThread(auth, threadId ?? "");
 
   const notSignedIn = state.loadError === "not signed in";
   const busy = state.sendStatus === "sending";
@@ -74,6 +74,14 @@ export function ClaraThreadView({
           </div>
         )}
         {streamStatusLabel(state, t) && <p className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>}
+        {state.stream.streamEndedUnexpectedly && <p className="text-sm text-destructive">{t("streamEndedUnexpectedly")}</p>}
+        {state.stream.retryAvailable && (
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => void retryConnection()}>
+              {t("retry")}
+            </Button>
+          </div>
+        )}
         {state.sendStatus === "error" && state.sendError && (
           <p className="text-sm text-destructive">{t("sendError", { message: state.sendError })}</p>
         )}
@@ -95,8 +103,16 @@ export function ClaraThreadView({
   );
 }
 
-function streamStatusLabel(state: ClaraThreadUiState, t: (key: string) => string): string | null {
+function streamStatusLabel(
+  state: ClaraThreadUiState,
+  t: (key: string, values?: Record<string, string | number | Date>) => string,
+): string | null {
+  if (state.stream.status === "connection-lost") return t("connectionLost");
   if (state.stream.status === "streaming") return t("responding");
-  if (state.stream.status === "detached") return t("reconnecting");
+  if (state.stream.status === "detached") {
+    return state.stream.reconnectAttempt > 0
+      ? t("reconnectingWithAttempt", { attempt: state.stream.reconnectAttempt })
+      : t("reconnecting");
+  }
   return null;
 }

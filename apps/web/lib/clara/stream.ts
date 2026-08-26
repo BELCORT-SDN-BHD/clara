@@ -92,7 +92,7 @@ export function createSseFrameParser(): { push(text: string): SseEvent[] } {
 // 1b. Authority-replacement reducer — events to UI state.
 // ---------------------------------------------------------------------------
 
-export type ClaraStreamStatus = "idle" | "streaming" | "terminal" | "detached";
+export type ClaraStreamStatus = "idle" | "streaming" | "terminal" | "detached" | "connection-lost";
 
 export interface ClaraStreamState {
   status: ClaraStreamStatus;
@@ -106,6 +106,20 @@ export interface ClaraStreamState {
   transcriptParts: ClaraPartLike[] | null;
   taskStatus: string | null;
   detachReason: string | null;
+  /** Consecutive failed (re)attach attempts since the last attach that yielded any
+   *  event (FIX 1). `0` when not reconnecting; the reattach loop bumps this right
+   *  before each backoff sleep, so the UI can show "Reconnecting… (attempt N)". Reset
+   *  to `0` by every real SSE event — a successful attach is evidence the connection
+   *  works again. */
+  reconnectAttempt: number;
+  /** `true` only while the most recent attach closed WITHOUT a `message`, `done`, or
+   *  `detached` event — an ungraceful close (FIX 2), distinct from an explicit,
+   *  graceful `detached`. Cleared by the next real SSE event. */
+  streamEndedUnexpectedly: boolean;
+  /** `true` only once the give-up ceiling (FIX 1) is reached: the reattach loop has
+   *  stopped on its own and a human must retry manually. The manual-retry affordance
+   *  the store exposes to the UI. */
+  retryAvailable: boolean;
 }
 
 export const initialClaraStreamState: ClaraStreamState = {
@@ -114,6 +128,9 @@ export const initialClaraStreamState: ClaraStreamState = {
   transcriptParts: null,
   taskStatus: null,
   detachReason: null,
+  reconnectAttempt: 0,
+  streamEndedUnexpectedly: false,
+  retryAvailable: false,
 };
 
 function isTerminalMessagePayload(data: unknown): data is ClaraTerminalMessagePayload {
@@ -128,17 +145,24 @@ function isDetachedPayload(data: unknown): data is ClaraDetachedPayload {
   return typeof data === "object" && data !== null && "reason" in data;
 }
 
+/** Every real SSE event — whatever else it means — is evidence THIS attach is
+ *  talking to the server: FIX 1's "backoff resets on a successful attach that yields
+ *  any event" and FIX 2's "an ungraceful close is cleared by the next real event"
+ *  both land here, spread into every branch below. */
+const NOT_RECONNECTING = { reconnectAttempt: 0, streamEndedUnexpectedly: false, retryAvailable: false };
+
 /** The one place the authority rule is implemented: a terminal `message` REPLACES
  *  `transcriptParts` wholesale and discards every provisional chunk — it never merges.
  *  Unknown event names are ignored (forward-compatible, never a crash). */
 export function applyClaraStreamEvent(state: ClaraStreamState, event: SseEvent): ClaraStreamState {
   switch (event.event) {
     case "chunk":
-      return { ...state, status: "streaming", provisionalChunks: [...state.provisionalChunks, event.data] };
+      return { ...state, ...NOT_RECONNECTING, status: "streaming", provisionalChunks: [...state.provisionalChunks, event.data] };
     case "message": {
       if (!isTerminalMessagePayload(event.data)) return state; // never guess a shape we didn't see
       return {
         ...state,
+        ...NOT_RECONNECTING,
         status: "terminal",
         transcriptParts: event.data.parts,
         taskStatus: event.data.status,
@@ -146,12 +170,12 @@ export function applyClaraStreamEvent(state: ClaraStreamState, event: SseEvent):
       };
     }
     case "done": {
-      if (!isDonePayload(event.data)) return { ...state, status: "terminal" };
-      return { ...state, status: "terminal", taskStatus: event.data.status };
+      if (!isDonePayload(event.data)) return { ...state, ...NOT_RECONNECTING, status: "terminal" };
+      return { ...state, ...NOT_RECONNECTING, status: "terminal", taskStatus: event.data.status };
     }
     case "detached": {
       const reason = isDetachedPayload(event.data) ? event.data.reason : null;
-      return { ...state, status: "detached", detachReason: reason, provisionalChunks: [] };
+      return { ...state, ...NOT_RECONNECTING, status: "detached", detachReason: reason, provisionalChunks: [] };
     }
     default:
       return state;
@@ -204,33 +228,117 @@ export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<Async
   return readSseEvents(res.body);
 }
 
+// ---------------------------------------------------------------------------
+// 2a. Reconnect backoff (FIX 1) — exponential, capped, jittered, with a give-up
+// ceiling. A `detached` (server-initiated, e.g. a drain window) and an ungraceful
+// close (FIX 2 — no message/done/detached at all) are folded into the SAME policy:
+// neither reattaches with zero delay, and neither retries forever.
+// ---------------------------------------------------------------------------
+
+export interface ReconnectPolicy {
+  /** Delay before the FIRST reattach, in ms. */
+  baseDelayMs: number;
+  /** The exponential curve never exceeds this, in ms. */
+  maxDelayMs: number;
+  /** A small random amount (0..jitterMs) added on top of every delay, so many open
+   *  tabs reattaching after the same drain window don't all land in the same instant. */
+  jitterMs: number;
+  /** Consecutive failed attempts allowed before giving up entirely. */
+  maxAttempts: number;
+}
+
+/** 1s -> 2s -> 4s -> 8s -> 16s -> 30s (cap) -> 30s -> 30s, +0..250ms jitter, give up
+ *  after 8 — roughly the "8 attempts or ~3 minutes" the work order asks for (the
+ *  worst case above sums to ~121s of sleeping before the 9th, refused attempt). */
+export const DEFAULT_RECONNECT_POLICY: ReconnectPolicy = {
+  baseDelayMs: 1000,
+  maxDelayMs: 30_000,
+  jitterMs: 250,
+  maxAttempts: 8,
+};
+
+/** `attempt` is 1-based: the delay BEFORE that attempt is made. Exported so tests can
+ *  independently verify the formula against whatever `onReconnectAttempt` observes. */
+export function backoffDelayMs(attempt: number, policy: ReconnectPolicy = DEFAULT_RECONNECT_POLICY): number {
+  const capped = Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
+  return capped + Math.floor(Math.random() * policy.jitterMs);
+}
+
+async function defaultSleep(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export interface RunClaraTaskStreamOptions extends OpenTaskStreamOptions {
   /** Fires once per (re)attach, right after the stream opens — before any event is
    *  read. Idempotent on the caller's side: fires again on every reattach. */
   onOpen?: () => void;
   onEvent: (event: SseEvent) => void;
+  /** Fires right before each backoff sleep — `attempt` is 1-based (this is the Nth
+   *  consecutive failed attempt), `delayMs` is what's about to be waited. */
+  onReconnectAttempt?: (info: { attempt: number; delayMs: number }) => void;
+  /** Fires when an attach's body ended WITHOUT `message`, `done`, or `detached` at all
+   *  (FIX 2) — an ungraceful close. Fires once per such close, before it is folded
+   *  into the same backoff/counter as an explicit `detached`. */
+  onStreamEndedUnexpectedly?: () => void;
+  /** Fires once the give-up ceiling is reached; no further reattach follows. */
+  onGiveUp?: () => void;
+  /** Injectable delay — defaults to a real `setTimeout`-based sleep. Tests inject a
+   *  fake so backoff is proven without waiting in real time. */
+  sleepImpl?: (ms: number) => Promise<void>;
+  /** Overrides for `DEFAULT_RECONNECT_POLICY`, merged shallowly. */
+  reconnectPolicy?: Partial<ReconnectPolicy>;
 }
 
 /** The detach -> reattach flow. Opens the stream; on a clean `done` it stops. On
- *  `detached` it loops and reattaches (the server replays from index 0, so the next
- *  attach's events are a fresh, complete replay — never a continuation to stitch by
- *  hand). Stops immediately if `signal` is already aborted, and lets a live `fetch`
- *  abort propagate as a rejection (callers race this against their own abort, same as
- *  `apps/dashboard/app/chat/api.ts` `streamTask` callers do). */
+ *  `detached` — or on an ungraceful close with no terminal event at all (FIX 2) — it
+ *  reattaches after a backoff sleep (FIX 1; the server replays from index 0, so the
+ *  next attach's events are a fresh, complete replay — never a continuation to stitch
+ *  by hand), up to `reconnectPolicy.maxAttempts` consecutive failures before giving
+ *  up. Stops immediately if `signal` is already aborted, and lets a live `fetch`
+ *  abort or a non-ok response propagate as a rejection (callers race this against
+ *  their own abort, same as `apps/dashboard/app/chat/api.ts` `streamTask` callers do)
+ *  — attach failures are never retried by this loop, only detaches/ungraceful closes. */
 export async function runClaraTaskStream(opts: RunClaraTaskStreamOptions): Promise<void> {
+  const policy: ReconnectPolicy = { ...DEFAULT_RECONNECT_POLICY, ...opts.reconnectPolicy };
+  const sleep = opts.sleepImpl ?? defaultSleep;
+  let attempt = 0; // consecutive failed attaches since the last one that yielded any event
+
   for (;;) {
     if (opts.signal.aborted) return;
     const events = await openTaskStream(opts);
     opts.onOpen?.();
+    let sawProgress = false; // some event OTHER than the closing `detached` signal itself
     let detached = false;
     for await (const evt of events) {
       opts.onEvent(evt);
       if (evt.event === "detached") {
-        detached = true;
+        detached = true; // the failure/retry signal, not evidence of progress — don't reset on it
         break;
       }
-      if (evt.event === "done") return;
+      sawProgress = true;
+      if (evt.event === "done") return; // clean terminal end — never reattach after it
     }
-    if (!detached) return; // stream ended without an explicit done/detached — stop rather than loop forever
+    // FIX 1: reset backoff only when THIS attach proved itself with real data (a
+    // `chunk`) before it ended. An attach that gets nothing but an immediate
+    // `detached` (the drain-storm case FIX 1 exists for) must NOT reset — every open
+    // tab reattaching, resetting, and immediately detaching again is exactly the
+    // zero-delay hammering this fix removes.
+    if (sawProgress) attempt = 0;
+
+    if (!detached) {
+      // FIX 2: the body closed with no message/done/detached at all — an ungraceful
+      // close. It is folded into the SAME backoff/counter as an explicit `detached`,
+      // never auto-retried beyond the policy below.
+      opts.onStreamEndedUnexpectedly?.();
+    }
+
+    attempt += 1;
+    if (attempt > policy.maxAttempts) {
+      opts.onGiveUp?.();
+      return;
+    }
+    const delayMs = backoffDelayMs(attempt, policy);
+    opts.onReconnectAttempt?.({ attempt, delayMs });
+    await sleep(delayMs);
   }
 }

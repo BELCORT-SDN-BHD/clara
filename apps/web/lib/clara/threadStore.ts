@@ -110,6 +110,38 @@ export const claraThreadStore = {
     setThread(threadId, { stream: applyClaraStreamEvent(current.stream, event) });
   },
 
+  /** FIX 1 — fires right before each backoff sleep. Surfaces the attempt count via
+   *  the SAME "detached" status the UI already renders as "reconnecting" (an
+   *  explicit `detached` event already set that status via `applyStreamEvent`; an
+   *  ungraceful close sets it itself via `markStreamEndedUnexpectedly` below). */
+  markReconnectAttempt(threadId: string, attempt: number): void {
+    const current = state.threads[threadId] ?? emptyThreadState;
+    setThread(threadId, { stream: { ...current.stream, status: "detached", reconnectAttempt: attempt } });
+  },
+
+  /** FIX 2 — an attach's body ended with no message/done/detached at all. Distinct
+   *  from an explicit `detached`: no SSE event carried this, so nothing else sets the
+   *  "reconnecting" status or clears the stale provisional buffer for it. */
+  markStreamEndedUnexpectedly(threadId: string): void {
+    const current = state.threads[threadId] ?? emptyThreadState;
+    setThread(threadId, {
+      stream: { ...current.stream, status: "detached", streamEndedUnexpectedly: true, provisionalChunks: [] },
+    });
+  },
+
+  /** FIX 1 — the give-up ceiling was reached. Reattaching has stopped; only a manual
+   *  retry (`beginRetry` + a fresh `runClaraTaskStream`) can resume it. */
+  markConnectionLost(threadId: string): void {
+    const current = state.threads[threadId] ?? emptyThreadState;
+    setThread(threadId, { stream: { ...current.stream, status: "connection-lost", retryAvailable: true } });
+  },
+
+  /** Clears a given-up stream back to a fresh attach's starting state, for the manual
+   *  "retry" affordance to build its `runClaraTaskStream` call on top of. */
+  beginRetry(threadId: string): void {
+    setThread(threadId, { stream: initialClaraStreamState });
+  },
+
   reset(threadId: string): void {
     setThread(threadId, emptyThreadState);
   },
