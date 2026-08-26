@@ -530,7 +530,9 @@ test("B5.4 — frozen-evaluators.json carries clara.evaluate_metric_v2 with the 
   // now-live body inside the append-only hash lock. A rig replays the chain fresh, so its DB
   // row is ALWAYS undeployed and "manifest agrees with this database" is unsatisfiable
   // post-stamp by construction. The monotonic contract over all four worlds:
-  //   db=false · manifest absent/false -> pre-ceremony: fine.
+  //   db=false · manifest absent/false -> pre-ceremony: fine for the TWO-HALVES rule below;
+  //                                       UNREACHABLE post-W4 — the order-independent
+  //                                       assertion above this table's consumer forbids it.
   //   db=false · manifest true         -> post-live-ceremony rig replay: fine (the stamp
   //                                       records LIVE; witness: wave-f-w4-ceremony-asrun.md).
   //   db=true  · manifest true         -> deployed and locked: fine.
