@@ -71,3 +71,14 @@ re-reading find?"
 > points at §6 and gains no duplicate clause.** That closes the last open item from the 2026-08-22
 > ratification. The 2026-08-22 minute above still reads "`AGENTS.md` stays FLAGGED" — correct on its date,
 > superseded here rather than rewritten.
+
+## 2026-08-27 — the 磨合-window docs batch (ADR-0076 · law 83 · law 79's caveat trued)
+
+> ADR-0076 mints the G1 universal wake-execution engine ruling (digest law 83, new §13), and
+> §5/§10 gain the R4/R5/R7 addenda — all four owner-ruled 2026-08-26
+> (`docs/plan/active/harness-audit-rulings-2026-08-26.md`). **Law 79's as-built caveat is
+> TRUED**: the F-A7 α recut shipped at `0125` (`method in ('human','rule','judgement')`,
+> `0125_f_a7_alpha2_judgement_recut.sql:184,209`), so the caveat no longer says "until F-A7a
+> recuts it" — the `>= 0.95` conjunct stays as R1's harmless failsafe (judgement confidence
+> mints pinned 1.0) until its Backlogged follow-up migration. The 2026-08-23 minute above
+> quotes the pre-recut wording — correct on its date, superseded here rather than rewritten.

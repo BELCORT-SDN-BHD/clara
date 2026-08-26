@@ -113,6 +113,8 @@ These conventions governed the append-only log and still govern this directory:
 
 | [0075](0075-test-data-authority-widened.md) | TEST-DATA AUTHORITY WIDENED: no real client exists before go-live; data is free, gates are walked by the delegate, mechanisms never move | 2026-08-23 | standing | Owner ruling (Tao, 2026-08-23, the alignment grill), amending **ADR-060**'s data authority and widening the 2026-08-22 identity grant. **(1)** Every client in the estate is TEST DATA authorised by its owner — BELCORT's ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION, the synthetic ROME PUBLIC ADVISORY, the Alara/Borneo RLS fixtures — all factory-reset and re-run at the Wave-G e2e. **(2) DATA is free:** delete, reseed, reverse, re-run any client's data, documents, consents and close state, **live DB included**, without asking; the corpus is the owner's three folders and **no oracle exists beyond them or is required**. **(3) GATES are walked by the agent as the owner's DELEGATE** through the REAL audited doors, receipted — law-71 human acts, consent signatures, capability grants, password-bearing acts (secrets env-to-env, **never printed**); **e-filing excluded by nature**. **(4) MECHANISMS never move** — RLS, the attribution walls, receipts, roles/grants, the generic name-only wall are the product under test; weakening one for testing convenience is forbidden (the NARROW reading, owner-confirmed, and the operative clause on any collision). **(5) No client-specific mechanism or documentation for a test client:** hard constraint **12 RETIRED as a named constraint** (the GENERIC "a client may be flagged name-only, never enriched" wall stays — `0062`/`0063` untouched), constraint **13 REWRITTEN** (BELCORT is the operator firm; every other firm/client is a resettable test fixture; never repurpose the synthetic sandbox as a real firm), constraint **14's "expires at beta" STANDS**. **(6)** Every wave's validation still runs in full; nothing is deferred to the e2e except what is e2e by nature, and a Known-issues or Backlog row is the only lawful home for a deferral. Folds as digest **law 82** (§12). |
 
+| [0076](0076-g1-universal-wake-execution-engine.md) | GATE G1 RULED: the universal wake-execution engine closes the stranded-row defect — one engine on the existing `kind='wake'` held projection, `close_prep` GRANDFATHERED as a second registered carrier shape | 2026-08-25 | standing | Owner ruling (Tao, 2026-08-25) on the cross-item register escalated by `bank-agency-gate-record.md` §6 item 1 (blocker B2), shared with F-A4/F-A5/F-A7. A `kind='wake'` `agent_task` is a HELD PROJECTION nothing can execute (`held→cancelled` its only legal transition) — one stranded row per cadence tick per client with no legal exit but a human cancel. **Mechanism (a) — heard, OVERRULED:** a dedicated `agent_tasks.kind` per source (the autodraft/`close_prep` precedent), paying a D1 trigger recut per item, forever. **Mechanism (b) — CHOSEN:** one universal engine on the held-wake projection, matrix delta paid once, `wake_engine_sources` a rows-only registry for every future source; `close_prep`'s already-shipped (`0120`) matrix is GRANDFATHERED, not retrofitted, and folds in as a SECOND, closed-world `direct_queue` carrier — never a third. Mechanism: migration `0133`, merged + W4-ceremonied 2026-08-26 (#349). `wake_engine_sources` ships EMPTY (`bank_agent`/`close_prep` seed rows `enabled=false`) — **F-A3 and F-A4 each owe their own INSERT-and-flip follow-up**, recorded in both lanes' `PROGRESS.md` rows. Folds as digest **law 83** (§13). |
+
 **Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
 owner rulings, so it is preserved as a file rather than dropped; the `a` suffix keeps it
@@ -336,6 +338,8 @@ governs.
 54. **Backup drills:** monthly LIGHT human-assisted + quarterly STRICT; the full-profile
     fresh-project DR drill re-runs quarterly. *(0037/WB-R26, 0020)*
 
+- **The evaluator deploy ceremony is TWO SEPARATE halves, beside law 50.** `deploy-evaluator-version.mjs` flips the DB row's `deployed` flag under the bare migration principal; `check-frozen-evaluators.mjs --lock-deployed` separately stamps the manifest so the deployed body's hash becomes immutable versus `origin/main` — neither substitutes for the other. Exhibit: the 2026-08-24 flip shipped without its manifest lock; caught and fixed 2026-08-26. *(`packages/db/README.md` "Evaluator deploy ceremony"; `docs/ARCHITECTURE.md` Appendix A)*
+
 ## 6 · Data, security and confidentiality posture
 
 55. **The pre-beta data doctrine (0060) IS IN FORCE.** Every firm/client row in the live
@@ -455,6 +459,9 @@ governs.
     PR that touches a closed drill or the pipeline itself, run the sweep by hand (`gh workflow run ci.yml`). Review intensity
     (law 26) is unaffected. *(0073)*
 
+- **A retirement/move PR trues every closed-wave floor pinning the moved surface, in the SAME PR** (minted at PR #352, migration `0129`'s bank-rules retirement outran a stale D-b2 floor at the next sweep) — branch on a migration-STEM witness OR a catalog witness by exact signature (`to_regprocedure`, never a bare name — law 27(3)), assert exact-signature ABSENCE plus a positive control that a surviving overload still resolves. Mechanically documented `.claude/rules/db-tests.md`.
+- **The four-runner CI expansion (`clara-wsl` … `-4`, 2026-08-23) is CONFIRMED STANDING, not provisional** — owner-ruled 2026-08-26, closing `harness-audit-2026-08-23.md` ambiguity #2. *(`docs/ops/ci-runner.md` "Runner count expansion to four")*
+
 ## 11 · The Track-A sitting supplement (folded 2026-08-22; source ADR-0074 — the sitting's other ten rulings bind through the ADR and `docs/plan/active/wave-f-contract.md`)
 
 78. **The human roster is an OPEN REGISTER.** Law 71's seven acts are a RESERVATION, not a census: any act they do not reserve is
@@ -465,8 +472,10 @@ governs.
 79. **Attribution is JUDGEMENT under walls.** Invariant (a) is satisfied by a human click, an exact identifier match, or her own judgement
     — walled by a hard-number contradiction refusal, a name-family collision guard, a correction path raising a named misrouted-egress
     event, and a firm-scoped carrier for the unattributable document. **Unsure → she asks**; a model never scores itself (law 72).
-    **As-built caveat: the live `assert_client_resolved` body still enforces `method in ('human','rule')` and `confidence >= 0.95`
-    (`0018_gate_k_domain.sql:57,62`) until F-A7a recuts it.** *(0074/TA-P7; dissent on file)*
+    **As-built caveat (TRUED 2026-08-27): the F-A7 α recut SHIPPED — the live body now admits `method in ('human','rule','judgement')`
+    (`0125_f_a7_alpha2_judgement_recut.sql:184,209`); the `confidence >= 0.95` conjunct is RETAINED as a harmless failsafe (judgement
+    rows mint pinned at 1.0, `0126`/D-2) until the R1 follow-up migration drops it for `method='judgement'` — owner-confirmed option B,
+    `harness-audit-rulings-2026-08-26.md` R1; tracked in `PROGRESS.md` Backlog.** *(0074/TA-P7; dissent on file)*
 80. **A clock may wake her; law 71 governs what she then does.** ONE time-triggered wake source, no ramp/first-draft/sampling; the
     WORK still triggers on data (a missing statement yields a chase notice, never a fabricated reconciliation); every clocked act
     is receipted; statutory PREPARATION is hers and submission stays human. *(0074/TA-P5; law 21 narrowed to posting belts)*
@@ -476,3 +485,6 @@ governs.
 
 ## 12 · The test-data authority supplement (folded 2026-08-23; source ADR-0075)
 82. **Test data is free; law-71 gates are walked by the DELEGATE; mechanisms NEVER move.** Every client in the estate is test data (reset, reseed, reverse, re-run freely — live DB included); the agent walks law-71's gates as the owner's DELEGATE through the REAL audited doors, receipted, e-filing excluded by nature and secrets never printed; **no mechanism ever moves for testing convenience** (RLS, the attribution walls, receipts, roles/grants, the generic name-only wall — they are the product under test), and nothing client-specific is built or kept for a test client. Full text: `0075-test-data-authority-widened.md`. *(0075; expires at beta with hard constraint 14)*
+
+## 13 · The G1 wake-execution engine supplement (folded 2026-08-27; source ADR-0076)
+83. **One engine, two carrier shapes, forever, unless reopened.** The stranded-row defect (a `kind='wake'` `agent_task` is a HELD PROJECTION nothing can execute) is closed by ONE universal wake-execution engine on the existing held projection, its matrix delta paid once; mechanism (a) — a per-source `agent_tasks.kind` and its own trigger recut, forever — was heard and OVERRULED. `close_prep`'s already-shipped (`0120`) per-kind matrix is GRANDFATHERED as a second, closed-world `direct_queue` carrier, never retrofitted and never a template for a third. `wake_engine_sources` ships EMPTY (`bank_agent`/`close_prep` rows `enabled=false` at birth); registering a new source is INSERT rows only — never another trigger recut — and F-A3/F-A4 each owe their own INSERT-and-flip follow-up. Mechanism: migration `0133`. *(0076)*
