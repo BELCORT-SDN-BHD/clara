@@ -132,13 +132,9 @@
 -- completion on the body it STARTED with and a mint spanning the migration would silently keep
 -- the broken arm. Nothing else in this file writes, drops, grants or alters anything.
 --
--- NUMBERING. Numbers are claimed at MERGE time. G1's 0133 and F-A3 PR-3's 0134 have since
--- MERGED (re-measured against main at 05d4aec, not assumed), so the chain this file lands on is
--- 0132 -> 0133 -> 0134 -> 0136. 0135 is deliberately left as a gap rather than claimed: the
--- runner applies in numeric order and forbids duplicates, not gaps, so the gap is
--- validation-safe, and holding at 0136 cannot collide with a lane that claims 0135 while this
--- PR is in review. Re-confirmed on the merged tree: NEITHER 0133 NOR 0134 touches
--- clara._sandbox_client_set, so this file's exactly-once prestate premise survives them.
+-- NUMBERING -- SETTLED. G1's 0133, F-A3 PR-3's 0134 and card-1's 0135 have all MERGED
+-- (re-measured against main at 07a8455, not assumed), so this file lands on
+-- 0132 -> 0133 -> 0134 -> 0135 -> 0136, with no gap and 0136 correctly above the frontier.
 -- Nothing here, and nothing in the batteries (which gate on the CATALOG, never on a filename or
 -- a schema_migrations row), depends on this file's own number.
 --
@@ -147,33 +143,29 @@
 -- would be decorative.
 --
 -- =====================================================================================
--- MERGE ORDER IS FORCED, AND THIS FILE MUST NOT MERGE FIRST. Card-1's 0135 (unmerged at the
--- time of writing) does a LITERAL `create or replace function clara._sandbox_client_set` -- a
--- full-body rewrite. If 0136 merged first, that CREATE OR REPLACE would silently OVERWRITE this
--- recut and reinstate both defects with no error anywhere. 0135 merges FIRST; this file merges
--- SECOND, rebased onto card-1's actual post-0135 body.
---
--- WHAT THE REBASE MUST DO -- written out in full, because a rebase obligation that lives only in
--- a transcript is one nobody can execute:
---   (1) RE-DERIVE the four search targets against the LIVE post-0135 body read from the catalog,
---       never against 0132's file text. MEASURED against card-1's working file: the id gate,
---       the declaration and the existence probe are byte-identical to 0132's, and the derivation
---       target still matches -- but the freeform arm as a WHOLE is NOT byte-identical, because
---       card-1 DELETED 0132's four-line "opus F7: NULL client_scope guard" comment. The four
---       targets survive only because none of them spans that comment. Draw a whole-block target
---       (the more robust shape) from CARD-1's body, never from 0132's, or it will not match.
---   (2) ADD A POSITIVE POST-CHECK for card-1's own stage-(a) arm. The tail's byte-equality
---       already proves nothing outside the substituted text moved, but that is an INFERRED
---       property; name it instead. After the patch, assert the live body STILL contains
---       `sandbox_placeholder_basis_not_cell`, `placeholder_unknown_key` and
---       `sandbox_placeholder_cell_not_ok`. This is the F-A3/PR-1b lesson exactly -- a CoR built
---       from file text once silently erased a later migration's patch on the same body -- and it
---       is the difference between provably not clobbering a shipped feature and probably not.
---       These markers do NOT exist until 0135 is on the chain, which is why the check belongs to
---       the rebase build and not to this pre-0135 checkpoint.
---   (3) The fix LOGIC below (F1 tenancy, F2 outcome, F3 ndims, the bigint id gate) is unchanged
---       by the rebase and already reviewed. Only the search targets and the recorded pre-image
---       sha move -- and the sha is RECORDED rather than pinned precisely so that it can.
+-- THE 0135 CROSS-PR COLLISION -- RESOLVED, and recorded because the resolution is the only
+-- reason this file is correct. Card-1's 0135 does a LITERAL
+-- `create or replace function clara._sandbox_client_set` -- a full-body rewrite. Had 0136
+-- merged FIRST, that CREATE OR REPLACE would have run afterwards and silently reinstated both
+-- defects with no error anywhere. 0135 merged first (main 07a8455); this file is rebased onto
+-- its ACTUAL merged body, and all three obligations that ordering created are DISCHARGED:
+--   (1) TARGETS RE-DERIVED FROM THE LIVE POST-0135 CATALOG, never from file text -- 0132's or
+--       card-1's. Card-1 restructured this body: it stripped 0132's comments from the
+--       derivation arm (the `-- opus F7:` block is gone), and the pre-image sha moved from
+--       0132's 1260aa61...aa94d43 to 3c641210...057df90f. The two freeform arms are now taken
+--       as WHOLE `elsif` blocks rather than as line-level targets, so the exactly-once guard
+--       keys on each arm's entire shape: any further restructuring aborts this file instead of
+--       letting a narrow match land inside a block that no longer means what it used to.
+--   (2) THE POSITIVE POST-CHECK for card-1's stage-(a) arm is IN (see the patch block's tail and
+--       the census). The byte-equality already implies the arm survived; this NAMES it, which is
+--       the F-A3/PR-1b lesson -- a CoR once silently erased a later migration's patch on the
+--       same body while everything it thought to check still passed.
+--   (3) The fix LOGIC is unchanged from the reviewed round -- F1 tenancy, F2 outcome, F3 ndims,
+--       the bigint id gate, collate "C". Only the targets and the recorded pre-image sha moved,
+--       and the sha is RECORDED rather than literal-pinned precisely so that it could.
+-- ALSO SETTLED BY THE REBASE: 0132's false "F-A6 does not (yet) forbid a NULL client_scope"
+-- sentence is gone from the live body -- card-1 deleted it with the rest of that comment -- so
+-- the N3 correction is now history rather than an excision this file has to perform.
 -- =====================================================================================
 
 do $fa5b_frtypes$
@@ -234,7 +226,21 @@ declare
         detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_label)::text;
     end if;$b1$;
 
-  v_old_c text := $c0$      if not exists(select 1 from clara.freeform_read_log where id = v_label_id::uuid and firm_id = p_firm) then$c0$;
+  -- REBASE (post-0135): the VALIDATION-loop freeform arm, WHOLE. Transcribed from the LIVE
+  -- post-0135 catalog body, never from 0132's or card-1's file text. Targeting the whole `elsif`
+  -- rather than the single `if not exists(...)` line makes the exactly-once guard key on the
+  -- arm's entire shape, so any further restructuring of it aborts this file instead of letting a
+  -- one-line match land inside a block that no longer means what it used to.
+  v_old_c text := $c0$    elsif v_basis_kind = 'freeform_read' then
+      if not v_fa6_scope_present then
+        raise exception 'a freeform-read basis cannot be resolved on this chain yet' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_label,
+            'note','free-read basis kinds are unavailable until F-A6 PR-1 lands (Annex K)')::text;
+      end if;
+      if not exists(select 1 from clara.freeform_read_log where id = v_label_id::uuid and firm_id = p_firm) then
+        raise exception 'a cited freeform read does not resolve in your firm' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_label)::text;
+      end if;$c0$;
   -- F2: `and outcome = 'ok'`. SETTLED IS NOT SUCCEEDED. 0131's receipt records outcome in
   -- ('ok','refused','error') (0131:538); a refused or errored read returned NO ROWS, so grounding
   -- a durable export's narrative on it is a provenance defect against hard constraint 2 -- the
@@ -245,17 +251,44 @@ declare
   -- parallel branch that has to be kept in step. It also SUBSUMES a settled_at conjunct:
   -- ck_freeform_settled (0131:555-561) makes outcome non-null exactly when settled_at is, so
   -- `outcome = 'ok'` already implies the receipt is settled.
-  v_new_c text := $c1$      if not exists(select 1 from clara.freeform_read_log where id = v_label_id::bigint and firm_id = p_firm and outcome = 'ok') then$c1$;
+  v_new_c text := $c1$    elsif v_basis_kind = 'freeform_read' then
+      if not v_fa6_scope_present then
+        raise exception 'a freeform-read basis cannot be resolved on this chain yet' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_label,
+            'note','free-read basis kinds are unavailable until F-A6 PR-1 lands (Annex K)')::text;
+      end if;
+      if not exists(select 1 from clara.freeform_read_log where id = v_label_id::bigint and firm_id = p_firm and outcome = 'ok') then
+        raise exception 'a cited freeform read does not resolve in your firm' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_label)::text;
+      end if;$c1$;
 
-  v_old_d text := $d0$      select scope, client_scope into v_fr_scope, v_fr_client_scope
+  -- REBASE (post-0135): the DERIVATION-loop freeform arm, WHOLE -- `elsif` through the closing
+  -- `end if;` of its own scope chain, INCLUDING the firm arm and the cross_client refusal.
+  -- Transcribed from the LIVE post-0135 catalog body. Two reasons to take the whole block:
+  -- card-1 restructured this arm (it stripped 0132's comments, including the `-- opus F7:`
+  -- block), so a narrow target survives only by where its boundaries happen to fall; and the
+  -- replacement below reproduces the firm and cross_client arms VERBATIM, which makes the tail's
+  -- byte-diff a positive proof that this file left them untouched rather than an inference.
+  v_old_d text := $d0$    elsif v_basis_kind = 'freeform_read' then
+      select scope, client_scope into v_fr_scope, v_fr_client_scope
         from clara.freeform_read_log where id = (v_basis_elem ->> 'id')::uuid and firm_id = p_firm;
       if v_fr_scope = 'client' then
         if v_fr_client_scope is null then
           raise exception 'a client-scoped freeform read carries no client' using errcode = 'CLR11',
             detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref)::text;
         end if;
-        v_client_set := v_client_set || v_fr_client_scope;$d0$;
-  v_new_d text := $d1$      select scope, client_scope into v_fr_scope, v_fr_client_scope
+        v_client_set := v_client_set || v_fr_client_scope;
+      elsif v_fr_scope = 'firm' then
+        v_uses_firm_closure := true;
+        select array_agg(id) into v_firm_roster from clara.clients where firm_id = p_firm;
+        v_client_set := v_client_set || coalesce(v_firm_roster, '{}'::uuid[]);
+      else
+        raise exception 'a cross-client named basis cannot be resolved until F-A6 v2 lands' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref,
+            'note','cross-client named reads are F-A6 v2''s own verb, a separate dependency (Annex K)')::text;
+      end if;$d0$;
+  v_new_d text := $d1$    elsif v_basis_kind = 'freeform_read' then
+      select scope, client_scope into v_fr_scope, v_fr_client_scope
         from clara.freeform_read_log where id = (v_basis_elem ->> 'id')::bigint and firm_id = p_firm and outcome = 'ok';
       if v_fr_scope = 'client' then
         -- client_scope is uuid[] (0131:519), NOT a scalar: the receipt NAMES the set it read
@@ -322,7 +355,16 @@ declare
             using errcode = 'CLR11',
             detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref)::text;
         end if;
-        v_client_set := v_client_set || v_fr_client_scope;$d1$;
+        v_client_set := v_client_set || v_fr_client_scope;
+      elsif v_fr_scope = 'firm' then
+        v_uses_firm_closure := true;
+        select array_agg(id) into v_firm_roster from clara.clients where firm_id = p_firm;
+        v_client_set := v_client_set || coalesce(v_firm_roster, '{}'::uuid[]);
+      else
+        raise exception 'a cross-client named basis cannot be resolved until F-A6 v2 lands' using errcode = 'CLR11',
+          detail = jsonb_build_object('reason','sandbox_view_basis_unknown','label',v_ref,
+            'note','cross-client named reads are F-A6 v2''s own verb, a separate dependency (Annex K)')::text;
+      end if;$d1$;
 
   v_sig text := 'clara._sandbox_client_set(uuid,jsonb,jsonb)';
   v_oid oid; v_def text; v_head text;
@@ -449,7 +491,22 @@ begin
     raise exception '0136: the live body after the recut is NOT the pre-image with only the four intended substitutions applied -- something else moved; investigate before trusting this deploy'
       using errcode='CLR10';
   end if;
-  raise notice '0136: recut applied -- post-image prosrc sha256 = %, byte-diff vs pre-image proves the SOLE changes are the four freeform-arm substitutions (% char(s) added, no other byte moved)',
+  -- =======================================================================================
+  -- POSITIVE POST-CHECK -- CARD-1'S STAGE-(a) PLACEHOLDER ARM SURVIVED THIS RECUT.
+  -- The byte-equality above already implies it: if the placeholder arm had been erased, v_post
+  -- could not equal v_expected. But an IMPLIED property is not a NAMED one, and the F-A3/PR-1b
+  -- lesson is exactly that a CoR can silently erase another migration's patch on the same body
+  -- while every check it thought to run still passes. So this asserts, BY NAME, that 0135's own
+  -- markers are still in the live body after the substitution. It is a positive read of what IS
+  -- there -- never an absence, never a derivation (review law 2).
+  if position('sandbox_placeholder_basis_not_cell' in v_post) = 0
+     or position('placeholder_unknown_key' in v_post) = 0
+     or position('sandbox_placeholder_cell_not_ok' in v_post) = 0 then
+    raise exception '0136: card-1 0135''s placeholder-arm markers are NOT all present in the post-recut body -- this substitution has erased part of another migration''s shipped feature; refusing this deploy'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '0136: recut applied -- post-image prosrc sha256 = %, byte-diff vs pre-image proves the SOLE changes are the four freeform-arm substitutions (% char(s) added, no other byte moved); card-1 0135''s three placeholder-arm markers are POSITIVELY confirmed still present',
     encode(sha256(convert_to(v_post,'UTF8')),'hex'), length(v_post) - length(v_pre);
 end
 $fa5b_frtypes$;
@@ -618,6 +675,16 @@ begin
   -- The Annex-K availability probe keeps its PRESENCE semantics, deliberately (see the header).
   if position($q$where table_schema = 'clara' and table_name = 'freeform_read_log' and column_name = 'scope'$q$ in v_src) = 0 then
     raise exception '0136 census: 0132''s Annex-K availability probe is gone -- this file must not change it'
+      using errcode='CLR10';
+  end if;
+
+  -- 5b. CARD-1'S PLACEHOLDER ARM, re-read INDEPENDENTLY of the post-check inside the patch block
+  --     above (that one reads v_post, the value this file computed; this one re-resolves the
+  --     function from the catalog and reads what the database actually stores).
+  if position('sandbox_placeholder_basis_not_cell' in v_src) = 0
+     or position('placeholder_unknown_key' in v_src) = 0
+     or position('sandbox_placeholder_cell_not_ok' in v_src) = 0 then
+    raise exception '0136 census: card-1 0135''s placeholder-arm markers are not all present in the live body -- this file must not disturb another migration''s arm'
       using errcode='CLR10';
   end if;
 

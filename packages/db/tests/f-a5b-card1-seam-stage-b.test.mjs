@@ -994,3 +994,41 @@ test("B4.12 (M6, cross-period axis) — a `cell` beneath a PERIOD SHIFT is refus
   assert.equal(e3?.code, "CLR10", `${e3?.code}: ${e3?.message}`);
   assert.equal(detailOf(e3).class, "cross_period_cell");
 });
+
+const percentChange = (current, prior) => ({ node: "percent_change", current, prior });
+
+test("B4.12-bis (ride-along from adversary-0135's re-attack) — percent_change over the SAME root-anchored cell is LEGITIMATE and mints ok; the guard refuses the period SHIFT, not binary composition over cells", async (t) => {
+  if (!ready) return skipHere(t, "the card-1 migration is not applied on this database");
+  // WHY THIS CELL EXISTS. B4.12 is a wall of refusals, and every one of its arms would be equally
+  // satisfied by a guard that banned cells beneath ANY binary node — a strictly broader ban that
+  // would silently delete legitimate vocabulary. This is the standing POSITIVE control that tells
+  // the two apart: percent_change composes two cells and is admitted, because it does not move the
+  // period the evaluator stands on. In this vocabulary `lag` is the ONLY shifter, which is exactly
+  // why guard 1 keys on the shift and not on the cell. Proved live by adversary-0135's re-attack.
+  const scope = scopeA1();
+  const X = cellNode(fx.A1.cellId);
+
+  // ---- GUARD 1 IS CORRECTLY SILENT, and the instrument it reads is confirmed live here rather
+  // than assumed: the same bottom-up `cells` counter B4.12's refusals depend on still counts BOTH
+  // operands, so this is a guard that saw two cells and admitted them — not a guard that missed
+  // them. A `cells: 2` with `po: 0` is the precise shape "composed over cells, unshifted".
+  const v = await validateNode(percentChange(X, X), scope);
+  assert.equal(v.po, 0, "percent_change shifts nothing: both operands stay anchored at the composition root");
+  assert.equal(v.cells, 2, "and the cells counter DID see both — the admission is informed, not blind");
+  assert.equal(v.lag, 0, "no lag depth is introduced, which is the whole reason the cross_period_cell wall stays quiet");
+
+  // ---- AND IT EVALUATES. Validation admitting a shape proves only that the shape is well-formed;
+  // the figure has to come out too, or "legitimate" is a claim about the parser rather than about
+  // the product. x versus x is no change, so the value is exactly zero.
+  const r = await evalNode(percentChange(X, X), ctxA1());
+  assert.equal(r.status, "ok", `percent_change(cell, cell) must evaluate, got ${r.status}/${r.reason_key}`);
+  assert.equal(Number(r.numerator), 0, "a cell compared against itself is a zero percent change");
+
+  // ---- THE DIFFERENTIAL TWIN. One term differs — the period shift — and the wall bites. Run here
+  // beside the admission so the pair is read together: if a future edit widened guard 1 into a
+  // blanket cell ban, the cell above goes red; if it narrowed it away, this one does.
+  const e = await raised(() => validateNode(lagN(1, X), scope));
+  assert.equal(e?.code, "CLR10", `the shifted twin must still refuse: ${e?.code}: ${e?.message}`);
+  assert.equal(detailOf(e).class, "cross_period_cell",
+    "and refuse for the SHIFT reason — the two shapes differ in exactly one term, so the reason must name that term");
+});
