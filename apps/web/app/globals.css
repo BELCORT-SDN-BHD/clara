@@ -1,0 +1,216 @@
+/*
+ * ClaraBook semantic tokens — ported from clarabook-frontend (design-asset
+ * archive repo) g5-design-system @ a86e48a, ratified brand system v1.0
+ * (owner ruling Q4, docs/plan/active/mohe-grill-rulings-2026-08-27.md).
+ *
+ * Contract model (docs/01-TOKEN-CONTRACT.md §1):
+ *   approved source value -> foundation token -> semantic role -> component
+ *   alias -> rendered state
+ * Components consume semantic roles (`bg-background`, `text-foreground`,
+ * `border-border`, ...) — never a raw hex value. `interaction` and `focus`
+ * are kept as SEPARATE semantic roles even though their source values
+ * currently match (§3.3): one may change without silently changing the
+ * other. Light theme only for beta (owner ruling Q4 caveat) — no `.dark`
+ * block; `@custom-variant dark` stays defined so primitives keep their dark
+ * variants dormant rather than absent, without this build ever adding a
+ * `.dark` class anywhere.
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:where(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-source-sans);
+  --font-heading: var(--font-source-sans);
+  --font-serif: var(--font-source-serif);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-canvas: var(--canvas);
+  --color-shell: var(--shell);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-ink: var(--ink);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-secondary-ink: var(--secondary-ink);
+  --color-clara: var(--clara);
+  --color-clara-foreground: var(--clara-foreground);
+  --color-clara-muted: var(--clara-muted);
+  --color-focus: var(--focus);
+  --color-interaction: var(--interaction);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-muted: var(--warning-muted);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
+  --color-error-muted: var(--error-muted);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-muted: var(--info-muted);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --spacing-density-compact: var(--density-compact);
+  --spacing-density-default: var(--density-default);
+  --spacing-density-comfortable: var(--density-comfortable);
+  --ease-standard: var(--motion-easing-standard);
+}
+
+:root {
+  color-scheme: light;
+
+  /* Founder-approved core palette (docs/01-TOKEN-CONTRACT.md §3.1) */
+  --identity-canvas: #f7f6f2;
+  --canvas: #ffffff;
+  --shell: #f7f7f5;
+  --surface: #ffffff;
+  --surface-subtle: #f5f6f4;
+  --ink: #202525;
+  --brand: #243b3b;
+  --brand-foreground: #ffffff;
+  --brand-accent: #315e71;
+  --secondary-ink: #4b5353;
+  --muted-readable: #687171;
+  --line: #e1e3df;
+  --interaction: #1d4ed8;
+  --focus: #1d4ed8;
+  --clara: #5b4ea3;
+  --clara-foreground: #ffffff;
+  --clara-muted: #f4f1fb;
+
+  /* Product semantics: identity and interaction stay separate. */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--interaction);
+  --primary-foreground: #ffffff;
+  --secondary: #f2f3f1;
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-subtle);
+  --muted-foreground: var(--muted-readable);
+  --accent: #e8eef7;
+  --accent-foreground: #163d75;
+  --destructive: #b42318;
+  --border: var(--line);
+  --input: #c7c5bd;
+  --ring: var(--focus);
+
+  /* Semantic state colours always accompany text or icon labels. */
+  --success: #216e4e;
+  --success-foreground: #ffffff;
+  --success-muted: #e9f5ef;
+  --warning: #8a4b08;
+  --warning-foreground: #ffffff;
+  --warning-muted: #fff7e6;
+  --error: #b42318;
+  --error-foreground: #ffffff;
+  --error-muted: #fef3f2;
+  --info: var(--brand-accent);
+  --info-foreground: #ffffff;
+  --info-muted: #edf4f7;
+
+  /* Ordered categorical palette; labels remain mandatory. */
+  --chart-1: var(--brand-accent);
+  --chart-2: var(--clara);
+  --chart-3: var(--warning);
+  --chart-4: var(--success);
+  --chart-5: var(--error);
+
+  --radius: 0.625rem;
+  --density-compact: 0.375rem;
+  --density-default: 0.75rem;
+  --density-comfortable: 1rem;
+  --motion-duration-fast: 120ms;
+  --motion-duration-standard: 180ms;
+  --motion-duration-deliberate: 240ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  --sidebar: var(--shell);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0ms;
+    --motion-duration-standard: 0ms;
+    --motion-duration-deliberate: 0ms;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply bg-background font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus);
+    outline-offset: var(--focus-ring-offset);
+  }
+}

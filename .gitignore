@@ -16,6 +16,15 @@ dist/
 out/
 *.tsbuildinfo
 
+# apps/web — Cloudflare Workers build output (@opennextjs/cloudflare) + local
+# wrangler dev state; never committed. wrangler's own local-secrets file
+# (never a real credential in git regardless — constraint 4).
+apps/web/.open-next/
+apps/web/.wrangler/
+apps/web/.dev.vars
+apps/web/.dev.vars.*
+apps/web/cloudflare-env.d.ts
+
 # test / coverage
 coverage/
 .workflow-data/

@@ -1,0 +1,15 @@
+{
+  "Metadata": {
+    "title": "Clara",
+    "description": "Clara — AI-native Agentic Accounting OS for Malaysian accounting firms."
+  },
+  "FirmHome": {
+    "heading": "Firm home",
+    "body": "P1 foundation scaffold — the firm-altitude workspace (Needs-you inbox, client register, firm activity, admin) is built in P3/P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+  },
+  "ClientWorkspace": {
+    "heading": "Client workspace",
+    "body": "P1 foundation scaffold — the client workspace tabs (journals, documents, bank, close, reports, registers, knowledge) are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "clientIdLabel": "Client ID"
+  }
+}
