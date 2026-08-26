@@ -347,6 +347,24 @@ test("fix.fr.tenancy — a receipt naming a client of ANOTHER firm refuses, indi
   assert.ok(!ok.client_set.includes(world.clients.B1), "no foreign client in the widened set either");
 });
 
+test("fix.fr.tenancy-archived — the tenancy wall is STATUS-BLIND: an ARCHIVED client of this firm still derives", async (t) => {
+  if (gate(t)) return;
+  // r1 (adversarial delta re-attack). F1's conjunct is `k.id = c and k.firm_id = p_firm` with NO
+  // status term, and that is REQUIRED: firm_closure counts every clara.clients row for the firm at
+  // ANY status (design §3.2, gate M2/C-21), so a client-pinned derivation that silently dropped
+  // archived clients would DISAGREE with the firm-wide one about the same client — under-covering
+  // exactly where §3.3's recipient wall would then accept the export.
+  // Nothing else in this battery forces that: fx.archived is otherwise cited only through
+  // fix.fr.firm-closure, so a future `and k.status = 'active'` added to F1 would break coverage
+  // with nothing red. This cell is that tripwire, and it costs one receipt.
+  const receipt = await mintReceipt({
+    firm: world.firms.A, scope: "client", clients: [fx.archived], actor: world.users.alice });
+  const out = await mintView(world.firms.A, world.users.alice,
+    body("fr"), basisArr(frBasis("fr", receipt)), "fixfr-ten-archived");
+  assert.deepEqual(out.client_set_exact, [fx.archived],
+    "an ARCHIVED client of this firm is still a client of this firm — the tenancy wall reads tenancy, never status, and must agree with firm_closure's own no-status rule");
+});
+
 // =============================================================================================
 // F2 — SETTLED IS NOT SUCCEEDED (fix round). A refused or errored read returned NO ROWS, so
 // grounding a durable export's narrative on it is a provenance defect against hard constraint 2.

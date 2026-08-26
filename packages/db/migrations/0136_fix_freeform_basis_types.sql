@@ -145,6 +145,35 @@
 -- No statement_timeout pin: this replaces one function body and reads pg_proc and pg_attribute
 -- a handful of times. There is no scan and no lock beyond the body's own, so a timeout here
 -- would be decorative.
+--
+-- =====================================================================================
+-- MERGE ORDER IS FORCED, AND THIS FILE MUST NOT MERGE FIRST. Card-1's 0135 (unmerged at the
+-- time of writing) does a LITERAL `create or replace function clara._sandbox_client_set` -- a
+-- full-body rewrite. If 0136 merged first, that CREATE OR REPLACE would silently OVERWRITE this
+-- recut and reinstate both defects with no error anywhere. 0135 merges FIRST; this file merges
+-- SECOND, rebased onto card-1's actual post-0135 body.
+--
+-- WHAT THE REBASE MUST DO -- written out in full, because a rebase obligation that lives only in
+-- a transcript is one nobody can execute:
+--   (1) RE-DERIVE the four search targets against the LIVE post-0135 body read from the catalog,
+--       never against 0132's file text. MEASURED against card-1's working file: the id gate,
+--       the declaration and the existence probe are byte-identical to 0132's, and the derivation
+--       target still matches -- but the freeform arm as a WHOLE is NOT byte-identical, because
+--       card-1 DELETED 0132's four-line "opus F7: NULL client_scope guard" comment. The four
+--       targets survive only because none of them spans that comment. Draw a whole-block target
+--       (the more robust shape) from CARD-1's body, never from 0132's, or it will not match.
+--   (2) ADD A POSITIVE POST-CHECK for card-1's own stage-(a) arm. The tail's byte-equality
+--       already proves nothing outside the substituted text moved, but that is an INFERRED
+--       property; name it instead. After the patch, assert the live body STILL contains
+--       `sandbox_placeholder_basis_not_cell`, `placeholder_unknown_key` and
+--       `sandbox_placeholder_cell_not_ok`. This is the F-A3/PR-1b lesson exactly -- a CoR built
+--       from file text once silently erased a later migration's patch on the same body -- and it
+--       is the difference between provably not clobbering a shipped feature and probably not.
+--       These markers do NOT exist until 0135 is on the chain, which is why the check belongs to
+--       the rebase build and not to this pre-0135 checkpoint.
+--   (3) The fix LOGIC below (F1 tenancy, F2 outcome, F3 ndims, the bigint id gate) is unchanged
+--       by the rebase and already reviewed. Only the search targets and the recorded pre-image
+--       sha move -- and the sha is RECORDED rather than pinned precisely so that it can.
 -- =====================================================================================
 
 do $fa5b_frtypes$
@@ -522,6 +551,15 @@ begin
   -- array_position is ever evaluated, because array_position raises a raw 0A000 on a 2-D array.
   -- A future edit that collapses the two statements into one boolean expression would reintroduce
   -- exactly that, so the census asserts the ORDER, not merely the presence.
+  -- r2: COUNT BEFORE COMPARING. position() returns the FIRST occurrence, so an ordering check on
+  -- its own would pass vacuously if a SECOND occurrence of either operand were introduced earlier
+  -- in the body. Pinning each to exactly one occurrence is what makes the comparison below mean
+  -- what it says.
+  if (length(v_src) - length(replace(v_src, 'array_ndims(v_fr_client_scope)', ''))) / length('array_ndims(v_fr_client_scope)') <> 1
+     or (length(v_src) - length(replace(v_src, 'array_position(v_fr_client_scope', ''))) / length('array_position(v_fr_client_scope') <> 1 then
+    raise exception '0136 census: array_ndims/array_position on client_scope do not each occur EXACTLY once -- the ordering check below would be ambiguous'
+      using errcode='CLR10';
+  end if;
   if position('array_ndims(v_fr_client_scope)' in v_src) > position('array_position(v_fr_client_scope' in v_src) then
     raise exception '0136 census: array_position on client_scope is evaluated BEFORE the array_ndims dimension test -- a 2-D client_scope would raise a raw 0A000 through the wake wrapper'
       using errcode='CLR10';
@@ -534,6 +572,14 @@ begin
      or position('where k.id = c and k.firm_id = p_firm' in v_src) = 0
      or position('unnest(v_fr_client_scope) c' in v_src) = 0 then
     raise exception '0136 census: the F1 tenancy wall is absent from the client-pinned arm -- a foreign-firm client could enter client_set, and _recipient_covers has no backstop behind it'
+      using errcode='CLR10';
+  end if;
+  -- r2 again: exactly one of each, so "the wall precedes the append" is unambiguous. A SECOND
+  -- append introduced earlier in the body is precisely the shape that would make a bare
+  -- position() comparison lie -- and it is also precisely the shape that would leak.
+  if (length(v_src) - length(replace(v_src, 'unnest(v_fr_client_scope) c', ''))) / length('unnest(v_fr_client_scope) c') <> 1
+     or (length(v_src) - length(replace(v_src, 'v_client_set := v_client_set || v_fr_client_scope;', ''))) / length('v_client_set := v_client_set || v_fr_client_scope;') <> 1 then
+    raise exception '0136 census: the tenancy wall and the client_scope append do not each occur EXACTLY once -- a second append would make the ordering check below vacuous AND would itself be the leak'
       using errcode='CLR10';
   end if;
   if position('unnest(v_fr_client_scope) c' in v_src) > position('v_client_set := v_client_set || v_fr_client_scope;' in v_src) then
