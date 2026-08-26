@@ -171,5 +171,13 @@ export const CLIENT_ROUTES: ClientCommandRoute[] = [
 export function resolveClientIdFromPathname(pathname: string): string | null {
   const match = /^\/clients\/([^/]+)(?:\/.*)?$/.exec(pathname);
   const segment = match?.[1];
-  return segment ? decodeURIComponent(segment) : null;
+  if (!segment) return null;
+  // A malformed percent-encoding ("%E0%A4%A") throws from decodeURIComponent;
+  // this runs in the palette's render body, so an uncaught throw would crash
+  // the whole component over a garbage URL. Garbage in → no client context.
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }
