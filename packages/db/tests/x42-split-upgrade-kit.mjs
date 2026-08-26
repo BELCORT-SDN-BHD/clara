@@ -43,8 +43,8 @@ import {
 // file under the repo's 500-line cap; see that file's header for the full "why". Used by
 // assertB3Floor() below, and re-exported so a drill can ask the same succession question.
 import {
-  RETIREMENT_WITNESS_SIG, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS, sigExists,
-  assertB3ProducerSuccession,
+  RETIREMENT_WITNESS_SIG, RETIREMENT_STEM_RE, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS,
+  sigExists, sigGrantedTo, assertB3ProducerSuccession,
 } from "./x42-b3-retirement-succession.mjs";
 
 export const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
@@ -144,7 +144,10 @@ export const grantedTo = async (fn, role) => (await rootQuery(
   `select 1 from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname=$1
      and has_function_privilege($2, p.oid, 'EXECUTE')`, [fn, role])).rowCount > 0;
 
-export { RETIREMENT_WITNESS_SIG, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS, sigExists };
+export {
+  RETIREMENT_WITNESS_SIG, RETIREMENT_STEM_RE, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS,
+  sigExists, sigGrantedTo,
+};
 
 /** A body with its SQL comments removed — block comments first, then line comments. The house
  *  `stripSqlComments` idiom (x41-surface.test.mjs, tail 3's two-instrument lesson), and the
