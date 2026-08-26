@@ -55,15 +55,46 @@ test("callDoor: a null token throws DoorError(kind: no_session) WITHOUT ever cal
   assert.equal(called, false, "no live session must short-circuit before any network call");
 });
 
+// Review note N8: read.test.ts already covers the default-parameter path;
+// doors.test.ts did not.
+test("callDoor: session defaults to the blessed singleton when not passed explicitly (compiles and resolves no_session with no configured source)", async () => {
+  await withMockedFetch(
+    async () => { throw new Error("fetch must not be called"); },
+    async () => {
+      const { setConfigTimeoutForTests, getConfigTimeoutMs } = await import("./session-accessor");
+      const originalTimeout = getConfigTimeoutMs();
+      setConfigTimeoutForTests(50);
+      try {
+        await assert.rejects(callDoor("approve_entry", { entry_id: "e1" }), (e: unknown) => {
+          assert.ok(isDoorError(e));
+          assert.equal((e as DoorError).kind, "no_session");
+          return true;
+        });
+      } finally {
+        setConfigTimeoutForTests(originalTimeout);
+      }
+    },
+  );
+});
+
 // --- the refusal contract: a CLR-shaped SQLSTATE surfaces typed, verbatim ----
 
-test("callDoor: a governed CLR refusal throws DoorRefusal carrying the SQLSTATE code + message verbatim", async () => {
+// Review note N1 (independent review, MED — binding fix): the namespace-scan
+// alone is THEATER — a mutant `callDoor` body that retries a refusal up to 3
+// times internally (same exported names, same public shape) sailed through it
+// GREEN. `attempts` here is the arm that actually distinguishes the two: it
+// counts every `fetch` call the mocked network sees, so a retrying mutant
+// fails RED (attempts > 1) while the real single-call `callDoor` stays GREEN.
+test("callDoor: a governed CLR refusal throws DoorRefusal carrying the SQLSTATE code + message verbatim, and NEVER retries (attempts === 1)", async () => {
+  let attempts = 0;
   await withMockedFetch(
-    async () =>
-      jsonResponse(
+    async () => {
+      attempts += 1;
+      return jsonResponse(
         { code: "CLR23", message: "CLR23: a payable line needs a resolved vendor.", details: '{"reason":"unresolved_vendor"}' },
         400,
-      ),
+      );
+    },
     async () => {
       await assert.rejects(
         callDoor("approve_entry", { entry_id: "e1" }, { session: fakeSession("tok") }),
@@ -80,13 +111,10 @@ test("callDoor: a governed CLR refusal throws DoorRefusal carrying the SQLSTATE 
       );
     },
   );
+  assert.equal(attempts, 1, "a DoorRefusal must be surfaced on the FIRST fetch — never retried, even once");
 });
 
-test("callDoor: NEVER retried — this module exposes no retry helper (a refusal is retired only by a fresh human call)", () => {
-  // Structural proof, not a runtime one: callDoor's own module surface has
-  // exactly one call-shaped export (`callDoor`) and no `retry`/`callDoorWithRetry`
-  // sibling — asserted here so a future addition trips this test, not just a
-  // silent reviewer.
+test("callDoor: no retry-shaped export exists on the module surface (a secondary, non-binding signal — see the attempt-counter test above for the real proof)", () => {
   const retryLike = Object.keys(doorsModule).filter((k) => /retry/i.test(k));
   assert.deepEqual(retryLike, [], "doors.ts must not grow a retry-shaped export — a refusal is never auto-retried");
 });

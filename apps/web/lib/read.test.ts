@@ -183,13 +183,18 @@ test("getRows: session defaults to the blessed singleton when not passed explici
   await withMockedFetch(
     async () => { throw new Error("fetch must not be called"); },
     async () => {
-      const { setConfigTimeoutForTests } = await import("./session-accessor");
+      const { setConfigTimeoutForTests, getConfigTimeoutMs } = await import("./session-accessor");
+      const originalTimeout = getConfigTimeoutMs();
       setConfigTimeoutForTests(50);
-      await assert.rejects(getRows("documents"), (e: unknown) => {
-        assert.ok(isReadError(e));
-        assert.equal((e as ReadError).kind, "no_session");
-        return true;
-      });
+      try {
+        await assert.rejects(getRows("documents"), (e: unknown) => {
+          assert.ok(isReadError(e));
+          assert.equal((e as ReadError).kind, "no_session");
+          return true;
+        });
+      } finally {
+        setConfigTimeoutForTests(originalTimeout); // review note N7: never leave the shared module's timeout mutated
+      }
     },
   );
 });

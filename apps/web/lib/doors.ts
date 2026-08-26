@@ -28,6 +28,7 @@
 
 import { pgrestRpc, WireError, isRefusalError } from "./wire";
 import { sessionTokenAccessor } from "./session-accessor";
+import { kindForStatus, type WireErrorKind } from "./wire-error-kind";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 /** A governed refusal — literally wire.ts's `RefusalError` class, re-exported
@@ -42,15 +43,11 @@ import type { SessionTokenAccessor } from "@/lib/session";
  *  DETAIL discriminant, when present) + `status`. */
 export { RefusalError as DoorRefusal, isRefusalError as isDoorRefusal } from "./wire";
 
-export type DoorErrorKind =
-  | "no_session"
-  | "unauthenticated"
-  | "forbidden"
-  | "not_found"
-  | "server_error"
-  | "transport"
-  | "malformed"
-  | "unexpected";
+/** SOURCED from ./wire-error-kind.ts (shared with read.ts's `ReadErrorKind`;
+ *  see that module's header for why it lives there rather than being
+ *  re-exported from either peer). Re-exported under this name so a doors.ts
+ *  consumer keeps its own vocabulary ("a door error's kind"). */
+export type DoorErrorKind = WireErrorKind;
 
 /** Every OTHER door failure — transport, auth, or malformed — distinct by
  *  construction from a `DoorRefusal`: this class and `RefusalError` never
@@ -68,16 +65,6 @@ export class DoorError extends WireError {
 
 export function isDoorError(e: unknown): e is DoorError {
   return e instanceof DoorError;
-}
-
-function kindForStatus(status: number | null): DoorErrorKind {
-  if (status === null) return "transport";
-  if (status === 401) return "unauthenticated";
-  if (status === 403) return "forbidden";
-  if (status === 404) return "not_found";
-  if (status >= 200 && status < 300) return "malformed"; // the only way an error carries a 2xx
-  if (status >= 500) return "server_error";
-  return "unexpected";
 }
 
 export type CallDoorOptions = {
@@ -102,10 +89,25 @@ export async function callDoor<T = unknown>(
   opts: CallDoorOptions = {},
 ): Promise<T> {
   const session = opts.session ?? sessionTokenAccessor;
+  // `!token`, not `token === null` (review note N3): matches wire.ts's own
+  // `requireToken` guard, so an empty-string token classifies the SAME way
+  // here as it eventually would inside `pgrestRpc` — never a mismatched
+  // "no_session" here vs "transport" there for the identical input.
   const token = await session.getAccessToken();
-  if (token === null) {
+  if (!token) {
     throw new DoorError(`${fn}: not authenticated — no live session`, { status: null, kind: "no_session" });
   }
+  // TOCTOU note (review note N4, record only): `session.getAccessToken()` is
+  // called a SECOND time inside `pgrestRpc`'s own `requireToken` — a token
+  // that goes null BETWEEN the two reads (e.g. a sign-out racing this call)
+  // surfaces as a plain `WireError("no live session")` from THAT call
+  // instead, classified below into `kind: "transport"` (that WireError
+  // carries `status: null`) rather than this function's own explicit `kind:
+  // "no_session"` — a narrow, low-consequence mislabel (rendered kind
+  // differs; the plain-language reason does not), not a security gap. The
+  // safety invariant this check exists for — zero governed calls ever
+  // attempted without a token — holds regardless of which read observes the
+  // null: `pgrestRpc` re-checks before it ever calls `fetch` too.
   try {
     return (await pgrestRpc(fn, args, session, opts.signal)) as T;
   } catch (e) {

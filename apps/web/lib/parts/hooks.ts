@@ -17,6 +17,14 @@
 //     where that is free (the cardHooks.ts `load` discipline): a stable
 //     identity is ordinary React perf hygiene, not a correctness requirement
 //     here any more.
+//   - review note N6: dropping the `[loader]` dependency also dropped the
+//     dashboard precedent's re-hydrate-ON-LOADER-CHANGE trigger. A NEW
+//     loader identity alone never re-triggers hydration any more — only a
+//     null<->present `session` transition does (see `hasSession` below). A
+//     card whose captured ids CHANGE (e.g. the user picks a different
+//     document) must be React-`key`ed by those ids (unmount/remount), or
+//     call `reload()` itself on the change — it must not rely on merely
+//     passing a differently-scoped `loader` to this hook.
 //   - `session` SHOULD be a referentially STABLE SessionTokenAccessor. Import the
 //     blessed singleton `sessionTokenAccessor` from ../session-accessor.ts — never
 //     construct a fresh accessor object literal inline at a call site

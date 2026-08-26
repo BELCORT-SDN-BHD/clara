@@ -38,39 +38,16 @@
 
 import { pgrestSelect, WireError, RefusalError } from "./wire";
 import { sessionTokenAccessor } from "./session-accessor";
+import { kindForStatus, type WireErrorKind } from "./wire-error-kind";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-/** Coarse HTTP-status taxonomy a card can branch on without inspecting a raw
- *  number. Derived from `WireError`/`RefusalError`'s own already-classified
- *  `.status` (never from message text — "spelling is not identity"):
- *   - "no_session"      — `getRows` was never even attempted; law 2's absence
- *                          posture (never a fabricated request).
- *   - "unauthenticated" — 401, an expired/invalid session JWT.
- *   - "forbidden"       — 403, an RLS/grant refusal — a real relation exists,
- *                          this role cannot read it. Reads carry no CLR code
- *                          (those only ride RPC writes, see doors.ts).
- *   - "not_found"       — 404: PostgREST's schema cache does not expose this
- *                          relation (dashboard precedent, reportsApi.ts: the
- *                          same signal for "not in the exposed schema" and "no
- *                          grant yet" — both honestly mean "not reachable
- *                          today", rendered explicitly, never a crash).
- *   - "server_error"    — 5xx.
- *   - "transport"       — `fetch` itself failed, or Supabase isn't configured.
- *   - "malformed"       — a 2xx response whose body did not parse as JSON (the
- *                          only path that reaches here with a 2xx status — a
- *                          real HTTP failure never carries one).
- *   - "unexpected"      — any other status (e.g. a raw 400 with no CLR body);
- *                          reads don't expect this, but it renders honestly
- *                          rather than being silently absorbed elsewhere. */
-export type ReadErrorKind =
-  | "no_session"
-  | "unauthenticated"
-  | "forbidden"
-  | "not_found"
-  | "server_error"
-  | "transport"
-  | "malformed"
-  | "unexpected";
+/** The coarse HTTP-status taxonomy `ReadError` carries — SOURCED from
+ *  `./wire-error-kind.ts` (shared with doors.ts's `DoorErrorKind`; see that
+ *  module's own header for why it lives there rather than being re-exported
+ *  from either peer). Re-exported under this name so a read.ts consumer keeps
+ *  its own vocabulary ("a read error's kind") without reaching into the
+ *  shared module directly. */
+export type ReadErrorKind = WireErrorKind;
 
 /** A read failure, typed — parallel naming to wire.ts's `WireError`, whose
  *  conventions this class stays a genuine SUBTYPE of: `instanceof WireError`
@@ -90,16 +67,15 @@ export function isReadError(e: unknown): e is ReadError {
   return e instanceof ReadError;
 }
 
-function kindForStatus(status: number | null): ReadErrorKind {
-  if (status === null) return "transport";
-  if (status === 401) return "unauthenticated";
-  if (status === 403) return "forbidden";
-  if (status === 404) return "not_found";
-  if (status >= 200 && status < 300) return "malformed"; // the only way an error carries a 2xx
-  if (status >= 500) return "server_error";
-  return "unexpected";
-}
-
+/** DELIBERATE (review note N5): a read failure whose body happens to carry a
+ *  CLR-shaped code loses its REFUSAL identity here — `toReadError` flattens
+ *  both `WireError` and `RefusalError` inputs into a plain `ReadError`; the
+ *  code survives only as `.pgCode`, never as a distinguishable refusal. Reads
+ *  have no refusal concept — RLS-scoped table/view GETs don't raise governed
+ *  CLR refusals, only RPC writes do (doors.ts's `DoorRefusal`) — so a CLR-
+ *  shaped body reaching here would be a structural surprise, not a real
+ *  business refusal to preserve typed; this function's job is to fold it into
+ *  the same honest, renderable shape as any other read failure. */
 function toReadError(e: WireError | RefusalError): ReadError {
   return new ReadError(e.message, { status: e.status, pgCode: e.pgCode, kind: kindForStatus(e.status) });
 }
@@ -144,10 +120,26 @@ function buildPathAndQuery(path: string, opts: GetRowsOptions): string {
  *  — inherited directly from `pgrestSelect`'s own carve-out. */
 export async function getRows<T>(path: string, opts: GetRowsOptions = {}): Promise<T[]> {
   const session = opts.session ?? sessionTokenAccessor;
+  // `!token`, not `token === null` (review note N3): matches wire.ts's own
+  // `requireToken` guard, so an empty-string token classifies the SAME way
+  // here as it eventually would inside `pgrestSelect` — never a mismatched
+  // "no_session" here vs "transport" there for the identical input.
   const token = await session.getAccessToken();
-  if (token === null) {
+  if (!token) {
     throw new ReadError(`getRows(${path}): not authenticated — no live session`, { status: null, kind: "no_session" });
   }
+  // TOCTOU note (review note N4, record only): `session.getAccessToken()` is
+  // called a SECOND time inside `pgrestSelect`'s own `requireToken` — a
+  // token that goes null BETWEEN the two reads (e.g. a sign-out racing this
+  // call) surfaces as a plain `WireError("no live session")` from THAT call
+  // instead, which `toReadError` still folds into `kind: "transport"` below
+  // (that WireError carries `status: null`) rather than this function's own
+  // explicit `kind: "no_session"` — a narrow, low-consequence mislabel
+  // (rendered kind differs; the plain-language reason does not), not a
+  // security gap. The safety invariant this check exists for — zero fetches
+  // ever attempted without a token — holds regardless of which of the two
+  // reads observes the null: `pgrestSelect` re-checks before it ever calls
+  // `fetch` too.
   try {
     return await pgrestSelect<T>(buildPathAndQuery(path, opts), session, opts.signal);
   } catch (e) {
