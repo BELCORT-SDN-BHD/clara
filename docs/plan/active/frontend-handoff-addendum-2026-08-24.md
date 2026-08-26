@@ -363,3 +363,35 @@ surface:
 7. **F-A7 β's merge slot (W2/W3) is not fixed.** Poll `PROGRESS.md`'s F-A7 lane row, not this
    file, for the actual landing window before you flip the filing-clarification card from
    "coming soon" to "live".
+
+## 7 · 2026-08-26 owner rulings widen the charter
+
+The owner ruled nine cards the night of the 2026-08-26 harness-alignment batch. Four widen
+this addendum's own scope; full text and the other five (which do not touch the frontend
+build) are in `docs/plan/active/harness-audit-rulings-2026-08-26.md` — read that file for the
+complete ruling record, this section only summarizes what changed for this addendum.
+
+1. **The three-tier firm model — ALL THREE tiers' screens build in 磨合, complete, no
+   re-work.** Tier 1 (staff invite + firm RBAC) and Tier 2 (operator-approved firm creation)
+   go LIVE at 磨合. **Tier 3 (self-serve PAID firm creation) is scoped for 磨合 UI but does not
+   go LIVE until beta** — build its screens now, but the self-serve tenant-creation door
+   itself takes its own design gate and security review before it is wired live (rulings
+   file, card R8b; the conductor's dissent is on file about pulling pricing, the per-firm DPA
+   e-sign flow, and anti-abuse controls into the beta critical path).
+2. **F-A7b client onboarding is now a JOINT design gate** — UI and backend contract designed
+   together in the 磨合 session, not sequenced the way this addendum's §0 otherwise assumes
+   for other lanes. Variable-client-materials playbooks (what the UI offers when a new
+   client's documents don't fit the standard interview shape) are named must-answer questions
+   in that gate. Wave-G's e2e acceptance corpus gains a named scenario: unknown-counterparty
+   invoice → held in an unattributed carrier → Clara proposes onboarding → interview → doors
+   signed → client born → document auto-attributes (rulings file, card R8a).
+3. **Pricing shape is RULED**: base monthly tier per firm + metered overage (F-A9's
+   `llm_usage_events` ledger is the substrate). Amounts are NOT ruled — a dedicated pricing
+   sitting owns them, and any billing/pricing UI built in 磨合 should build against the SHAPE
+   only, never a guessed number (rulings file, card R8c).
+4. **The `/ready` storage write probe** — a small backend PR, not a frontend item — ships in
+   磨合 too; unrelated to the OS surface, but worth knowing the backend session is carrying it
+   the same window (rulings file, card R9).
+
+None of the above changes §0's settled decisions or the §1-§5 verb inventory as written; they
+add scope, they do not narrow anything already committed here.
