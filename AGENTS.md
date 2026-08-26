@@ -23,7 +23,7 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · harness-links · pinned-ids · dispatch-model-guard · eslint
+pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · harness-links · dsn-pipe selftests · pinned-ids · dispatch-model-guard · eslint (scripts + reporting-render)
 pnpm build       # nitro runtime + next dashboard
 pnpm test        # per-package tests
 ```
@@ -52,7 +52,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
    argv. The leak-scan and gitleaks gates enforce it.
 5. **Every dispatch pins an explicit `model`.** Omission silently inherits Fable, which is
    forbidden. Codex lanes are `gpt-5.6-sol`. Named and built-in Workflows count as dispatches.
-6. **Grill until crystal-clear before a non-trivial build** (`/grillme`, as many rounds as it
+6. **Grill until crystal-clear before a non-trivial build** (`/grilling`, as many rounds as it
    takes). Ambiguity is resolved before code, not during review.
 7. **Query the codebase graph before you grep** — roughly 100× cheaper for where/what/
    who-calls; drill in with Read once it points you at a file. Manual:
@@ -94,9 +94,10 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
 | Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
-| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/`(make sure the files are arranged correctly ) |
+| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/` (keep new documents correctly filed under `active/`/`completed/` per the index's own path-stability convention) |
 | Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
+| Path-scoped mechanical rules that bind edits under their own paths (migrations, db-tests, handoffs, runtime-workflows) | `.claude/rules/` |
 | Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
 | Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
@@ -128,7 +129,7 @@ any genuinely destructive or irreversible operation — a DROP on shared state, 
 teardown. ADR-060's data authority is the one standing exception, and it is DATA-scoped
 (constraint 14): resetting test books is yours; the mechanisms under test are not.
 
-**Always query the newest, advanced, updated tech stack's official docs** like *Context7* or internet official sources before building or do the devolepment, AVOID any stale standard or old docs being used or referred in development.
+**Always query the newest, advanced, updated tech stack's official docs** like *Context7* or internet official sources before building or doing development, AVOID any stale standard or old docs being used or referred in development.
 
 **The three review and evidence laws** (minted 2026-08-06; each cost real money to learn):
 
@@ -175,9 +176,11 @@ never lets one silently pass.
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
 leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches
 code additionally gets, in parallel jobs
-(ADR-0073): typecheck/build + the worker-path gate, the deploy-onto-existing check + the
-estate suite (migrate → seed → every package's tests), the live-behavior e2es + the DR
-round-trip, and the render drill — all against throwaway `postgres:17` service containers.
+(ADR-0073): typecheck/build + the worker-path gate (no database of its own), the
+deploy-onto-existing check + the estate suite (migrate → seed → every package's tests,
+against a throwaway `postgres:17` service container), the live-behavior e2es + the DR
+round-trip (a second, independent `postgres:17` pair), and the render drill (no database
+of its own).
 **The closed-wave upgrade/contract drills and the D-b frontier matrix run on the weekly
 sweep + manual dispatch only** (ADR-0073; after merging a PR that touches a closed drill or
 the pipeline itself, run `gh workflow run ci.yml` by hand). A docs-only diff skips the code
