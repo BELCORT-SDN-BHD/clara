@@ -67,6 +67,14 @@ export const PART_CATALOG = {
       },
       {
         type: "je_review",
+        entry_id: "entry-2222",
+        revision_token: "rev-2222",
+        client_id: "client-1111",
+        document_id: "doc-2222",
+        provenance_tier: "verified",
+      },
+      {
+        type: "je_review",
         entry_id: "entry-3333",
         revision_token: "rev-3333",
         client_id: "client-1111",

@@ -80,16 +80,12 @@ test("act() re-reloads after a successful mutation — never applies an optimist
   }
 });
 
-// Ported behavior, verified against the source (cardHooks.ts:37/54 both
-// unconditionally `setErr(null)` on a SUCCESSFUL reload): the freshest real read
-// always wins, even over an error `act()` just surfaced — reload() runs again
-// after a failed act() specifically so a read that still succeeds (the write
-// failed, but the row is fine) does not leave a stale error banner up forever.
-// A caller that needs the failure message to persist visibly through a
-// SUCCEEDING follow-up read must capture it locally in its own `onOk`-adjacent
-// handling — this hook's `err` field always reflects the LATEST reload/act
-// outcome, never a cached one.
-test("act() re-reloads after a FAILED mutation too — the DB may have partially applied — and a follow-up reload that SUCCEEDS clears the error (the freshest read always wins)", async () => {
+// FIX-ROUND finding 1 (HIGH, was a regression from the ported source): a
+// governed refusal `act()` surfaces is STICKY across the follow-up reload it
+// triggers — a read that still succeeds (the write failed, but the row is fine)
+// must NOT silently erase the refusal the user just saw. Retired only by the
+// NEXT act(), or by the follow-up reload itself failing (see the next test).
+test("act() re-reloads after a FAILED mutation too — the DB may have partially applied — and a follow-up reload that SUCCEEDS does NOT erase the standing error (sticky refusal)", async () => {
   let calls = 0;
   const loader = async () => { calls += 1; return { generation: calls }; };
   const sess = session();
@@ -103,7 +99,42 @@ test("act() re-reloads after a FAILED mutation too — the DB may have partially
     });
     assert.equal(calls, 2, "a failed act() must still trigger a REAL second reload — the DB may have partially applied");
     assert.deepEqual(h.current.data, { generation: 2 }, "data still comes from the fresh reload, never fabricated from the failure");
-    assert.equal(h.current.err, null, "a follow-up reload that itself succeeds clears the transient action error — the latest real read is authoritative");
+    assert.equal(h.current.err, "the governed write refused", "a follow-up reload that itself SUCCEEDS must not erase the action's own refusal — the write failing is real news even though the row still reads fine");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// THE EXACT SCENARIO THE REVIEW NAMED: a RefusalError-throwing act(), followed by
+// a loader that SUCCEEDS on the post-act reload — clr (the badge a card renders)
+// must survive, not just err.
+test("[fix-round finding 1] a RefusalError from act(), followed by a SUCCEEDING reload, leaves clr standing — a card's refusal badge survives", async () => {
+  let calls = 0;
+  const loader = async () => { calls += 1; return { generation: calls }; };
+  const sess = session();
+  const h = await renderHook(() => useHydratedPart(sess, loader));
+  try {
+    await h.settle();
+    assert.deepEqual(h.current.data, { generation: 1 });
+    await h.act(async () => {
+      await h.current.act(async () => {
+        throw new RefusalError("CLR21", "CLR21: the proposed lines do not match the machine-corroborated total.", {
+          reason: "amount_conflict", status: 400, pgCode: "CLR21", codeSource: "sqlstate",
+        });
+      });
+    });
+    assert.equal(calls, 2, "the follow-up reload really ran (and succeeded)");
+    assert.deepEqual(h.current.data, { generation: 2 }, "the record itself still hydrates fine");
+    assert.equal(h.current.err, "CLR21: the proposed lines do not match the machine-corroborated total.", "the refusal message survives — this is what a card renders");
+    assert.deepEqual(h.current.clr, { code: "CLR21", reason: "amount_conflict" }, "the CLR badge survives — this is what the review's finding named specifically");
+    // Retired by the NEXT act(), even one that itself succeeds.
+    await h.act(async () => {
+      await h.current.act(async () => {
+        /* a later, successful action */
+      });
+    });
+    assert.equal(h.current.err, null, "the NEXT act() call retires the standing refusal");
+    assert.equal(h.current.clr, null);
   } finally {
     await h.unmount();
   }
@@ -137,7 +168,9 @@ test("act() re-reloads after a FAILED mutation, and when the reload ALSO fails, 
 
 test("a RefusalError from the loader sets clr with code+reason; a plain WireError leaves clr null", async () => {
   const refusing = async () => {
-    throw new RefusalError("CLR21", "CLR21: amounts do not match.", { reason: "amount_conflict", status: 400 });
+    throw new RefusalError("CLR21", "CLR21: amounts do not match.", {
+      reason: "amount_conflict", status: 400, pgCode: "CLR21", codeSource: "sqlstate",
+    });
   };
   const sess1 = session();
   const h1 = await renderHook(() => useHydratedPart(sess1, refusing));
@@ -162,3 +195,40 @@ test("a RefusalError from the loader sets clr with code+reason; a plain WireErro
     await h2.unmount();
   }
 });
+
+// FIX-ROUND finding 2 (HIGH): a fresh accessor object built every render used to
+// drive an UNBOUNDED reload loop (measured: 4GB heap OOM) — `reload`'s useCallback
+// closed over `session` by identity, so a churning accessor changed `reload`'s own
+// identity every render, re-firing the mount effect forever. The hook now reads the
+// accessor via a ref and keys the mount effect on `hasSession` (a primitive
+// boolean) instead — this test is the ANTI-PATTERN itself (a fresh accessor per
+// render, exactly what the header tells consumers never to do), asserting the hook
+// merely under-performs (no free memoization) rather than storming. `{ timeout:
+// 5000 }` is a deliberate fail-FAST safety net, not a tuning knob: if this
+// regresses, the correct outcome is a fast, clean test failure — never a repeat of
+// the multi-minute, multi-GB crash this fix-round measured on the pre-fix code.
+test(
+  "a fresh accessor object built every render does not storm the reload effect (bounded loader calls under identity churn)",
+  { timeout: 5000 },
+  async () => {
+    let calls = 0;
+    const loader = async () => { calls += 1; return { seen: calls }; };
+    // Deliberately the anti-pattern the header warns against: session() returns a
+    // NEW object literal on every invocation, and the render callback below calls
+    // it fresh on every render (unlike every other test in this file, which hoists
+    // ONE session object outside the render callback).
+    const h = await renderHook(() => useHydratedPart(session(), loader));
+    try {
+      await h.settle();
+      await h.settle();
+      await h.settle();
+      assert.ok(
+        calls <= 3,
+        `loader call count must stay bounded under accessor identity churn, got ${calls} (a storm would run into the thousands, then OOM)`,
+      );
+      assert.ok(h.current.data !== null, "despite the churn, the hook still hydrates successfully — it degrades to 'no storm', not 'broken'");
+    } finally {
+      await h.unmount();
+    }
+  },
+);

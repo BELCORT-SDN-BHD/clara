@@ -21,6 +21,14 @@
 // every wire call late-bind the freshest token without every caller threading one
 // through by hand, and lets a test inject a fixed/failing accessor with no real
 // session at all.
+//
+// FIX-ROUND (independent review, 2 MED findings): every `fetch` and every
+// `res.json()` parse — on BOTH the failure path (already handled, `wireError`) and
+// the SUCCESS path — is now wrapped so a network failure or a malformed body always
+// surfaces as a typed WireError, never a raw unhandled rejection; and RefusalError
+// now carries `pgCode`/`codeSource` so a REAL governed SQLSTATE is distinguishable
+// from a coincidental message-regex match (e.g. migration 0011's self-test probe,
+// `code: "ZA011", message: "... CLR05 probe rollback"` — not a real refusal).
 
 import type { SessionTokenAccessor } from "./session-contract";
 
@@ -49,6 +57,17 @@ export function parseClrCode(code?: string, message?: string): string | null {
   return (message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
 }
 
+/** Whether a `parseClrCode` match came from the SQLSTATE itself ("sqlstate" —
+ *  trustworthy: PostgREST reported `body.code` as a CLR-shaped errcode) or only from
+ *  the defensive message-regex fallback ("message" — a coincidental token loose in
+ *  free text, e.g. migration 0011's self-test probe `code: "ZA011", message: "...
+ *  CLR05 probe rollback"`, which is NOT a governed refusal). RefusalError.codeSource
+ *  carries this same discriminant; exported so it can be checked independently of a
+ *  live classification. */
+export function clrSource(code?: string): "sqlstate" | "message" {
+  return code && /^CLR\d{2}$/.test(code) ? "sqlstate" : "message";
+}
+
 /** The reason discriminant rides in the exception DETAIL as a json object. Defensive parse. */
 export function parseReasonToken(details?: string): string | null {
   if (!details) return null;
@@ -68,19 +87,37 @@ export class RefusalError extends Error {
   readonly code: string;
   readonly reason: string | null;
   readonly status: number;
-  constructor(code: string, message: string, opts: { reason: string | null; status: number }) {
+  /** The RAW `body.code` PostgREST reported, independent of `code` — present even
+   *  when `code` was recovered via the message-regex fallback (in which case
+   *  `pgCode` will be a non-CLR-shaped SQLSTATE, e.g. "ZA011"); null when the
+   *  response carried no `code` field at all. */
+  readonly pgCode: string | null;
+  /** "sqlstate" when `code` came from a REAL governed SQLSTATE — trustworthy.
+   *  "message" when `code` was recovered only via the defensive message-regex
+   *  fallback — a coincidental match, NOT proof of a governed refusal. A caller
+   *  that must not act on a coincidental match should check
+   *  `codeSource === "sqlstate"` before trusting `code`. */
+  readonly codeSource: "sqlstate" | "message";
+  constructor(
+    code: string,
+    message: string,
+    opts: { reason: string | null; status: number; pgCode: string | null; codeSource: "sqlstate" | "message" },
+  ) {
     super(message);
     this.name = "RefusalError";
     this.code = code;
     this.reason = opts.reason;
     this.status = opts.status;
+    this.pgCode = opts.pgCode;
+    this.codeSource = opts.codeSource;
   }
 }
 
 /** Every other wire failure: an auth rejection (401 — never a governed refusal,
- *  finding 6a), a missing/unconfigured session, a network failure, or an ungoverned
- *  Postgres error (no CLR-shaped SQLSTATE). `status` is null when the request never
- *  reached the network (e.g. no session, no configured base URL). */
+ *  finding 6a), a missing/unconfigured session, a network failure (`fetch` itself
+ *  rejected), a malformed response body, or an ungoverned Postgres error (no
+ *  CLR-shaped SQLSTATE). `status` is null when the request never reached the
+ *  network, or the network call itself failed before any status existed. */
 export class WireError extends Error {
   readonly status: number | null;
   readonly pgCode: string | null;
@@ -90,6 +127,15 @@ export class WireError extends Error {
     this.status = opts.status;
     this.pgCode = opts.pgCode ?? null;
   }
+}
+
+/** Type guards — ergonomic, `instanceof`-equivalent predicates for callers/tests
+ *  that would rather not import the classes directly. */
+export function isRefusalError(e: unknown): e is RefusalError {
+  return e instanceof RefusalError;
+}
+export function isWireError(e: unknown): e is WireError {
+  return e instanceof WireError;
 }
 
 /** True when `status` is an auth-layer rejection — an expired/invalid session JWT —
@@ -116,15 +162,74 @@ export function classifyPgrestFailure(
   const clr = parseClrCode(body.code, body.message);
   if (clr) {
     const reason = parseReasonToken(body.details);
-    return new RefusalError(clr, body.message ?? clr, { reason, status });
+    return new RefusalError(clr, body.message ?? clr, {
+      reason,
+      status,
+      pgCode: body.code ?? null,
+      codeSource: clrSource(body.code),
+    });
   }
   const detail = [body.code, body.message].filter(Boolean).join(" — ");
   return new WireError(detail || `request failed (${status})`, { status, pgCode: body.code ?? null });
 }
 
+/** Parse a FAILED response's body defensively — a malformed error body degrades to
+ *  `{}` (never throws), which `classifyPgrestFailure` turns into a generic WireError. */
 async function wireError(res: Response): Promise<RefusalError | WireError> {
   const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string; details?: string };
   return classifyPgrestFailure(res.status, body);
+}
+
+/** `fetch` itself can reject (DNS/network failure, an aborted signal, a CORS
+ *  failure) — wrap it so that ALWAYS surfaces as a typed WireError, never a raw,
+ *  unhandled rejection reaching a card (the doc on WireError promises exactly
+ *  this; the fix-round closes the gap between that promise and the code). */
+async function safeFetch(url: string, init: RequestInit, what: string): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    throw new WireError(
+      `${what}: network request failed${e instanceof Error && e.message ? ` (${e.message})` : ""}`,
+      { status: null },
+    );
+  }
+}
+
+/** Parse a SUCCESSFUL response's body as JSON, required to be present (a read
+ *  always returns an array — an empty result is `[]`, never an empty body). A
+ *  malformed body throws WireError rather than letting a raw SyntaxError escape. */
+async function parseJsonOrThrow<T>(res: Response, what: string): Promise<T> {
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    throw new WireError(`${what}: failed to read the response body`, { status: res.status });
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new WireError(`${what}: malformed response body`, { status: res.status });
+  }
+}
+
+/** Parse a SUCCESSFUL RPC response's body, where an EMPTY body is legitimate (a
+ *  void governed function, or a 204) and resolves to `null` — but a NON-EMPTY body
+ *  that fails to parse is a malformed response and throws WireError, never silently
+ *  swallowed into `null` (the pre-fix behavior: `res.json().catch(() => null)` hid a
+ *  malformed body as a false "no result"). */
+async function parseOptionalJson(res: Response, what: string): Promise<unknown> {
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    throw new WireError(`${what}: failed to read the response body`, { status: res.status });
+  }
+  if (text.length === 0) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new WireError(`${what}: malformed response body`, { status: res.status });
+  }
 }
 
 async function requireToken(session: SessionTokenAccessor): Promise<string> {
@@ -144,17 +249,18 @@ export async function pgrestSelect<T>(
   const base = supabaseBase();
   if (!base) throw new WireError("NEXT_PUBLIC_SUPABASE_URL is not configured", { status: null });
   const token = await requireToken(session);
-  const res = await fetch(`${base}/rest/v1/${pathAndQuery}`, {
-    headers: pgrestHeaders(token, false),
-    cache: "no-store",
-    signal,
-  });
+  const res = await safeFetch(
+    `${base}/rest/v1/${pathAndQuery}`,
+    { headers: pgrestHeaders(token, false), cache: "no-store", signal },
+    "read",
+  );
   if (!res.ok) throw await wireError(res);
-  return (await res.json()) as T[];
+  return parseJsonOrThrow<T[]>(res, "read");
 }
 
 /** A governed function call: `POST /rest/v1/rpc/<fn>`. Returns the jsonb result (or
- *  null). `signal` is optional and additive — see pgrestSelect's note. */
+ *  null for a void/empty-bodied response). `signal` is optional and additive — see
+ *  pgrestSelect's note. */
 export async function pgrestRpc(
   fn: string,
   args: Record<string, unknown>,
@@ -164,13 +270,11 @@ export async function pgrestRpc(
   const base = supabaseBase();
   if (!base) throw new WireError("NEXT_PUBLIC_SUPABASE_URL is not configured (governed writers need PostgREST)", { status: null });
   const token = await requireToken(session);
-  const res = await fetch(`${base}/rest/v1/rpc/${fn}`, {
-    method: "POST",
-    headers: pgrestHeaders(token, true),
-    body: JSON.stringify(args),
-    cache: "no-store",
-    signal,
-  });
+  const res = await safeFetch(
+    `${base}/rest/v1/rpc/${fn}`,
+    { method: "POST", headers: pgrestHeaders(token, true), body: JSON.stringify(args), cache: "no-store", signal },
+    fn,
+  );
   if (!res.ok) throw await wireError(res);
-  return res.json().catch(() => null);
+  return parseOptionalJson(res, fn);
 }

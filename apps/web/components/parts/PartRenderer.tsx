@@ -21,16 +21,16 @@ import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
  *  registered render type never reaches this. */
 export const FALLBACK_UNSUPPORTED_PREFIX = "Unsupported part: ";
 
-type SummaryPartType =
-  | "je_review" | "doc_review" | "diff" | "sweep_receipt" | "open_question"
-  | "bank_recon_receipt" | "fixed_asset" | "depreciation_run_receipt"
-  | "adjustment_run_receipt" | "staff_advance";
-
-const SUMMARY_TYPES: readonly SummaryPartType[] = [
+// ONE source of truth (fix-round finding 6): SummaryPartType is DERIVED from the
+// array, not hand-duplicated alongside it — the two could otherwise drift (a type
+// listing a member the array omits, or vice versa) with nothing to catch it.
+const SUMMARY_TYPES = [
   "je_review", "doc_review", "diff", "sweep_receipt", "open_question",
   "bank_recon_receipt", "fixed_asset", "depreciation_run_receipt",
   "adjustment_run_receipt", "staff_advance",
-];
+] as const;
+
+type SummaryPartType = (typeof SUMMARY_TYPES)[number];
 
 function isSummaryPart(t: ClaraPart["type"]): t is SummaryPartType {
   return (SUMMARY_TYPES as readonly string[]).includes(t);
