@@ -501,6 +501,29 @@ await t.test("both evaluator closures are exact, independent, and registered —
       "clara._metric_context_sha256_v1(uuid,uuid[],uuid,uuid,uuid,uuid,bytea,text)",
       "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)",
       "clara._hash(jsonb)"]]]);
+  // F-A5b card 1's stage-(b) evaluator. NINE members: the four v2 bodies plus the FIVE v1 helpers
+  // reused verbatim. v1's TENTH member, clara.evaluate_fs_pack_v1, is deliberately NOT one of
+  // them — it is pinned to v1's entrypoint and is no part of v2's determinism, so freezing it into
+  // v2's closure would assert a closure v2 does not have. It is named here rather than absorbed
+  // into a bumped total, because this census is CLOSED-WORLD by design; and it is added
+  // CONDITIONALLY, because the row does not exist on a pre-card-1 chain and a roster that demanded
+  // it there would fail for a frontier reason rather than a defect.
+  const card1V2Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=2 and firm_id is null) as ok")).rows[0].ok;
+  if (card1V2Registered) {
+    expected.set("evaluate_metric@v2", [
+      "clara.evaluate_metric_v2(uuid,uuid,uuid[],uuid,uuid)",
+      "clara._metric_eval_node_v2(uuid,uuid,uuid,uuid,uuid,jsonb,boolean,text,date)",
+      "clara.validate_metric_ast_v2(jsonb,uuid,uuid)",
+      "clara._validate_metric_node_v2(jsonb,uuid,uuid,integer)",
+      "clara._metric_selector_account_ids(uuid,jsonb)",
+      "clara._metric_input_dataset_v1(uuid,uuid,uuid[])",
+      "clara._metric_context_sha256_v1(uuid,uuid[],uuid,uuid,uuid,uuid,bytea,text)",
+      "clara._metric_resolved_inputs_sha256_v1(bytea,uuid[],uuid,uuid,uuid,bytea,uuid[],uuid[],uuid,uuid,uuid,text)",
+      "clara._hash(jsonb)"]);
+  }
+  /** Closures whose deploy state this census does NOT assert: each owns its own separate ceremony. */
+  const OWNS_ITS_OWN_CEREMONY = new Set(["evaluate_fs_pack_agent@v1", "evaluate_metric@v2"]);
   const members = (await rootQuery(`select e.evaluator_name,e.version,e.deployed,m.ordinal,m.member_signature,encode(m.body_sha256,'hex') stored,encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(m.member_signature))::text,'UTF8')),'hex') live,encode(e.closure_sha256,'hex') aggregate from clara.evaluator_versions e join clara.evaluator_version_members m on m.evaluator_version_id=e.id order by e.evaluator_name,e.version,m.ordinal`)).rows;
   // FRESH once here, reused below: fs_pack_agent owns its OWN ceremony (f-a5 cell D), so its
   // deployed flag is never asserted by this closed-world census either way -- only the covered
@@ -510,7 +533,7 @@ await t.test("both evaluator closures are exact, independent, and registered —
     const rows = members.filter((row) => `${row.evaluator_name}@v${row.version}` === key);
     assert.deepEqual(rows.map((row) => row.member_signature), roster, `${key} exact ordered closure`);
     assert.ok(rows.every((row) => row.stored === row.live), `${key} closure member bodies are byte-exact`);
-    if (key !== "evaluate_fs_pack_agent@v1") {
+    if (!OWNS_ITS_OWN_CEREMONY.has(key)) {
       assert.ok(rows.every((row) => row.deployed === !fresh), fresh
         ? `${key} is undeployed (fresh witness)`
         : `${key} is deployed -- monotone, a prior run's one-way ceremony (re-run shape)`);
@@ -546,7 +569,7 @@ await t.test("both evaluator closures are exact, independent, and registered —
   // have read the two witness versions as a duplicate rather than as the append they are.
   assert.deepEqual(registered.map((row) => `${row.evaluator_name}@v${row.version}`), [...expected.keys()].sort());
   assert.ok(registered.every((row) => /^[0-9a-f]{64}$/.test(row.hash)), "every registered closure carries a valid hash");
-  const covered = registered.filter((row) => row.evaluator_name !== "evaluate_fs_pack_agent");
+  const covered = registered.filter((row) => !OWNS_ITS_OWN_CEREMONY.has(`${row.evaluator_name}@v${row.version}`));
   assert.ok(covered.every((row) => row.deployed === !fresh), fresh
     ? "the five covered closures are undeployed (fresh witness)"
     : "the five covered closures are deployed -- monotone, a prior run's one-way ceremony (re-run shape)");
@@ -609,14 +632,25 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   const fresh = await evaluatorCeremonyUnwitnessed();
   const fsPackDeployed = (await rootQuery(
     "select deployed from clara.evaluator_versions where evaluator_name='evaluate_fs_pack_agent' and version=1")).rows[0]?.deployed === true;
-  assert.equal(result.verified_deployed, fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0), JSON.stringify(result));
+  // F-A5b card 1's evaluate_metric v2 is the SECOND closure that owns its own separate ceremony
+  // (CD-15 — stage (b) ships dark). Like fs_pack's, its state is read directly rather than
+  // assumed, and its ABSENCE on a pre-card-1 chain contributes nothing.
+  const card1V2Deployed = (await rootQuery(
+    "select deployed from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=2 and firm_id is null")).rows[0]?.deployed === true;
+  assert.equal(result.verified_deployed,
+    fresh ? 0 : 5 + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0), JSON.stringify(result));
   // SIX registered closures at this frontier: delta's evaluate_metric +
   // assess_metric_cell_independent, F-A1's evaluate_witness_fact_state (v1) +
   // evaluate_witness_identity (0091/0092), F-A2's evaluate_witness_fact_state **v2** — the
   // three-locks nil-tax arm, a NEW closure beside the frozen v1 rather than a recut of it, so
   // the count moves by one and the frozen predecessor keeps its own row — and F-A5 PR-1's
   // evaluate_fs_pack_agent v1, the agent-lane pack entrypoint, on the same terms. This total is
-  // REGISTRATION, not deployment -- unaffected by re-run.
-  assert.equal(result.verified_registered, 6, JSON.stringify(result));
+  // REGISTRATION, not deployment -- unaffected by re-run. SEVEN once F-A5b card 1 registers
+  // evaluate_metric **v2**, a NEW closure beside the frozen v1 on exactly the terms F-A2's witness
+  // v2 already set: the count moves by one and the frozen predecessor keeps its own row. Measured,
+  // not assumed, so this cell is exact on a pre-card-1 chain too.
+  const card1V2Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_metric' and version=2 and firm_id is null) as ok")).rows[0].ok;
+  assert.equal(result.verified_registered, card1V2Registered ? 7 : 6, JSON.stringify(result));
 });
 }

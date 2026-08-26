@@ -440,6 +440,25 @@ value is DB-read, never model-supplied — R-7's early warning is discharged. **
 result-carrying row on the free-read lane) and PR-3 (the renderer's substitution step) both
 unblock; the `displayed_text` figure path as v1 built it is replaced, not resumed.**
 
+**FORWARD POINTER — the mechanism this ruling names but does not build now EXISTS.**
+`docs/plan/active/card1-substitution-seam-design.md` (v3, gate-PASSed 2026-08-26; `-part2.md` §3,
+`-part3.md` §4-§7, `card1-substitution-seam-annexes.md` A-F) is the design of record for both
+stages, and the build is F-A5b card 1's own migration plus
+`packages/reporting-render/lib/layout-sandbox.mjs`. **Stage (a)** is the `kind='placeholder'`
+block: it carries `{kind, basis_ref}` and no numeral-shaped field at all, so the re-cut of
+`sandbox_view_body_malformed` from a TYPE assertion to a PROVENANCE assertion promised above is
+realised structurally rather than by a string check. **Stage (b)** is the twelfth AST primitive
+`cell`, evaluated by a NEW frozen `evaluate_metric` v2 closure beside the untouched v1 — so a
+figure may also be COMPUTED from DB-owned inputs, not only cited. Two consequences land back on
+this document: the fail-safe interim recorded in Codex #2 below is now genuinely conditional (a
+placeholder-only body carries no free text, so the exact per-basis-kind derivation survives to the
+returned `client_set`; a MIXED body still widens, which is the boundary S30 draws), and the CLAIM
+verb this lane registered as a gap ships with card 1 as
+`clara.claim_sandbox_export` plus the leader's `sandbox_dispatch_begin`/`_record` pair and
+`reap_exhausted_sandbox_exports`. **Stage (b) ships DARK** — its closure is born undeployed and
+every `wake_compose_metric_preview_v2` call refuses `evaluator_undeployed` until a separate
+ceremony runs; that is the expected post-merge state, not a defect.
+
 **Codex #2 — the coverage consequence while the seam itself is unbuilt.** PR-1 (this lane's own
 DB layer) ships before the substitution engine does, and every block kind it admits is free text
 (model-authored prose, `kind='text'` — a placeholder-typed block is second-render-entrance

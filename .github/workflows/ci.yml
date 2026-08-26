@@ -152,6 +152,23 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20.19.5
+      # THE RENDERER'S OWN UNIT BATTERY, WIRED IN (Wave F Track-A, F-A5b card 1).
+      #
+      # It was running NOWHERE. packages/reporting-render is deliberately excluded from the pnpm
+      # workspace (pnpm-workspace.yaml:4), so the estate suite's `pnpm -r --if-present test` never
+      # reached it; the root `render:check` script that would have run it is invoked by no workflow;
+      # and this job built the image and ran the double-render drill without ever executing
+      # tests/. So layout.mjs's own battery — the assembler that decides what a statutory PDF says —
+      # has been green-by-absence. A test that never runs is not a test, and card 1 adds the
+      # substitution seam's render-time refusals to that same directory, so it is wired here rather
+      # than added to a directory nothing executes.
+      #
+      # `node --test` DIRECTLY, not pnpm: this job installs no workspace (it needs none — the whole
+      # battery is Node built-ins plus first-party modules, measured, and `pg` is imported only by
+      # db.mjs/render-worker.mjs which the battery does not load). It runs BEFORE the image build so
+      # a broken assembler fails in seconds instead of after a Docker build.
+      - name: Renderer unit battery (packages/reporting-render/tests)
+        run: node --test packages/reporting-render/tests/
       # The fixture is typeset with a content-addressed font MOUNTED at run time, exactly
       # as production supplies them — the image ships no font directory, so a drill that
       # found one would not test what ships. HOST-LOCKED like the PG17 client install

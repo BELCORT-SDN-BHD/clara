@@ -137,6 +137,13 @@ const METRICS_0058_HUMAN_FNS = [
   "assess_metric_cell_independent_v1", "record_metric_evaluation_attempt_v1",
   "verify_evaluator_freeze",
 ];
+// [Wave-F Track A, F-A5b card 1] clara.evaluate_metric_v2 — the substitution seam's stage-(b)
+// evaluator, granted to clara_authenticated on its v1 twin's own terms and for the same reason:
+// it is the evaluator itself, and the floor is body-enforced. It is kept in its OWN roster rather
+// than appended to METRICS_0058_HUMAN_FNS above, because that array is a COHORT that ships
+// together across 0059/0060 and must live or die together — v2 ships in a different migration and
+// would make that cohort read PARTIAL on every pre-card-1 chain.
+const CARD1_SEAM_HUMAN_FNS = ["evaluate_metric_v2"];
 // A COHORT for the same closed-set reason as 0057's: these eleven ship together across 0059/0060
 // and must live or die together, so a name that silently vanishes while its exemption survives
 // here is a finding rather than a quiet pass.
@@ -396,6 +403,18 @@ const F_A5B_PR1_WAKE_FNS = ["wake_mint_sandbox_view", "wake_request_sandbox_expo
 const F_A5B_PR1_RUNTIME_FNS = ["sandbox_export_payload", "complete_sandbox_export", "fail_sandbox_export"];
 const F_A5B_PR1_HUMAN_FNS = ["register_export_recipient", "supersede_export_recipient", "list_sandbox_exports"];
 export const F_A5B_PR1_COHORT = [...F_A5B_PR1_WAKE_FNS, ...F_A5B_PR1_RUNTIME_FNS, ...F_A5B_PR1_HUMAN_FNS];
+// F-A5b CARD 1 [Wave-F Track A, the substitution seam]: TWO grant tiers, and no human one — card 1
+// mints no new human door. The wake tier is the stage-(b) preview composer; the runtime tier is the
+// sandbox job family's claim/dispatch/reap quartet, which PR-1 deliberately did not ship (its own
+// header registers the gap) and which nothing could render end to end without.
+// clara.evaluate_metric_v2 is NOT in this cohort: it is clara_authenticated-granted like its v1
+// twin, not a wake or runtime verb, and its own grant is censused by the migration's tail.
+const CARD1_SEAM_WAKE_FNS = ["wake_compose_metric_preview_v2"];
+const CARD1_SEAM_RUNTIME_FNS = [
+  "claim_sandbox_export", "sandbox_dispatch_begin", "sandbox_dispatch_record",
+  "reap_exhausted_sandbox_exports",
+];
+export const CARD1_SEAM_COHORT = [...CARD1_SEAM_WAKE_FNS, ...CARD1_SEAM_RUNTIME_FNS];
 // 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
 // kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
 // + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
@@ -1048,6 +1067,8 @@ export const ALLOWED = {
     // lifecycle verbs, the two frozen-input minters, the evaluator pair, the independent E6
     // re-check, the A30b attempt-receipt writer and the freeze verifier — clara_authenticated
     // ONLY, every floor body-enforced; agent/wake/runtime gain ZERO (see the block above)
+    ...CARD1_SEAM_HUMAN_FNS, // [Wave-F Track A, F-A5b card 1] clara.evaluate_metric_v2, on
+    // evaluate_metric_v1's own terms — clara_authenticated ONLY; agent/wake/runtime gain ZERO
     ...CLOSE_PLAN_0064_HUMAN_FNS, // 0064 [Wave E lane θ] the close-plan-as-document read —
     // clara_authenticated ONLY (the /close consumer); agent row empty by T17's ruling,
     // not by omission — see the block above
@@ -1089,7 +1110,9 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS,
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
+    // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
+    // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
     // [Wave-F Track A, F-A7 beta, 0126] wake_file_document ONLY -- annexes-1 "clara_wake_filing +
     // clara_wake_interactive; one allowlist row per kind" (chat parity). The other four filing
     // wrappers (wake_open_firm_question, wake_propose_identifier_promotion, wake_reattribute_document,
@@ -1179,6 +1202,9 @@ export const ALLOWED = {
     ...F_A5B_PR1_RUNTIME_FNS, // [Wave-F Track A, F-A5b PR-1] the sandbox export worker verbs —
     // payload (stable, lease-scoped read), complete (hash IN, set-once) and fail — the 0081:162-
     // 168 lease shape; clara_runtime holds no table privilege on the two new relations either
+    ...CARD1_SEAM_RUNTIME_FNS, // [Wave-F Track A, F-A5b card 1] the sandbox job family's
+    // claim/dispatch/reap quartet, mirroring render_jobs' own verbs (0081) retargeted — the half
+    // PR-1 registered as a gap and without which no worker ever transitions a claimable row
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1352,6 +1378,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("Gate G1 wake-execution engine (runtime lane)", G1_WAKE_ENGINE_RUNTIME_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-3 retirement + parity + doors", BANK_AGENCY_F_A3_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
+  failures.push(...cohortFailures("wave F F-A5b card 1 substitution seam", CARD1_SEAM_COHORT, liveNames));
   return failures;
 }
 
