@@ -536,10 +536,19 @@ test("B5.4 — frozen-evaluators.json carries clara.evaluate_metric_v2 with the 
   //   db=true  · manifest true         -> deployed and locked: fine.
   //   db=true  · manifest absent/false -> a DEPLOYED body OUTSIDE the append-only lock — the
   //                                       one state the script's two-halves rule forbids.
-  const dbDeployed = (await rootQuery(
+  // ORDER-INDEPENDENT HALF (review finding on the repair): the two-halves check below reads
+  // the rig row, so a FOCUSED run on a fresh database (deployV2 never invoked, db=false)
+  // would pass vacuously. Post-W4 the manifest itself permanently carries the stamp — the
+  // lint's monotonic ratchet (UNLOCKED-VS-BASE) forbids ever removing it — so the flag can be
+  // asserted directly, regardless of run order or database state. Precedent:
+  // f-a2-regression.test.mjs's witness_fact_state deploy-lock cells.
+  assert.equal(entry.deployed, true,
+    "post-W4 the manifest permanently carries deployed:true for evaluate_metric_v2 — the append-only ratchet forbids unstamping");
+  const reg = (await rootQuery(
     `select deployed from clara.evaluator_versions
-      where evaluator_name = 'evaluate_metric' and version = 2 and firm_id is null`)).rows[0].deployed;
-  assert.ok(!(dbDeployed === true && entry.deployed !== true),
+      where evaluator_name = 'evaluate_metric' and version = 2 and firm_id is null`)).rows;
+  assert.equal(reg.length, 1, "exactly one ('evaluate_metric', 2) registry row — the reads below must not be reading nothing");
+  assert.ok(!(reg[0].deployed === true && entry.deployed !== true),
     "a DB-deployed evaluate_metric_v2 must carry the manifest deployed:true stamp — a live body outside the append-only hash lock is the one forbidden state");
 });
 
