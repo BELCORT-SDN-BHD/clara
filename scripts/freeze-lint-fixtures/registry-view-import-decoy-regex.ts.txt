@@ -1,0 +1,24 @@
+// Fixture: round-7 (native adversarial leg, MUST #11, D3) — the SAME "backdoor" local-function
+// smuggle as D2, but the decoy text lives inside a REGEX LITERAL rather than a string literal.
+// blankSource's own comment (freeze-lint-lex.mjs) documents a known limit: "regex literals
+// containing quote or slash characters can confuse the scan" — the old regex-based
+// parseImportBindings never specially recognized `/.../ ` delimiters at all, so decoy text placed
+// there was exposed exactly like a string literal's contents were. Must REJECT
+// (REGISTRY-EXPORTS-CLOSED-WORLD) — a real AST parse sees a RegularExpressionLiteral token, a
+// completely different node kind from an ImportDeclaration; its source text is never re-walked
+// looking for statements no matter what it contains.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+function backdoor() {
+  return { evil: true };
+}
+const RE = /import \{ backdoor \} from "\.\/chatTurn\.v2\.js"/;
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { backdoor };

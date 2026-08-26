@@ -1,0 +1,26 @@
+// Fixture: round-7 (native adversarial leg, MUST #11, D4) — the SAME "backdoor" local-function
+// smuggle as D2/D3, but the decoy text lives inside an Error message string argument — a shape
+// naturally occurring in real code (a diagnostic string that happens to quote import syntax),
+// unlike a bare `const NOTE = "..."`. The old regex-based parseImportBindings does not care WHICH
+// syntactic position a string literal sits in — `importRe` scans the whole (strings-preserved)
+// source uniformly, so any string anywhere containing import-shaped text was equally exploitable.
+// Must REJECT (REGISTRY-EXPORTS-CLOSED-WORLD) for the identical structural reason as D2/D3: a
+// real AST parse only ever recognizes an import statement AS a statement, never as the payload of
+// a StringLiteral argument three nodes deep inside a ThrowStatement.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+function backdoor() {
+  return { evil: true };
+}
+function assertNever() {
+  throw new Error("diagnostic: import { backdoor } from './chatTurn.v2.js' was expected but not found");
+}
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { backdoor };

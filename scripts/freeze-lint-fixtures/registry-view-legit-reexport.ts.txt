@@ -1,0 +1,19 @@
+// Fixture (OK, control): a LEGITIMATE bare, unaliased re-export of an actual relatively-imported
+// workflow implementation — the real shape every historical frozen version in the live registry
+// uses (constraint 9: an older export stays exported/frozen even after being repointed). Must
+// stay clean under the #11 (round-4) closed-world census, never a false positive.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { chatTurn_v1 } from "./chatTurn.v1.js";
+import { chatTurn_v2 } from "./chatTurn.v2.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+  chatTurn: chatTurn_v2,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+// chatTurn_v1 stays exported+frozen even though the registry above now points chatTurn at v2 —
+// the constraint-9 shape this fixture exists to prove clean.
+export { chatTurn_v1 };

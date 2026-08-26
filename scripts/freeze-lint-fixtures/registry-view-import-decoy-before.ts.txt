@@ -1,0 +1,19 @@
+// Fixture: round-7 (native adversarial leg, MUST #11, D1 — control) — a string literal shaped
+// like an import statement sits BEFORE the real import for the SAME local name. Under the old
+// regex-based parseImportBindings (strings preserved, not blanked), this ordering happened to be
+// SAFE only by luck of last-write-wins: the decoy's fake Map entry gets overwritten by the real
+// import statement's own entry, which is parsed SECOND (it appears later in the source). Must
+// stay clean either way — this fixture exists to prove the AST-based replacement is not "safe by
+// ordering" but safe by CONSTRUCTION (a string literal is never mistaken for an import at all,
+// regardless of where it sits relative to a real one).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+const NOTE = "import { closeExampleV1 } from './evil.js'";
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { closeExampleV1 };
