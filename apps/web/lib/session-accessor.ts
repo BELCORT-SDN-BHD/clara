@@ -30,11 +30,10 @@
 // first stays mounted) and is not this round's concern — recorded here so it is
 // not later mistaken for an oversight.
 //
-// LAZY ADAPTER, WIRE AT MERGE: this module has no opinion on WHERE a token comes
-// from. `configureSessionTokenSource` plugs in the real source exactly once, at
-// app-wiring time (e.g. a root client provider effect) — the natural call site is
-// p2-auth's `getSessionToken` once lib/session.ts lands (see
-// ./session-contract.ts's own header for the repoint note).
+// LAZY ADAPTER, WIRED AT THE P2 FOLD: this module has no opinion on WHERE a token
+// comes from. `configureSessionTokenSource` plugs in the real source exactly once,
+// at app-wiring time — the live call site is `components/session-token-bridge.tsx`
+// (mounted in the root layout), feeding `lib/session.ts`'s `getSessionToken`.
 
 import type { SessionTokenAccessor } from "@/lib/session";
 

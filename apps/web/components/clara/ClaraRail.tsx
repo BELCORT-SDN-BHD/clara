@@ -6,8 +6,9 @@
 // module-level thread store directly, so it needs no provider mounted above it.
 //
 // P2 FOLD SEAM H: mounted ONCE, app-wide, from `components/clara/rail-mount.tsx`
-// (itself mounted in `app/(firm)/layout.tsx`) — see that file for the escalation-route
-// suppression this depends on. `auth` defaults to the blessed `sessionTokenAccessor`
+// (itself mounted in `app/(firm)/layout.tsx`). The full-screen escalation routes live
+// in the `app/(full)/` route group, outside that layout, so no runtime suppression is
+// needed (P2 fold round 3). `auth` defaults to the blessed `sessionTokenAccessor`
 // singleton (`@/lib/session-accessor`); a caller (tests included) may still override it.
 
 import { usePathname } from "next/navigation";

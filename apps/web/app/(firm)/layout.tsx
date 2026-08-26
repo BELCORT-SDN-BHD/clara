@@ -19,8 +19,10 @@ import { RailMount } from "@/components/clara/rail-mount";
  *
  * P2 FOLD SEAM H: mounts the two app-wide shell affordances here, ONCE —
  * `<CommandKProvider>` (⌘K, per its own header's integration note) and
- * `<RailMount>` (the docked Clara rail; see its own header for why it
- * self-suppresses on a Clara full-screen escalation route).
+ * `<RailMount>` (the docked Clara rail). The Clara full-screen escalation
+ * routes live in the sibling `app/(full)/` group, which this layout never
+ * wraps — that structure, not a runtime check, is what keeps the rail off
+ * the escalated thread (Q2; P2 fold round 3).
  */
 export default async function FirmLayout({
   children,
