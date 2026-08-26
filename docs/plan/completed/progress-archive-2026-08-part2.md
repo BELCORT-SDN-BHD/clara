@@ -453,3 +453,5 @@ twice** — the δ residual above) · the local disposable Supabase stack · the
 `acknowledged_at` echo · the unreverted-admin-grant lint watch · **`0084`'s derivation tooling
 retained only at `C:\ct\`** — the machine-local-custody shape that bit the DSN bridge twice;
 worth pricing for in-repo custody.
+
+*(Continues in `progress-archive-2026-08-part3.md` — this part reached the 500-line cap.)*

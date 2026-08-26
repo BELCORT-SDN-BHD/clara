@@ -522,8 +522,36 @@ test("B5.4 — frozen-evaluators.json carries clara.evaluate_metric_v2 with the 
   assert.ok(at > 0, "the migration defines clara.evaluate_metric_v2 by the exact name shape the lint discovers");
   assert.equal(entry.sha256, hashText(extractBody(sql, at)),
     "the manifest hash is the lint's own hash of the live body");
-  assert.notEqual(entry.deployed, true,
-    "v2 is registered UNDEPLOYED — the manifest must agree with the DB, and the live ceremony has not run");
+  // DATED-TRIPWIRE REPAIR (2026-08-26). This cell originally pinned `deployed !== true` with
+  // the words "the live ceremony has not run" — a CEREMONY-STATE pin, the class the F-A2
+  // openers taught us never to write (pin the monotonic direction, never the state of the
+  // world). The W4 ceremony HAS run: live flipped ('evaluate_metric', 2) and the manifest was
+  // stamped by check-frozen-evaluators --lock-deployed, whose whole purpose is to pull the
+  // now-live body inside the append-only hash lock. A rig replays the chain fresh, so its DB
+  // row is ALWAYS undeployed and "manifest agrees with this database" is unsatisfiable
+  // post-stamp by construction. The monotonic contract over all four worlds:
+  //   db=false · manifest absent/false -> pre-ceremony: fine for the TWO-HALVES rule below;
+  //                                       UNREACHABLE post-W4 — the order-independent
+  //                                       assertion above this table's consumer forbids it.
+  //   db=false · manifest true         -> post-live-ceremony rig replay: fine (the stamp
+  //                                       records LIVE; witness: wave-f-w4-ceremony-asrun.md).
+  //   db=true  · manifest true         -> deployed and locked: fine.
+  //   db=true  · manifest absent/false -> a DEPLOYED body OUTSIDE the append-only lock — the
+  //                                       one state the script's two-halves rule forbids.
+  // ORDER-INDEPENDENT HALF (review finding on the repair): the two-halves check below reads
+  // the rig row, so a FOCUSED run on a fresh database (deployV2 never invoked, db=false)
+  // would pass vacuously. Post-W4 the manifest itself permanently carries the stamp — the
+  // lint's monotonic ratchet (UNLOCKED-VS-BASE) forbids ever removing it — so the flag can be
+  // asserted directly, regardless of run order or database state. Precedent:
+  // f-a2-regression.test.mjs's witness_fact_state deploy-lock cells.
+  assert.equal(entry.deployed, true,
+    "post-W4 the manifest permanently carries deployed:true for evaluate_metric_v2 — the append-only ratchet forbids unstamping");
+  const reg = (await rootQuery(
+    `select deployed from clara.evaluator_versions
+      where evaluator_name = 'evaluate_metric' and version = 2 and firm_id is null`)).rows;
+  assert.equal(reg.length, 1, "exactly one ('evaluate_metric', 2) registry row — the reads below must not be reading nothing");
+  assert.ok(!(reg[0].deployed === true && entry.deployed !== true),
+    "a DB-deployed evaluate_metric_v2 must carry the manifest deployed:true stamp — a live body outside the append-only hash lock is the one forbidden state");
 });
 
 test("B5.5 — editing a v1 closure member in place makes verify_evaluator_freeze REFUSE (the DB-side wall, not merely the repo-side lint)", async (t) => {
