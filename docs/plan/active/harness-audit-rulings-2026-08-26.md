@@ -10,9 +10,11 @@ argument — cite this file, don't restate it.*
 The as-built caveat's truing to the shipped `0125` recut (`method in ('human','rule',
 'judgement')`, `confidence >= 0.95` retained) — landed this same batch, `docs/product/PRD.md`
 — is **CONFIRMED by the owner (option B)**: the wording stands as written, including the
-note that law 79's "the numeral leaves with the judgement" is satisfied at the mint (a
-judgement resolution mints at confidence 1.0 by convention), not by dropping the SQL
-conjunct.
+note that law 79's "the numeral leaves with the judgement" is satisfied at the mint —
+confidence is PINNED at 1.0 by the minting core itself (`0126_f_a7_beta_filing_verb.sql:46,
+1473`, D-2: "confidence is PINNED at 1.0 by this core — the model's own stated confidence…
+is never read by any rung"), not merely a convention the model happens to follow — not by
+dropping the SQL conjunct.
 
 **New obligation:** a **future migration** removes the `confidence >= 0.95` conjunct from
 `assert_client_resolved` specifically for `method = 'judgement'` rows — full review ladder,
@@ -131,12 +133,15 @@ metering ledger as the substrate (already built, `llm_usage_events` reshaped wit
 `client_id` + triggering actor). **Amounts are deferred to a dedicated pricing sitting** —
 this ruling settles the SHAPE only. `docs/product/PRD.md` §9 item 3's usage-CAP half was
 already RESOLVED by digest laws 76/81 (meter, never cap); its billing/PRICING half is now
-**SHAPE-ruled, amounts still OPEN** — that PRD row is not re-edited under this ruling (out of
-this batch's file list); the pricing-amounts sitting is tracked as its own `PROGRESS.md`
-Backlog row.
+**SHAPE-ruled, amounts still OPEN**. At this ruling's writing that PRD row was not planned for
+re-edit here (out of this round's file list); **the row WAS subsequently annotated
+PART-RESOLVED at the owner's later direction (commit `4960b39`), consistent with this
+ruling's substance** — the SHAPE-ruled/amounts-open split above is exactly what that
+annotation states.
 
-Tracked: `PROGRESS.md` Next item 1 (the 磨合 in-scope list) for (a)/(b); `PROGRESS.md`
-Backlog for the pricing-amounts sitting (c).
+Tracked: `PROGRESS.md` Next item 1 (the 磨合 in-scope list, since the pricing sitting runs
+DURING 磨合 so tier-3's checkout can finish) for (a)/(b)/(c); `PROGRESS.md` Backlog also
+carries the pricing-amounts sitting as its own row.
 
 ## R9 — Storage write probe: fix in 磨合. PITR: HOLD again.
 

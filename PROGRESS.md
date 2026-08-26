@@ -64,7 +64,8 @@ LIVE END TO END, CARD-1 STAGE (b) LIT**; trued at every clock-out)*
   `open_fiscal_year`. The snapshot registry is likewise inert (zero `reporting_periods` /
   `period_snapshots`) until the first `mint_month_snapshot`.
 - **CI (ADR-0073 two-runner base; expanded to four 2026-08-23, `docs/ops/ci-runner.md` §"Runner
-  count expansion to four" — ADR/digest entry PENDING OWNER, see Backlog):** self-hosted
+  count expansion to four" — ADR/digest addendum owed, owner CONFIRMED the expansion standing
+  2026-08-26, see Backlog):** self-hosted
   `clara-wsl`/`-2`/`-3`/`-4` — FOUR instances since
   2026-08-23, all verified online (private-repo-only
   law). Per-PR (~13 min, parallel): lint · build · estate suite + deploy-onto-existing ·
@@ -180,7 +181,7 @@ its finding; none blocks beta):
 - **F-A6 PR-2 runtime obligations (load-bearing, not optional)** — named in `freeform-read-design.md` §7 item 4 and `freeform-read-annexes-2-record.md` Annex J R-3's S-1 note: **H-4** the POOL, not the verb, must set a session `statement_timeout` before calling `wake_freeform_read` (a verb-local `SET LOCAL` cannot bound a single FETCH) · **H-5** `withFreeformRead` releases the freeform pool connection with `DISCARD ALL`, never `reset all` (which does not release a payload-taken session advisory lock) · **S-1** `withFreeformRead` calls ONLY `wake_freeform_read`, never `_freeform_arm`/`_freeform_settle` directly (both GRANTED to `clara_freeform_ro`, callable outside the verb).
 - **Gate-record OQ long tail (audited 2026-08-26)** — carried, not yet ruled: F-T1 OQ-1/2/3/5/6/7/8/9/10 · F-A4 OQ-1..6 · F-T3 OQ-2/3/9 · F-A8 OI-1 · F-A7 gate §5 item 3 (dual-attribution severance) · F-A9 TA-P13-OQ-2/4 · fix-queue's claims-auto-post widening trigger · bank-agency OQ-8's later-relation question · reporting-agency OQ-4 + P12 · freeform OQ-A — one row, pointers only.
 - **Small unrecorded follow-ups (audit 2026-08-26)** — wb-o's AMB-11 adjudication request (`docs/plan/research/wave-b/0017-ambiguity-adjudications.md`) · the metering `firm_usage_daily`/`task_usage` read-drop follow-up (`metering-survey.md:447`, design §3.9 — PR-1 only stops reading them) · `chatTurn.v14.bank`'s per-rung friendly-message table · `wake-engine.mjs:70-79`'s CAS cancel-race guard is a NAMED obligation on whoever ships the first `bank_agent`/`close_prep` wake workflow body — VERIFIED still absent from `chatTurn.v14.bank.ts` (zero `cas`/`cancel` hits, 2026-08-26).
-- **Dated-tripwire class, seen 3×** (f-a2 witness v2 08-21 · #352's closed-wave floor · B5.4) — pin the monotonic DIRECTION, never a ceremony-state; a trued pin proves both ways; sweep for a candidate at every ceremony. Same-audit reviewer items: `--lock-deployed` is BLANKET (stamps every non-`true` entry — run only when every dark entry is genuinely deployed, or use `--only`) · the D-a window (08-24) has NO as-run document · the `frozen-evaluators.json` `evaluate_fs_pack_agent_v1` migration-path one-liner is fixed in this PR (see M1).
+- **Dated-tripwire class, seen 3×** (f-a2 witness v2 08-21 · #352's closed-wave floor · B5.4) — pin the monotonic DIRECTION, never a ceremony-state; a trued pin proves both ways; sweep for a candidate at every ceremony. Same-audit reviewer items: `--lock-deployed` is BLANKET (stamps every non-`true` entry — run only when every dark entry is genuinely deployed; a scoped `--only` flag would be its own PR, none exists today) · the D-a window (08-24) has NO as-run document · the `frozen-evaluators.json` `evaluate_fs_pack_agent_v1` migration-path one-liner is fixed in this PR (see M1).
 **Owner rulings from the harness-audit sitting (2026-08-26)** — full text `docs/plan/active/harness-audit-rulings-2026-08-26.md`, one section per card:
 - **R1 — the judgement-confidence conjunct drop**: a future migration removes `assert_client_resolved`'s `confidence>=0.95` conjunct for `method='judgement'` rows (full ladder); until then it's a harmless failsafe (judgement rows mint at 1.0).
 - **R2 — PRD two-tier reporting wording**: §4/§6 gain the two-tier text; exact wording awaits the owner's word-by-word review — do NOT edit PRD.md for this without it.
@@ -215,7 +216,7 @@ its finding; none blocks beta):
 the owner is named so none of them drifts back into nobody's queue):
 - **Manual journal-entry compose UI → the Codex frontend build.** The verb exists
   (`wake_draft_entry`); no surface composes a JE by hand. Not a DB gap — a UI gap, new app owns it.
-- ~~**`coding_rules` propose/sign retirement**~~ — **DONE**: `0118` (F-A2 PR-3, #324) drops the six coding/autopost-rule verbs outright, confirmed absent by the tail assertion; `coding_rules` stays KEEP-AS-HISTORY.
+- ~~**`coding_rules` propose/sign retirement**~~ — **DONE**: `0118` (F-A2 PR-3, #324) drops the five coding-rule verbs (with their five autopost siblings) outright, confirmed absent by the tail assertion; `coding_rules` stays KEEP-AS-HISTORY, consistent with OQ-2's ruling.
 - ~~**The autoDraft 8-step cap**~~ — **DONE**: `autoDraft.v9.impl.ts:197`, `AUTODRAFT_STEP_BUDGET = 8`, design-cell docstring (F-A2 PR-2, #323).
 - **Payroll document ingestion as a first-class product capability** (own purpose class + sensitivity walls) — owner decision, future scope. *(F-T2 B1/B14 ruling, 2026-08-23: `payroll-calendar-gate-record.md` OC-1.)*
 
@@ -452,7 +453,7 @@ version + ceremony):**
   (revoke-from-public is FUNCTIONS-ONLY) is now in the lane brief; the instrument-side
   normalization (`aclexplode(coalesce(acl, acldefault(...)))`) is a candidate fix-queue item —
   judgement logic on a verification tool, its own reviewed PR.
-- **VHDX compaction residue — RE-BITTEN 2026-08-24 as a full disk-zero event, recovered same-day** (root cause: unpruned rig volumes + worktrees; keeper re-armed). `ext4.vhdx` stays **109.5 GB host-side** (internal use ~11 G/1 TB). **OWNER GRANTED FULL PERMISSION 2026-08-24** for the elevated compact, still PENDING (idle window): `wsl --shutdown` → elevated `diskpart` → `select vdisk file="C:\Users\zhant\AppData\Local\wsl\{dd65d2d5-2451-49a5-8436-6857685a4eae}\ext4.vhdx"` → `compact vdisk` (~95 GB returned). Standing practice BINDING: fleet runs prune docker volumes as stages finish; conductor sweeps `docker volume prune` at every wave close.
+- **VHDX compaction residue — RE-BITTEN 2026-08-24 as a full disk-zero event, recovered same-day** (root cause: 369 never-pruned rig volumes/100.8 GB + 65 build worktrees/34 GB; keeper re-armed — **the 08-14 law was on file and was NOT re-applied after the manual restarts, conductor error, owned**). `ext4.vhdx` stays **109.5 GB host-side** (internal use ~11 G/1 TB; `--set-sparse` refused by WSL). **OWNER GRANTED FULL PERMISSION 2026-08-24** for the elevated compact, still PENDING (idle window): `wsl --shutdown` → elevated `diskpart` → `select vdisk file="C:\Users\zhant\AppData\Local\wsl\{dd65d2d5-2451-49a5-8436-6857685a4eae}\ext4.vhdx"` → `compact vdisk` (~95 GB returned). Standing practice BINDING: fleet runs prune docker volumes as stages finish; conductor sweeps `docker volume prune` at every wave close.
 
 ## Session log
 
