@@ -21,6 +21,18 @@ modules) plus architecture-level notes, separate from and much cheaper to query 
 tree file-by-file. It is Claude Code's first stop for any "where / what / who-calls" question —
 before Grep, before Read, before spawning an explore agent.
 
+## The `project` parameter — REQUIRED, and easy to get wrong
+
+Every query tool (`search_graph`, `query_graph`, `get_architecture`, `trace_path`,
+`search_code`, `get_code_snippet`, `manage_adr`, `ingest_traces`, `detect_changes`,
+`index_status`, `index_repository`) takes a REQUIRED `project` argument — there is no
+default, and the server holds MORE THAN ONE indexed project. **This repo's project id is
+`C-Users-zhant-Desktop-clara-rebuild`.** The SAME server also holds the FROZEN prior build,
+`C-Users-zhant-Desktop-initial-acc-software-skillmd` — a wrong or guessed `project` string
+silently queries that other, unrelated graph instead of erroring, so a typo or a stale
+memory of the id reads back as confidently wrong answers about the wrong codebase. Confirm
+the exact id with `list_projects` if in doubt; never assume it from the directory name alone.
+
 ## The tools
 
 All are `mcp__codebase-memory-mcp__*`, deferred (load via `ToolSearch("select:<name>")` before
