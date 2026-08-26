@@ -187,10 +187,11 @@ Fixes H-1/H-2/H-4 (model-authored numbers laundered as DB-authoritative). Compos
 - Renderers (CSV/PDF/XLSX/UI artifact) **format** DB output; a model cannot inject a number or a balance claim into a rendered artifact. Free-text commentary is clearly labelled model-authored and never presented as a computed figure.
 - Every export is persisted as a **durable, auditable artifact** with parameters, data-version token, permissions, and reproducibility — never a loose file, never model-authored bytes filed as authoritative (fixes H-1).
 
-**As shipped:** the renderer lives in `packages/reporting-render` — `lib/layout.mjs` is the
-FROZEN sealed-lane layout (golden-hashed like a workflow body), `lib/layout-sandbox.mjs` its
-sibling for the non-authoritative analysis lane, and `scripts/render-worker.mjs` the worker
-driving both. **The two-tier split is SHIPPED FACT (digest law 74):** the sandbox lane is
+**As shipped:** the renderer lives in `packages/reporting-render` —
+`packages/reporting-render/lib/layout.mjs` is the FROZEN sealed-lane layout (golden-hashed
+like a workflow body), `packages/reporting-render/lib/layout-sandbox.mjs` its sibling for the
+non-authoritative analysis lane, and `packages/reporting-render/scripts/render-worker.mjs` the
+worker driving both. **The two-tier split is SHIPPED FACT (digest law 74):** the sandbox lane is
 watermarked non-authoritative and structurally unreachable from the seal chain; the sealed
 lane runs the full open→evaluate→seal→render chain through the OBO lane.
 

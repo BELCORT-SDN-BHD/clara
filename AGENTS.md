@@ -94,7 +94,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
 | Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
-| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/` (keep new documents correctly filed under `active/`/`completed/` per the index's own path-stability convention) |
+| A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/` (keep new documents correctly filed under `docs/plan/active/`/`docs/plan/completed/` per the index's own path-stability convention) |
 | Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Path-scoped mechanical rules that bind edits under their own paths (migrations, db-tests, handoffs, runtime-workflows) | `.claude/rules/` |
