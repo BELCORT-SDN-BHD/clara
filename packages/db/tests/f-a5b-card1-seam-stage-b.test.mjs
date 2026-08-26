@@ -888,3 +888,98 @@ test("B5.9 (N3/CD-14) — the canonical door stays CLOSED: a cell-containing AST
   assert.equal((await rootQuery(
     "select to_regprocedure('clara._validate_metric_ast_shape_v2(jsonb)') is null as absent")).rows[0].absent, true);
 });
+
+const lagN = (periods, of) => ({ node: "lag", periods, of });
+const sumOf = (...terms) => ({ node: "sum", terms });
+
+test("B4.12 (M6, cross-period axis) — a `cell` beneath a PERIOD SHIFT is refused at BOTH guards, at any depth, while every unshifted cell path and every non-cell lag still works", async (t) => {
+  if (!ready) return skipHere(t, "the card-1 migration is not applied on this database");
+  // WHY THIS CELL EXISTS. Adversarial review found `lag(1, cell(X))` minting a real 'ok' preview
+  // cell whose value was the cell's UNSHIFTED whole-period-set number while the composition was
+  // labelled one period earlier. M6's period-set equality compares the cell's periods to the
+  // CONTEXT's whole set and says nothing about which period the evaluator is standing on; `lag`
+  // moves exactly that. The result was a deterministic, reproducible, period-MISLABELLED figure —
+  // citable by a stage-(a) placeholder into a rendered PDF. Not a constraint-2 break (no model
+  // numeral), but a divergence from this lane's own M6 contract, which names cross-period
+  // composition over a cell a NAMED, UNBUILT extension point.
+  const scope = scopeA1();
+  const X = cellNode(fx.A1.cellId);
+
+  // ---- INSTRUMENT CONTROL FIRST. The guard keys on a new bottom-up `cells` count in the node
+  // contract, so before asserting any refusal, prove that counter is real and that it does NOT
+  // refuse cells generally — a refusal cell whose instrument miscounts would pass for the wrong
+  // reason. All three propagation paths are measured, because the guard is only as deep as the
+  // shallowest one: the leaf, the loop (sum/average terms) and the binary (subtract/divide operands).
+  assert.equal((await validateNode(X, scope)).cells, 1, "the leaf contributes one cell");
+  assert.equal((await validateNode(sumOf(X, X), scope)).cells, 2, "the LOOP path accumulates");
+  assert.equal((await validateNode(subtract(X, X), scope)).cells, 2, "the BINARY path accumulates");
+  assert.equal((await validateNode(measure({ set: "revenue" }), scope)).cells ?? 0, 0,
+    "a cell-free subtree carries no cells — the counter is not simply always positive");
+
+  // ---- GUARD 1 (STRUCTURAL, at validation): the adversary's EXACT scenario, plus the same shape
+  // at depth through each accumulating path. Depth matters: a guard that only inspected lag's
+  // DIRECT child would pass the first arm and miss the other two.
+  for (const [label, node] of [
+    ["direct", lagN(1, X)],
+    ["through the loop path", lagN(1, sumOf(X))],
+    ["through the binary path", lagN(1, subtract(X, X))],
+  ]) {
+    const e = await raised(() => validateNode(node, scope));
+    assert.equal(e?.code, "CLR10", `${label}: ${e?.code}: ${e?.message}`);
+    const d = detailOf(e);
+    assert.equal(d.reason, "temporality_mismatch", label);
+    assert.equal(d.class, "cross_period_cell", label);
+  }
+
+  // ---- THE OTHER POLARITY: the legitimate cross-period vocabulary is untouched. A lag over a RAW
+  // measure is exactly what the design says to use for "this period versus three months ago", and
+  // an unshifted cell still validates. Without these two arms the refusal above could have been a
+  // blanket ban on lag, or on cells, and the cell would still be green.
+  assert.equal((await validateNode(lagN(1, measure({ set: "revenue" })), scope)).lag, 1,
+    "lag over a raw measure still validates and still reports its lag depth");
+  assert.equal((await validateNode(X, scope)).po, 0, "a direct, unshifted cell still validates");
+
+  // ---- GUARD 2 (BEHAVIOURAL, at eval) — proven INDEPENDENTLY of guard 1 by calling the evaluator
+  // node directly, so this arm still bites if the validator were ever loosened.
+  // THE AXIS IS ISOLATED THE SAME WAY B4.5 ISOLATES ITS OWN: the cited cell's period set must
+  // EQUAL the context's, or M6's period_set arm fires first and this cell passes while proving the
+  // wrong thing. So the cell is minted over BOTH periods and read against its OWN context — only
+  // the period the evaluator stands on differs.
+  const c = await freshDeltaClient(world.users.alice, "c1shift");
+  const base = await mintDefinitionBackedCell(world.users.alice, c, "shift");
+  const second = await addSecondPeriod(world.users.alice, { client: base.clientId, monthStart: base.monthStart });
+  const { mintMetricInput } = await import("./delta-fixtures.mjs");
+  const two = await mintMetricInput(world.users.alice, {
+    client: base.clientId, periodIds: [base.periodId, second.id],
+  });
+  const wide = await evaluateMetricHuman(world.users.alice, {
+    client: base.clientId, definitionVersion: base.definitionVersionId,
+    periodIds: [base.periodId, second.id], snapshotId: two.snapshotId, runId: randomUUID(),
+  });
+  const wrow = (await rootQuery(
+    "select evaluation_context_id, cell_status from clara.metric_cells where id = $1", [wide.cell_id])).rows[0];
+  assert.equal(wrow.cell_status, "ok", "the two-period fixture cell itself evaluated");
+  const at = (period) => evalNode(cellNode(wide.cell_id), {
+    firm: base.firmId, client: base.clientId, snapshot: two.snapshotId,
+    context: wrow.evaluation_context_id, period,
+  });
+  const e2 = await raised(() => at(second.id));
+  assert.equal(e2?.code, "CLR10", `${e2?.code}: ${e2?.message}`);
+  const d2 = detailOf(e2);
+  assert.equal(d2.reason, "metric_cell_context_mismatch");
+  assert.equal(d2.class, "period_shift",
+    "the SHIFT axis fired, not the period_set axis — the cell's periods and the context's are equal by construction");
+  // The twin, differing in exactly one term: the same cell, same context, read at the ROOT period.
+  assert.equal((await at(base.periodId)).status, "ok",
+    "the identical read at the composition root still evaluates — the guard refuses the shift, not the cell");
+
+  // ---- NO REGRESSION on the shape that ALREADY refused, with its reason recorded honestly:
+  // subtract(cell, lag(1, cell)) used to refuse on the po (period-offset) mismatch between its two
+  // operands. It still refuses, but now EARLIER and for the more specific reason — guard 1 fires
+  // while validating the lag operand, before the operands are ever compared. That is a tightening,
+  // not a drift, and it is asserted rather than assumed so a future reordering cannot quietly turn
+  // this shape back into a po-mismatch that a looser operand rule might one day admit.
+  const e3 = await raised(() => validateNode(subtract(X, lagN(1, X)), scope));
+  assert.equal(e3?.code, "CLR10", `${e3?.code}: ${e3?.message}`);
+  assert.equal(detailOf(e3).class, "cross_period_cell");
+});
