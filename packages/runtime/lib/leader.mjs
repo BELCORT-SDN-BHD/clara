@@ -28,6 +28,12 @@ import { runReconcilerSweep } from "./reconciler.mjs";
 // belts run on different cadences anyway (dispatch every fast cycle, enqueue daily), and this is
 // where every other cadence decision is already made.
 import { reconcileRenderDispatch, reconcileRenderEnqueue } from "./reconciler-render.mjs";
+// Wave F Track-A, F-A5b card 1. The sandbox-export queue is a SIBLING job family with its own
+// verbs, so it gets its own belt on the SAME fast cadence as the render dispatch half — and for
+// the same reason: latency is the feature, and its DB-side cooldown (not this loop) bounds how
+// often the machine API is touched. It feature-detects the card-1 migration itself, so a runtime
+// image running ahead of the migration boots it dormant.
+import { reconcileSandboxDispatch } from "./reconciler-sandbox.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
@@ -208,6 +214,15 @@ export function startLeaderLoop(deps) {
               }
             } catch (err) {
               log(`[reconcile] render belt error: ${err?.message ?? err}`); // transient — retry next cycle
+            }
+            // ITS OWN try/catch, NOT the render belt's. A sandbox-lane failure must not stop a
+            // render dispatch that could still start work, and sharing a catch would make the
+            // second belt's outcome depend on the first one's — the two queues are independent and
+            // their failure modes have to stay independent too.
+            try {
+              await reconcileSandboxDispatch(client, { log });
+            } catch (err) {
+              log(`[reconcile] sandbox belt error: ${err?.message ?? err}`); // transient — retry next cycle
             }
             // NB: the 'world' heartbeat is NOT written here (S4-AB7b / ND5) — relay
             // leadership must not gate /ready. The engine heartbeat is a dedicated

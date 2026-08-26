@@ -121,7 +121,12 @@ async function reapExhausted(client, log) {
  * an already-running machine, or creating a second one, costs money and time but can never
  * produce a second artifact (see arm (iii) above).
  */
-async function startRenderMachine(cfg, log) {
+// EXPORTED for the sandbox-export belt (reconciler-sandbox.mjs), which starts THE SAME MACHINE.
+// One renderer image serves both job families -- the sandbox lane's own ceremony discipline
+// (sandbox-export-annexes.md Annex I) is explicit that its renderer changes are additive to the
+// render lane's ceremony rather than a second one -- so a second starter would be a second thing
+// to keep in step with the Fly wiring for no gain.
+export async function startRenderMachine(cfg, log) {
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
   const signal = AbortSignal.timeout(FLY_TIMEOUT_MS);
   if (cfg.machineId) {

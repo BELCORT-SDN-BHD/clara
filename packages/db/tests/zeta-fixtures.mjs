@@ -102,11 +102,19 @@ export async function sharedWorld() {
     // partial-migration or focused run where f-a5's battery never reaches cell D while zeta's
     // does, an UNSCOPED sweep here would flip that row first and permanently steal cell D's only
     // witness window. Scoped exactly like its delta/epsilon/eta siblings.
+    //
+    // A SECOND ROW JOINS THE EXCLUSION on identical terms (F-A5b card 1): clara.evaluate_metric
+    // **v2**, the substitution seam's stage-(b) evaluator, ships DARK until its own ceremony
+    // (CD-15) and f-a5b-card1-seam-stage-b.test.mjs's B5.6 measures its pre-flip refusal. The key
+    // becomes (NAME, VERSION) rather than name, and it has to: evaluate_metric **v1** must still
+    // deploy here, and a name-only predicate would exclude the whole family.
     const pending = (await rootQuery(
-      "select count(*)::int n from clara.evaluator_versions where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'")).rows[0].n;
+      `select count(*)::int n from clara.evaluator_versions where not deployed
+        and (evaluator_name, version) not in (('evaluate_fs_pack_agent',1),('evaluate_metric',2))`)).rows[0].n;
     if (pending > 0) {
       await withActor({ transaction: true }, async (db) => {
-        await db.query("update clara.evaluator_versions set deployed=true where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'");
+        await db.query(`update clara.evaluator_versions set deployed=true where not deployed
+          and (evaluator_name, version) not in (('evaluate_fs_pack_agent',1),('evaluate_metric',2))`);
       });
     }
   }

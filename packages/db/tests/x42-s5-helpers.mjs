@@ -475,6 +475,28 @@ const SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES = [
   "fail_sandbox_export", "supersede_export_recipient",
 ];
 
+// [Wave-F Track A, F-A5b CARD 1] the sandbox job family's clock-reading verbs — the same shape of
+// verb, on the same job family, as RENDER_0081_CLOCK_NAMES' claim_render_job /
+// render_dispatch_begin, and rostered for the identical reason. Each READS A BARE CLOCK TOKEN in
+// its own body: claim_sandbox_export stamps claimed_at / lease_expires_at / first_claimed_at and
+// computes claim_delay_ms from `now() - created_at`; sandbox_dispatch_begin stamps last_dispatch_at
+// and reads due-ness against `now() - cooldown`; reap_exhausted_sandbox_exports compares
+// `lease_expires_at < now()` and stamps finished_at. Lawful, and therefore rostered rather than
+// hidden.
+//
+// THREE, NOT FOUR — sandbox_dispatch_record is DELIBERATELY ABSENT, and its absence was MEASURED
+// rather than reasoned from the family it belongs to. It writes the receipt for the rows
+// sandbox_dispatch_begin already stamped and reads no clock at all, so arm (D)'s detector does not
+// flag it; rostering it on the strength of "it is one of the four dispatch verbs" would have made
+// this closed world carry a name the catalog never produces, which is precisely the drift the cell
+// that walks this array exists to catch — and did.
+//
+// GATED on card 1's own migration STEM like every group above, so a chain stopped short of it
+// measures the roster it actually has — numbers are claimed at merge, stems are not.
+const CARD1_SEAM_CLOCK_NAMES = [
+  "claim_sandbox_export", "reap_exhausted_sandbox_exports", "sandbox_dispatch_begin",
+];
+
 // F-A1 PR-3 [the cutover, `f_a1_cutover` at whatever number merge claimed]:
 // clara.fail_witness_facts stamps `finished_at=now()` — the SAME timestamptz column its
 // siblings fail_invoice_facts / fail_statement_facts already stamp bare, no ::date suffix and
@@ -689,6 +711,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a7_pi_additive$")) names.push(...F_A7_PI_CLOCK_NAMES);
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
   if (await appliedStem("f_a5b_pr1_sandbox_export$")) names.push(...SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES);
+  if (await appliedStem("card1_substitution_seam$")) names.push(...CARD1_SEAM_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);

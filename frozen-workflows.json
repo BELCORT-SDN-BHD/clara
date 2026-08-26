@@ -16,6 +16,10 @@
       "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
       "deployed": true
     },
+    "packages/reporting-render/lib/layout-sandbox.mjs": {
+      "sha256": "42f9d9953a8b68b3101c30ae29aba61a2b5603e3e51697b6a0162a8cd3935351",
+      "note": "Wave F Track-A, F-A5b CARD 1 — the SANDBOX assembler: the substitution seam's render-time half, where a `placeholder` block's pinned cell id becomes bytes. A SIBLING of layout.mjs rather than an export added to it, and that is forced rather than stylistic: layout.mjs is deployed:true here, so check-frozen-workflows' REHASHED-VS-BASE rule makes its body immutable versus origin/main and an added export would be rejected — correctly. Marked @frozen for the same reason its sibling is (determinism-critical, walks DB-owned payload into typesetting source). UNDEPLOYED: the deploy-lock is the ceremony's act, exactly as every layout module's entry was before the zeta ceremony ran."
+    },
     "packages/reporting-render/lib/layout.mjs": {
       "sha256": "bc416972436ef18ff6b2de137facc4f172fc597efbc4ff957ad12ea20be6377b",
       "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",

@@ -104,14 +104,20 @@ async function pr1Ready() {
  *  measures its refusal. That exclusion is asserted at exactly one name in
  *  epsilon-contract.test.mjs; this call must not be the place it silently widens, so it names the
  *  row it skips rather than filtering on anything derived. */
+/*  TWO rows are skipped now, and the key is (NAME, VERSION) rather than name alone. F-A5b card 1
+ *  registers clara.evaluate_metric **v2**, which ships DARK until its own ceremony (CD-15) and
+ *  whose one-shot pre-flip refusal f-a5b-card1-seam-stage-b's B5.6 owns — while evaluate_metric
+ *  **v1** must still deploy here. A name-only predicate cannot express that difference. */
 async function ensureMetricEvaluatorDeployed() {
   const pending = (await rootQuery(
     `select count(*)::int n from clara.evaluator_versions
-      where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'`)).rows[0].n;
+      where not deployed
+        and (evaluator_name, version) not in (('evaluate_fs_pack_agent',1),('evaluate_metric',2))`)).rows[0].n;
   if (pending === 0) return;
   await withActor({ transaction: true }, (db) => db.query(
     `update clara.evaluator_versions set deployed=true
-      where not deployed and evaluator_name <> 'evaluate_fs_pack_agent'`));
+      where not deployed
+        and (evaluator_name, version) not in (('evaluate_fs_pack_agent',1),('evaluate_metric',2))`));
 }
 
 before(async () => {
