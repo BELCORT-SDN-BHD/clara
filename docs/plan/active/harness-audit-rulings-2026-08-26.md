@@ -12,9 +12,10 @@ The as-built caveat's truing to the shipped `0125` recut (`method in ('human','r
 — is **CONFIRMED by the owner (option B)**: the wording stands as written, including the
 note that law 79's "the numeral leaves with the judgement" is satisfied at the mint —
 confidence is PINNED at 1.0 by the minting core itself (`0126_f_a7_beta_filing_verb.sql:46,
-1473`, D-2: "confidence is PINNED at 1.0 by this core — the model's own stated confidence…
-is never read by any rung"), not merely a convention the model happens to follow — not by
-dropping the SQL conjunct.
+1473`, D-2: "confidence is PINNED at 1.0 by this core", the model's own stated confidence
+"is never read here; it lives ONLY in the receipt's `verdict` column, as an annotation" —
+digest law 72 generalizes the same posture), not merely a convention the model happens to
+follow — not by dropping the SQL conjunct.
 
 **New obligation:** a **future migration** removes the `confidence >= 0.95` conjunct from
 `assert_client_resolved` specifically for `method = 'judgement'` rows — full review ladder,
