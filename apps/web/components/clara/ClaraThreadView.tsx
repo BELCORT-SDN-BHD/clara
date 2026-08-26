@@ -5,14 +5,14 @@
 // never a separate universe"). All state comes from `useClaraThread` /
 // `lib/clara/threadStore.ts`, the one source of truth both mount points read.
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { PartSlot } from "@/components/clara/PartSlot";
 import type { SessionTokenAccessor } from "@/lib/clara/sessionContract";
 import type { ClaraThreadUiState } from "@/lib/clara/threadStore";
-import { useClaraThread } from "@/lib/clara/useClaraThread";
+import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
 import { cn } from "@/lib/utils";
 
 export function ClaraThreadView({
@@ -32,6 +32,20 @@ export function ClaraThreadView({
   const t = useTranslations("Clara.thread");
   const [draft, setDraft] = useState("");
   const { state, sendMessage, retryConnection } = useClaraThread(auth, threadId ?? "");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // P2 FOLD SEAM C: the ⌘K "Ask" -> composer handoff (ClaraRail's event subscriber
+  // requests this; see lib/command/bus.ts's CLARA_FOCUS_RAIL_EVENT contract). A new
+  // `token` is applied at most once — prefilling never overwrites a draft the human
+  // is mid-typing on an UNRELATED, later request, and it never sends on its own.
+  const focusRequest = useComposerFocusRequest();
+  const appliedFocusTokenRef = useRef(0);
+  useEffect(() => {
+    if (!focusRequest || focusRequest.token === appliedFocusTokenRef.current) return;
+    appliedFocusTokenRef.current = focusRequest.token;
+    if (focusRequest.prefill) setDraft(focusRequest.prefill);
+    textareaRef.current?.focus();
+  }, [focusRequest]);
 
   const notSignedIn = state.loadError === "not signed in";
   const busy = state.sendStatus === "sending";
@@ -88,6 +102,7 @@ export function ClaraThreadView({
       </div>
       <form onSubmit={handleSubmit} className="flex gap-2 border-t border-border p-2">
         <textarea
+          ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t("composerPlaceholder")}

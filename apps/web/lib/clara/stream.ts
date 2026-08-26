@@ -28,7 +28,7 @@
 //      (and tests that want to prove the reattach loop end-to-end) never have to monkey-
 //      patch `globalThis.fetch`.
 
-import type { ClaraPartLike } from "./api";
+import type { ClaraPart } from "./api";
 
 // ---------------------------------------------------------------------------
 // 1a. Frame parsing — bytes to `{event, data}` pairs.
@@ -40,8 +40,18 @@ export type SseEvent = { event: string; data: unknown };
 
 /** Payload shapes for the three named (non-`chunk`) events, as `streamRoute.ts` sends
  *  them. `chunk`'s payload is intentionally left `unknown` — see the module doc above:
- *  we treat it as an opaque liveness signal, never as content we parse or render. */
-export type ClaraTerminalMessagePayload = { taskId: string; status: string; parts: ClaraPartLike[] | null };
+ *  we treat it as an opaque liveness signal, never as content we parse or render.
+ *
+ *  P2 FOLD SEAM B: `parts` below is typed as the canonical `ClaraPart` union, but
+ *  `isTerminalMessagePayload`'s runtime check only proves `data` is an object with a
+ *  `status` field — it never walks `parts` to prove each element is a real union
+ *  member. That narrowing (an `unknown` -> `ClaraTerminalMessagePayload` type
+ *  predicate) IS the one wire/parse-boundary cast for this module: it is safe only
+ *  because `PartRenderer` (components/parts/PartRenderer.tsx) is fail-closed on any
+ *  part whose `type` it does not recognise, so a malformed element from this cast
+ *  renders a visible "Unsupported part" chip rather than manufacturing a state the
+ *  UI silently trusts. */
+export type ClaraTerminalMessagePayload = { taskId: string; status: string; parts: ClaraPart[] | null };
 export type ClaraDonePayload = { taskId: string; status: string };
 export type ClaraDetachedPayload = { taskId: string; reason: string };
 
@@ -103,7 +113,7 @@ export interface ClaraStreamState {
   /** Set ONLY by a terminal `message` event — never inferred, never merged. `null`
    *  until then (law 2: absence is not evidence; an empty/absent transcript must render
    *  as "not yet authoritative", not as "empty"). */
-  transcriptParts: ClaraPartLike[] | null;
+  transcriptParts: ClaraPart[] | null;
   taskStatus: string | null;
   detachReason: string | null;
   /** Consecutive failed (re)attach attempts since the last attach that yielded any

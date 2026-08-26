@@ -1,12 +1,15 @@
 // The Clara AGENT-lane wire client (P2-RAIL): sessions, messages, turns. Ported from
 // the sealed `apps/dashboard/app/chat/api.ts` (the shape stays load-bearing; naming and
-// behaviour here track it deliberately) with two changes: (1) every call takes a
+// behaviour here track it deliberately) with one change: every call takes a
 // `SessionTokenAccessor` instead of a raw token string — the token-accessor seam this
-// lane was asked to build (`lib/clara/sessionContract.ts`); (2) `parts` are typed as
-// the local, structural `ClaraPartLike` rather than the canonical `ClaraPart` union —
-// this lane does not import `lib/parts/` (out of scope; the sibling `p2-parts` lane
-// owns that module). Swap `ClaraPartLike` for the real union at merge; every call site
-// here only ever reads `.type`.
+// lane was asked to build (`lib/clara/sessionContract.ts`).
+//
+// P2 FOLD SEAM B: `parts` are typed as the canonical `ClaraPart` union
+// (`lib/parts/types.ts`, owned by the sibling p2-parts lane) rather than this lane's
+// former local, structural `ClaraPartLike` stand-in. Re-exported here so callers that
+// already `import type { ClaraPartLike } from "./api"` (now `ClaraPart`) don't need to
+// reach into `lib/parts/` directly — every call site in this lane only ever reads
+// `.type`, so the swap is type-level only.
 //
 // HUMAN-lane governance RPCs (`answer_interruption`, `cancel_agent_task`,
 // `share_chat_session`, …) are deliberately NOT ported here — they ride PostgREST via
@@ -14,7 +17,8 @@
 
 import type { SessionTokenAccessor } from "./sessionContract";
 
-export type ClaraPartLike = { type: string; text?: string; [key: string]: unknown };
+export type { ClaraPart } from "@/lib/parts/types";
+import type { ClaraPart } from "@/lib/parts/types";
 
 export type SessionRow = {
   id: string;
@@ -28,7 +32,7 @@ export type SessionRow = {
 export type MessageRow = {
   id: string;
   role: "user" | "assistant";
-  parts: ClaraPartLike[];
+  parts: ClaraPart[];
   turn_key: string | null;
   task_id: string | null;
   seq: number;

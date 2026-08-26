@@ -157,6 +157,25 @@ available fix that doesn't touch `apps/dashboard`'s own declared contract; verif
 apps' `typecheck`/`build` stay green after it. Worth a second look from whoever owns
 `apps/dashboard` if its own type pins are meant to track something else deliberately.
 
+## Dependency notes
+
+- **Root `pnpm.overrides`** (repo-root `package.json`): pins `@types/react` to
+  `19.2.18` and `@types/react-dom` to `19.2.5` workspace-wide. Introduced adding
+  `cmdk` (the command-palette dependency): `cmdk` declares neither a dependency nor a
+  peer on `@types/react`, so pnpm's shared phantom-hoist slot picked up an older copy
+  from `apps/dashboard` (`19.2.17`) instead of this package's own `19.2.18` — a skew
+  that broke `tsc` on every `cmdk` JSX element (React 19 mints a new nominal
+  `unique symbol` for `Key` per patch release, so the two copies' `Key` types don't
+  match). The override is the narrowest fix that doesn't touch `apps/dashboard`'s own
+  declared contract; see "Known deviation, by design" under Command palette above for
+  the full account, including the open question for whoever owns `apps/dashboard`.
+- **`"type": "module"`** (this package's `package.json`): every script and test file
+  in `apps/web` runs as native ESM — `.js`/`.mjs` files here follow `.mjs` semantics
+  (no bare `require`, `import.meta` works, `__dirname`/`__filename` do not exist) even
+  without the `.mjs` extension. The test runner (`node --import ./test/bootstrap.mjs
+  --import tsx --test …`) and every file under `tests/`/`test/` are written to that
+  contract already — carry it forward for anything new added here.
+
 ## What is deliberately NOT here yet
 
 No auth (Supabase SSR cookie sessions land at P2), no rail/thread, no part-catalog renderer,

@@ -8,10 +8,12 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
+import { onFocusRail } from "@/lib/command/bus";
+
 import { getMessages, postTurn, resolveStreamAuth } from "./api";
 import type { SessionTokenAccessor } from "./sessionContract";
 import { runClaraTaskStream } from "./stream";
-import { claraThreadStore, type ClaraThreadUiState } from "./threadStore";
+import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
 
 export function useClaraRailOpen(): boolean {
   return useSyncExternalStore(
@@ -19,6 +21,30 @@ export function useClaraRailOpen(): boolean {
     () => claraThreadStore.isRailOpen(),
     () => claraThreadStore.isRailOpen(),
   );
+}
+
+/** P2 FOLD SEAM C: `ClaraThreadView`'s side of the ⌘K "Ask" -> composer handoff —
+ *  see `useFocusRailSubscription` below for the emitting side. */
+export function useComposerFocusRequest(): ComposerFocusRequest | null {
+  return useSyncExternalStore(
+    claraThreadStore.subscribe,
+    () => claraThreadStore.getComposerFocusRequest(),
+    () => claraThreadStore.getComposerFocusRequest(),
+  );
+}
+
+/** P2 FOLD SEAM C: subscribes to ⌘K's "Ask" row (`lib/command/bus.ts`'s
+ *  `CLARA_FOCUS_RAIL_EVENT` contract) — mounted from `ClaraRail`. The palette never
+ *  converses itself; selecting "Ask" is meant to do exactly what clicking straight
+ *  into the rail's own composer would: open the rail and hand it focus (+ the typed
+ *  text to review, never to auto-send — sending stays the human's act). */
+export function useFocusRailSubscription(): void {
+  useEffect(() => {
+    return onFocusRail((detail) => {
+      claraThreadStore.setRailOpen(true);
+      claraThreadStore.requestComposerFocus(detail.query || null);
+    });
+  }, []);
 }
 
 function useClaraThreadState(threadId: string): ClaraThreadUiState {

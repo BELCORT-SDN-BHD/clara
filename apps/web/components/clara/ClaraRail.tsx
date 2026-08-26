@@ -23,7 +23,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ClaraThreadView } from "@/components/clara/ClaraThreadView";
 import { useActiveThreadId } from "@/lib/clara/useActiveThread";
 import type { SessionTokenAccessor } from "@/lib/clara/sessionContract";
-import { useClaraRailOpen } from "@/lib/clara/useClaraThread";
+import { useClaraRailOpen, useFocusRailSubscription } from "@/lib/clara/useClaraThread";
 import { claraThreadStore } from "@/lib/clara/threadStore";
 
 export function ClaraRail({ auth, clientId }: { auth: SessionTokenAccessor; clientId?: string }) {
@@ -31,6 +31,7 @@ export function ClaraRail({ auth, clientId }: { auth: SessionTokenAccessor; clie
   const open = useClaraRailOpen();
   const pathname = usePathname();
   const { threadId, error } = useActiveThreadId(auth, clientId);
+  useFocusRailSubscription(); // P2 FOLD SEAM C: ⌘K "Ask" -> this rail's composer
 
   const escalateBase = clientId ? `/clients/${clientId}/clara/${threadId}` : `/clara/${threadId}`;
   const escalateHref = `${escalateBase}?from=${encodeURIComponent(pathname)}`;

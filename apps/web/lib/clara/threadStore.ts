@@ -40,12 +40,23 @@ const emptyThreadState: ClaraThreadUiState = {
   stream: initialClaraStreamState,
 };
 
+/** P2 FOLD SEAM C: a one-shot signal for "focus the rail's composer", not keyed to
+ *  any thread — the ⌘K emitter (`lib/command/bus.ts`) has no thread context, only
+ *  whichever thread the rail itself resolves. `token` increments on every request so
+ *  a subscriber (ClaraThreadView) can tell a fresh request from a stale one even if
+ *  `prefill` repeats the same text twice in a row. */
+export interface ComposerFocusRequest {
+  token: number;
+  prefill: string | null;
+}
+
 interface ClaraStoreState {
   railOpen: boolean;
+  composerFocusRequest: ComposerFocusRequest | null;
   threads: Record<string, ClaraThreadUiState>;
 }
 
-let state: ClaraStoreState = { railOpen: true, threads: {} };
+let state: ClaraStoreState = { railOpen: true, composerFocusRequest: null, threads: {} };
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -75,6 +86,19 @@ export const claraThreadStore = {
   setRailOpen(open: boolean): void {
     state = { ...state, railOpen: open };
     emit();
+  },
+
+  /** P2 FOLD SEAM C: the ⌘K "Ask" -> rail composer handoff. Bumps `token` so the
+   *  composer's effect fires even when `prefill` repeats. Does NOT open the rail —
+   *  the caller (`ClaraRail`'s event subscriber) owns that decision explicitly. */
+  requestComposerFocus(prefill: string | null): void {
+    const current = state.composerFocusRequest;
+    state = { ...state, composerFocusRequest: { token: (current?.token ?? 0) + 1, prefill } };
+    emit();
+  },
+
+  getComposerFocusRequest(): ComposerFocusRequest | null {
+    return state.composerFocusRequest;
   },
 
   /** Authoritative — replaces the whole message list from a fresh `getMessages` read,

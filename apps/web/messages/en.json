@@ -44,9 +44,6 @@
         "user": "You",
         "assistant": "Clara"
       }
-    },
-    "part": {
-      "unsupported": "Unsupported part: {kind}"
     }
   },
   "CommandPalette": {
