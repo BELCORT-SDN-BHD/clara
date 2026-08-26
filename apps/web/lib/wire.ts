@@ -218,7 +218,10 @@ async function parseJsonOrThrow<T>(res: Response, what: string): Promise<T> {
   let text: string;
   try {
     text = await res.text();
-  } catch {
+  } catch (e) {
+    // The abort carve-out reaches here too: an abort landing mid-body-stream is
+    // still cancellation, not a transport failure, and must stay distinguishable.
+    if (e instanceof Error && e.name === "AbortError") throw e;
     throw new WireError(`${what}: failed to read the response body`, { status: res.status });
   }
   try {
@@ -237,7 +240,9 @@ async function parseOptionalJson(res: Response, what: string): Promise<unknown> 
   let text: string;
   try {
     text = await res.text();
-  } catch {
+  } catch (e) {
+    // Same abort carve-out as parseJsonOrThrow — see there.
+    if (e instanceof Error && e.name === "AbortError") throw e;
     throw new WireError(`${what}: failed to read the response body`, { status: res.status });
   }
   if (text.length === 0) return null;
