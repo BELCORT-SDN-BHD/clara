@@ -39,6 +39,13 @@ import {
   matchRow, matchIdOf, birthCounterparty, counterpartyStampedItem,
   BANKCOA1, AR1, REVN, EXPN,
 } from "./x38-match-fixtures.mjs";
+// F-A3 PR-3 RETIREMENT SUCCESSION (migration 0129) — split into its own module to keep this
+// file under the repo's 500-line cap; see that file's header for the full "why". Used by
+// assertB3Floor() below, and re-exported so a drill can ask the same succession question.
+import {
+  RETIREMENT_WITNESS_SIG, RETIREMENT_STEM_RE, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS,
+  sigExists, sigGrantedTo, assertB3ProducerSuccession,
+} from "./x42-b3-retirement-succession.mjs";
 
 export const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
 export const MIG_DIR =
@@ -136,6 +143,11 @@ export const V_B2 = "^[0-9]{4}_wave_d_b2_recurring_adjustments$";
 export const grantedTo = async (fn, role) => (await rootQuery(
   `select 1 from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname=$1
      and has_function_privilege($2, p.oid, 'EXECUTE')`, [fn, role])).rowCount > 0;
+
+export {
+  RETIREMENT_WITNESS_SIG, RETIREMENT_STEM_RE, RETIRED_BANK_RULE_SIGS, SURVIVING_BANK_LINE_SIGS,
+  sigExists, sigGrantedTo,
+};
 
 /** A body with its SQL comments removed — block comments first, then line comments. The house
  *  `stripSqlComments` idiom (x41-surface.test.mjs, tail 3's two-instrument lesson), and the
@@ -316,26 +328,10 @@ export async function assertB3Floor(handles) {
   assert.equal(await taxonomyDecision("bank.line_exception_reopened"), "ignore", "[D-b3 floor] …covered at the ACTIVE taxonomy version, decision 'ignore'");
   assert.ok(await indexDef("ix_ble_line"), "[D-b3 floor] ix_ble_line exists");
   assert.ok(await indexDef("uq_je_bank_rule_suggested_line"), "[D-b3 floor] uq_je_bank_rule_suggested_line exists");
-  // [FIX WAVE W-B — CF-B3-1/CX1] THE PRODUCER IS CREATED HERE AND GRANTED ONE SLICE LATER.
-  // 0044 creates clara.accept_bank_rule_suggestion, revokes it from PUBLIC and owns it as
-  // clara_fn_owner, but WITHHOLDS `grant execute ... to clara_authenticated`: its approve-time
-  // account-role door (clara._adj_on_approve arm (3), the round-2 PHANTOM STAFF ADVANCE wall)
-  // is a D-b2 body, and a reachable producer without it mints a staff debt nobody incurred that
-  // the register, the statement and the tie all agree with. 0045's S2.9-b3 adds the grant.
-  // Asserted BOTH WAYS so the deferral is a claim rather than an omission.
-  for (const fn of ["resolve_and_book_bank_line", "accept_bank_rule_suggestion"]) {
-    assert.equal(await fnExists(fn), true, `[D-b3 floor] clara.${fn} exists`);
-  }
-  assert.equal(await grantedTo("resolve_and_book_bank_line", "clara_authenticated"), true,
-    "[D-b3 floor] the AF-2 composite is executable by clara_authenticated");
-  const producerGranted = await grantedTo("accept_bank_rule_suggestion", "clara_authenticated");
-  if (await appliedCount(V_B2) > 0) {
-    assert.equal(producerGranted, true,
-      "[D-b3 floor, with D-b2 applied] the withheld producer grant lands with D-b2 (S2.9-b3)");
-  } else {
-    assert.equal(producerGranted, false,
-      "[D-b3 floor, at the D-b3 frontier] the producer is created, revoked from PUBLIC and clara_fn_owner-owned but NOT granted — the phantom-staff-advance door stays shut until clara._adj_on_approve arm (3) ships with D-b2");
-  }
+  // [FIX WAVE W-B — CF-B3-1/CX1, SUCCESSION-AWARE per F-A3 PR-3 / 0129 — see
+  // x42-b3-retirement-succession.mjs for the full "why"] the producer claims below flip WHOLE
+  // once 0129 retires the bank-rules machine; branch on its exact-signature witness.
+  await assertB3ProducerSuccession({ fnExists, grantedTo, appliedCount, V_B2 });
 }
 
 /** D-b2's floor: the three adjustment relations, the two hot-loop partial indexes and the
