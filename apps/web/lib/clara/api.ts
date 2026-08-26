@@ -1,0 +1,159 @@
+// The Clara AGENT-lane wire client (P2-RAIL): sessions, messages, turns. Ported from
+// the sealed `apps/dashboard/app/chat/api.ts` (the shape stays load-bearing; naming and
+// behaviour here track it deliberately) with two changes: (1) every call takes a
+// `SessionTokenAccessor` instead of a raw token string — the token-accessor seam this
+// lane was asked to build (`lib/clara/sessionContract.ts`); (2) `parts` are typed as
+// the local, structural `ClaraPartLike` rather than the canonical `ClaraPart` union —
+// this lane does not import `lib/parts/` (out of scope; the sibling `p2-parts` lane
+// owns that module). Swap `ClaraPartLike` for the real union at merge; every call site
+// here only ever reads `.type`.
+//
+// HUMAN-lane governance RPCs (`answer_interruption`, `cancel_agent_task`,
+// `share_chat_session`, …) are deliberately NOT ported here — they ride PostgREST via
+// `lib/wire.ts`, which is out of this lane's scope by the work order.
+
+import type { SessionTokenAccessor } from "./sessionContract";
+
+export type ClaraPartLike = { type: string; text?: string; [key: string]: unknown };
+
+export type SessionRow = {
+  id: string;
+  title: string | null;
+  client_id: string | null;
+  visibility: "private" | "firm";
+  created_by: string;
+  created_at: string;
+};
+
+export type MessageRow = {
+  id: string;
+  role: "user" | "assistant";
+  parts: ClaraPartLike[];
+  turn_key: string | null;
+  task_id: string | null;
+  seq: number;
+  created_at: string;
+};
+
+export type TurnResult =
+  | { kind: "accepted"; taskId: string }
+  | { kind: "conflict"; message: string }
+  | { kind: "limit"; message: string; resetCopy: string | null; resetUtc: string | null }
+  | { kind: "error"; message: string };
+
+/** The banner text for a `limit` turn result — ported verbatim from
+ *  `apps/dashboard/app/chat/api.ts` `limitBanner` (a named, testable seam because the
+ *  failure it guards is silent: joining a null `resetCopy` renders the literal string
+ *  "null" into a user-facing banner). */
+export function limitBanner(message: string, resetCopy: string | null): string {
+  return [message, resetCopy].filter((s): s is string => typeof s === "string" && s.trim().length > 0).join(" ");
+}
+
+export function runtimeBase(): string {
+  return (process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL ?? "").replace(/\/+$/, "");
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/** Resolves the bearer token or throws a clear, catchable error — every AGENT-lane call
+ *  below goes through this so "signed out" never silently becomes an unauthenticated
+ *  fetch. */
+async function requireToken(auth: SessionTokenAccessor): Promise<string> {
+  const token = await auth.getAccessToken();
+  if (!token) throw new Error("not signed in");
+  return token;
+}
+
+async function runtimeFetch(path: string, token: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${runtimeBase()}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(init?.body ? { "content-type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
+async function expectJson<T>(res: Response, what: string): Promise<T> {
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`${what} failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  return (await res.json()) as T;
+}
+
+export async function listSessions(auth: SessionTokenAccessor): Promise<SessionRow[]> {
+  const token = await requireToken(auth);
+  const res = await runtimeFetch("/api/chat/sessions", token);
+  const body = await expectJson<{ sessions: SessionRow[] }>(res, "list sessions");
+  return body.sessions ?? [];
+}
+
+export async function createSession(
+  auth: SessionTokenAccessor,
+  opts: { title?: string; clientId?: string } = {},
+): Promise<string> {
+  const token = await requireToken(auth);
+  const res = await runtimeFetch("/api/chat/sessions", token, {
+    method: "POST",
+    body: JSON.stringify({ title: opts.title || undefined, clientId: opts.clientId || undefined }),
+  });
+  const body = await expectJson<{ session_id: string }>(res, "create session");
+  return body.session_id;
+}
+
+export async function getMessages(auth: SessionTokenAccessor, sessionId: string): Promise<MessageRow[]> {
+  const token = await requireToken(auth);
+  const res = await runtimeFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, token);
+  const body = await expectJson<{ messages: MessageRow[] }>(res, "load messages");
+  return body.messages ?? [];
+}
+
+/** Posts a turn with a client-generated `turnKey` (idempotency key). 202 -> accepted
+ *  with a `taskId`; 409/429 come back typed rather than thrown, so the caller can
+ *  render them without a try/catch. This resolving does NOT mean the turn is "sent" —
+ *  only the stream actually opening does (see `lib/clara/stream.ts` `openTaskStream`). */
+export async function postTurn(
+  auth: SessionTokenAccessor,
+  sessionId: string,
+  text: string,
+  turnKey: string,
+): Promise<TurnResult> {
+  let token: string;
+  try {
+    token = await requireToken(auth);
+  } catch (err) {
+    return { kind: "error", message: (err as Error).message };
+  }
+  let res: Response;
+  try {
+    res = await runtimeFetch(`/api/chat/${encodeURIComponent(sessionId)}/turns`, token, {
+      method: "POST",
+      body: JSON.stringify({ turnKey, parts: [{ type: "text", text }] }),
+    });
+  } catch (err) {
+    return { kind: "error", message: `network error: ${(err as Error).message}` };
+  }
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.status === 202) return { kind: "accepted", taskId: String(body.task_id) };
+  if (res.status === 409)
+    return { kind: "conflict", message: asString(body.message) ?? "this session already has a turn in progress" };
+  if (res.status === 429)
+    return {
+      kind: "limit",
+      message: asString(body.message) ?? "usage limit reached",
+      resetCopy: asString(body.reset_copy),
+      resetUtc: asString(body.reset_utc),
+    };
+  return { kind: "error", message: `${res.status}: ${asString(body.message) ?? asString(body.error) ?? "request failed"}` };
+}
+
+/** Resolves the bearer token for `lib/clara/stream.ts` (which is not itself an AGENT-
+ *  lane wire function — it opens the stream directly against `runtimeBase()`). */
+export async function resolveStreamAuth(auth: SessionTokenAccessor): Promise<{ token: string; runtimeBase: string }> {
+  return { token: await requireToken(auth), runtimeBase: runtimeBase() };
+}

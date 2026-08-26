@@ -11,5 +11,42 @@
     "heading": "Client workspace",
     "body": "P1 foundation scaffold — the client workspace tabs (journals, documents, bank, close, reports, registers, knowledge) are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
     "clientIdLabel": "Client ID"
+  },
+  "Clara": {
+    "rail": {
+      "title": "Clara",
+      "expand": "Open Clara",
+      "escalate": "Open full screen",
+      "escalateShort": "⤢",
+      "collapse": "Collapse Clara",
+      "collapseShort": "×"
+    },
+    "fullScreen": {
+      "title": "Clara",
+      "collapse": "Back"
+    },
+    "thread": {
+      "resolving": "Finding your conversation with Clara…",
+      "signInRequired": "Sign in to talk with Clara.",
+      "loading": "Loading the conversation…",
+      "loadError": "Could not load the conversation: {message}",
+      "sendError": "Could not send that message: {message}",
+      "responding": "Clara is responding…",
+      "reconnecting": "Reconnecting…",
+      "reconnectingWithAttempt": "Reconnecting… (attempt {attempt})",
+      "streamEndedUnexpectedly": "The connection to Clara ended unexpectedly.",
+      "connectionLost": "Connection lost.",
+      "retry": "Retry",
+      "composerPlaceholder": "Ask Clara…",
+      "send": "Send",
+      "sending": "Sending…",
+      "role": {
+        "user": "You",
+        "assistant": "Clara"
+      }
+    },
+    "part": {
+      "unsupported": "Unsupported part: {kind}"
+    }
   }
 }
