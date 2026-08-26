@@ -77,11 +77,13 @@ stamps the manifest — documented this batch in `packages/db/README.md` and
 after the DB-side flip, caught and fixed 2026-08-26) as the exhibit for why the two acts are
 separate and both required. Tracked: `PROGRESS.md` Backlog (combined with R4/R7).
 
-## R6 — `docs/ops/ceremony-practices.md` — new file, owed during 磨合
+## R6 — a new docs/ops/ceremony-practices.md — owed during 磨合
 
 A standing gap: ceremony practice knowledge lives scattered across session logs and lane
-briefs, never consolidated into an ops runbook. The owner ruled a new file,
-`docs/ops/ceremony-practices.md`, written **during the 磨合 window**, carrying at minimum:
+briefs, never consolidated into an ops runbook. The owner ruled a new file, at the path
+docs/ops/ceremony-practices.md *(not yet created — this section is its own forward
+obligation, not a pointer to an existing file)*, written **during the 磨合 window**, carrying
+at minimum:
 
 - The combined-window ceremony practice (when to fold multiple migrations into one
   D1-quiesced window vs. run them separately — the W2+W3 and W4 precedents).
