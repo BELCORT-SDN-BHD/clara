@@ -3,7 +3,7 @@
 // level: exercises storage-probe.mjs directly against storage.mjs's own RELAY_TEST_MODE seams
 // (local-fs fallback + the injectable globalThis.__claraStorageForTest shim already defined in
 // storage.mjs), so no DB rig and no live Supabase credential are needed. checkReadiness()'s own
-// wiring of checks.storage is exercised end to end in ready.test.mjs (rig-gated).
+// wiring of checks.storage is presence-pinned in ready.test.mjs's fresh-beats cell (rig-gated).
 
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";

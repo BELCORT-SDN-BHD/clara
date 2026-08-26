@@ -69,6 +69,7 @@ test("ready: world ON with fresh world+control beats is READY", { skip }, async 
     await setBeat("control", "now()");
     const r = await checkReadiness();
     assert.equal(r.ready, true, `ready with fresh beats (${JSON.stringify(r.checks)})`);
+    assert.ok("storage" in r.checks, "the storage probe verdict must surface on /ready");
     assert.equal(r.checks.world.ok, true);
     assert.equal(r.checks.control.ok, true);
     assert.equal(r.checks.taxonomy.ok, true, "seed taxonomy pointer present");

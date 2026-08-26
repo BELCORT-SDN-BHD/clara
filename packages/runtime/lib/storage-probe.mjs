@@ -87,8 +87,11 @@ import { putCanonical, verifyCanonical, StorageError } from "./storage.mjs";
 const PROBE_FIRM_ID = "00000000-0000-4000-8000-000000000000";
 
 function cacheMs() {
+  // Floor 1000ms: this value now FEEDS setInterval (not a staleness compare), so 0 would be
+  // a sustained storage hot loop from a health check — the old async design's "0 = no cache"
+  // meaning no longer exists. Out-of-range values fall back to the 60s default.
   const n = Number(process.env.CLARA_STORAGE_PROBE_CACHE_MS);
-  return Number.isFinite(n) && n >= 0 ? n : 60_000;
+  return Number.isFinite(n) && n >= 1000 ? n : 60_000;
 }
 
 function timeoutMs() {
