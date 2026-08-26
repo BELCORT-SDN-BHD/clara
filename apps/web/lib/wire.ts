@@ -24,11 +24,16 @@
 //
 // FIX-ROUND (independent review, 2 MED findings): every `fetch` and every
 // `res.json()` parse — on BOTH the failure path (already handled, `wireError`) and
-// the SUCCESS path — is now wrapped so a network failure or a malformed body always
-// surfaces as a typed WireError, never a raw unhandled rejection; and RefusalError
-// now carries `pgCode`/`codeSource` so a REAL governed SQLSTATE is distinguishable
-// from a coincidental message-regex match (e.g. migration 0011's self-test probe,
-// `code: "ZA011", message: "... CLR05 probe rollback"` — not a real refusal).
+// the SUCCESS path — is now wrapped so a GENUINE network failure or a malformed
+// body always surfaces as a typed WireError, never a raw unhandled rejection; and
+// RefusalError now carries `pgCode`/`codeSource` so a REAL governed SQLSTATE is
+// distinguishable from a coincidental message-regex match (e.g. migration 0011's
+// self-test probe, `code: "ZA011", message: "... CLR05 probe rollback"` — not a
+// real refusal).
+//
+// ROUND-2 (independent review, 2 MED findings): a DELIBERATE ABORT is explicitly
+// carved OUT of the "wrap as WireError" net — see safeFetch's own doc — so
+// cancelling a superseded request stays distinguishable from a real failure.
 
 import type { SessionTokenAccessor } from "./session-contract";
 
@@ -180,14 +185,25 @@ async function wireError(res: Response): Promise<RefusalError | WireError> {
   return classifyPgrestFailure(res.status, body);
 }
 
-/** `fetch` itself can reject (DNS/network failure, an aborted signal, a CORS
- *  failure) — wrap it so that ALWAYS surfaces as a typed WireError, never a raw,
- *  unhandled rejection reaching a card (the doc on WireError promises exactly
- *  this; the fix-round closes the gap between that promise and the code). */
+/** `fetch` itself can reject on a genuine network failure (DNS, connectivity, a
+ *  CORS failure) — wrap ONLY that, so it ALWAYS surfaces as a typed WireError,
+ *  never a raw, unhandled rejection reaching a card. A DELIBERATE ABORT is
+ *  explicitly NOT wrapped (round-2 fix): `signal` exists exactly for the
+ *  superseded-request cancellation race (pgrestSelect's own doc — a fast-changing
+ *  client picker, an unmounted card), so painting a cancellation as a network
+ *  failure would defeat the one thing callers build `signal` for — telling "the
+ *  user moved on" apart from "the network failed". An abort re-throws UNCHANGED
+ *  (the platform's own DOMException named "AbortError"), checked both by the
+ *  thrown error's name AND the signal's own `.aborted` flag (belt-and-braces: some
+ *  fetch implementations reject with a differently-shaped error on an
+ *  already-aborted signal). */
 async function safeFetch(url: string, init: RequestInit, what: string): Promise<Response> {
   try {
     return await fetch(url, init);
   } catch (e) {
+    if ((e instanceof Error && e.name === "AbortError") || init.signal?.aborted) {
+      throw e;
+    }
     throw new WireError(
       `${what}: network request failed${e instanceof Error && e.message ? ` (${e.message})` : ""}`,
       { status: null },

@@ -23,6 +23,13 @@
 //     `sessionRef` below), so an unstable accessor degrades to "no storm, but no
 //     free perf win" rather than an infinite loop. That defense is a backstop, not
 //     a license: still pass the stable singleton.
+//   - One-liner worth stating explicitly (round-2): `hasSession` below is a
+//     null<->present TRANSITION detector, not a general "session changed"
+//     detector. Reconfiguring the blessed singleton's underlying token source
+//     while it stays present (a same-truthiness swap) does NOT by itself
+//     re-trigger a mount reload here — see ../session-accessor.ts's own header
+//     for why that is unreachable under the intended one-singleton usage, not an
+//     oversight.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefusalError, WireError } from "../wire";
@@ -91,7 +98,13 @@ export function useHydratedPart<T>(
   sessionRef.current = session;
   const hasSession = session != null;
 
-  const reload = useCallback(
+  // The internal variant, carrying the private `preserveErrorOnSuccess` opt-in
+  // (finding 1's sticky-refusal mechanism). Round-2 finding: the PUBLIC `reload`
+  // exposed on the returned state must not leak this parameter — a consumer must
+  // not even be ABLE to pass it, accidentally or otherwise. `reload` below is a
+  // separate, genuinely param-less closure over this one; only `act` (internally)
+  // ever calls `reloadImpl` with the opt-in directly.
+  const reloadImpl = useCallback(
     async (opts?: { preserveErrorOnSuccess?: boolean }) => {
       const sess = sessionRef.current;
       if (!sess) return;
@@ -119,10 +132,15 @@ export function useHydratedPart<T>(
   // here — see the sessionRef comment above. This project's eslint config does not
   // register `react-hooks/exhaustive-deps`, so no suppression comment is needed;
   // if that rule is ever added, this effect's deps are intentionally narrower than
-  // a naive "close over everything reload reads" would suggest.
+  // a naive "close over everything reloadImpl reads" would suggest.
   useEffect(() => {
-    void reload();
-  }, [reload, hasSession]);
+    void reloadImpl();
+  }, [reloadImpl, hasSession]);
+
+  /** The PUBLIC reload — genuinely `() => Promise<void>`, no hidden opts channel
+   *  (round-2 finding). Always clears any standing err/clr on success, exactly
+   *  like the internal variant's default. */
+  const reload = useCallback(() => reloadImpl(), [reloadImpl]);
 
   const act = useCallback(
     async (fn: () => Promise<void>, onOk?: () => void) => {
@@ -132,7 +150,7 @@ export function useHydratedPart<T>(
       try {
         await fn();
         onOk?.();
-        await reload(); // re-derive — never trust the write's own view of the result.
+        await reloadImpl(); // re-derive — never trust the write's own view of the result.
       } catch (e) {
         applyFailure(e, setErr, setClr);
         // Sticky refusal (finding 1): re-derive `data` for real, but PRESERVE the
@@ -140,12 +158,12 @@ export function useHydratedPart<T>(
         // still reads fine) must not silently erase the write's own refusal. Only
         // the reload's OWN failure (still unconditional, inside its catch above)
         // or the next act() call retires it.
-        await reload({ preserveErrorOnSuccess: true }).catch(() => {});
+        await reloadImpl({ preserveErrorOnSuccess: true }).catch(() => {});
       } finally {
         setBusy(false);
       }
     },
-    [reload],
+    [reloadImpl],
   );
 
   return { data, loading, busy, err, clr, reload, act };

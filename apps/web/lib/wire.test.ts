@@ -302,3 +302,63 @@ test("pgrestRpc: a 200 with a genuinely EMPTY body (a void governed function) re
     },
   );
 });
+
+// --- round-2 finding R1: a deliberate abort stays DISTINGUISHABLE from a real ---
+// --- network failure — never fabricated into a WireError.                    ---
+
+/** A fetch mock that never resolves on its own — it settles ONLY when the request
+ *  is aborted (simulating an in-flight request cancelled before any response
+ *  arrives, the superseded-request race `signal` exists for), rejecting with a
+ *  real platform AbortError exactly as a genuine fetch implementation would. */
+function abortableFetchMock(): typeof fetch {
+  return (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      const abortErr = () => new DOMException("The operation was aborted.", "AbortError");
+      if (signal?.aborted) {
+        reject(abortErr());
+        return;
+      }
+      signal?.addEventListener("abort", () => reject(abortErr()));
+    });
+  }) as typeof fetch;
+}
+
+test("pgrestSelect: an aborted in-flight request stays a distinguishable AbortError, never a fabricated WireError", async () => {
+  await withMockedFetch(abortableFetchMock(), async () => {
+    const controller = new AbortController();
+    const promise = pgrestSelect("documents?select=id", fakeSession("good-token"), controller.signal);
+    controller.abort();
+    await assert.rejects(promise, (e: unknown) => {
+      assert.ok(!isWireError(e), "an abort must NOT be fabricated into a WireError — it defeats cancellation detection");
+      assert.ok(e instanceof Error);
+      assert.equal((e as Error).name, "AbortError", "the platform's own error shape must survive unchanged");
+      return true;
+    });
+  });
+});
+
+test("pgrestRpc: an aborted in-flight request stays a distinguishable AbortError, never a fabricated WireError", async () => {
+  await withMockedFetch(abortableFetchMock(), async () => {
+    const controller = new AbortController();
+    const promise = pgrestRpc("approve_entry", { entry_id: "e1" }, fakeSession("good-token"), controller.signal);
+    controller.abort();
+    await assert.rejects(promise, (e: unknown) => {
+      assert.ok(!isWireError(e));
+      assert.equal((e as Error).name, "AbortError");
+      return true;
+    });
+  });
+});
+
+test("pgrestSelect: a request whose signal is ALREADY aborted before fetch is even reached also stays an AbortError", async () => {
+  await withMockedFetch(abortableFetchMock(), async () => {
+    const controller = new AbortController();
+    controller.abort(); // aborted before the call even starts — the pre-flight race
+    await assert.rejects(pgrestSelect("documents?select=id", fakeSession("good-token"), controller.signal), (e: unknown) => {
+      assert.ok(!isWireError(e));
+      assert.equal((e as Error).name, "AbortError");
+      return true;
+    });
+  });
+});
