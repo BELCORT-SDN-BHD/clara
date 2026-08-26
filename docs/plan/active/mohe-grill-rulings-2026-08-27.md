@@ -12,7 +12,7 @@ adversarially-verified alignment scan of `clarabook-frontend` PR #1 vs clara @ `
 
 1. **Q1 — Codex artifact status: (a).** The Codex `clarabook-frontend` output is DESIGN LAW +
    prototype evidence, not the production app. Production = **`apps/web` in THIS repo**, Next
-   15/16 on Cloudflare Workers, TypeScript, branch `frontend/web`, replacing `apps/dashboard`
+   15/16 on Cloudflare Workers, TypeScript, branch **frontend/web**, replacing `apps/dashboard`
    at cutover — §0 of the base handoff stands in full. The Codex design system / brand /
    routing IA / screens are PORTED in. Grounds (scan-verified): their integration contract is
    36 commits stale and materially wrong on bank/filing/close/freeform/reports; the prototype

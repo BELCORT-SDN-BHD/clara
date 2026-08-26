@@ -64,3 +64,61 @@ here verbatim from `PROGRESS.md` at clock-outs; the live file keeps only current
   census (a different table, different writer) confirmed unaffected. Pending: review ladder
   (judgement logic → independent pass, ADR-061 full ladder), merge, D1-quiesced ceremony.
   → **COMPLETED: 0128 merged and ceremonied at W4 2026-08-26.**
+
+## Forward obligations from the 2026-08-24 β review ladder + train night — archived verbatim 2026-08-27
+
+*(Condensed to a single pointer line in `PROGRESS.md`'s Backlog at the 磨合 window's opening.
+None blocks beta; each was named at its own finding.)*
+
+- **The candidate-parameterized `evaluate_witness_identity` variant → pi/F-A1-successor scope.**
+  Widens B3's corroborated-anchor floor beyond hard-id; ALSO the exact event that makes β's B2
+  collision wall outcome-bearing (today B2 is rung-vector/label quality — everything it flags, B3
+  already refuses) AND the β named-skip's path (i). **DESIGN v1 LANDED 2026-08-25** — see
+  `witness-identity-variant-survey.md` (+`-design`/`-annex`): a firm-guarded candidate-uuid array
+  on `evaluate_witness_identity_v2`, plus a homoglyph gap the same pass closed (`R0ME PROPERTIES`
+  had zero `name_family_candidates` coverage — new confusables fold); ship as one unit (cell W2).
+- **F-A2/PR-2-successor prompt: `candidates` becomes MANDATORY** (B2 arm (b)'s feed — the
+  runtime does not supply it today, by design).
+- **`document_regions.field_path` is caller-supplied and un-CHECKed** — a future producer
+  emitting a path containing tin/ssm/brn/account manufactures a corroborated anchor. No live
+  producer does today; the obligation rides the PRODUCER lanes, not β.
+- **Consolidate `wake_propose_bank_identifier_promotion` onto pi's `_identifier_promotion_core`**
+  (post-W4/beta-era; fa3-pr1b's own analysis: fold is the correct long-run shape,
+  `bank_account` already an enumerated kind; the rename stands meanwhile).
+- **A shared marker-survival helper before any FOURTH `_sandbox_client_set` recut** — three
+  migrations recut this ~19KB body (0132→0135→0136); cross-lane marker post-checks are
+  per-AUTHOR discipline; a shared prior-markers helper makes it structural. *(2026-08-26.)*
+- **Closed-wave-floor law (minted at #352): a PR retiring/moving an object pinned by a
+  closed-wave floor trues the floor IN THE SAME PR** (grep the drill kits for every dropped
+  name; closed drills don't run per-PR, so an untrued floor reds the NEXT sweep far from its
+  cause). Succession pattern: stem-OR-witness, exact-signature absences + positive controls.
+  *(Lifted into the ADR digest §10 at #356 and `.claude/rules/db-tests.md`.)*
+
+## The W4 posture bullet — archived verbatim 2026-08-27 at the 磨合 window's opening
+
+*(Moved out of `PROGRESS.md`'s Current posture when the 磨合 bullet superseded it there; the
+W4 window itself is unchanged fact, and its as-run remains
+`docs/plan/completed/wave-f-w4-ceremony-asrun.md`.)*
+
+- **W4 (THE CLOSING WINDOW) MERGED AND CEREMONIED — 2026-08-26 (~18:55-19:05 MYT).** The
+  Wave-F merge train's final eight items landed on `main` (0129 #343 · 0131 #346 · 0132 #345 ·
+  0133 G1 #349 · 0134 C1-bis #348 · #347 card-1 design docs · **0135 card-1 substitution seam
+  #351** · 0136 fix-forward #350), then NINE migrations ceremonied to live in one combined
+  D1-quiesced window: **live 122/`0127` → 131/`0136`** (0128 and 0130, merged post-W2W3 with
+  no window of their own, rode this one). **The BL-3 deploy flip ran: `('evaluate_metric', 2)`
+  DARK → deployed — card-1's stage (b) is LIT** (freeze 7/7; manifest `--lock-deployed`
+  stamped v2 AND trued the stale `evaluate_fs_pack_agent_v1` entry from the 08-24 C-flip).
+  As-run: `docs/plan/completed/wave-f-w4-ceremony-asrun.md`. **The pre-window sweep gate
+  earned its keep**: the first manual dispatch came back RED — the closed-wave D-b2 drill's
+  B3 floor still pinned `accept_bank_rule_suggestion`, which `0129` legitimately retired —
+  fixed as **#352** (succession-aware floors, stem-OR-witness branch, independent review
+  CLEAN with a mutation matrix), second sweep ALL-GREEN incl. the first true
+  `wave-e-contract-drills` run this cycle. 0135 itself carried a fix-before-merge adversary
+  finding (lag-over-cell period mislabel → two guards; pc(cell,cell) proven legitimate) and
+  0136 a both-direction superseded-body re-derivation with a dual-derivation byte-proof.
+  **Next: the frontend 磨合 window (its own session) → Wave G (factory reset + estate e2e +
+  beta).** The byte-burn render worker stays F-A5b PR-3 by prior ruling — sequenced, not owed.
+- **The earlier Wave-F windows (W1 2026-08-24 · D-a cascade · W2+W3 2026-08-25) and the F-A2
+  opener train (2026-08-21)** — superseded in posture by the W4 bullet; the four bullets moved
+  verbatim to this file earlier. Records: the four as-runs (`wave-f-w1-` ·
+  `f-a2-window-ab-` · `wave-f-w2w3-` · `wave-f-w4-ceremony-asrun.md`).
