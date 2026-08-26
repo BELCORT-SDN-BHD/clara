@@ -21,7 +21,7 @@ import {
   setConfigTimeoutForTests,
 } from "./session-accessor";
 import { WireError } from "./wire";
-import type { SessionTokenAccessor } from "./session-contract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 test("a card mounting BEFORE configuration still hydrates once configureSessionTokenSource lands — no re-mount, no hasSession re-fire needed", async () => {
   resetSessionTokenSource();

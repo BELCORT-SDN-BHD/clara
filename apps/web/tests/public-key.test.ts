@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { classifyPublicKey as classifyRaw } from "../scripts/check-public-key.mjs";
+import { classifyPublicKey as classifyRaw, readEnv as readEnvRaw } from "../scripts/check-public-key.mjs";
 
 /**
  * Finding 7 (MEDIUM) — the build-time gate on the CLASS of the key that gets
@@ -24,6 +27,10 @@ type Classification =
 
 function classify(value: string | undefined | null): Classification {
   return classifyRaw(value) as Classification;
+}
+
+function readEnv(name: string, envDir?: string): string | undefined {
+  return readEnvRaw(name, envDir) as string | undefined;
 }
 
 function jwt(payload: Record<string, unknown>): string {
@@ -125,6 +132,85 @@ describe("classifyPublicKey — rejected classes", () => {
     assert.deepEqual(classify("eyJ" + "abc.notbase64json.sig"), {
       ok: false,
       reason: "unrecognised-key-format",
+    });
+  });
+});
+
+describe("readEnv — Next's own production dotenv precedence (reviewer note 1)", () => {
+  // A unique, never-real env var name — never the app's actual
+  // NEXT_PUBLIC_SUPABASE_ANON_KEY — so this arm cannot collide with, or be
+  // masked by, a real value the ambient environment happens to carry.
+  const NAME = "CLARA_TEST_DOTENV_PRECEDENCE_PROBE";
+
+  function withFixtureDir(files: Record<string, string>, run: (dir: string) => void): void {
+    const dir = mkdtempSync(join(tmpdir(), "clara-dotenv-precedence-"));
+    try {
+      for (const [file, contents] of Object.entries(files)) {
+        writeFileSync(join(dir, file), contents, "utf8");
+      }
+      run(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it(".env.production.local WINS over .env.local (the exact gap the note names)", () => {
+    withFixtureDir(
+      {
+        ".env.production.local": `${NAME}=from-production-local\n`,
+        ".env.local": `${NAME}=from-local\n`,
+      },
+      (dir) => {
+        assert.equal(readEnv(NAME, dir), "from-production-local");
+      },
+    );
+  });
+
+  it(".env.local wins over .env.production and .env when .env.production.local is absent", () => {
+    withFixtureDir(
+      {
+        ".env.local": `${NAME}=from-local\n`,
+        ".env.production": `${NAME}=from-production\n`,
+        ".env": `${NAME}=from-plain\n`,
+      },
+      (dir) => {
+        assert.equal(readEnv(NAME, dir), "from-local");
+      },
+    );
+  });
+
+  it(".env.production wins over .env when neither .local file sets it", () => {
+    withFixtureDir(
+      {
+        ".env.production": `${NAME}=from-production\n`,
+        ".env": `${NAME}=from-plain\n`,
+      },
+      (dir) => {
+        assert.equal(readEnv(NAME, dir), "from-production");
+      },
+    );
+  });
+
+  it("falls back to .env when none of the more specific files set it", () => {
+    withFixtureDir({ ".env": `${NAME}=from-plain\n` }, (dir) => {
+      assert.equal(readEnv(NAME, dir), "from-plain");
+    });
+  });
+
+  it("the process environment still outranks every dotenv file", () => {
+    withFixtureDir({ ".env.production.local": `${NAME}=from-production-local\n` }, (dir) => {
+      process.env[NAME] = "from-process-env";
+      try {
+        assert.equal(readEnv(NAME, dir), "from-process-env");
+      } finally {
+        delete process.env[NAME];
+      }
+    });
+  });
+
+  it("resolves undefined when no file sets it and no directory has a match", () => {
+    withFixtureDir({}, (dir) => {
+      assert.equal(readEnv(NAME, dir), undefined);
     });
   });
 });

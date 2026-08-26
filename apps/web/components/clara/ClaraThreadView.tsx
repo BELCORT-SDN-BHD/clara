@@ -10,18 +10,19 @@ import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { PartSlot } from "@/components/clara/PartSlot";
-import type { SessionTokenAccessor } from "@/lib/clara/sessionContract";
+import type { SessionTokenAccessor } from "@/lib/session";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { ClaraThreadUiState } from "@/lib/clara/threadStore";
 import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
 import { cn } from "@/lib/utils";
 
 export function ClaraThreadView({
-  auth,
+  auth = sessionTokenAccessor,
   threadId,
   variant,
   resolveError = null,
 }: {
-  auth: SessionTokenAccessor;
+  auth?: SessionTokenAccessor;
   threadId: string | null;
   variant: "rail" | "full";
   /** Set by the caller when it could not even resolve/create a thread id (e.g. no

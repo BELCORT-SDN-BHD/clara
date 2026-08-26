@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 
 import { createSession, listSessions } from "./api";
-import type { SessionTokenAccessor } from "./sessionContract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 export function useActiveThreadId(
   auth: SessionTokenAccessor,

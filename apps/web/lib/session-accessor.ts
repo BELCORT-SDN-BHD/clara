@@ -36,7 +36,7 @@
 // p2-auth's `getSessionToken` once lib/session.ts lands (see
 // ./session-contract.ts's own header for the repoint note).
 
-import type { SessionTokenAccessor } from "./session-contract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 type TokenFn = () => Promise<string | null>;
 

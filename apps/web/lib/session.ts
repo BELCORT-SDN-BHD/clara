@@ -1,6 +1,23 @@
 import { createClient } from "@/lib/supabase/client";
 
 /**
+ * P2 FOLD SEAM F: the ONE `SessionTokenAccessor` contract home — every wire/card/
+ * rail lane converged onto this from their own parallel-build stand-ins
+ * (`lib/session-contract.ts`, `lib/clara/sessionContract.ts`, both retired at this
+ * fold). Carried over from `lib/clara/sessionContract.ts`'s own doc comment.
+ */
+export interface SessionTokenAccessor {
+  /**
+   * Resolves the current user's bearer token (the Supabase session JWT the
+   * runtime's AGENT-lane routes authenticate with — `streamRoute.ts:29`,
+   * `apps/dashboard/app/chat/api.ts` `runtimeFetch`). Resolves `null` when
+   * signed out or the session could not be read — callers must treat `null`
+   * as "not authenticated", never retry with an empty string.
+   */
+  getAccessToken(): Promise<string | null>;
+}
+
+/**
  * getSessionToken() — the session→API seam. This is the ONE place later
  * lanes read the Supabase access token through to attach as
  * `Authorization: Bearer <token>` on outbound calls:

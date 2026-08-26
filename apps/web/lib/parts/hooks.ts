@@ -33,7 +33,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefusalError, WireError } from "../wire";
-import type { SessionTokenAccessor } from "../session-contract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 export type PartClr = { code: string; reason: string | null } | null;
 

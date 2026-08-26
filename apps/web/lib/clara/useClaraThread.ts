@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { onFocusRail } from "@/lib/command/bus";
 
 import { getMessages, postTurn, resolveStreamAuth } from "./api";
-import type { SessionTokenAccessor } from "./sessionContract";
+import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
 

@@ -6,22 +6,24 @@
 // the collapse control returns to `returnHref`, the URL the rail escalated FROM,
 // captured as the `?from=` query param at the moment of escalation.
 //
-// `auth` defaults to the placeholder accessor client-side (never accepted as a prop
-// from a Server Component page — a real `SessionTokenAccessor` is a function-bearing
-// object and cannot cross the RSC boundary; it must be constructed in a client
-// ancestor once `lib/session.ts` lands, same as `ClaraRail`'s integration note).
+// `auth` defaults to the blessed `sessionTokenAccessor` singleton (P2 FOLD SEAM G —
+// never accepted as a REQUIRED prop from a Server Component page: a real
+// `SessionTokenAccessor` is a function-bearing object and cannot cross the RSC
+// boundary, so the default has to be constructed here, client-side, same as
+// `ClaraRail`'s own default).
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { buttonVariants } from "@/components/ui/button";
 import { ClaraThreadView } from "@/components/clara/ClaraThreadView";
-import { noSessionTokenAccessor, type SessionTokenAccessor } from "@/lib/clara/sessionContract";
+import type { SessionTokenAccessor } from "@/lib/session";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
 
 export function ClaraFullScreenThread({
   threadId,
   returnHref,
-  auth = noSessionTokenAccessor,
+  auth = sessionTokenAccessor,
 }: {
   threadId: string;
   returnHref: string;

@@ -15,7 +15,7 @@
 // OpeningCeremony.tsx:96-100).
 //
 // Departure from the dashboard shape (deliberate, task-directed): pgrestSelect/
-// pgrestRpc take an injected SessionTokenAccessor (./session-contract.ts) instead of
+// pgrestRpc take an injected SessionTokenAccessor (@/lib/session) instead of
 // a raw token string. apps/web starts fresh with Supabase SSR, where obtaining the
 // current session's access token can require an async cookie read; an accessor lets
 // every wire call late-bind the freshest token without every caller threading one
@@ -35,7 +35,7 @@
 // carved OUT of the "wrap as WireError" net — see safeFetch's own doc — so
 // cancelling a superseded request stays distinguishable from a real failure.
 
-import type { SessionTokenAccessor } from "./session-contract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 export function supabaseBase(): string | null {
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");

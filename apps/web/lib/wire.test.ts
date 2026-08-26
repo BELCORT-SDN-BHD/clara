@@ -20,7 +20,7 @@ import {
   isRefusalError,
   isWireError,
 } from "./wire";
-import type { SessionTokenAccessor } from "./session-contract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 // --- Pure parse (ported 1:1 from the dashboard's wire.test.ts) -------------------
 

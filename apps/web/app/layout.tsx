@@ -3,6 +3,8 @@ import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getTranslations } from "next-intl/server";
 
+import { SessionTokenBridge } from "@/components/session-token-bridge";
+
 import "./globals.css";
 
 // Local ClaraBook typefaces (public/brand/fonts/ — ported from clarabook-frontend
@@ -53,7 +55,10 @@ export default async function RootLayout({
       className={`${sourceSans.variable} ${sourceSerif.variable}`}
     >
       <body className="font-sans antialiased">
-        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+        <NextIntlClientProvider>
+          <SessionTokenBridge />
+          {children}
+        </NextIntlClientProvider>
       </body>
     </html>
   );

@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { renderHook } from "../../test/hookHarness";
 import { useHydratedPart } from "./hooks";
 import { RefusalError, WireError } from "../wire";
-import type { SessionTokenAccessor } from "../session-contract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 function session(token: string | null = "tok"): SessionTokenAccessor {
   return { getAccessToken: async () => token };

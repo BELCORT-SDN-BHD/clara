@@ -3,17 +3,12 @@
 // The Clara RAIL (P2-RAIL, build order item 1) — a dockable right-side panel present
 // in every workspace, per the interaction law (Q2: "persistent rail in every
 // workspace"). Self-contained: it resolves/creates its own active thread and reads the
-// module-level thread store directly, so it needs no provider mounted above it — a
-// (firm) layout or a client-workspace layout can drop `<ClaraRail />` /
-// `<ClaraRail clientId={clientId} />` in without any other wiring once it supplies a
-// real `SessionTokenAccessor` (`lib/clara/sessionContract.ts`).
+// module-level thread store directly, so it needs no provider mounted above it.
 //
-// INTEGRATION NOTE for the layout that eventually mounts this (do not edit here — the
-// (firm) layout files are out of this lane's scope by the work order):
-//   apps/web/app/(firm)/layout.tsx            -> <ClaraRail auth={session} />
-//   apps/web/app/(firm)/clients/[clientId]/layout.tsx -> <ClaraRail auth={session} clientId={clientId} />
-// `auth` must satisfy `SessionTokenAccessor`; the layout's own session/auth module
-// supplies it (e.g. a client-side wrapper around `lib/session.ts` once it lands).
+// P2 FOLD SEAM H: mounted ONCE, app-wide, from `components/clara/rail-mount.tsx`
+// (itself mounted in `app/(firm)/layout.tsx`) — see that file for the escalation-route
+// suppression this depends on. `auth` defaults to the blessed `sessionTokenAccessor`
+// singleton (`@/lib/session-accessor`); a caller (tests included) may still override it.
 
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -22,11 +17,12 @@ import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ClaraThreadView } from "@/components/clara/ClaraThreadView";
 import { useActiveThreadId } from "@/lib/clara/useActiveThread";
-import type { SessionTokenAccessor } from "@/lib/clara/sessionContract";
+import type { SessionTokenAccessor } from "@/lib/session";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useClaraRailOpen, useFocusRailSubscription } from "@/lib/clara/useClaraThread";
 import { claraThreadStore } from "@/lib/clara/threadStore";
 
-export function ClaraRail({ auth, clientId }: { auth: SessionTokenAccessor; clientId?: string }) {
+export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: SessionTokenAccessor; clientId?: string }) {
   const t = useTranslations("Clara.rail");
   const open = useClaraRailOpen();
   const pathname = usePathname();

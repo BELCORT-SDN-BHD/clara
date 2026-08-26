@@ -148,7 +148,11 @@ still a real navigation, landing on Next's own not-found) · **Ask** (never conv
 lands) · **Do** (a fixed, disabled, single row naming the shape — "dispatch a run" — with no
 verb list and no fake dispatch; P3 wires it up). Full detail, key map, and the layout
 integration note are in `components/command/command-k-provider.tsx`'s header comment — that
-file deliberately does **not** self-mount into any layout.
+file deliberately does **not** self-mount into any layout. **Mounted** in
+`app/(firm)/layout.tsx` (P2 fold seam H) — every route under the firm shell has ⌘K reachable
+end to end; the docked Clara rail is mounted alongside it via `components/clara/rail-mount.tsx`
+(one mount app-wide, suppressed on a Clara full-screen escalation route — see that file's own
+header for why).
 
 **Known deviation, by design:** adding `cmdk` (a `command.tsx` dependency) surfaced a
 pre-existing `@types/react` version skew between this package (`19.2.18`) and

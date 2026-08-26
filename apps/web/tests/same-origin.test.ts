@@ -149,4 +149,62 @@ describe("isSameOriginRequest — refusals", () => {
       false,
     );
   });
+
+  it("refuses a plain-HTTP Origin against a matching prod-like host (reviewer note 2)", () => {
+    assert.equal(
+      isSameOriginRequest(
+        headers({
+          origin: "http://app.clara.example",
+          host: "app.clara.example",
+          "sec-fetch-site": "same-origin",
+        }),
+        APP_URL,
+      ),
+      false,
+    );
+  });
+});
+
+describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
+  it("accepts loopback http (local dev only ever serves HTTP)", () => {
+    assert.equal(
+      isSameOriginRequest(
+        headers({
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+          "sec-fetch-site": "same-origin",
+        }),
+        "http://localhost:3000/logout",
+      ),
+      true,
+    );
+  });
+
+  it("accepts loopback http via 127.0.0.1", () => {
+    assert.equal(
+      isSameOriginRequest(
+        headers({
+          origin: "http://127.0.0.1:3000",
+          host: "127.0.0.1:3000",
+          "sec-fetch-site": "same-origin",
+        }),
+        "http://127.0.0.1:3000/logout",
+      ),
+      true,
+    );
+  });
+
+  it("refuses http for a non-loopback host even with a matching Host header", () => {
+    assert.equal(
+      isSameOriginRequest(
+        headers({
+          origin: "http://staging.clara.example",
+          host: "staging.clara.example",
+          "sec-fetch-site": "same-origin",
+        }),
+        "http://staging.clara.example/logout",
+      ),
+      false,
+    );
+  });
 });

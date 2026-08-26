@@ -15,7 +15,7 @@
 // `share_chat_session`, …) are deliberately NOT ported here — they ride PostgREST via
 // `lib/wire.ts`, which is out of this lane's scope by the work order.
 
-import type { SessionTokenAccessor } from "./sessionContract";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 export type { ClaraPart } from "@/lib/parts/types";
 import type { ClaraPart } from "@/lib/parts/types";

@@ -104,28 +104,35 @@ export function classifyPublicKey(value) {
 const ENV_NAME = "NEXT_PUBLIC_SUPABASE_ANON_KEY";
 
 /**
- * Reads one variable the way `next build` will see it: the process
- * environment first (that is what a deploy sets), then the dotenv files Next
- * itself loads, in Next's own precedence — `.env.local` beats `.env`.
+ * Reads one variable the way a PRODUCTION `next build`/`next start` will see
+ * it: the process environment first (that is what a deploy sets), then the
+ * dotenv files Next itself loads, in Next's own production precedence —
+ * `.env.production.local` > `.env.local` > `.env.production` > `.env`,
+ * first-match-wins (reviewer note 1, 2026-08-27: the previous two-file list
+ * stopped at `.env.local`, so a value set only in `.env.production.local` —
+ * which OUTRANKS `.env.local` — would build with a key this gate never saw).
  *
  * A deliberately minimal parser rather than a dependency: `@next/env` is not
  * a direct dependency of this package, and this gate must run under bare
  * `node` before any bundler exists. It never PRINTS a value it reads.
  *
  * @param {string} name
+ * @param {string} [envDir] Directory the dotenv files live in — defaults to
+ *   this package's root (one level up from `scripts/`). Overridable so tests
+ *   can point it at a disposable fixture directory instead of writing real
+ *   dotenv files into the package.
  * @returns {string | undefined}
  */
-function readEnv(name) {
+export function readEnv(name, envDir = join(dirname(fileURLToPath(import.meta.url)), "..")) {
   const fromProcess = process.env[name];
   if (typeof fromProcess === "string" && fromProcess.trim() !== "") {
     return fromProcess;
   }
 
-  const here = dirname(fileURLToPath(import.meta.url));
-  for (const file of [".env.local", ".env"]) {
+  for (const file of [".env.production.local", ".env.local", ".env.production", ".env"]) {
     let contents;
     try {
-      contents = readFileSync(join(here, "..", file), "utf8");
+      contents = readFileSync(join(envDir, file), "utf8");
     } catch {
       continue;
     }
