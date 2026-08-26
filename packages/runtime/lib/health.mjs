@@ -8,8 +8,9 @@
 //
 // A dead relay LEADER is handled by the supervisor's fail-fast (S4-ND5), not here.
 // Relay lag / dead-letters / backlog are WARNINGS only (degraded, still serving) —
-// surfaced from clara.relay_health(). Everything is bounded + sanitized: /ready must
-// never hang and never leak raw DB text.
+// surfaced from clara.relay_health(). The storage write probe (R9, below) joins this
+// same WARN-only class: a broken document lane is not "nothing works." Everything is
+// bounded + sanitized: /ready must never hang and never leak raw DB text.
 
 import { withRuntime } from "./pools.mjs";
 import { scannerReachable } from "./scan.mjs";
@@ -22,6 +23,7 @@ import { sstWatchHealth } from "./sst-watch.mjs";
 import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
+import { storageProbeHealth } from "./storage-probe.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -296,6 +298,18 @@ export async function checkReadiness() {
     const queueWarnMs = Number(process.env.CLARA_DOCUMENT_QUEUE_WARN_MS || 60000);
     if (intake.oldestQueuedMs > queueWarnMs) warnings.push(`oldest unbound document task age ${Math.round(intake.oldestQueuedMs)}ms`);
   }
+
+  // Storage write probe (R9, docs/plan/active/harness-audit-rulings-2026-08-26.md —
+  // follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md: that outage held
+  // /ready TRUE for ~12h while every upload failed, because /ready never touched storage
+  // at all). WARN-only, like every other intake-adjacent signal above: a storage outage
+  // takes the DOCUMENT LANE down, not "nothing works" — the /ready contract at the top of
+  // this file fails only on the latter. storageProbeHealth() already self-bounds
+  // (storage-probe.mjs); wrapped in bounded() again here too (belt-and-suspenders, same
+  // shape as checks.intake above) so a hung storage call can never hang /ready either way.
+  const storage = await bounded(storageProbeHealth, { ok: false, reason: "storage_probe_check_timeout" });
+  checks.storage = storage;
+  if (!storage.ok) warnings.push(`storage write probe failed: ${storage.reason || "unknown"}`);
 
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.
