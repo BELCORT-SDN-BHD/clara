@@ -48,5 +48,42 @@
     "part": {
       "unsupported": "Unsupported part: {kind}"
     }
+  },
+  "CommandPalette": {
+    "title": "Command palette",
+    "description": "Go to a page, ask Clara, or dispatch a run.",
+    "inputPlaceholder": "Search or ask Clara…",
+    "go": {
+      "heading": "Go",
+      "clientHeading": "This client",
+      "empty": "No matching pages for “{query}”",
+      "plannedBadge": "Not built yet",
+      "routes": {
+        "firmHome": "Firm home",
+        "needsYou": "Needs you",
+        "clientRegister": "Client register",
+        "firmActivity": "Firm activity",
+        "admin": "Admin",
+        "clientWorkspaceHome": "Workspace overview",
+        "journals": "Journals",
+        "documents": "Documents",
+        "bank": "Bank",
+        "close": "Close",
+        "reports": "Reports",
+        "registers": "Registers",
+        "knowledge": "Knowledge"
+      }
+    },
+    "ask": {
+      "heading": "Ask",
+      "withQuery": "Ask Clara: “{query}”",
+      "withoutQuery": "Ask Clara…",
+      "hint": "Opens the rail"
+    },
+    "do": {
+      "heading": "Do",
+      "disabledLabel": "Dispatch a run — wires up in P3",
+      "hint": "Not connected yet"
+    }
   }
 }

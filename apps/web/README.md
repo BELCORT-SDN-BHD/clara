@@ -131,8 +131,35 @@ pnpm --filter @clara/web dev        # local dev server
 (`pnpm -r --if-present <script>`) — this scaffold does not change that fan-out's shape or
 break any existing package's pipeline.
 
+## Command palette (⌘K)
+
+`components/command/` (the vendored shadcn `command`/`dialog`/`input`/`input-group`/`badge`
+primitives live in `components/ui/`, added via `pnpm dlx shadcn@latest add`, `dark:` classes
+stripped per the token-provenance prohibition above) + `lib/command/` (`routes.ts`, `bus.ts`).
+Three sections — **Go** (real navigation over the ruled two-level IA, `lib/command/routes.ts`;
+a route with no page yet is labelled "not built yet", never hidden or faked — selecting it is
+still a real navigation, landing on Next's own not-found) · **Ask** (never converses — emits
+`clara:focus-rail` on `lib/command/bus.ts`, the seam the rail lane subscribes to once it
+lands) · **Do** (a fixed, disabled, single row naming the shape — "dispatch a run" — with no
+verb list and no fake dispatch; P3 wires it up). Full detail, key map, and the layout
+integration note are in `components/command/command-k-provider.tsx`'s header comment — that
+file deliberately does **not** self-mount into any layout.
+
+**Known deviation, by design:** adding `cmdk` (a `command.tsx` dependency) surfaced a
+pre-existing `@types/react` version skew between this package (`19.2.18`) and
+`apps/dashboard` (`19.2.17`) — pnpm's shared phantom-hoist slot for packages with no declared
+`@types/react` edge of their own (cmdk is one: it has neither a dependency nor a peer on
+`@types/react`) picked the older copy, which broke `tsc` on every cmdk JSX element with a
+`React.Key`-branding mismatch (React 19's `Key` type mints a new nominal `unique symbol` per
+patch release). Fixed with a root `pnpm.overrides` (`package.json`) pinning
+`@types/react`/`@types/react-dom` to this package's versions workspace-wide — the narrowest
+available fix that doesn't touch `apps/dashboard`'s own declared contract; verified both
+apps' `typecheck`/`build` stay green after it. Worth a second look from whoever owns
+`apps/dashboard` if its own type pins are meant to track something else deliberately.
+
 ## What is deliberately NOT here yet
 
-No auth (Supabase SSR cookie sessions land at P2), no `⌘K`, no rail/thread, no part-catalog
-renderer, no data fetching, no product screens of any kind. See
+No auth (Supabase SSR cookie sessions land at P2), no rail/thread, no part-catalog renderer,
+no data fetching, no product screens of any kind. `⌘K` is built (Go/Ask real, Do an honest
+disabled skeleton — see above) but not yet mounted into any layout. See
 `docs/plan/active/mohe-grill-rulings-2026-08-27.md` Q9 for the phase plan.

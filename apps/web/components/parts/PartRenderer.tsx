@@ -1,6 +1,6 @@
 import type { ClaraPart } from "../../lib/parts/types";
 import { isStatusResolverType } from "../../lib/parts/catalog";
-import { Badge } from "../ui/badge";
+import { Badge } from "./PartBadge";
 import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
 
 // The fail-closed part renderer (contract §3.1 / frontend-handoff-2026-08-23 §3.1,

@@ -10,7 +10,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "node --import ./test/bootstrap.mjs --import tsx --test lib/parts/catalog.test.tsx lib/parts/hooks.test.ts lib/wire.test.ts lib/session-accessor.test.ts tests/"
+    "test": "node --import ./test/bootstrap.mjs --import tsx --test lib/parts/catalog.test.tsx lib/parts/hooks.test.ts lib/wire.test.ts lib/session-accessor.test.ts tests/",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
@@ -20,6 +20,7 @@
     "@base-ui/react": "1.7.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "cmdk": "1.1.1",
     "lucide-react": "1.34.0",
     "next": "16.3.3",
     "next-intl": "4.13.7",
