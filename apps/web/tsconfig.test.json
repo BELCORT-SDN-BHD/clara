@@ -1,0 +1,8 @@
+{
+  "//": "tsx transform config for the node:test parity/wire run (test/bootstrap.mjs points TSX_TSCONFIG_PATH here). Mirrors apps/dashboard/tsconfig.test.json: only overrides jsx so esbuild uses the automatic runtime — the app build still uses the Next `jsx: preserve` in tsconfig.json.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  }
+}
