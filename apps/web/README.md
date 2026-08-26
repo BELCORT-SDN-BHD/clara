@@ -1,8 +1,10 @@
-# apps/web — Clara's production frontend (P1 foundation scaffold)
+# apps/web — Clara's production frontend (P2 shell)
 
-**Status: P1 FOUNDATION.** This is the scaffold only — package wiring, tokens, i18n plumbing,
-an empty two-level route skeleton. No product screens. It replaces `apps/dashboard` **at
-cutover**, not before (`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1).
+**Status: P2 SHELL.** The full shell is landed — Supabase SSR invite-only auth, the
+two-level workspace chrome, the Clara rail + full-screen thread escalation, the 18-part
+catalog renderer, and `⌘K`. No product data screens yet (those are P3). It replaces
+`apps/dashboard` **at cutover**, not before
+(`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1).
 
 ## What this is
 
@@ -84,14 +86,21 @@ Matches the two-level IA ruled in Q3 (firm altitude / client-workspace altitude)
 groups only, no URL segment added by the grouping:
 
 ```
-app/(firm)/page.tsx                          → "/"                     firm home (placeholder)
-app/(firm)/clients/[clientId]/page.tsx        → "/clients/:clientId"    client workspace (placeholder)
+app/(firm)/    — the firm shell (FirmNav + the ONE Clara rail mount + ⌘K): firm home ·
+                 needs-you · clients register · activity · admin, plus the client
+                 workspace (clients/[clientId]/ + its seven object tabs: journals ·
+                 documents · bank · close · reports · registers · knowledge) under its
+                 scope-activating layout.
+app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
+                 /clients/:clientId/clara/:threadId — same URLs, route groups add no
+                 segment): a viewport-owning minimal layout with NO firm chrome, plus a
+                 thin scope layout so the client variant never escapes client-scope
+                 activation.
+app/login · app/invite/[token] · app/logout — the auth surfaces (proxy-gated).
 ```
 
-Both are placeholder pages — no content, no data fetching, no chrome. The real firm-altitude
-surface (Needs-you inbox, client register, firm activity/receipts feed, admin) and the real
-client-workspace surface (journals/documents/bank/close/reports/registers/knowledge as tabs,
-Clara docked as a rail) are P3/P2 work respectively.
+The workbench tab pages are placeholder shells — the real data surfaces (hydrate-never-trust
+reads, governed doors) land per-journey in P3.
 
 ## Cloudflare
 
