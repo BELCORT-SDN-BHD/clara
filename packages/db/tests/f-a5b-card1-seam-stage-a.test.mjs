@@ -114,11 +114,18 @@ test("B1.2 — a placeholder citing a NON-preview_cell basis kind REFUSES sandbo
     t.skip("card 1 B1.2 refusal arm: migration 0136 is not on this chain, so clara._sandbox_client_set still casts a freeform basis id ::uuid against a bigint column and refuses at the earlier malformed-id wall — this cell's own refusal is unreachable behind it");
   } else {
     // A REAL, FULLY RESOLVABLE receipt, minted here rather than scavenged from whatever another
-    // battery happened to leave behind. Post-0136 a freeform basis must survive the bigint id
-    // gate, the tenancy conjunct AND the outcome='ok' conjunct before the placeholder wall can be
-    // the thing that refuses. A row failing any of those would refuse EARLIER — which is the very
-    // "pass read off the wrong refusal" the old gate was trying to prevent, now prevented for
-    // real instead of by skipping.
+    // battery happened to leave behind. Post-0136 a freeform basis must survive the bigint id gate
+    // AND the existence lookup's `firm_id = p_firm and outcome = 'ok'` conjuncts before the
+    // placeholder wall can be the thing that refuses. A row failing either would refuse EARLIER —
+    // which is the very "pass read off the wrong refusal" the old gate was trying to prevent, now
+    // prevented for real instead of by skipping.
+    // ORDER MEASURED, not assumed (character offsets in the live post-0136 body): id gate 4003 ·
+    // existence lookup 5460 · card-1's placeholder wall 10329 · derivation-loop start 11268 ·
+    // F1's tenancy conjunct 16971. So 0136's TENANCY wall is NOT on this path at all — a
+    // placeholder-citing body refuses at 10329, before the derivation loop is even entered. An
+    // earlier draft of this comment named the tenancy conjunct here; that was wrong, and naming
+    // the wrong upstream wall in a cell about refusal ordering is exactly the kind of confident
+    // false premise this lane keeps paying for.
     const read = (await rootQuery(
       `insert into clara.freeform_read_log
          (firm_id, credential_id, query_text, purpose, verb, scope, client_scope, acting_actor,

@@ -122,8 +122,11 @@ before(async () => {
   fixReady = Boolean(row.has_fix);
   preShape = Boolean(row.has_pre);
   if (ready && fa6 && !fixReady && !preShape) {
-    // Not a skip and not silent: say out loud that the cells below will RUN and FAIL.
-    console.log("fix.fr GATE: clara._sandbox_client_set carries NEITHER the pre-0136 ::uuid arm nor 0136's ::bigint arm — the cells below will RUN and FAIL rather than skip.");
+    // Not a skip and not silent: say out loud that the cells below will RUN. Whether they pass is
+    // then the body's business, not the gate's — a semantics-preserving change to an unrecognised
+    // body would run them and pass, which is the correct outcome, so promising FAILURE here would
+    // be the gate over-claiming.
+    console.log("fix.fr GATE: clara._sandbox_client_set carries NEITHER the pre-0136 ::uuid arm nor 0136's ::bigint arm — the cells below will RUN rather than skip.");
   }
   if (!ready || !fa6) return;
 
