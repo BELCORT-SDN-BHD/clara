@@ -70,17 +70,21 @@ function gate(t) {
  *  credential/pool machinery is F-A6's to exercise (f-a6-freeform-read.test.mjs does); what this
  *  battery needs from a receipt is only its durable arm-phase columns, which are exactly what
  *  _sandbox_client_set reads. `p_clients` is null for a firm-wide read and a uuid[] otherwise. */
-async function mintReceipt({ firm, scope, clients = null, actor, wakeKind = "interactive_client" }) {
+async function mintReceipt({ firm, scope, clients = null, actor, wakeKind = "interactive_client",
+  outcome = "ok" }) {
+  // ck_freeform_settled (0131:555-561): a non-ok outcome MUST name a refusal_reason.
+  const reason = outcome === "ok" ? null : `fix.fr synthetic ${outcome}`;
   const r = await rootQuery(
     `insert into clara.freeform_read_log
        (firm_id, credential_id, query_text, purpose, verb, scope, client_scope, acting_actor,
-        via_wake_kind, task_id, op_key, arm_txid, settled_at, outcome, rung_vector,
+        via_wake_kind, task_id, op_key, arm_txid, settled_at, outcome, refusal_reason, rung_vector,
         relations_read, row_count, byte_count, duration_ms)
      values ($1, $2, 'select id from clara.clients', 'fix.fr basis fixture', 'wake_freeform_read',
-             $3, $4::uuid[], $5, $6, $7, $8, pg_current_xact_id(), now(), 'ok',
+             $3, $4::uuid[], $5, $6, $7, $8, pg_current_xact_id(), now(), $9, $10,
              '{"statement_shape":"pass"}'::jsonb, array['clara.clients']::text[], 1, 64, 3)
      returning id`,
-    [firm, randomUUID(), scope, clients, actor, wakeKind, randomUUID(), `fixfr-${randomUUID()}`],
+    [firm, randomUUID(), scope, clients, actor, wakeKind, randomUUID(), `fixfr-${randomUUID()}`,
+      outcome, reason],
   );
   return String(r.rows[0].id);
 }
@@ -230,6 +234,16 @@ test("fix.fr.malformed — a genuinely malformed freeform id still REFUSES typed
     [randomUUID(), "a UUID — well-formed for the OTHER basis kind, malformed for this one"],
     ["9223372036854775808", "int8's ceiling plus one: an overflow that must never reach the ::bigint cast"],
     ["99999999999999999999999", "a 23-digit overflow"],
+    // N5 — THE EMBEDDED-NEWLINE CLASS, the one shape where a regex surprise could actually leak.
+    // In many regex dialects `$` matches before a trailing newline, which would make '7\n' pass a
+    // `^[0-9]+$` test and reach the cast. PostgreSQL's ARE anchors `$` at end-of-STRING unless
+    // newline-sensitive matching is switched on, so these refuse — but that is a property of the
+    // engine, not of the pattern, and it is the difference between a typed refusal and a raw
+    // 22P02 escaping through the wake wrapper. Measured, not assumed.
+    ["7\n", "a trailing newline after a valid digit"],
+    ["7\nx", "a valid digit, a newline, then garbage"],
+    ["\n7", "a leading newline"],
+    ["7\n9223372036854775808", "a valid digit, a newline, then an overflow"],
   ];
   for (const [id, why] of bad) {
     const e = await mintRefusal(world.firms.A, world.users.alice,
@@ -292,7 +306,91 @@ test("fix.fr.no-oracle — an absent id and another firm's real receipt refuse I
 });
 
 // =============================================================================================
-// WHY 0136 ADDS NO `settled_at` CONJUNCT — proven positively, not asserted. 0131's
+// F1 — THE TENANCY WALL (fix round; the implementation and adversarial review legs converged on
+// this independently). Proving the RECEIPT belongs to the firm does not prove the CLIENTS it
+// names do. The adversarial leg measured that clara._recipient_covers answers covered:true for a
+// foreign-firm client_set with no backstop behind it, so the arm's correctness rested on a
+// three-hop cross-file premise. One conjunct makes it local. These cells force it directly:
+// client_scope has no FK, so a receipt naming a foreign client is CONSTRUCTIBLE at the table —
+// which is exactly why the wall has to live in the body.
+// =============================================================================================
+test("fix.fr.tenancy — a receipt naming a client of ANOTHER firm refuses, indistinguishably from one naming no client at all; the own-firm twin is admitted", async (t) => {
+  if (gate(t)) return;
+  const cite = (id, tag) => mintRefusal(world.firms.A, world.users.alice,
+    body("fr"), basisArr(frBasis("fr", id)), tag);
+
+  // (1) A firm-A receipt whose client_scope names a REAL client of firm B.
+  const foreignClient = await mintReceipt({
+    firm: world.firms.A, scope: "client", clients: [world.clients.B1], actor: world.users.alice });
+  const eForeign = await cite(foreignClient, "fixfr-ten-foreign");
+  assert.ok(eForeign, "a client_scope naming another firm's client must refuse the mint — otherwise the foreign client enters client_set and _recipient_covers answers covered:true on it");
+  assert.equal(eForeign.code, "CLR11", `expected the typed CLR11, got ${eForeign.code} (${eForeign.message})`);
+  assert.match(eForeign.detail || "", /sandbox_view_basis_unknown/);
+
+  // (2) NO ORACLE: a client_scope naming a uuid that is no client of ANY firm must be
+  //     indistinguishable from (1). Same label, so any difference at all IS the oracle.
+  const noSuchClient = await mintReceipt({
+    firm: world.firms.A, scope: "client", clients: [randomUUID()], actor: world.users.alice });
+  const eAbsent = await cite(noSuchClient, "fixfr-ten-absent");
+  assert.ok(eAbsent, "a client_scope naming a non-existent client must also refuse");
+  assert.equal(eAbsent.code, eForeign.code, "the error CODE must not distinguish a foreign client from a non-existent one");
+  assert.equal(eAbsent.message, eForeign.message, "nor the message");
+  assert.equal(eAbsent.detail, eForeign.detail, "nor the detail — same label was used, so any difference IS an existence oracle");
+
+  // (3) The differential twin: identical in every term except WHOSE client it names, and admitted.
+  const ok = await mintView(world.firms.A, world.users.alice,
+    body("fr"), basisArr(frBasis("fr", fx.frA1)), "fixfr-ten-twin");
+  assert.deepEqual(ok.client_set_exact, [world.clients.A1],
+    "a receipt naming this firm's own client still derives normally — the wall refuses foreign clients, not legitimate ones");
+
+  // (4) And no firm-B client ever reached the set, on any path this cell exercised.
+  assert.ok(!ok.client_set.includes(world.clients.B1), "no foreign client in the widened set either");
+});
+
+// =============================================================================================
+// F2 — SETTLED IS NOT SUCCEEDED (fix round). A refused or errored read returned NO ROWS, so
+// grounding a durable export's narrative on it is a provenance defect against hard constraint 2.
+// The conjunct rides inside the existence probe, so a non-ok read refuses through the SAME arm as
+// an absent or foreign one and the three stay indistinguishable.
+// =============================================================================================
+test("fix.fr.outcome — a settled-but-REFUSED and a settled-but-ERRORED read cannot ground a basis, and refuse indistinguishably from an absent id; the ok twin is admitted", async (t) => {
+  if (gate(t)) return;
+  const cite = (id, tag) => mintRefusal(world.firms.A, world.users.alice,
+    body("fr"), basisArr(frBasis("fr", id)), tag);
+
+  const refusedId = await mintReceipt({
+    firm: world.firms.A, scope: "client", clients: [world.clients.A1], actor: world.users.alice, outcome: "refused" });
+  const erroredId = await mintReceipt({
+    firm: world.firms.A, scope: "client", clients: [world.clients.A1], actor: world.users.alice, outcome: "error" });
+
+  const eRefused = await cite(refusedId, "fixfr-out-refused");
+  const eErrored = await cite(erroredId, "fixfr-out-errored");
+  const eAbsent = await cite(fx.absentId, "fixfr-out-absent");
+
+  assert.ok(eRefused, "a REFUSED read produced no rows — it must not ground a basis");
+  assert.ok(eErrored, "an ERRORED read produced no rows — it must not ground a basis");
+  assert.equal(eRefused.code, "CLR11", `expected the typed CLR11, got ${eRefused.code} (${eRefused.message})`);
+  assert.match(eRefused.detail || "", /sandbox_view_basis_unknown/);
+  // No oracle: a non-ok read is indistinguishable from an id that does not exist at all.
+  for (const [label, e] of [["refused", eRefused], ["errored", eErrored]]) {
+    assert.equal(e.code, eAbsent.code, `${label}: the CODE must not distinguish a non-ok read from an absent id`);
+    assert.equal(e.message, eAbsent.message, `${label}: nor the message`);
+    assert.equal(e.detail, eAbsent.detail, `${label}: nor the detail`);
+  }
+
+  // The differential twin: same firm, same client, same everything — outcome 'ok' — and admitted.
+  const okId = await mintReceipt({
+    firm: world.firms.A, scope: "client", clients: [world.clients.A1], actor: world.users.alice, outcome: "ok" });
+  const ok = await mintView(world.firms.A, world.users.alice,
+    body("fr"), basisArr(frBasis("fr", okId)), "fixfr-out-twin");
+  assert.deepEqual(ok.client_set_exact, [world.clients.A1],
+    "the ONLY term that differs from the refused/errored receipts is `outcome`, and this one derives");
+});
+
+// =============================================================================================
+// WHY 0136 ADDS NO SEPARATE `settled_at` CONJUNCT — F2's `outcome = 'ok'` already implies it
+// (ck_freeform_settled makes outcome non-null exactly when settled_at is). The weaker property is
+// independently guaranteed anyway, and this cell proves that rather than asserting it. 0131's
 // t_freeform_must_settle is a DEFERRABLE INITIALLY DEFERRED constraint trigger, so an armed and
 // unsettled receipt can never COMMIT. Every row this arm can see from another transaction is
 // settled by construction, which is exactly the design's "pure function of durable rows" (P-3).
@@ -369,6 +467,19 @@ test("fix.fr.guards-unreachable — ck_freeform_scope_client is what makes the m
     assert.equal(e.code, "23514", `${label}: expected a CHECK violation, got ${e.code} (${e.message})`);
     assert.equal(e.constraint, constraint, `${label}: refused by ${e.constraint}, expected ${constraint}`);
   }
+
+  // THE SIXTH SHAPE (F3), and it refuses DIFFERENTLY — measured, not assumed. A 2-D client_scope
+  // is not caught by a CHECK returning false: ck_freeform_scope_client's OWN array_position
+  // raises 0A000 ("searching for elements in multidimensional arrays is not supported") while
+  // evaluating the constraint, so the refusal carries no constraint name at all. That is exactly
+  // the raw error 0136's array_ndims guard pre-empts on the READ side, for the day a writer
+  // reaches this column by some path that does not evaluate this CHECK.
+  const eNd = await tryRow("client", `array[array['${world.clients.A1}'::uuid]]`);
+  assert.ok(eNd, "a 2-D client_scope must not be writable");
+  assert.equal(eNd.code, "0A000",
+    `a 2-D client_scope is refused by array_position raising, not by a CHECK returning false — got ${eNd.code} (${eNd.message})`);
+  assert.match(eNd.message, /multidimensional/,
+    "and the raise is the multidimensional-array one, which is the precise error 0136's array_ndims guard exists to pre-empt");
   // POSITIVE CONTROL on the probe itself: the one shape F-A6 v1 DOES admit goes through, so the
   // five refusals above are the CHECKs answering and not the fixture failing for its own reasons.
   assert.equal(await tryRow("client", `array['${world.clients.A1}']::uuid[]`), null,
