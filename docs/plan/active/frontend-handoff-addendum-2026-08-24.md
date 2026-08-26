@@ -90,8 +90,9 @@ verb existing in a design doc or an unmerged branch is not the same as it being 
 **F-A3 bank agency — thirteen verbs, ALL thirteen in one branch, merges as a set at the W2
 window** (`PROGRESS.md:85`, lane row: "merges at the W2 window"). Design enumeration:
 `docs/plan/active/bank-agency-design.md:122-128` ("Thirteen verbs"). Verified present, by exact
-`create function` line, in `f-a3/pr-1b@c623178` (full sha `c6231781266a326ca44e7a1b980af132fde2d7b5`,
-branch `f-a3/pr-1b`, file `packages/db/migrations/0121_f_a3_pr1b_agent_limb.sql`):
+`create function` line, at commit `c6231781266a326ca44e7a1b980af132fde2d7b5` (then branch
+f-a3/pr-1b, pre-merge; since MERGED as PR #328) in file
+`packages/db/migrations/0121_f_a3_pr1b_agent_limb.sql`:
 
 | Verb | Line |
 |---|---|
@@ -113,14 +114,15 @@ branch `f-a3/pr-1b`, file `packages/db/migrations/0121_f_a3_pr1b_agent_limb.sql`
 `wake_propose_identifier_promotion`; the conductor renamed it at `c623178` because F-A7 owns the
 door for the *un-prefixed* name (see §2). `PROGRESS.md:171-173` (Backlog) already logs a forward
 obligation to consolidate it onto pi's core post-beta — **do not build two separate promotion
-confirm flows; both land on the one human door in §2.** `f-a3/pr-1a` (core extraction,
-prerequisite refactor) and `f-a3/pr-1c` (the `bank_matching` egress purpose grant) carry no
-wake verbs themselves and merge in the same W2 window.
+confirm flows; both land on the one human door in §2.** F-A3's PR-1a (core extraction,
+prerequisite refactor; since MERGED as `0119`/PR #327) and PR-1c (the `bank_matching` egress
+purpose grant; since MERGED as `0122`/PR #330) carry no wake verbs themselves and merged in
+the same W2 window.
 
-**F-A7 β — five verbs, all in ONE file, merge slot W2/W3 (not yet fixed —
-`PROGRESS.md:89`: "β waits its W2/W3 merge slot")**. Verified present in
-`f-a7/pr-4-beta@6892033` (full sha `6892033822101d578e2806bd5d49efdbecf2b483`, file
-`packages/db/migrations/0126_f_a7_beta_filing_verb.sql`):
+**F-A7 β — five verbs, all in ONE file, merged as PR #333** (was: "merge slot W2/W3 (not yet
+fixed — `PROGRESS.md:89`: 'β waits its W2/W3 merge slot')" — since CEREMONIED as part of the
+W2+W3 window). Verified present at commit `6892033822101d578e2806bd5d49efdbecf2b483` (then
+branch f-a7/pr-4-beta, pre-merge) in file `packages/db/migrations/0126_f_a7_beta_filing_verb.sql`:
 
 | Verb | Line |
 |---|---|
@@ -131,16 +133,20 @@ wake verbs themselves and merge in the same W2 window.
 | `wake_propose_filing_correction` | 1758 |
 
 **Correction to this addendum's own brief:** the assignment named the reference commit as
-`f-a7/pr-4-beta@898da67`. That sha (`898da673726cdfacc142b4f51e9337290fbd8a3e`) resolves on
-this remote to a merge commit on **`f-a2/pr-2`**, not `f-a7/pr-4-beta` — verified with
-`git merge-base --is-ancestor` (not an ancestor of beta's head) and `git branch --contains`
-(returns only `f-a2/pr-2`). `PROGRESS.md:24-29,89` independently names beta's closed-ladder head
-as `6892033`, which is what this section cites. Treat `898da67` as a stale/mistyped reference,
+branch f-a7/pr-4-beta at sha `898da67`. That sha (`898da673726cdfacc142b4f51e9337290fbd8a3e`)
+resolves on this remote to a merge commit on branch **f-a2/pr-2**, not f-a7/pr-4-beta —
+verified with `git merge-base --is-ancestor` (not an ancestor of beta's head) and
+`git branch --contains` (returns only f-a2/pr-2). `PROGRESS.md:24-29,89` independently names
+beta's closed-ladder head as `6892033`, which is what this section cites. **Both have since
+MERGED**: f-a2/pr-2 as F-A2 PR-2 (`0117`, PR #323, via the D-a deploy window); f-a7/pr-4-beta
+as PR #333 (`0126_f_a7_beta_filing_verb.sql`). Treat `898da67` as a stale/mistyped reference,
 not a second source — a name is not the thing it points at (`AGENTS.md`, review law 3).
 
-Sibling trains **γ** (`f-a7/pr-2-gamma`, file `0123_f_a7_gamma_egress.sql`) and **α**
-(`f-a7/pr-3-alpha`, files `0124_f_a7_alpha1_file_document_extraction.sql` +
-`_alpha2_judgement_recut.sql`) carry **zero** `create function clara.wake_*` statements between
+Sibling trains **γ** (branch f-a7/pr-2-gamma, since MERGED as PR #331, file
+`0123_f_a7_gamma_egress.sql`) and **α** (branch f-a7/pr-3-alpha, since MERGED as PR #332, files
+`0124_f_a7_alpha1_file_document_extraction.sql` + `0125_f_a7_alpha2_judgement_recut.sql` —
+corrected here from a truncated filename that was missing its `0125_f_a7` prefix) carry
+**zero** `create function clara.wake_*` statements between
 them (checked directly) — despite the filenames, the extraction and judgement-recut work they do
 is consumed BY beta's wrappers, not exposed as wake verbs of their own. Do not budget UI work
 against a γ- or α-owned verb; there isn't one. `PROGRESS.md:89` marks both "BUILT (reviews owed
@@ -160,8 +166,8 @@ enumeration: `docs/plan/active/close-key-1-design.md:105-117` (`wake_list_fiscal
 `wake_run_depreciation_catchup` · `wake_establish_prepayment_schedule`). **This is the one lane
 where the base task's framing overstates readiness.** `PROGRESS.md:86` shows PR-1a merged
 (measurement layer only — no wake verbs, see §3) and PR-1b "BUILT (three review flags on file)".
-Reading `f-a4/pr-1b@bc548e9` (branch `f-a4/pr-1b`, file
-`packages/db/migrations/0120_f_a4_pr_1b_close_lifecycle.sql`) directly: `grep -c` for
+Reading commit `bc548e9` (then branch f-a4/pr-1b, pre-merge; since MERGED as PR #329) at file
+`packages/db/migrations/0120_f_a4_pr_1b_close_lifecycle.sql` directly: `grep -c` for
 `create function clara.wake_` returns **zero**, and the file's own header states this explicitly
 — *"WHAT THIS FILE DOES NOT SHIP (Annex F.3): the thirteen wake_\* wrappers, the agent cores...
 siblings (mint_wake_credential_for_task, _wake_task_id) and the read-core extractions"*
