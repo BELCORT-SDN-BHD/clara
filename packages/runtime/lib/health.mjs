@@ -299,17 +299,21 @@ export async function checkReadiness() {
     if (intake.oldestQueuedMs > queueWarnMs) warnings.push(`oldest unbound document task age ${Math.round(intake.oldestQueuedMs)}ms`);
   }
 
-  // Storage write probe (R9, docs/plan/active/harness-audit-rulings-2026-08-26.md —
-  // follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md: that outage held
-  // /ready TRUE for ~12h while every upload failed, because /ready never touched storage
-  // at all). WARN-only, like every other intake-adjacent signal above: a storage outage
-  // takes the DOCUMENT LANE down, not "nothing works" — the /ready contract at the top of
-  // this file fails only on the latter. storageProbeHealth() already self-bounds
-  // (storage-probe.mjs); wrapped in bounded() again here too (belt-and-suspenders, same
-  // shape as checks.intake above) so a hung storage call can never hang /ready either way.
-  const storage = await bounded(storageProbeHealth, { ok: false, reason: "storage_probe_check_timeout" });
+  // Storage write probe (R9, docs/plan/active/harness-audit-rulings-2026-08-26.md — the
+  // MEASUREMENT half of follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md; the
+  // ALARM/ROUTING half is DR.md:300's still-open "external /ready uptime checks" item, not
+  // this change). WARN-only, like every other intake-adjacent signal above: a storage outage
+  // takes the DOCUMENT LANE down, not "nothing works" — the /ready contract at the top of this
+  // file fails only on the latter. storageProbeHealth() is SYNCHRONOUS (storage-probe.mjs runs
+  // the actual round trip on its own background interval, off this call entirely) — no await,
+  // no bounded() wrap, ~0ms: three SEQUENTIAL bounded() network round trips already share fly's
+  // 5s /ready timeout above, and this check's own verdict cannot change the status code, so it
+  // must never spend any of that budget. The object it returns is already the full public
+  // shape (ok/reason/pending only — never the raw vendor error text) — safe to assign as-is to
+  // an unauthenticated endpoint's response.
+  const storage = storageProbeHealth();
   checks.storage = storage;
-  if (!storage.ok) warnings.push(`storage write probe failed: ${storage.reason || "unknown"}`);
+  if (!storage.ok) warnings.push(`storage write probe failed: ${storage.reason || (storage.pending ? "first probe still pending" : "unknown")}`);
 
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.

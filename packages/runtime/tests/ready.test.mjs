@@ -4,17 +4,42 @@
 // world switch and the heartbeat freshness. (Taxonomy-HALT is NOT exercised here —
 // removing the shared active pointer would corrupt the relay suite.)
 
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as rig from "./rig.mjs";
 import { checkReadiness } from "../lib/health.mjs";
+import { _resetStorageProbeCacheForTest } from "../lib/storage-probe.mjs";
 
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
 
+// checkReadiness() now folds in the storage write probe (R9), which — like the four sibling
+// storage tests (intake-unit.test.mjs et al.) — needs CLARA_TEST_STORAGE_DIR set, or
+// storage.mjs's RELAY_TEST_MODE local-fs fallback (testRoot()) lands at ./test-storage
+// relative to CWD, i.e. INSIDE THE REPO WORKING TREE when run from packages/runtime/ (proven
+// by execution 2026-08-27 — untracked files showed up under packages/runtime/test-storage/).
+let storageDir;
+let previousStorageDir;
+
+before(async () => {
+  const base = process.env.CLARA_TEST_TMP_ROOT || tmpdir();
+  await mkdir(base, { recursive: true });
+  storageDir = await mkdtemp(join(base, "clara-ready-storage-"));
+  previousStorageDir = process.env.CLARA_TEST_STORAGE_DIR;
+  process.env.CLARA_TEST_STORAGE_DIR = storageDir;
+});
+
 after(async () => {
   await rig.endPool();
+  // Stop the storage probe's background interval before its scratch dir disappears below.
+  _resetStorageProbeCacheForTest();
+  if (previousStorageDir === undefined) delete process.env.CLARA_TEST_STORAGE_DIR;
+  else process.env.CLARA_TEST_STORAGE_DIR = previousStorageDir;
+  if (storageDir) await rm(storageDir, { recursive: true, force: true }).catch(() => {});
 });
 
 async function setBeat(component, expr) {

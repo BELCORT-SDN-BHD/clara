@@ -250,9 +250,18 @@ upload needs it, and unproven grants on a security boundary are how boundaries r
 
 1. **Fix the two observability defects** (below) — a failure whose cause is unrecoverable
    afterwards is its own bug, separate from whatever broke.
-2. **Add a storage write-probe to `/ready`.** This outage reported `ready: true` for ~12 hours.
-   The probe must exercise the *write* privilege, not just reachability — a read-only check
-   would have stayed green throughout this incident.
+2. **Add a storage write-probe to `/ready`.** *(Trued 2026-08-27: this item's original
+   "reported `ready: true` for ~12 hours" framing inherited the retracted "intake is down"
+   headline above — there was no ~12h outage; every observed failure was a duplicate
+   re-upload.)* What stayed true regardless of that correction: `/ready` never touched storage
+   at all, so it could not have corroborated anything storage-side, real or not — a read-only
+   reachability check would have stayed green either way. **Shipped 2026-08-27** (PR #358 —
+   `checks.storage` in `packages/runtime/lib/health.mjs`, the probe itself in
+   `packages/runtime/lib/storage-probe.mjs`): this closes the MEASUREMENT half of this
+   follow-up — the runtime now knows, and logs (`console.error`) on a red<->green transition.
+   The ALARM/ROUTING half — an external check that pages someone when it flips — is
+   `docs/ops/DR.md`:300's still-open "external `/ready` uptime checks" wiring piece; this PR
+   does not close that.
 3. **Rig-cover the storage grant surface.** The fixture written for this amendment
    (`scratchpad/storage-fixture.sql`) should become a permanent battery so a vendor change
    that needs another privilege fails in CI instead of in production.
