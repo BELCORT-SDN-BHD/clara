@@ -16,6 +16,24 @@
 
 ## Annex A · The surface
 
+> **Card 1 widens this surface — read alongside `card1-substitution-seam-annexes.md` Annex A.**
+> F-A5b card 1 (the substitution seam) adds SIX verbs this lane's own enumeration does not carry:
+> `claim_sandbox_export`, `sandbox_dispatch_begin`, `sandbox_dispatch_record` and
+> `reap_exhausted_sandbox_exports` (the claim/dispatch/reap quartet PR-1 registered as a NAMED GAP
+> — "no CLAIM verb ships in this PR-1"), plus `wake_compose_metric_preview_v2` and
+> `clara.evaluate_metric_v2`. It also ALTERs two relations rather than minting any:
+> `clara.sandbox_exports` gains the seven dispatch/cap columns those verbs need, and
+> `clara.metric_primitives`' closed CHECK widens 11→12 for the `cell` primitive. No new TABLE, so
+> A.1's count of three is unmoved. Card 1 CoRs four of this lane's bodies —
+> `_sandbox_client_set`, `sandbox_export_payload`, `_tf_sandbox_export_lifecycle` and (outside this
+> lane) `_tf_metric_cell_integrity` — each pinned by pre-image sha in its own prestate.
+>
+> **Annex B cross-reference:** card 1's own battery (its Annex B) re-runs THIS lane's censuses
+> against the widened surface — the wake grant roster, the bidirectional aclexplode EXECUTE census,
+> and the block/basis walls — rather than restating them. **Annex C cross-reference:** card 1's
+> CD-1..CD-16 and BL-1..BL-8 all descend from §3.6b's ruling above; where they disagree with this
+> document, §3.6b's forward pointer says which is later.
+
 ### A.1 · Relations — three, enumerated (law 34: an addition is a review event)
 
 | relation | posture | why it exists |
@@ -390,6 +408,17 @@ grant roster** gains this lane's wrappers, asserted by NAME LIST in both directi
 relation/table census** moves by three (`sandbox_views`, `sandbox_exports`, `export_recipients`) —
 counted from the migration's printed line, never from an annex. **The RLS forced-relation census**
 gains three: all firm-scoped, FORCE RLS, no `clara_agent_ro` table grant anywhere (F-A5's C4/C5).
+
+**Card 1's own additions to the counts that move** (`card1-substitution-seam-design-part3.md` §7):
+the **relation/table census does NOT move again** — card 1 mints no table, it ALTERs two that
+already exist, so the RLS forced-relation census is likewise unmoved and owes no new row. What DOES
+move: the **verb enumeration** by six (A.1's note above), the **wake grant roster** by exactly ONE
+allowlist row (`('interactive', 'wake_compose_metric_preview_v2')` — never `interactive_client`,
+whose roster card 1 captures at prestate and re-proves byte-identical at its tail), the
+**evaluator-closure census** by one registered version (`evaluate_metric` v2, nine members, born
+UNDEPLOYED), and the **primitive closure** 11→12. Every one of those counts is printed by card 1's
+own migration tail and re-derived from the live catalog, never from this annex — the standing
+caveat that the printed line is right and the annex is the bug applies here as it does above.
 **G-1** is new and is TA-P11's watch made mechanical (Annex I).
 
 **G-3 is new at the fold** (design §3.7, cell B4.5): **no FK and no uuid column in the posting,

@@ -88,3 +88,38 @@ export async function failJob(client, { jobId, workerId, reason }) {
     [jobId, workerId, JSON.stringify(reason)]);
   return r.rows[0]?.r ?? null;
 }
+
+// =============================================================================================
+// THE SANDBOX EXPORT LANE (Wave F Track-A, F-A5b card 1). A SIBLING JOB FAMILY, not a widening of
+// the render-job wrappers above: clara.sandbox_exports is its own queue with its own verbs, and
+// the two families' rows never meet. Each wrapper below wraps EXACTLY ONE clara.* verb and adds
+// no judgement of its own — the queue's decisions are the database's.
+//
+// The role is the same clara_runtime the render lane already runs as, and the same
+// no-table-privilege posture holds: this lane reads a cell's value ONLY through
+// clara.sandbox_export_payload, because clara_runtime holds no grant on clara.metric_cells.
+// =============================================================================================
+
+export async function claimSandboxJob(client, workerId, leaseSeconds) {
+  const r = await client.query("select clara.claim_sandbox_export($1, ($2 || ' seconds')::interval) as j",
+    [workerId, String(leaseSeconds)]);
+  return r.rows[0]?.j ?? null;
+}
+
+export async function sandboxJobPayload(client, exportId, workerId) {
+  const r = await client.query("select clara.sandbox_export_payload($1, $2) as p", [exportId, workerId]);
+  return r.rows[0]?.p ?? null;
+}
+
+export async function completeSandboxJob(client, { exportId, workerId, sha256, byteSize, storageKey }) {
+  const r = await client.query(
+    "select clara.complete_sandbox_export($1, $2, $3, $4::bigint, $5) as r",
+    [exportId, workerId, sha256, String(byteSize), storageKey]);
+  return r.rows[0]?.r ?? null;
+}
+
+export async function failSandboxJob(client, { exportId, workerId, reason }) {
+  const r = await client.query("select clara.fail_sandbox_export($1, $2, $3::jsonb) as r",
+    [exportId, workerId, JSON.stringify(reason)]);
+  return r.rows[0]?.r ?? null;
+}
