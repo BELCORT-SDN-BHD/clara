@@ -347,7 +347,7 @@ deploy takes, the prestate proves the posture rather than assuming it.**
 
 ---
 
-## 10 · Pointers — **Annex A** is the battery: forty-four walls, each with its own cell AND mutant, plus fixtures and the armed-skip statement. **Annex C** is the named OCR follow-up: its four steps, and the three reasons it is not in PR-2a.
+## 10 · Pointers — **Annex A** is the battery: forty-five walls, each with its own cell AND mutant, plus fixtures and the armed-skip statement. **Annex C** is the named OCR follow-up: its four steps, and the three reasons it is not in PR-2a.
 
 ## 11 · NON-GOALS — stated so a builder does not helpfully widen
 
@@ -500,6 +500,20 @@ human's own proposal — still meets the rung with its id, exactly as §6.2a int
 D-25's replay contract is the design's own law, and §6.2a's wording simply failed to carve the
 self-twin case; this is a design-internal consistency completion, not new behaviour. The build
 lane's cell pins **both** arms.
+
+**RECUT 2026-08-28 — what "the same request" means.** The ruling above says a self-twin replays;
+it does not say how the estate decides two calls are the same act, and the build's first two cuts
+got that wrong in both directions. The comparison now runs **digest to digest** against a new
+frozen column, `adjustment_templates.proposed_request_digest` — md5 over
+`jsonb_build_array(target_account, target_basis, rationale, model_name, model_version)` — set at
+INSERT beside `proposed_op_key` and immutable by the transition trigger's deny-by-default rule (the
+same property §5.3 leans on for `schedule`). It replaced a comparison against the receipt's
+**composed rationale**, which failed twice over: not injective (the join characters occur inside the
+joined fields, so a straddling pair composed to identical bytes and a changed request replayed
+SILENTLY) and not transform-stable (the receipt stores `left(...,4000)`, so a near-ceiling request
+false-refused every replay). **An identity must ride an injective, transform-stable encoding — never
+a display string.** Wall **W45** pins all four arms plus the freeze; the evidence is the battery's,
+not this section's.
 
 **The maxim both rulings turn on, recorded where a builder will meet it (§5.0): *facts get
 anchored, judgements get receipted.*** It is the line that explains why §4's carrier and §5.3's

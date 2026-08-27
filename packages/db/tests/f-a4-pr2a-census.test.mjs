@@ -18,7 +18,11 @@ let skipped = 0;
 const markSkip = () => { skipped += 1; };
 before(async () => { await ensurePrepay(noteLane); });
 
-const CORE = "clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)";
+// THE CORE CARRIES ONE ARGUMENT THE DOOR DOES NOT -- `p_request_digest`, the agent lane's replay
+// identity (W45). That asymmetry is the point and is asserted below: the DOOR's signature is
+// byte-unmoved from the design's eleven, so the extraction did not widen the human surface, and the
+// digest can only be set by the internal the agent core calls directly.
+const CORE = "clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)";
 const DOOR = "clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)";
 
 const prosrc = async (sig) => (await rootQuery(

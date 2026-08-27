@@ -11,7 +11,7 @@ import { noteLane } from "./rig-runtime-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught,
-  receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account,
+  receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account, MODEL,
 } from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
@@ -156,11 +156,16 @@ test("fa4p2a.W13-basischanged (P2) a changed BASIS under the same key is an op-k
   assert.ok(e, "a changed basis under the same key replayed silently");
   assert.match(String(e.detail ?? e.message), /op_key_reused_with_different_args|reused with different args/);
 
-  // AND A CHANGED MODEL likewise -- law 79's triple is part of what the receipt records.
+  // AND A CHANGED MODEL likewise -- law 79's triple is part of what the receipt records. Asserted
+  // BY TOKEN, not by "some error was raised": this arm drives a wake session that can refuse for a
+  // dozen unrelated reasons, and an assertion that any of them satisfies proves nothing about the
+  // wall it names. (It read `assert.ok(m)` until 2026-08-28.)
   const m = await caught(() => wake12(sc.s, {
     client: sc.client, entry: sc.entry, target: sc.target,
     model: { name: "some-other-model", version: "9.9" } }));
   assert.ok(m, "a changed model triple under the same key replayed silently");
+  assert.match(String(m.detail ?? m.message), /op_key_reused_with_different_args/,
+    `a changed model must refuse as an op-key REUSE, got ${String(m.detail ?? m.message).slice(0, 250)}`);
 
   // POSITIVE CONTROL: the IDENTICAL request still replays, so the widened identity did not turn
   // every retry into a refusal.
@@ -168,6 +173,147 @@ test("fa4p2a.W13-basischanged (P2) a changed BASIS under the same key is an op-k
   assert.equal(same.status, "acted");
   assert.equal(same.replayed, true, "the identical retry stopped replaying");
   assert.equal(same.receipt_id, first.receipt_id);
+});
+
+// ---------------------------------------------------------------------------------------------
+// W45 -- THE REPLAY IDENTITY RIDES AN INJECTIVE, TRANSFORM-STABLE ENCODING, NEVER A DISPLAY
+// STRING. Four arms, because the display-string identity failed in BOTH directions and a fix that
+// only closes one of them is not a fix:
+//   (a) a rationale-only change still refuses TYPED -- the digest covers the whole request;
+//   (b) a delimiter-STRADDLING pair refuses, where the old composition made the two requests
+//       byte-identical and the second one replayed SILENTLY (a false ACCEPT);
+//   (c) a NEAR-CEILING rationale acts and its identical retry REPLAYS, where the old comparison
+//       compared a full string against the receipt's left(...,4000) copy and false-REFUSED;
+//   (d) the identical-request control stays green (also held in W13-basischanged).
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W45 a rationale-only change under the same key refuses TYPED as an op-key reuse", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  const sc = await prepaidScene("w45a");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted");
+
+  const e = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target,
+    rationale: "a DIFFERENT rationale for the very same account and the very same grounds" }));
+  assert.ok(e, "a changed rationale under the same key replayed silently");
+  assert.match(String(e.detail ?? e.message), /op_key_reused_with_different_args/,
+    `expected the typed reuse token, got ${String(e.detail ?? e.message).slice(0, 250)}`);
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
+  assert.equal(drafted.rows[0].n, 1, "the refused retry drafted a template anyway");
+});
+
+test("fa4p2a.W45-straddle a delimiter-STRADDLING pair refuses -- the identity is injective", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE FALSE-ACCEPT ARM, and it is the dangerous one: a refusal is loud, a silent replay is not.
+  // The old identity was the receipt's composed rationale,
+  //     rationale || ' | target account ' || account || ': ' || basis,
+  // whose join characters can occur INSIDE the fields it joins. So this pair, on ONE account:
+  //     r1 = X                                  b1 = Y | target account <acct>: Z
+  //     r2 = X | target account <acct>: Y        b2 = Z
+  // composes to IDENTICAL bytes while being two different requests -- different stated grounds,
+  // different rationale. Under the old comparison the second one replayed the first one's receipt
+  // and recorded grounds nobody gave.
+  const sc = await prepaidScene("w45s");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const A = sc.target;
+  const r1 = "X";
+  const b1 = `Y | target account ${A}: Z`;
+  const r2 = `X | target account ${A}: Y`;
+  const b2 = "Z";
+
+  // THE MUTANT, run FIRST and in the DB itself: prove the pair actually collides under the old
+  // encoding and does NOT under the shipped one. Without this the cell would pass against an
+  // identity that never had the defect, and would be measuring nothing. (Law 2: the collision is
+  // asserted from what a read SAW, not from arithmetic done in the test's head.)
+  const enc = await rootQuery(
+    `select ($1::text || ' | target account ' || $5::text || ': ' || $2::text)
+          = ($3::text || ' | target account ' || $5::text || ': ' || $4::text) as old_collides,
+            md5(jsonb_build_array($5::text, $2::text, $1::text, 'm', 'v')::text)
+          = md5(jsonb_build_array($5::text, $4::text, $3::text, 'm', 'v')::text) as new_collides`,
+    [r1, b1, r2, b2, A]);
+  assert.equal(enc.rows[0].old_collides, true,
+    "the straddling pair does NOT collide under the old composition -- this cell is not testing the defect");
+  assert.equal(enc.rows[0].new_collides, false,
+    "the straddling pair COLLIDES under the shipped digest -- the encoding is not injective");
+
+  const first = await wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: A, rationale: r1, basis: b1 });
+  assert.equal(first.status, "acted", `first act refused: ${JSON.stringify(first).slice(0, 250)}`);
+
+  const e = await caught(() => wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: A, rationale: r2, basis: b2 }));
+  assert.ok(e, "the straddling twin REPLAYED SILENTLY -- a different request wore the first one's receipt");
+  assert.match(String(e.detail ?? e.message), /op_key_reused_with_different_args/,
+    `expected the typed reuse token, got ${String(e.detail ?? e.message).slice(0, 250)}`);
+
+  // AND THE DIGESTS ARE WHAT SEPARATED THEM: the stored one is the FIRST request's, unchanged.
+  const stored = await templateById(first.template_id);
+  const expect = await rootQuery(
+    "select md5(jsonb_build_array($1::text, $2::text, $3::text, $4::text, $5::text)::text) as d",
+    [A, b1, r1, MODEL.name, MODEL.version]);
+  assert.equal(stored.proposed_request_digest, expect.rows[0].d,
+    "the persisted digest is not the digest of the request that was acted on");
+});
+
+test("fa4p2a.W45-ceiling a NEAR-CEILING rationale acts, and its identical retry REPLAYS", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE FALSE-REFUSE ARM. B2 bounds the RAW rationale at 4000 (0138:1433) but the receipt stores
+  // the COMPOSED one through left(..., 4000) (0138:1366). So a rationale near the ceiling was
+  // stored truncated, and every replay compared a full string against a shortened one and refused
+  // work that had already succeeded -- fail-closed, but it broke the very idempotency this path
+  // exists to provide. The digest is fixed-width: no storage transform can shorten it.
+  const sc = await prepaidScene("w45c");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const long = `near-ceiling ${"r".repeat(3970)}`;
+  assert.ok(long.length <= 4000 && long.length + 30 > 4000,
+    `the fixture must sit UNDER B2's bound and OVER it once composed, got ${long.length}`);
+
+  const first = await wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: sc.target, rationale: long });
+  assert.equal(first.status, "acted", `a lawful near-ceiling rationale refused: ${JSON.stringify(first).slice(0, 250)}`);
+
+  // THE RECEIPT REALLY IS TRUNCATED -- measured, not assumed. This is what made the old comparison
+  // false-refuse, and it is still true: the fix moved the IDENTITY off it, it did not remove it.
+  const rec = await rootQuery(
+    "select length(rationale) as n from clara.agent_act_receipts where id = $1", [first.receipt_id]);
+  assert.equal(rec.rows[0].n, 4000, "the composed rationale was not stored at the truncation ceiling");
+
+  const again = await wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: sc.target, rationale: long });
+  assert.equal(again.status, "acted",
+    `the identical retry of a near-ceiling request refused: ${JSON.stringify(again).slice(0, 300)}`);
+  assert.equal(again.replayed, true, "the identical retry did not replay");
+  assert.equal(again.receipt_id, first.receipt_id, "the replay minted a second receipt");
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
+  assert.equal(drafted.rows[0].n, 1, "the replay drafted a second template");
+});
+
+test("fa4p2a.W45-frozen the persisted digest is IMMUTABLE -- an identity a signer could rewrite is not one", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // The column is worth nothing without this. §TAIL's T.12b proves the NAME is absent from the
+  // transition trigger's exemption array; that is a spelling instrument, and spelling is not
+  // identity (review law 3). This is the behavioural half: the storage layer itself refuses.
+  const sc = await prepaidScene("w45f");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted");
+  const before = (await templateById(first.template_id)).proposed_request_digest;
+  assert.ok(before && /^[0-9a-f]{32}$/.test(before), `no digest was persisted: ${before}`);
+
+  // ROOT, deliberately -- the strongest caller in the estate, so the refusal is the TRIGGER's and
+  // not a missing grant's. withTxn because a raise inside the pooled session would otherwise
+  // poison it for the post-check read.
+  const e = await caught(() => withTxn(async (c) => {
+    await c.query("update clara.adjustment_templates set proposed_request_digest = $1 where id = $2",
+      ["00000000000000000000000000000000", first.template_id]);
+  }));
+  assert.ok(e, "the replay identity was REWRITTEN in place -- a later signer could redirect a replay");
+  assert.match(String(e.detail ?? e.message), /adjustment_template_immutable|immutable outside/,
+    `expected the transition trigger's immutability refusal, got ${String(e.detail ?? e.message).slice(0, 250)}`);
+  const after = (await templateById(first.template_id)).proposed_request_digest;
+  assert.equal(after, before, "the digest moved despite the refusal");
 });
 
 test("fa4p2a.W13-granularity (C3) an amount smaller than its period count refuses TYPED, with a receipt", async (t) => {

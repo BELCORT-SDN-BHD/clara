@@ -213,13 +213,21 @@ begin
       using errcode = 'CLR10', detail = '{"reason":"prestate_schedule_column_present"}';
   end if;
 
+  select count(*)::int into v_n from pg_attribute
+   where attrelid = 'clara.adjustment_templates'::regclass
+     and attname = 'proposed_request_digest' and not attisdropped;
+  if v_n <> 0 then
+    raise exception 'F-A4 PR-2a prestate: adjustment_templates.proposed_request_digest already exists — this file is the one that mints the replay identity, so a column already standing means something else defines it and §TAIL would be censusing a stranger'
+      using errcode = 'CLR10', detail = '{"reason":"prestate_request_digest_column_present"}';
+  end if;
+
   foreach v_sig in array array[
       'clara._adj_canon_schedule(jsonb)',
       'clara._adj_period_lines(jsonb,jsonb,date,date)',
       'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
       'clara.record_document_service_period(uuid,date,date,text,text)',
       'clara.prepayment_schedule_v1(uuid,uuid)',
-      'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
+      'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)',
       'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)',
       'clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
       'clara._tf_document_service_period_region_congruent()'
@@ -650,6 +658,39 @@ comment on column clara.document_service_periods.evidence_region_id is
 --     clara._adj_canon_lines is NOT touched.
 -- =================================================================================================
 alter table clara.adjustment_templates add column schedule jsonb;
+
+-- -------------------------------------------------------------------------------------------------
+-- THE REQUEST DIGEST -- the replay identity's own column, and the reason it exists is a class worth
+-- naming: *** AN IDENTITY MUST RIDE AN INJECTIVE, TRANSFORM-STABLE ENCODING -- NEVER A DISPLAY
+-- STRING. ***
+--
+-- The replay comparison used to run over the acted receipt's composed rationale, which is a DISPLAY
+-- string, and it failed that rule in BOTH directions at once:
+--   * NOT INJECTIVE -- it is `rationale || ' | target account ' || account || ': ' || basis`, so
+--     (rationale = A, basis = B∥D∥C) and (rationale = A∥D∥B, basis = C) compose to IDENTICAL BYTES.
+--     Two genuinely different requests read as the same one, and a CHANGED-ARGUMENT retry would
+--     SILENTLY REPLAY. A false ACCEPT -- strictly worse than the false refuse below, because the
+--     refusal is loud and this is not.
+--   * NOT TRANSFORM-STABLE -- clara._agent_close_receipt stores `left(..., 4000)` (0138:1366) while
+--     B2 bounds only the RAW rationale, so a composed string within ~40 characters of the ceiling
+--     is stored TRUNCATED and every later replay compares a full string against a truncated one and
+--     false-refuses `op_key_reused_with_different_args`. Fail-closed, but it breaks the very
+--     idempotency guarantee the replay path exists to provide.
+--
+-- Both symptoms are ONE seam, so this is one wall rather than two patches. The digest is md5 over a
+-- jsonb ARRAY encoding: array elements are delimited structurally rather than by a character that
+-- can also occur inside an element, so the straddle pair above becomes two distinct values. It
+-- never truncates, because it is fixed-width regardless of what it encodes.
+--
+-- IT IS FROZEN FOR FREE, and that is not luck: clara._tf_adjustment_template_transition compares
+-- `to_jsonb(new) - v_frozen` against `to_jsonb(old) - v_frozen` where v_frozen is ONLY the eight
+-- lifecycle stamps, so it is DENY-BY-DEFAULT over every other column -- a new one inherits the
+-- immutability with no change to the trigger. §5.3 already leans on exactly this property for
+-- `schedule`; the identity of a signed request now leans on it too, which is the right place for it.
+alter table clara.adjustment_templates add column proposed_request_digest text;
+
+comment on column clara.adjustment_templates.proposed_request_digest is
+  'F-A4 PR-2a: md5 over an INJECTIVE encoding of the agent request that produced this template -- jsonb_build_array(target_account, target_basis, rationale, model_name, model_version). Set at INSERT beside proposed_op_key and frozen by clara._tf_adjustment_template_transition''s deny-by-default rule. It exists because the replay identity previously rode the receipt''s COMPOSED RATIONALE, a display string that is neither injective (a delimiter can occur inside an element, so two different requests compose to identical bytes and a changed-argument retry replays silently) nor transform-stable (the receipt stores left(...,4000), so a near-ceiling request false-refuses every replay). An identity must ride an injective, transform-stable encoding -- never a display string. NULL on every human-proposed template: only the agent lane sets it.';
 
 comment on column clara.adjustment_templates.schedule is
   'F-A4 PR-2a (owner ruling F1): OPTIONAL per-occurrence line schedule, [{period_start, period_end, lines:[...]}]. NULL means "this template posts `lines` verbatim for every period" — exactly the pre-PR-2a behaviour, which is why every body that resolves lines does so through clara._adj_period_lines and is null-stable BY CONSTRUCTION. Validated AT PROPOSE for shape congruence, per-period balance and full coverage (design §5.2a); that validation is what keeps six other live `lines` readers correct and holds the D1 inventory at four bodies instead of six. NOT in clara._tf_adjustment_template_transition''s frozen-stamp set, so it inherits that trigger''s immutability with no change to it — a sign-time edit to a schedule is refused by the storage layer.';
@@ -1179,7 +1220,7 @@ comment on function clara.prepayment_schedule_v1(uuid, uuid) is
 create function clara._propose_adjustment_template_core(p_ctx jsonb, p_client uuid, p_name text,
     p_cadence text, p_start_date date, p_end_date date, p_auto_reverse boolean, p_lines jsonb,
     p_memo_template text, p_op_key text, p_replaces uuid default null,
-    p_schedule jsonb default null)
+    p_schedule jsonb default null, p_request_digest text default null)
   returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $core$
 declare
@@ -1682,10 +1723,12 @@ begin
     -- again: the transition trigger's frozen-set subtraction makes it immutable from this moment.
     insert into clara.adjustment_templates(firm_id, client_id, status, name, cadence,
         start_date, end_date, auto_reverse, lines, memo_template, content_hash,
-        replaces_template_id, lineage_root_id, proposed_by, proposed_op_key, schedule)
+        replaces_template_id, lineage_root_id, proposed_by, proposed_op_key, schedule,
+        proposed_request_digest)
       values (c_firm, p_client, 'proposed', btrim(p_name), p_cadence, p_start_date, p_end_date,
         p_auto_reverse, v_lines, p_memo_template, v_hash, p_replaces,
-        case when p_replaces is null then null else v_repl_root end, c_actor, p_op_key, v_sched)
+        case when p_replaces is null then null else v_repl_root end, c_actor, p_op_key, v_sched,
+        p_request_digest)
       returning id into v_id;
   exception when unique_violation then
     -- The index caught a twin the precheck could not see (a concurrent proposer inside the
@@ -1840,9 +1883,9 @@ begin
       'warnings', v_warn));
 end
 $core$;
-revoke all on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb) from public;
+revoke all on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb, text) from public;
 
-comment on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb) is
+comment on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb, text) is
   'F-A4 PR-2a §D: the extracted body of clara.propose_adjustment_template, harvested from the live catalog and ctx-substituted (two fields). UNGRANTED -- its callers are the door above it and clara._agent_prepayment_schedule_core. Carries §5.2a''s congruence validation, which is what keeps six other live t.lines readers correct under a schedule and holds the D1 inventory at four bodies instead of six.';
 
 -- THE DOOR, now a thin delegate.
@@ -1882,6 +1925,12 @@ begin
   return clara._propose_adjustment_template_core(
     jsonb_build_object('firm', c.firm, 'actor', c.actor),
     p_client, p_name, p_cadence, p_start_date, p_end_date, p_auto_reverse, p_lines,
+    -- THE DIGEST IS NOT THE HUMAN DOOR'S TO SET. It is the AGENT lane's replay identity, computed
+    -- by _agent_prepayment_schedule_core over the request it is about to act on; a human proposer
+    -- has no such request and no business stamping one. Widening this door would also hand a
+    -- caller who can already choose p_op_key the OTHER half of a forged twin -- a template the
+    -- agent would then REPLAY instead of acting. It defaults to NULL here, which is exactly what a
+    -- human-proposed template should carry.
     p_memo_template, p_op_key, p_replaces, p_schedule);
 end $door$;
 revoke all on function clara.propose_adjustment_template(uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb) from public;
@@ -3260,9 +3309,8 @@ declare
   v_acct record; v_breach jsonb; v_lines jsonb; v_tmpl_sched jsonb := '[]'::jsonb;
   v_start date; v_end date; v_total bigint; v_n int; v_name text; v_memo text;
   v_hash text; v_twin uuid; v_result jsonb; v_template uuid; x jsonb; v_base bigint;
-  v_sub text; v_prior_acct text; v_prior_receipt uuid; v_prior_rationale text;
-  v_prior_model_name text; v_prior_model_version text; v_expect_rationale text;
-  v_prior_status text;
+  v_sub text; v_prior_acct text; v_prior_receipt uuid; v_prior_digest text;
+  v_expect_digest text; v_prior_status text;
 begin
   -- ---- TIER A (raises, writes nothing) -------------------------------------------------------
   -- A receipt row needs a NON-NULL subject, and this verb's refusal subject IS the source entry.
@@ -3288,8 +3336,21 @@ begin
   -- clara._tf_adjustment_template_transition. So the twin is found by the sub-key, and the request
   -- is validated against the stored row rather than against anything recomputed from a world that
   -- may since have changed. This is the estate's own op_receipts idiom read one layer up.
+  --
+  -- THE REQUEST DIGEST IS COMPUTED HERE, ONCE, AND THE SAME VALUE IS BOTH COMPARED ON A REPLAY AND
+  -- PERSISTED ON THE ACT. Two computations that "must agree" are a divergence waiting to happen --
+  -- the whole point of an identity is that ONE expression defines it. jsonb_build_array is the
+  -- encoding because it is INJECTIVE: the array's structure separates the fields, so no field's
+  -- content can imitate the separator (a `|` inside a rationale is just a character), and jsonb's
+  -- own text form escapes what it must. md5 then makes it FIXED-WIDTH, which is what makes it
+  -- transform-stable: nothing downstream can truncate it into agreement with something else.
+  v_expect_digest := md5(jsonb_build_array(
+    btrim(coalesce(p_target_account, '')), btrim(coalesce(p_target_basis, '')),
+    p_rationale, p_model ->> 'name', p_model ->> 'version')::text);
+
   v_sub := p_op_key || ':' || p_source_entry::text;
-  select t.id into v_twin from clara.adjustment_templates t
+  select t.id, t.proposed_request_digest into v_twin, v_prior_digest
+    from clara.adjustment_templates t
    where t.client_id = p_client and t.proposed_op_key = v_sub limit 1;
   if v_twin is not null then
     select (e ->> 'account_code') into v_prior_acct
@@ -3299,8 +3360,7 @@ begin
     -- the rest of the request was persisted. If it is absent the act did not complete the way a
     -- replay would be claiming it did, so this FAILS CLOSED rather than minting a fresh receipt
     -- for an old act (law 2).
-    select r.id, r.rationale, r.model_name, r.model_version
-      into v_prior_receipt, v_prior_rationale, v_prior_model_name, v_prior_model_version
+    select r.id into v_prior_receipt
       from clara.agent_act_receipts r
      where r.firm_id = v_firm and r.act_kind = 'prepayment_schedule'
        and r.subject_kind = 'adjustment_template' and r.subject_id = v_twin
@@ -3317,27 +3377,35 @@ begin
     -- for the same account is a different act, and answering it with the first one's receipt would
     -- record grounds nobody gave.
     --
-    -- COMPARED AGAINST WHAT WAS PERSISTED, not against a re-derivation: the acted receipt's
-    -- rationale is composed by this core's own acted path as
-    -- `rationale | target account <code>: <basis>`, and its model name/version are the triple
-    -- law 79 carries. Rebuilding that string here and comparing it covers account, basis and
-    -- rationale in one comparison of stored bytes.
-    v_expect_rationale := p_rationale || ' | target account ' || v_prior_acct
-                          || ': ' || btrim(coalesce(p_target_basis, ''));
-    if v_prior_acct is distinct from btrim(coalesce(p_target_account, ''))
-       or v_prior_rationale is distinct from v_expect_rationale
-       or v_prior_model_name is distinct from (p_model ->> 'name')
-       or v_prior_model_version is distinct from (p_model ->> 'version') then
+    -- COMPARED DIGEST TO DIGEST -- *** AN IDENTITY MUST RIDE AN INJECTIVE, TRANSFORM-STABLE
+    -- ENCODING, NEVER A DISPLAY STRING. *** This comparison used to rebuild the receipt's COMPOSED
+    -- RATIONALE and compare that, which failed the rule twice over and in opposite directions:
+    --   * NOT INJECTIVE -- `rationale | target account <code>: <basis>` joins on characters that can
+    --     occur INSIDE the fields, so (rationale = A, basis = B∥D∥C) and (rationale = A∥D∥B,
+    --     basis = C) compose to identical bytes. A genuinely CHANGED request read as the same one
+    --     and REPLAYED SILENTLY -- a false ACCEPT, and worse than any false refuse because a
+    --     refusal is loud and this is not.
+    --   * NOT TRANSFORM-STABLE -- the receipt stores left(...,4000) (0138:1366) while B2 bounds only
+    --     the RAW rationale, so a composed string near the ceiling is stored TRUNCATED and every
+    --     replay compared a full string against a truncated one and false-refused. Fail-closed, but
+    --     it broke the idempotency guarantee this path exists to provide.
+    -- Both are one seam, so this is one wall: the digest is computed over a jsonb ARRAY (structural
+    -- delimitation, so no field's content can imitate the separator) and is fixed-width (so no
+    -- storage transform can shorten it). B2's raw length bound stays as the DoS guard; the
+    -- receipt's composed rationale reverts to what it always should have been -- display only.
+    --
+    -- A NULL stored digest REFUSES, because `is distinct from` is the comparison: no template this
+    -- verb wrote can carry NULL there (the INSERT sets it on the same row, in the same statement),
+    -- so a NULL is a row this verb did not write and must not answer for. Law 2 -- absence is not
+    -- evidence -- taken to its fail-closed branch.
+    if v_prior_digest is distinct from v_expect_digest then
       raise exception 'op_key reused with different args'
         using errcode = 'CLR10',
           detail = jsonb_build_object('reason', 'op_key_reused_with_different_args',
-            'template_id', v_twin, 'stored_target_account', v_prior_acct,
-            'supplied_target_account', btrim(coalesce(p_target_account, '')),
-            'stored_rationale', v_prior_rationale, 'supplied_rationale', v_expect_rationale,
-            'stored_model', jsonb_build_object('name', v_prior_model_name,
-                                               'version', v_prior_model_version),
-            'supplied_model', jsonb_build_object('name', p_model ->> 'name',
-                                                 'version', p_model ->> 'version'))::text;
+            'template_id', v_twin, 'stored_request_digest', v_prior_digest,
+            'supplied_request_digest', v_expect_digest,
+            'stored_target_account', v_prior_acct,
+            'supplied_target_account', btrim(coalesce(p_target_account, '')))::text;
     end if;
     -- status is READ, not asserted (native C2 nit): the twin lookup has no status filter, so a
     -- retired template's replay would otherwise report 'proposed' as a literal and lie in that one
@@ -3548,7 +3616,7 @@ begin
   v_result := clara._propose_adjustment_template_core(
     jsonb_build_object('firm', v_firm, 'actor', clara.agent_user_id()),
     p_client, v_name, 'monthly', v_start, v_end, false, v_lines, v_memo,
-    p_op_key || ':' || p_source_entry::text, null, v_tmpl_sched);
+    p_op_key || ':' || p_source_entry::text, null, v_tmpl_sched, v_expect_digest);
   v_template := (v_result ->> 'template_id')::uuid;
   -- FAIL CLOSED rather than substitute a stand-in subject: a delegate answer with no template_id
   -- means the proposal did not happen the way this receipt is about to claim it did. The
@@ -4058,7 +4126,7 @@ declare
     'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
     'clara.record_document_service_period(uuid,date,date,text,text)',
     'clara.prepayment_schedule_v1(uuid,uuid)',
-    'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
+    'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)',
     'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)',
     'clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
     'clara._tf_document_service_period_region_congruent()',
@@ -4072,7 +4140,7 @@ declare
     'clara._adj_period_lines(jsonb,jsonb,date,date)',
     'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
     'clara.prepayment_schedule_v1(uuid,uuid)',
-    'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
+    'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)',
     'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)',
     'clara._tf_document_service_period_region_congruent()',
     'clara._tf_dsp_supersede_only()',
@@ -4362,6 +4430,36 @@ begin
       using errcode = 'CLR10', detail = '{"reason":"tail_resolver_callers"}';
   end if;
 
+  -- ---- T.12b THE REPLAY IDENTITY'S COLUMN, and the freeze it inherits ------------------------
+  -- Two claims, because the column is worth nothing without the second one. A digest a signer could
+  -- UPDATE is not an identity -- it is a suggestion, and the replay comparison built on it would be
+  -- comparing against whatever was written last.
+  --   (1) the column EXISTS and is text -- the replay reads it and the propose INSERT writes it;
+  --   (2) it is FROZEN. Read the polarity carefully: v_frozen in
+  --       clara._tf_adjustment_template_transition is the set of columns EXEMPTED from the
+  --       immutability compare (the lifecycle stamps), so the proof of immutability is ABSENCE from
+  --       that array, not presence in it. The trigger is deny-by-default over everything else, and
+  --       T.7's differential separately proves its body is byte-identical to the prestate sha -- so
+  --       this asserts the ONE thing that differential cannot: that the new column did not land
+  --       inside the exemption. Cell W45 proves the behaviour from the outside.
+  if not exists (select 1 from pg_attribute a
+                  where a.attrelid = 'clara.adjustment_templates'::regclass
+                    and a.attname = 'proposed_request_digest' and a.atttypid = 'text'::regtype
+                    and a.attnum > 0 and not a.attisdropped) then
+    raise exception 'F-A4 PR-2a tail: adjustment_templates.proposed_request_digest is absent or not text -- the replay identity has nothing to ride'
+      using errcode = 'CLR10', detail = '{"reason":"tail_request_digest_column"}';
+  end if;
+  select p.prosrc into v_txt from pg_proc p
+   where p.oid = to_regprocedure('clara._tf_adjustment_template_transition()');
+  if v_txt is null then
+    raise exception 'F-A4 PR-2a tail: the adjustment-template transition trigger body did not resolve'
+      using errcode = 'CLR10', detail = '{"reason":"tail_transition_body_absent"}';
+  end if;
+  if v_txt ~ '''proposed_request_digest''' then
+    raise exception 'F-A4 PR-2a tail: proposed_request_digest is named inside the transition trigger -- if it entered v_frozen it is EXEMPT from the immutability compare and a signer could rewrite the replay identity'
+      using errcode = 'CLR10', detail = '{"reason":"tail_request_digest_not_frozen"}';
+  end if;
+
   -- ---- T.13 CONSTRAINT 15: the frozen schemas ------------------------------------------------
   -- REPORTED, NOT ASSERTED AT ZERO. On live those schemas hold the Slice-0 parked run, so a census
   -- that reads green only because the fixture is empty is the vacuous-green class. What this file
@@ -4382,7 +4480,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-A4 PR-2a tail: OK — the park is OVER. Wrapper 12 (clara.wake_establish_prepayment_schedule) and clara.prepayment_schedule_v1 both resolve at their EXACT signatures, inverting 0138 T.9''s positive-absence gate; the close_prep allowlist moved % -> % (a MEASURED delta, not a literal) with 0 rows naming a dead function, and wrapper 12 holds exactly ONE application grant, to clara_wake_interactive. 10 new functions + clara.document_service_periods all resolve, ALL owned by clara_fn_owner (a definer body owned by the migration role would bypass RLS), and ZERO functions this file creates or replaces are executable by PUBLIC. EXACTLY ONE overload of propose_adjustment_template survives at eleven arguments with its harvested ACL — the extraction REPLACED the door rather than shadowing it. 9 internals hold no EXECUTE grant beyond their owner, _tf_close_proposal_drafted_unique among them (residual 4''s migration half; its rig-meta half joins the PR-1c cohort separately, because 0138''s own closed set lives in an APPLIED file and applied files are immutable). The R6 SCOPE CUT IS PROVEN, not promised: sign_adjustment_template, _adj_canon_lines and _tf_adjustment_template_transition are byte-identical to their prestate shas, and _adj_template_hash is still a plain sql function with no definer and no search_path. subject_kind EXTENDED to seven values with all six originals intact. Three human-read policies carry BOTH the firm predicate and the bookkeeper rank conjunct, asserted by EXPRESSION and not by count, and all three are SELECT-only. uq_document_service_period_live is pinned by relation, key column and predicate text rather than by name. The prepayment_schedule v1 closure has exactly ONE member, so the freeze means this body and no other. clara._adj_period_lines has exactly 2 callers. FROZEN SCHEMAS (constraint 15): all 3 checks positive — nothing this file created lives outside clara — and the % relation(s) workflow/graphile_worker/spike hold are REPORTED, not asserted (on live that is the Slice-0 parked run and is expected to be non-zero).',
+  raise notice 'F-A4 PR-2a tail: OK — the park is OVER. Wrapper 12 (clara.wake_establish_prepayment_schedule) and clara.prepayment_schedule_v1 both resolve at their EXACT signatures, inverting 0138 T.9''s positive-absence gate; the close_prep allowlist moved % -> % (a MEASURED delta, not a literal) with 0 rows naming a dead function, and wrapper 12 holds exactly ONE application grant, to clara_wake_interactive. 10 new functions + clara.document_service_periods all resolve, ALL owned by clara_fn_owner (a definer body owned by the migration role would bypass RLS), and ZERO functions this file creates or replaces are executable by PUBLIC. EXACTLY ONE overload of propose_adjustment_template survives at eleven arguments with its harvested ACL — the extraction REPLACED the door rather than shadowing it. 9 internals hold no EXECUTE grant beyond their owner, _tf_close_proposal_drafted_unique among them (residual 4''s migration half; its rig-meta half joins the PR-1c cohort separately, because 0138''s own closed set lives in an APPLIED file and applied files are immutable). The R6 SCOPE CUT IS PROVEN, not promised: sign_adjustment_template, _adj_canon_lines and _tf_adjustment_template_transition are byte-identical to their prestate shas, and _adj_template_hash is still a plain sql function with no definer and no search_path. subject_kind EXTENDED to seven values with all six originals intact. Three human-read policies carry BOTH the firm predicate and the bookkeeper rank conjunct, asserted by EXPRESSION and not by count, and all three are SELECT-only. uq_document_service_period_live is pinned by relation, key column and predicate text rather than by name. The prepayment_schedule v1 closure has exactly ONE member, so the freeze means this body and no other. clara._adj_period_lines has exactly 2 callers. adjustment_templates.proposed_request_digest exists as text and is NOT named inside the transition trigger — absence from v_frozen is what makes it immutable, so the replay identity cannot be rewritten by a later signer. FROZEN SCHEMAS (constraint 15): all 3 checks positive — nothing this file created lives outside clara — and the % relation(s) workflow/graphile_worker/spike hold are REPORTED, not asserted (on live that is the Slice-0 parked run and is expected to be non-zero).',
     (select v from _fa4_pr2a_prestate where k = 'allowlist_close_prep_pre'),
     (select count(*) from clara.wake_fn_allowlist where wake_kind = 'close_prep'),
     v_frozen;
