@@ -50,12 +50,13 @@ test("fa4c.D1 law 71: no wake verb can finalize, reopen or attest -- not by allo
        cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
       where n.nspname='clara'
         and p.proname in ('finalize_close','reopen_fiscal_year','attest_close_exception',
-                          'begin_close','abandon_close','hold_close_prep','release_close_prep')
+                          'begin_close','abandon_close','hold_close_prep','release_close_prep',
+                          'settle_close_proposal')
         and a.privilege_type='EXECUTE'
         and a.grantee::regrole::text in ('clara_wake_interactive','clara_wake_proactive',
                                          'clara_agent_ro','clara_runtime')`);
   assert.deepEqual(acl.rows, [],
-    "no wake, agent or runtime role executes a human close door -- including the HOLD, which the lane must not be able to lift off itself");
+    "no wake, agent or runtime role executes a human close door -- including the HOLD, which the lane must not be able to lift off itself, and the SETTLE door, which it must not be able to work on its own proposal");
 
   // (c) NO clara.wake_* body CALLS a reserved act, read off the live prosrc.
   const calls = await rootQuery(

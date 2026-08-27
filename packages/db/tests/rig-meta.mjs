@@ -1045,7 +1045,14 @@ const F_A4_PR1C_RUNTIME_FNS = ["close_prep_due", "mint_wake_credential_for_task"
 //   the three human doors — clara_authenticated ONLY, floors body-enforced (bookkeeper+). The
 //   agent identity and BOTH wake roles gain ZERO: a brake the agent lane could lift off itself
 //   is not a brake, and a receipt panel is a human audit control.
-const F_A4_PR1C_HUMAN_FNS = ["hold_close_prep", "release_close_prep", "list_agent_act_receipts"];
+//   settle_close_proposal joins them at the conductor's ruling on this train: Annex I.1's review
+//   card offers adopt/decline, attest_close_exception READS a proposal without settling it, and
+//   without this door `adopted`/`withdrawn` are unreachable values on a live CHECK. Its floor is
+//   attest_close_exception's own (bookkeeper + close_and_attest), so it sits at the same tier as
+//   the other three and the wake roles gain ZERO on it.
+const F_A4_PR1C_HUMAN_FNS = [
+  "hold_close_prep", "release_close_prep", "list_agent_act_receipts", "settle_close_proposal",
+];
 //   the ungranted internals — every agent core, ladder helper, extracted read core and trigger
 //   function the limb ships. Declaring them turns a future accidental grant into a FAILING test
 //   rather than a silently-widened wall. `_adjustment_run_due_core` / `_depreciation_run_due_core`
@@ -1152,9 +1159,10 @@ export const ALLOWED = {
     // F-A3/PR-3 [retirement + parity + doors] confirm_bank_identifier_promotion — see the block
     // above (OQ-8's deferred confirm half; agent + both wake roles gain ZERO).
     ...BANK_AGENCY_F_A3_PR3_COHORT,
-    // F-A4/PR-1c [the close-domain agent limb] the three human doors: hold/release_close_prep
-    // (the brake on the clocked lane) and list_agent_act_receipts (TA-P4 (4)'s read surface).
-    // clara_authenticated ONLY — see the block above.
+    // F-A4/PR-1c [the close-domain agent limb] the FOUR human doors: hold/release_close_prep
+    // (the brake on the clocked lane), list_agent_act_receipts (TA-P4 (4)'s read surface) and
+    // settle_close_proposal (the review card's terminal door). clara_authenticated ONLY — see the
+    // block above.
     ...F_A4_PR1C_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other

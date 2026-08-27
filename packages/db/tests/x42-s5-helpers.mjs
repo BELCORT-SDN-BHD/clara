@@ -312,9 +312,13 @@ const F_A4_PR1B_CLOCK_NAMES = ["_abandon_close_core"];
 // runs against databases pinned at earlier frontiers (d-b0..b3 stop at 0042-0045), where none of
 // these five exist, and an unconditional entry reds every one of those legs with a diff that says
 // nothing about clock discipline.
+//   · settle_close_proposal        — `settled_at = now()`, the same timestamptz settle stamp
+//                                     _agent_close_proposal_core writes on the supersession path.
+//                                     Added with the door itself (conductor ruling, this train),
+//                                     MEASURED on the applied rig like the other five.
 const F_A4_PR1C_CLOCK_NAMES = [
   "_agent_close_proposal_core", "_wake_task_id", "close_prep_due",
-  "mint_wake_credential_for_task", "release_close_prep",
+  "mint_wake_credential_for_task", "release_close_prep", "settle_close_proposal",
 ];
 
 // 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps

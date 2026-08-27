@@ -92,6 +92,42 @@
 --     sentence says it mints. The three arguments are therefore uniform across all twelve. One
 --     spelling for one discipline.
 --
+-- ================ THE DOCS THIS FILE FALSIFIES — the exact lines owed a re-cut ================
+-- Conductor ruling (this train): deviation (4) is ACCEPTED as inside R-L11, and the DESIGN-SIDE
+-- truing folds into this train's PR. These are the lines, enumerated here so the docs pass is a
+-- transcription rather than a re-derivation. EVERY ONE of them rests on the SAME superseded cite
+-- (`0041:3617-3630`), and every one is false BEFORE this file and after it — this migration did not
+-- break them, it measured that 0042's WDB-R1/WDB-R2 recut already had.
+--
+--   · docs/plan/active/close-key-1-design.md:88 — gate finding G1's own row ends
+--     "`depreciation_run_due` (`0041:3617-3630`) is unaffected". It is affected: the live body
+--     carries `perform clara._assert_due_read_ctx(v_firm)` and raises CLR03 on a wake session.
+--   · docs/plan/active/close-key-1-annexes-1-mechanics.md:118-119 — Annex A.3's rung-B13 arm 1
+--     opens "clara.depreciation_run_due(p_client) is wake-safe (`0041:3617-3630` compares a
+--     non-null jwt_firm() only, and jwt_firm() is null here)". Both halves of that parenthesis
+--     describe a body that no longer exists.
+--   · docs/plan/active/close-key-1-annexes-1-mechanics.md:515 — cell C-19's closing sentence,
+--     "Twin: `depreciation_run_due` answers on the same session both before and after". It answers
+--     on NEITHER. (The cell's main clause about `adjustment_run_due` also needs one word of care:
+--     at the live frontier clara_wake_interactive holds no EXECUTE on that verb at all, so the ACL
+--     refuses 42501 one rung EARLIER than the admission's CLR03. Both codes mean "unreachable from
+--     this lane", which is what GB-1 rests on; the battery asserts the disjunction and records
+--     which one fired.)
+--   · docs/plan/active/close-key-1-annexes-1-mechanics.md:520 — cell C-17 pins the `prosrc` of
+--     `depreciation_run_due(uuid)` "exactly as at `cfa0710`". This file recuts it into a thin
+--     delegate; the other three names in that cell (`adjustment_run_due` aside, which D-26 already
+--     exempts) are untouched and the pin on them stands.
+--   · docs/plan/active/close-key-1-gate-record.md:67 — "The FA twin is fine (`0041:3617-3630`
+--     compares a non-null `jwt_firm()` only)."
+--   · docs/plan/active/close-key-1-gate-record.md:448 — the GB-1 verification recipe's "the twin
+--     call to `depreciation_run_due` answers".
+--
+-- WHAT THE RE-CUT MUST NOT SAY: that the FA oracle was ever *changed by F-A4* to carry the
+-- admission. It was carrying it before this lane opened. The design read a two-year-old line
+-- number; the estate had moved. That is the finding, and it is the reason the review brief's
+-- MUST-VERIFY is "human-session answers byte-unchanged for BOTH oracles" — cells fa4c.F1 and
+-- §TAIL T.6 both measure it, and the four EXECUTE grants are counted, not assumed.
+--
 -- LOCK INVENTORY (there is no D1 row here; this line exists so nobody has to derive it):
 --   · §B installs a CONSTRAINT TRIGGER on the LIVE table clara.close_runs — ACCESS EXCLUSIVE on
 --     that table for the length of the DDL statement. No writer BODY is replaced, so PostgreSQL's
@@ -1431,6 +1467,97 @@ begin
 end $$;
 revoke all on function clara.release_close_prep(uuid, text, text) from public;
 
+-- -------------------------------------------------------------------------------------------------
+-- I.1b · clara.settle_close_proposal — THE PROPOSAL'S OWN TERMINAL DOOR (conductor ruling, this
+-- train). Annex I.1's review card offers the reviewer two actions — "adopt" and "decline with a
+-- reason" — but no PR's list named a DB door for either, and clara.attest_close_exception READS a
+-- proposal without settling it (0120:1010-1041, measured). Without this verb `adopted` and
+-- `withdrawn` are UNREACHABLE values on a live CHECK: a proposal stays `open` for ever after the
+-- reviewer has walked every attestation, and uq_close_proposal_live then blocks the lane from ever
+-- proposing again on that run. A carrier with a known-stuck lifecycle is not a carrier.
+--
+-- THE FLOOR IS attest_close_exception's, MIRRORED RATHER THAN INVENTED (0120:931-936, read at the
+-- bytes): `_human_ctx(role_rank('bookkeeper'))` THEN `_has_capability(…,'close_and_attest')`.
+-- Adopting is what the reviewer does in the same sitting as the attestations it authorises, and
+-- declining is the refusal of that same key-② work — a lower floor here would be a side door onto
+-- a decision the capability model already governs. §3.1's entrance seam is untouched: the AGENT
+-- entrance cannot satisfy this wall (cell fa4c.D1 proves she holds no capability row anywhere and
+-- no wake role holds EXECUTE on this verb).
+--
+-- ONLY TWO STATES ARE ADMISSIBLE. `superseded` is the LANE's own stamp — _agent_close_proposal_core
+-- writes it when it replaces its own predecessor at a moved gate vector — and a human who wants a
+-- fresh proposal asks the lane for one rather than re-labelling the old row. `open` is a birth
+-- state and never a destination. Anything else is a typed CLR10, so a caller's typo is a readable
+-- refusal rather than a CHECK violation.
+--
+-- LAW 6, STRUCTURALLY: this verb performs the ONE update _tf_close_proposals_settle_only admits
+-- and there is no delete path anywhere. The trigger is the backstop; the positive state read below
+-- is the MESSAGE (a reviewer should read "already adopted", not "immutable").
+-- -------------------------------------------------------------------------------------------------
+create function clara.settle_close_proposal(p_proposal uuid, p_state text, p_reason text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_dedupe jsonb; v_p record; v_reason text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if not clara._has_capability(c.firm, c.actor, 'close_and_attest') then
+    raise exception 'settling a close proposal takes the close_and_attest capability (key 2)'
+      using errcode = 'CLR04',
+        detail = '{"reason":"capability_missing","capability":"close_and_attest"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  if p_state is null or p_state not in ('adopted', 'withdrawn') then
+    raise exception 'a close proposal settles to adopted or withdrawn, never %', coalesce(p_state, 'null')
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'close_proposal_state_invalid', 'state', p_state)::text;
+  end if;
+  -- abandon_close's own shape (0120:1167-1170): the refusing act is the one that must say why.
+  -- An adoption needs no reason -- the attestations it authorises carry their own, per item.
+  v_reason := nullif(btrim(coalesce(p_reason, '')), '');
+  if p_state = 'withdrawn' and v_reason is null then
+    raise exception 'declining a close proposal requires its reason -- who declined this and why'
+      using errcode = 'CLR10', detail = '{"reason":"fact_basis_missing"}';
+  end if;
+  select * into v_p from clara.close_proposals cp where cp.id = p_proposal;
+  if v_p.id is null or v_p.firm_id <> c.firm then
+    raise exception 'close proposal not found in your firm'
+      using errcode = 'CLR11', detail = '{"reason":"fiscal_year_not_in_firm"}';
+  end if;
+  -- RESERVED AFTER the firm check, so a foreign id can never burn an op key (and the CLR11 stays
+  -- an honest not-found rather than becoming a replayable outcome).
+  v_dedupe := clara._reserve_op(c.firm, 'settle_close_proposal', p_op_key,
+    clara._hash(jsonb_build_object('proposal', p_proposal, 'state', p_state, 'reason', v_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  if v_p.state <> 'open' then
+    raise exception 'close proposal % is already %; a settled proposal is terminal', p_proposal, v_p.state
+      using errcode = 'CLR41',
+        detail = jsonb_build_object('reason', 'close_proposal_already_settled',
+          'state', v_p.state)::text;
+  end if;
+  update clara.close_proposals
+    set state = p_state, settled_by = c.actor, settled_at = now(), settle_reason = v_reason
+    where id = p_proposal;
+  perform clara._audit(c.firm, c.actor, null, null, 'settle_close_proposal', null,
+    jsonb_build_object('proposal_id', p_proposal, 'close_run_id', v_p.close_run_id,
+      'fiscal_year_id', v_p.fiscal_year_id, 'state', p_state, 'reason', v_reason,
+      'op_key', p_op_key));
+  perform clara._append_event(c.firm, 'close.proposal_settled', v_p.client_id, c.actor,
+    null, null, null, null, null,
+    jsonb_build_object('proposal_id', p_proposal, 'close_run_id', v_p.close_run_id,
+      'fiscal_year_id', v_p.fiscal_year_id, 'state', p_state));
+  return clara._finish_op(c.firm, 'settle_close_proposal', p_op_key,
+    jsonb_build_object('proposal_id', p_proposal, 'close_run_id', v_p.close_run_id,
+      'state', p_state, 'settled_by', c.actor, 'settled_at', now(), 'settle_reason', v_reason));
+end $$;
+revoke all on function clara.settle_close_proposal(uuid, text, text, text) from public;
+comment on function clara.settle_close_proposal(uuid, text, text, text) is
+  'F-A4 (Annex I.1''s review card, built at the conductor''s ruling): the proposal carrier''s '
+  'terminal human door. Bookkeeper floor + close_and_attest, mirroring attest_close_exception''s '
+  'own gate; admits ONLY adopted/withdrawn (superseded is the lane''s own stamp, open is a birth '
+  'state); a withdrawal must state its reason. Settling FREES uq_close_proposal_live, so the lane '
+  'may propose again on the same run. There is no delete path.';
+
 -- TA-P4 (4): the bookkeeper+ read surface. One row per agent act — kind, subject, model + version,
 -- rationale, verdict, and the failing-rung vector when refused.
 create function clara.list_agent_act_receipts(p_client uuid, p_since timestamptz default null)
@@ -2151,7 +2278,8 @@ with inserted_types as (
   insert into clara.event_types(name, client_scoped, description)
     values
       ('close.proposed', true, 'clara.wake_propose_close recorded a durable close proposal (design §3.7) — the drafted attestations and the gate digest vector they bind'),
-      ('close.preparation_started', true, 'the close-prep clock woke on a fiscal year whose end has passed (design §3.3) — the notice card''s own event; emitted by the leader belt (PR-2), registered here because clara._append_event validates the name')
+      ('close.preparation_started', true, 'the close-prep clock woke on a fiscal year whose end has passed (design §3.3) — the notice card''s own event; emitted by the leader belt (PR-2), registered here because clara._append_event validates the name'),
+      ('close.proposal_settled', true, 'a reviewer adopted or declined a close proposal through clara.settle_close_proposal (Annex I.1''s review card) — the terminal half of close.proposed, and a DIFFERENT fact from it, so it gets its own name rather than a second payload shape on the first')
     on conflict (name) do nothing returning name
 )
 insert into clara.trigger_taxonomy(version, event_type, decision, note)
@@ -2212,6 +2340,10 @@ grant execute on function clara.mint_wake_credential_for_task(text, uuid, uuid, 
 grant execute on function clara.hold_close_prep(uuid, text, text) to clara_authenticated;
 grant execute on function clara.release_close_prep(uuid, text, text) to clara_authenticated;
 grant execute on function clara.list_agent_act_receipts(uuid, timestamptz) to clara_authenticated;
+-- The review card's terminal door. clara_authenticated ONLY, floor body-enforced -- and the wake
+-- roles gain ZERO for the same reason the HOLD verbs do: the lane may propose, never settle its
+-- own proposal.
+grant execute on function clara.settle_close_proposal(uuid, text, text, text) to clara_authenticated;
 
 reset role;
 
@@ -2311,6 +2443,57 @@ begin
                   where c.relname = 'uq_hold_active' and i.indisunique
                     and pg_get_expr(i.indpred, i.indrelid) is not null) then
     raise exception 'F-A4 PR-1c tail: uq_hold_active is absent or not a PARTIAL unique index'
+      using errcode = 'CLR10';
+  end if;
+
+  -- T.1b2 · THE PROPOSAL LIFECYCLE HAS NO STUCK STATE (conductor ruling). Three independent reads,
+  -- because "the door exists" is not the claim -- "every value the CHECK admits has a writer" is.
+  --   (i) the state domain is exactly the four Annex E.4 names;
+  --  (ii) the settle-only trigger is installed (the structural backstop under the door);
+  -- (iii) the HUMAN door names ONLY adopted/withdrawn as admissible, read positionally off its own
+  --       prosrc -- so it can never reach `superseded` (the LANE's stamp, written by
+  --       _agent_close_proposal_core) nor write `open` back over a settled row.
+  -- `like '%state%'` alone is NOT the domain CHECK: ck_cp_state_settled ("(state = 'open') =
+  -- (settled_at is null)") matches that too and carries only one of the four literals. Pin the
+  -- ENUM form -- Postgres renders `state in (...)` as `state = ANY (ARRAY[...])` -- so this reads
+  -- the constraint it means to read. Caught by this file's own first apply.
+  select pg_get_constraintdef(c.oid) into v_def from pg_constraint c
+    where c.conrelid = 'clara.close_proposals'::regclass and c.contype = 'c'
+      and pg_get_constraintdef(c.oid) like '%state = ANY%';
+  if v_def is null then
+    raise exception 'F-A4 PR-1c tail: close_proposals carries no state-domain CHECK' using errcode = 'CLR10';
+  end if;
+  foreach v_sig in array array['open', 'adopted', 'withdrawn', 'superseded'] loop
+    if position('''' || v_sig || '''' in v_def) = 0 then
+      raise exception 'F-A4 PR-1c tail: close_proposals.state does not admit %', v_sig using errcode = 'CLR10';
+    end if;
+  end loop;
+  if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara' and c.relname = 'close_proposals'
+        and t.tgname = 't_close_proposals_settle_only' and not t.tgisinternal) then
+    raise exception 'F-A4 PR-1c tail: t_close_proposals_settle_only is absent' using errcode = 'CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+    where p.oid = 'clara.settle_close_proposal(uuid,text,text,text)'::regprocedure;
+  if position('p_state not in (''adopted'', ''withdrawn'')' in v_src) = 0 then
+    raise exception 'F-A4 PR-1c tail: settle_close_proposal''s admissible-state gate is not the closed adopted/withdrawn pair'
+      using errcode = 'CLR10';
+  end if;
+  if v_src ~ '''superseded''' then
+    raise exception 'F-A4 PR-1c tail: the HUMAN settle door names ''superseded'' -- that stamp is the lane''s own'
+      using errcode = 'CLR10';
+  end if;
+  -- It mirrors attest_close_exception's floor, read from BOTH bodies rather than asserted of one.
+  if position('clara._has_capability(c.firm, c.actor, ''close_and_attest'')' in v_src) = 0
+     or position('clara._human_ctx(clara.role_rank(''bookkeeper''))' in v_src) = 0 then
+    raise exception 'F-A4 PR-1c tail: settle_close_proposal does not carry attest_close_exception''s own floor'
+      using errcode = 'CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+    where p.oid = 'clara.attest_close_exception(uuid,text,text,text,text,uuid)'::regprocedure;
+  if position('clara._has_capability(c.firm, c.actor, ''close_and_attest'')' in v_src) = 0 then
+    raise exception 'F-A4 PR-1c tail: attest_close_exception''s floor is not what the settle door was mirrored from'
       using errcode = 'CLR10';
   end if;
 
@@ -2536,21 +2719,41 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- T.9b · The two new event types are REGISTERED, and each carries a trigger_taxonomy disposition
-  -- at the ACTIVE version (an unregistered name makes _append_event raise; an untriaged one makes
-  -- the taxonomy census incomplete).
+  -- T.9b · The three new event types are REGISTERED, and each carries a trigger_taxonomy
+  -- disposition at the ACTIVE version (an unregistered name makes _append_event raise; an
+  -- untriaged one makes the taxonomy census incomplete).
   select count(*)::int into v_n from clara.event_types
-    where name in ('close.proposed', 'close.preparation_started');
-  if v_n <> 2 then
-    raise exception 'F-A4 PR-1c tail: % of the 2 new event types are registered', v_n using errcode = 'CLR10';
+    where name in ('close.proposed', 'close.preparation_started', 'close.proposal_settled');
+  if v_n <> 3 then
+    raise exception 'F-A4 PR-1c tail: % of the 3 new event types are registered', v_n using errcode = 'CLR10';
   end if;
   select count(*)::int into v_n from clara.trigger_taxonomy tt
     join clara.taxonomy_active a on a.version = tt.version
-    where tt.event_type in ('close.proposed', 'close.preparation_started');
-  if v_n <> 2 then
-    raise exception 'F-A4 PR-1c tail: % of the 2 new event types carry an active taxonomy disposition', v_n
+    where tt.event_type in ('close.proposed', 'close.preparation_started', 'close.proposal_settled');
+  if v_n <> 3 then
+    raise exception 'F-A4 PR-1c tail: % of the 3 new event types carry an active taxonomy disposition', v_n
       using errcode = 'CLR10';
   end if;
+
+  -- T.9c · THE FOUR HUMAN DOORS: clara_authenticated and NOTHING else. Read as a closed set over
+  -- all four, so a stray wake/agent/runtime grant on any of them is a finding -- the brake and the
+  -- settle door in particular, which the lane must never be able to work on itself.
+  foreach v_sig in array array['clara.hold_close_prep(uuid,text,text)',
+                               'clara.release_close_prep(uuid,text,text)',
+                               'clara.list_agent_act_receipts(uuid,timestamptz)',
+                               'clara.settle_close_proposal(uuid,text,text,text)'] loop
+    if to_regprocedure(v_sig) is null then
+      raise exception 'F-A4 PR-1c tail: human door % does not resolve', v_sig using errcode = 'CLR10';
+    end if;
+    select array_agg(a.grantee::regrole::text order by 1) into v_extra from pg_proc f
+      cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
+      where f.oid = v_sig::regprocedure and a.privilege_type = 'EXECUTE'
+        and a.grantee <> 'clara_fn_owner'::regrole;
+    if v_extra is distinct from array['clara_authenticated'] then
+      raise exception 'F-A4 PR-1c tail: % is executable by %, expected clara_authenticated alone',
+        v_sig, coalesce(array_to_string(v_extra, ', '), '(nobody)') using errcode = 'CLR10';
+    end if;
+  end loop;
 
   -- T.10 · The gate catalog is still FOURTEEN rows and this file added none (census C15 unmoved).
   select count(*)::int into v_n from clara.close_gate_checks;
@@ -2562,6 +2765,6 @@ begin
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname in ('workflow', 'graphile_worker', 'spike') and c.relkind = 'r';
 
-  raise notice 'F-A4 PR-1c tail: OK — 3 new tables (agent_act_receipts / close_proposals / close_prep_holds), each FORCE RLS with exactly the owner+human-read policy pair and ZERO DML grant to any non-owner role; close_proposals carries the five columns attest_close_exception''s shipped p_from_proposal arm reads, plus its partial one-live-proposal index; the deferred Tier-C wall t_close_run_agent_receipt is installed on close_runs (DEFERRABLE INITIALLY DEFERRED). TWELVE wake wrappers resolve at their exact signatures, all SECURITY DEFINER / search_path-pinned / clara_fn_owner-owned, each naming ITSELF in its _close_wake_ctx call, none carrying DML text, all holding EXECUTE for clara_wake_interactive and ZERO for clara_agent_ro / clara_runtime / clara_wake_proactive, PUBLIC on none. % internals resolve and are app-callable by no role. wake_fn_allowlist gained exactly 12 close_prep rows, every one naming a live function, and no existing row moved. list_fiscal_years / get_close_readiness / verify_close are thin viewer-floor delegates over their new cores; BOTH due oracles still assert _assert_due_read_ctx BEFORE delegating to their additive ungranted cores, exactly TWO bodies in clara consult that predicate (x42.d8''s closed census, unmoved), and all four EXECUTE grants survived. mint_wake_credential, wake_context (still 5 columns) and _close_gate_uncoded are byte-identical to their prestate shas. The close_prep wake_engine_sources row is still registered-and-DISABLED (the flip is PR-2''s). The PARKED thirteenth verb and its evaluator are provably absent. close_gate_checks is still 14 rows. % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file).',
+  raise notice 'F-A4 PR-1c tail: OK — 3 new tables (agent_act_receipts / close_proposals / close_prep_holds), each FORCE RLS with exactly the owner+human-read policy pair and ZERO DML grant to any non-owner role; close_proposals carries the five columns attest_close_exception''s shipped p_from_proposal arm reads, plus its partial one-live-proposal index; the deferred Tier-C wall t_close_run_agent_receipt is installed on close_runs (DEFERRABLE INITIALLY DEFERRED). The proposal lifecycle has NO STUCK STATE: the state domain is exactly the four Annex E.4 names, the settle-only trigger is installed, and clara.settle_close_proposal (bookkeeper + close_and_attest, mirrored from attest_close_exception''s own floor and proven against BOTH bodies) admits adopted/withdrawn and never names ''superseded''. The four human doors are executable by clara_authenticated ALONE. TWELVE wake wrappers resolve at their exact signatures, all SECURITY DEFINER / search_path-pinned / clara_fn_owner-owned, each naming ITSELF in its _close_wake_ctx call, none carrying DML text, all holding EXECUTE for clara_wake_interactive and ZERO for clara_agent_ro / clara_runtime / clara_wake_proactive, PUBLIC on none. % internals resolve and are app-callable by no role. wake_fn_allowlist gained exactly 12 close_prep rows, every one naming a live function, and no existing row moved. list_fiscal_years / get_close_readiness / verify_close are thin viewer-floor delegates over their new cores; BOTH due oracles still assert _assert_due_read_ctx BEFORE delegating to their additive ungranted cores, exactly TWO bodies in clara consult that predicate (x42.d8''s closed census, unmoved), and all four EXECUTE grants survived. mint_wake_credential, wake_context (still 5 columns) and _close_gate_uncoded are byte-identical to their prestate shas. The close_prep wake_engine_sources row is still registered-and-DISABLED (the flip is PR-2''s). The PARKED thirteenth verb and its evaluator are provably absent. close_gate_checks is still 14 rows. % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file).',
     array_length(k_ungranted, 1), v_n;
 end $tail$;
