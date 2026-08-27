@@ -611,4 +611,138 @@ begin
 end $$;
 revoke all on function clara._adj_period_lines(clara.adjustment_templates, date, date) from public;
 
+-- =================================================================================================
+-- §B — THE HUMAN DOOR, BUILT door -> core FROM BIRTH (design §4.2).
+--
+-- WHY A CORE FOR ONE CALLER. There is exactly one caller today, on purpose. 0138'S PARK IS THE
+-- MEASURED COST OF NOT DOING THIS: two writers born without cores (propose/sign_adjustment_template)
+-- put a whole wrapper on ice and bought this train its D1 window. The core is UNGRANTED; Annex C's
+-- deterministic promoter is its named second consumer.
+--
+-- UNDER R6 THERE IS NO WAKE WRAPPER FOR THIS DOOR AND NO AGENT PATH TO IT — CONFIRMED AS LAW by the
+-- conductor (design §13 item 3), on hard-constraint-2 grounds: a service period read off a document
+-- by a model is a MODEL-GENERATED VALUE, and no such value enters a durable artifact. OCR's
+-- financial_date precedent (0026:916) does NOT transfer, because that value anchors to a stored
+-- region with a locator and a confidence. The agent's role here is to REFUSE AND SAY WHAT IS
+-- MISSING (§F's rung B10 names this table and the document id). The interim cost is accepted and
+-- owner-visible: a human keys the period before Clara can draft.
+--
+-- THE MAXIM BOTH HALVES OF THIS TRAIN TURN ON (design §5.0), recorded where a builder will meet it:
+--   *** FACTS GET ANCHORED, JUDGEMENTS GET RECEIPTED. ***
+-- A service period is a FACT read off a document — it gets anchored (this section). An expense
+-- classification is a JUDGEMENT — it gets receipted, shown and signed (§F). The two never swap
+-- lanes, and that is why §B and §F look nothing alike.
+--
+-- NO EVENT TYPE IS MINTED. _audit carries the act; nothing downstream is designed to wake on a
+-- recorded service period, and this file does not manufacture a consumer for one (the 0024 §B
+-- "ignore" posture, and law 31's dead-member discipline applied before the member exists).
+-- =================================================================================================
+create function clara._record_document_service_period_core(p_ctx jsonb, p_document uuid,
+    p_period_start date, p_period_end date, p_basis text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $core$
+declare
+  c_firm uuid; c_actor uuid; v_dedupe jsonb; v_doc_firm uuid; v_prior uuid; v_new uuid;
+begin
+  -- The 0124 substitution shape verbatim: the two ctx fields ride as jsonb, and NOTHING else off
+  -- the caller's _human_ctx record is read (Annex B.0c measured the same two-field surface on the
+  -- propose body, which is why §D's extraction is the same substitution).
+  c_firm  := (p_ctx ->> 'firm')::uuid;
+  c_actor := (p_ctx ->> 'actor')::uuid;
+  if c_firm is null or c_actor is null then
+    raise exception 'the service-period core requires a firm and an actor in its ctx'
+      using errcode = 'CLR10', detail = '{"reason":"ctx_incomplete"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+
+  -- THE 0021 RULE (the 0022:203-206 door idiom): absent and foreign answer with ONE refusal, so
+  -- this door is not an existence oracle for another firm's documents.
+  select d.firm_id into v_doc_firm from clara.documents d where d.id = p_document;
+  if v_doc_firm is null or v_doc_firm <> c_firm then
+    raise exception 'document is not in your firm' using errcode = 'CLR11';
+  end if;
+
+  -- RESERVE-BEFORE-MUTABLE-VALIDATION (the 0055:518-524 placement, same reasoning): the replay
+  -- short-circuit sits after identity/authz and before anything reading mutable world state, so a
+  -- retry of a SUCCEEDED call returns its stored receipt even though the world moved. A FIRST call
+  -- that fails a later validation raises, and the raise rolls back the reservation with it.
+  v_dedupe := clara._reserve_op(c_firm, 'record_document_service_period', p_op_key,
+    clara._hash(jsonb_build_object('document', p_document, 'period_start', p_period_start,
+      'period_end', p_period_end, 'basis', p_basis)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- WHO/BASIS/WHEN is the ruled trio (ADR-062): a fact without its basis is REFUSED, never
+  -- defaulted. The table CHECK says the same thing; this is the door saying it by name first, so
+  -- the caller gets a reason rather than a constraint violation.
+  if p_basis is null or btrim(p_basis) = '' then
+    raise exception 'a service period requires its basis -- who said so, on what evidence'
+      using errcode = 'CLR10', detail = '{"reason":"service_period_basis_missing"}';
+  end if;
+  if p_period_start is null or p_period_end is null then
+    raise exception 'a service period requires both of its dates'
+      using errcode = 'CLR10', detail = '{"reason":"service_period_dates_missing"}';
+  end if;
+  if p_period_end < p_period_start then
+    raise exception 'a service period ends on or after it starts'
+      using errcode = 'CLR10', detail = '{"reason":"service_period_dates_inverted"}';
+  end if;
+
+  -- SUPERSESSION, NEVER UPDATE (0055:610-623's idiom). Lock the live predecessor, stamp it with the
+  -- successor's id (the FK is deferred to commit), then insert the successor. Two humans racing on
+  -- the same document serialize on the row lock; the second re-reads a superseded row, finds no live
+  -- predecessor, and its insert then meets uq_document_service_period_live -- a loud unique-violation
+  -- abort, never a silent double-live state.
+  select sp.id into v_prior from clara.document_service_periods sp
+    where sp.document_id = p_document and sp.superseded_at is null
+    for update;
+  v_new := gen_random_uuid();
+  if v_prior is not null then
+    update clara.document_service_periods
+      set superseded_by = v_new, superseded_at = now()
+      where id = v_prior;
+  end if;
+  -- basis_kind is 'human_stated' STRUCTURALLY, not by parameter: this door is the human producer,
+  -- and 'extracted' ships with no writer (§A's table comment). A door that accepted the kind as an
+  -- argument would be one refactor away from letting a caller CLAIM an extraction it never did.
+  insert into clara.document_service_periods(id, firm_id, document_id, period_start, period_end,
+      basis_kind, basis, evidence_region_id, recorded_by)
+    values (v_new, c_firm, p_document, p_period_start, p_period_end,
+      'human_stated', p_basis, null, c_actor);
+
+  -- args stay REDACTED (ids and dates, never the basis text -- the basis lives on the row, which is
+  -- the record of record; 0002's audit_log doctrine, 0055:629-630).
+  perform clara._audit(c_firm, c_actor, null, null, 'record_document_service_period', null,
+    jsonb_build_object('document', p_document, 'service_period_id', v_new,
+      'superseded_id', v_prior, 'period_start', p_period_start, 'period_end', p_period_end,
+      'op_key', p_op_key));
+
+  return clara._finish_op(c_firm, 'record_document_service_period', p_op_key,
+    jsonb_build_object('service_period_id', v_new, 'document_id', p_document,
+      'period_start', p_period_start, 'period_end', p_period_end,
+      'basis_kind', 'human_stated', 'basis', p_basis,
+      'superseded_id', v_prior, 'recorded_by', c_actor));
+end $core$;
+revoke all on function clara._record_document_service_period_core(jsonb, uuid, date, date, text, text) from public;
+
+-- THE DOOR — a THIN DELEGATE. The floor lives HERE because this is the public verb, not the core
+-- (0055:507-509's rule). BOOKKEEPER: recording the term stated on an invoice is day-book work, not
+-- a signing act -- and the agent cannot reach it at any rank, because there is no wake wrapper.
+create function clara.record_document_service_period(p_document uuid, p_period_start date,
+    p_period_end date, p_basis text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $door$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  return clara._record_document_service_period_core(
+    jsonb_build_object('firm', c.firm, 'actor', c.actor),
+    p_document, p_period_start, p_period_end, p_basis, p_op_key);
+end $door$;
+revoke all on function clara.record_document_service_period(uuid, date, date, text, text) from public;
+grant execute on function clara.record_document_service_period(uuid, date, date, text, text)
+  to clara_authenticated;
+
+comment on function clara.record_document_service_period(uuid, date, date, text, text) is
+  'F-A4 PR-2a: the ONE human door that anchors a prepayment/service term to a document, at the bookkeeper floor. HUMAN-ONLY BY LAW (design §13 item 3): there is no wake wrapper and no agent path, because a period read off a document by a model is a model-generated value and hard constraint 2 forbids it entering a durable artifact. Writes basis_kind=''human_stated'' structurally -- the kind is not a parameter. Supersede-never-mutate. The clocked lane''s role is to REFUSE and name this door: rung B10 of clara.wake_establish_prepayment_schedule returns {missing:''document_service_periods'', document_id: ...}.';
+
 -- ##FA4PR2A-APPEND-POINT##
