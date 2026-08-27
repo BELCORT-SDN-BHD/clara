@@ -1,17 +1,17 @@
 # F-A4 PR-2a — design part 2 (build envelope · rulings · acceptance)
 
-*Part 2 of the design of record. Part 1 —
-`docs/plan/active/fa4-pr2-design-2026-08-27.md` — carries the ruling, the scope, the verb
-census, the carrier and the evaluator with both owner rulings (§§0-5); this file carries wrapper 12
-itself, the debt batch and the build envelope from §6 on. Split at
-the estate's own design-doc convention (`close-key-1`, `sandbox-export` and
-`tax-computation` all run design + part 2) after the 2026-08-27 review fold pushed part 1 past
-the 500-line gate. Section numbers are CONTINUOUS across the two files: a cite of "§13 item 4"
-resolves here and nowhere else.*
+*Part 2 of the design of record. Part 1 — `docs/plan/active/fa4-pr2-design-2026-08-27.md` —
+carries the ruling, the scope, the verb census, the carrier and the evaluator with both owner
+rulings (§§0-5); this file carries wrapper 12 itself, the debt batch and the build envelope from §6
+on. Split at the estate's design + part-2 convention (`close-key-1`, `sandbox-export` and
+`tax-computation` all run it) after the 2026-08-27 review folds pushed part 1 past the 500-line
+gate. **Section numbers are CONTINUOUS across the two files**, and **§12 is VACANT** — its
+one-line pointer folded into §10 at the 2026-08-27 tidy, the number retired **in place** the way
+AGENTS.md retires constraint 12: the other numbers did NOT shift, so every §13/§14 cite written
+before or after that date still resolves.*
 
 **Annex A** is `docs/plan/active/fa4-pr2-battery-2026-08-27.md`; **B-C**
-`docs/plan/active/fa4-pr2-annexes-2026-08-27.md`; **D-H**
-`docs/plan/active/fa4-pr2-derivations-2026-08-27.md`.
+`docs/plan/active/fa4-pr2-annexes-2026-08-27.md`; **D-H** `docs/plan/active/fa4-pr2-derivations-2026-08-27.md`.
 
 ---
 
@@ -286,12 +286,12 @@ file, sections in apply order:
 | §D | **the extraction** — the core, then the door as a thin delegate, now also carrying `p_schedule` | **YES** |
 | §D2 | **F1** — `clara._adj_template_hash` at eight arguments, null-stable (§5.2) | **YES** |
 | §D3 | **F1** — `clara._adj_run_occurrence_core` and `clara._adj_on_approve` resolve per-period lines (§5.2) | **YES** |
+| §D4 | **F2 wall 3, visible half** — `clara._adj_template_json` projects `schedule` + the target account (§5.3). A live body, so it takes the prosrc pin and the CoR — but a READ PROJECTION, so an in-flight call is stale, never wrong (§5.2) | live-body CoR, not a correctness hazard |
 | §E | `agent_act_receipts.subject_kind` CHECK swap (extend) | no |
 | §F | wrapper 12's agent core + the wrapper + allowlist row 13 + the one grant | no |
 | §G | the two policy mirrors (§7) | no |
 | §H | `_agent_close_proposal_core` CoR — B11b + the truthful `settle_reason` | declared |
 | §H2 | **F4** — `_agent_mint_month_snapshot_core` CoR, the month-scoped receipt op key (§6.3a) | rides §H's slot |
-| §D4 | **F2 wall 3, visible half** — `clara._adj_template_json` projects `schedule` + the target account (§5.3). A live body, so it takes the prosrc pin and the CoR — but a READ PROJECTION, so an in-flight call is stale, never wrong (§5.2) | live-body CoR, not a correctness hazard |
 | §I | the catalog-comment truings (Annex B.4, B.5) | no |
 | §TAIL | the strengthened index/policy assertions, the closed ungranted set, the thirteen-count flips, the frozen-schema check (constraint 15) | — |
 
