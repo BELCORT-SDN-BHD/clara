@@ -1735,4 +1735,1252 @@ revoke all on function clara._adj_template_hash(text, text, date, date, boolean,
 comment on function clara._adj_template_hash(text, text, date, date, boolean, jsonb, text, jsonb) is
   'F-A4 PR-2a §D2: the seven-key template content hash, plus an eighth `schedule` key folded in ONLY when the schedule is non-null. Null-stability is not a nicety -- the duplicate guard compares a RECOMPUTED hash against STORED ones, so an unconditional key would make every pre-existing template stop recognising its own twin (cell W37). Deliberately still `language sql stable` with NO security definer and NO search_path, exactly as harvested.';
 
+-- =================================================================================================
+-- §D3 — F1: THE TWO POSTING BODIES RESOLVE PER-PERIOD LINES [D1] (design §5.2, Annex H.4).
+--
+-- These are the two bodies that make this window matter: clara._adj_run_occurrence_core is THE
+-- DAILY UNATTENDED ADJUSTMENT BELT, and clara._adj_on_approve fires at EVERY approve of an
+-- occurrence. Both are harvested from the live catalog and carry EXACTLY ONE counted substitution
+-- each — "two call sites change, and only two" (Annex H.4), asserted by the generator rather than
+-- believed.
+--
+-- WHAT IS DELIBERATELY *NOT* CHANGED, and why that is the whole D1 argument: the OTHER t.lines
+-- reads in these bodies stay exactly as they are — the _wdb_line_shape read and the
+-- _adj_line_eligibility_breach read in the occurrence core, and the eligibility read in
+-- _adj_on_approve. Every one is AMOUNT-BLIND, and §5.2a's shape-congruence clause makes them
+-- correct BY CONSTRUCTION under a schedule (Annex H.3 censuses all six such readers estate-wide).
+-- The generator ASSERTS those reads survived — 3 in the occurrence core, 1 in _adj_on_approve — so
+-- a substitution that reached too far reds at generation time instead of in production.
+--
+-- NULL-STABILITY, structurally: with schedule null — every row in the estate on the day this
+-- applies, guaranteed by §0's absence pin — clara._adj_period_lines returns
+-- clara._adj_canon_lines(t.lines), which is byte-identical to the expression each line replaced.
+-- Cells W36/W37 are the rig proof of that; they are the belt, not the argument.
+--
+-- BOTH RESOLVE ON (v_ps, v_pe), THE DERIVED PERIOD — not on the caller's requested date. In the
+-- occurrence core those come from clara._adj_period_start/_adj_period_end; in _adj_on_approve they
+-- are read off the entry's own recurring_adjustment flags, and that body already asserts the two
+-- agree. Resolving on anything else would let a schedule entry match a period the run did not post.
+-- =================================================================================================
+CREATE OR REPLACE FUNCTION clara._adj_run_occurrence_core(p_client uuid, p_template uuid, p_period_start date, p_period_end date, p_op_key text, p_actor uuid, p_firm uuid, p_verb text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $d3occ$
+declare
+  v_dedupe jsonb; v_approve_key text; v_mirror_key text; t record; r record;
+  v_ps date; v_pe date; v_entry uuid; v_rev uuid; v_actor uuid; v_breach jsonb;
+  v_corr_breach jsonb; v_shape text[]; v_remedy text; v_collide text;
+  v_pred jsonb; v_pred_txt text; v_own jsonb;
+  -- [round 10, lane P1] the RECORDED lineage half of the same refusal: the ancestry answer, the
+  -- ancestor ids as text (the census speaks jsonb, the stamp speaks uuid), the subset of them that
+  -- actually has something standing, the sentence built from that subset, and the last period it
+  -- charged (the date a non-doubling replacement must start after).
+  v_anc jsonb; v_anc_ids text[]; v_repl_ids text[]; v_repl_txt text; v_repl_last text;
+  -- [R11 FIX 2026-08-04] admission predicate (5)'s subject: what a generation this template replaces
+  -- still has standing IN THE PERIOD being run. The shape gate's own use of v_repl_txt/v_repl_last
+  -- is one branch further down and cannot collide -- (5) raises before it is reached.
+  v_repl_std jsonb;
+  -- ...and the same question over the template's WHOLE BOOKABLE WINDOW, which is the reachability
+  -- predicate term (a) was missing.
+  v_repl_win jsonb;
+  -- Whether the entry the shape gate names was written by a generation this template replaces.
+  -- The two facts were composed as if they were one, and on the finding's scenario they were not.
+  v_blocker_is_ancestor boolean;
+  v_dr bigint; v_cr bigint; v_ramp boolean; v_high boolean; v_catch_up boolean;
+  v_mode text; v_status text; v_label text; v_memo text; v_watermark timestamptz;
+  v_run uuid; v_rev_entry uuid; v_amount bigint;
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  v_dedupe := clara._reserve_op(p_firm, p_verb, p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'template', p_template,
+      'ps', p_period_start, 'pe', p_period_end)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  v_approve_key := p_op_key || ':approve';
+  if clara._reserve_op(p_firm, 'approve_entry', v_approve_key,
+       clara._hash(jsonb_build_object('template', p_template, 'ps', p_period_start,
+         'pe', p_period_end, 'role', 'occurrence'))) is not null then
+    raise exception 'the derived approve op key is already in use'
+      using errcode = 'CLR10', detail = '{"reason":"approve_key_collision"}';
+  end if;
+  v_mirror_key := p_op_key || ':mirror:approve';
+  if clara._reserve_op(p_firm, 'approve_entry', v_mirror_key,
+       clara._hash(jsonb_build_object('template', p_template, 'ps', p_period_start,
+         'pe', p_period_end, 'role', 'reversal'))) is not null then
+    raise exception 'the derived mirror approve op key is already in use'
+      using errcode = 'CLR10', detail = '{"reason":"approve_key_collision"}';
+  end if;
+
+  -- THE CLIENT RUNG, BEFORE ANY TEMPLATE OR ENTRY READ (the 0041 poster's law restated).
+  -- It is what makes the admission decision, the mode decision, the post and any concurrent
+  -- correction ONE lock-holding transaction -- which is why ramp flap is impossible rather
+  -- than merely unlikely.
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  select * into t from clara.adjustment_templates a
+    where a.id = p_template and a.client_id = p_client;
+  if not found or t.status <> 'live' then
+    raise exception 'this adjustment template is not live for this client'
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'template_not_live',
+          'template_id', p_template)::text;
+  end if;
+  v_actor := coalesce(p_actor, t.signed_by);
+
+  -- THE NON-AUTO_REVERSE BRANCH CLOSES THE MIRROR KEY (ABI SSE closer column). Done as soon
+  -- as the branch is knowable, with an honest deferral marker: nothing will ever spend it.
+  if not t.auto_reverse then
+    perform clara._finish_op(p_firm, 'approve_entry', v_mirror_key,
+      jsonb_build_object('deferred', true, 'reason', 'template_not_auto_reverse',
+        'template_id', p_template));
+  end if;
+
+  -- THE PERIOD BOUNDS ARE INSIDE THE SUPPORTED DATE DOMAIN (round 8), asked BEFORE the cadence
+  -- algebra runs on them. clara.run_adjustment_manual takes both bounds from a human, so this
+  -- door lets dates in independently of propose's window check -- and a period stamp outside
+  -- clara._wdb_iso_date_supported's range makes the re-run gate read that entry as in-set for
+  -- the client's whole calendar. Refused with the poster's own period_request_invalid grammar
+  -- (CLR38 + an axis), not propose's, because a shared asserter would have had to be handed both
+  -- families' error codes. The measurement is at clara._wdb_iso_date_supported.
+  if not clara._wdb_iso_date_supported(p_period_start)
+     or not clara._wdb_iso_date_supported(p_period_end) then
+    raise exception 'the period % .. % is outside the supported date range 0001-01-01 .. 9999-12-31 (AD)', p_period_start, p_period_end
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'period_request_invalid',
+          'axis', 'date_unsupported', 'period_start', p_period_start,
+          'period_end', p_period_end, 'supported_from', date '0001-01-01',
+          'supported_to', date '9999-12-31')::text;
+  end if;
+  -- THE PERIOD IS THE CADENCE'S, NOT THE CALLER'S (WD-R8 consumed; the 0041 poster's shape).
+  v_ps := clara._adj_period_start(p_client, t.cadence, p_period_start);
+  v_pe := clara._adj_period_end(p_client, t.cadence, p_period_start);
+  if v_ps is distinct from p_period_start or v_pe is distinct from p_period_end then
+    raise exception 'this template''s % cadence runs % .. %, not % .. %', t.cadence, v_ps, v_pe, p_period_start, p_period_end
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'period_request_invalid',
+          'axis', 'not_cadence_aligned', 'cadence', t.cadence,
+          'period_start', v_ps, 'period_end', v_pe)::text;
+  end if;
+  -- A PERIOD IS RUNNABLE ONLY ONCE IT HAS ENDED, IN MALAYSIA. clara._fa_today() is the house
+  -- MYT legal date (0041:1012): a UTC runtime between 00:00 and 08:00 MYT is a calendar day
+  -- BEHIND the books it is posting into, and this file never asks the session zone.
+  if v_pe >= clara._fa_today() then
+    raise exception 'the period % .. % has not ended yet (MYT %)', v_ps, v_pe, clara._fa_today()
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'period_request_invalid', 'axis', 'not_ended',
+          'period_end', v_pe)::text;
+  end if;
+
+  -- ------------------------------------------------------------------------------------
+  -- THE ADMISSION LAW (design SS2.3), three predicates, each with its own token.
+  -- ------------------------------------------------------------------------------------
+  -- (1) THE WINDOW: [start_date, coalesce(end_date, infinity)]. Both bounds are cadence
+  -- boundaries (validated at propose and re-validated at sign), so comparing the period's own
+  -- ends against them is exact.
+  if v_ps < t.start_date or (t.end_date is not null and v_pe > t.end_date) then
+    raise exception 'the period % .. % lies outside this template''s window (% .. %)', v_ps, v_pe, t.start_date, coalesce(t.end_date::text, 'open')
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'period_out_of_window',
+          'template_id', p_template, 'period_start', v_ps, 'period_end', v_pe,
+          'start_date', t.start_date, 'end_date', t.end_date)::text;
+  end if;
+  -- (2) UNMET: no APPROVED, UN-REVERSED role='occurrence' entry exists for this
+  -- (template, period). Entries are the truth -- receipts are never read for eligibility
+  -- (the 0041:695-697 law restated), because a pair-corrected period must become unmet again
+  -- and its receipt legitimately survives. Written as TEXT comparisons on the two expressions
+  -- the ABI SSC index ix_je_adj_occurrence is built over, so this rides the index instead of
+  -- casting its way off it (the D-a F10 measured law).
+  if exists (select 1 from clara.journal_entries je
+             where je.flags ? 'recurring_adjustment'
+               and (je.flags -> 'recurring_adjustment' ->> 'template_id') = p_template::text
+               and (je.flags -> 'recurring_adjustment' ->> 'period_start')
+                     = to_char(v_ps, 'YYYY-MM-DD')
+               and (je.flags -> 'recurring_adjustment' ->> 'role') = 'occurrence'
+               and je.status = 'approved' and je.reversed_by is null) then
+    raise exception 'this template already has an approved, un-reversed occurrence for % .. %', v_ps, v_pe
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'period_already_met',
+          'template_id', p_template, 'period_start', v_ps, 'period_end', v_pe)::text;
+  end if;
+  -- (3) NOT BLOCKED: draft-N blocks N+1, per template (never client-wide -- two templates on
+  -- one client are independent lanes). This is blocked[]'s TRANSIENT reason; the due oracle
+  -- also reports template_line_ineligible, which is the eligibility refusal just below.
+  if clara._adj_occurrence_outstanding(p_client, p_template) then
+    raise exception 'an occurrence draft for this template is outstanding; approve or withdraw it before running another period'
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'occurrence_draft_outstanding',
+          'template_id', p_template)::text;
+  end if;
+  -- (4) THE PERIOD IS SOUND TO RE-RUN [as-built ladder round 5 -- THE CORRECT-AND-RE-RUN
+  -- DOUBLE]. (2) proves the period is UNMET; this proves it is unmet SOUNDLY -- that whatever
+  -- made it unmet actually left the period's own books flat. Without it, the two settled laws
+  -- this file and clara.reverse_entry each hold correctly compose into a permanent doubling of
+  -- a statutory year-end balance: measured at RM100,000.00 of FY2025 expense (and RM100,000.00
+  -- of FY2025 accrual liability) against a RM50,000.00 accrual, on BOTH lanes, with this very
+  -- oracle re-proposing the period on every sweep.
+  --
+  -- IT IS ADDITIVE AND LAST AMONG THE ADMISSION PREDICATES, deliberately: the window /
+  -- period_already_met / occurrence_draft_outstanding trio keeps its pinned order, wording and
+  -- precedence exactly (round 4 measured three regressions in this body's admission law and
+  -- the lesson was to add beside, never to reorder). It sits ABOVE the eligibility
+  -- re-derivation for one reason: a period that cannot lawfully be re-run at all must not be
+  -- reported as an ACCOUNT problem, and clara._adj_oldest_unmet_period asks the two in exactly
+  -- this order so the verb and the oracle can never name different reasons for one period.
+  --
+  -- THE REMEDY NAMES ONLY ACTS THAT EXIST (WDB-R2: "if a message cannot honestly promise an
+  -- outcome, it must not promise it"). An earlier cut of this refusal said "book the correction
+  -- into the period by hand" -- and that is the right ACCOUNTING act, but it does NOT clear
+  -- this gate and could never have: a hand-booked entry sets no reversed_by, the original's
+  -- reversed_by still names the out-of-period correction, and clara.reverse_entry refuses to
+  -- re-reverse an already-reversed entry. The state is TERMINAL for the automatic lane, and
+  -- exactly one act reaches it: retiring the template, which stops the period being advertised
+  -- and hands the books to a human. So that is what is named, in the detail as a machine-
+  -- readable `remedy` key as well as in the sentence. (`period_correction_unsound` is terminal
+  -- for the PERIOD in the same way template_line_ineligible is terminal for the TEMPLATE.)
+  --
+  -- The refusal names BOTH entries and BOTH dates, because the one thing a human cannot
+  -- reconstruct from a token is which two dates disagreed.
+  --
+  -- ASKED WITH THE TEMPLATE'S ACCOUNT SHAPE, NOT ITS ID [round 6]. (2) above is the
+  -- template-keyed met-ness test and it keeps its exact pinned wording and precedence -- but it
+  -- can only ever see THIS template's own occurrences, and [WDB-G13] says an edit IS a new
+  -- template. Asking the shared gate with clara._wdb_line_shape(t.lines) is what makes the
+  -- question the books' rather than the register-of-templates': "does this client's overlapping
+  -- calendar already carry a posting that moves ANY of these accounts in the same direction?"
+  -- (round 8: ANY, not ALL -- the equality form was an identity test a one-sen edit could vary).
+  v_shape := clara._wdb_line_shape(t.lines);
+  v_corr_breach := clara._wdb_rerun_breach(p_client, 'recurring_adjustment', v_shape, v_ps, v_pe);
+  if v_corr_breach is not null and (v_corr_breach ->> 'axis') = 'shape_already_met' then
+    -- A DIFFERENT REFUSAL FROM period_correction_unsound, because it is a different fact with a
+    -- different remedy. Nothing here is unsound: a posting that moves at least one of this
+    -- template's accounts in the same direction is standing, correctly, in a period overlapping
+    -- this one, under another authority. (2) has already proved it is not this template's, so it
+    -- is either the generation this template replaces -- correct that entry, in its own period,
+    -- and this period reopens by itself -- or a genuinely separate live template sharing an
+    -- account with this one, in which case the books cannot tell the two charges on that account
+    -- apart and neither can any reader; give it its own code. BOTH remedies are acts that exist
+    -- and that clear this gate (WDB-R2).
+    --
+    -- THE PRODUCT LAW THIS REFUSAL ENFORCES, written down at the gate so nobody has to infer it
+    -- from the key: at most one standing machine-posted charge per (client, overlapping calendar,
+    -- account, side) is the designed grain [round 8]. Two templates that genuinely accrue
+    -- different things but SHARE an account -- audit fees and legal fees, both crediting one
+    -- "Accruals" code -- ARE refused here, deliberately: the books record two charges on that
+    -- code and no reader, human or machine, can attribute them afterwards. The professional's
+    -- remedy is a distinct accrual account per liability class, and under the round-8
+    -- intersection test it is actually SUFFICIENT -- under round 7's equality key, distinct codes
+    -- on the debit side alone still left the shared accrual carrying both charges and the gate
+    -- said nothing.
+    --
+    -- ...AND IT IS OFFERED WITH THE MEASUREMENT BESIDE IT, WHICH IS ROUND 10's REPAIR OF ROUND
+    -- 9's REPAIR OF ROUND 8's SENTENCE. "Give this template distinct account codes" clears THIS
+    -- gate in every case -- and on a [WDB-G13] EDIT it clears it by booking the charge a second
+    -- time on fresh codes while the retired generation's entry stays standing on the old ones
+    -- (measured, probe y1/p1-reclass.mjs: five months, RM30,000 against an RM15,000 intention).
+    -- Round 9 answered that by CONDITIONING the clause on the standing writer's template status
+    -- -- prohibiting the act, and asserting "it is the generation this one replaces". Round 10
+    -- measured that assertion wrong in both directions, each with money: on a retired SIBLING the
+    -- prohibition forbade the correct act and the one remaining instruction erased RM6,000 of a
+    -- legitimate audit accrual (z1/p1-retired-sibling.mjs, z1/p1b-follow-the-only-remedy.mjs),
+    -- and on the natural propose-then-retire ORDER the status read `live` and reprinted the
+    -- doubling instruction anyway (z1/p5-order-bypass.mjs: RM18,000 against RM6,000, blocked:[]).
+    --
+    -- SO THE SENTENCE NOW NEITHER ASSERTS NOR PROHIBITS WHAT ONLY LINEAGE CAN PROVE. Three
+    -- clauses, each keyed on something the books can actually show:
+    --   1. correct the standing entry in its own period, with the verb the door named -- ALWAYS
+    --      offered, unchanged;
+    --   2. give this template distinct account codes -- ALWAYS offered as an ACT, because it is
+    --      lawful and, on the designed audit-fee/legal-fee collision, it is the CORRECT act
+    --      (measured: 401 books both months clean, every figure right, nothing doubled);
+    --   3. ...carrying the CAUTION whenever this client has a sibling template whose shape
+    --      collides with this one AND which already has standing charges -- naming that sibling,
+    --      its status, how many periods it carries and which. The consequence is stated
+    --      conditionally ("IF this template replaces that one, ...") because the professional is
+    --      the only party who knows whether it does, and this file has no state that can.
+    -- The census is clara._wdb_overlapping_siblings -- ONE body, consulted here, at the
+    -- template_line_ineligible refusal below (the cross-family re-cut road) and at
+    -- clara.propose_adjustment_template, so the three doors that promise this outcome cannot
+    -- drift (WDB-R2).
+    --
+    -- ...AND WHERE THE LINEAGE IS RECORDED, THE CAUTION BECOMES AN ASSERTION [round 10, lane P1;
+    -- the OWNER took option (b) on 2026-08-04]. The three clauses above are what this file can say
+    -- when it is GUESSING at lineage. It no longer always has to: a professional who declares
+    -- `p_replaces` at propose writes an immutable edge, and where that edge reaches a generation
+    -- with charges still standing, clause 3 stops being conditional -- the refusal says "this
+    -- template REPLACES that one", FORBIDS the distinct-codes act, and offers the two acts that do
+    -- not double (correct the standing entry; or start the replacement after that generation's
+    -- last charged period). The discriminant is the recorded edge and NOTHING ELSE -- never the
+    -- status, never the shape, never which member of the window the scan reached first -- which is
+    -- what makes it immune to the click order that defeated round 9. The walk is
+    -- clara._wdb_template_ancestry (ONE body, shared with propose's validation, WDB-R2), and the
+    -- fallback when no edge exists is lane O1's caution, VERBATIM and permanently reachable: every
+    -- template proposed without a declaration lands there.
+    --
+    -- THE SENTENCE NAMES THE COLLIDING CODES. `colliding_elements` comes off the gate's own
+    -- membership derivation (clara._wdb_shape_overlap), so "these collide" is always accompanied
+    -- by "on WHAT" -- with three-line templates there are up to three candidate codes to re-cut
+    -- and a reader who is not told which one cannot follow the remedy at all.
+    --
+    -- THE FIRST CLAUSE NAMES THE VERB THE GATE WAS TOLD, NOT ONE THIS BODY GUESSED (round 7,
+    -- WDB-R2; round 8 moved the derivation into clara._adj_correction_door so the run-receipt
+    -- card and this refusal cannot drift). Round 6 hard-coded clara.reverse_entry here, and for a
+    -- [WDB-G13] edit of an AUTO-REVERSE template (the commonest case this gate fires on) that
+    -- verb refuses CLR39 adjustment_pair_locked: the refusal handed the reader a door that
+    -- refuses them. Where the door body names a wall it cannot translate into a verb -- including
+    -- pair_already_active, the SECOND walled corridor, found inside round 7's own repair -- the
+    -- sentence says so instead of inventing one.
+    -- THE jsonb_typeof GUARD IS NOT DECORATION. `colliding_elements` is to_jsonb(text[]), and a
+    -- NULL array serialises to the jsonb SCALAR `null` (which the p_shape-is-null read produces),
+    -- on which jsonb_array_elements_text raises 22023. A cast or an extraction that can throw
+    -- inside a refusal path turns a diagnosis into an error -- the same argument the gate's own
+    -- regex-not-cast handler carries.
+    v_collide := coalesce(nullif(array_to_string(
+      array(select jsonb_array_elements_text(
+        case when jsonb_typeof(v_corr_breach -> 'colliding_elements') = 'array'
+             then v_corr_breach -> 'colliding_elements' else '[]'::jsonb end)), ', '), ''),
+      'these accounts');
+    v_remedy := case
+      when (v_corr_breach ->> 'correction_verb') is not null then
+        'Correct entry ' || (v_corr_breach ->> 'correction_entry') || ' within its own period with '
+        || (v_corr_breach ->> 'correction_verb')
+        || ' (a correction of a period-dated posting is now dated with the entry it corrects)'
+      else
+        -- THE WALL'S OWN SENTENCE RIDES WITH ITS TOKEN [round 10, Codex finding 1]. This
+        -- clause used to end at "so clear that first", which names a token and no act: when
+        -- the wall is the advance register's (a run whose halves move a code that has since
+        -- been enrolled as a staff advance), "clear that first" is not something a bookkeeper
+        -- can do without being told WHAT. `correction_wall_advice` is composed by the body
+        -- that OWNS the wall and is carried through clara._adj_correction_door untouched, so
+        -- this sentence can only ever say what that body actually says -- never a second
+        -- opinion of it (WDB-R2).
+        'Entry ' || (v_corr_breach ->> 'correction_entry')
+        || ' cannot be corrected directly (' || coalesce(v_corr_breach ->> 'correction_wall', 'blocked')
+        || ')'
+        || coalesce(': ' || (v_corr_breach ->> 'correction_wall_advice'), '')
+        || ', so clear that first' end;
+    -- THE SECOND CLAUSE, AND THE MEASUREMENT THAT RIDES IT WHEN THERE IS ONE. The census is
+    -- asked ONCE and both the sentence and the machine payload are built from that one answer,
+    -- so "why was I cautioned" and "which templates were you looking at" can never disagree.
+    -- Siblings with NOTHING standing are dropped here rather than inside the census: a template
+    -- that has never posted (or whose occurrences are all corrected) cannot leave a charge behind
+    -- a re-cut, and cautioning about it would be the unearned assertion this round deleted.
+    -- THE RECORDED LINEAGE IS ASKED FIRST, AND IT OUTRANKS THE CENSUS [round 10, lane P1; the
+    -- OWNER's option (b), ruled 2026-08-04]. The census can only ever say "these collide and this
+    -- much stands under them"; clara.adjustment_templates.replaces_template_id says "and THAT one
+    -- is the generation I replace", because the professional declared it at propose and the column
+    -- is immutable. Where the declaration reaches the standing charge in the way, the sentence
+    -- below stops cautioning and states it -- which is the whole difference between round 10's
+    -- honest minimum and a gate that can actually stop the double.
+    --
+    -- THE ANCESTORS ARE TAKEN AS TEXT because the two sources speak different types: the census
+    -- returns `template_id` as a jsonb string and clara._wdb_rerun_breach carries
+    -- `standing_template_id` as the raw stamp text (which may be MALFORMED -- that is the whole
+    -- point of the regex-not-cast reader at the v_met branch). Comparing as text can never raise
+    -- 22P02 inside a refusal path; casting could, and a diagnosis that turns into an error is the
+    -- defect this file guards against in four other places.
+    v_anc := clara._wdb_template_ancestry(p_client, p_template);
+    select coalesce(array_agg(a #>> '{}'), '{}'::text[]) into v_anc_ids
+      from jsonb_array_elements(v_anc -> 'ancestors') as t(a);
+    -- [R11 FIX 2026-08-04] IS THE ENTRY IN THE WAY ONE OF MINE TO REPLACE? Compared as TEXT, never cast:
+    -- `standing_template_id` is the raw recurring_adjustment stamp and may be malformed, which is
+    -- the whole reason the gate's own reader is a regex. A NULL stamp (an unattributable charge)
+    -- coalesces to FALSE -- a charge these books cannot attribute to any template cannot be
+    -- attributed to an ANCESTOR either, which is the same rule the census rows already follow.
+    v_blocker_is_ancestor := coalesce(
+      (v_corr_breach ->> 'standing_template_id') = any (v_anc_ids), false);
+
+    -- THE CENSUS ROWS, EACH CARRYING THE LINEAGE FACT ABOUT ITSELF. `replaced` is reported on
+    -- every candidate (never omitted on the false ones -- a key a reader has to test for existence
+    -- before trusting is a key they will one day forget), and it is what lets a surface render
+    -- "the generation you replace" and "a sibling that merely collides" as the different things
+    -- they are. The unattributed row's `template_id` is jsonb null, and `null = any(...)` is NULL,
+    -- so it is coalesced to FALSE explicitly: a charge these books cannot attribute to any
+    -- template cannot be attributed to an ANCESTOR either.
+    select jsonb_agg(e || jsonb_build_object('replaced',
+             coalesce((e ->> 'template_id') = any (v_anc_ids), false))
+             order by (e ->> 'standing')::int desc, e ->> 'template_id') into v_pred
+      from jsonb_array_elements(
+             clara._wdb_overlapping_siblings(p_client, p_template, v_shape)) as t(e)
+     where (e ->> 'standing')::int > 0;
+
+    -- WHICH RECORDED GENERATIONS A RE-CUT WOULD PROVABLY DOUBLE. Two sources, unioned, and the
+    -- union is what makes the answer ORDER-INDEPENDENT -- the defect round 9 died of:
+    --   (a) any colliding sibling with standing charges that is a recorded ancestor. Not "the one
+    --       the refusal happens to name": which member of the window the scan reached first is an
+    --       artefact of `order by posting_date, id`, and a prohibition that switches off because a
+    --       different row sorted first is round 9's status snapshot wearing a new hat.
+    --   (b) the writer of the entry this refusal NAMES, when that writer is a recorded ancestor --
+    --       even if the census counted 0 for it. The census counts role='occurrence' only (its
+    --       money argument is at clara._wdb_template_standing_charges), so an ancestor whose
+    --       standing member here is its auto-reversal MIRROR would otherwise slip out of the set
+    --       while its money is demonstrably standing in this very window. That is the mirror arm
+    --       of Z1's probe 2, and it needs no separate branch -- only this second term.
+    -- [R11 FIX 2026-08-04 -- W1 finding 2, HIGH] TERM (a) IS KEYED ON THE MONEY THIS TEMPLATE CAN
+    -- ACTUALLY REACH. It used to admit any colliding ancestor with `standing > 0` counted over ALL
+    -- PERIODS, with no reachability predicate anywhere -- and clara._wdb_template_standing_charges
+    -- has none either, by design. MEASURED (probe w1d-period-blind-assert.mjs): gen1 charged
+    -- 2026-01 and 2026-02 and was retired; gen2 honestly DECLARED it and started 2026-05-01 --
+    -- FORWARD-ONLY, after gen1's last charged period, the lawful edit this file's own note calls
+    -- safe. The 2026-05 run collided with a genuinely SEPARATE live template on a shared accrual
+    -- code (the designed grain this file documents), and the refusal ASSERTED that gen2's distinct
+    -- codes "would book 2026-01 .. 2026-02 a SECOND time". False: gen2 starts 2026-05-01 and can
+    -- never book them. Following the forbidden act was measured CORRECT to the sen; following the
+    -- FIRST remedy erased RM900 of an unrelated legitimate accrual, permanently.
+    -- THE WINDOW IS THE TEMPLATE'S OWN, not this period's: the assertion's claim is "distinct codes
+    -- would re-charge periods that generation carries", and the periods this template could ever
+    -- re-charge are exactly [start_date, coalesce(end_date, the far horizon)]. Asking the same
+    -- authority admission predicate (5) asks, with a wider window, is what keeps the wall and the
+    -- sentence from ever disagreeing about whose money is in the way (WDB-R2).
+    -- TERM (b) NEEDS NO PREDICATE and gets none: it names the writer of the entry THIS refusal is
+    -- raised on, which is in this period by construction.
+    v_repl_win := clara._wdb_replaced_generation_standing(p_client, p_template,
+                    t.start_date, coalesce(t.end_date, date '9999-12-31'));
+    select array_agg(distinct x order by x) into v_repl_ids
+      from unnest(v_anc_ids) x
+     where x = (v_corr_breach ->> 'standing_template_id')
+        or exists (select 1 from jsonb_array_elements(coalesce(v_pred, '[]'::jsonb)) as t(e)
+                    where (e ->> 'template_id') = x
+                      and coalesce((e ->> 'replaced')::boolean, false)
+                      and exists (select 1 from jsonb_array_elements(v_repl_win) as t2(g)
+                                   where (g ->> 'template_id') = x));
+    -- THE UN-NAMED ROW GETS A SENTENCE OF ITS OWN [round 10, Codex finding 3]. The census's
+    -- second term reports standing charges no template of this client can claim, with
+    -- `template_id` NULL -- and `'template ' || NULL` is NULL, which string_agg DROPS, so the
+    -- caution would have gone silent on exactly the case it was widened for. The two spellings
+    -- are branch-distinct here rather than papered over with a coalesce: "some template you can
+    -- go and look at" and "a charge whose writer these books cannot identify" are different
+    -- facts and a professional has to be able to tell them apart.
+    select string_agg(
+             case when (e ->> 'template_id') is null
+               then 'a standing charge these books cannot attribute to any template of this '
+                    || 'client (its recurring_adjustment stamp names none)'
+               else 'template ' || (e ->> 'template_id') || ' ("' || (e ->> 'name') || '", '
+                    || (e ->> 'status') || ', ' || (e ->> 'containment') || ' shape)' end
+             || ' already carries ' || (e ->> 'standing') || ' standing charge(s) for '
+             || coalesce(e ->> 'first_period', 'an unstated period') || ' .. '
+             || coalesce(e ->> 'last_period', 'an unstated period'), '; ')
+      into v_pred_txt
+      from jsonb_array_elements(coalesce(v_pred, '[]'::jsonb)) as t(e);
+    -- THE ASSERTED SENTENCE'S OWN FACTS [round 10, lane P1]. Built with a LEFT JOIN rather than
+    -- from the census alone, because term (b) above can name a generation the census dropped (a
+    -- standing MIRROR): that arm gets the honest shorter phrase -- "wrote the standing charge named
+    -- above" -- instead of a fabricated count. The period bound is the max over the replaced
+    -- generations under collate "C" (ISO text, the same collation every other comparison of these
+    -- stamps uses), and it is the date a replacement may start after without re-charging anything.
+    if v_repl_ids is not null then
+      select string_agg(
+               'template ' || x
+               || coalesce(' ("' || (c.e ->> 'name') || '", ' || (c.e ->> 'status') || ', '
+                           || (c.e ->> 'containment') || ' shape)', '')
+               || case when c.e is null then ', which wrote the standing charge named above'
+                       else ', which already carries ' || (c.e ->> 'standing')
+                            || ' standing charge(s) for '
+                            || coalesce(c.e ->> 'first_period', 'an unstated period') || ' .. '
+                            || coalesce(c.e ->> 'last_period', 'an unstated period') end,
+               '; ' order by x)
+        into v_repl_txt
+        from unnest(v_repl_ids) x
+        left join lateral (select e from jsonb_array_elements(coalesce(v_pred, '[]'::jsonb)) as t(e)
+                            where (e ->> 'template_id') = x) c on true;
+      -- [R11 FIX 2026-08-04 -- W1 finding 2] THE BOUND IS THE MAX OVER THE GENERATIONS THIS REFUSAL
+      -- ACTUALLY ASSERTS ON, not over every replaced candidate the census returned. Under the old
+      -- form `start_after_replaced_generation` was measured VACUOUS in the finding's own scenario:
+      -- it printed 2026-02-28 at a template that already started 2026-05-01, so the "other act
+      -- that does not double" was an act the professional had already taken. It is also taken
+      -- from clara._wdb_template_standing_charges rather than from the census row, because the
+      -- date a replacement may safely start after is the generation's LAST CHARGE, full stop --
+      -- an in-window bound would name a date that still re-charges the months after it.
+      -- THE CAST IS SAFE HERE AND NOWHERE ELSE IN THIS BODY: v_repl_ids is a subset of v_anc_ids,
+      -- which comes from the ancestry walk's own uuid rows -- never from a recurring_adjustment
+      -- STAMP, which may be malformed and which this file therefore only ever compares as text.
+      select max((clara._wdb_template_standing_charges(p_client, x::uuid) ->> 'last_period')
+                 collate "C") into v_repl_last
+        from unnest(v_repl_ids) x;
+    end if;
+    -- THREE SPELLINGS OF THE SECOND CLAUSE, ONE PER STATE OF WHAT THIS FILE ACTUALLY KNOWS.
+    --   * NOTHING COLLIDING STANDS -> offer the act plainly (round 8's sentence, untouched).
+    --   * SOMETHING STANDS AND MIGHT BE A PREDECESSOR -> offer the act WITH the measurement and a
+    --     CONDITIONAL consequence (round 10 lane O1's caution, kept verbatim: it is what the books
+    --     can prove and no more, and it is the branch every template proposed before this column
+    --     existed will always land on).
+    --   * A RECORDED GENERATION THIS TEMPLATE REPLACES HAS CHARGES STANDING -> ASSERT and FORBID.
+    --     This is the one branch round 9 reached for and had no state to earn: the doubling is not
+    --     a possibility here, it is arithmetic -- the professional declared the lineage, the
+    --     declaration is immutable, and fresh codes would re-charge every period that generation
+    --     already carries while its charge stays where it is.
+    -- THE PROHIBITION IS NOT A DEAD END, and this file may not let it be one (the walled-corridor
+    -- class, the ladder's most-repeated defect): the sentence carries TWO acts that do not double
+    -- -- correct the standing entry in its own period (clause 1, the verb the door named, printed
+    -- above), and start the replacement after the last period that generation charged. Both are
+    -- acts a professional can take today with the verbs they already hold.
+    --
+    -- ...AND A THIRD, WHICH IS THE ONE ROUND 9's GHOST COMES BACK THROUGH IF IT IS LEFT OUT.
+    -- Round 9 forbade a lawful act on a lineage the SYSTEM inferred wrongly. This branch forbids
+    -- it on a lineage the PROFESSIONAL declared -- and a professional can be wrong too. Work the
+    -- z1/p1 scenario with one slip: the retired AUDIT template is declared as the predecessor of a
+    -- genuinely separate LEGAL-fee template. The assertion is then false in exactly round 9's way,
+    -- the distinct-codes act (which here is the CORRECT one -- measured, x42.r10p1e) is forbidden,
+    -- and the two acts above are useless: correcting the standing entry destroys a legitimate
+    -- audit accrual, and starting later does not give the legal fee the months it is owed. The
+    -- declaration is IMMUTABLE, so there is no un-declaring it, and a corridor whose only exits
+    -- are wrong is the defect family this ladder exists to kill. So the sentence NAMES THE
+    -- RECOVERY: retire this template and propose it again without naming a predecessor. That act
+    -- is available (the run was refused, so no occurrence draft is outstanding to block the
+    -- retire; the retired row frees its content_hash slot, so the identical proposal is admitted),
+    -- it restores lane O1's caution branch with both acts offered, and it leaves BOTH declarations
+    -- in the audit trail rather than editing a claim in place. Celled end-to-end, with the four
+    -- balances asserted after the recovery: x42.r10p1h.
+    --
+    -- WHAT THIS PROHIBITION IS NOT, STATED PLAINLY RATHER THAN LEFT TO BE DISCOVERED [round 10,
+    -- lane P1; probe p1/probes/pA-lineage-assert.mjs]. It is a SENTENCE, not a wall. A
+    -- professional who reads it and re-cuts anyway -- proposing a THIRD template on free codes,
+    -- declaring the same predecessor -- is not stopped: that template's shape is disjoint from the
+    -- standing charges, clara._wdb_rerun_breach is keyed on shape intersection, and the four
+    -- already-charged months run as ordinary catch-up drafts (MEASURED on this rig: EXPA 1,200,000
+    -- standing plus EXPB 600,000 booked, against a 600,000 intention). Closing THAT needs a
+    -- membership term keyed on the recorded lineage rather than on the shape, which is a NEW
+    -- admission law with its own refusal token, its own blocked[] word and its own surface gloss --
+    -- an adjudication, not a fix lane's call. It is recorded here, at the sentence that names the
+    -- act, so the next reader inherits a measurement instead of a surprise. What was measured and
+    -- REJECTED as the cheap version: folding the ancestors' accounts into the shape this gate is
+    -- asked about. It is over-broad in a way that parks healthy templates -- a lawful FORWARD-ONLY
+    -- re-code (a replacement on fresh codes starting after the predecessor's last period) would be
+    -- refused whenever any unrelated template happens to charge the predecessor's OLD accounts in
+    -- a period the replacement covers, and a shape argument cannot say "only for the periods that
+    -- generation actually charged".
+    v_remedy := v_remedy || case
+      when v_repl_txt is not null then
+        '. Do NOT give this template distinct account codes: this template was PROPOSED AS THE '
+        || 'REPLACEMENT FOR ' || v_repl_txt || ' -- that lineage is RECORDED on this template '
+        || '(replaces_template_id, declared at propose and immutable since), not inferred -- so '
+        || 'distinct codes would book those periods a SECOND time while that charge stays standing '
+        || 'on ' || v_collide || '. '
+        -- [R11 FIX 2026-08-04 -- W1 finding 2 (the remedy[0] half) and finding 4] CLAUSE 1 AND CLAUSE 2
+        -- ARE NO LONGER COMPOSED AS IF THEY CONCERNED THE SAME MONEY. The entry clause 1 names is
+        -- whichever standing charge blocks THIS period; the generation clause 2 asserts on is
+        -- whichever ancestor this template declared. MEASURED (probe w1f-corridor-exits.mjs): on a
+        -- shared accrual code those are DIFFERENT templates, the first machine remedy named an
+        -- entry belonging to an unrelated LIVE template, and following it erased RM900 of a
+        -- legitimate accrual and left that template's own period refused forever. So when the
+        -- blocker is not an ancestor, the sentence says so instead of implying that correcting a
+        -- stranger's entry is the act this prohibition calls for.
+        -- AND THE REOPEN PROMISE IS CONDITIONAL ON THE CENSUS. "Correct the entry named above and
+        -- this period reopens by itself" was made unconditionally; MEASURED (probe w1h-promise.mjs)
+        -- with two standing charges that collide with this shape on DIFFERENT elements, the first
+        -- correction did not reopen the period and the refusal made the same promise again about
+        -- the second. The payload already carried both rows -- only the sentence lied -- so the
+        -- count is read from it rather than promised away.
+        -- THE TAIL CLAUSE KEEPS ITS EXACT CANONICAL SHAPE ("; the only other act that does not
+        -- double them is a replacement starting after <date>") -- only the clause BEFORE it moves.
+        -- Cell x42.r10p1a pins that sentence verbatim, and a fix that re-punctuated a contract
+        -- test's subject while repairing a different clause would be a delta nobody adjudicated.
+        || case
+             when not v_blocker_is_ancestor then
+               'The entry named above was written by a template this one does NOT replace, so '
+               || 'correcting it is not what this prohibition asks of you -- it is somebody '
+               || 'else''s charge standing in your way and has to be dealt with on its own terms; '
+               || 'what this prohibition is about is the generation named here'
+             when jsonb_array_length(coalesce(v_pred, '[]'::jsonb)) > 1 then
+               'Correct the standing entry named above -- and measure before you expect the '
+               || 'period back: ' || jsonb_array_length(coalesce(v_pred, '[]'::jsonb))::text
+               || ' colliding templates carry standing charges here, so this period reopens only '
+               || 'once every one of them is corrected'
+             else 'Correct the standing entry named above and this period reopens by itself'
+           end
+        || '; the only other act that does not double them is a replacement starting '
+        || 'after ' || coalesce(v_repl_last, 'the last period that generation charged')
+        || '. If this template does NOT in fact replace that generation, retire it '
+        || '(clara.retire_adjustment_template) and propose it again without naming a predecessor: '
+        || 'a recorded lineage is a claim about these books and is corrected by making it again, '
+        || 'never by editing it.'
+      when v_pred_txt is null then ', or give this template distinct account codes.'
+      else ', or give this template distinct account codes -- BUT MEASURE FIRST: ' || v_pred_txt
+        || '. IF this template replaces that one, distinct codes would book those periods a '
+        || 'second time while that charge stays standing on ' || v_collide
+        || ': reverse those charges first, or keep these codes and correct the standing entry '
+        || 'named above. If the two templates genuinely accrue different things (the same '
+        || 'accrual code for two liabilities), distinct codes is the right act.' end;
+    raise exception 'period % .. % already carries an approved posting on % (entry %, dated %) booked under another authority; a second one would leave the figure standing twice. %', v_ps, v_pe, v_collide, v_corr_breach ->> 'entry_id', v_corr_breach ->> 'posting_date', v_remedy
+      using errcode = 'CLR38',
+        detail = (jsonb_build_object('reason', 'period_shape_already_met',
+          'template_id', p_template, 'period_start', v_ps, 'period_end', v_pe,
+          'account_shape', to_jsonb(v_shape),
+          -- THE MACHINE KEY IS THE COMPOSED REMEDY, BRANCH-DISTINCT (round 10, ABI delta). It
+          -- was the scalar `correct_the_standing_entry_in_period` in BOTH round-9 branches, so
+          -- no consumer could ever learn that a second act was offered -- or withheld. It is now
+          -- the ORDERED LIST of the acts the sentence actually offers: clause 1's token is kept
+          -- verbatim and is always first, and the second element says which spelling of the
+          -- distinct-codes act was printed. `predecessor_candidates` carries the facts the
+          -- caution was composed from, so a surface can render them without re-deriving them.
+          -- [round 10, lane P1] Position 2 stays what lane O1 defined it to be -- WHICH SPELLING of
+          -- the distinct-codes clause was printed -- and gains its third value,
+          -- `distinct_codes_forbidden_replaced_generation`, for the branch where the act is
+          -- refused by grammar. A THIRD element joins ONLY on that branch, because on that branch
+          -- the sentence offers a second act (start the replacement after the replaced
+          -- generation's last charged period) and a machine list that hid an act the human
+          -- sentence offers is exactly the drift O1's defect was, one round on.
+          'remedy', jsonb_build_array('correct_the_standing_entry_in_period',
+            case when v_repl_txt is not null then 'distinct_codes_forbidden_replaced_generation'
+                 when v_pred_txt is null then 'distinct_codes'
+                 else 'distinct_codes_with_predecessor_caution' end)
+            || case when v_repl_txt is not null
+                    then jsonb_build_array('start_after_replaced_generation',
+                                           're_propose_without_predecessor')
+                    else '[]'::jsonb end,
+          'predecessor_candidates', coalesce(v_pred, '[]'::jsonb),
+          -- THE PROOF, SEPARATELY MACHINE-READABLE. `replaced_generations` is the subset of this
+          -- template's RECORDED ancestry that the refusal proved has charges standing -- the facts
+          -- the prohibition rests on, so a consumer can render or audit the prohibition without
+          -- re-deriving it (and, when it is empty, can see that the caution branch was a caution
+          -- and not a hidden assertion). `lineage_truncated` says the upward walk stopped before a
+          -- root: unreachable through these verbs (propose refuses to extend a chain to the cap),
+          -- so a true here is a forged or restored register and worth a census of its own. Both
+          -- keys are ALWAYS present -- empty array, false -- for this file's stable-shape rule.
+          'replaced_generations', to_jsonb(coalesce(v_repl_ids, '{}'::text[])),
+          'lineage_truncated', coalesce((v_anc ->> 'truncated')::boolean, false))
+          || v_corr_breach)::text;
+  end if;
+  if v_corr_breach is not null then
+    raise exception 'period % .. % cannot be run again: entry % is dated % but its correction is dated %, so the period''s own balance never cleared and re-running it would leave the figure standing twice. This period must be finished by hand; retire this template (clara.retire_adjustment_template) to stop it being proposed.', v_ps, v_pe, v_corr_breach ->> 'entry_id', v_corr_breach ->> 'posting_date', coalesce(v_corr_breach ->> 'correction_posting_date', 'nothing -- the half is still standing un-corrected')
+      using errcode = 'CLR38',
+        detail = (jsonb_build_object('reason', 'period_correction_unsound',
+          'template_id', p_template, 'period_start', v_ps, 'period_end', v_pe,
+          'remedy', 'retire_adjustment_template')
+          || v_corr_breach)::text;
+  end if;
+
+  -- (5) THE PERIOD IS NOT ONE A GENERATION THIS TEMPLATE REPLACES HAS ALREADY CHARGED
+  -- [R11 FIX 2026-08-04 -- as-built ladder round 11; W1 finding 1 HIGH, Codex r11 finding 1 HIGH].
+  --
+  -- THIS IS THE WALL THE SENTENCE WAS NOT. The prohibition one screen down is a SENTENCE inside
+  -- the shape gate's refusal, and this file said so in as many words: "a professional who reads it
+  -- and re-cuts anyway ... is not stopped: that template's shape is disjoint from the standing
+  -- charges, clara._wdb_rerun_breach is keyed on shape intersection, and the four already-charged
+  -- months run as ordinary catch-up drafts". Round 11 MEASURED both halves of that note as live
+  -- money -- RM18,000 of expense against an RM6,000 intention, declared and undeclared alike, with
+  -- warnings [] and blocked [] -- and the owned adjudication ruled the sentence insufficient. The
+  -- note also named what the fix must be ("a membership term keyed on the recorded lineage rather
+  -- than on the shape ... a NEW admission law with its own refusal token, its own blocked[] word
+  -- and its own surface gloss -- an adjudication, not a fix lane's call"). It was adjudicated, and
+  -- this is it, with all three of those pieces.
+  --
+  -- IT IS ADDITIVE AND LAST, exactly as (4) was: the window / period_already_met /
+  -- occurrence_draft_outstanding trio and the re-run gate keep their pinned order, wording and
+  -- precedence to the character (round 4 measured three regressions in this body's admission law
+  -- and the lesson was to add beside, never to reorder). Being last also makes its blast radius
+  -- exactly what it should be: where the shape gate already refuses -- every [WDB-G13] edit that
+  -- keeps its accounts -- the reader still gets (4)'s refusal with its remedy grammar, unchanged.
+  -- What reaches HERE is the case nothing else could see: the RE-CODE, whose shape is disjoint by
+  -- construction.
+  --
+  -- IT SITS ABOVE THE ELIGIBILITY RE-DERIVATION for (4)'s own reason, restated: a period that
+  -- cannot lawfully be run at all must not be reported as an ACCOUNT problem, and
+  -- clara._adj_oldest_unmet_period asks the two in exactly this order so the verb and the oracle
+  -- can never name different reasons for one period.
+  --
+  -- WHAT IT CANNOT DO, STATED SO NOBODY EXPECTS IT TO. It keys on the RECORDED edge and nothing
+  -- else -- never the status, never the shape, never the click order (that immunity is the whole
+  -- point of round 10's column). A professional who declares nothing gets no wall here; what
+  -- reaches them is propose's term (c) advisory, at the door where the start date is still one
+  -- edit from being right. That asymmetry is deliberate and it is why BOTH were built: a wall
+  -- that guessed at lineage would be round 9's defect a third time.
+  --
+  -- THE FALSE-POSITIVE PROOF THAT MAKES IT SAFE TO BUILD (W1 probe w1b-lawful-recode.mjs, both
+  -- lawful re-code roads, measured): (1) FORWARD-ONLY -- gen1 charged 2026-03/04, gen2 declared
+  -- and starting 2026-05 -- both months RAN and the books are exactly right, because gen1's
+  -- standing periods do not overlap the periods gen2 books, so this predicate does not fire;
+  -- (2) CORRECT-THEN-RECUT -- reversing gen1's occurrences in their own periods drops its standing
+  -- count to zero, after which the disjoint re-cut books every month exactly once. Every lawful
+  -- re-code is already covered by acts the professional holds today, and this wall parks neither.
+  v_repl_std := clara._wdb_replaced_generation_standing(p_client, p_template, v_ps, v_pe);
+  if jsonb_array_length(v_repl_std) > 0 then
+    select string_agg('template ' || (g ->> 'template_id')
+                      || coalesce(' ("' || (g ->> 'name') || '", ' || (g ->> 'status') || ')', '')
+                      || ' carries ' || (g ->> 'standing_in_window')
+                      || ' standing charge(s) in this period (entry ' || (g ->> 'entry_id')
+                      || '), and last charged anything at '
+                      || coalesce(g ->> 'last_period_any', 'an unstated period'),
+                      '; ' order by g ->> 'template_id'),
+           max((g ->> 'last_period_any') collate "C")
+      into v_repl_txt, v_repl_last
+      from jsonb_array_elements(v_repl_std) as t(g);
+    raise exception 'period % .. % is already charged by a generation this template REPLACES, so running it would book those months a second time: %. That lineage is RECORDED on this template (replaces_template_id, declared at propose and immutable since), not inferred, and the account codes are irrelevant to it -- a replacement on fresh codes doubles the figure just as exactly as one on the same codes. Two acts do not double: correct that standing entry within its own period (the run receipt names the verb that admits it today), or retire this template and propose it again starting after %. If this template does NOT in fact replace that generation, retire it (clara.retire_adjustment_template) and propose it again without naming a predecessor -- a recorded lineage is a claim about these books and is corrected by making it again, never by editing it.', v_ps, v_pe, v_repl_txt, coalesce(v_repl_last, 'that generation''s last charged period')
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'replaced_generation_period_standing',
+          'template_id', p_template, 'period_start', v_ps, 'period_end', v_pe,
+          -- THE FACTS THE PROHIBITION RESTS ON, SEPARATELY MACHINE-READABLE, in the same two
+          -- spellings the shape gate uses -- `replaced_generations` as bare ids for a consumer
+          -- that only needs to know WHO, and the full rows for one that renders the measurement.
+          'replaced_generations', (select coalesce(jsonb_agg(g ->> 'template_id'
+                                                    order by g ->> 'template_id'), '[]'::jsonb)
+                                     from jsonb_array_elements(v_repl_std) as t(g)),
+          'standing_in_period', v_repl_std,
+          'start_after', v_repl_last,
+          'remedy', jsonb_build_array('correct_the_standing_entry_in_period',
+                                      'start_after_replaced_generation',
+                                      're_propose_without_predecessor'),
+          'lineage_truncated', coalesce(
+            (clara._wdb_template_ancestry(p_client, p_template) ->> 'truncated')::boolean,
+            false))::text;
+  end if;
+
+  -- ELIGIBILITY IS RE-DERIVED AT EVERY OCCURRENCE (design SS2.1), not only at propose: an
+  -- account can be deactivated, re-classed, bound to a bank account or enrolled into a
+  -- register between the signature and the run. Refusing here (rather than at approve) keeps
+  -- the honest state visible in the due oracle instead of minting a draft that can only die.
+  v_breach := clara._adj_line_eligibility_breach(p_client, t.lines);
+  if v_breach is not null then
+    -- THE OTHER ROAD TO THE SAME DOUBLING, AND THE ONE ROUND 9 LEFT UNWARNED (round 10,
+    -- finding 3). This refusal NAMES A REMEDY -- "retire this template and propose a corrected
+    -- one" -- and a remedy that names an act is asserting something about that act's
+    -- consequences (WDB-R2). MEASURED (probes z2/p5-fa-claims-template-code.mjs and
+    -- z2/p6-realistic-recut.mjs, re-run on this rig): a live RM500/month accrual Dr EXPA / Cr
+    -- ACCR with May and June standing (EXPA 100000, ACCR -100000); an admin binds EXPA as a
+    -- fixed-asset profile's expense role on the /assets screen -- an ordinary act on another
+    -- family's door, admitted silently -- and this template goes terminally blocked. The
+    -- bookkeeper follows the printed remedy, and the replacement necessarily lands on FREE codes
+    -- (the old one is claimed), so its shape is FULLY DISJOINT from the standing charges and
+    -- clara._wdb_rerun_breach -- which is keyed on shape intersection -- cannot see them: the
+    -- sweep offered May, June and July, all three arrived as ordinary catch-up drafts with
+    -- blocked:[], and the books carried EXPA 100000 + EXPB 150000 against an intention of
+    -- 150000. The sibling refusal above has warned about exactly this since round 9, but only
+    -- inside a branch that REQUIRES an overlap to fire -- and this road is the one where an
+    -- overlap is impossible by construction.
+    --
+    -- SO THE CAUTION RIDES HERE TOO, MEASURED, FROM THE SAME CENSUS BODY. And here it needs no
+    -- lineage inference at all: the predecessor of the replacement this refusal is asking for is
+    -- THIS template, by construction, so what its own standing charges are is a fact rather than
+    -- a guess. It is a caution and not a refusal because retire-and-re-propose IS the right act
+    -- -- there is no other -- and the periods only double if the replacement's start date reaches
+    -- back over them.
+    v_own := clara._wdb_template_standing_charges(p_client, p_template);
+    raise exception 'template line account % is no longer eligible (%); retire this template and propose a corrected one%', v_breach ->> 'account_code', v_breach ->> 'axis',
+      case when coalesce((v_own ->> 'standing')::int, 0) = 0 then ''
+           else '. MEASURE FIRST: this template already carries ' || (v_own ->> 'standing')
+             || ' standing charge(s) for ' || coalesce(v_own ->> 'first_period', 'an unstated period')
+             || ' .. ' || coalesce(v_own ->> 'last_period', 'an unstated period')
+             || '; a replacement whose start date reaches back over them re-charges those '
+             || 'periods, and because the replacement must use FREE account codes it shares no '
+             || 'account with these charges, so the re-run gate cannot see the double. Start the '
+             || 'replacement after ' || coalesce(v_own ->> 'last_period', 'the last charged period')
+             || ', or reverse those charges first.' end
+      using errcode = 'CLR38',
+        detail = (jsonb_build_object('reason', 'template_line_ineligible',
+          'template_id', p_template,
+          'standing_charges', coalesce((v_own ->> 'standing')::int, 0),
+          'standing_first_period', v_own ->> 'first_period',
+          'standing_last_period', v_own ->> 'last_period') || v_breach)::text;
+  end if;
+
+  -- ------------------------------------------------------------------------------------
+  -- THE DRAFT (SS9.5 direct INSERT; the SS2.3 column recipe).
+  -- ------------------------------------------------------------------------------------
+  -- HEADERS ARE FALSE, ALWAYS [L5/3]: a template is an ORDINARY periodic adjustment.
+  -- Year-end and tax-affecting adjustments are hand-draft territory in v1 -- a stated
+  -- boundary -- which is what makes the template lane's CLR05 exposure amount-driven only.
+  v_label := clara._adj_period_label(t.cadence, v_pe);
+  v_memo := t.memo_template || ' — ' || v_label;   -- ABI SSC memo grammar (U+2014 em dash)
+  insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+      is_opening_balance, is_year_end, tax_affecting, maker_actor, last_human_editor, flags)
+    values (p_client, 'draft', v_pe, v_memo, 'scheduled_run',
+      false, false, false, v_actor,
+      -- THE SIGNER STAMP (the 0041 poster's law): with last_human_editor NULL,
+      -- clara._approve_entry_core accepts ANY approver plus an attestation and WD-R8's
+      -- distinct-checker intent would not bind at all on a machine-born high-stakes
+      -- adjustment. Stamping the TEMPLATE SIGNER puts that signer on the distinct-checker arm.
+      t.signed_by,
+      jsonb_build_object('recurring_adjustment', jsonb_build_object(
+        'template_id', p_template, 'op_key', p_op_key, 'role', 'occurrence',
+        'auto_reverse', t.auto_reverse,
+        -- The mirror's posting date, stated on the occurrence so /queue can disclose the
+        -- pair before it exists (the [L1/24] G2 disclosure item). NULL when the template does
+        -- not auto-reverse: the key stays present so the flags schema is stable, and it says
+        -- honestly that no mirror is coming.
+        'reversal_date', case when t.auto_reverse then v_pe + 1 end,
+        'period_start', v_ps, 'period_end', v_pe)))
+    returning id into v_entry;
+
+  for r in select (x.value ->> 'account_code') as code,
+                  coalesce((x.value ->> 'debit_cents')::bigint, 0) as dr,
+                  coalesce((x.value ->> 'credit_cents')::bigint, 0) as cr,
+                  nullif(btrim(coalesce(x.value ->> 'description', '')), '') as descr,
+                  x.ord::int as n
+           from jsonb_array_elements(clara._adj_period_lines(t, v_ps, v_pe)) with ordinality as x(value, ord)
+           order by x.ord loop
+    insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
+        credit_cents, description)
+      values (v_entry, r.n, r.code, r.dr, r.cr, r.descr);
+  end loop;
+
+  -- EXACT EQUALITY BEFORE THE VALIDATOR (the 0041 poster's law). clara._validate_entry_lines
+  -- tolerates a five-sen rounding residue and would silently route it to a rounding account;
+  -- a signed template that does not balance to the sen is a defect, not a rounding event.
+  select coalesce(sum(debit_cents), 0), coalesce(sum(credit_cents), 0) into v_dr, v_cr
+    from clara.journal_lines where entry_id = v_entry;
+  if v_dr <> v_cr then
+    raise exception 'the occurrence does not balance exactly (% vs %)', v_dr, v_cr
+      using errcode = 'CLR07';
+  end if;
+  perform clara._assert_balanced(v_entry);
+
+  -- ------------------------------------------------------------------------------------
+  -- THE MODE DECISION (design SS2.3). post IFF ramp-earned AND NOT high-stakes AND NOT
+  -- catch-up. All three are decided HERE, under the rung, and the answer is STAMPED into the
+  -- flags [L5/8] -- the hook re-checks the stamp against the two facts that can still be
+  -- true at approve (forced-draft, high-stakes) and NEVER re-derives the ramp.
+  -- ------------------------------------------------------------------------------------
+  -- THE UNIFIED RAMP CLOCK [L6/1 -- the round-6 money defect]. A correction on EITHER lane
+  -- resets the template's clock: a COMPLETED pair reversal (auto-reverse templates) and a
+  -- plain clara.reverse_entry on a SOLO occurrence (non-auto-reverse templates). Without the
+  -- second term the sweep would re-post the very occurrence a human had just corrected.
+  -- GREATEST ignores NULLs, so a template with only one kind of correction still reads its
+  -- own clock correctly, and a template with none coalesces to -infinity.
+  select coalesce(greatest(
+           (select max(pr.completed_at) from clara.adjustment_pair_reversals pr
+             where pr.template_id = p_template and pr.status = 'completed'),
+           (select max(m.approved_at) from clara.journal_entries m
+              join clara.journal_entries o on o.id = m.reversal_of
+             where m.status = 'approved'
+               and o.flags ? 'recurring_adjustment'
+               and (o.flags -> 'recurring_adjustment' ->> 'template_id') = p_template::text
+               and (o.flags -> 'recurring_adjustment' ->> 'role') = 'occurrence')),
+         '-infinity'::timestamptz)
+    into v_watermark;
+  -- THE RAMP IS DERIVED, PER TEMPLATE, WITH NO COLUMN AND NO RECEIPT JOIN: autonomy is earned
+  -- iff at least one OTHER approved, un-reversed occurrence of THIS template was approved
+  -- strictly after the watermark. Occurrence #1 always drafts; a corrected period's re-run
+  -- drafts; a mirror never earns (role='reversal' is excluded by the predicate itself).
+  v_ramp := exists (select 1 from clara.journal_entries j
+                    where j.client_id = p_client
+                      and j.flags ? 'recurring_adjustment'
+                      and (j.flags -> 'recurring_adjustment' ->> 'template_id') = p_template::text
+                      and (j.flags -> 'recurring_adjustment' ->> 'role') = 'occurrence'
+                      and j.status = 'approved' and j.reversed_by is null
+                      and j.id <> v_entry
+                      and j.approved_at > v_watermark);
+
+  -- CATCH-UP OCCURRENCES ALL DRAFT [WDB-G4]. A period that had already ENDED, in Malaysia,
+  -- when the template was signed is history being written -- it gets a human's eyes every
+  -- time, however earned the ramp is. The boundary is strict: a period ending ON the MYT sign
+  -- date was not "already ended at signing" and follows the normal ramp law [L1/E3].
+  v_catch_up := (v_pe < (t.signed_at at time zone 'Asia/Kuala_Lumpur')::date);
+
+  -- HIGH STAKES IS ASKED OF THE ENTRY, NOT RE-DERIVED. clara.is_high_stakes is the product's
+  -- single definition of the term and it takes an entry id, so the stamp is a SECOND
+  -- statement on the draft: `flags` is in the draft->draft allowset of
+  -- clara._tf_entry_immutable (0015:1057-1059), which is exactly what that allowset is for.
+  -- Re-deriving the threshold arithmetic here to fit the stamp into the INSERT would put a
+  -- second copy of the high-stakes law in the file, and the copy would be the one that rots.
+  v_high := clara.is_high_stakes(v_entry);
+  v_mode := case when v_ramp and not v_high and not v_catch_up then 'post' else 'draft' end;
+  update clara.journal_entries
+     set flags = jsonb_set(flags, '{recurring_adjustment,mode}', to_jsonb(v_mode), true),
+         updated_at = now()
+   where id = v_entry;
+
+  -- The revision token is read AFTER both the line inserts (t_jl_rotate_token rotates it) and
+  -- the mode stamp, so the value handed to the approve core is the live one.
+  select je.revision_token into v_rev from clara.journal_entries je where je.id = v_entry;
+
+  if v_mode = 'post' then
+    -- The CLR26 open-question block or any other core refusal leaves the entry a DRAFT and
+    -- the period due, honestly -- the transaction rolls back and nothing half-lands.
+    perform clara._approve_entry_core(
+      jsonb_build_object('actor', t.signed_by, 'firm', p_firm, 'receipt_preheld', true),
+      v_entry, v_rev, null, v_approve_key);
+    v_status := 'posted';
+    -- The receipt and the mirror were minted by clara._adj_on_approve inside that call; the
+    -- envelope reports what the hook actually wrote rather than what this verb intended.
+    select ar.id, ar.reversal_entry_id, ar.amount_cents
+      into v_run, v_rev_entry, v_amount
+      from clara.adjustment_runs ar where ar.entry_id = v_entry;
+  else
+    v_status := 'drafted';
+    v_amount := v_dr;
+  end if;
+
+  perform clara._audit(p_firm, v_actor, null, null, p_verb, v_entry,
+    jsonb_build_object('client', p_client, 'template', p_template, 'period_start', v_ps,
+      'period_end', v_pe, 'period_label', v_label, 'mode', v_mode, 'status', v_status,
+      'ramp_earned', v_ramp, 'catch_up', v_catch_up, 'high_stakes', v_high,
+      'amount_cents', v_amount, 'op_key', p_op_key));
+  return clara._finish_op(p_firm, p_verb, p_op_key,
+    jsonb_build_object('status', v_status, 'entry_id', v_entry, 'mode', v_mode)
+      || case when v_run is not null then jsonb_build_object('run_id', v_run)
+              else '{}'::jsonb end
+      || case when v_rev_entry is not null
+              then jsonb_build_object('reversal_entry_id', v_rev_entry)
+              else '{}'::jsonb end);
+end
+$d3occ$;
+
+CREATE OR REPLACE FUNCTION clara._adj_on_approve(p_entry uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $d3app$
+declare
+  e record; t record; pr record; rl record; ln record;
+  v_prop jsonb; v_role text; v_ps date; v_pe date; v_mode text; v_actor uuid;
+  v_attest text; v_mirror uuid; v_rev uuid; v_run uuid; v_amount bigint;
+  v_want jsonb; v_have jsonb; v_breach jsonb; v_sug jsonb;
+  v_derived jsonb; v_actual jsonb;
+begin
+  select * into e from clara.journal_entries where id = p_entry;
+  if not found then return; end if;
+  v_prop := e.flags -> 'recurring_adjustment';
+  v_role := v_prop ->> 'role';
+
+  -- -----------------------------------------------------------------------------------
+  -- (0) THE AUTO-REVERSAL MIRROR. It exists ONLY to keep arm (2) off the mirror -- nothing
+  -- else. This is NOT a soft-birth exemption and must never be read as one [L4/9]:
+  -- clara._fa_on_approve has already run by the time we are called, and SECTION S3's
+  -- clara._adv_on_approve runs after us regardless, so nothing here could suppress a register
+  -- birth even if it wanted to. The mirror's immunity is carried by SS2.1 line eligibility
+  -- ALONE -- a template line is never an enrolled FA cost account and never an enrolled
+  -- advance account, at propose, at every occurrence and again at axis (2g) below. An
+  -- eligibility violation therefore RAISES up there; it is never skipped down here.
+  -- -----------------------------------------------------------------------------------
+  if v_role = 'reversal' then
+    return;
+  end if;
+
+  -- -----------------------------------------------------------------------------------
+  -- (1) THE PAIR DEFENSE (design SS2.4). A pair correction is born by
+  -- clara._pair_reverse_core carrying reversal_of and NO D-b flags -- which is exactly why
+  -- reversal_of is the right discriminator here and why the (0)(1)(2)(3) order stands.
+  --
+  -- THE RECEIPT IS THE AUTHORIZATION CHANNEL [L4/1]. This hook has a one-argument signature
+  -- and cannot see who called it, so the pair verbs transition their receipt into the
+  -- transaction-only `approving` state BEFORE their core calls, and we refuse any pair
+  -- correction whose receipt is not in it. An ordinary clara.approve_entry on one half
+  -- therefore cannot break the pair apart; the remedy names the atomic verbs.
+  -- -----------------------------------------------------------------------------------
+  if e.reversal_of is not null then
+    select * into pr from clara.adjustment_pair_reversals r
+      where r.occurrence_correction_id = p_entry or r.mirror_correction_id = p_entry
+      limit 1;
+    if found and pr.status <> 'approving' then
+      raise exception 'this draft is one half of an adjustment pair reversal and cannot be approved on its own; use clara.approve_pair_reversal (or clara.cancel_pair_reversal to abandon both halves)'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'pair_draft_locked', 'entry_id', p_entry,
+            'pair_id', pr.id, 'pair_status', pr.status)::text;
+    end if;
+    return;
+  end if;
+
+  -- -----------------------------------------------------------------------------------
+  -- (2) THE OCCURRENCE. Seven axes re-validated under the locks the approve core already
+  -- holds, then the mirror, then the receipt, then the event. Same doctrine as the D-a
+  -- depreciation arm: the stored proposal is a statement about a world, and if the world
+  -- moved the honest answer is one named refusal whose remedy is stated.
+  -- -----------------------------------------------------------------------------------
+  if v_role = 'occurrence' then
+    v_actor := coalesce(e.checker_actor, e.maker_actor);
+    v_ps := (v_prop ->> 'period_start')::date;
+    v_pe := (v_prop ->> 'period_end')::date;
+
+    -- (2a) ORIGIN. The proposal and the origin are one fact; a recurring-adjustment proposal
+    -- on a manual entry would be a forged machine post wearing a human's clothes.
+    if e.origin <> 'scheduled_run' then
+      raise exception 'a recurring-adjustment proposal may only ride an origin=scheduled_run entry'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'origin',
+            'entry_id', p_entry)::text;
+    end if;
+
+    -- (2b) THE ISSUER BINDING THAT SURVIVES THE MAKER-CHECKER GAP. A flags blob alone proves
+    -- nothing about who wrote it; a durable op receipt does. clara.op_receipts carries no
+    -- client column, but clara._reserve_op stores the REQUEST HASH and the poster hashes
+    -- exactly (client, template, ps, pe) -- so re-deriving that hash from this entry's own
+    -- client and the period the proposal names turns a firm-wide receipt lookup into an exact
+    -- match on the act that minted it. A receipt belonging to a SIBLING CLIENT, a sibling
+    -- template, or a sibling period no longer authenticates this proposal.
+    if not exists (select 1 from clara.op_receipts r
+                   where r.firm_id = e.firm_id
+                     and r.fn in ('run_adjustment_occurrence', 'run_adjustment_manual')
+                     and r.op_key = v_prop ->> 'op_key'
+                     and r.request_hash = clara._hash(jsonb_build_object(
+                           'client', e.client_id,
+                           'template', (v_prop ->> 'template_id')::uuid,
+                           'ps', v_ps, 'pe', v_pe))) then
+      raise exception 'this adjustment proposal carries no issuer op-key receipt for this client, template and period; withdraw the draft and re-run the period'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'issuer_receipt',
+            'entry_id', p_entry)::text;
+    end if;
+
+    -- (2c) THE TEMPLATE IS STILL LIVE, and still this client's.
+    select * into t from clara.adjustment_templates a
+      where a.id = (v_prop ->> 'template_id')::uuid;
+    if not found or t.client_id <> e.client_id or t.status <> 'live' then
+      raise exception 'the adjustment template this occurrence names is not live for this client; withdraw the draft'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'template_retired',
+            'template_id', v_prop ->> 'template_id')::text;
+    end if;
+
+    -- (2d) THE LINE SET IS BYTE-EQUAL TO THE TEMPLATE'S. Templates are immutable outside
+    -- their transitions, so this axis catches the OTHER direction: a draft whose lines were
+    -- edited between the run and the approval. (clara.revise_entry refuses a D-b proposal
+    -- draft outright -- SECTION S5 -- so this is defense in depth, and it is cheap.)
+    -- F-A4 PR-2a §D3: axis (2d) resolves THE ENTRY'S OWN PERIOD rather than the flat template
+    -- lines. v_ps/v_pe were read off this entry's own recurring_adjustment flags above, so the
+    -- comparison is against what THIS occurrence was supposed to post. A null-schedule template
+    -- resolves to the canonicalised template lines -- byte-identical to the line replaced here.
+    -- (Spelled in prose: written as code, this comment would be counted by the generator's own
+    -- surviving-reads assertion and would inflate it.)
+    v_want := clara._adj_period_lines(t, v_ps, v_pe);
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'account_code', jl.account_code,
+             'debit_cents', jl.debit_cents,
+             'credit_cents', jl.credit_cents,
+             'description', jl.description) order by jl.line_no), '[]'::jsonb)
+      into v_have from clara.journal_lines jl where jl.entry_id = p_entry;
+    if v_want is distinct from v_have then
+      raise exception 'this occurrence''s lines no longer equal its template''s; withdraw the draft and re-run the period'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'lines_changed',
+            'template_id', t.id)::text;
+    end if;
+
+    -- (2e) THE PERIOD IS STILL A CADENCE PERIOD, AND IT HAS ENDED. The FY end is client data
+    -- and can move between the run and the approval, which is precisely what this axis
+    -- catches for an ANNUAL template. posting_date is asserted against period_end in the same
+    -- axis: it is the one column of the recipe a proposal could otherwise misstate.
+    if clara._adj_period_start(e.client_id, t.cadence, v_ps) is distinct from v_ps
+       or clara._adj_period_end(e.client_id, t.cadence, v_ps) is distinct from v_pe
+       or e.posting_date is distinct from v_pe
+       or v_pe >= clara._fa_today() then
+      raise exception 'the period % .. % is no longer a valid, ended % period for this client', v_ps, v_pe, t.cadence
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'period_invalid',
+            'cadence', t.cadence, 'period_start', v_ps, 'period_end', v_pe)::text;
+    end if;
+
+    -- (2f) THE MODE STAMP [L5/8]. The ramp is NEVER re-derived here (the sequencing law
+    -- freezes it for the draft's whole life: a second run is refused while a draft is
+    -- outstanding). What CAN still become true between the run and the approval is
+    -- forced-draft (a template signed later than this period ended cannot happen -- signed_at
+    -- is immutable -- but the predicate is re-measured anyway) and HIGH STAKES (the firm's
+    -- threshold is firm data and can be lowered). A 'post' stamp under either is refused.
+    v_mode := v_prop ->> 'mode';
+    if v_mode is null or v_mode not in ('post', 'draft') then
+      raise exception 'this occurrence carries no lawful mode stamp'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'mode',
+            'mode', v_mode)::text;
+    end if;
+    if v_mode = 'post'
+       and (v_pe < (t.signed_at at time zone 'Asia/Kuala_Lumpur')::date
+            or clara.is_high_stakes(p_entry)) then
+      raise exception 'this occurrence was stamped for auto-posting but now requires a human checker; withdraw the draft and re-run the period'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'adjustment_stale', 'axis', 'mode',
+            'mode', v_mode, 'high_stakes', clara.is_high_stakes(p_entry))::text;
+    end if;
+
+    -- (2g) LINE ELIGIBILITY -- the SEVENTH axis [L4/9], and the load-bearing one: it is the
+    -- SOLE guarantee that the mirror born below cannot soft-birth a register row anywhere.
+    -- The cell that proves it: enrol or reserve one of the template's accounts DURING the
+    -- draft window, then approve.
+    -- THE BREACH'S OWN `axis` IS RE-KEYED, NEVER MERGED OVER THE ARM'S. ABI SSF pins the
+    -- arm-(2) vocabulary exactly -- axis IN origin, issuer_receipt, template_retired,
+    -- lines_changed, period_invalid, mode, line_eligibility -- and jsonb `||` lets the
+    -- right operand win, so a bare concat let _adj_line_eligibility_breach's finer-grained
+    -- axis ('account_reserved', 'account_inactive', 'control_account', 'bank_account',
+    -- 'account_unknown') CLOBBER the ABI's own token. The two axes are at different
+    -- altitudes and both are worth keeping: `axis` answers "which of the seven", and
+    -- `eligibility_axis` answers "which of the five conditions inside the seventh".
+    -- The other two callers (propose CLR10 / poster CLR38) raise `template_line_ineligible`,
+    -- for which the ABI names no axis at all, so they keep the breach's axis verbatim.
+    v_breach := clara._adj_line_eligibility_breach(e.client_id, t.lines);
+    if v_breach is not null then
+      raise exception 'template line account % is no longer eligible to back an adjustment (%); withdraw this draft', v_breach ->> 'account_code', v_breach ->> 'axis'
+        using errcode = 'CLR39',
+          detail = (jsonb_build_object('reason', 'adjustment_stale', 'axis', 'line_eligibility',
+            'template_id', t.id, 'eligibility_axis', v_breach ->> 'axis')
+            || (v_breach - 'axis'))::text;
+    end if;
+
+    -- ---------------------------------------------------------------------------------
+    -- THE MIRROR (design SS2.4; [WDB-G1] hook-born at approve, dated next-period day 1;
+    -- [WDB-G2] ONE act births the approved pair).
+    -- ---------------------------------------------------------------------------------
+    if coalesce((v_prop ->> 'auto_reverse')::boolean, false) then
+      -- THE ATTESTATION IS RE-READ AFTER THE OUTER UPDATE [L4/10]. clara._approve_entry_core
+      -- stamps self_approval_attestation on the occurrence and THEN calls the subledger hook,
+      -- so the value is already durable when we arrive -- but it is re-selected explicitly
+      -- rather than taken from the `e` snapshot, because the whole point of the G2 one-act law
+      -- under high stakes is that the occurrence's attestation is the mirror's attestation.
+      select je.self_approval_attestation into v_attest
+        from clara.journal_entries je where je.id = p_entry;
+
+      -- THE 13-COLUMN RECIPE, adapted from clara.reverse_entry's mirror: the three HEADER
+      -- booleans are copied VERBATIM from the occurrence so clara.is_high_stakes is provably
+      -- equal on both halves and CLR05 cannot diverge across the pair [L4/10]. maker_actor and
+      -- last_human_editor are the TEMPLATE SIGNER (not the checker), which keeps the
+      -- distinct-checker arm binding on the mirror exactly as it binds on the occurrence.
+      -- LINKAGE IS ONE-WAY [L2/4]: the mirror carries auto_reversal_of (FK, UNIQUE) and the
+      -- occurrence carries no column at all -- no immutability-trigger recut, boundary clean.
+      insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+          resolution_id, is_opening_balance, is_year_end, tax_affecting,
+          maker_actor, last_human_editor, flags, auto_reversal_of)
+        values (e.client_id, 'draft', v_pe + 1, 'Auto-reversal: ' || coalesce(e.memo, ''),
+          'scheduled_run', e.resolution_id,
+          e.is_opening_balance, e.is_year_end, e.tax_affecting,
+          t.signed_by, t.signed_by,
+          jsonb_build_object('recurring_adjustment', jsonb_build_object(
+            'template_id', t.id, 'op_key', v_prop ->> 'op_key', 'role', 'reversal',
+            'auto_reverse', true, 'reversal_date', v_pe + 1,
+            'period_start', v_ps, 'period_end', v_pe, 'mode', v_mode)),
+          p_entry)
+        returning id into v_mirror;
+      insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
+          credit_cents, description, counterparty_id)
+        select v_mirror, jl.line_no, jl.account_code, jl.credit_cents, jl.debit_cents,
+               jl.description, jl.counterparty_id
+        from clara.journal_lines jl where jl.entry_id = p_entry order by jl.line_no;
+      perform clara._assert_balanced(v_mirror);
+      select je.revision_token into v_rev from clara.journal_entries je where je.id = v_mirror;
+
+      -- THE MIRROR FLIPS THROUGH THE CORE, PREHELD, ON THE POSTER-RESERVED KEY [L3/1]. Never
+      -- a direct UPDATE to 'approved': routing through clara._approve_entry_core is what keeps
+      -- the approve-path census at FOUR, restores CLR05 on the mirror, and makes the mirror's
+      -- own subledger hook run exactly as a human approval's would. ANY refusal in here aborts
+      -- the WHOLE approving statement, so no committed half-pair can exist -- that is the
+      -- intended semantics, by construction rather than by cleanup.
+      perform clara._approve_entry_core(
+        jsonb_build_object('actor', v_actor, 'firm', e.firm_id, 'receipt_preheld', true),
+        v_mirror, v_rev, v_attest, (v_prop ->> 'op_key') || ':mirror:approve');
+    end if;
+
+    -- ---------------------------------------------------------------------------------
+    -- THE RECEIPT, MINTED AFTER THE MIRROR (design SS2.5) so reversal_entry_id is a birth
+    -- fact and never an UPDATE on an immutable row [L2/18]. mode is READ FROM THE FLAGS
+    -- STAMP, not re-decided: the receipt records what the poster ruled.
+    -- ---------------------------------------------------------------------------------
+    select coalesce(sum(jl.debit_cents), 0) into v_amount
+      from clara.journal_lines jl where jl.entry_id = p_entry;
+    insert into clara.adjustment_runs(firm_id, client_id, template_id, period_start,
+        period_end, mode, entry_id, reversal_entry_id, amount_cents, op_key)
+      values (e.firm_id, e.client_id, t.id, v_ps, v_pe, v_mode, p_entry, v_mirror, v_amount,
+        v_prop ->> 'op_key')
+      returning id into v_run;
+
+    -- THE EVENT, LAST OF THE THREE (ABI SSG payload -- identifiers and figures the receipt
+    -- already holds, nothing else). EVENT ORDER IS LAW AND IT IS STRUCTURAL: the mirror's
+    -- events were emitted inside the core call above, this one is emitted here, and the
+    -- OCCURRENCE's own entry.approved is emitted by the outer clara._approve_entry_core only
+    -- after this hook returns. So the mirror's events precede the occurrence's, always, with
+    -- no ordering code anywhere.
+    perform clara._append_event(e.firm_id, 'adjustment.posted', e.client_id, v_actor,
+      null, null, p_entry, null, null,
+      jsonb_build_object('template_id', t.id, 'run_id', v_run,
+        'period_start', v_ps, 'period_end', v_pe, 'amount_cents', v_amount,
+        'reversal_entry_id', v_mirror));
+  end if;
+
+  -- -----------------------------------------------------------------------------------
+  -- (3) THE BANK-RULE SUGGESTION (design SS5). Hosted HERE rather than as a fifth splice:
+  -- the approve-time re-validation of a suggestion draft is the same kind of act as arm (2)
+  -- and adding a splice would move the hook-caller census for no gain [L4/9].
+  --
+  -- SIX axes, one token (suggestion_stale) with a named axis -- the design's five plus the
+  -- ROLE-ELIGIBILITY axis the as-built ladder ruled in (round 2). The draft's own legs are
+  -- re-derived from the LIVE line and the LIVE rule through clara._wdb_suggestion_lines --
+  -- the same body clara.accept_bank_rule_suggestion mints from -- so "the rule still says
+  -- this" is one definition in one place, and the accept verb and this arm can never disagree.
+  -- -----------------------------------------------------------------------------------
+  if e.flags ? 'bank_rule_suggested' then
+    v_sug := e.flags -> 'bank_rule_suggested';
+    select * into rl from clara.bank_rules br where br.id = (v_sug ->> 'rule_id')::uuid;
+    if not found or rl.client_id <> e.client_id or rl.status <> 'signed'
+       or rl.kind <> 'coding' then
+      raise exception 'the bank rule this suggestion names is no longer a signed coding rule for this client; withdraw the draft'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'suggestion_stale', 'axis', 'rule',
+            'rule_id', v_sug ->> 'rule_id')::text;
+    end if;
+    select l.* into ln from clara.bank_statement_lines l where l.id = (v_sug ->> 'line_id')::uuid;
+    if not found or ln.client_id <> e.client_id then
+      raise exception 'the statement line this suggestion names is not this client''s'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'suggestion_stale', 'axis', 'line',
+            'line_id', v_sug ->> 'line_id')::text;
+    end if;
+    if not exists (select 1 from clara.bank_statements bs
+                   where bs.id = ln.statement_id and bs.status = 'live') then
+      raise exception 'the statement carrying this line is no longer live; withdraw the draft'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'suggestion_stale', 'axis', 'statement',
+            'statement_id', ln.statement_id)::text;
+    end if;
+    -- UNMATCHED AND UN-EXCEPTED, at exactly the 0040 list_bank_line_suggestions predicate:
+    -- ANY exception on the line disqualifies it (not merely an open one), because an excepted
+    -- line's booking is the exception machinery's business, not a coding rule's.
+    if exists (select 1 from clara.bank_match_line_members m
+               where m.line_id = ln.id and m.group_status in ('pending', 'live'))
+       or exists (select 1 from clara.bank_line_exceptions ex where ex.line_id = ln.id) then
+      raise exception 'this statement line is now matched or excepted; withdraw the draft'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'suggestion_stale', 'axis', 'line_claimed',
+            'line_id', ln.id)::text;
+    end if;
+    if not clara._wdb_suggestion_rule_hit(ln.id, rl.id) then
+      raise exception 'this rule no longer matches this statement line; withdraw the draft'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'suggestion_stale', 'axis', 'predicate',
+            'rule_id', rl.id, 'line_id', ln.id)::text;
+    end if;
+    v_derived := clara._wdb_suggestion_lines(e.client_id, ln.id, rl.id);
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'account_code', jl.account_code,
+             'debit_cents', jl.debit_cents,
+             'credit_cents', jl.credit_cents) order by jl.line_no), '[]'::jsonb)
+      into v_actual from clara.journal_lines jl where jl.entry_id = p_entry;
+    if v_derived is distinct from v_actual then
+      raise exception 'this draft''s legs no longer equal what the rule derives for this line; withdraw the draft'
+        using errcode = 'CLR39',
+          detail = jsonb_build_object('reason', 'suggestion_stale', 'axis', 'legs',
+            'rule_id', rl.id, 'line_id', ln.id)::text;
+    end if;
+    -- THE SIXTH AXIS -- THE PROPOSED ACCOUNT IS STILL ELIGIBLE (as-built ladder round 2, the
+    -- PHANTOM STAFF ADVANCE). clara.accept_bank_rule_suggestion asks this at its door, and this
+    -- arm re-asks it here for the same reason it re-asks the other five: an account can be
+    -- ENROLLED between the accept and the approval. A DEBIT leg on a code enrolled as a staff
+    -- advance is SOFT-BIRTHED by SECTION S3's clara._adv_on_approve arm (3) -- so the register
+    -- would say a named person owes the firm money they never received, while the GL, the
+    -- entry and clara.staff_advance_tie all agree to the sen and no instrument fires. (An FA
+    -- cost/accum/expense role is the same defect from the other family.)
+    --
+    -- THE SAME BODY THE DOOR READS, over the SAME account clara._wdb_suggestion_lines derives
+    -- from -- the rule's own `proposal ->> 'account_code'` -- so the two sites cannot drift.
+    -- The CONTRA leg ALONE is asked: the other derived leg IS this client's bank account, and
+    -- clara._adj_line_eligibility_breach would refuse it on its own `bank_account` axis. The
+    -- axis is LAST, deliberately: the five axes above keep their pinned precedence, and the
+    -- `legs` axis immediately above has already proved this draft equals what the rule derives,
+    -- so the account asked about here is provably one of the draft's own two.
+    --
+    -- THE BREACH'S OWN `axis` IS RE-KEYED, never merged over this arm's (the arm-(2g) idiom):
+    -- `axis` answers "which of the six", `eligibility_axis` "which of the five conditions".
+    v_breach := clara._adj_line_eligibility_breach(e.client_id,
+      jsonb_build_array(jsonb_build_object('account_code',
+        nullif(btrim(coalesce(rl.proposal ->> 'account_code', '')), ''))));
+    if v_breach is not null then
+      raise exception 'the account bank rule % proposes is no longer eligible to carry a coding suggestion (%); withdraw the draft', rl.id, v_breach ->> 'axis'
+        using errcode = 'CLR39',
+          detail = (jsonb_build_object('reason', 'suggestion_stale', 'axis', 'line_eligibility',
+            'rule_id', rl.id, 'line_id', ln.id, 'eligibility_axis', v_breach ->> 'axis')
+            || (v_breach - 'axis'))::text;
+    end if;
+  end if;
+end
+$d3app$;
+
 -- ##FA4PR2A-APPEND-POINT##
