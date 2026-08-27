@@ -23,11 +23,15 @@
 //        (advisory-only) receipt — see finalizeIntake's own doc in intake.ts.
 //   N7/N8 — every leg carries an AbortController; unmount aborts every in-flight
 //        item, and Remove aborts its item's controller too. A document may already
-//        exist server-side once `finalizeIntake` has succeeded (verifying/filing
-//        states, or `documentId` set) — Remove past that point does NOT delete the
-//        row (which would let it silently keep filing with nothing left to show
-//        for it); it stops this queue's own tracking and relabels the row "filing"
-//        so it stays visible rather than vanishing.
+//        exist server-side once the finalize REQUEST has been SENT (not merely once
+//        its response is back — R2, round 2: a `sentFinalize` flag is set before
+//        that `await`, since an abort can land inside the round-trip after the
+//        runtime already processed it) — Remove past that point does NOT delete
+//        the row; it stops this queue's own tracking and moves it to the distinct
+//        terminal state "stopped" (round 2, R3 — NOT "filing", which read as
+//        still-in-progress forever and could never be cleared). A SECOND Remove
+//        on an already-"stopped" row deletes it for real (nothing left to lose by
+//        then), and `clearDone` sweeps "stopped" rows alongside "ready" ones.
 //   N14 — a second `add()` of the same name+size+lastModified while a LIVE
 //        (non-terminal) row for it already exists is refused locally, honestly.
 
@@ -42,7 +46,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 const CONCURRENCY = 2;
 
-export type QueueState = "queued" | "starting" | "uploading" | "verifying" | "filing" | "ready" | "failed" | "error";
+export type QueueState = "queued" | "starting" | "uploading" | "verifying" | "filing" | "ready" | "failed" | "error" | "stopped";
 export type QueueErrorPhase = "upload" | "filing" | "timeout";
 
 export type QueueItem = {
@@ -91,9 +95,12 @@ function fileIdentity(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
-/** true once `finalizeIntake` has succeeded for this item — a document MAY already
- *  exist server-side from this point on, even though this queue has not (yet, or
- *  ever) confirmed it via the DB-confirmed poll read (N7/N8's Remove guard). */
+/** true once this item's `state` alone already proves a document may exist
+ *  server-side — the CHEAPER half of the Remove guard (N7/N8). The other half
+ *  (a finalize REQUEST already SENT, response not yet back) is tracked
+ *  separately via `finalizeSent` below — round 2, R2: the response-received
+ *  moment is too late a boundary, since the runtime can process a request the
+ *  client later aborts waiting on. */
 function pastFinalize(item: Pick<QueueItem, "documentId" | "state">): boolean {
   return item.documentId !== null || item.state === "verifying" || item.state === "filing";
 }
@@ -130,6 +137,9 @@ export function useUploadQueue(
   const [items, setItems] = useState<QueueItem[]>([]);
   const running = useRef(0);
   const controllers = useRef(new Map<string, AbortController>());
+  // The EARLIER half of the "a document may already exist" boundary (R2) — set
+  // right before the finalize request is SENT, not once its response is back.
+  const finalizeSent = useRef(new Set<string>());
 
   const sync = useCallback(() => setItems([...ref.current]), []);
   const patch = useCallback(
@@ -156,6 +166,7 @@ export function useUploadQueue(
         const begun = await beginIntake({ filename: file.name, mime: file.type || "application/octet-stream", declaredBytes: file.size }, { session, signal });
         patch(localId, { state: "uploading" });
         await putIntakeBytes(begun.upload_token, begun.intake_id, file, signal);
+        finalizeSent.current.add(localId); // BEFORE the await (R2) — the request may land server-side even if the client aborts waiting on its response
         const receipt = await finalizeIntake(begun.upload_token, begun.intake_id, signal);
         const refused = receipt.recovery_refused;
         patch(localId, { state: "verifying" });
@@ -195,6 +206,7 @@ export function useUploadQueue(
         patch(localId, { state: "error", errorPhase: "upload", error: (err as Error).message });
       } finally {
         controllers.current.delete(localId);
+        finalizeSent.current.delete(localId);
       }
     },
     [session, clientId, patch, onFiled],
@@ -248,14 +260,24 @@ export function useUploadQueue(
   const remove = useCallback(
     (localId: string) => {
       const item = ref.current.find((i) => i.localId === localId);
+      // A SECOND Remove on an already-"stopped" row: nothing left to protect
+      // (round 2, R3) — this really does delete it now.
+      if (item?.state === "stopped") {
+        ref.current = ref.current.filter((i) => i.localId !== localId);
+        sync();
+        return;
+      }
       controllers.current.get(localId)?.abort();
       controllers.current.delete(localId);
-      if (item && pastFinalize(item)) {
+      if (item && (finalizeSent.current.has(localId) || pastFinalize(item))) {
         // A document may already exist server-side, now untracked by this queue —
-        // N7/N8: never let the row silently vanish while that is still true. The
-        // client's "Filed to this client" / "Needs your confirmation" lanes are
-        // where it resurfaces if a matcher or a human picks it up later.
-        patch(localId, { state: "filing" });
+        // N7/N8: never let the row silently vanish while that is still true.
+        // "stopped" (round 2, R3) is a DISTINCT terminal state from "filing" —
+        // the previous cut reused "filing", which read as still-in-progress
+        // forever and could never be cleared. The client's "Filed to this
+        // client" / "Needs your confirmation" lanes are where it resurfaces if
+        // a matcher or a human picks it up later.
+        patch(localId, { state: "stopped" });
         return;
       }
       ref.current = ref.current.filter((i) => i.localId !== localId);
@@ -265,7 +287,7 @@ export function useUploadQueue(
   );
 
   const clearDone = useCallback(() => {
-    ref.current = ref.current.filter((i) => i.state !== "ready");
+    ref.current = ref.current.filter((i) => i.state !== "ready" && i.state !== "stopped");
     sync();
   }, [sync]);
 

@@ -82,6 +82,7 @@ export function queueStateLabelKey(item: Pick<QueueItem, "state" | "errorPhase">
     case "filing": return "queueFiling";
     case "ready": return "queueReady";
     case "failed": return "queueFailed";
+    case "stopped": return "queueStopped";
     case "error":
       switch (item.errorPhase) {
         case "filing": return "queueErrorFiling";

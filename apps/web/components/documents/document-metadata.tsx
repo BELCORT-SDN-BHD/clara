@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { documentBadges, type DocumentBadge } from "@/lib/documents/copy";
-import { fetchDocumentBytes } from "@/lib/documents/bytes";
+import { openDocumentInNewTab } from "@/lib/documents/open-in-new-tab";
 import type { DocumentRow, ProcessingTaskRow } from "@/lib/documents/types";
 
 /** The next-intl KEY for a processing task's status — never English text here
@@ -59,38 +59,24 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
     setOpenState("loading");
     setOpenError(null);
 
-    // Open the tab SYNCHRONOUSLY, inside the click handler — every major browser
-    // popup-blocks a `window.open` called AFTER an `await` (independent review
-    // 2026-08-27, F5), and it does so by returning `null` WITHOUT throwing, so the
-    // old code reported "opened" regardless. `noreferrer` only (not `noopener` —
-    // that nulls the returned reference outright, and this tab's own `.location`
-    // is exactly what gets set once the fetch resolves).
-    const tab = window.open("about:blank", "_blank", "noreferrer");
-
     const controller = new AbortController();
     abortRef.current = controller;
 
-    void (async () => {
-      try {
-        const bytes = await fetchDocumentBytes(doc.id, { signal: controller.signal });
-        if (!tab || tab.closed) {
-          bytes.revoke();
-          setOpenState("error");
-          setOpenError(t("openDocumentPopupBlocked"));
-          return;
-        }
-        tab.location.href = bytes.blobUrl;
-        // The tab keeps its own reference to the blob; revoking immediately would
-        // race its own load of it, so this leaks one object URL per open —
-        // acceptable for a human-paced click action, unlike a hot loop.
-        setOpenState("idle");
-      } catch (e) {
-        tab?.close();
+    // openDocumentInNewTab opens the tab SYNCHRONOUSLY inside this click handler
+    // (see its own header — R1: a features string of "noreferrer"/"noopener"
+    // makes window.open return null UNCONDITIONALLY, which the previous cut here
+    // got backwards).
+    void openDocumentInNewTab(doc.id, { signal: controller.signal })
+      .then((result) => {
+        if (result.ok) { setOpenState("idle"); return; }
+        setOpenState("error");
+        setOpenError(result.reason === "popup_blocked" ? t("openDocumentPopupBlocked") : t("openDocumentFailed", { message: result.message }));
+      })
+      .catch((e: unknown) => {
         if (e instanceof Error && e.name === "AbortError") return; // unmounted mid-fetch — no state left to update
         setOpenState("error");
         setOpenError(e instanceof Error ? e.message : String(e));
-      }
-    })();
+      });
   };
 
   return (

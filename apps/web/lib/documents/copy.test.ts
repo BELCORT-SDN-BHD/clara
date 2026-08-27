@@ -79,7 +79,7 @@ test("documentBadges: an e-invoice document gets the eInvoice badge, no raw text
 });
 
 test("queueStateLabelKey: every state maps to a distinct KEY, never English text — 'error' branches by errorPhase", () => {
-  const nonError = ["queued", "starting", "uploading", "verifying", "filing", "ready", "failed"] as const;
+  const nonError = ["queued", "starting", "uploading", "verifying", "filing", "ready", "failed", "stopped"] as const;
   const keys = nonError.map((state) => queueStateLabelKey({ state, errorPhase: null }));
   assert.equal(new Set(keys).size, nonError.length);
   for (const key of keys) assert.doesNotMatch(key, /\s/, "a next-intl key must never contain a rendered sentence");

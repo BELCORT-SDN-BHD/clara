@@ -74,9 +74,16 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   }
 
   // A redirect from the runtime is not a shape this proxy interprets — forward it
-  // as an honest opaque failure rather than following it (manual redirect above
-  // makes `res.type` "opaqueredirect", carrying no usable status/body).
-  if (res.type === "opaqueredirect") {
+  // as an honest opaque failure rather than following it. CLASSIFIED BY STATUS,
+  // never by `res.type` (independent review 2026-08-27, R4): "opaqueredirect" is
+  // a BROWSER-fetch concept for a manual-redirect response filtered by the
+  // Fetch spec's CORS/service-worker machinery — this `fetch` call runs
+  // SERVER-SIDE (Node.js/undici, or the Workers runtime once deployed), where a
+  // manual-redirect 3xx comes back as an ordinary Response carrying its real
+  // status — `res.type` here is never "opaqueredirect", so that check was dead
+  // code and a genuine 3xx from the runtime silently fell through to the
+  // generic forward below as a bare, bodyless 307.
+  if (res.status >= 300 && res.status < 400) {
     return NextResponse.json({ error: "runtime_redirected" }, { status: 502 });
   }
 

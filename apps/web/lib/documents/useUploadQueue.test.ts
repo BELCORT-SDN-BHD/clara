@@ -200,7 +200,7 @@ test("N7/N8: Remove BEFORE finalize aborts and fully deletes the row (nothing du
   );
 });
 
-test("N7/N8: Remove AFTER finalize (verifying/filing) does NOT delete the row — it aborts tracking and keeps it visible as 'filing'", async () => {
+test("N7/N8 (round 2, R3): Remove AFTER finalize (verifying/filing) does NOT delete the row — it moves to the DISTINCT terminal state 'stopped', never the still-in-progress-looking 'filing'", async () => {
   await withMockedFetch(
     async (url, init) => {
       const u = String(url);
@@ -227,7 +227,84 @@ test("N7/N8: Remove AFTER finalize (verifying/filing) does NOT delete the row �
         await h.act(() => { h.current.remove(id); });
         await h.settle();
         assert.equal(h.current.items.length, 1, "a post-finalize Remove must NOT delete the row — a document may already exist server-side");
-        assert.equal(h.current.items[0]!.state, "filing");
+        assert.equal(h.current.items[0]!.state, "stopped");
+
+        // round 2, R3: a SECOND Remove on an already-"stopped" row really does
+        // delete it — nothing left to protect by then, and it must be clearable.
+        await h.act(() => { h.current.remove(id); });
+        assert.equal(h.current.items.length, 0, "a second Remove on a 'stopped' row must delete it for real");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("N7/N8 (round 2, R3): clearDone() also sweeps 'stopped' rows, not only 'ready' ones", async () => {
+  await withMockedFetch(
+    async (url, init) => {
+      const u = String(url);
+      if (u === "/api/runtime/intake/documents") return new Response(JSON.stringify({ intake_id: "in-1", upload_token: "ut-1", expires_at: null }), { status: 200 });
+      if (u.includes("/bytes")) return new Response(null, { status: 200 });
+      if (u.includes("/finalize")) return new Response(JSON.stringify({ status: "finalized" }), { status: 200 });
+      if (u.includes("document_intakes_visible")) {
+        return new Promise((_resolve, reject) => {
+          if (init?.signal?.aborted) return reject(new DOMException("aborted", "AbortError"));
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    },
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        await waitFor(() => h.current.items[0]?.state === "verifying", () => h.settle());
+        await h.act(() => { h.current.remove(h.current.items[0]!.localId); });
+        await h.settle();
+        assert.equal(h.current.items[0]!.state, "stopped");
+        await h.act(() => { h.current.clearDone(); });
+        assert.equal(h.current.items.length, 0);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("round 2, R2: an abort landing INSIDE the finalize round-trip (request sent, response not yet back) still protects the row as 'stopped', never deletes it", async () => {
+  let finalizeRequestSeen = false;
+  await withMockedFetch(
+    async (url, init) => {
+      const u = String(url);
+      if (u === "/api/runtime/intake/documents") return new Response(JSON.stringify({ intake_id: "in-1", upload_token: "ut-1", expires_at: null }), { status: 200 });
+      if (u.includes("/bytes")) return new Response(null, { status: 200 });
+      if (u.includes("/finalize")) {
+        // The request IS sent (the runtime may process it) but its RESPONSE
+        // never arrives before the abort — the exact seam R2 is about.
+        finalizeRequestSeen = true;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    },
+    async () => {
+      const h = await renderHook(() => useUploadQueue("client-1", session(), () => {}, () => {}));
+      try {
+        await h.act(() => { h.current.add([fakeFile("a.pdf", 16)]); });
+        // Wait until the finalize request has genuinely been sent — the item's
+        // OWN state is still "uploading" at this instant (it only flips to
+        // "verifying" once finalize's RESPONSE comes back), which is exactly
+        // the case `pastFinalize(item)` alone cannot catch — only `finalizeSent`
+        // can.
+        await waitFor(() => finalizeRequestSeen, () => h.settle());
+        assert.equal(h.current.items[0]!.state, "uploading", "the response has not arrived yet — state has NOT advanced to verifying");
+        const id = h.current.items[0]!.localId;
+        await h.act(() => { h.current.remove(id); });
+        await h.settle();
+        assert.equal(h.current.items.length, 1, "a request-sent-response-pending Remove must NOT delete the row (R2)");
+        assert.equal(h.current.items[0]!.state, "stopped");
       } finally {
         await h.unmount();
       }

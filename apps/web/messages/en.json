@@ -144,6 +144,7 @@
     "queueFiling": "Filing…",
     "queueReady": "Filed",
     "queueFailed": "Failed",
+    "queueStopped": "Stopped tracking — the document may already be stored",
     "queueErrorFiling": "Stored — filing to this client failed",
     "queueErrorTimeout": "Timed out awaiting the intake row",
     "queueErrorUpload": "Upload error",
