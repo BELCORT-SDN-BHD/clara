@@ -97,6 +97,24 @@
 --     sentence says it mints. The three arguments are therefore uniform across all twelve. One
 --     spelling for one discipline.
 --
+-- ================== CARRIED FORWARD BY NAME, not by silence (FIX-10) ==================
+-- One battery gap is knowingly carried into PR-2/PR-3 acceptance rather than closed here, and it
+-- is named so a later reader finds the reason instead of the absence:
+--
+--   * RUNG B13, ARM 1 (reason `fa_period_due`) -- the STRANDED-PRIOR-YEAR half of D-22. Arm 2 (an
+--     outstanding belt draft dated at or before the FY end) is proven both polarities by cell
+--     fa4c.B1b, and arm 3 (the ADJ oracle) by fa4c.F1. Arm 1 needs a real FA register carrying a
+--     period stranded in an EARLIER fiscal year -- the fixture the design itself prices at cell
+--     C-20 (i) -- and standing one up here would make a close cell an FA cell wearing its name.
+--     The arm FAILS CLOSED by construction (an inevaluable or anomalous due-probe answer counts
+--     as DUE and refuses the freeze), so the carried risk is a freeze that refuses when it need
+--     not, never one that proceeds when it must not.
+--
+-- Everything else the review named as unfired is now driven: B3 (fa4c.R1, with a clean control
+-- year as its mutant), B14 (fa4c.R2, which also proves the rung and clara.close_prep_due() read
+-- the SAME population in both directions), and C-5 (fa4c.R5, the ACTED catch-up with its receipt
+-- census asserted afterward).
+--
 -- ================ THE DOCS THIS FILE FALSIFIES — the exact lines owed a re-cut ================
 -- Conductor ruling (this train): deviation (4) is ACCEPTED as inside R-L11, and the DESIGN-SIDE
 -- truing folds into this train's PR. These are the lines, enumerated here so the docs pass is a

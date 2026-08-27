@@ -74,10 +74,24 @@ test("fa4c.D1 law 71: no wake verb can finalize, reopen or attest -- not by allo
 
   // (e) The AGENT IDENTITY holds no close capability anywhere -- §3.1's entrance seam depends on
   // that being structurally unsatisfiable, not merely unseeded today.
+  //
+  // WITH A POSITIVE CONTROL (fix round, N7). Asserting zero against a table that may simply be
+  // empty is only non-vacuous by suite ORDER -- run this file alone and the cell passes without
+  // the query having discriminated anything. So a real grant is planted for a REAL human first:
+  // now the table demonstrably holds rows, the agent-scoped read still returns none, and the zero
+  // means "not the agent" rather than "not anybody".
+  const w = await scene("d1ctl");
+  await humanQuery(w.alice, "select clara.grant_firm_capability($1,$2,$3,$4) as r",
+    [w.bob, "close_and_attest", "fa4c d1: a positive control for the agent-capability census",
+      opk("fa4c-d1-ctl")]);
+  const anyGrant = await rootQuery(
+    "select count(*)::int as n from clara.firm_capability_grants where revoked_at is null");
+  assert.ok(anyGrant.rows[0].n >= 1,
+    "the capability table HOLDS live rows, so the agent-scoped zero below is a discrimination");
   const cap = await rootQuery(
     `select 1 from clara.firm_capability_grants
       where user_id = clara.agent_user_id() and revoked_at is null`);
-  assert.equal(cap.rows.length, 0, "no capability row exists for the agent identity");
+  assert.equal(cap.rows.length, 0, "and no capability row exists for the agent identity");
 });
 
 test("fa4c.D2 the entrance seam holds for HUMANS too: a bookkeeper without close_and_attest is still refused CLR04, while the agent path succeeds on the same firm", async (t) => {
