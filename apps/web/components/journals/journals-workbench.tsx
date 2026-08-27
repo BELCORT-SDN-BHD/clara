@@ -9,6 +9,10 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useJournalsWorkbench } from "@/lib/journals/use-journals-workbench";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { SectionTabs } from "@/components/common/section-tabs";
+import { LoadingState, StateBanner } from "@/components/common/state";
+import { Button } from "@/components/ui/button";
 import { DraftsQueuePanel } from "@/components/journals/drafts-queue-panel";
 import { PostedPanel } from "@/components/journals/posted-panel";
 import { ComposeDialog } from "@/components/journals/compose-dialog";
@@ -28,53 +32,70 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
   // not a reason to withhold the one recovery action that might actually work
   // (a session that was momentarily stale, a grant that just landed). ---
 
-  if (workbench.readErrorKind === "no_session") {
-    return <ReadFailure tone="warning" message={t("noSession")} onRetry={() => void workbench.reload()} retryLabel={t("retry")} />;
-  }
-  if (workbench.readErrorKind === "unauthenticated") {
-    // N4: distinct from "forbidden" — a 401 means the SESSION itself is
-    // rejected (expired/invalid JWT), never a governed refusal (wire.ts's own
-    // "spelling is not identity" ordering: status is checked before any CLR
-    // parsing) — the fix is signing in again, not asking for a grant.
-    return <ReadFailure tone="destructive" message={t("unauthenticated")} onRetry={() => void workbench.reload()} retryLabel={t("retry")} />;
-  }
-  if (workbench.readErrorKind === "forbidden") {
-    return <ReadFailure tone="destructive" message={t("forbidden")} onRetry={() => void workbench.reload()} retryLabel={t("retry")} />;
-  }
-  if (workbench.readErrorKind === "not_found") {
-    return <ReadFailure tone="destructive" message={t("notFound")} onRetry={() => void workbench.reload()} retryLabel={t("retry")} />;
-  }
-  if (workbench.err && !workbench.data) {
+  // P3 polish, structure: every state below now renders INSIDE the page shell
+  // and keeps the page's own title. Before this pass a read failure or the
+  // loading instant replaced the whole surface, so Journals was the one tab
+  // whose <h1> could vanish — a professional loses their place in the IA
+  // exactly when something has gone wrong. The BRANCHES themselves, and N5's
+  // rule that every failure kind keeps the same retry affordance, are
+  // untouched; only the frame around them and the tone mapping changed
+  // (no_session is a state, not a fault — components/common/state.tsx).
+  const failure = readFailure(workbench.readErrorKind, workbench.err, workbench.data, t);
+  if (failure) {
     return (
-      <ReadFailure tone="destructive" message={t("loadError", { message: workbench.err })} onRetry={() => void workbench.reload()} retryLabel={t("retry")} />
+      <PageShell>
+        <PageHeader title={t("heading")} />
+        <StateBanner
+          tone={failure.tone}
+          action={
+            <Button type="button" variant="outline" size="sm" onClick={() => void workbench.reload()}>
+              {t("retry")}
+            </Button>
+          }
+        >
+          {failure.message}
+        </StateBanner>
+      </PageShell>
     );
   }
   if (!workbench.data) {
     // Loading, or the pre-mount instant with no error yet either.
-    return <p className="p-8 text-sm text-muted-foreground">{t("loading")}</p>;
+    return (
+      <PageShell>
+        <PageHeader title={t("heading")} />
+        <LoadingState>{t("loading")}</LoadingState>
+      </PageShell>
+    );
   }
 
   const data = workbench.data;
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-        <ComposeDialog
-          open={composeOpen}
-          onOpenChange={setComposeOpen}
-          accounts={data.accounts}
-          busy={workbench.busy}
-          err={workbench.err}
-          clr={workbench.clr}
-          actingId={workbench.actingId}
-          onSubmit={(input) => void workbench.compose(input, () => setComposeOpen(false))}
-        />
-      </div>
-      <div className="flex gap-1 border-b border-border">
-        <TabButton active={tab === "drafts"} onClick={() => setTab("drafts")} label={t("tabs.drafts")} />
-        <TabButton active={tab === "posted"} onClick={() => setTab("posted")} label={t("tabs.posted")} />
-      </div>
+    <PageShell>
+      <PageHeader
+        title={t("heading")}
+        action={
+          <ComposeDialog
+            open={composeOpen}
+            onOpenChange={setComposeOpen}
+            accounts={data.accounts}
+            busy={workbench.busy}
+            err={workbench.err}
+            clr={workbench.clr}
+            actingId={workbench.actingId}
+            onSubmit={(input) => void workbench.compose(input, () => setComposeOpen(false))}
+          />
+        }
+      />
+      <SectionTabs
+        label={t("heading")}
+        items={[
+          { value: "drafts" as const, label: t("tabs.drafts") },
+          { value: "posted" as const, label: t("tabs.posted") },
+        ]}
+        value={tab}
+        onSelect={setTab}
+      />
       {tab === "drafts" && (
         <DraftsQueuePanel
           queueRows={data.queueRows}
@@ -103,44 +124,30 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
           onReverse={(id, reason, onOk) => void workbench.reverse(id, reason, onOk)}
         />
       )}
-    </main>
+    </PageShell>
   );
 }
 
-function ReadFailure({
-  tone,
-  message,
-  onRetry,
-  retryLabel,
-}: {
-  tone: "warning" | "destructive";
-  message: string;
-  onRetry: () => void;
-  retryLabel: string;
-}) {
-  return (
-    <div className="flex flex-col items-start gap-2 p-8">
-      <p className={tone === "warning" ? "text-sm text-warning" : "text-sm text-destructive"}>{message}</p>
-      <button type="button" className="text-sm text-primary underline" onClick={onRetry}>
-        {retryLabel}
-      </button>
-    </div>
-  );
-}
-
-function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      className={
-        active
-          ? "border-b-2 border-primary px-2 pb-2 text-sm font-medium text-foreground"
-          : "border-b-2 border-transparent px-2 pb-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-      }
-    >
-      {label}
-    </button>
-  );
+/**
+ * The read-failure branch table, extracted so the render body reads as one
+ * decision rather than five near-identical early returns. Same kinds, same
+ * order, same messages — the only change is the TONE each one carries, which
+ * now follows the product-wide ladder in components/common/state.tsx:
+ * `no_session` is a state (info), everything else here is a genuine failure
+ * (error). N4's distinction between `unauthenticated` (the session itself is
+ * rejected — sign in again) and `forbidden` (a missing grant) is preserved
+ * verbatim, because they are two different fixes.
+ */
+function readFailure(
+  kind: string | null,
+  err: string | null,
+  data: unknown,
+  t: (key: string, values?: Record<string, string>) => string,
+): { tone: "info" | "error"; message: string } | null {
+  if (kind === "no_session") return { tone: "info", message: t("noSession") };
+  if (kind === "unauthenticated") return { tone: "error", message: t("unauthenticated") };
+  if (kind === "forbidden") return { tone: "error", message: t("forbidden") };
+  if (kind === "not_found") return { tone: "error", message: t("notFound") };
+  if (err && !data) return { tone: "error", message: t("loadError", { message: err }) };
+  return null;
 }
