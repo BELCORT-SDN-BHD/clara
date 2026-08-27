@@ -134,7 +134,7 @@ function AttestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: stri
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={reason.trim().length === 0}
+      confirmDisabled={reason.trim().length === 0}
       onConfirm={() => onSubmit(reason)}
     >
       <Textarea

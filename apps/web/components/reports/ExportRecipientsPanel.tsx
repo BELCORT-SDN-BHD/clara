@@ -84,7 +84,7 @@ function RegisterDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={!userId.trim() || !displayName.trim() || !basis.trim()}
+      confirmDisabled={!userId.trim() || !displayName.trim() || !basis.trim()}
       onConfirm={() =>
         act(async () => {
           // firm_member ONLY in this crude door (0132:1074-1083 requires a

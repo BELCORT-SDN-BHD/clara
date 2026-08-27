@@ -31,7 +31,7 @@ export function CloseDoorDialog({
   description,
   confirmLabel,
   busy,
-  disabled,
+  confirmDisabled,
   onConfirm,
   children,
 }: {
@@ -41,7 +41,24 @@ export function CloseDoorDialog({
   description?: string;
   confirmLabel: string;
   busy: boolean;
-  disabled?: boolean;
+  /**
+   * Gates the CONFIRM button — never the trigger.
+   *
+   * BLOCKER (a11y lane, WCAG 2.1.1 + 4.1.2; and a functional product
+   * blocker): this prop was named `disabled` and was handed to the
+   * DialogTrigger, while the fields it gates on live INSIDE the dialog that
+   * trigger opens. Every caller that passed it therefore rendered a door
+   * that was disabled from first paint and could never become enabled — by
+   * keyboard OR mouse — because the only way to satisfy the condition was
+   * to type into a textarea that could not be reached. Six doors were
+   * unreachable this way: attest, abandon, reopen, issue-for-approval,
+   * archive-signed-original and register-recipient.
+   *
+   * The rename is deliberate and is the guard: `confirmDisabled` cannot be
+   * mistaken for "you may not open this", and every existing call site had
+   * to be re-read to compile.
+   */
+  confirmDisabled?: boolean;
   /** Performs exactly one governed call. This component does not inspect the
    *  outcome — the caller's own hydrated-part state (err/clr) is the source of
    *  truth for what happened, rendered outside this dialog. */
@@ -61,7 +78,7 @@ export function CloseDoorDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant={triggerVariant} size="sm" disabled={disabled} />}>
+      <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>
         {triggerLabel}
       </DialogTrigger>
       <DialogContent>
@@ -73,7 +90,7 @@ export function CloseDoorDialog({
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
-            disabled={busy}
+            disabled={busy || confirmDisabled === true}
             onClick={async () => {
               const ran = await runOnce(guardRef.current, onConfirm);
               if (ran) setOpen(false);

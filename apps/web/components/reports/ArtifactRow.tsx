@@ -104,7 +104,7 @@ function IssueDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={reason.trim().length === 0}
+      confirmDisabled={reason.trim().length === 0}
       onConfirm={() =>
         act(async () => {
           await issueReportForApproval(
@@ -150,7 +150,7 @@ function ArchiveDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={!sha.trim() || !byteSizeValid || !signer.trim()}
+      confirmDisabled={!sha.trim() || !byteSizeValid || !signer.trim()}
       onConfirm={() =>
         act(async () => {
           await archiveSignedOriginal(
