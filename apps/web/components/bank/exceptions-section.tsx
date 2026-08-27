@@ -50,8 +50,18 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
 
   function prefillFromProposal(proposalLineId: string, payload: Record<string, unknown>) {
     setLineId(proposalLineId);
-    if (typeof payload.kind === "string") setKind(payload.kind);
-    if (typeof payload.reason === "string") setReason(payload.reason);
+    const rawReason = typeof payload.reason === "string" ? payload.reason : "";
+    // N18 fix (independent review): an agent proposal's `payload.kind` is
+    // UNTRUSTED — accepting it verbatim would let a value outside
+    // EXCEPTION_KINDS (the door's own vocabulary) sit in `kind` state with
+    // no matching <option> selected, then still get sent as-is to
+    // exceptBankLine on submit. Fall back to the first known kind, and keep
+    // the raw value HONESTLY VISIBLE (never silently dropped) by folding it
+    // into the reason text rather than swallowing it.
+    const rawKind = typeof payload.kind === "string" ? payload.kind : null;
+    const knownKind = rawKind && (EXCEPTION_KINDS as readonly string[]).includes(rawKind) ? (rawKind as BankLineExceptionKind) : null;
+    setKind(knownKind ?? EXCEPTION_KINDS[0] ?? "bank_error");
+    setReason(knownKind || !rawKind ? rawReason : `[proposed kind: ${rawKind}] ${rawReason}`.trim());
   }
 
   async function submitExcept(e: React.FormEvent) {

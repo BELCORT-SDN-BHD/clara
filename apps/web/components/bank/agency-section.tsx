@@ -59,7 +59,11 @@ export function AgencySection({ clientId }: { clientId: string }) {
           <CardDescription>{t("holdDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <ActionRefusal err={hold.err} clr={hold.clr} />
+          {/* N16 fix (independent review): gated on holdLoadedOnce — before
+              the first successful read, hold.err is a plain READ failure
+              already rendered by ReadState below; painting it here too
+              double-painted it as if a write had also refused. */}
+          {holdLoadedOnce && <ActionRefusal err={hold.err} clr={hold.clr} />}
           <ReadState hasData={holdLoadedOnce} err={hold.err} errKind={holdKind.kind} onRetry={() => void hold.reload()}>
             <div className="flex items-center gap-2">
               <Badge variant={hold.data?.on_hold ? "destructive" : "outline"}>

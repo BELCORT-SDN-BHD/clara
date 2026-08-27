@@ -45,10 +45,24 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
 
   const itemsKind = useReadErrKind();
   const domain = settlementDomainFor(kind);
+  // N16 fix (independent review): the pre-selection branch below always
+  // resolves `[]` trivially, so a bare `items.data !== null` gate would have
+  // read "loaded" from mount onward — a REAL per-counterparty read failure
+  // (which leaves `data` at that stale `[]`, hooks.ts never clears data on
+  // failure) would then render as a silent empty list, not an error, and
+  // the ONLY visible sign of it would have been an ungated <ActionRefusal>
+  // double-painting a plain read failure as a write refusal. `itemsLoadedOnce`
+  // flips true only inside the REAL fetch's own success path (same idiom as
+  // statements-section's `detailLoadedOnce`), so ReadState can show its own
+  // dedicated read-error banner, and <ActionRefusal> below only ever paints
+  // once a real read has actually landed.
+  const [itemsLoadedOnce, setItemsLoadedOnce] = useState(false);
   const items = useHydratedPart(
     sessionTokenAccessor,
     useCallback(
-      (s) => (counterpartyId ? itemsKind.wrap(() => listOpenItemsByCounterparty(clientId, domain, counterpartyId, { session: s })) : Promise.resolve([])),
+      (s) => (counterpartyId
+        ? itemsKind.wrap(() => listOpenItemsByCounterparty(clientId, domain, counterpartyId, { session: s }).then((v) => { setItemsLoadedOnce(true); return v; }))
+        : Promise.resolve([])),
       [clientId, domain, counterpartyId, itemsKind],
     ),
   );
@@ -106,7 +120,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
       </div>
 
       {counterpartyId && (
-        <ReadState hasData={items.data !== null} err={items.err} errKind={itemsKind.kind} isEmpty={items.data?.length === 0} onRetry={() => void items.reload()}>
+        <ReadState hasData={itemsLoadedOnce} err={items.err} errKind={itemsKind.kind} isEmpty={items.data?.length === 0} onRetry={() => void items.reload()}>
           <ul className="flex flex-col gap-1">
             {(items.data ?? []).map((it) => (
               <li key={it.id} className="flex items-center justify-between gap-2 text-xs">
@@ -128,7 +142,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
       )}
 
       {formError && <p role="alert" className="text-xs text-destructive">{formError}</p>}
-      <ActionRefusal err={items.err} clr={items.clr} />
+      {itemsLoadedOnce && <ActionRefusal err={items.err} clr={items.clr} />}
       <div className="flex gap-2">
         <Button type="button" size="sm" disabled={items.busy || !counterpartyId} onClick={() => void submit()}>
           {items.busy ? tc("busy") : t("settleSubmit")}

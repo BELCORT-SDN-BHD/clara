@@ -23,7 +23,15 @@
 
 import { useEffect, useRef } from "react";
 
-export function useReloadOnChange(reload: () => void, dep: unknown): void {
+// N4 fix (independent review): `dep` is a React effect dependency compared
+// by `Object.is` — a primitive is exactly right, but `unknown` would also
+// silently accept an array/Set/object, which `Object.is` compares by
+// REFERENCE, not value, reopening the exact re-fetch-storm class this hook
+// exists to close (a freshly-built array/Set is a new reference every
+// render, so the effect would fire on EVERY render, not just a real
+// change). Every current call site already passes a string id, so this is
+// a compile-time fence, not a behaviour change.
+export function useReloadOnChange(reload: () => void, dep: string | number | boolean | null | undefined): void {
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {
