@@ -205,7 +205,9 @@ begin
   -- EVIDENCE (review law 2) — a READ OF THE DISABLED FLAG is. If it is enabled, this file must not
   -- apply: the idle-slot argument would be false and §H/§H2 would owe a real window.
   -- ---------------------------------------------------------------------------------------------
-  select enabled into v_enabled from clara.wake_engine_sources where kind = 'close_prep';
+  -- (i) The NAMED row, read positively. Keyed on source_key, which is this table's identity column
+  -- (wake_kind is NOT unique — see (ii)).
+  select enabled into v_enabled from clara.wake_engine_sources where source_key = 'close_prep';
   if not found then
     raise exception 'F-A4 PR-2a prestate: no close_prep row in clara.wake_engine_sources — 0138''s registration is missing, so the idle-slot premise cannot be read at all'
       using errcode = 'CLR10', detail = '{"reason":"prestate_wake_source_absent"}';
@@ -214,7 +216,23 @@ begin
     raise exception 'F-A4 PR-2a prestate: the close_prep wake source is ENABLED (%) — §H/§H2''s declared-but-idle argument is FALSE and those two CoRs owe their own D1 window', v_enabled
       using errcode = 'CLR10', detail = '{"reason":"prestate_wake_source_enabled"}';
   end if;
-  raise notice 'F-A4 PR-2a prestate: close_prep wake source read POSITIVELY at enabled = false — §H/§H2 ride one declared idle slot (design §9).';
+
+  -- (ii) THE WHOLE close_prep POPULATION, which is what the argument actually rests on — a
+  -- STRENGTHENING over the design's wording, and the rig is why it is here. §H/§H2's bodies are
+  -- reachable through ANY source that can mint a close_prep credential, not only through the row
+  -- that happens to be named 'close_prep'. wake_kind is NOT unique: this rig carries a second
+  -- close_prep-kind source (a G1 test registration), and on any estate a later lane may add one.
+  -- Reading only the named row would therefore answer a NARROWER question than the one the D1
+  -- argument asks, and would read green while a sibling source was live. Absence of traffic is not
+  -- evidence (review law 2); this is the read that makes "provably idle" true rather than likely.
+  select count(*)::int into v_n from clara.wake_engine_sources
+   where wake_kind = 'close_prep' and enabled;
+  if v_n <> 0 then
+    raise exception 'F-A4 PR-2a prestate: % wake_engine_sources row(s) of wake_kind close_prep are ENABLED — §H/§H2''s declared-but-idle argument is FALSE even though the row named close_prep is disabled', v_n
+      using errcode = 'CLR10', detail = '{"reason":"prestate_wake_kind_enabled"}';
+  end if;
+  select count(*)::int into v_n from clara.wake_engine_sources where wake_kind = 'close_prep';
+  raise notice 'F-A4 PR-2a prestate: close_prep wake source read POSITIVELY at enabled = false, AND all % source(s) of wake_kind close_prep are disabled — §H/§H2 ride one declared idle slot (design §9), proven over the whole population rather than one named row.', v_n;
 
   -- ---------------------------------------------------------------------------------------------
   -- §0.3 — THE FIVE LIVE BODIES: exactly one overload each, at the pinned signature.
@@ -224,10 +242,10 @@ begin
   -- ---------------------------------------------------------------------------------------------
   foreach v_sig in array array[
       'clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid)',
-      'clara._adj_template_hash(uuid,text,date,date,boolean,jsonb,text)',
-      'clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,text)',
-      'clara._adj_on_approve(uuid,uuid)',
-      'clara._adj_template_json(clara.adjustment_templates)'
+      'clara._adj_template_hash(text,text,date,date,boolean,jsonb,text)',
+      'clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,uuid,text)',
+      'clara._adj_on_approve(uuid)',
+      'clara._adj_template_json(uuid)'
     ] loop
     if to_regprocedure(v_sig) is null then
       raise exception 'F-A4 PR-2a prestate: % does not resolve — the body this file replaces is not where the design measured it', v_sig
@@ -247,10 +265,10 @@ begin
    where p.oid in (
      to_regprocedure('clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid)'),
      to_regprocedure('clara.sign_adjustment_template(uuid,uuid,text)'),
-     to_regprocedure('clara._adj_template_hash(uuid,text,date,date,boolean,jsonb,text)'),
-     to_regprocedure('clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,text)'),
-     to_regprocedure('clara._adj_on_approve(uuid,uuid)'),
-     to_regprocedure('clara._adj_template_json(clara.adjustment_templates)'));
+     to_regprocedure('clara._adj_template_hash(text,text,date,date,boolean,jsonb,text)'),
+     to_regprocedure('clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,uuid,text)'),
+     to_regprocedure('clara._adj_on_approve(uuid)'),
+     to_regprocedure('clara._adj_template_json(uuid)'));
 
   insert into _fa4_pr2a_prestate(k, v)
   select 'triple:' || p.oid::regprocedure::text,
@@ -260,10 +278,10 @@ begin
    where p.oid in (
      to_regprocedure('clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid)'),
      to_regprocedure('clara.sign_adjustment_template(uuid,uuid,text)'),
-     to_regprocedure('clara._adj_template_hash(uuid,text,date,date,boolean,jsonb,text)'),
-     to_regprocedure('clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,text)'),
-     to_regprocedure('clara._adj_on_approve(uuid,uuid)'),
-     to_regprocedure('clara._adj_template_json(clara.adjustment_templates)'));
+     to_regprocedure('clara._adj_template_hash(text,text,date,date,boolean,jsonb,text)'),
+     to_regprocedure('clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,uuid,text)'),
+     to_regprocedure('clara._adj_on_approve(uuid)'),
+     to_regprocedure('clara._adj_template_json(uuid)'));
 
   -- The PRE-IMAGE prosrc sha of each replaced body, captured for §TAIL's differential. The tail
   -- proves the moved text is unchanged MODULO the ruled edits — a byte-diff against a pre-edit
@@ -274,10 +292,10 @@ begin
     from pg_proc p
    where p.oid in (
      to_regprocedure('clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid)'),
-     to_regprocedure('clara._adj_template_hash(uuid,text,date,date,boolean,jsonb,text)'),
-     to_regprocedure('clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,text)'),
-     to_regprocedure('clara._adj_on_approve(uuid,uuid)'),
-     to_regprocedure('clara._adj_template_json(clara.adjustment_templates)'));
+     to_regprocedure('clara._adj_template_hash(text,text,date,date,boolean,jsonb,text)'),
+     to_regprocedure('clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,uuid,text)'),
+     to_regprocedure('clara._adj_on_approve(uuid)'),
+     to_regprocedure('clara._adj_template_json(uuid)'));
 
   -- clara.sign_adjustment_template is UNTOUCHED by this train (NON-GOAL 2, R6). Its sha is pinned
   -- here and re-read byte-identical in §TAIL — a positive proof that the scope cut HELD, rather
@@ -312,19 +330,25 @@ begin
   -- value; this reads the CURRENT closed set so the extension is provably an EXTENSION and not a
   -- rewrite that happens to look like one.
   -- ---------------------------------------------------------------------------------------------
+  -- SELECTED BY conname, never by a LIKE over the definition (the T.1b2 / settle-door S3 lesson:
+  -- a predicate that matches on spelling picks up whatever else happens to contain the word).
+  -- The name is the one POSTGRES generated, because 0138 wrote subject_kind's CHECK inline on the
+  -- column rather than as a named table constraint — measured on the rig, not guessed from the
+  -- file. §E replaces it with an EXPLICITLY named constraint so the next lane can select it by a
+  -- name it chose rather than one the system did.
   select pg_get_constraintdef(c.oid) into v_txt
     from pg_constraint c
    where c.conrelid = 'clara.agent_act_receipts'::regclass
-     and c.conname  = 'ck_aar_subject_kind';
+     and c.conname  = 'agent_act_receipts_subject_kind_check';
   if v_txt is null then
-    raise exception 'F-A4 PR-2a prestate: ck_aar_subject_kind not found on clara.agent_act_receipts'
+    raise exception 'F-A4 PR-2a prestate: agent_act_receipts_subject_kind_check not found on clara.agent_act_receipts'
       using errcode = 'CLR10', detail = '{"reason":"prestate_constraint_absent"}';
   end if;
   if position('adjustment_template' in v_txt) > 0 then
     raise exception 'F-A4 PR-2a prestate: subject_kind already admits adjustment_template'
       using errcode = 'CLR10', detail = '{"reason":"prestate_already_extended"}';
   end if;
-  insert into _fa4_pr2a_prestate(k, v) values ('ck_aar_subject_kind', v_txt);
+  insert into _fa4_pr2a_prestate(k, v) values ('subject_kind_check', v_txt);
 
   -- The two policies §G mirrors the bookkeeper conjunct into. Captured so §TAIL can assert the
   -- firm predicate SURVIVED and the rank conjunct was ADDED — not that the expression merely
