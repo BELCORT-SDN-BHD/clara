@@ -83,8 +83,8 @@ export function isKnownReviewQueueRowKind(kind: string): kind is ReviewQueueRowK
  *  is unique within one queue read: `id` is the source table's own primary key
  *  (entry_id/filing_id/question_id/task_id/watch_id/finding_id/asset_id/
  *  advance_id all alias to it per-kind — the row-json projection lives in the
- *  LIVE body, 0016_a21_compliance_watch.sql:4715-4723, plus the 0017/0041/0043
- *  splices; 0011's original body is superseded and only 4367 lines long),
+ *  LIVE body, 0016_a21_compliance_watch.sql:4715-4723, plus the
+ *  0017/0036/0041/0043 splices; 0011's body is superseded, only 4367 lines),
  *  never reused across row_kinds. */
 export function reviewQueueRowKey(row: ReviewQueueRow): string {
   return `${row.row_kind}:${row.id}`;

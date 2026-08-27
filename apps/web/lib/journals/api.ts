@@ -192,8 +192,8 @@ function toReviewQueueRow(raw: unknown): ReviewQueueRow {
  *
  *  clara.list_review_queue(p_scope jsonb, p_cursor jsonb, p_limit int default 50)
  *  — 0011_daily_loop.sql:3748, recut 0016:4558-4909, then DYNAMICALLY SPLICED
- *  at 0017 (lint_finding), 0036 §C (additive; its :1052 tail pins the 0017
- *  marker), 0041 (fixed_asset_incomplete), 0043 (staff_advance_incomplete) —
+ *  at 0017 (lint_finding), 0036 §C (additive; its :1052 prestate guard and
+ *  :1764 tail pin the 0017 marker), 0041 and 0043 (fa/staff-adv incomplete) —
  *  types.ts's header explains why a bare grep missed the patches. Granted to clara_authenticated at viewer+
  *  (`_human_ctx(role_rank('viewer'))`, 0016:4563) — a plain read, not
  *  bookkeeper-gated. `p_scope` is `{}` (firm-wide) or `{client_id: uuid}`
@@ -266,11 +266,11 @@ export async function loadJournalsWorkbench(
  *  those definitions; the wrapper itself carries no logic beyond a role check
  *  and a delegation, so it is a poor dynamic-patch target — but see this
  *  file's types.ts header before trusting that as proof). It delegates to
- *  `_approve_entry_core`, whose LIVE body is the recut at
- *  0037_wave_c_a_subledger.sql:1750 (5-arity CREATE OR REPLACE — 0037's own
- *  census at :165-172 quoting the 0035:140-483 fifth recut is that file's
- *  PRESTATE, superseded by 0037 itself; the fold-delta review caught the
- *  off-by-one) — CLR06/CLR05 below are cited against the 0037 body. Bookkeeper+ (`_human_ctx`).
+ *  `_approve_entry_core`, whose LIVE body is the NINTH generation at
+ *  0106_f_a2_posting_core.sql §E (its :1379 lineage note: … 0035:140 →
+ *  0037:1750 → the 0040 S5 splice → 0053 §2's splice → 0106 §E). What grounds
+ *  the CLR06/CLR05 prose below is 0106 §E's own pin that "THE HUMAN LANE'S
+ *  THREE ARMS ARE BYTE-UNTOUCHED" — not any single recut citation. Bookkeeper+ (`_human_ctx`).
  *  The revision/idempotency pattern this ports from apps/dashboard/app/chat/
  *  review.ts:272-283 (`approveEntry`): `p_expected_revision` is the row's OWN
  *  `revision_token` at read time — a mismatch raises CLR06 "stale revision
