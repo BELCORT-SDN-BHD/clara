@@ -144,7 +144,7 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       // admits this row like any other by watching the gate stop refusing.
       // FIVE is what this ceremony COVERS. Each EXCLUDED row adds one to the deployed total only
       // if its OWN separate, one-way ceremony already ran in a prior invocation.
-      const extra = (fsPackDeployed ? 1 : 0) + (v2Deployed ? 1 : 0);
+      const extra = (fsPackDeployed ? 1 : 0) + (v2Deployed ? 1 : 0) + (v3Deployed ? 1 : 0);
       assert.equal((await db.query(
         "select count(*)::int n from clara.evaluator_versions where deployed",
       )).rows[0].n, 5 + extra);
@@ -159,11 +159,14 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       )).rows, [
         ...(fsPackDeployed ? [] : [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }]),
         ...(v2Registered && !v2Deployed ? [{ ...CEREMONY_EXCLUDED_V2 }] : []),
-      ], "the only closures this ceremony leaves undeployed are the ones that own their own flip");
+        ...(v3Registered && !v3Deployed ? [{ ...CEREMONY_EXCLUDED_V3 }] : []),
+      ].sort((x, y) => (x.evaluator_name < y.evaluator_name ? -1
+        : x.evaluator_name > y.evaluator_name ? 1 : x.version - y.version)),
+      "the only closures this ceremony leaves undeployed are the ones that own their own flip");
     });
     assert.equal((await rootQuery(
       "select count(*)::int n from clara.evaluator_versions where deployed",
-    )).rows[0].n, 5 + (fsPackDeployed ? 1 : 0) + (v2Deployed ? 1 : 0),
+    )).rows[0].n, 5 + (fsPackDeployed ? 1 : 0) + (v2Deployed ? 1 : 0) + (v3Deployed ? 1 : 0),
     "the named ceremony commits every registered closure it covers before algebra runs");
   });
   await registerPackPhase(t);
