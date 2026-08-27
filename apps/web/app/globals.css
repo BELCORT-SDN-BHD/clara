@@ -89,18 +89,52 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  /*
+   * PORT DRIFT, CONFORMED (contract §6, ratified v1.0 — provenance
+   * a86e48a, byte-identical to `main`: blob d189698d). The ported ratios
+   * off a 10px `--radius` produced sm 6 / md 8 / lg 10 / xl 14 — every
+   * rung one step wide of the contract's own table:
+   *
+   *   --radius-sm  4px  Chips, dense controls
+   *   --radius-md  6px  Inputs and buttons
+   *   --radius-lg  8px  Cards and panels
+   *   --radius-xl 10px  Dialogs and sheets
+   *
+   * Written as literals, not ratios, because the contract states four
+   * independent role values rather than a geometric scale — a ratio would
+   * re-introduce the drift the moment `--radius` moved. 2xl/3xl/4xl have no
+   * contract row; they stay above xl for the badge pill only.
+   */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: 0.625rem;
+  --radius-2xl: 0.875rem;
+  --radius-3xl: 1.125rem;
+  --radius-4xl: 1.375rem;
+
+  /*
+   * PORT DRIFT, CONFORMED (contract §4.2). The ported theme never redefined
+   * the type scale, so `text-xl` stayed at Tailwind's 20px/28px against the
+   * contract's 22px/30px "Page title" — the size every <PageHeader> h1 uses.
+   * `--text-xs` 12/16 and `--text-sm` 14/20 already matched Tailwind's own
+   * defaults and need no override; `--text-lg` and `--text-2xl` also drift
+   * but have NO consumer in this app, and §2 bars defining a token with no
+   * named consumer, so they are reported rather than set.
+   */
+  --text-xl: 1.375rem;
+  --text-xl--line-height: calc(30 / 22);
 
   --spacing-density-compact: var(--density-compact);
   --spacing-density-default: var(--density-default);
   --spacing-density-comfortable: var(--density-comfortable);
+
+  /* §7's two curves, both bridged: `--ease-standard` (ease-in-out) for a
+   * small in-place state transition, `--ease-out` for a panel/welcome
+   * ENTRANCE. Two consumers each (§2's bar): the enter-* utilities take
+   * ease-out; the control transitions take ease-standard. */
   --ease-standard: var(--motion-easing-standard);
+  --ease-out: var(--motion-easing-out);
 }
 
 :root {
@@ -188,14 +222,37 @@
   --chart-4: var(--success);
   --chart-5: var(--error);
 
-  --radius: 0.625rem;
+  /* 8px — the contract's `--radius-lg`, "Cards and panels" (§6). The other
+   * three rungs are literals in @theme above; this stays the shadcn-shaped
+   * anchor because components/ui/input-group.tsx does its own arithmetic
+   * off it. */
+  --radius: 0.5rem;
   --density-compact: 0.375rem;
   --density-default: 0.75rem;
   --density-comfortable: 1rem;
+
+  /*
+   * PORT DRIFT, CONFORMED (contract §7). The port carried 120/180/240 with a
+   * single home-made curve; the ratified table is:
+   *
+   *   --duration-fast     120ms  Tooltip, in-place acknowledgement
+   *   --duration-standard 160ms  Popover, dropdown, row state
+   *   --duration-panel    200ms  Dialog, sheet, Clara dock reflow
+   *   --ease-standard     ease-in-out                     small state transition
+   *   --ease-out          cubic-bezier(0.23, 1, 0.32, 1)  panel/welcome entrance
+   *
+   * The ported `--motion-duration-*` NAMES are kept (the port's own ratified
+   * naming); only the values conform, and `deliberate` is renamed `panel` to
+   * match the tier it actually maps to — the Clara rail is literally §7's
+   * "Clara dock reflow". `--duration-instant` (0ms) and `--duration-welcome`
+   * (220ms) are NOT defined here: nothing consumes them, and §2 bars a token
+   * without a named consumer.
+   */
   --motion-duration-fast: 120ms;
-  --motion-duration-standard: 180ms;
-  --motion-duration-deliberate: 240ms;
-  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-duration-standard: 160ms;
+  --motion-duration-panel: 200ms;
+  --motion-easing-standard: ease-in-out;
+  --motion-easing-out: cubic-bezier(0.23, 1, 0.32, 1);
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
@@ -209,13 +266,28 @@
   --sidebar-ring: var(--focus);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion-duration-fast: 0ms;
-    --motion-duration-standard: 0ms;
-    --motion-duration-deliberate: 0ms;
-  }
-}
+/*
+ * PORT DRIFT, CONFORMED (contract §7, and the correction of a note I wrote
+ * in this branch's own shell commit). The port zeroed all three duration
+ * tokens under reduced motion, which also killed every OPACITY transition.
+ * The ratified contract says the opposite, in its own words:
+ *
+ *   "Reduced motion removes position, scale, stagger and parallax;
+ *    OPACITY and explicit state copy REMAIN."
+ *
+ * So durations are no longer zeroed. Each motion utility below instead drops
+ * its own MOVEMENT arm under reduced motion and keeps its fade — which is
+ * both the contract's rule and the standard accessibility guidance (fewer
+ * and gentler, never nothing: a hard cut loses the continuity the motion
+ * existed to carry).
+ *
+ * DISCIPLINE FOR WHOEVER ADDS THE NEXT ONE: there is no global net any more,
+ * because a blanket transform-killer would also break the centering
+ * transforms that dialogs and popovers depend on. Any new motion carries its
+ * own `@media (prefers-reduced-motion: reduce)` arm, here, beside these
+ * three. Every animation in this app is one of: the utilities below, the
+ * Dialog's fade/zoom, or the Select popup's fade/zoom — all four conform.
+ */
 
 /*
  * Motion utilities — the ClaraBook motion discipline (owner ruling Q4:
@@ -254,34 +326,62 @@
   animation-duration: var(--motion-duration-standard);
 }
 
-@utility motion-deliberate {
-  --tw-duration: var(--motion-duration-deliberate);
-  transition-duration: var(--motion-duration-deliberate);
-  animation-duration: var(--motion-duration-deliberate);
+@utility motion-panel {
+  --tw-duration: var(--motion-duration-panel);
+  transition-duration: var(--motion-duration-panel);
+  animation-duration: var(--motion-duration-panel);
 }
 
 /* `translate`, the standalone property — never `transform: translateY(...)`,
  * which would collide with Tailwind's own `--tw-*` transform composition on
  * any element that also carries a transform utility. */
+/* An ENTRANCE, so §7's `--ease-out` curve, not `--ease-standard`; the
+ * `--duration-standard` tier is §7's own "row state". Under reduced motion
+ * the 4px rise is dropped and the fade is kept — the contract's rule. */
 @utility enter-content {
   opacity: 1;
   translate: 0;
   transition:
-    opacity var(--motion-duration-standard) var(--motion-easing-standard),
-    translate var(--motion-duration-standard) var(--motion-easing-standard);
+    opacity var(--motion-duration-standard) var(--motion-easing-out),
+    translate var(--motion-duration-standard) var(--motion-easing-out);
 
   @starting-style {
     opacity: 0;
     translate: 0 0.25rem;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: opacity var(--motion-duration-standard) var(--motion-easing-out);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0;
+    }
+  }
 }
 
+/* §7 names this tier literally: "Dialog, sheet, Clara dock reflow". Under
+ * reduced motion the slide becomes a fade — position removed, opacity
+ * retained — rather than the panel simply appearing. */
 @utility enter-panel {
+  opacity: 1;
   translate: 0;
-  transition: translate var(--motion-duration-deliberate) var(--motion-easing-standard);
+  transition:
+    opacity var(--motion-duration-panel) var(--motion-easing-out),
+    translate var(--motion-duration-panel) var(--motion-easing-out);
 
   @starting-style {
+    opacity: 1;
     translate: 100% 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: opacity var(--motion-duration-panel) var(--motion-easing-out);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0;
+    }
   }
 }
 

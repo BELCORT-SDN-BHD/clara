@@ -83,12 +83,15 @@ function SelectContent({
         <SelectPrimitive.Popup
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
-          // P3 polish, motion: the last raw `duration-100` in the tree became
-          // the --motion-duration-fast token, and the popup picked up the same
-          // `motion-reduce:animate-none` belt the Dialog carries. The
-          // `origin-(--transform-origin)` this already had is correct and
-          // untouched — a popover scales from its trigger, never from centre.
-          className={cn("motion-fast relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 ease-standard data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none motion-reduce:transition-none", className )}
+          // Contract §7: "Popover, dropdown" is `--duration-standard` (160ms)
+          // on the `--ease-out` entrance curve. `origin-(--transform-origin)`
+          // is correct and untouched — a popover scales from its trigger,
+          // never from centre.
+          //
+          // Reduced motion per §7: the SCALE and the directional SLIDE are
+          // gated behind `motion-safe:` and disappear; `fade-in-0`/`fade-out-0`
+          // stay unconditional, so the opacity remains.
+          className={cn("motion-standard relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 ease-out data-[align-trigger=true]:animate-none motion-safe:data-[side=bottom]:slide-in-from-top-2 motion-safe:data-[side=inline-end]:slide-in-from-left-2 motion-safe:data-[side=inline-start]:slide-in-from-right-2 motion-safe:data-[side=left]:slide-in-from-right-2 motion-safe:data-[side=right]:slide-in-from-left-2 motion-safe:data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:zoom-out-95", className )}
           {...props}
         >
           <SelectScrollUpButton />
