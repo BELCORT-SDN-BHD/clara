@@ -61,7 +61,7 @@ before the fix has proven that the instrument once worked, not that it still doe
 | W41 | **N1 — shape congruence, validated AT PROPOSE** | a schedule whose period lines post to a **BANK account** not present in `lines` → `schedule_shape_incongruent` **at propose**, before any row is written ▣ | the congruent schedule proposes cleanly — and with the constraint removed in a scratch build, the bank-account schedule PROPOSES and then posts, which is the defect the constraint exists to make impossible |
 | W42 | **N1 — per-period balance** | a schedule with one period out of balance by one sen → `schedule_period_unbalanced` at propose | a balanced schedule proposes; and the poster's own exact-equality check (0045:5196-5199) is never reached, proving the propose-time wall is the one talking |
 | W43 | **N10 — coverage, and the resolver's typed no-match** | a schedule that is empty (`'[]'::jsonb`) → refused; one with a gap in the occurrence range → `schedule_coverage_gap` at propose; and a hand-planted gap reaching the resolver → `schedule_period_uncovered`, **never an empty line set** | make the resolver return `'[]'` in a scratch build → the occurrence posts ZERO lines and balances trivially, charging nothing: the silent-nothing this branch exists to prevent |
-| W44 | **N1 — the six amount-blind readers stay correct** | with a congruent schedule live, all six `t.lines` readers (Annex H.3) answer exactly as they do for a null-schedule twin: the due oracle, both eligibility reads, both shape reads and the advisory ▣ | make one period incongruent by bypassing propose → the due oracle's answer diverges, proving the cell reads real behaviour and that congruence is what holds those six |
+| W44 | **N1 — the six readers' answers stay ABOUT what posts** | with a congruent schedule live, all six `t.lines` readers (Annex H.3) answer exactly as they do for a null-schedule twin: the due oracle, both eligibility reads, both shape reads and the advisory ▣ | **the readers go BLIND, which is the true hazard (M2):** plant (past the door) an incongruent schedule whose period posts to an INELIGIBLE account — the due oracle still answers `due:true`, both eligibility reads still PASS, and the occurrence nonetheless posts to the bank account. Their answers are unchanged precisely because they still read `t.lines`; what breaks is that `t.lines` has stopped describing what posts. *An earlier cut asserted the oracle's answer would DIVERGE — it cannot: incongruence never touches `t.lines`, so that mutant could not fail.* |
 
 **Fixtures the battery needs that do not exist today:** a client with an approved prepaid
 journal entry bound to a document (W6-W9), a second such entry on the same client in one wake
@@ -69,8 +69,19 @@ task (W13-W14), a client whose service period runs past its open FY with the suc
 **not yet opened** (W31), two months mintable in one task (W32), a second document on the same
 firm carrying its own extraction region (W33), a signed template whose occurrences can all be
 run and whose total does NOT divide evenly by `n` (W35), a pre-migration template carrying a live
-occurrence history (W36), and a client whose COA offers no plausible expense target (W40). All
-built through governed doors, never as hand-written rows.
+occurrence history (W36), a client whose COA offers no plausible expense target (W40), **a client
+wired with a REAL ineligible target — a `clara.bank_accounts` row whose `coa_account_code` is on
+the COA, which is what feeds `_adj_line_eligibility_breach`'s `bank_account` axis (W41, and W44's
+mutant)**, and **a congruent-schedule template together with its null-schedule twin (W44)**, since
+the cell is a comparison and needs both halves.
+
+**Built through governed doors — with ONE deliberate, named exception.** W43's gap-planting and
+W44's incongruent schedule are inserted **as `clara_fn_owner`, past the propose door**, and that is
+not a shortcut: once §5.2a's clauses (a) and (c) exist, **no governed door CAN produce the
+malformed shape** — propose refuses it, which is the whole point of the constraint. A mutant that
+could only reach its state through a door that now refuses it would test nothing. So these two
+plant directly, and each says in-cell that it is planting what the door forbids, so a later reader
+does not mistake the exception for the rule.
 
 **Every conditional skip is ARMED and PROBED (F8c).** Vacuity has layers in this estate, and the
 battery states its own defence rather than assuming it: (i) no cell may gate on a flag assigned

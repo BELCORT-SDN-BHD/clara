@@ -68,10 +68,9 @@ delegates. No DML text in the wrapper body.
 
 #### 6.2a The five pre-rungs (review finding F3, HIGH)
 
-**The defect they close.** The propose core keeps all five of its `raise exception` paths, and a
-raise inside an agent core **aborts the transaction and takes the receipt with it** (0138's own
-Tier-C contract) — a judgement act that leaves no trace, the silent-daily-log failure F-A4 exists
-to end.
+**The defect they close.** The propose core keeps all five `raise exception` paths, and a raise
+inside an agent core **aborts the transaction and takes the receipt with it** (0138's Tier-C
+contract) — a judgement act leaving no trace, the silent-daily-log failure F-A4 exists to end.
 
 | # | the delegate's raise | where | the pre-rung, asked in the agent core |
 |---|---|---|---|
@@ -81,11 +80,10 @@ to end.
 | d | `template_date_unsupported` — the DERIVED first period end outside the ISO domain | 0045:3929-3937 | **`template_date_unsupported`.** Same predicate on the same derived date |
 | e | `template_lines_invalid` — the lines must balance to the sen | 0045:3842-3847 | **`template_lines_unbalanced`.** This one is a self-check on OUR OWN evaluator output, so a red here is a *design* fault, not a caller fault — and it must still be a receipt, not an abort |
 
-**They are courtesies, not walls — and the design says so rather than implying otherwise.**
-Pre-rung (c) reads `_adj_line_eligibility_breach` *without* the `client:fa-roles` leaf the
-delegate takes at 0045:3936, and (b)'s durable half is a partial unique index, so both race a
-concurrent writer. **The delegate's raise remains the structural wall**, Tier D captures it as
-`last_refusal`, and no cell may assert the pre-rungs make it unreachable (Annex F.3).
+**They are courtesies, not walls, and the design says so.** Pre-rung (c) reads the eligibility
+helper without the `client:fa-roles` leaf the delegate takes at 0045:3936, and (b)'s durable half
+is a partial unique index — both race a concurrent writer. **The delegate's raise remains the
+structural wall**, Tier D captures it, and no cell may assert otherwise (Annex F.3).
 
 **Pre-rung (a) — DE-PARAMETERIZED, and the P-align/P-carry fork DISSOLVES.** F1's ruling settles
 it: whole-calendar-month straight-line, the schedule starting at the service-start month. And
@@ -103,9 +101,8 @@ accordingly, from "a mid-month term refuses" to a construction invariant (Annex 
 
 **The refusal names the missing field.** B10's rung object carries
 `{rung:'B10', token:'prepayment_term_underivable', missing:'document_service_periods',
-document_id:<the bound document or null>}` — the receipt a human reads says *which* fact to record
-and *on which document*, and their next act is one call to §4.2's door: fail-closed as a durable
-typed refusal rather than a guess.
+document_id:…}` — the receipt says *which* fact to record and *on which document*, and the human's
+next act is one call to §4.2's door: fail-closed as a durable typed refusal, not a guess.
 
 **The acted path:** evaluator → `_propose_adjustment_template_core` with
 `p_ctx = {firm, actor: clara.agent_user_id()}` and the §5.2 schedule → the template lands
@@ -118,17 +115,16 @@ core, and `adjustment_templates.status` moves to `live` in exactly one body,
 grant to any wake role. The census cell reads that as a closed-world fact rather than trusting
 the wrapper's shape.
 
-**No new event type.** The human twin emits none (its record is `_audit` at 0045:4136 plus
-`_finish_op`); minting one for the agent path alone would be a second architecture for one lane's
-convenience. `_audit` fires from inside the shared core exactly as it does for a human — agent
-user as actor, `via_wake_kind` NULL on `audit_log`, the shipped GR-2 decision (0138:334-336),
-asserted by a cell rather than assumed.
+**No new event type.** The human twin emits none (`_audit` at 0045:4136 plus `_finish_op`);
+minting one for the agent path alone would be a second architecture for one lane's convenience.
+`_audit` fires from inside the shared core as it does for a human — agent user as actor,
+`via_wake_kind` NULL on `audit_log` (the shipped GR-2 decision, 0138:334-336), asserted by a cell.
 
 **No new human door is owed** — the proposed template surfaces through
 `clara.list_adjustment_templates(uuid)` (viewer floor, 0045:6721) and the signing door exists.
-**F2 wall 3 adds one obligation to that door rather than a new door:** the schedule and the target
-account must be VISIBLE and the account CHANGEABLE there, which is a PR-3 dashboard item named
-here so it is not discovered late.
+**F2 wall 3 adds an obligation to that door, not a new door:** the schedule and target account must
+be VISIBLE there (§D4's projection), with correction by decline-and-re-propose — a PR-3 dashboard
+item named here so it is not discovered late.
 
 ### 6.3 The receipt subject, the op key, and one recut NOT taken
 
@@ -194,24 +190,21 @@ the allowlist gains a thirteenth `close_prep` row (0138:2521-2533), the wake ros
 ## 7 · Item 6 — residual 1, the bookkeeper conjunct mirrored
 
 **The measured defect** (fix order, Post-re-verification follow-up 1): a firm *viewer* reads
-`model_name` / `model_version` / `rationale` / `narrative` straight off `clara.close_proposals`
-— the same data class FIX-6 walled off on `agent_act_receipts`. `p_cp_human` (0138:558-559) and
-`p_cph_human` (0138:625-626) both check `firm_id = clara.jwt_firm()` and nothing else.
+`model_name` / `model_version` / `rationale` / `narrative` straight off `clara.close_proposals` —
+the data class FIX-6 walled off on `agent_act_receipts`. `p_cp_human` (0138:558-559) and
+`p_cph_human` (0138:625-626) check `firm_id = clara.jwt_firm()` and nothing else.
 
 **The consumer census was run before choosing the wall — Annex B.0b carries it row by row.** Its
-result: the two definer doors (`attest_close_exception`'s `p_from_proposal` arm,
-`settle_close_proposal`) read under the owner policy and are unaffected; the `apps/web` close
-panel deliberately reads **nothing** (it renders an honest not-built note); every rig read goes
-through `rootQuery` and bypasses RLS.
+result: the two definer doors read under the owner policy and are unaffected; the `apps/web` close
+panel deliberately reads **nothing**; every rig read bypasses RLS as superuser or owner.
 
 **No legitimate consumer breaks.** Both policies gain
 `and clara.actor_role_rank() >= clara.role_rank('bookkeeper')`, spelled identically to 0138:427
 so the close-limb tables read as one rule.
 
-`close_prep_holds` carries a weaker data class (a human's hold reason, not a model's rationale).
-It is walled anyway, stated in-migration: the brake's doors are bookkeeper-floored
-(`hold_close_prep` 0138:1573, `release_close_prep` 0138:1608), so a record readable below the
-floor of the act that wrote it is an inconsistency waiting to be found.
+`close_prep_holds` carries a weaker data class (a hold reason, not a model's rationale) but is
+walled anyway, stated in-migration: its doors are bookkeeper-floored (0138:1573, :1608), so a
+record readable below the floor of the act that wrote it is an inconsistency waiting to be found.
 
 ---
 
@@ -237,21 +230,19 @@ after the review supplied the missing churn fact:
 > (incoming pairs ⊋ live pairs). Neither ⇒ typed refusal naming the live proposal's id, and the
 > live proposal stays `open`.
 
-**Arm (2) is over PAIRS, not check_keys, and the distinction is load-bearing (N5).** At
-check_key granularity, a live proposal drafting `{(A, i1)}` and an incoming one drafting
-`{(A, i1), (A, i2)}` have the SAME key set `{A}` — so a check_key reading would refuse a
-proposal that adds a genuinely new outstanding item under an existing check. That is legitimate
-growth, and it is exactly what arm (2) exists to admit. The pair set separates them; the
-check_key set cannot. W24's positive control is that case.
+**Arm (2) is over PAIRS, not check_keys, and the distinction is load-bearing (N5).** At check_key
+granularity a live `{(A, i1)}` and an incoming `{(A, i1), (A, i2)}` share the key set `{A}`, so a
+check_key reading would refuse a proposal adding a genuinely new item under an existing check —
+legitimate growth, which is exactly what arm (2) exists to admit. W24's positive control is that
+case.
 
-**Arm (1) can drop coverage, and its `settle_reason` must SAY SO (N7).** A moved digest is a real
-state change and rightly supersedes — but nothing about it forces the successor to cover as much
-as its predecessor did, so an honest re-measurement can quietly carry fewer drafted pairs. The
-guard does not refuse that (the measurement genuinely moved), so the **record** carries it
-instead: when arm (1) fires, `settle_reason` names both the moved `check_key`s **and every
-`(check_key, item_key)` pair the successor drops.** A reviewer reading a superseded proposal then
-sees what was lost, rather than inferring it from two documents. This is the same principle as the
-literal-reason fix below: a durable record that cannot state what happened should not be written.
+**Arm (1) can drop coverage, and its `settle_reason` must SAY SO (N7).** A moved digest rightly
+supersedes, but nothing forces the successor to cover as much as its predecessor, so an honest
+re-measurement can quietly carry fewer pairs. The guard permits it (the measurement really moved),
+so the **record** carries it: arm (1)'s reason names the moved `check_key`s **and every dropped
+`(check_key, item_key)` pair**. A reviewer then sees what was lost instead of diffing two
+documents — the same principle as the literal-reason fix: a durable record that cannot state what
+happened should not be written.
 
 **Arm (2) was "at least one new pair"; the review killed that reading.** Under a
 merely-non-empty-new-pairs test, an incoming set that adds one pair *and drops three* still
@@ -265,13 +256,12 @@ supersede is the wrong way to perform a retraction. **My judgement, as the desig
 NOT ship in PR-2a**, carried by this sketch so PR-2b or PR-3 inherits a shape rather than a gap:
 
 > **`clara.withdraw_close_proposal_item(p_proposal uuid, p_check_key text, p_item_key text,
-> p_reason text, p_op_key text)`** — a NAMED act, not a side effect of proposing. It is the
-> agent's own retraction, so it is a wake verb with a receipt (`act_kind` extends by one), it
-> refuses on a settled proposal, and it records the dropped pair and the reason on the durable
-> record rather than letting a successor's silence imply it. The reason PR-2a does not carry it:
+> p_reason text, p_op_key text)`** — a NAMED act, not a side effect of proposing: a wake verb with
+> its own receipt (`act_kind` extends by one), refusing on a settled proposal, recording the
+> dropped pair and the reason rather than letting a successor's silence imply it. Why not PR-2a:
 > it is a fourteenth wrapper with its own allowlist row, grant, ladder and battery — a second
-> verb's worth of surface inside a PR whose window is already sized for one body, and the
-> estate's own D-24 severance law says that is how a train stops being reviewable.
+> verb's worth of surface in a PR whose window is already sized for one body, which D-24 names as
+> how a train stops being reviewable.
 
 Until it ships the retraction path is the human one that exists:
 `clara.settle_close_proposal(..., 'withdrawn')` (0138:1671ff), after which the next wake proposes
@@ -301,39 +291,43 @@ file, sections in apply order:
 | §G | the two policy mirrors (§7) | no |
 | §H | `_agent_close_proposal_core` CoR — B11b + the truthful `settle_reason` | declared |
 | §H2 | **F4** — `_agent_mint_month_snapshot_core` CoR, the month-scoped receipt op key (§6.3a) | rides §H's slot |
+| §D4 | **F2 wall 3, visible half** — `clara._adj_template_json` projects `schedule` + the target account (§5.3). A live body, so it takes the prosrc pin and the CoR — but a READ PROJECTION, so an in-flight call is stale, never wrong (§5.2) | live-body CoR, not a correctness hazard |
 | §I | the catalog-comment truings (Annex B.4, B.5) | no |
 | §TAIL | the strengthened index/policy assertions, the closed ungranted set, the thirteen-count flips, the frozen-schema check (constraint 15) | — |
 
-`set local statement_timeout` near the top, precautionary rather than load-bearing (no backfill,
-no bulk scan).
+`set local statement_timeout` near the top, precautionary (no backfill, no bulk scan).
 
 ### The D1 window
 
-**FOUR bodies are genuinely live, re-derived after F1's ruling (§5.2)** — up from one, and the
-design states the increase rather than letting the ceremony discover it:
-`clara.propose_adjustment_template` (hot: every template proposal) · `clara._adj_template_hash`
-(one caller) · **`clara._adj_run_occurrence_core` (the daily unattended adjustment belt)** ·
-**`clara._adj_on_approve` (every approve of an occurrence)**. PostgreSQL runs an in-flight
-PL/pgSQL call to completion on the body it *started* with, so a call spanning the migration runs
-the old body; that is the whole reason for the window. Standard quiesce from the `docs/ops/`
-ceremony family, the CA-pinned bridge of `docs/ops/dsn-bridge.md`, and **from merged `main`,
-never a branch.**
+**FOUR bodies are genuinely live, re-derived after F1's ruling (§5.2)** — up from one, and stated
+rather than left for the ceremony to discover: `clara.propose_adjustment_template` (hot) ·
+`clara._adj_template_hash` (one caller) · **`clara._adj_run_occurrence_core` (the daily unattended
+adjustment belt)** · **`clara._adj_on_approve` (every approve of an occurrence)**. PostgreSQL runs
+an in-flight PL/pgSQL call to completion on the body it *started* with, so a call spanning the
+migration runs the old body — the whole reason for the window. Standard quiesce from `docs/ops/`,
+the CA-pinned bridge of `docs/ops/dsn-bridge.md`, **from merged `main`, never a branch.**
 
-**What bounds the widened radius is STRUCTURAL null-stability, and the migration header carries
-the sentence where the ceremony conductor reads it (N9).** §0's prestate pins the **absence of
-every object this file creates**, `adjustment_templates.schedule` included — so a column that does
-not exist until this file runs cannot be non-null in any row when it does. Every template is
-therefore `schedule is null` **by construction** at apply time, and each of the four recut bodies
-is observably unchanged **by construction**, not by a survey that happened to find no counterexample
-(review law 2 applied to our own claim). Cells W36/W37 stay as rig proof of a fact the prestate
-already guarantees — the belt, not the argument. **It is still ONE window:** these four are one
+**What bounds the widened radius is STRUCTURAL null-stability, and this is the sentence the
+ceremony conductor reads (N9).** §0's prestate pins the **absence of every object this file
+creates**, `adjustment_templates.schedule` included — a column that does not exist until the file
+runs cannot be non-null when it does. Every template is therefore `schedule is null` **by
+construction**, and each of the four recut bodies observably unchanged by construction, not by a
+survey that happened to find no counterexample (review law 2, applied to our own claim). W36/W37
+stay as rig proof of what the prestate already guarantees — the belt, not the argument. **It is still ONE window:** these four are one
 layer, the adjustment carrier and its readers, which is what D-24's severance law asks a window
 to be.
 
-**And the four-body count is EARNED, not given (N1):** it holds only because §5.2a's congruence
-constraint makes six other live `t.lines` readers correct by construction — without clause (a) the
-inventory is **six**. Annex H.3 censuses them with their sites. The number rests on a validation
-the propose door performs, not on those readers being incurious.
+**And the four-body count is EARNED (N1):** it holds only because §5.2a's congruence constraint
+makes six other live `t.lines` readers correct by construction — without clause (a) the inventory
+is **six** (Annex H.3 censuses them with sites). The number rests on a validation the propose door
+performs, not on those readers being incurious.
+
+**Four is the count of D1 CORRECTNESS hazards; the CoR set is FIVE (M1).** §D4 recuts
+`clara._adj_template_json` — live (reached by `list_adjustment_templates`, 0045:6647, granted at
+:6721) so it takes its own prosrc pin, but a **read projection**: a call spanning the migration
+returns the old shape, **stale not wrong**. It cannot post a number against the wrong body, which
+is what the quiesce exists to prevent, so it does not join the four. Stated rather than blurred,
+because a conductor counting bodies and one counting hazards should both get a true answer.
 
 **The other two bodies are declared and provably idle.** `_agent_close_proposal_core` (§H) and
 `_agent_mint_month_snapshot_core` (§H2) are each reachable only through their own wrapper under a
@@ -353,9 +347,7 @@ deploy takes, the prestate proves the posture rather than assuming it.**
 
 ---
 
-## 10 · The battery — **Annex A**: forty-four walls, each with its own cell AND mutant, plus fixtures and the armed-skip statement.
-
----
+## 10 · Pointers — **Annex A** is the battery: forty-four walls, each with its own cell AND mutant, plus fixtures and the armed-skip statement. **Annex C** is the named OCR follow-up: its four steps, and the three reasons it is not in PR-2a.
 
 ## 11 · NON-GOALS — stated so a builder does not helpfully widen
 
@@ -387,10 +379,6 @@ deploy takes, the prestate proves the posture rather than assuming it.**
     is chosen so it lands as an evaluator `_v2` with no carrier change, no CoR and no window.
 13. **`clara._adj_canon_lines` is NOT touched** (§5.2) — the schedule is a sibling structure, so
     `lines` keeps its present meaning for every body outside this train that reads it.
-
----
-
-## 12 · The named follow-up — **Annex C**: the OCR half of the service period, its four steps, and the three reasons it is not in PR-2a.
 
 ---
 
@@ -444,28 +432,26 @@ The design review raised two CRITICAL input-contract findings and both went to t
 than being designed around. Both are now ruled, and the design is built on the rulings (§5.0,
 §5.2, §5.3); this section is the record with attribution.
 
-**F1 — the carrier could not carry unequal per-period amounts.** Both available readings posted
-wrong books: the remainder never charged, or `n × total`. **RULED — OPTION A: extend the
-CARRIER**, chosen by the owner for the one-signature experience (the human signs once, and the
-whole schedule is what they signed). **Convention ruled with it: whole-CALENDAR-month
-straight-line** — schedule starts at the service-start month, `n` = the term's months, equal
-amounts with the remainder in the FINAL period, **no day-count pro-rata in v1**. *Extension path,
-recorded so it is not rediscovered:* pro-rata is a **second ruled policy, per-client-selectable
-and still deterministic**. The design's own choice under this ruling — **per-occurrence schedule
-lines in a sibling column, not a final-occurrence override** — is made in §5.2 with its reasoning,
-and its whole point is that the ruled extension lands as an evaluator `_v2` with no second window.
-**Consequence for F3:** pre-rung (a)'s P-align/P-carry fork **DISSOLVES** — monthly is
-calendar-month at the bytes (0045:1881-1884), so the ruled convention makes alignment true by
-construction, and the rung is reclassified from an ordinary-input refusal to a self-check (§6.2a).
+**F1 — the carrier could not carry unequal per-period amounts.** Both readings posted wrong books:
+the remainder never charged, or `n × total`. **RULED — OPTION A: extend the CARRIER**, chosen for
+the one-signature experience (the human signs once, and the whole schedule is what they signed).
+**Convention ruled with it: whole-CALENDAR-month straight-line** — schedule starts at the
+service-start month, `n` = the term's months, equal amounts with the remainder in the FINAL period,
+**no day-count pro-rata in v1**; pro-rata is a **second ruled policy, per-client-selectable and
+still deterministic**. The design's own choice under it — **per-occurrence schedule lines in a
+sibling column, not a final-occurrence override** — is made in §5.2, and its whole point is that
+the ruled extension lands as an evaluator `_v2` with no second window. **Consequence for F3:**
+pre-rung (a)'s P-align/P-carry fork **DISSOLVES** — monthly is calendar-month at the bytes
+(0045:1881-1884), so alignment is true by construction and the rung becomes a self-check (§6.2a).
 
-**F2 — no DB-owned source for the amortisation TARGET account.** **RULED: Clara JUDGES it.** The
-owner overruled the conductor's human-keys recommendation, correctly: this is the same
-agent-codes / human-approves pattern the estate already runs in `autoDraft` coding, not OQ-4's
-fact class. Three walls, all load-bearing and all in §5.3: deterministic validation · the
-judgement receipted with its basis through the law-79 machinery · **visible and CHANGEABLE at the
-admin sign door**, with `content_hash` freezing at signature. `prepayment_target_underivable` is
-the no-plausible-account arm, never the default path. **The service-period TERM is unchanged** —
-human-keyed interim, OQ-4 stands, Annex C's OCR-anchored route is the automation train.
+**F2 — no DB-owned source for the amortisation TARGET account. RULED: Clara JUDGES it.** The owner
+overruled the conductor's human-keys recommendation, correctly: this is the agent-codes /
+human-approves pattern the estate already runs in `autoDraft` coding, not OQ-4's fact class. Three
+walls, all in §5.3: deterministic validation · the judgement receipted with its basis through the
+law-79 machinery · **visible and CHANGEABLE at the admin sign door**, `content_hash` freezing at
+signature. `prepayment_target_underivable` is the no-plausible-account arm, never the default path.
+**The service-period TERM is unchanged** — human-keyed interim, OQ-4 stands, Annex C is the
+automation train.
 
 **F2 wall 3 is CONDUCTOR-IMPLEMENTED, pending the owner's eyes — flagged, not folded silently.**
 The owner ruled the account "visible and CHANGEABLE at the admin sign door". The design implements
@@ -474,28 +460,41 @@ must be byte-identical to what was proposed and receipted — a sign-time edit w
 attest to content no receipt describes, and it would require touching the sign door that R6 keeps
 shut. *Visible* is implemented literally, and needs `_adj_template_json` to gain the schedule and
 the account projection, which is why that body is explicitly in PR-2a scope. **The conductor is
-surfacing this form to the owner in the next batch as the implementation of his ruling.** If he
-reads "changeable" as edit-at-signature, §5.3 wall 3 and W39's third sub-cell change and NON-GOAL 2
-comes back into question; nothing else in the design moves.
+surfacing this form to the owner in the next batch as the implementation of his ruling**, so he
+should see the full price of the alternative rather than a partial one. If he reads "changeable"
+as **edit-at-signature**, FIVE things move, not three:
+
+1-3. §5.3 wall 3 and W39's third sub-cell are rewritten, and NON-GOAL 2
+   (`sign_adjustment_template` untouched) comes back into question.
+4. **`clara.sign_adjustment_template` becomes a FIFTH D1 body — and a HOT one**, run at every
+   signature on the estate; §9's window note and its correctness headline move with it.
+5. **`clara._tf_adjustment_template_transition` (0045:1323-1350) must be recut FIRST.** It freezes
+   every column outside the eight lifecycle stamps and raises CLR38
+   `adjustment_template_immutable` on any other change — so today a sign-time edit is not merely
+   forbidden by policy, **the storage layer refuses it**, and enabling it means widening the
+   immutability guarantee the whole propose→sign→post chain rests on.
+
+Item 5 is why §5.3 argues the storage layer first and R6 second: decline-and-re-propose is not a
+policy preference laid over a permissive schema, it is what the schema already enforces.
 
 **The maxim both rulings turn on, recorded where a builder will meet it (§5.0): *facts get
 anchored, judgements get receipted.*** It is the line that explains why §4's carrier and §5.3's
 account — superficially both "something Clara needs that the DB does not have" — are designed as
 opposites.
 
----
-
 ## 14 · Acceptance
 
 1. Full estate suite green on an **instance-unique** throwaway rig (torn down after) with a
    differential-control baseline, plus `pnpm lint`, `pnpm typecheck`, `pnpm build`.
-2. **Deploy-onto-existing at the TRUE merge frontier** — the on-disk chain including 0137 and
-   0138, then this file at its claimed number; prestate holds, tail passes.
-3. Every prestate pin re-derived by **rig replay** against `pg_get_functiondef` — never from this
-   document's line cites, never from a migration's file text.
-4. Every cell in Annex A green, and **every mutant re-run after the fix**.
-5. The three flip-counts move together: allowlist 12→13, rig-meta's wake roster 12→13, the
+2. **Deploy-onto-existing at the TRUE merge frontier** — the on-disk chain including 0137 and 0138,
+   then this file at its claimed number; prestate holds, tail passes. Every prestate pin re-derived
+   by **rig replay** against `pg_get_functiondef` — never from this document's line cites, never
+   from a migration's file text.
+3. Every cell in Annex A green, and **every mutant re-run after the fix**. W36/W37 (F1
+   null-stability) and W41-W43 (the congruence constraint) are green **before the ceremony window
+   opens**, not after — they are what the four-body correctness claim rests on.
+4. The three flip-counts move together: allowlist 12→13, rig-meta's wake roster 12→13, the
    parked-absence census inverted to presence. A positive read of the `close_prep`
    `wake_engine_sources` row at `enabled = false` is recorded in the tail notice.
-6. The fix diff goes back to the **same** reviewers for the targeted verification rung — the fix
+5. The fix diff goes back to the **same** reviewers for the targeted verification rung — the fix
    round is judgement logic (review law 1).
