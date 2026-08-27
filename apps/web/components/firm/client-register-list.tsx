@@ -19,6 +19,8 @@ import Link from "next/link";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientRegister, loadClientRegisterFacts, type ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "./data-state";
 
 type EnrichedRow = { client: ClientRow; entityType: string | null; msic: string | null };
@@ -71,32 +73,41 @@ export function ClientRegisterList() {
     <div className="flex flex-col gap-2">
       {data && !data.factsAvailable ? <p className="text-xs text-warning">{t("factsUnavailableNote")}</p> : null}
       <DataState loading={loading} error={error} isEmpty={rows.length === 0} emptyMessage={t("emptyMessage")}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs text-muted-foreground">
-                <th className="py-2 pr-4 font-medium">{t("columnName")}</th>
-                <th className="py-2 pr-4 font-medium">{t("columnStatus")}</th>
-                <th className="py-2 pr-4 font-medium">{t("columnEntityType")}</th>
-                <th className="py-2 pr-4 font-medium">{t("columnMsic")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ client, entityType, msic }) => (
-                <tr key={client.id} className="border-b border-border last:border-0">
-                  <td className="py-2 pr-4">
-                    <Link href={`/clients/${client.id}`} className="font-medium text-primary underline-offset-4 hover:underline">
-                      {client.name}
-                    </Link>
-                  </td>
-                  <td className="py-2 pr-4 text-card-foreground">{statusLabels[client.status] ?? client.status}</td>
-                  <td className="py-2 pr-4 text-card-foreground">{factCell(entityType)}</td>
-                  <td className="py-2 pr-4 text-card-foreground">{factCell(msic)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {/* P3 polish: the hand-rolled `<table className="w-full text-left
+            text-sm">` with `py-2 pr-4` cells became components/ui/table.tsx —
+            the SAME primitive the Documents tab already used, so every data
+            table in the product now shares one density, one hairline and one
+            row-hover. It sits inside a Card because every other panel-level
+            block on a page does; a bare table floating on the shell grey was
+            the one surface with no edge at all. */}
+        <Card>
+          <CardContent>
+            <Table className="enter-content">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("columnName")}</TableHead>
+                  <TableHead>{t("columnStatus")}</TableHead>
+                  <TableHead>{t("columnEntityType")}</TableHead>
+                  <TableHead>{t("columnMsic")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map(({ client, entityType, msic }) => (
+                  <TableRow key={client.id}>
+                    <TableCell>
+                      <Link href={`/clients/${client.id}`} className="font-medium text-primary underline-offset-4 hover:underline">
+                        {client.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{statusLabels[client.status] ?? client.status}</TableCell>
+                    <TableCell className="text-muted-foreground">{factCell(entityType)}</TableCell>
+                    <TableCell className="text-muted-foreground">{factCell(msic)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       </DataState>
     </div>
   );
