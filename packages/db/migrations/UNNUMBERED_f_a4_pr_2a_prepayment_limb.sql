@@ -2983,4 +2983,360 @@ begin
 end
 $d3app$;
 
+-- =================================================================================================
+-- §H — MED-8: THE SUPERSEDE-CHURN GUARD [declared, provably idle] (design §8; derivation Annex D).
+--
+-- This body was created by 0138 and is reachable only through its own wrapper under a close_prep
+-- credential; §0 read the close_prep wake sources POSITIVELY at enabled = false across the WHOLE
+-- wake_kind population, so this CoR and §H2's ride ONE declared idle slot rather than buying a
+-- window. That read is the evidence; absence of traffic would not have been (review law 2).
+--
+-- WHY B11b RATHER THAN CANONICAL COVERAGE (Annex D). Requiring a proposal to bind every outstanding
+-- check_key would close the churn as a side effect and be structurally cleaner — and it would also
+-- REFUSE AN HONEST PARTIAL OFFER. The carrier's content is drafted attestation texts per
+-- outstanding item; an agent with defensible language for three of five items and offering three is
+-- doing the right thing, and a professional adopting three of five is an ordinary act. B11b closes
+-- the churn without taking that latitude away.
+--
+-- WHAT THIS DELIBERATELY LEAVES WITHOUT A DOOR, named rather than left as a gap: the legitimate
+-- correction that DROPS a pair. A silent supersede is the wrong way to perform a retraction, and
+-- B11b now refuses it — so until clara.withdraw_close_proposal_item ships (NON-GOAL 10, its shape
+-- sketched in design §8), the retraction path is the human one that already exists:
+-- clara.settle_close_proposal(..., 'withdrawn'), after which the next wake proposes cleanly against
+-- no live row.
+-- =================================================================================================
+CREATE OR REPLACE FUNCTION clara._agent_close_proposal_core(p_ctx jsonb, p_close_run uuid, p_drafted jsonb, p_narrative text, p_rationale text, p_model jsonb, p_op_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $hmed8$
+declare
+  v_firm uuid := (p_ctx ->> 'firm_id')::uuid;
+  v_client uuid := (p_ctx ->> 'client_id')::uuid;
+  v_run record; v_rungs jsonb; v_receipt uuid; v_keys text[]; v_dry jsonb;
+  v_bound jsonb := '{}'::jsonb; v_stale jsonb := '[]'::jsonb; v_k text;
+  v_fresh text; v_recorded text; v_id uuid; v_live uuid; v_live_bound jsonb;
+  v_live_drafted jsonb; v_pairs_new text[]; v_pairs_live text[];
+  v_moved text[]; v_dropped text[]; v_added text[]; v_arm text;
+begin
+  v_rungs := clara._close_tier_b_common(v_client, p_rationale, p_model);
+  select * into v_run from clara.close_runs r where r.id = p_close_run;
+  if v_run.id is null then
+    v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'A', 'token', 'fiscal_year_not_in_firm'));
+  else
+    if v_run.state <> 'in_progress' then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B4',
+        'token', 'close_not_in_progress', 'state', v_run.state));
+    end if;
+    if p_drafted is null or jsonb_typeof(p_drafted) <> 'array' or jsonb_array_length(p_drafted) = 0
+       or nullif(btrim(coalesce(p_narrative, '')), '') is null then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B2',
+        'token', 'receipt_incomplete', 'class', 'proposal_shape'));
+    else
+      -- Every drafted element names a check_key, an item_key and a non-blank text. A malformed
+      -- element is refused HERE rather than stored and discovered at adoption time.
+      if exists (select 1 from jsonb_array_elements(p_drafted) x(el)
+                  where nullif(btrim(coalesce(x.el ->> 'check_key', '')), '') is null
+                     or nullif(btrim(coalesce(x.el ->> 'item_key', '')), '') is null
+                     or nullif(btrim(coalesce(x.el ->> 'text', '')), '') is null) then
+        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B2',
+          'token', 'receipt_incomplete', 'class', 'drafted_element'));
+      -- DUPLICATE ITEMS ARE A SHAPE REFUSAL, NOT A RAISE (FIX-8). t_close_proposal_drafted_unique
+      -- is the structural backstop under every writer, but a trigger raise escaping this core
+      -- would abort the transaction and leave no receipt — breaking Tier B's "a typed non-act, no
+      -- raise" contract for what is only a malformed request. The rung answers it first, so the
+      -- lane gets a durable, readable refusal and the trigger stays the wall for anything that
+      -- reaches the table another way.
+      elsif (select count(*) from jsonb_array_elements(p_drafted) x(el))
+            is distinct from (select count(distinct jsonb_build_array(x.el ->> 'check_key', x.el ->> 'item_key'))
+                                from jsonb_array_elements(p_drafted) x(el)) then
+        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B2',
+          'token', 'receipt_incomplete', 'class', 'drafted_duplicate_item'));
+      else
+        select array_agg(distinct x.el ->> 'check_key') into v_keys
+          from jsonb_array_elements(p_drafted) x(el);
+        -- B12 -- FRESHNESS. For every bound check_key: the dry run taken NOW must agree with the
+        -- run's own latest recorded measurement. Disagreement means the measurement MOVED since
+        -- the run recorded it, so any attestation adopted from this proposal would be stale on
+        -- arrival.
+        v_dry := clara._close_dry_run_core(v_client, v_run.fiscal_year_id);
+        foreach v_k in array v_keys loop
+          select el ->> 'measured_digest' into v_fresh
+            from jsonb_array_elements(v_dry -> 'checks') y(el)
+           where el ->> 'check_key' = v_k limit 1;
+          select g.measured_digest into v_recorded
+            from clara.close_gate_results g
+           where g.close_run_id = p_close_run and g.check_key = v_k
+           order by g.seq desc limit 1;
+          -- THE VECTOR IS BUILT OVER EVERY REQUESTED KEY, stale ones included. Building it only
+          -- from the FRESH keys would make a stale two-key request collapse onto the one-key
+          -- vector a live proposal already holds, and B11 would then report "a live proposal
+          -- stands at the same digest vector" about a vector that was never asked for -- a false
+          -- sentence on a durable record, caught by this file's own battery. Staleness is tracked
+          -- separately, in v_stale.
+          if v_fresh is null or v_recorded is null or v_fresh is distinct from v_recorded then
+            v_stale := v_stale || jsonb_build_array(jsonb_build_object('check_key', v_k,
+              'fresh_digest', v_fresh, 'recorded_digest', v_recorded));
+          end if;
+          v_bound := v_bound || jsonb_build_object(v_k, coalesce(v_recorded, '(unmeasured)'));
+        end loop;
+        if jsonb_array_length(v_stale) > 0 then
+          v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B12',
+            'token', 'close_proposal_stale', 'moved', v_stale));
+        end if;
+      end if;
+    end if;
+    -- B11 -- a live proposal already stands for this run AT THE SAME DIGEST VECTOR. A live
+    -- proposal at a DIFFERENT vector is not a duplicate: it is a superseded one, and the act below
+    -- supersedes it rather than refusing (supersede-never-mutate, law 6's reverse-not-delete).
+    -- FOR UPDATE (FIX-8): the live row is read under a lock, so the settle door cannot terminate
+    -- it between this read and the supersede below. Without the lock the two writers could each
+    -- see `open`, and the loser would stamp `superseded` over a row a reviewer had just adopted —
+    -- the settle-only trigger would refuse it, but only after the lane had already decided it was
+    -- superseding a live proposal. Locking here makes the two lifecycle writers take turns.
+    select cp.id, cp.bound_digests, cp.drafted into v_live, v_live_bound, v_live_drafted
+      from clara.close_proposals cp
+      where cp.close_run_id = p_close_run and cp.state = 'open' limit 1 for update;
+    if v_live is not null and v_live_bound is not distinct from v_bound then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B11',
+        'token', 'close_proposal_exists', 'proposal_id', v_live));
+    elsif v_live is not null then
+      -- ===== F-A4 PR-2a §H -- RUNG B11b, MED-8's CHURN GUARD (design §8, Annex D) =====
+      -- THE DEFECT: v_bound is built over the keys THE AGENT CHOSE, and B11 refuses only on an
+      -- EXACT jsonb match. So a fresh task drafting a strict SUBSET of a live proposal's keys skips
+      -- B11 and stamps that proposal `superseded` with a fixed literal saying the gate vector
+      -- moved. NOTHING MOVED -- the measurement is identical on the shared key and the request
+      -- simply shrank. A FALSE SENTENCE ON A DURABLE RECORD, found by a reviewer who was about to
+      -- adopt the proposal it quietly buried.
+      --
+      -- THE GUARD: an incoming proposal may supersede a live one only if at least one holds --
+      --   (1) A MOVED DIGEST: some check_key present in BOTH binds a different digest; or
+      --   (2) STRICT SUPERSET OF THE PAIR SET: the incoming (check_key, item_key) pairs are a
+      --       PROPER superset of the live proposal's pairs.
+      -- Neither => typed refusal naming the live proposal, and the live proposal stays `open`.
+      --
+      -- ARM (2) IS OVER PAIRS, NOT check_keys, and the distinction is load-bearing (N5): at
+      -- check_key granularity a live {(A,i1)} and an incoming {(A,i1),(A,i2)} share the key set
+      -- {A}, so a check_key reading would REFUSE a proposal adding a genuinely new item under an
+      -- existing check -- legitimate growth, which is exactly what arm (2) exists to admit.
+      --
+      -- AND IT IS STRICT SUPERSET, NOT "at least one new pair" -- the review killed that reading.
+      -- Under a merely-non-empty-new-pairs test, an incoming set that adds one pair AND DROPS THREE
+      -- still supersedes, so a rotation across overlapping subsets burns live proposals one after
+      -- another whenever the complement is non-empty: the same churn B11b exists to stop, wearing a
+      -- different shape. STRICT SUPERSET ADMITS GROWTH AND REFUSES TRADE.
+      select coalesce(array_agg(distinct (x.el ->> 'check_key') || '|' || (x.el ->> 'item_key')), '{}')
+        into v_pairs_new from jsonb_array_elements(p_drafted) x(el);
+      select coalesce(array_agg(distinct (x.el ->> 'check_key') || '|' || (x.el ->> 'item_key')), '{}')
+        into v_pairs_live from jsonb_array_elements(coalesce(v_live_drafted, '[]'::jsonb)) x(el);
+      select coalesce(array_agg(k order by k), '{}') into v_moved
+        from jsonb_object_keys(v_bound) k
+       where v_live_bound ? k and (v_live_bound ->> k) is distinct from (v_bound ->> k);
+      select coalesce(array_agg(p order by p), '{}') into v_dropped
+        from unnest(v_pairs_live) p where not (p = any (v_pairs_new));
+      select coalesce(array_agg(p order by p), '{}') into v_added
+        from unnest(v_pairs_new) p where not (p = any (v_pairs_live));
+      if coalesce(array_length(v_moved, 1), 0) > 0 then
+        v_arm := 'moved_digest';
+      elsif coalesce(array_length(v_added, 1), 0) > 0
+            and coalesce(array_length(v_dropped, 1), 0) = 0 then
+        v_arm := 'strict_superset';
+      else
+        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B11b',
+          'token', 'close_proposal_no_state_change', 'proposal_id', v_live,
+          'dropped_pairs', to_jsonb(v_dropped), 'added_pairs', to_jsonb(v_added)));
+      end if;
+    end if;
+  end if;
+  if jsonb_array_length(v_rungs) > 0 then
+    v_receipt := clara._agent_close_receipt(v_firm, v_client, 'propose_close', 'close_run', p_close_run,
+      p_ctx ->> 'wake_kind', nullif(p_ctx ->> 'on_behalf_of', '')::uuid, (p_ctx ->> 'task_id')::uuid,
+      p_rationale, p_model, 'refused', v_rungs, p_op_key);
+    return jsonb_build_object('status', 'refused', 'receipt_id', v_receipt, 'rung_vector', v_rungs);
+  end if;
+  -- SUPERSEDE, NEVER MUTATE AND NEVER DELETE: an outstanding proposal at a moved vector is stamped
+  -- `superseded` with its reason, and the successor is a NEW row. The partial unique index makes
+  -- the ordering mandatory rather than merely intended.
+  if v_live is not null then
+    update clara.close_proposals
+      set state = 'superseded', settled_by = clara.agent_user_id(), settled_at = now(),
+          -- THE REASON IS NOW TRUE OF THE ACT THAT HAPPENED, not a fixed literal (Annex D.2).
+          -- ARM (1) CAN DROP COVERAGE -- a moved digest rightly supersedes, but nothing forces the
+          -- successor to cover as much as its predecessor, so an honest re-measurement can quietly
+          -- carry fewer pairs. The guard permits it (the measurement really moved), so THE RECORD
+          -- CARRIES IT: the reason names the moved check_keys AND every dropped pair. A reviewer
+          -- must not have to diff two proposals to discover what a supersession took away.
+          -- ARM (2) loses nothing by construction, so its sentence is simply what was added.
+          settle_reason = case v_arm
+            when 'moved_digest' then
+              'superseded on a moved gate vector: ' || array_to_string(v_moved, ', ')
+              || case when coalesce(array_length(v_dropped, 1), 0) > 0
+                      then '; coverage dropped for: ' || array_to_string(v_dropped, ', ')
+                      else '; coverage retained in full' end
+            when 'strict_superset' then
+              'superseded by a strict superset of its drafted items; newly covered: '
+              || array_to_string(v_added, ', ')
+            else 'superseded by a fresh proposal' end
+      where id = v_live;
+  end if;
+  insert into clara.close_proposals(firm_id, client_id, fiscal_year_id, close_run_id, state,
+      proposed_by, bound_digests, drafted, narrative, model_name, model_version, rationale)
+    values (v_firm, v_client, v_run.fiscal_year_id, p_close_run, 'open',
+      clara.agent_user_id(), v_bound, p_drafted, p_narrative,
+      btrim(p_model ->> 'name'), btrim(p_model ->> 'version'), p_rationale)
+    returning id into v_id;
+  perform clara._append_event(v_firm, 'close.proposed', v_client, clara.agent_user_id(),
+    null, null, null, null, null,
+    jsonb_build_object('close_run_id', p_close_run, 'proposal_id', v_id,
+      'fiscal_year_id', v_run.fiscal_year_id, 'drafted_items', jsonb_array_length(p_drafted)));
+  v_receipt := clara._agent_close_receipt(v_firm, v_client, 'propose_close', 'close_run', p_close_run,
+    p_ctx ->> 'wake_kind', nullif(p_ctx ->> 'on_behalf_of', '')::uuid, (p_ctx ->> 'task_id')::uuid,
+    p_rationale, p_model, 'acted', '[]'::jsonb, p_op_key);
+  return jsonb_build_object('status', 'acted', 'receipt_id', v_receipt,
+    'result', jsonb_build_object('proposal_id', v_id, 'close_run_id', p_close_run,
+      'superseded_proposal_id', v_live, 'bound_digests', v_bound));
+end
+$hmed8$;
+
+-- =================================================================================================
+-- §H2 — F4: THE MINT-SNAPSHOT RECEIPT COLLISION, FIXED (design §6.3a; derivation Annex G).
+--
+-- THE SHIPPED DEFECT, derived rather than suspected. clara._agent_mint_month_snapshot_core takes
+-- p_month_start — the act is MONTH-GRAIN — but pins its REFUSED receipt to ('mint_snapshot',
+-- 'client', p_client) while _close_wake_ctx derives the op key per (task, verb, CLIENT). So for two
+-- refusals of two DIFFERENT months inside ONE wake task, every one of uq_aar's seven columns is
+-- equal — THE MONTH APPEARS IN NONE OF THEM. _agent_close_receipt's `on conflict do nothing`
+-- read-back then finds the standing row, its identity guard compares task, actor, client, wake kind
+-- and vector and finds them ALL EQUAL, and it returns THE FIRST MONTH'S RECEIPT ID FOR THE SECOND
+-- MONTH'S REFUSAL. Same defect class as FIX-1, shipped and undetected.
+--
+-- IT NEEDS IDENTICAL RUNG VECTORS, AND THAT DOES NOT SAVE IT: the ordinary way to reach this is a
+-- live hold or an incomplete model triple — conditions of the TASK, which produce exactly the same
+-- vector for every month in the pass.
+--
+-- WHY THE SHAPE DIFFERS FROM WRAPPER 12'S. There the subject could carry the grain (journal_entry /
+-- adjustment_template, both uuids). A month start is a DATE and subject_id is `uuid not null` —
+-- there is nothing to name. So the discriminator moves to the op_key COLUMN, which is already in
+-- the key: both receipt calls take p_op_key || ':' || p_month_start, the same sub-key idiom the
+-- depreciation catch-up already uses (0138:2399).
+--
+-- THE ACTED PATH IS ALREADY SAFE by its minted snapshot_id, but it takes the month-scoped key TOO —
+-- a receipt row for this verb should say which month it was about whichever way the act went.
+--
+-- THE DELEGATE CALL IS DELIBERATELY LEFT ALONE, and the generator asserts it survived intact:
+-- clara._mint_month_snapshot_core has its own _reserve_op slot and its own replay identity, and
+-- re-keying it would change behaviour F4 never asked about and nothing has measured.
+--
+-- BLAST RADIUS: no wall, no floor, no grant moves. This changes what a receipt is KEYED and
+-- LABELLED by, on a verb no live credential can currently reach. Cell W32; its mutant reverts to
+-- the bare key and reproduces the shipped defect.
+-- =================================================================================================
+CREATE OR REPLACE FUNCTION clara._agent_mint_month_snapshot_core(p_ctx jsonb, p_client uuid, p_month_start date, p_rationale text, p_model jsonb, p_op_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $h2mint$
+declare
+  v_firm uuid := (p_ctx ->> 'firm_id')::uuid;
+  v_rungs jsonb; v_receipt uuid; v_result jsonb;
+begin
+  v_rungs := clara._close_tier_b_common(p_client, p_rationale, p_model);
+  if jsonb_array_length(v_rungs) > 0 then
+    v_receipt := clara._agent_close_receipt(v_firm, p_client, 'mint_snapshot', 'client', p_client,
+      p_ctx ->> 'wake_kind', nullif(p_ctx ->> 'on_behalf_of', '')::uuid, (p_ctx ->> 'task_id')::uuid,
+      p_rationale, p_model, 'refused', v_rungs, p_op_key || ':' || p_month_start::text);
+    return jsonb_build_object('status', 'refused', 'receipt_id', v_receipt, 'rung_vector', v_rungs);
+  end if;
+  v_result := clara._mint_month_snapshot_core(v_firm, clara.agent_user_id(), p_client,
+    p_month_start, p_op_key);
+  -- FAIL CLOSED rather than substitute a stand-in subject: a delegate answer with no snapshot_id
+  -- means the mint did not happen the way this receipt is about to claim it did (law 2 — a derived
+  -- subject is not evidence of the real one).
+  if (v_result ->> 'snapshot_id') is null then
+    raise exception 'the snapshot mint returned no snapshot_id; the receipt has no subject to name'
+      using errcode = 'CLR08', detail = '{"reason":"mint_snapshot_subject_unresolvable"}';
+  end if;
+  v_receipt := clara._agent_close_receipt(v_firm, p_client, 'mint_snapshot', 'snapshot',
+    (v_result ->> 'snapshot_id')::uuid, p_ctx ->> 'wake_kind',
+    nullif(p_ctx ->> 'on_behalf_of', '')::uuid, (p_ctx ->> 'task_id')::uuid,
+    p_rationale, p_model, 'acted', '[]'::jsonb, p_op_key || ':' || p_month_start::text);
+  return jsonb_build_object('status', 'acted', 'receipt_id', v_receipt, 'result', v_result);
+end
+$h2mint$;
+
+-- =================================================================================================
+-- §D4 — F2 WALL 3, THE VISIBLE HALF [live-body CoR, NOT a D1 correctness hazard].
+--
+-- clara._adj_template_json is genuinely live: ungranted itself, but reached by
+-- clara.list_adjustment_templates (called 0045:6647, granted to clara_authenticated at 0045:6721),
+-- so a human panel really does execute it. It therefore takes its own prosrc pin and its own CoR.
+--
+-- BUT IT IS A READ PROJECTION, and the distinction is stated rather than blurred (design §9, M1):
+-- a call spanning this migration returns the OLD SHAPE, which is STALE, NOT WRONG — a panel that
+-- renders without the schedule column for one request, never a number posted against the wrong
+-- body. It cannot post anything at all. So it does NOT join the four D1 correctness hazards, and
+-- §9's "four bodies" headline stays true while the CoR set is five. A conductor counting bodies and
+-- one counting hazards should both get a true answer from this file.
+--
+-- WHY IT IS IN SCOPE AT ALL: the owner ruled the judged account "visible and changeable at the
+-- admin sign door". VISIBLE is implemented literally here — without this projection the ruling is
+-- not implementable. CHANGEABLE is decline-and-re-propose, never edit-at-signature, and that is not
+-- merely a policy preference: clara._tf_adjustment_template_transition (0045:1323-1350) freezes
+-- every column outside the eight lifecycle stamps and raises CLR38 on any other difference, so THE
+-- STORAGE LAYER ALREADY REFUSES a sign-time edit. Because `schedule` is a NEW column and is not in
+-- that frozen set, it inherits that immutability with NO CHANGE TO THE TRIGGER AT ALL — §0 pins the
+-- trigger's sha and §TAIL re-reads it, so "we did not widen it" is proven, not promised.
+-- =================================================================================================
+CREATE OR REPLACE FUNCTION clara._adj_template_json(p_template uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $d4json$
+declare t clara.adjustment_templates%rowtype; v_draft uuid;
+begin
+  select * into t from clara.adjustment_templates where id = p_template;
+  if not found then return null; end if;
+  -- The oldest outstanding occurrence draft for this template, if any. Same predicate
+  -- clara._adj_occurrence_outstanding uses (status='draft' + the ABI SSB stamp), so the row
+  -- and the oracle can never disagree about whether a draft is in the way.
+  select je.id into v_draft from clara.journal_entries je
+   where je.client_id = t.client_id and je.status = 'draft'
+     and je.flags ? 'recurring_adjustment'
+     and (je.flags -> 'recurring_adjustment' ->> 'template_id') = t.id::text
+   order by je.created_at, je.id limit 1;
+  return jsonb_build_object(
+    'template_id', t.id, 'client_id', t.client_id, 'status', t.status, 'name', t.name,
+    'cadence', t.cadence, 'start_date', t.start_date, 'end_date', t.end_date,
+    'auto_reverse', t.auto_reverse, 'lines', t.lines, 'memo_template', t.memo_template,
+    'content_hash', t.content_hash, 'proposed_by', t.proposed_by, 'signed_by', t.signed_by,
+    'signed_at', t.signed_at, 'retired_by', t.retired_by, 'retired_at', t.retired_at,
+    'retired_reason', t.retired_reason, 'created_at', t.created_at,
+    -- [R11 FIX 2026-08-04 -- W1 finding 3 / Codex r11 finding 2] THE RECORDED DECLARATION IS PROJECTED.
+    -- The gate ASSERTS on this column and forbids an act on the strength of it; a professional who
+    -- cannot see it on the row has no way to check the claim the refusal will one day make about
+    -- their books, and no way to notice a mis-declaration until it refuses. jsonb null when
+    -- nothing was declared -- ALWAYS present, this file's stable-shape rule.
+    'replaces_template_id', t.replaces_template_id,
+    'occurrence_draft_entry_id', v_draft,
+    -- F-A4 PR-2a §D4 -- F2 WALL 3, THE VISIBLE HALF. The owner ruled that Clara's judged
+    -- expense account must be VISIBLE at the admin sign door. Without these keys "visible" is
+    -- not implementable at all, which is why this read projection is explicitly in PR-2a scope.
+    -- ALWAYS PRESENT, jsonb null when absent -- this file's own stable-shape rule.
+    'schedule', t.schedule,
+    -- The judged target is the DEBITED account on the template's own lines. Projected as an
+    -- ARRAY always, plus a scalar that is non-null ONLY when there is exactly one -- a
+    -- projection must not resolve an ambiguity it can only guess at, and a surface that showed
+    -- one of two debited accounts as "the" target would be lying quietly.
+    'target_accounts', coalesce((select jsonb_agg(distinct e ->> 'account_code')
+                                   from jsonb_array_elements(t.lines) as x(e)
+                                  where (e ->> 'debit_cents')::bigint > 0), '[]'::jsonb),
+    'target_account', (select case when count(*) = 1 then min(e ->> 'account_code') end
+                         from jsonb_array_elements(t.lines) as x(e)
+                        where (e ->> 'debit_cents')::bigint > 0));
+end
+$d4json$;
+
 -- ##FA4PR2A-APPEND-POINT##
