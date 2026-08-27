@@ -21,11 +21,15 @@ import { enterBankStatement, voidBankStatement, type BankStatementLineInput } fr
 import { completePendingMatch } from "@/lib/bank/match-doors";
 import { parseAmountToCents, formatMyr } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SectionHeader } from "@/components/common/section-header";
+import { NativeSelect } from "@/components/common/native-select";
 import { ReadState } from "./read-state";
+import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 
 type LineDraft = { entryDate: string; description: string; amount: string };
@@ -171,31 +175,31 @@ export function StatementsSection({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{t("accountPickerHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("accountPickerHeading")}</SectionHeader>
         </CardHeader>
         <CardContent>
           <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} onRetry={() => void accounts.reload()}>
-            <select
+            <NativeSelect
               aria-label={t("accountPickerHeading")}
-              className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+              className="w-full"
               value={activeAccountId}
               onChange={(e) => setBankAccountId(e.target.value)}
             >
               {(accounts.data ?? []).map((a) => (
                 <option key={a.id} value={a.id}>{a.bank_name_display} · {a.account_number}</option>
               ))}
-            </select>
+            </NativeSelect>
           </ReadState>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("enterHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("enterHeading")}</SectionHeader>
         </CardHeader>
         <CardContent>
           <form onSubmit={submitEnter} className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="document-id">{t("documentIdLabel")}</Label>
                 <Input id="document-id" value={documentId} onChange={(e) => setDocumentId(e.target.value)} required />
@@ -235,7 +239,7 @@ export function StatementsSection({ clientId }: { clientId: string }) {
               <Button type="button" variant="outline" size="sm" onClick={addLine} className="self-start">{t("addLine")}</Button>
             </div>
 
-            {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
+            {formError && <StateBanner tone="error">{formError}</StateBanner>}
             <ActionRefusal err={enterAction.err} clr={enterAction.clr} />
             <Button type="submit" disabled={enterAction.busy || !activeAccountId} className="self-start">
               {enterAction.busy ? tc("busy") : t("enterSubmit")}
@@ -246,14 +250,14 @@ export function StatementsSection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("listHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("listHeading")}</SectionHeader>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {statements.data !== null && <ActionRefusal err={statements.err} clr={statements.clr} />}
           <ReadState hasData={statements.data !== null} err={statements.err} errKind={statementsKind.kind} isEmpty={statements.data?.length === 0} onRetry={() => void statements.reload()}>
             <ul className="flex flex-col gap-2">
               {(statements.data ?? []).map((st) => (
-                <li key={st.id} className="flex flex-col gap-2 rounded-lg border border-border p-2 text-sm">
+                <li key={st.id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium text-foreground">{st.period_start} → {st.period_end}</p>
@@ -281,21 +285,26 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                   {openStatementId === st.id && (
                     <ReadState hasData={detailLoadedOnce} err={detail.err} errKind={detailKind.kind} onRetry={() => void detail.reload()}>
                       {detail.data !== null && <ActionRefusal err={detail.err} clr={detail.clr} />}
-                      <table className="w-full text-xs">
-                        <thead className="text-left text-muted-foreground">
-                          <tr>
-                            <th className="p-1">{t("colDate")}</th><th className="p-1">{t("colDescription")}</th>
-                            <th className="p-1">{t("colAmount")}</th><th className="p-1">{t("colMatch")}</th><th className="p-1" />
-                          </tr>
-                        </thead>
-                        <tbody>
+                      {/* P3 polish: the last hand-rolled table in the product
+                          (its own `w-full text-xs` with p-1 cells) onto the
+                          shared primitive. It is inside the statement's own row
+                          card, so no DataTableCard here — a card inside a card
+                          would be a second edge saying nothing. */}
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t("colDate")}</TableHead><TableHead>{t("colDescription")}</TableHead>
+                            <TableHead>{t("colAmount")}</TableHead><TableHead>{t("colMatch")}</TableHead><TableHead />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
                           {(detail.data?.lines ?? []).map((ln) => (
-                            <tr key={ln.id} className="border-t border-border">
-                              <td className="p-1">{ln.entry_date}</td>
-                              <td className="p-1">{ln.description ?? "—"}</td>
-                              <td className="p-1">{formatMyr(ln.amount_cents)}</td>
-                              <td className="p-1"><Badge variant={ln.match_state === "live" ? "default" : "outline"}>{matchLabel(ln.match_state)}</Badge></td>
-                              <td className="p-1">
+                            <TableRow key={ln.id}>
+                              <TableCell>{ln.entry_date}</TableCell>
+                              <TableCell className="text-muted-foreground">{ln.description ?? "—"}</TableCell>
+                              <TableCell>{formatMyr(ln.amount_cents)}</TableCell>
+                              <TableCell><Badge variant={ln.match_state === "live" ? "default" : "outline"}>{matchLabel(ln.match_state)}</Badge></TableCell>
+                              <TableCell>
                                 {/* N13: complete_pending_match is built + tested — this is
                                     the only surface a 'pending' match is visible on today. */}
                                 {ln.match_state === "pending" && ln.match_id && (
@@ -307,11 +316,11 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                                     {t("completePendingMatch")}
                                   </Button>
                                 )}
-                              </td>
-                            </tr>
+                              </TableCell>
+                            </TableRow>
                           ))}
-                        </tbody>
-                      </table>
+                        </TableBody>
+                      </Table>
                     </ReadState>
                   )}
                 </li>

@@ -17,10 +17,12 @@ import { listUnmatchedLines, listBankMatchCandidates } from "@/lib/bank/match-re
 import { matchBankLine, unmatchBankMatch } from "@/lib/bank/match-doors";
 import { formatMyr, parseAmountToCents } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SectionHeader } from "@/components/common/section-header";
 import { ReadState } from "./read-state";
+import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 import { SettleLineForm } from "./settle-line-form";
 
@@ -126,14 +128,14 @@ export function MatchingSection({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{t("unmatchedHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("unmatchedHeading")}</SectionHeader>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {unmatchedLines.data !== null && <ActionRefusal err={unmatchedLines.err} clr={unmatchedLines.clr} />}
           <ReadState hasData={unmatchedLines.data !== null} err={unmatchedLines.err} errKind={linesKind.kind} isEmpty={unmatchedLines.data?.length === 0} onRetry={() => void unmatchedLines.reload()}>
             <ul className="flex flex-col gap-2">
               {(unmatchedLines.data ?? []).map((l) => (
-                <li key={l.line_id} className="flex flex-col gap-2 rounded-lg border border-border p-2 text-sm">
+                <li key={l.line_id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -167,7 +169,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
       {selectedLineIds.size > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>{t("matchHeading", { count: selectedLineIds.size })}</CardTitle>
+            <SectionHeader level={2}>{t("matchHeading", { count: selectedLineIds.size })}</SectionHeader>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             <ReadState hasData={candidates.data !== null} err={candidates.err} errKind={candidatesKind.kind} isEmpty={candidates.data?.length === 0} onRetry={() => void candidates.reload()}>
@@ -190,7 +192,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
               <input type="checkbox" checked={ackPeriodExceptions} onChange={(e) => setAckPeriodExceptions(e.target.checked)} />
               {t("ackPeriodExceptions")}
             </label>
-            {matchFormError && <p role="alert" className="text-sm text-destructive">{matchFormError}</p>}
+            {matchFormError && <StateBanner tone="error">{matchFormError}</StateBanner>}
             {/* BLOCKER-2 fix (independent review): match_bank_line and
                 unmatch_bank_match both act through the SAME unmatchedLines
                 hook (one part, one lifecycle, hooks.ts's own design) — a
@@ -208,7 +210,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("unmatchHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("unmatchHeading")}</SectionHeader>
         </CardHeader>
         <CardContent>
           <form onSubmit={submitUnmatch} className="flex flex-col gap-3">
