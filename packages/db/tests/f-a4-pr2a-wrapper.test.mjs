@@ -67,24 +67,18 @@ test("fa4p2a.W13 a caller-MINTED op key is refused, and a retry of the same act 
   const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
   assert.equal(first.status, "acted", `expected an act, got ${JSON.stringify(first).slice(0, 300)}`);
 
-  // *** AN OPEN DESIGN COLLISION, PINNED HERE RATHER THAN DECIDED IN A TEST -- reported to the
-  // conductor 2026-08-27, cell to be flipped with the ruling. ***
-  //   D-25 / cell B-11 say a same-task retry REPLAYS the stored outcome.
-  //   §6.2a pre-rung (b) says a re-wake over an already-drafted schedule REFUSES with the twin's id.
-  // Both are in the design and neither carves out the other. This build follows (b) literally, so a
-  // same-task retry meets the duplicate rung BEFORE the delegate's own replay can answer -- and the
-  // twin it names is the template THIS TASK just drafted. The act is not repeated and nothing is
-  // double-drafted, which is the safety property that matters; what is lost is IDEMPOTENCY OF THE
-  // ANSWER, and a lane retrying after a blip could read `refused` for work that succeeded.
+  // ARM 1 -- THE OWN-KEY RETRY REPLAYS (D-25 / cell B-11), per the conductor's 2026-08-27 ruling
+  // recorded at design §13.2. This build's first cut asked pre-rung (b) unconditionally, so the
+  // rung fired on the lane's OWN prior act and an idempotent retry read `refused` while naming the
+  // template that very task had just drafted -- nothing double-drafted, but the ANSWER dishonest,
+  // which is the class FIX-1 spent a fix round killing. The self-twin is now excluded by the
+  // delegate's own sub-key.
   const again = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.equal(again.status, "refused",
-    "the same-task retry no longer meets pre-rung (b) -- if this changed deliberately, flip this cell to the B-11 replay contract");
-  assert.deepEqual((again.rung_vector ?? []).map((v) => v.token), ["template_duplicate_pending"]);
-  assert.equal(again.rung_vector[0].template_id, first.template_id,
-    "the refusal must NAME the standing twin, so the lane can see what already exists");
-
-  // WHAT IS SETTLED EITHER WAY, and the reason the collision is not urgent: the retry drafts
-  // NOTHING. One template, whichever way the ruling goes.
+  assert.equal(again.status, "acted",
+    `a same-task retry must REPLAY the stored outcome, got ${JSON.stringify(again).slice(0, 300)}`);
+  assert.equal(again.template_id, first.template_id, "the replay returned a DIFFERENT template");
+  assert.equal(again.receipt_id, first.receipt_id,
+    "the replay minted a second receipt -- a retry must hand back the stored one");
   const drafted = await rootQuery(
     "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
   assert.equal(drafted.rows[0].n, 1, "the retry drafted a SECOND template");
@@ -94,6 +88,31 @@ test("fa4p2a.W13 a caller-MINTED op key is refused, and a retry of the same act 
 // W14 / W15 -- RECEIPT HONESTY UNDER MULTIPLICITY. FIX-1's defect, re-opened by a subject too
 // coarse to tell two acts apart.
 // ---------------------------------------------------------------------------------------------
+test("fa4p2a.W13-arm2 a FOREIGN task's duplicate still meets pre-rung (b), named with the twin's id", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE OTHER HALF of §13.2's ruling, and the arm §6.2a was written for: the lane drafted this
+  // schedule in an EARLIER pass, nobody signed it, and today's pass must REFUSE with the twin's id
+  // rather than abort on the delegate's raise. Excluding the self-twin must not have disarmed it.
+  const sc = await prepaidScene("w13b");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted");
+
+  // A SECOND clocked session over the same client -- a genuinely different task, so a different
+  // derived key and therefore a different delegate sub-key.
+  const { mintClosePrepSession } = await import("./f-a4-pr1c-fixtures.mjs");
+  const s2 = await mintClosePrepSession(sc.firm, sc.client);
+  const again = await wake12(s2, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(again.status, "refused",
+    `a foreign task's duplicate must refuse, got ${JSON.stringify(again).slice(0, 300)}`);
+  assert.deepEqual((again.rung_vector ?? []).map((v) => v.token), ["template_duplicate_pending"]);
+  assert.equal(again.rung_vector[0].template_id, first.template_id,
+    "the refusal must NAME the standing twin, so the lane can see what already exists");
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
+  assert.equal(drafted.rows[0].n, 1, "the re-wake drafted a second template instead of refusing");
+});
+
 test("fa4p2a.W14 two source entries refusing for the SAME reason in ONE task write TWO receipts with distinct subjects", async (t) => {
   if (prepayGate(t, markSkip)) return;
   // THE REFUSAL IS DRIVEN BY A TASK-LEVEL RUNG, and that choice is the whole point. Annex E names

@@ -75,7 +75,7 @@ contract) — a judgement act leaving no trace, the silent-daily-log failure F-A
 | # | the delegate's raise | where | the pre-rung, asked in the agent core |
 |---|---|---|---|
 | a | `template_fy_stale` — `_adj_period_start(client, cadence, start)` must equal the start; likewise the end | 0045:3888-3902 | **`template_alignment_unmet`** — **RECUT under F1's ruled convention; see below** |
-| b | `template_duplicate` — a `proposed`/`live` twin at the same `content_hash` | 0045:3948-3952, durable half `uq_adjustment_templates_content` 0045:1257-1258 | **`template_duplicate_pending`.** The rung computes the same hash and probes the same partial-unique population, so a re-wake over an already-drafted schedule REFUSES with the twin's id instead of aborting |
+| b | `template_duplicate` — a `proposed`/`live` twin at the same `content_hash` | 0045:3948-3952, durable half `uq_adjustment_templates_content` 0045:1257-1258 | **`template_duplicate_pending`.** The rung computes the same hash and probes the same partial-unique population, so a re-wake over an already-drafted schedule REFUSES with the twin's id instead of aborting — **EXCEPT the SELF-TWIN, excluded by conductor ruling 2026-08-27 (§13.1)**: a twin bearing this act's own delegate sub-key is the lane's own prior act, and D-25/cell B-11 make a same-task retry a REPLAY |
 | c | `template_line_ineligible` — `_adj_line_eligibility_breach` on a line account | 0045:3938-3943 | **`template_line_ineligible`.** Same helper, same payload, asked before the delegate |
 | d | `template_date_unsupported` — the DERIVED first period end outside the ISO domain | 0045:3929-3937 | **`template_date_unsupported`.** Same predicate on the same derived date |
 | e | `template_lines_invalid` — the lines must balance to the sen | 0045:3842-3847 | **`template_lines_unbalanced`.** This one is a self-check on OUR OWN evaluator output, so a red here is a *design* fault, not a caller fault — and it must still be a receipt, not an abort |
@@ -476,6 +476,30 @@ as **edit-at-signature**, FIVE things move, not three:
 
 Item 5 is why §5.3 argues the storage layer first and R6 second: decline-and-re-propose is not a
 policy preference laid over a permissive schema, it is what the schema already enforces.
+
+### 13.2 · Pre-rung (b) vs D-25's replay contract — RULED 2026-08-27 (conductor)
+
+**Surfaced by the build lane's own battery, not by a review.** §6.2a's pre-rung (b) and D-25 /
+cell **B-11** disagreed about the same call, and neither carved out the other:
+
+- **D-25 / B-11:** a **same-task retry REPLAYS** the stored outcome.
+- **§6.2a (b):** a re-wake over an already-drafted schedule **REFUSES** with the twin's id.
+
+Asked unconditionally, (b) fires on the lane's **own prior act**: the rig showed call 1 `acted`
+minting template *X*, and call 2 — same task, same derived key — `refused` with
+`template_duplicate_pending` naming *X* itself. Nothing is double-drafted (the battery asserts
+exactly one template either way), but **the answer is not idempotent**, and a lane retrying after a
+blip reads `refused` for work that succeeded. That is the same answer-dishonesty class FIX-1 spent
+a whole fix round killing — milder here only because the twin id is named.
+
+**RULING: the SELF-TWIN is excluded.** Pre-rung (b) skips when the standing twin was drafted under
+**this act's own delegate sub-key** (`p_op_key ‖ ':' ‖ p_source_entry`, which
+`propose_adjustment_template` stamps into `proposed_op_key`), letting `_reserve_op`'s replay answer
+with the stored acted outcome. A twin bearing **any other** key — a genuinely different task, or a
+human's own proposal — still meets the rung with its id, exactly as §6.2a intends. **Grounds:**
+D-25's replay contract is the design's own law, and §6.2a's wording simply failed to carve the
+self-twin case; this is a design-internal consistency completion, not new behaviour. The build
+lane's cell pins **both** arms.
 
 **The maxim both rulings turn on, recorded where a builder will meet it (§5.0): *facts get
 anchored, judgements get receipted.*** It is the line that explains why §4's carrier and §5.3's

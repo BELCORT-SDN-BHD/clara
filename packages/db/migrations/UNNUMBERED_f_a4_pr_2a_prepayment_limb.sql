@@ -3206,11 +3206,29 @@ begin
     -- yesterday, nobody signed it, and today's pass would otherwise ABORT on the delegate's raise.
     -- Same hash over the same canonical content, same partial-unique population, and the twin's id
     -- rides in the payload so the receipt says WHICH template already stands.
+    --
+    -- THE SELF-TWIN IS EXCLUDED -- CONDUCTOR RULING, 2026-08-27 (design §13.1). §6.2a as written
+    -- collided with D-25 and cell B-11, which make a SAME-TASK retry a REPLAY of the stored
+    -- outcome: asked unconditionally, this rung fires on the lane's OWN prior act, so an idempotent
+    -- retry answered `refused` and named the template that very task had just drafted. Nothing was
+    -- double-drafted, but the ANSWER was dishonest -- the same class FIX-1 spent a fix round
+    -- killing, milder only because the twin id is named. §6.2a simply failed to carve the self-twin
+    -- case; excluding it is a design-internal consistency completion, not new behaviour.
+    --
+    -- THE DISCRIMINATOR IS THE DELEGATE'S OWN SUB-KEY, which is what makes "this task's own prior
+    -- act" a fact rather than an inference: propose_adjustment_template stamps proposed_op_key with
+    -- the key it was called under, and this core always calls it with
+    -- `p_op_key || ':' || p_source_entry`. A twin bearing THAT key is this act's own replay and is
+    -- skipped here so _reserve_op can answer with the stored receipt; a twin bearing any other key
+    -- (a genuinely different task, or a human's own proposal) still meets the rung with its id,
+    -- exactly as §6.2a intends.
     v_hash := clara._adj_template_hash(btrim(v_name), 'monthly', v_start, v_end, false,
       v_lines, v_memo, v_tmpl_sched);
     select t.id into v_twin from clara.adjustment_templates t
      where t.client_id = p_client and t.content_hash = v_hash
-       and t.status in ('proposed', 'live') limit 1;
+       and t.status in ('proposed', 'live')
+       and t.proposed_op_key is distinct from (p_op_key || ':' || p_source_entry::text)
+     limit 1;
     if v_twin is not null then
       v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10b',
         'token', 'template_duplicate_pending', 'template_id', v_twin));
