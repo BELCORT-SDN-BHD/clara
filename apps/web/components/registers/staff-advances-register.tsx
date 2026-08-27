@@ -13,6 +13,7 @@ import { DataState } from "@/components/firm/data-state";
 
 export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientRegisters.staffAdvances");
+  const tc = useTranslations("Common");
   const { data, loading, error } = useAsyncRead(() => loadStaffAdvances(sessionTokenAccessor, clientId));
   const rows = data ?? [];
 
@@ -32,7 +33,7 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
               <tr key={a.id} className="border-b border-border last:border-0">
                 <td className="py-2 pr-4 text-card-foreground">{a.issue_date}</td>
                 <td className="py-2 pr-4 text-card-foreground">
-                  {fmtCents(a.amount_cents)}
+                  {fmtCents(a.amount_cents, tc("centsUnsafe"))}
                   {a.voided_by_entry_id ? ` (${t("voided")})` : ""}
                 </td>
                 <td className="py-2 pr-4 text-card-foreground">{a.purpose ?? "—"}</td>

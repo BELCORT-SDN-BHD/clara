@@ -7,37 +7,62 @@
 // same-page LINK into the object that actually owns its verbs (a draft's journals
 // tab, a filing's documents tab, a coding task's documents tab), never a duplicated
 // action here.
+//
+// FIX-1 (independent review, fix-required, 2026-08-27): the row_kind label used a
+// `t(\`rowKind.${row.row_kind}\` as "rowKind.draft")` CAST, which compiles clean
+// against tsc regardless of whether the key actually exists — exactly the "hides
+// it from tsc" failure the review caught (four of the eight LIVE row kinds had no
+// label and rendered as a raw next-intl key path, e.g. "NeedsYou.rowKind.
+// staff_advance_incomplete", to a professional). Replaced with a CHECKED lookup
+// against lib/firm/needs-you.ts's REVIEW_QUEUE_ROW_KINDS (the closed world, kept
+// in the one module that also grounds it against the live DB body) with an honest
+// "unrecognized" fallback for anything outside it — never a key path, never a
+// silent cast.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Badge } from "@/components/parts/PartBadge";
 import { fmtCents } from "@/lib/registers/money";
-import type { ReviewQueueRow } from "@/lib/firm/needs-you";
+import { ErrorMessage } from "./data-state";
+import { isKnownReviewQueueRowKind, type ReviewQueueRow } from "@/lib/firm/needs-you";
 
 export function NeedsYouRow({
   row,
   busy,
+  error,
   onResolve,
   onDismiss,
 }: {
   row: ReviewQueueRow;
   busy: boolean;
-  onResolve: (questionId: string, resolution: string) => void;
-  onDismiss: (questionId: string, reason: string) => void;
+  /** Attached to THIS row only when it was the one last acted on (N13) — a page-
+   *  level banner would misattribute a refusal to whichever row a human looks at
+   *  next. */
+  error: unknown;
+  onResolve: (questionId: string, resolution: string) => Promise<boolean>;
+  onDismiss: (questionId: string, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("NeedsYou");
   const tc = useTranslations("Common");
   const [mode, setMode] = useState<"resolve" | "dismiss" | null>(null);
   const [text, setText] = useState("");
 
-  const submit = () => {
+  const submit = async () => {
     if (!row.question_id || !text.trim()) return;
-    if (mode === "resolve") onResolve(row.question_id, text.trim());
-    else if (mode === "dismiss") onDismiss(row.question_id, text.trim());
-    setMode(null);
-    setText("");
+    const ok =
+      mode === "resolve" ? await onResolve(row.question_id, text.trim()) : await onDismiss(row.question_id, text.trim());
+    // N13: clear ONLY on success — a refusal must not discard what the human
+    // typed; they should be able to see the refusal, adjust, and resubmit.
+    if (ok) {
+      setMode(null);
+      setText("");
+    }
   };
+
+  const kindLabel = isKnownReviewQueueRowKind(row.row_kind)
+    ? t(`rowKind.${row.row_kind}`)
+    : t("rowKind.unknown", { kind: row.row_kind });
 
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -45,7 +70,7 @@ export function NeedsYouRow({
         <Badge tone={row.section === "needs_you" ? "info" : "neutral"}>
           {row.section === "needs_you" ? t("sectionNeedsYou") : t("sectionNeedsReview")}
         </Badge>
-        <span className="font-medium text-card-foreground">{t(`rowKind.${row.row_kind}` as "rowKind.draft")}</span>
+        <span className="font-medium text-card-foreground">{kindLabel}</span>
         {row.high_stakes ? <Badge tone="error">{t("highStakes")}</Badge> : null}
         {row.client_id ? (
           <Link href={`/clients/${row.client_id}`} className="text-xs text-primary underline-offset-4 hover:underline">
@@ -58,7 +83,7 @@ export function NeedsYouRow({
         {row.amount_cents != null ? (
           <>
             <dt>{t("amountLabel")}</dt>
-            <dd>{fmtCents(row.amount_cents)}</dd>
+            <dd>{fmtCents(row.amount_cents, tc("centsUnsafe"))}</dd>
           </>
         ) : null}
         {row.period ? (
@@ -70,6 +95,7 @@ export function NeedsYouRow({
       </dl>
       {row.row_kind === "open_question" && row.question_id ? (
         <div className="flex flex-col gap-2">
+          {error ? <ErrorMessage error={error} /> : null}
           {mode ? (
             <div className="flex flex-col gap-2">
               <input
@@ -83,7 +109,7 @@ export function NeedsYouRow({
                 <button
                   type="button"
                   className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                  onClick={submit}
+                  onClick={() => void submit()}
                   disabled={busy || !text.trim()}
                 >
                   {busy ? t("submitting") : t("submit")}

@@ -10,7 +10,8 @@
     "notFound": "This isn't available yet.",
     "unexpectedError": "Something went wrong: {message}",
     "notBuiltHeading": "Not built yet",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "centsUnsafe": "(amount out of range — verify in the ledger)"
   },
   "FirmShell": {
     "productName": "Clara"
@@ -37,15 +38,24 @@
     "countsOpenDrafts": "Open drafts",
     "countsOpenQuestions": "Open questions",
     "countsOpenTasks": "Open coding tasks",
+    "countsComplianceWatches": "Compliance watches",
+    "countsLintFindings": "Lint findings",
     "sectionNeedsYou": "Needs you",
     "sectionNeedsReview": "Needs review",
     "rowKind": {
       "draft": "Draft entry",
       "uncoded_filing": "Uncoded filing",
       "open_question": "Open question",
-      "coding_task": "Coding task"
+      "coding_task": "Coding task",
+      "compliance_watch": "Compliance watch",
+      "lint_finding": "Lint finding",
+      "fixed_asset_incomplete": "Fixed asset — particulars incomplete",
+      "staff_advance_incomplete": "Staff advance — particulars incomplete",
+      "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
+    "loadMore": "Load more",
+    "loadingMore": "Loading more…",
     "highStakes": "high stakes",
     "amountLabel": "amount",
     "periodLabel": "period",
@@ -67,12 +77,21 @@
     "columnStatus": "Status",
     "columnEntityType": "Entity type",
     "columnMsic": "MSIC",
-    "factAbsent": "—"
+    "factAbsent": "—",
+    "factsUnavailable": "Could not be loaded",
+    "factsUnavailableNote": "Entity type and MSIC could not be loaded for this list — the client register itself is unaffected.",
+    "statuses": {
+      "active": "Active",
+      "archived": "Archived",
+      "onboarding": "Onboarding"
+    }
   },
   "FirmActivity": {
     "heading": "Activity",
     "body": "P2 shell — the firm activity/receipts feed is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
     "subheading": "A record of what the agent did across every client — not a queue of what awaits you. See Needs you for that.",
+    "visibilityNote": "Receipts are visible to bookkeeper-and-above roles. A more limited role sees an empty feed for that reason, not because nothing happened.",
+    "showingRecent": "Showing the most recent 100 events.",
     "emptyMessage": "No agent activity has been recorded yet.",
     "columnAct": "Act",
     "columnActor": "Actor",
@@ -81,7 +100,17 @@
     "columnOccurred": "Occurred",
     "columnScope": "Scope",
     "platformScope": "Platform-wide",
-    "noRationale": "No stated rationale."
+    "firmScopeNoClient": "Firm-wide (no client)",
+    "noRationale": "No stated rationale.",
+    "receiptKinds": {
+      "entry_post": "Journal entry posted",
+      "bank_agent": "Bank agent act",
+      "agent_act": "Agent act",
+      "report_agent": "Report agent act",
+      "freeform_read": "Freeform read",
+      "agent_filing": "Agent filing",
+      "web_fetch": "Web fetch"
+    }
   },
   "Admin": {
     "heading": "Admin",
@@ -220,7 +249,7 @@
       "d6190": "61–90",
       "d91plus": "91+",
       "total": "Total",
-      "totalsRow": "Firm total"
+      "totalsRow": "Client total"
     },
     "fixedAssets": {
       "empty": "No fixed assets recorded for this client.",
@@ -231,7 +260,19 @@
       "accumulated": "Accumulated depreciation",
       "nbv": "Net book value",
       "method": "Method",
-      "incompleteNote": "{count} asset(s) have incomplete particulars."
+      "incompleteNote": "{count} asset(s) have incomplete particulars.",
+      "statuses": {
+        "pending": "Pending",
+        "active": "Active",
+        "superseded": "Superseded",
+        "disposed": "Disposed",
+        "unwound": "Unwound"
+      },
+      "methods": {
+        "straight_line": "Straight-line",
+        "reducing_balance": "Reducing balance",
+        "none": "None"
+      }
     },
     "adjustments": {
       "templatesHeading": "Templates",
@@ -243,7 +284,20 @@
       "cadence": "Cadence",
       "period": "Period",
       "amount": "Amount",
-      "mode": "Mode"
+      "mode": "Mode",
+      "statuses": {
+        "proposed": "Proposed",
+        "live": "Live",
+        "retired": "Retired"
+      },
+      "cadences": {
+        "monthly": "Monthly",
+        "annual": "Annual"
+      },
+      "modes": {
+        "post": "Posted",
+        "draft": "Draft"
+      }
     },
     "staffAdvances": {
       "empty": "No staff advances recorded for this client.",
@@ -257,7 +311,14 @@
       "code": "Code",
       "name": "Name",
       "type": "Type",
-      "inactive": "Inactive"
+      "inactive": "Inactive",
+      "types": {
+        "asset": "Asset",
+        "liability": "Liability",
+        "equity": "Equity",
+        "income": "Income",
+        "expense": "Expense"
+      }
     }
   },
   "ClientKnowledge": {

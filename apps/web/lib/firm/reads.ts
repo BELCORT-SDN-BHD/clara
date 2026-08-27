@@ -13,6 +13,10 @@
 //     name, status, created_at. `p_clients_human` (0003:514) + the table-level SELECT
 //     grant (0003:522-525) let a firm's own bookkeeper+ read every row scoped to
 //     firm_id = jwt_firm() — RLS does the firm scoping; no explicit filter is sent.
+//     `status` gained a THIRD value: 0017_wave_b.sql:658-659 replaces the CHECK
+//     constraint to admit 'onboarding' beside 'active'/'archived' — trued here after
+//     the independent review's superseded-body finding on a sibling module prompted
+//     a re-check of every citation in this file.
 //   - clara.client_facts (0055_client_facts_trio.sql:386-420, granted :467) — the
 //     entity_type/msic enrichment for the register, joined CLIENT-SIDE by client_id
 //     (two honest reads, never a fabricated join the DB doesn't offer). A client with
@@ -68,7 +72,7 @@ export function loadFirmActivity(session: SessionTokenAccessor, limit = 100): Pr
 export type ClientRow = {
   id: string;
   name: string;
-  status: "active" | "archived" | string;
+  status: "active" | "archived" | "onboarding" | string;
   created_at: string;
 };
 

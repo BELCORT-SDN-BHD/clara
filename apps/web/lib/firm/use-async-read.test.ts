@@ -39,30 +39,34 @@ test("a mount failure surfaces the raw error object, not just a message", async 
   }
 });
 
-test("act(): success re-reloads and clears any prior error", async () => {
+test("act(): success re-reloads, clears any prior error, and resolves true", async () => {
   let n = 0;
   const loader = async () => ({ n: ++n });
   const h = await renderHook(() => useAsyncRead(loader));
+  let ok: boolean | undefined;
   try {
     await h.settle();
     assert.deepEqual(h.current.data, { n: 1 });
-    await h.act(() => h.current.act(async () => {}));
+    await h.act(async () => { ok = await h.current.act(async () => {}); });
     assert.deepEqual(h.current.data, { n: 2 }, "act() must re-read, never assume the write's own result");
     assert.equal(h.current.error, null);
+    assert.equal(ok, true);
   } finally {
     await h.unmount();
   }
 });
 
-test("act(): a failed write's error is STICKY across the follow-up reload it triggers", async () => {
+test("act(): a failed write's error is STICKY across the follow-up reload it triggers, and resolves false", async () => {
   const loader = async () => ({ ok: true });
   const writeErr = new Error("CLR10: refused");
   const h = await renderHook(() => useAsyncRead(loader));
+  let ok: boolean | undefined;
   try {
     await h.settle();
-    await h.act(() => h.current.act(async () => { throw writeErr; }));
+    await h.act(async () => { ok = await h.current.act(async () => { throw writeErr; }); });
     assert.equal(h.current.error, writeErr, "the write's own failure must survive its own successful follow-up reload");
     assert.deepEqual(h.current.data, { ok: true }, "data still re-derives for real despite the sticky error");
+    assert.equal(ok, false, "act() must resolve false on a caught failure, never reject");
   } finally {
     await h.unmount();
   }
@@ -80,8 +84,56 @@ test("act(): when the follow-up reload ALSO fails, that failure wins over the wr
   const h = await renderHook(() => useAsyncRead(loader));
   try {
     await h.settle();
-    await h.act(() => h.current.act(async () => { throw writeErr; }));
+    await h.act(async () => { await h.current.act(async () => { throw writeErr; }); });
     assert.equal(h.current.error, reloadErr);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// Independent review finding PC2 (fix-required, 2026-08-27): a monotonic reload
+// epoch must make the LAST-STARTED reload win, regardless of resolution order —
+// never rely on a consumer to key itself to avoid the race.
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+test("reload(): the LAST-STARTED call wins even when an OLDER call resolves LATER", async () => {
+  const d1 = deferred<{ n: number }>();
+  const d2 = deferred<{ n: number }>();
+  const d3 = deferred<{ n: number }>();
+  const queue = [d1, d2, d3];
+  let callIndex = 0;
+  const loader = () => {
+    const d = queue[callIndex];
+    callIndex += 1;
+    if (!d) throw new Error("unexpected extra call");
+    return d.promise;
+  };
+  const h = await renderHook(() => useAsyncRead(loader));
+  try {
+    await h.settle(); // mount -> call #1 (d1), left unresolved
+    await h.act(() => {
+      void h.current.reload(); // call #2 (d2), left unresolved
+    });
+    await h.act(() => {
+      void h.current.reload(); // call #3 (d3), left unresolved
+    });
+    // Resolve the NEWER call (#3) first, then the OLDER call (#2) — #3 must still win.
+    await h.act(async () => {
+      d3.resolve({ n: 3 });
+    });
+    await h.settle();
+    await h.act(async () => {
+      d2.resolve({ n: 2 });
+    });
+    await h.settle();
+    assert.deepEqual(h.current.data, { n: 3 }, "the last-started reload must win regardless of resolution order");
+    d1.resolve({ n: 1 }); // tidy up the still-pending mount call
   } finally {
     await h.unmount();
   }

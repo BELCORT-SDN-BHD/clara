@@ -28,3 +28,25 @@ export function businessDate(instant: Date = new Date()): string {
 export function businessToday(): string {
   return businessDate(new Date());
 }
+
+/** N11 (independent review, 2026-08-27): a PROVENANCE timestamp (who recorded
+ *  what, when — an agent receipt, a client fact, a client's created_at) rendered
+ *  via the viewer's browser locale/timezone is the "two machines, two days"
+ *  audit-trail hazard — a reviewer in a DIFFERENT timezone than the firm's own
+ *  business day sees a date that can disagree with the DB's own idea of when the
+ *  act happened, exactly the class of bug `businessDate` above exists to
+ *  prevent for a query argument. This renders the SAME instant explicitly in
+ *  the business timezone, date AND time, so every viewer of an audit trail
+ *  reads the identical wall-clock moment regardless of where they are. */
+export function businessDateTime(instant: Date | string): string {
+  const d = typeof instant === "string" ? new Date(instant) : instant;
+  try {
+    return new Intl.DateTimeFormat("en-MY", {
+      timeZone: CLARA_BUSINESS_TIMEZONE,
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(d);
+  } catch {
+    return d.toISOString();
+  }
+}

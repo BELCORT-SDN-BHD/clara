@@ -16,6 +16,7 @@ import { DataState } from "@/components/firm/data-state";
 
 export function AgingRegister({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientRegisters.aging");
+  const tc = useTranslations("Common");
   const [domain, setDomain] = useState<AgingDomain>("ar");
   const asOf = businessToday();
   const { data, loading, error, reload } = useAsyncRead(() => loadAging(sessionTokenAccessor, domain, clientId, asOf));
@@ -66,11 +67,11 @@ export function AgingRegister({ clientId }: { clientId: string }) {
               {rows.map((r) => (
                 <tr key={r.counterparty_id} className="border-b border-border last:border-0">
                   <td className="py-2 pr-4 text-card-foreground">{r.counterparty_name ?? r.counterparty_id.slice(0, 8)}</td>
-                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.current_cents)}</td>
-                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.d31_60_cents)}</td>
-                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.d61_90_cents)}</td>
-                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.d91_plus_cents)}</td>
-                  <td className="py-2 pr-4 font-medium text-card-foreground">{fmtCents(r.total_cents)}</td>
+                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.current_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.d31_60_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.d61_90_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.d91_plus_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4 font-medium text-card-foreground">{fmtCents(r.total_cents, tc("centsUnsafe"))}</td>
                 </tr>
               ))}
             </tbody>
@@ -78,11 +79,11 @@ export function AgingRegister({ clientId }: { clientId: string }) {
               <tfoot>
                 <tr className="text-xs font-medium text-foreground">
                   <td className="py-2 pr-4">{t("totalsRow")}</td>
-                  <td className="py-2 pr-4">{fmtCents(data.totals.current_cents)}</td>
-                  <td className="py-2 pr-4">{fmtCents(data.totals.d31_60_cents)}</td>
-                  <td className="py-2 pr-4">{fmtCents(data.totals.d61_90_cents)}</td>
-                  <td className="py-2 pr-4">{fmtCents(data.totals.d91_plus_cents)}</td>
-                  <td className="py-2 pr-4">{fmtCents(data.totals.total_cents)}</td>
+                  <td className="py-2 pr-4">{fmtCents(data.totals.current_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4">{fmtCents(data.totals.d31_60_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4">{fmtCents(data.totals.d61_90_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4">{fmtCents(data.totals.d91_plus_cents, tc("centsUnsafe"))}</td>
+                  <td className="py-2 pr-4">{fmtCents(data.totals.total_cents, tc("centsUnsafe"))}</td>
                 </tr>
               </tfoot>
             ) : null}
