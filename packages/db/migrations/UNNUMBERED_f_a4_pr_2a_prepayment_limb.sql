@@ -970,4 +970,74 @@ revoke all on function clara.prepayment_schedule_v1(uuid, uuid) from public;
 comment on function clara.prepayment_schedule_v1(uuid, uuid) is
   'F-A4 PR-2a: the versioned deterministic evaluator behind wrapper 12. Amounts are DB-derived from the source entry''s own prepaid-asset leg; the emitted period_lines carry that ASSET half only, and the judged EXPENSE account is applied by clara._agent_prepayment_schedule_core under F2''s three walls. Whole-calendar-month straight line, remainder wholly in the final period. A calendar month is charged iff the term covers that month''s FIRST day (the uniform reading of law 20''s split-month doctrine, ruled 2026-08-27). Calls no other clara function, which is what keeps its evaluator_versions closure at ONE member and the freeze meaningful; a changed formula is _v2, never an edit.';
 
+-- =================================================================================================
+-- §E — agent_act_receipts.subject_kind ADMITS 'adjustment_template' (design §6.3, Annex E).
+--
+-- EXTEND, NEVER REWRITE. act_kind already admits 'prepayment_schedule' (0138:346-348 — a declared
+-- SHAPE 0138 shipped for exactly this verb) but subject_kind admits no template. The new set is the
+-- existing SIX values plus one; §0 captured the old definition so §TAIL can prove the six survived
+-- rather than trusting that they did.
+--
+-- WHY THE SUBJECT DIFFERS BY VERDICT, and why that is not cosmetic (Annex E). The derived op key is
+-- per (task, verb, CLIENT) — _close_expected_op_key hashes task || verb || subject (0138:1266-1269)
+-- and wrapper 12 pins its ctx subject to the client. So two source entries in ONE wake task carry
+-- the SAME op key. If the refusal receipt named the CLIENT as its subject, two entries refusing for
+-- the same reason would collide on uq_aar (firm, act_kind, subject_kind, subject_id, op_key,
+-- verdict, rung_digest — 0138:396), the read-back's identity guard would find every compared field
+-- equal, and entry B's refusal would be answered with ENTRY A'S RECEIPT ID. That is FIX-1's defect
+-- exactly, re-opened not by a missing comparison but by a subject too coarse to tell two acts apart.
+-- Hence: refused -> ('journal_entry', p_source_entry); acted -> ('adjustment_template', template).
+-- Both discriminate per entry, and the split across verdicts is the shipped idiom (the fix order
+-- records begin_close/open_fy/mint_snapshot as "safe by differing subject").
+--
+-- THE COLLISION IS NARROWER THAN A LOOSE READING SUGGESTS, WHICH IS WHY IT SURVIVED REVIEW:
+-- rung_digest is in uq_aar, so two refusals collide only when their rung VECTORS are byte-identical.
+-- That is not a corner — the ordinary path walks straight into it. Two prepaid entries on one
+-- client, neither carrying a service period, both refuse with the same single-element B10 vector.
+-- A narrow window the common case walks into is the worst kind.
+-- =================================================================================================
+alter table clara.agent_act_receipts drop constraint agent_act_receipts_subject_kind_check;
+alter table clara.agent_act_receipts add constraint ck_aar_subject_kind check (
+  subject_kind in ('client', 'fiscal_year', 'close_run', 'close_receipt', 'journal_entry',
+                   'snapshot', 'adjustment_template'));
+
+comment on constraint ck_aar_subject_kind on clara.agent_act_receipts is
+  'F-A4 PR-2a: the six kinds 0138 shipped plus ''adjustment_template'', which wrapper 12''s ACTED receipt names. EXPLICITLY NAMED, replacing the system-generated agent_act_receipts_subject_kind_check that 0138 produced by writing the CHECK inline on the column — so a later lane can select this constraint by a name someone chose rather than by a LIKE over its definition (the T.1b2 lesson: a predicate that matches on spelling picks up whatever else contains the word).';
+
+-- =================================================================================================
+-- §G — RESIDUAL 1: the bookkeeper conjunct mirrored into two read policies (design §7).
+--
+-- THE MEASURED DEFECT (fix order, post-re-verification follow-up 1): a firm VIEWER reads
+-- model_name / model_version / rationale / narrative straight off clara.close_proposals — the exact
+-- data class FIX-6 walled off on agent_act_receipts. p_cp_human (0138:558-559) and p_cph_human
+-- (0138:625-626) check firm_id = clara.jwt_firm() and NOTHING ELSE.
+--
+-- THE CONSUMER CENSUS WAS RUN BEFORE CHOOSING THE WALL — Annex B.0b carries it row by row, and its
+-- second cut names the four readers the first cut MISSED (a consumer census that misses readers is
+-- the instrument failure it exists to prevent). Its result: two definer doors that read under the
+-- OWNER policy and are unaffected; ZERO apps/web row reads (the close panel deliberately reads
+-- nothing); six rig readers, four as clara_fn_owner and two as superuser. Not one is a
+-- clara_authenticated row read, which is the only population this conjunct can touch. No legitimate
+-- consumer breaks.
+--
+-- close_prep_holds carries a WEAKER data class (a hold reason, not a model's rationale) and is
+-- walled anyway — stated here rather than left to inference: its own doors are bookkeeper-floored
+-- (0138:1573, :1608), so a record readable BELOW the floor of the act that wrote it is an
+-- inconsistency waiting to be found.
+--
+-- Spelled IDENTICALLY to 0138:427 and to §A's p_dsp_human, so every close-limb table reads as ONE
+-- rule rather than four similar ones.
+-- =================================================================================================
+drop policy p_cp_human on clara.close_proposals;
+create policy p_cp_human on clara.close_proposals
+  for select to clara_authenticated
+  using (firm_id = clara.jwt_firm()
+         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
+
+drop policy p_cph_human on clara.close_prep_holds;
+create policy p_cph_human on clara.close_prep_holds
+  for select to clara_authenticated
+  using (firm_id = clara.jwt_firm()
+         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
+
 -- ##FA4PR2A-APPEND-POINT##
