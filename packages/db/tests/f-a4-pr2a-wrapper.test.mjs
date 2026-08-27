@@ -1,0 +1,355 @@
+// F-A4 PR-2a -- Annex A, WRAPPER 12's ladder: the op-key discipline and receipt honesty under
+// multiplicity (W13-W16), F2's three walls (W39, W40), pre-rung (a) as a construction invariant
+// (W38), and the closed-world proof that the agent can never sign (W5).
+//
+// Every acted path here runs through a REAL clara_wake_interactive session, so a missing grant or
+// an argument-name mismatch is a finding rather than something a direct core call would smooth over.
+
+import test, { before } from "node:test";
+import assert from "node:assert/strict";
+import { noteLane } from "./rig-runtime-helpers.mjs";
+import { withTxn } from "./rig-txn.mjs";
+import {
+  ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught,
+  receiptsForTask, templateById, derivedOpKey, VERB12, uniq,
+} from "./f-a4-pr2a-fixtures.mjs";
+
+let skipped = 0;
+const markSkip = () => { skipped += 1; };
+before(async () => { await ensurePrepay(noteLane); });
+
+const PERIOD = { start: "2025-02-01", end: "2025-04-30" };
+
+/** A second document + approved prepaid entry on the SAME client, so two source entries can be
+ *  driven inside ONE wake task -- the multiplicity W14 is about. */
+async function secondEntry(sc, { cents = 90000 } = {}) {
+  const { seedVerifiedDocument, fileDocument } = await import("./rig-docs-fixtures.mjs");
+  const { draftEntryV3, approveEntry } = await import("./wave-a-reads.mjs");
+  const { freshResolution, opk } = await import("./wave-a-fixtures.mjs");
+  const doc = await seedVerifiedDocument({ firm: sc.firm, client: null, filename: `p2-${uniq()}.pdf` });
+  await fileDocument(sc.alice, { document: doc.documentId, client: sc.client, opKey: opk("fa4p2a-file2") });
+  const d = await draftEntryV3(sc.alice, {
+    client: sc.client,
+    resolution: await freshResolution(sc.alice, sc.client,
+      { subjectKind: "document", subjectId: doc.documentId }),
+    memo: `second prepaid ${uniq()}`, postingDate: "2025-01-16",
+    document: doc.documentId, sha256: doc.sha256,
+    lines: [
+      { account_code: sc.prepaid, debit_cents: cents, credit_cents: 0, description: "prepaid" },
+      { account_code: "170-C56", debit_cents: 0, credit_cents: cents, description: "paid" },
+    ],
+    opKey: opk("fa4p2a-draft2"),
+  });
+  await approveEntry(sc.bob, { entry: d.entry_id, expectedRevision: d.revision_token,
+    opKey: opk("fa4p2a-appr2") });
+  return { document: doc.documentId, entry: d.entry_id, cents };
+}
+
+// ---------------------------------------------------------------------------------------------
+// W13 -- the op-key discipline.
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W13 a caller-MINTED op key is refused, and a retry of the same act REPLAYS", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // TWO SCENES, deliberately. The forged-key attempt raises at Tier A, and a raise inside a wake
+  // session is not free of consequence for that session -- driving the replay arm in the same one
+  // measured the aftermath of the refusal rather than the replay. Separate sessions keep each arm
+  // about the thing it names.
+  const forgedScene = await prepaidScene("w13f");
+  await recordPeriod(forgedScene.alice, { document: forgedScene.document, ...PERIOD });
+  const forged = await caught(() => wake12(forgedScene.s,
+    { client: forgedScene.client, entry: forgedScene.entry, target: forgedScene.target,
+      opKey: "not-a-derived-key" }));
+  assert.ok(forged, "a hand-minted op key was accepted -- the derivation is not being enforced");
+  assert.match(String(forged.detail ?? forged.message), /op_key_not_derived|CLR10|derived/i);
+
+  const sc = await prepaidScene("w13");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted", `expected an act, got ${JSON.stringify(first).slice(0, 300)}`);
+
+  // *** AN OPEN DESIGN COLLISION, PINNED HERE RATHER THAN DECIDED IN A TEST -- reported to the
+  // conductor 2026-08-27, cell to be flipped with the ruling. ***
+  //   D-25 / cell B-11 say a same-task retry REPLAYS the stored outcome.
+  //   §6.2a pre-rung (b) says a re-wake over an already-drafted schedule REFUSES with the twin's id.
+  // Both are in the design and neither carves out the other. This build follows (b) literally, so a
+  // same-task retry meets the duplicate rung BEFORE the delegate's own replay can answer -- and the
+  // twin it names is the template THIS TASK just drafted. The act is not repeated and nothing is
+  // double-drafted, which is the safety property that matters; what is lost is IDEMPOTENCY OF THE
+  // ANSWER, and a lane retrying after a blip could read `refused` for work that succeeded.
+  const again = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(again.status, "refused",
+    "the same-task retry no longer meets pre-rung (b) -- if this changed deliberately, flip this cell to the B-11 replay contract");
+  assert.deepEqual((again.rung_vector ?? []).map((v) => v.token), ["template_duplicate_pending"]);
+  assert.equal(again.rung_vector[0].template_id, first.template_id,
+    "the refusal must NAME the standing twin, so the lane can see what already exists");
+
+  // WHAT IS SETTLED EITHER WAY, and the reason the collision is not urgent: the retry drafts
+  // NOTHING. One template, whichever way the ruling goes.
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
+  assert.equal(drafted.rows[0].n, 1, "the retry drafted a SECOND template");
+});
+
+// ---------------------------------------------------------------------------------------------
+// W14 / W15 -- RECEIPT HONESTY UNDER MULTIPLICITY. FIX-1's defect, re-opened by a subject too
+// coarse to tell two acts apart.
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W14 two source entries refusing for the SAME reason in ONE task write TWO receipts with distinct subjects", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE REFUSAL IS DRIVEN BY A TASK-LEVEL RUNG, and that choice is the whole point. Annex E names
+  // the collision case exactly: "a live hold or an incomplete model triple produces byte-identical
+  // vectors for every entry in the pass", because those are conditions of the TASK, not of the
+  // entry. An incomplete model triple gives B2 `receipt_incomplete`, whose payload carries nothing
+  // entry-specific.
+  //
+  // MEASURED WHILE WRITING THIS CELL, and worth recording: the B10 no-service-period refusal does
+  // NOT collide, because its payload names the entry and its document, so rung_digest already
+  // separates the two rows. The subject discrimination is belt-and-braces for that arm. The arm
+  // that genuinely needs it is this one -- so this is the arm the cell drives.
+  const sc = await prepaidScene("w14");
+  const second = await secondEntry(sc);
+  const a = await wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: sc.target, model: {} });
+  const b = await wake12(sc.s,
+    { client: sc.client, entry: second.entry, target: sc.target, model: {} });
+  assert.equal(a.status, "refused");
+  assert.equal(b.status, "refused");
+  assert.notEqual(a.receipt_id, b.receipt_id,
+    "the second entry's refusal was answered with the FIRST entry's receipt id -- FIX-1's defect, re-opened");
+
+  const rows = await receiptsForTask(sc.s.task);
+  const mine = rows.filter((r) => r.act_kind === "prepayment_schedule" && r.verdict === "refused");
+  assert.equal(mine.length, 2, "two refusals, two durable rows");
+  assert.deepEqual(mine.map((r) => r.subject_kind), ["journal_entry", "journal_entry"]);
+  assert.deepEqual([...new Set(mine.map((r) => r.subject_id))].sort(),
+    [sc.entry, second.entry].sort(), "each receipt names ITS OWN entry");
+  // And the vectors really are identical -- otherwise rung_digest would have separated them anyway
+  // and the cell would prove nothing about the subject.
+  assert.equal(mine[0].rung_digest, mine[1].rung_digest,
+    "the two refusals differ in their rung vector, so this cell is not exercising the collision it claims");
+});
+
+test("fa4p2a.W14-mutant collapsing the subject to the CLIENT reproduces the defect", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // Reproduced against the real uq_aar rather than a scratch build: two rows that differ ONLY in
+  // subject_id are what the fix relies on, so making them agree must collide.
+  const sc = await prepaidScene("w14m");
+  const second = await secondEntry(sc);
+  const a = await wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: sc.target, model: {} });
+  const b = await wake12(sc.s,
+    { client: sc.client, entry: second.entry, target: sc.target, model: {} });
+  await withTxn(async (c) => {
+    const e = await c.query(
+      "update clara.agent_act_receipts set subject_id = $1 where id = $2",
+      [sc.client, b.receipt_id]).then(() => null, (err) => err);
+    // Whether the collapse is refused by the unique key or by the table's own append-only rule, the
+    // point stands: the two rows are kept apart BY THE SUBJECT.
+    assert.ok(e, "collapsing the second receipt's subject onto the client was accepted -- nothing keeps the two acts apart");
+    assert.ok(["23505", "CLR08", "CLR10"].includes(e.code) || /immutable|append/i.test(String(e.message)),
+      `unexpected refusal shape: ${e.code} ${e.message}`);
+  }, { commit: false });
+  assert.notEqual(a.receipt_id, b.receipt_id);
+});
+
+test("fa4p2a.W15 refused-then-ACTED on the same entry in one task gives TWO receipts with honest verdicts", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // FIX-1's regression, extended to this verb: the acted receipt must never be answered with the
+  // refused one's id, and the refusal must still be on the table afterwards.
+  const sc = await prepaidScene("w15");
+  const refused = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(refused.status, "refused", "with no service period this must refuse");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const acted = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(acted.status, "acted", "with the fact recorded the SAME call must act");
+  assert.notEqual(acted.receipt_id, refused.receipt_id,
+    "the acted call returned the REFUSED receipt's id -- a receipt that lies about its own verdict");
+
+  const rows = await receiptsForTask(sc.s.task);
+  const mine = rows.filter((r) => r.act_kind === "prepayment_schedule");
+  assert.equal(mine.length, 2, "the refusal must still be on the table -- reverse, never delete");
+  assert.deepEqual(mine.map((r) => r.verdict).sort(), ["acted", "refused"]);
+  const act = mine.find((r) => r.verdict === "acted");
+  assert.equal(act.subject_kind, "adjustment_template", "the ACTED receipt names the template it minted");
+  assert.equal(act.subject_id, acted.template_id);
+});
+
+test("fa4p2a.W16 subject_kind EXTENDS, it does not loosen", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  const def = await rootQuery(
+    `select pg_get_constraintdef(c.oid) as d from pg_constraint c
+      where c.conrelid='clara.agent_act_receipts'::regclass and c.conname='ck_aar_subject_kind'`);
+  const d = def.rows[0].d;
+  for (const k of ["client", "fiscal_year", "close_run", "close_receipt", "journal_entry",
+                   "snapshot", "adjustment_template"]) {
+    assert.match(d, new RegExp(`'${k}'`), `subject_kind no longer admits ${k}`);
+  }
+  // MUTANT: an UNKNOWN kind still refuses, so the CHECK was extended rather than dropped.
+  const e = await caught(() => rootQuery(
+    `insert into clara.agent_act_receipts(firm_id, act_kind, subject_kind, subject_id, op_key,
+       verdict, acting_actor)
+     select firm_id, 'prepayment_schedule', 'not_a_kind', id, 'x', 'refused', id
+       from clara.users limit 1`));
+  assert.ok(e, "an unknown subject_kind was accepted -- the closed set is no longer closed");
+});
+
+// ---------------------------------------------------------------------------------------------
+// W39 / W40 -- F2's walls: the account is a JUDGEMENT, and it is validated, receipted and shown.
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W39 an INELIGIBLE target refuses; the acted receipt carries the account AND its basis; the sign surface renders both", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  const sc = await prepaidScene("w39");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+
+  // (1) DETERMINISTIC VALIDATION -- a BANK-class account refuses by the estate's own existing rule.
+  const bank = await rootQuery(
+    "select coa_account_code from clara.bank_accounts where client_id = $1 limit 1", [sc.client]);
+  const bankCode = bank.rows[0]?.coa_account_code ?? "170-C56";
+  const ineligible = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: bankCode });
+  assert.equal(ineligible.status, "refused");
+  const badTokens = (ineligible.rung_vector ?? []).map((v) => v.token);
+  assert.ok(badTokens.includes("prepayment_target_ineligible"),
+    `expected prepayment_target_ineligible, got ${badTokens.join(",")}`);
+
+  // A NON-EXPENSE account refuses on its own axis: an amortisation charge is an expense, and a
+  // balance-sheet target would move the prepayment sideways and never charge it.
+  const asset = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.prepaid });
+  assert.equal(asset.status, "refused");
+  assert.ok((asset.rung_vector ?? []).some((v) => v.axis === "not_expense_class"),
+    "a non-expense target was not refused on the expense-class axis");
+
+  // (2) RECEIPTED -- the account and its stated basis ride the acted receipt.
+  const acted = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(acted.status, "acted", `expected an act, got ${JSON.stringify(acted).slice(0, 200)}`);
+  assert.equal(acted.target_account, sc.target);
+  const rows = await receiptsForTask(sc.s.task);
+  const act = rows.find((r) => r.verdict === "acted" && r.act_kind === "prepayment_schedule");
+  assert.ok(act, "no acted receipt");
+  assert.match(act.rationale, new RegExp(sc.target), "the receipt does not name the judged account");
+  assert.match(act.rationale, /target account/, "the receipt does not carry the judgement's stated grounds");
+
+  // (3a) VISIBLE at the sign door -- the projection F2 wall 3 needs to be implementable at all.
+  const json = await rootQuery("select clara._adj_template_json($1) as j", [acted.template_id]);
+  const j = json.rows[0].j;
+  assert.ok(Object.hasOwn(j, "schedule"), "_adj_template_json does not project the schedule");
+  assert.ok(Array.isArray(j.schedule) && j.schedule.length === 3, "the schedule is not rendered");
+  assert.equal(j.target_account, sc.target, "the judged account is not visible at the sign surface");
+  assert.deepEqual(j.target_accounts, [sc.target]);
+
+  // MUTANT / positive control: the template really is only PROPOSED, and the sign door is untouched.
+  const tmpl = await templateById(acted.template_id);
+  assert.equal(tmpl.status, "proposed", "the agent's draft must never be live");
+  assert.ok(tmpl.schedule, "the template carries its per-occurrence schedule");
+});
+
+test("fa4p2a.W40 the no-plausible-account arm: an absent judgement refuses UNDERIVABLE, not INELIGIBLE", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // The distinction matters: `underivable` is the arm for "I could not pick with confidence", and
+  // it must never become the default path -- a lane that refused whenever it was unsure would never
+  // charge anything, which is over-caution wearing a safety property's clothes.
+  const sc = await prepaidScene("w40");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const none = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: "   " });
+  assert.equal(none.status, "refused");
+  const toks = (none.rung_vector ?? []).map((v) => v.token);
+  assert.ok(toks.includes("prepayment_target_underivable"),
+    `expected prepayment_target_underivable, got ${toks.join(",")}`);
+
+  // And a MISSING BASIS refuses too -- a judgement with no recorded grounds is what TA-P4 prevents.
+  const noBasis = await wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: sc.target, basis: "  " });
+  assert.equal(noBasis.status, "refused");
+  assert.ok((noBasis.rung_vector ?? []).some((v) => v.axis === "basis_missing"),
+    "a judged account with NO stated basis was accepted");
+
+  // MUTANT / positive control: with a plausible account AND its basis the same call ACTS.
+  const ok = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(ok.status, "acted", "the refusal is not conditional -- W40 is refusing everything");
+});
+
+// ---------------------------------------------------------------------------------------------
+// W38 / W5 -- the construction invariant, and the closed-world sign proof.
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W38 (F3 pre-rung a) the constructed template start is a PERIOD START for a term beginning on ANY day of a month", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // Under F1's ruled convention monthly IS calendar-month at the bytes, so alignment holds BY
+  // CONSTRUCTION and the rung can no longer fire on ordinary caller input. It is kept as a
+  // self-check; this cell proves the invariant across every start day rather than one.
+  // ONE SCENE PER DAY. The op key derives per (task, verb, client), so re-driving the same verb in
+  // one session after the world has moved is refused by _reserve_op as "op_key reused with
+  // different args" -- which is the estate being right and my first cut asking the wrong question.
+  for (const day of ["01", "02", "15", "28"]) {
+    const sc = await prepaidScene(`w38d${day}`);
+    await recordPeriod(sc.alice, { document: sc.document, start: `2025-02-${day}`, end: "2025-06-30",
+      basis: `term starting on day ${day}` });
+    const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+    if (r.status === "refused") {
+      const toks = (r.rung_vector ?? []).map((v) => v.token);
+      assert.ok(!toks.includes("template_alignment_unmet"),
+        `a term starting on day ${day} produced a MISALIGNED template -- the construction invariant is false`);
+      continue;
+    }
+    const tmpl = await templateById(r.template_id);
+    const aligned = await rootQuery(
+      "select clara._adj_period_start($1,'monthly',$2::date) = $2::date as ok", [sc.client, tmpl.start_date]);
+    assert.equal(aligned.rows[0].ok, true,
+      `the template built for a day-${day} term does not start on a period start`);
+  }
+});
+
+test("fa4p2a.W38-mutant a hand-built MISALIGNED start makes the rung fire -- it is live code, not a comment", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  const sc = await prepaidScene("w38m");
+  const mid = await rootQuery(
+    "select clara._adj_period_start($1,'monthly',date '2025-02-15') as ps", [sc.client]);
+  assert.notEqual(mid.rows[0].ps.toISOString?.().slice(0, 10) ?? String(mid.rows[0].ps), "2025-02-15",
+    "a mid-month date IS a period start on this client -- the mutant cannot discriminate");
+  // The delegate itself refuses a misaligned start, which is the structural wall the pre-rung only
+  // anticipates (Annex F.3: the pre-rungs are courtesies, not walls).
+  const e = await caught(() => rootQuery(
+    `select clara._propose_adjustment_template_core(
+       jsonb_build_object('firm', $1::uuid, 'actor', (select id from clara.users limit 1)),
+       $2::uuid, $3, 'monthly', date '2025-02-15', date '2025-04-30', false,
+       $4::jsonb, 'm', $5, null, null)`,
+    [sc.firm, sc.client, `w38m-${uniq()}`,
+      JSON.stringify([{ account_code: sc.target, debit_cents: 100, credit_cents: 0 },
+                      { account_code: sc.prepaid, debit_cents: 0, credit_cents: 100 }]),
+      `w38m-${uniq()}`]));
+  assert.ok(e, "a misaligned start was accepted by the delegate -- the structural wall is gone");
+  assert.match(String(e.detail ?? e.message), /template_fy_stale|alignment|period/i);
+});
+
+test("fa4p2a.W5 THE AGENT CAN NEVER SIGN -- a closed-world read, with its ceiling stated", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE BINDING HALF IS STRUCTURAL: clara.sign_adjustment_template holds EXECUTE for no wake role.
+  const acl = await rootQuery(
+    `select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') as a
+       from pg_proc p where p.oid = to_regprocedure('clara.sign_adjustment_template(uuid,uuid,text)')`);
+  assert.doesNotMatch(acl.rows[0].a, /clara_wake_/, "a wake role holds EXECUTE on the signing door");
+  assert.doesNotMatch(acl.rows[0].a, /^=|,=/, "the signing door is executable by PUBLIC");
+  assert.match(acl.rows[0].a, /clara_authenticated/, "the HUMAN path must stay open");
+
+  // THE PROSRC HALF IS A SPELLING INSTRUMENT, and its ceiling is stated HERE rather than implied:
+  // it cannot tell a WRITE of status='live' from a comparison against it, so it is reported and
+  // paired with the ACL half above, which is the claim that actually binds (Annex A's own W5 note).
+  const writers = await rootQuery(
+    `select count(*)::int as n from pg_proc p where p.pronamespace='clara'::regnamespace
+       and p.prosrc ~ 'status\\s*=\\s*''live'''`);
+  noteLane(`W5: ${writers.rows[0].n} bodies mention status='live' (a spelling scan -- comparisons included; the ACL half is the binding claim)`);
+
+  // And wrapper 12 reaches only the PROPOSE core: its acted answer says `proposed`, every time.
+  const sc = await prepaidScene("w5");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(r.status, "acted");
+  assert.equal(r.status_of_template, "proposed");
+  const tmpl = await templateById(r.template_id);
+  assert.equal(tmpl.status, "proposed");
+  assert.equal(tmpl.signed_by, null, "the agent's draft carries a signature");
+});
+
+test("fa4p2a.armed-skip the focused run records ZERO skips", async () => {
+  assert.equal(skipped, 0,
+    `${skipped} cell(s) skipped -- a focused PR-2a run must fail rather than skip`);
+  void VERB12; void derivedOpKey;
+});
