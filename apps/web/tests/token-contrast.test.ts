@@ -24,9 +24,11 @@ import {
  *     reported as failing — a detector that can only ever say "PASS" is
  *     worthless; this is the deliberately-red arm review law 1 asks for), and
  *   - the REAL `app/globals.css` pairs end to end, pinned to today's known,
- *     honest result (25 passing + the one documented near-threshold
- *     violation) so a silent regression — or a silent "fix" that edits the
- *     ratio here instead of the token — is caught either direction.
+ *     honest result (P3 finale: every pinned pair passes — the one former
+ *     near-miss was RETIRED by the polish's rewrite onto the shared
+ *     StateBanner, not nudged over the line) so a silent regression — or a
+ *     silent "fix" that edits the ratio here instead of the token — is
+ *     caught either direction.
  */
 
 describe("colour-math primitives", () => {
@@ -75,9 +77,29 @@ describe("parseRootTokens + resolveTokenHex", () => {
     const tokens = parseRootTokens(css);
     assert.equal(tokens.get("canvas"), "#ffffff");
     assert.equal(tokens.get("background"), "var(--canvas)");
-    // The reduced-motion re-opening of :root is never reached (non-greedy
-    // match stops at the first block's own closing brace).
+    // The reduced-motion re-opening of :root is never reached (the match
+    // stops at the first block's own closing brace).
     assert.equal(tokens.has("motion-duration-fast"), false);
+  });
+
+  it("does not truncate at a literal '}' character sitting inside a comment inside the block (the real app/globals.css has exactly this, in its FOCUS TREATMENT note)", () => {
+    // Regression fixture for a real bug found running this suite against the
+    // P3-polished app/globals.css: a documentation comment quoting CSS
+    // (`outline-offset: 2px; }`) used to satisfy the old comment-blind
+    // regex's `[^}]*` before the block's OWN closing brace, silently
+    // truncating the parsed token set — every token declared after the
+    // comment (including --foreground) came back "unknown".
+    const css = `
+      :root {
+        --canvas: #ffffff;
+        /* a note quoting CSS, e.g. "outline-offset: 2px; }" — must not end the block */
+        --background: var(--canvas);
+        --foreground: var(--background);
+      }
+    `;
+    const tokens = parseRootTokens(css);
+    assert.equal(tokens.get("background"), "var(--canvas)");
+    assert.equal(tokens.get("foreground"), "var(--background)", "a brace inside a comment must never be mistaken for the block's own closing brace");
   });
 
   it("resolves a var() chain to its terminal hex literal", () => {
@@ -160,21 +182,28 @@ describe("the REAL app/globals.css pairs, end to end", () => {
     }
   });
 
-  it("KNOWN VIOLATION, pinned honestly: the destructive/80 door-refusal line stays a documented near-miss", () => {
-    const r = results.find((x) => x.id === "destructive-80pct-on-destructive-5-box");
-    assert.ok(r, "the known-violation pair must still be evaluated, not silently dropped");
-    assert.equal(r.pass, false, "if this now passes, the token/opacity choice was fixed — update this test AND report it, do not just delete the assertion");
-    assert.ok(r.ratio > 4.0 && r.ratio < 4.5, `expected a near-miss around 4.36:1, got ${r.ratio}:1`);
+  it("RETIRED, honestly: the old destructive/80 door-refusal pairs no longer exist — action-refusal.tsx and reconciliation-section.tsx now render through the shared StateBanner", () => {
+    // These two ids must never silently reappear in PAIR_SPECS unless a
+    // bespoke bg-destructive/5-tinted box genuinely comes back into the
+    // codebase (it does not, as of the P3 finale fold) — see
+    // check-token-contrast.mjs's own header, "THE P3 FINALE RE-CENSUS".
+    assert.equal(results.find((x) => x.id === "destructive-80pct-on-destructive-5-box"), undefined);
+    assert.equal(results.find((x) => x.id === "destructive-full-on-destructive-5-box"), undefined);
+    // Its replacement shapes are both present and both pass.
+    for (const id of ["error-on-error-muted", "error-on-card"]) {
+      const r = results.find((x) => x.id === id);
+      assert.ok(r, `missing replacement pair ${id}`);
+      assert.equal(r.pass, true, `${id} must pass — it is what the retired near-miss pair was replaced by`);
+    }
   });
 
-  it("exactly one pair fails today — a second regression would mean a NEW violation slipped in unreported", () => {
+  it("every pinned pair passes today — the strict gate (apps/web's lint script) has no WARN carve-out left, so a single regression here fails the build", () => {
     const failing = results.filter((r) => !r.pass);
     assert.equal(
       failing.length,
-      1,
-      `expected exactly 1 known failing pair, got ${failing.length}: ${failing.map((r) => r.id).join(", ")}`,
+      0,
+      `expected zero failing pairs, got ${failing.length}: ${failing.map((r) => r.id).join(", ")}`,
     );
-    assert.equal(failing[0]!.id, "destructive-80pct-on-destructive-5-box");
   });
 });
 

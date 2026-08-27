@@ -77,41 +77,70 @@ function gateApp() {
   });
 }
 
-// KNOWN VIOLATION (found BY this keyboard walk, not fixed here — hard scope
-// wall on this lane): GateCheckRow's AttestForm passes `disabled={reason.
-// trim().length === 0}` to CloseDoorDialog, which applies that `disabled`
-// to the DIALOG TRIGGER button itself (CloseDoorDialog.tsx: `<DialogTrigger
-// render={<Button ... disabled={disabled} />}>`). `reason` starts as `""`
-// and its ONLY input — the `<Textarea>` — is passed as `children`, rendered
-// INSIDE `<DialogContent>`, i.e. it does not exist in the DOM until the
-// dialog is already open. The trigger can therefore NEVER be activated, by
-// keyboard OR mouse: this is not a keyboard-specific gap, it is WCAG 2.1.1
-// (Keyboard) failing for every input modality at once — the drawer-2 gate-
-// exception Attest door is completely unreachable as shipped. Proven here
-// rather than asserted away: `attestTrigger.disabled` reads `true`, and a
-// `click` fired at a genuinely disabled native `<button>` (mkNode's real
-// `HTMLButtonElementStub`) never invokes its `onClick`, so the dialog never
-// opens — exactly what a real browser does with a disabled button.
-test("KNOWN VIOLATION: the Attest door's own trigger is permanently disabled — the reason field it waits on only exists inside the dialog it is blocking", async () => {
+// FIXED (P3 finale fold-seam truing): this test used to pin a KNOWN
+// VIOLATION — GateCheckRow's AttestForm passed `disabled={reason.trim().
+// length === 0}` to CloseDoorDialog, which applied that `disabled` to the
+// DIALOG TRIGGER button itself, while the field it gated on (the reason
+// textarea) lived INSIDE the dialog that trigger opens: a deadlock, WCAG
+// 2.1.1 failing for every input modality at once. The P3 polish repaired it
+// at the source (CloseDoorDialog.tsx's own header records the blocker and
+// the fix): the prop is now named `confirmDisabled` and gates ONLY the
+// CONFIRM button inside the dialog — the trigger itself takes no `disabled`
+// prop at all any more and is unconditionally reachable. This test now pins
+// THAT fix: the trigger is enabled from first render (the opposite of the
+// old assertion), the click genuinely opens the dialog and reaches the
+// reason field, and — per the polished trigger-test idiom in
+// components/close/close-components.test.tsx's BLOCKER tests (reading the
+// live `disabled` property, never string-matching) — the gate DID NOT
+// disappear, it moved: exactly the dialog's own Confirm button stays
+// disabled while the reason is empty, and the trigger is never that button.
+test("the drawer-2 Attest door's trigger is ENABLED from first render, and Confirm (not the trigger) gates on the reason field it opens", async () => {
   const h = await renderComponent(gateApp());
+  const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+  body.appendChild(h.container);
   try {
     for (let i = 0; i < 2; i++) await h.settle();
     const attestTrigger = h.find((n) => n.tagName === "BUTTON");
     assert.ok(attestTrigger, "the Attest dialog trigger must render as a real <button>");
-    assert.equal((attestTrigger as unknown as { disabled: boolean }).disabled, true, "reproduces the deadlock: disabled from first render, before any human input");
     assert.equal(
-      focusableElements(h.container as never).includes(attestTrigger as never),
+      (attestTrigger as unknown as { disabled: boolean }).disabled,
       false,
-      "a disabled control is correctly excluded from the keyboard-operable set — this IS the violation, not a detector miss",
+      "the fix: the trigger is enabled from first render, before any human input — it no longer waits on content only reachable inside itself",
+    );
+    assert.ok(
+      focusableElements(h.container as never).includes(attestTrigger as never),
+      "an enabled trigger must be keyboard-reachable",
     );
 
-    let openedDialogContent = false;
     await h.fireEvent(attestTrigger as never, "click");
     for (let i = 0; i < 3; i++) await h.settle();
-    openedDialogContent = h.text().includes("Textarea") || h.find((n) => n.tagName === "TEXTAREA") !== null;
-    assert.equal(openedDialogContent, false, "confirms the click genuinely did nothing — the dialog never opens");
+
+    const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+    assert.ok(textarea, "the click genuinely opens the dialog and reaches the reason field — the deadlock is gone");
+    assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
+
+    // The confirm-gating claim: the disabled condition MOVED, it did not
+    // disappear. The dialog's own Confirm button — a second, distinct
+    // "Attest"-labelled <button> now in the tree — must be disabled while
+    // the reason is empty, and the ORIGINAL trigger must never be it.
+    const confirmButton = findIn(
+      body as never,
+      (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Attest") && (n as unknown) !== (attestTrigger as unknown),
+    );
+    assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
+    assert.equal(
+      (confirmButton as unknown as { disabled: boolean }).disabled,
+      true,
+      "Confirm stays disabled while the reason is empty — the gate moved here, it did not disappear",
+    );
+    assert.equal(
+      (attestTrigger as unknown as { disabled: boolean }).disabled,
+      false,
+      "the trigger itself must remain enabled after opening — it is not the one being gated",
+    );
   } finally {
     await h.unmount();
+    for (let i = 0; i < 3; i++) await h.settle();
   }
 });
 

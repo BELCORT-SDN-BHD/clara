@@ -19,8 +19,9 @@
  * THE CLOSED-WORLD PAIR LIST (`PAIR_SPECS` below): which foreground sits on
  * which background is NOT invented — every entry was derived from a census
  * of actual `text-*`/`bg-*` (and their `/opacity` variants) co-occurring in
- * `apps/web/components/**` and `apps/web/app/**` (run 2026-08-27, the
- * grep this file's own header would reproduce:
+ * `apps/web/components/**` and `apps/web/app/**` (re-run 2026-08-27 against
+ * the POLISHED tree — the P3 finale fold-seam pass — the grep this file's
+ * own header would reproduce:
  *   rg -n '(text|bg)-(background|foreground|card|card-foreground|popover|
  *   popover-foreground|primary|primary-foreground|secondary|secondary-
  *   foreground|muted|muted-foreground|accent|accent-foreground|destructive|
@@ -42,15 +43,54 @@
  * hand), because a ring nobody can see is a keyboard-walk failure (gate (c))
  * wearing a contrast-gate disguise.
  *
- * WARN vs STRICT: two real pairs in the current token set fail their
- * threshold (see `main()`'s report) — the `text-destructive/80` code/reason
- * line in `components/bank/action-refusal.tsx` computes to a hair under
- * 4.5:1 once its own translucent alert box is correctly composited. Per Q7
- * + the owner's "ship in WARN mode" instruction, this gate REPORTS every
- * failing pair with its measured ratio and exits 0 by default — it never
- * silently adjusts a token (that is the polish lane's call, not this
- * script's). Pass `--strict` (a human or a later, tokens-fixed CI step) to
- * make a real failure exit 1.
+ * THE P3 FINALE RE-CENSUS (fold-seam truing against the polished tree):
+ *   RETIRED — `destructive-full-on-destructive-5-box` and
+ *   `destructive-80pct-on-destructive-5-box`: their sole sources
+ *   (`components/bank/action-refusal.tsx`'s message,
+ *   `components/bank/reconciliation-section.tsx`'s stale-box) no longer
+ *   render a bespoke `bg-destructive/5` tinted box at all — the P3 polish
+ *   moved both onto the shared `<StateBanner tone="error">`
+ *   (`components/common/state.tsx`), whose own `border-error/30
+ *   bg-error-muted text-error` markup is the ALREADY-covered
+ *   `error-on-error-muted` pair below. `RETIRED` — `info-on-background`:
+ *   its sole source (`components/firm/data-state.tsx`'s bare `text-info`
+ *   info variant) was likewise folded into `<StateBanner tone="info">`
+ *   (`bg-info-muted text-info`) — the already-covered `info-on-info-muted`
+ *   pair. Grepping the polished tree for a bare, unboxed `text-info` or
+ *   `text-destructive/[0-9]+` confirms zero remaining consumers of either
+ *   retired shape.
+ *   ADDED — `destructive-on-destructive-10`: the shadcn `destructive`
+ *   variant of `components/ui/button.tsx`/`components/ui/badge.tsx`
+ *   (`bg-destructive/10 text-destructive`) is heavily consumed (void/legal-
+ *   hold/uncertified/claim-removed badges, the reconciliation void action,
+ *   the statements/posted-panel reversal buttons) and was never in the
+ *   original 26-pair census — a genuine gap, not a polish-introduced shape.
+ *   `error-on-card`: `StateBanner`'s own `code` chip
+ *   (`border-current/25 bg-card`, inheriting the tone's `text-error`) is a
+ *   real new co-occurrence — the pre-polish code line rendered dimmed text
+ *   directly on the tinted alert box (the now-retired `destructive-80pct`
+ *   pair); the polish moved the code onto its own `bg-card` chip instead
+ *   (`components/common/state.tsx`'s own header explains why: "a tinted
+ *   chip on a tinted banner has no visible edge"). `clara-on-background`:
+ *   the P3 "canvas swap" (`app/(firm)/layout.tsx`'s content column moved off
+ *   `--shell` onto `--background`, see that file's own TOKEN-ROLE FIX note)
+ *   means `components/clara/ClaraFullScreenThread.tsx`'s `text-clara`
+ *   heading now sits on `--background` rather than a `bg-card` chrome —
+ *   kept as its own pair rather than folded into `clara-on-card` (which
+ *   stays real via `components/clara/ClaraRail.tsx`'s `bg-card` panel) for
+ *   the same token-drift reason `sidebar-accent-foreground-on-sidebar-accent`
+ *   is kept separate from `accent-foreground-on-accent` below, even though
+ *   both resolve to the same hex today.
+ *   Several KEPT pairs had their `source` comments trued to the polished
+ *   call sites (a stale citation — e.g. a file that moved onto SectionTabs
+ *   or StateBanner — does not retire the PAIR when another real consumer
+ *   still renders it; it just needed its citation corrected).
+ *
+ * Every pair below PASSES today — the P3 finale fold retired the one
+ * pre-existing near-miss (see RETIRED, above) rather than nudging its
+ * ratio, so the gate has no WARN carve-out left to keep: `main()` now fails
+ * the build on ANY failing pair, unconditionally (no `--strict` flag to
+ * pass or forget).
  */
 
 import { readFileSync } from "node:fs";
@@ -132,7 +172,19 @@ export function alphaBlend(fgHex, alpha, overHex) {
 
 /** @returns {Map<string, string>} CSS custom-property name (no `--`) -> raw declared value */
 export function parseRootTokens(cssText) {
-  const match = cssText.match(/:root\s*\{([^}]*)\}/);
+  // Comments are stripped FIRST, unconditionally. `app/globals.css`'s own
+  // FOCUS TREATMENT note (the `:root` block's longest comment) quotes real
+  // CSS containing a literal "}" — `outline: 2px solid var(--focus);
+  // outline-offset: 2px; }` — and the match below, which stops at the FIRST
+  // `}` it can reach, used to stop right there: every token declared after
+  // that comment (`--foreground` included) silently never made it into the
+  // returned Map, surfacing downstream as `unknown token: --foreground`
+  // rather than as a parsing bug. A real CSS parser discards comments
+  // before it ever looks at block structure; this now does too, so a
+  // documentation comment can never again masquerade as the block's own
+  // closing brace.
+  const withoutComments = cssText.replace(/\/\*[\s\S]*?\*\//g, "");
+  const match = withoutComments.match(/:root\s*\{([^}]*)\}/);
   if (!match) throw new Error("no :root { … } block found in globals.css");
   const body = match[1];
   const tokens = new Map();
@@ -180,7 +232,7 @@ export function resolveTokenHex(tokens, name, depth = 0) {
 export const PAIR_SPECS = [
   // --- Base surface pairs: the foundation almost every screen rests on ---
   { id: "foreground-on-background", fg: (h) => h("foreground"), bg: (h) => h("background"), threshold: 4.5,
-    source: "globals.css @layer base — body { bg-background text-foreground }" },
+    source: "globals.css @layer base — body { bg-background text-foreground }. Also the real, literal ambient for every P3 firm-shell page's content column since the P3 polish's canvas-swap TOKEN-ROLE FIX (app/(firm)/layout.tsx's content <div> moved off --shell onto --background) — previously this pair was true only of <body> itself; now every page's own content genuinely renders against it." },
   { id: "card-foreground-on-card", fg: (h) => h("card-foreground"), bg: (h) => h("card"), threshold: 4.5,
     source: "every bg-card panel's default text — components/ui/card.tsx, PartSummaryCard, GateCheckRow, needs-you-row, ArtifactRow, CloseReceiptPanel dt/dd" },
   { id: "popover-foreground-on-popover", fg: (h) => h("popover-foreground"), bg: (h) => h("popover"), threshold: 4.5,
@@ -190,11 +242,11 @@ export const PAIR_SPECS = [
 
   // --- Interactive-control pairs ---
   { id: "primary-foreground-on-primary", fg: (h) => h("primary-foreground"), bg: (h) => h("primary"), threshold: 4.5,
-    source: "components/ui/button.tsx default variant, components/bank/bank-workbench.tsx active tab, components/firm/needs-you-row.tsx approve button" },
+    source: "components/ui/button.tsx default variant (bg-primary text-primary-foreground), components/ui/badge.tsx default variant, components/firm/needs-you-row.tsx's approve/resolve <Button> (no variant prop — the default). components/bank/bank-workbench.tsx's active tab moved off this pattern onto the shared components/common/section-tabs.tsx underline in the P3 polish (that file's own header note: \"the filled-primary pill strip became the shared <SectionTabs> underline\")." },
   { id: "accent-foreground-on-accent", fg: (h) => h("accent-foreground"), bg: (h) => h("accent"), threshold: 4.5,
-    source: "components/ui/select.tsx item focus:bg-accent focus:text-accent-foreground; components/ui/command.tsx selected item" },
+    source: "components/ui/select.tsx item focus:bg-accent focus:text-accent-foreground. components/ui/command.tsx's own selected item moved onto data-selected:bg-muted data-selected:text-foreground in the P3 polish (now a foreground-on-muted consumer, below) — select.tsx alone keeps this pair real." },
   { id: "sidebar-foreground-on-sidebar", fg: (h) => h("sidebar-foreground"), bg: (h) => h("sidebar"), threshold: 4.5,
-    source: "app/(firm)/layout.tsx aside (bg-sidebar) + components/firm-nav.tsx base link state (text-sidebar-foreground)" },
+    source: "app/(firm)/layout.tsx <aside> (bg-sidebar) + components/firm-nav.tsx base link state (text-sidebar-foreground) — the sidebar itself is the one chrome surface the P3 canvas-swap deliberately left on --shell (== --sidebar)" },
   { id: "sidebar-accent-foreground-on-sidebar-accent", fg: (h) => h("sidebar-accent-foreground"), bg: (h) => h("sidebar-accent"), threshold: 4.5,
     source: "components/firm-nav.tsx hover/active state (hover:bg-sidebar-accent hover:text-sidebar-accent-foreground). Resolves to the same hex as accent-foreground-on-accent today — kept as its own pair because the token contract keeps the roles separate on purpose (globals.css header)." },
 
@@ -204,41 +256,37 @@ export const PAIR_SPECS = [
   { id: "muted-foreground-on-card", fg: (h) => h("muted-foreground"), bg: (h) => h("card"), threshold: 4.5,
     source: "the same caption style inside a bg-card row — components/firm/needs-you-row.tsx dl, components/reports/ArtifactRow.tsx dt, components/close/CloseReceiptPanel.tsx dt" },
   { id: "muted-foreground-on-muted", fg: (h) => h("muted-foreground"), bg: (h) => h("muted"), threshold: 4.5,
-    source: "text-muted-foreground inside an explicit muted box — components/bank/exceptions-section.tsx, components/bank/settle-line-form.tsx, components/bank/write-off-form.tsx (bg-muted/30) and components/ui/table.tsx header row (bg-muted/50)" },
+    source: "text-muted-foreground inside an explicit muted box — components/bank/exceptions-section.tsx, components/bank/settle-line-form.tsx, components/bank/write-off-form.tsx (bg-muted/30) and components/ui/table.tsx header row (bg-muted/50); also components/parts/PartBadge.tsx's neutral chip variant (bg-muted text-muted-foreground)" },
   { id: "foreground-on-muted", fg: (h) => h("foreground"), bg: (h) => h("muted"), threshold: 4.5,
-    source: "the active-tab state — components/client-workspace-nav.tsx and components/registers/registers-workbench.tsx (bg-muted text-foreground)" },
+    source: "the active-tab state — components/client-workspace-nav.tsx (bg-muted text-foreground); the P3-polished components/ui/command.tsx CommandItem's own selected state (data-selected:bg-muted data-selected:text-foreground, moved off accent tokens). registers-workbench.tsx's former copy of the active-tab pattern moved onto the shared components/common/section-tabs.tsx (a border-primary indicator, not a muted fill), which does not render this pair." },
   { id: "foreground-on-clara-muted", fg: (h) => h("foreground"), bg: (h) => h("clara-muted"), threshold: 4.5,
     source: "components/clara/ClaraThreadView.tsx assistant chat bubble (bg-clara-muted, default/inherited text colour)" },
 
   // --- Brand/Clara accent text ---
   { id: "clara-on-card", fg: (h) => h("clara"), bg: (h) => h("card"), threshold: 4.5,
-    source: "components/clara/ClaraRail.tsx and ClaraFullScreenThread.tsx heading (text-clara) on the rail/full-screen chrome" },
+    source: "components/clara/ClaraRail.tsx heading (text-clara) on the docked rail's own bg-card panel" },
+  { id: "clara-on-background", fg: (h) => h("clara"), bg: (h) => h("background"), threshold: 4.5,
+    source: "components/clara/ClaraFullScreenThread.tsx heading (text-clara), whose <header> carries no background of its own and inherits the full-screen container's bg-background — a distinct real pair from clara-on-card above since the P3 polish's canvas swap, even though both resolve to the same hex today (same token-drift rationale as sidebar-accent-foreground-on-sidebar-accent)." },
   { id: "primary-on-background", fg: (h) => h("primary"), bg: (h) => h("background"), threshold: 4.5,
-    source: "inline text links — components/firm/client-register-list.tsx, components/firm/needs-you-row.tsx, components/journals/journals-workbench.tsx retry, components/registers/knowledge-panel.tsx (text-primary underline)" },
+    source: "inline text links — components/firm/client-register-list.tsx, components/firm/needs-you-row.tsx (text-primary underline)" },
 
   // --- Semantic state colours: plain text AND their own -muted containers ---
   { id: "warning-on-background", fg: (h) => h("warning"), bg: (h) => h("background"), threshold: 4.5,
     source: "components/journals/drafts-queue-panel.tsx highStakes/linesTruncated, components/firm/client-register-list.tsx factsUnavailableNote, components/documents/upload-panel.tsx hint, components/registers/fixed-assets-register.tsx incompleteNote, components/journals/entry-lines-editor.tsx unbalanced cell" },
   { id: "warning-on-warning-muted", fg: (h) => h("warning"), bg: (h) => h("warning-muted"), threshold: 4.5,
-    source: "components/parts/PartRenderer.tsx status-pill chip (border-warning/40 bg-warning-muted text-warning)" },
+    source: "components/parts/PartBadge.tsx warning chip (border-warning/40 bg-warning-muted text-warning), consumed by PartRenderer.tsx's status-pill fallback (<Badge tone=\"warning\">)" },
   { id: "error-on-background", fg: (h) => h("error"), bg: (h) => h("background"), threshold: 4.5,
-    source: "the dominant plain text-destructive/text-error usage — components/close/FiscalYearPicker.tsx, components/journals/journals-workbench.tsx, components/journals/compose-dialog.tsx, components/journals/posted-panel.tsx, components/login-form.tsx, components/invite-accept-form.tsx, components/reports/ExportRecipientsPanel.tsx, components/reports/ArtifactRow.tsx, components/reports/ReportAgentReceiptsPanel.tsx, components/reports/StatutoryReportsPanel.tsx, components/bank/matching-section.tsx, components/bank/statements-section.tsx, components/bank/settle-line-form.tsx, components/bank/write-off-form.tsx, components/firm/data-state.tsx, components/documents/document-metadata.tsx" },
+    source: "the surviving BARE (unboxed) text-error usage — components/documents/upload-panel.tsx per-file error line, components/reports/ArtifactRow.tsx byteSizeInvalid note, components/reports/FreeformReadsPanel.tsx refusal_reason, components/reports/ReportAgentReceiptsPanel.tsx refusal_token. Every other former bare-text-error surface (FiscalYearPicker, journals-workbench, compose-dialog, posted-panel, login-form, invite-accept-form, matching-section, statements-section, settle-line-form, write-off-form, data-state.tsx, document-metadata.tsx, ExportRecipientsPanel, StatutoryReportsPanel) moved onto the shared StateBanner box in the P3 polish — already covered by error-on-error-muted and error-on-card below." },
   { id: "error-on-error-muted", fg: (h) => h("error"), bg: (h) => h("error-muted"), threshold: 4.5,
-    source: "components/parts/PartRenderer.tsx error box, components/documents/door-feedback.tsx, components/close/ClosePlanPanel.tsx mismatch box, components/reports/StatutoryReportsPanel.tsx notice, components/firm/data-state.tsx error variant, components/parts/PartBadge.tsx error chip" },
-  { id: "destructive-full-on-destructive-5-box", fg: (h) => h("destructive"),
-    bg: (h, composite) => composite("destructive", 0.05, h("background")),
-    threshold: 4.5,
-    source: "components/bank/action-refusal.tsx main message <p>{err}</p> and components/bank/reconciliation-section.tsx stale-box — both `border-destructive/30 bg-destructive/5 ... text-destructive` (full-opacity text over the alert box's own 5%-tint background, composited over the page's white canvas)" },
-  { id: "destructive-80pct-on-destructive-5-box", fg: (h, composite) => composite("destructive", 0.8, composite("destructive", 0.05, h("background"))),
-    bg: (h, composite) => composite("destructive", 0.05, h("background")),
-    threshold: 4.5,
-    source: "components/bank/action-refusal.tsx `<p className=\"text-xs text-destructive/80\">{clr.code}…</p>` — the door-refusal code/reason line, at 80% text opacity over the SAME 5%-tint alert box. KNOWN VIOLATION as of 2026-08-27 (see main()'s WARN-mode report) — do not silently fix the ratio here; flip via the token/opacity choice in that component (polish lane), then this pair should start passing on its own." },
+    source: "the canonical shape: components/common/state.tsx's TONE_CLASS.error (border-error/30 bg-error-muted text-error), rendered via <StateBanner tone=\"error\"> at every governed-door-refusal/read-error call site in the app (action-refusal.tsx, compose-dialog.tsx, PartRenderer.tsx, posted-panel.tsx, drafts-queue-panel.tsx, data-state.tsx's ErrorMessage, ExportRecipientsPanel.tsx, CloseReceiptPanel.tsx, ClosePlanPanel.tsx, StatutoryReportsPanel.tsx, door-feedback.tsx); also components/parts/PartBadge.tsx's own error chip." },
+  { id: "error-on-card", fg: (h) => h("error"), bg: (h) => h("card"), threshold: 4.5,
+    source: "components/common/state.tsx StateBanner's own `code` chip (border-current/25 bg-card, inheriting the banner's text-error) — every governed refusal's CLR code/reason line now renders here instead of dimmed prose on the tinted box (the retired destructive-80pct-on-destructive-5-box pattern). Real at every `code=` call site: action-refusal.tsx, compose-dialog.tsx, PartRenderer.tsx, posted-panel.tsx, drafts-queue-panel.tsx, data-state.tsx, ExportRecipientsPanel.tsx, CloseReceiptPanel.tsx, ClosePlanPanel.tsx, StatutoryReportsPanel.tsx, door-feedback.tsx — all tone=\"error\"." },
+  { id: "destructive-on-destructive-10", fg: (h) => h("destructive"), bg: (h, composite) => composite("destructive", 0.10, h("background")), threshold: 4.5,
+    source: "the shadcn destructive variant (components/ui/button.tsx, components/ui/badge.tsx: bg-destructive/10 text-destructive, full-opacity text over a 10%-tint background composited on the page canvas) — components/bank/reconciliation-section.tsx void status/tie-variance badges and its own destructive void button, components/bank/agency-section.tsx hold badge/button, components/bank/statements-section.tsx void badge and reversal button, components/close/CloseReceiptPanel.tsx not-verified badge, components/documents/filed-document-list.tsx legal-hold badge, components/journals/posted-panel.tsx reversal button, components/reports/ArtifactRow.tsx claim-removed/uncertified badges, components/reports/FreeformReadsPanel.tsx and ReportAgentReceiptsPanel.tsx refused/non-done outcome badges." },
   { id: "success-on-background", fg: (h) => h("success"), bg: (h) => h("background"), threshold: 4.5,
     source: "components/documents/correction-wizard.tsx \"done\" message (text-success)" },
-  { id: "info-on-background", fg: (h) => h("info"), bg: (h) => h("background"), threshold: 4.5,
-    source: "components/firm/data-state.tsx info variant (text-info)" },
   { id: "info-on-info-muted", fg: (h) => h("info"), bg: (h) => h("info-muted"), threshold: 4.5,
-    source: "components/parts/PartBadge.tsx info chip (bg-info-muted text-info)" },
+    source: "components/parts/PartBadge.tsx info chip (bg-info-muted text-info); components/common/state.tsx TONE_CLASS.info (border-info/30 bg-info-muted text-info), rendered via <StateBanner tone=\"info\"> — e.g. data-state.tsx's ErrorMessage no_session state, which moved onto this boxed shape in the P3 polish (formerly a bare text-info line, now retired as its own pair — see the RETIRED note above)." },
 
   // --- The one non-text pair: the visible focus ring itself (WCAG 1.4.11 /
   // 2.4.7 UI-component threshold, 3:1). Named by hand because gate (c)'s
@@ -248,7 +296,7 @@ export const PAIR_SPECS = [
   { id: "focus-ring-on-background", fg: (h) => h("focus"), bg: (h) => h("background"), threshold: 3,
     source: "globals.css :focus-visible { outline: … solid var(--focus); } against the canvas/card/popover surfaces (all #ffffff in this token set) it is drawn on" },
   { id: "focus-ring-on-shell", fg: (h) => h("focus"), bg: (h) => h("shell"), threshold: 3,
-    source: "the same :focus-visible ring against app/(firm)/layout.tsx's bg-shell chrome and components/firm-nav.tsx's bg-sidebar (== shell)" },
+    source: "the same :focus-visible ring against app/(firm)/layout.tsx's <aside> (bg-sidebar) and components/firm-nav.tsx — both alias --shell" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -293,8 +341,15 @@ const GLOBALS_CSS_PATH = join(
   "globals.css",
 );
 
-export function main(argv = process.argv.slice(2)) {
-  const strict = argv.includes("--strict");
+/**
+ * Unconditionally strict as of the P3 finale fold-seam pass: the one
+ * pre-existing near-miss (destructive-80pct-on-destructive-5-box) was
+ * RETIRED, not nudged over the line (see the header's P3 FINALE RE-CENSUS
+ * note) — every pair below is a real, currently-passing pair, so there is
+ * no WARN mode left to keep. A future genuine regression fails the build
+ * the same PR it lands in; there is no flag to pass or forget.
+ */
+export function main() {
   const cssText = readFileSync(GLOBALS_CSS_PATH, "utf8");
   const tokens = parseRootTokens(cssText);
   const results = evaluatePairs(tokens);
@@ -317,13 +372,9 @@ export function main(argv = process.argv.slice(2)) {
     console.log(`  - ${r.id} (${r.source}): measured ${r.ratio}:1, needs ${r.threshold}:1 — ${r.fgHex} on ${r.bgHex}`);
   }
   console.log("");
-  console.log(
-    strict
-      ? "[check-token-contrast] --strict set: failing the build. Fix the token/opacity choice, never this script."
-      : "[check-token-contrast] WARN mode (default): not failing the build. Pass --strict once the polish lane retires the pairs above. This script never adjusts a token itself.",
-  );
+  console.log("[check-token-contrast] failing the build. Fix the token/opacity choice, never this script.");
 
-  return strict ? 1 : 0;
+  return 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

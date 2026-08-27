@@ -6,6 +6,19 @@
 // pattern here is copied from the existing matching-section.test.tsx /
 // reconciliation-section.test.tsx interaction tests (same fixtures, minimal
 // realistic data so both sections render their real, non-empty markup).
+//
+// Both sections are wrapped in a synthetic <h1>, the same idiom already used
+// in components/documents/documents-a11y.test.tsx: on the real page
+// (app/(firm)/clients/[clientId]/bank/page.tsx) BankWorkbench — and every
+// section inside it — always renders under PageHeader's own <h1>. Each
+// section's own SectionHeader level={2} (a real h2) is a valid section
+// heading under that ambient h1 in production; scanning it standalone
+// without that h1 would flag a heading-order violation that is an artifact
+// of testing an interior section in isolation, not a real defect in either
+// section (found running gate (b) against the P3-polished markup, which
+// moved both sections' top headings from unstyled text onto the shared
+// SectionHeader component — the real h2 tag is new and correct; the missing
+// ambient h1 in this fixture is what needed truing).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -52,7 +65,12 @@ test("bank matching section has zero violations", async () => {
     },
     async () => {
       const h = await renderComponent(
-        createElement(NextIntlClientProvider, { locale: "en", messages, children: createElement(MatchingSection, { clientId: "c1" }) }),
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          // Ambient <h1> stand-in — see this file's own header note.
+          children: createElement("div", null, createElement("h1", null, "Bank"), createElement(MatchingSection, { clientId: "c1" })),
+        }),
       );
       try {
         for (let i = 0; i < 3; i++) await h.settle();
@@ -84,7 +102,12 @@ test("bank reconciliation section has zero violations", async () => {
     },
     async () => {
       const h = await renderComponent(
-        createElement(NextIntlClientProvider, { locale: "en", messages, children: createElement(ReconciliationSection, { clientId: "c1" }) }),
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          // Ambient <h1> stand-in — see this file's own header note.
+          children: createElement("div", null, createElement("h1", null, "Bank"), createElement(ReconciliationSection, { clientId: "c1" })),
+        }),
       );
       try {
         for (let i = 0; i < 4; i++) await h.settle();

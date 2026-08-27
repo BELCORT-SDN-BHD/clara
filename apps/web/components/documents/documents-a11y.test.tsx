@@ -113,11 +113,24 @@ test("documents workbench: DocumentMetadata + DocumentEvidence + DocumentEntries
   // ambient h1 would flag a heading-order violation that is an artifact of
   // this test's own composition, not a real defect in any of these
   // components (own note found running this scan the first time).
+  //
+  // P3 finale (fold-seam truing): a SECOND ambient heading is needed too —
+  // <h2>Detail</h2>, matching documents-workbench.tsx's own <aside> (its
+  // SectionHeader level={2} "detailHeading", rendered immediately before
+  // DocumentDetail, which is what actually composes these five components
+  // together). Without it, DocumentMetadata's own SectionHeader level={3}
+  // (a real, correct h3 one rung below its real aside-level h2 ancestor)
+  // reads as an h1 -> h3 skip in this fixture alone — the polish moved
+  // DocumentMetadata's heading onto the shared SectionHeader component
+  // (previously unstyled/non-semantic text), which is a real improvement;
+  // this fixture's missing ambient h2 is what needed truing, not the
+  // component's level={3}.
   const violations = await scan(
     createElement(
       "div",
       null,
       createElement("h1", null, "Documents"),
+      createElement("h2", null, "Detail"),
       createElement(DocumentMetadata, { document: DOCUMENT, tasks: [TASK] }),
       createElement(DocumentEvidence, { regions: [REGION] }),
       createElement(DocumentEntries, { entries: [ENTRY] }),

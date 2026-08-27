@@ -4,6 +4,16 @@
 //
 // NeedsYouInbox self-fetches list_review_queue (lib/firm/needs-you.ts) — one
 // mocked RPC, matching that module's own `listReviewQueue` call shape.
+//
+// Wrapped in a synthetic <h1> — the same idiom used in
+// components/documents/documents-a11y.test.tsx and
+// components/bank/bank-a11y.test.tsx: on the real page
+// (app/(firm)/needs-you/page.tsx) NeedsYouInbox always renders under
+// PageHeader's own <h1>. NeedsYouGaps' own SectionHeader level={2} (a real
+// h2 — see that component's own fold-seam note) is a valid section heading
+// under that ambient h1 in production; scanning it standalone without that
+// h1 would flag a heading-order violation that is an artifact of testing an
+// interior component in isolation, not a real defect.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -62,7 +72,12 @@ test("firm needs-you inbox has zero violations", async () => {
     },
     async () => {
       const h = await renderComponent(
-        createElement(NextIntlClientProvider, { locale: "en", messages, children: createElement(NeedsYouInbox) }),
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          // Ambient <h1> stand-in — see this file's own header note.
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
       );
       try {
         for (let i = 0; i < 3; i++) await h.settle();
