@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderHook } from "../../test/hookHarness";
-import { useUploadQueue, type QueueRejection } from "./useUploadQueue";
+import { useUploadQueue, pastFinalize, type QueueRejection } from "./useUploadQueue";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function session(): SessionTokenAccessor {
@@ -49,6 +49,27 @@ const intakeRow = (overrides: Record<string, unknown>) => ({
 async function waitFor(check: () => boolean, settle: () => Promise<void>, tries = 20): Promise<void> {
   for (let i = 0; i < tries && !check(); i++) await settle();
 }
+
+test("pastFinalize (round 3, R6): a timed-out item ('error'/'timeout') counts as past-finalize — a document may exist server-side even though documentId was never set", () => {
+  // The exact regression: runOne's OWN `finally` clears `finalizeSent` once the
+  // timeout path's response has come back, so `finalizeSent` alone can no
+  // longer protect this row by the time Remove is clicked — pastFinalize
+  // itself must catch it.
+  assert.equal(pastFinalize({ documentId: null, state: "error", errorPhase: "timeout" }), true);
+
+  // Every OTHER "error" arm stays exactly as before — pre-finalize failures
+  // (errorPhase "upload") and post-finalize-but-documentId-already-set
+  // failures ("filing", caught via documentId) must not be conflated with the
+  // timeout case.
+  assert.equal(pastFinalize({ documentId: null, state: "error", errorPhase: "upload" }), false);
+  assert.equal(pastFinalize({ documentId: "doc-1", state: "error", errorPhase: "filing" }), true);
+  assert.equal(pastFinalize({ documentId: null, state: "failed", errorPhase: null }), false);
+
+  // The pre-existing arms, unchanged.
+  assert.equal(pastFinalize({ documentId: null, state: "queued", errorPhase: null }), false);
+  assert.equal(pastFinalize({ documentId: null, state: "verifying", errorPhase: null }), true);
+  assert.equal(pastFinalize({ documentId: "doc-1", state: "ready", errorPhase: null }), true);
+});
 
 test("add(): a file over MAX_FILE_BYTES is rejected via onRejected (a STRUCTURED note, never rendered text) and never queued (no fetch attempted)", async () => {
   let called = false;

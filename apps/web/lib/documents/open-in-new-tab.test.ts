@@ -4,10 +4,16 @@
 // `windowOpen`'s TYPE ITSELF takes only (url, target) — there is no third
 // parameter a caller (or a future edit) could pass a "noreferrer"/"noopener"
 // features string through, which is what made R1 possible in the first place.
+//
+// R5 (round 3): every test below injects its OWN `windowOpen` stub — none of
+// them exercise `realWindowOpen`, the DEFAULT (and only production) adapter.
+// The dedicated `realWindowOpen` test further down is what actually closes R5;
+// the rest of this file proves `openDocumentInNewTab`'s own branch logic,
+// independent of which adapter it was handed.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openDocumentInNewTab, type OpenedTab } from "./open-in-new-tab";
+import { openDocumentInNewTab, realWindowOpen, type OpenedTab } from "./open-in-new-tab";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function session(): SessionTokenAccessor {
@@ -124,6 +130,50 @@ test("a genuine abort re-throws UNCHANGED (never fabricated into a result), and 
         (e: unknown) => { assert.equal((e as Error).name, "AbortError"); return true; },
       );
       assert.equal(tab.closedCalled, true);
+    },
+  );
+});
+
+// --- R5: the DEFAULT production adapter, exercised directly ---------------------
+//
+// Every test above injects its own `windowOpen` — round 2 reintroduced the exact
+// R1 regression INSIDE this default adapter while the full suite stayed green,
+// because nothing ever called it. This test stubs `globalThis.window` (Node has
+// no DOM global) and calls `realWindowOpen` itself — the same function
+// `openDocumentInNewTab` falls back to when no adapter is injected, i.e. every
+// real call site in production.
+
+function withStubbedWindow(open: (...args: unknown[]) => unknown, run: () => void): void {
+  const target = globalThis as unknown as { window?: { open: (...args: unknown[]) => unknown } };
+  const original = target.window;
+  target.window = { open };
+  try {
+    run();
+  } finally {
+    if (original === undefined) delete target.window;
+    else target.window = original;
+  }
+}
+
+test("realWindowOpen: the DEFAULT production adapter calls window.open with EXACTLY two arguments — no features string, ever", () => {
+  let seenArgs: unknown[] = [];
+  const fakeReturn = { fake: true };
+  withStubbedWindow(
+    (...args: unknown[]) => { seenArgs = args; return fakeReturn; },
+    () => {
+      const result = realWindowOpen("about:blank", "_blank");
+      assert.deepEqual(seenArgs, ["about:blank", "_blank"]);
+      assert.equal(seenArgs.length, 2, "window.open must never receive a third (features) argument");
+      assert.equal(result, fakeReturn);
+    },
+  );
+});
+
+test("realWindowOpen: passes through whatever window.open returns, including null (a real popup block)", () => {
+  withStubbedWindow(
+    () => null,
+    () => {
+      assert.equal(realWindowOpen("about:blank", "_blank"), null);
     },
   );
 });

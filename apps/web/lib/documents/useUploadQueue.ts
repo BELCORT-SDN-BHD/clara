@@ -95,14 +95,31 @@ function fileIdentity(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
-/** true once this item's `state` alone already proves a document may exist
- *  server-side — the CHEAPER half of the Remove guard (N7/N8). The other half
- *  (a finalize REQUEST already SENT, response not yet back) is tracked
- *  separately via `finalizeSent` below — round 2, R2: the response-received
- *  moment is too late a boundary, since the runtime can process a request the
- *  client later aborts waiting on. */
-function pastFinalize(item: Pick<QueueItem, "documentId" | "state">): boolean {
-  return item.documentId !== null || item.state === "verifying" || item.state === "filing";
+/** true once this item's `state`/`errorPhase` alone already proves a document
+ *  may exist server-side — the CHEAPER half of the Remove guard (N7/N8). The
+ *  other half (a finalize REQUEST already SENT, response not yet back) is
+ *  tracked separately via `finalizeSent` below — round 2, R2: the response-
+ *  received moment is too late a boundary, since the runtime can process a
+ *  request the client later aborts waiting on.
+ *
+ *  `error`+`errorPhase:"timeout"` is included explicitly (round 3, R6): a
+ *  timeout means finalize's RESPONSE came back (so `runOne`'s own `finally`
+ *  clears `finalizeSent` for this item — the round-trip is genuinely over) but
+ *  the poll loop gave up before ever seeing an adopted row. The finalize
+ *  request itself still went through, so a document may exist server-side —
+ *  `documentId` alone never catches this path (the loop exhausts BEFORE ever
+ *  setting it), which is exactly why `finalizeSent` being cleared by then would
+ *  otherwise make this row look falsely safe to delete outright. Exported for
+ *  its own direct test (useUploadQueue.test.ts, R6) — driving the hook through
+ *  a REAL 60-iteration/60-second timeout to prove this arm end-to-end would be
+ *  an impractical integration test for what is, at its core, a pure-function
+ *  defect; `remove()`'s call site (`finalizeSent.current.has(localId) ||
+ *  pastFinalize(item)`) is a direct, unconditional call with no branching of
+ *  its own, so this function's own correctness is the actual property to
+ *  prove for R6. */
+export function pastFinalize(item: Pick<QueueItem, "documentId" | "state" | "errorPhase">): boolean {
+  return item.documentId !== null || item.state === "verifying" || item.state === "filing"
+    || (item.state === "error" && item.errorPhase === "timeout");
 }
 
 /** An abortable sleep — `setTimeout(resolve, ms)` alone leaves the poll loop deaf
