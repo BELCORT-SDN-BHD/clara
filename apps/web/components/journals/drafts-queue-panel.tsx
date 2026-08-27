@@ -13,6 +13,8 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState, StateBanner } from "@/components/common/state";
 import { Money } from "@/components/journals/money";
 import { EntryStatusBadge, QueueSectionBadge } from "@/components/journals/entry-status-badge";
 import { EntryLinesEditor } from "@/components/journals/entry-lines-editor";
@@ -66,7 +68,7 @@ export function DraftsQueuePanel({
   // exist than this page could show) gets its own honest note instead of a
   // silently-empty page.
   if (queueCounts.open_drafts === 0) {
-    return <p className="text-sm text-muted-foreground">{t("empty")}</p>;
+    return <EmptyState>{t("empty")}</EmptyState>;
   }
 
   return (
@@ -83,12 +85,19 @@ export function DraftsQueuePanel({
         const expanded = expandedId === entryId;
         const isActing = entryId !== null && actingId === entryId;
         return (
-          <Card key={row.id}>
+          <Card key={row.id} className="enter-content">
             <CardContent className="flex flex-col gap-2">
+              {/* Stays a raw <button>: the whole row IS the disclosure, and
+                  the Button primitive is a fixed-height, nowrap control. What
+                  it was missing is the product's focus idiom — it fell through
+                  to the browser/global outline while every other control drew
+                  the 3px ring — and `aria-expanded`, which a disclosure owes
+                  a screen reader. */}
               <button
                 type="button"
+                aria-expanded={expanded}
                 onClick={() => setExpandedId(expanded ? null : (entryId ?? null))}
-                className="flex w-full items-center justify-between gap-2 text-left"
+                className="-m-1 flex w-full items-center justify-between gap-2 rounded-md p-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 <span className="flex items-center gap-2">
                   <QueueSectionBadge section={row.section} />
@@ -115,7 +124,7 @@ export function DraftsQueuePanel({
                   onRevise={onRevise}
                 />
               )}
-              {expanded && !entry && <p className="text-sm text-destructive">{t("entryUnavailable")}</p>}
+              {expanded && !entry && <StateBanner tone="error">{t("entryUnavailable")}</StateBanner>}
             </CardContent>
           </Card>
         );
@@ -169,49 +178,54 @@ function DraftDetail({
       ) : (
         <>
           {linesTruncated && <p className="text-sm text-warning">{t("linesTruncated")}</p>}
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="text-xs text-muted-foreground">
-                <th className="pb-1 font-medium">{t("account")}</th>
-                <th className="pb-1 font-medium">{t("description")}</th>
-                <th className="pb-1 text-right font-medium">{t("debit")}</th>
-                <th className="pb-1 text-right font-medium">{t("credit")}</th>
-              </tr>
-            </thead>
-            <tbody>
+          {/* P3 polish: the shared Table primitive, so a draft's lines have the
+              same density and hairlines as every other table in the product.
+              No DataTableCard here — this table is already INSIDE the draft's
+              own Card, and a card inside a card is a second edge saying
+              nothing. */}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("account")}</TableHead>
+                <TableHead>{t("description")}</TableHead>
+                <TableHead className="text-right">{t("debit")}</TableHead>
+                <TableHead className="text-right">{t("credit")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {lines.map((line) => {
                 const account = accounts.find((a) => a.account_code === line.account_code);
                 return (
-                  <tr key={line.id}>
-                    <td>{account ? `${line.account_code} — ${account.name}` : line.account_code}</td>
-                    <td>{line.description ?? ""}</td>
-                    <td className="text-right">{line.debit_cents ? <Money cents={line.debit_cents} /> : ""}</td>
-                    <td className="text-right">{line.credit_cents ? <Money cents={line.credit_cents} /> : ""}</td>
-                  </tr>
+                  <TableRow key={line.id}>
+                    <TableCell>{account ? `${line.account_code} — ${account.name}` : line.account_code}</TableCell>
+                    <TableCell className="text-muted-foreground">{line.description ?? ""}</TableCell>
+                    <TableCell className="text-right">{line.debit_cents ? <Money cents={line.debit_cents} /> : ""}</TableCell>
+                    <TableCell className="text-right">{line.credit_cents ? <Money cents={line.credit_cents} /> : ""}</TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-            <tfoot>
-              <tr className="text-sm font-medium">
-                <td colSpan={2} className="pt-1 text-right text-muted-foreground">
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableCell colSpan={2} className="text-right text-muted-foreground">
                   {linesTruncated ? t("presentationSumUnavailable") : t("presentationSumLabel")}
-                </td>
-                <td className="pt-1 text-right">{linesTruncated ? "—" : <Money cents={balance.debitCents} />}</td>
-                <td className="pt-1 text-right">{linesTruncated ? "—" : <Money cents={balance.creditCents} />}</td>
-              </tr>
-            </tfoot>
-          </table>
+                </TableCell>
+                <TableCell className="text-right">{linesTruncated ? "—" : <Money cents={balance.debitCents} />}</TableCell>
+                <TableCell className="text-right">{linesTruncated ? "—" : <Money cents={balance.creditCents} />}</TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
         </>
       )}
-      {clr && (
-        <p role="alert" className="text-sm text-destructive">
-          {clr.code}: {err}
-        </p>
-      )}
-      {!clr && err && (
-        <p role="alert" className="text-sm text-destructive">
+      {/* P3 polish: the same <StateBanner> shell every other refusal in the
+          product uses — the CLR code becomes the chip rather than a "CLR41: "
+          prefix glued onto the message, which is how Bank, Documents, Close
+          and the Clara `refusal` part have all rendered it. The message text
+          itself is still the DB's own bytes, verbatim. */}
+      {err && (
+        <StateBanner tone="error" code={clr ? clr.code : undefined}>
           {err}
-        </p>
+        </StateBanner>
       )}
       <div className="flex flex-wrap items-center gap-2">
         {editing ? (

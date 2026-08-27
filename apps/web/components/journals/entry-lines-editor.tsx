@@ -12,6 +12,8 @@
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { NativeSelect } from "@/components/common/native-select";
 import { Money } from "@/components/journals/money";
 import { useAmountInput } from "@/components/journals/use-amount-input";
 import { sumLines } from "@/lib/journals/balance";
@@ -71,25 +73,30 @@ export function EntryLinesEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="text-xs text-muted-foreground">
-            <th className="pb-1 pr-2 font-medium">{t("account")}</th>
-            <th className="pb-1 pr-2 font-medium">{t("description")}</th>
-            <th className="pb-1 pr-2 text-right font-medium">{t("debit")}</th>
-            <th className="pb-1 pr-2 text-right font-medium">{t("credit")}</th>
-            <th className="pb-1" />
-          </tr>
-        </thead>
-        <tbody>
+      {/* P3 polish: the shared Table primitive here too, so the editor and the
+          read-only view of the SAME lines (drafts-queue-panel.tsx, shown when
+          not editing) no longer swap between two densities as you toggle
+          Revise. The `<select>` picked up the shared <NativeSelect>, which is
+          what finally gives it the same focus ring as the Input beside it. */}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("account")}</TableHead>
+            <TableHead>{t("description")}</TableHead>
+            <TableHead className="text-right">{t("debit")}</TableHead>
+            <TableHead className="text-right">{t("credit")}</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {lines.map((line, i) => (
-            <tr key={i}>
-              <td className="pr-2 pb-1">
-                <select
+            <TableRow key={i}>
+              <TableCell>
+                <NativeSelect
                   aria-label={t("account")}
                   value={line.account_code}
                   onChange={(e) => updateLine(i, { account_code: e.target.value })}
-                  className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm"
+                  className="w-full"
                 >
                   <option value="">{t("selectAccount")}</option>
                   {activeAccounts.map((a) => (
@@ -97,59 +104,59 @@ export function EntryLinesEditor({
                       {a.account_code} — {a.name}
                     </option>
                   ))}
-                </select>
-              </td>
-              <td className="pr-2 pb-1">
+                </NativeSelect>
+              </TableCell>
+              <TableCell>
                 <Input
                   aria-label={t("description")}
                   value={line.description ?? ""}
                   onChange={(e) => updateLine(i, { description: e.target.value })}
                 />
-              </td>
-              <td className="pr-2 pb-1">
+              </TableCell>
+              <TableCell>
                 <AmountInput
                   ariaLabel={t("debit")}
                   cents={line.debit_cents}
                   onChange={(debit_cents) => updateLine(i, { debit_cents, credit_cents: 0 })}
                 />
-              </td>
-              <td className="pr-2 pb-1">
+              </TableCell>
+              <TableCell>
                 <AmountInput
                   ariaLabel={t("credit")}
                   cents={line.credit_cents}
                   onChange={(credit_cents) => updateLine(i, { credit_cents, debit_cents: 0 })}
                 />
-              </td>
-              <td className="pb-1">
+              </TableCell>
+              <TableCell>
                 <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label={t("removeLine")}>
                   ×
                 </Button>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-        <tfoot>
-          <tr className="text-sm font-medium">
-            <td colSpan={2} className="pt-1 text-right text-muted-foreground">
+        </TableBody>
+        <TableFooter>
+          <TableRow>
+            <TableCell colSpan={2} className="text-right text-muted-foreground">
               {t("presentationSumLabel")}
-            </td>
-            <td className={`pt-1 text-right ${balance.balanced ? "" : "text-warning"}`}>
+            </TableCell>
+            <TableCell className={balance.balanced ? "text-right" : "text-right text-warning"}>
               <Money cents={balance.debitCents} />
-            </td>
-            <td className={`pt-1 text-right ${balance.balanced ? "" : "text-warning"}`}>
+            </TableCell>
+            <TableCell className={balance.balanced ? "text-right" : "text-right text-warning"}>
               <Money cents={balance.creditCents} />
-            </td>
-            <td />
-          </tr>
+            </TableCell>
+            <TableCell />
+          </TableRow>
           {!balance.balanced && (
-            <tr>
-              <td colSpan={5} className="pt-1 text-right text-xs text-warning">
+            <TableRow>
+              <TableCell colSpan={5} className="text-right text-xs text-warning">
                 {t("notBalanced")}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           )}
-        </tfoot>
-      </table>
+        </TableFooter>
+      </Table>
       <Button type="button" variant="outline" size="sm" onClick={addLine}>
         {t("addLine")}
       </Button>

@@ -33,12 +33,15 @@ export function FirmActivityFeed() {
   const rows = data ?? [];
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className="max-w-prose text-sm text-muted-foreground">{t("subheading")}</p>
-      <p className="text-xs text-muted-foreground">{t("visibilityNote")}</p>
+    // `subheading` moved up into the page header (app/(firm)/activity/page.tsx)
+    // — the one place every surface puts its orientation line. The two
+    // remaining notes are caveats about THIS read (the role floor, the flat
+    // limit), which belong beside the data they qualify.
+    <div className="flex flex-col gap-2">
+      <p className="max-w-prose text-xs text-muted-foreground">{t("visibilityNote")}</p>
       <DataState loading={loading} error={error} isEmpty={rows.length === 0} emptyMessage={t("emptyMessage")}>
-        <p className="text-xs text-muted-foreground">{t("showingRecent")}</p>
-        <ul className="flex flex-col gap-2">
+        <p className="max-w-prose text-xs text-muted-foreground">{t("showingRecent")}</p>
+        <ul className="mt-2 flex flex-col gap-2">
           {rows.map((row) => (
             <ReceiptRow key={row.receipt_id} row={row} />
           ))}
@@ -68,7 +71,7 @@ function ReceiptRow({ row }: { row: AgentReceiptRow }) {
   // key path.
   const kindLabel = key ? t(key) : row.receipt_kind;
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="neutral">{kindLabel}</Badge>
         <Badge tone={row.scope === "platform" ? "info" : "neutral"}>

@@ -25,6 +25,8 @@ import {
 } from "@/lib/close/api";
 import type { ReopenCorrectionTarget } from "@/lib/close/types";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { CloseDoors } from "./CloseDoors";
 import { CloseReceiptPanel } from "./CloseReceiptPanel";
 import { GateCheckRow } from "./GateCheckRow";
@@ -58,11 +60,7 @@ export function ClosePlanPanel({
     // legitimate `null` (get_close_plan's own "plan unavailable" shape) — both
     // render the same honest waiting/empty state; a real failure (err set)
     // renders distinctly.
-    return err ? (
-      <p className="text-sm text-destructive">{err}</p>
-    ) : (
-      <p className="text-sm text-muted-foreground">{t("loading")}</p>
-    );
+    return err ? <StateBanner tone="error">{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
   }
   // THE VISIBLE-PLAN BELT (coordinator ruling, porting the dashboard precedent's
   // own defense-in-depth): even though this panel is keyed by fiscalYearId and
@@ -70,25 +68,32 @@ export function ClosePlanPanel({
   // a cross-selection race structurally), never paint a plan whose own
   // fiscal_year identity doesn't match what is currently selected.
   if (plan.fiscal_year.id !== fiscalYearId || plan.fiscal_year.client_id !== clientId) {
-    return <p className="text-sm text-destructive">{t("mismatch")}</p>;
+    return <StateBanner tone="error">{t("mismatch")}</StateBanner>;
   }
 
   const closeRunId = plan.close_run.state === "present" ? plan.close_run.close_run_id : null;
 
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-medium text-foreground">{plan.fiscal_year.label}</h2>
+      <header className="flex flex-wrap items-baseline gap-2">
+        <SectionHeader level={2}>{plan.fiscal_year.label}</SectionHeader>
         <span className="text-xs text-muted-foreground">
           {plan.fiscal_year.starts_on} – {plan.fiscal_year.ends_on} · {plan.fiscal_year.status} · {t("fyEnd")}: {plan.fiscal_year.fy_end_source}
         </span>
       </header>
 
-      {(err || clr) && (
-        <p className="rounded-lg border border-destructive/30 bg-error-muted p-2 text-sm text-destructive">
-          {clr ? `${clr.code}${clr.reason ? ` (${clr.reason})` : ""}: ` : ""}
+      {/* P3 polish: the sticky-refusal banner F2 hoisted out of the !read
+          branch keeps that exact placement and lifetime — only its paint moved
+          onto <StateBanner>, so a close refusal and a bank refusal are one
+          thing to the eye. The code+reason are the chip now instead of a
+          "CLR41 (reason): " prefix glued to the DB's own sentence. */}
+      {err && (
+        <StateBanner
+          tone="error"
+          code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}
+        >
           {err}
-        </p>
+        </StateBanner>
       )}
 
       <CloseDoors
@@ -110,9 +115,9 @@ export function ClosePlanPanel({
       />
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">{tGates("heading")}</h3>
+        <SectionHeader level={3}>{tGates("heading")}</SectionHeader>
         {plan.checks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{tGates("empty")}</p>
+          <EmptyState>{tGates("empty")}</EmptyState>
         ) : (
           <div className="flex flex-col gap-2">
             {plan.checks.map((check) => (
@@ -133,7 +138,7 @@ export function ClosePlanPanel({
       </section>
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">{tReceipt("heading")}</h3>
+        <SectionHeader level={3}>{tReceipt("heading")}</SectionHeader>
         <CloseReceiptPanel receipt={plan.receipt} session={session} />
       </section>
 

@@ -1,4 +1,5 @@
 import { getTranslations } from "next-intl/server";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { ClientRegisterList } from "@/components/firm/client-register-list";
 
 /**
@@ -11,9 +12,9 @@ export default async function ClientsRegisterPage() {
   const t = await getTranslations("ClientsRegister");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      <PageHeader title={t("heading")} />
       <ClientRegisterList />
-    </main>
+    </PageShell>
   );
 }

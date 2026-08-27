@@ -9,13 +9,16 @@
 
 import { useTranslations } from "next-intl";
 
+import { NotBuiltNote } from "@/components/common/not-built-note";
+import { SectionHeader } from "@/components/common/section-header";
+
 export function NeedsYouGaps() {
   const t = useTranslations("NeedsYou");
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-      <span className="font-medium text-foreground">{t("gapsHeading")}</span>
+    <NotBuiltNote>
+      <SectionHeader level={3}>{t("gapsHeading")}</SectionHeader>
       <p>{t("gapFirmQuestions")}</p>
       <p>{t("gapIdentifierPromotions")}</p>
-    </div>
+    </NotBuiltNote>
   );
 }

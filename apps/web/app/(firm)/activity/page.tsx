@@ -1,4 +1,5 @@
 import { getTranslations } from "next-intl/server";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { FirmActivityFeed } from "@/components/firm/firm-activity-feed";
 
 /**
@@ -11,9 +12,12 @@ export default async function FirmActivityPage() {
   const t = await getTranslations("FirmActivity");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      {/* The orientation line moved OUT of FirmActivityFeed and into the page
+          header — same `FirmActivity.subheading` key, now in the one place
+          every surface puts its "what am I looking at" sentence. */}
+      <PageHeader title={t("heading")} description={t("subheading")} />
       <FirmActivityFeed />
-    </main>
+    </PageShell>
   );
 }

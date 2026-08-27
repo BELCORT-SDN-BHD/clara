@@ -1,5 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader, PageShell } from "@/components/common/page-shell";
+
 /**
  * Firm-altitude home ("/") — honest empty state, P2 shell only.
  *
@@ -12,9 +14,8 @@ export default async function FirmHomePage() {
   const t = await getTranslations("FirmHome");
 
   return (
-    <main className="flex flex-col gap-2 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-      <p className="max-w-prose text-sm text-muted-foreground">{t("body")}</p>
-    </main>
+    <PageShell>
+      <PageHeader title={t("heading")} description={t("body")} />
+    </PageShell>
   );
 }

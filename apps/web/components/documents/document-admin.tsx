@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { placeLegalHold, releaseLegalHold, setDocumentKind } from "@/lib/documents/doors";
+import { SectionHeader } from "@/components/common/section-header";
 import { DOCUMENT_KINDS, type DocumentRow } from "@/lib/documents/types";
 
 /**
@@ -30,7 +31,7 @@ export function DocumentAdmin({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-muted-foreground uppercase">{t("kindHeading")}</span>
+        <SectionHeader level={4}>{t("kindHeading")}</SectionHeader>
         <p className="text-sm text-muted-foreground">{t("kindCurrent", { kind: doc.document_kind ?? t("kindUnclassified") })}</p>
         <div className="flex flex-wrap gap-2">
           <Select value={kind} onValueChange={(v) => setKind(v ?? "")}>
@@ -62,7 +63,7 @@ export function DocumentAdmin({
       </div>
 
       <div className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-muted-foreground uppercase">{t("adminHeading")}</span>
+        <SectionHeader level={4}>{t("adminHeading")}</SectionHeader>
         <div className="flex flex-wrap gap-2">
           <Input
             className="max-w-56"

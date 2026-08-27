@@ -16,11 +16,18 @@
 // replace-the-content behaviour — hydrate-never-trust means a later action failing
 // must never hide the data a successful read already produced.
 
+// P3 polish: the BRANCHING is untouched (same predicates, same order, same
+// verbatim-refusal rule) — only the paint moved onto components/common/state.tsx,
+// so a refusal rendered here, on the Bank tab, on the Documents tab and inside a
+// Clara `refusal` part are now one visual thing. The four wire-error kinds keep
+// the tone mapping this file already chose; what changed is that they are now
+// BOXED like every other failure in the product instead of being the one lane
+// that painted a failure as bare coloured prose.
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { isReadError } from "@/lib/read";
 import { isDoorError, isDoorRefusal } from "@/lib/doors";
-import { Badge } from "@/components/parts/PartBadge";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 
 export function ErrorMessage({ error }: { error: unknown }) {
   const t = useTranslations("Common");
@@ -29,23 +36,27 @@ export function ErrorMessage({ error }: { error: unknown }) {
     // The deliberate no-hydrate exception, same as PartRenderer's refusal card: a
     // governed refusal renders its code + message VERBATIM, never re-worded.
     return (
-      <div className="flex flex-col gap-1 rounded-lg border border-error/30 bg-error-muted p-3 text-sm">
-        <Badge tone="error">
-          {error.code}
-          {error.reason ? ` · ${error.reason}` : ""}
-        </Badge>
-        <p className="text-error">{error.message}</p>
-      </div>
+      <StateBanner
+        tone="error"
+        code={
+          <>
+            {error.code}
+            {error.reason ? ` · ${error.reason}` : ""}
+          </>
+        }
+      >
+        {error.message}
+      </StateBanner>
     );
   }
   if (isReadError(error) || isDoorError(error)) {
-    if (error.kind === "no_session") return <StateMessage tone="info">{t("noSession")}</StateMessage>;
-    if (error.kind === "forbidden") return <StateMessage tone="warning">{t("forbidden")}</StateMessage>;
-    if (error.kind === "not_found") return <StateMessage tone="neutral">{t("notFound")}</StateMessage>;
-    return <StateMessage tone="error">{t("unexpectedError", { message: error.message })}</StateMessage>;
+    if (error.kind === "no_session") return <StateBanner tone="info">{t("noSession")}</StateBanner>;
+    if (error.kind === "forbidden") return <StateBanner tone="warning">{t("forbidden")}</StateBanner>;
+    if (error.kind === "not_found") return <StateBanner tone="neutral">{t("notFound")}</StateBanner>;
+    return <StateBanner tone="error">{t("unexpectedError", { message: error.message })}</StateBanner>;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return <StateMessage tone="error">{t("unexpectedError", { message })}</StateMessage>;
+  return <StateBanner tone="error">{t("unexpectedError", { message })}</StateBanner>;
 }
 
 export function DataState({
@@ -64,18 +75,7 @@ export function DataState({
   const t = useTranslations("Common");
 
   if (error) return <ErrorMessage error={error} />;
-  if (loading) return <StateMessage tone="neutral">{t("loading")}</StateMessage>;
-  if (isEmpty) return <StateMessage tone="neutral">{emptyMessage}</StateMessage>;
+  if (loading) return <LoadingState>{t("loading")}</LoadingState>;
+  if (isEmpty) return <EmptyState>{emptyMessage}</EmptyState>;
   return <>{children}</>;
-}
-
-const TONE_CLASSES = {
-  neutral: "text-muted-foreground",
-  info: "text-info",
-  warning: "text-warning",
-  error: "text-error",
-} as const;
-
-function StateMessage({ tone, children }: { tone: keyof typeof TONE_CLASSES; children: ReactNode }) {
-  return <p className={`max-w-prose text-sm ${TONE_CLASSES[tone]}`}>{children}</p>;
 }

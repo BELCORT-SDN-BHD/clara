@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StateBanner } from "@/components/common/state";
 
 type Stage = "confirm" | "verifying" | "set-password" | "saving" | "error";
 
@@ -175,9 +176,7 @@ export function InviteAcceptForm({ token }: { token: string }) {
           <CardDescription>{t("errorDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <p role="alert" className="text-sm text-destructive">
-            {errorMessage}
-          </p>
+          <StateBanner tone="error">{errorMessage}</StateBanner>
         </CardContent>
       </Card>
     );
@@ -193,7 +192,7 @@ export function InviteAcceptForm({ token }: { token: string }) {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSetPassword} className="flex flex-col gap-6">
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             <Label htmlFor="password">{t("passwordLabel")}</Label>
             {/*
               `minLength` is a UI convenience ONLY — a direct SDK/Auth API call
@@ -211,11 +210,7 @@ export function InviteAcceptForm({ token }: { token: string }) {
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
-          {errorMessage && (
-            <p role="alert" className="text-sm text-destructive">
-              {errorMessage}
-            </p>
-          )}
+          {errorMessage && <StateBanner tone="error">{errorMessage}</StateBanner>}
           <Button type="submit" className="w-full" disabled={isSaving}>
             {isSaving ? t("submitting") : t("submit")}
           </Button>

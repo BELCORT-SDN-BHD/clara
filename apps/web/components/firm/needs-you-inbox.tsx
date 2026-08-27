@@ -40,6 +40,7 @@ import { useTranslations } from "next-intl";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
 import { resolveOpenQuestion, dismissOpenQuestion, reviewQueueRowKey, shouldShowQueueErrorBanner } from "@/lib/firm/needs-you";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { Button } from "@/components/ui/button";
 import { DataState, ErrorMessage } from "./data-state";
 import { NeedsYouCounts } from "./needs-you-counts";
 import { NeedsYouRow } from "./needs-you-row";
@@ -93,14 +94,20 @@ export function NeedsYouInbox() {
           })}
         </ul>
         {hasMore ? (
-          <button
+          // P3 polish: the <Button> primitive, not a hand-rolled bordered
+          // <button> — same act, same affordance, but now the same press
+          // feedback, disabled treatment and focus ring as every other
+          // secondary control in the product.
+          <Button
             type="button"
-            className="mt-2 self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground"
+            variant="outline"
+            size="sm"
+            className="mt-2 self-start"
             onClick={handleLoadMore}
             disabled={loadingMore || busy}
           >
             {loadingMore ? t("loadingMore") : t("loadMore")}
-          </button>
+          </Button>
         ) : null}
       </DataState>
       <NeedsYouGaps />

@@ -55,7 +55,7 @@ export function UploadPanel({ clientId, onFiled }: { clientId: string; onFiled: 
       ) : null}
 
       {queue.items.length > 0 ? (
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col gap-2">
           {queue.items.map((item) => <QueueRow key={item.localId} item={item} onRetry={queue.retry} onRemove={queue.remove} />)}
           <li>
             <Button size="xs" variant="ghost" onClick={queue.clearDone}>{t("clearFinished")}</Button>
@@ -71,7 +71,7 @@ function QueueRow({ item, onRetry, onRemove }: { item: QueueItem; onRetry: (id: 
   const recoveryKey = queueRecoveryLabelKey(item.recoveryReason ?? null);
 
   return (
-    <li className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm">
+    <li className="enter-content flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <span className="max-w-40 truncate font-medium text-card-foreground" title={item.name}>{item.name}</span>
       <span className="flex-1 text-xs text-muted-foreground">
         {t(queueStateLabelKey(item))}
@@ -82,9 +82,9 @@ function QueueRow({ item, onRetry, onRemove }: { item: QueueItem; onRetry: (id: 
         <Button size="xs" variant="outline" onClick={() => onRetry(item.localId)}>{t("retry")}</Button>
       ) : null}
       <Button size="xs" variant="ghost" onClick={() => onRemove(item.localId)}>{t("remove")}</Button>
-      {item.state === "error" && item.error ? <span className="w-full text-xs text-error">{item.error}</span> : null}
+      {item.state === "error" && item.error ? <span className="w-full text-xs text-error wrap-anywhere">{item.error}</span> : null}
       {item.state === "ready" && item.recoveryReason ? (
-        <span className="w-full text-xs text-muted-foreground">
+        <span className="w-full text-xs text-muted-foreground wrap-anywhere">
           {item.recoveryRemedy
             ?? (item.recoveryReason === "mime_mismatch"
               ? t("queueRecoveryMimeMismatchDetail", {

@@ -6,6 +6,8 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listReportAgentReceipts } from "@/lib/reports/api";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -16,23 +18,27 @@ export function ReportAgentReceiptsPanel({ clientId, session }: { clientId: stri
 
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium text-foreground">{t("heading")}</h3>
+      <SectionHeader level={3}>{t("heading")}</SectionHeader>
+      {/* P3 polish, microcopy: the loading state was a literal `…` — the one
+          loading string in the product that never went through next-intl and
+          the one that did not say WHAT was loading. Every other surface names
+          it ("Loading the close plan…"), so this one does too. */}
       {err ? (
-        <p className="text-sm text-destructive">{err}</p>
+        <StateBanner tone="error">{err}</StateBanner>
       ) : !receipts ? (
-        <p className="text-sm text-muted-foreground">…</p>
+        <LoadingState>{t("loading")}</LoadingState>
       ) : receipts.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+        <EmptyState>{t("empty")}</EmptyState>
       ) : (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           {receipts.map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2 text-xs">
+            <div key={r.id} className="enter-content flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3 text-xs">
               <span className="font-medium text-card-foreground">{r.act}</span>
               <Badge variant={r.outcome === "done" ? "default" : "destructive"}>{r.outcome}</Badge>
               <span className="font-mono text-muted-foreground">{r.model}/{r.model_version}</span>
               <span className="text-muted-foreground">{r.at}</span>
               {r.directed_by ? <span className="text-muted-foreground">{t("directedBy")} {r.directed_by.slice(0, 8)}</span> : null}
-              {r.refusal_token ? <span className="font-mono text-destructive">{r.refusal_token}</span> : null}
+              {r.refusal_token ? <span className="font-mono text-error">{r.refusal_token}</span> : null}
             </div>
           ))}
         </div>

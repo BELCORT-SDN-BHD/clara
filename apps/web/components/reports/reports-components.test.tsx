@@ -12,6 +12,8 @@ import { ArtifactRow, isValidByteSize } from "./ArtifactRow";
 import { SandboxExportsPanel } from "./SandboxExportsPanel";
 import { FreeformReadsPanel } from "./FreeformReadsPanel";
 import { StatutoryReportsPanel } from "./StatutoryReportsPanel";
+import { ExportRecipientsPanel } from "./ExportRecipientsPanel";
+import { Button } from "@/components/ui/button";
 import type { ReportArtifactRow } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -39,6 +41,39 @@ test("ArtifactRow: a pre_sign row offers Issue + Archive, and states honestly th
   assert.match(html, /Archive signed original/);
   assert.match(html, /No byte-download door exists yet/);
   assert.doesNotMatch(html, />Retrieve</);
+});
+
+// THE UNREACHABLE-DOOR REGRESSION, reports half — see components/close/
+// close-components.test.tsx's own note for the full shape. DoorDialog used to
+// hand its `disabled` prop to the DialogTrigger while the fields that prop
+// tested lived INSIDE the dialog, so Issue-for-approval, Archive-signed-
+// original and Register-recipient were disabled from first paint forever.
+//
+// Reads the ATTRIBUTE, never the word: a naive `.includes("disabled")` passes
+// on every button here, because the shadcn Button's own class string carries
+// `disabled:pointer-events-none`. The positive control proves it can say NO.
+function triggerIsEnabled(html: string, label: string): boolean {
+  const idx = html.indexOf(`>${label}<`);
+  if (idx < 0) return false;
+  const openTag = html.lastIndexOf("<button", idx);
+  if (openTag < 0) return false;
+  return !/\sdisabled=/.test(html.slice(openTag, idx));
+}
+
+test("the trigger-enabled probe can still say NO (positive control)", () => {
+  assert.ok(triggerIsEnabled(render(createElement(Button, { children: "Probe" })), "Probe"));
+  assert.equal(triggerIsEnabled(render(createElement(Button, { disabled: true, children: "Probe" })), "Probe"), false);
+});
+
+test("BLOCKER: Issue and Archive triggers are ENABLED before their in-dialog fields are filled", () => {
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+  assert.ok(triggerIsEnabled(html, "Issue for approval"), "the reason field is inside the dialog this trigger opens");
+  assert.ok(triggerIsEnabled(html, "Archive signed original"), "sha/byte-size/signer are inside the dialog this trigger opens");
+});
+
+test("BLOCKER: the Register-recipient trigger is ENABLED before its in-dialog fields are filled", () => {
+  const html = render(createElement(ExportRecipientsPanel, { session: noSession() }));
+  assert.ok(triggerIsEnabled(html, "Register recipient"), "user id / display name / basis are inside the dialog this trigger opens");
 });
 
 test("ArtifactRow: a signed_original row offers Retrieve, never Issue/Archive", () => {

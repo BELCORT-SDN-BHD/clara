@@ -23,7 +23,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/common/native-select";
 import { ReadState } from "./read-state";
+import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 
 export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string; lineId: string; onDone: () => void }) {
@@ -95,27 +97,26 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2">
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/50 p-3">
       <div className="flex gap-2">
-        <select
+        <NativeSelect
           aria-label={t("kindLabel")}
-          className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"
           value={kind}
           onChange={(e) => { setKind(e.target.value as CounterpartyKind); setCounterpartyId(""); }}
         >
           <option value="customer">{t("kindCustomer")}</option>
           <option value="vendor">{t("kindVendor")}</option>
-        </select>
+        </NativeSelect>
         <ReadState hasData={counterparties.data !== null} err={counterparties.err} errKind={cpKind.kind} isEmpty={counterparties.data?.length === 0} onRetry={() => void counterparties.reload()}>
-          <select
+          <NativeSelect
             aria-label={t("counterpartyLabel")}
-            className="h-8 flex-1 rounded-lg border border-input bg-transparent px-2 text-sm"
+            className="flex-1"
             value={counterpartyId}
             onChange={(e) => setCounterpartyId(e.target.value)}
           >
             <option value="">{t("selectCounterparty")}</option>
             {(counterparties.data ?? []).map((cp) => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
-          </select>
+          </NativeSelect>
         </ReadState>
       </div>
 
@@ -141,7 +142,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
         </ReadState>
       )}
 
-      {formError && <p role="alert" className="text-xs text-destructive">{formError}</p>}
+      {formError && <StateBanner tone="error" className="text-xs">{formError}</StateBanner>}
       {itemsLoadedOnce && <ActionRefusal err={items.err} clr={items.clr} />}
       <div className="flex gap-2">
         <Button type="button" size="sm" disabled={items.busy || !counterpartyId} onClick={() => void submit()}>

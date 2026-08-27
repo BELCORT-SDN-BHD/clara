@@ -30,7 +30,7 @@ export function DoorDialog({
   description,
   confirmLabel,
   busy,
-  disabled,
+  confirmDisabled,
   onConfirm,
   children,
 }: {
@@ -40,7 +40,13 @@ export function DoorDialog({
   description?: string;
   confirmLabel: string;
   busy: boolean;
-  disabled?: boolean;
+  /** Gates the CONFIRM button — never the trigger. See components/close/
+   *  CloseDoorDialog.tsx's own note for the blocker this rename closes: the
+   *  prop used to disable the TRIGGER on a condition that could only be
+   *  satisfied by fields inside the dialog that trigger opens, which made
+   *  issue-for-approval, archive-signed-original and register-recipient
+   *  permanently unopenable. */
+  confirmDisabled?: boolean;
   onConfirm: () => Promise<void>;
   children?: ReactNode;
 }) {
@@ -53,7 +59,7 @@ export function DoorDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant={triggerVariant} size="sm" disabled={disabled} />}>
+      <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>
         {triggerLabel}
       </DialogTrigger>
       <DialogContent>
@@ -65,7 +71,7 @@ export function DoorDialog({
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
-            disabled={busy}
+            disabled={busy || confirmDisabled === true}
             onClick={async () => {
               const ran = await runOnce(guardRef.current, onConfirm);
               if (ran) setOpen(false);

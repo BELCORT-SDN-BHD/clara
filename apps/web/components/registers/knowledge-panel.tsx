@@ -23,6 +23,7 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientFacts, loadClientFactKeys, type ClientFactRow } from "@/lib/registers/knowledge";
 import { businessDateTime } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { Button } from "@/components/ui/button";
 import { DataState } from "@/components/firm/data-state";
 
 function groupByFactKey(rows: ClientFactRow[]): Map<string, ClientFactRow[]> {
@@ -46,8 +47,9 @@ export function KnowledgePanel({ clientId }: { clientId: string }) {
   const descriptions = new Map((keys.data ?? []).map((k) => [k.fact_key, k.description]));
 
   return (
+    // `subheading` moved into the page header (the knowledge route) — one
+    // place for a surface's orientation line, product-wide.
     <div className="flex flex-col gap-4">
-      <p className="max-w-prose text-sm text-muted-foreground">{t("subheading")}</p>
       <DataState loading={facts.loading} error={facts.error} isEmpty={groups.size === 0} emptyMessage={t("empty")}>
         <ul className="flex flex-col gap-3">
           {[...groups.entries()].map(([factKey, versions]) => (
@@ -78,7 +80,7 @@ function FactGroup({
   const history = versions.filter((v) => v.id !== live.id);
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-baseline gap-3">
         <span className="font-medium text-card-foreground">{factKey}</span>
         <span className="text-card-foreground">{String(live.fact_value)}</span>
@@ -92,13 +94,16 @@ function FactGroup({
       </dl>
       {history.length > 0 ? (
         <div className="flex flex-col gap-1">
-          <button
+          <Button
             type="button"
-            className="self-start text-xs text-primary underline-offset-4 hover:underline"
+            variant="link"
+            size="xs"
+            className="self-start px-0"
+            aria-expanded={showHistory}
             onClick={() => setShowHistory((s) => !s)}
           >
             {showHistory ? t("hideHistory") : t("historyLabel", { count: history.length })}
-          </button>
+          </Button>
           {showHistory ? (
             <ul className="flex flex-col gap-1 border-t border-border pt-1 text-xs text-muted-foreground">
               {history.map((h) => (

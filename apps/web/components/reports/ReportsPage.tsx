@@ -7,6 +7,7 @@
 
 import { useTranslations } from "next-intl";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { StatutoryReportsPanel } from "./StatutoryReportsPanel";
 import { SandboxExportsPanel } from "./SandboxExportsPanel";
 import { FreeformReadsPanel } from "./FreeformReadsPanel";
@@ -15,14 +16,11 @@ export function ReportsPage({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientReports");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">{t("body")}</p>
-      </div>
+    <PageShell>
+      <PageHeader title={t("heading")} description={t("body")} />
       <StatutoryReportsPanel clientId={clientId} session={sessionTokenAccessor} />
       <SandboxExportsPanel clientId={clientId} session={sessionTokenAccessor} />
       <FreeformReadsPanel clientId={clientId} session={sessionTokenAccessor} />
-    </main>
+    </PageShell>
   );
 }

@@ -5,6 +5,9 @@ import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadFiledDocuments, loadFirmClients, loadOpenCandidates } from "@/lib/documents/loaders";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState, LoadingState } from "@/components/common/state";
 import { FiledDocumentList } from "./filed-document-list";
 import { OpenCandidateList } from "./open-candidate-list";
 import { UploadPanel } from "./upload-panel";
@@ -30,20 +33,20 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const refreshFiled = () => void filed.reload();
 
   return (
-    <main className="flex flex-col gap-6 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      <PageHeader title={t("heading")} />
 
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium text-foreground">{t("uploadHeading")}</h2>
+            <SectionHeader level={2}>{t("uploadHeading")}</SectionHeader>
             <UploadPanel clientId={clientId} onFiled={refreshFiled} />
           </section>
 
           <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium text-foreground">{t("candidatesHeading")}</h2>
+            <SectionHeader level={2}>{t("candidatesHeading")}</SectionHeader>
             {candidates.loading && !candidates.data ? (
-              <p className="text-sm text-muted-foreground">{t("loading")}</p>
+              <LoadingState>{t("loading")}</LoadingState>
             ) : (
               <OpenCandidateList
                 entries={candidates.data ?? []}
@@ -56,9 +59,9 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
           </section>
 
           <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium text-foreground">{t("filedHeading")}</h2>
+            <SectionHeader level={2}>{t("filedHeading")}</SectionHeader>
             {filed.loading && !filed.data ? (
-              <p className="text-sm text-muted-foreground">{t("loading")}</p>
+              <LoadingState>{t("loading")}</LoadingState>
             ) : (
               <>
                 <FiledDocumentList entries={filed.data ?? []} selectedId={selectedId} onSelect={setSelectedId} />
@@ -68,12 +71,15 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
           </section>
         </div>
 
-        <aside className="flex min-w-0 flex-1 flex-col gap-2 rounded-lg border border-border bg-surface p-4 lg:max-w-md">
-          <h2 className="text-sm font-medium text-foreground">{t("detailHeading")}</h2>
+        {/* The detail aside is a panel, so it wears the panel radius the Card
+            primitive uses (rounded-xl) rather than the row-card one — the two
+            rungs were reading the same before this pass. */}
+        <aside className="flex min-w-0 flex-1 flex-col gap-3 rounded-xl border border-border bg-surface p-4 lg:max-w-md">
+          <SectionHeader level={2}>{t("detailHeading")}</SectionHeader>
           {!selectedId ? (
-            <p className="text-sm text-muted-foreground">{t("detailEmpty")}</p>
+            <EmptyState>{t("detailEmpty")}</EmptyState>
           ) : clients.loading && !clients.data ? (
-            <p className="text-sm text-muted-foreground">{t("loading")}</p>
+            <LoadingState>{t("loading")}</LoadingState>
           ) : (
             <DocumentDetail
               key={selectedId}
@@ -87,6 +93,6 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
           )}
         </aside>
       </div>
-    </main>
+    </PageShell>
   );
 }

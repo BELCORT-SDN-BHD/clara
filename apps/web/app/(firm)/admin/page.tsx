@@ -1,5 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader, PageShell } from "@/components/common/page-shell";
+
 /**
  * "/admin" — users, capabilities, metering rollup (owner ruling Q3; PRD §4
  * item 21). Honest empty state, P2 shell only; the real surface is P4 work.
@@ -10,9 +12,8 @@ export default async function AdminPage() {
   const t = await getTranslations("Admin");
 
   return (
-    <main className="flex flex-col gap-2 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-      <p className="max-w-prose text-sm text-muted-foreground">{t("body")}</p>
-    </main>
+    <PageShell>
+      <PageHeader title={t("heading")} description={t("body")} />
+    </PageShell>
   );
 }
