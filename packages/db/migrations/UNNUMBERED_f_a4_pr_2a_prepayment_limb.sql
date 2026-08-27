@@ -178,7 +178,7 @@ begin
 
   foreach v_sig in array array[
       'clara._adj_canon_schedule(jsonb)',
-      'clara._adj_period_lines(clara.adjustment_templates,date,date)',
+      'clara._adj_period_lines(jsonb,jsonb,date,date)',
       'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
       'clara.record_document_service_period(uuid,date,date,text,text)',
       'clara.prepayment_schedule_v1(uuid,uuid)',
@@ -614,37 +614,49 @@ revoke all on function clara._adj_canon_schedule(jsonb) from public;
 -- the silent-nothing this branch exists to prevent. W43's mutant makes it return '[]' and watches
 -- an occurrence post nothing at all.
 --
--- ON THE COMPOSITE PARAMETER, measured rather than assumed: both live call sites hold the template
--- in a plpgsql variable declared `record` (0045:4446 and :5629), not %rowtype. Passing a record to a
--- composite-typed parameter is only safe while that record's column list matches the table's
--- exactly — and it does, because BOTH sites populate it with a bare single-table `select *`
--- (0045:4498-4499, :5720-5721) with no join. That is a property of those bodies, not a guarantee of
--- the language, so §TAIL censuses it: a future body that loads a SUBSET of columns and passes it
--- here would fail at runtime, and the census is how that gets caught at review instead.
+-- IT TAKES THE TWO jsonb VALUES IT NEEDS, NOT THE TEMPLATE ROW — a FORCED correction to the
+-- design's `p_template_row` shape, and the reason is a hard type error rather than a preference.
+--
+-- The design specifies `clara._adj_period_lines(p_template_row, p_period_start, p_period_end)`.
+-- THAT SIGNATURE CANNOT BE CALLED FROM EITHER OF ITS TWO LIVE CALL SITES. Both hold the template in
+-- a plpgsql variable declared `record` (0045:4446, :5629), and PostgreSQL answers
+--     ERROR 42846: cannot cast type record to adjustment_templates
+-- when such a variable is passed to a composite-typed parameter. It is not a question of the column
+-- list matching — a bare `record` has no composite type to cast FROM, so no `select *` shape could
+-- have saved it. An earlier draft of this comment reasoned the opposite and was WRONG.
+--
+-- CAUGHT BY THE END-TO-END BOOKS CELL (W35) and by nothing else: every other cell passes a genuine
+-- clara.adjustment_templates value and never meets the wall, while W35 is the only one that drives
+-- the real posting belt. Without it this train would have shipped an adjustment belt that could not
+-- post a single occurrence.
+--
+-- Taking (schedule, lines) is also the SMALLER COUPLING: the resolver no longer depends on the
+-- table's row type at all, so a later ALTER on clara.adjustment_templates cannot reach it, and a
+-- caller holding only those two columns can use it. Reported to the conductor as a forced
+-- deviation, with this evidence.
 -- -------------------------------------------------------------------------------------------------
-create function clara._adj_period_lines(p_template clara.adjustment_templates,
+create function clara._adj_period_lines(p_schedule jsonb, p_lines jsonb,
     p_period_start date, p_period_end date) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare v_lines jsonb;
 begin
-  if p_template.schedule is null then
-    return clara._adj_canon_lines(p_template.lines);
+  if p_schedule is null then
+    return clara._adj_canon_lines(p_lines);
   end if;
   select clara._adj_canon_lines(x.value -> 'lines') into v_lines
-    from jsonb_array_elements(p_template.schedule) as x(value)
+    from jsonb_array_elements(p_schedule) as x(value)
    where (x.value ->> 'period_start')::date = p_period_start
      and (x.value ->> 'period_end')::date   = p_period_end;
   if v_lines is null then
     raise exception 'this template carries a schedule that does not cover the period being posted'
       using errcode = 'CLR38',
         detail = jsonb_build_object('reason', 'schedule_period_uncovered',
-                                    'template_id', p_template.id,
                                     'period_start', p_period_start,
                                     'period_end', p_period_end)::text;
   end if;
   return v_lines;
 end $$;
-revoke all on function clara._adj_period_lines(clara.adjustment_templates, date, date) from public;
+revoke all on function clara._adj_period_lines(jsonb, jsonb, date, date) from public;
 
 -- =================================================================================================
 -- §B — THE HUMAN DOOR, BUILT door -> core FROM BIRTH (design §4.2).
@@ -1190,11 +1202,20 @@ begin
     -- This is exactly the projection clara._wdb_line_shape computes: it emits code||':D'/':C' keyed
     -- on debit_cents > 0 and DISCARDS EVERY MAGNITUDE (0045:2054-2062). Amount-blind readers are
     -- therefore correct BY CONSTRUCTION, not by luck.
-    select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end order by 1)
+    --
+    -- THE SORT IS BY THE EXPRESSION, NOT `order by 1`. Inside an AGGREGATE, a bare integer in
+    -- ORDER BY is a CONSTANT, not a positional column reference -- so `array_agg(x order by 1)`
+    -- does not sort at all and silently compares ARRIVAL ORDER. The first cut did exactly that,
+    -- while the design asks for a MULTISET: a perfectly lawful schedule that listed its two lines
+    -- in the opposite order to `lines` would have been refused at propose. Caught by W34's own
+    -- mutant, which reverses the line order and must still be accepted.
+    select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end
+             order by (e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end)
       into v_shape_t from jsonb_array_elements(v_lines) as t(e);
     v_prev := null; v_first_ps := null; v_last_pe := null;
     for y in select value from jsonb_array_elements(v_sched) loop
-      select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end order by 1)
+      select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end
+             order by (e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end)
         into v_shape_s from jsonb_array_elements(y -> 'lines') as t(e);
       if v_shape_s is distinct from v_shape_t then
         raise exception 'a schedule period posts a different set of accounts than the template lines declare'
@@ -2515,7 +2536,7 @@ begin
                   coalesce((x.value ->> 'credit_cents')::bigint, 0) as cr,
                   nullif(btrim(coalesce(x.value ->> 'description', '')), '') as descr,
                   x.ord::int as n
-           from jsonb_array_elements(clara._adj_period_lines(t, v_ps, v_pe)) with ordinality as x(value, ord)
+           from jsonb_array_elements(clara._adj_period_lines(t.schedule, t.lines, v_ps, v_pe)) with ordinality as x(value, ord)
            order by x.ord loop
     insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
         credit_cents, description)
@@ -2741,7 +2762,7 @@ begin
     -- resolves to the canonicalised template lines -- byte-identical to the line replaced here.
     -- (Spelled in prose: written as code, this comment would be counted by the generator's own
     -- surviving-reads assertion and would inflate it.)
-    v_want := clara._adj_period_lines(t, v_ps, v_pe);
+    v_want := clara._adj_period_lines(t.schedule, t.lines, v_ps, v_pe);
     select coalesce(jsonb_agg(jsonb_build_object(
              'account_code', jl.account_code,
              'debit_cents', jl.debit_cents,
@@ -3747,7 +3768,7 @@ declare
   v_missing text[] := '{}'; v_pub text[] := '{}'; v_frozen int;
   k_new_fns text[] := array[
     'clara._adj_canon_schedule(jsonb)',
-    'clara._adj_period_lines(clara.adjustment_templates,date,date)',
+    'clara._adj_period_lines(jsonb,jsonb,date,date)',
     'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
     'clara.record_document_service_period(uuid,date,date,text,text)',
     'clara.prepayment_schedule_v1(uuid,uuid)',
@@ -3762,7 +3783,7 @@ declare
   -- 0138's own k_ungranted lives in an APPLIED file and applied files are immutable.
   k_ungranted text[] := array[
     'clara._adj_canon_schedule(jsonb)',
-    'clara._adj_period_lines(clara.adjustment_templates,date,date)',
+    'clara._adj_period_lines(jsonb,jsonb,date,date)',
     'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
     'clara.prepayment_schedule_v1(uuid,uuid)',
     'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',

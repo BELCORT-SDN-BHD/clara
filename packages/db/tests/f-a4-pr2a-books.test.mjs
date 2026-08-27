@@ -24,9 +24,30 @@ const sign = (sub, client, template) => humanQuery(sub,
   "select clara.sign_adjustment_template($1::uuid,$2::uuid,$3) as r",
   [client, template, opk("fa4p2a-sign")]).then((r) => r.rows[0].r);
 
-const runOccurrence = (sub, client, template, ps, pe) => humanQuery(sub,
-  "select clara.run_adjustment_occurrence($1::uuid,$2::uuid,$3::date,$4::date,$5) as r",
-  [client, template, ps, pe, opk("fa4p2a-run")]).then((r) => r.rows[0].r);
+// THE OCCURRENCE BELT IS clara_runtime's, not a human's -- measured: the door holds EXECUTE for
+// clara_fn_owner and clara_runtime only, and a human call answers 42501. That is the design's own
+// division (F-A4 writes no journal line; the existing belt posts after a human signature), so the
+// cell uses the estate's OWN runtime helper rather than inventing a call.
+const runOccurrence = async (_sub, client, template, ps, pe) => {
+  const { runOccurrence: run } = await import("./x42-adj-core.mjs");
+  return run({ client, template, periodStart: ps, periodEnd: pe });
+};
+
+/** Approve every outstanding occurrence draft for one template, through the governed door. The
+ *  belt admits ONE unreviewed draft per template at a time, so this is called between runs. */
+async function approveOutstanding(sc, template) {
+  const { approveEntry } = await import("./wave-a-reads.mjs");
+  const rows = await rootQuery(
+    `select id, revision_token from clara.journal_entries
+      where client_id=$1 and status='draft' and flags ? 'recurring_adjustment'
+        and (flags -> 'recurring_adjustment' ->> 'template_id') = $2 order by created_at`,
+    [sc.client, template]);
+  for (const e of rows.rows) {
+    await approveEntry(sc.bob, { entry: e.id, expectedRevision: e.revision_token,
+      opKey: opk("fa4p2a-runappr") });
+  }
+  return rows.rows.length;
+}
 
 /** The net movement on one account across every APPROVED line of a client, in cents. */
 async function accountNet(client, code) {
@@ -65,29 +86,26 @@ test("fa4p2a.W35 end-to-end over the ruled convention: the prepaid asset reaches
   assert.equal(live.status, "live", "the template did not go live at signature");
   assert.ok(live.signed_by, "a live template with no signatory");
 
-  // EVERY OCCURRENCE RUNS, through the existing belt's own door.
+  // EVERY OCCURRENCE RUNS, through the existing belt's own door -- and each is APPROVED before the
+  // next is run. The belt refuses otherwise ("an occurrence draft for this template is outstanding;
+  // approve or withdraw it before running another period"), which is the estate keeping one
+  // unreviewed draft per template rather than letting a schedule stack up unapproved. Measured; the
+  // first cut ran all three and then approved, and never got past the second.
   const periods = live.schedule.map((s) => [s.period_start, s.period_end]);
   assert.equal(periods.length, 3);
-  const posted = [];
-  for (const [ps, pe] of periods) {
-    const r = await runOccurrence(sc.alice, sc.client, drafted.template_id, ps, pe);
-    posted.push(r);
-  }
-
-  // Occurrences post as DRAFTS; approve each so the books actually move.
   const { approveEntry } = await import("./wave-a-reads.mjs");
+  for (const [ps, pe] of periods) {
+    await runOccurrence(sc.alice, sc.client, drafted.template_id, ps, pe);
+    await approveOutstanding(sc, drafted.template_id);
+  }
   const entries = await rootQuery(
-    `select id, revision_token, status from clara.journal_entries
+    `select id, status from clara.journal_entries
       where client_id=$1 and flags ? 'recurring_adjustment'
         and (flags -> 'recurring_adjustment' ->> 'template_id') = $2 order by created_at`,
     [sc.client, drafted.template_id]);
   assert.equal(entries.rows.length, 3, `expected three occurrence entries, found ${entries.rows.length}`);
-  for (const e of entries.rows) {
-    if (e.status === "draft") {
-      await approveEntry(sc.bob, { entry: e.id, expectedRevision: e.revision_token,
-        opKey: opk("fa4p2a-runappr") });
-    }
-  }
+  assert.ok(entries.rows.every((e) => e.status === "approved"), "an occurrence was left unapproved");
+  void approveEntry;
 
   // THE ASSERTION THE WHOLE TRAIN EXISTS FOR.
   const prepaidAfter = await accountNet(sc.client, sc.prepaid);
@@ -115,19 +133,9 @@ test("fa4p2a.W35-mutant stopping ONE occurrence short leaves the prepaid account
   const drafted = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
   await sign(sc.alice, sc.client, drafted.template_id);
   const live = await templateById(drafted.template_id);
-  const { approveEntry } = await import("./wave-a-reads.mjs");
   for (const s of live.schedule.slice(0, 2)) {          // TWO of three, deliberately
     await runOccurrence(sc.alice, sc.client, drafted.template_id, s.period_start, s.period_end);
-  }
-  const entries = await rootQuery(
-    `select id, revision_token, status from clara.journal_entries
-      where client_id=$1 and flags ? 'recurring_adjustment'
-        and (flags -> 'recurring_adjustment' ->> 'template_id') = $2`, [sc.client, drafted.template_id]);
-  for (const e of entries.rows) {
-    if (e.status === "draft") {
-      await approveEntry(sc.bob, { entry: e.id, expectedRevision: e.revision_token,
-        opKey: opk("fa4p2a-runappr2") });
-    }
+    await approveOutstanding(sc, drafted.template_id);
   }
   const left = await accountNet(sc.client, sc.prepaid);
   assert.notEqual(left, 0,
@@ -148,10 +156,18 @@ test("fa4p2a.W34 the agent core and the human door, given IDENTICAL inputs, prod
   assert.equal(agent.status, "acted");
   const a = await templateById(agent.template_id);
 
-  // The HUMAN door, same inputs, on a twin client so the duplicate guard does not intervene.
+  // The HUMAN door, THE SAME INPUTS, on a twin client so the duplicate guard does not intervene.
+  // DATES COME BACK FORMATTED BY THE DATABASE. A DATE column arrives as a JS Date at LOCAL
+  // midnight, so toISOString() shifts it a day west of UTC -- feeding the door a start of
+  // 2025-01-31 for a schedule that begins 2025-02-01, which the coverage clause then refused. The
+  // wall was right; my fixture was reformatting its own inputs.
+  const dates = await rootQuery(
+    `select to_char(start_date,'YYYY-MM-DD') as s, to_char(end_date,'YYYY-MM-DD') as e
+       from clara.adjustment_templates where id = $1`, [agent.template_id]);
+  const iso = (which) => (which === "start" ? dates.rows[0].s : dates.rows[0].e);
   const sc2 = await prepaidScene("w34b", { cents: 90000 });
   const human = await proposeTemplate(sc2.alice, {
-    client: sc2.client, name: a.name, start: a.start_date, end: a.end_date,
+    client: sc2.client, name: a.name, start: iso('start'), end: iso('end'),
     lines: a.lines, schedule: a.schedule, memo: a.memo_template });
   const h = await templateById(human.template_id);
 
@@ -169,7 +185,7 @@ test("fa4p2a.W34 the agent core and the human door, given IDENTICAL inputs, prod
   // comparison is live rather than trivially true.
   const sc3 = await prepaidScene("w34c", { cents: 90000 });
   const perturbed = await proposeTemplate(sc3.alice, {
-    client: sc3.client, name: a.name, start: a.start_date, end: a.end_date,
+    client: sc3.client, name: a.name, start: iso('start'), end: iso('end'),
     lines: [...a.lines].reverse(), schedule: a.schedule, memo: a.memo_template });
   const p = await templateById(perturbed.template_id);
   assert.notEqual(p.content_hash, a.content_hash,

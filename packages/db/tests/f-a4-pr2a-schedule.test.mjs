@@ -37,7 +37,7 @@ test("fa4p2a.W36 every null-schedule template resolves to EXACTLY its canonical 
   const r = await rootQuery(
     `select count(*) filter (where t.schedule is null)::int as nulls,
             count(*) filter (where t.schedule is null
-                               and clara._adj_period_lines(t, t.start_date, t.start_date)
+                               and clara._adj_period_lines(t.schedule, t.lines, t.start_date, t.start_date)
                                    = clara._adj_canon_lines(t.lines))::int as equal,
             count(*) filter (where t.schedule is not null)::int as with_schedule
        from clara.adjustment_templates t`);
@@ -68,7 +68,7 @@ test("fa4p2a.W36-mutant a template that DOES carry a schedule resolves DIFFERENT
     ] });
   assert.ok(r?.template_id, `the schedule-bearing proposal was refused: ${JSON.stringify(r).slice(0, 200)}`);
   const q = await rootQuery(
-    `select clara._adj_period_lines(t, date '2025-02-01', date '2025-02-28') as feb,
+    `select clara._adj_period_lines(t.schedule, t.lines, date '2025-02-01', date '2025-02-28') as feb,
             clara._adj_canon_lines(t.lines) as flat
        from clara.adjustment_templates t where t.id = $1`, [r.template_id]);
   assert.notDeepEqual(q.rows[0].feb, q.rows[0].flat,
@@ -307,12 +307,12 @@ test("fa4p2a.W43-resolver a period the schedule does not cover raises a TYPED re
   assert.ok(r?.template_id, "the single-period template was refused");
   // The covered period answers.
   const ok = await rootQuery(
-    `select clara._adj_period_lines(t, date '2025-02-01', date '2025-02-28') as l
+    `select clara._adj_period_lines(t.schedule, t.lines, date '2025-02-01', date '2025-02-28') as l
        from clara.adjustment_templates t where t.id = $1`, [r.template_id]);
   assert.equal(Number(ok.rows[0].l[0].debit_cents), 10000, "the covered period must answer normally");
   // An UNCOVERED period must RAISE, never return an empty set.
   const e = await caught(() => rootQuery(
-    `select clara._adj_period_lines(t, date '2025-03-01', date '2025-03-31')
+    `select clara._adj_period_lines(t.schedule, t.lines, date '2025-03-01', date '2025-03-31')
        from clara.adjustment_templates t where t.id = $1`, [r.template_id]));
   assert.ok(e, "the resolver answered for a period the schedule does not cover -- an empty line set would post a zero-line occurrence that balances trivially and charges nothing");
   assert.match(String(e.detail ?? e.message), /schedule_period_uncovered/);

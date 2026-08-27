@@ -25,7 +25,7 @@ export async function hasPR2A() {
   const r = await rootQuery(
     `select (to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)') is not null) as wrapper,
             (to_regprocedure('clara.prepayment_schedule_v1(uuid,uuid)') is not null) as evaluator,
-            (to_regprocedure('clara._adj_period_lines(clara.adjustment_templates,date,date)') is not null) as resolver,
+            (to_regprocedure('clara._adj_period_lines(jsonb,jsonb,date,date)') is not null) as resolver,
             (to_regclass('clara.document_service_periods') is not null) as carrier,
             (to_regprocedure('clara.record_document_service_period(uuid,date,date,text,text)') is not null) as door,
             exists (select 1 from pg_attribute where attrelid = 'clara.adjustment_templates'::regclass
