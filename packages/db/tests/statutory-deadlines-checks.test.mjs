@@ -9,6 +9,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { roleQuery, endPool, ROLES } from "./rig-fixtures.mjs";
 import { tableApplied, insertSql, insertRow, baseRow, insertMutant } from "./statutory-deadlines-fixtures.mjs";
 
@@ -16,8 +17,19 @@ let live = false;
 before(async () => { live = await tableApplied(); });
 after(async () => { await endPool(); });
 
+/** Two-armed gate (fix round -- see statutory-deadlines-ddl.test.mjs's own comment for the full
+ *  reasoning). Package-wide runs skip LOUDLY via CLARA_ALLOW_MISSING_STATUTORY_DEADLINES=1
+ *  (set by tests/statutory-deadlines-preintegration-gate.mjs); a focused run with the variable
+ *  unset fails instead of skipping. */
 const gate = (t) => {
-  if (!live) { t.skip("clara.statutory_deadlines not applied -- migration not yet on this rig"); return true; }
+  if (!live) {
+    if (process.env.CLARA_ALLOW_MISSING_STATUTORY_DEADLINES === "1") {
+      console.warn("SKIP statutory-deadlines: the migration is not applied to this database (explicit pre-integration run).");
+      t.skip("clara.statutory_deadlines not applied -- explicit pre-integration run");
+      return true;
+    }
+    assert.fail("clara.statutory_deadlines is required for a focused or post-migration run: apply the migration, or set CLARA_ALLOW_MISSING_STATUTORY_DEADLINES=1 for the package-wide pre-integration sweep");
+  }
   return false;
 };
 
@@ -89,12 +101,45 @@ test("sd-C8 · notice_lead_days refuses negative", async (t) => {
   assert.equal(r.rowCount, 1, "zero is a legitimate lead (speak same-day)");
 });
 
-test("sd-C9 · due_rule_kind is closed to the three named kinds -- an out-of-domain value "
-  + "necessarily also fails the pairing CHECK (Annex A.2 has no fourth arm for it), so either "
-  + "named wall firing is correct", async (t) => {
+test("sd-C9 · an out-of-domain due_rule_kind is refused -- by the PAIRING check, not the "
+  + "closed-set check alone (fix round: an earlier title overclaimed this). Every arm of "
+  + "ck_..._due_params requires due_rule_kind to equal one of the three known literals, so a "
+  + "fourth value can NEVER be the sole refusing wall -- ck_..._due_rule_kind's own closed-set "
+  + "membership test contributes a diagnosis NAME (a reader sees 'not a known kind' instead of "
+  + "'wrong day/month for this kind'), it does not add refusal reach the pairing check lacks.", async (t) => {
     if (gate(t)) return;
     await insertMutant({ due_rule_kind: "next_full_moon" },
       ["ck_statutory_deadlines_due_rule_kind", "ck_statutory_deadlines_due_params"]);
+  });
+
+test("sd-C13 · ck_..._supersession_paired has real behavioural coverage on the INSERT path "
+  + "(fix round, item 2) -- the UPDATE-side trigger (sd-E2) never reaches this CHECK, since its "
+  + "own OR-guard fires first and refuses a partial UPDATE before Postgres would evaluate the "
+  + "table CHECK; only a fresh INSERT (no BEFORE INSERT trigger exists on this table) actually "
+  + "exercises it. Both half-set shapes refused on the exact conname.", async (t) => {
+    if (gate(t)) return;
+    await insertMutant(
+      { superseded_by: randomUUID(), superseded_at: null },
+      "ck_statutory_deadlines_supersession_paired");
+    await insertMutant(
+      { superseded_by: null, superseded_at: new Date().toISOString() },
+      "ck_statutory_deadlines_supersession_paired");
+    // Positive control: both null (the default -- a live, never-superseded row) already
+    // inserts clean in every other cell in this file; both set together is sd-E3's own
+    // positive control (via the trigger's lawful UPDATE path, statutory-deadlines-ddl.test.mjs).
+  });
+
+test("sd-C14 · an impossible (due_month, due_day) pair is refused by "
+  + "ck_..._due_day_calendar_valid (fix round, item 4) -- February bounded to 28, never 29", async (t) => {
+    if (gate(t)) return;
+    await insertMutant(
+      { due_rule_kind: "date_in_following_year", due_month: 2, due_day: 31 },
+      "ck_statutory_deadlines_due_day_calendar_valid");
+    await insertMutant(
+      { due_rule_kind: "date_in_following_year", due_month: 2, due_day: 29 },
+      "ck_statutory_deadlines_due_day_calendar_valid");
+    const r = await insertRow({ due_rule_kind: "date_in_following_year", due_month: 2, due_day: 28 });
+    assert.equal(r.rowCount, 1, "28 February is a legitimate date_in_following_year target");
   });
 
 test("sd-C10 · due_day/due_month are paired to due_rule_kind (Annex A.2) -- each kind's "

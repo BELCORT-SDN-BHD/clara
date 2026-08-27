@@ -60,6 +60,12 @@ export function baseRow(overrides = {}) {
     notice_lead_days: 3,
     effective_from: "2020-01-01",
     effective_to: null,
+    // superseded_by/superseded_at (fix round, item 2): NULL-defaulted so every EXISTING cell's
+    // insert shape is unchanged (null=null satisfies ck_..._supersession_paired trivially),
+    // but present in COLS/insertSql so a cell CAN override them to exercise the paired CHECK
+    // on the INSERT path -- the path the trigger (UPDATE-only) never reaches.
+    superseded_by: null,
+    superseded_at: null,
     recorded_by: "rig-fixture",
     basis: "rig fixture row",
     basis_kind: "migration_seed",
@@ -71,7 +77,8 @@ const COLS = [
   "domain", "obligation_code", "authority", "cadence", "due_rule_kind", "due_day", "due_month",
   "wording", "instrument", "holiday_rule", "working_day_basis", "conflict", "source_url",
   "source_note", "source_accessed_on", "evidence_grade", "cite_role", "notice_lead_days",
-  "effective_from", "effective_to", "recorded_by", "basis", "basis_kind",
+  "effective_from", "effective_to", "superseded_by", "superseded_at",
+  "recorded_by", "basis", "basis_kind",
 ];
 
 export function insertSql(row) {

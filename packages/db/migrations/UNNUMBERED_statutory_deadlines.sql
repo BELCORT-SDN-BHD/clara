@@ -12,17 +12,18 @@
 -- UNNUMBERED against the 0138 frontier -- renumber mechanically at merge (this file + its rig
 -- cells; nothing else keys on the number except the schema_migrations ledger).
 --
--- LANE NOTE (2026-08-27). PROGRESS.md's F-A4 row still labels this item "F-A4/PR-1c" -- that
--- is now STALE. The migration that actually landed as F-A4/PR-1c (0138 F_a4_pr_1c_close_
--- agent_limb, #368) shipped the close-domain agent limb (carrier, receipts, holds, settle)
--- and did NOT carry this DDL. The 磨合 session handoff
--- (docs/plan/active/mohe-session-handoff-2026-08-27.md, "Rulings made this session") records
--- the correction verbatim: "statutory_deadlines stays OUT of the PR-1c train -- PROGRESS's
--- F-A4 row labels it 'PR-1c' but it belongs to the payroll-calendar spec; needs its own lane
--- + a PROGRESS re-label." This file IS that lane, built standalone. F-T2's own PR-1 (the nine
--- seed rows + three clara.client_fact_keys rows) is BLOCKED on this file merging; F-T1 (SST)
--- is a second, LATER contributor via domain='sst' (Annex A.1). THIS FILE SEEDS NO ROWS, MINTS
--- NO WAKE WRAPPER AND NO CHASE LOGIC -- the table and its walls, nothing else, per scope.
+-- LANE NOTE (2026-08-27, TRUED against PROGRESS.md #371). This DDL was never F-A4/PR-1c's
+-- content: the migration that actually landed as F-A4/PR-1c (0138 F_a4_pr_1c_close_agent_limb,
+-- #368) shipped the close-domain agent limb (carrier, receipts, holds, settle). PROGRESS.md's
+-- own #371 truing (`docs: 0137+0138 apply ceremony as-run + PROGRESS frontier truing`) already
+-- re-labels the F-A4 row and the F-T2 row to match: this DDL is its own, currently-UNOWNED
+-- lane under the payroll-calendar spec (F-T2's own words, live in PROGRESS.md today) -- an
+-- earlier draft of this header called PROGRESS "stale" on this point; that is no longer true
+-- as of the branch's own parent commit, and this file must not carry a claim that outlives its
+-- own truth. This file IS that lane, built standalone. F-T2's own PR-1 (the nine seed rows +
+-- three clara.client_fact_keys rows) is BLOCKED on this file merging; F-T1 (SST) is a second,
+-- LATER contributor via domain='sst' (Annex A.1). THIS FILE SEEDS NO ROWS, MINTS NO WAKE
+-- WRAPPER AND NO CHASE LOGIC -- the table and its walls, nothing else, per scope.
 --
 -- CARRIED GAP (conductor-resolved 2026-08-27, this lane's own build-time question). The gate
 -- record's OC-2 ruling (finding M3) says the four monthly obligations' per-regulator period
@@ -36,6 +37,53 @@
 -- and an additive column is cheap before any rows exist. If PR-1 rules a column is needed, it
 -- lands as a widening migration onto this table, extend-only, the same pattern every other
 -- closed set here follows -- never a retrofit of this file.
+--
+-- NOTE FOR F-T2 PR-1's AUTHOR (seed values, not a DDL change). The gate record's OC-4 owner
+-- ruling SUPERSEDES design §3.6's "never moved" framing and Annex A.2's roll-BACK direction
+-- for holiday_rule='unverified': the legal due date actually rolls FORWARD per the
+-- Interpretation Acts 1948/1967, and `effective_due` is a SEPARATE, distinctly-labelled
+-- internal working-target field, not a replacement for the statutory date. This DDL stores
+-- `holiday_rule` as a bare value per row and computes nothing -- the roll direction lives
+-- entirely in F-A4's future oracle, so no column here changes -- but whoever seeds
+-- 'unverified' rows at PR-1, and whoever builds that oracle, must read OC-4's ruling, not
+-- A.2's now-superseded roll-back arithmetic, when deciding what `effective_due` means.
+--
+-- =====================================================================================
+-- DEPARTURES REGISTER -- every place this file's built shape diverges from Annex A.1's own
+-- text, in one place, so an A.1 auditor finds every delta here rather than diffing prose.
+-- =====================================================================================
+-- (1) RLS POSTURE. A.1 does not specify a grant/policy shape at all (that is db-migrations.md
+--     + A.5 territory, not A.1's column list). This file ships ZERO clara_authenticated grant
+--     and exactly one clara_fn_owner-only policy -- narrower than db-migrations.md's generic
+--     firm-scoped default (inapplicable here: no firm_id column) and narrower than BOTH global
+--     sibling tables it could have copied: clara.client_fact_keys grants clara_authenticated=r
+--     unconditionally (a genuine counter-example on the grant question, not a precedent for
+--     this table's choice) and clara.sst_threshold_schedule, at the live 0138 frontier, now
+--     ALSO carries a grant (clara_freeform_ro=r, a 0131 freeform-read policy) -- so neither
+--     sibling is actually zero-grant today. This table's owner-only posture is a DOCUMENTED
+--     CHOICE grounded in Annex A.5's "never a raw SELECT grant on a base table" for the
+--     specific reader this table is built for (list_statutory_calendar, PR-3, unbuilt), not a
+--     forced default inherited from either precedent. See the RLS comment block below for the
+--     corrected precedent wording.
+-- (2) conflict/source_note "both citations" pairing. A.1 calls this a "paired CHECK"; this
+--     file does NOT build a content-shape CHECK for it (see the `conflict` column's own
+--     comment for why -- there is no second source_note column to pair against mechanically,
+--     and a citation-count regex would be inventing a format convention A.1 never specifies).
+--     The discipline stays a PR-1 authoring/review obligation, named honestly rather than
+--     claimed as a wall this file does not have.
+-- (3) recorded_by is TEXT, not a clara.users uuid FK (client_facts' own WHO column type). See
+--     the WHO/BASIS/WHEN trio's own comment for the precedent cites
+--     (client_turnover_accounts.set_by / sst_future_attestations.reviewer, both 0016) -- this
+--     table has no live session actor, ever, so a clara.users FK would have no honest value to
+--     hold.
+-- (4) OC-2's period-basis column: NOT built here, carried by name to F-T2 PR-1 -- see the
+--     CARRIED GAP paragraph above for the full reasoning.
+-- (5) A new CHECK beyond A.1's own list: ck_statutory_deadlines_due_day_calendar_valid, bounding
+--     due_day to the real day-count of due_month wherever both are set (only
+--     `date_in_following_year` carries both) -- A.1 never asked for this, but an impossible
+--     combination (e.g. due_month=2, due_day=31) would otherwise pass every A.1-named CHECK and
+--     only fail later, inside F-A4's oracle, as a raw make_date() 22008. Added here because a
+--     malformed row is cheaper to refuse at INSERT than to debug from an oracle crash.
 --
 -- =====================================================================================
 -- SS0 -- D1 WRITE-QUIESCE INVENTORY: EMPTY
@@ -137,9 +185,13 @@ create table clara.statutory_deadlines (
   -- one cited field.
   notice_lead_days    int         not null check (notice_lead_days >= 0),
 
-  -- EFFECTIVE-DATING + IMMUTABLE/SUPERSEDE, client_facts' idiom (0055:394-408): half-open
-  -- [from, to), a paired supersession stamp, deferrable so a future supersession act can
-  -- insert the successor row and stamp the predecessor in one transaction.
+  -- EFFECTIVE-DATING + IMMUTABLE/SUPERSEDE, client_facts' idiom (0055:394-408). CONDUCTOR
+  -- RULING (this lane's fix round): the window is CLOSED/INCLUSIVE on its upper bound --
+  -- `effective_to is null or effective_to >= effective_from` below, so a single-day window is
+  -- effective_to == effective_from -- matching the estate's OWN live idiom
+  -- (client_turnover_accounts, client_facts' sibling effective-dated tables, 0016/0055), not
+  -- the half-open [from, to) phrase Annex A.1's prose uses. A.1's phrasing is the outlier here,
+  -- not this file's constraint.
   effective_from      date        not null,
   effective_to        date,
   superseded_by       uuid        references clara.statutory_deadlines(id) deferrable initially deferred,
@@ -183,6 +235,24 @@ create table clara.statutory_deadlines (
   ),
   constraint ck_statutory_deadlines_due_day_range check (due_day is null or due_day between 1 and 31),
   constraint ck_statutory_deadlines_due_month_range check (due_month is null or due_month between 1 and 12),
+
+  -- Fix round (independent review): an impossible (due_month, due_day) pair -- e.g. (2, 31) --
+  -- passes every CHECK above (both are individually in-range) and would only fail LATER, as a
+  -- raw make_date() 22008 inside F-A4's oracle (Annex A.2's date_in_following_year arithmetic,
+  -- the only rule kind that feeds both into make_date together; day_of_month_following uses
+  -- interval addition instead and never raises, so it needs no bound here -- vacuously
+  -- satisfied below since its own due_month is always NULL). February is bounded to 28, NEVER
+  -- 29: a fixed-year statutory date landing on "29 February of the following year" does not
+  -- exist in law (three years in four there is no such day), and the row that actually needs a
+  -- leap-aware Feb deadline (form_ea_ec) uses last_day_of_month_in_following_year instead,
+  -- which self-adjusts via make_date(y,m,1)+interval, never storing a fixed day number.
+  constraint ck_statutory_deadlines_due_day_calendar_valid check (
+    due_month is null or due_day is null or due_day <= case due_month
+      when 2 then 28
+      when 4 then 30 when 6 then 30 when 9 then 30 when 11 then 30
+      else 31
+    end
+  ),
 
   constraint ck_statutory_deadlines_effective_range check (
     effective_to is null or effective_to >= effective_from),
@@ -252,9 +322,17 @@ create trigger t_statutory_deadlines_no_truncate before truncate on clara.statut
 -- get_close_plan idiom (0064:154,280-285,312), "never a raw SELECT grant on a base table"
 -- (Annex A.5, stated twice in the design set). A future definer function owned by
 -- clara_fn_owner reaches this table through the owner policy below without any separate
--- grant -- the exact posture clara.sst_threshold_schedule already holds (0016:401-412), the
--- closest sibling table in the estate: global vocabulary, zero clara_authenticated grant,
--- definer-only reach.
+-- grant. PRECEDENTS, CORRECTED against the LIVE 0138 frontier (fix round -- an earlier draft
+-- over-claimed both): clara.sst_threshold_schedule holds ZERO clara_authenticated grant
+-- (verbatim true, still the shared ground), but is no longer definer-only reach full stop --
+-- it now ALSO carries `clara_freeform_ro=r` behind a 0131 freeform-read policy, so
+-- statutory_deadlines is STRICTER than its own precedent's live shape (this table's `relacl`
+-- is NULL -- no grantee at all, proven in the tail below). clara.client_fact_keys is a
+-- COUNTER-EXAMPLE on the grant question, not a supporting precedent: it holds
+-- `clara_authenticated=r` behind an unconditional human read policy, because its vocabulary
+-- (entity-type labels, key descriptions) has no floor to protect. This table's owner-only
+-- posture is therefore a genuine documented CHOICE -- grounded in Annex A.5's floor
+-- requirement for THIS table's future reader -- not a default either sibling forces.
 alter table clara.statutory_deadlines enable row level security;
 alter table clara.statutory_deadlines force row level security;
 create policy p_statutory_deadlines_owner on clara.statutory_deadlines
@@ -282,6 +360,7 @@ declare
   v_expect_cons constant text[] := array[
     'ck_statutory_deadlines_basis_kind','ck_statutory_deadlines_cadence',
     'ck_statutory_deadlines_cite_role','ck_statutory_deadlines_domain',
+    'ck_statutory_deadlines_due_day_calendar_valid',
     'ck_statutory_deadlines_due_day_range','ck_statutory_deadlines_due_month_range',
     'ck_statutory_deadlines_due_params','ck_statutory_deadlines_due_rule_kind',
     'ck_statutory_deadlines_effective_range','ck_statutory_deadlines_evidence_grade',
@@ -384,9 +463,18 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- (7) ZERO reach for every app role -- no clara_authenticated/agent/wake/runtime role can
-  --     SELECT, INSERT, UPDATE or DELETE this base table (Annex A.5's "never a raw SELECT
-  --     grant on a base table", generalised to every DML verb).
+  -- (7) THE TRUE CLOSED WORLD (fix round -- a five-role roster probe is a diagnosis, not a
+  --     proof: a sixth role this file never thought to name would sail past it silently).
+  --     relacl IS NULL means no ACL entry exists AT ALL -- not even an explicit grant back to
+  --     clara_fn_owner itself -- which is the one predicate no future role, named or not, can
+  --     slip past.
+  if (select relacl from pg_class where oid = 'clara.statutory_deadlines'::regclass) is not null then
+    raise exception 'S2: clara.statutory_deadlines carries a non-null relacl -- some role holds an explicit grant'
+      using errcode = 'CLR10';
+  end if;
+  -- Roster probe, kept as a NAMED diagnosis beneath the true closed-world check above: if (7)
+  -- ever fires, this pinpoints WHICH of the known app roles reaches the table (informational
+  -- only -- (7)'s relacl check is what actually holds the wall now).
   select string_agg(x.role || ':' || x.priv, ', ') into v_bad
     from (values
       ('clara_authenticated','select'),('clara_authenticated','insert'),
@@ -398,7 +486,7 @@ begin
     ) x(role, priv)
     where has_table_privilege(x.role, 'clara.statutory_deadlines', x.priv);
   if v_bad is not null then
-    raise exception 'S2: unexpected reach on clara.statutory_deadlines -- %', v_bad using errcode = 'CLR10';
+    raise exception 'S2: unexpected reach on clara.statutory_deadlines (roster diagnosis) -- %', v_bad using errcode = 'CLR10';
   end if;
 
   -- (8) Zero rows -- this file seeds nothing.
@@ -408,5 +496,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'statutory_deadlines tail: OK -- 27 columns, 24 named constraints, the partial unique live-row index, 3 triggers (supersede-only / no-delete / no-truncate), forced RLS with exactly 1 owner-only policy, zero app-role reach on any DML verb, zero rows, table + trigger function both owned by clara_fn_owner with PUBLIC execute revoked.';
+  raise notice 'statutory_deadlines tail: OK -- 27 columns, 25 named constraints, the partial unique live-row index, 3 triggers (supersede-only / no-delete / no-truncate), forced RLS with exactly 1 owner-only policy, relacl NULL (true closed world) plus a clean 5-role roster diagnosis, zero rows, table + trigger function both owned by clara_fn_owner with PUBLIC execute revoked.';
 end $s2$;
