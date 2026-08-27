@@ -4477,10 +4477,18 @@ begin
   -- behavioural half, measuring 64 hex characters on a digest the verb actually wrote.
   select p.prosrc into v_txt from pg_proc p
    where p.oid = to_regprocedure('clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)');
-  -- COMMENTS ARE MASKED BEFORE THE SCAN, and that is not tidiness: this body's own comment EXPLAINS
-  -- why md5 was rejected, so an un-masked scan would fire on the explanation and this census would
-  -- have failed on the very file that fixed the defect. The estate has met that class before (the
-  -- wiki gate reading a CoR comment); the answer is the same one -- strip `--` runs, then read.
+  -- COMMENTS ARE MASKED BEFORE THE SCAN, and the reason is a FUTURE one, not a present one.
+  -- RECUT 2026-08-28 (review lane): the first cut of this comment claimed the mask was load-bearing
+  -- TODAY -- "this body's own comment explains why md5 was rejected, so an un-masked scan would fire
+  -- on the explanation". That is checkably FALSE and was measured to be: the body says `md5's
+  -- chosen-prefix` and `used md5`, but the literal `md5(` this regex forbids appears ZERO times, so
+  -- an un-masked scan passes today exactly as a masked one does. The mask stays because it is a
+  -- cheap defence against the comment this body does NOT yet have -- a later hand writing `md5(...)`
+  -- in prose here would red a census about the CODE, and a gate that fires on prose teaches the next
+  -- reader to weaken it. The estate has met that class before (the wiki gate reading a CoR comment
+  -- un-masked); the answer is the same, but the JUSTIFICATION had to be true to be worth writing.
+  -- Third named right-conclusion-wrong-reason on this train, so it is named here rather than fixed
+  -- quietly: the conclusion was sound and the argument for it was not, which is the whole class.
   v_txt := regexp_replace(coalesce(v_txt, ''), '--[^\n]*', '', 'g');
   if v_txt = '' or v_txt !~ 'encode\(sha256\(convert_to\(' or v_txt ~ 'md5\(' then
     raise exception 'F-A4 PR-2a tail: the agent core''s request digest is not the estate''s canonical sha256 form (or md5 has reappeared in its CODE)'
