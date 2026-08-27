@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { Suspense } from "react";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { RegistersWorkbench } from "@/components/registers/registers-workbench";
 
 /**
@@ -19,11 +20,11 @@ export default async function ClientRegistersPage({
   const t = await getTranslations("ClientRegisters");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      <PageHeader title={t("heading")} />
       <Suspense fallback={null}>
         <RegistersWorkbench clientId={clientId} />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }

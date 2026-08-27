@@ -9,6 +9,8 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadStaffAdvances } from "@/lib/registers/staff-advances";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
 
 export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
@@ -19,29 +21,27 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
 
   return (
     <DataState loading={loading} error={error} isEmpty={rows.length === 0} emptyMessage={t("empty")}>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs text-muted-foreground">
-              <th className="py-2 pr-4 font-medium">{t("issued")}</th>
-              <th className="py-2 pr-4 font-medium">{t("amount")}</th>
-              <th className="py-2 pr-4 font-medium">{t("purpose")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => (
-              <tr key={a.id} className="border-b border-border last:border-0">
-                <td className="py-2 pr-4 text-card-foreground">{a.issue_date}</td>
-                <td className="py-2 pr-4 text-card-foreground">
-                  {fmtCents(a.amount_cents, tc("centsUnsafe"))}
-                  {a.voided_by_entry_id ? ` (${t("voided")})` : ""}
-                </td>
-                <td className="py-2 pr-4 text-card-foreground">{a.purpose ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTableCard>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("issued")}</TableHead>
+            <TableHead>{t("amount")}</TableHead>
+            <TableHead>{t("purpose")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((a) => (
+            <TableRow key={a.id}>
+              <TableCell>{a.issue_date}</TableCell>
+              <TableCell>
+                {fmtCents(a.amount_cents, tc("centsUnsafe"))}
+                {a.voided_by_entry_id ? ` (${t("voided")})` : ""}
+              </TableCell>
+              <TableCell className="text-muted-foreground">{a.purpose ?? "—"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </DataTableCard>
     </DataState>
   );
 }

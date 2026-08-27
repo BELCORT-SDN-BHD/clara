@@ -19,8 +19,8 @@ import Link from "next/link";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientRegister, loadClientRegisterFacts, type ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "./data-state";
 
 type EnrichedRow = { client: ClientRow; entityType: string | null; msic: string | null };
@@ -80,34 +80,30 @@ export function ClientRegisterList() {
             row-hover. It sits inside a Card because every other panel-level
             block on a page does; a bare table floating on the shell grey was
             the one surface with no edge at all. */}
-        <Card>
-          <CardContent>
-            <Table className="enter-content">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("columnName")}</TableHead>
-                  <TableHead>{t("columnStatus")}</TableHead>
-                  <TableHead>{t("columnEntityType")}</TableHead>
-                  <TableHead>{t("columnMsic")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map(({ client, entityType, msic }) => (
-                  <TableRow key={client.id}>
-                    <TableCell>
-                      <Link href={`/clients/${client.id}`} className="font-medium text-primary underline-offset-4 hover:underline">
-                        {client.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{statusLabels[client.status] ?? client.status}</TableCell>
-                    <TableCell className="text-muted-foreground">{factCell(entityType)}</TableCell>
-                    <TableCell className="text-muted-foreground">{factCell(msic)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <DataTableCard>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("columnName")}</TableHead>
+              <TableHead>{t("columnStatus")}</TableHead>
+              <TableHead>{t("columnEntityType")}</TableHead>
+              <TableHead>{t("columnMsic")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(({ client, entityType, msic }) => (
+              <TableRow key={client.id}>
+                <TableCell>
+                  <Link href={`/clients/${client.id}`} className="font-medium text-primary underline-offset-4 hover:underline">
+                    {client.name}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{statusLabels[client.status] ?? client.status}</TableCell>
+                <TableCell className="text-muted-foreground">{factCell(entityType)}</TableCell>
+                <TableCell className="text-muted-foreground">{factCell(msic)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </DataTableCard>
       </DataState>
     </div>
   );

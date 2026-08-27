@@ -12,6 +12,9 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadAdjustmentTemplates, loadAdjustmentRuns } from "@/lib/registers/adjustments";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { SectionHeader } from "@/components/common/section-header";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
 
 export function AdjustmentsRegister({ clientId }: { clientId: string }) {
@@ -37,16 +40,19 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold text-foreground">{t("templatesHeading")}</h3>
+        <SectionHeader level={2}>{t("templatesHeading")}</SectionHeader>
         <DataState
           loading={templates.loading}
           error={templates.error}
           isEmpty={(templates.data ?? []).length === 0}
           emptyMessage={t("emptyTemplates")}
         >
-          <ul className="flex flex-col gap-1 text-sm">
+          <ul className="flex flex-col gap-2 text-sm">
             {(templates.data ?? []).map((tpl) => (
-              <li key={tpl.id} className="flex flex-wrap gap-3 rounded-md border border-border p-2">
+              // The row-card idiom, matching every other list row in the
+              // product: rounded-lg + border + bg-card + p-3, not the
+              // rounded-md/p-2/no-surface variant this lane grew.
+              <li key={tpl.id} className="enter-content flex flex-wrap gap-3 rounded-lg border border-border bg-card p-3">
                 <span className="font-medium text-card-foreground">{tpl.name}</span>
                 <span className="text-muted-foreground">
                   {t("status")}: {statusLabels[tpl.status] ?? tpl.status}
@@ -60,33 +66,31 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
         </DataState>
       </section>
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold text-foreground">{t("runsHeading")}</h3>
+        <SectionHeader level={2}>{t("runsHeading")}</SectionHeader>
         <DataState
           loading={runs.loading}
           error={runs.error}
           isEmpty={(runs.data ?? []).length === 0}
           emptyMessage={t("emptyRuns")}
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">{t("period")}</th>
-                  <th className="py-2 pr-4 font-medium">{t("mode")}</th>
-                  <th className="py-2 pr-4 font-medium">{t("amount")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(runs.data ?? []).map((r) => (
-                  <tr key={r.id} className="border-b border-border last:border-0">
-                    <td className="py-2 pr-4 text-card-foreground">{r.period_start} – {r.period_end}</td>
-                    <td className="py-2 pr-4 text-card-foreground">{modeLabels[r.mode] ?? r.mode}</td>
-                    <td className="py-2 pr-4 text-card-foreground">{fmtCents(r.amount_cents, tc("centsUnsafe"))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTableCard>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("period")}</TableHead>
+                <TableHead>{t("mode")}</TableHead>
+                <TableHead>{t("amount")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(runs.data ?? []).map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.period_start} – {r.period_end}</TableCell>
+                  <TableCell className="text-muted-foreground">{modeLabels[r.mode] ?? r.mode}</TableCell>
+                  <TableCell>{fmtCents(r.amount_cents, tc("centsUnsafe"))}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </DataTableCard>
         </DataState>
       </section>
     </div>
