@@ -13,7 +13,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   rootQuery, humanQuery, roleQuery, endPool, printLaneNotes, printSkipCount, noteLane, markSkip,
-  opk, approveEntry, filedDocument,
+  opk, approveEntry, filedDocument, draftEntryV3, freshResolution,
 } from "./wave-a-fixtures.mjs";
 import { ROLES, CLR } from "./rig-helpers.mjs";
 import { beginClose, attestClose, EXPN, BANK1 } from "./x56-fixtures.mjs";
@@ -207,6 +207,53 @@ test("fa4c.B1 wake_begin_close is the LAST act of preparation: it acts on a clea
   const outOfOrder = await VERBS.begin(s3, { fy: fy2.rows[0].r.fiscal_year_id });
   assert.equal(outOfOrder.status, "refused");
   assert.ok(tokens(outOfOrder).includes("close_ordering_violation"), "oldest-first, in the estate's own words");
+});
+
+test("fa4c.B1b rung B13 (D-22's recut): an outstanding belt draft dated AT OR BEFORE the FY end refuses the freeze; the same draft dated AFTER it does not", async (t) => {
+  if (gate(t)) return;
+  // ARM 2 of B13, and the sharper half of F13. The FA oracle answers
+  // {due:false,'period_draft_outstanding'} whenever ANY depreciation draft stands -- a NOT-DUE
+  // answer hiding a draft CLR19 will refuse forever once the year freezes. So the rung reads the
+  // draft ITSELF, with the oracle's own predicate (status='draft' and flags ? 'depreciation_
+  // charges') PLUS the date bound the oracle lacks. Both polarities, because a rung that refuses
+  // everything is not a rung.
+  const late = await scene("b1b_late");
+  const lateDraft = await draftEntryV3(late.bob, {
+    client: late.client, resolution: freshResolution(late.bob, late.client, { subjectKind: "manual", subjectId: null }),
+    memo: "fa4c b1b: depreciation draft AFTER the year end", postingDate: "2026-06-30",
+    flags: { depreciation_charges: true },
+    lines: [
+      { account_code: EXPN, debit_cents: 4200, credit_cents: 0, description: "dr" },
+      { account_code: BANK1, debit_cents: 0, credit_cents: 4200, description: "cr" },
+    ],
+    opKey: opk("fa4c-b1b-late"),
+  });
+  assert.ok(lateDraft.entry_id, "the out-of-period depreciation draft stands");
+  const proceeds = await VERBS.begin(late.s, { fy: late.fy });
+  assert.equal(proceeds.status, "acted",
+    `a draft dated AFTER ends_on does not strand anything, so the freeze proceeds: ${JSON.stringify(tokens(proceeds))}`);
+
+  const inside = await scene("b1b_in");
+  const inDraft = await draftEntryV3(inside.bob, {
+    client: inside.client, resolution: freshResolution(inside.bob, inside.client, { subjectKind: "manual", subjectId: null }),
+    memo: "fa4c b1b: depreciation draft INSIDE the year", postingDate: "2025-11-30",
+    flags: { depreciation_charges: true },
+    lines: [
+      { account_code: EXPN, debit_cents: 4200, credit_cents: 0, description: "dr" },
+      { account_code: BANK1, debit_cents: 0, credit_cents: 4200, description: "cr" },
+    ],
+    opKey: opk("fa4c-b1b-in"),
+  });
+  assert.ok(inDraft.entry_id, "the in-period depreciation draft stands");
+  const refused = await VERBS.begin(inside.s, { fy: inside.fy });
+  assert.equal(refused.status, "refused");
+  assert.ok(tokens(refused).includes("belt_period_unrun"),
+    "freezing would strand a charge CLR19 then refuses forever");
+  const rung = refused.rung_vector.find((v) => v.token === "belt_period_unrun");
+  assert.ok(rung.reasons.includes("fa_draft_outstanding"),
+    `the receipt NAMES which arm refused: ${JSON.stringify(rung.reasons)}`);
+  const st = await rootQuery("select status from clara.fiscal_years where id=$1", [inside.fy]);
+  assert.equal(st.rows[0].status, "open", "and the year never flipped");
 });
 
 test("fa4c.B2 wake_abandon_close at TA-P1 C's ruled width: a HUMAN-started run yields, an ATTESTED run does not", async (t) => {
