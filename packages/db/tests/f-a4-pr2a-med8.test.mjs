@@ -28,22 +28,44 @@ const CHECK = "unapproved_drafts_in_period";
  *  a meaningful thing to draft. The item_key IS the draft entry's id -- PR-1c's own cells build it
  *  exactly this way, so this battery keys the same way rather than inventing a second convention.
  *  Both drafts are planted BEFORE begin_close, because the freeze makes the year unwritable. */
-async function runWithItems(tag) {
+async function runWithItems(tag, drafts = 2) {
   const sc = await scene(tag);
-  const a = await inPeriodDraft(sc.alice, {
-    client: sc.client, postingDate: "2025-03-01", memo: `med8 a ${tag}`,
-    debit: "574-C56", credit: "170-C56", cents: 1500 });
-  const b = await inPeriodDraft(sc.alice, {
-    client: sc.client, postingDate: "2025-03-02", memo: `med8 b ${tag}`,
-    debit: "574-C56", credit: "170-C56", cents: 2500 });
+  const ids = [];
+  for (let i = 0; i < drafts; i++) {
+    ids.push(await inPeriodDraft(sc.alice, {
+      client: sc.client, postingDate: `2025-03-0${i + 1}`, memo: `med8 ${tag} ${i}`,
+      debit: "574-C56", credit: "170-C56", cents: 1500 + i }));
+  }
   const begun = await VERBS.begin(sc.s, { fy: sc.fy });
   assert.equal(begun.status, "acted", `begin_close: ${JSON.stringify(tokens(begun))}`);
-  return { sc, pairs: [{ check_key: CHECK, item_key: a }, { check_key: CHECK, item_key: b }],
+  return { sc, ids, pairs: ids.map((id) => ({ check_key: CHECK, item_key: id })),
     run: begun.result.close_run_id };
 }
 
 const drafted = (pairs, text = "Clara: the professional's drafted words for this item.") =>
   pairs.map((p) => ({ ...p, text }));
+
+test("fa4p2a.W23-digest a NEW outstanding item under an ALREADY-COVERED check MOVES that check's digest", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE CRUX MEASUREMENT behind design Annex D.1a's ruling, driven here so the ruling rests on a
+  // cell rather than on a transcript. Two worlds identical but for the number of outstanding drafts
+  // under the SAME check: if the digests differ, real growth moves the digest and therefore arrives
+  // through ARM (1), never meeting B11 -- which is what makes B11 correct exactly as 0138 shipped
+  // it, and what makes D.1's original justifying example a mis-derivation rather than a defect.
+  const a = await runWithItems("w23d1", 1);
+  const b = await runWithItems("w23d2", 2);
+  const g = async (run) => (await rootQuery(
+    `select measured_digest, measured from clara.close_gate_results
+      where close_run_id=$1 and check_key=$2`, [run, CHECK])).rows[0];
+  const ga = await g(a.run), gb = await g(b.run);
+  assert.ok(ga && gb, "the check did not measure on one of the runs");
+  // The payload carries the item list OUTRIGHT -- so this is visible, not inferred.
+  assert.equal(ga.measured.draft_count, 1);
+  assert.equal(gb.measured.draft_count, 2);
+  assert.notEqual(ga.measured_digest, gb.measured_digest,
+    "a second outstanding item under the same check did NOT move the digest -- legitimate growth would then be unreachable and B11 would need to become pair-aware (design Annex D.1a's other fork)");
+  noteLane(`W23-digest: draft_count 1 -> ${ga.measured_digest}, 2 -> ${gb.measured_digest}`);
+});
 
 test("fa4p2a.W23 (MED-8) a strict SUBSET with unmoved digests REFUSES, and the live proposal stays OPEN", async (t) => {
   if (prepayGate(t, markSkip)) return;
@@ -75,27 +97,30 @@ test("fa4p2a.W23 (MED-8) a strict SUBSET with unmoved digests REFUSES, and the l
   assert.equal(after.find((p) => p.state === "open").id, live.id,
     "a DIFFERENT proposal is now open -- the live one was superseded after all");
   assert.equal(after.length, 1, "the refused draft wrote a proposal row");
+
+  // THE SHARED CEILING (the same one W24 states, because the two share it rather than each having
+  // their own): ARM (1)'s supersede -- and with it the dropped-pair naming its settle_reason owes
+  // -- is NOT driven here. It needs a check's digest to move BETWEEN two proposals on one run, and
+  // `begin_close` freezes the year so `unapproved_drafts_in_period` cannot move that way mid-run.
+  // The MECHANISM is proven by W23-digest; the same-run TRANSITION is carried by name to PR-2b/PR-3
+  // rather than manufactured by planting into a frozen year.
 });
 
 test("fa4p2a.W24 (MED-8) the STRICT-SUPERSET arm is over PAIRS, and the TRADE case still refuses", async (t) => {
   if (prepayGate(t, markSkip)) return;
   const { sc, pairs, run } = await runWithItems("w24");
 
-  // *** ARM (2)'s STATED POSITIVE CONTROL IS CURRENTLY UNREACHABLE, and that is a real finding
-  // rather than a fixture problem -- pinned here and reported to the conductor 2026-08-27. ***
+  // RULED 2026-08-27 (design Annex D.1a) AFTER THE MEASUREMENT BELOW: Annex D.1's justifying
+  // example was MIS-DERIVED, and B11 is right as 0138 shipped it.
   //
-  // Annex D.1 gives the case exactly: live {(A,i1)}, incoming {(A,i1),(A,i2)} -- the same check_key
-  // SET {A}, so "a check_key reading would refuse a proposal adding a genuinely new item under an
-  // existing check -- legitimate growth, which is exactly what arm (2) exists to admit."
+  // The example said live {(A,i1)} vs incoming {(A,i1),(A,i2)} is legitimate growth a check_key
+  // reading would wrongly refuse. But in an UNCHANGED WORLD those two proposals differ only in how
+  // many items the AGENT CHOSE to draft -- nothing measured moved -- and B11's map-equality refusal
+  // is then the honest answer. Real growth moves the check's digest (cell W23-digest proves it), so
+  // it arrives through ARM (1) and never meets B11 at all.
   //
-  // But B11 refuses it FIRST. B11 was shipped by 0138 and compares `bound_digests`, a
-  // check_key -> digest MAP, for exact equality -- and adding a second ITEM under the SAME check
-  // leaves that map identical. So the growth Annex D.1 wants admitted is refused as
-  // `close_proposal_exists` before B11b's superset arm is ever evaluated. Arm (2) can only be
-  // reached when the KEY set changes, which is not the case the annex uses to justify it.
-  //
-  // The cell asserts what the estate DOES, and names what the design SAYS, so the two cannot drift
-  // apart silently while a ruling is pending.
+  // This cell therefore pins the UNCHANGED-WORLD arm: same key set, same digests, agent drafts more
+  // items -> B11 refuses, and nothing is superseded on a sentence that would not be true.
   const one = await VERBS.propose(sc.s, { run, drafted: drafted(pairs.slice(0, 1)) });
   assert.equal(one.status, "acted");
   const s2 = await mintClosePrepSession(sc.firm, sc.client);
@@ -110,6 +135,23 @@ test("fa4p2a.W24 (MED-8) the STRICT-SUPERSET arm is over PAIRS, and the TRADE ca
   assert.equal(rows.filter((p) => p.state === "open").length, 1);
   assert.equal(rows.filter((p) => p.state === "superseded").length, 0,
     "a proposal was superseded despite the refusal");
+
+  // ================= THE SHARED CEILING, stated in BOTH cells that share it =================
+  // NEITHER ARM (1)'s SUPERSEDE NOR ARM (2)'s SUPERSET IS DRIVEN BY THIS BATTERY, and they share
+  // ONE reason rather than two. Both need the world to MOVE between two proposals on the same run:
+  // arm (1) needs a check's digest to change, arm (2) needs the pair set to grow by a NEW key. For
+  // `unapproved_drafts_in_period` neither can happen mid-run, because `begin_close` FREEZES the
+  // year -- the wall fa4c.B1b and fa4c.G1b already pin -- so no new draft can appear in the period
+  // after the run starts.
+  //
+  // WHAT IS PROVEN ANYWAY: cell W23-digest shows the digest DOES move with the item set, which is
+  // the mechanism arm (1) rides and the fact design Annex D.1a's ruling rests on. What is NOT
+  // proven is the same-run TRANSITION.
+  //
+  // NOTHING IS PLANTED TO FAKE IT. A fixture that mutated a frozen year to manufacture the
+  // transition would be testing the plant, not the guard. CARRIED BY NAME to PR-2b/PR-3, where the
+  // runtime's own wake cycles drive real mid-run movement across separate runs.
+  // ==========================================================================================
 });
 
 test("fa4p2a.W22 (residual 1) the rank conjunct breaks NO definer path, and a below-floor viewer still cannot read", async (t) => {

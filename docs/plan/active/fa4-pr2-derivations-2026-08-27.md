@@ -42,10 +42,33 @@ subsets burns live proposals one after another whenever the complement is non-em
 same churn B11b exists to stop, wearing a different shape, which is a guard defeating itself.
 
 **The ruled arm is strict superset (incoming ⊋ live): it admits growth and refuses trade.** And it
-is over the **`(check_key, item_key)` pair set**, never the check_key set — at check_key
-granularity, live `{(A, i1)}` versus incoming `{(A, i1), (A, i2)}` share the key set `{A}`, so a
-check_key reading would refuse a proposal adding a genuinely new item under an existing check.
-The pair set tells those apart; the key set cannot.
+is over the **`(check_key, item_key)` pair set**, never the check_key set.
+
+#### D.1a · The justifying example was MIS-DERIVED — RULED 2026-08-27 after a rig measurement
+
+*An earlier cut of this section justified arm (2) with: live `{(A, i1)}` versus incoming
+`{(A, i1), (A, i2)}` share the key set `{A}`, so "a check_key reading would refuse a proposal
+adding a genuinely new item under an existing check". **The build lane's battery found that case is
+never reached, and the measurement showed why the example — not the guard — was wrong.***
+
+**Measured on the rig** (two worlds identical but for the number of outstanding drafts under the
+same check): `draft_count = 1` digests `ebc4ae27…`, `draft_count = 2` digests `7b75a76d…`, and the
+stored `measured` payload carries the item list and the count outright. **A new outstanding item
+under an already-covered check IS a change in that check's measured state, and the digest moves
+with it.**
+
+So legitimate same-key growth **arrives through arm (1)**: the world moved, the digest moved, and
+B11 — whose predicate is exact equality of the `check_key → digest` MAP — does not fire.
+**B11 therefore binds only when NOTHING MEASURED MOVED**, and refusing there is the honest answer:
+a second item appearing with no measured change would be measurement incoherence, and fail-closed
+is correct. **Arm (2)'s real province is NEW-KEY coverage**, which the map inequality already lets
+through to the superset test. **B11 stays exactly as 0138 shipped it; no body changes.**
+
+**Battery ceiling, stated rather than papered over:** the unchanged-world same-key retry (→ B11)
+and the new-key case (→ arm (2)) are both drivable. A *real* new item arriving mid-run is **not**
+drivable for `unapproved_drafts_in_period`, because `begin_close` FREEZES the year and no new draft
+can appear in the period after the run starts — the same wall `fa4c.B1b`/`G1b` pin. The digest
+mechanism is proven by the measurement above; the same-run transition is carried by name.
 
 ### D.2 · What `settle_reason` must say under each arm
 
