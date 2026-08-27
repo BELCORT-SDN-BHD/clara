@@ -978,6 +978,46 @@ begin
 end $eval$;
 revoke all on function clara.prepayment_schedule_v1(uuid, uuid) from public;
 
+-- -------------------------------------------------------------------------------------------------
+-- §C.1 — THE FREEZE REGISTRATION, single-member by construction.
+--
+-- THE search_path HERE IS LOAD-BEARING, NOT COSMETIC (0059:243-245's recorded reason, which 0091
+-- restates): verify_evaluator_freeze() reproduces the closure hash under pg_catalog,pg_temp, so a
+-- registration performed under ANY OTHER search_path stores a hash the verifier CANNOT reproduce
+-- and every later apply reds. It is set immediately before and restored immediately after.
+--
+-- ONE MEMBER, deliberately (design §5.1). Registering a closure freezes EVERY member body
+-- estate-wide -- verify_evaluator_freeze() ignores the `deployed` flag and hashes the full
+-- pg_get_functiondef -- so an N-member registration is N bodies a later lane can never recut
+-- without reding an apply. clara.prepayment_schedule_v1 calls no other clara function precisely so
+-- that this list can honestly have one entry.
+--
+-- deployed = false: the runtime half is PR-2b (design §13 item 1). The freeze binds regardless,
+-- which is the point -- the flag is about traffic, not about immutability.
+-- -------------------------------------------------------------------------------------------------
+set local search_path = pg_catalog, pg_temp;
+do $fa4pr2a_freeze$
+declare e uuid; h bytea;
+begin
+  select sha256(convert_to(string_agg(
+           encode(sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')), 'hex'),
+           '' order by o), 'UTF8')) into h
+    from (values (0, 'clara.prepayment_schedule_v1(uuid,uuid)')) m(o, s);
+  insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
+      closure_sha256, migration_version, deployed)
+    values ('prepayment_schedule', 1, 'clara.prepayment_schedule_v1(uuid,uuid)', h,
+      -- *** CLAIMED AT MERGE: this literal is the file's own name and MUST be trued when the
+      -- migration number is claimed (.claude/rules/db-migrations.md). It is named in the header's
+      -- merge checklist so it cannot be forgotten. ***
+      'UNNUMBERED_f_a4_pr_2a_prepayment_limb', false)
+    returning id into e;
+  insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
+      body_sha256, firm_id)
+    select e, o, s, sha256(convert_to(pg_get_functiondef(to_regprocedure(s))::text, 'UTF8')), null::uuid
+      from (values (0, 'clara.prepayment_schedule_v1(uuid,uuid)')) m(o, s);
+end $fa4pr2a_freeze$;
+set local search_path = clara, pg_temp;
+
 comment on function clara.prepayment_schedule_v1(uuid, uuid) is
   'F-A4 PR-2a: the versioned deterministic evaluator behind wrapper 12. Amounts are DB-derived from the source entry''s own prepaid-asset leg; the emitted period_lines carry that ASSET half only, and the judged EXPENSE account is applied by clara._agent_prepayment_schedule_core under F2''s three walls. Whole-calendar-month straight line, remainder wholly in the final period. A calendar month is charged iff the term covers that month''s FIRST day (the uniform reading of law 20''s split-month doctrine, ruled 2026-08-27). Calls no other clara function, which is what keeps its evaluator_versions closure at ONE member and the freeze meaningful; a changed formula is _v2, never an edit.';
 
@@ -3646,6 +3686,304 @@ grant execute on function clara.wake_establish_prepayment_schedule(uuid, uuid, t
 comment on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text) is
   'F-A4 PR-2a: wrapper 12, unparked. DRAFT-ONLY BY CONSTRUCTION, not by promise -- this verb reaches only clara._propose_adjustment_template_core, and adjustment_templates.status moves to ''live'' in exactly ONE body, clara.sign_adjustment_template, which opens the ADMIN floor and holds no grant to any wake role (R6). The judged expense account arrives as an argument with its stated basis, is validated deterministically, receipted, and shown at the sign door; the AMOUNTS come only from clara.prepayment_schedule_v1. Facts get anchored, judgements get receipted.';
 
+-- =================================================================================================
+-- §I — THE CATALOG-COMMENT TRUINGS (Annex B.4, B.5).
+--
+-- WHY THE CATALOG AND NOT THE FILE. The fix order asked for two "comment truings" in 0138. THEY
+-- CANNOT LAND WHERE IT SAYS: the runner records each migration file's sha256 and an edit to an
+-- APPLIED file trips a checksum-drift error (.claude/rules/db-migrations.md). So the truing lands
+-- where a reader actually QUERIES it — the catalog — and this file's header records the
+-- correction. That is the 0052 principle: put the reasoning where the next pg_get_functiondef
+-- reader will find it, not only in a file that reader may never open.
+-- =================================================================================================
+
+-- B.4 -- 0138:1331 spells uq_aar as SIX columns. The live constraint is SEVEN: `verdict` and
+-- `rung_digest` are in it (0138:396), and they are the whole reason FIX-1's identity guard can tell
+-- two outcomes apart. A reader who trusts the six-column prose would conclude that two refusals
+-- differing only in their rung vector must collide -- and would then "fix" a defect that is not
+-- there, or miss the one that is.
+comment on constraint uq_aar on clara.agent_act_receipts is
+  'The receipt identity key is SEVEN columns: (firm_id, act_kind, subject_kind, subject_id, op_key, verdict, rung_digest). The six-column spelling in the prose at 0138:1331 is SUPERSEDED -- it predates FIX-1, which added verdict and rung_digest so that each distinct OUTCOME of an act is its own durable row rather than being answered with a standing row''s id. Two refusals of the same act differing in ANY rung therefore occupy separate rows; they collide only on byte-identical rung vectors, which is exactly the case F-A4 PR-2a''s receipt subjects are chosen to discriminate.';
+
+-- B.5 -- FIX-7's comment on the settle door OVER-CLAIMS, and the gap is real: clara.close_attestations
+-- carries no from-proposal column, so the `adopted` arm proves *a live agent-authored attestation on
+-- the run for that key pair*, NOT one naming THIS proposal. A superseded predecessor's attestation
+-- can therefore cover a successor's item. The column is carried to PR-3 by name (NON-GOAL 7): writing
+-- it means recutting clara.attest_close_exception -- the estate's most-reviewed close writer --
+-- inside a window sized for one layer, to close a PROVENANCE BLUR rather than a wrong number. The
+-- professional's signed words live on the attestation row itself; what mis-binds is which proposal
+-- the `adopted` stamp credits. Cell W28 demonstrates the blur so it cannot go quiet.
+comment on function clara.settle_close_proposal(uuid, text, text, text) is
+  'The reviewer''s terminal door on a close proposal: admits ''adopted'' and ''withdrawn'' only, at the bookkeeper floor plus close_and_attest, op-key idempotent, reverse-never-delete. PRECISE STRENGTH OF THE ''adopted'' ARM, trued by F-A4 PR-2a (fix order residual 5): it proves that a LIVE AGENT-AUTHORED ATTESTATION EXISTS ON THE RUN for each drafted (check_key, item_key) pair -- it does NOT prove that attestation names THIS proposal, because clara.close_attestations carries no from_proposal_id column. A superseded predecessor''s attestation can satisfy a successor''s item. That column is a named PR-3 carry; after PR-2a''s B11b churn guard supersession is rarer, which narrows the window without shutting it.';
+
 reset role;
 
--- ##FA4PR2A-APPEND-POINT##
+-- =================================================================================================
+-- §TAIL — THE CENSUS A REVIEWER READS. A migration whose tail only says "OK" has proven nothing.
+-- It runs AFTER `reset role` deliberately: as the migration role, not as the owner, so it cannot be
+-- fooled by the owner's own view of its objects.
+-- =================================================================================================
+do $tail$
+declare
+  v_n int; v_m int; v_txt text; v_sig text; v_pre text; v_post text;
+  v_missing text[] := '{}'; v_pub text[] := '{}'; v_frozen int;
+  k_new_fns text[] := array[
+    'clara._adj_canon_schedule(jsonb)',
+    'clara._adj_period_lines(clara.adjustment_templates,date,date)',
+    'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
+    'clara.record_document_service_period(uuid,date,date,text,text)',
+    'clara.prepayment_schedule_v1(uuid,uuid)',
+    'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
+    'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)',
+    'clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
+    'clara._tf_document_service_period_region_congruent()',
+    'clara._tf_dsp_supersede_only()'];
+  -- The internals this file adds that NO application role may call. Includes
+  -- _tf_close_proposal_drafted_unique, which residual 4 found missing from BOTH closed sets in
+  -- 0138 -- the rig-meta half joins that cohort separately; THIS half is censused here, because
+  -- 0138's own k_ungranted lives in an APPLIED file and applied files are immutable.
+  k_ungranted text[] := array[
+    'clara._adj_canon_schedule(jsonb)',
+    'clara._adj_period_lines(clara.adjustment_templates,date,date)',
+    'clara._record_document_service_period_core(jsonb,uuid,date,date,text,text)',
+    'clara.prepayment_schedule_v1(uuid,uuid)',
+    'clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
+    'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)',
+    'clara._tf_document_service_period_region_congruent()',
+    'clara._tf_dsp_supersede_only()',
+    'clara._tf_close_proposal_drafted_unique()'];
+begin
+  -- ---- T.1 EVERY NEW OBJECT RESOLVES AT ITS EXACT SIGNATURE (law 3: never a bare name) --------
+  foreach v_sig in array k_new_fns loop
+    if to_regprocedure(v_sig) is null then v_missing := v_missing || v_sig; end if;
+  end loop;
+  if array_length(v_missing, 1) is not null then
+    raise exception 'F-A4 PR-2a tail: % declared object(s) did not resolve: %',
+      array_length(v_missing, 1), array_to_string(v_missing, ', ')
+      using errcode = 'CLR10', detail = '{"reason":"tail_object_missing"}';
+  end if;
+  if to_regclass('clara.document_service_periods') is null then
+    raise exception 'F-A4 PR-2a tail: clara.document_service_periods absent' using errcode = 'CLR10';
+  end if;
+
+  -- ---- T.2 EXACTLY ONE PROPOSE DOOR, AND NO FUNCTION THIS FILE TOUCHES IS PUBLIC-EXECUTE ------
+  -- This is the census that would have caught the overload defect: `create or replace` with an
+  -- added argument creates a SECOND overload rather than replacing, leaving the shipped body live
+  -- and the new one at DEFAULT ACL -- which for a function means PUBLIC EXECUTE.
+  select count(*)::int into v_n from pg_proc
+   where pronamespace = 'clara'::regnamespace and proname = 'propose_adjustment_template';
+  if v_n <> 1 then
+    raise exception 'F-A4 PR-2a tail: % overload(s) of propose_adjustment_template -- the extraction left the shipped body standing', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_propose_overloaded"}';
+  end if;
+  foreach v_sig in array (k_new_fns || array[
+      'clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
+      'clara._adj_template_hash(text,text,date,date,boolean,jsonb,text,jsonb)']) loop
+    if exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl,
+                 acldefault('f', p.proowner))) a
+                where p.oid = to_regprocedure(v_sig) and a.grantee = 0) then
+      v_pub := v_pub || v_sig;
+    end if;
+  end loop;
+  if array_length(v_pub, 1) is not null then
+    raise exception 'F-A4 PR-2a tail: % function(s) executable by PUBLIC: %',
+      array_length(v_pub, 1), array_to_string(v_pub, ', ')
+      using errcode = 'CLR10', detail = '{"reason":"tail_public_execute"}';
+  end if;
+
+  -- ---- T.3 EVERY NEW BODY IS OWNED BY clara_fn_owner -----------------------------------------
+  -- A SECURITY DEFINER body owned by the migration role runs as that role and BYPASSES RLS. Read
+  -- positively here rather than trusted to the set-role above.
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = any (array(select to_regprocedure(s)::oid from unnest(k_new_fns) s))
+     and pg_get_userbyid(p.proowner) <> 'clara_fn_owner';
+  if v_n <> 0 then
+    raise exception 'F-A4 PR-2a tail: % new function(s) are NOT owned by clara_fn_owner -- a definer body would run with the wrong privileges', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_wrong_owner"}';
+  end if;
+
+  -- ---- T.4 THE UNGRANTED SET IS CLOSED --------------------------------------------------------
+  v_missing := '{}';
+  foreach v_sig in array k_ungranted loop
+    if exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl,
+                 acldefault('f', p.proowner))) a
+                where p.oid = to_regprocedure(v_sig)
+                  and a.grantee <> p.proowner and a.privilege_type = 'EXECUTE') then
+      v_missing := v_missing || v_sig;
+    end if;
+  end loop;
+  if array_length(v_missing, 1) is not null then
+    raise exception 'F-A4 PR-2a tail: % internal(s) hold an EXECUTE grant they must not: %',
+      array_length(v_missing, 1), array_to_string(v_missing, ', ')
+      using errcode = 'CLR10', detail = '{"reason":"tail_internal_granted"}';
+  end if;
+
+  -- ---- T.5 THE UNTOUCHED BODIES ARE BYTE-UNCHANGED (the R6 scope cut, PROVEN) -----------------
+  foreach v_sig in array array['sign_adjustment_template', '_adj_canon_lines',
+                               '_tf_adjustment_template_transition'] loop
+    select v into v_pre from _fa4_pr2a_prestate where k = 'untouched_sha:' || v_sig;
+    select encode(sha256(p.prosrc::bytea), 'hex') into v_post from pg_proc p
+     where p.oid = to_regprocedure(case v_sig
+       when 'sign_adjustment_template' then 'clara.sign_adjustment_template(uuid,uuid,text)'
+       when '_adj_canon_lines' then 'clara._adj_canon_lines(jsonb)'
+       else 'clara._tf_adjustment_template_transition()' end);
+    if v_pre is distinct from v_post then
+      raise exception 'F-A4 PR-2a tail: % was MODIFIED (pre % / post %) -- NON-GOAL 2/13 broken', v_sig, v_pre, v_post
+        using errcode = 'CLR10', detail = '{"reason":"tail_untouched_body_moved"}';
+    end if;
+  end loop;
+
+  -- ---- T.6 THE ACL/OWNERSHIP/search_path TRIPLES ARE BYTE-UNMOVED where they must be ----------
+  -- W4: the extraction must leave the door's ACL exactly as harvested. _adj_template_hash keeps
+  -- its NON-definer, NO-search_path triple -- a from-memory rebuild would have promoted it.
+  select v into v_pre from _fa4_pr2a_prestate
+   where k = 'acl:clara.sign_adjustment_template(uuid,uuid,text)';
+  select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') into v_post
+    from pg_proc p where p.oid = to_regprocedure('clara.sign_adjustment_template(uuid,uuid,text)');
+  if v_pre is distinct from v_post then
+    raise exception 'F-A4 PR-2a tail: sign_adjustment_template''s ACL moved (pre % / post %)', v_pre, v_post
+      using errcode = 'CLR10', detail = '{"reason":"tail_acl_moved"}';
+  end if;
+  select p.prosecdef::text || '|' || coalesce(array_to_string(p.proconfig, ','), '(none)') into v_post
+    from pg_proc p
+   where p.oid = to_regprocedure('clara._adj_template_hash(text,text,date,date,boolean,jsonb,text,jsonb)');
+  if v_post is distinct from 'false|(none)' then
+    raise exception 'F-A4 PR-2a tail: _adj_template_hash was promoted to % -- it must stay a plain sql function', v_post
+      using errcode = 'CLR10', detail = '{"reason":"tail_hash_promoted"}';
+  end if;
+
+  -- ---- T.7 subject_kind EXTENDED, NEVER REWRITTEN --------------------------------------------
+  select pg_get_constraintdef(c.oid) into v_txt from pg_constraint c
+   where c.conrelid = 'clara.agent_act_receipts'::regclass and c.conname = 'ck_aar_subject_kind';
+  select v into v_pre from _fa4_pr2a_prestate where k = 'subject_kind_check';
+  foreach v_sig in array array['client', 'fiscal_year', 'close_run', 'close_receipt',
+                               'journal_entry', 'snapshot', 'adjustment_template'] loop
+    if position('''' || v_sig || '''' in v_txt) = 0 then
+      raise exception 'F-A4 PR-2a tail: subject_kind no longer admits % -- this was an EXTENSION, not a rewrite', v_sig
+        using errcode = 'CLR10', detail = '{"reason":"tail_subject_kind_lost"}';
+    end if;
+  end loop;
+
+  -- ---- T.8 THE POLICY CENSUS READS EXPRESSIONS, NOT COUNTS (residual 3 / Annex B.2) -----------
+  -- 0138's T.1 counted policies = 2 per table and read nothing about them, so FIX-6's own rank
+  -- conjunct was never census-pinned and neither would §G's mirrors be. This reads polcmd, the
+  -- resolved role names and the qual EXPRESSION, and asserts the rank conjunct by expression.
+  for v_sig in select unnest(array['p_cp_human', 'p_cph_human', 'p_dsp_human']) loop
+    select pg_get_expr(pol.polqual, pol.polrelid) into v_txt from pg_policy pol
+     where pol.polname = v_sig;
+    if v_txt is null then
+      raise exception 'F-A4 PR-2a tail: policy % is absent', v_sig using errcode = 'CLR10';
+    end if;
+    if position('jwt_firm' in v_txt) = 0 then
+      raise exception 'F-A4 PR-2a tail: policy % lost its firm predicate: %', v_sig, v_txt
+        using errcode = 'CLR10', detail = '{"reason":"tail_policy_firm_lost"}';
+    end if;
+    if position('actor_role_rank' in v_txt) = 0 or position('bookkeeper' in v_txt) = 0 then
+      raise exception 'F-A4 PR-2a tail: policy % carries no bookkeeper rank conjunct: %', v_sig, v_txt
+        using errcode = 'CLR10', detail = '{"reason":"tail_policy_rank_missing"}';
+    end if;
+    if (select pol.polcmd from pg_policy pol where pol.polname = v_sig) <> 'r' then
+      raise exception 'F-A4 PR-2a tail: policy % is not SELECT-only', v_sig using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- ---- T.9 THE INDEX CENSUS PINS relation + KEY COLUMNS + PREDICATE (residual 2 / Annex B.1) --
+  -- 0138's T.1b pinned by relname + indisunique + "indpred is not null" -- a same-named index on
+  -- ANOTHER table over OTHER columns with ANY predicate satisfies all three. Law 3: a name is a
+  -- projection of the thing, not the thing.
+  select count(*)::int into v_n from pg_index i
+    join pg_class ic on ic.oid = i.indexrelid
+   where ic.relname = 'uq_document_service_period_live'
+     and i.indrelid = 'clara.document_service_periods'::regclass
+     and i.indisunique
+     and pg_get_expr(i.indpred, i.indrelid) = '(superseded_at IS NULL)'
+     and (select array_agg(a.attname::text order by a.attnum)
+            from pg_attribute a
+           where a.attrelid = i.indrelid and a.attnum = any (i.indkey::smallint[]))
+         = array['document_id']::text[];
+  if v_n <> 1 then
+    raise exception 'F-A4 PR-2a tail: uq_document_service_period_live does not match its pinned relation/columns/predicate'
+      using errcode = 'CLR10', detail = '{"reason":"tail_index_unpinned"}';
+  end if;
+
+  -- ---- T.10 THE THIRTEEN-COUNT FLIPS MOVE TOGETHER --------------------------------------------
+  select v::int into v_n from _fa4_pr2a_prestate where k = 'allowlist_close_prep_pre';
+  select count(*)::int into v_m from clara.wake_fn_allowlist where wake_kind = 'close_prep';
+  if v_m <> v_n + 1 then
+    raise exception 'F-A4 PR-2a tail: close_prep allowlist went % -> % (expected +1)', v_n, v_m
+      using errcode = 'CLR10', detail = '{"reason":"tail_allowlist_delta"}';
+  end if;
+  select count(*)::int into v_n from clara.wake_fn_allowlist
+   where wake_kind = 'close_prep' and to_regproc('clara.' || function_name) is null;
+  if v_n <> 0 then
+    raise exception 'F-A4 PR-2a tail: % close_prep allowlist row(s) name a function that does not exist', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_allowlist_dead"}';
+  end if;
+  -- 0138's T.9 proved the parked pair ABSENT by a positive read. This is that gate FLIPPED, at
+  -- exact signatures (never a bare name), which the fold-seam law requires when a defect is fixed.
+  if to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)') is null
+     or to_regprocedure('clara.prepayment_schedule_v1(uuid,uuid)') is null then
+    raise exception 'F-A4 PR-2a tail: the unparked pair does not resolve at its exact signatures'
+      using errcode = 'CLR10', detail = '{"reason":"tail_unpark_absent"}';
+  end if;
+  -- WRAPPER 12 HOLDS EXACTLY ONE APPLICATION GRANT, and it is the interactive wake role.
+  if exists (select 1 from pg_proc p, aclexplode(p.proacl) a
+              where p.oid = to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)')
+                and a.grantee <> p.proowner
+                and a.grantee::regrole::text <> 'clara_wake_interactive') then
+    raise exception 'F-A4 PR-2a tail: wrapper 12 holds a grant beyond clara_wake_interactive'
+      using errcode = 'CLR10', detail = '{"reason":"tail_wrapper_overgranted"}';
+  end if;
+
+  -- ---- T.11 THE EVALUATOR'S CLOSURE IS GENUINELY SINGLE-MEMBER --------------------------------
+  -- The structural half of W11, and the half that BINDS. The prosrc half (no clara.<name>( call
+  -- site) is a SPELLING instrument and is stated in §C with its ceiling; this is the fact.
+  select count(*)::int into v_n from clara.evaluator_version_members m
+    join clara.evaluator_versions ev on ev.id = m.evaluator_version_id
+   where ev.evaluator_name = 'prepayment_schedule' and ev.version = 1;
+  if v_n <> 1 then
+    raise exception 'F-A4 PR-2a tail: the prepayment_schedule v1 closure has % member(s), not 1 -- an N-member registration freezes N bodies estate-wide', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_closure_not_single"}';
+  end if;
+
+  -- ---- T.12 THE COMPOSITE-PARAMETER PROPERTY, censused rather than assumed --------------------
+  -- clara._adj_period_lines takes clara.adjustment_templates. Both live call sites hold the row in
+  -- a plpgsql variable declared `record` and populate it with a BARE SINGLE-TABLE `select *`, which
+  -- is the only reason passing it to a composite-typed parameter is safe. That is a property of
+  -- those bodies, not a guarantee of the language: a future body that loads a SUBSET of columns and
+  -- passes it here would fail at RUNTIME. Censused so the next lane meets it at review instead.
+  select count(*)::int into v_n from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace
+     and p.prosrc ~ '_adj_period_lines\s*\('
+     and p.proname <> '_adj_period_lines';
+  if v_n <> 2 then
+    raise exception 'F-A4 PR-2a tail: _adj_period_lines has % caller(s), expected exactly 2 (the occurrence poster and the approve axis)', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_resolver_callers"}';
+  end if;
+
+  -- ---- T.13 CONSTRAINT 15: the frozen schemas ------------------------------------------------
+  -- REPORTED, NOT ASSERTED AT ZERO. On live those schemas hold the Slice-0 parked run, so a census
+  -- that reads green only because the fixture is empty is the vacuous-green class. What this file
+  -- can claim is that it created nothing outside `clara`, and that is what is measured.
+  select count(*)::int into v_frozen from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
+   where ns.nspname in ('workflow', 'graphile_worker', 'spike');
+  select count(*)::int into v_n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+   where ns.nspname in ('workflow', 'graphile_worker', 'spike')
+     and (p.proname like 'wake!_%' escape '!' or p.proname like '!_adj!_%' escape '!'
+          or p.proname like 'prepayment!_%' escape '!' or p.proname like '!_record!_document%' escape '!');
+  if v_n <> 0 then
+    raise exception 'F-A4 PR-2a tail: % PR-2a function(s) landed in a frozen schema', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_frozen_schema"}';
+  end if;
+  if (select ns.nspname from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
+       where c.oid = to_regclass('clara.document_service_periods')) is distinct from 'clara' then
+    raise exception 'F-A4 PR-2a tail: document_service_periods was created outside schema clara'
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice 'F-A4 PR-2a tail: OK — the park is OVER. Wrapper 12 (clara.wake_establish_prepayment_schedule) and clara.prepayment_schedule_v1 both resolve at their EXACT signatures, inverting 0138 T.9''s positive-absence gate; the close_prep allowlist moved % -> % (a MEASURED delta, not a literal) with 0 rows naming a dead function, and wrapper 12 holds exactly ONE application grant, to clara_wake_interactive. 10 new functions + clara.document_service_periods all resolve, ALL owned by clara_fn_owner (a definer body owned by the migration role would bypass RLS), and ZERO functions this file creates or replaces are executable by PUBLIC. EXACTLY ONE overload of propose_adjustment_template survives at eleven arguments with its harvested ACL — the extraction REPLACED the door rather than shadowing it. 9 internals hold no EXECUTE grant beyond their owner, _tf_close_proposal_drafted_unique among them (residual 4''s migration half; its rig-meta half joins the PR-1c cohort separately, because 0138''s own closed set lives in an APPLIED file and applied files are immutable). The R6 SCOPE CUT IS PROVEN, not promised: sign_adjustment_template, _adj_canon_lines and _tf_adjustment_template_transition are byte-identical to their prestate shas, and _adj_template_hash is still a plain sql function with no definer and no search_path. subject_kind EXTENDED to seven values with all six originals intact. Three human-read policies carry BOTH the firm predicate and the bookkeeper rank conjunct, asserted by EXPRESSION and not by count, and all three are SELECT-only. uq_document_service_period_live is pinned by relation, key column and predicate text rather than by name. The prepayment_schedule v1 closure has exactly ONE member, so the freeze means this body and no other. clara._adj_period_lines has exactly 2 callers. FROZEN SCHEMAS (constraint 15): all 3 checks positive — nothing this file created lives outside clara — and the % relation(s) workflow/graphile_worker/spike hold are REPORTED, not asserted (on live that is the Slice-0 parked run and is expected to be non-zero).',
+    (select v from _fa4_pr2a_prestate where k = 'allowlist_close_prep_pre'),
+    (select count(*) from clara.wake_fn_allowlist where wake_kind = 'close_prep'),
+    v_frozen;
+end $tail$;
+
