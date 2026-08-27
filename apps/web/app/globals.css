@@ -107,6 +107,28 @@
   color-scheme: light;
 
   /* Founder-approved core palette (docs/01-TOKEN-CONTRACT.md §3.1) */
+
+  /*
+   * `--identity-canvas` is DEFINED AND DELIBERATELY UNBRIDGED — it has no
+   * `--color-*` entry in @theme above, so no utility can reach it, and that is
+   * correct. The token contract of record (clarabook-frontend
+   * g5-design-system/docs/01-TOKEN-CONTRACT.md, read at `main` 2026-08-27)
+   * says so twice:
+   *
+   *   §3.1  `--ref-identity-canvas` | #F7F6F2 | "Approved Brand Guideline
+   *         canvas; NOT the primary product canvas"
+   *   §3.3  "Keep #F7F6F2 available for approved identity applications; do NOT
+   *         restore it as the product page canvas without a new
+   *         founder-approved impact note."
+   *
+   * /login and /invite are product pages. Grounding them on this value is
+   * therefore a founder-approval item under §3.3 and §9, not a change-control
+   * note — recorded here so the next reader does not re-litigate it. Those two
+   * pages sit on `--shell`, which §3.1 defines as "Navigation and APPLICATION
+   * SHELL": an auth gate is the application's shell, and carries no content
+   * canvas at all. Bridging was also measured worse in the browser at 1440px —
+   * the card loses its edge on white — so both the contract and the eye agree.
+   */
   --identity-canvas: #f7f6f2;
   --canvas: #ffffff;
   --shell: #f7f7f5;
