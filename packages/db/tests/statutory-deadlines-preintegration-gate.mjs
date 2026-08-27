@@ -12,7 +12,6 @@
 // this file, so the variable stays unset and a pre-migration database fails loudly. Final
 // acceptance is exactly that focused shape with the variable UNSET, and accounts for zero skips.
 //
-// MERGE NOTE: packages/db/package.json's test script needs this file folded into the combined
-// --import chain alongside the other wave gates. The team lead/conductor owns that edit at merge
-// prep; this lane does not touch package.json.
+// FOLDED (fix round, merge-prep obligation): packages/db/package.json's test script's --import
+// chain now carries this file alongside the other wave gates.
 process.env.CLARA_ALLOW_MISSING_STATUTORY_DEADLINES = "1";

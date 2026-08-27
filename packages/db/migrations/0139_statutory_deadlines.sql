@@ -1,4 +1,4 @@
--- UNNUMBERED_statutory_deadlines.sql -- clara.statutory_deadlines: the ONE developer-seeded,
+-- 0139_statutory_deadlines.sql -- clara.statutory_deadlines: the ONE developer-seeded,
 -- versioned, effective-dated table for statutory due dates, across every domain that needs
 -- one (R-L22; docs/adr/README.md digest laws 80/81 -- "one architecture, one clock").
 --
@@ -8,9 +8,8 @@
 -- decisions D-08/D-08b/D-08c (docs/plan/active/payroll-calendar-gate-record.md,
 -- payroll-calendar-annexes.md Annex B).
 --
--- MIGRATION NUMBER claimed at MERGE time (standing law, AGENTS.md constraint 10). Authored
--- UNNUMBERED against the 0138 frontier -- renumber mechanically at merge (this file + its rig
--- cells; nothing else keys on the number except the schema_migrations ledger).
+-- MIGRATION NUMBER CLAIMED (standing law, AGENTS.md constraint 10): 0139, against the 0138
+-- frontier -- the next migration to merge (F-A4 PR-2a) claims 0140 at its own merge time.
 --
 -- LANE NOTE (2026-08-27, TRUED against PROGRESS.md #371). This DDL was never F-A4/PR-1c's
 -- content: the migration that actually landed as F-A4/PR-1c (0138 F_a4_pr_1c_close_agent_limb,
@@ -18,9 +17,9 @@
 -- own #371 truing (`docs: 0137+0138 apply ceremony as-run + PROGRESS frontier truing`) already
 -- re-labels the F-A4 row and the F-T2 row to match: this DDL is its own, currently-UNOWNED
 -- lane under the payroll-calendar spec (F-T2's own words, live in PROGRESS.md today) -- an
--- earlier draft of this header called PROGRESS "stale" on this point; that is no longer true
--- as of the branch's own parent commit, and this file must not carry a claim that outlives its
--- own truth. This file IS that lane, built standalone. F-T2's own PR-1 (the nine seed rows +
+-- earlier draft of this header called PROGRESS "stale" on this point; that is no longer true,
+-- per #371, and this file must not carry a claim that outlives its own truth. This file IS
+-- that lane, built standalone. F-T2's own PR-1 (the nine seed rows +
 -- three clara.client_fact_keys rows) is BLOCKED on this file merging; F-T1 (SST) is a second,
 -- LATER contributor via domain='sst' (Annex A.1). THIS FILE SEEDS NO ROWS, MINTS NO WAKE
 -- WRAPPER AND NO CHASE LOGIC -- the table and its walls, nothing else, per scope.
@@ -185,13 +184,13 @@ create table clara.statutory_deadlines (
   -- one cited field.
   notice_lead_days    int         not null check (notice_lead_days >= 0),
 
-  -- EFFECTIVE-DATING + IMMUTABLE/SUPERSEDE, client_facts' idiom (0055:394-408). CONDUCTOR
-  -- RULING (this lane's fix round): the window is CLOSED/INCLUSIVE on its upper bound --
-  -- `effective_to is null or effective_to >= effective_from` below, so a single-day window is
-  -- effective_to == effective_from -- matching the estate's OWN live idiom
-  -- (client_turnover_accounts, client_facts' sibling effective-dated tables, 0016/0055), not
-  -- the half-open [from, to) phrase Annex A.1's prose uses. A.1's phrasing is the outlier here,
-  -- not this file's constraint.
+  -- IMMUTABLE/SUPERSEDE follows client_facts' idiom (0055:394-408) -- but client_facts itself
+  -- carries NO effective_from/effective_to (supersession-only, not effective-dated), so the
+  -- window convention below is NOT that citation's claim. CONDUCTOR RULING (fix round): the
+  -- window is CLOSED/INCLUSIVE on its upper bound (`effective_to is null or effective_to >=
+  -- effective_from` below, so a single-day window is effective_to == effective_from) --
+  -- matching client_turnover_accounts' (0016) byte-identical CHECK, not the half-open
+  -- [from, to) phrase Annex A.1's prose uses. A.1's phrasing is the outlier here.
   effective_from      date        not null,
   effective_to        date,
   superseded_by       uuid        references clara.statutory_deadlines(id) deferrable initially deferred,

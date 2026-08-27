@@ -2,10 +2,9 @@
 // versioned, effective-dated table for statutory due dates (R-L22; digest laws 80/81), and
 // the table F-T2's payroll deadline calendar is blocked on (PR-1 seeds nine rows there, not
 // this file). This DDL was never F-A4/PR-1c's content -- the actual F-A4/PR-1c (0138, #368)
-// shipped the close agent limb -- and is its own, currently-UNOWNED lane, per PROGRESS.md's own
-// #371 truing (this branch's own parent commit). See the migration's own header for the full
-// provenance. Migration: packages/db/migrations/UNNUMBERED_statutory_deadlines.sql (numbered
-// at merge).
+// shipped the close agent limb -- and is its own, currently-UNOWNED lane, per #371. See the
+// migration's own header for the full provenance. Migration:
+// packages/db/migrations/0139_statutory_deadlines.sql.
 //
 // THIS FILE: sections A (closed-world census -- columns/constraints/triggers/index/RLS shape,
 // re-derived independently of the migration's own tail), B (the ACL census, with a positive
@@ -17,11 +16,12 @@
 // mints obligation_code values prefixed `x_sdtest_<pid>_<n>` and inserts them into THIS
 // append-only, DELETE-forever-blocked, GLOBAL table -- roughly two dozen rows per full run,
 // none of them ever removable. Against a FRESH throwaway database (CI's own shape) this is
-// invisible; against a REUSED local dev rig (a real, supported pattern here -- db-tests.md's
-// CLARA_ESTATE_REUSED_DB note), these rows ACCUMULATE across repeated runs. PR-1's own seed
-// assertions must therefore filter by the real seed rows' known obligation_code values (or a
-// domain='payroll' scope), NEVER by a blind `count(*)` against this table -- a reused database
-// with leftover x_sdtest_ rows would silently inflate any such count.
+// invisible; against a REUSED local dev rig (a real, supported pattern here --
+// packages/db/README.md:108's CLARA_ESTATE_REUSED_DB note), these rows ACCUMULATE across
+// repeated runs. PR-1's own seed assertions must therefore filter by the real seed rows' known
+// obligation_code values (or a domain='payroll' scope), NEVER by a blind `count(*)` against
+// this table -- a reused database with leftover x_sdtest_ rows would silently inflate any such
+// count.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
