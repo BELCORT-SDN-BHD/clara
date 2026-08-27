@@ -12,7 +12,7 @@
 
 import { callDoor } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
-import { businessToday } from "./business-date";
+import { businessToday } from "@/lib/business-date";
 
 export type AgingDomain = "ar" | "ap";
 
@@ -53,7 +53,7 @@ export type AgingEnvelope = {
 };
 
 /** read RPC — transport via callDoor; not a governed act. `asOf` defaults to the
- *  business-timezone today (see ./business-date.ts's header for why never a plain
+ *  business-timezone today (see @/lib/business-date's header for why never a plain
  *  browser UTC date). */
 export function loadAging(
   session: SessionTokenAccessor,

@@ -191,10 +191,10 @@ function toReviewQueueRow(raw: unknown): ReviewQueueRow {
  *  re-read-after semantics (the workbench's own reload already covers that).
  *
  *  clara.list_review_queue(p_scope jsonb, p_cursor jsonb, p_limit int default 50)
- *  — packages/db/migrations/0011_daily_loop.sql:3748, recut
- *  0016_a21_compliance_watch.sql:4558-4909, then PATCHED (additive-only) at
- *  0036's section C — see types.ts's header for why a bare grep missed that
- *  patch, and for the citation. Granted to clara_authenticated at viewer+
+ *  — 0011_daily_loop.sql:3748, recut 0016:4558-4909, then DYNAMICALLY SPLICED
+ *  at 0017 (lint_finding), 0036 §C (additive; its :1052 tail pins the 0017
+ *  marker), 0041 (fixed_asset_incomplete), 0043 (staff_advance_incomplete) —
+ *  types.ts's header explains why a bare grep missed the patches. Granted to clara_authenticated at viewer+
  *  (`_human_ctx(role_rank('viewer'))`, 0016:4563) — a plain read, not
  *  bookkeeper-gated. `p_scope` is `{}` (firm-wide) or `{client_id: uuid}`
  *  (0016:4564-4575); this module always scopes to the one client. `p_cursor`
@@ -266,11 +266,11 @@ export async function loadJournalsWorkbench(
  *  those definitions; the wrapper itself carries no logic beyond a role check
  *  and a delegation, so it is a poor dynamic-patch target — but see this
  *  file's types.ts header before trusting that as proof). It delegates to
- *  `_approve_entry_core`, which 0037_wave_c_a_subledger.sql:165-172's own
- *  verified census places at its FIFTH recut, 0035_*.sql:140-483, "REBUILT…
- *  Verified clean: no migration patches it dynamically after 0035" (that
- *  census diffed the live body byte-for-byte) — CLR06/CLR05 below are cited
- *  against that body, not 0016's now-superseded one. Bookkeeper+ (`_human_ctx`).
+ *  `_approve_entry_core`, whose LIVE body is the recut at
+ *  0037_wave_c_a_subledger.sql:1750 (5-arity CREATE OR REPLACE — 0037's own
+ *  census at :165-172 quoting the 0035:140-483 fifth recut is that file's
+ *  PRESTATE, superseded by 0037 itself; the fold-delta review caught the
+ *  off-by-one) — CLR06/CLR05 below are cited against the 0037 body. Bookkeeper+ (`_human_ctx`).
  *  The revision/idempotency pattern this ports from apps/dashboard/app/chat/
  *  review.ts:272-283 (`approveEntry`): `p_expected_revision` is the row's OWN
  *  `revision_token` at read time — a mismatch raises CLR06 "stale revision

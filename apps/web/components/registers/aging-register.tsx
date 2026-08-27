@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadAging, type AgingDomain } from "@/lib/registers/aging";
-import { businessToday } from "@/lib/registers/business-date";
+import { businessToday } from "@/lib/business-date";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState } from "@/components/firm/data-state";

@@ -22,7 +22,7 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientById } from "@/lib/firm/reads";
 import { isKnownReviewQueueRowKind, reviewQueueRowKey } from "@/lib/firm/needs-you";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
-import { businessDate } from "@/lib/registers/business-date";
+import { businessDate } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState } from "./data-state";
 

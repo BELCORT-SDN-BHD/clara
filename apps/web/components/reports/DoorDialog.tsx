@@ -21,7 +21,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { createSingleFireGuard, runOnce } from "@/lib/parts/singleFireGuard";
+import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
 
 export function DoorDialog({
   triggerLabel,
@@ -47,7 +47,7 @@ export function DoorDialog({
   const [open, setOpen] = useState(false);
   const t = useTranslations("ClientReports.dialog");
   // The single-fire guard (review finding M3) — see components/close/
-  // CloseDoorDialog.tsx's identical comment and lib/parts/singleFireGuard.ts's
+  // CloseDoorDialog.tsx's identical comment and lib/parts/single-fire-guard.ts's
   // header for the measured regression this closes.
   const guardRef = useRef(createSingleFireGuard());
 

@@ -1,10 +1,10 @@
-// See ./singleFireGuard.ts's header for the regression this guards against
+// See ./single-fire-guard.ts's header for the regression this guards against
 // (review finding M3: `disabled={busy}` alone left no net against a
 // concurrent second click — a mutant that removed it stayed green).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createSingleFireGuard, runOnce } from "./singleFireGuard";
+import { createSingleFireGuard, runOnce } from "./single-fire-guard";
 
 test("runOnce: a concurrent call while the first is in flight is dropped — the underlying fn runs exactly once", async () => {
   const guard = createSingleFireGuard();

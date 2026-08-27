@@ -82,8 +82,10 @@ export function isKnownReviewQueueRowKind(kind: string): kind is ReviewQueueRowK
  *  React key, or R1's acted-on-row-still-present check below). `row_kind`+`id`
  *  is unique within one queue read: `id` is the source table's own primary key
  *  (entry_id/filing_id/question_id/task_id/watch_id/finding_id/asset_id/
- *  advance_id all alias to it per-kind, 0011_daily_loop.sql:4715-4723 +
- *  splices), never reused across row_kinds. */
+ *  advance_id all alias to it per-kind — the row-json projection lives in the
+ *  LIVE body, 0016_a21_compliance_watch.sql:4715-4723, plus the 0017/0041/0043
+ *  splices; 0011's original body is superseded and only 4367 lines long),
+ *  never reused across row_kinds. */
 export function reviewQueueRowKey(row: ReviewQueueRow): string {
   return `${row.row_kind}:${row.id}`;
 }

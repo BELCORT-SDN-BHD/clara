@@ -28,7 +28,7 @@ test("no apps/web file originates a date from the browser's UTC clock", () => {
   const offenders: string[] = [];
   for (const file of walkTs(APP_DIR)) {
     const rel = relative(APP_DIR, file).split("\\").join("/");
-    if (rel === "lib/business-date.ts" || rel === "lib/registers/business-date.ts") continue; // sanctioned
+    if (rel === "lib/business-date.ts") continue; // sanctioned — the ONE canonical copy (P3 fold)
     if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue; // fixtures, not production defaults
     const src = readFileSync(file, "utf8");
     for (const [i, line] of src.split("\n").entries()) {

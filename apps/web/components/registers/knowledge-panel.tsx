@@ -21,7 +21,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientFacts, loadClientFactKeys, type ClientFactRow } from "@/lib/registers/knowledge";
-import { businessDateTime } from "@/lib/registers/business-date";
+import { businessDateTime } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState } from "@/components/firm/data-state";
 

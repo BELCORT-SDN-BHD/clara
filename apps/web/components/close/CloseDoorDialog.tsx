@@ -22,7 +22,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { createSingleFireGuard, runOnce } from "@/lib/parts/singleFireGuard";
+import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
 
 export function CloseDoorDialog({
   triggerLabel,
@@ -53,7 +53,7 @@ export function CloseDoorDialog({
   const t = useTranslations("ClientClose.dialog");
   // The single-fire guard (review finding M3): `disabled={busy}` alone is a
   // cosmetic affordance, not a correctness guard — see lib/parts/
-  // singleFireGuard.ts's header for the measured regression. `guardRef`
+  // single-fire-guard.ts's header for the measured regression. `guardRef`
   // persists across the re-renders `busy` itself provokes, so a rapid second
   // click is dropped even in the window before React repaints the disabled
   // button.

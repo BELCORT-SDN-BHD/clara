@@ -13,7 +13,7 @@
 // N10: receipt_kind is the closed registry clara.agent_receipt_surfaces
 // (0103:294-301) — translated via a checked lookup with an honest raw-value
 // fallback for anything outside it. N11: occurred_at renders in the business
-// timezone explicitly (lib/registers/business-date.ts) — an audit trail read by
+// timezone explicitly (lib/business-date.ts) — an audit trail read by
 // people in different timezones must show the SAME moment, not each viewer's own.
 // FIX-5: loadFirmActivity reads a flat limit=100, unpaginated — stated honestly
 // rather than implying completeness.
@@ -22,7 +22,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadFirmActivity, type AgentReceiptRow } from "@/lib/firm/reads";
-import { businessDateTime } from "@/lib/registers/business-date";
+import { businessDateTime } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState } from "./data-state";
 import { Badge } from "@/components/parts/PartBadge";
