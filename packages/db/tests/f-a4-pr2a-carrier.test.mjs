@@ -160,6 +160,40 @@ test("fa4p2a.W19 the carrier's BASIS DISCIPLINE: a blank basis, an 'extracted' r
   assert.equal(ok.basis_kind, "human_stated", "the door writes the kind STRUCTURALLY, never from a caller");
 });
 
+test("fa4p2a.W19-domain (P4) the date walls bind BEFORE interval arithmetic, and the limit counts PERIODS", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  const sc = await prepaidScene("w19d");
+
+  // (a) A FINITE BUT ABSURD date must get a TYPED refusal, not a raw 22008. It passes isfinite,
+  // and the old guard then overflowed the timestamp domain inside `+ interval '120 months'` --
+  // blowing up before the refusal it was guarding could speak.
+  const far = await caught(() => recordPeriod(sc.alice, {
+    document: sc.document, start: "5874897-01-01", end: "5874897-06-30" }));
+  assert.ok(far, "a 5874897-AD term was recorded");
+  assert.match(String(far.detail ?? far.message), /service_period_dates_out_of_domain/,
+    `expected the typed domain refusal, got ${String(far.detail ?? far.message).slice(0, 200)}`);
+  assert.notEqual(far.code, "22008", "the guard still overflows before it can refuse");
+  // 'infinity' refuses on its own axis, ahead of the domain check.
+  const inf = await caught(() => recordPeriod(sc.alice,
+    { document: sc.document, start: "2025-01-01", end: "infinity" }));
+  assert.ok(inf, "an infinite term was recorded");
+  assert.match(String(inf.detail ?? inf.message), /service_period_dates_not_finite/);
+
+  // (b) THE LIMIT COUNTS PERIODS, and the boundary is probed on BOTH sides. The old date
+  // subtraction admitted exactly 120 months, and a day-one endpoint pair then charges 121.
+  const ok120 = await recordPeriod(sc.alice, {
+    document: sc.document, start: "2000-01-01", end: "2009-12-31",   // Jan-2000..Dec-2009 = 120
+    basis: "exactly one hundred and twenty charged months" });
+  assert.ok(ok120?.service_period_id, "a 120-period term was refused -- the boundary binds one too tight");
+  const over = await caught(() => recordPeriod(sc.alice, {
+    document: sc.document, start: "2000-01-01", end: "2010-01-31",   // ..Jan-2010 = 121
+    basis: "one hundred and twenty-one charged months" }));
+  assert.ok(over, "a 121-period term was recorded -- the boundary binds one too loose");
+  assert.match(String(over.detail ?? over.message), /service_period_term_too_long/);
+  assert.match(String(over.detail ?? over.message), /"derived_periods": ?121/,
+    "the refusal does not report the derived period count, so it is still bounding a date span");
+});
+
 test("fa4p2a.W20 the carrier's TENANCY and FLOOR: a below-floor viewer reads zero, a bookkeeper reads its own firm", async (t) => {
   if (prepayGate(t, markSkip)) return;
   const sc = await prepaidScene("w20");

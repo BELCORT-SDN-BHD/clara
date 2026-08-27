@@ -28,6 +28,22 @@ test("fa4p2a.W36 every null-schedule template resolves to EXACTLY its canonical 
   // Measured over the WHOLE population, not a sample: the resolver is what _adj_run_occurrence_core
   // and _adj_on_approve now call in place of the flat template lines, so if it ever answers
   // differently for a null-schedule row, the daily unattended belt posts different books.
+  // THE CELL MINTS ITS OWN SUBJECT (native N1). It used to measure whatever null-schedule
+  // templates happened to be lying around, so on a NEVER-RUN database -- no ambient templates --
+  // its own anti-vacuity guard fired and the cell FAILED. It greened only through undeclared
+  // cross-suite ordering: a reproducibility claim resting on which files ran first. Annex A already
+  // names the fixture it needs ("a pre-migration template carrying a live occurrence history"), so
+  // it is minted here, through the governed door, and the population is measured INCLUDING it.
+  const seed = await prepaidScene("w36seed", { cents: 90000 });
+  const seeded = await propose(seed.alice, {
+    client: seed.client, name: `w36seed-${uniq()}`, start: "2025-02-01", end: "2025-04-30",
+    lines: pair(seed.target, seed.prepaid, 30000) });          // NO schedule -- a null-schedule row
+  assert.ok(seeded?.template_id, "the cell could not mint its own null-schedule template");
+  const seededRow = await rootQuery(
+    "select schedule from clara.adjustment_templates where id = $1", [seeded.template_id]);
+  assert.equal(seededRow.rows[0].schedule, null,
+    "the minted fixture carries a schedule -- it cannot stand for the null-schedule population");
+
   // SCOPED TO THE NULL-SCHEDULE POPULATION, deliberately. An earlier cut also asserted that NO
   // template anywhere carries a schedule -- but that is §0's PRE-MIGRATION premise, which the
   // prestate already enforces by aborting the apply. After the migration, schedule-bearing
@@ -42,7 +58,8 @@ test("fa4p2a.W36 every null-schedule template resolves to EXACTLY its canonical 
             count(*) filter (where t.schedule is not null)::int as with_schedule
        from clara.adjustment_templates t`);
   const { nulls, equal, with_schedule } = r.rows[0];
-  assert.ok(nulls > 0, "no null-schedule templates on this rig -- the cell would pass vacuously");
+  assert.ok(nulls > 0,
+    "no null-schedule templates even after this cell minted one -- the fixture did not land");
   assert.equal(equal, nulls,
     `${nulls - equal} of ${nulls} null-schedule templates resolve to something OTHER than their canonical lines -- the daily unattended belt would post different books`);
   noteLane(`W36: ${equal}/${nulls} null-schedule templates resolve to their canonical lines (${with_schedule} schedule-bearing rows present, which after this migration is lawful)`);
@@ -348,7 +365,30 @@ test("fa4p2a.W43-boundary (C1b) a CONTIGUOUS schedule on the wrong boundaries re
       { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) },
     ] }));
   assert.ok(short, "a schedule stopping a month early proposed cleanly");
-  assert.match(String(short.detail ?? short.message), /short/);
+  assert.match(String(short.detail ?? short.message), /"axis": ?"short"/);
+
+  // EXTRANEOUS COVERAGE -- both reviewers' attack shapes, converged blind (Codex P1 / native N2).
+  // The walk alone did not close this: once it had consumed the range it kept advancing, so a
+  // trailing entry was compared against its OWN derived period (which matches) and the post-loop
+  // lower-bound check passed too. It is INERT at posting -- _adj_run_occurrence_core refuses an
+  // out-of-range period -- but it RIDES INTO content_hash, so a human signs a schedule containing
+  // periods that can never run. An inert defect that corrupts what a signature attests to is still
+  // a defect, which is why the axis is DISTINGUISHED from 'short' rather than folded into it.
+  for (const [label, end, entries] of [
+    ["a Jan-31 template with Jan+Feb", "2025-01-31", [
+      { period_start: "2025-01-01", period_end: "2025-01-31", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) }]],
+    ["a Jan-Feb template with Jan+Feb+Mar", "2025-02-28", [
+      { period_start: "2025-01-01", period_end: "2025-01-31", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-03-01", period_end: "2025-03-31", lines: pair(sc.target, sc.prepaid, 10000) }]],
+  ]) {
+    const x = await caught(() => propose(sc.alice, {
+      client: sc.client, name: `w43x-${uniq()}`, start: "2025-01-01", end, lines, schedule: entries }));
+    assert.ok(x, `${label} proposed cleanly -- a human would sign periods that can never run`);
+    assert.match(String(x.detail ?? x.message), /"axis": ?"extraneous"/,
+      `${label} refused on the wrong axis: ${String(x.detail ?? x.message).slice(0, 200)}`);
+  }
 
   // POSITIVE CONTROL: the three EXACT calendar months propose.
   const ok = await propose(sc.alice, {

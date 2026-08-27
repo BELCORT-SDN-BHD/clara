@@ -139,6 +139,37 @@ test("fa4p2a.W13-changedargs (C2) the SAME key with a DIFFERENT judged account i
   assert.equal(drafted.rows[0].n, 1, "the refused retry drafted a template anyway");
 });
 
+test("fa4p2a.W13-basischanged (P2) a changed BASIS under the same key is an op-key reuse refusal, not a silent replay", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // The identity comparison used to cover only the target ACCOUNT, so a retry supplying different
+  // GROUNDS for the same account replayed silently -- and the basis is not incidental: it is the
+  // stated grounds of a judgement, durable receipt content that F2 wall 2 exists to carry.
+  // Answering that retry with the first act's receipt would record grounds nobody gave.
+  const sc = await prepaidScene("w13bc");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted");
+
+  const e = await caught(() => wake12(sc.s, {
+    client: sc.client, entry: sc.entry, target: sc.target,
+    basis: "a DIFFERENT justification for the very same account" }));
+  assert.ok(e, "a changed basis under the same key replayed silently");
+  assert.match(String(e.detail ?? e.message), /op_key_reused_with_different_args|reused with different args/);
+
+  // AND A CHANGED MODEL likewise -- law 79's triple is part of what the receipt records.
+  const m = await caught(() => wake12(sc.s, {
+    client: sc.client, entry: sc.entry, target: sc.target,
+    model: { name: "some-other-model", version: "9.9" } }));
+  assert.ok(m, "a changed model triple under the same key replayed silently");
+
+  // POSITIVE CONTROL: the IDENTICAL request still replays, so the widened identity did not turn
+  // every retry into a refusal.
+  const same = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(same.status, "acted");
+  assert.equal(same.replayed, true, "the identical retry stopped replaying");
+  assert.equal(same.receipt_id, first.receipt_id);
+});
+
 test("fa4p2a.W13-granularity (C3) an amount smaller than its period count refuses TYPED, with a receipt", async (t) => {
   if (prepayGate(t, markSkip)) return;
   // One cent over two months truncates to a base of 0, so the representative flat lines go

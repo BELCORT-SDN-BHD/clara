@@ -467,8 +467,32 @@ create table clara.document_service_periods (
   -- NAME so a caller gets a reason -- these two exist so no OTHER writer, now or later, can get
   -- past them. 120 months is a conductor-set default (2026-08-27): it covers every ordinary
   -- prepayment, and widening it is a one-line PR.
+  -- THE PRODUCT DOMAIN, IN PURE DATE COMPARISON, BEFORE ANY INTERVAL ARITHMETIC (Codex P4a).
+  -- isfinite() alone was not enough: a FINITE 5874897-AD date passes it and then OVERFLOWS the
+  -- timestamp domain inside `period_start + interval '120 months'` -- the guard blew up before the
+  -- typed refusal it was guarding could speak. Bounds first, in date-vs-date comparison, which
+  -- cannot overflow. 1900-01-01 and 2200-12-31 are the product's own domain: no Malaysian
+  -- accounting record predates the former, and nothing this product plans for reaches the latter.
   constraint ck_dsp_finite check (isfinite(period_start) and isfinite(period_end)),
-  constraint ck_dsp_max_term check (period_end <= (period_start + interval '120 months')::date),
+  constraint ck_dsp_domain check (
+    period_start >= date '1900-01-01' and period_start <= date '2200-12-31'
+    and period_end >= date '1900-01-01' and period_end <= date '2200-12-31'),
+  -- THE LIMIT BINDS ON THE PERIOD COUNT THE RULED PREDICATE DERIVES, not on a date subtraction
+  -- (Codex P4b). `period_end <= period_start + 120 months` admitted EXACTLY 120 months, and a
+  -- day-one endpoint pair then yields 121 charged periods -- the ruled predicate counts a month
+  -- whenever the term covers its first day, so the arithmetic that bounds it must be the same
+  -- arithmetic. n is inlined here exactly as clara.prepayment_schedule_v1 computes it: the first
+  -- charged month, the last charged month, months between, inclusive.
+  constraint ck_dsp_max_periods check (
+    ((extract(year from date_trunc('month', period_end))::int * 12
+      + extract(month from date_trunc('month', period_end))::int)
+     - (extract(year from case when period_start = date_trunc('month', period_start)::date
+                               then date_trunc('month', period_start)
+                               else date_trunc('month', period_start) + interval '1 month' end)::int * 12
+        + extract(month from case when period_start = date_trunc('month', period_start)::date
+                                  then date_trunc('month', period_start)
+                                  else date_trunc('month', period_start) + interval '1 month' end)::int)
+     + 1) <= 120),
   -- The stamp is ONE act: both columns or neither (0055:405-408).
   constraint ck_dsp_supersession_paired check (
     (superseded_by is null) = (superseded_at is null)),
@@ -734,6 +758,7 @@ create function clara._record_document_service_period_core(p_ctx jsonb, p_docume
   language plpgsql security definer set search_path = clara, pg_temp as $core$
 declare
   c_firm uuid; c_actor uuid; v_dedupe jsonb; v_doc_firm uuid; v_prior uuid; v_new uuid;
+  v_first date; v_last date; v_n int;
 begin
   -- The 0124 substitution shape verbatim: the two ctx fields ride as jsonb, and NOTHING else off
   -- the caller's _human_ctx record is read (Annex B.0c measured the same two-field surface on the
@@ -786,19 +811,43 @@ begin
   -- than buried as a literal: it covers every ordinary prepayment an accounting firm meets, and
   -- widening it is a one-line PR. It goes to the owner in the next batch as a set default, not as
   -- a silent choice.
+  -- ORDER IS LOAD-BEARING (Codex P4a): finiteness, then the DOMAIN in pure date comparison, and
+  -- only THEN anything that does interval arithmetic. A finite 5874897-AD date passes isfinite and
+  -- then OVERFLOWS the timestamp domain inside `p_period_start + interval '120 months'` -- the
+  -- guard blew up before the typed refusal it was guarding could speak, so the caller got a raw
+  -- 22008 instead of a reason.
   if not isfinite(p_period_start) or not isfinite(p_period_end) then
     raise exception 'a service period must carry finite dates'
       using errcode = 'CLR10', detail = '{"reason":"service_period_dates_not_finite"}';
+  end if;
+  if p_period_start < date '1900-01-01' or p_period_start > date '2200-12-31'
+     or p_period_end < date '1900-01-01' or p_period_end > date '2200-12-31' then
+    raise exception 'a service period must fall inside 1900-01-01 .. 2200-12-31'
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'service_period_dates_out_of_domain',
+          'domain_from', date '1900-01-01', 'domain_to', date '2200-12-31',
+          'period_start', p_period_start, 'period_end', p_period_end)::text;
   end if;
   if p_period_end < p_period_start then
     raise exception 'a service period ends on or after it starts'
       using errcode = 'CLR10', detail = '{"reason":"service_period_dates_inverted"}';
   end if;
-  if p_period_end > (p_period_start + interval '120 months')::date then
-    raise exception 'a service period longer than 120 months is out of range for this carrier'
+  -- THE LIMIT BINDS ON THE PERIOD COUNT, not a date subtraction (Codex P4b). The previous form
+  -- admitted EXACTLY 120 months, and a day-one endpoint pair then charges 121 periods -- the ruled
+  -- predicate counts a month whenever the term covers its FIRST DAY, so the bound must count the
+  -- same way the evaluator does. n is computed here exactly as clara.prepayment_schedule_v1 does.
+  v_first := case when p_period_start = date_trunc('month', p_period_start)::date
+                  then p_period_start
+                  else (date_trunc('month', p_period_start) + interval '1 month')::date end;
+  v_last  := date_trunc('month', p_period_end)::date;
+  v_n := ((extract(year from v_last)::int * 12 + extract(month from v_last)::int)
+        - (extract(year from v_first)::int * 12 + extract(month from v_first)::int)) + 1;
+  if v_n > 120 then
+    raise exception 'a service period spanning % charged months exceeds this carrier''s limit of 120', v_n
       using errcode = 'CLR10',
         detail = jsonb_build_object('reason', 'service_period_term_too_long',
-          'max_months', 120, 'period_start', p_period_start, 'period_end', p_period_end)::text;
+          'max_periods', 120, 'derived_periods', v_n,
+          'period_start', p_period_start, 'period_end', p_period_end)::text;
   end if;
 
   -- SUPERSESSION, NEVER UPDATE (0055:610-623's idiom). Lock the live predecessor, stamp it with the
@@ -1332,6 +1381,20 @@ begin
       -- has already signed. The wall must therefore compare each entry against the period the
       -- occurrence runner will actually derive, which is what _adj_period_start/_adj_period_end
       -- return, and must consume the whole range with NO missing and NO extraneous entry.
+      -- NO EXTRANEOUS TRAILING PERIOD (Codex P1). The walk alone did not close this: once it had
+      -- consumed the declared range it kept advancing, so a Jan-Feb template carrying Jan+Feb+MAR
+      -- entries had its March entry compared against March's own derived period -- which matches --
+      -- and the final short-check then passed too, because Apr-1 > Feb-28. The schedule covered
+      -- MORE than the template declares, and every period-by-period comparison agreed. The walk
+      -- must therefore consume EXACTLY the derived range: an entry that begins after the range is
+      -- already exhausted is refused here, before its boundaries are even compared.
+      if v_walk > p_end_date then
+        raise exception 'the schedule carries a period beyond the template''s own end date'
+          using errcode = 'CLR10',
+            detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'extraneous',
+              'entry_start', y ->> 'period_start', 'entry_end', y ->> 'period_end',
+              'template_end', p_end_date)::text;
+      end if;
       if (y ->> 'period_start')::date is distinct from v_walk
          or (y ->> 'period_end')::date
             is distinct from clara._adj_period_end(p_client, p_cadence, v_walk) then
@@ -1344,13 +1407,27 @@ begin
       end if;
       v_walk := clara._adj_period_end(p_client, p_cadence, v_walk) + 1;
     end loop;
-    -- NO MISSING PERIOD: the walk must have consumed the declared range. (A schedule that stops
-    -- early is the stranding case again, one period further out.)
-    if v_walk <= p_end_date then
-      raise exception 'the schedule stops before the template''s own end date'
+    -- THE WALK MUST CONSUME THE RANGE **EXACTLY** -- an EQUALITY, not a lower bound (Codex P1 /
+    -- native N2, converged blind). `v_walk <= p_end_date` rejects only a SHORT schedule; a walk
+    -- that ran PAST the end satisfies it, which is how a Jan-Feb template carrying Jan+Feb+Mar
+    -- passed every period-by-period comparison and this check too.
+    --
+    -- THE TWO FAILURES ARE DISTINGUISHED AXES, because they are different defects with different
+    -- harms and a reader should not have to infer which one happened.
+    --   'short'      -- a period the template declares has no entry: the occurrence resolves to
+    --                   nothing and the prepaid asset is STRANDED mid-schedule, after signature.
+    --   'extraneous' -- an entry beyond the declared range. This one is INERT AT POSTING
+    --                   (clara._adj_run_occurrence_core refuses an out-of-range period at
+    --                   0045:4558), so no wrong number is ever posted -- but it RIDES INTO
+    --                   content_hash, so the human signs a schedule containing periods that can
+    --                   never run. The signature attests to something the product cannot honour,
+    --                   which is why an inert defect is still refused at the door.
+    if v_walk <> p_end_date + 1 then
+      raise exception 'the schedule does not consume the template''s declared range exactly'
         using errcode = 'CLR10',
-          detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'short',
-            'first_uncovered_period_start', v_walk, 'template_end', p_end_date)::text;
+          detail = jsonb_build_object('reason', 'schedule_coverage_gap',
+            'axis', case when v_walk <= p_end_date then 'short' else 'extraneous' end,
+            'walk_stopped_at', v_walk, 'template_end', p_end_date)::text;
     end if;
     -- CLAUSE (c) NOW BINDS THE CEILING AN EARLIER CUT ONLY DECLARED. That cut said the validation
     -- "does not prove that its entry boundaries coincide with the boundaries the occurrence runner
@@ -3183,7 +3260,9 @@ declare
   v_acct record; v_breach jsonb; v_lines jsonb; v_tmpl_sched jsonb := '[]'::jsonb;
   v_start date; v_end date; v_total bigint; v_n int; v_name text; v_memo text;
   v_hash text; v_twin uuid; v_result jsonb; v_template uuid; x jsonb; v_base bigint;
-  v_sub text; v_prior_acct text; v_prior_receipt uuid;
+  v_sub text; v_prior_acct text; v_prior_receipt uuid; v_prior_rationale text;
+  v_prior_model_name text; v_prior_model_version text; v_expect_rationale text;
+  v_prior_status text;
 begin
   -- ---- TIER A (raises, writes nothing) -------------------------------------------------------
   -- A receipt row needs a NON-NULL subject, and this verb's refusal subject IS the source entry.
@@ -3216,19 +3295,13 @@ begin
     select (e ->> 'account_code') into v_prior_acct
       from clara.adjustment_templates t, jsonb_array_elements(t.lines) as z(e)
      where t.id = v_twin and (e ->> 'debit_cents')::bigint > 0 limit 1;
-    -- CHANGED ARGS UNDER THE SAME KEY ARE A REUSE REFUSAL, exactly as _reserve_op would answer:
-    -- a retry that quietly re-judges the account is a different act wearing the first one's key.
-    if v_prior_acct is distinct from btrim(coalesce(p_target_account, '')) then
-      raise exception 'op_key reused with different args'
-        using errcode = 'CLR10',
-          detail = jsonb_build_object('reason', 'op_key_reused_with_different_args',
-            'template_id', v_twin, 'stored_target_account', v_prior_acct,
-            'supplied_target_account', btrim(coalesce(p_target_account, '')))::text;
-    end if;
-    -- THE STORED ACTED RECEIPT, returned as it stands. Read by the subject this verb's acted path
-    -- writes; if it is absent the act did not complete the way a replay would be claiming it did,
-    -- so this FAILS CLOSED rather than minting a fresh receipt for an old act (law 2).
-    select r.id into v_prior_receipt from clara.agent_act_receipts r
+    -- THE STORED ACTED RECEIPT, read BEFORE the identity comparison, because the receipt is where
+    -- the rest of the request was persisted. If it is absent the act did not complete the way a
+    -- replay would be claiming it did, so this FAILS CLOSED rather than minting a fresh receipt
+    -- for an old act (law 2).
+    select r.id, r.rationale, r.model_name, r.model_version
+      into v_prior_receipt, v_prior_rationale, v_prior_model_name, v_prior_model_version
+      from clara.agent_act_receipts r
      where r.firm_id = v_firm and r.act_kind = 'prepayment_schedule'
        and r.subject_kind = 'adjustment_template' and r.subject_id = v_twin
        and r.verdict = 'acted' limit 1;
@@ -3236,9 +3309,43 @@ begin
       raise exception 'a template stands for this op key but its acted receipt does not'
         using errcode = 'CLR08', detail = '{"reason":"prepayment_replay_receipt_absent"}';
     end if;
-    select t.content_hash into v_hash from clara.adjustment_templates t where t.id = v_twin;
+
+    -- CHANGED ARGS UNDER THE SAME KEY ARE A REUSE REFUSAL, over the WHOLE REQUEST (Codex P2).
+    -- Comparing only the target account left target_basis, rationale and model free to change and
+    -- SILENTLY REPLAY -- and the basis is not incidental: it is the stated grounds of a JUDGEMENT,
+    -- durable receipt content that wall 2 exists to carry. A retry that supplies different grounds
+    -- for the same account is a different act, and answering it with the first one's receipt would
+    -- record grounds nobody gave.
+    --
+    -- COMPARED AGAINST WHAT WAS PERSISTED, not against a re-derivation: the acted receipt's
+    -- rationale is composed by this core's own acted path as
+    -- `rationale | target account <code>: <basis>`, and its model name/version are the triple
+    -- law 79 carries. Rebuilding that string here and comparing it covers account, basis and
+    -- rationale in one comparison of stored bytes.
+    v_expect_rationale := p_rationale || ' | target account ' || v_prior_acct
+                          || ': ' || btrim(coalesce(p_target_basis, ''));
+    if v_prior_acct is distinct from btrim(coalesce(p_target_account, ''))
+       or v_prior_rationale is distinct from v_expect_rationale
+       or v_prior_model_name is distinct from (p_model ->> 'name')
+       or v_prior_model_version is distinct from (p_model ->> 'version') then
+      raise exception 'op_key reused with different args'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'op_key_reused_with_different_args',
+            'template_id', v_twin, 'stored_target_account', v_prior_acct,
+            'supplied_target_account', btrim(coalesce(p_target_account, '')),
+            'stored_rationale', v_prior_rationale, 'supplied_rationale', v_expect_rationale,
+            'stored_model', jsonb_build_object('name', v_prior_model_name,
+                                               'version', v_prior_model_version),
+            'supplied_model', jsonb_build_object('name', p_model ->> 'name',
+                                                 'version', p_model ->> 'version'))::text;
+    end if;
+    -- status is READ, not asserted (native C2 nit): the twin lookup has no status filter, so a
+    -- retired template's replay would otherwise report 'proposed' as a literal and lie in that one
+    -- field.
+    select t.content_hash, t.status into v_hash, v_prior_status
+      from clara.adjustment_templates t where t.id = v_twin;
     return jsonb_build_object('status', 'acted', 'receipt_id', v_prior_receipt,
-      'template_id', v_twin, 'status_of_template', 'proposed', 'replayed', true,
+      'template_id', v_twin, 'status_of_template', v_prior_status, 'replayed', true,
       'target_account', v_prior_acct, 'content_hash', v_hash);
   end if;
 
