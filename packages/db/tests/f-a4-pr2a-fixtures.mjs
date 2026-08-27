@@ -6,7 +6,6 @@
 // migration's SQL text and never a migration NUMBER -- numbers are claimed at merge, so a number
 // gate would break the moment this train is renumbered.
 
-import { randomUUID } from "node:crypto";
 import { rootQuery, opk, waveAEnsureReady, buildWorld, firmOf, freshResolution } from "./wave-a-fixtures.mjs";
 import { wakeQuery, ROLES, humanQuery } from "./rig-helpers.mjs";
 import { upsertAccount } from "./rig-fixtures.mjs";
