@@ -1,23 +1,19 @@
-import { getTranslations } from "next-intl/server";
+import { ReportsPage } from "@/components/reports/ReportsPage";
 
 /**
- * "/clients/:clientId/reports" — one tab of the client workspace (owner
- * ruling Q3). Honest empty state, P2 shell only; the real surface
- * (statutory close reports, flexible/generative reports, the agent-receipt
- * panel, watermark policy) is P3 work.
+ * "/clients/:clientId/reports" — one tab of the client workspace (owner ruling
+ * Q3). Three direct DB-read surfaces: the sealed statutory close-report
+ * archive (0127), the watermarked analysis sandbox's history (0132 — its
+ * mint/request verbs are agent-lane only, see components/reports/
+ * SandboxExportsPanel.tsx), and the freeform read audit log (0131). This
+ * route only threads `clientId` down to the client component that does the
+ * reading.
  */
 export default async function ClientReportsPage({
   params,
 }: {
   params: Promise<{ clientId: string }>;
 }) {
-  await params;
-  const t = await getTranslations("ClientReports");
-
-  return (
-    <main className="flex flex-col gap-2 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-      <p className="max-w-prose text-sm text-muted-foreground">{t("body")}</p>
-    </main>
-  );
+  const { clientId } = await params;
+  return <ReportsPage clientId={clientId} />;
 }

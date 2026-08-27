@@ -1,22 +1,19 @@
-import { getTranslations } from "next-intl/server";
+import { ClosePage } from "@/components/close/ClosePage";
 
 /**
- * "/clients/:clientId/close" — one tab of the client workspace (owner
- * ruling Q3). Honest empty state, P2 shell only; the real surface (the
- * three close keys, the agent-act receipt panel) is P3 work.
+ * "/clients/:clientId/close" — one tab of the client workspace (owner ruling
+ * Q3). Fiscal-year picker + the selected year's close plan: the begin/
+ * finalize/abandon/reopen doors, the close-gate checks, the receipt/
+ * segregation panel, and an honest not-built note for "Clara proposes close"
+ * (no `close_proposals` carrier exists yet — see components/close/
+ * CloseProposalPanel.tsx). All state comes from the DB — this route only
+ * threads `clientId` down to the client component that does the reading.
  */
 export default async function ClientClosePage({
   params,
 }: {
   params: Promise<{ clientId: string }>;
 }) {
-  await params;
-  const t = await getTranslations("ClientClose");
-
-  return (
-    <main className="flex flex-col gap-2 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-      <p className="max-w-prose text-sm text-muted-foreground">{t("body")}</p>
-    </main>
-  );
+  const { clientId } = await params;
+  return <ClosePage clientId={clientId} />;
 }
