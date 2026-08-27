@@ -304,9 +304,12 @@ constraint is not a nicety; it is what buys the smaller window.
 
 ### H.4 · The resolver, and null-stability as the safety property
 
-`clara._adj_period_lines(p_template_row, p_period_start, p_period_end)`:
+`clara._adj_period_lines(p_schedule jsonb, p_lines jsonb, p_period_start date, p_period_end date)`
+— **RECUT 2026-08-27** from the `p_template_row` form, which no live call site can invoke; the
+grounds and the evidence live in the migration's DEVIATIONS REGISTER, deviation (1), and are
+deliberately not restated here:
 
-- `t.schedule is null` → `clara._adj_canon_lines(t.lines)`, i.e. **exactly today's answer**;
+- `p_schedule is null` → `clara._adj_canon_lines(p_lines)`, i.e. **exactly today's answer**;
 - otherwise → the matching entry's lines, canonicalised through the same helper.
 
 Two call sites change, and only two: `_adj_run_occurrence_core` at 0045:5186 (the materialisation
