@@ -195,6 +195,74 @@
   }
 }
 
+/*
+ * Motion utilities — the ClaraBook motion discipline (owner ruling Q4:
+ * "motion explains change · immediate feedback · visible focus · no
+ * decorative perpetual animation"). Two jobs:
+ *
+ *   1. NAME the --motion-duration-* scale so no component ever hardcodes a
+ *      millisecond. Because they read the CSS vars, they inherit the
+ *      prefers-reduced-motion override above for free — the whole scale
+ *      collapses to 0ms and every transition below settles instantly.
+ *      That collapse is the token contract's own ratified reduced-motion
+ *      answer; components must not re-implement a second one.
+ *   2. Carry the ONE content-arrival transition (`enter-content`), so an
+ *      async read landing reads as content ARRIVING rather than teleporting.
+ *      It fires on first paint only (`@starting-style`), which is exactly
+ *      the semantics wanted: a hydrate-never-trust re-read reuses the same
+ *      DOM nodes for rows that did not change, so only genuinely NEW rows
+ *      animate — the motion reports a real change, and never replays.
+ *
+ * Nothing here loops: every rule is a one-shot transition.
+ */
+/* `--tw-duration` is set alongside the real property because Tailwind's own
+ * `transition-*` utilities declare `transition-duration: var(--tw-duration,
+ * 150ms)` — without it, a `transition-[...]` class emitted after these would
+ * silently reset the duration back to Tailwind's 150ms default and the token
+ * would never reach the browser. Verified against the compiled stylesheet. */
+@utility motion-fast {
+  --tw-duration: var(--motion-duration-fast);
+  transition-duration: var(--motion-duration-fast);
+  animation-duration: var(--motion-duration-fast);
+}
+
+@utility motion-standard {
+  --tw-duration: var(--motion-duration-standard);
+  transition-duration: var(--motion-duration-standard);
+  animation-duration: var(--motion-duration-standard);
+}
+
+@utility motion-deliberate {
+  --tw-duration: var(--motion-duration-deliberate);
+  transition-duration: var(--motion-duration-deliberate);
+  animation-duration: var(--motion-duration-deliberate);
+}
+
+/* `translate`, the standalone property — never `transform: translateY(...)`,
+ * which would collide with Tailwind's own `--tw-*` transform composition on
+ * any element that also carries a transform utility. */
+@utility enter-content {
+  opacity: 1;
+  translate: 0;
+  transition:
+    opacity var(--motion-duration-standard) var(--motion-easing-standard),
+    translate var(--motion-duration-standard) var(--motion-easing-standard);
+
+  @starting-style {
+    opacity: 0;
+    translate: 0 0.25rem;
+  }
+}
+
+@utility enter-panel {
+  translate: 0;
+  transition: translate var(--motion-duration-deliberate) var(--motion-easing-standard);
+
+  @starting-style {
+    translate: 100% 0;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

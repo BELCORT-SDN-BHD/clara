@@ -1,6 +1,7 @@
 import type { ClaraPart } from "../../lib/parts/types";
 import { isStatusResolverType } from "../../lib/parts/catalog";
 import { Badge } from "./PartBadge";
+import { StateBanner } from "../common/state";
 import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
 
 // The fail-closed part renderer (contract §3.1 / frontend-handoff-2026-08-23 §3.1,
@@ -127,14 +128,23 @@ export function PartRenderer({ part }: { part: ClaraPart }) {
     // The deliberate no-hydrate exception (contract §3.2): a governed refusal
     // renders its code + message VERBATIM — there is no draft left to hydrate, and
     // the copy is never re-worded (apps/dashboard/app/chat/parts.tsx:209-218).
+    //
+    // P3 polish: the SHELL is now the shared <StateBanner> every governed
+    // refusal in the workbench uses, so a refusal Clara reports in the rail and
+    // the same refusal reported by a door on the Bank tab look identical. Only
+    // the shell moved — the code/reason/message are still the DB's own bytes.
     return (
-      <div className="flex flex-col gap-1 rounded-lg border border-error/30 bg-error-muted p-3 text-sm">
-        <Badge tone="error">
-          {part.code}
-          {part.reason ? ` · ${part.reason}` : ""}
-        </Badge>
-        <p className="text-error">{part.message}</p>
-      </div>
+      <StateBanner
+        tone="error"
+        code={
+          <>
+            {part.code}
+            {part.reason ? ` · ${part.reason}` : ""}
+          </>
+        }
+      >
+        {part.message}
+      </StateBanner>
     );
   }
 
@@ -154,9 +164,9 @@ export function PartRenderer({ part }: { part: ClaraPart }) {
   // client, a future server, or malformed data).
   const unknown = part as { type?: unknown };
   return (
-    <span className="inline-flex items-center rounded-full border border-warning/40 bg-warning-muted px-2 py-0.5 text-xs font-medium text-warning">
+    <Badge tone="warning">
       {FALLBACK_UNSUPPORTED_PREFIX}
       {typeof unknown.type === "string" ? unknown.type : "?"}
-    </span>
+    </Badge>
   );
 }

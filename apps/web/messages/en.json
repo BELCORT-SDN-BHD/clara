@@ -11,6 +11,8 @@
     "unexpectedError": "Something went wrong: {message}",
     "notBuiltHeading": "Not built yet",
     "cancel": "Cancel",
+    "close": "Close",
+    "retry": "Retry",
     "centsUnsafe": "(amount out of range — verify in the ledger)"
   },
   "FirmShell": {

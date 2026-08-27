@@ -10,9 +10,14 @@ import { cn } from "../../lib/utils";
 // Exports keep their original names so PartRenderer's reviewed body changes by one
 // import path only.
 
+// P3 polish: `warning` joins the set so PartRenderer's unsupported-part
+// fallback stops hand-rolling its own chip span (it was the third chip
+// implementation in the tree, beside this one and components/ui/badge.tsx's
+// cva variants).
 const TONES = {
   neutral: "border-border bg-muted text-muted-foreground",
   info: "border-transparent bg-info-muted text-info",
+  warning: "border-warning/40 bg-warning-muted text-warning",
   error: "border-transparent bg-error-muted text-error",
 } as const;
 
