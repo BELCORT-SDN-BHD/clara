@@ -215,7 +215,34 @@ made:
   ClaraBook product-name copy pass are recorded as owed **pre-P6**; the audit confirms both
   landed and that the R3 focus-ring pass covers every new surface.
 
-### 9.3 · What "the wave completes" means
+### 9.3 · NAMED NOTE — for T1 and T9, rung 5 is FIRST EXECUTION, not confirmation
+
+*Conductor-recorded, 2026-08-28.* Two trains light paths that have never carried a run in
+this product's life:
+
+- **T1 (close + fiscal year).** `PROGRESS.md` records the close model as **LIVE-INERT** —
+  zero `fiscal_years` rows, activation being the first human `open_fiscal_year`. The census
+  found the matching hole on the frontend side: *"nothing in the entire product (web or
+  dashboard) can open a fiscal year today."* T1 is the train that closes it, so the first
+  `open_fiscal_year` in the product's history happens on T1's rung-5 walk.
+- **T9 (reports, snapshots, seeding).** The snapshot registry is likewise inert — zero
+  `reporting_periods` / `period_snapshots` rows until the first `mint_month_snapshot`.
+
+**Why this is a named note and not a footnote.** Q9's rung 5 is written as *"an end-to-end
+walk on live test data"* — a confirmation rung everywhere else in the wave, because every
+other train exercises a path some caller has already walked. For these two it is the
+**first execution of the path**, which means a failure there is a genuine discovery about
+the backend rather than a defect in the train's UI. Three consequences bind:
+
+1. **Neither train may treat a green rung-5 as routine.** The walk's output is recorded —
+   what was opened, what the DB returned, what the receipt says — not merely asserted passed.
+2. **A rung-5 failure on T1 or T9 is escalated, not fixed in-lane.** A first execution that
+   refuses may be the backend telling the truth about a precondition nobody has met. The
+   train reports; it does not reach for the UI to work around a refusal.
+3. **These two walks are scheduled with slack.** They are the only rungs in the wave whose
+   duration cannot be estimated from a prior run, because there is no prior run.
+
+### 9.4 · What "the wave completes" means
 
 Both gates green, the wire bump deployed and bundle-proven, and the cutover PR's as-run
 record written. Only then does `apps/dashboard` stop existing, and only then does
@@ -308,6 +335,31 @@ it needs a backend change has found a census error and should stop and report it
 ---
 
 ## 12 · Open questions, each with a recommendation
+
+### CONDUCTOR ADOPTIONS (2026-08-28)
+
+**All seven recommendations below are ADOPTED AS WRITTEN.** They are no longer open
+questions awaiting a call — they are the wave's standing instructions, and a train that
+wants to depart from one raises it rather than deciding for itself. The text of each is left
+exactly as the planning lane wrote it, so the reasoning that earned the adoption stays
+readable beside the decision. Two carry a conductor annotation:
+
+- **On OQ-5 (`create_account_set_v1`) — an exception never goes silent.** The adoption lets
+  T9's rung-0 census decide, and confirms that a superseded body is not a userflow, so
+  ruling A does not force the port. **But if that census confirms the door is covered by the
+  derived core, the resulting fourth exception goes to the OWNER for visibility in the next
+  batch** — alongside the three ruling A already carries. The wave may decline to build a
+  dead surface on its own measurement; it may not quietly grow the exception list. Exceptions
+  are the owner's ledger, not the wave's.
+- **On OQ-4 (`apply_open_items` / `unallocate_group`) — report the census outcome by name.**
+  These two are the weakest provenance in the wave: the census found them only inside
+  refusal/remedy text, and their placement in T8 is the planning lane's judgement rather than
+  a measurement. **T8 reports its rung-0 outcome — confirm or re-home — to the conductor by
+  name**, not folded into a status line. A judgement that turns out right still has to be
+  seen turning out right, or the next wave inherits it as though it had been measured.
+
+*(These adoptions do not close §12. They convert it from a decision sheet into a record of
+what was decided and why — which is what a later reader actually needs.)*
 
 **OQ-1 — web/stale-notes-truing overlaps T1 by four doors.** The census records that lane
 as wiring the `0138` four (`hold_close_prep`, `release_close_prep`, `list_agent_act_receipts`,

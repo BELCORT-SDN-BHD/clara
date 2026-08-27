@@ -19,8 +19,9 @@ ruling and the 29 orphan dispositions — into one answer: **port them all**, an
 and is cited `file:line`. Nothing is inherited from a summary.*
 
 **Companion: `port-wave-plan-2026-08-28-part2.md`** — §7 the ladder, §8 the P6 wire bump
-and the cutover PR, §9 exit gates, §10 effort and dependencies, §11 non-goals,
-§12 open questions, §13 the Mobbin grounding debt.
+and the cutover PR, §9 exit gates (**§9.3 is the named first-execution note for T1 and
+T9**), §10 effort and dependencies, §11 non-goals, §12 the seven questions and the
+**conductor's adoptions of all seven, 2026-08-28**, §13 the Mobbin grounding debt.
 
 ---
 
