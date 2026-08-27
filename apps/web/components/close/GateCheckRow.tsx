@@ -102,9 +102,18 @@ export function GateCheckRow({
                     ) : null}
                   </>
                 ) : (
-                  <Badge variant={item.attestation.state === "live" ? "default" : "outline"}>
-                    {item.attestation.state} — {item.attestation.reason}
-                  </Badge>
+                  // P3 polish: the STATE is the badge; the human's free-text
+                  // reason is prose beside it. Seen in the harness at 1440px,
+                  // a whole sentence inside a filled `--primary` pill was the
+                  // loudest element on the close plan and grew unboundedly
+                  // with whatever the attester typed. Both values still render
+                  // verbatim — only which one is a chip changed.
+                  <>
+                    <Badge variant={item.attestation.state === "live" ? "default" : "outline"}>
+                      {item.attestation.state}
+                    </Badge>
+                    <span className="text-muted-foreground">{item.attestation.reason}</span>
+                  </>
                 )}
               </li>
             );

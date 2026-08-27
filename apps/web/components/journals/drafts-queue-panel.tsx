@@ -87,10 +87,17 @@ export function DraftsQueuePanel({
         return (
           <Card key={row.id} className="enter-content">
             <CardContent className="flex flex-col gap-2">
+              {/* Stays a raw <button>: the whole row IS the disclosure, and
+                  the Button primitive is a fixed-height, nowrap control. What
+                  it was missing is the product's focus idiom — it fell through
+                  to the browser/global outline while every other control drew
+                  the 3px ring — and `aria-expanded`, which a disclosure owes
+                  a screen reader. */}
               <button
                 type="button"
+                aria-expanded={expanded}
                 onClick={() => setExpandedId(expanded ? null : (entryId ?? null))}
-                className="flex w-full items-center justify-between gap-2 text-left"
+                className="-m-1 flex w-full items-center justify-between gap-2 rounded-md p-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 <span className="flex items-center gap-2">
                   <QueueSectionBadge section={row.section} />
